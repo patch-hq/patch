@@ -825,6 +825,59 @@ describe('JobEditorRoute (single-page form)', () => {
       vi.unstubAllGlobals();
     });
 
+    it('shareKey toggle shows only with a key, loads, and saves only when ticked', async () => {
+      const job = {
+        id: 'j_test1',
+        name: 'Triage',
+        enabled: true,
+        trigger: { type: 'todoist' },
+        filter: null,
+        action: {
+          type: 'continue',
+          hostId: 'd1',
+          folder: '/tmp',
+          skill: 'app-update',
+          key: '{{payload.event_data.id}}',
+        },
+        createdAt: 1,
+        updatedAt: 1,
+      };
+      const calls: Array<{ body: unknown }> = [];
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, init?: RequestInit) => {
+          const method = (init?.method ?? 'GET').toUpperCase();
+          if (String(url).includes('/runs')) {
+            return new Response(JSON.stringify({ runs: [] }), { status: 200 });
+          }
+          if (method === 'PATCH') {
+            calls.push({ body: JSON.parse(String(init?.body)) });
+            return new Response(JSON.stringify({ ...job, updatedAt: 2 }), { status: 200 });
+          }
+          if (String(url).includes('/api/jobs/j_test1')) {
+            return new Response(JSON.stringify(job), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+          return defaultRoute(String(url));
+        }),
+      );
+      renderEdit();
+      await screen.findByTestId('job-name');
+      const box = (await screen.findByTestId('job-share-key')) as HTMLInputElement;
+      expect(box.checked).toBe(false);
+      fireEvent.change(screen.getByTestId('job-ensure-key'), { target: { value: '' } });
+      expect(screen.queryByTestId('job-share-key')).toBeNull();
+      fireEvent.change(screen.getByTestId('job-ensure-key'), { target: { value: 'k' } });
+      fireEvent.click(await screen.findByTestId('job-share-key'));
+      fireEvent.click(screen.getByTestId('job-save'));
+      await waitFor(() => expect(calls.length).toBe(1));
+      const action = (calls[0]?.body as { action: Record<string, unknown> }).action;
+      expect(action.shareKey).toBe(true);
+      vi.unstubAllGlobals();
+    });
+
     it('unticking a stored hidden ensure drops the key rather than writing false', async () => {
       const job = {
         id: 'j_test1',

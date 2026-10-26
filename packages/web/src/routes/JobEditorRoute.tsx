@@ -672,6 +672,8 @@ interface FormState {
   includePayload: boolean;
   /** `continue` only — the per-fire dedup key (Mustache template). */
   ensureKey: string;
+  /** `continue` only — adopt another job's chat for the same key (spec/08). */
+  shareKey: boolean;
   /**
    * `spawn` only — the permission mode each fire's chat runs under. Always a
    * real mode: a job has no "host default" row, because a job that followed
@@ -757,6 +759,7 @@ const DEFAULT_FORM: FormState = {
   spawnNotifyOnComplete: true,
   includePayload: true,
   ensureKey: '',
+  shareKey: false,
   spawnPermissionMode: 'auto',
   messageChatId: '',
   messagePrompt: '',
@@ -2297,6 +2300,14 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                     fresh chat every fire.
                   </p>
                 </label>
+                {form.actionType === 'continue' ? (
+                  <Toggle
+                    checked={form.shareKey}
+                    onChange={(next) => setForm((f) => ({ ...f, shareKey: next }))}
+                    label="Share chat with other jobs using the same key"
+                    testid="job-share-key"
+                  />
+                ) : null}
                 {form.actionType === 'spawn' ? (
                   <label>
                     Permission mode
@@ -2834,6 +2845,7 @@ function jobToForm(job: Job): FormState {
       f.spawnPermissionMode = job.action.permissionMode ?? 'auto';
     } else {
       f.ensureKey = job.action.key ?? '';
+      f.shareKey = job.action.shareKey === true;
     }
   } else if (job.action.type === 'script') {
     f.spawnHostId = job.action.hostId;
@@ -2918,6 +2930,10 @@ function formToBody(form: FormState): JobCreateBody {
       // Same inverted encoding: absent is the ticked, default state.
       ...(form.includePayload ? {} : { includePayload: false }),
       ...(form.actionType === 'continue' && form.ensureKey.trim() ? { key: form.ensureKey } : {}),
+      // Only meaningful with a key, and written only when ticked (absent = off).
+      ...(form.actionType === 'continue' && form.ensureKey.trim() && form.shareKey
+        ? { shareKey: true }
+        : {}),
       // Spawn-only for the same reason as `startHidden`. `auto` is what an absent
       // field already means (spec/08 § Action), so it persists as absent —
       // that keeps a job written before this field existed byte-identical
