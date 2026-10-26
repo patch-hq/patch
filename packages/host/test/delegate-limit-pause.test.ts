@@ -10,7 +10,7 @@ import type { WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { TurnFailedError } from '../src/sdkBackend.js';
-import type { SdkBackend } from '../src/sdkBackend.js';
+import type { SdkBackend, SdkEnvelope } from '../src/sdkBackend.js';
 
 const NOW = 1_700_000_000_000;
 const RESETS_AT = NOW + 3 * 3_600_000;
@@ -37,8 +37,11 @@ describe('a subagent that hits a usage limit', () => {
     const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-delegate-limit-f-')));
     const events: WireEvent[] = [];
     const backend: SdkBackend = {
-      async *run(): AsyncIterable<never> {
-        throw statedLimit();
+      // Only the subagent's turn hits the limit; the parent's own turn is fine.
+      async *run(o): AsyncGenerator<SdkEnvelope> {
+        if (String(o.prompt) === 'work') throw statedLimit();
+        yield { type: 'assistant', content: 'ok', raw: {} };
+        yield { type: 'result', sessionId: 'sess-p', content: 'ok', raw: {} };
       },
     };
     let n = 0;
@@ -70,8 +73,10 @@ describe('a subagent that hits a usage limit', () => {
     expect(msg).toContain('Work');
     expect(msg).toContain(
       new Date(RESETS_AT).toLocaleString('en-GB', {
-        dateStyle: 'medium',
-        timeStyle: 'short',
+        day: 'numeric',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
         timeZoneName: 'short',
       }),
     );

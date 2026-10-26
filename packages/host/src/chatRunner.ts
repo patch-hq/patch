@@ -2096,6 +2096,15 @@ function renderSeedTrack(track: readonly TrackEntry[]): string {
   return lines.join('\n\n');
 }
 
+/** A reset instant in the host's own zone, zone named. */
+const LOCAL_INSTANT: Intl.DateTimeFormatOptions = {
+  day: 'numeric',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+  timeZoneName: 'short',
+};
+
 export class Daemon {
   readonly chatState: ChatStateMap;
   private readonly opts: Required<
@@ -4540,11 +4549,7 @@ export class Daemon {
     const resume =
       block?.resetsAt === undefined
         ? 'It will resume when credit returns.'
-        : `It resumes automatically at ${new Date(block.resetsAt).toLocaleString('en-GB', {
-            dateStyle: 'medium',
-            timeStyle: 'short',
-            timeZoneName: 'short',
-          })}.`;
+        : `It resumes automatically at ${new Date(block.resetsAt).toLocaleString('en-GB', LOCAL_INSTANT)}.`;
     this.deliverToParent(
       subagent.parentChatId,
       formatAgentReturn(
@@ -6735,6 +6740,30 @@ export class Daemon {
     }));
   }
 
+  /**
+   * Is the account this turn ran on out of credit? One provider-generic answer:
+   * the backend's structured limit first, then the host's own usage probe, and
+   * prose only as a logged last resort.
+   */
+  private accountOutOfCredit(
+    chatId: string,
+    limit: LimitFacts | undefined,
+    errMsg: string,
+  ): boolean {
+    const ranOn = this.runningOnAccount.get(chatId);
+    const info = this.opts.accountLimitInfo?.(ranOn);
+    const probeBlocked =
+      info?.scope !== undefined && (info.resetsAt === undefined || info.resetsAt > this.opts.now());
+    return isAccountExhausted(limit, errMsg, {
+      probeBlocked,
+      onProse: (m) =>
+        this.opts.logger.warn(
+          { chatId, account: ranOn ?? null, message: m.slice(0, 200) },
+          'out of credit read from the error prose — no structured limit or probe reading said so',
+        ),
+    });
+  }
+
   /** A reset the failure itself states and that is still ahead, structured first. */
   private statedResetOf(limit: LimitFacts | undefined, errMsg: string): number | undefined {
     const now = this.opts.now();
@@ -6779,6 +6808,9 @@ export class Daemon {
       ...(ranOn !== undefined ? { accountId: ranOn } : {}),
       ...(info?.label !== undefined ? { accountLabel: info.label } : {}),
       scope: info?.scope ?? 'unknown',
+      ...(this.triedAccountLabels(chatId).length > 0
+        ? { tried: this.triedAccountLabels(chatId) }
+        : {}),
       ...(info?.utilization !== undefined ? { utilization: info.utilization } : {}),
       ...(resetsAt !== undefined ? { resetsAt } : {}),
       ...(info?.overageBlocked !== undefined ? { overageBlocked: info.overageBlocked } : {}),
@@ -6787,6 +6819,13 @@ export class Daemon {
       // reader is shown it as the failure.
       raw: errMsg.slice(0, 300),
     });
+  }
+
+  /** Labels of the accounts failover has already run this turn on, in order tried. */
+  private triedAccountLabels(chatId: string): string[] {
+    return [...(this.failoverTriedAccounts.get(chatId) ?? [])].map(
+      (id) => this.opts.accountLimitInfo?.(id)?.label ?? id,
+    );
   }
 
   /**
@@ -9716,7 +9755,7 @@ export class Daemon {
         let hostOutOfCredit = this.opts.hostOutOfCredit?.(chatId) === true;
         if (
           harnessTraitsForModel(state.model).turnRetrySafe(err) &&
-          isAccountExhausted(limit, errMsg) &&
+          this.accountOutOfCredit(chatId, limit, errMsg) &&
           this.opts.nextAccountAfterExhausted
         ) {
           const cur = this.chatState.get(chatId);
@@ -9771,7 +9810,9 @@ export class Daemon {
           // the structured `resetsAt`, or a reset the prose gives. Without this
           // such a failure matched neither phrase list and went down the 10/30/90s
           // ladder against a limit that was already known to last hours.
-          (isRateLimitError(errMsg) || this.statedResetOf(limit, errMsg) !== undefined)
+          (isRateLimitError(errMsg) ||
+            statedLimitOf(limit, errMsg) !== undefined ||
+            this.statedResetOf(limit, errMsg) !== undefined)
         ) {
           const now = this.opts.now();
           const isOverload = isOverloadedError(errMsg);
