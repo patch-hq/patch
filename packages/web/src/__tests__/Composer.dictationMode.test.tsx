@@ -46,6 +46,21 @@ describe('composer dictation mode', () => {
     fireEvent.click(screen.getByText('Keep dictating'));
   };
 
+  it('shows interim words greyed in the input while speaking, and clears them at the end', () => {
+    mount();
+    keepDictating();
+    act(() => cb.onPartial?.('hello wor'));
+    expect(screen.getByTestId('composer-live-partial').textContent).toContain('hello wor');
+    act(() => cb.onPartial?.(''));
+    expect(screen.queryByTestId('composer-live-partial')).toBeNull();
+  });
+
+  it('offers the mode a live-preview opener', () => {
+    mount();
+    keepDictating();
+    expect(factory.mock.calls[0]![0].openPreview).toBeTypeOf('function');
+  });
+
   it('right-click offers it in a menu, and does not start it by itself', () => {
     mount();
     fireEvent.contextMenu(mic(), { clientX: 10, clientY: 10 });

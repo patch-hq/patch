@@ -15,6 +15,7 @@ import {
   type UtteranceSegmenterOptions,
 } from '@patch/wire/utterance-segmenter';
 import { startRecording, type VoiceRecording } from './voiceRecorder.js';
+import type { DictationPreview, DictationPreviewCallbacks } from './dictationPreview.js';
 
 const SAMPLE_RATE = 16000;
 
@@ -27,6 +28,12 @@ export interface DictationModeDeps {
    */
   turnCheck?: (clip: Blob) => Promise<{ probability: number }>;
   segmenter?: UtteranceSegmenterOptions;
+  /**
+   * Opens a live-transcript session for one utterance (spec/07 § Dictation
+   * mode). Called when speech starts; stopped when the utterance is cut or
+   * dropped. Without it there is no interim text.
+   */
+  openPreview?: (callbacks: DictationPreviewCallbacks) => DictationPreview;
 }
 
 /** Quiet this long after speech asks the turn check. */
@@ -39,6 +46,8 @@ export interface DictationModeCallbacks {
   onText(text: string): void;
   /** Capture is running (true) / the user has gone quiet and a transcript is pending (busy). */
   onBusy(pending: number): void;
+  /** Interim words of the utterance being spoken; '' once it ends. */
+  onPartial?(text: string): void;
   onError(message: string): void;
 }
 
@@ -89,7 +98,10 @@ export function startDictationMode(
               ({ probability }) => {
                 if (stopped || probability < TURN_COMPLETE) return;
                 const utterance = segmenter.cut(seq);
-                if (utterance) enqueue(utterance);
+                if (utterance) {
+                  closePreview();
+                  enqueue(utterance);
+                }
               },
               (e: Error) => {
                 if (!stopped) cb.onError(`voice turn check failed: ${e.message}`);
@@ -103,6 +115,14 @@ export function startDictationMode(
   let rec: VoiceRecording | null = null;
   let pending = 0;
   let chain: Promise<void> = Promise.resolve();
+  let preview: DictationPreview | null = null;
+
+  function closePreview(): void {
+    if (!preview) return;
+    preview.stop();
+    preview = null;
+    cb.onPartial?.('');
+  }
 
   function enqueue(pcm: Int16Array): void {
     pending++;
@@ -131,7 +151,22 @@ export function startDictationMode(
     r.onPcm((pcm) => {
       if (stopped) return;
       const utterance = segmenter.push(pcm);
-      if (utterance) enqueue(utterance);
+      if (deps.openPreview) {
+        if (!preview && segmenter.speaking) {
+          preview = deps.openPreview({
+            onPartial: (text) => {
+              if (!stopped && preview) cb.onPartial?.(text);
+            },
+            onPreviewError: (m) =>
+              cb.onError(`voice: live transcript unavailable (still recording): ${m}`),
+          });
+        }
+        preview?.push(pcm);
+      }
+      if (utterance) {
+        closePreview();
+        enqueue(utterance);
+      } else if (preview && !segmenter.speaking) closePreview();
     });
   })();
 
@@ -140,6 +175,7 @@ export function startDictationMode(
     stop(): void {
       if (stopped) return;
       stopped = true;
+      closePreview();
       rec?.cancel();
       rec = null;
     },

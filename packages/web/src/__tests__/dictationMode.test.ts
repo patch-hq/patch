@@ -29,6 +29,42 @@ function fakeRecorder() {
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 describe('dictation mode', () => {
+  it('opens a live preview per utterance, feeds it, and closes it when the utterance ends', async () => {
+    const r = fakeRecorder();
+    const partials: string[] = [];
+    const stops: number[] = [];
+    let pcb: { onPartial(t: string): void } | null = null;
+    let pushed = 0;
+    const openPreview = vi.fn((c) => {
+      pcb = c;
+      return { push: () => void pushed++, stop: () => void stops.push(1) };
+    });
+    const mode = startDictationMode(
+      { recorderFactory: r.factory, transcribe: async () => ({ transcript: 'hi' }), openPreview },
+      {
+        onText: () => {},
+        onBusy: () => {},
+        onPartial: (t) => partials.push(t),
+        onError: (m) => {
+          throw new Error(m);
+        },
+      },
+    );
+    await mode.ready;
+    r.feed(speech, 800);
+    expect(openPreview).toHaveBeenCalledOnce();
+    expect(pushed).toBeGreaterThan(0);
+    pcb!.onPartial('hel');
+    expect(partials).toEqual(['hel']);
+    r.feed(quiet, 3200);
+    await flush();
+    expect(stops).toEqual([1]);
+    expect(partials.at(-1)).toBe('');
+    r.feed(speech, 800);
+    expect(openPreview).toHaveBeenCalledTimes(2);
+    mode.stop();
+  });
+
   it('sends each utterance as its own text and keeps listening', async () => {
     const r = fakeRecorder();
     const texts: string[] = [];

@@ -102,7 +102,11 @@ import {
   type VoiceRecording,
   type VoiceRecorderDeps,
 } from '../lib/voiceRecorder.js';
-import { startDictationPreview, type DictationPreview } from '../lib/dictationPreview.js';
+import {
+  startDictationPreview,
+  type DictationPreview,
+  type DictationPreviewCallbacks,
+} from '../lib/dictationPreview.js';
 import { registerComposerMic } from '../lib/composerMic.js';
 import { startDictationMode, type DictationMode } from '../lib/dictationMode.js';
 import type { OutgoingFile } from '../lib/sendQueue.js';
@@ -1116,7 +1120,7 @@ export const Composer = forwardRef(function Composer(
   // The mic marker (and any words heard so far) stays drawn through
   // 'transcribing' until the authoritative transcript replaces it, rather than
   // vanishing mid-wait. It replaces the old status line above the input.
-  const showLivePreview = micState !== 'idle';
+  const showLivePreview = micState !== 'idle' || livePartial !== '';
 
   // Auto-grow the textarea to fit its content. `field-sizing: content` (CSS) is
   // unreliable in the desktop shell, so size it here: reset to `auto` (allows
@@ -1442,6 +1446,7 @@ export const Composer = forwardRef(function Composer(
     const mode = dictModeRef.current;
     dictModeRef.current = null;
     mode?.stop();
+    setLivePartial('');
     setDictModeOn(false);
     setDictPending(0);
   }
@@ -1458,8 +1463,11 @@ export const Composer = forwardRef(function Composer(
         transcribe: (c: Blob) => api.voiceTranscribe(c),
         ...(prefs.dictationTurnDetection ? { turnCheck: (c: Blob) => api.voiceTurnCheck(c) } : {}),
         segmenter: { silenceMs: prefs.dictationPauseSeconds * 1000 },
+        openPreview: (pcb: DictationPreviewCallbacks) =>
+          (previewFactory ?? startDictationPreview)(chatId, pcb),
       },
       {
+        onPartial: (t: string) => setLivePartial(t),
         onText: (t: string) => {
           const cur = valueRef.current;
           const text = cur.trim().length > 0 ? `${cur.trimEnd()} ${t}` : t;

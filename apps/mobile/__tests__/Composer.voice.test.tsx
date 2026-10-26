@@ -397,6 +397,7 @@ describe('Composer — dictation mode (long-press the mic)', () => {
     const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
     await keepDictating(r);
     expect(vi.mocked(factory).mock.calls[0]![1]).toEqual({
+      chatId: 'c1',
       segmenter: { silenceMs: 5000 },
       turnDetection: true,
     });
@@ -441,6 +442,7 @@ describe('Composer — dictation mode (long-press the mic)', () => {
     const calls: Array<{
       onText: (t: string) => void;
       onBusy: (n: number) => void;
+      onPartial?: (t: string) => void;
       onError: (m: string) => void;
       stop: ReturnType<typeof vi.fn>;
     }> = [];
@@ -448,6 +450,7 @@ describe('Composer — dictation mode (long-press the mic)', () => {
       (cb: {
         onText: (t: string) => void;
         onBusy: (n: number) => void;
+        onPartial?: (t: string) => void;
         onError: (m: string) => void;
       }) => {
         const stop = vi.fn(async () => undefined);
@@ -460,6 +463,22 @@ describe('Composer — dictation mode (long-press the mic)', () => {
       calls,
     };
   }
+
+  it('dictation mode shows interim words greyed while speaking and clears them after', async () => {
+    const { factory, calls } = makeModeFactory();
+    const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
+    await keepDictating(r);
+    expect(r.root.findAllByProps({ testID: 'dictation-live-words' })).toHaveLength(0);
+    await actAsync(() => {
+      calls[0]!.onPartial!('buy oat');
+    });
+    const live = findHost(r.root, (i) => i.props['testID'] === 'dictation-live-words');
+    expect(live.props['children']).toEqual(['🎤 ', 'buy oat']);
+    await actAsync(() => {
+      calls[0]!.onPartial!('');
+    });
+    expect(r.root.findAllByProps({ testID: 'dictation-live-words' })).toHaveLength(0);
+  });
 
   it('long-press opens dictation mode, and each utterance is sent as its own message', async () => {
     const { factory, calls } = makeModeFactory();

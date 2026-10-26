@@ -57,6 +57,41 @@ async function start(options?: import('../src/lib/dictationMode').DictationModeO
 }
 
 describe('mobile dictation mode', () => {
+  it('opens a live preview per utterance, feeds it, and closes it when the utterance ends', async () => {
+    const partials: string[] = [];
+    let onPartial!: (t: string) => void;
+    const push = vi.fn();
+    const stop = vi.fn();
+    const previewFactory = vi.fn((_chat: string, p: (t: string) => void) => {
+      onPartial = p;
+      return { push, stop };
+    });
+    const { startDictationMode } = await import('../src/lib/dictationMode');
+    const h = startDictationMode(
+      {
+        onText: () => {},
+        onError: (m) => {
+          throw new Error(m);
+        },
+        onBusy: () => {},
+        onPartial: (t) => partials.push(t),
+      },
+      { chatId: 'c1', previewFactory: previewFactory as never },
+    );
+    await flush();
+    feed(speech, 800);
+    expect(previewFactory).toHaveBeenCalledOnce();
+    expect(previewFactory.mock.calls[0]![0]).toBe('c1');
+    expect(push).toHaveBeenCalled();
+    onPartial('hel');
+    expect(partials).toEqual(['hel']);
+    feed(quiet, 3200);
+    await flush();
+    expect(stop).toHaveBeenCalledOnce();
+    expect(partials.at(-1)).toBe('');
+    await h.stop();
+  });
+
   it('opens the mic once and sends each utterance separately', async () => {
     const { texts, errors } = await start();
     expect(startMicCaptureMock).toHaveBeenCalledOnce();

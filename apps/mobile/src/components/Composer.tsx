@@ -696,10 +696,12 @@ export function Composer({
   const [inputScrollY, setInputScrollY] = React.useState(0);
   // Rendered height of the dictation mirror, so the input can grow to fit it.
   const [mirrorHeight, setMirrorHeight] = React.useState(0);
+  // Mic recording, or dictation mode with words being spoken: the input is painted over by the mirror.
+  const livePreviewOn = micState !== 'idle' || livePartial !== '';
   // spec/15 § Skill autocomplete — chips: the mirror only needs to exist
   // while there's a chip to draw, and only when dictation isn't already using
   // the transparent-input trick for its own mirror — the two never overlap.
-  const showChipMirror = micState === 'idle' && chipTokens.length > 0;
+  const showChipMirror = !livePreviewOn && chipTokens.length > 0;
   // Send pressed while dictating: the dictation ends and, once its transcript
   // lands in the draft, the whole draft goes out as one message.
   const sendAfterDictationRef = React.useRef(false);
@@ -846,6 +848,7 @@ export function Composer({
   function stopDictationMode(): void {
     const h = dictModeRef.current;
     dictModeRef.current = null;
+    setLivePartial('');
     setDictModeOn(false);
     setDictPending(0);
     if (h) void h.stop();
@@ -886,11 +889,13 @@ export function Composer({
           submitRef.current();
         },
         onBusy: (n: number): void => setDictPending(n),
+        onPartial: (t: string): void => setLivePartial(t),
         onError: (message: string): void => {
           useUiStore.getState().pushError(`voice: ${message}`);
         },
       },
       {
+        chatId: dictationChatId ?? chatId,
         segmenter: { silenceMs: prefs.dictationPauseSeconds * 1000 },
         turnDetection: prefs.dictationTurnDetection,
       },
@@ -1639,7 +1644,7 @@ export function Composer({
           // writing on top"). Nothing about an empty input needs naming while
           // the user is talking into it.
           placeholder={
-            micState !== 'idle' ? undefined : linkDown ? (linkReason ?? 'Disconnected…') : 'Message'
+            livePreviewOn ? undefined : linkDown ? (linkReason ?? 'Disconnected…') : 'Message'
           }
           placeholderTextColor={colors.ink3}
           style={{
@@ -1649,10 +1654,9 @@ export function Composer({
             // (spec/15 § Composer). Past the cap it scrolls internally.
             // While dictating, the words are drawn by the mirror, not held by
             // the input, so grow to the mirror's height like typing would.
-            minHeight:
-              micState !== 'idle'
-                ? Math.min(Math.max(COMPOSER_MIN_HEIGHT, mirrorHeight), COMPOSER_MAX_HEIGHT)
-                : COMPOSER_MIN_HEIGHT,
+            minHeight: livePreviewOn
+              ? Math.min(Math.max(COMPOSER_MIN_HEIGHT, mirrorHeight), COMPOSER_MAX_HEIGHT)
+              : COMPOSER_MIN_HEIGHT,
             maxHeight: COMPOSER_MAX_HEIGHT,
             paddingHorizontal: space.md,
             paddingVertical: space.sm,
@@ -1660,7 +1664,7 @@ export function Composer({
             borderWidth: 1,
             borderColor: colors.lineSoft,
             borderRadius: radii.lg,
-            color: micState !== 'idle' || showChipMirror ? 'transparent' : colors.ink,
+            color: livePreviewOn || showChipMirror ? 'transparent' : colors.ink,
             fontSize: 16,
           }}
         />
@@ -1675,7 +1679,7 @@ export function Composer({
               "Dictation into the composer" — "the input stays
               focusable/editable throughout"). Only mounted while there's
               something to preview, so idle typing is unaffected. */}
-        {micState !== 'idle' ? (
+        {livePreviewOn ? (
           <View
             pointerEvents="none"
             onLayout={(e) => setMirrorHeight(e.nativeEvent.layout.height)}

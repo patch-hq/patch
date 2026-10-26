@@ -4,7 +4,7 @@
 // pause, says so, or a long silence does — the speech so far is cut out as one
 // utterance, transcribed through the same `POST /api/voice/transcribe` the
 // composer's tap-dictation uses, and handed to `onText` (the composer sends
-// it). Not a call: nothing speaks back, and there is no live preview.
+// it). Not a call: nothing speaks back, and interim words show while speaking.
 //
 // Utterances are transcribed strictly in order. Every failure reaches `onError`.
 
@@ -15,6 +15,7 @@ import {
 } from '@patch/wire/utterance-segmenter';
 import { api } from '../api/rest';
 import { startMicCapture, stopMicCapture } from './voiceMic';
+import { startDictationPreview, type DictationPreview } from './dictationPreview';
 import { encodePcm16Wav, encodeBase64 } from './pcmWav';
 
 const SAMPLE_RATE = 16000;
@@ -24,6 +25,8 @@ export interface DictationModeCallbacks {
   onText(text: string): void;
   /** Utterances waiting on a transcript. */
   onBusy(pending: number): void;
+  /** Interim words of the utterance being spoken; '' once it ends. */
+  onPartial?(text: string): void;
   onError(message: string): void;
 }
 
@@ -41,6 +44,10 @@ export interface DictationModeOptions {
   segmenter?: UtteranceSegmenterOptions;
   /** Ask Smart Turn at each short pause whether the speaker has finished. */
   turnDetection?: boolean;
+  /** Live-transcript session for the chat; without it there is no interim text. */
+  chatId?: string;
+  /** Test seam: substitute the preview session opener. */
+  previewFactory?: typeof startDictationPreview;
 }
 
 export function startDictationMode(
@@ -58,7 +65,10 @@ export function startDictationMode(
               (probability) => {
                 if (stopped || probability < TURN_COMPLETE) return;
                 const utterance = segmenter.cut(seq);
-                if (utterance) enqueue(utterance);
+                if (utterance) {
+                  closePreview();
+                  enqueue(utterance);
+                }
               },
               (e: Error) => {
                 if (!stopped) cb.onError(`voice turn check failed: ${e.message}`);
@@ -72,6 +82,14 @@ export function startDictationMode(
   let micStarted = false;
   let pending = 0;
   let chain: Promise<void> = Promise.resolve();
+  let preview: DictationPreview | null = null;
+
+  function closePreview(): void {
+    if (!preview) return;
+    preview.stop();
+    preview = null;
+    cb.onPartial?.('');
+  }
 
   async function writeWav(pcm: Int16Array, name: string): Promise<string> {
     const dir = FileSystem.cacheDirectory;
@@ -124,7 +142,22 @@ export function startDictationMode(
         (pcm) => {
           if (stopped) return;
           const utterance = segmenter.push(pcm);
-          if (utterance) enqueue(utterance);
+          if (options.chatId !== undefined) {
+            if (!preview && segmenter.speaking) {
+              preview = (options.previewFactory ?? startDictationPreview)(
+                options.chatId,
+                (text) => {
+                  if (!stopped && preview) cb.onPartial?.(text);
+                },
+                (m) => cb.onError(`live transcript unavailable (still recording): ${m}`),
+              );
+            }
+            preview?.push(pcm);
+          }
+          if (utterance) {
+            closePreview();
+            enqueue(utterance);
+          } else if (preview && !segmenter.speaking) closePreview();
         },
         (message) => {
           if (!stopped) cb.onError(`dictation mic failed: ${message}`);
@@ -141,6 +174,7 @@ export function startDictationMode(
     async stop(): Promise<void> {
       if (stopped) return;
       stopped = true;
+      closePreview();
       if (micStarted) await stopMicCapture().catch(() => undefined);
     },
   };
