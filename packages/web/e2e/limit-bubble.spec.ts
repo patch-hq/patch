@@ -145,6 +145,36 @@ test.describe('the limit bubble', () => {
     await page.screenshot({ path: process.env['LIMIT_SHOT'] ?? 'test-results/limit-card.png' });
   });
 
+  // Todoist 6hr2VWg7J5v5wwhF: the Change account / Change provider menus opened
+  // downward and ran off the bottom of the window.
+  test('the change menus stay inside the window on a short viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 520 });
+    await page.goto(HARNESS);
+    await page.evaluate(() => {
+      const mk = (id: string, label: string) => ({ id, label, connected: true });
+      (
+        window as unknown as {
+          __preferencesStore: { setState: (s: unknown) => void };
+        }
+      ).__preferencesStore.setState({
+        shared: {
+          secrets: { claude: [mk('a1', 'work'), mk('a2', 'home')], codex: [mk('c1', 'codex')] },
+        },
+      });
+    });
+    await park(page, { scope: 'session' });
+    const composer = (await page.getByTestId('composer').boundingBox())!;
+    for (const kind of ['account', 'provider']) {
+      await page.getByTestId(`rate-limit-change-${kind}`).click();
+      const menu = page.getByTestId(`rate-limit-${kind}-menu`);
+      await expect(menu).toBeVisible();
+      const box = (await menu.boundingBox())!;
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.y + box.height).toBeLessThanOrEqual(composer.y);
+      await page.getByTestId(`rate-limit-change-${kind}`).click();
+    }
+  });
+
   test('is one state: the interrupted line and red failure are not drawn under the card', async ({
     page,
   }) => {

@@ -112,6 +112,7 @@ test('a live chat with two accounts gets an account dropdown styled like the app
   await expect(select).not.toHaveAttribute('title', /.*/);
   // Drawn as the approval-mode select beside it, not as a bordered chip.
   const mode = page.getByTestId('permission-mode');
+  await page.mouse.move(0, 0);
   for (const prop of ['appearance', 'font-size', 'border-top-width', 'height', 'color']) {
     expect(await select.evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop)).toBe(
       await mode.evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop),

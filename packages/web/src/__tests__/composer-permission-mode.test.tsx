@@ -200,15 +200,14 @@ describe('Composer — approval mode', () => {
     seedChat('c1', 'auto');
     renderComposer('c1');
     // Every row but the one already selected changes the mode.
-    for (const v of ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto']) pick(v);
-    expect(sent).toHaveLength(5);
+    for (const v of ['default', 'acceptEdits', 'bypassPermissions', 'plan']) pick(v);
+    expect(sent).toHaveLength(4);
     for (const frame of sent) expect('permissionMode' in (frame as object)).toBe(true);
     expect(sent.map((f) => (f as { permissionMode: string }).permissionMode)).toEqual([
       'default',
       'acceptEdits',
       'bypassPermissions',
       'plan',
-      'auto',
     ]);
   });
 

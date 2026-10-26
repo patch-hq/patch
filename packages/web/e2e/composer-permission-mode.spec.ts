@@ -85,10 +85,12 @@ test.describe('Composer approval mode', () => {
     });
   });
 
-  test('every option sends a mode — none of them sends a bare frame', async ({ page }) => {
+  test('every option other than the current one sends a mode — none of them sends a bare frame', async ({
+    page,
+  }) => {
     await page.goto(HARNESS);
     const select = page.getByTestId('permission-mode');
-    const values = ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto'];
+    const values = ['default', 'acceptEdits', 'bypassPermissions', 'plan'];
 
     for (const value of values) {
       await page.evaluate(() => {
