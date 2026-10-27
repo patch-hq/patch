@@ -16199,7 +16199,7 @@ select.permission-mode.is-pending {
   gap: 8px;
   padding: 6px 6px 6px 10px;
   border-radius: var(--radius-sm);
-  background: var(--bg);
+  background: var(--bg-soft);
   color: var(--ink-2);
   font-size: var(--text-min);
 }
