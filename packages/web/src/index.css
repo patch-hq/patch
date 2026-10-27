@@ -8552,6 +8552,9 @@ button.view-file-download {
    lines up flush with the form, and tighten the bottom gap below the divider. */
 .job-editor .route-head {
   padding: 20px 0 14px;
+  /* Packed from the start like the Jobs list head, so the title sits beside the
+     back controls instead of being spread to the far edge. */
+  justify-content: flex-start;
 }
 .job-editor form {
   display: flex;
@@ -8720,8 +8723,27 @@ button.view-file-download {
 .job-editor .skill-edit-reason {
   color: var(--ink-3);
 }
-.job-editor .form-group:first-of-type {
+.job-editor form > .form-group:first-child {
   border-top: none;
+}
+/* The collapsed Advanced row is one line, not a block: full group padding left
+   a large empty gap before Trigger's own divider. */
+.job-editor details.form-group {
+  padding: 12px 0 0;
+}
+.job-editor details.form-group:not([open]) {
+  margin-bottom: -12px;
+}
+.job-editor details.form-group:not([open]) + .form-group {
+  padding-top: 16px;
+}
+.job-editor details.form-group[open] {
+  padding-bottom: 24px;
+}
+/* A <select> insets its text 2px further than an <input> does; take that off
+   its padding so stacked fields share one text edge. */
+.job-editor select {
+  padding-left: 8px;
 }
 .job-editor .form-group-title {
   margin: 0;
