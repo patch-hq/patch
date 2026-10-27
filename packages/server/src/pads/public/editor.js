@@ -50,9 +50,12 @@
   function el(tag, cls, parent) {
     var e = document.createElement(tag); if (cls) e.className = cls; if (parent) parent.appendChild(e); return e;
   }
+  // A screen wider than the stage is scaled down to fit (see applyWidth); pointer
+  // distances are screen pixels, the design and the layer work in unscaled ones.
+  var scale = 1;
   function local(e) {
     var r = layer.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+    return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale };
   }
   function hit(pt) {
     var d = doc(); if (!d) return null;
@@ -221,10 +224,29 @@
   }
   // A captured screen keeps the width it was photographed at: the stage scrolls
   // sideways rather than letting the design reflow into a different layout.
+  // When the stage is narrower than that (a phone), the whole screen is scaled
+  // down to fit instead, as a picture viewer would; pinching the page zooms in.
   function applyWidth() {
     var w = screen && screen.width;
-    wrap.style.minWidth = w && !wrap.classList.contains('phone') ? w + 'px' : '';
+    var fixed = w && !wrap.classList.contains('phone');
+    var avail = $('stage').clientWidth;
+    scale = fixed && avail > 0 && avail < w ? avail / w : 1;
+    if (scale < 1) {
+      wrap.style.width = w + 'px';
+      wrap.style.minWidth = '';
+      wrap.style.height = ($('stage').clientHeight / scale) + 'px';
+      wrap.style.margin = '0';
+      wrap.style.transformOrigin = '0 0';
+      wrap.style.transform = 'scale(' + scale + ')';
+      wrap.style.marginRight = (-(w - w * scale)) + 'px';
+    } else {
+      wrap.style.width = ''; wrap.style.height = ''; wrap.style.margin = '';
+      wrap.style.marginRight = ''; wrap.style.transform = ''; wrap.style.transformOrigin = '';
+      wrap.style.minWidth = fixed ? w + 'px' : '';
+    }
+    wrap.dataset.scale = String(scale);
   }
+  window.addEventListener('resize', function () { applyWidth(); draw(); });
   function renderScreens() {
     applyWidth();
     var seen = seenIds();
@@ -519,7 +541,7 @@
       if (e.pointerType === 'mouse' && tool === 'select') { hoverEl = hit(local(e)); draw(); }
       return;
     }
-    var dx = e.clientX - drag.x0, dy = e.clientY - drag.y0, far = Math.abs(dx) + Math.abs(dy);
+    var dx = (e.clientX - drag.x0) / scale, dy = (e.clientY - drag.y0) / scale, far = Math.abs(dx) + Math.abs(dy);
     if (drag.mode === 'press-sel' && far > 4) drag.mode = 'move';
     if (drag.mode === 'press' && far > 6) drag.mode = e.pointerType === 'mouse' && tool === 'select' ? 'marquee' : 'pan';
     if (drag.mode === 'marquee') {
@@ -532,7 +554,7 @@
       drag.el.style.translate = (drag.base.x + dx) + 'px ' + (drag.base.y + dy) + 'px';
       draw();
     } else if (drag.mode === 'pan') {
-      drag.scroller.scrollBy(drag.lx - e.clientX, drag.ly - e.clientY);
+      drag.scroller.scrollBy((drag.lx - e.clientX) / scale, (drag.ly - e.clientY) / scale);
       drag.lx = e.clientX; drag.ly = e.clientY;
     }
   });
@@ -547,7 +569,7 @@
       return;
     }
     if (d.mode === 'move') {
-      var dx = e.clientX - d.x0, dy = e.clientY - d.y0;
+      var dx = (e.clientX - d.x0) / scale, dy = (e.clientY - d.y0) / scale;
       post({ kind: 'move', target: target(d.el), dx: Math.round(d.base.x + dx), dy: Math.round(d.base.y + dy) });
     } else if (d.mode === 'press' || d.mode === 'press-sel') {
       var t = d.el, now = Date.now();
@@ -670,8 +692,8 @@
       if (!moved && Math.abs(ev.clientX - drag.x0) + Math.abs(ev.clientY - drag.y0) <= 6) return;
       moved = true;
       var sx = (pos === 'ne' || pos === 'se') ? 1 : -1, sy = (pos === 'sw' || pos === 'se') ? 1 : -1;
-      drag.nw = Math.max(4, drag.w + (ev.clientX - drag.x0) * sx);
-      drag.nh = Math.max(4, drag.h + (ev.clientY - drag.y0) * sy);
+      drag.nw = Math.max(4, drag.w + (ev.clientX - drag.x0) / scale * sx);
+      drag.nh = Math.max(4, drag.h + (ev.clientY - drag.y0) / scale * sy);
       drag.el.style.width = Math.round(drag.nw) + 'px'; drag.el.style.height = Math.round(drag.nh) + 'px';
       draw();
     };
@@ -764,14 +786,14 @@
     var moved = false;
     var move = function (ev) {
       if (Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) > 4) moved = true;
-      n.style.left = (l0 + ev.clientX - x0) + 'px'; n.style.top = (t0 + ev.clientY - y0) + 'px';
+      n.style.left = (l0 + (ev.clientX - x0) / scale) + 'px'; n.style.top = (t0 + (ev.clientY - y0) / scale) + 'px';
     };
     var up = function (ev) {
       n.removeEventListener('pointermove', move); n.removeEventListener('pointerup', up);
       drag = null;
       if (c.status !== 'pending') { draw(); return; }
       if (moved) {
-        var off = { x: c.offset.x + Math.round(ev.clientX - x0), y: c.offset.y + Math.round(ev.clientY - y0) };
+        var off = { x: c.offset.x + Math.round((ev.clientX - x0) / scale), y: c.offset.y + Math.round((ev.clientY - y0) / scale) };
         c.offset = off;
         ownPending = true;
         api('PATCH', '/changes/' + c.id, { offset: off }).then(function () { return refresh(); }).catch(fail);
