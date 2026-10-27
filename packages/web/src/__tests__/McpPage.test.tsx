@@ -80,6 +80,12 @@ describe('Settings → MCP', () => {
       'mcp-server-chrome-devtools',
     ]);
     expect(screen.getByTestId('mcp-server-patch')).toHaveTextContent('Always on');
+    // Wording keeps three things apart: the host (machine), its MCP servers,
+    // and Patch's built-in tools server — never just "Patch" or "servers".
+    expect(screen.getByTestId('mcp-server-patch')).toHaveTextContent('Patch tools');
+    expect(screen.getByTestId('mcp-server-patch')).toHaveTextContent('Built-in MCP server');
+    expect(list).toHaveTextContent('MCP servers on mac');
+    expect(screen.getByTestId('mcp-add')).toHaveTextContent('Add MCP server');
     // Patch's own server has no switch and no editor.
     expect(screen.queryByTestId('mcp-server-patch-enabled')).toBeNull();
     expect(screen.getByTestId('mcp-server-playwright')).toHaveTextContent(

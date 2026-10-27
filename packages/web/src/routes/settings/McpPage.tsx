@@ -116,7 +116,7 @@ export function McpPage(): JSX.Element {
             onClick={() => setAdding(true)}
             disabled={adding}
           >
-            Add server
+            Add MCP server
           </button>
         ) : null
       }
@@ -161,8 +161,8 @@ function ServerList({
   }
 
   return (
-    <Group label="Servers chats get" testid="mcp-servers">
-      <Row title="Patch" sub="Built in" testid="mcp-server-patch">
+    <Group label={`MCP servers on ${hostLabel(host)}`} testid="mcp-servers">
+      <Row title="Patch tools" sub="Built-in MCP server" testid="mcp-server-patch">
         <span className="set-val">Always on</span>
       </Row>
       {servers.map((s, i) =>
