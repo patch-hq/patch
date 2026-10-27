@@ -63,7 +63,7 @@ import { isMeetingOpen, useMeetingStore } from '../stores/meetingStore.js';
 import { EffortControl } from './EffortControl.js';
 import { PopupSelect } from './PopupSelect.js';
 import { CloseIcon } from './icons.js';
-import { joinQuotes, splitQuotes } from '../lib/composerQuotes.js';
+import { joinThread, splitThread } from '../lib/composerQuotes.js';
 import { ImageAnnotator } from './ImageAnnotator.js';
 import { ImageLightbox } from './ImageLightbox.js';
 import { SkillPreviewPanel } from './SkillPreviewPanel.js';
@@ -566,10 +566,11 @@ export const Composer = forwardRef(function Composer(
   // join its transcript onto whatever is in the box by then.
   const valueRef = useRef(value);
   valueRef.current = value;
-  // spec/14 § Composer — quotes: leading `> ` blocks of the draft are drawn as
-  // cards above the input, and the textarea (with its caret, `/` menu and
-  // chips) works on the remaining `body` only.
-  const { quotes, body } = useMemo(() => splitQuotes(value), [value]);
+  // spec/14 § Composer — quotes: the `> ` blocks of the draft, and the replies
+  // typed under them, are drawn above the textarea inside the input; the
+  // textarea (with its caret, `/` menu and chips) works on the last reply, the
+  // `body`, only.
+  const { thread, body } = useMemo(() => splitThread(value), [value]);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // Where the caret sits, kept in sync so the `/` menu (and chip rendering)
   // can reason about the token the cursor is actually IN, anywhere in the
@@ -936,7 +937,7 @@ export const Composer = forwardRef(function Composer(
     // completion). The trailing space commits the token: it stops matching
     // an open `/token`, so the menu closes and it renders as a chip.
     const { text, cursor } = spliceCompletion(body, activeToken.start, cursorPos, name);
-    setValue(joinQuotes(quotes, text));
+    setValue(joinThread(thread, text));
     pendingCursorRef.current = cursor;
     // Only remember last-used for skills (not built-in commands).
     if (!isBuiltin) setLastUsedSkill(trimmedFolder, name);
@@ -1102,8 +1103,8 @@ export const Composer = forwardRef(function Composer(
     // The owed text was typed FIRST, so it leads anything typed since the note
     // started, joined the same way the turn itself would have been joined.
     setValue((cur) => {
-      const { quotes: q, body: b } = splitQuotes(cur);
-      return joinQuotes(q, b.trim().length > 0 ? `${owed.trimEnd()} ${b.trimStart()}` : owed);
+      const { thread: t, body: b } = splitThread(cur);
+      return joinThread(t, b.trim().length > 0 ? `${owed.trimEnd()} ${b.trimStart()}` : owed);
     });
   }, [composerRestore, chatId]);
   const pressAt = useRef<number | null>(null);
@@ -2044,33 +2045,6 @@ export const Composer = forwardRef(function Composer(
           ) : null}
         </div>
       ) : null}
-      {/* Quote cards stacked above the input (spec/14 § Composer — quotes). */}
-      {quotes.length > 0 ? (
-        <div className="composer-quotes" data-testid="composer-quotes">
-          {quotes.map((q, i) => (
-            <div key={i} className="composer-quote" data-testid="composer-quote">
-              <span className="composer-quote-text">{q}</span>
-              <button
-                type="button"
-                className="composer-quote-remove"
-                data-testid="composer-quote-remove"
-                aria-label="remove quote"
-                title="Remove quote"
-                onClick={() =>
-                  setValue(
-                    joinQuotes(
-                      quotes.filter((_, j) => j !== i),
-                      body,
-                    ),
-                  )
-                }
-              >
-                <CloseIcon size={14} />
-              </button>
-            </div>
-          ))}
-        </div>
-      ) : null}
       {/* Removable thumbnails/chips above the input (spec/14 § Composer).
           Step 3 of 3: each chip tracks its OWN upload independently — a
           failed one reads "Not uploaded" with Retry (same pattern as a sent
@@ -2199,203 +2173,257 @@ export const Composer = forwardRef(function Composer(
       <div className="composer-row">
         {/* The input and its live-dictation mirror share one positioned box so
             the greyed preview sits exactly over the real text. */}
-        <div className={leading ? 'composer-input-wrap has-leading' : 'composer-input-wrap'}>
-          {leading ? <div className="composer-leading">{leading}</div> : null}
-          {/* Live-dictation preview (spec/07 § Dictation into the composer):
+        <div
+          className={thread.length > 0 ? 'composer-field has-thread' : 'composer-field'}
+          data-testid={thread.length > 0 ? 'composer-quotes' : undefined}
+        >
+          {/* Quotes and the replies under them, inside the input (spec/14 §
+              Composer — quotes): reply to one quote, then quote another. */}
+          {thread.map((item, i) =>
+            item.kind === 'quote' ? (
+              <div key={i} className="composer-quote" data-testid="composer-quote">
+                <span className="composer-quote-text">{item.text}</span>
+                <button
+                  type="button"
+                  className="composer-quote-remove"
+                  data-testid="composer-quote-remove"
+                  aria-label="remove quote"
+                  title="Remove quote"
+                  onClick={() => {
+                    // A reply belongs to the quote above it: it goes with it.
+                    const next = thread.filter(
+                      (_, j) => j !== i && !(j === i + 1 && thread[j]?.kind === 'reply'),
+                    );
+                    setValue(joinThread(next, body));
+                  }}
+                >
+                  <CloseIcon size={14} />
+                </button>
+              </div>
+            ) : (
+              <textarea
+                key={i}
+                className="composer-reply"
+                data-testid="composer-reply"
+                aria-label="Reply to quote"
+                rows={1}
+                value={item.text}
+                onChange={(e) =>
+                  setValue(
+                    joinThread(
+                      thread.map((t, j) => (j === i ? { kind: 'reply', text: e.target.value } : t)),
+                      body,
+                    ),
+                  )
+                }
+              />
+            ),
+          )}
+          <div className={leading ? 'composer-input-wrap has-leading' : 'composer-input-wrap'}>
+            {leading ? <div className="composer-leading">{leading}</div> : null}
+            {/* Live-dictation preview (spec/07 § Dictation into the composer):
               what is already in the input, in normal ink, plus the host's
               interim transcript GREYED behind a text-transparent textarea, so
               the real input keeps the caret and stays editable throughout.
               Only mounted while there is something to preview. */}
-          {showLivePreview ? (
-            <div className="composer-live-preview" data-testid="composer-live-preview" aria-hidden>
-              <span className="composer-live-committed">{body}</span>
-              {body.trim().length > 0 ? ' ' : ''}
-              <span className="composer-live-partial" data-testid="composer-live-partial">
-                <span aria-hidden>🎤 </span>
-                {livePartial}
-              </span>
-            </div>
-          ) : showChipMirror ? (
-            // spec/14 § Composer — chips: the same text-transparent-textarea
-            // trick as the dictation preview above, generalised: the real
-            // input keeps the caret and every editing gesture, and this mirror
-            // draws the SAME text back over it, with each completed
-            // `/<skill>` wrapped in a little box instead of plain characters.
-            <div className="composer-chip-mirror" data-testid="composer-chip-mirror" aria-hidden>
-              {renderChipMirror()}
-            </div>
-          ) : null}
-          <textarea
-            ref={inputRef}
-            className="composer-input"
-            data-preview={showLivePreview ? 'true' : undefined}
-            data-chips={showChipMirror ? 'true' : undefined}
-            data-testid={edit ? 'msg-edit-input' : 'composer-input'}
-            /* spec/14 § Copy — no helper text: the prompt names the field and
+            {showLivePreview ? (
+              <div
+                className="composer-live-preview"
+                data-testid="composer-live-preview"
+                aria-hidden
+              >
+                <span className="composer-live-committed">{body}</span>
+                {body.trim().length > 0 ? ' ' : ''}
+                <span className="composer-live-partial" data-testid="composer-live-partial">
+                  <span aria-hidden>🎤 </span>
+                  {livePartial}
+                </span>
+              </div>
+            ) : showChipMirror ? (
+              // spec/14 § Composer — chips: the same text-transparent-textarea
+              // trick as the dictation preview above, generalised: the real
+              // input keeps the caret and every editing gesture, and this mirror
+              // draws the SAME text back over it, with each completed
+              // `/<skill>` wrapped in a little box instead of plain characters.
+              <div className="composer-chip-mirror" data-testid="composer-chip-mirror" aria-hidden>
+                {renderChipMirror()}
+              </div>
+            ) : null}
+            <textarea
+              ref={inputRef}
+              className="composer-input"
+              data-preview={showLivePreview ? 'true' : undefined}
+              data-chips={showChipMirror ? 'true' : undefined}
+              data-testid={edit ? 'msg-edit-input' : 'composer-input'}
+              /* spec/14 § Copy — no helper text: the prompt names the field and
              stops. It used to trail the send convention, which put a sentence
              of instruction in front of the user on every empty chat; the send
              button's own `Send (↵)` tooltip and the ⌘? cheat-sheet carry that.
              `Reconnecting…` is the one permitted swap — state, not teaching. */
-            placeholder={
-              suppressPlaceholder ? undefined : offline ? 'Reconnecting…' : placeholderText
-            }
-            onChange={(e) => {
-              setValue(joinQuotes(quotes, e.target.value));
-              // Any edit re-opens a menu the user had Esc-dismissed.
-              setSlashDismissed(false);
-              syncCursor(e.target);
-            }}
-            onClick={(e) => syncCursor(e.currentTarget)}
-            onKeyUp={(e) => syncCursor(e.currentTarget)}
-            onSelect={(e) => syncCursor(e.currentTarget)}
-            onPaste={onPaste}
-            onScroll={(e) => syncMirrors(e.currentTarget)}
-            onFocus={() => {
-              if (!edit) useComposerDraftStore.getState().setFocused(chatId, true);
-            }}
-            onBlur={() => {
-              // spec/14 § Composer — a draft that arrived from another
-              // surface while this composer had focus is held back rather
-              // than overwriting text under the cursor; losing focus is what
-              // resolves it, taking the newer text if there is one.
-              if (edit) return;
-              const applied = useComposerDraftStore.getState().setFocused(chatId, false);
-              if (applied !== undefined) setValue(applied);
-            }}
-            onKeyDown={(e) => {
-              // A voice note in flight owns ⏎ and esc, ahead of EVERY other
-              // binding and whatever has focus (spec/07 ## Voice-input modes). The
-              // overlay has no controls of its own and the global window handler
-              // stands down inside a text field, so without this a note started
-              // from the new-chat mic — which navigates into a chat whose composer
-              // auto-focuses — could be neither committed nor cancelled (the user,
-              // patch/todo.md: "cannot be ended or cancelled"). The typed text is
-              // left untouched: ⏎ commits the NOTE, not the half-written message.
-              if (noteActive && (e.key === 'Escape' || e.key === 'Enter')) {
-                if (e.key === 'Enter' && (e.shiftKey || e.nativeEvent.isComposing)) return;
-                e.preventDefault();
-                e.stopPropagation();
-                if (e.key === 'Escape') cancelVoiceNote();
-                else sendVoiceNote();
-                return;
+              placeholder={
+                suppressPlaceholder ? undefined : offline ? 'Reconnecting…' : placeholderText
               }
-              // spec/14 § Skill autocomplete — Backspace right after a chip
-              // removes the whole `/<skill> ` in one press rather than eating
-              // it one character at a time. Only for a collapsed caret (a real
-              // selection deletes normally, as Backspace always has).
-              if (e.key === 'Backspace') {
-                const el = e.currentTarget;
-                if (el.selectionStart !== null && el.selectionStart === el.selectionEnd) {
-                  const chip = chipEndingAt(body, el.selectionStart, knownChipNames);
-                  if (chip) {
-                    e.preventDefault();
-                    setValue(
-                      joinQuotes(quotes, body.slice(0, chip.start) + body.slice(el.selectionStart)),
-                    );
-                    pendingCursorRef.current = chip.start;
-                    return;
-                  }
-                }
-              }
-              // Skill-menu navigation takes priority over send/stop while open.
-              // Only the arrow/complete keys are gated on there being something to
-              // navigate: the menu now also opens on an EMPTY result to say so,
-              // and swallowing Enter there would leave `/nomatch` unsendable.
-              if (showSkillMenu) {
-                if (allItems.length > 0) {
-                  if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    setSkillIndex((i) => (i + 1) % allItems.length);
-                    return;
-                  }
-                  if (e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    setSkillIndex((i) => (i - 1 + allItems.length) % allItems.length);
-                    return;
-                  }
-                  // Enter AND Tab both complete the highlighted item. preventDefault
-                  // on Tab keeps focus in the composer (no tab-out) — matching an
-                  // editor's autocomplete (spec/14 § Skill autocomplete).
-                  if ((e.key === 'Enter' || e.key === 'Tab') && !e.nativeEvent.isComposing) {
-                    e.preventDefault();
-                    const picked = allItems[activeSkillIndex];
-                    if (picked) completeItem(picked.name, picked.isBuiltin);
-                    return;
-                  }
-                }
-                if (e.key === 'Escape') {
+              onChange={(e) => {
+                setValue(joinThread(thread, e.target.value));
+                // Any edit re-opens a menu the user had Esc-dismissed.
+                setSlashDismissed(false);
+                syncCursor(e.target);
+              }}
+              onClick={(e) => syncCursor(e.currentTarget)}
+              onKeyUp={(e) => syncCursor(e.currentTarget)}
+              onSelect={(e) => syncCursor(e.currentTarget)}
+              onPaste={onPaste}
+              onScroll={(e) => syncMirrors(e.currentTarget)}
+              onFocus={() => {
+                if (!edit) useComposerDraftStore.getState().setFocused(chatId, true);
+              }}
+              onBlur={() => {
+                // spec/14 § Composer — a draft that arrived from another
+                // surface while this composer had focus is held back rather
+                // than overwriting text under the cursor; losing focus is what
+                // resolves it, taking the newer text if there is one.
+                if (edit) return;
+                const applied = useComposerDraftStore.getState().setFocused(chatId, false);
+                if (applied !== undefined) setValue(applied);
+              }}
+              onKeyDown={(e) => {
+                // A voice note in flight owns ⏎ and esc, ahead of EVERY other
+                // binding and whatever has focus (spec/07 ## Voice-input modes). The
+                // overlay has no controls of its own and the global window handler
+                // stands down inside a text field, so without this a note started
+                // from the new-chat mic — which navigates into a chat whose composer
+                // auto-focuses — could be neither committed nor cancelled (the user,
+                // patch/todo.md: "cannot be ended or cancelled"). The typed text is
+                // left untouched: ⏎ commits the NOTE, not the half-written message.
+                if (noteActive && (e.key === 'Escape' || e.key === 'Enter')) {
+                  if (e.key === 'Enter' && (e.shiftKey || e.nativeEvent.isComposing)) return;
                   e.preventDefault();
                   e.stopPropagation();
-                  setSlashDismissed(true);
+                  if (e.key === 'Escape') cancelVoiceNote();
+                  else sendVoiceNote();
                   return;
                 }
-              }
-              // Esc cancels an open transcribe-mode recording without transcribing
-              // (mic toggle session) — before the running-turn Esc so a recording
-              // takes priority.
-              if (e.key === 'Escape' && dictModeRef.current) {
-                e.preventDefault();
-                e.stopPropagation();
-                stopDictationMode();
-                return;
-              }
-              if (e.key === 'Escape' && !noteMode && micState !== 'idle') {
-                e.preventDefault();
-                e.stopPropagation();
-                cancelRecording();
-                return;
-              }
-              if (e.key === 'Escape' && editingTurn) {
-                e.preventDefault();
-                e.stopPropagation();
-                editingTurn.onCancel();
-                return;
-              }
-              if (e.key === 'Escape' && edit) {
-                e.preventDefault();
-                e.stopPropagation();
-                edit.onCancel();
-                return;
-              }
-              // Esc interrupts the running turn (parity with Claude Code). Scoped to
-              // the composer + guarded on `running` so it doesn't clash with the
-              // global Esc handlers (dismiss call / close kebab / cancel voice note).
-              if (e.key === 'Escape' && running && onStop) {
-                e.preventDefault();
-                e.stopPropagation();
-                onStop();
-                return;
-              }
-              // Chat convention: Enter sends, Shift+Enter inserts a newline. IME
-              // composition (e.g. for CJK input) must not be hijacked — Enter there
-              // commits the candidate.
-              if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
-              // ⇧ alone is a newline; ⌘⇧↵ / Ctrl⇧↵ is the keyboard form of the send
-              // menu's "Send, interrupt immediately" — send, then promote.
-              if (e.shiftKey && !(e.metaKey || e.ctrlKey)) return; // newline
-              // An edit is often several lines: bare ↵ is a newline there and only
-              // ⌘↵ / Ctrl↵ saves (spec/14 § Keyboard shortcuts).
-              if (edit && !isSubmitChord(e)) return;
-              e.preventDefault();
-              // ↵ and ⌘↵ both just send; mid-turn that queues behind the running
-              // turn and does not interrupt it. Only ⌘⇧↵, Stop, Esc and a queued
-              // message's ↑ do (spec/04 § Message queueing). An empty composer
-              // has nothing to send, so Enter there does nothing.
-              handleSubmit(e.shiftKey);
-            }}
-            // Typing stays possible while the LINK is down (`offline`), and
-            // for an existing chat so does sending — it queues and flushes on
-            // reconnect (Todoist 6hWrcpCQFqXGJpF6). A missing Claude
-            // credential is the one case that disables the field itself:
-            // that turn can never run at all.
-            disabled={claudeDisconnected}
-            {...(claudeDisconnected
-              ? {
-                  title: `${accountModel?.startsWith('openai/') ? 'Codex' : 'Claude'} isn’t connected. Connect in Settings.`,
+                // spec/14 § Skill autocomplete — Backspace right after a chip
+                // removes the whole `/<skill> ` in one press rather than eating
+                // it one character at a time. Only for a collapsed caret (a real
+                // selection deletes normally, as Backspace always has).
+                if (e.key === 'Backspace') {
+                  const el = e.currentTarget;
+                  if (el.selectionStart !== null && el.selectionStart === el.selectionEnd) {
+                    const chip = chipEndingAt(body, el.selectionStart, knownChipNames);
+                    if (chip) {
+                      e.preventDefault();
+                      setValue(
+                        joinThread(
+                          thread,
+                          body.slice(0, chip.start) + body.slice(el.selectionStart),
+                        ),
+                      );
+                      pendingCursorRef.current = chip.start;
+                      return;
+                    }
+                  }
                 }
-              : {})}
-            rows={1}
-          />
+                // Skill-menu navigation takes priority over send/stop while open.
+                // Only the arrow/complete keys are gated on there being something to
+                // navigate: the menu now also opens on an EMPTY result to say so,
+                // and swallowing Enter there would leave `/nomatch` unsendable.
+                if (showSkillMenu) {
+                  if (allItems.length > 0) {
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setSkillIndex((i) => (i + 1) % allItems.length);
+                      return;
+                    }
+                    if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setSkillIndex((i) => (i - 1 + allItems.length) % allItems.length);
+                      return;
+                    }
+                    // Enter AND Tab both complete the highlighted item. preventDefault
+                    // on Tab keeps focus in the composer (no tab-out) — matching an
+                    // editor's autocomplete (spec/14 § Skill autocomplete).
+                    if ((e.key === 'Enter' || e.key === 'Tab') && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      const picked = allItems[activeSkillIndex];
+                      if (picked) completeItem(picked.name, picked.isBuiltin);
+                      return;
+                    }
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setSlashDismissed(true);
+                    return;
+                  }
+                }
+                // Esc cancels an open transcribe-mode recording without transcribing
+                // (mic toggle session) — before the running-turn Esc so a recording
+                // takes priority.
+                if (e.key === 'Escape' && dictModeRef.current) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  stopDictationMode();
+                  return;
+                }
+                if (e.key === 'Escape' && !noteMode && micState !== 'idle') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  cancelRecording();
+                  return;
+                }
+                if (e.key === 'Escape' && editingTurn) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  editingTurn.onCancel();
+                  return;
+                }
+                if (e.key === 'Escape' && edit) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  edit.onCancel();
+                  return;
+                }
+                // Esc interrupts the running turn (parity with Claude Code). Scoped to
+                // the composer + guarded on `running` so it doesn't clash with the
+                // global Esc handlers (dismiss call / close kebab / cancel voice note).
+                if (e.key === 'Escape' && running && onStop) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onStop();
+                  return;
+                }
+                // Chat convention: Enter sends, Shift+Enter inserts a newline. IME
+                // composition (e.g. for CJK input) must not be hijacked — Enter there
+                // commits the candidate.
+                if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+                // ⇧ alone is a newline; ⌘⇧↵ / Ctrl⇧↵ is the keyboard form of the send
+                // menu's "Send, interrupt immediately" — send, then promote.
+                if (e.shiftKey && !(e.metaKey || e.ctrlKey)) return; // newline
+                // An edit is often several lines: bare ↵ is a newline there and only
+                // ⌘↵ / Ctrl↵ saves (spec/14 § Keyboard shortcuts).
+                if (edit && !isSubmitChord(e)) return;
+                e.preventDefault();
+                // ↵ and ⌘↵ both just send; mid-turn that queues behind the running
+                // turn and does not interrupt it. Only ⌘⇧↵, Stop, Esc and a queued
+                // message's ↑ do (spec/04 § Message queueing). An empty composer
+                // has nothing to send, so Enter there does nothing.
+                handleSubmit(e.shiftKey);
+              }}
+              // Typing stays possible while the LINK is down (`offline`), and
+              // for an existing chat so does sending — it queues and flushes on
+              // reconnect (Todoist 6hWrcpCQFqXGJpF6). A missing Claude
+              // credential is the one case that disables the field itself:
+              // that turn can never run at all.
+              disabled={claudeDisconnected}
+              {...(claudeDisconnected
+                ? {
+                    title: `${accountModel?.startsWith('openai/') ? 'Codex' : 'Claude'} isn’t connected. Connect in Settings.`,
+                  }
+                : {})}
+              rows={1}
+            />
+          </div>
         </div>
         {/* spec/14 § Copy — no helper text: an icon-only control's tooltip NAMES
             it in a word or two; it is never a sentence explaining what it does

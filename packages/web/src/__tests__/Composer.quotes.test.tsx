@@ -48,3 +48,33 @@ describe('Composer — quote cards', () => {
     expect(onSend).toHaveBeenCalledWith('> one\n\nwhy?');
   });
 });
+
+describe('Composer — reply to one quote, then another', () => {
+  afterEach(cleanup);
+
+  it('draws quotes and the replies under them, with the last reply in the textarea', () => {
+    const input = renderComposer('> one\n\nabout one\n\n> two\n\nabout two');
+    expect(screen.getAllByTestId('composer-quote').map((c) => c.textContent)).toEqual([
+      'one',
+      'two',
+    ]);
+    expect((screen.getByTestId('composer-reply') as HTMLTextAreaElement).value).toBe('about one');
+    expect(input.value).toBe('about two');
+  });
+
+  it('edits an earlier reply in place and sends the whole thread', () => {
+    const onSend = vi.fn();
+    const input = renderComposer('> one\n\nabout one\n\n> two\n\nabout two', onSend);
+    fireEvent.change(screen.getByTestId('composer-reply'), { target: { value: 'changed' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onSend).toHaveBeenCalledWith('> one\n\nchanged\n\n> two\n\nabout two');
+  });
+
+  it('removing a quote takes its reply with it', () => {
+    const input = renderComposer('> one\n\nabout one\n\n> two\n\nabout two');
+    fireEvent.click(screen.getAllByTestId('composer-quote-remove')[0] as HTMLElement);
+    expect(screen.getAllByTestId('composer-quote').map((c) => c.textContent)).toEqual(['two']);
+    expect(screen.queryByTestId('composer-reply')).toBeNull();
+    expect(input.value).toBe('about two');
+  });
+});

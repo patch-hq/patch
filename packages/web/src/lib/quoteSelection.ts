@@ -5,14 +5,22 @@
 // (spec/14 § Composer — server-owned, so it's there the moment the user
 // switches back to the chat) rather than sending anything itself — the user
 // still writes and sends their own question.
-import { joinQuotes, splitQuotes } from './composerQuotes.js';
+import { joinThread, splitThread } from './composerQuotes.js';
 import { useComposerDraftStore } from '../stores/composerDraftStore.js';
 
 /** Pure for testability — the DOM-touching part is just reading/writing the store.
- * The new quote joins the stack of quotes already at the head of the draft. */
+ * With no quote in the draft yet, the new one goes ahead of whatever was typed
+ * (that text is the question about it). Once there is one, the typed text is
+ * the reply to it, so the new quote goes after it and gets a reply of its own. */
 export function withQuotedSelection(existingDraft: string, selectedText: string): string {
-  const { quotes, body } = splitQuotes(existingDraft);
-  return joinQuotes([...quotes, selectedText], body);
+  const { thread, body } = splitThread(existingDraft);
+  const quote = { kind: 'quote' as const, text: selectedText };
+  if (thread.length === 0) return joinThread([quote], body);
+  const reply = body.trimEnd();
+  return joinThread(
+    reply === '' ? [...thread, quote] : [...thread, { kind: 'reply', text: reply }, quote],
+    '',
+  );
 }
 
 export function quoteSelectionIntoComposer(chatId: string, selectedText: string): void {

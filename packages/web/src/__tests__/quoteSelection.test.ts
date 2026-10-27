@@ -19,10 +19,13 @@ describe('withQuotedSelection', () => {
 });
 
 describe('withQuotedSelection stacking', () => {
-  it('adds a second quote after the first, before the typed text', () => {
+  it('keeps the typed text as the reply to the first quote and adds the next after it', () => {
     expect(withQuotedSelection('> one\n\nmy question', 'two')).toBe(
-      '> one\n\n> two\n\nmy question',
+      '> one\n\nmy question\n\n> two\n\n',
     );
+  });
+  it('stacks quotes when nothing has been typed under the first', () => {
+    expect(withQuotedSelection('> one\n\n', 'two')).toBe('> one\n\n> two\n\n');
   });
 });
 

@@ -5610,7 +5610,6 @@ button.view-file-download {
 }
 .composer-row,
 .composer-skill-popover,
-.composer-quotes,
 .composer-attachments {
   width: 100%;
   max-width: 780px;
@@ -16167,20 +16166,42 @@ select.permission-mode.is-pending {
   gap: 6px;
 }
 
-/* Quotes stacked above the prompt input (spec/14 § Composer — quotes). */
-.composer-quotes {
+/* Quotes and the replies under them, inside the prompt input (spec/14 §
+   Composer — quotes). With a thread the field carries the border and the inner
+   textarea goes borderless, so cards and typing read as one box. */
+.composer-field {
+  width: 100%;
+}
+.composer-field.has-thread {
   display: flex;
   flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-sm);
+  padding: 6px;
   gap: 6px;
+}
+.composer-field.has-thread .composer-input {
+  border-color: transparent;
+  box-shadow: none;
+  background: transparent;
+}
+.composer-field.has-thread .composer-input:focus-visible {
+  outline: none;
+}
+.composer-field.has-thread:focus-within {
+  border-color: var(--ink-3);
 }
 .composer-quote {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 6px 6px 6px 12px;
+  padding: 6px 6px 6px 10px;
   border-radius: var(--radius-sm);
-  background: var(--bg-elevated);
+  background: var(--bg);
   color: var(--ink-2);
+  font-size: var(--text-min);
 }
 .composer-quote-text {
   flex: 1;
@@ -16200,6 +16221,22 @@ select.permission-mode.is-pending {
   background: none;
   color: inherit;
   cursor: pointer;
+}
+.composer-reply {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  field-sizing: content;
+  resize: none;
+  min-height: 0;
+  max-height: 30vh;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.4;
+  padding: 2px 8px;
 }
 
 /* ---------- Sign-in by approval ---------- */
