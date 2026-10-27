@@ -27,7 +27,7 @@ import {
   type ClaudeSessionEntry,
   type TrackEntry,
 } from './nativeReconstruct.js';
-import { stripSyntheticTurns } from './syntheticTurns.js';
+import { markRestoredImages, stripSyntheticTurns } from './syntheticTurns.js';
 import { newlineIfTorn } from './jsonlAppend.js';
 
 export interface ClaudeSessionStoreOptions {
@@ -118,7 +118,7 @@ export function createClaudeSessionStore(opts: ClaudeSessionStoreOptions): Sessi
           'claude session store: kept harness-written turns out of the resumed context',
         );
       }
-      return result.entries;
+      return markRestoredImages(result.entries);
     },
   };
 

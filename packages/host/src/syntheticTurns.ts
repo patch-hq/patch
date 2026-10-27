@@ -149,3 +149,51 @@ export function stripSyntheticTurns(input: readonly SessionStoreEntry[]): Synthe
   );
   return { entries: relinked, synthetic, injectedPrompts, unansweredPrompts, danglingToolCalls };
 }
+
+type Block = { type?: unknown; name?: unknown; input?: { file_path?: unknown } };
+
+const hasImage = (content: unknown): boolean =>
+  Array.isArray(content) && content.some((b) => (b as Block | null)?.type === 'image');
+
+/**
+ * After a compaction Claude Code re-attaches the files the agent had Read as
+ * `file` attachments. An image comes back as a bare image turn with nothing to
+ * say it is old, and the model took it for something the user had just sent
+ * (Unite, 27 Oct 2026). A note ahead of each such image says what it is and
+ * when the agent first read it; the original Read's own timestamp is the time,
+ * and without a Read to find, the note says only "earlier".
+ */
+export function markRestoredImages(input: readonly SessionStoreEntry[]): SessionStoreEntry[] {
+  const readAt = new Map<string, string>();
+  return (input as readonly Entry[]).map((e) => {
+    const rec = e as unknown as Record<string, unknown>;
+    const content = (e.message as { content?: unknown } | undefined)?.content;
+    if (e.type === 'assistant' && Array.isArray(content) && typeof rec['timestamp'] === 'string') {
+      for (const b of content as Block[]) {
+        const path = b.input?.file_path;
+        if (b.type === 'tool_use' && b.name === 'Read' && typeof path === 'string') {
+          if (!readAt.has(path)) readAt.set(path, rec['timestamp']);
+        }
+      }
+      return e as SessionStoreEntry;
+    }
+    const att = rec['attachment'] as
+      | { type?: unknown; filename?: unknown; displayPath?: unknown; content?: unknown }
+      | undefined;
+    const rendered = rec['rendered'];
+    if (e.type !== 'attachment' || att?.type !== 'file' || !Array.isArray(rendered))
+      return e as SessionStoreEntry;
+    const isImage =
+      (att.content as { type?: unknown } | null)?.type === 'image' ||
+      rendered.some((r) => hasImage((r as { content?: unknown } | null)?.content));
+    if (!isImage) return e as SessionStoreEntry;
+    const name = String(att.displayPath ?? att.filename ?? 'an image');
+    const when = typeof att.filename === 'string' ? readAt.get(att.filename) : undefined;
+    const note = {
+      content: `<system-reminder>\nEarlier context, not a new message: the image ${name} was read ${
+        when ? `at ${when}` : 'earlier in this chat'
+      } and is restored here after context compaction. The user has not just sent it.\n</system-reminder>`,
+    };
+    return { ...rec, rendered: [note, ...rendered] } as unknown as SessionStoreEntry;
+  });
+}

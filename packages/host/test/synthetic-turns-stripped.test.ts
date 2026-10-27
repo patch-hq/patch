@@ -15,7 +15,7 @@ import { createHistoryReader, encodeFolder } from '../src/history.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import { createClaudeSessionStore } from '../src/claudeSessionStore.js';
-import { stripSyntheticTurns } from '../src/syntheticTurns.js';
+import { markRestoredImages, stripSyntheticTurns } from '../src/syntheticTurns.js';
 
 type E = SessionStoreEntry & { uuid?: string; parentUuid?: string | null };
 
@@ -321,5 +321,42 @@ describe('a session with no conversation left is not resumed', () => {
       reply('a1', 'u1', 'answered'),
     ]);
     expect(sdk.lastOptions()?.resumeSessionId).toBe('old-sess');
+  });
+});
+
+describe('markRestoredImages', () => {
+  const read = (ts: string): E =>
+    ({
+      type: 'assistant',
+      uuid: 'a1',
+      timestamp: ts,
+      message: {
+        content: [{ type: 'tool_use', name: 'Read', input: { file_path: '/x/shot.png' } }],
+      },
+    }) as unknown as E;
+  const restored = (rendered: unknown[]): E =>
+    ({
+      type: 'attachment',
+      uuid: 'f1',
+      attachment: { type: 'file', filename: '/x/shot.png', displayPath: 'shot.png' },
+      rendered,
+    }) as unknown as E;
+  const image = { content: [{ type: 'image', source: { type: 'base64', data: 'AAAA' } }] };
+
+  it('puts a dated earlier-context note ahead of a restored image', () => {
+    const out = markRestoredImages([read('2026-10-26T19:40:00Z'), restored([image])]);
+    const r = (out[1] as unknown as { rendered: Array<{ content: unknown }> }).rendered;
+    expect(r).toHaveLength(2);
+    expect(String(r[0]!.content)).toContain('Earlier context, not a new message');
+    expect(String(r[0]!.content)).toContain('2026-10-26T19:40:00Z');
+    expect(r[1]).toBe(image);
+  });
+
+  it('leaves restored text files and the Read itself alone', () => {
+    const text = restored([{ content: '<system-reminder>x</system-reminder>' }]);
+    const input = [read('2026-10-26T19:40:00Z'), text];
+    const out = markRestoredImages(input);
+    expect(out[0]).toBe(input[0]);
+    expect(out[1]).toBe(text);
   });
 });
