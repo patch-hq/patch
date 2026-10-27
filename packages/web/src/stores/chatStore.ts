@@ -1146,6 +1146,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         next[r.chatId] = {
           ...existing,
           ...r,
+          awaitingState: false,
           ...(stale ? { activity: existing.activity, lastUpdated: existing.lastUpdated } : {}),
           // A snapshot that settles the chat means no call is in flight; the
           // counter is client-side and a lost result would pin `working`.
@@ -1211,6 +1212,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ? { ...base, lastReadSeq: Math.max(base.lastReadSeq, persisted) }
             : base;
       }
+    }
+    // `GET /api/chats` leaves out archived, deleted, hidden and snoozed chats;
+    // they enter the store through their own sections. Rebuilding the map from
+    // the snapshot alone dropped them on every reconnect refetch and they
+    // flickered back only when their section next refetched. Keep them. An
+    // active row missing from the snapshot really is gone, so it is dropped.
+    const now = Date.now();
+    for (const [id, existing] of Object.entries(prev)) {
+      if (next[id]) continue;
+      const outsideSnapshot =
+        existing.status === 'archived' ||
+        existing.status === 'deleted' ||
+        existing.hidden === true ||
+        (existing.snoozedUntil !== null && existing.snoozedUntil > now);
+      if (outsideSnapshot) next[id] = existing;
     }
     set({ chats: next, hydrated: true });
   },
@@ -1278,6 +1294,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         next[r.chatId] = {
           ...existing,
           ...r,
+          awaitingState: false,
           preview,
           goal,
           goalProgress,
@@ -1622,9 +1639,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       switch (event.type) {
         case 'chat.spawned': {
           rosteredChatIds.add(event.chatId);
+          // A chat this surface has never seen may be one of the archived or
+          // hidden chats a reconnecting host re-announces; its status is only
+          // known once its `chat.state` lands, which can be a batch later.
+          const unseen = chats[event.chatId] === undefined;
           const row = ensureRow(event.chatId, event.folder);
           chats[event.chatId] = {
             ...row,
+            ...(unseen ? { awaitingState: true } : {}),
             hostId: event.hostId,
             folder: event.folder,
             // spec/08 § Action, spec/14 § Sidebar — Automations: set ONCE, at
@@ -1661,6 +1683,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ...row,
             activity: nextActivity,
             optimisticSend: false,
+            awaitingState: false,
             // The turn is over, so no tool call is in flight. The counter is
             // client-side and only a tool_result decrements it; a result that
             // never arrived would otherwise pin the row on `working` for good.
