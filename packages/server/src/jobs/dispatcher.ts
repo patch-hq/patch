@@ -1646,8 +1646,9 @@ export class JobDispatcher {
    * and the reconnect picks it up.
    */
   private drain(scope: string): void {
-    const limit = this.limits.get(scope);
-    if (limit === undefined) return;
+    // No limit means nothing holds the queue back: the limit was removed from
+    // the job while fires waited behind it, so they all go.
+    const limit = this.limits.get(scope) ?? Number.POSITIVE_INFINITY;
     while (this.inFlightFor(scope) < limit) {
       const next = this.listQueuedForJob(scope)[0];
       if (!next) return;
@@ -2323,6 +2324,13 @@ export class JobDispatcher {
     if (limit === undefined) {
       this.limits.delete(fireScope);
       this.jobLimits.delete(job.id);
+      // Fires queued under the limit this job just lost would otherwise wait
+      // for a slot release that, with no limit, never comes. Release them now,
+      // ahead of this fire, so the FIFO order holds.
+      for (const queuedScope of new Set(this.listQueuedForJob(job.id, true).map(scopeOf))) {
+        this.limits.delete(queuedScope);
+        this.drain(queuedScope);
+      }
     } else {
       this.limits.set(fireScope, limit);
       this.jobLimits.set(job.id, limit);

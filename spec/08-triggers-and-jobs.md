@@ -448,6 +448,8 @@ That re-check has three outcomes, not two. The server restores the chat mirror f
 
 The bounded wait is measured from when the slot was taken, not from when the server last started. A slot cannot be extended indefinitely by restarting underneath it: a chat that has held one past the bound releases it on the next boot, recorded as `slot-timeout` exactly as it would be in a long-lived process.
 
+Removing a job's limit releases the fires already queued under it, in order, at the job's next fire: with no limit there is no slot release left to drain them.
+
 The queue is unbounded — a fire waits, it is never refused. This is the opposite of the host-offline buffer, which is capped and drops its oldest entry when full (`12-error-and-offline.md` § Cron fires while a host is down). One queue exists because a host cannot be reached and discards the stalest work, so a cap bounds how much can pile up behind an outage; this one exists because the job asked to run its work one at a time, where the stalest work is exactly what must not be lost — so it has no cap to lose it against. Depth here is a signal to look at (via `GET /api/jobs/:id`), not a limit to enforce.
 
 `GET /api/jobs/:id` reports the job's current in-flight and queued counts, and `GET /api/jobs/:id/queue` lists what those counts are counting: the fires in flight, oldest first, and the fires waiting, in the order they will be released. Each carries when it started or queued, its trigger, its action type, the host it is addressed to and the chat it landed in or will land in.

@@ -134,6 +134,30 @@ describe('job concurrency gate', () => {
     disp.close();
   });
 
+  it('removing the limit releases the fires already queued, ahead of the next fire', () => {
+    const link = new InProcessHostLink();
+    const disp = new JobDispatcher({
+      dataDir: dir,
+      logs: new JobLogs(dir),
+      hostLink: link,
+      logger: silentLogger,
+      idGenerator: seqIds(),
+    });
+    const limited = makeJob({ concurrency: 1 });
+    expect(disp.dispatch(limited, { n: 1 }, 'todoist').status).toBe('sent');
+    expect(disp.dispatch(limited, { n: 2 }, 'todoist').status).toBe('queued');
+    expect(disp.dispatch(limited, { n: 3 }, 'todoist').status).toBe('queued');
+    expect(spawnedChatIds(link)).toHaveLength(1);
+
+    // The limit comes off the job; the next fire must not strand the two
+    // waiting behind a slot release that can no longer happen.
+    const unlimited = makeJob();
+    expect(disp.dispatch(unlimited, { n: 4 }, 'todoist').status).toBe('sent');
+    expect(spawnedChatIds(link)).toHaveLength(4);
+    expect(disp.counts(JOB_ID).queued).toBe(0);
+    disp.close();
+  });
+
   // `counts` says how many; the job page has to say WHICH — spec/08 §
   // Concurrency.
   it('queue() lists the in-flight fires oldest-first and the waiting fires in release order', () => {
@@ -257,9 +281,10 @@ describe('job concurrency gate', () => {
     // It opened no new chat, so it took no second slot.
     expect(disp.counts(JOB_ID)).toEqual({ inFlight: 1, queued: 0 });
 
-    // A DIFFERENT task is genuinely new work and still respects the limit.
-    expect(disp.dispatch(job, { id: 'taskB' }, 'todoist').status).toBe('queued');
-    expect(disp.counts(JOB_ID)).toEqual({ inFlight: 1, queued: 1 });
+    // A DIFFERENT task has its own limit: one task's long chat must not hold
+    // up every other task.
+    expect(disp.dispatch(job, { id: 'taskB' }, 'todoist').status).toBe('sent');
+    expect(disp.counts(JOB_ID)).toEqual({ inFlight: 2, queued: 0 });
     disp.close();
   });
 
