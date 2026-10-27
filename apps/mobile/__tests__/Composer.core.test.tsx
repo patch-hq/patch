@@ -375,7 +375,7 @@ describe('Composer — submit() internal guards (defensive, normally unreachable
   });
 });
 
-describe('Composer — autoFocus (opening a chat puts the cursor in the composer)', () => {
+describe('Composer — autoFocus prop', () => {
   it('focuses the input on mount when autoFocus is set', () => {
     const r = renderRN(<Composer chatId="c1" autoFocus />);
     expect(findHost(r.root, byType('TextInput')).props['autoFocus']).toBe(true);

@@ -1369,7 +1369,7 @@ function ChatDetailBody(): React.ReactElement {
           <>
             <BrowserLiveCard chatId={chatId} />
             <DelegateStrip chatId={chatId} />
-            <Composer key={chatId} chatId={chatId} folder={row?.folder} autoFocus />
+            <Composer key={chatId} chatId={chatId} folder={row?.folder} />
           </>
         )}
       </KeyboardAvoidingView>

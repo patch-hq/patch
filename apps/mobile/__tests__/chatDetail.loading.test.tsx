@@ -47,3 +47,13 @@ describe('empty chat while its transcript loads', () => {
     expect(JSON.stringify(view.toJSON())).toContain('No messages yet');
   });
 });
+
+describe('opening a chat does not raise the keyboard', () => {
+  it('renders the composer input without autoFocus', async () => {
+    const Screen = (await import('../app/chats/[chatId]')).default;
+    const view = renderRN(<Screen />);
+    const inputs = view.root.findAll((n) => typeof n.type === 'string' && n.type === 'TextInput');
+    expect(inputs.length).toBeGreaterThan(0);
+    for (const i of inputs) expect(i.props['autoFocus']).toBeFalsy();
+  });
+});
