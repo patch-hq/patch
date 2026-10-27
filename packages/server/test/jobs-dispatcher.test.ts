@@ -1646,6 +1646,36 @@ describe('JobDispatcher', () => {
       disp.close();
     });
 
+    it('a bare concurrency limit on a keyed continue applies per key, not job-wide', () => {
+      // 27 Oct: Todoist Inbox triage keyed on the task id with concurrency 1 —
+      // one long chat for one task queued every other task's events behind it.
+      const { link, disp } = setup();
+      const job = makeJob({
+        id: JOB_ID,
+        concurrency: 1,
+        action: {
+          type: 'continue',
+          hostId: 'd1',
+          folder: '/work',
+          prompt: 'go',
+          key: '{{id}}',
+        },
+      });
+      const a = disp.dispatch(job, { id: 'A' }, 'todoist');
+      expect(a.status).toBe('sent');
+      link.emit({
+        type: 'chat.spawned',
+        chatId: a.event.chatId as string,
+        hostId: 'd1',
+        folder: '/work',
+      });
+      // A different subject runs alongside.
+      expect(disp.dispatch(job, { id: 'B' }, 'todoist').status).toBe('sent');
+      // The same subject lands in its own in-flight chat: delivered, not queued.
+      expect(disp.dispatch(job, { id: 'A' }, 'todoist').status).toBe('sent');
+      disp.close();
+    });
+
     it('a chat that lands and THEN dies is recorded against its job (chat-error)', () => {
       // The 2026-08-26 failure: nine spawns landed fine and every chat died on
       // its first turn to a usage limit. Each fire read `ok` forever, so the

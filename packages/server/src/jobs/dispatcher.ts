@@ -2089,7 +2089,7 @@ export class JobDispatcher {
       }
       scope = `${job.id}#${slug}`;
     }
-    const fireScope = scope ?? job.id;
+    let fireScope = scope ?? job.id;
 
     let event: ChatSpawnRequestEvent | ChatInputEvent | JobExecRequestEvent;
     // The chat this fire names. For a spawn that is the id the server allocates
@@ -2183,6 +2183,13 @@ export class JobDispatcher {
           );
         }
         keySlug = slug;
+        // A bare `concurrency` on a keyed continue limits per subject: one
+        // subject's long chat must not queue every other subject's fires
+        // (spec/08 ## Concurrency). `queueing` already chose its own scope.
+        if (queueing === undefined && limit !== undefined) {
+          scope = `${job.id}#${slug}`;
+          fireScope = scope;
+        }
       }
       let chatId = ensureChatId(job.id, keySlug, this.appendGeneration(job, keySlug));
       if (
