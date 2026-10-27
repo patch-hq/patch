@@ -578,6 +578,20 @@ body {
 .overlay-titlebar [data-testid='tab-window'] .pane-tab {
   -webkit-app-region: no-drag;
 }
+/* The same strip for the top-left pane's tab bar in a main-shell window whose
+   sidebar is hidden — a chat opened in its own window boots that way and reads
+   the opener's saved layout, so it can carry a tab bar (more than one tab or
+   pane) above the chat header. With the sidebar up the brand row is the
+   top-left instead. */
+.overlay-titlebar .three-col.sidebar-collapsed .pane-origin > .pane-tab-bar {
+  /* Past the expand chevron too, which sits just right of the lights. */
+  padding-left: calc(var(--overlay-titlebar-inset) + 36px);
+  padding-top: 20px;
+  -webkit-app-region: drag;
+}
+.overlay-titlebar .three-col.sidebar-collapsed .pane-origin > .pane-tab-bar .pane-tab {
+  -webkit-app-region: no-drag;
+}
 .editor-window .editor-rail {
   border-left: 0;
   flex: 1;

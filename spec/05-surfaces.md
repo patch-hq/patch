@@ -111,7 +111,9 @@ title bar:
   sidebar is up, and the sidebar expand control plus the chat header while it
   is collapsed — which is also how a chat opened in its own window starts. A single tab
   detached into its own window has the tab bar as its top row, which clears them
-  the same way. They
+  the same way, as does the top-left pane's tab bar in a window whose sidebar
+  is hidden (a chat opened in its own window inherits the opener's tabs and panes, so it can
+  show one). They
   are pinned to that row's own centre-line, so the brand wordmark immediately
   right of them reads as part of the same row rather than staggered under it.
 - With no title bar there is nothing left to drag the window by, so the sidebar
