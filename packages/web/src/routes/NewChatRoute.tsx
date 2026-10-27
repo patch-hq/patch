@@ -818,7 +818,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     }
     const chatId = await resolveNewChatId();
     if (!chatId) return; // creation error already surfaced
-    // Same guard as handleStartVoiceNote/handleStartCall: without it, `run`
+    // Same guard as handleStartCall: without it, `run`
     // can open a host session (e.g. the Editor tab's audio/dictation path)
     // against a chatId the host hasn't registered yet, which 404s as
     // "chat not found" (session_not_found) even though the chat looks open.
