@@ -42,6 +42,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { ContextRing } from './ContextRing.js';
+import { useStackedActions } from '../lib/composerActionsLayout.js';
 import { ChatModelControl } from './ChatModelControl.js';
 import {
   Mic,
@@ -584,6 +585,8 @@ export const Composer = forwardRef(function Composer(
         ? `${body.trimEnd()} ${livePartial}`
         : livePartial;
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const stackedActions = useStackedActions(actionsRef);
   // Where the caret sits, kept in sync so the `/` menu (and chip rendering)
   // can reason about the token the cursor is actually IN, anywhere in the
   // message, not just about the value as a whole (spec/14 § Skill
@@ -690,10 +693,13 @@ export const Composer = forwardRef(function Composer(
     const wrap = el.parentElement;
     if (!wrap) return;
     const bar = el.offsetWidth - el.clientWidth - 2; // 2 = left+right border
+    // The field's own right padding (room for the in-field mic), read rather
+    // than assumed so the mirrors wrap at exactly its text width.
+    const pad = parseFloat(getComputedStyle(el).paddingRight) || 0;
     wrap
       .querySelectorAll<HTMLElement>('.composer-live-preview, .composer-chip-mirror')
       .forEach((m) => {
-        m.style.paddingRight = `${14 + Math.max(0, bar)}px`;
+        m.style.paddingRight = `${pad + Math.max(0, bar)}px`;
         m.scrollTop = el.scrollTop;
       });
   }
@@ -2447,6 +2453,47 @@ export const Composer = forwardRef(function Composer(
                 : {})}
               rows={1}
             />
+            {/* Dictate sits inside the field, bottom-right, so the action row
+                below keeps its room for the settings (spec/14 § Composer). */}
+            <button
+              type="button"
+              className={`voice-note-btn ${noteActive || micState !== 'idle' || dictModeOn ? 'active' : ''}${micState === 'transcribing' ? ' busy' : ''}`}
+              data-testid="voice-note-btn"
+              aria-label={noteMode ? 'voice note' : 'dictate into message'}
+              aria-pressed={noteActive || micState !== 'idle' || dictModeOn}
+              title={
+                !offline && !hostOnline
+                  ? 'Voice unavailable while the agent is offline (audio can’t be queued)'
+                  : noteMode
+                    ? shortcutTitle('Voice note', chordGlyphs(dictateChord))
+                    : micState === 'transcribing'
+                      ? 'Transcribing…'
+                      : shortcutTitle('Dictate', chordGlyphs(dictateChord))
+              }
+              // Only the primary button dictates: a right-click opens the mic
+              // menu (onContextMenu), and its own mousedown must not also start
+              // a hold-to-talk recording.
+              onMouseDown={(e) => {
+                if (e.button === 0) onMicDown(e.timeStamp);
+              }}
+              onMouseUp={(e) => {
+                if (e.button === 0) onMicUp(e.timeStamp);
+              }}
+              onContextMenu={(e) => {
+                if (voiceDisabled || noteMode || noteActive || micState !== 'idle' || dictModeOn) {
+                  e.preventDefault();
+                  return;
+                }
+                micMenu.openAt(e);
+              }}
+              onMouseLeave={(e) => {
+                // Pointer left while holding: commit (release-sends / release-dictates).
+                if (pressAt.current !== null) onMicUp(e.timeStamp);
+              }}
+              disabled={voiceDisabled || micState === 'transcribing'}
+            >
+              <Mic size={ICON_SIZE} aria-hidden />
+            </button>
           </div>
         </div>
         {/* spec/14 § Copy — no helper text: an icon-only control's tooltip NAMES
@@ -2457,9 +2504,12 @@ export const Composer = forwardRef(function Composer(
             which is discoverability, not explanation. The one wordy tooltip
             left is the offline/unavailable case: that states a REASON the
             control is dead, which nothing else on screen says. */}
-        <div className="composer-actions">
+        <div
+          ref={actionsRef}
+          className={stackedActions ? 'composer-actions is-stacked' : 'composer-actions'}
+        >
           {edit ? null : (
-            <>
+            <div className="composer-tools">
               <button
                 type="button"
                 className="attach-btn"
@@ -2482,49 +2532,6 @@ export const Composer = forwardRef(function Composer(
               >
                 <PenLine size={ICON_SIZE} aria-hidden />
               </button>
-            </>
-          )}
-          <button
-            type="button"
-            className={`voice-note-btn ${noteActive || micState !== 'idle' || dictModeOn ? 'active' : ''}${micState === 'transcribing' ? ' busy' : ''}`}
-            data-testid="voice-note-btn"
-            aria-label={noteMode ? 'voice note' : 'dictate into message'}
-            aria-pressed={noteActive || micState !== 'idle' || dictModeOn}
-            title={
-              !offline && !hostOnline
-                ? 'Voice unavailable while the agent is offline (audio can’t be queued)'
-                : noteMode
-                  ? shortcutTitle('Voice note', chordGlyphs(dictateChord))
-                  : micState === 'transcribing'
-                    ? 'Transcribing…'
-                    : shortcutTitle('Dictate', chordGlyphs(dictateChord))
-            }
-            // Only the primary button dictates: a right-click opens the mic
-            // menu (onContextMenu), and its own mousedown must not also start
-            // a hold-to-talk recording.
-            onMouseDown={(e) => {
-              if (e.button === 0) onMicDown(e.timeStamp);
-            }}
-            onMouseUp={(e) => {
-              if (e.button === 0) onMicUp(e.timeStamp);
-            }}
-            onContextMenu={(e) => {
-              if (voiceDisabled || noteMode || noteActive || micState !== 'idle' || dictModeOn) {
-                e.preventDefault();
-                return;
-              }
-              micMenu.openAt(e);
-            }}
-            onMouseLeave={(e) => {
-              // Pointer left while holding: commit (release-sends / release-dictates).
-              if (pressAt.current !== null) onMicUp(e.timeStamp);
-            }}
-            disabled={voiceDisabled || micState === 'transcribing'}
-          >
-            <Mic size={ICON_SIZE} aria-hidden />
-          </button>
-          {edit ? null : (
-            <>
               {/* Call (spec/14 § Composer) — starts a sustained voice call for
               this chat. Moved here from the chat header (§ Chat panel
               header): attach, dictate and call read as one family of
@@ -2574,6 +2581,10 @@ export const Composer = forwardRef(function Composer(
                   <MeetingSetupPopover chatId={chatId} />
                 </span>
               )}
+            </div>
+          )}
+          {edit ? null : (
+            <div className="composer-settings">
               {/* Approval mode (spec/14 § Composer — Approval mode): the mode this
               chat's next turn will use, last in the utility group so it reads
               against the turn about to be sent without displacing stop/send from
@@ -2617,84 +2628,85 @@ export const Composer = forwardRef(function Composer(
               )}
               <ChatModelControl chatId={chatId} />
               <EffortControl chatId={chatId} />
-              {/* spec/14 § Composer — context ring, immediately left of stop/send. */}
-              <ContextRing chatId={chatId} />
-            </>
+            </div>
           )}
-          {edit ? (
-            <>
+          <div className="composer-actions-end">
+            {edit ? null : <ContextRing chatId={chatId} />}
+            {edit ? (
+              <>
+                <button
+                  type="button"
+                  className="msg-edit-cancel"
+                  data-testid="msg-edit-cancel"
+                  onClick={edit.onCancel}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="msg-edit-save"
+                  data-testid="msg-edit-save"
+                  disabled={!edit.allowEmpty && !hasContent}
+                >
+                  Save
+                  <span className="btn-chord" data-testid="msg-edit-save-chord" aria-hidden="true">
+                    {shortcutLabel('⌘↵')}
+                  </span>
+                </button>
+              </>
+            ) : showStop ? (
               <button
                 type="button"
-                className="msg-edit-cancel"
-                data-testid="msg-edit-cancel"
-                onClick={edit.onCancel}
+                className="stop-btn"
+                data-testid="stop-btn"
+                aria-label="stop turn"
+                title={shortcutTitle('Stop', 'Esc')}
+                onClick={onStop}
+                disabled={offline}
               >
-                Cancel
+                <Square size={ICON_SIZE} aria-hidden />
               </button>
+            ) : checking ? (
+              <button
+                type="button"
+                className="send-btn composer-checking-btn"
+                data-testid="composer-checking"
+                aria-label={
+                  checkingHookNames && checkingHookNames.length > 0
+                    ? `checking: ${checkingHookNames.join(', ')}`
+                    : 'checking'
+                }
+                title={
+                  checkingHookNames && checkingHookNames.length > 0
+                    ? `Checking… (${checkingHookNames.join(', ')})`
+                    : 'Checking…'
+                }
+                disabled
+              >
+                Checking…
+              </button>
+            ) : (
               <button
                 type="submit"
-                className="msg-edit-save"
-                data-testid="msg-edit-save"
-                disabled={!edit.allowEmpty && !hasContent}
-              >
-                Save
-                <span className="btn-chord" data-testid="msg-edit-save-chord" aria-hidden="true">
-                  {shortcutLabel('⌘↵')}
-                </span>
-              </button>
-            </>
-          ) : showStop ? (
-            <button
-              type="button"
-              className="stop-btn"
-              data-testid="stop-btn"
-              aria-label="stop turn"
-              title={shortcutTitle('Stop', 'Esc')}
-              onClick={onStop}
-              disabled={offline}
-            >
-              <Square size={ICON_SIZE} aria-hidden />
-            </button>
-          ) : checking ? (
-            <button
-              type="button"
-              className="send-btn composer-checking-btn"
-              data-testid="composer-checking"
-              aria-label={
-                checkingHookNames && checkingHookNames.length > 0
-                  ? `checking: ${checkingHookNames.join(', ')}`
-                  : 'checking'
-              }
-              title={
-                checkingHookNames && checkingHookNames.length > 0
-                  ? `Checking… (${checkingHookNames.join(', ')})`
-                  : 'Checking…'
-              }
-              disabled
-            >
-              Checking…
-            </button>
-          ) : (
-            <button
-              type="submit"
-              className="send-btn"
-              data-testid="send-btn"
-              aria-label="send message"
-              /* `↵` is the primary key and `⌘↵` also works — name the primary one
+                className="send-btn"
+                data-testid="send-btn"
+                aria-label="send message"
+                /* `↵` is the primary key and `⌘↵` also works — name the primary one
                  (Tom, `patch/todo.md` — "nothing tells you enter sends"). */
-              title={
-                editingTurn
-                  ? shortcutTitle('Save edit', '↵')
-                  : running
-                    ? shortcutTitle('Queue', '↵')
-                    : shortcutTitle('Send', '↵')
-              }
-              disabled={sendBlocked || resolving || !hasContent}
-              onContextMenu={sendMenu.openAt}
-            >
-              <Send size={ICON_SIZE} aria-hidden />
-            </button>
-          )}
+                title={
+                  editingTurn
+                    ? shortcutTitle('Save edit', '↵')
+                    : running
+                      ? shortcutTitle('Queue', '↵')
+                      : shortcutTitle('Send', '↵')
+                }
+                disabled={sendBlocked || resolving || !hasContent}
+                onContextMenu={sendMenu.openAt}
+              >
+                <Send size={ICON_SIZE} aria-hidden />
+              </button>
+            )}
+          </div>
         </div>
       </div>
       <ContextMenu

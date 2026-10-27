@@ -35,9 +35,12 @@ test.describe('Composer approval mode', () => {
 
     // BELOW the text input, not beside it.
     expect(selectBox.y).toBeGreaterThanOrEqual(inputBox.y + inputBox.height);
-    // Right of attach and mic — the dropdown closes the utility group.
+    // Right of attach — the dropdown follows the utility group.
     expect(selectBox.x).toBeGreaterThan(attachBox.x);
-    expect(selectBox.x).toBeGreaterThan(micBox.x);
+    // Dictate sits inside the field, at its right edge.
+    expect(micBox.y + micBox.height).toBeLessThanOrEqual(inputBox.y + inputBox.height);
+    expect(micBox.x + micBox.width).toBeLessThanOrEqual(inputBox.x + inputBox.width);
+    expect(micBox.x).toBeGreaterThan(inputBox.x + inputBox.width / 2);
     // Send stays pinned to the far right, so the dropdown is still left of it.
     expect(selectBox.x).toBeLessThan(sendBox.x);
     // Inside the composer itself.

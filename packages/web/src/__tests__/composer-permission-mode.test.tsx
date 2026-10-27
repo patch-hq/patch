@@ -112,30 +112,35 @@ describe('Composer — approval mode', () => {
     expect(actions!.contains(select())).toBe(true);
   });
 
+  // Document order across the row's groups (tools, settings, end).
+  const before = (a: Element, b: Element): boolean =>
+    (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+
   it('follows the utility buttons and still leaves send last in the row', () => {
     seedChat('c1', 'auto');
     renderComposer('c1');
     const actions = screen.getByTestId('composer').querySelector('.composer-actions')!;
-    const order = Array.from(actions.children);
-    expect(order.indexOf(selectRow())).toBeGreaterThan(
-      order.indexOf(screen.getByTestId('attach-btn')),
-    );
-    expect(order.indexOf(selectRow())).toBeGreaterThan(
-      order.indexOf(screen.getByTestId('voice-note-btn')),
-    );
+    expect(before(screen.getByTestId('attach-btn'), selectRow())).toBe(true);
+    // Dictate sits inside the text field now, not in the action row.
+    expect(actions.contains(screen.getByTestId('voice-note-btn'))).toBe(false);
+    expect(
+      screen
+        .getByTestId('composer')
+        .querySelector('.composer-input-wrap')!
+        .contains(screen.getByTestId('voice-note-btn')),
+    ).toBe(true);
     // Send is pinned to the far right (spec/14 § Composer), so the dropdown
     // moving right of the utility buttons must not have overtaken it.
-    expect(order.indexOf(selectRow())).toBeLessThan(order.indexOf(screen.getByTestId('send-btn')));
-    expect(actions.lastElementChild).toBe(screen.getByTestId('send-btn'));
+    expect(before(selectRow(), screen.getByTestId('send-btn'))).toBe(true);
+    expect(actions.lastElementChild!.lastElementChild).toBe(screen.getByTestId('send-btn'));
   });
 
   it('sits left of stop (which replaces send) while a turn is running', () => {
     seedChat('c1', 'auto');
     render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStop={() => {}} running />);
     const actions = screen.getByTestId('composer').querySelector('.composer-actions')!;
-    const order = Array.from(actions.children);
-    expect(order.indexOf(selectRow())).toBeLessThan(order.indexOf(screen.getByTestId('stop-btn')));
-    expect(actions.lastElementChild).toBe(screen.getByTestId('stop-btn'));
+    expect(before(selectRow(), screen.getByTestId('stop-btn'))).toBe(true);
+    expect(actions.lastElementChild!.lastElementChild).toBe(screen.getByTestId('stop-btn'));
   });
 
   it('shows the mode the next turn will use', () => {
