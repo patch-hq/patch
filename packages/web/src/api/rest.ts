@@ -423,11 +423,12 @@ export const api = {
     request<LifecycleListResponse>(`/api/chats?snoozed=only${pageParams(opts)}`),
   // spec/04 § Hidden — the sidebar's Hidden section. Hidden chats are absent
   // from the default active snapshot, so the section loads them on expand.
-  // `order=asc` pages oldest-first, matching the section's own FIFO display
-  // (`web/src/lib/chatGroups.ts`), so a scroll-triggered page lands at the
-  // bottom of the list instead of splicing into what's already on screen.
+  // Paged most-recent-first (the server default): the section draws working
+  // chats first, then settled ones newest-first, so page one must hold the
+  // chats drawn at the top — oldest-first paging filled it with the stalest
+  // runs and left the recent ones unloaded until scrolled to.
   listChatsHidden: (opts: LifecyclePageOpts = {}) =>
-    request<LifecycleListResponse>(`/api/chats?hidden=only&order=asc${pageParams(opts)}`),
+    request<LifecycleListResponse>(`/api/chats?hidden=only${pageParams(opts)}`),
   listChats: () => request<{ chats: ChatSummaryRow[] }>('/api/chats'),
   // `archived=only`, not `archived=include`: the section only ever draws the
   // `status === 'archived'` rows (`web/src/lib/chatGroups.ts`), and the
