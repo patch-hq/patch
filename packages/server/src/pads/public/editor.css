@@ -186,7 +186,7 @@ iframe { border: 0; width: 100%; height: 100%; display: block; background: #fff;
   .screenbar button:disabled { opacity: .3; }
   .screenbar #addScreenBar { display: block; }
   .screens button.add-screen { display: none; }
-  .screenbar .name { flex: 1; font-weight: 600; }
+  .screenbar .name { flex: 1; font-weight: 600; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .screens { position: absolute; left: 0; right: 0; top: 0; width: auto; max-height: 70%; z-index: 30; border-right: 0; border-bottom: 1px solid var(--ui-line); box-shadow: 0 12px 30px rgba(0,0,0,.35); display: none; }
   .screens.open:not([hidden]) { display: flex; }
   .changes-btn b { margin-left: 0; }
