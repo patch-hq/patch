@@ -1,7 +1,7 @@
 // SDK lifecycle test: feed canned envelopes through the mock backend and
 // assert wire events fan out with correct seq + chat_state mutates.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, realpathSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -281,6 +281,36 @@ describe('Host ChatRunner', () => {
       | { tool: string; callId: string; result: unknown }
       | undefined;
     expect(result?.result).toEqual(imageContent);
+  });
+
+  it('shows a chat as awaiting-permission while a browser hand-off waits on the user', async () => {
+    const { daemon, events, folder } = setup();
+    const chatId = await daemon.spawnChat({ folder, prompt: 'go' });
+    await new Promise((r) => setTimeout(r, 30));
+    // No Chromium here: every browser call the hand-off makes is a no-op.
+    (daemon as unknown as { browser: unknown }).browser = new Proxy(
+      {},
+      { get: (_t, prop) => (prop === 'redactedUrl' ? () => 'https://x.test/' : vi.fn()) },
+    );
+    (
+      daemon as unknown as { browserHandoff_: { opts: { browser: unknown } } }
+    ).browserHandoff_.opts.browser = (daemon as unknown as { browser: unknown }).browser;
+    const activities = () =>
+      events
+        .filter((e) => e.type === 'chat.state' && (e as { chatId: string }).chatId === chatId)
+        .map((e) => (e as { activity: string }).activity);
+
+    const pending = daemon.browserHandoff({
+      chatId,
+      tabId: 't1',
+      reason: 'Sign in to Google',
+      timeoutMs: 150,
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(activities().at(-1)).toBe('awaiting-permission');
+
+    await expect(pending).resolves.toMatchObject({ outcome: 'timeout' });
+    expect(activities().at(-1)).not.toBe('awaiting-permission');
   });
 
   it('translates a permission envelope into chat.permission_request + awaiting-permission', async () => {

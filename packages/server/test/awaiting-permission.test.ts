@@ -451,6 +451,40 @@ describe('AwaitingPermissionNotifier', () => {
     expect(routed[0]?.event.actions).toBeUndefined();
   });
 
+  test('a blocking browser hand-off rings, saying what the user has to do', () => {
+    seedRunning('c1', { name: 'bed planner' });
+    feed({
+      type: 'patch.browser_handoff.state',
+      chatId: 'c1',
+      handoffId: 'h1',
+      tabId: 't1',
+      status: 'waiting',
+      reason: 'Sign in to Google',
+      startedAt: 0,
+    } as WireEvent);
+    feed(state('c1', { activity: 'awaiting-permission' }));
+    expect(routed.map((r) => r.event.channel)).toEqual(['desktop', 'push']);
+    expect(routed[0]?.event.message).toBe(
+      'bed planner needs you in the browser: Sign in to Google',
+    );
+  });
+
+  test('a shared browser view does not ring', () => {
+    seedRunning('c1');
+    feed({
+      type: 'patch.browser_handoff.state',
+      chatId: 'c1',
+      handoffId: 'h1',
+      tabId: 't1',
+      status: 'waiting',
+      reason: 'Look at this',
+      startedAt: 0,
+      shared: true,
+    } as WireEvent);
+    feed(state('c1', { activity: 'running' }));
+    expect(routed).toEqual([]);
+  });
+
   test('every chat that blocks is reported, not just the first', () => {
     seedRunning('c1');
     seedRunning('c2');

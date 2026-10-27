@@ -106,6 +106,9 @@ export class AwaitingPermissionNotifier {
    */
   private readonly pendingAsk = new Map<string, PendingAsk>();
 
+  /** The reason of the blocking browser hand-off open on each chat, so the notification can say what to do. */
+  private readonly pendingHandoff = new Map<string, string>();
+
   constructor(deps: AwaitingPermissionNotifierDeps) {
     this.deps = deps;
     this.now = deps.now ?? (() => Date.now());
@@ -120,6 +123,12 @@ export class AwaitingPermissionNotifier {
         args: event.request.args,
         requestId: event.requestId,
       });
+      return;
+    }
+    if (event.type === 'patch.browser_handoff.state') {
+      if (event.shared) return;
+      if (event.status === 'waiting') this.pendingHandoff.set(event.chatId, event.reason);
+      else this.pendingHandoff.delete(event.chatId);
       return;
     }
     if (event.type !== 'chat.state') return;
@@ -181,7 +190,11 @@ export class AwaitingPermissionNotifier {
   private notify(chatId: string, name: string): void {
     const ask = this.pendingAsk.get(chatId);
     this.pendingAsk.delete(chatId);
-    const message = this.describe(chatId, name, ask);
+    const handoffReason = this.pendingHandoff.get(chatId);
+    const message =
+      handoffReason !== undefined && !ask
+        ? `${name} needs you in the browser: ${handoffReason}`
+        : this.describe(chatId, name, ask);
     const actions = this.actionsFor(ask);
 
     // Each channel is dispatched and failed independently: push throws by

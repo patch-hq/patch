@@ -2512,6 +2512,9 @@ export class Daemon {
       browser: this.browser,
       emit: (e) => this.emit(e),
       logger: options.logger.child({ component: 'browser-handoff' }),
+      onWaitingChange: (chatId) => {
+        if (this.chatState.get(chatId)) this.emitState(chatId);
+      },
     });
     // Seed the mutable harness config from the initial opts (Task 3).
     if (options.harnessConfig) {
@@ -8367,6 +8370,10 @@ export class Daemon {
         best = 'awaiting-permission';
       }
     }
+    // A blocking browser hand-off stops the agent until the user finishes with
+    // the tab: the same "waiting on you" as a permission, to the sidebar and
+    // the notifier alike.
+    if (this.browserHandoff_.isWaiting(chatId)) best = 'awaiting-permission';
     return best;
   }
 

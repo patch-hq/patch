@@ -70,6 +70,8 @@ export interface BrowserHandoffOptions {
   /** How often a waiting hand-off is announced again. */
   stateRepeatMs?: number;
   now?: () => number;
+  /** A chat started or stopped waiting on a blocking hand-off (not a shared view). */
+  onWaitingChange?: (chatId: string) => void;
 }
 
 interface Active {
@@ -125,6 +127,12 @@ export class BrowserHandoff {
     this.now = opts.now ?? Date.now;
   }
 
+  /** The chat has a blocking hand-off open: the agent is stopped until the user finishes with the tab. */
+  isWaiting(chatId: string): boolean {
+    for (const h of this.active.values()) if (h.chatId === chatId && !h.shared) return true;
+    return false;
+  }
+
   /** `patch_browser_handoff`. Resolves when the user finishes, declines, or the hand-off times out. */
   async request(args: {
     chatId: string;
@@ -163,6 +171,7 @@ export class BrowserHandoff {
       settle,
     });
     this.emitState({ chatId, handoffId, tabId, reason, startedAt, status: 'waiting' });
+    this.opts.onWaitingChange?.(chatId);
     this.touchStream(chatId, tabId);
 
     const timeoutMs = args.timeoutMs ?? this.defaultTimeoutMs;
@@ -188,6 +197,7 @@ export class BrowserHandoff {
       browser.endHandoff(tabId);
     }
     this.emitState({ chatId, handoffId, tabId, reason, startedAt, status: 'ended', outcome });
+    this.opts.onWaitingChange?.(chatId);
     return {
       outcome,
       url: browser.redactedUrl(tabId),
