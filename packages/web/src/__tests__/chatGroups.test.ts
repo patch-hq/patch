@@ -4,6 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   chatsInProject,
+  groupByStatus,
   groupChats,
   nextChatAfterArchive,
   stepVisibleChat,
@@ -648,5 +649,37 @@ describe('stepVisibleChat', () => {
   });
   it('returns null when nothing is drawn', () => {
     expect(stepVisibleChat([], 'a', 1)).toBeNull();
+  });
+});
+
+describe('groupByStatus', () => {
+  const grp = (rows: ChatRow[]) => [{ key: 'k', hostId: 'd1', folder: '~/proj', rows }];
+  it('buckets rows into status headings in fixed order and drops empty ones', () => {
+    const working = row({ chatId: 'w', activity: 'running', lastSeq: 1, lastUpdated: 5 });
+    const ready = row({ chatId: 'r', lastSeq: 3, lastReadSeq: 1, lastUpdated: 5 });
+    const read = row({ chatId: 'd', lastSeq: 3, lastReadSeq: 3, lastUpdated: 5 });
+    const waiting = row({
+      chatId: 'p',
+      activity: 'awaiting-permission',
+      lastSeq: 1,
+      lastUpdated: 5,
+    });
+    const out = groupByStatus(grp([read, working, ready, waiting]));
+    expect(out.map((g) => [g.label, g.rows.map((r) => r.chatId)])).toEqual([
+      ['Waiting on you', ['p']],
+      ['Ready to review', ['r']],
+      ['Working', ['w']],
+      ['Done', ['d']],
+    ]);
+  });
+  it('pools rows from every project', () => {
+    const a = row({ chatId: 'a', folder: '~/a', activity: 'running', lastSeq: 1, lastUpdated: 5 });
+    const b = row({ chatId: 'b', folder: '~/b', activity: 'running', lastSeq: 1, lastUpdated: 5 });
+    const out = groupByStatus([
+      { key: 'x', hostId: 'd1', folder: '~/a', rows: [a] },
+      { key: 'y', hostId: 'd1', folder: '~/b', rows: [b] },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]?.rows.map((r) => r.chatId)).toEqual(['a', 'b']);
   });
 });

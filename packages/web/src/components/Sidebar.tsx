@@ -89,11 +89,13 @@ import { useAmbiguousHostLabel } from '../lib/hostLabel.js';
 import { stripMarkdown } from '../lib/stripMarkdown.js';
 import {
   chatsInProject,
+  groupByStatus,
   groupChats,
   needsAttention,
   matchesStateFilter,
   sortAttentionQueue,
   type Grouped,
+  type SidebarGrouping,
 } from '../lib/chatGroups.js';
 import { navigateAfterArchive } from '../lib/archiveNav.js';
 import { isNearScrollBottom } from '../lib/scrollPaging.js';
@@ -228,6 +230,7 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
   // no badge; see the group's own comment below.
   const sectionCounts = useChatStore((s) => s.sectionCounts);
   const chatSort = useUiStore((s) => s.chatSort);
+  const grouping = useUiStore((s) => s.grouping);
   const groupSort = useUiStore((s) => s.groupSort);
   const grouped = useMemo(
     () => groupChats(Object.values(chats), folderRoster, { chatSort, groupSort }),
@@ -419,6 +422,7 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
           showSidebarSkeleton={showSidebarSkeleton}
           view={view}
           grouped={grouped}
+          grouping={grouping}
           activeChatId={highlightedChatId}
           activeDraftId={activeDraftId}
           attentionOnly={attentionOnly}
@@ -457,6 +461,7 @@ function RegularSidebar({
   showSidebarSkeleton,
   view,
   grouped,
+  grouping,
   activeChatId,
   activeDraftId,
   attentionOnly,
@@ -484,6 +489,7 @@ function RegularSidebar({
   showSidebarSkeleton: boolean;
   view: Grouped;
   grouped: Grouped;
+  grouping: SidebarGrouping;
   activeChatId: string | null;
   activeDraftId: string | null;
   attentionOnly: boolean;
@@ -543,15 +549,20 @@ function RegularSidebar({
   // top to bottom — so a shift-click resolves a range the user can actually
   // see. Anything that leaves the list leaves the selection with it.
   // While search results replace the list there are no selectable rows drawn.
+  const statusGroups = useMemo(
+    () => (grouping === 'status' ? groupByStatus(view.folders) : []),
+    [grouping, view.folders],
+  );
+  const listedGroups = grouping === 'status' ? statusGroups : view.folders;
   const selectableOrder = useMemo(
     () =>
       activeSearch !== null
         ? []
         : [
             ...view.pinned,
-            ...view.folders.flatMap((f) => (collapsedFolders.includes(f.key) ? [] : f.rows)),
+            ...listedGroups.flatMap((f) => (collapsedFolders.includes(f.key) ? [] : f.rows)),
           ].map((c) => c.chatId),
-    [view, collapsedFolders, activeSearch],
+    [view, listedGroups, collapsedFolders, activeSearch],
   );
   useEffect(() => {
     useSelectionStore.getState().setOrder(selectableOrder);
@@ -637,6 +648,53 @@ function RegularSidebar({
           those rows are still listed (hiding a chat is worse), just unheaded
           until the folder is known. */}
             {!showSidebarSkeleton &&
+              grouping === 'status' &&
+              statusGroups.map((g) => {
+                const collapsed = collapsedFolders.includes(g.key);
+                return (
+                  <section
+                    key={g.key}
+                    className="sb-folder"
+                    data-testid={`status-section-${g.key}`}
+                  >
+                    <div className="folder-head">
+                      <button
+                        type="button"
+                        className="folder-head-toggle"
+                        data-testid={`status-collapse-${g.key}`}
+                        aria-expanded={!collapsed}
+                        aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${g.label}`}
+                        onClick={() => toggleFolderCollapsed(g.key)}
+                      >
+                        {collapsed ? (
+                          <ChevronRight size={13} aria-hidden className="folder-head-chev" />
+                        ) : (
+                          <ChevronDown size={13} aria-hidden className="folder-head-chev" />
+                        )}
+                        <StatusBadge badge={g.icon} pendingWake={null} failureReason={null} />
+                        <span className="folder-head-label">{g.label}</span>
+                      </button>
+                      {collapsed ? (
+                        <span className="folder-head-count" data-testid={`status-count-${g.key}`}>
+                          {g.rows.length}
+                        </span>
+                      ) : null}
+                    </div>
+                    {collapsed
+                      ? null
+                      : g.rows.map((c) => (
+                          <ChatRowView
+                            key={c.chatId}
+                            row={c}
+                            active={activeChatId === c.chatId}
+                            project={projectLabel(c.folder, c.hostId, view.folders, hostNames)}
+                          />
+                        ))}
+                  </section>
+                );
+              })}
+            {!showSidebarSkeleton &&
+              grouping === 'project' &&
               view.folders.map(({ key, hostId, folder, rows }) => {
                 const collapsed = collapsedFolders.includes(key);
                 const projectName = projectLabel(folder, hostId, view.folders, hostNames);
@@ -1897,8 +1955,11 @@ const ChatRowView = memo(function ChatRowView({
   snoozed,
   hidden,
   automations,
+  project,
 }: {
   row: ChatRow;
+  /** Project name shown under the title when rows are grouped by status. */
+  project?: string;
   /** Whether this row is the open chat. A boolean, not the open id, so a switch re-renders two rows rather than all of them. */
   active: boolean;
   pinned?: boolean;
@@ -2338,6 +2399,11 @@ const ChatRowView = memo(function ChatRowView({
         ) : (
           <span className="name">{title}</span>
         )}
+        {project ? (
+          <span className="preview" data-testid={`row-project-${row.chatId}`}>
+            {project}
+          </span>
+        ) : null}
         {preview ? (
           <span className="preview" data-testid={`row-preview-${row.chatId}`}>
             {preview}

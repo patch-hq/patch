@@ -388,6 +388,60 @@ export function needsAttention(row: ChatRow): boolean {
   );
 }
 
+/** How the sidebar's active chats are grouped: by project, or by status. */
+export type SidebarGrouping = 'project' | 'status';
+
+export const SIDEBAR_GROUPINGS: ReadonlyArray<{ value: SidebarGrouping; label: string }> = [
+  { value: 'project', label: 'Group by project' },
+  { value: 'status', label: 'Group by status' },
+];
+
+export const DEFAULT_SIDEBAR_GROUPING: SidebarGrouping = 'project';
+
+/** One status heading in the by-status grouping. */
+export interface StatusGroup {
+  key: string;
+  label: string;
+  /** The badge the heading's icon is drawn from. */
+  icon: 'errored' | 'permission' | 'done' | 'working' | 'read';
+  rows: ChatRow[];
+}
+
+const STATUS_GROUP_DEFS: ReadonlyArray<Pick<StatusGroup, 'key' | 'label' | 'icon'>> = [
+  { key: 'status:failed', label: 'Failed', icon: 'errored' },
+  { key: 'status:waiting', label: 'Waiting on you', icon: 'permission' },
+  { key: 'status:ready', label: 'Ready to review', icon: 'done' },
+  { key: 'status:working', label: 'Working', icon: 'working' },
+  { key: 'status:done', label: 'Done', icon: 'read' },
+];
+
+/**
+ * Re-bucket the project groups' rows by status — Failed, Waiting on you, Ready
+ * to review (finished, unread), Working, Done (finished, read). Each row lands
+ * in exactly one bucket, driven off the same `deriveBadge` as the row's own
+ * icon; empty buckets are dropped. Order within a bucket is the order the rows
+ * had across the project groups.
+ */
+export function groupByStatus(folders: readonly FolderGroup[]): StatusGroup[] {
+  const buckets = new Map<string, ChatRow[]>(STATUS_GROUP_DEFS.map((d) => [d.key, []]));
+  for (const row of folders.flatMap((f) => f.rows)) {
+    const badge = deriveBadge(row);
+    const key = matchesStateFilter(row, 'failed')
+      ? 'status:failed'
+      : matchesStateFilter(row, 'waiting')
+        ? 'status:waiting'
+        : matchesStateFilter(row, 'working')
+          ? 'status:working'
+          : badge === 'done'
+            ? 'status:ready'
+            : 'status:done';
+    buckets.get(key)?.push(row);
+  }
+  return STATUS_GROUP_DEFS.map((d) => ({ ...d, rows: buckets.get(d.key) ?? [] })).filter(
+    (g) => g.rows.length > 0,
+  );
+}
+
 /** The states the sidebar can be filtered down to (spec/14 § Sidebar). */
 export type ChatStateFilter = 'all' | 'failed' | 'working' | 'waiting' | 'done';
 

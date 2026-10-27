@@ -11,6 +11,9 @@ import {
   CHAT_SORTS,
   CHAT_STATE_FILTERS,
   DEFAULT_CHAT_SORT,
+  DEFAULT_SIDEBAR_GROUPING,
+  SIDEBAR_GROUPINGS,
+  type SidebarGrouping,
   type ChatSort,
   type GroupSort,
   type ChatStateFilter,
@@ -135,6 +138,18 @@ function loadChatSort(key: string): ChatSort {
   const raw = localStorage.getItem(key);
   // Missing or garbled is a first run, not a swallowed error.
   return CHAT_SORTS.some((o) => o.value === raw) ? (raw as ChatSort) : DEFAULT_CHAT_SORT;
+}
+
+const GROUPING_KEY = 'patch.sidebar.grouping';
+
+function loadGrouping(): SidebarGrouping {
+  /* v8 ignore next -- jsdom always defines localStorage; this SSR guard can't be hit under vitest+jsdom. */
+  if (typeof localStorage === 'undefined') return DEFAULT_SIDEBAR_GROUPING;
+  const raw = localStorage.getItem(GROUPING_KEY);
+  // Missing or garbled is a first run, not a swallowed error.
+  return SIDEBAR_GROUPINGS.some((o) => o.value === raw)
+    ? (raw as SidebarGrouping)
+    : DEFAULT_SIDEBAR_GROUPING;
 }
 
 function loadGroupSort(): GroupSort {
@@ -765,6 +780,8 @@ interface UiState {
   chatSort: ChatSort;
   /** Order of the projects themselves. */
   groupSort: GroupSort;
+  /** Whether the sidebar groups chats under projects or under status headings. */
+  grouping: SidebarGrouping;
   sidebarCollapsed: boolean;
   /** Sidebar drawn as a rail of status dots (spec/14 § Mini sidebar). */
   sidebarMini: boolean;
@@ -911,6 +928,7 @@ interface UiState {
   setAttentionOnly(v: boolean): void;
   setStateFilter(v: ChatStateFilter): void;
   setChatSort(v: ChatSort): void;
+  setGrouping(v: SidebarGrouping): void;
   setGroupSort(v: GroupSort): void;
   /** Forget a recent folder — removes it from the Recent folders list. */
   forgetFolder(folder: string): void;
@@ -1038,6 +1056,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   stateFilter: loadStateFilter(),
   chatSort: loadChatSort(CHAT_SORT_KEY),
   groupSort: loadGroupSort(),
+  grouping: loadGrouping(),
   forgottenFolders: loadForgottenFolders(),
   collapsedFolders: loadCollapsedFolders(),
   sidebarCollapsed: loadSidebarHiddenParam(),
@@ -1115,6 +1134,11 @@ export const useUiStore = create<UiState>((set, get) => ({
   setChatSort(v) {
     persistSort(CHAT_SORT_KEY, v);
     set({ chatSort: v });
+  },
+  setGrouping(v) {
+    /* v8 ignore next -- jsdom always defines localStorage. */
+    if (typeof localStorage !== 'undefined') localStorage.setItem(GROUPING_KEY, v);
+    set({ grouping: v });
   },
   setGroupSort(v) {
     persistSort(GROUP_SORT_KEY, v);
