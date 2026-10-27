@@ -572,6 +572,17 @@ export const Composer = forwardRef(function Composer(
   // textarea (with its caret, `/` menu and chips) works on the last reply, the
   // `body`, only.
   const { thread, body } = useMemo(() => splitThread(value), [value]);
+  // The host's interim transcript of what has been said so far (spec/07 §
+  // Dictation into the composer). It is drawn IN the input, after what was
+  // already there, and replaced by the authoritative transcript when that lands
+  // — never part of `value`, so a cancelled dictation leaves the draft intact.
+  const [livePartial, setLivePartial] = useState('');
+  const shownBody =
+    livePartial === ''
+      ? body
+      : body.trim().length > 0
+        ? `${body.trimEnd()} ${livePartial}`
+        : livePartial;
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // Where the caret sits, kept in sync so the `/` menu (and chip rendering)
   // can reason about the token the cursor is actually IN, anywhere in the
@@ -596,8 +607,8 @@ export const Composer = forwardRef(function Composer(
   // differs, so typing never touches the value and the undo stack survives.
   useLayoutEffect(() => {
     const el = inputRef.current;
-    if (el && el.value !== body) el.value = body;
-  }, [body]);
+    if (el && el.value !== shownBody) el.value = shownBody;
+  }, [shownBody]);
   useLayoutEffect(() => {
     const pos = pendingCursorRef.current;
     if (pos === null) return;
@@ -1116,7 +1127,6 @@ export const Composer = forwardRef(function Composer(
   // Dictation into the composer). Shown GREYED, mirrored behind the input, and
   // dropped the instant the authoritative transcript lands — it is a preview of
   // a guess, never something the user is left holding and unable to edit.
-  const [livePartial, setLivePartial] = useState('');
   const recordingRef = useRef<VoiceRecording | null>(null);
   const previewRef = useRef<DictationPreview | null>(null);
   // The mic marker (and any words heard so far) stays drawn through
@@ -1159,7 +1169,7 @@ export const Composer = forwardRef(function Composer(
     el.style.overflowY = contentHeight > cap ? 'auto' : 'hidden';
     el.scrollTop = scrollTop;
     syncMirrors(el);
-  }, [value, livePartial, showLivePreview]);
+  }, [value, shownBody, showLivePreview]);
   // spec/14 § Composer — chips: the mirror only needs to exist while there is
   // at least one chip to draw, and only when dictation isn't already using
   // the transparent-textarea trick for its own mirror (the two never overlap
@@ -1332,10 +1342,10 @@ export const Composer = forwardRef(function Composer(
    * NOT swallowed: `pushError` puts it in front of the user, so a live leg that
    * has stopped working can't be mistaken for a quiet one.
    */
-  function startLivePreview(rec: VoiceRecording, gen: number): void {
+  function startLivePreview(rec: VoiceRecording, gen: number, previewChatId: string): void {
     try {
       const openPreview = previewFactory ?? startDictationPreview;
-      previewRef.current = openPreview(chatId, {
+      previewRef.current = openPreview(previewChatId, {
         onPartial: (text: string) => {
           if (gen !== recGenRef.current) return;
           setLivePartial(text);
@@ -1358,14 +1368,26 @@ export const Composer = forwardRef(function Composer(
     const factory = recorderFactory ?? startRecording;
     recPrepareRef.current = (async () => {
       try {
-        const rec = await factory();
+        // The live leg needs a real chat on the host. A composer that has none
+        // yet (new chat) creates it now, in parallel with the mic opening — the
+        // same create-then-act path attachments use.
+        const [rec, previewChatId] = await Promise.all([
+          factory(),
+          resolveChatId ? resolveChatId() : Promise.resolve(chatId),
+        ]);
         if (gen !== recGenRef.current) {
           // Committed/cancelled while the mic was spinning up.
           rec.cancel();
           return;
         }
+        if (previewChatId === null) {
+          // Chat creation failed and has already said why.
+          rec.cancel();
+          setMicState('idle');
+          return;
+        }
         recordingRef.current = rec;
-        startLivePreview(rec, gen);
+        startLivePreview(rec, gen, previewChatId);
       } catch (e) {
         if (gen !== recGenRef.current) return;
         recordingRef.current = null;
@@ -2222,25 +2244,7 @@ export const Composer = forwardRef(function Composer(
           )}
           <div className={leading ? 'composer-input-wrap has-leading' : 'composer-input-wrap'}>
             {leading ? <div className="composer-leading">{leading}</div> : null}
-            {/* Live-dictation preview (spec/07 § Dictation into the composer):
-              what is already in the input, in normal ink, plus the host's
-              interim transcript GREYED behind a text-transparent textarea, so
-              the real input keeps the caret and stays editable throughout.
-              Only mounted while there is something to preview. */}
-            {showLivePreview ? (
-              <div
-                className="composer-live-preview"
-                data-testid="composer-live-preview"
-                aria-hidden
-              >
-                <span className="composer-live-committed">{body}</span>
-                {body.trim().length > 0 ? ' ' : ''}
-                <span className="composer-live-partial" data-testid="composer-live-partial">
-                  <span aria-hidden>🎤 </span>
-                  {livePartial}
-                </span>
-              </div>
-            ) : showChipMirror ? (
+            {showChipMirror ? (
               // spec/14 § Composer — chips: the same text-transparent-textarea
               // trick as the dictation preview above, generalised: the real
               // input keeps the caret and every editing gesture, and this mirror
@@ -2253,7 +2257,7 @@ export const Composer = forwardRef(function Composer(
             <textarea
               ref={inputRef}
               className="composer-input"
-              data-preview={showLivePreview ? 'true' : undefined}
+              readOnly={micState !== 'idle'}
               data-chips={showChipMirror ? 'true' : undefined}
               data-testid={edit ? 'msg-edit-input' : 'composer-input'}
               /* spec/14 § Copy — no helper text: the prompt names the field and

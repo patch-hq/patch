@@ -40,7 +40,7 @@ import {
   providerConnectedForModel,
   usePreferencesStore,
 } from '../stores/preferencesStore.js';
-import { startVoiceCall, startVoiceNote } from '../lib/voiceController.js';
+import { startVoiceCall } from '../lib/voiceController.js';
 import { startMeeting } from '../lib/meetingControl.js';
 import { sendMessage, type OutgoingFile } from '../lib/sendQueue.js';
 import { usePopupPlacement } from '../lib/popupPlacement.js';
@@ -779,34 +779,6 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     return true;
   }
 
-  // Voice can START a chat (spec/14 § Sidebar §8, spec/07 ## Voice-input modes):
-  // create the chat, open it, and bind the voice note to its real chatId so the
-  // host routes the typed text + transcript in as the first turn. The first note always
-  // runs as a TOGGLE session (commit ⏎, cancel esc — handled globally in
-  // AppShell): a press-and-hold release can't survive the route change off the
-  // new-chat composer, so PTT-release would never commit.
-  async function handleStartVoiceNote(typed: string): Promise<void> {
-    const chatId = await createChatInFolder();
-    if (!chatId) return;
-    // Guard against WS-level spawn rejections (same as handleSend above).
-    const spawnErr = await waitForSpawnRejection(chatId);
-    if (spawnErr !== null) {
-      useChatStore.getState().removeChat(chatId);
-      const human = humaniseError(spawnErr, 'spawn');
-      pushError(human.sentence, undefined, human.detail);
-      setSubmitting(false);
-      return;
-    }
-    ensureChat(chatId, folder.trim()); // render the transcript at once, no "not found yet"
-    removeDraft(draftId); // the draft is now a real chat — consume it
-    navigate(`/chats/${chatId}`);
-    // The typed first message rides along with the note: this composer unmounts
-    // on the navigation, so anything already written here would otherwise be
-    // thrown away by the act of starting the note. It leads the turn, with the
-    // transcript appended (spec/07 § 1. Voice note).
-    void startVoiceNote(chatId, 'toggle', typed);
-  }
-
   // Call on a NOT-YET-SPAWNED chat: same shape as a voice note starting a chat —
   // create it, wait until its host has it, open it, then bind the call to the
   // real chatId. Starting the call without opening the chat left an off-screen
@@ -1475,10 +1447,6 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
           initialValue={seedRef.current.text}
           onValueChange={(t) => updateDraft(draftId, { text: t })}
           onSend={handleSend}
-          // Voice can START a chat: create it, open it, then bind the note to the
-          // real chatId (see handleStartVoiceNote). The gesture is ignored here —
-          // the first note always runs as a toggle session.
-          onStartVoiceNote={(_chatId, _gesture, typed) => void handleStartVoiceNote(typed)}
         />
       )}
     </main>

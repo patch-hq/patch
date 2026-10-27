@@ -279,8 +279,8 @@ describe('voice note — the typed message is appended to, never erased', () => 
       fireEvent.mouseUp(mic);
       await waitFor(() => expect(input().getAttribute('placeholder')).toBeNull());
       preview.emit('buy oat');
-      // The mirror is mounted and the placeholder is gone — they can't overlap.
-      expect(screen.getByTestId('composer-live-preview')).toBeTruthy();
+      // The words are in the input itself and the placeholder is gone.
+      await waitFor(() => expect(input().value).toBe('buy oat'));
       expect(input().getAttribute('placeholder')).toBeNull();
     });
 

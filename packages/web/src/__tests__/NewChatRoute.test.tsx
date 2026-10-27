@@ -48,8 +48,7 @@ import { useUiStore } from '../stores/uiStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
-import { __setAudioOpenerForTests, __setRecorderFactoryForTests } from '../lib/voiceController.js';
-import type { VoiceRecording } from '../lib/voiceRecorder.js';
+import { __setAudioOpenerForTests } from '../lib/voiceController.js';
 import type { PatchWs } from '../api/ws.js';
 import { loadLastNewChat, saveLastNewChat } from '../lib/lastNewChat';
 import { startMeeting } from '../lib/meetingControl.js';
@@ -491,7 +490,7 @@ describe('/chats/new', () => {
     expect(screen.queryByTestId('new-chat-setup')).toBeNull();
   });
 
-  it('a voice note STARTS the chat: creates it, navigates, binds the note to the new chatId', async () => {
+  it('the mic dictates in place: no voice note, no navigation, nothing sent', async () => {
     const fetchMock = vi.fn(
       async () =>
         new Response(JSON.stringify({ chatId: 'c-voice', folder: '~/x', status: 'pending' }), {
@@ -500,16 +499,7 @@ describe('/chats/new', () => {
         }),
     );
     vi.stubGlobal('fetch', fetchMock);
-    // The composer (and its mic) is disabled unless the WS is connected.
     usePresenceStore.getState().setConnection('connected');
-    // Inject a fake mic recorder so startVoiceNote records nothing real (notes
-    // use the record-and-upload path, not the streaming audio WSS).
-    let recorderStarts = 0;
-    __setRecorderFactoryForTests(async () => {
-      recorderStarts += 1;
-      return { onLevel: () => {}, stop: vi.fn(), cancel: vi.fn() } as unknown as VoiceRecording;
-    });
-
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={qc}>
@@ -521,27 +511,15 @@ describe('/chats/new', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
-    fireEvent.click(screen.getByTestId('new-chat-folder-pill'));
-    fireEvent.change(screen.getByTestId('new-chat-folder'), { target: { value: '~/x' } });
-    // Press the composer mic on a brand-new chat.
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'typed first' } });
     fireEvent.mouseDown(screen.getByTestId('voice-note-btn'));
-
-    await waitFor(() => {
-      expect(screen.getByTestId('navigated')).toBeInTheDocument();
-    });
-    expect(fetchMock).toHaveBeenCalled(); // chat was created
-    // The note is bound to the NEW chatId (not 'new'), as a toggle session, and
-    // the mic started recording (record-and-upload path).
-    await waitFor(() => {
-      expect(useVoiceStore.getState().note?.chatId).toBe('c-voice');
-    });
-    expect(useVoiceStore.getState().note?.gesture).toBe('toggle');
-    expect(recorderStarts).toBeGreaterThan(0);
-    // Row seeded optimistically so ChatRoute renders immediately (no "not found").
-    expect(useChatStore.getState().chats['c-voice']?.folder).toBe('~/x');
-
-    __setRecorderFactoryForTests(null);
-    useVoiceStore.getState().endNote();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(useVoiceStore.getState().note).toBeNull();
+    expect(screen.queryByTestId('navigated')).toBeNull();
+    expect((screen.getByTestId('composer-input') as HTMLTextAreaElement).value).toBe('typed first');
+    expect(
+      fetchMock.mock.calls.some((c) => String((c as unknown[])[0]).includes('/api/voice/note')),
+    ).toBe(false);
   });
 
   it('a call STARTS the chat: creates it, navigates into it, binds the call to the new chatId', async () => {

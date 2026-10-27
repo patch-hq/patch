@@ -2212,22 +2212,18 @@ describe('Composer', () => {
         rec: makeRec(),
         transcribeClip: () => new Promise((r) => (resolveT = r)),
       });
-      expect(screen.queryByTestId('composer-live-preview')).toBeNull();
       fireEvent.mouseDown(mic);
       fireEvent.mouseUp(mic);
       await waitFor(() => expect(preview.opened()).toBe(1));
       preview.emit('hello there');
-      await waitFor(() =>
-        expect(screen.getByTestId('composer-live-partial').textContent).toBe('🎤 hello there'),
-      );
+      await waitFor(() => expect(input().value).toBe('hello there'));
       expect(screen.queryByTestId('dictation-status')).toBeNull();
       fireEvent.mouseDown(mic);
       await waitFor(() => expect(mic.getAttribute('title')).toBe('Transcribing…'));
       // The words already heard do not vanish while the upload runs.
-      expect(screen.getByTestId('composer-live-partial').textContent).toBe('🎤 hello there');
+      expect(input().value).toBe('hello there');
       resolveT!({ transcript: 'done' });
-      await waitFor(() => expect(screen.queryByTestId('composer-live-preview')).toBeNull());
-      expect(input().value).toBe('done');
+      await waitFor(() => expect(input().value).toBe('done'));
     });
 
     it('send while dictating with nothing heard sends nothing and says so', async () => {
@@ -2249,6 +2245,27 @@ describe('Composer', () => {
       );
       expect(onSend).not.toHaveBeenCalled();
       expect(mic.getAttribute('aria-pressed')).toBe('false');
+    });
+
+    it('on a new chat the live leg opens against the chat created when the mic starts', async () => {
+      const rec = makeRec();
+      const factory = vi.fn(preview.factory);
+      render(
+        <Composer
+          chatId="new"
+          hostId="d1"
+          onSend={() => {}}
+          resolveChatId={async () => 'c-made'}
+          previewFactory={factory}
+          recorderFactory={async () => rec as unknown as VoiceRecording}
+          transcribeClip={async () => ({ transcript: 'hello' })}
+        />,
+      );
+      const mic = screen.getByTestId('voice-note-btn');
+      fireEvent.mouseDown(mic);
+      fireEvent.mouseUp(mic);
+      await waitFor(() => expect(factory).toHaveBeenCalledOnce());
+      expect(factory.mock.calls[0]![0]).toBe('c-made');
     });
 
     it('a failed transcription on send keeps the typed text and sends nothing', async () => {
@@ -2296,9 +2313,7 @@ describe('Composer', () => {
       });
       await waitFor(() => expect(preview.opened()).toBe(1));
       preview.emit('from the');
-      await waitFor(() =>
-        expect(screen.getByTestId('composer-live-partial').textContent).toBe('🎤 from the'),
-      );
+      await waitFor(() => expect(input().value).toBe('from the'));
       act(() => {
         mic!.down(1000);
         mic!.up(1050);
@@ -2517,7 +2532,7 @@ describe('Composer', () => {
     // host's interim transcript paints GREYED into the input while the user
     // is still speaking, and is replaced by the authoritative one on commit. ---
 
-    it('paints the interim transcript as a greyed preview while recording, leaving the input editable', async () => {
+    it('writes the interim transcript straight into the input while recording', async () => {
       const rec = makeRec();
       render(
         <Composer
@@ -2533,31 +2548,66 @@ describe('Composer', () => {
       fireEvent.mouseDown(mic);
       fireEvent.mouseUp(mic);
       await waitFor(() => expect(preview.opened()).toBe(1));
-      // Just the mic marker until there are words.
-      expect(screen.getByTestId('composer-live-partial').textContent).toBe('🎤 ');
+      expect(input().value).toBe('');
 
       preview.emit('buy oat');
-      await waitFor(() =>
-        expect(screen.getByTestId('composer-live-partial').textContent).toBe('🎤 buy oat'),
-      );
-      // Greyed PREVIEW, not committed text: the real value is still empty, so
-      // sending now would send nothing rather than a half-heard guess.
-      expect(input().value).toBe('');
-      expect(input().getAttribute('data-preview')).toBe('true');
-      expect(input().disabled).toBe(false);
+      await waitFor(() => expect(input().value).toBe('buy oat'));
+      expect(screen.queryByTestId('composer-live-preview')).toBeNull();
 
       // Each pass replaces the last — the text is allowed to rewrite itself.
       preview.emit('buy oat milk');
-      await waitFor(() =>
-        expect(screen.getByTestId('composer-live-partial').textContent).toBe('🎤 buy oat milk'),
-      );
+      await waitFor(() => expect(input().value).toBe('buy oat milk'));
 
-      // The authoritative transcript lands as real text and the preview goes.
+      // The authoritative transcript lands as real text.
       fireEvent.mouseDown(mic);
       await waitFor(() => expect(input().value).toBe('buy oat milk please'));
-      expect(screen.queryByTestId('composer-live-preview')).toBeNull();
-      expect(input().getAttribute('data-preview')).toBeNull();
       expect(preview.stopped()).toBe(1);
+    });
+
+    it('tapping the mic again stops dictation without sending anything', async () => {
+      const rec = makeRec();
+      const onSend = vi.fn();
+      render(
+        <Composer
+          chatId="c1"
+          hostId="d1"
+          onSend={onSend}
+          previewFactory={preview.factory}
+          recorderFactory={async () => rec as unknown as VoiceRecording}
+          transcribeClip={async () => ({ transcript: 'just words' })}
+        />,
+      );
+      const mic = screen.getByTestId('voice-note-btn');
+      fireEvent.mouseDown(mic);
+      fireEvent.mouseUp(mic);
+      await waitFor(() => expect(preview.opened()).toBe(1));
+      fireEvent.mouseDown(mic);
+      await waitFor(() => expect(input().value).toBe('just words'));
+      expect(onSend).not.toHaveBeenCalled();
+    });
+
+    it('starting a dictation keeps the text already in the input', async () => {
+      const rec = makeRec();
+      render(
+        <Composer
+          chatId="c1"
+          hostId="d1"
+          onSend={() => {}}
+          previewFactory={preview.factory}
+          recorderFactory={async () => rec as unknown as VoiceRecording}
+          transcribeClip={async () => ({ transcript: 'and bread' })}
+        />,
+      );
+      fireEvent.change(input(), { target: { value: 'shopping:' } });
+      const mic = screen.getByTestId('voice-note-btn');
+      fireEvent.mouseDown(mic);
+      fireEvent.mouseUp(mic);
+      await waitFor(() => expect(preview.opened()).toBe(1));
+      expect(input().value).toBe('shopping:');
+      preview.emit('and');
+      await waitFor(() => expect(input().value).toBe('shopping: and'));
+      fireEvent.mouseDown(mic);
+      await waitFor(() => expect(input().value).toBe('shopping: and bread'));
     });
 
     it('draws the preview after text already typed, and tees the recorder PCM into it', async () => {
@@ -2584,11 +2634,7 @@ describe('Composer', () => {
       expect(Array.from(preview.pushed[0]!)).toEqual([1, 2, 3]);
 
       preview.emit('and some');
-      await waitFor(() =>
-        expect(screen.getByTestId('composer-live-preview').textContent).toBe(
-          'shopping: 🎤 and some',
-        ),
-      );
+      await waitFor(() => expect(input().value).toBe('shopping: and some'));
     });
 
     it('a broken preview leg is surfaced but the dictation still completes', async () => {
@@ -2668,10 +2714,10 @@ describe('Composer', () => {
       fireEvent.mouseUp(mic);
       await waitFor(() => expect(preview.opened()).toBe(1));
       preview.emit('half a sentence');
-      await waitFor(() => expect(screen.getByTestId('composer-live-preview')).toBeTruthy());
+      await waitFor(() => expect(input().value).toBe('half a sentence'));
 
       fireEvent.keyDown(input(), { key: 'Escape' });
-      await waitFor(() => expect(screen.queryByTestId('composer-live-preview')).toBeNull());
+      await waitFor(() => expect(input().value).toBe(''));
       expect(preview.stopped()).toBe(1);
       expect(rec.cancel).toHaveBeenCalledOnce();
       expect(input().value).toBe('');

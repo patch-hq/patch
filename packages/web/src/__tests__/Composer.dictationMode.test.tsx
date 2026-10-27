@@ -46,13 +46,13 @@ describe('composer dictation mode', () => {
     fireEvent.click(screen.getByText('Keep dictating'));
   };
 
-  it('shows interim words greyed in the input while speaking, and clears them at the end', () => {
+  it('shows interim words in the input while speaking, and clears them at the end', () => {
     mount();
     keepDictating();
     act(() => cb.onPartial?.('hello wor'));
-    expect(screen.getByTestId('composer-live-partial').textContent).toContain('hello wor');
+    expect((screen.getByTestId('composer-input') as HTMLTextAreaElement).value).toBe('hello wor');
     act(() => cb.onPartial?.(''));
-    expect(screen.queryByTestId('composer-live-partial')).toBeNull();
+    expect((screen.getByTestId('composer-input') as HTMLTextAreaElement).value).toBe('');
   });
 
   it('offers the mode a live-preview opener', () => {
