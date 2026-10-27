@@ -13,7 +13,7 @@
 // height however many accounts are connected.
 
 import { Fragment, useState, type JSX, type KeyboardEvent } from 'react';
-import { rateLimitWindowState } from '@patch/wire';
+import { rateLimitWindowState, type ProviderId } from '@patch/wire';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { accountRows, type AccountUsageRow } from './UsagePopover.js';
@@ -29,7 +29,7 @@ const METERS: { scope: 'session' | 'week'; label: string }[] = [
 
 export interface AccountUsageStripProps {
   /** The backend the new chat's model runs on; only its accounts can be picked. */
-  providerId: 'claude' | 'codex';
+  providerId: ProviderId;
   /** The account the chat will start on — chosen, or the strategy's pick. */
   usedAccountId: string | null;
   /** Called with the account id when a usable card is clicked. */

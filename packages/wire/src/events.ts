@@ -39,7 +39,7 @@ import {
   DEFAULT_WATCH_CHECK_IN_PROMPT,
 } from './watch-check-in-prompt.js';
 import { HostProviderKey, ProviderKeyId } from './provider-keys.js';
-import { PROVIDERS, providerForModel, type ProviderId } from './providers.js';
+import { BACKEND_IDS, PROVIDERS, providerForModel, type ProviderId } from './providers.js';
 import {
   HookDecision,
   HookImages,
@@ -8452,7 +8452,7 @@ export const PatchAccountsRequestEvent = z
     requestId: z.string().min(1),
     op: z.enum(['list', 'order', 'strategy']),
     /** order/strategy (and an optional filter for list). */
-    backendId: z.enum(['claude-code', 'codex']).optional(),
+    backendId: z.enum(BACKEND_IDS).optional(),
     /** order: every account id, each once, first to last. */
     accountIds: z.array(z.string().min(1)).optional(),
     /** strategy. */

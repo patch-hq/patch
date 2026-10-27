@@ -47,6 +47,8 @@ import {
   type SharedCodexAccount,
   type SharedSecretsSummary,
   type WireEvent,
+  accountsKeyForBackend,
+  type ProviderBackendId,
 } from '@patch/wire';
 import { generateWebBotAuthKey, parseWebBotAuthKey } from '@patch/wire/web-bot-auth';
 import { validateClaudeOAuthToken, type ClaudeTokenValidation } from '@patch/auth';
@@ -80,7 +82,7 @@ export class SettingsError extends Error {
   }
 }
 
-export type BackendId = 'claude-code' | 'codex';
+export type BackendId = ProviderBackendId;
 
 /** Server-at-rest format. The identity key is intentionally not in the wire SharedSecrets schema. */
 const StoredSecrets = SharedSecrets.extend({
@@ -390,7 +392,7 @@ export class SharedSettingsService {
 
   /** Every Claude account id, for checking a spawn's preferred account. */
   accountIds(backendId: BackendId): string[] {
-    return (backendId === 'codex' ? this.secrets.codex : this.secrets.claude).map((a) => a.id);
+    return this.list(backendId).map((a) => a.id);
   }
 
   // ---- commit + push ----
@@ -721,7 +723,7 @@ export class SharedSettingsService {
   }
 
   setStrategy(backendId: BackendId, strategy: AccountStrategy): void {
-    const key = backendId === 'codex' ? 'codex' : 'claude';
+    const key = accountsKeyForBackend(backendId);
     this.update({ accountStrategy: { ...this.settings.accountStrategy, [key]: strategy } });
   }
 
@@ -832,7 +834,7 @@ export class SharedSettingsService {
   }
 
   private list(backendId: BackendId): (SharedClaudeAccount | SharedCodexAccount)[] {
-    return backendId === 'codex' ? this.secrets.codex : this.secrets.claude;
+    return this.secrets[accountsKeyForBackend(backendId)];
   }
 
   private find(backendId: BackendId, accountId: string): SharedClaudeAccount | SharedCodexAccount {
@@ -860,9 +862,8 @@ export class SharedSettingsService {
   remove(backendId: BackendId, accountId: string): void {
     this.requireSecrets();
     this.find(backendId, accountId);
-    if (backendId === 'codex')
-      this.secrets.codex = this.secrets.codex.filter((a) => a.id !== accountId);
-    else this.secrets.claude = this.secrets.claude.filter((a) => a.id !== accountId);
+    const key = accountsKeyForBackend(backendId);
+    this.secrets[key] = this.secrets[key].filter((a) => a.id !== accountId) as never;
     this.commit({ secrets: true });
   }
 
@@ -879,11 +880,9 @@ export class SharedSettingsService {
         `The order must name each account exactly once (holds: ${held.join(', ') || 'none'})`,
       );
     }
-    if (backendId === 'codex') {
-      this.secrets.codex = accountIds.map((id) => this.secrets.codex.find((a) => a.id === id)!);
-    } else {
-      this.secrets.claude = accountIds.map((id) => this.secrets.claude.find((a) => a.id === id)!);
-    }
+    const key = accountsKeyForBackend(backendId);
+    const held$ = this.secrets[key] as { id: string }[];
+    this.secrets[key] = accountIds.map((id) => held$.find((a) => a.id === id)!) as never;
     this.commit({ secrets: true });
   }
 

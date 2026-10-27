@@ -20,7 +20,8 @@ import {
   folderLabels,
   isJunkFolder,
   isReservedSpecialThread,
-  CLAUDE_BACKEND_ID,
+  backendIdForModel,
+  providerForModel,
 } from '@patch/wire';
 import { api } from '../api/rest.js';
 import { ApiError } from '../api/rest.js';
@@ -501,9 +502,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     hostAccount(
       s.hosts,
       pickerHostId,
-      (model ?? hostDefaultModel(s.hosts, pickerHostId))?.startsWith('openai/')
-        ? 'codex'
-        : CLAUDE_BACKEND_ID,
+      backendIdForModel(model ?? hostDefaultModel(s.hosts, pickerHostId)),
     ),
   );
   // The catalogue is per MACHINE, so it loads once the machine is known and
@@ -1297,7 +1296,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
           is chosen with its headroom in view without the figures being the
           control. */}
       <AccountUsageStrip
-        providerId={effectiveModel?.startsWith('openai/') ? 'codex' : 'claude'}
+        providerId={providerForModel(effectiveModel)}
         usedAccountId={preferredAccountId ?? chosenAccount?.activeAccountId ?? null}
         onSelect={setPreferredAccountId}
       />

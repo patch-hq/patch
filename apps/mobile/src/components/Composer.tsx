@@ -110,6 +110,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import {
   harnessForModel,
+  modelSupportsEffort,
   providerBuiltinCommands,
   type AttachmentRef,
   type EffortLevel,
@@ -666,7 +667,7 @@ export function Composer({
   // Composer — Effort control). Claude backend only. Same pending rule as the
   // model pill: the pick reads dimmed until the host's `chat.state` carries
   // it, and goes back with an error if it never does (NO FALLBACK).
-  const showEffort = chatModel !== null && harnessForModel(chatModel) === 'claude';
+  const showEffort = chatModel !== null && modelSupportsEffort(chatModel);
   const [pendingEffort, setPendingEffort] = React.useState<{ value: EffortLevel | null } | null>(
     null,
   );

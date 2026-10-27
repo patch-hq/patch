@@ -18,18 +18,16 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { CLAUDE_BACKEND_ID, type ChatContextUsage } from '@patch/wire';
+import { PROVIDERS, type ChatContextUsage, type ProviderId } from '@patch/wire';
 import { usePresenceStore, type HostAccount } from '../stores/presenceStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { UsageBars } from '../routes/settings/accountList.js';
 import { formatReadAt, summariseContext } from '../lib/usage.js';
 
-const BACKEND_LABEL: Record<string, string> = { [CLAUDE_BACKEND_ID]: 'Claude', codex: 'Codex' };
-
 export interface AccountUsageRow {
   key: string;
   /** The provider the account belongs to (`claude`, `codex`). */
-  providerId: 'claude' | 'codex';
+  providerId: ProviderId;
   /** The shared account's id. */
   accountId: string;
   /** The account's own label, without the backend prefix. */
@@ -47,12 +45,9 @@ export function accountRows(
 ): AccountUsageRow[] {
   if (shared === null) return [];
   const rows: AccountUsageRow[] = [];
-  const backends = [
-    { id: CLAUDE_BACKEND_ID, providerId: 'claude', accounts: shared.secrets.claude },
-    { id: 'codex', providerId: 'codex', accounts: shared.secrets.codex },
-  ] as const;
-  for (const { id: backendId, providerId, accounts } of backends) {
-    const backend = BACKEND_LABEL[backendId] ?? backendId;
+  for (const p of PROVIDERS) {
+    const { backendId, id: providerId, label: backend } = p;
+    const accounts = shared.secrets[p.accountsKey];
     for (const account of accounts) {
       if (!account.connected || ('kind' in account && account.kind === 'apiKey')) continue;
       let usage: HostAccount['usage'];

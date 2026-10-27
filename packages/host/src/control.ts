@@ -25,7 +25,7 @@ import Fastify, {
 } from 'fastify';
 import { z } from 'zod';
 import { imageSize } from './imageSize.js';
-import { MeetingAgentNotesEdit } from '@patch/wire';
+import { BACKEND_IDS, MeetingAgentNotesEdit } from '@patch/wire';
 import type {
   HostAccountEvent,
   ClaudeMemoryEntry,
@@ -865,7 +865,7 @@ const ServerApiBody = z
     body: z.unknown().optional(),
   })
   .strict();
-const AccountsBackendParams = z.object({ backendId: z.enum(['claude-code', 'codex']) }).strict();
+const AccountsBackendParams = z.object({ backendId: z.enum(BACKEND_IDS) }).strict();
 const AccountsOrderBody = z.object({ accountIds: z.array(z.string().min(1)).min(1) }).strict();
 const AccountsStrategyBody = z
   .object({ strategy: z.enum(['priority', 'round-robin', 'soonest-reset', 'least-used']) })

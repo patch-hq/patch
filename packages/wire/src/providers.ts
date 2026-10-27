@@ -24,6 +24,16 @@ export interface ProviderDescriptor {
   readonly sessionIdPrefix: string | null;
   /** Permission modes the provider can run at all; `'all'` is every PermissionMode. */
   readonly permissionModes: 'all' | readonly PermissionMode[];
+  /** The backend id the provider's credentials and account reports are keyed by (`claude-code`). */
+  readonly backendId: string;
+  /** The key of the provider's list in the shared settings (`secrets.<key>`, `strategy.<key>`). */
+  readonly accountsKey: string;
+  /** Other names the CLI accepts for it (`openai` for codex). */
+  readonly aliases: readonly string[];
+  /** Does the provider honour the per-chat reasoning-effort control? */
+  readonly supportsEffort: boolean;
+  /** The `chat.error` code for a turn refused because the provider is not signed in. */
+  readonly loginRequiredCode: string;
   /**
    * Slash commands the provider's own CLI handles itself (`/context`, `/help`).
    * The provider intercepts these before any skill of the same name, so Patch
@@ -42,6 +52,11 @@ export const PROVIDERS = [
     modelPrefix: null,
     sessionIdPrefix: null,
     permissionModes: 'all',
+    backendId: 'claude-code',
+    accountsKey: 'claude',
+    aliases: ['claude-code'],
+    supportsEffort: true,
+    loginRequiredCode: 'claude_oauth_missing',
     builtinCommands: [
       'add-dir',
       'agents',
@@ -82,6 +97,11 @@ export const PROVIDERS = [
     sessionIdPrefix: 'codex-',
     // Codex has no classifier-driven approval, so no `auto`.
     permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
+    backendId: 'codex',
+    accountsKey: 'codex',
+    aliases: ['openai', 'chatgpt'],
+    supportsEffort: false,
+    loginRequiredCode: 'chatgpt_login_required',
     builtinCommands: [
       'approvals',
       'compact',
@@ -137,3 +157,43 @@ export function providerForSessionId(sessionId: string | null | undefined): Prov
   }
   return DEFAULT_PROVIDER_ID;
 }
+
+/** The provider whose credentials are keyed by this backend id. */
+export function providerForBackendId(backendId: string): ProviderId {
+  const p = (PROVIDERS as readonly ProviderDescriptor[]).find((d) => d.backendId === backendId);
+  if (!p) throw new Error(`unknown backend: ${backendId}`);
+  return p.id as ProviderId;
+}
+
+/** A provider by id, backend id or CLI alias. */
+export function providerByName(name: string): ProviderId {
+  const p = (PROVIDERS as readonly ProviderDescriptor[]).find(
+    (d) => d.id === name || d.backendId === name || d.aliases.includes(name),
+  );
+  if (!p) throw new Error(`unknown provider: ${name}`);
+  return p.id as ProviderId;
+}
+
+/** The backend id a model's chats sign in with. */
+export function backendIdForModel(model: string | null | undefined): ProviderBackendId {
+  return providerDescriptor(providerForModel(model)).backendId as ProviderBackendId;
+}
+
+/** Does the model's provider honour the reasoning-effort control? */
+export function modelSupportsEffort(model: string | null | undefined): boolean {
+  return providerDescriptor(providerForModel(model)).supportsEffort;
+}
+
+export type ProviderBackendId = (typeof PROVIDERS)[number]['backendId'];
+export type ProviderAccountsKey = (typeof PROVIDERS)[number]['accountsKey'];
+
+/** Where the provider's accounts and strategy sit in the shared settings. */
+export function accountsKeyForBackend(backendId: string): ProviderAccountsKey {
+  return providerDescriptor(providerForBackendId(backendId)).accountsKey as ProviderAccountsKey;
+}
+
+/** Every backend id, for schemas that list them. */
+export const BACKEND_IDS = PROVIDERS.map((p) => p.backendId) as unknown as [
+  ProviderBackendId,
+  ...ProviderBackendId[],
+];

@@ -14,7 +14,7 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 import { createPortal } from 'react-dom';
 import { Gauge } from 'lucide-react';
 import type { EffortLevel } from '@patch/wire';
-import { harnessForModel } from '@patch/wire';
+import { modelSupportsEffort } from '@patch/wire';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -37,7 +37,7 @@ const EFFORT_CONFIRM_TIMEOUT_MS = 8000;
 
 export function EffortControl({ chatId }: { chatId: string }): JSX.Element | null {
   const row = useChatStore((s) => s.chats[chatId]);
-  if (!row?.model || harnessForModel(row.model) !== 'claude') return null;
+  if (!row?.model || !modelSupportsEffort(row.model)) return null;
   return <Control chatId={chatId} />;
 }
 

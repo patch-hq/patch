@@ -6,7 +6,13 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { AccountStrategy, ProviderKeyId, SharedSettingsPatch } from '@patch/wire';
+import {
+  AccountStrategy,
+  BACKEND_IDS,
+  ProviderKeyId,
+  providerForBackendId,
+  SharedSettingsPatch,
+} from '@patch/wire';
 import type { Registry } from './registry.js';
 import { requireAuth } from './folder-routes.js';
 import { SettingsError, type BackendId, type SharedSettingsService } from './shared-settings.js';
@@ -16,7 +22,7 @@ export interface SettingsRoutesDeps {
   shared: SharedSettingsService;
 }
 
-const Backend = z.enum(['claude-code', 'codex']);
+const Backend = z.enum(BACKEND_IDS);
 const AddBody = z
   .object({
     token: z.string().min(1).optional(),
@@ -163,7 +169,10 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: SettingsRoute
     '/api/accounts/:backendId/adopt',
     handle(AdoptBody, async (req, body) => {
       const backend = backendOf(req);
-      await shared.adoptInto(body.hostId, backend === 'codex' ? 'codex-login' : 'claude-login');
+      await shared.adoptInto(
+        body.hostId,
+        `${providerForBackendId(backend)}-login` as 'claude-login' | 'codex-login',
+      );
     }),
   );
 

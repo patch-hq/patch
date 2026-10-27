@@ -25,7 +25,7 @@ import { quoteSelectionIntoComposer } from '../lib/quoteSelection.js';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   SPECIAL_THREAD_IDS,
-  harnessForModel,
+  modelSupportsEffort,
   hasTaskNotification,
   isEditToolCall as isEditToolCallWire,
   isGroupableToolCall,
@@ -1704,11 +1704,7 @@ export function ChatRoute({
         pushError(`unknown effort level: ${parsedEffort.unknown}`);
         return;
       }
-      if (
-        row?.model !== undefined &&
-        row.model !== null &&
-        harnessForModel(row.model) !== 'claude'
-      ) {
+      if (row?.model !== undefined && row.model !== null && !modelSupportsEffort(row.model)) {
         pushError('effort is not available on this chat’s model');
         return;
       }
