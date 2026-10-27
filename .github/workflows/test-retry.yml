@@ -1,0 +1,22 @@
+# Runs a failed test run once more, failed shards only. The browser layer has
+# the odd flaky test, and a PR in the merge queue should not need a person to
+# press re-run. A second failure is left alone: that one is real.
+
+name: test-retry
+
+on:
+  workflow_run:
+    workflows: [test]
+    types: [completed]
+
+permissions:
+  actions: write
+
+jobs:
+  retry:
+    if: github.repository == 'patch-hq/patch' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.run_attempt == 1 && github.event.workflow_run.event != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run rerun "${{ github.event.workflow_run.id }}" --failed --repo "$GITHUB_REPOSITORY"
