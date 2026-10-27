@@ -439,7 +439,7 @@ describe('Composer', () => {
     expect(input.disabled).toBe(true);
     expect(input.title).toMatch(/Claude isn’t connected/);
     expect((screen.getByTestId('send-btn') as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByTestId('attach-btn') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId('composer-add-btn') as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('keeps sending enabled while only the HOST is offline', () => {
@@ -486,7 +486,7 @@ describe('Composer', () => {
   // attach button that opens a single dialog accepting images AND any file.
   it('has a single attach button (no duplicate image button) on web', () => {
     render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
-    expect(screen.getByTestId('attach-btn')).toBeInTheDocument();
+    expect(screen.getByTestId('composer-add-btn')).toBeInTheDocument();
     // The old image-only button + its input are gone.
     expect(screen.queryByTestId('attach-image-btn')).toBeNull();
     expect(screen.queryByTestId('composer-image-input')).toBeNull();
@@ -513,7 +513,7 @@ describe('Composer', () => {
       expect(svg, `${id} icon`).not.toBeNull();
       expect(svg?.getAttribute('width'), `${id} icon width`).toBe('18');
     };
-    for (const id of ['attach-btn', 'voice-note-btn', 'stop-btn']) check(id);
+    for (const id of ['composer-add-btn', 'voice-note-btn', 'stop-btn']) check(id);
     fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'hi' } });
     check('send-btn');
   });
@@ -537,7 +537,7 @@ describe('Composer', () => {
     render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
     expect(screen.queryByTestId('screenshot-btn')).toBeNull();
     // Attach paperclip still there.
-    expect(screen.getByTestId('attach-btn')).toBeInTheDocument();
+    expect(screen.getByTestId('composer-add-btn')).toBeInTheDocument();
   });
 
   // Item 4: typing `/` at the start opens a skill autocomplete for the folder;
@@ -1210,7 +1210,8 @@ describe('Composer', () => {
       render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       const fileInput = screen.getByTestId('composer-file-input') as HTMLInputElement;
       const clickSpy = vi.spyOn(fileInput, 'click').mockImplementation(() => {});
-      fireEvent.click(screen.getByTestId('attach-btn'));
+      fireEvent.click(screen.getByTestId('composer-add-btn'));
+      fireEvent.click(screen.getByTestId('add-menu-attach'));
       expect(clickSpy).toHaveBeenCalledTimes(1);
     });
 
@@ -1551,7 +1552,7 @@ describe('Composer', () => {
       await waitFor(() => expect(resolveChatId).toHaveBeenCalled());
       expect(onSend).not.toHaveBeenCalled();
       await waitFor(() =>
-        expect((screen.getByTestId('attach-btn') as HTMLButtonElement).disabled).toBe(false),
+        expect((screen.getByTestId('composer-add-btn') as HTMLButtonElement).disabled).toBe(false),
       );
       expect(input.value).toBe('keep me');
       expect(screen.getByTestId('composer-attachment')).toBeInTheDocument();
@@ -1576,7 +1577,7 @@ describe('Composer', () => {
       await waitFor(() => {
         expect(screen.getByTestId('composer-attachment').className).toContain('uploading');
       });
-      expect((screen.getByTestId('attach-btn') as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByTestId('composer-add-btn') as HTMLButtonElement).disabled).toBe(true);
       await act(async () => resolve('c-made'));
       await waitFor(() => expect(screen.queryByTestId('composer-attachment')).toBeNull());
     });
@@ -1648,7 +1649,8 @@ describe('Composer', () => {
 
       it('sketch button opens a blank annotator and attaches the result as a new chip', () => {
         render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
-        fireEvent.click(screen.getByTestId('sketch-btn'));
+        fireEvent.click(screen.getByTestId('composer-add-btn'));
+        fireEvent.click(screen.getByTestId('add-menu-sketch'));
         expect(screen.getByTestId('mock-annotator-filename').textContent).toBe('blank');
         fireEvent.click(screen.getByTestId('mock-annotator-done'));
         expect(screen.queryByTestId('mock-annotator')).toBeNull();
@@ -1659,7 +1661,8 @@ describe('Composer', () => {
 
       it('cancelling a sketch attaches nothing', () => {
         render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
-        fireEvent.click(screen.getByTestId('sketch-btn'));
+        fireEvent.click(screen.getByTestId('composer-add-btn'));
+        fireEvent.click(screen.getByTestId('add-menu-sketch'));
         fireEvent.click(screen.getByTestId('mock-annotator-cancel'));
         expect(screen.queryByTestId('composer-attachment')).toBeNull();
       });
@@ -2839,7 +2842,7 @@ describe('Composer', () => {
       render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       const call = screen.getByTestId('call-btn');
       expect(call).toBeInTheDocument();
-      const attachIcon = screen.getByTestId('attach-btn').querySelector('svg')!;
+      const attachIcon = screen.getByTestId('composer-add-btn').querySelector('svg')!;
       const callIcon = call.querySelector('svg')!;
       expect(callIcon.getAttribute('width')).toBe(attachIcon.getAttribute('width'));
       expect(callIcon.getAttribute('height')).toBe(attachIcon.getAttribute('height'));

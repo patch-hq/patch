@@ -1,57 +1,54 @@
 import { test, expect, type Page } from '@playwright/test';
 
-// The composer's action row (spec/14 § Composer): tools, the standing settings
-// (approval mode, model, effort) and the end group (context ring, stop/send).
-// One line when everything fits; otherwise the settings take a line of their
-// own under the tools. Either way no setting is clipped to an ellipsis.
+// The composer's action row (spec/14 § Composer) is always ONE line: call and
+// meeting, the standing settings (approval mode, model, account, effort) and
+// the end group (context ring, stop/send). When the settings' words don't fit
+// they drop to icons; the row never wraps and nothing is clipped. Attach and
+// sketch live behind the + inside the field, dictate at its right.
 
 const CHAT = '/app/dev-harness.html?chat=chat_bus';
 
-async function noneClipped(page: Page): Promise<void> {
-  const clipped = await page.$$eval(
-    '.composer-settings button, .composer-settings .model-pill-label',
-    (els) => els.filter((e) => e.scrollWidth > e.clientWidth + 1).map((e) => e.textContent),
-  );
-  expect(clipped).toEqual([]);
+async function oneLine(page: Page): Promise<void> {
+  const call = (await page.getByTestId('call-btn').boundingBox())!;
+  const stop = (await page.getByTestId('stop-btn').boundingBox())!;
+  const model = (await page.getByTestId('chat-model').boundingBox())!;
+  const mid = (b: { y: number; height: number }): number => b.y + b.height / 2;
+  expect(Math.abs(mid(model) - mid(call))).toBeLessThan(2);
+  expect(Math.abs(mid(stop) - mid(call))).toBeLessThan(2);
+  const row = (await page.locator('.composer-actions').boundingBox())!;
+  expect(stop.x + stop.width).toBeLessThanOrEqual(row.x + row.width + 0.5);
 }
 
-test('wide: tools, settings and stop share one line', async ({ page }) => {
+test('wide: settings read as icon and word on one line', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(CHAT);
-  const row = page.locator('.composer-actions');
-  await expect(row).not.toHaveClass(/is-stacked/);
-  const attach = (await page.getByTestId('attach-btn').boundingBox())!;
-  const effort = (await page.getByTestId('chat-effort').boundingBox())!;
-  const stop = (await page.getByTestId('stop-btn').boundingBox())!;
-  expect(Math.abs(effort.y + effort.height / 2 - (attach.y + attach.height / 2))).toBeLessThan(2);
-  expect(effort.x + effort.width).toBeLessThanOrEqual(stop.x);
-  await noneClipped(page);
+  await expect(page.locator('.composer-actions')).not.toHaveClass(/is-compact/);
+  await oneLine(page);
+  await expect(page.getByTestId('permission-mode')).toHaveText(/Auto/);
 });
 
-test('narrow: settings drop to their own line, stop stays top-right', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 800 });
+test('phone: settings drop to icons, still one line, model keeps its short name', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 360, height: 800 });
   await page.goto(CHAT);
-  const row = page.locator('.composer-actions');
-  await expect(row).toHaveClass(/is-stacked/);
-  const attach = (await page.getByTestId('attach-btn').boundingBox())!;
-  const stop = (await page.getByTestId('stop-btn').boundingBox())!;
-  const mode = (await page.getByTestId('permission-mode').boundingBox())!;
-  // Stop on the tools' line, at the right.
-  expect(Math.abs(stop.y - attach.y)).toBeLessThan(2);
-  // Settings start below it, from the left edge.
-  expect(mode.y).toBeGreaterThanOrEqual(attach.y + attach.height);
-  expect(mode.x).toBeLessThan(attach.x + attach.width);
-  await expect(page.getByTestId('chat-model')).toBeVisible();
-  await expect(page.getByTestId('chat-effort')).toBeVisible();
-  await noneClipped(page);
+  await expect(page.locator('.composer-actions')).toHaveClass(/is-compact/);
+  await oneLine(page);
+  const word = page.getByTestId('permission-mode').locator('.setting-word');
+  expect((await word.boundingBox())!.width).toBe(0);
+  await expect(page.getByTestId('chat-model')).toHaveText(/Sonnet 4\.6/);
+  await expect(page.getByTestId('chat-model')).not.toHaveText(/Claude/);
 });
 
-test('the mic sits inside the text field', async ({ page }) => {
+test('the + in the field offers a file or image, and a sketch', async ({ page }) => {
   await page.goto(CHAT);
   const input = (await page.getByTestId('composer-input').boundingBox())!;
+  const add = (await page.getByTestId('composer-add-btn').boundingBox())!;
   const mic = (await page.getByTestId('voice-note-btn').boundingBox())!;
-  expect(mic.x + mic.width).toBeLessThanOrEqual(input.x + input.width);
-  expect(mic.y).toBeGreaterThanOrEqual(input.y);
-  expect(mic.y + mic.height).toBeLessThanOrEqual(input.y + input.height);
-  await expect(page.locator('.composer-actions').getByTestId('voice-note-btn')).toHaveCount(0);
+  expect(add.x).toBeGreaterThanOrEqual(input.x);
+  expect(add.x).toBeLessThan(input.x + input.width / 2);
+  expect(mic.x).toBeGreaterThan(input.x + input.width / 2);
+  await page.getByTestId('composer-add-btn').click();
+  await expect(page.getByTestId('add-menu-attach')).toHaveText('File or image');
+  await expect(page.getByTestId('add-menu-sketch')).toHaveText('Sketch');
 });

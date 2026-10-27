@@ -5,6 +5,7 @@
 
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { harnessForModel } from '@patch/wire';
+import { UserRound } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -88,15 +89,24 @@ export function AccountControl({
         data-testid="chat-account"
         title={`The latest turn ran on the ${row.account.label} account`}
       >
-        {row.account.label}
+        <UserRound size={16} aria-hidden />
+        <span className="setting-word" data-collapsible="">
+          {row.account.label}
+        </span>
       </span>
     ) : null;
   }
   const shown = pending !== undefined ? pending : settled;
+  // The trigger names the account the chat is on: the one it is locked to, or
+  // under Switch automatically the one its latest turn ran on.
+  const locked = shown !== null ? choices.find((a) => a.id === shown) : undefined;
+  const onNow = locked?.label ?? row.account?.label;
   return (
     <PopupSelect
       testId={testId}
       ariaLabel="Account"
+      icon={<UserRound size={16} aria-hidden />}
+      {...(changeLabel === undefined ? { triggerLabel: onNow ?? 'Account' } : {})}
       // No native tooltip: one already showing when the list opens draws over it,
       // and the Automatic option already names the account in use.
       pending={pending !== undefined}
@@ -117,9 +127,13 @@ export function AccountControl({
           : []),
         {
           value: '',
-          label: row.account && settled === null ? `Automatic: ${row.account.label}` : 'Automatic',
+          label: 'Switch automatically',
+          description:
+            row.account && settled === null
+              ? `Now on ${row.account.label}. Moves to another account when one runs out.`
+              : 'Moves to another account when one runs out.',
         },
-        ...choices.map((a) => ({ value: a.id, label: a.label })),
+        ...choices.map((a) => ({ value: a.id, label: `Always ${a.label}` })),
       ]}
     />
   );
@@ -224,6 +238,7 @@ export function ModelControl({
         placement={modelPlacement}
         testId={testId}
         triggerLabel={triggerLabel}
+        compact
         variant="crumb"
         // A switch lands on the NEXT turn, so while one is running the pop-up
         // says which turn it affects — presenting it as instant would

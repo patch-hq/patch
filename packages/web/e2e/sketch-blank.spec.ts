@@ -11,7 +11,8 @@ test.describe('Sketch without a photo', () => {
     page,
   }) => {
     await page.goto(HARNESS);
-    await page.getByTestId('sketch-btn').click();
+    await page.getByTestId('composer-add-btn').click();
+    await page.getByTestId('add-menu-sketch').click();
     await expect(page.getByTestId('image-annotator')).toBeVisible();
 
     const canvas = page.getByTestId('annotator-canvas');

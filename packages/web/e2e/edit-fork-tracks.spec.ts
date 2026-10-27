@@ -104,7 +104,7 @@ test.describe('the message editor is the composer', () => {
     const editor = page.getByTestId('composer');
     await expect(editor.getByTestId('composer-input')).toBeFocused();
     await expect(editor.getByTestId('voice-note-btn')).toBeVisible();
-    await expect(editor.getByTestId('attach-btn')).toBeVisible();
+    await expect(editor.getByTestId('composer-add-btn')).toBeVisible();
     await expect(editor.getByTestId('send-btn')).toBeVisible();
     await expect(page.getByTestId('composer-edit-banner')).toBeVisible();
     await expect(userTurn.getByTestId('msg-editor')).toHaveCount(0);

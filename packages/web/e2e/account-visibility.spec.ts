@@ -102,10 +102,14 @@ test('a live chat with two accounts gets an account dropdown styled like the app
     preferredAccountId: null,
   });
   const select = page.getByTestId('chat-account');
-  await expect(select).toHaveText('Automatic: work');
+  await expect(select).toHaveText('work');
   await select.click();
   const list = page.getByTestId('chat-account-list');
-  await expect(list.getByRole('option')).toHaveText(['Automatic: work', 'work', 'personal']);
+  await expect(list.getByRole('option')).toHaveText([
+    /^Switch automatically/,
+    'Always work',
+    'Always personal',
+  ]);
   await expect(list).toHaveAttribute('data-direction', 'up');
   await select.click();
   // A tooltip would sit over the open list, so the select carries none.

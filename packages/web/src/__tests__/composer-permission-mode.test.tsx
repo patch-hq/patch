@@ -120,7 +120,7 @@ describe('Composer — approval mode', () => {
     seedChat('c1', 'auto');
     renderComposer('c1');
     const actions = screen.getByTestId('composer').querySelector('.composer-actions')!;
-    expect(before(screen.getByTestId('attach-btn'), selectRow())).toBe(true);
+    expect(before(screen.getByTestId('composer-add-btn'), selectRow())).toBe(true);
     // Dictate sits inside the text field now, not in the action row.
     expect(actions.contains(screen.getByTestId('voice-note-btn'))).toBe(false);
     expect(
@@ -156,23 +156,28 @@ describe('Composer — approval mode', () => {
     expect(values).toEqual(['auto', 'default', 'acceptEdits', 'bypassPermissions', 'plan']);
   });
 
-  it("names each mode in the SDK's own words, inventing no label", () => {
+  it('names each mode by a short word and says what it does', () => {
     seedChat('c1', 'auto');
     renderComposer('c1');
     const options = openOptions();
-    expect(options.map((o) => o.textContent)).toEqual([
-      'Auto',
-      'Default',
-      'Accept edits',
-      'Bypass permissions',
-      'Plan',
+    expect(
+      options.map((o) => o.querySelector('.model-option-name')!.firstChild!.textContent),
+    ).toEqual(['Auto', 'Ask', 'Edits', 'Bypass', 'Plan']);
+    expect(options.map((o) => o.querySelector('.model-option-desc')?.textContent)).toEqual([
+      'Decides what needs asking',
+      'Asks before each action',
+      'Edits files without asking',
+      'No checks at all',
+      'Plans only, changes nothing',
     ]);
-    // The label a user reads is the value that goes over the wire, cased and
-    // spaced for reading and nothing more — no synonym, no invented word, so
-    // the mode he picks is the mode the model is given.
-    for (const o of options) {
-      expect(o.textContent?.toLowerCase().replace(/ /g, '')).toBe(o.dataset.value!.toLowerCase());
-    }
+  });
+
+  it('reads as an icon and the short word, in the danger colour for Bypass', () => {
+    seedChat('c1', 'bypassPermissions');
+    renderComposer('c1');
+    expect(select()).toHaveTextContent('Bypass');
+    expect(select().querySelector('svg')).not.toBeNull();
+    expect(select().className).toContain('danger');
   });
 
   it('has no row that clears the mode back to the host default', () => {
@@ -191,7 +196,7 @@ describe('Composer — approval mode', () => {
     expect(screen.getByRole('button', { name: 'Approval mode' })).toBe(select());
     // spec/14 § Copy — no helper text: the tooltip NAMES the control, it does
     // not describe it ("What the agent can do" was a description).
-    expect(select().title).toBe('Approval mode');
+    expect(select().title).toBe('Approval: Plan');
   });
 
   it('choosing a mode sends chat.settings carrying it', () => {

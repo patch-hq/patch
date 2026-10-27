@@ -6,7 +6,7 @@
 // portalled to the body and placed by `usePopupPlacement`, so it opens upward
 // when there is more room above and scrolls inside the room it has.
 
-import { useLayoutEffect, useRef, useState, type JSX } from 'react';
+import { useLayoutEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { usePopupPlacement } from '../lib/popupPlacement.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
@@ -17,6 +17,10 @@ export interface PopupSelectOption {
   /** Shown in the trigger when selected, but not offered in the list. */
   hidden?: boolean;
   disabled?: boolean;
+  /** A line under the label saying what the choice does. */
+  description?: string;
+  /** Drawn in the danger colour (a choice that removes a safeguard). */
+  danger?: boolean;
 }
 
 export function PopupSelect({
@@ -28,6 +32,9 @@ export function PopupSelect({
   title,
   disabled = false,
   pending = false,
+  icon,
+  triggerLabel,
+  danger = false,
 }: {
   value: string;
   options: PopupSelectOption[];
@@ -37,6 +44,15 @@ export function PopupSelect({
   title?: string;
   disabled?: boolean;
   pending?: boolean;
+  /** Leads the trigger; with it the trigger can shrink to the icon alone. */
+  icon?: ReactNode;
+  /**
+   * The trigger's word, when it should be shorter than the chosen option's
+   * label ("Bypass" for "Bypass — no checks"). Empty shows the icon alone.
+   */
+  triggerLabel?: string;
+  /** Draws the trigger in the danger colour. */
+  danger?: boolean;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -96,7 +112,7 @@ export function PopupSelect({
               key={o.value}
               type="button"
               role="option"
-              className={o.value === value ? 'model-option selected' : 'model-option'}
+              className={`model-option${o.value === value ? ' selected' : ''}${o.danger ? ' danger' : ''}`}
               aria-selected={o.value === value}
               data-value={o.value}
               disabled={o.disabled}
@@ -105,17 +121,28 @@ export function PopupSelect({
                 if (o.value !== value) onChange(o.value);
               }}
             >
-              <span className="model-option-name">{o.label}</span>
+              <span className="model-option-name">
+                {o.label}
+                {o.description !== undefined ? (
+                  <span className="model-option-desc">{o.description}</span>
+                ) : null}
+              </span>
+              {o.value === value ? (
+                <span className="model-option-check" aria-hidden>
+                  ✓
+                </span>
+              ) : null}
             </button>
           ))}
       </div>
     ) : null;
 
+  const word = triggerLabel ?? selected?.label ?? '';
   return (
     <div className="permission-mode-wrap" ref={wrapRef}>
       <button
         type="button"
-        className={pending ? 'permission-mode is-pending' : 'permission-mode'}
+        className={`permission-mode${pending ? ' is-pending' : ''}${icon !== undefined ? ' has-icon' : ''}${danger ? ' danger' : ''}`}
         data-testid={testId}
         data-value={value}
         aria-label={ariaLabel}
@@ -125,7 +152,18 @@ export function PopupSelect({
         disabled={disabled}
         onClick={() => setOpen(!open)}
       >
-        {selected?.label ?? ''}
+        {icon !== undefined ? (
+          <>
+            {icon}
+            {word !== '' ? (
+              <span className="setting-word" data-collapsible="">
+                {word}
+              </span>
+            ) : null}
+          </>
+        ) : (
+          word
+        )}
       </button>
       <span className="permission-mode-caret" aria-hidden>
         ▾

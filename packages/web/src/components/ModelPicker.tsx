@@ -17,6 +17,7 @@
 
 import { useLayoutEffect, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
+import { compactModelLabel } from '@patch/wire';
 import { useModelCatalog } from '../lib/models.js';
 import { humaniseError } from '../lib/errorCopy.js';
 import { ErrorDetail } from './ErrorDetail.js';
@@ -79,6 +80,11 @@ export interface ModelPickerProps {
    * carries the choice.
    */
   active?: boolean;
+  /**
+   * Read the model by its short name ("Opus 5.5") — the composer's row has no
+   * room for "Claude Opus 5.5", let alone a dated id (spec/14 § Composer).
+   */
+  compact?: boolean;
 }
 
 export function ModelPicker({
@@ -97,6 +103,7 @@ export function ModelPicker({
   pending = false,
   triggerLabel,
   active = false,
+  compact = false,
 }: ModelPickerProps): JSX.Element {
   // The selectable models are LIVE: loaded from the host's catalogue, which
   // reads the backend's model list. NO baked-in array — that is what let the
@@ -108,10 +115,14 @@ export function ModelPicker({
   // An id with no matching option (a model retired since the chat started, or
   // the catalogue not loaded yet) shows the raw id — surfaced, never silently
   // blanked.
+  const catalogueLabel =
+    selected === null ? undefined : catalog.models.find((m) => m.id === selected)?.label;
   const label =
     selected === null
       ? placeholder
-      : (catalog.models.find((m) => m.id === selected)?.label ?? selected);
+      : compact
+        ? compactModelLabel(selected, catalogueLabel)
+        : (catalogueLabel ?? selected);
 
   // The crumb variant's pop-up is rendered into the document body, not next to
   // its anchor. The chat header's crumb zone is `overflow: hidden` (it
@@ -226,7 +237,7 @@ export function ModelPicker({
         disabled={disabled}
         onClick={onToggle}
       >
-        <span className={`model-pill-label ${triggerLabel ? '' : 'mono'}`}>
+        <span className={`model-pill-label ${triggerLabel || compact ? '' : 'mono'}`}>
           {triggerLabel ?? label}
         </span>
         <span className="model-pill-caret" aria-hidden>

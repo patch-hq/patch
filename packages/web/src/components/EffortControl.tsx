@@ -12,6 +12,7 @@
 
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { createPortal } from 'react-dom';
+import { Gauge } from 'lucide-react';
 import type { EffortLevel } from '@patch/wire';
 import { harnessForModel } from '@patch/wire';
 import { useChatStore } from '../stores/chatStore.js';
@@ -27,7 +28,7 @@ const EFFORT_LABELS: Record<EffortLevel, string> = {
   low: 'Low',
   medium: 'Medium',
   high: 'High',
-  xhigh: 'X-high',
+  xhigh: 'Extra high',
   max: 'Max',
 };
 
@@ -85,7 +86,9 @@ function Control({ chatId }: { chatId: string }): JSX.Element {
     getActiveWs()?.send({ type: 'chat.effort_request', chatId: row.chatId, effort });
   }
 
-  const label = current === null ? 'Default' : EFFORT_LABELS[current];
+  // Unset reads as the icon alone: "Default" told the user nothing (spec/14 §
+  // Composer — Effort control). The tooltip and the list say what it means.
+  const label = current === null ? '' : EFFORT_LABELS[current];
 
   // Portalled to the body, same reasoning as `ModelPicker`'s `crumb` variant:
   // the composer action row sits low in the chat window and is painted over
@@ -117,15 +120,24 @@ function Control({ chatId }: { chatId: string }): JSX.Element {
     <div className="model-picker as-crumb" ref={anchorRef}>
       <button
         type="button"
-        className={`model-pill as-crumb ${pending !== false ? 'is-pending' : ''}`}
+        className={`model-pill as-crumb has-icon ${pending !== false ? 'is-pending' : ''}`}
         data-testid="chat-effort"
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label="thinking effort"
-        title="Thinking effort"
+        title={
+          current === null
+            ? 'Thinking effort: the model decides'
+            : `Thinking effort: ${EFFORT_LABELS[current]}`
+        }
         onClick={() => setOpen((v) => !v)}
       >
-        <span className="model-pill-label mono">{label}</span>
+        <Gauge size={16} aria-hidden />
+        {label !== '' ? (
+          <span className="model-pill-label setting-word" data-collapsible="">
+            {label}
+          </span>
+        ) : null}
         <span className="model-pill-caret" aria-hidden>
           ▾
         </span>
@@ -177,7 +189,10 @@ function Control({ chatId }: { chatId: string }): JSX.Element {
                   aria-selected={current === null}
                   onClick={() => choose(null)}
                 >
-                  <span className="model-option-name">Default</span>
+                  <span className="model-option-name">
+                    Let the model decide
+                    <span className="model-option-desc">The model’s own default</span>
+                  </span>
                   {current === null ? (
                     <span className="model-option-check" aria-hidden>
                       ✓

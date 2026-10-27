@@ -30,7 +30,7 @@ test.describe('Composer approval mode', () => {
     const selectBox = (await select.boundingBox())!;
     const inputBox = (await page.getByTestId('composer-input').boundingBox())!;
     const sendBox = (await page.getByTestId('send-btn').boundingBox())!;
-    const attachBox = (await page.getByTestId('attach-btn').boundingBox())!;
+    const attachBox = (await page.getByTestId('composer-add-btn').boundingBox())!;
     const micBox = (await page.getByTestId('voice-note-btn').boundingBox())!;
 
     // BELOW the text input, not beside it.
@@ -53,16 +53,15 @@ test.describe('Composer approval mode', () => {
     const select = page.getByTestId('permission-mode');
     await expect(select).toHaveAttribute('data-value', 'auto');
     await select.click();
-    // The visible text is the SAME WORDS as the value that reaches the model,
-    // only cased and spaced for reading (permissionModeLabel) — no invented
-    // label, and no extra row for following the host default.
+    // Each mode by a short word and a line saying what it does; no extra row
+    // for following the host default.
     const list = page.getByTestId('permission-mode-list');
     await expect(list.getByRole('option')).toHaveText([
-      'Auto',
-      'Default',
-      'Accept edits',
-      'Bypass permissions',
-      'Plan',
+      /^Auto/,
+      /^Ask/,
+      /^Edits/,
+      /^Bypass/,
+      /^Plan/,
     ]);
     const values = await list
       .getByRole('option')
