@@ -25,7 +25,8 @@ const LONG = {
   updatedAt: 1,
 };
 
-for (const width of [390, 900, 1400]) {
+// On a phone the line is dropped altogether (jobs-phone-layout.spec.ts).
+for (const width of [900, 1400]) {
   test(`job action line is one truncated row at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
     await page.route('**/api/jobs/*/runs**', (route) =>

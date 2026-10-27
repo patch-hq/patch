@@ -16788,3 +16788,80 @@ select.permission-mode.is-pending {
 .run-row-linked {
   background: rgba(127, 127, 127, 0.15);
 }
+
+/* Jobs and the job editor on a phone. The collapsed sidebar's expand button
+   (`.sidebar-expand-btn`, 8px + 28px) sits over the head's top-left, so the
+   head steps past it; the list head becomes an even grid (title and New job on
+   the first row, search full width, then the three selects as equal thirds);
+   and a card is name + trigger with the buttons beneath and the switch beside
+   the name, the action line left to the editor. */
+@media (max-width: 640px) {
+  /* Back/Forward pull themselves 12px left (`.nav-history`), so clear the
+     button's 36px edge plus that. */
+  .three-col.sidebar-collapsed .jobs-route .route-head-title {
+    padding-left: 20px;
+  }
+  .three-col.sidebar-collapsed .job-editor .route-head {
+    padding-left: 44px;
+  }
+  .jobs-route .route-head {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .jobs-route .route-head-title {
+    grid-column: 1 / 3;
+    grid-row: 1;
+    min-width: 0;
+  }
+  .jobs-route .route-head .primary-btn {
+    grid-column: 3;
+    grid-row: 1;
+    justify-self: end;
+    white-space: nowrap;
+  }
+  .jobs-search {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    margin: 0;
+    width: auto;
+    min-width: 0;
+  }
+  .jobs-control {
+    grid-row: 3;
+    margin: 0;
+    min-width: 0;
+    width: 100%;
+  }
+  .job-row .job-action {
+    display: none;
+  }
+  .job-row .job-trigger {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .job-row .job-link {
+    order: 0;
+    flex: 1 1 calc(100% - 70px);
+  }
+  .job-row .job-row-main > .toggle {
+    order: 1;
+  }
+  .job-row .job-row-main > :not(.job-link):not(.toggle) {
+    order: 2;
+  }
+  .job-row .toggle-label {
+    display: none;
+  }
+  .job-row-main {
+    gap: 6px;
+  }
+  .job-row .runs-toggle,
+  .job-row .job-run-now,
+  .job-row .job-archive,
+  .job-row .job-delete,
+  .job-row .job-chat-link {
+    padding: 6px 8px;
+  }
+}
