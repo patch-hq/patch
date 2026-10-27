@@ -221,6 +221,10 @@ export function groupChats(
   const deletedFolders = new Set<string>();
   const liveFolders = new Set<string>();
   for (const c of all) {
+    // Not drawn until its state says where it belongs (`ChatRow.awaitingState`):
+    // a reconnecting host's re-announced archived chats would otherwise flash
+    // into the active list and straight back out.
+    if (c.awaitingState === true) continue;
     // Special threads are matched by stable chatId — the host emits a
     // lowercase folder-name as `name` and a full filesystem path as `folder`,
     // so neither is a reliable discriminator (spec/06).

@@ -522,6 +522,7 @@ function mergeListRow(prior: ChatRow | undefined, r: ChatListRow): ChatRow {
   return {
     ...base,
     ...r,
+    awaitingState: false,
     model: r.model !== undefined ? r.model : (prior?.model ?? null),
     jobId: r.jobId !== undefined ? r.jobId : base.jobId,
     statusSummary: r.statusSummary !== undefined ? r.statusSummary : base.statusSummary,
@@ -779,11 +780,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       switch (event.type) {
         case 'chat.spawned': {
           rosteredChatIds.add(event.chatId);
+          // Possibly an archived or hidden chat a reconnecting host is
+          // re-announcing: not listed until its `chat.state` says (as web).
+          const unseen = chats[event.chatId] === undefined;
           const row = ensureRow(event.chatId, event.folder);
           // Keep the host: a chat row with no hostId cannot answer "is this
           // machine's Claude connected?" or "whose disk is this folder on?".
           chats[event.chatId] = {
             ...row,
+            ...(unseen ? { awaitingState: true } : {}),
             hostId: event.hostId,
             folder: event.folder,
             // Absent on a host with no model catalogue (or an older host):
@@ -805,6 +810,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ...row,
             activity: event.activity,
             optimisticSend: false,
+            awaitingState: false,
             // The turn is over, so no tool call is in flight; a lost result would
             // otherwise pin the row on `working` for good (as web).
             openToolCalls:

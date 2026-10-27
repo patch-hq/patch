@@ -542,7 +542,9 @@ function buildSections(
       : byQuery.filter((r) => matchesStateFilter(r, stateFilter));
   };
 
-  const all = Object.values(chats);
+  // A row known only from a reconnecting host's re-announcement has no status
+  // yet (`ChatRow.awaitingState`); listing it would flash archived chats in.
+  const all = Object.values(chats).filter((c) => c.awaitingState !== true);
   const manager = all.find((c) => c.chatId === MANAGER_ID);
   const channels = all.filter((c) => c.chatId === SPEAKERS_ID);
   const channelIds = new Set<string>([MANAGER_ID, SPEAKERS_ID]);

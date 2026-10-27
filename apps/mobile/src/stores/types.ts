@@ -157,6 +157,12 @@ export interface ChatRow {
    * chats. Toggled from the chat-detail ⋯ menu (Disable / Enable).
    */
   disabled: boolean;
+  /**
+   * Known only from a `chat.spawned` frame, with no `chat.state` or roster row
+   * yet — a reconnecting host re-announces archived and hidden chats too, so
+   * the list leaves it out until its status is known. As web.
+   */
+  awaitingState?: boolean;
 }
 
 /**

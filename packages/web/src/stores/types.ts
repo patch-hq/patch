@@ -145,6 +145,15 @@ export interface ChatRow {
    * which is also what the wire's absent field means.
    */
   hidden?: boolean;
+  /**
+   * Known only from a `chat.spawned` frame, with no `chat.state` or snapshot
+   * yet. A host re-announces every chat it holds on (re)connect, archived and
+   * hidden ones included, as `chat.spawned` then `chat.state`; until the state
+   * lands the row's status is a default, not a fact, so the sidebar leaves it
+   * out (`groupChats`) rather than drawing an archived chat as active for one
+   * batch. Absent or false is settled.
+   */
+  awaitingState?: boolean;
   /** Pending permission requests (unanswered). */
   pendingPermissions: PendingPermission[];
   /** Highest seq we've seen — used for chat.replay on reconnect. */
