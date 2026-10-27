@@ -38,15 +38,17 @@ test.describe('Settings — Voice engines', () => {
       'OpenAI',
     ]);
     await expect(page.getByTestId('voice-dictation-engine').locator('button')).toHaveText([
-      'Local',
+      'Whisper',
       'Gemini',
       'OpenAI',
+      'Deepgram',
     ]);
     await expect(page.getByText(/\b(direct|light|heavy)\b/)).toHaveCount(0);
   });
 
   test('defaults to Local everywhere, no status hint shown', async ({ page }) => {
-    for (const surface of ['dictation', 'device', 'handsFree', 'call']) {
+    await expectChosen(page, 'voice-dictation-engine', 'Whisper');
+    for (const surface of ['device', 'handsFree', 'call']) {
       await expectChosen(page, `voice-${surface}-engine`, 'Local');
     }
     await expect(
