@@ -23,12 +23,16 @@ import {
   draftDictationHostId,
   deriveVoiceSurface,
   voiceCellFor,
+  dictationEngineFor,
   modesShareVoiceEngine,
   voiceKeyMissingMessage,
   DEFAULT_VOICE_CONFIG,
   type AudioErrorCode,
   type AudioSurfaceKind,
+  type VoiceBackend,
   type VoiceConfig,
+  type VoiceHandoff,
+  type VoiceLayer,
 } from '@patch/wire/audio';
 import { VoiceSession, type SessionDeps, type SessionInit, type SessionState } from './session.js';
 import { MockVad, type Vad } from './vad.js';
@@ -41,7 +45,6 @@ import {
   openaiRealtimeModelFor,
   type OpenAIWsCtor,
 } from './openai-realtime.js';
-import { pickDictationTranscriber, type DictationTranscribers } from './hosted-stt.js';
 import type { VoiceSessionLike, VoiceTimeline } from './voice-session-like.js';
 import type { EngineCosting } from './voiceCost.js';
 import { verifyVoiceToken, VoiceTokenError, type VoiceTokenClaims } from './token-verifier.js';
@@ -164,14 +167,6 @@ export interface AudioServerOptions {
   /** Per-layer overrides of openai-realtime.ts's `DEFAULT_OPENAI_REALTIME_MODELS`. */
   openaiRealtimeModelLight?: string;
   openaiRealtimeModelHeavy?: string;
-  /**
-   * The transcribers the DICTATION surface can run on (hosted-stt.ts). A
-   * dictation / voice-note session runs the ordinary `VoiceSession` pipeline
-   * with the configured backend's transcriber in place of Whisper. Absent (the
-   * in-process tests) means only `local` is available, and a dictation
-   * configured for a hosted backend is refused with `voice_key_missing`.
-   */
-  dictationTranscribers?: DictationTranscribers;
   /**
    * spec/07 § Keeping voice and text as one conversation — the one-time
    * context snapshot a native session sends Gemini Live before the mic opens.
@@ -679,7 +674,17 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           ...(start.mode !== undefined ? { mode: start.mode } : {}),
         });
         const voiceConfig = opts.getVoiceConfig?.() ?? DEFAULT_VOICE_CONFIG;
-        const cell = voiceCellFor(voiceConfig, voiceSurface);
+        // Dictation has no conversation cell: it runs on the engine chosen for
+        // this kind of surface (spec/07 § Dictation engines), on the host's own
+        // pipeline unless that engine is Deepgram.
+        const dictationEngine =
+          voiceSurface === 'dictation'
+            ? dictationEngineFor(voiceConfig.dictation, start.surfaceKind)
+            : null;
+        const cell: { backend: VoiceBackend; layer?: VoiceLayer; handoff?: VoiceHandoff } =
+          voiceSurface === 'dictation'
+            ? { backend: 'local' }
+            : voiceCellFor(voiceConfig, voiceSurface);
         // A hosted session whose provider side dies ends the surface session
         // too — the surface must stop streaming into a dead engine.
         const onFatal = (message: string): void => {
@@ -688,7 +693,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         const sessionLog = log.child({
           sessionId: start.sessionId,
           surface: voiceSurface,
-          backend: cell.backend,
+          backend: dictationEngine ?? cell.backend,
           ...(cell.layer !== undefined ? { layer: cell.layer } : {}),
         });
         const sendAudioFn = (ev: AudioEvent): void => send(ws, ev);
@@ -776,7 +781,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             ...(opts.openaiWsCtor ? { wsCtor: opts.openaiWsCtor } : {}),
             ...(opts.openaiWsUrl ? { wsUrl: opts.openaiWsUrl } : {}),
           });
-        } else if (voiceSurface === 'dictation' && cell.backend === 'deepgram') {
+        } else if (dictationEngine === 'deepgram') {
           // Streaming dictation (spec/07 § Dictation engines): the live words
           // are the transcript, finished by `audio.dictation_finish`.
           if (readKey(opts.deepgramApiKey) === undefined) {
@@ -792,21 +797,9 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             ...(opts.deepgramWsUrl ? { wsUrl: opts.deepgramWsUrl } : {}),
           });
         } else {
-          // The self-hosted pipeline — and dictation on ANY backend, which is
-          // STT only: the same VoiceSession, with the configured backend's
-          // transcriber in Whisper's place (hosted-stt.ts).
-          let whisper: WhisperBackend = opts.whisper;
-          if (voiceSurface === 'dictation') {
-            const picked = pickDictationTranscriber(
-              cell.backend,
-              opts.dictationTranscribers ?? { local: opts.whisper },
-            );
-            if (!picked.ok) {
-              rejectConn(ws, 'voice_key_missing', picked.message);
-              return;
-            }
-            whisper = picked.whisper;
-          }
+          // The self-hosted pipeline — and a dictation on Whisper, or a phone
+          // on its own recogniser whose dictation-mode preview still needs one.
+          const whisper: WhisperBackend = opts.whisper;
           const vad = (opts.makeVad ?? ((): Vad => new MockVad()))();
           const aec = (
             opts.makeAec ??

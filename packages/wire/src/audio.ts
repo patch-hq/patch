@@ -61,25 +61,60 @@ export const VoiceBackend = z.enum(['local', 'gemini', 'openai']);
 export type VoiceBackend = z.infer<typeof VoiceBackend>;
 
 /**
- * What transcribes dictation (spec/07 § Dictation engines). The call surfaces'
- * three plus `deepgram`, which streams: it is the only one whose live words
- * arrive as they are spoken rather than by re-reading the recording so far.
- * Deepgram is STT only, so it exists for dictation and nowhere else.
+ * Where dictation's words come from (spec/07 § Dictation engines), named by
+ * where the work happens: `device` — the phone's own speech recogniser, on the
+ * phone; `deepgram` — streamed to Deepgram as it is spoken; `whisper` — the
+ * host's Whisper, which re-reads the recording so far for the live words and
+ * the whole clip once it ends.
  */
-export const DictationBackend = z.enum(['local', 'gemini', 'openai', 'deepgram']);
-export type DictationBackend = z.infer<typeof DictationBackend>;
+export const PhoneDictationEngine = z.enum(['device', 'deepgram', 'whisper']);
+export type PhoneDictationEngine = z.infer<typeof PhoneDictationEngine>;
+/** A computer has no recogniser of its own. */
+export const ComputerDictationEngine = z.enum(['deepgram', 'whisper']);
+export type ComputerDictationEngine = z.infer<typeof ComputerDictationEngine>;
+export type DictationEngine = PhoneDictationEngine;
 
 /**
- * The dictation cell (spec/07 § Dictation engines). `phone`: on Android, the
- * phone's own speech recogniser makes the words and `backend` is only used by
- * web and desktop. `tidy`: every finished phrase of a live engine (the phone,
- * or `deepgram`) is read again by Whisper and swapped in place as dictation
- * goes on.
+ * The dictation setting: an engine for the phone app, an engine for web and
+ * desktop, and whether Whisper tidies up a live engine's words — each finished
+ * phrase read again and swapped in place as dictation goes on.
  */
 export interface DictationConfig {
-  backend: DictationBackend;
-  phone: boolean;
+  phone: PhoneDictationEngine;
+  computer: ComputerDictationEngine;
   tidy: boolean;
+}
+
+/**
+ * Reads a dictation setting saved before the phone and computer had engines of
+ * their own (`{ backend, phone?, tidy? }`). `deepgram` stays Deepgram, the
+ * phone recogniser switch becomes the phone's `device` engine, and the retired
+ * hosted transcribers (`gemini`, `openai`) become the host's Whisper.
+ */
+export function upgradeDictationSetting(raw: unknown): unknown {
+  if (typeof raw !== 'object' || raw === null || !('backend' in raw)) return raw;
+  const old = raw as { backend?: unknown; phone?: unknown; tidy?: unknown };
+  const deepgram = old.backend === 'deepgram';
+  return {
+    phone: old.phone === true ? 'device' : deepgram ? 'deepgram' : 'whisper',
+    computer: deepgram ? 'deepgram' : 'whisper',
+    tidy: old.tidy === true,
+  };
+}
+
+export const DictationSetting = z.preprocess(
+  upgradeDictationSetting,
+  z
+    .object({ phone: PhoneDictationEngine, computer: ComputerDictationEngine, tidy: z.boolean() })
+    .strict(),
+);
+
+/** The engine a dictation from this kind of surface runs on. */
+export function dictationEngineFor(
+  dictation: DictationConfig,
+  surfaceKind: AudioSurfaceKind,
+): DictationEngine {
+  return surfaceKind === 'mobile' ? dictation.phone : dictation.computer;
 }
 
 export const VoiceLayer = z.enum(['direct', 'light', 'heavy']);
@@ -109,7 +144,7 @@ export interface VoiceConfig {
 }
 
 export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
-  dictation: { backend: 'local', phone: false, tidy: false },
+  dictation: { phone: 'device', computer: 'whisper', tidy: false },
   device: { backend: 'local', layer: 'direct', handoff: 'auto' },
   handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
   call: { backend: 'local', layer: 'direct', handoff: 'auto' },
@@ -142,15 +177,14 @@ export function deriveVoiceSurface(args: {
   return 'call';
 }
 
-/**
- * The `{backend, layer}` cell a surface runs on. Dictation has no layer (STT
- * only), so its cell carries `backend` alone.
- */
+/** A surface that holds a conversation, as opposed to dictation. */
+export type ConversationSurface = Exclude<VoiceSurface, 'dictation'>;
+
+/** The `{backend, layer, handoff}` cell a conversation surface runs on. */
 export function voiceCellFor(
   config: VoiceConfig,
-  surface: VoiceSurface,
-): { backend: DictationBackend; layer?: VoiceLayer; handoff?: VoiceHandoff } {
-  if (surface === 'dictation') return config.dictation;
+  surface: ConversationSurface,
+): VoiceSurfaceConfig {
   if (surface === 'hands-free') return config.handsFree;
   return config[surface];
 }
@@ -174,7 +208,7 @@ export function modesShareVoiceEngine(
 }
 
 /** A backend that runs on a provider's API and so needs a key on the host. */
-export type HostedVoiceBackend = Exclude<DictationBackend, 'local'>;
+export type HostedVoiceBackend = Exclude<VoiceBackend, 'local'> | 'deepgram';
 
 /** The env var each hosted backend reads its key from on a host. */
 export const VOICE_BACKEND_KEY_ENV: Record<HostedVoiceBackend, string> = {
@@ -224,11 +258,11 @@ export function voiceKeyMissingMessage(surface: VoiceSurface, backend: HostedVoi
  * counted either way.
  */
 export function voiceKeyHostStatus(
-  backend: DictationBackend,
+  backend: VoiceBackend | DictationEngine,
   hosts: ReadonlyArray<{ hostName: string; voiceKeys?: VoiceKeys | undefined }>,
 ): string | null {
-  if (backend === 'local') return null;
-  const missing = hosts.filter((h) => h.voiceKeys !== undefined && !h.voiceKeys[backend]);
+  if (backend === 'local' || backend === 'device' || backend === 'whisper') return null;
+  const missing = hosts.filter((h) => h.voiceKeys !== undefined && h.voiceKeys[backend] !== true);
   if (missing.length === 0) return null;
   const names = missing.map((h) => h.hostName).join(', ');
   return `Not configured on ${names}: ${VOICE_BACKEND_KEY_ENV[backend]} is missing. Sessions there are refused.`;
@@ -242,8 +276,12 @@ export function voiceSurfacesMissingKey(
   config: VoiceConfig,
   keys: VoiceKeys,
 ): Array<{ surface: VoiceSurface; backend: HostedVoiceBackend; env: string }> {
-  const surfaces: VoiceSurface[] = ['dictation', 'device', 'hands-free', 'call'];
   const out: Array<{ surface: VoiceSurface; backend: HostedVoiceBackend; env: string }> = [];
+  const { phone, computer } = config.dictation;
+  if ((phone === 'deepgram' || computer === 'deepgram') && keys.deepgram !== true) {
+    out.push({ surface: 'dictation', backend: 'deepgram', env: VOICE_BACKEND_KEY_ENV.deepgram });
+  }
+  const surfaces: ConversationSurface[] = ['device', 'hands-free', 'call'];
   for (const surface of surfaces) {
     const { backend } = voiceCellFor(config, surface);
     if (backend === 'local' || keys[backend] === true) continue;

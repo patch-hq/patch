@@ -18,6 +18,7 @@ import React from 'react';
 import { Pressable as RNPressable } from 'react-native';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { seedDictation } from './testUtils/settingsFixtures';
 import {
   findHost,
   byLabel,
@@ -109,6 +110,8 @@ function makeDictationFactory(): {
 }
 
 beforeEach(() => {
+  // The upload path these tests drive is the phone's Whisper engine.
+  seedDictation('whisper');
   // The composer now restores the open chat's unsent text (spec/15 §
   // Composer), and the MMKV stub's registry is shared by every test in the
   // file — without this each test starts holding the previous one's draft.

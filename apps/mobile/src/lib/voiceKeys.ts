@@ -15,11 +15,13 @@ import { voiceConfigOrNull } from './preferences';
 export function voiceKeyRefusal(chatId: string, surface: VoiceSurface): string | null {
   const config = voiceConfigOrNull();
   if (config === null) return null;
-  const { backend } = voiceCellFor(config, surface);
-  if (backend === 'local') return null;
+  // Dictation from this phone runs on the phone's engine; only Deepgram needs a key.
+  const backend =
+    surface === 'dictation' ? config.dictation.phone : voiceCellFor(config, surface).backend;
+  if (backend === 'local' || backend === 'device' || backend === 'whisper') return null;
   const hostId = useChatStore.getState().chats[chatId]?.hostId;
   if (!hostId) return null;
   const keys = usePresenceStore.getState().hosts[hostId]?.host?.voiceKeys;
-  if (!keys || keys[backend]) return null;
+  if (!keys || keys[backend] === true) return null;
   return voiceKeyMissingMessage(surface, backend);
 }

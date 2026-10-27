@@ -5,7 +5,7 @@
 //
 //   - call surface, backend='gemini'          -> GeminiLiveSession (dials "Gemini")
 //   - device surface, backend='gemini'        -> voice_config_not_implemented (not a silent fallback)
-//   - dictation surface (voice-note role), backend='gemini', no transcriber -> voice_key_missing
+//   - dictation: the phone and the computer each run their own engine; Deepgram with no key -> voice_key_missing
 //   - call surface, backend='gemini', no key  -> audio.error{voice_key_missing}
 //   - call surface, backend='openai', no key  -> audio.error{openai_unavailable}
 //   (the working hosted cells are covered in audio-server-hosted-backends.test.ts)
@@ -207,49 +207,13 @@ describe('audio server — voice config matrix selection', () => {
     ws.close();
   });
 
-  test("dictation surface (voice-note role), backend='gemini' with no Gemini transcriber refuses — never Whisper", async () => {
-    server = await startServer({
-      voiceConfig: { dictation: { backend: 'gemini' } },
-      geminiApiKey: 'test-key',
-    });
-    const ws = await openSocket(server.port, 's-note-1');
-    ws.send(
-      encodeAudio({
-        type: 'audio.session_start',
-        sessionId: 's-note-1',
-        accountId: 'a',
-        surfaceId: 'surf',
-        surfaceKind: 'web',
-        chatId: 'c1',
-        role: 'voice-note',
-        token: mintToken({
-          accountId: 'a',
-          surfaceId: 'surf',
-          sessionId: 's-note-1',
-          chatId: 'c1',
-        }),
-        surfaceHasAec: true,
-      }),
-    );
-    const msg = await recvOne(ws);
-    expect(msg.type).toBe('audio.error');
-    expect(msg).toMatchObject({
-      code: 'voice_key_missing',
-      message:
-        'Dictation is set to gemini, but GEMINI_API_KEY is not set on this host. ' +
-        'Switch Dictation to another backend in Settings → Voice.',
-    });
-    expect(instances.length).toBe(0);
-    ws.close();
-  });
-
-  function dictationStart(sessionId: string): string {
+  function dictationStart(sessionId: string, surfaceKind: 'mobile' | 'web' = 'mobile'): string {
     return encodeAudio({
       type: 'audio.session_start',
       sessionId,
       accountId: 'a',
       surfaceId: 'surf',
-      surfaceKind: 'mobile',
+      surfaceKind,
       chatId: 'c1',
       role: 'voice-note',
       token: mintToken({ accountId: 'a', surfaceId: 'surf', sessionId, chatId: 'c1' }),
@@ -257,7 +221,24 @@ describe('audio server — voice config matrix selection', () => {
     });
   }
   const dictation = (tidy = false): Partial<VoiceConfig> => ({
-    dictation: { backend: 'deepgram', phone: false, tidy },
+    dictation: { phone: 'deepgram', computer: 'deepgram', tidy },
+  });
+
+  test('the phone and the computer each dictate on their own engine', async () => {
+    // Phone on Deepgram with no key: refused. Computer on Whisper: runs.
+    server = await startServer({
+      voiceConfig: { dictation: { phone: 'deepgram', computer: 'whisper', tidy: false } },
+    });
+    const phone = await openSocket(server.port, 's-dg-phone');
+    phone.send(dictationStart('s-dg-phone', 'mobile'));
+    expect(await recvOne(phone)).toMatchObject({ type: 'audio.error', code: 'voice_key_missing' });
+    phone.close();
+
+    const web = await openSocket(server.port, 's-wh-web');
+    web.send(dictationStart('s-wh-web', 'web'));
+    const first = await recvOne(web);
+    expect(first.type).not.toBe('audio.error');
+    web.close();
   });
 
   test("dictation on 'deepgram' with no DEEPGRAM_API_KEY refuses the session", async () => {

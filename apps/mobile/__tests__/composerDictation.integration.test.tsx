@@ -15,6 +15,7 @@
 
 import React from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { seedDictation } from './testUtils/settingsFixtures';
 import { micNeedsPrompt } from './testUtils/permissionPrompt';
 import { encodeAudio } from '@patch/wire/audio';
 import { installFakeWebSocket, restoreWebSocket, FakeWebSocket } from './testUtils/fakeWebSocket';
@@ -79,6 +80,8 @@ const placeholder = (r: ReturnType<typeof renderRN>): string | undefined =>
 let submitSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
+  // The upload path these tests drive is the phone's Whisper engine.
+  seedDictation('whisper');
   // The composer now restores the open chat's unsent text (spec/15 §
   // Composer), and the MMKV stub's registry is shared by every test in the
   // file — without this each test starts holding the previous one's draft.

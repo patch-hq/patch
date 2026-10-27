@@ -8,6 +8,7 @@
 // inputs (`chat.input`) carry `localId` for server-side dedup on (chatId, localId).
 
 import { z } from 'zod';
+import { DictationSetting } from './audio.js';
 import { DEFAULT_SWEEP_PROMPT } from './sweep-prompt.js';
 import { DEFAULT_LINK_SUMMARY_PROMPT } from './link-summary-prompt.js';
 import { DEFAULT_QUESTION_EXPIRED_PROMPT } from './question-expired-prompt.js';
@@ -2046,14 +2047,7 @@ const VoiceSurfaceSetting = z
 /** Per-surface voice config (spec/07 § Voice is a config matrix). */
 export const VoiceConfigSetting = z
   .object({
-    dictation: z
-      .object({
-        backend: z.enum(['local', 'gemini', 'openai', 'deepgram']),
-        // Absent in settings saved before the dictation engines existed.
-        phone: z.boolean().default(false),
-        tidy: z.boolean().default(false),
-      })
-      .strict(),
+    dictation: DictationSetting,
     device: VoiceSurfaceSetting,
     handsFree: VoiceSurfaceSetting,
     call: VoiceSurfaceSetting,
@@ -2272,7 +2266,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   // Every surface starts on the free, self-hosted pipeline talking straight to
   // Manager; each hosted cell is a deliberate opt-in.
   voiceConfig: {
-    dictation: { backend: 'local', phone: false, tidy: false },
+    dictation: { phone: 'device', computer: 'whisper', tidy: false },
     device: { backend: 'local', layer: 'direct', handoff: 'auto' },
     handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
     call: { backend: 'local', layer: 'direct', handoff: 'auto' },

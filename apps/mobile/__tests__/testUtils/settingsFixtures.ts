@@ -6,6 +6,7 @@ import { act, type ReactTestInstance } from 'react-test-renderer';
 import type { HostAccountSummary, HostInfoEvent } from '@patch/wire';
 import { CLAUDE_BACKEND_ID, DEFAULT_SHARED_SETTINGS } from '@patch/wire';
 import type { SettingsResponse } from '../../src/api/rest';
+import type { PhoneDictationEngine } from '@patch/wire/audio';
 import { usePresenceStore } from '../../src/stores/presenceStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { useSettingsHostChoice } from '../../src/components/settings/HostSwitcher';
@@ -36,6 +37,18 @@ export function settingsFixture(patch: Partial<SettingsResponse> = {}): Settings
 /** Seed the settings store as though `/api/settings` had answered. */
 export function seedSettings(patch: Partial<SettingsResponse> = {}): SettingsResponse {
   const data = settingsFixture(patch);
+  useSettingsStore.setState({ data, error: null });
+  return data;
+}
+
+/** Seed settings with the phone dictating on `phone` (spec/07 § Dictation engines). */
+export function seedDictation(phone: PhoneDictationEngine, tidy = false): SettingsResponse {
+  const data = settingsFixture();
+  const voiceConfig = data.preferences.voiceConfig;
+  data.preferences = {
+    ...data.preferences,
+    voiceConfig: { ...voiceConfig, dictation: { ...voiceConfig.dictation, phone, tidy } },
+  };
   useSettingsStore.setState({ data, error: null });
   return data;
 }

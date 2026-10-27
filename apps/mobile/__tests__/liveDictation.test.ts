@@ -266,28 +266,12 @@ describe('phone engine', () => {
 });
 
 describe('which engine the composer uses', () => {
-  it('phone on Android only; deepgram streams; everything else uploads', async () => {
+  it('follows the phone setting: Built-in, Deepgram streaming, or Whisper with nothing to tidy', async () => {
     const { dictationEngineFor } = await import('../src/lib/dictationEngine');
-    const cfg = (backend: 'local' | 'deepgram', phone: boolean, tidy = true) => ({
-      backend,
-      phone,
-      tidy,
-    });
-    expect(dictationEngineFor(cfg('local', true), 'android')).toEqual({
-      engine: 'phone',
-      tidy: true,
-    });
-    expect(dictationEngineFor(cfg('deepgram', true), 'web')).toEqual({
-      engine: 'stream',
-      tidy: true,
-    });
-    expect(dictationEngineFor(cfg('deepgram', false), 'android')).toEqual({
-      engine: 'stream',
-      tidy: true,
-    });
-    expect(dictationEngineFor(cfg('local', false), 'android')).toEqual({
-      engine: 'whisper',
-      tidy: false,
-    });
+    const cfg = (phone: 'device' | 'deepgram' | 'whisper') =>
+      ({ phone, computer: 'deepgram', tidy: true }) as const;
+    expect(dictationEngineFor(cfg('device'))).toEqual({ engine: 'phone', tidy: true });
+    expect(dictationEngineFor(cfg('deepgram'))).toEqual({ engine: 'stream', tidy: true });
+    expect(dictationEngineFor(cfg('whisper'))).toEqual({ engine: 'whisper', tidy: false });
   });
 });

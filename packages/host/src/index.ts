@@ -257,7 +257,8 @@ import {
   DEFAULT_VOICE_CONFIG,
   voiceKeyMissingMessage,
   voiceSurfacesMissingKey,
-  type DictationBackend,
+  dictationEngineFor,
+  type DictationEngine,
   type VoiceConfig,
   type VoiceKeys,
 } from '@patch/wire/audio';
@@ -428,7 +429,7 @@ async function startHost(
       gemini: config.audio.geminiApiKey,
       openai: config.audio.openaiApiKey,
       groq: config.audio.groqApiKey,
-      deepgram: process.env['DEEPGRAM_API_KEY'],
+      deepgram: config.audio.deepgramApiKey,
     },
     ...(config.audio.whisperBackend === 'groq'
       ? { requiredToStart: { groq: 'This host transcribes with Groq (WHISPER_BACKEND=groq)' } }
@@ -2424,7 +2425,7 @@ async function startHost(
         void handleVoiceNoteTranscribe(
           event,
           dictationTranscribers,
-          voiceConfig.dictation.backend,
+          dictationEngineFor(voiceConfig.dictation, event.surfaceKind),
           sender,
           logger,
         );
@@ -4833,10 +4834,6 @@ async function startHost(
   dictationTranscribers = createDictationTranscribers({
     logger: logger.child({ component: 'hosted-stt' }),
     local: whisper,
-    geminiApiKey: () => providerKeys.get('gemini'),
-    geminiModel: config.audio.geminiTranscribeModel,
-    openaiApiKey: () => providerKeys.get('openai'),
-    openaiModel: config.audio.openaiTranscribeModel,
     deepgramApiKey: () => providerKeys.get('deepgram'),
   });
   // spec/02 § Optional components: voice is a component the user installs on a
@@ -5098,7 +5095,6 @@ async function startHost(
     ...(config.audio.openaiRealtimeModelHeavy
       ? { openaiRealtimeModelHeavy: config.audio.openaiRealtimeModelHeavy }
       : {}),
-    dictationTranscribers,
     // spec/07 § Keeping voice and text as one conversation — what a fast
     // voice opens with: the chat's name and its most recent messages. A chat
     // whose history cannot be read fails the session loudly rather than
@@ -5679,7 +5675,7 @@ export function logVoiceKeysMissing(logger: Logger, config: VoiceConfig, keys: V
 export async function handleVoiceNoteTranscribe(
   event: import('@patch/wire').PatchVoiceNoteTranscribeRequestEvent,
   transcribers: DictationTranscribers | undefined,
-  backend: DictationBackend,
+  engine: DictationEngine,
   sender: (e: WireEvent) => void,
   logger: Logger,
 ): Promise<void> {
@@ -5713,15 +5709,11 @@ export async function handleVoiceNoteTranscribe(
     return;
   }
   /* v8 ignore stop */
-  // spec/07 § Voice — a config matrix: a note and a composer dictation are the
-  // `dictation` surface, so its configured backend transcribes the clip. A
-  // hosted backend with no key on this host is refused, not quietly
-  // transcribed by Whisper instead (NO SILENT FALLBACK). The phone's tidy-up
-  // pass asks for Whisper by name: that IS the engine it chose.
-  const picked =
-    event.engine === 'whisper'
-      ? ({ ok: true, whisper: transcribers.local } as const)
-      : pickDictationTranscriber(backend, transcribers);
+  // spec/07 § Dictation engines: the engine chosen for the uploading surface
+  // reads the clip. Deepgram with no key on this host is refused, not quietly
+  // transcribed by Whisper instead (NO SILENT FALLBACK). A tidy-up pass asks
+  // for Whisper by name: that IS the engine it chose.
+  const picked = pickDictationTranscriber(event.engine ?? engine, transcribers);
   if (!picked.ok) {
     sender({
       type: 'patch.voice_note.transcribe_response',

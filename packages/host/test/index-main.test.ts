@@ -3937,9 +3937,8 @@ function fakeWhisper(overrides: Partial<WhisperBackend> = {}): WhisperBackend {
 }
 
 describe('src/index.ts main() — a voice surface on a provider with no key', () => {
-  // the user's live config on 2026-09-24: dictation on gemini, the device on
-  // openai, hands-free + call local — and no GEMINI_* / OPENAI_* key in the
-  // host's environment. That must NOT stop the host (every chat on the
+  // The phone dictating on Deepgram, the device on openai, hands-free + call
+  // local — and no DEEPGRAM_* / OPENAI_* key in the host's environment. That must NOT stop the host (every chat on the
   // host would go down over one voice setting): it boots, says so in the log,
   // reports the missing keys on daemon.host, and refuses only that surface.
   it('boots, logs each surface whose key is missing, reports voiceKeys, refuses the session', async () => {
@@ -3952,11 +3951,11 @@ describe('src/index.ts main() — a voice surface on a provider with no key', ()
       },
     };
     const boot = await bootMain(
-      { GEMINI_API_KEY: undefined, OPENAI_REALTIME_API_KEY: undefined },
+      { DEEPGRAM_API_KEY: undefined, OPENAI_REALTIME_API_KEY: undefined },
       {
         hostJson: {
           voiceConfig: {
-            dictation: { backend: 'gemini' },
+            dictation: { phone: 'deepgram', computer: 'whisper', tidy: false },
             device: { backend: 'openai', layer: 'light' },
             handsFree: { backend: 'local', layer: 'direct' },
             call: { backend: 'local', layer: 'direct' },
@@ -3971,8 +3970,8 @@ describe('src/index.ts main() — a voice surface on a provider with no key', ()
         [
           50,
           'dictation',
-          'GEMINI_API_KEY',
-          'voice: Dictation is set to gemini, but GEMINI_API_KEY is not set on this host. ' +
+          'DEEPGRAM_API_KEY',
+          'voice: Dictation is set to deepgram, but DEEPGRAM_API_KEY is not set on this host. ' +
             'Switch Dictation to another backend in Settings → Voice. Its sessions will be refused.',
         ],
         [
@@ -3987,7 +3986,7 @@ describe('src/index.ts main() — a voice surface on a provider with no key', ()
       await boot.fakeServer.waitForAuthed();
       await boot.fakeServer.waitForFrame((e) => e.type === 'host.host' && e.hostId === 'd1');
       const host = boot.fakeServer.received.find((e) => e.type === 'host.host');
-      expect(host).toMatchObject({ voiceKeys: { gemini: false, openai: false } });
+      expect(host).toMatchObject({ voiceKeys: { gemini: false, openai: false, deepgram: false } });
 
       const folder = makeFolder();
       const spawnRes = await boot.ready.app.inject({
@@ -4033,7 +4032,7 @@ describe('src/index.ts main() — a voice surface on a provider with no key', ()
           type: 'audio.error',
           code: 'voice_key_missing',
           message:
-            'Dictation is set to gemini, but GEMINI_API_KEY is not set on this host. ' +
+            'Dictation is set to deepgram, but DEEPGRAM_API_KEY is not set on this host. ' +
             'Switch Dictation to another backend in Settings → Voice.',
         },
       ]);
@@ -4048,7 +4047,7 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
   // no restart: the host report flips, and the surface that was refused for
   // want of the key now opens. Values are fake; no session sends audio, so no
   // provider is ever called.
-  const FAKE_GEMINI = 'fake-gemini-key-for-tests-0000-LAST';
+  const FAKE_DEEPGRAM = 'fake-deepgram-key-for-tests-00-LAST';
 
   async function openDictation(
     boot: Boot,
@@ -4091,11 +4090,16 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
   it('a snapshot with the key → stored 0600, reported without the value, next session runs; without it → refused again', async () => {
     const lines: string[] = [];
     const boot = await bootMain(
-      { GEMINI_API_KEY: undefined, OPENAI_REALTIME_API_KEY: undefined, GROQ_API_KEY: undefined },
+      {
+        GEMINI_API_KEY: undefined,
+        OPENAI_REALTIME_API_KEY: undefined,
+        GROQ_API_KEY: undefined,
+        DEEPGRAM_API_KEY: undefined,
+      },
       {
         hostJson: {
           voiceConfig: {
-            dictation: { backend: 'gemini' },
+            dictation: { phone: 'deepgram', computer: 'whisper', tidy: false },
             device: { backend: 'local', layer: 'direct' },
             handsFree: { backend: 'local', layer: 'direct' },
             call: { backend: 'local', layer: 'direct' },
@@ -4108,7 +4112,7 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
       await boot.fakeServer.waitForAuthed();
       await boot.fakeServer.waitForFrame((e) => e.type === 'host.host');
       expect(boot.fakeServer.received.find((e) => e.type === 'host.host')).toMatchObject({
-        voiceKeys: { gemini: false, openai: false },
+        voiceKeys: { gemini: false, openai: false, deepgram: false },
         providerKeys: [
           { id: 'gemini', source: 'none', envSet: false },
           { id: 'openai', source: 'none', envSet: false },
@@ -4137,7 +4141,7 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
         settings: {
           ...DEFAULT_SHARED_SETTINGS,
           voiceConfig: {
-            dictation: { backend: 'gemini' },
+            dictation: { phone: 'deepgram', computer: 'whisper', tidy: false },
             device: { backend: 'local', layer: 'direct' },
             handsFree: { backend: 'local', layer: 'direct' },
             call: { backend: 'local', layer: 'direct' },
@@ -4149,7 +4153,7 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
           providerKeys,
         },
       });
-      boot.fakeServer.send(withKeys(1, { gemini: FAKE_GEMINI }));
+      boot.fakeServer.send(withKeys(1, { deepgram: FAKE_DEEPGRAM }));
       const res = await boot.fakeServer.waitForFrame(
         (e) => e.type === 'settings.applied' && e.version === 1,
       );
@@ -4162,18 +4166,18 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
       const hosts = boot.fakeServer.received.filter((e) => e.type === 'host.host');
       const latest = hosts[hosts.length - 1]!;
       expect(latest).toMatchObject({
-        voiceKeys: { gemini: true, openai: false },
+        voiceKeys: { gemini: false, openai: false, deepgram: true },
         providerKeys: [
-          { id: 'gemini', source: 'ui', last4: 'LAST', envSet: false },
+          { id: 'gemini', source: 'none', envSet: false },
           { id: 'openai', source: 'none', envSet: false },
           { id: 'groq', source: 'none', envSet: false },
-          { id: 'deepgram', source: 'none', envSet: false },
+          { id: 'deepgram', source: 'ui', last4: 'LAST', envSet: false },
         ],
       });
       // Nothing the host sent anywhere carries the value.
       expect(
         JSON.stringify(boot.fakeServer.received.filter((e) => e.type !== 'settings.snapshot')),
-      ).not.toContain(FAKE_GEMINI);
+      ).not.toContain(FAKE_DEEPGRAM);
       const keysPath = join(boot.home, 'keys.json');
       expect(statSync(keysPath).mode & 0o777).toBe(0o600);
 
@@ -4189,7 +4193,7 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
       revoked.close();
 
       // And the log never carried it either.
-      expect(lines.join('')).not.toContain(FAKE_GEMINI);
+      expect(lines.join('')).not.toContain(FAKE_DEEPGRAM);
       expect(lines.join('')).toContain('shared settings: snapshot applied');
     } finally {
       await boot.cleanup();
@@ -4209,7 +4213,7 @@ describe('handleVoiceNoteTranscribe', () => {
         audioBase64: Buffer.from('x').toString('base64'),
       },
       undefined,
-      'local',
+      'whisper',
       sender,
       silent,
     );
@@ -4227,7 +4231,7 @@ describe('handleVoiceNoteTranscribe', () => {
         audioBase64: '',
       },
       { local: fakeWhisper() },
-      'local',
+      'whisper',
       sender,
       silent,
     );
@@ -4245,7 +4249,7 @@ describe('handleVoiceNoteTranscribe', () => {
         audioBase64: Buffer.from('real clip').toString('base64'),
       },
       { local: fakeWhisper() },
-      'local',
+      'whisper',
       sender,
       silent,
     );
@@ -4269,7 +4273,7 @@ describe('handleVoiceNoteTranscribe', () => {
           },
         }),
       },
-      'local',
+      'whisper',
       sender,
       silent,
     );
@@ -4293,17 +4297,17 @@ describe('handleVoiceNoteTranscribe', () => {
           },
         }),
       },
-      'local',
+      'whisper',
       sender,
       silent,
     );
     expect(sent[0]).toMatchObject({ ok: false, error: { code: 'transcription_failed' } });
   });
 
-  it('dictation on a hosted backend transcribes with THAT backend, not Whisper', async () => {
+  it('dictation on Deepgram transcribes with Deepgram, not Whisper; a tidy-up asks for Whisper by name', async () => {
     const { sender, sent } = captureSender();
     const local = vi.fn(async () => 'whisper words');
-    const gemini = vi.fn(async () => 'gemini words');
+    const deepgram = vi.fn(async () => 'deepgram words');
     await handleVoiceNoteTranscribe(
       {
         type: 'patch.voice_note.transcribe_request',
@@ -4314,18 +4318,38 @@ describe('handleVoiceNoteTranscribe', () => {
       },
       {
         local: fakeWhisper({ transcribeClip: local }),
-        gemini: fakeWhisper({ transcribeClip: gemini }),
+        deepgram: fakeWhisper({ transcribeClip: deepgram }),
       },
-      'gemini',
+      'deepgram',
       sender,
       silent,
     );
-    expect(sent[0]).toMatchObject({ ok: true, transcript: 'gemini words' });
+    expect(sent[0]).toMatchObject({ ok: true, transcript: 'deepgram words' });
     expect(local).not.toHaveBeenCalled();
-    expect(gemini).toHaveBeenCalledWith(expect.any(Buffer), 'm4a');
+    expect(deepgram).toHaveBeenCalledWith(expect.any(Buffer), 'm4a');
+
+    await handleVoiceNoteTranscribe(
+      {
+        type: 'patch.voice_note.transcribe_request',
+        requestId: 'v6b',
+        surfaceKind: 'mobile',
+        format: 'wav',
+        audioBase64: Buffer.from('a phrase').toString('base64'),
+        engine: 'whisper',
+      },
+      {
+        local: fakeWhisper({ transcribeClip: local }),
+        deepgram: fakeWhisper({ transcribeClip: deepgram }),
+      },
+      'deepgram',
+      sender,
+      silent,
+    );
+    expect(sent[1]).toMatchObject({ ok: true, transcript: 'whisper words' });
+    expect(deepgram).toHaveBeenCalledTimes(1);
   });
 
-  it('dictation on a hosted backend with no key on this host is refused, never Whisper', async () => {
+  it('dictation on Deepgram with no key on this host is refused, never Whisper', async () => {
     const { sender, sent } = captureSender();
     const local = vi.fn(async () => 'whisper words');
     await handleVoiceNoteTranscribe(
@@ -4337,7 +4361,7 @@ describe('handleVoiceNoteTranscribe', () => {
         audioBase64: Buffer.from('real clip').toString('base64'),
       },
       { local: fakeWhisper({ transcribeClip: local }) },
-      'openai',
+      'deepgram',
       sender,
       silent,
     );
@@ -4346,7 +4370,7 @@ describe('handleVoiceNoteTranscribe', () => {
       error: {
         code: 'voice_key_missing',
         message:
-          'Dictation is set to openai, but OPENAI_REALTIME_API_KEY is not set on this host. ' +
+          'Dictation is set to deepgram, but DEEPGRAM_API_KEY is not set on this host. ' +
           'Switch Dictation to another backend in Settings → Voice.',
       },
     });

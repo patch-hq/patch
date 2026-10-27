@@ -311,56 +311,44 @@ describe('switching mode', () => {
   });
 });
 
-describe('dictation on every backend', () => {
-  for (const backend of ['local', 'gemini', 'openai'] as const) {
-    it(`${backend}: records locally and uploads to the one transcribe route`, async () => {
-      seedConfig({ ...DEFAULT_VOICE_CONFIG, dictation: { backend } });
-      const { startDictation, __resetDictationAudio } = await import('../src/lib/dictation');
-      __resetDictationAudio();
-      const onError = vi.fn();
-      const handle = startDictation('c1', vi.fn(), onError);
-      await flush();
-      for (let i = 0; i < 10; i++) micOnFrame!(new Int16Array(640));
-      expect(await handle.finish(true)).toEqual({ kind: 'text', text: 'hello world' });
-      expect(voiceTranscribeMock).toHaveBeenCalledTimes(1);
-      expect(onError).not.toHaveBeenCalled();
+describe('dictation on each phone engine', () => {
+  it('Whisper: records locally and uploads to the one transcribe route', async () => {
+    seedConfig({
+      ...DEFAULT_VOICE_CONFIG,
+      dictation: { phone: 'whisper', computer: 'whisper', tidy: false },
     });
+    const { startDictation, __resetDictationAudio } = await import('../src/lib/dictation');
+    __resetDictationAudio();
+    const onError = vi.fn();
+    const handle = startDictation('c1', vi.fn(), onError, vi.fn(), { engine: 'whisper' });
+    await flush();
+    for (let i = 0; i < 10; i++) micOnFrame!(new Int16Array(640));
+    expect(await handle.finish(true)).toEqual({ kind: 'text', text: 'hello world' });
+    expect(voiceTranscribeMock).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+  });
 
-    if (backend !== 'local') {
-      it(`${backend}: a host with no key for it refuses at the press — mic stopped, nothing uploaded`, async () => {
-        seedConfig({ ...DEFAULT_VOICE_CONFIG, dictation: { backend } });
-        const message = voiceKeyMissingMessage('dictation', backend);
-        const { startDictation, __resetDictationAudio } = await import('../src/lib/dictation');
-        __resetDictationAudio();
-        const onError = vi.fn();
-        const handle = startDictation('c1', vi.fn(), onError);
-        await flush();
-        const sock = FakeWebSocket.last();
-        sock.emitOpen();
-        micOnFrame!(new Int16Array(640));
-        // The host refuses the session the moment it starts.
-        sock.emitMessage(
-          JSON.stringify({ type: 'audio.error', code: 'voice_key_missing', message }),
-        );
-        await flush();
-        expect(onError).toHaveBeenCalledWith(message);
-        expect(onError).toHaveBeenCalledTimes(1);
-        expect(stopMicCaptureMock).toHaveBeenCalled();
-        expect(await handle.finish(true)).toEqual({ kind: 'discarded' });
-        expect(voiceTranscribeMock).not.toHaveBeenCalled();
-      });
-
-      it(`${backend}: a refusal on upload carries the same sentence`, async () => {
-        seedConfig({ ...DEFAULT_VOICE_CONFIG, dictation: { backend } });
-        const message = voiceKeyMissingMessage('dictation', backend);
-        voiceTranscribeMock.mockRejectedValueOnce(new Error(message));
-        const { startDictation, __resetDictationAudio } = await import('../src/lib/dictation');
-        __resetDictationAudio();
-        const handle = startDictation('c1', vi.fn(), vi.fn());
-        await flush();
-        for (let i = 0; i < 10; i++) micOnFrame!(new Int16Array(640));
-        await expect(handle.finish(true)).rejects.toThrow(message);
-      });
-    }
-  }
+  it('Deepgram: a host with no key for it refuses at the press — mic stopped, nothing uploaded', async () => {
+    seedConfig({
+      ...DEFAULT_VOICE_CONFIG,
+      dictation: { phone: 'deepgram', computer: 'whisper', tidy: false },
+    });
+    const message = voiceKeyMissingMessage('dictation', 'deepgram');
+    const { startDictation, __resetDictationAudio } = await import('../src/lib/dictation');
+    __resetDictationAudio();
+    const onError = vi.fn();
+    const handle = startDictation('c1', vi.fn(), onError, vi.fn(), { engine: 'stream' });
+    await flush();
+    const sock = FakeWebSocket.last();
+    sock.emitOpen();
+    micOnFrame!(new Int16Array(640));
+    // The host refuses the session the moment it starts.
+    sock.emitMessage(JSON.stringify({ type: 'audio.error', code: 'voice_key_missing', message }));
+    await flush();
+    expect(onError).toHaveBeenCalledWith(message);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(stopMicCaptureMock).toHaveBeenCalled();
+    expect(await handle.finish(true)).toEqual({ kind: 'discarded' });
+    expect(voiceTranscribeMock).not.toHaveBeenCalled();
+  });
 });
