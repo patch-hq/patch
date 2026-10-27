@@ -4382,16 +4382,7 @@ export class Daemon {
     if (!this.chatState.has(opts.id)) this.chatState.hydrate([meta]);
     const state = this.chatState.get(opts.id)!;
     const result = opts.wait ? this.registerDelegateWaiter(opts.id) : undefined;
-    if (state.subagent?.outcome !== undefined) {
-      const { outcome: _o, finishedAt: _f, ...rest } = state.subagent;
-      state.subagent = rest;
-      this.opts.metaStore.update(opts.id, (m) => {
-        if (!m.subagent) return m;
-        const { outcome: _mo, finishedAt: _mf, ...mrest } = m.subagent;
-        return { ...m, subagent: mrest };
-      });
-      this.emitDelegateUpdate(opts.parentChatId, opts.id, state.subagent.label, 'running');
-    }
+    this.rearmDelegate(opts.id);
     try {
       await this.sendInput({
         chatId: opts.id,
@@ -4404,6 +4395,25 @@ export class Daemon {
       throw err;
     }
     return { id: opts.id, ...(result ? { result } : {}) };
+  }
+
+  /**
+   * A settled subagent that starts another turn is running again, whoever woke
+   * it (its parent, a background job it started, a timer): clear the outcome so
+   * that turn's settle delivers its result to the parent. Without this the
+   * later turn finishes with `outcome` still stamped and its report is dropped.
+   */
+  private rearmDelegate(chatId: string): void {
+    const state = this.chatState.get(chatId);
+    if (state?.subagent?.outcome === undefined) return;
+    const { outcome: _o, finishedAt: _f, ...rest } = state.subagent;
+    state.subagent = rest;
+    this.opts.metaStore.update(chatId, (m) => {
+      if (!m.subagent) return m;
+      const { outcome: _mo, finishedAt: _mf, ...mrest } = m.subagent;
+      return { ...m, subagent: mrest };
+    });
+    this.emitDelegateUpdate(rest.parentChatId, chatId, rest.label, 'running');
   }
 
   /**
@@ -5998,6 +6008,7 @@ export class Daemon {
     if (this.movingOut.has(req.chatId)) {
       throw new Error('This chat is moving to another host; send it again once it has arrived.');
     }
+    this.rearmDelegate(req.chatId);
 
     // spec/20-hooks.md § On the agent's response — an `advise` outcome rides
     // with the chat's NEXT turn, whichever origin it turns out to have. The
