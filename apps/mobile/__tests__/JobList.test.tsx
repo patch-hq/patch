@@ -180,6 +180,18 @@ describe('JobList — job rows', () => {
     expect(colour('job-1')).toBe(colour('job-3'));
   });
 
+  it('fades the whole body of a disabled row, not just the name', async () => {
+    vi.mocked(api.listJobs).mockResolvedValue({ jobs });
+    const r = renderRN(<JobList onOpen={() => {}} />);
+    await flush();
+    const opacity = (id: string) => {
+      const style = findHost(r.root, byTestId(`job-body-${id}`)).props.style;
+      return [style].flat(Infinity).reduce((acc, x) => ({ ...acc, ...x }), {}).opacity;
+    };
+    expect(opacity('job-1')).toBe(1);
+    expect(opacity('job-4')).toBeLessThan(1);
+  });
+
   it('tapping a row calls onOpen with that job id', async () => {
     vi.mocked(api.listJobs).mockResolvedValue({ jobs });
     const onOpen = vi.fn();

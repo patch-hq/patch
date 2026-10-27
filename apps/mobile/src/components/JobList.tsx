@@ -140,7 +140,7 @@ export function JobList({ onOpen }: { onOpen: (jobId?: string) => void }): React
               borderColor: colors.lineSoft,
             }}
           >
-            <View style={{ flex: 1 }}>
+            <View style={{ flex: 1, opacity: j.enabled ? 1 : 0.6 }} testID={`job-body-${j.id}`}>
               <Text
                 testID={`job-name-${j.id}`}
                 style={{ ...typography.rowTitle, color: j.enabled ? colors.ink : colors.ink3 }}

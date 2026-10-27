@@ -473,6 +473,17 @@ describe('JobsRoute', () => {
     });
   });
 
+  it('labels the switch by state and mutes disabled rows', async () => {
+    renderJobs();
+    await waitFor(() => expect(screen.getByTestId('job-gh')).toBeInTheDocument());
+    const off = screen.getByTestId('job-toggle-gh').closest('label')!;
+    expect(off.textContent).toBe('Disabled');
+    expect(screen.getByTestId('job-gh').className).toContain('disabled');
+    const on = screen.getByTestId('job-toggle-bus').closest('label')!;
+    expect(on.textContent).toBe('Enabled');
+    expect(screen.getByTestId('job-bus').className).not.toContain('disabled');
+  });
+
   it('toggling a disabled job calls the enable endpoint', async () => {
     renderJobs();
     await waitFor(() => expect(screen.getByTestId('job-gh')).toBeInTheDocument());

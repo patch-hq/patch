@@ -666,7 +666,7 @@ function JobRow({
           checked={job.enabled}
           onChange={(enabled) => actions.onToggle(job.id, enabled)}
           disabled={expired || archived}
-          label="Enabled"
+          label={job.enabled ? 'Enabled' : 'Disabled'}
           testid={`job-toggle-${job.id}`}
           title={archived ? 'Archived' : expired ? 'Expired' : job.enabled ? 'Enabled' : 'Disabled'}
         />
