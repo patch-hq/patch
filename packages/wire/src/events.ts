@@ -1741,6 +1741,13 @@ export const ChatDelegateUpdateEvent = z
     delegateId: z.string().min(1),
     label: z.string().min(1),
     status: z.enum(['running', 'awaiting-permission', 'done', 'failed', 'stopped']),
+    /**
+     * Present only while the subagent is parked on a usage limit (status stays
+     * `running`: it is alive and resumes on its own). `resetsAt` is the epoch ms
+     * it resumes at, absent when the provider named no reset. A later update
+     * without it means the subagent is running again.
+     */
+    outOfCredit: z.object({ resetsAt: z.number().int().positive().optional() }).strict().optional(),
     seq: z.number().int().nonnegative(),
     ...forSurfaceIdField,
   })

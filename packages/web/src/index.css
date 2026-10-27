@@ -3123,9 +3123,12 @@ button.nav-row {
 .workers-pill-segment {
   padding: 3px 10px;
   min-width: 0;
-  max-width: 180px;
+  max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.workers-pill-segment[data-state='done'] {
+  color: var(--ink-3, var(--ink-2));
 }
 .workers-pill-segment + .workers-pill-segment {
   border-left: 1px solid var(--line);

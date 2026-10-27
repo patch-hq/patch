@@ -88,6 +88,15 @@ describe.each([true, false])(
         expect.objectContaining({ id, status: 'running' }),
       ]);
       expect(fromAgent()).toHaveLength(1);
+      // The header pill is told too: still running, out of credit until the reset.
+      const updates = events.filter(
+        (e): e is Extract<WireEvent, { type: 'chat.delegate_update' }> =>
+          e.type === 'chat.delegate_update' && e.delegateId === id,
+      );
+      expect(updates.at(-1)).toMatchObject({
+        status: 'running',
+        outOfCredit: { resetsAt: RESETS_AT },
+      });
       daemon.shutdown();
     });
   },

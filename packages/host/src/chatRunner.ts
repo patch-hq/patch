@@ -4554,9 +4554,16 @@ export class Daemon {
     chatId: string,
     subagent: NonNullable<ChatState['subagent']>,
   ): void {
+    const block = this.limitBlocks.get(chatId);
+    this.emitDelegateUpdate(
+      subagent.parentChatId,
+      chatId,
+      subagent.label,
+      'running',
+      block?.resetsAt !== undefined ? { resetsAt: block.resetsAt } : {},
+    );
     // A caller blocked on `wait: true` keeps waiting for the real result.
     if (this.delegateWaiters.get(chatId)?.length) return;
-    const block = this.limitBlocks.get(chatId);
     const on = block?.accountLabel === undefined ? '' : ` on ${block.accountLabel}`;
     const resume =
       block?.resetsAt === undefined
@@ -4608,14 +4615,18 @@ export class Daemon {
     delegateId: string,
     label: string,
     status: DelegateStatus,
+    outOfCredit?: { resetsAt?: number },
   ): void {
     if (!this.chatState.has(parentChatId)) return;
+    if (outOfCredit) this.pausedDelegates.add(delegateId);
+    else this.pausedDelegates.delete(delegateId);
     const ev: ChatDelegateUpdateEvent = {
       type: 'chat.delegate_update',
       chatId: parentChatId,
       delegateId,
       label,
       status,
+      ...(outOfCredit ? { outOfCredit } : {}),
       seq: this.bumpSeq(parentChatId),
     };
     this.emit(ev);
@@ -8646,6 +8657,9 @@ export class Daemon {
   // Internal: run one SDK query for the chat. Emits wire events as they
   // arrive, persists nextSeq + claudeSessionId after every emit.
 
+  /** Subagents whose last update told the parent they are out of credit. */
+  private readonly pausedDelegates = new Set<string>();
+
   private async runQuery(
     chatId: string,
     prompt: string,
@@ -8680,6 +8694,9 @@ export class Daemon {
     }
     const state = this.chatState.get(chatId);
     if (!state) throw new Error(`runQuery: unknown chatId ${chatId}`);
+    if (state.subagent && this.pausedDelegates.has(chatId)) {
+      this.emitDelegateUpdate(state.subagent.parentChatId, chatId, state.subagent.label, 'running');
+    }
 
     // G2-d4: capture a one-line snippet of the FIRST user message as the chat's
     // durable `preview`. The sidebar uses it to give otherwise-unnamed rows —

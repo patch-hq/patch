@@ -251,6 +251,28 @@ describe('running delegates strip', () => {
     expect(findAllHost(r.root, byTestId('delegate-strip'))).toHaveLength(0);
   });
 
+  it('shows "out of credit until <time>" for a parked subagent and running time again once it resumes', () => {
+    const r = renderRN(<ChatDetailScreen />);
+    actSync(() => {
+      useChatStore.getState().applyEvent({
+        type: 'chat.delegate_update',
+        chatId: 'c1',
+        delegateId: 'sub-1',
+        label: 'draft the email',
+        status: 'running',
+        outOfCredit: { resetsAt: new Date(2030, 0, 15, 14, 5).getTime() },
+        seq: 1,
+      });
+    });
+    expect(
+      hasText(findAllHost(r.root, byTestId('delegate-strip-time'))[0]!, 'out of credit until'),
+    ).toBe(true);
+    update('sub-1', 'draft the email', 'running', 2);
+    expect(hasText(findAllHost(r.root, byTestId('delegate-strip-time'))[0]!, 'out of credit')).toBe(
+      false,
+    );
+  });
+
   it('shows a workers pill in the header while subagents run', () => {
     const r = renderRN(<ChatDetailScreen />);
     expect(findAllHost(r.root, byTestId('header-workers'))).toHaveLength(0);

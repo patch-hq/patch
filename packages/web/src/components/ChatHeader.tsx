@@ -25,6 +25,7 @@ import { useLayoutStore } from '../stores/layoutStore.js';
 import type { ChatRow } from '../stores/types.js';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
 import { isHidden } from '../stores/types.js';
+import { formatReset } from '../lib/usage.js';
 import {
   Edit3,
   Archive,
@@ -77,17 +78,34 @@ const NO_DELEGATES: Record<string, DelegateUpdateInfo> = {};
  */
 function WorkersIndicator({ chatId }: { chatId: string }): JSX.Element | null {
   const updates = useChatStore((s) => s.delegateUpdates[chatId] ?? NO_DELEGATES);
-  const running = Object.entries(updates).filter(
-    ([, d]) => d.status === 'running' || d.status === 'awaiting-permission',
+  const shown = Object.entries(updates).filter(
+    ([, d]) => d.status === 'running' || d.status === 'awaiting-permission' || d.status === 'done',
   );
-  if (running.length === 0) return null;
+  if (!shown.some(([, d]) => d.status !== 'done')) return null;
   return (
     <span className="workers-pill" data-testid="header-workers">
-      {running.map(([id, d]) => (
-        <span key={id} className="workers-pill-segment" data-testid="header-worker" title={d.label}>
-          {d.label}
-        </span>
-      ))}
+      {shown.map(([id, d]) => {
+        const state = d.outOfCredit
+          ? d.outOfCredit.resetsAt !== undefined
+            ? `out of credit until ${formatReset(d.outOfCredit.resetsAt)}`
+            : 'out of credit'
+          : d.status === 'done'
+            ? 'done'
+            : d.status === 'awaiting-permission'
+              ? 'waiting on you'
+              : 'running';
+        return (
+          <span
+            key={id}
+            className="workers-pill-segment"
+            data-testid="header-worker"
+            data-state={d.outOfCredit ? 'out-of-credit' : d.status}
+            title={`${d.label} — ${state}`}
+          >
+            {d.label} · {state}
+          </span>
+        );
+      })}
     </span>
   );
 }

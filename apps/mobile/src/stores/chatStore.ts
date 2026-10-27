@@ -42,6 +42,8 @@ export interface ToolRunSummary {
 export interface DelegateUpdateInfo {
   label: string;
   status: ChatDelegateUpdateEvent['status'];
+  /** Set while the subagent is parked on a usage limit; `resetsAt` is when it resumes. */
+  outOfCredit?: { resetsAt?: number };
   /** Epoch ms this surface first saw the subagent — the running-time clock. */
   since: number;
 }
@@ -1508,6 +1510,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             [event.delegateId]: {
               label: event.label,
               status: event.status,
+              ...(event.outOfCredit ? { outOfCredit: event.outOfCredit } : {}),
               since: delegateUpdates[event.chatId]?.[event.delegateId]?.since ?? Date.now(),
             },
           };

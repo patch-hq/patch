@@ -49,7 +49,11 @@ export function DelegateStrip({ chatId }: { chatId: string }): React.ReactElemen
               {d.label}
             </Text>
             <Text testID="delegate-strip-time" style={{ ...typography.meta, color: colors.ink3 }}>
-              {formatElapsed(now - d.since)}
+              {d.outOfCredit
+                ? d.outOfCredit.resetsAt !== undefined
+                  ? `out of credit until ${new Date(d.outOfCredit.resetsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                  : 'out of credit'
+                : formatElapsed(now - d.since)}
             </Text>
           </Pressable>
           {openId === id ? <DelegateTranscript chatId={chatId} delegateId={id} /> : null}
