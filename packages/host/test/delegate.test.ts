@@ -450,8 +450,9 @@ describe('patch_delegate', () => {
       })(),
       discoverClaudeMcpServers: () => [],
     });
-    const parentChatId = await daemon.spawnChat({ folder });
+    const parentChatId = await daemon.spawnChat({ folder, permissionMode: 'bypassPermissions' });
     const { id } = await daemon.createDelegate({ parentChatId, prompt: 'pick an approach' });
+    expect(daemon.chatPermissionMode(id)).toBe('bypassPermissions');
 
     await flushUntil(() => daemon.listDelegates(parentChatId)[0]?.status === 'done');
     expect(denyMessage).toBe(SUBAGENT_PERMISSION_DENIED_MESSAGE);
