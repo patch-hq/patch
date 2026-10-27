@@ -91,6 +91,17 @@ describe('self-wake on the host (spec/02 § Self-wake)', () => {
     expect(daemon.peekWake(chatId)).toBeNull();
   });
 
+  it('a wake whose message is a /skill reaches the SDK with the command first', async () => {
+    const b = recordingBackend();
+    const { daemon, folder } = setup(b.backend);
+    const chatId = await daemon.spawnChat({ folder });
+    await tick();
+
+    daemon.scheduleWake(chatId, { in: '0', message: '/pr-monitor check now' });
+    await tick(60);
+    expect(b.prompts).toContain('/pr-monitor [wake] check now');
+  });
+
   it('cancelWake stops a pending wake before it fires', async () => {
     const b = recordingBackend();
     const { daemon, folder } = setup(b.backend);

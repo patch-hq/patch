@@ -218,6 +218,7 @@ import type {
 } from '@patch/wire';
 import { BrowserHandoff, type HandoffResult, type ShareResult } from './browserHandoff.js';
 import { voicePrefixForSource } from './specialThreads.js';
+import { prefixKeepingCommandFirst } from './leadCommand.js';
 
 /**
  * Result of the per-query OAuth check. `ok:true` carries the access token to
@@ -6276,7 +6277,9 @@ export class Daemon {
       block === undefined ? m : m.length > 0 ? `${m}\n\n${block}` : block;
     const promptHead = head;
     const compose =
-      promptHead === null ? undefined : (typed: string): string => withBlock(promptHead + typed);
+      promptHead === null
+        ? undefined
+        : (typed: string): string => withBlock(prefixKeepingCommandFirst(promptHead, typed));
     const message = compose ? compose(req.message) : withBlock(rewrittenWhole);
 
     // spec/02 § Questions are not approvals — a message sent while the agent's

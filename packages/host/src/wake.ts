@@ -35,6 +35,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync 
 import { join } from 'node:path';
 import type { Logger } from 'pino';
 import { z } from 'zod';
+import { prefixKeepingCommandFirst } from './leadCommand.js';
 
 /** A pending self-wake, persisted at `<chatDir>/wake.json`. */
 export const WakeRecord = z
@@ -222,7 +223,7 @@ export class WakeScheduler {
       rmSync(this.filePath(chatId), { force: true });
     }
     try {
-      await this.deps.deliver(chatId, `${WAKE_PREFIX} ${rec.message}`);
+      await this.deps.deliver(chatId, prefixKeepingCommandFirst(`${WAKE_PREFIX} `, rec.message));
     } catch (err) {
       this.deps.logger.error({ chatId, err }, 'wake: delivery failed');
     }
