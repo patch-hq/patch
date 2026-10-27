@@ -2253,6 +2253,21 @@ function userMessageText(msg: Record<string, unknown>): string {
 // across every message so a result can see a call from an earlier message;
 // omitted (fresh map per call) falls back to the literal `'tool'` placeholder
 // when truly unmatched — same convention as the replay path.
+/** What the Claude runtime substitutes for a tool result it never received. */
+export const LOST_TOOL_RESULT = '[Tool result missing due to internal error]';
+
+function isLostToolResult(content: unknown): boolean {
+  if (typeof content === 'string') return content.trim() === LOST_TOOL_RESULT;
+  if (!Array.isArray(content)) return false;
+  return content.some(
+    (c) =>
+      typeof c === 'object' &&
+      c !== null &&
+      (c as Record<string, unknown>)['type'] === 'text' &&
+      String((c as Record<string, unknown>)['text']).trim() === LOST_TOOL_RESULT,
+  );
+}
+
 export function translateSdkMessage(
   msg: unknown,
   toolNames: Map<string, string> = new Map(),
@@ -2401,6 +2416,14 @@ export function translateSdkMessage(
       if (b['type'] !== 'tool_result') continue;
       const callId = typeof b['tool_use_id'] === 'string' ? b['tool_use_id'] : '';
       if (callId.length === 0) continue;
+      // The runtime's stand-in for a result it never received: the call may
+      // have run. Say so, and log it so the cause can be traced to a restart,
+      // stop or reload.
+      const lost = isLostToolResult(b['content']);
+      const toolName = toolNames.get(callId) ?? 'tool';
+      if (lost) {
+        console.warn(`tool result lost by the agent runtime: ${toolName} (${callId})`);
+      }
       out.push(
         withNative({
           type: 'tool_result',
@@ -2409,10 +2432,12 @@ export function translateSdkMessage(
             // (see the `toolNames` doc above). 'tool' is a last-resort,
             // non-empty placeholder for the rare case no matching call is in
             // scope (e.g. this run started mid-turn).
-            name: toolNames.get(callId) ?? 'tool',
+            name: toolName,
             callId,
-            result: b['content'],
-            ...(b['is_error'] === true ? { isError: true } : {}),
+            result: lost
+              ? `${LOST_TOOL_RESULT} The call may have run; check its effect before repeating it.`
+              : b['content'],
+            ...(b['is_error'] === true || lost ? { isError: true } : {}),
           },
           raw: msg,
         }),
