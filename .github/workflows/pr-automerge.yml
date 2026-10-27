@@ -1,7 +1,7 @@
 # Turns on auto-merge for every PR from the repository owner's chats. The merge
 # queue then merges it, with the method the queue sets, the moment the required
 # `tests` check is green; until then it waits. Branches are tidied by the
-# repo's "delete branch on merge" setting (the queue refuses --delete-branch).
+# repo's "delete branch on merge" setting.
 
 name: pr-automerge
 
