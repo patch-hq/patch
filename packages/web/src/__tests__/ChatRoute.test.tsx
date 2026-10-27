@@ -1782,6 +1782,9 @@ describe('ChatRoute regression', () => {
       const composer = screen.getByTestId('composer-input');
       fireEvent.change(composer, { target: { value: 'actually do this' } });
       fireEvent.keyDown(composer, { key: 'Enter', metaKey: true });
+      // A second send inside the first's in-flight window is ignored on purpose
+      // (Composer.doubleEnter), so let the first land before the Ctrl+↵ one.
+      await waitFor(() => expect(types(send).filter((t) => t === 'chat.input')).toHaveLength(1));
       fireEvent.change(composer, { target: { value: 'and this' } });
       fireEvent.keyDown(composer, { key: 'Enter', ctrlKey: true });
       await waitFor(() => expect(types(send).filter((t) => t === 'chat.input')).toHaveLength(2));
