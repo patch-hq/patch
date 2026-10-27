@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, realpathSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
@@ -1014,6 +1014,53 @@ describe('Host ChatRunner', () => {
     // resume id was passed through unchanged (genuine resume).
     expect(sdk.lastOptions()?.resumeSessionId).toBe('real-sess-99');
     expect(daemon.chatState.get('resumable-chat')?.activity).toBe('idle');
+  });
+
+  it("F1: a session only Patch's mirror holds still resumes (no rebuild-and-compress loop)", async () => {
+    // A turn resumed through the session store runs from a throwaway config
+    // dir, so Claude Code's own transcript never lands in ~/.claude/projects.
+    // Treating that as an orphan rebuilt the session from the whole chat log
+    // every turn, and the oversized rebuild compressed straight away.
+    const home = mkdtempSync(join(tmpdir(), 'patch-runner-mirror-'));
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-folder-mirror-')));
+    const projectsRoot = mkdtempSync(join(tmpdir(), 'patch-projects-mirror-'));
+    const metaStore = createMetaStore(home);
+    const events: WireEvent[] = [];
+    const sdk = createMockSdkBackend();
+    const daemon = new Daemon({
+      hostId: 'd1',
+      metaStore,
+      sdkBackend: sdk,
+      sdkBackendKind: 'real',
+      historyReader: createHistoryReader({ claudeProjectsRoot: projectsRoot }),
+      oauthAccessToken: 'fake-token',
+      emit: (e) => events.push(e),
+      logger: silent,
+      now: () => 1_700_000_000_000,
+    });
+    sdk.enqueue([{ type: 'result', sessionId: 'mirror-only-sess' }]);
+    metaStore.write({
+      chatId: 'mirror-chat',
+      folder,
+      name: 'mirror',
+      nextSeq: 4,
+      claudeSessionId: 'mirror-only-sess',
+      createdAt: 1,
+      updatedAt: 2,
+    });
+    const nativeDir = join(dirname(metaStore.pathFor('mirror-chat')), 'native', 'claude');
+    mkdirSync(nativeDir, { recursive: true });
+    writeFileSync(
+      join(nativeDir, 'mirror-only-sess.jsonl'),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'hi' } }) + '\n',
+    );
+    daemon.hydrate();
+
+    await daemon.sendInput({ chatId: 'mirror-chat', message: 'continue', localId: 'L1' });
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(sdk.lastOptions()?.resumeSessionId).toBe('mirror-only-sess');
+    expect(metaStore.read('mirror-chat')?.claudeSessionId).toBe('mirror-only-sess');
   });
 
   it('F5: resumed chat whose folder is gone goes errored on input, no SDK query', async () => {

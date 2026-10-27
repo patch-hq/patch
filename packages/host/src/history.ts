@@ -131,7 +131,13 @@ export interface HistoryReader {
    * still surfaces loudly — `read()` logs each damaged line and replays a
    * system message in its place (see `walk()`).
    */
-  hasSession(opts: { folder: string; sessionId: string }): boolean;
+  /**
+   * Whether the session can be resumed. Pass `nativeDir` for a Claude session:
+   * once a turn resumes through Patch's session store the SDK runs it from a
+   * throwaway config dir, so Claude Code's own transcript stops existing and
+   * the mirror is the only copy.
+   */
+  hasSession(opts: { folder: string; sessionId: string; nativeDir?: string }): boolean;
 }
 
 export function defaultClaudeProjectsRoot(): string {
@@ -275,12 +281,14 @@ export function createHistoryReader(opts: HistoryReaderOptions = {}): HistoryRea
     return events.filter((ev) => (ev as { seq: number }).seq > req.fromSeq);
   }
 
-  function hasSession(opts: { folder: string; sessionId: string }): boolean {
-    return existsSync(jsonlPath(opts.folder, opts.sessionId));
+  function hasSession(opts: { folder: string; sessionId: string; nativeDir?: string }): boolean {
+    return forkTranscriptPath(opts) !== null;
   }
 
   /** The transcript a session resumes from: its mirror when non-empty, else Claude Code's own file. */
-  function forkTranscriptPath(opts: ForkPointOptions): string | null {
+  function forkTranscriptPath(
+    opts: Pick<ForkPointOptions, 'folder' | 'sessionId' | 'nativeDir'>,
+  ): string | null {
     if (opts.nativeDir !== undefined) {
       const mirrored = join(opts.nativeDir, `${opts.sessionId}.jsonl`);
       if (existsSync(mirrored) && statSync(mirrored).size > 0) return mirrored;

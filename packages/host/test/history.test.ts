@@ -407,6 +407,18 @@ describe('history reader', () => {
     expect(reader.hasSession({ folder, sessionId: 'now-here' })).toBe(true);
   });
 
+  it("hasSession() counts a non-empty session mirror when Claude Code's own transcript is gone", () => {
+    const root = mkdtempSync(join(tmpdir(), 'patch-history-'));
+    const nativeDir = mkdtempSync(join(tmpdir(), 'patch-native-'));
+    const folder = '/work/proj';
+    const reader = createHistoryReader({ claudeProjectsRoot: root });
+    writeFileSync(join(nativeDir, 'empty.jsonl'), '', 'utf8');
+    expect(reader.hasSession({ folder, sessionId: 'empty', nativeDir })).toBe(false);
+    writeFileSync(join(nativeDir, 'mirrored.jsonl'), '{"type":"user"}\n', 'utf8');
+    expect(reader.hasSession({ folder, sessionId: 'mirrored', nativeDir })).toBe(true);
+    expect(reader.hasSession({ folder, sessionId: 'mirrored' })).toBe(false);
+  });
+
   it('createHistoryReader() defaults to ~/.claude/projects when no override is given', () => {
     // No claudeProjectsRoot passed — exercises defaultClaudeProjectsRoot().
     // We don't touch the real ~/.claude/projects; hasSession() only stats a

@@ -1448,7 +1448,9 @@ export function chatInputToSendOptions(event: ChatInputEvent): SendInputOptions 
     // A Pad's delivery is system input too (not typed), but the user's own Send
     // started it, so it still counts as the user's activity.
     ...(event.source?.kind === 'job' || event.source?.kind === 'pad' ? { jobTrigger: true } : {}),
-    ...(event.source?.kind === 'job' ? {} : { fromUser: true }),
+    // A `machine` origin is an agent's CLI send-to, not a person: it must not
+    // move the chat up the sidebar (spec/14 § Sidebar ordering).
+    ...(event.source?.kind === 'job' || event.origin === 'machine' ? {} : { fromUser: true }),
     ...(event.origin === 'machine' ? { origin: 'machine' as const } : {}),
     // spec/04 § Branching — address a specific branch; absent means the active one.
     ...(event.branchId !== undefined ? { branchId: event.branchId } : {}),
@@ -8543,7 +8545,13 @@ export class Daemon {
       // fresh chat, not a lost one. Leave it.
       if (!state.claudeSessionId) continue;
       // Lost iff the captured session's transcript is gone on disk.
-      if (this.historyReader.hasSession({ folder: state.folder, sessionId: state.claudeSessionId }))
+      if (
+        this.historyReader.hasSession({
+          folder: state.folder,
+          sessionId: state.claudeSessionId,
+          nativeDir: this.nativeClaudeDirFor(state.chatId),
+        })
+      )
         continue;
 
       // Delete the on-disk meta dir (meta.json + seq sidecar) and the
@@ -8710,6 +8718,7 @@ export class Daemon {
       !this.historyReader.hasSession({
         folder: state.folder,
         sessionId: state.claudeSessionId,
+        nativeDir: this.nativeClaudeDirFor(chatId),
       })
     ) {
       this.opts.logger.warn(
