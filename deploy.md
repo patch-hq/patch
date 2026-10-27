@@ -5,7 +5,7 @@ Open a PR; when its tests pass it merges itself, and the merge is the release.
 
 0. **Tests** (`.github/workflows/test.yml`) run the full gate
    (`scripts/verify.mjs`, four shards) on every PR and every push to `main`.
-   `pr-automerge.yml` turns on auto-merge (rebase) for each PR;
+   `pr-automerge.yml` turns on auto-merge for each PR (the merge queue sets the method);
    `pr-conflicts.yml` labels a PR `needs-rebase` and comments when main moves
    under it, for the chat that owns it to rebase and force-push.
 1. **GitHub Actions** (`.github/workflows/release.yml`) builds every surface

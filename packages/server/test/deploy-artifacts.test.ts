@@ -110,6 +110,10 @@ describe('H1 deploy artifacts — deploy command + backup scripts', () => {
     expect(tests).toMatch(/\n  tests:\n[\s\S]*?needs: \[verify\]/);
     // with PRs merged by themselves once green, and conflicts handed back.
     expect(read('.github/workflows/pr-automerge.yml')).toMatch(/gh pr merge --auto/);
+    // The merge queue sets the method and refuses -d/--delete-branch.
+    expect(read('.github/workflows/pr-automerge.yml')).not.toMatch(
+      /--delete-branch|--rebase|\s-d\s/,
+    );
     expect(read('.github/workflows/pr-conflicts.yml')).toMatch(/needs-rebase/);
     // ...and the phone's over-the-air update is one of those surfaces: release
     // files the servers mirror, never published anywhere else first
