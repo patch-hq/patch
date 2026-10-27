@@ -2609,4 +2609,32 @@ describe('Sidebar', () => {
       vi.useRealTimers();
     });
   });
+  describe('grouping by status', () => {
+    afterEach(() => useUiStore.setState({ grouping: 'project' }));
+
+    it('lists status headings with the project on each row, and collapses', () => {
+      useChatStore
+        .getState()
+        .hydrate([
+          rowFixture({ chatId: 'g-work', name: 'Busy', folder: '/p/alpha', activity: 'running' }),
+          rowFixture({ chatId: 'g-idle', name: 'Idle', folder: '/p/beta', lastUpdated: 5 }),
+        ]);
+      renderInRouter();
+      expect(screen.getByTestId('folder-collapse-/p/alpha')).toBeInTheDocument();
+      fireEvent.click(screen.getByTestId('sidebar-grouping-status'));
+      expect(screen.queryByTestId('folder-collapse-/p/alpha')).toBeNull();
+      expect(screen.getByTestId('status-section-status:working')).toBeInTheDocument();
+      expect(screen.getByTestId('status-section-status:ready')).toBeInTheDocument();
+      expect(
+        within(screen.getByTestId('status-section-status:working')).getByText('Working'),
+      ).toBeTruthy();
+      expect(screen.getByTestId('row-project-g-work')).toHaveTextContent('alpha');
+      expect(screen.getByTestId('row-project-g-idle')).toHaveTextContent('beta');
+      fireEvent.click(screen.getByTestId('status-collapse-status:working'));
+      expect(screen.queryByTestId('chat-row-g-work')).toBeNull();
+      expect(screen.getByTestId('status-count-status:working')).toHaveTextContent('1');
+      fireEvent.click(screen.getByTestId('sidebar-grouping-project'));
+      expect(screen.getByTestId('folder-collapse-/p/alpha')).toBeInTheDocument();
+    });
+  });
 });

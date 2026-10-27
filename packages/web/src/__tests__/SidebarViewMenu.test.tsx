@@ -286,3 +286,23 @@ describe('SidebarSortMenu (outside the view dropdown)', () => {
     expect(useUiStore.getState().groupSort).toBe('same-as-chats');
   });
 });
+
+describe('SidebarSortMenu grouping switch', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useUiStore.setState({ grouping: 'project' });
+  });
+  afterEach(() => cleanup());
+  it('defaults to project, switches to status and persists', () => {
+    render(
+      <MemoryRouter>
+        <SidebarSortMenu />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId('sidebar-grouping-project')).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByTestId('sidebar-grouping-status'));
+    expect(screen.getByTestId('sidebar-grouping-status')).toHaveAttribute('aria-checked', 'true');
+    expect(useUiStore.getState().grouping).toBe('status');
+    expect(localStorage.getItem('patch.sidebar.grouping')).toBe('status');
+  });
+});
