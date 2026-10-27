@@ -2325,6 +2325,7 @@ const ChatRowView = memo(function ChatRowView({
           takes the nested shape — an ordinary row keeps the plain text node. */}
         {row.goal !== null || goalMet ? (
           <span className="name has-marks">
+            <span className="name-text">{title}</span>
             <span
               className={goalMet ? 'goal-marker is-met' : 'goal-marker'}
               data-testid={`goal-marker-${row.chatId}`}
@@ -2333,7 +2334,6 @@ const ChatRowView = memo(function ChatRowView({
             >
               <Target size={12} aria-label={goalMet ? 'goal met' : 'working toward a goal'} />
             </span>
-            <span className="name-text">{title}</span>
           </span>
         ) : (
           <span className="name">{title}</span>
