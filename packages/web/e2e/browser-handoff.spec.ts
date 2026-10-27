@@ -123,8 +123,9 @@ for (const [name, viewport] of [
       await expect(page.getByTestId('browser-drive-chip')).toHaveText('Needs you');
       await expect.poll(() => drawn(page, 'browser-handoff-preview')).toBe(true);
       const box = (await card.boundingBox())!;
-      // Small: well under half the window, so the chat stays usable behind it.
-      expect(box.width * box.height).toBeLessThan((viewport.width * viewport.height) / 3);
+      // Small: under half the window, so the chat stays usable behind it. On a phone the card
+      // is the full width less its margins, which is a little over a third of the screen.
+      expect(box.width * box.height).toBeLessThan((viewport.width * viewport.height) / 2);
 
       const grip = page.getByTestId('browser-handoff-title');
       const g = (await grip.boundingBox())!;
@@ -185,11 +186,21 @@ for (const [name, viewport] of [
         true,
       );
 
-      await page
-        .getByTestId(name === 'desktop' ? 'browser-live-close' : 'browser-live-minimise')
-        .click();
-      await expect(page.getByTestId('browser-live')).toHaveCount(0);
-      await expect(page.getByTestId('browser-watch-bar')).toBeVisible();
+      if (name === 'desktop') {
+        // Close dismisses the browser outright: no pane, no bar.
+        await page.getByTestId('browser-live-close').click();
+        await expect(page.getByTestId('browser-live')).toHaveCount(0);
+        await expect(page.getByTestId('browser-watch-bar')).toHaveCount(0);
+        expect(await sent(page)).toContainEqual({
+          type: 'patch.browser_view.stop',
+          chatId: 'chat_bgtask',
+        });
+      } else {
+        // Back to the chat leaves the browser running, behind its bar.
+        await page.getByTestId('browser-live-minimise').click();
+        await expect(page.getByTestId('browser-live')).toHaveCount(0);
+        await expect(page.getByTestId('browser-watch-bar')).toBeVisible();
+      }
     });
 
     test('typing and Enter reach the page as text and a key; Done ends the hand-off', async ({

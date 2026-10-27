@@ -752,6 +752,7 @@ export function BrowserView({
     !usePage;
 
   const close = (): void => dismissBrowser(chatId);
+  const backToChat = (): void => closeBrowserLarge(chatId, undefined);
   const shrink = (): void => closeBrowserLarge(chatId, 'mini');
 
   return (
@@ -767,7 +768,7 @@ export function BrowserView({
             className="bv-icon"
             aria-label="Back to the chat"
             data-testid="browser-live-minimise"
-            onClick={close}
+            onClick={backToChat}
           >
             <ChevronDown size={18} aria-hidden />
           </button>
