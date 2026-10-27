@@ -68,7 +68,7 @@ import { useUiStore, SIDEBAR_MINI_WIDTH } from './stores/uiStore.js';
 import { isMeetingOpen, useMeetingStore } from './stores/meetingStore.js';
 import { endMeeting, startMeeting } from './lib/meetingControl.js';
 import { usePreferencesStore } from './stores/preferencesStore.js';
-import { resolvePane, useLayoutStore } from './stores/layoutStore.js';
+import { focusedChatId, resolvePane, useLayoutStore } from './stores/layoutStore.js';
 import { useVoiceStore } from './stores/voiceStore.js';
 import { composerHotkeyDown, composerHotkeyUp } from './lib/composerMic.js';
 import { api } from './api/rest.js';
@@ -553,8 +553,8 @@ export function AppShell(): JSX.Element {
         // ⌃` — spec/14 § Terminal. Only meaningful on a live chat: a terminal
         // tab is rooted at that chat's folder, so there is nothing to toggle
         // elsewhere.
-        const chatId = location.pathname.match(/\/chats\/([^/]+)/)?.[1];
-        if (chatId === undefined || chatId === 'new') return;
+        const chatId = currentChatId(location);
+        if (chatId === null || chatId === 'new') return;
         useLayoutStore.getState().toggleTab({ kind: 'terminal', chatId });
       },
       onFileBrowser: () => {
@@ -760,6 +760,16 @@ export function AppShell(): JSX.Element {
   );
 }
 
+/** The chat the user is on: the focused pane's chat, else the URL's. */
+function currentChatId(location: { pathname: string }): string | null {
+  const layout = useLayoutStore.getState();
+  return (
+    focusedChatId(layout.root, layout.activePaneId) ??
+    location.pathname.match(/\/chats\/([^/]+)/)?.[1] ??
+    null
+  );
+}
+
 function navigateChat(
   delta: number,
   location: { pathname: string },
@@ -768,8 +778,7 @@ function navigateChat(
   // The sidebar publishes the order it draws; stepping through anything else
   // lands on chats the user cannot see (hidden, snoozed, collapsed).
   const order = useSelectionStore.getState().order;
-  const match = location.pathname.match(/\/chats\/([^/]+)/);
-  const next = stepVisibleChat(order, match?.[1] ?? null, delta);
+  const next = stepVisibleChat(order, currentChatId(location), delta);
   if (next) navigate(`/chats/${next}`);
 }
 
@@ -808,8 +817,7 @@ function navigateFolder(
     .sort((a, b) => b.maxAt - a.maxAt);
   /* v8 ignore next -- defensive only: `chats` (filtered above, `chats.length === 0` already returned) only keeps rows with a truthy `c.folder`, so `byFolder` always gains at least one entry and `folders` can never be empty here. */
   if (folders.length === 0) return;
-  const match = location.pathname.match(/\/chats\/([^/]+)/);
-  const currentId = match ? match[1] : null;
+  const currentId = currentChatId(location);
   const current = currentId ? useChatStore.getState().chats[currentId] : undefined;
   const curIdx = current ? folders.findIndex((f) => f.folder === current.folder) : -1;
   let nextIdx: number;

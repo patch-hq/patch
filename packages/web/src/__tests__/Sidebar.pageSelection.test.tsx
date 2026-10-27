@@ -93,6 +93,15 @@ describe('Sidebar selection tracks the page you are actually on', () => {
     expect(screen.getByTestId('chat-row-r1')).not.toHaveClass('active');
   });
 
+  it('highlights the chat shown in the focused pane even when the URL is on another page', () => {
+    useChatStore.getState().hydrate([rowFixture({ chatId: 'r1' }), rowFixture({ chatId: 'r2' })]);
+    useLayoutStore.getState().openTab({ kind: 'chat', chatId: 'r2' });
+    useChatStore.getState().setActiveChat('r2');
+    renderAt('/jobs');
+    expect(screen.getByTestId('chat-row-r2')).toHaveClass('active');
+    expect(screen.getByTestId('chat-row-r1')).not.toHaveClass('active');
+  });
+
   it('marks the Settings bottom-nav row active while on /settings', () => {
     useChatStore.getState().hydrate([rowFixture({ chatId: 'r1' })]);
     renderAt('/settings');

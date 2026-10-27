@@ -9,6 +9,7 @@ import {
   type LeafPane,
   type SplitPane,
   setTabDirty,
+  focusedChatId,
 } from '../stores/layoutStore.js';
 
 const store = (): ReturnType<typeof useLayoutStore.getState> => useLayoutStore.getState();
@@ -404,5 +405,27 @@ describe('layoutStore — unsaved edits (spec/14 § Opening things)', () => {
     setTabDirty(fileTab.id, false);
     store().openTab({ kind: 'chat', chatId: 'c2' });
     expect(rootLeaf().tabs).toHaveLength(1);
+  });
+});
+
+describe('layoutStore — focusedChatId', () => {
+  it('is null with no tabs, and the chat of the focused pane once one is open', () => {
+    expect(focusedChatId(store().root, store().activePaneId)).toBeNull();
+    store().openTab({ kind: 'chat', chatId: 'a' });
+    expect(focusedChatId(store().root, store().activePaneId)).toBe('a');
+  });
+
+  it('follows the focused pane, and is null when that pane shows a non-chat tab', () => {
+    store().openTab({ kind: 'chat', chatId: 'a' }, { placement: 'tab' });
+    store().openTab({ kind: 'chat', chatId: 'b' }, { placement: 'tab' });
+    store().splitActivePane(store().activePaneId, 'right');
+    const split = store().root as SplitPane;
+    const [left, right] = split.children.map((c) => c.pane as LeafPane);
+    store().setActivePane(right!.id);
+    expect(focusedChatId(store().root, store().activePaneId)).toBe('b');
+    store().setActivePane(left!.id);
+    expect(focusedChatId(store().root, store().activePaneId)).toBe('a');
+    store().openTab({ kind: 'page', page: 'host-files' });
+    expect(focusedChatId(store().root, store().activePaneId)).toBeNull();
   });
 });

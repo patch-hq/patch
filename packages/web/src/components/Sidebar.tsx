@@ -105,7 +105,7 @@ import {
   openNewChatInNewWindow,
   openSidebarInNewWindow,
 } from '../lib/newWindow.js';
-import { useLayoutStore, resolvePane } from '../stores/layoutStore.js';
+import { useLayoutStore, resolvePane, focusedChatId } from '../stores/layoutStore.js';
 import {
   startVoiceNote,
   sendVoiceNote,
@@ -177,7 +177,11 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
   // for the page you're actually on gets `active`, not a stale chat row).
   // Gate the highlight on actually being on a chat route.
   const location = useLocation();
-  const highlightedChatId = location.pathname.startsWith('/chats/') ? activeChatId : null;
+  // The focused pane's own chat always counts, whatever the URL says: the URL
+  // only follows navigations, not a click into another pane.
+  const paneChatId = useLayoutStore((s) => focusedChatId(s.root, s.activePaneId));
+  const highlightedChatId =
+    paneChatId ?? (location.pathname.startsWith('/chats/') ? activeChatId : null);
   // Which draft (if any) the new-chat route is currently showing — highlights
   // its row in the Drafts section (spec/14 § New chat drafts).
   const [routeSearch] = useSearchParams();

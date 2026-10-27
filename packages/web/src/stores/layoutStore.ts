@@ -196,6 +196,13 @@ export function activeChatOf(pane: LeafPane): string | null {
   return tab && tab.descriptor.kind === 'chat' ? tab.descriptor.chatId : null;
 }
 
+/** The chat showing in the FOCUSED pane's active tab, or null — "the selected
+ *  chat" follows pane focus, not the address bar (which only tracks URL
+ *  navigations, see ChatPaneRoute). */
+export function focusedChatId(root: PaneNode, activePaneId: string): string | null {
+  return activeChatOf(resolvePane(root, activePaneId));
+}
+
 /** How many leaf panes the tree currently has — a single pane holding a
  *  single tab draws no tab bar at all (spec/14 § Panes and tabs), so a
  *  pane needs to know whether it's the only one. */
