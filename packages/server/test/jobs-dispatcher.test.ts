@@ -1134,6 +1134,82 @@ describe('JobDispatcher', () => {
     disp.close();
   });
 
+  describe('shareKey with append generations', () => {
+    const setup = () => {
+      const link = new InProcessHostLink();
+      const links = new Map<string, string>();
+      const existing = new Set<string>();
+      const disp = new JobDispatcher({
+        dataDir: dir,
+        logs: new JobLogs(dir),
+        hostLink: link,
+        logger: silentLogger,
+        idGenerator: () => 'k',
+        chatExists: (c) => existing.has(c),
+        chatLinks: {
+          record: (c, j) => void links.set(c, j),
+          get: (c) => links.get(c) ?? null,
+          chatIds: () => [...links.keys()],
+        },
+      });
+      const action = {
+        type: 'continue' as const,
+        hostId: 'd1',
+        folder: '/work',
+        prompt: 'task',
+        key: '{{payload.event_data.id}}',
+        shareKey: true,
+      };
+      const fire = (j: ReturnType<typeof makeJob>) =>
+        disp.dispatch(j, { payload: { event_data: { id: 'taskA' } } }, 'todoist');
+      const lastInputChat = () => {
+        const inputs = link.sent.filter((s) => s.event.type === 'chat.input');
+        const e = inputs[inputs.length - 1]?.event;
+        return e?.type === 'chat.input' ? e.chatId : undefined;
+      };
+      return { disp, link, links, existing, action, fire, lastInputChat };
+    };
+
+    it('a second job joins the later-generation chat of an append job that reset', () => {
+      const { disp, link, action, fire, lastInputChat } = setup();
+      const appender = makeJob({
+        id: 'j_00000000000000000000000040',
+        action,
+        queueing: { mode: 'append', resetAfterMessages: 1 },
+      });
+      const other = makeJob({ id: 'j_00000000000000000000000041', action });
+      fire(appender); // g0 spawned
+      fire(appender); // reset -> g1 spawned
+      fire(appender); // reset -> g2 spawned
+      const spawned = link.sent.flatMap((s) =>
+        s.event.type === 'chat.spawn_request' ? [s.event.chatId] : [],
+      );
+      expect(spawned).toEqual([
+        'jobchat-j_00000000000000000000000040-taskA',
+        'jobchat-j_00000000000000000000000040-taskA-g1',
+        'jobchat-j_00000000000000000000000040-taskA-g2',
+      ]);
+      fire(other);
+      expect(lastInputChat()).toBe('jobchat-j_00000000000000000000000040-taskA-g2');
+      expect(link.sent.filter((s) => s.event.type === 'chat.spawn_request')).toHaveLength(3);
+      disp.close();
+    });
+
+    it('refuses rather than guessing when two jobs tie on the highest generation', () => {
+      const { disp, link, links, existing, action, fire } = setup();
+      links.set('jobchat-j_00000000000000000000000050-taskA', 'j_00000000000000000000000050');
+      links.set('jobchat-j_00000000000000000000000051-taskA', 'j_00000000000000000000000051');
+      existing.add('jobchat-j_00000000000000000000000050-taskA');
+      existing.add('jobchat-j_00000000000000000000000051-taskA');
+      const third = makeJob({ id: 'j_00000000000000000000000052', action });
+      const before = link.sent.length;
+      fire(third);
+      const sent = link.sent.slice(before);
+      expect(sent.filter((s) => s.event.type === 'chat.input')).toHaveLength(0);
+      disp.close();
+    });
+  });
+
   it('without shareKey, two jobs on the same subject keep separate chats', () => {
     const link = new InProcessHostLink();
     const links = new Map<string, string>();

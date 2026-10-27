@@ -1220,18 +1220,46 @@ export class JobDispatcher {
   }
 
   /**
-   * `shareKey`: the existing chat, owned by any job, for this subject slug —
-   * so one subject stays in one conversation across jobs. Null if none.
+   * `shareKey`: the existing chat, owned by any OTHER job, for this subject
+   * slug — so one subject stays in one conversation across jobs. An `append`
+   * job that has reset lives at `…-<slug>-g<N>`, so the highest generation
+   * wins. Null if none; `ambiguous` when different jobs tie on the highest
+   * generation (no guessing).
    */
-  private sharedKeyChat(keySlug: string): string | null {
+  private sharedKeyChat(
+    keySlug: string,
+    ownJobId: string,
+  ): { chatId: string } | { ambiguous: string[] } | null {
     const ids = this.chatLinks?.chatIds?.() ?? [];
-    const suffix = `-${keySlug}`;
+    const prefix = 'jobchat-j_';
+    const base = `-${keySlug}`;
+    let best = -1;
+    let bestIds: string[] = [];
     for (const id of ids) {
-      if (!id.startsWith('jobchat-j_') || !id.endsWith(suffix)) continue;
-      if (id.slice('jobchat-j_'.length, -suffix.length).includes('-')) continue;
-      if (this.ensureSpawned.has(id) || this.chatExists(id)) return id;
+      if (!id.startsWith(prefix)) continue;
+      const gen = /-g(\d+)$/.exec(id);
+      // A slug may itself end in `-g<N>`; the generation reading is tried first,
+      // then the bare slug.
+      const candidates: Array<[string, number]> = [];
+      if (gen?.[1] !== undefined && id.endsWith(`${base}-g${gen[1]}`)) {
+        candidates.push([id.slice(0, -`${base}-g${gen[1]}`.length), Number(gen[1])]);
+      }
+      if (id.endsWith(base)) candidates.push([id.slice(0, -base.length), 0]);
+      for (const [owner, generation] of candidates) {
+        const jobId = owner.slice('jobchat-'.length);
+        if (jobId.includes('-') || jobId === ownJobId) continue;
+        if (!this.ensureSpawned.has(id) && !this.chatExists(id)) continue;
+        if (generation > best) {
+          best = generation;
+          bestIds = [id];
+        } else if (generation === best) bestIds.push(id);
+        break;
+      }
     }
-    return null;
+    if (bestIds.length === 0) return null;
+    const owners = new Set(bestIds.map((id) => id.slice(prefix.length - 2).split(/-/)[0]));
+    if (bestIds.length > 1 && owners.size > 1) return { ambiguous: bestIds };
+    return { chatId: bestIds[0] as string };
   }
 
   private appendGeneration(job: Job, keySlug: string | undefined): number {
@@ -2163,7 +2191,17 @@ export class JobDispatcher {
         !this.ensureSpawned.has(chatId) &&
         !this.chatExists(chatId)
       ) {
-        chatId = this.sharedKeyChat(keySlug) ?? chatId;
+        const shared = this.sharedKeyChat(keySlug, job.id);
+        if (shared !== null && 'ambiguous' in shared) {
+          return this.refuse(
+            job,
+            payload,
+            trigger,
+            fireId,
+            `shareKey: subject "${keySlug}" has live chats in several jobs (${shared.ambiguous.join(', ')}) at the same generation, so the fire will not guess which to join`,
+          );
+        }
+        if (shared !== null) chatId = shared.chatId;
       }
       targetChatId = chatId;
       // Tagged for `▸ Automations` exactly as a spawn's chat is (spec/08 ##
