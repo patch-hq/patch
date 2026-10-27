@@ -170,6 +170,7 @@ import {
   closestPermissionModeForModel,
   DEFAULT_GOAL_REFUSAL_LIMIT,
   QUESTION_EXPIRY_SECONDS_DEFAULT,
+  DEFAULT_QUESTION_EXPIRED_PROMPT,
   QUESTION_EXPIRY_SECONDS_MIN,
   QUESTION_EXPIRY_SECONDS_MAX,
   LOGGED_EVENT_TYPES,
@@ -1342,8 +1343,11 @@ const FILE_EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit']);
  * it is a lie told to the AGENT, which is the one reader with no other way to
  * find out what actually happened.
  */
-export function questionExpiredMessage(seconds: number): string {
-  return `No answer: the question timed out after ${seconds} seconds without a reply. The user did not refuse — nobody saw it. Do not assume any of the options; ask again or proceed only where you can without the answer.`;
+export function questionExpiredMessage(
+  seconds: number,
+  template: string = DEFAULT_QUESTION_EXPIRED_PROMPT,
+): string {
+  return template.replaceAll('{seconds}', String(seconds));
 }
 
 /**
@@ -2597,9 +2601,10 @@ export class Daemon {
    * is unaffected either way: it has its own fixed window, and the setting the
    * user is offered is about questions.
    */
-  private questionExpiry: { enabled: boolean; seconds: number } = {
+  private questionExpiry: { enabled: boolean; seconds: number; expiredPrompt: string } = {
     enabled: true,
     seconds: QUESTION_EXPIRY_SECONDS_DEFAULT,
+    expiredPrompt: DEFAULT_QUESTION_EXPIRED_PROMPT,
   };
 
   /**
@@ -2608,7 +2613,7 @@ export class Daemon {
    * number while Settings showed another, which is the silent disagreement
    * spec/12 forbids.
    */
-  setQuestionExpiry(next: { enabled?: boolean; seconds?: number }): void {
+  setQuestionExpiry(next: { enabled?: boolean; seconds?: number; expiredPrompt?: string }): void {
     if (next.seconds !== undefined) {
       if (
         !Number.isInteger(next.seconds) ||
@@ -2622,11 +2627,12 @@ export class Daemon {
       this.questionExpiry.seconds = next.seconds;
     }
     if (next.enabled !== undefined) this.questionExpiry.enabled = next.enabled;
+    if (next.expiredPrompt !== undefined) this.questionExpiry.expiredPrompt = next.expiredPrompt;
   }
 
   /** What this host currently holds, for `host.host`. */
   questionExpirySetting(): { enabled: boolean; seconds: number } {
-    return { ...this.questionExpiry };
+    return { enabled: this.questionExpiry.enabled, seconds: this.questionExpiry.seconds };
   }
 
   /** Toggle auto-resume and emit updated `host.host` if available. */
@@ -12038,7 +12044,10 @@ export class Daemon {
     }
     if (!this.questionExpiry.enabled) return null;
     const seconds = this.questionExpiry.seconds;
-    return { timeoutMs: seconds * 1000, denyMessage: questionExpiredMessage(seconds) };
+    return {
+      timeoutMs: seconds * 1000,
+      denyMessage: questionExpiredMessage(seconds, this.questionExpiry.expiredPrompt),
+    };
   }
 
   /**
@@ -12068,7 +12077,7 @@ export class Daemon {
     if (gate.expiry) clearTimeout(gate.expiry);
     const windowMs = ev.expiry.windowMs;
     const expiry = { at: this.opts.now() + windowMs, windowMs };
-    const denyMessage = questionExpiredMessage(windowMs / 1000);
+    const denyMessage = questionExpiredMessage(windowMs / 1000, this.questionExpiry.expiredPrompt);
     // Replayed verbatim to a surface that reconnects after the reset
     // (`replayChat`), so it must carry the SAME deadline the live update
     // below announces, not the stale one from when the question was asked.

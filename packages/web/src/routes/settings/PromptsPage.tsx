@@ -11,6 +11,7 @@ import {
   DEFAULT_MEETING_ACTIONS_PROMPT,
   DEFAULT_MEETING_NOTES_PROMPT,
   DEFAULT_MEETING_NOW_PROMPT,
+  DEFAULT_QUESTION_EXPIRED_PROMPT,
   DEFAULT_SWEEP_PROMPT,
   DEFAULT_WATCH_CHECK_IN_PROMPT,
 } from '@patch/wire';
@@ -241,7 +242,7 @@ export function PromptsPage(): JSX.Element {
 
   return (
     <SettingsPage title="Prompts" testid="settings-prompts-page">
-      <Group label="Prompts" testid="settings-prompts-group">
+      <Group testid="settings-prompts-group">
         <Row title="Background task check-in every">
           <PositiveNumberInput
             integer
@@ -305,6 +306,19 @@ export function PromptsPage(): JSX.Element {
           onSave={(text) => patchShared('autonomy prompt', { jobAutonomyPrompt: text })}
           onDefault={() =>
             patchShared('autonomy prompt', { jobAutonomyPrompt: DEFAULT_JOB_AUTONOMY_PROMPT })
+          }
+        />
+        <PromptRow
+          id="question-expired"
+          title="Question timed out"
+          sub="Told to an agent when a question it asked goes unanswered. {seconds} is the window."
+          defaultText={DEFAULT_QUESTION_EXPIRED_PROMPT}
+          current={p.questionExpiredPrompt}
+          onSave={(text) => patchShared('question timeout prompt', { questionExpiredPrompt: text })}
+          onDefault={() =>
+            patchShared('question timeout prompt', {
+              questionExpiredPrompt: DEFAULT_QUESTION_EXPIRED_PROMPT,
+            })
           }
         />
         <PromptRow

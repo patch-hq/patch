@@ -16,6 +16,7 @@ import {
   DEFAULT_GOAL_EVAL_PROMPT,
   DEFAULT_LINK_SUMMARY_PROMPT,
   DEFAULT_MEETING_ACTIONS_PROMPT,
+  DEFAULT_QUESTION_EXPIRED_PROMPT,
   DEFAULT_MEETING_NOTES_PROMPT,
   DEFAULT_MEETING_NOW_PROMPT,
   DEFAULT_SWEEP_PROMPT,
@@ -79,6 +80,7 @@ export type Layer =
   | 'watch-check-in'
   | 'sweep'
   | 'job-autonomy'
+  | 'question-expired'
   | 'meeting-now'
   | 'meeting-notes'
   | 'meeting-actions';
@@ -91,6 +93,7 @@ export const LAYER_TITLE: Record<Layer, string> = {
   'watch-check-in': 'Background task check-in',
   sweep: 'Manager sweep',
   'job-autonomy': 'Job autonomy',
+  'question-expired': 'Question timed out',
   'meeting-now': 'Meeting: Now',
   'meeting-notes': 'Meeting: Notes',
   'meeting-actions': 'Meeting: Actions',
@@ -105,6 +108,7 @@ const EDITOR_TITLE: Record<Layer, string> = {
   'watch-check-in': 'Check-in prompt',
   sweep: 'Sweep prompt',
   'job-autonomy': 'Autonomy prompt',
+  'question-expired': 'Question timeout prompt',
   'meeting-now': 'Meeting Now prompt',
   'meeting-notes': 'Meeting notes prompt',
   'meeting-actions': 'Meeting actions prompt',
@@ -117,6 +121,10 @@ export const TEXT_PROMPTS = {
   'watch-check-in': { key: 'watchCheckInPrompt', fallback: DEFAULT_WATCH_CHECK_IN_PROMPT },
   sweep: { key: 'sweepPrompt', fallback: DEFAULT_SWEEP_PROMPT },
   'job-autonomy': { key: 'jobAutonomyPrompt', fallback: DEFAULT_JOB_AUTONOMY_PROMPT },
+  'question-expired': {
+    key: 'questionExpiredPrompt',
+    fallback: DEFAULT_QUESTION_EXPIRED_PROMPT,
+  },
   'meeting-now': { key: 'meetingNowPrompt', fallback: DEFAULT_MEETING_NOW_PROMPT },
   'meeting-notes': { key: 'meetingNotesPrompt', fallback: DEFAULT_MEETING_NOTES_PROMPT },
   'meeting-actions': { key: 'meetingActionsPrompt', fallback: DEFAULT_MEETING_ACTIONS_PROMPT },

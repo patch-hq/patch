@@ -133,6 +133,8 @@ const HostStateFile = z
      */
     questionExpiry: z.boolean().optional(),
     questionExpirySeconds: z.number().int().positive().optional(),
+    /** The text an expired question tells the agent; absent means the default. */
+    questionExpiredPrompt: z.string().min(1).optional(),
     /**
      * Per-host system prompt override passed to the SDK query's `systemPrompt`
      * option. Empty string means cleared (use SDK default). Absent means no

@@ -73,6 +73,7 @@ import {
   DEFAULT_GOAL_MODEL,
   DEFAULT_GOAL_REFUSAL_LIMIT,
   QUESTION_EXPIRY_SECONDS_DEFAULT,
+  DEFAULT_QUESTION_EXPIRED_PROMPT,
   refusingRateLimitScope,
 } from '@patch/wire';
 import type { Logger } from 'pino';
@@ -779,6 +780,8 @@ async function startHost(
   let questionExpiry = persistedHostState.questionExpiry ?? true;
   let questionExpirySeconds =
     persistedHostState.questionExpirySeconds ?? QUESTION_EXPIRY_SECONDS_DEFAULT;
+  let questionExpiredPrompt =
+    persistedHostState.questionExpiredPrompt ?? DEFAULT_QUESTION_EXPIRED_PROMPT;
 
   /** Per-host Claude harness config (Task 3). Persisted in host.json. */
   let harnessSystemPrompt: string | undefined = persistedHostState.harnessSystemPrompt;
@@ -1721,12 +1724,18 @@ async function startHost(
     }
     if (
       shared.questionExpiry !== questionExpiry ||
-      shared.questionExpirySeconds !== questionExpirySeconds
+      shared.questionExpirySeconds !== questionExpirySeconds ||
+      shared.questionExpiredPrompt !== questionExpiredPrompt
     ) {
       questionExpiry = shared.questionExpiry;
       questionExpirySeconds = shared.questionExpirySeconds;
-      daemon.setQuestionExpiry({ enabled: questionExpiry, seconds: questionExpirySeconds });
-      hostStateStore.update({ questionExpiry, questionExpirySeconds });
+      questionExpiredPrompt = shared.questionExpiredPrompt;
+      daemon.setQuestionExpiry({
+        enabled: questionExpiry,
+        seconds: questionExpirySeconds,
+        expiredPrompt: questionExpiredPrompt,
+      });
+      hostStateStore.update({ questionExpiry, questionExpirySeconds, questionExpiredPrompt });
     }
     const systemPrompt = shared.harnessSystemPrompt || undefined;
     const toolsPrompt = toolsPromptOverride(shared.harnessToolsPrompt);
@@ -1838,6 +1847,7 @@ async function startHost(
             autoResumeRateLimit,
             questionExpiry,
             questionExpirySeconds,
+            questionExpiredPrompt,
             harnessSystemPrompt: harnessSystemPrompt ?? '',
             harnessToolsPrompt: harnessToolsPrompt ?? null,
             harnessSkills: harnessSkills ?? null,
@@ -4232,7 +4242,11 @@ async function startHost(
   daemon.setTitleGenerationEnabled(titleGenerationEnabled);
   daemon.setStatusGenerationEnabled(statusGenerationEnabled);
   daemon.setAutoResumeRateLimit(autoResumeRateLimit);
-  daemon.setQuestionExpiry({ enabled: questionExpiry, seconds: questionExpirySeconds });
+  daemon.setQuestionExpiry({
+    enabled: questionExpiry,
+    seconds: questionExpirySeconds,
+    expiredPrompt: questionExpiredPrompt,
+  });
   daemon.setGoalRefusalLimit(goalRefusalLimit);
   // Apply persisted harness config (Task 3; spec/14 § Agent behavior) before hydrate.
   applyHarnessConfig();

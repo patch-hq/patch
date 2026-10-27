@@ -10,6 +10,7 @@
 import { z } from 'zod';
 import { DEFAULT_SWEEP_PROMPT } from './sweep-prompt.js';
 import { DEFAULT_LINK_SUMMARY_PROMPT } from './link-summary-prompt.js';
+import { DEFAULT_QUESTION_EXPIRED_PROMPT } from './question-expired-prompt.js';
 import {
   DEFAULT_MEETING_ACTIONS_PROMPT,
   DEFAULT_MEETING_MODEL,
@@ -2192,6 +2193,8 @@ export const SharedSettings = z
       .int()
       .min(QUESTION_EXPIRY_SECONDS_MIN)
       .max(QUESTION_EXPIRY_SECONDS_MAX),
+    /** What the agent is told when a question expires; `{seconds}` is the window. "Reset to default" writes `DEFAULT_QUESTION_EXPIRED_PROMPT` back. */
+    questionExpiredPrompt: z.string().min(1),
     /** `''` = no override; the SDK's own system prompt stands. */
     harnessSystemPrompt: z.string(),
     /** `null` = the built-in guidance; `''` = turned off. */
@@ -2276,6 +2279,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   syncPosition: true,
   questionExpiry: true,
   questionExpirySeconds: QUESTION_EXPIRY_SECONDS_DEFAULT,
+  questionExpiredPrompt: DEFAULT_QUESTION_EXPIRED_PROMPT,
   harnessSystemPrompt: '',
   harnessToolsPrompt: null,
   harnessSkills: null,

@@ -120,6 +120,30 @@ describe('the question-expiry setting drives the timer', () => {
     }
   });
 
+  it('tells the agent the configured expiry text, with the window filled in', async () => {
+    vi.useFakeTimers();
+    try {
+      const { daemon, events, folder } = setup();
+      daemon.setQuestionExpiry({
+        enabled: true,
+        seconds: 10,
+        expiredPrompt: 'Keep going, {seconds}s passed.',
+      });
+      await daemon.spawnChat({ folder, prompt: '[[ask-user-question]]' });
+      await vi.advanceTimersByTimeAsync(11_000);
+      expect(askResult(events)?.result).toBe('Keep going, 10s passed.');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('the default expiry text tells the agent to carry on, not stop', () => {
+    const text = questionExpiredMessage(30);
+    expect(text).toContain('30 seconds');
+    expect(text).toContain('Do not stop');
+    expect(text).not.toContain('{seconds}');
+  });
+
   it('turned off: no deadline on the request, and the question waits indefinitely', async () => {
     vi.useFakeTimers();
     try {

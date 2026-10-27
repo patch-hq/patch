@@ -255,6 +255,10 @@ real deny — the tool does not run and the agent is told so — which is what
 `{[questionText]: string}` deny the call and raise a `chat.error`, rather than
 approving an empty answer.
 
+What the agent is told when a question expires is the shared `questionExpiredPrompt`
+setting (`{seconds}` is the window), edited under Settings → Prompts. Its default
+tells the agent to carry on with what does not depend on the answer rather than stop.
+
 A question asked while a person's message is already queued on the chat is not
 raised at all: it is denied at once with the superseded message, because the
 message is the answer and the turn would otherwise park before the tool call

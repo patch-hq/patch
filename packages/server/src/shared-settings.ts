@@ -62,6 +62,7 @@ const HOST_HELD_KEYS = [
   'autoResumeRateLimit',
   'questionExpiry',
   'questionExpirySeconds',
+  'questionExpiredPrompt',
   'harnessSystemPrompt',
   'harnessToolsPrompt',
   'harnessSkills',

@@ -15,6 +15,7 @@ const LAYERS: readonly Layer[] = [
   'watch-check-in',
   'sweep',
   'job-autonomy',
+  'question-expired',
   'meeting-now',
   'meeting-notes',
   'meeting-actions',

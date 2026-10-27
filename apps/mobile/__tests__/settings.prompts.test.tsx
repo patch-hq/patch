@@ -74,6 +74,7 @@ describe('Settings → Prompts', () => {
       'goal-judge',
       'link-summary',
       'job-autonomy',
+      'question-expired',
       'meeting-now',
       'meeting-notes',
       'meeting-actions',

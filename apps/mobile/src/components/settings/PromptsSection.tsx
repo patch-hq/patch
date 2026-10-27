@@ -81,7 +81,7 @@ export function PromptsPage(): React.ReactElement {
             (toolsDefault === '' || p.harnessToolsPrompt !== toolsDefault);
           return (
             <>
-              <SettingsSection title="Prompts" testID="settings-prompts">
+              <SettingsSection testID="settings-prompts">
                 <CheckInInterval preferences={p} />
                 {(Object.keys(TEXT_PROMPTS) as (keyof typeof TEXT_PROMPTS)[])
                   .filter((layer) => !(MEETING_PROMPTS as readonly string[]).includes(layer))
