@@ -79,6 +79,7 @@ export function ChatSearchField(): JSX.Element {
 interface Loaded {
   query: string;
   fullText: boolean;
+  includeArchived: boolean;
   hits: ChatSearchHit[];
   hosts: ChatSearchHostResult[];
   nextOffset: number | null;
@@ -115,6 +116,11 @@ export function ChatSearchResults({
 }): JSX.Element {
   const fullText = useUiStore((s) => s.searchFullText);
   const setFullText = useUiStore((s) => s.setSearchFullText);
+  const archivedBox = useUiStore((s) => s.searchIncludeArchived);
+  const setArchivedBox = useUiStore((s) => s.setSearchIncludeArchived);
+  // The Archived page is searching archived chats by definition; elsewhere the
+  // box decides.
+  const includeArchived = section === 'archived' || archivedBox;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
   // The query a "More results" fetch is running for — keyed by query so a new
@@ -131,10 +137,17 @@ export function ChatSearchResults({
     const ctrl = new AbortController();
     const timer = setTimeout(() => {
       setFailure(null);
-      api.searchChats(query, { limit: PAGE, fullText, signal: ctrl.signal }).then(
+      api.searchChats(query, { limit: PAGE, fullText, includeArchived, signal: ctrl.signal }).then(
         (r) => {
           if (genRef.current !== gen) return;
-          setLoaded({ query, fullText, hits: r.hits, hosts: r.hosts, nextOffset: r.nextOffset });
+          setLoaded({
+            query,
+            fullText,
+            includeArchived,
+            hits: r.hits,
+            hosts: r.hosts,
+            nextOffset: r.nextOffset,
+          });
         },
         (e: unknown) => {
           if (genRef.current !== gen) return;
@@ -146,11 +159,16 @@ export function ChatSearchResults({
       clearTimeout(timer);
       ctrl.abort();
     };
-  }, [query, fullText]);
+  }, [query, fullText, includeArchived]);
 
   // A result set is for one query AND one scope; flipping the box orphans it.
   const settled =
-    loaded !== null && loaded.query === query && loaded.fullText === fullText ? loaded : null;
+    loaded !== null &&
+    loaded.query === query &&
+    loaded.fullText === fullText &&
+    loaded.includeArchived === includeArchived
+      ? loaded
+      : null;
   const failed = failure !== null && failure.query === query ? failure : null;
 
   function loadMore(): void {
@@ -158,7 +176,7 @@ export function ChatSearchResults({
     const gen = genRef.current;
     const q = settled.query;
     setMoreFor(q);
-    api.searchChats(q, { limit: PAGE, offset: settled.nextOffset, fullText }).then(
+    api.searchChats(q, { limit: PAGE, offset: settled.nextOffset, fullText, includeArchived }).then(
       (r) => {
         if (genRef.current !== gen) return;
         setLoaded((prev) =>
@@ -166,6 +184,7 @@ export function ChatSearchResults({
             ? {
                 query: q,
                 fullText,
+                includeArchived,
                 hits: appendHits(prev.hits, r.hits),
                 hosts: r.hosts,
                 nextOffset: r.nextOffset,
@@ -192,10 +211,12 @@ export function ChatSearchResults({
     () =>
       waiting
         ? localSearchHits(Object.values(chats), query, fullText).filter(
-            (h) => section === undefined || h.section === section,
+            (h) =>
+              (section === undefined || h.section === section) &&
+              (includeArchived || h.section !== 'archived'),
           )
         : [],
-    [waiting, chats, query, fullText, section],
+    [waiting, chats, query, fullText, includeArchived, section],
   );
 
   // A host is named by what the surface already calls it (its self-reported
@@ -228,6 +249,17 @@ export function ChatSearchResults({
         />
         Full text
       </label>
+      {section === undefined ? (
+        <label className="sb-search-scope">
+          <input
+            type="checkbox"
+            data-testid="chat-search-archived"
+            checked={archivedBox}
+            onChange={(e) => setArchivedBox(e.target.checked)}
+          />
+          Archived
+        </label>
+      ) : null}
       {waiting ? (
         <>
           <div className="sb-search-status" data-testid="chat-search-searching">

@@ -170,6 +170,27 @@ describe('chat search route', () => {
     }
   });
 
+  it('leaves archived chats out unless includeArchived=true, and refuses nonsense', async () => {
+    const link = new FakeSearchHosts(() => ({ ok: true, hits: [], total: 0 }));
+    const { built, auth } = await boot(link);
+    try {
+      const get = (qs: string) =>
+        built.app.inject({ method: 'GET', url: search(qs), headers: auth });
+      expect((await get('q=boiler')).statusCode).toBe(200);
+      const defaults = link.asked.length;
+      expect(defaults).toBeGreaterThan(0);
+      expect(link.asked.every((a) => a.event.includeArchived !== true)).toBe(true);
+      expect((await get('q=boiler&includeArchived=true')).statusCode).toBe(200);
+      const withArchived = link.asked.slice(defaults);
+      expect(withArchived).toHaveLength(defaults);
+      expect(withArchived.every((a) => a.event.includeArchived === true)).toBe(true);
+      expect((await get('q=boiler&includeArchived=maybe')).statusCode).toBe(400);
+      expect(link.asked).toHaveLength(defaults * 2);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('asks every online host, merges by recency, and names the offline one', async () => {
     const link = new FakeSearchHosts((hostId) =>
       hostId === 'd1'

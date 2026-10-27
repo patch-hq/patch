@@ -795,6 +795,7 @@ interface UiState {
    * names only (false, the default). Ticking the results band's "Full text" box.
    */
   searchFullText: boolean;
+  searchIncludeArchived: boolean;
   sidebarWidth: number;
   /** spec/14 § Side threads panel — resizable right-docked column width (px). */
   threadsPanelWidth: number;
@@ -921,6 +922,7 @@ interface UiState {
   closeDiagnosticsBlocking(): void;
   setSearchQuery(q: string): void;
   setSearchFullText(v: boolean): void;
+  setSearchIncludeArchived(v: boolean): void;
   setSidebarWidth(w: number): void;
   setThreadsPanelWidth(w: number): void;
   setToolsPanelWidth(w: number): void;
@@ -1045,6 +1047,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   diagnosticsBlockingClosed: false,
   searchQuery: '',
   searchFullText: false,
+  searchIncludeArchived: false,
   sidebarWidth: loadWidth(SIDEBAR_W_KEY, DEFAULT_SIDEBAR_W),
   threadsPanelWidth: loadWidth(THREADS_PANEL_W_KEY, DEFAULT_THREADS_PANEL_W),
   toolsPanelWidth: loadWidth(TOOLS_PANEL_W_KEY, DEFAULT_TOOLS_PANEL_W),
@@ -1151,6 +1154,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   setSearchFullText(v) {
     set({ searchFullText: v });
+  },
+  setSearchIncludeArchived(v) {
+    set({ searchIncludeArchived: v });
   },
   setSidebarMini(v) {
     persistBool(SIDEBAR_MINI_KEY, v);

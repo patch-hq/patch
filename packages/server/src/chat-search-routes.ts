@@ -1,8 +1,9 @@
 // Chat search REST (spec/01 § Endpoints, spec/03 § Chat search).
 //
 //   GET /api/chats/search?q=<query>&limit=<n>&offset=<n>&fullText=<true|false>
+//                         &includeArchived=<true|false>
 //
-// Searches every chat on every host — names and the full text of what was
+// Searches every chat on every host (archived ones only on request) — names and the full text of what was
 // said. The transcripts live on the hosts (the server holds none), so this
 // fans one `patch.chat_search.request` out to each ONLINE host, merges what
 // comes back under the one shared ranking (`compareChatSearchHits`), and pages
@@ -134,7 +135,12 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
    * the chat registry's names and the mirrored message text. Hits are flagged
    * `mirrored` so a surface can say the host is not reachable right now.
    */
-  function searchMirror(hostId: string, query: string, fullText: boolean): HostOutcome {
+  function searchMirror(
+    hostId: string,
+    query: string,
+    fullText: boolean,
+    includeArchived: boolean,
+  ): HostOutcome {
     const hostName = deps.registry.hostName(hostId) ?? null;
     const offline = { hostId, hostName, state: 'offline' as const };
     if (!deps.mirror) return { status: offline, hits: [], total: 0 };
@@ -145,6 +151,7 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
     const mirrored = new Set(deps.mirror.chatIds());
     for (const chat of deps.chatRegistry.list({ includeArchived: true, includeSnoozed: true })) {
       if (chat.hostId !== hostId || chat.status === 'deleted') continue;
+      if (chat.status === 'archived' && !includeArchived) continue;
       if (!mirrored.has(chat.chatId) && chat.name === null) continue;
       mirroredChats++;
       const name = chat.name ?? '';
@@ -187,10 +194,11 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
     query: string,
     depth: number,
     fullText: boolean,
+    includeArchived: boolean,
   ): Promise<HostOutcome> {
     const hostName = deps.registry.hostName(hostId) ?? null;
     if (!deps.hostLink.isOnline(hostId)) {
-      return searchMirror(hostId, query, fullText);
+      return searchMirror(hostId, query, fullText, includeArchived);
     }
     const requestId = deps.idGenerator();
     const result = await new Promise<Response | 'timeout'>((resolve) => {
@@ -206,6 +214,7 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
         query,
         limit: depth,
         fullText,
+        ...(includeArchived ? { includeArchived } : {}),
       });
     });
     if (result === 'timeout') {
@@ -232,68 +241,86 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
     };
   }
 
-  app.get<{ Querystring: { q?: string; limit?: string; offset?: string; fullText?: string } }>(
-    '/api/chats/search',
-    async (req, reply) => {
-      let auth;
-      try {
-        auth = await requireAuth(req, deps.registry);
-      } catch (e) {
-        return reply
-          .code((e as Error & { statusCode?: number }).statusCode ?? 401)
-          .send({ error: (e as Error).message });
-      }
-      const query = (req.query?.q ?? '').toString().trim();
-      if (query.length < CHAT_SEARCH_MIN_QUERY) {
-        return reply.code(400).send({
-          error: 'query_too_short',
-          message: `q must be at least ${CHAT_SEARCH_MIN_QUERY} characters`,
-        });
-      }
-      const limit = intParam(
-        req.query?.limit,
-        'limit',
-        CHAT_SEARCH_DEFAULT_LIMIT,
-        1,
-        CHAT_SEARCH_MAX_LIMIT,
-      );
-      const offset = intParam(req.query?.offset, 'offset', 0, 0, CHAT_SEARCH_MAX_DEPTH - 1);
-      if (typeof limit === 'string' || typeof offset === 'string') {
-        return reply
-          .code(400)
-          .send({ error: 'invalid_query', message: typeof limit === 'string' ? limit : offset });
-      }
-      const fullTextRaw = req.query?.fullText;
-      if (
-        fullTextRaw !== undefined &&
-        fullTextRaw !== '' &&
-        !['true', 'false', '1', '0'].includes(fullTextRaw)
-      ) {
-        return reply
-          .code(400)
-          .send({ error: 'invalid_query', message: 'fullText must be true or false' });
-      }
-      const fullText = fullTextRaw !== 'false' && fullTextRaw !== '0';
-      // Each host sends its own top `depth`; the merged top `depth` is always
-      // inside their union, so this page is exact.
-      const depth = Math.min(offset + limit, CHAT_SEARCH_MAX_DEPTH);
-      const outcomes = await Promise.all(
-        hostIds().map((hostId) => askHost(hostId, auth.surfaceId, query, depth, fullText)),
-      );
-      const merged = outcomes
-        .flatMap((o) => o.hits)
-        .map((hit) => ({ ...hit, jobId: deps.chatRegistry.get(hit.chatId)?.jobId ?? null }))
-        .sort(compareChatSearchHits);
-      const total = outcomes.reduce((n, o) => n + o.total, 0);
-      const end = offset + limit;
-      const body: ChatSearchResponse = {
-        query,
-        hits: merged.slice(offset, depth),
-        total,
-        nextOffset: end < Math.min(total, CHAT_SEARCH_MAX_DEPTH) ? end : null,
-        hosts: outcomes.map((o) => o.status),
-      };
-      return reply.code(200).send(body);
-    },
-  );
+  app.get<{
+    Querystring: {
+      q?: string;
+      limit?: string;
+      offset?: string;
+      fullText?: string;
+      includeArchived?: string;
+    };
+  }>('/api/chats/search', async (req, reply) => {
+    let auth;
+    try {
+      auth = await requireAuth(req, deps.registry);
+    } catch (e) {
+      return reply
+        .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+        .send({ error: (e as Error).message });
+    }
+    const query = (req.query?.q ?? '').toString().trim();
+    if (query.length < CHAT_SEARCH_MIN_QUERY) {
+      return reply.code(400).send({
+        error: 'query_too_short',
+        message: `q must be at least ${CHAT_SEARCH_MIN_QUERY} characters`,
+      });
+    }
+    const limit = intParam(
+      req.query?.limit,
+      'limit',
+      CHAT_SEARCH_DEFAULT_LIMIT,
+      1,
+      CHAT_SEARCH_MAX_LIMIT,
+    );
+    const offset = intParam(req.query?.offset, 'offset', 0, 0, CHAT_SEARCH_MAX_DEPTH - 1);
+    if (typeof limit === 'string' || typeof offset === 'string') {
+      return reply
+        .code(400)
+        .send({ error: 'invalid_query', message: typeof limit === 'string' ? limit : offset });
+    }
+    const fullTextRaw = req.query?.fullText;
+    if (
+      fullTextRaw !== undefined &&
+      fullTextRaw !== '' &&
+      !['true', 'false', '1', '0'].includes(fullTextRaw)
+    ) {
+      return reply
+        .code(400)
+        .send({ error: 'invalid_query', message: 'fullText must be true or false' });
+    }
+    const fullText = fullTextRaw !== 'false' && fullTextRaw !== '0';
+    const archivedRaw = req.query?.includeArchived;
+    if (
+      archivedRaw !== undefined &&
+      archivedRaw !== '' &&
+      !['true', 'false', '1', '0'].includes(archivedRaw)
+    ) {
+      return reply
+        .code(400)
+        .send({ error: 'invalid_query', message: 'includeArchived must be true or false' });
+    }
+    const includeArchived = archivedRaw === 'true' || archivedRaw === '1';
+    // Each host sends its own top `depth`; the merged top `depth` is always
+    // inside their union, so this page is exact.
+    const depth = Math.min(offset + limit, CHAT_SEARCH_MAX_DEPTH);
+    const outcomes = await Promise.all(
+      hostIds().map((hostId) =>
+        askHost(hostId, auth.surfaceId, query, depth, fullText, includeArchived),
+      ),
+    );
+    const merged = outcomes
+      .flatMap((o) => o.hits)
+      .map((hit) => ({ ...hit, jobId: deps.chatRegistry.get(hit.chatId)?.jobId ?? null }))
+      .sort(compareChatSearchHits);
+    const total = outcomes.reduce((n, o) => n + o.total, 0);
+    const end = offset + limit;
+    const body: ChatSearchResponse = {
+      query,
+      hits: merged.slice(offset, depth),
+      total,
+      nextOffset: end < Math.min(total, CHAT_SEARCH_MAX_DEPTH) ? end : null,
+      hosts: outcomes.map((o) => o.status),
+    };
+    return reply.code(200).send(body);
+  });
 }

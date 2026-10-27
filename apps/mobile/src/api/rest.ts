@@ -436,6 +436,8 @@ export const api = {
     const params = new URLSearchParams({ q });
     if (opts.limit !== undefined) params.set('limit', String(opts.limit));
     if (opts.offset !== undefined) params.set('offset', String(opts.offset));
+    // The Chats tab lists Archived as its own section and searches it too.
+    params.set('includeArchived', 'true');
     return request<ChatSearchResponse>(
       `/api/chats/search?${params.toString()}`,
       opts.signal === undefined ? {} : { signal: opts.signal },

@@ -442,12 +442,21 @@ export const api = {
   // CHAT_SEARCH_MIN_QUERY first — the server answers a shorter query with 400.
   searchChats: (
     q: string,
-    opts: { limit?: number; offset?: number; fullText?: boolean; signal?: AbortSignal } = {},
+    opts: {
+      limit?: number;
+      offset?: number;
+      fullText?: boolean;
+      includeArchived?: boolean;
+      signal?: AbortSignal;
+    } = {},
   ) => {
     const params = new URLSearchParams({ q });
     if (opts.limit !== undefined) params.set('limit', String(opts.limit));
     if (opts.offset !== undefined) params.set('offset', String(opts.offset));
     if (opts.fullText !== undefined) params.set('fullText', String(opts.fullText));
+    if (opts.includeArchived !== undefined) {
+      params.set('includeArchived', String(opts.includeArchived));
+    }
     return request<ChatSearchResponse>(
       `/api/chats/search?${params.toString()}`,
       opts.signal === undefined ? {} : { signal: opts.signal },

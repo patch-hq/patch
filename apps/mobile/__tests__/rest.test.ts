@@ -171,14 +171,16 @@ describe('api.* — every method call shape', () => {
   it('searchChats() with just a query', async () => {
     await api.searchChats('pan cakes & syrup');
     const [url, init] = lastCall();
-    expect(url).toBe(`${SERVER_URL}/api/chats/search?q=pan+cakes+%26+syrup`);
+    expect(url).toBe(`${SERVER_URL}/api/chats/search?q=pan+cakes+%26+syrup&includeArchived=true`);
     expect(init.signal ?? undefined).toBeUndefined();
   });
   it('searchChats() with a page and a signal', async () => {
     const ctrl = new AbortController();
     await api.searchChats('pan', { limit: 20, offset: 40, signal: ctrl.signal });
     const [url, init] = lastCall();
-    expect(url).toBe(`${SERVER_URL}/api/chats/search?q=pan&limit=20&offset=40`);
+    expect(url).toBe(
+      `${SERVER_URL}/api/chats/search?q=pan&limit=20&offset=40&includeArchived=true`,
+    );
     expect(init.signal).toBe(ctrl.signal);
   });
   it('snoozeChat() posts the ABSOLUTE wake time', async () => {

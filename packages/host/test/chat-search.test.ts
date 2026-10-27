@@ -193,6 +193,22 @@ describe('chat search index', () => {
     expect(index().search([gone], 'garden', 20, false).transcriptsMissing).toBe(0);
   });
 
+  it('leaves archived chats out unless includeArchived is set', () => {
+    const live = chat({ chatId: 'live', name: 'Garden live' });
+    const old = chat({ chatId: 'old', name: 'Garden old', status: 'archived' });
+    writeTranscript(live, [user('nothing')]);
+    writeTranscript(old, [user('nothing')]);
+    const idx = index();
+    expect(idx.search([live, old], 'garden', 20).hits.map((h) => h.chatId)).toEqual(['live']);
+    expect(idx.search([live, old], 'garden', 20, false, false).total).toBe(1);
+    expect(
+      idx
+        .search([live, old], 'garden', 20, true, true)
+        .hits.map((h) => h.chatId)
+        .sort(),
+    ).toEqual(['live', 'old']);
+  });
+
   it('does not search tool calls, tool output or thinking', () => {
     const c = chat({ chatId: 'c1' });
     writeTranscript(c, [
@@ -234,7 +250,7 @@ describe('chat search index', () => {
       chat({ chatId: 'pin', name: 'moss pinned', pinned: true }),
       chat({ chatId: 'del', name: 'moss deleted', status: 'deleted' }),
     ];
-    const r = index().search(chats, 'moss', 20);
+    const r = index().search(chats, 'moss', 20, true, true);
     const sections = Object.fromEntries(r.hits.map((h) => [h.chatId, h.section]));
     expect(sections).toEqual({
       thread_manager: 'manager',

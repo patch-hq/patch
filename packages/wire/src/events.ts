@@ -7775,6 +7775,8 @@ export const PatchChatSearchRequestEvent = z
     limit: z.number().int().positive().max(CHAT_SEARCH_MAX_DEPTH),
     /** false = chat names only; absent or true = names and message text. */
     fullText: z.boolean().optional(),
+    /** true = archived chats are searched too; absent or false = they are left out. */
+    includeArchived: z.boolean().optional(),
   })
   .strict();
 export type PatchChatSearchRequestEvent = z.infer<typeof PatchChatSearchRequestEvent>;
