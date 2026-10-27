@@ -11,7 +11,7 @@
 // router's history and this mirror cannot drift apart.
 
 import type { JSX } from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { shortcutTitle, useActionGlyphs } from '../lib/shortcuts.js';
