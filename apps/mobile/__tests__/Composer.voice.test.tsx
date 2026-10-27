@@ -152,6 +152,7 @@ describe('Composer — dictation mic (tap-toggle)', () => {
       expect.any(Function),
       expect.any(Function),
       expect.any(Function),
+      { engine: 'whisper', tidy: false },
     );
   });
 
@@ -169,6 +170,7 @@ describe('Composer — dictation mic (tap-toggle)', () => {
       expect.any(Function),
       expect.any(Function),
       expect.any(Function),
+      { engine: 'whisper', tidy: false },
     );
     update(r, <Composer chatId="c1" folder="work" dictationFactory={factory} />);
     // Still recording — chatId untouched in voiceStore and nothing sent yet.
@@ -845,6 +847,7 @@ describe('Composer — dictation uses the default lib/dictation.startDictation w
       expect.any(Function),
       expect.any(Function),
       expect.any(Function),
+      { engine: 'whisper', tidy: false },
     );
     await actAsync(() => {
       findHost(r.root, byLabel('Dictate into message')).props['onPress']();

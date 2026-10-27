@@ -14,14 +14,15 @@ import {
   voiceCellFor,
   type AudioErrorCode,
   type AudioSessionMode,
-  type VoiceBackend,
+  type DictationBackend,
   type VoiceConfig,
   type VoiceLayer,
 } from '@patch/wire/audio';
 
-const ENGINE_NAME: Record<Exclude<VoiceBackend, 'local'>, string> = {
+const ENGINE_NAME: Record<Exclude<DictationBackend, 'local'>, string> = {
   gemini: 'Gemini Live',
   openai: 'OpenAI Realtime',
+  deepgram: 'Deepgram',
 };
 
 /**

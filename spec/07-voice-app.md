@@ -340,6 +340,17 @@ A dictation that produces no text says which of three things happened: no audio 
 
 An in-flight dictation is discarded without transcribing by `esc` on web/desktop, and on mobile by a clear control at the left of the action row, which stands in for the attach buttons while a dictation is in flight.
 
+### Dictation engines
+
+The flow above — a local recording uploaded on the gesture end, with a preview made by re-reading the recording so far — is the `local`, `gemini` and `openai` engines. None of them listens continuously, so the preview arrives about once a second at best, slows as the recording grows, and is rationed by the provider's request limit. Two engines are live instead, and on them the live words are the transcript: nothing is transcribed a second time when the user stops.
+
+- **`deepgram`** — a dictation engine like the others in Settings → Voice, with its key in Settings → Keys. The host streams the microphone to Deepgram as it arrives and the words come back as they are spoken, in well under a second. On the gesture end the surface asks the host to finish (`audio.dictation_finish`); the host flushes the stream and answers with the whole dictation as one `audio.transcript_final`. A stream that cannot open or dies mid-dictation fails the dictation and says so; it is never answered by another engine.
+- **The phone's own recogniser** — a switch on the dictation setting that applies on Android only; web and desktop keep the configured engine. The phone's speech recogniser makes the words on the phone, fed the same microphone capture Patch is already recording (never a second capture of the microphone). It needs Android 13 or newer and a speech recognition service on the phone, and says so when either is missing.
+
+**Tidy-up with Whisper** is a second switch, for the two live engines. Each time the speaker pauses, the phrase just finished is read once by the host's Whisper and Whisper's version replaces it in place while the speaker carries on, so by the time they stop only the last phrase is left to tidy and the finish waits for it. A failed tidy-up is reported once and the live words for that phrase stand.
+
+On web and desktop a `deepgram` dictation still finishes through the upload: the live words come from the stream, and the clip is read once more by Deepgram on the gesture end.
+
 ### Dictation mode
 
 The composer mic can be left open. A plain click or tap is ordinary dictation; right-click it on web/desktop, or long-press it on mobile, and a small menu offers **Keep dictating**. Chosen, the mic stays listening: the user keeps talking, and each time they finish what they were saying it is transcribed and sent as its own message, then the mic carries on listening for the next thing. It is dictation, not a call — nothing speaks back and no agent voice is involved — but it can sit open in the background so the user can talk message after message without returning to the composer.

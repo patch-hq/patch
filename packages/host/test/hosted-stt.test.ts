@@ -6,6 +6,7 @@ import pino from 'pino';
 import {
   OpenAITranscribeBackend,
   GeminiTranscribeBackend,
+  DeepgramTranscribeBackend,
   HostedSttError,
   createDictationTranscribers,
   pickDictationTranscriber,
@@ -158,6 +159,45 @@ describe('GeminiTranscribeBackend', () => {
   });
 });
 
+describe('DeepgramTranscribeBackend (the clip path)', () => {
+  test('posts the clip body with a Token key and reads the first transcript', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ results: { channels: [{ alternatives: [{ transcript: ' buy milk ' }] }] } }),
+    );
+    const t = new DeepgramTranscribeBackend({ logger, apiKey: 'dg-key', fetchImpl });
+    expect(await t.transcribeClip(Buffer.from('RIFF....'), 'wav')).toBe('buy milk');
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain('https://api.deepgram.com/v1/listen?model=nova-3');
+    expect((init.headers as Record<string, string>)['Authorization']).toBe('Token dg-key');
+    expect((init.headers as Record<string, string>)['Content-Type']).toBe('audio/wav');
+  });
+
+  test('HTTP failure, network failure and a missing transcript all throw', async () => {
+    const http = new DeepgramTranscribeBackend({
+      logger,
+      apiKey: 'k',
+      fetchImpl: async () => new Response('nope', { status: 401 }),
+    });
+    await expect(http.transcribeClip(Buffer.from('x'), 'wav')).rejects.toThrow('HTTP 401');
+    const net = new DeepgramTranscribeBackend({
+      logger,
+      apiKey: 'k',
+      fetchImpl: async () => {
+        throw new Error('ECONNRESET');
+      },
+    });
+    await expect(net.transcribe(new Int16Array(10))).rejects.toBeInstanceOf(HostedSttError);
+    const empty = new DeepgramTranscribeBackend({
+      logger,
+      apiKey: 'k',
+      fetchImpl: async () => jsonResponse({ results: {} }),
+    });
+    await expect(empty.transcribeClip(Buffer.from('x'), 'wav')).rejects.toThrow('no transcript');
+    const noKey = new DeepgramTranscribeBackend({ logger, apiKey: undefined });
+    await expect(noKey.transcribeClip(Buffer.from('x'), 'wav')).rejects.toThrow('DEEPGRAM_API_KEY');
+  });
+});
+
 describe('picking the dictation transcriber', () => {
   const local = { supportsLivePartials: true } as WhisperBackend;
   test('only the backends with a key exist', () => {
@@ -190,6 +230,13 @@ describe('picking the dictation transcriber', () => {
       backend: 'openai',
       message: expect.stringContaining('OPENAI_REALTIME_API_KEY'),
     });
+    expect(pickDictationTranscriber('deepgram', t)).toMatchObject({
+      ok: false,
+      backend: 'deepgram',
+      message: expect.stringContaining('DEEPGRAM_API_KEY'),
+    });
+    const withDeepgram = createDictationTranscribers({ logger, local, deepgramApiKey: 'd' });
+    expect(withDeepgram.deepgram).toBeInstanceOf(DeepgramTranscribeBackend);
     const withGemini = createDictationTranscribers({ logger, local, geminiApiKey: 'g' });
     const picked = pickDictationTranscriber('gemini', withGemini);
     expect(picked.ok && picked.whisper).toBe(withGemini.gemini);

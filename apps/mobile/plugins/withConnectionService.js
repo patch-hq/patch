@@ -189,6 +189,7 @@ const VOICE_MIC_KT = fs.readFileSync(
   path.join(__dirname, 'native', 'PatchVoiceMicModule.kt'),
   'utf8',
 );
+const SPEECH_KT = fs.readFileSync(path.join(__dirname, 'native', 'PatchSpeechModule.kt'), 'utf8');
 const VOICE_TTS_KT = fs.readFileSync(
   path.join(__dirname, 'native', 'PatchVoiceTtsModule.kt'),
   'utf8',
@@ -220,6 +221,7 @@ const withNativeFiles = (config) =>
       );
       fs.writeFileSync(path.join(javaDir, 'PatchVoiceMicModule.kt'), VOICE_MIC_KT);
       fs.writeFileSync(path.join(javaDir, 'PatchVoiceTtsModule.kt'), VOICE_TTS_KT);
+      fs.writeFileSync(path.join(javaDir, 'PatchSpeechModule.kt'), SPEECH_KT);
       return cfg;
     },
   ]);

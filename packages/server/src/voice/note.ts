@@ -127,6 +127,7 @@ export function registerVoiceNoteRoute(app: FastifyInstance, deps: VoiceNoteRout
         format: 'm4a' | 'wav';
         surfaceKindRaw?: string;
         prefix?: string;
+        engine?: string;
       }
   > {
     if (!req.isMultipart()) return { error: 'expected multipart/form-data' };
@@ -134,6 +135,7 @@ export function registerVoiceNoteRoute(app: FastifyInstance, deps: VoiceNoteRout
     let audio: Buffer | undefined;
     let surfaceKindRaw: string | undefined;
     let prefix: string | undefined;
+    let engine: string | undefined;
     let format: 'm4a' | 'wav' = 'm4a';
     try {
       for await (const part of req.parts()) {
@@ -159,12 +161,21 @@ export function registerVoiceNoteRoute(app: FastifyInstance, deps: VoiceNoteRout
           surfaceKindRaw = String(part.value);
         } else if (part.fieldname === 'prefix') {
           prefix = String(part.value);
+        } else if (part.fieldname === 'engine') {
+          engine = String(part.value);
         }
       }
     } catch (err) {
       return { error: `invalid multipart body: ${(err as Error).message}` };
     }
-    return { chatId, audio, format, surfaceKindRaw, prefix };
+    return {
+      chatId,
+      audio,
+      format,
+      surfaceKindRaw,
+      prefix,
+      ...(engine !== undefined ? { engine } : {}),
+    };
   }
 
   // Hand a clip to the host (it owns Whisper) and await the transcript, mapping
@@ -174,6 +185,7 @@ export function registerVoiceNoteRoute(app: FastifyInstance, deps: VoiceNoteRout
     surfaceKind: VoiceAppSurfaceKind,
     format: 'm4a' | 'wav',
     audio: Buffer,
+    engine?: 'whisper',
   ): Promise<{ ok: true; transcript: string } | { ok: false; status: number; body: object }> {
     const audioBase64 = audio.toString('base64');
     const result = await awaitHost(surfaceId, (requestId) => ({
@@ -182,6 +194,7 @@ export function registerVoiceNoteRoute(app: FastifyInstance, deps: VoiceNoteRout
       surfaceKind,
       format,
       audioBase64,
+      ...(engine !== undefined ? { engine } : {}),
     }));
     if (result === 'timeout') {
       deps.logger.warn('voice: host transcription timed out');
@@ -354,6 +367,9 @@ export function registerVoiceNoteRoute(app: FastifyInstance, deps: VoiceNoteRout
     if ('error' in parsed) return reply.code(400).send({ error: parsed.error });
     const { audio, format } = parsed;
     const surfaceKind = normaliseSurfaceKind(parsed.surfaceKindRaw);
+    if (parsed.engine !== undefined && parsed.engine !== 'whisper') {
+      return reply.code(400).send({ error: `unknown engine: ${parsed.engine}` });
+    }
 
     if (!audio || audio.byteLength === 0) {
       return reply.code(400).send({ error: 'audio file is required' });
@@ -363,7 +379,13 @@ export function registerVoiceNoteRoute(app: FastifyInstance, deps: VoiceNoteRout
       return reply.code(413).send({ error: 'audio clip too large' });
     }
 
-    const result = await transcribe(auth.surfaceId, surfaceKind, format, audio);
+    const result = await transcribe(
+      auth.surfaceId,
+      surfaceKind,
+      format,
+      audio,
+      parsed.engine === 'whisper' ? 'whisper' : undefined,
+    );
     if (!result.ok) return reply.code(result.status).send(result.body);
     return reply.code(200).send({ ok: true, transcript: result.transcript });
   });

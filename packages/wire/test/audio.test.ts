@@ -33,6 +33,7 @@ const FIXTURES: { [K in AudioEventType]: Extract<AudioEvent, { type: K }> } = {
   'audio.session_end': { type: 'audio.session_end', sessionId: 'sess1', reason: 'user' },
   'audio.mode': { type: 'audio.mode', sessionId: 'sess1', mode: 'hands-free' },
   'audio.speak': { type: 'audio.speak', sessionId: 'sess1', text: 'the bus chat is blocked' },
+  'audio.dictation_finish': { type: 'audio.dictation_finish', sessionId: 'sess1' },
   'audio.pcm16': { type: 'audio.pcm16', ts: 1, sampleRate: 16000, samples: 480 },
   'audio.transcript_partial': {
     type: 'audio.transcript_partial',

@@ -43,6 +43,12 @@ class PatchVoiceMicModule(private val ctx: ReactApplicationContext) :
     const val EVENT = "PatchVoiceMicFrame"
     // adb logcat | grep patch-voice → pinpoints where the mic uplink stalls.
     const val TAG = "patch-voice"
+    /**
+     * A second reader of every frame, on the read thread — the phone's own
+     * recogniser ([PatchSpeechModule]) hears the same audio without opening
+     * the microphone a second time.
+     */
+    @Volatile var tap: ((ByteArray) -> Unit)? = null
   }
 
   private var record: AudioRecord? = null
@@ -133,6 +139,7 @@ class PatchVoiceMicModule(private val ctx: ReactApplicationContext) :
         Log.i(TAG, "native mic: first PCM frame captured → emitting to JS")
         firstFrame = false
       }
+      tap?.invoke(buf.copyOf())
       val map = Arguments.createMap()
       map.putString("base64", Base64.encodeToString(buf, Base64.NO_WRAP))
       map.putInt("samples", FRAME_SAMPLES)

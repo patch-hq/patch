@@ -47,6 +47,7 @@ import type { EngineCosting } from './voiceCost.js';
 import { verifyVoiceToken, VoiceTokenError, type VoiceTokenClaims } from './token-verifier.js';
 import { DEVICE_CONTROL_PATH } from '../devices/control-ws.js';
 import { readKey, type KeySource } from './keySource.js';
+import { DeepgramDictationSession } from './deepgram-dictation.js';
 
 /** Spoken once when a local call opens, so the user is never left in silence. */
 const CALL_GREETING = 'Connected.';
@@ -152,6 +153,14 @@ export interface AudioServerOptions {
    * FALLBACK). Read at each session's start, like `geminiApiKey`.
    */
   openaiApiKey?: KeySource;
+  /**
+   * DEEPGRAM_API_KEY, for dictation on `deepgram` (deepgram-dictation.ts).
+   * Absent: such a session is refused with `voice_key_missing`.
+   */
+  deepgramApiKey?: KeySource;
+  /** Test seam: the WebSocket constructor and URL a Deepgram dictation dials. */
+  deepgramWsCtor?: typeof import('ws').default;
+  deepgramWsUrl?: string;
   /** Per-layer overrides of openai-realtime.ts's `DEFAULT_OPENAI_REALTIME_MODELS`. */
   openaiRealtimeModelLight?: string;
   openaiRealtimeModelHeavy?: string;
@@ -767,6 +776,21 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             ...(opts.openaiWsCtor ? { wsCtor: opts.openaiWsCtor } : {}),
             ...(opts.openaiWsUrl ? { wsUrl: opts.openaiWsUrl } : {}),
           });
+        } else if (voiceSurface === 'dictation' && cell.backend === 'deepgram') {
+          // Streaming dictation (spec/07 § Dictation engines): the live words
+          // are the transcript, finished by `audio.dictation_finish`.
+          if (readKey(opts.deepgramApiKey) === undefined) {
+            rejectConn(ws, 'voice_key_missing', voiceKeyMissingMessage('dictation', 'deepgram'));
+            return;
+          }
+          session = new DeepgramDictationSession(sessionInit, {
+            logger: sessionLog,
+            apiKey: opts.deepgramApiKey,
+            sendAudio: sendAudioFn,
+            ...(voiceConfig.dictation.tidy ? { tidyWith: opts.whisper } : {}),
+            ...(opts.deepgramWsCtor ? { wsCtor: opts.deepgramWsCtor } : {}),
+            ...(opts.deepgramWsUrl ? { wsUrl: opts.deepgramWsUrl } : {}),
+          });
         } else {
           // The self-hosted pipeline — and dictation on ANY backend, which is
           // STT only: the same VoiceSession, with the configured backend's
@@ -925,6 +949,32 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           } else {
             ws.close();
           }
+          break;
+        }
+        case 'audio.dictation_finish': {
+          if (parsed.sessionId !== urlSessionId) {
+            rejectConn(
+              ws,
+              'invalid_frame',
+              'dictation_finish sessionId mismatch with this session',
+            );
+            return;
+          }
+          if (!(session instanceof DeepgramDictationSession)) {
+            send(ws, {
+              type: 'audio.error',
+              code: 'invalid_frame',
+              message: 'dictation_finish is only for a dictation on a streaming engine',
+              sessionId: urlSessionId,
+            });
+            break;
+          }
+          void session.finishDictation().catch((err: Error) => {
+            log.warn(
+              { err: err.message, sessionId: urlSessionId },
+              'audio: dictation finish failed',
+            );
+          });
           break;
         }
         default:

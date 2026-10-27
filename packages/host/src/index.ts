@@ -257,7 +257,7 @@ import {
   DEFAULT_VOICE_CONFIG,
   voiceKeyMissingMessage,
   voiceSurfacesMissingKey,
-  type VoiceBackend,
+  type DictationBackend,
   type VoiceConfig,
   type VoiceKeys,
 } from '@patch/wire/audio';
@@ -428,6 +428,7 @@ async function startHost(
       gemini: config.audio.geminiApiKey,
       openai: config.audio.openaiApiKey,
       groq: config.audio.groqApiKey,
+      deepgram: process.env['DEEPGRAM_API_KEY'],
     },
     ...(config.audio.whisperBackend === 'groq'
       ? { requiredToStart: { groq: 'This host transcribes with Groq (WHISPER_BACKEND=groq)' } }
@@ -709,6 +710,7 @@ async function startHost(
   const voiceKeys = (): VoiceKeys => ({
     gemini: providerKeys.has('gemini'),
     openai: providerKeys.has('openai'),
+    deepgram: providerKeys.has('deepgram'),
   });
   logVoiceKeysMissing(logger, voiceConfig, voiceKeys());
   // spec/07 § Call cost — every costed call, and this host's totals.
@@ -4834,6 +4836,7 @@ async function startHost(
     geminiModel: config.audio.geminiTranscribeModel,
     openaiApiKey: () => providerKeys.get('openai'),
     openaiModel: config.audio.openaiTranscribeModel,
+    deepgramApiKey: () => providerKeys.get('deepgram'),
   });
   // spec/02 § Optional components: voice is a component the user installs on a
   // machine, and installing it is what turns it ON. A machine that has installed
@@ -5082,6 +5085,7 @@ async function startHost(
     // spec/07 § Voice — live read, same pattern as getKokoroVoice above.
     getVoiceConfig: () => voiceConfig,
     geminiApiKey: () => providerKeys.get('gemini'),
+    deepgramApiKey: () => providerKeys.get('deepgram'),
     ...(config.audio.geminiLiveModel ? { geminiLiveModel: config.audio.geminiLiveModel } : {}),
     ...(config.audio.geminiLiveModelHeavy
       ? { geminiLiveModelHeavy: config.audio.geminiLiveModelHeavy }
@@ -5674,7 +5678,7 @@ export function logVoiceKeysMissing(logger: Logger, config: VoiceConfig, keys: V
 export async function handleVoiceNoteTranscribe(
   event: import('@patch/wire').PatchVoiceNoteTranscribeRequestEvent,
   transcribers: DictationTranscribers | undefined,
-  backend: VoiceBackend,
+  backend: DictationBackend,
   sender: (e: WireEvent) => void,
   logger: Logger,
 ): Promise<void> {
@@ -5711,8 +5715,12 @@ export async function handleVoiceNoteTranscribe(
   // spec/07 § Voice — a config matrix: a note and a composer dictation are the
   // `dictation` surface, so its configured backend transcribes the clip. A
   // hosted backend with no key on this host is refused, not quietly
-  // transcribed by Whisper instead (NO SILENT FALLBACK).
-  const picked = pickDictationTranscriber(backend, transcribers);
+  // transcribed by Whisper instead (NO SILENT FALLBACK). The phone's tidy-up
+  // pass asks for Whisper by name: that IS the engine it chose.
+  const picked =
+    event.engine === 'whisper'
+      ? ({ ok: true, whisper: transcribers.local } as const)
+      : pickDictationTranscriber(backend, transcribers);
   if (!picked.ok) {
     sender({
       type: 'patch.voice_note.transcribe_response',

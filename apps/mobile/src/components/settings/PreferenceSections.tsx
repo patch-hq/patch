@@ -13,7 +13,13 @@
 
 import React from 'react';
 import { Alert, Text, View } from 'react-native';
-import type { AccountPreferences, VoiceBackend, VoiceHandoff, VoiceLayer } from '../../api/rest';
+import type {
+  AccountPreferences,
+  DictationBackend,
+  VoiceBackend,
+  VoiceHandoff,
+  VoiceLayer,
+} from '../../api/rest';
 import { space, typography, useTheme } from '../../lib/theme';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { usePresenceStore } from '../../stores/presenceStore';
@@ -181,6 +187,8 @@ function ManagerControls({ preferences }: { preferences: AccountPreferences }): 
 // ── Voice ────────────────────────────────────────────────────────────────────
 
 const VOICE_BACKENDS: readonly VoiceBackend[] = ['local', 'gemini', 'openai'];
+/** Dictation adds `deepgram`, the one engine that streams its words. */
+const DICTATION_BACKENDS: readonly DictationBackend[] = ['local', 'gemini', 'openai', 'deepgram'];
 const VOICE_LAYERS: readonly VoiceLayer[] = ['direct', 'light', 'heavy'];
 const VOICE_HANDOFFS: readonly VoiceHandoff[] = ['auto', 'always', 'never'];
 type VoiceSurfaceKey = 'dictation' | 'device' | 'handsFree' | 'call';
@@ -201,7 +209,7 @@ const VOICE_SURFACE_LABELS: Record<VoiceSurfaceKey, string> = {
  */
 export function voiceCellStatus(
   surface: VoiceSurfaceKey,
-  backend: VoiceBackend,
+  backend: DictationBackend,
   layer?: VoiceLayer,
 ): string | null {
   if (backend !== 'local' && surface === 'device') {
@@ -289,28 +297,32 @@ function VoiceEngine(): React.ReactElement {
     <WithSettings testID="voice-config">
       {(data) => {
         const voiceConfig = data.preferences.voiceConfig;
-        const write = (
-          surface: VoiceSurfaceKey,
-          backend: VoiceBackend,
-          layer: VoiceLayer | undefined,
-          handoff: VoiceHandoff | undefined,
-        ): void => {
-          const cell =
-            layer === undefined || handoff === undefined
-              ? { backend }
-              : { backend, layer, handoff };
+        const save = (next: AccountPreferences['voiceConfig']): void => {
           setBusy(true);
           void useSettingsStore
             .getState()
-            .updatePreferences({
-              voiceConfig: {
-                ...voiceConfig,
-                [surface]: cell,
-              } as AccountPreferences['voiceConfig'],
-            })
+            .updatePreferences({ voiceConfig: next })
             .catch((e: Error) => Alert.alert('Settings failed', e.message))
             .finally(() => setBusy(false));
         };
+        const write = (
+          surface: VoiceSurfaceKey,
+          backend: DictationBackend,
+          layer: VoiceLayer | undefined,
+          handoff: VoiceHandoff | undefined,
+        ): void => {
+          // Dictation keeps its own two switches when its engine changes.
+          const cell =
+            surface === 'dictation'
+              ? { ...voiceConfig.dictation, backend }
+              : layer === undefined || handoff === undefined
+                ? { backend }
+                : { backend, layer, handoff };
+          save({ ...voiceConfig, [surface]: cell } as AccountPreferences['voiceConfig']);
+        };
+        const dictation = voiceConfig.dictation;
+        const writeDictation = (patch: { phone?: boolean; tidy?: boolean }): void =>
+          save({ ...voiceConfig, dictation: { ...dictation, ...patch } });
         return VOICE_SURFACES.map((surface) => {
           const cell = voiceConfig[surface];
           const backend = cell.backend;
@@ -328,12 +340,12 @@ function VoiceEngine(): React.ReactElement {
               <View style={{ gap: space.xs }}>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.md }}>
                   <Chips
-                    options={VOICE_BACKENDS}
+                    options={surface === 'dictation' ? DICTATION_BACKENDS : VOICE_BACKENDS}
                     selected={backend}
                     disabled={busy}
                     testIDPrefix={`voice-${surface}-backend`}
                     labelPrefix={`${VOICE_SURFACE_LABELS[surface]} backend`}
-                    onSelect={(b) => write(surface, b, layer, handoff)}
+                    onSelect={(b: DictationBackend) => write(surface, b, layer, handoff)}
                   />
                   {layer !== undefined ? (
                     <Chips
@@ -357,6 +369,22 @@ function VoiceEngine(): React.ReactElement {
                   ) : null}
                 </View>
                 {status ? <Muted testID={`voice-${surface}-status`}>{status}</Muted> : null}
+                {surface === 'dictation' ? (
+                  <>
+                    <ToggleRow
+                      label="Use this phone's own recogniser"
+                      testID="dictation-phone-recogniser"
+                      value={dictation.phone}
+                      onChange={(next) => writeDictation({ phone: next })}
+                    />
+                    <ToggleRow
+                      label="Tidy up with Whisper"
+                      testID="dictation-tidy"
+                      value={dictation.tidy}
+                      onChange={(next) => writeDictation({ tidy: next })}
+                    />
+                  </>
+                ) : null}
                 {keyStatus ? (
                   <Text
                     testID={`voice-${surface}-keys`}

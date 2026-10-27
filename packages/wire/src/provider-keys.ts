@@ -18,7 +18,7 @@
 import { z } from 'zod';
 
 /** The keys a host can use, by id. */
-export const ProviderKeyId = z.enum(['gemini', 'openai', 'groq']);
+export const ProviderKeyId = z.enum(['gemini', 'openai', 'groq', 'deepgram']);
 export type ProviderKeyId = z.infer<typeof ProviderKeyId>;
 
 export interface ProviderKeyInfo {
@@ -51,11 +51,17 @@ export const PROVIDER_KEYS: readonly ProviderKeyInfo[] = [
     envVar: 'GROQ_API_KEY',
     usedFor: 'Whisper transcription when WHISPER_BACKEND=groq',
   },
+  {
+    id: 'deepgram',
+    label: 'Deepgram',
+    envVar: 'DEEPGRAM_API_KEY',
+    usedFor: 'Live dictation on the deepgram engine',
+  },
 ];
 
 export function providerKeyInfo(id: ProviderKeyId): ProviderKeyInfo {
   const info = PROVIDER_KEYS.find((k) => k.id === id);
-  /* v8 ignore next -- the enum and the table are the same three ids. */
+  /* v8 ignore next -- the enum and the table are the same ids. */
   if (!info) throw new Error(`unknown provider key: ${id}`);
   return info;
 }

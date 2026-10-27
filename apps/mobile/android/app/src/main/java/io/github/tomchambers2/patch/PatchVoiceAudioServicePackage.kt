@@ -20,6 +20,7 @@ class PatchVoiceAudioServicePackage : ReactPackage {
       PatchVoiceAudioServiceModule(reactContext),
       PatchVoiceMicModule(reactContext),
       PatchVoiceTtsModule(reactContext),
+      PatchSpeechModule(reactContext),
     )
 
   override fun createViewManagers(

@@ -6,7 +6,12 @@ import type { JSX } from 'react';
 import { Fragment, useEffect, useState } from 'react';
 import { voiceKeyHostStatus } from '@patch/wire/audio';
 import { DICTATION_PAUSE_CHOICES } from '@patch/wire';
-import { type VoiceBackend, type VoiceHandoff, type VoiceLayer } from '../../api/rest.js';
+import {
+  type DictationBackend,
+  type VoiceBackend,
+  type VoiceHandoff,
+  type VoiceLayer,
+} from '../../api/rest.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
@@ -46,8 +51,9 @@ const ENGINE_CELL: Record<ConversationEngine, { backend: VoiceBackend; layer: Vo
   openai: { backend: 'openai', layer: 'heavy' },
 };
 /** The engine a stored cell runs. A hosted `direct` runs as `light`. */
-function engineOf(backend: VoiceBackend, layer: VoiceLayer): ConversationEngine {
-  if (backend === 'local') return 'local';
+function engineOf(backend: DictationBackend, layer: VoiceLayer): ConversationEngine {
+  // `deepgram` is dictation-only; a conversation cell never holds it.
+  if (backend === 'local' || backend === 'deepgram') return 'local';
   if (backend === 'gemini') return layer === 'heavy' ? 'gemini-thinking' : 'gemini-flash';
   return layer === 'heavy' ? 'openai' : 'openai-mini';
 }
@@ -57,11 +63,12 @@ const HANDOFF_LABELS: Record<VoiceHandoff, string> = {
   always: 'Always',
   never: 'Never',
 };
-const DICTATION_ENGINES: readonly VoiceBackend[] = ['local', 'gemini', 'openai'];
-const DICTATION_LABELS: Record<VoiceBackend, string> = {
-  local: 'Local',
+const DICTATION_ENGINES: readonly DictationBackend[] = ['local', 'gemini', 'openai', 'deepgram'];
+const DICTATION_LABELS: Record<DictationBackend, string> = {
+  local: 'Whisper',
   gemini: 'Gemini',
   openai: 'OpenAI',
+  deepgram: 'Deepgram',
 };
 
 /** Dollars, to the penny that matters: two significant figures under 10 cents. */
@@ -90,7 +97,7 @@ const SURFACES: { key: VoiceSurfaceKey; label: string }[] = [
  */
 export function voiceCellStatus(
   surface: VoiceSurfaceKey,
-  backend: VoiceBackend,
+  backend: DictationBackend,
   layer?: VoiceLayer,
 ): string | null {
   if (backend !== 'local' && surface === 'device') {
@@ -256,7 +263,12 @@ function EngineGroup(): JSX.Element {
                   disabled={!loaded}
                   testid={`voice-${surface}-engine`}
                   onChange={(next) =>
-                    write({ voiceConfig: { ...voiceConfig, [surface]: { backend: next } } })
+                    write({
+                      voiceConfig: {
+                        ...voiceConfig,
+                        dictation: { ...voiceConfig.dictation, backend: next },
+                      },
+                    })
                   }
                 />
               ) : (
@@ -278,6 +290,40 @@ function EngineGroup(): JSX.Element {
                 />
               )}
             </Row>
+            {surface === 'dictation' ? (
+              <>
+                <Row title="Phone's own recogniser (Android)" testid="dictation-phone-row">
+                  <Toggle
+                    checked={voiceConfig.dictation.phone}
+                    disabled={!loaded}
+                    onChange={(next) =>
+                      write({
+                        voiceConfig: {
+                          ...voiceConfig,
+                          dictation: { ...voiceConfig.dictation, phone: next },
+                        },
+                      })
+                    }
+                    testid="dictation-phone-toggle"
+                  />
+                </Row>
+                <Row title="Tidy up with Whisper" testid="dictation-tidy-row">
+                  <Toggle
+                    checked={voiceConfig.dictation.tidy}
+                    disabled={!loaded}
+                    onChange={(next) =>
+                      write({
+                        voiceConfig: {
+                          ...voiceConfig,
+                          dictation: { ...voiceConfig.dictation, tidy: next },
+                        },
+                      })
+                    }
+                    testid="dictation-tidy-toggle"
+                  />
+                </Row>
+              </>
+            ) : null}
             {layer !== undefined && backend !== 'local' && handoff !== undefined ? (
               <Row title={`${label} hand-off`} testid={`voice-${surface}-handoff-row`}>
                 <Pills

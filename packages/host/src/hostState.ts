@@ -67,7 +67,13 @@ const HostStateFile = z
      */
     voiceConfig: z
       .object({
-        dictation: z.object({ backend: z.enum(['local', 'gemini', 'openai']) }).strict(),
+        dictation: z
+          .object({
+            backend: z.enum(['local', 'gemini', 'openai', 'deepgram']),
+            phone: z.boolean().default(false),
+            tidy: z.boolean().default(false),
+          })
+          .strict(),
         device: z
           .object({
             backend: z.enum(['local', 'gemini', 'openai']),

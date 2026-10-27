@@ -573,6 +573,44 @@ describe('Voice page: Dictation mode pause (shared)', () => {
   });
 });
 
+describe('Voice page: dictation engines (shared)', () => {
+  it('offers Deepgram and keeps the two switches when the engine changes', async () => {
+    seedSettings();
+    const r = renderRN(<VoicePage />);
+    await actAsync(async () => {
+      findHost(r.root, byTestId('voice-dictation-backend-deepgram')).props.onPress();
+    });
+    expect(api.setPreferences).toHaveBeenLastCalledWith({
+      voiceConfig: expect.objectContaining({
+        dictation: { backend: 'deepgram', phone: false, tidy: false },
+      }),
+    });
+  });
+
+  it('the phone recogniser and Whisper tidy-up are each a switch on the dictation cell', async () => {
+    seedSettings();
+    const r = renderRN(<VoicePage />);
+    const phone = findHost(r.root, byTestId('dictation-phone-recogniser'));
+    expect(phone.props.value).toBe(false);
+    await actAsync(async () => {
+      phone.props.onValueChange(true);
+    });
+    expect(api.setPreferences).toHaveBeenLastCalledWith({
+      voiceConfig: expect.objectContaining({
+        dictation: { backend: 'local', phone: true, tidy: false },
+      }),
+    });
+    await actAsync(async () => {
+      findHost(r.root, byTestId('dictation-tidy')).props.onValueChange(true);
+    });
+    expect(api.setPreferences).toHaveBeenLastCalledWith({
+      voiceConfig: expect.objectContaining({
+        dictation: expect.objectContaining({ tidy: true }),
+      }),
+    });
+  });
+});
+
 describe('Voice page: frame', () => {
   it('draws Engine, Speaking and Voice devices, with surfaces in the design’s order', () => {
     seedSettings();

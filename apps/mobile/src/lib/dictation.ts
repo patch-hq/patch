@@ -61,6 +61,7 @@ import { api } from '../api/rest';
 import { audioWsUrl } from '../config';
 import { startMicCapture, stopMicCapture } from './voiceMic';
 import { encodePcm16Wav, encodeBase64, mergePcmChunks } from './pcmWav';
+import { startPhoneSpeech, type PhoneSpeechSession } from './phoneSpeech';
 
 /**
  * Why an outcome UNION rather than `string | null`: a dictation that produces
@@ -202,7 +203,42 @@ export async function warmDictation(): Promise<void> {
  * slow/failed preview socket is swallowed here, exactly because that failure
  * mode must never affect whether the note is captured (see file header).
  */
+/**
+ * Which way a dictation makes its words (spec/07 § Dictation engines):
+ *   whisper — the recording so far is re-read by the dictation engine for a
+ *             preview, and the whole clip is uploaded on finish (below).
+ *   stream  — `deepgram`: the host streams it, the live words ARE the
+ *             transcript, and finishing asks the host for them.
+ *   phone   — the phone's own recogniser hears the mic tap; its words are the
+ *             transcript, nothing leaves the phone except tidy-up.
+ */
+export type DictationEngine = 'whisper' | 'stream' | 'phone';
+
+export interface DictationOptions {
+  engine?: DictationEngine;
+  /** Phone engine: read each finished phrase again with Whisper, as it goes. */
+  tidy?: boolean;
+}
+
+/** How long a live engine may take to hand over its last words after a stop. */
+export const LIVE_FINISH_TIMEOUT_MS = 15_000;
+
 export function startDictation(
+  chatId: string,
+  onPartial: (text: string) => void,
+  onError: (message: string) => void,
+  onPreviewError: (message: string) => void,
+  options: DictationOptions = {},
+): DictationHandle {
+  if (options.engine === 'stream')
+    return startStreamDictation(chatId, onPartial, onError, onPreviewError);
+  if (options.engine === 'phone') {
+    return startPhoneDictation(chatId, onPartial, onError, onPreviewError, options.tidy === true);
+  }
+  return startWhisperDictation(chatId, onPartial, onError, onPreviewError);
+}
+
+function startWhisperDictation(
   chatId: string,
   onPartial: (text: string) => void,
   onError: (message: string) => void,
@@ -405,6 +441,379 @@ export function startDictation(
       );
       const text = transcript.trim();
       return text.length > 0 ? { kind: 'text', text } : { kind: 'no-speech' };
+    },
+  };
+}
+
+/** Begin mic capture now when warm, else after permission + audio mode. */
+async function openMic(
+  onFrame: (pcm: Int16Array) => void,
+  onFailure: (message: string) => void,
+  isClosed: () => boolean,
+): Promise<boolean> {
+  if (!audioReady) {
+    await prepareAudio();
+    if (isClosed()) return false;
+  }
+  await startMicCapture(onFrame, onFailure);
+  return true;
+}
+
+/** The text a no-text-or-text outcome reports. */
+function outcomeOf(text: string, pcmAll: Int16Array[]): DictationOutcome {
+  if (pcmAll.length === 0) return { kind: 'no-audio' };
+  const t = text.trim();
+  return t.length > 0 ? { kind: 'text', text: t } : { kind: 'no-speech' };
+}
+
+/**
+ * Deepgram (spec/07 § Dictation engines). The host's stream is the only
+ * source of the words, so a socket that fails is the dictation failing, said
+ * through `onError` — not a preview hiccup. A failed tidy-up on the host
+ * (`whisper_unavailable`) is said through `onPreviewError`: the live words
+ * still stand.
+ */
+function startStreamDictation(
+  chatId: string,
+  onPartial: (text: string) => void,
+  onError: (message: string) => void,
+  onPreviewError: (message: string) => void,
+): DictationHandle {
+  let closed = false;
+  let finished = false;
+  let failed = false;
+  let micStarted = false;
+  let ws: WebSocket | null = null;
+  let wsOpen = false;
+  const pcmAll: Int16Array[] = [];
+  const pending: Int16Array[] = [];
+  let sessionId: string | null = null;
+  let resolveFinal: ((text: string) => void) | null = null;
+  let rejectFinal: ((e: Error) => void) | null = null;
+
+  function send(pcm: Int16Array): void {
+    ws!.send(
+      JSON.stringify({
+        type: 'audio.pcm16',
+        ts: Date.now(),
+        sampleRate: SAMPLE_RATE,
+        samples: pcm.length,
+      }),
+    );
+    ws!.send(pcm.buffer as ArrayBuffer);
+  }
+  async function fail(message: string): Promise<void> {
+    if (failed || finished) {
+      rejectFinal?.(new Error(message));
+      return;
+    }
+    failed = true;
+    closed = true;
+    ws?.close();
+    onError(message);
+    if (micStarted) await stopMicCapture().catch(() => undefined);
+  }
+
+  const capture = openMic(
+    (pcm) => {
+      pcmAll.push(pcm);
+      if (wsOpen) {
+        try {
+          send(pcm);
+        } catch (e) {
+          void fail(`live dictation failed: ${(e as Error).message}`);
+        }
+      } else pending.push(pcm);
+    },
+    (m) => void fail(`dictation mic failed: ${m}`),
+    () => closed,
+  ).then(
+    (started) => {
+      micStarted = started;
+      if (started && closed) void stopMicCapture().catch(() => undefined);
+    },
+    (e: Error) => void fail(`dictation setup failed: ${e.message}`),
+  );
+
+  void (async () => {
+    try {
+      const me = await api.me();
+      const tok = await api.voiceToken(chatId, 'voice-note');
+      if (closed) return;
+      const socket = new WebSocket(audioWsUrl(tok.audioUrl));
+      ws = socket;
+      sessionId = tok.sessionId;
+      socket.onopen = (): void => {
+        if (closed && !finished) {
+          socket.close();
+          return;
+        }
+        socket.send(
+          JSON.stringify({
+            type: 'audio.session_start',
+            sessionId: tok.sessionId,
+            accountId: me.account.accountId,
+            surfaceId: me.surface.surfaceId,
+            surfaceKind: 'mobile',
+            chatId,
+            role: 'voice-note',
+            token: tok.token,
+            surfaceHasAec: true,
+          }),
+        );
+        wsOpen = true;
+        for (const pcm of pending.splice(0)) send(pcm);
+        if (finished)
+          socket.send(JSON.stringify({ type: 'audio.dictation_finish', sessionId: tok.sessionId }));
+      };
+      socket.onmessage = (evt: WebSocketMessageEvent): void => {
+        if (typeof evt.data !== 'string') return;
+        let frame: AudioEvent;
+        try {
+          frame = decodeAudio(evt.data);
+        } catch (e) {
+          void fail(`malformed audio frame: ${(e as Error).message}`);
+          return;
+        }
+        if (frame.type === 'audio.transcript_partial' && !failed) onPartial(frame.text);
+        else if (frame.type === 'audio.transcript_final') resolveFinal?.(frame.text);
+        else if (frame.type === 'audio.error') {
+          if (frame.code === 'whisper_unavailable') onPreviewError(frame.message);
+          else void fail(frame.message);
+        }
+      };
+      socket.onerror = (): void => void fail('the live dictation connection failed');
+      socket.onclose = (evt: { code?: number; reason?: string }): void => {
+        if (finished && resolveFinal === null) return;
+        void fail(
+          `the live dictation connection closed${evt?.code ? ` (${evt.code}${evt.reason ? `: ${evt.reason}` : ''})` : ''}`,
+        );
+      };
+    } catch (e) {
+      void fail(`live dictation could not start: ${(e as Error).message}`);
+    }
+  })();
+
+  return {
+    async finish(send: boolean): Promise<DictationOutcome> {
+      if (finished) return { kind: 'discarded' };
+      finished = true;
+      closed = true;
+      await capture;
+      if (micStarted) {
+        if (send)
+          await withTimeout(stopMicCapture(), STOP_MIC_TIMEOUT_MS, 'stopping the microphone');
+        else await stopMicCapture().catch(() => undefined);
+      }
+      const end = (): void => {
+        resolveFinal = null;
+        try {
+          ws?.send(JSON.stringify({ type: 'audio.session_end', reason: 'cancelled' }));
+        } catch {
+          // closing below is the source of truth
+        }
+        ws?.close();
+      };
+      if (!send || failed) {
+        end();
+        return { kind: 'discarded' };
+      }
+      if (pcmAll.length === 0) {
+        end();
+        return { kind: 'no-audio' };
+      }
+      const text = await withTimeout(
+        new Promise<string>((resolve, reject) => {
+          resolveFinal = resolve;
+          rejectFinal = reject;
+          if (wsOpen && sessionId !== null) {
+            ws!.send(JSON.stringify({ type: 'audio.dictation_finish', sessionId }));
+          }
+          // Not open yet: onopen flushes the audio, then sends the finish.
+        }),
+        LIVE_FINISH_TIMEOUT_MS,
+        'the live transcript',
+      ).finally(end);
+      return outcomeOf(text, pcmAll);
+    },
+  };
+}
+
+interface PhoneSegment {
+  raw: string;
+  tidied?: string;
+}
+
+/**
+ * The phone's own recogniser (spec/07 § Dictation engines). With tidy-up on,
+ * each finished segment's audio — everything captured since the previous
+ * segment ended — is uploaded for Whisper and its text swapped in, while the
+ * recogniser carries on with the next one.
+ */
+function startPhoneDictation(
+  _chatId: string,
+  onPartial: (text: string) => void,
+  onError: (message: string) => void,
+  onPreviewError: (message: string) => void,
+  tidy: boolean,
+): DictationHandle {
+  let closed = false;
+  let finished = false;
+  let failed = false;
+  let micStarted = false;
+  let speech: PhoneSpeechSession | null = null;
+  const pcmAll: Int16Array[] = [];
+  let capturedSamples = 0;
+  let segmentStart = 0;
+  const segments: PhoneSegment[] = [];
+  let current = '';
+  const tidying = new Set<Promise<void>>();
+  let tidyReported = false;
+  let onEnd: (() => void) | null = null;
+  let ended = false;
+
+  const text = (): string =>
+    [...segments.map((s) => s.tidied ?? s.raw), current].filter((t) => t.length > 0).join(' ');
+  const show = (): void => {
+    if (!failed) onPartial(text());
+  };
+
+  async function fail(message: string): Promise<void> {
+    if (failed) return;
+    failed = true;
+    closed = true;
+    onEnd?.();
+    void speech?.cancel().catch(() => undefined);
+    if (!finished) onError(message);
+    if (micStarted) await stopMicCapture().catch(() => undefined);
+  }
+
+  function cutSegment(fromSample: number, toSample: number): Int16Array {
+    const out = new Int16Array(toSample - fromSample);
+    let pos = 0;
+    let written = 0;
+    for (const chunk of pcmAll) {
+      const a = Math.max(fromSample, pos);
+      const b = Math.min(toSample, pos + chunk.length);
+      if (b > a) {
+        out.set(chunk.subarray(a - pos, b - pos), written);
+        written += b - a;
+      }
+      pos += chunk.length;
+      if (pos >= toSample) break;
+    }
+    return out;
+  }
+
+  function tidyUp(segment: PhoneSegment, pcm: Int16Array): void {
+    const job = (async (): Promise<void> => {
+      const dir = FileSystem.cacheDirectory;
+      if (!dir) throw new Error('no cache directory available');
+      const uri = `${dir}tidy-${Date.now()}-${segments.length}.wav`;
+      await FileSystem.writeAsStringAsync(uri, encodeBase64(encodePcm16Wav(pcm, SAMPLE_RATE)), {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      try {
+        const { transcript } = await api.voiceTranscribe(uri, { engine: 'whisper' });
+        const t = transcript.trim();
+        if (t.length > 0) {
+          segment.tidied = t;
+          show();
+        }
+      } finally {
+        void FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => undefined);
+      }
+    })().catch((e: Error) => {
+      if (tidyReported || failed) return;
+      tidyReported = true;
+      onPreviewError(`tidying up with Whisper failed (${e.message}); the phone's words stand`);
+    });
+    const tracked: Promise<void> = job.finally(() => tidying.delete(tracked));
+    tidying.add(tracked);
+  }
+
+  const started = (async (): Promise<void> => {
+    try {
+      // The recogniser must be listening to the tap before the mic feeds it.
+      speech = await startPhoneSpeech((ev) => {
+        if (ev.type === 'partial') {
+          current = ev.text ?? '';
+          show();
+        } else if (ev.type === 'segment') {
+          const raw = (ev.text ?? '').trim();
+          current = '';
+          const end = capturedSamples;
+          if (raw.length > 0) {
+            const segment: PhoneSegment = { raw };
+            segments.push(segment);
+            if (tidy && end > segmentStart) tidyUp(segment, cutSegment(segmentStart, end));
+          }
+          segmentStart = end;
+          show();
+        } else if (ev.type === 'end') {
+          ended = true;
+          onEnd?.();
+        } else if (ev.type === 'error') {
+          void fail(`the phone's recogniser failed: ${ev.message ?? 'unknown error'}`);
+        }
+      });
+      if (closed) {
+        void speech.cancel().catch(() => undefined);
+        return;
+      }
+      micStarted = await openMic(
+        (pcm) => {
+          pcmAll.push(pcm);
+          capturedSamples += pcm.length;
+        },
+        (m) => void fail(`dictation mic failed: ${m}`),
+        () => closed,
+      );
+      if (micStarted && closed && !finished) await stopMicCapture().catch(() => undefined);
+    } catch (e) {
+      void fail(`dictation setup failed: ${(e as Error).message}`);
+    }
+  })();
+
+  return {
+    async finish(send: boolean): Promise<DictationOutcome> {
+      if (finished) return { kind: 'discarded' };
+      finished = true;
+      await started;
+      if (micStarted) {
+        if (send)
+          await withTimeout(stopMicCapture(), STOP_MIC_TIMEOUT_MS, 'stopping the microphone');
+        else await stopMicCapture().catch(() => undefined);
+      }
+      if (!send || failed || !speech) {
+        closed = true;
+        void speech?.cancel().catch(() => undefined);
+        return { kind: 'discarded' };
+      }
+      const session = speech;
+      if (!ended) {
+        await withTimeout(
+          new Promise<void>((resolve) => {
+            onEnd = resolve;
+            void session.stop();
+          }),
+          LIVE_FINISH_TIMEOUT_MS,
+          "the phone's recogniser",
+        );
+      }
+      if (failed) throw new Error("the phone's recogniser failed while finishing");
+      if (current.length > 0) {
+        segments.push({ raw: current.trim() });
+        current = '';
+      }
+      if (tidying.size > 0) {
+        await Promise.race([
+          Promise.allSettled([...tidying]),
+          new Promise((r) => setTimeout(r, TRANSCRIBE_TIMEOUT_MS)),
+        ]);
+      }
+      closed = true;
+      return outcomeOf(text(), pcmAll);
     },
   };
 }

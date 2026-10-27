@@ -267,6 +267,8 @@ export interface WebBotAuthStatus {
 }
 
 export type VoiceBackend = 'local' | 'gemini' | 'openai';
+/** Dictation's engines: the call surfaces' three plus streaming `deepgram`. */
+export type DictationBackend = VoiceBackend | 'deepgram';
 export type VoiceLayer = 'direct' | 'light' | 'heavy';
 export type VoiceHandoff = 'auto' | 'always' | 'never';
 export interface VoiceSurfaceConfig {

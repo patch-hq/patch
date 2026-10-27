@@ -89,6 +89,7 @@ import {
   TextInput,
   View,
   useWindowDimensions,
+  Platform,
 } from 'react-native';
 import {
   Mic,
@@ -153,6 +154,7 @@ import {
   dictationMaxHeight,
 } from '../lib/composerHeight';
 import { startDictation, warmDictation, type DictationHandle } from '../lib/dictation';
+import { dictationEngineFor } from '../lib/dictationEngine';
 import { startDictationMode, type DictationModeHandle } from '../lib/dictationMode';
 import { voiceKeyRefusal } from '../lib/voiceKeys';
 import { usePresenceStore } from '../stores/presenceStore';
@@ -755,9 +757,17 @@ export function Composer({
   );
 
   function beginDictation(): void {
+    // spec/07 § Dictation engines. Settings are loaded at launch; before they
+    // are, the upload path runs, and the host still transcribes with whatever
+    // engine the account chose — only the phone recogniser waits for them.
+    const dictationConfig = useSettingsStore.getState().data?.preferences.voiceConfig.dictation;
+    const { engine, tidy } = dictationConfig
+      ? dictationEngineFor(dictationConfig, Platform.OS)
+      : { engine: 'whisper' as const, tidy: false };
     // Dictation on a backend this chat's host has no key for is refused at the
-    // press, not after the user has spoken (the host refuses it too).
-    const refusal = voiceKeyRefusal(chatId, 'dictation');
+    // press, not after the user has spoken (the host refuses it too). The
+    // phone's recogniser needs no key.
+    const refusal = engine === 'phone' ? null : voiceKeyRefusal(chatId, 'dictation');
     if (refusal !== null) {
       useUiStore.getState().pushError(`voice: ${refusal}`);
       return;
@@ -786,10 +796,17 @@ export function Composer({
         useUiStore.getState().pushError(`voice: ${message}`);
       },
       (message: string): void => {
-        // Preview only: the recording carries on and the transcript still lands.
+        // Preview or tidy-up only: the recording carries on and the words still land.
         if (discardedRef.current) return;
-        useUiStore.getState().pushError(`voice: live preview unavailable — ${message}`);
+        useUiStore
+          .getState()
+          .pushError(
+            engine === 'whisper'
+              ? `voice: live preview unavailable — ${message}`
+              : `voice: ${message}`,
+          );
       },
+      { engine, tidy },
     );
   }
 

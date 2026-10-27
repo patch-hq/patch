@@ -2039,7 +2039,14 @@ const VoiceSurfaceSetting = z
 /** Per-surface voice config (spec/07 § Voice is a config matrix). */
 export const VoiceConfigSetting = z
   .object({
-    dictation: z.object({ backend: VoiceBackendSetting }).strict(),
+    dictation: z
+      .object({
+        backend: z.enum(['local', 'gemini', 'openai', 'deepgram']),
+        // Absent in settings saved before the dictation engines existed.
+        phone: z.boolean().default(false),
+        tidy: z.boolean().default(false),
+      })
+      .strict(),
     device: VoiceSurfaceSetting,
     handsFree: VoiceSurfaceSetting,
     call: VoiceSurfaceSetting,
@@ -2258,7 +2265,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   // Every surface starts on the free, self-hosted pipeline talking straight to
   // Manager; each hosted cell is a deliberate opt-in.
   voiceConfig: {
-    dictation: { backend: 'local' },
+    dictation: { backend: 'local', phone: false, tidy: false },
     device: { backend: 'local', layer: 'direct', handoff: 'auto' },
     handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
     call: { backend: 'local', layer: 'direct', handoff: 'auto' },
@@ -2338,6 +2345,7 @@ export const SharedSecrets = z
         gemini: z.string().min(1).optional(),
         openai: z.string().min(1).optional(),
         groq: z.string().min(1).optional(),
+        deepgram: z.string().min(1).optional(),
       })
       .strict(),
   })
@@ -2646,7 +2654,10 @@ export const HostInfoEvent = z
      * surface's sessions with `voice_key_missing`. Absent = a host older than
      * this report, which says nothing either way.
      */
-    voiceKeys: z.object({ gemini: z.boolean(), openai: z.boolean() }).strict().optional(),
+    voiceKeys: z
+      .object({ gemini: z.boolean(), openai: z.boolean(), deepgram: z.boolean().optional() })
+      .strict()
+      .optional(),
     /**
      * spec/07 § Call cost — what this host's voice calls have cost, this
      * calendar month (UTC) and in all. Absent = a host older than call
@@ -8144,6 +8155,12 @@ export const PatchVoiceNoteTranscribeRequestEvent = z
     format: z.enum(['m4a', 'wav']),
     /** The clip bytes, base64-encoded (JSON codec has no binary frame). */
     audioBase64: z.string().min(1),
+    /**
+     * `whisper`: transcribe with the host's Whisper whatever the dictation
+     * engine is — the phone's tidy-up pass over one finished phrase (spec/07 §
+     * Dictation engines). Absent: the configured dictation engine.
+     */
+    engine: z.literal('whisper').optional(),
   })
   .strict();
 export type PatchVoiceNoteTranscribeRequestEvent = z.infer<

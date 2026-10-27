@@ -118,6 +118,8 @@ describe('audio server — voice config matrix selection', () => {
   async function startServer(opts: {
     voiceConfig?: Partial<VoiceConfig>;
     geminiApiKey?: string;
+    deepgramApiKey?: string;
+    deepgramWsUrl?: string;
   }): Promise<AudioServerHandle & { port: number }> {
     const voiceConfig: VoiceConfig = { ...DEFAULT_VOICE_CONFIG, ...opts.voiceConfig };
     const handle = await startAudioServer({
@@ -134,6 +136,8 @@ describe('audio server — voice config matrix selection', () => {
       getVoiceConfig: () => voiceConfig,
       ...(opts.geminiApiKey !== undefined ? { geminiApiKey: opts.geminiApiKey } : {}),
       geminiWsCtor: makeGeminiWsCtor(),
+      ...(opts.deepgramApiKey !== undefined ? { deepgramApiKey: opts.deepgramApiKey } : {}),
+      ...(opts.deepgramWsUrl !== undefined ? { deepgramWsUrl: opts.deepgramWsUrl } : {}),
     });
     const addr = handle.address();
     return Object.assign(handle, { port: addr.port });
@@ -236,6 +240,102 @@ describe('audio server — voice config matrix selection', () => {
         'Switch Dictation to another backend in Settings → Voice.',
     });
     expect(instances.length).toBe(0);
+    ws.close();
+  });
+
+  function dictationStart(sessionId: string): string {
+    return encodeAudio({
+      type: 'audio.session_start',
+      sessionId,
+      accountId: 'a',
+      surfaceId: 'surf',
+      surfaceKind: 'mobile',
+      chatId: 'c1',
+      role: 'voice-note',
+      token: mintToken({ accountId: 'a', surfaceId: 'surf', sessionId, chatId: 'c1' }),
+      surfaceHasAec: true,
+    });
+  }
+  const dictation = (tidy = false): Partial<VoiceConfig> => ({
+    dictation: { backend: 'deepgram', phone: false, tidy },
+  });
+
+  test("dictation on 'deepgram' with no DEEPGRAM_API_KEY refuses the session", async () => {
+    server = await startServer({ voiceConfig: dictation() });
+    const ws = await openSocket(server.port, 's-dg-nokey');
+    ws.send(dictationStart('s-dg-nokey'));
+    const msg = await recvOne(ws);
+    expect(msg).toMatchObject({
+      type: 'audio.error',
+      code: 'voice_key_missing',
+      message: expect.stringContaining('DEEPGRAM_API_KEY'),
+    });
+    ws.close();
+  });
+
+  test("dictation on 'deepgram' streams to Deepgram and a finish answers with its words", async () => {
+    const { WebSocketServer } = await import('ws');
+    const dg = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+    await new Promise<void>((r) => dg.on('listening', () => r()));
+    let binary = 0;
+    dg.on('connection', (sock) => {
+      sock.on('message', (data, isBinary) => {
+        if (isBinary) {
+          binary += 1;
+          return;
+        }
+        if ((JSON.parse(String(data)) as { type: string }).type === 'Finalize') {
+          sock.send(
+            JSON.stringify({
+              type: 'Results',
+              start: 0,
+              duration: 1,
+              is_final: true,
+              from_finalize: true,
+              channel: { alternatives: [{ transcript: 'buy oat milk' }] },
+            }),
+          );
+        }
+      });
+    });
+    try {
+      server = await startServer({
+        voiceConfig: dictation(),
+        deepgramApiKey: 'dg-test-key-0000000000',
+        deepgramWsUrl: `ws://127.0.0.1:${(dg.address() as { port: number }).port}/v1/listen`,
+      });
+      const ws = await openSocket(server.port, 's-dg-1');
+      const events: AudioEvent[] = [];
+      ws.on('message', (d: Buffer, isBinary: boolean) => {
+        if (!isBinary) events.push(decodeAudio(d));
+      });
+      ws.send(dictationStart('s-dg-1'));
+      ws.send(encodeAudio({ type: 'audio.pcm16', ts: 1, sampleRate: 16000, samples: 640 }));
+      ws.send(Buffer.alloc(1280), { binary: true });
+      for (let i = 0; i < 100 && binary === 0; i++) await new Promise((r) => setTimeout(r, 20));
+      expect(binary).toBe(1);
+      ws.send(encodeAudio({ type: 'audio.dictation_finish', sessionId: 's-dg-1' }));
+      for (let i = 0; i < 100 && !events.some((e) => e.type === 'audio.transcript_final'); i++) {
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      expect(events.find((e) => e.type === 'audio.transcript_final')).toMatchObject({
+        text: 'buy oat milk',
+      });
+      ws.close();
+    } finally {
+      await new Promise<void>((r) => dg.close(() => r()));
+    }
+  });
+
+  test('a dictation finish on a non-streaming engine is refused, not ignored', async () => {
+    server = await startServer({});
+    const ws = await openSocket(server.port, 's-dg-local');
+    ws.send(dictationStart('s-dg-local'));
+    await new Promise((r) => setTimeout(r, 50));
+    ws.send(encodeAudio({ type: 'audio.dictation_finish', sessionId: 's-dg-local' }));
+    let msg = await recvOne(ws);
+    while (msg.type !== 'audio.error') msg = await recvOne(ws);
+    expect(msg).toMatchObject({ code: 'invalid_frame' });
     ws.close();
   });
 

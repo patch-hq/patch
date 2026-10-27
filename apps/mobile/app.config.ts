@@ -13,7 +13,7 @@ const EAS_PROJECT_ID = '07ef948a-199a-4689-ad8b-24d6b87300c4';
 const config: ExpoConfig = {
   name: 'Patch',
   slug: 'patch',
-  version: '0.1.7',
+  version: '0.1.8',
   icon: './assets/icon.png',
   orientation: 'portrait',
   scheme: 'patch',
@@ -63,7 +63,11 @@ const config: ExpoConfig = {
   // Bumped to 0.1.7 for the native Android theme: AppTheme is DayNight with
   // night-qualified window/status-bar colours, re-applied by MainActivity on a
   // scheme switch (uiMode is handled in-process). Native, so it needs a fresh APK.
-  runtimeVersion: '0.1.7',
+  //
+  // Bumped to 0.1.8 for PatchSpeech (the phone's own recogniser for dictation)
+  // and the mic tap that feeds it: the phone engine throws when the module is
+  // missing (NO FALLBACK), so this JS must not reach a 0.1.7 APK.
+  runtimeVersion: '0.1.8',
   updates: {
     // Never contacted. The app points the updater at ITS server once paired
     // (src/lib/otaUpdates.ts), and nothing checks before that: there is no

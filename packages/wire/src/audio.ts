@@ -60,6 +60,28 @@ export function modeRequiresAddress(mode: AudioSessionMode): boolean {
 export const VoiceBackend = z.enum(['local', 'gemini', 'openai']);
 export type VoiceBackend = z.infer<typeof VoiceBackend>;
 
+/**
+ * What transcribes dictation (spec/07 § Dictation engines). The call surfaces'
+ * three plus `deepgram`, which streams: it is the only one whose live words
+ * arrive as they are spoken rather than by re-reading the recording so far.
+ * Deepgram is STT only, so it exists for dictation and nowhere else.
+ */
+export const DictationBackend = z.enum(['local', 'gemini', 'openai', 'deepgram']);
+export type DictationBackend = z.infer<typeof DictationBackend>;
+
+/**
+ * The dictation cell (spec/07 § Dictation engines). `phone`: on Android, the
+ * phone's own speech recogniser makes the words and `backend` is only used by
+ * web and desktop. `tidy`: every finished phrase of a live engine (the phone,
+ * or `deepgram`) is read again by Whisper and swapped in place as dictation
+ * goes on.
+ */
+export interface DictationConfig {
+  backend: DictationBackend;
+  phone: boolean;
+  tidy: boolean;
+}
+
 export const VoiceLayer = z.enum(['direct', 'light', 'heavy']);
 export type VoiceLayer = z.infer<typeof VoiceLayer>;
 
@@ -80,14 +102,14 @@ export interface VoiceSurfaceConfig {
 }
 
 export interface VoiceConfig {
-  dictation: { backend: VoiceBackend };
+  dictation: DictationConfig;
   device: VoiceSurfaceConfig;
   handsFree: VoiceSurfaceConfig;
   call: VoiceSurfaceConfig;
 }
 
 export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
-  dictation: { backend: 'local' },
+  dictation: { backend: 'local', phone: false, tidy: false },
   device: { backend: 'local', layer: 'direct', handoff: 'auto' },
   handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
   call: { backend: 'local', layer: 'direct', handoff: 'auto' },
@@ -127,7 +149,7 @@ export function deriveVoiceSurface(args: {
 export function voiceCellFor(
   config: VoiceConfig,
   surface: VoiceSurface,
-): { backend: VoiceBackend; layer?: VoiceLayer; handoff?: VoiceHandoff } {
+): { backend: DictationBackend; layer?: VoiceLayer; handoff?: VoiceHandoff } {
   if (surface === 'dictation') return config.dictation;
   if (surface === 'hands-free') return config.handsFree;
   return config[surface];
@@ -152,12 +174,13 @@ export function modesShareVoiceEngine(
 }
 
 /** A backend that runs on a provider's API and so needs a key on the host. */
-export type HostedVoiceBackend = Exclude<VoiceBackend, 'local'>;
+export type HostedVoiceBackend = Exclude<DictationBackend, 'local'>;
 
 /** The env var each hosted backend reads its key from on a host. */
 export const VOICE_BACKEND_KEY_ENV: Record<HostedVoiceBackend, string> = {
   gemini: 'GEMINI_API_KEY',
   openai: 'OPENAI_REALTIME_API_KEY',
+  deepgram: 'DEEPGRAM_API_KEY',
 };
 
 /** How each surface is named on every screen, Settings → Voice included. */
@@ -177,6 +200,8 @@ export const VOICE_SURFACE_LABEL: Record<VoiceSurface, string> = {
 export interface VoiceKeys {
   gemini: boolean;
   openai: boolean;
+  /** Absent on a host older than Deepgram dictation, which cannot run it. */
+  deepgram?: boolean;
 }
 
 /**
@@ -199,7 +224,7 @@ export function voiceKeyMissingMessage(surface: VoiceSurface, backend: HostedVoi
  * counted either way.
  */
 export function voiceKeyHostStatus(
-  backend: VoiceBackend,
+  backend: DictationBackend,
   hosts: ReadonlyArray<{ hostName: string; voiceKeys?: VoiceKeys | undefined }>,
 ): string | null {
   if (backend === 'local') return null;
@@ -221,7 +246,7 @@ export function voiceSurfacesMissingKey(
   const out: Array<{ surface: VoiceSurface; backend: HostedVoiceBackend; env: string }> = [];
   for (const surface of surfaces) {
     const { backend } = voiceCellFor(config, surface);
-    if (backend === 'local' || keys[backend]) continue;
+    if (backend === 'local' || keys[backend] === true) continue;
     out.push({ surface, backend, env: VOICE_BACKEND_KEY_ENV[backend] });
   }
   return out;
@@ -360,6 +385,21 @@ export const AudioSessionEndEvent = z
   })
   .strict();
 export type AudioSessionEndEvent = z.infer<typeof AudioSessionEndEvent>;
+
+/**
+ * Surface → host: the user has stopped dictating on a streaming engine
+ * (spec/07 § Dictation engines). The host flushes the engine, waits for the
+ * last words (and, with tidy-up on, for Whisper's pass over the last phrase)
+ * and answers with one `audio.transcript_final` carrying the whole dictation.
+ * The live text already is the transcript, so nothing is transcribed again.
+ */
+export const AudioDictationFinishEvent = z
+  .object({
+    type: z.literal('audio.dictation_finish'),
+    sessionId: z.string().min(1),
+  })
+  .strict();
+export type AudioDictationFinishEvent = z.infer<typeof AudioDictationFinishEvent>;
 
 // --- streaming frames ------------------------------------------------------
 
@@ -542,6 +582,13 @@ export const AudioErrorCode = z.enum([
    * Never answered by running `local` instead; never a reason not to boot.
    */
   'voice_key_missing',
+  /**
+   * Dictation on the `deepgram` engine: the streaming connection could not
+   * open, or Deepgram failed mid-dictation. The live words ARE the transcript
+   * on this engine, so the dictation has failed and the surface says so. Never
+   * answered by quietly transcribing with another engine.
+   */
+  'deepgram_unavailable',
 ]);
 export type AudioErrorCode = z.infer<typeof AudioErrorCode>;
 
@@ -562,6 +609,7 @@ export const AudioEvent = z.discriminatedUnion('type', [
   AudioSessionEndEvent,
   AudioModeEvent,
   AudioSpeakEvent,
+  AudioDictationFinishEvent,
   AudioPcm16Event,
   AudioTranscriptPartialEvent,
   AudioTranscriptFinalEvent,
@@ -579,6 +627,7 @@ export const AUDIO_EVENT_SCHEMAS = {
   'audio.session_end': AudioSessionEndEvent,
   'audio.mode': AudioModeEvent,
   'audio.speak': AudioSpeakEvent,
+  'audio.dictation_finish': AudioDictationFinishEvent,
   'audio.pcm16': AudioPcm16Event,
   'audio.transcript_partial': AudioTranscriptPartialEvent,
   'audio.transcript_final': AudioTranscriptFinalEvent,

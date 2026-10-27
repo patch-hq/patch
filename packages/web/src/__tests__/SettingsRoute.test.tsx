@@ -696,7 +696,7 @@ describe('Settings → Voice', () => {
           ...usePreferencesStore.getState().preferences,
           // the user's live config, 2026-09-24.
           voiceConfig: {
-            dictation: { backend: 'gemini' },
+            dictation: { backend: 'gemini', phone: false, tidy: false },
             device: { backend: 'openai', layer: 'light', handoff: 'auto' },
             handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
             call: { backend: 'local', layer: 'direct', handoff: 'auto' },
@@ -731,7 +731,7 @@ describe('Settings → Voice', () => {
         preferences: {
           ...usePreferencesStore.getState().preferences,
           voiceConfig: {
-            dictation: { backend: 'gemini' },
+            dictation: { backend: 'gemini', phone: false, tidy: false },
             device: { backend: 'local', layer: 'direct', handoff: 'auto' },
             handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
             call: { backend: 'local', layer: 'direct', handoff: 'auto' },
@@ -774,13 +774,39 @@ describe('Settings → Voice', () => {
       await waitFor(() => expect(server.writes).toHaveLength(1));
       const cfg = server.writes[0]!.voiceConfig as Record<string, unknown>;
       expect(cfg.call).toEqual({ backend: 'openai', layer: 'light', handoff: 'auto' });
-      expect(cfg.dictation).toEqual({ backend: 'local' });
+      expect(cfg.dictation).toEqual({ backend: 'local', phone: false, tidy: false });
       await waitFor(() =>
         expect(screen.getByTestId('voice-call-engine-openai-mini')).toHaveAttribute(
           'aria-pressed',
           'true',
         ),
       );
+    });
+
+    it('dictation offers Deepgram and keeps its two switches when the engine changes', async () => {
+      const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
+      vi.stubGlobal('fetch', makeFetch({}, server.handler));
+      renderSettings('/settings/voice');
+      fireEvent.click(await screen.findByTestId('voice-dictation-engine-deepgram'));
+      await waitFor(() => expect(server.writes).toHaveLength(1));
+      expect((server.writes[0]!.voiceConfig as Record<string, unknown>).dictation).toEqual({
+        backend: 'deepgram',
+        phone: false,
+        tidy: false,
+      });
+    });
+
+    it('the phone recogniser and Whisper tidy-up are switches on the dictation cell', async () => {
+      const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
+      vi.stubGlobal('fetch', makeFetch({}, server.handler));
+      renderSettings('/settings/voice');
+      fireEvent.click(await screen.findByTestId('dictation-tidy-toggle'));
+      await waitFor(() => expect(server.writes).toHaveLength(1));
+      expect((server.writes[0]!.voiceConfig as Record<string, unknown>).dictation).toEqual({
+        backend: 'local',
+        phone: false,
+        tidy: true,
+      });
     });
 
     it('pressing the engine already chosen writes nothing', async () => {
@@ -840,7 +866,7 @@ describe('Settings → Voice', () => {
         preferences: {
           ...usePreferencesStore.getState().preferences,
           voiceConfig: {
-            dictation: { backend: 'local' },
+            dictation: { backend: 'local', phone: false, tidy: false },
             device: { backend: 'gemini', layer: 'light', handoff: 'auto' },
             handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
             call: { backend: 'local', layer: 'direct', handoff: 'auto' },

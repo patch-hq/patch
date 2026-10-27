@@ -12,6 +12,10 @@
 //            request per clip.
 //   gemini — `models/<m>:generateContent` with the clip inline and a
 //            transcribe-verbatim instruction, one request per clip.
+//   deepgram — `POST /v1/listen` (nova-3), one request per clip. This is only
+//            the CLIP path (a voice note, an upload): a live dictation on
+//            deepgram streams instead (deepgram-dictation.ts) and its live
+//            words are the transcript.
 //
 // Neither offers live partials (`supportsLivePartials: false`): the interim
 // preview is produced by RE-transcribing the growing utterance about once a
@@ -26,7 +30,7 @@
 // is never answered by quietly transcribing with Whisper instead.
 
 import type { Logger } from 'pino';
-import { voiceKeyMissingMessage, type VoiceBackend } from '@patch/wire/audio';
+import { voiceKeyMissingMessage, type DictationBackend } from '@patch/wire/audio';
 import {
   pcm16ToWav,
   type ClipOptions,
@@ -40,6 +44,8 @@ export const DEFAULT_OPENAI_TRANSCRIBE_MODEL = 'gpt-4o-mini-transcribe';
 export const DEFAULT_GEMINI_TRANSCRIBE_MODEL = 'gemini-3.8-flash';
 
 const OPENAI_TRANSCRIBE_URL = 'https://api.openai.com/v1/audio/transcriptions';
+export const DEEPGRAM_MODEL = 'nova-3';
+const DEEPGRAM_LISTEN_URL = 'https://api.deepgram.com/v1/listen';
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
 const GEMINI_TRANSCRIBE_PROMPT =
@@ -52,7 +58,7 @@ type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 export class HostedSttError extends Error {
   override readonly name = 'HostedSttError';
   constructor(
-    readonly backend: Exclude<VoiceBackend, 'local'>,
+    readonly backend: Exclude<DictationBackend, 'local'>,
     message: string,
   ) {
     super(message);
@@ -208,10 +214,65 @@ export class GeminiTranscribeBackend implements WhisperBackend {
   async close(): Promise<void> {}
 }
 
+export class DeepgramTranscribeBackend implements WhisperBackend {
+  readonly supportsLivePartials = false;
+  private readonly opts: HostedSttBase;
+  constructor(opts: HostedSttBase) {
+    this.opts = opts;
+  }
+
+  async transcribe(pcm: Int16Array): Promise<string> {
+    return this.transcribeClip(pcm16ToWav(pcm, 16000), 'wav');
+  }
+
+  async transcribeClip(audio: Buffer, format: 'm4a' | 'wav'): Promise<string> {
+    const apiKey = readKey(this.opts.apiKey);
+    if (apiKey === undefined) {
+      throw new HostedSttError('deepgram', 'DEEPGRAM_API_KEY is no longer set on this host');
+    }
+    const url = `${DEEPGRAM_LISTEN_URL}?${new URLSearchParams({
+      model: this.opts.model ?? DEEPGRAM_MODEL,
+      language: 'en',
+      smart_format: 'true',
+    }).toString()}`;
+    const doFetch = this.opts.fetchImpl ?? fetch;
+    let res: Response;
+    try {
+      res = await doFetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Token ${apiKey}`, 'Content-Type': mimeFor(format) },
+        body: new Uint8Array(audio.buffer, audio.byteOffset, audio.byteLength),
+      });
+    } catch (err) {
+      throw new HostedSttError(
+        'deepgram',
+        `Deepgram transcription request failed: ${(err as Error).message}`,
+      );
+    }
+    if (!res.ok) {
+      throw new HostedSttError(
+        'deepgram',
+        `Deepgram transcription failed: ${await failureText(res)}`,
+      );
+    }
+    const json = (await res.json()) as {
+      results?: { channels?: Array<{ alternatives?: Array<{ transcript?: unknown }> }> };
+    };
+    const transcript = json.results?.channels?.[0]?.alternatives?.[0]?.transcript;
+    if (typeof transcript !== 'string') {
+      throw new HostedSttError('deepgram', 'Deepgram transcription returned no transcript');
+    }
+    return transcript.trim();
+  }
+
+  async close(): Promise<void> {}
+}
+
 export interface DictationTranscribers {
   local: WhisperBackend;
   gemini?: WhisperBackend | undefined;
   openai?: WhisperBackend | undefined;
+  deepgram?: WhisperBackend | undefined;
 }
 
 /**
@@ -220,11 +281,11 @@ export interface DictationTranscribers {
  * Never substitutes `local` for a hosted choice.
  */
 export function pickDictationTranscriber(
-  backend: VoiceBackend,
+  backend: DictationBackend,
   transcribers: DictationTranscribers,
 ):
   | { ok: true; whisper: WhisperBackend }
-  | { ok: false; backend: 'gemini' | 'openai'; message: string } {
+  | { ok: false; backend: Exclude<DictationBackend, 'local'>; message: string } {
   if (backend === 'local') return { ok: true, whisper: transcribers.local };
   const t = transcribers[backend];
   if (t) return { ok: true, whisper: t };
@@ -244,6 +305,7 @@ export function createDictationTranscribers(opts: {
   geminiModel?: string | undefined;
   openaiApiKey?: KeySource;
   openaiModel?: string | undefined;
+  deepgramApiKey?: KeySource;
 }): DictationTranscribers {
   const gemini = new GeminiTranscribeBackend({
     logger: opts.logger,
@@ -255,8 +317,15 @@ export function createDictationTranscribers(opts: {
     apiKey: opts.openaiApiKey,
     ...(opts.openaiModel ? { model: opts.openaiModel } : {}),
   });
+  const deepgram = new DeepgramTranscribeBackend({
+    logger: opts.logger,
+    apiKey: opts.deepgramApiKey,
+  });
   return {
     local: opts.local,
+    get deepgram(): WhisperBackend | undefined {
+      return readKey(opts.deepgramApiKey) !== undefined ? deepgram : undefined;
+    },
     get gemini(): WhisperBackend | undefined {
       return readKey(opts.geminiApiKey) !== undefined ? gemini : undefined;
     },

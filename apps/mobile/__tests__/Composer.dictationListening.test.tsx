@@ -9,7 +9,7 @@
 // exactly as Composer.voice.test.tsx does.
 
 import React from 'react';
-import { Keyboard, __setWindowDimensions } from 'react-native';
+import { Keyboard, Platform, __setWindowDimensions } from 'react-native';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   actAsync,
@@ -79,6 +79,53 @@ afterEach(() => {
 
 const mic = (r: ReturnType<typeof renderRN>): Record<string, () => void> =>
   findHost(r.root, byLabel('Dictate into message')).props as Record<string, () => void>;
+
+describe('Composer — the dictation engine follows the account setting', () => {
+  function withDictation(dictation: {
+    backend: 'local' | 'deepgram';
+    phone: boolean;
+    tidy: boolean;
+  }): void {
+    const data = settingsFixture();
+    data.preferences = {
+      ...data.preferences,
+      voiceConfig: { ...data.preferences.voiceConfig, dictation },
+    };
+    useSettingsStore.setState({ data, error: null });
+  }
+  afterEach(() => {
+    Platform.OS = 'test';
+  });
+
+  it('on Android with the phone recogniser on, the phone dictates with tidy-up as set', async () => {
+    Platform.OS = 'android';
+    withDictation({ backend: 'local', phone: true, tidy: true });
+    const { factory } = makeFactory();
+    const r = renderRN(<Composer chatId="c1" dictationFactory={factory} />);
+    await actAsync(() => mic(r)['onPress']!());
+    expect(factory).toHaveBeenCalledWith(
+      'c1',
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(Function),
+      { engine: 'phone', tidy: true },
+    );
+  });
+
+  it('Deepgram streams, and the phone switch means nothing off Android', async () => {
+    withDictation({ backend: 'deepgram', phone: true, tidy: false });
+    const { factory } = makeFactory();
+    const r = renderRN(<Composer chatId="c1" dictationFactory={factory} />);
+    await actAsync(() => mic(r)['onPress']!());
+    expect(factory).toHaveBeenCalledWith(
+      'c1',
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(Function),
+      { engine: 'stream', tidy: false },
+    );
+  });
+});
 
 describe('Composer — starting a dictation puts the keyboard away', () => {
   it('a tap-started dictation dismisses the keyboard', async () => {

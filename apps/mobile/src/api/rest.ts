@@ -250,6 +250,8 @@ export interface SettingsResponse {
 }
 
 export type VoiceBackend = 'local' | 'gemini' | 'openai';
+/** Dictation's engines: the call surfaces' three plus streaming `deepgram`. */
+export type DictationBackend = VoiceBackend | 'deepgram';
 export type VoiceLayer = 'direct' | 'light' | 'heavy';
 export type VoiceHandoff = 'auto' | 'always' | 'never';
 export interface VoiceSurfaceConfig {
@@ -638,7 +640,10 @@ export const api = {
    * `format: 'wav'` from the `.wav` extension / mimetype
    * (`packages/server/src/voice/note.ts`), so no server change was needed.
    */
-  voiceTranscribe: async (fileUri: string): Promise<{ ok: true; transcript: string }> => {
+  voiceTranscribe: async (
+    fileUri: string,
+    opts?: { engine?: 'whisper' },
+  ): Promise<{ ok: true; transcript: string }> => {
     const cred = loadCredential();
     const headers = new Headers();
     if (cred) headers.set('authorization', `Bearer ${cred}`);
@@ -649,6 +654,8 @@ export const api = {
       name: 'dictation.wav',
       type: 'audio/wav',
     } as unknown as Blob);
+    // The phone recogniser's tidy-up asks for Whisper whatever the dictation engine.
+    if (opts?.engine) form.append('engine', opts.engine);
     const res = await fetch(apiUrl('/api/voice/transcribe'), {
       method: 'POST',
       headers,

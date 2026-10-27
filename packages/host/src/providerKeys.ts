@@ -49,6 +49,7 @@ const KeysFile = z
         gemini: z.string().min(1).optional(),
         openai: z.string().min(1).optional(),
         groq: z.string().min(1).optional(),
+        deepgram: z.string().min(1).optional(),
       })
       .strict(),
   })
