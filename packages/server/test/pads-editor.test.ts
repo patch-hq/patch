@@ -52,7 +52,7 @@ describe('pad editor in a browser', () => {
 
   let n = 0;
   /** A fresh Pad (two screens) — each test owns one, so a retry never inherits state. */
-  const newPad = async (): Promise<string> => {
+  const newPad = async (extraFiles: { path: string; base64: string }[] = []): Promise<string> => {
     const requestId = `create-${++n}`;
     link.emit({
       type: 'patch.pad.request',
@@ -63,6 +63,7 @@ describe('pad editor in a browser', () => {
       files: [
         { path: 'index.html', base64: Buffer.from(home('Home')).toString('base64') },
         { path: 'other.html', base64: Buffer.from(home('Other')).toString('base64') },
+        ...extraFiles,
       ],
     } as WireEvent);
     for (let i = 0; i < 200; i++) {
@@ -179,6 +180,35 @@ describe('pad editor in a browser', () => {
     await expect
       .poll(() => other.frameLocator('#frame').locator('[data-pad-add]').textContent())
       .toBe('Brand new line');
+    await ctx.close();
+  });
+
+  it('phone: a 1440-wide screen is scaled to fit the pane, the name stays on one line, and edits map back to design pixels', async () => {
+    const manifest = {
+      screens: [
+        {
+          id: 'wide',
+          name: 'A very long screen name that would wrap onto a second line',
+          path: 'index.html',
+          width: 1440,
+        },
+      ],
+    };
+    const frameUrl = await newPad([
+      { path: 'pad.json', base64: Buffer.from(JSON.stringify(manifest)).toString('base64') },
+    ]);
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 800 }, hasTouch: true });
+    const page = await ctx.newPage();
+    await page.goto(frameUrl);
+    await page.frameLocator('#frame').locator('#t').waitFor();
+    const wrap = await page.locator('#wrap').boundingBox();
+    expect(Math.round(wrap!.width)).toBeLessThanOrEqual(390);
+    expect(await page.locator('#wrap').getAttribute('data-scale')).toBe(String(390 / 1440));
+    expect(
+      await page.evaluate(() => document.getElementById('stage')!.scrollWidth <= innerWidth),
+    ).toBe(true);
+    const nameBox = await page.locator('#screenName').boundingBox();
+    expect(nameBox!.height).toBeLessThan(48);
     await ctx.close();
   });
 
