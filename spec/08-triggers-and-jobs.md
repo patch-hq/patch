@@ -432,7 +432,7 @@ The older `concurrency` field is `queue` without a key. A job may carry one or t
 
 ## Concurrency
 
-A job may set `concurrency` — an integer of 1 or more — and that is how a job serialises its own fires. While the job has that many fires in flight, every further fire is queued rather than run. Omitted means no limit: every fire dispatches the moment it arrives.
+A job may set `concurrency` — an integer of 1 or more — and that is how a job serialises its own fires. While the job has that many fires in flight, every further fire is queued rather than run. Omitted means no limit: every fire dispatches the moment it arrives. The job editor has a "Max fires running at once" number field for it (its own Concurrency group, above Run window); empty means no limit, and emptying it on a job that had one saves `null` to remove it.
 
 This matters for the high-volume triggers. A Todoist project that gets thirty tasks dropped into it at once fires a `spawn` job thirty times, and without a limit that is thirty chats starting together on one machine, in one working tree. `concurrency: 1` turns the same thirty fires into thirty builds, one after another.
 

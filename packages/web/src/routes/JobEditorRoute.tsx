@@ -697,6 +697,10 @@ interface FormState {
   gateCommand: string;
   /** Empty string means the 60s default. */
   gateTimeoutMs: string;
+  /** Max simultaneous fires (spec/08 § Concurrency). Empty string means no limit. */
+  concurrency: string;
+  /** True when the loaded job had a limit, so emptying the field must save `null` to remove it. */
+  loadedConcurrency: boolean;
   /** The run window (spec/08 § Run window). `windowOn` is editor state: unticked saves `window: null`. */
   windowOn: boolean;
   windowStart: string;
@@ -765,6 +769,8 @@ const DEFAULT_FORM: FormState = {
   messagePrompt: '',
   messageSkill: '',
   gateOn: false,
+  concurrency: '',
+  loadedConcurrency: false,
   gateHostId: '',
   gateFolder: '',
   gateCommand: '',
@@ -1208,7 +1214,8 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
       }
     }
     const body = formToBody(form);
-    if (isNew) createMut.mutate(body);
+    // `concurrency: null` is only ever written for a loaded job, never a new one.
+    if (isNew) createMut.mutate(body as JobCreateBody);
     else patchMut.mutate(body);
   }
 
@@ -1395,7 +1402,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
             once expired. A `oneOff` job retires itself after its first fire
             settles `ok`; `expiredAt`'s presence IS "already has" (there is no
             separate flag to fall out of step with it — see `isExpiredJob`).
-            Read-only here, the same as the Queue panel's concurrency limit:
+            Read-only here:
             both are real stored fields with no editable control on this page,
             set instead through the agent tools (`patch_job_create`/`update`). */}
         {!isNew && (data as Job | undefined)?.oneOff ? (
@@ -2026,6 +2033,30 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
               </label>
             </>
           ) : null}
+        </section>
+
+        <section className="form-group" data-testid="group-concurrency">
+          <h2 className="form-group-title">
+            Concurrency <span className="form-group-opt">· optional</span>
+          </h2>
+          <label>
+            Max fires running at once
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={form.concurrency}
+              onChange={(e) => {
+                const next = e.target.value;
+                setForm((f) => ({ ...f, concurrency: next }));
+              }}
+              placeholder="No limit"
+              data-testid="job-concurrency"
+            />
+            <p className="field-hint">
+              Further fires queue until a slot frees. Empty means no limit.
+            </p>
+          </label>
         </section>
 
         <section className="form-group" data-testid="group-window">
@@ -2814,6 +2845,10 @@ function jobToForm(job: Job): FormState {
     f.gateCommand = job.gate.command;
     f.gateTimeoutMs = job.gate.timeoutMs === undefined ? '' : String(job.gate.timeoutMs);
   }
+  if (job.concurrency !== undefined) {
+    f.concurrency = String(job.concurrency);
+    f.loadedConcurrency = true;
+  }
   if (job.window) {
     f.windowOn = true;
     f.windowStart = job.window.start;
@@ -2861,7 +2896,9 @@ function jobToForm(job: Job): FormState {
   return f;
 }
 
-function formToBody(form: FormState): JobCreateBody {
+function formToBody(
+  form: FormState,
+): Omit<JobCreateBody, 'concurrency'> & { concurrency?: number | null } {
   let trigger: JobTrigger;
   switch (form.triggerType) {
     case 'cron':
@@ -3013,6 +3050,13 @@ function formToBody(form: FormState): JobCreateBody {
         : null,
     // Unticked is `null`, not omitted: a PATCH that omits the field leaves the
     // stored window alone (spec/08 § Run window).
+    // Empty is no limit. A job that HAD one saves `null` to remove it (an omitted
+    // key on PATCH leaves the stored limit alone); a new job just omits it.
+    ...(form.concurrency.trim() !== ''
+      ? { concurrency: Number(form.concurrency) }
+      : form.loadedConcurrency
+        ? { concurrency: null }
+        : {}),
     window: form.windowOn
       ? { start: form.windowStart, end: form.windowEnd, timezone: form.windowTimezone }
       : null,

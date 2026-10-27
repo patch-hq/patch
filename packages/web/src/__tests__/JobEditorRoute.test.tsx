@@ -878,6 +878,59 @@ describe('JobEditorRoute (single-page form)', () => {
       vi.unstubAllGlobals();
     });
 
+    for (const [typed, expected] of [
+      ['3', 3],
+      ['', null],
+    ] as const)
+      it(`concurrency field loads 2 and saves ${JSON.stringify(typed)} as ${expected}`, async () => {
+        const job = {
+          id: 'j_test1',
+          name: 'Triage',
+          enabled: true,
+          trigger: { type: 'todoist' },
+          filter: null,
+          concurrency: 2,
+          action: { type: 'spawn', hostId: 'd1', folder: '/tmp', skill: 'app-update' },
+          createdAt: 1,
+          updatedAt: 1,
+        };
+        const calls: Array<{ body: Record<string, unknown> }> = [];
+        vi.stubGlobal(
+          'fetch',
+          vi.fn(async (url: string, init?: RequestInit) => {
+            const method = (init?.method ?? 'GET').toUpperCase();
+            if (String(url).includes('/runs')) {
+              return new Response(JSON.stringify({ runs: [] }), { status: 200 });
+            }
+            if (String(url).includes('/queue')) {
+              return new Response(JSON.stringify({ concurrency: 2, inFlight: [], queued: [] }), {
+                status: 200,
+              });
+            }
+            if (method === 'PATCH') {
+              calls.push({ body: JSON.parse(String(init?.body)) });
+              return new Response(JSON.stringify({ ...job, updatedAt: 2 }), { status: 200 });
+            }
+            if (String(url).includes('/api/jobs/j_test1')) {
+              return new Response(JSON.stringify(job), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              });
+            }
+            return defaultRoute(String(url));
+          }),
+        );
+        renderEdit();
+        await screen.findByTestId('job-name');
+        const input = (await screen.findByTestId('job-concurrency')) as HTMLInputElement;
+        expect(input.value).toBe('2');
+        fireEvent.change(input, { target: { value: typed } });
+        fireEvent.click(screen.getByTestId('job-save'));
+        await waitFor(() => expect(calls.length).toBe(1));
+        expect(calls[0]?.body.concurrency).toBe(expected);
+        vi.unstubAllGlobals();
+      });
+
     it('unticking a stored hidden ensure drops the key rather than writing false', async () => {
       const job = {
         id: 'j_test1',
