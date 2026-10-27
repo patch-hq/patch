@@ -45,4 +45,25 @@ describe('mobile Settings → Chats', () => {
     });
     expect(api.setPreferences).toHaveBeenCalledWith({ statusGenerationEnabled: false });
   });
+
+  it('snooze hours default to 9 and 17, and a changed hour writes the shared settings', async () => {
+    vi.mocked(api.setPreferences).mockImplementation(async (patch) => ({
+      preferences: { ...DEFAULT_SHARED_SETTINGS, ...patch },
+    }));
+    const r = renderRN(<ChatsPage />);
+    mounted.push(r);
+    await flush();
+    const get = (id: string) => findHost(r.root, byTestId(id));
+    expect(get('snooze-morning-hour').props.value).toBe('9');
+    expect(get('snooze-evening-hour').props.value).toBe('17');
+    await actAsync(async () => {
+      get('snooze-morning-hour').props.onChangeText('7');
+      await flush();
+    });
+    await actAsync(async () => {
+      get('snooze-morning-hour').props.onBlur();
+      await flush();
+    });
+    expect(api.setPreferences).toHaveBeenCalledWith({ snoozeMorningHour: 7 });
+  });
 });

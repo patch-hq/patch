@@ -63,10 +63,10 @@ describe('each preset resolves to the wording the sheet shows', () => {
       expect(shown).toEqual({
         '30-minutes': '16:35',
         '1-hour': '17:05',
-        '5pm': '17:00',
-        'tomorrow-8am': 'Fri 08:00',
+        evening: '17:00',
+        'tomorrow-morning': 'Fri 09:00',
         '1-day': 'Fri 16:05',
-        'next-monday': 'Mon 08:00',
+        'next-monday': 'Mon 09:00',
       });
     } finally {
       vi.useRealTimers();
@@ -77,7 +77,7 @@ describe('each preset resolves to the wording the sheet shows', () => {
     const late = new Date(2026, 9, 15, 18, 0).getTime();
     vi.setSystemTime(late);
     try {
-      const p = SNOOZE_PRESETS.find((x) => x.id === '5pm')!;
+      const p = SNOOZE_PRESETS.find((x) => x.id === 'evening')!;
       expect(formatWakeAt(p.resolve(), late)).toBe('Fri 17:00');
     } finally {
       vi.useRealTimers();

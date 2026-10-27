@@ -9,21 +9,23 @@
 // ever stores an absolute `snoozedUntil`.
 
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Clock } from 'lucide-react';
+import { Clock, Settings } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useChatStore } from '../stores/chatStore.js';
 import { useSelectionStore } from '../stores/selectionStore.js';
+import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { useUiStore, type SnoozeSheetTarget } from '../stores/uiStore.js';
 import { ModalOverlay } from './ModalOverlay.js';
 import { chatsInProject } from '../lib/chatGroups.js';
 import { deriveChatTitle } from '../lib/chatTitle.js';
 import { stripMarkdown } from '../lib/stripMarkdown.js';
 import {
-  SNOOZE_PRESETS,
+  snoozePresets,
   distinctPresets,
   UNTIL_COMPLETE_PRESET,
   formatElapsed,
   formatWakeAt,
+  type SnoozePreset,
 } from '../lib/snoozePresets.js';
 import { applySnooze } from '../lib/snoozeApply.js';
 import type { ChatRow } from '../stores/types.js';
@@ -31,7 +33,11 @@ import type { ChatRow } from '../stores/types.js';
 const CUSTOM = 'custom';
 
 /** The wake time for the chosen option, or null while there is none to show. */
-function wakeFor(selected: string | null, customValue: string): number | null {
+function wakeFor(
+  selected: string | null,
+  customValue: string,
+  all: ReadonlyArray<SnoozePreset>,
+): number | null {
   if (selected === null) return null;
   if (selected === CUSTOM) {
     // `datetime-local` gives a LOCAL wall-clock string; Date parses it in the
@@ -39,9 +45,7 @@ function wakeFor(selected: string | null, customValue: string): number | null {
     const at = new Date(customValue).getTime();
     return customValue === '' || Number.isNaN(at) ? null : at;
   }
-  return (
-    [...SNOOZE_PRESETS, UNTIL_COMPLETE_PRESET].find((p) => p.id === selected)?.resolve() ?? null
-  );
+  return [...all, UNTIL_COMPLETE_PRESET].find((p) => p.id === selected)?.resolve() ?? null;
 }
 
 export function SnoozeSheet(): JSX.Element | null {
@@ -54,6 +58,9 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
   const pushError = useUiStore((s) => s.pushError);
   const chats = useChatStore((s) => s.chats);
   const navigate = useNavigate();
+  const morningHour = usePreferencesStore((s) => s.preferences.snoozeMorningHour);
+  const eveningHour = usePreferencesStore((s) => s.preferences.snoozeEveningHour);
+  const allPresets = snoozePresets({ morningHour, eveningHour });
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [customValue, setCustomValue] = useState('');
@@ -80,10 +87,10 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
   const canUntilComplete =
     targets.length > 0 && targets.every((c) => c.activity === 'running' || c.goal !== null);
   const presets = [
-    ...distinctPresets(SNOOZE_PRESETS),
+    ...distinctPresets(allPresets),
     ...(canUntilComplete ? [UNTIL_COMPLETE_PRESET] : []),
   ];
-  const wake = wakeFor(selected, customValue);
+  const wake = wakeFor(selected, customValue, allPresets);
   const canConfirm = selected !== null && targets.length > 0;
 
   useEffect(() => {
@@ -112,11 +119,17 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
       }
       at = wake;
     } else {
-      at = wakeFor(selected, '')!;
+      at = wakeFor(selected, '', allPresets)!;
     }
     close();
     if (target.kind === 'chats') useSelectionStore.getState().clear();
     applySnooze({ targets, until: at, name, isProject, navigate });
+  }
+
+  function openSettings(): void {
+    close();
+    useUiStore.getState().requestSettingsPage('chats');
+    navigate('/settings');
   }
 
   // Esc cancels and Enter confirms, wherever focus is — except on a button of
@@ -161,12 +174,24 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
         ref={rootRef}
       >
         <div className="snooze-sheet-head">
-          <h2 className="display" data-testid="snooze-sheet-title">
-            {target.kind === 'project' ? `Snooze ${name}` : 'Snooze'}
-          </h2>
-          <span data-testid="snooze-sheet-subtitle">
-            {isProject ? `${targets.length} ${targets.length === 1 ? 'chat' : 'chats'}` : name}
-          </span>
+          <div className="snooze-sheet-titles">
+            <h2 className="display" data-testid="snooze-sheet-title">
+              {target.kind === 'project' ? `Snooze ${name}` : 'Snooze'}
+            </h2>
+            <span data-testid="snooze-sheet-subtitle">
+              {isProject ? `${targets.length} ${targets.length === 1 ? 'chat' : 'chats'}` : name}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="snooze-cog"
+            aria-label="Snooze settings"
+            title="Snooze settings"
+            data-testid="snooze-sheet-settings"
+            onClick={openSettings}
+          >
+            <Settings size={16} aria-hidden />
+          </button>
         </div>
 
         <div className="snooze-presets">

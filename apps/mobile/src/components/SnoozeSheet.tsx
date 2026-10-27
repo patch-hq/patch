@@ -9,18 +9,22 @@
 
 import React from 'react';
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { AlarmClock } from 'lucide-react-native';
+import { AlarmClock, Settings } from 'lucide-react-native';
+import { useRouter, type Href } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { create } from 'zustand';
 import { formatElapsed, formatWakeAt } from '@patch/wire';
 import type { ChatRow } from '../stores/types';
 import { useChatStore } from '../stores/chatStore';
 import { useUiStore } from '../stores/uiStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import {
-  SNOOZE_PRESETS,
+  DEFAULT_SNOOZE_HOURS,
+  snoozePresets,
   UNTIL_COMPLETE_PRESET,
   distinctPresets,
   parseCustomSnooze,
+  type SnoozePreset,
 } from '../lib/snooze';
 import { applySnoozeSet, chatsInFolder } from '../lib/snoozeApply';
 import { deriveChatTitle } from '../lib/labels';
@@ -49,7 +53,11 @@ export function showSnoozeSheet(target: SnoozeSheetTarget): void {
 const CUSTOM = 'custom';
 
 /** The wake time for the chosen option, or null while there is none to show. */
-function wakeFor(selected: string | null, customValue: string): number | null {
+function wakeFor(
+  selected: string | null,
+  customValue: string,
+  all: readonly SnoozePreset[],
+): number | null {
   if (selected === null) return null;
   if (selected === CUSTOM) {
     try {
@@ -58,9 +66,7 @@ function wakeFor(selected: string | null, customValue: string): number | null {
       return null;
     }
   }
-  return (
-    [...SNOOZE_PRESETS, UNTIL_COMPLETE_PRESET].find((p) => p.id === selected)?.resolve() ?? null
-  );
+  return [...all, UNTIL_COMPLETE_PRESET].find((p) => p.id === selected)?.resolve() ?? null;
 }
 
 export function SnoozeSheet(): React.ReactElement | null {
@@ -71,8 +77,18 @@ export function SnoozeSheet(): React.ReactElement | null {
 function SheetBody({ target }: { target: SnoozeSheetTarget }): React.ReactElement {
   const colors = useTheme();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const close = useSnoozeSheetStore((s) => s.close);
   const chats = useChatStore((s) => s.chats);
+  const prefs = useSettingsStore((s) => s.data?.preferences);
+  // Until the account's settings have answered, the shipped defaults stand in.
+  React.useEffect(() => {
+    if (useSettingsStore.getState().data === null) void useSettingsStore.getState().load();
+  }, []);
+  const allPresets = snoozePresets({
+    morningHour: prefs?.snoozeMorningHour ?? DEFAULT_SNOOZE_HOURS.morningHour,
+    eveningHour: prefs?.snoozeEveningHour ?? DEFAULT_SNOOZE_HOURS.eveningHour,
+  });
   const [selected, setSelected] = React.useState<string | null>(null);
   const [customValue, setCustomValue] = React.useState('');
 
@@ -89,10 +105,10 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): React.ReactElemen
   const canUntilComplete =
     targets.length > 0 && targets.every((c) => c.activity === 'running' || c.goal !== null);
   const presets = [
-    ...distinctPresets(SNOOZE_PRESETS),
+    ...distinctPresets(allPresets),
     ...(canUntilComplete ? [UNTIL_COMPLETE_PRESET] : []),
   ];
-  const wake = wakeFor(selected, customValue);
+  const wake = wakeFor(selected, customValue, allPresets);
   const wakeText =
     wake === null ? '' : selected === UNTIL_COMPLETE_PRESET.id ? 'complete' : formatWakeAt(wake);
   const canConfirm = selected !== null && targets.length > 0;
@@ -109,7 +125,7 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): React.ReactElemen
         return;
       }
     } else {
-      at = wakeFor(selected, '')!;
+      at = wakeFor(selected, '', allPresets)!;
     }
     close();
     applySnoozeSet({ targets, until: at, name, isProject });
@@ -144,17 +160,37 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): React.ReactElemen
           }}
         >
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: space.md }}>
-            <View>
-              <Text testID="snooze-sheet-title" style={{ ...typography.title, color: colors.ink }}>
-                {isProject ? `Snooze ${name}` : 'Snooze'}
-              </Text>
-              <Text
-                testID="snooze-sheet-subtitle"
-                numberOfLines={1}
-                style={{ ...typography.meta, color: colors.ink3 }}
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.sm }}>
+              <View style={{ flex: 1 }}>
+                <Text
+                  testID="snooze-sheet-title"
+                  style={{ ...typography.title, color: colors.ink }}
+                >
+                  {isProject ? `Snooze ${name}` : 'Snooze'}
+                </Text>
+                <Text
+                  testID="snooze-sheet-subtitle"
+                  numberOfLines={1}
+                  style={{ ...typography.meta, color: colors.ink3 }}
+                >
+                  {isProject
+                    ? `${targets.length} ${targets.length === 1 ? 'chat' : 'chats'}`
+                    : name}
+                </Text>
+              </View>
+              <Pressable
+                testID="snooze-sheet-settings"
+                accessibilityRole="button"
+                accessibilityLabel="Snooze settings"
+                hitSlop={8}
+                onPress={() => {
+                  close();
+                  router.push('/settings/chats' as Href);
+                }}
+                style={{ padding: space.xs }}
               >
-                {isProject ? `${targets.length} ${targets.length === 1 ? 'chat' : 'chats'}` : name}
-              </Text>
+                <Settings size={20} color={colors.ink3} />
+              </Pressable>
             </View>
 
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>

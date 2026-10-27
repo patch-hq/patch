@@ -16,6 +16,7 @@ import { SnoozeSheet } from '../components/SnoozeSheet.js';
 import type { ChatRow } from '../stores/types.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
+import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
 import { api } from '../api/rest.js';
 
 vi.mock('../api/rest.js', () => ({
@@ -116,7 +117,7 @@ describe('ChatHeader — snooze', () => {
       '30 minutes',
       '1 hour',
       '5pm',
-      'Tomorrow 8am',
+      'Tomorrow 9am',
       '1 day',
       'Next Monday',
       'Custom…',
@@ -152,7 +153,7 @@ describe('ChatHeader — snooze', () => {
     await waitFor(() => expect(api.snoozeChat).toHaveBeenCalled());
     const at = new Date((api.snoozeChat as any).mock.calls[0][1]);
     expect(at.getDay()).toBe(1);
-    expect(at.getHours()).toBe(8);
+    expect(at.getHours()).toBe(9);
     expect(at.getTime()).toBeGreaterThan(NOW);
     expect(at.getTime() - NOW).toBeLessThanOrEqual(7 * 24 * 3_600_000);
   });
@@ -188,7 +189,7 @@ describe('ChatHeader — snooze', () => {
     render(<ChatHeader row={r} />);
     fireEvent.click(screen.getByTestId('action-more'));
     fireEvent.click(screen.getByTestId('action-snooze'));
-    fireEvent.click(screen.getByTestId('snooze-sheet-preset-5pm'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-preset-evening'));
     fireEvent.click(screen.getByTestId('snooze-sheet-confirm'));
     await waitFor(() =>
       expect(api.snoozeChat).toHaveBeenCalledWith(
@@ -206,7 +207,7 @@ describe('ChatHeader — snooze', () => {
     render(<ChatHeader row={r} />);
     fireEvent.click(screen.getByTestId('action-more'));
     fireEvent.click(screen.getByTestId('action-snooze'));
-    fireEvent.click(screen.getByTestId('snooze-sheet-preset-5pm'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-preset-evening'));
     fireEvent.click(screen.getByTestId('snooze-sheet-confirm'));
     await waitFor(() =>
       expect(api.snoozeChat).toHaveBeenCalledWith(
@@ -217,22 +218,54 @@ describe('ChatHeader — snooze', () => {
     );
   });
 
-  it('"Tomorrow 8am" preset always snoozes to tomorrow 08:00, regardless of current time', async () => {
+  it('"Tomorrow 9am" preset always snoozes to tomorrow 09:00, regardless of current time', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(new Date(2026, 7, 25, 23, 59, 0).getTime());
     const r = row();
     seed(r);
     render(<ChatHeader row={r} />);
     fireEvent.click(screen.getByTestId('action-more'));
     fireEvent.click(screen.getByTestId('action-snooze'));
-    fireEvent.click(screen.getByTestId('snooze-sheet-preset-tomorrow-8am'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-preset-tomorrow-morning'));
     fireEvent.click(screen.getByTestId('snooze-sheet-confirm'));
     await waitFor(() =>
       expect(api.snoozeChat).toHaveBeenCalledWith(
         'c1',
-        new Date(2026, 7, 26, 8, 0, 0, 0).getTime(),
+        new Date(2026, 7, 26, 9, 0, 0, 0).getTime(),
         expect.any(String),
       ),
     );
+  });
+
+  it("wakes at the account's snooze morning hour, and labels the preset with it", async () => {
+    usePreferencesStore.getState().set({ ...DEFAULT_PREFERENCES, snoozeMorningHour: 7 });
+    vi.spyOn(Date, 'now').mockReturnValue(new Date(2026, 7, 25, 12, 0, 0).getTime());
+    const r = row();
+    seed(r);
+    render(<ChatHeader row={r} />);
+    fireEvent.click(screen.getByTestId('action-more'));
+    fireEvent.click(screen.getByTestId('action-snooze'));
+    expect(screen.getByTestId('snooze-sheet')).toHaveTextContent('Tomorrow 7am');
+    fireEvent.click(screen.getByTestId('snooze-sheet-preset-tomorrow-morning'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-confirm'));
+    await waitFor(() =>
+      expect(api.snoozeChat).toHaveBeenCalledWith(
+        'c1',
+        new Date(2026, 7, 26, 7, 0, 0, 0).getTime(),
+        expect.any(String),
+      ),
+    );
+    usePreferencesStore.getState().set(DEFAULT_PREFERENCES);
+  });
+
+  it('the cog closes the sheet and asks Settings to open on Chats', () => {
+    const r = row();
+    seed(r);
+    render(<ChatHeader row={r} />);
+    fireEvent.click(screen.getByTestId('action-more'));
+    fireEvent.click(screen.getByTestId('action-snooze'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-settings'));
+    expect(screen.queryByTestId('snooze-sheet')).toBeNull();
+    expect(useUiStore.getState().settingsPageRequest).toBe('chats');
   });
 
   it('Custom… snoozes to the picked date/time', async () => {

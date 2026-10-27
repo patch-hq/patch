@@ -1,7 +1,7 @@
 // Snooze primitives (spec/04 § Snooze): the wake-time preset ladder, the
 // "is this chat snoozed" derivation, and the wake-time formatter.
 //
-// Most presets are DELTAS, two ("5pm", "Tomorrow 8am") are wall-clock targets;
+// Most presets are DELTAS, two ("5pm", "Tomorrow 9am") are wall-clock targets;
 // all resolve against the clock at the moment of choosing — the host only
 // ever stores the resulting absolute timestamp, so these tests pin the
 // resolution happening here rather than a delta going over the wire.
@@ -28,7 +28,7 @@ describe('SNOOZE_PRESETS', () => {
       '30 minutes',
       '1 hour',
       '5pm',
-      'Tomorrow 8am',
+      'Tomorrow 9am',
       '1 day',
       'Next Monday',
     ]);
@@ -56,44 +56,44 @@ describe('resolvePreset', () => {
   it('"5pm" resolves to today 17:00 when it is currently before 5pm', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 25, 9, 0, 0));
-    const fivePm = SNOOZE_PRESETS.find((p) => p.id === '5pm')!;
+    const fivePm = SNOOZE_PRESETS.find((p) => p.id === 'evening')!;
     expect(resolvePreset(fivePm)).toBe(new Date(2026, 7, 25, 17, 0, 0, 0).getTime());
   });
 
   it('"5pm" resolves to tomorrow 17:00 when it is currently after 5pm', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 25, 18, 30, 0));
-    const fivePm = SNOOZE_PRESETS.find((p) => p.id === '5pm')!;
+    const fivePm = SNOOZE_PRESETS.find((p) => p.id === 'evening')!;
     expect(resolvePreset(fivePm)).toBe(new Date(2026, 7, 26, 17, 0, 0, 0).getTime());
   });
 
-  it('"tomorrow-8am" always resolves to tomorrow 08:00, regardless of current time', () => {
+  it('"tomorrow-morning" always resolves to tomorrow 09:00, regardless of current time', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 25, 3, 0, 0));
-    const tomorrow8am = SNOOZE_PRESETS.find((p) => p.id === 'tomorrow-8am')!;
-    expect(resolvePreset(tomorrow8am)).toBe(new Date(2026, 7, 26, 8, 0, 0, 0).getTime());
+    const tomorrow8am = SNOOZE_PRESETS.find((p) => p.id === 'tomorrow-morning')!;
+    expect(resolvePreset(tomorrow8am)).toBe(new Date(2026, 7, 26, 9, 0, 0, 0).getTime());
 
     vi.setSystemTime(new Date(2026, 7, 25, 23, 59, 0));
-    expect(resolvePreset(tomorrow8am)).toBe(new Date(2026, 7, 26, 8, 0, 0, 0).getTime());
+    expect(resolvePreset(tomorrow8am)).toBe(new Date(2026, 7, 26, 9, 0, 0, 0).getTime());
   });
 });
 
 describe('Next Monday', () => {
   const nextMonday = SNOOZE_PRESETS.find((p) => p.id === 'next-monday')!;
-  it('from a Tuesday is the following Monday 08:00', () => {
+  it('from a Tuesday is the following Monday 09:00', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 9, 13, 10, 0, 0)); // Tue 13 Oct 2026
-    expect(resolvePreset(nextMonday)).toBe(new Date(2026, 9, 19, 8, 0, 0, 0).getTime());
+    expect(resolvePreset(nextMonday)).toBe(new Date(2026, 9, 19, 9, 0, 0, 0).getTime());
   });
   it('from a Sunday is the next day', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 9, 18, 10, 0, 0));
-    expect(resolvePreset(nextMonday)).toBe(new Date(2026, 9, 19, 8, 0, 0, 0).getTime());
+    expect(resolvePreset(nextMonday)).toBe(new Date(2026, 9, 19, 9, 0, 0, 0).getTime());
   });
   it('from a Monday is a week out, even before 8am', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 9, 19, 6, 0, 0));
-    expect(resolvePreset(nextMonday)).toBe(new Date(2026, 9, 26, 8, 0, 0, 0).getTime());
+    expect(resolvePreset(nextMonday)).toBe(new Date(2026, 9, 26, 9, 0, 0, 0).getTime());
   });
 });
 
@@ -191,15 +191,15 @@ describe('distinctPresets', () => {
     vi.setSystemTime(now);
     return distinctPresets(SNOOZE_PRESETS).map((p) => p.id);
   };
-  it('drops Next Monday on a Sunday, when it is Tomorrow 8am', () => {
+  it('drops Next Monday on a Sunday, when it is Tomorrow 9am', () => {
     const got = ids(new Date(2026, 9, 25, 10));
     expect(got).not.toContain('next-monday');
-    expect(got).toContain('tomorrow-8am');
+    expect(got).toContain('tomorrow-morning');
   });
   it('keeps every preset on an ordinary Wednesday morning', () => {
-    expect(ids(new Date(2026, 9, 21, 9))).toEqual(SNOOZE_PRESETS.map((p) => p.id));
+    expect(ids(new Date(2026, 9, 21, 8))).toEqual(SNOOZE_PRESETS.map((p) => p.id));
   });
-  it('drops 1 day when it lands on Tomorrow 8am', () => {
-    expect(ids(new Date(2026, 9, 21, 8))).not.toContain('1-day');
+  it('drops 1 day when it lands on Tomorrow 9am', () => {
+    expect(ids(new Date(2026, 9, 21, 9))).not.toContain('1-day');
   });
 });

@@ -64,9 +64,20 @@ const THREE = (running: Row = {}): Row[] => [
 ];
 
 test.describe('snooze sheet', () => {
+  test('the cog at the top right opens Settings on the Chats page, snooze defaults included', async ({
+    page,
+  }) => {
+    await seed(page, THREE());
+    await page.getByTestId('action-more').click();
+    await page.getByTestId('action-snooze').click();
+    await page.getByTestId('snooze-sheet-settings').click();
+    await expect(page.getByTestId('snooze-sheet')).toHaveCount(0);
+    await expect(page.getByTestId('snooze-morning-hour')).toBeVisible();
+  });
+
   test('opens from the chat header; nothing is chosen until a preset is', async ({ page }) => {
     // Presets that land within 15 minutes of an earlier one are hidden, so pin a
-    // midweek morning where all seven are distinct (on a Sunday, Tomorrow 8am
+    // midweek morning where all seven are distinct (on a Sunday, Tomorrow 9am
     // and Next Monday coincide).
     await page.clock.setFixedTime(new Date('2026-10-21T10:00:00Z'));
     await seed(page, THREE());
@@ -80,7 +91,7 @@ test.describe('snooze sheet', () => {
       '30 minutes',
       '1 hour',
       '5pm',
-      'Tomorrow 8am',
+      'Tomorrow 9am',
       '1 day',
       'Next Monday',
       'Custom…',
@@ -199,7 +210,7 @@ test.describe('snooze sheet', () => {
     await expect(box).toContainText('Fix flaky checkout');
     await expect(box).toContainText('25m');
     await expect(box).toContainText('+ 1 not running');
-    await page.getByTestId('snooze-sheet-preset-tomorrow-8am').click();
+    await page.getByTestId('snooze-sheet-preset-tomorrow-morning').click();
     await expect(page.getByTestId('snooze-sheet-confirm')).toHaveText(/^Snooze 3 until /);
   });
 
@@ -207,7 +218,7 @@ test.describe('snooze sheet', () => {
     page,
   }) => {
     const calls = await stubSnooze(page);
-    // Pinned: near 08:00 the wall clock hides 1 day / Tomorrow 8am as duplicates.
+    // Pinned: near 09:00 the wall clock hides 1 day / Tomorrow 9am as duplicates.
     await page.clock.setFixedTime(new Date('2026-10-21T10:00:00Z'));
     await seed(page, THREE());
     await page.getByTestId(`folder-snooze-${FOLDER}`).click({ force: true });

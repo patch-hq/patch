@@ -15858,10 +15858,29 @@ select.permission-mode.is-pending {
 }
 .snooze-sheet-head {
   display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.snooze-sheet-titles {
+  display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
-.snooze-sheet-head > span {
+.snooze-cog {
+  display: inline-flex;
+  padding: 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.snooze-cog:hover {
+  color: var(--ink);
+}
+.snooze-sheet-titles > span {
   color: var(--ink-3);
   font-size: var(--text-min);
 }

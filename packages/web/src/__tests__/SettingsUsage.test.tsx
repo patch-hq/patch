@@ -378,6 +378,22 @@ describe('Settings → Chats → token-spending generation', () => {
   });
 });
 
+describe('Settings → Chats → snooze defaults', () => {
+  it('shows 9 and 17 by default and writes a changed hour to the shared settings', async () => {
+    const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
+    vi.stubGlobal('fetch', makeFetch({}, server.handler));
+    loadShared();
+    renderSettings('/settings/chats');
+    const morning = screen.getByTestId('snooze-morning-hour') as HTMLSelectElement;
+    expect(morning.value).toBe('9');
+    expect((screen.getByTestId('snooze-evening-hour') as HTMLSelectElement).value).toBe('17');
+    fireEvent.change(morning, { target: { value: '7' } });
+    await waitFor(() => expect(server.writes).toContainEqual({ snoozeMorningHour: 7 }));
+    fireEvent.change(screen.getByTestId('snooze-evening-hour'), { target: { value: '18' } });
+    await waitFor(() => expect(server.writes).toContainEqual({ snoozeEveningHour: 18 }));
+  });
+});
+
 describe('Settings → Usage → auto-resume', () => {
   it('reads and writes the shared setting', async () => {
     const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);

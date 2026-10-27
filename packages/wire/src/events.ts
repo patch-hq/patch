@@ -2167,6 +2167,12 @@ export const SharedSettings = z
     titleGenerationEnabled: z.boolean(),
     /** Whether the one-shot AI per-turn status summary (a token-spending call) runs. */
     statusGenerationEnabled: z.boolean(),
+    /**
+     * Snooze defaults (spec/04 § Snooze): the local hour that "Tomorrow" and
+     * "Next Monday" wake at, and the hour the same-day evening preset wakes at.
+     */
+    snoozeMorningHour: z.number().int().min(0).max(23),
+    snoozeEveningHour: z.number().int().min(0).max(23),
     autoResumeRateLimit: z.boolean(),
     /**
      * Whether hosts install a published host build on their own (spec/02 §
@@ -2261,6 +2267,8 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   chatNameInterval: 0,
   titleGenerationEnabled: true,
   statusGenerationEnabled: true,
+  snoozeMorningHour: 9,
+  snoozeEveningHour: 17,
   // On: a chat that hits a limit waits for the reset rather than being
   // silently abandoned mid-task.
   autoResumeRateLimit: true,

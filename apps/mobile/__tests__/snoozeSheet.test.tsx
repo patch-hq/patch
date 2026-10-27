@@ -23,7 +23,9 @@ import { SnoozeDivider } from '../src/components/SnoozeDivider';
 import { ErrorToasts } from '../src/components/ErrorToasts';
 import ChatsScreen from '../app/(tabs)/chats';
 import { insertSnoozeDividers, groupToolRuns } from '../src/lib/toolSummary';
-import { __resetRouterMock } from './stubs/expo-router';
+import { __resetRouterMock, routerMock } from './stubs/expo-router';
+import { useSettingsStore } from '../src/stores/settingsStore';
+import { seedSettings } from './testUtils/settingsFixtures';
 import { __clearAllMmkv } from './stubs/mmkv';
 
 vi.mock('../src/lib/voiceNote', () => ({
@@ -81,6 +83,7 @@ beforeEach(() => {
   useChatStore.getState()._reset();
   useUiStore.setState({ errors: [] });
   useSnoozeSheetStore.getState().close();
+  useSettingsStore.setState({ data: null, error: null });
   usePresenceStore.setState({
     connection: 'connected',
     daemon: 'online',
@@ -130,6 +133,34 @@ describe('the Snooze sheet', () => {
     expect(snoozeChatSpy).toHaveBeenCalledWith('a', 8_640_000_000_000_000, expect.any(String));
   });
 
+  it("wakes at the account's snooze morning hour and labels the preset with it", () => {
+    const data = seedSettings();
+    useSettingsStore.setState({
+      data: { ...data, preferences: { ...data.preferences, snoozeMorningHour: 7 } },
+    });
+    seedThree();
+    const r = renderRN(<SnoozeSheet />);
+    actSync(() => showSnoozeSheet({ kind: 'chat', chatId: 'c' }));
+    const preset = findHost(r.root, byTestId('snooze-sheet-preset-tomorrow-morning'));
+    expect(hasText(preset, 'Tomorrow 7am')).toBe(true);
+    press(r, 'snooze-sheet-preset-tomorrow-morning');
+    press(r, 'snooze-sheet-confirm');
+    expect(snoozeChatSpy).toHaveBeenCalledWith(
+      'c',
+      new Date(2026, 9, 16, 7, 0, 0, 0).getTime(),
+      expect.any(String),
+    );
+  });
+
+  it('the cog closes the sheet and opens Settings → Chats', () => {
+    seedThree();
+    const r = renderRN(<SnoozeSheet />);
+    actSync(() => showSnoozeSheet({ kind: 'chat', chatId: 'c' }));
+    press(r, 'snooze-sheet-settings');
+    expect(useSnoozeSheetStore.getState().target).toBeNull();
+    expect(routerMock.push).toHaveBeenCalledWith('/settings/chats');
+  });
+
   it('does not offer Until complete for an idle chat', () => {
     seedThree();
     const r = renderRN(<SnoozeSheet />);
@@ -143,14 +174,14 @@ describe('the Snooze sheet', () => {
     actSync(() => showSnoozeSheet({ kind: 'chat', chatId: 'a' }));
     expect(textOf(findHost(r.root, byTestId('snooze-sheet-title')))).toBe('Snooze');
     expect(textOf(findHost(r.root, byTestId('snooze-sheet-subtitle')))).toBe('Migrate billing');
-    for (const l of ['30 minutes', '1 hour', 'Tomorrow 8am', 'Next Monday', 'Custom…']) {
+    for (const l of ['30 minutes', '1 hour', 'Tomorrow 9am', 'Next Monday', 'Custom…']) {
       expect(hasText(r.root, l)).toBe(true);
     }
     // 5pm is 5 minutes from "1 hour" at 16:05, so it says the same thing and is hidden.
     expect(hasText(r.root, '5pm')).toBe(false);
     expect(hasText(findHost(r.root, byTestId('snooze-sheet-preset-1-hour')), '17:05')).toBe(true);
     expect(
-      hasText(findHost(r.root, byTestId('snooze-sheet-preset-tomorrow-8am')), 'Fri 08:00'),
+      hasText(findHost(r.root, byTestId('snooze-sheet-preset-tomorrow-morning')), 'Fri 09:00'),
     ).toBe(true);
     const run = findHost(r.root, byTestId('snooze-sheet-run'));
     expect(hasText(run, 'Run in background')).toBe(true);
@@ -180,9 +211,9 @@ describe('the Snooze sheet', () => {
     expect(findAllHost(run, byTestId('snooze-sheet-run-item'))).toHaveLength(2);
     expect(hasText(run, 'Migrate billing')).toBe(true);
     expect(hasText(run, '+ 1 not running')).toBe(true);
-    press(r, 'snooze-sheet-preset-tomorrow-8am');
+    press(r, 'snooze-sheet-preset-tomorrow-morning');
     expect(textOf(findHost(r.root, byTestId('snooze-sheet-confirm')))).toBe(
-      'Snooze 3 until Fri 08:00',
+      'Snooze 3 until Fri 09:00',
     );
   });
 
