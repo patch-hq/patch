@@ -277,6 +277,24 @@ describe('patch_delegate', () => {
     expect(await daemon.stopDelegate(parentChatId, id)).toBe(false);
   });
 
+  it("counts a running subagent in the parent's chat.state backgroundTasks, and drops it once stopped", async () => {
+    const { daemon, events, folder } = setupHanging();
+    const parentChatId = await daemon.spawnChat({ folder });
+    const lastCount = () =>
+      events
+        .filter(
+          (e): e is Extract<WireEvent, { type: 'chat.state' }> =>
+            e.type === 'chat.state' && e.chatId === parentChatId,
+        )
+        .at(-1)?.backgroundTasks;
+
+    const { id } = await daemon.createDelegate({ parentChatId, prompt: 'a slow task' });
+    await flushUntil(() => lastCount() === 1);
+
+    await daemon.stopDelegate(parentChatId, id);
+    await flushUntil(() => lastCount() === 0);
+  });
+
   it("stopping a parent aborts the parent's own turn at once, not after its subagents settle", async () => {
     const aborted = new Map<string, number>();
     const backend: SdkBackend = {

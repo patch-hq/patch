@@ -4343,6 +4343,7 @@ export class Daemon {
       this.delegateWaiters.delete(chatId);
       throw err;
     }
+    if (this.chatState.has(opts.parentChatId)) this.emitState(opts.parentChatId);
     return { id: chatId, label, ...(result ? { result } : {}) };
   }
 
@@ -4517,6 +4518,7 @@ export class Daemon {
       this.deliverToParent(parentChatId, formatAgentReturn(label, chatId, reply));
     }
     this.emitDelegateUpdate(parentChatId, chatId, label, outcome);
+    if (this.chatState.has(parentChatId)) this.emitState(parentChatId);
   }
 
   /**
@@ -4964,9 +4966,14 @@ export class Daemon {
 
   /** True while a `patch_delegate` subagent of `parentChatId` has not yet finished. */
   private hasRunningDelegates(parentChatId: string): boolean {
+    return this.countRunningDelegates(parentChatId) > 0;
+  }
+
+  private countRunningDelegates(parentChatId: string): number {
     return this.opts.metaStore
       .list()
-      .some((m) => m.subagent?.parentChatId === parentChatId && m.subagent.outcome === undefined);
+      .filter((m) => m.subagent?.parentChatId === parentChatId && m.subagent.outcome === undefined)
+      .length;
   }
 
   /**
@@ -15336,7 +15343,9 @@ export class Daemon {
       // nothing is running, and a surface that never hears it is talking to a
       // host that does not track them and must show no background state at
       // all.
-      backgroundTasks: this.watch.count(chatId),
+      // Running `patch_delegate` subagents are background work too: the chat is
+      // idle but agents it launched are still going.
+      backgroundTasks: this.watch.count(chatId) + this.countRunningDelegates(chatId),
       // spec/14 § Composer — context ring. `null` is "not measured", never zero.
       context: s.context ?? null,
       // spec/04 § Model — the model the chat's NEXT turn will run on, carried on
