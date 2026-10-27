@@ -306,6 +306,30 @@ describe('Sidebar', () => {
     expect(screen.queryByTestId('goal-marker-c-no-goal')).not.toBeInTheDocument();
   });
 
+  it('goal marker sits to the right of the title text', () => {
+    useChatStore.getState().hydrate([
+      {
+        chatId: 'c-order',
+        hostId: 'd1',
+        name: 'Ordered',
+        permissionMode: 'bypassPermissions',
+        folder: '/work',
+        activity: 'idle',
+        status: 'active',
+        pinned: false,
+        pinnedAt: null,
+        disabled: false,
+        lastUpdated: 1,
+        goal: 'Ship it',
+      },
+    ]);
+    renderInRouter();
+    const marker = screen.getByTestId('goal-marker-c-order');
+    const text = marker.parentElement?.querySelector('.name-text');
+    expect(text).not.toBeNull();
+    expect(text!.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('goal marker is working while a goal is active, met once it finishes, absent when impossible', () => {
     const base = {
       hostId: 'd1',
