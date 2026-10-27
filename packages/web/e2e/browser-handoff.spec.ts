@@ -260,3 +260,19 @@ for (const [name, viewport] of [
     });
   });
 }
+
+test.describe('agent browser — a narrow desktop window', () => {
+  test.use({ viewport: { width: 700, height: 700 } });
+
+  test('the large view stays a pane beside the chat, not the whole screen', async ({ page }) => {
+    await page.goto(CHAT);
+    await play(page, false);
+    await page.getByTestId('browser-watch').click();
+    await page.getByTestId('browser-handoff-expand').click();
+    const live = page.getByTestId('browser-live');
+    await expect(live).toBeVisible();
+    await expect(page.getByTestId('composer-input').first()).toBeInViewport();
+    const view = (await live.boundingBox())!;
+    expect(view.width).toBeLessThan(700 - 100);
+  });
+});

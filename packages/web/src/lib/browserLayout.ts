@@ -24,7 +24,7 @@ function parentOf(
 }
 
 /** Narrower than this, the large view takes the whole screen instead of a pane. */
-export const BROWSER_PANE_MIN_WINDOW = 800;
+export const BROWSER_PANE_MIN_WINDOW = 640;
 
 export function browserTab(chatId: string): TabDescriptor {
   return { kind: 'browser', chatId };
