@@ -232,6 +232,78 @@ describe('WatchScheduler — survives a host restart', () => {
   });
 });
 
+describe('WatchScheduler — restarts watches the host restart killed', () => {
+  it('re-runs a running record whose process died with the host, keeping its task id and output, and tells the chat', async () => {
+    const depsA = makeDeps();
+    const schedulerA = mkScheduler(depsA);
+    const rec = schedulerA.start({
+      chatId: 'c-rerun',
+      command: 'echo run >> "$PWD/ran.txt"; sleep 5',
+      description: 'long watch',
+      timeoutSec: 600,
+      cwd: depsA.home,
+    });
+    schedulerA.dispose();
+    // The host restart took the process down with it.
+    process.kill(-rec.pid, 'SIGKILL');
+    await flushUntil(() => {
+      try {
+        process.kill(rec.pid, 0);
+        return false;
+      } catch {
+        return true;
+      }
+    });
+
+    const depsB = makeDeps({
+      home: depsA.home,
+      dirForChat: depsA.dirForChat,
+      allChatIds: () => ['c-rerun'],
+    });
+    const schedulerB = mkScheduler(depsB);
+    try {
+      schedulerB.loadAll();
+      const after = schedulerB.list('c-rerun');
+      expect(after).toHaveLength(1);
+      expect(after[0]!.taskId).toBe(rec.taskId);
+      expect(after[0]!.status).toBe('running');
+      expect(after[0]!.pid).not.toBe(rec.pid);
+      expect(after[0]!.restarts).toBe(1);
+      await flushUntil(() => depsB.delivered.length > 0);
+      expect(depsB.delivered[0]!.message).toMatch(/^\[watch\].*restarted/);
+      // Nothing was reported as finished.
+      expect(depsB.delivered.some((d) => /finished/.test(d.message))).toBe(false);
+    } finally {
+      schedulerB.stop('c-rerun', rec.taskId);
+      schedulerB.dispose();
+    }
+  });
+
+  it('does not re-run a watch whose process is still alive', () => {
+    const depsA = makeDeps();
+    const schedulerA = mkScheduler(depsA);
+    const rec = schedulerA.start({
+      chatId: 'c-alive',
+      command: 'sleep 5',
+      description: 'alive',
+      timeoutSec: 600,
+      cwd: depsA.home,
+    });
+    schedulerA.dispose();
+    const schedulerB = mkScheduler(
+      makeDeps({ home: depsA.home, dirForChat: depsA.dirForChat, allChatIds: () => ['c-alive'] }),
+    );
+    try {
+      schedulerB.loadAll();
+      expect(schedulerB.list('c-alive')[0]!.pid).toBe(rec.pid);
+      expect(schedulerB.list('c-alive')[0]!.restarts).toBeUndefined();
+    } finally {
+      schedulerB.stop('c-alive', rec.taskId);
+      schedulerB.dispose();
+    }
+  });
+});
+
 describe('WatchScheduler.stop', () => {
   it('kills the whole process group and marks the record stopped WITHOUT delivering', async () => {
     const deps = makeDeps();

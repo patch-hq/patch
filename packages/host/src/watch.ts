@@ -69,6 +69,8 @@ export const WatchRecord = z
     checkInSec: z.number().int().positive().optional(),
     /** When the periodic check-in last went to the chat. */
     lastCheckInAt: z.number().int().optional(),
+    /** How many times a host restart killed the process and the host re-ran it. */
+    restarts: z.number().int().positive().optional(),
     status: z.enum(['running', 'exited', 'stopped', 'failed']),
     /** Set once the task leaves `running`. Undefined = unknown (e.g. a
      *  restart re-attached to the pid and only ever observed it vanish). */
@@ -332,23 +334,87 @@ export class WatchScheduler {
   }
 
   /**
-   * Boot: nothing to arm (see the class comment) — this only logs how many
-   * in-flight tasks this host is resuming, for observability parity with
-   * `WakeScheduler.loadAll()`.
+   * Boot: a watched process normally dies with the host (same cgroup/service
+   * stop), leaving a `running` record whose pid is gone. Finishing it as
+   * "exit status unknown" drops the job, so it is re-run instead — same task
+   * id and output file (appended to), with `restarts` counting how often, and
+   * the owning chat is told. A pid still alive is simply re-attached by the
+   * poll. The wall-clock `timeoutSec` keeps counting from the original start.
    */
   loadAll(): void {
     let running = 0;
+    let restarted = 0;
     for (const chatId of this.deps.allChatIds()) {
       for (const rec of this.list(chatId)) {
-        if (rec.status === 'running') running++;
+        if (rec.status !== 'running') continue;
+        running++;
+        if (this.isAliveFn(rec.pid)) continue;
+        if (this.rerun(rec)) restarted++;
       }
     }
     if (running > 0) {
       this.deps.logger.info(
-        { running },
+        { running, restarted },
         'watch: resuming in-flight background tasks after restart',
       );
     }
+  }
+
+  private rerun(rec: WatchRecord): boolean {
+    let child: ChildProcess;
+    try {
+      const fd = openSync(rec.outputFile, 'a');
+      try {
+        child = this.spawnFn('/bin/sh', ['-c', rec.command], {
+          cwd: rec.cwd,
+          detached: true,
+          stdio: ['ignore', fd, fd],
+        });
+      } finally {
+        closeSync(fd);
+      }
+    } catch (err) {
+      this.failRerun(rec, err);
+      return false;
+    }
+    child.on('error', (err) => {
+      this.deps.logger.warn(
+        { chatId: rec.chatId, taskId: rec.taskId, err },
+        'watch: process error',
+      );
+    });
+    if (child.pid === undefined) {
+      this.failRerun(rec, new Error('no pid'));
+      return false;
+    }
+    const restarts = (rec.restarts ?? 0) + 1;
+    this.writeRecord({ ...rec, pid: child.pid, restarts });
+    this.liveHandles.set(rec.taskId, child);
+    void this.send(
+      rec,
+      `${WATCH_PREFIX} "${rec.description}" was cut off when the host restarted and has been restarted from the beginning (restart ${restarts}). ` +
+        `Its output file continues from the earlier run. Command: ${rec.command}. Call patch_watch_output("${rec.taskId}") to read its output.`,
+    );
+    return true;
+  }
+
+  private failRerun(rec: WatchRecord, err: unknown): void {
+    this.deps.logger.error(
+      { chatId: rec.chatId, taskId: rec.taskId, err },
+      'watch: restart failed',
+    );
+    this.writeRecord({
+      ...rec,
+      status: 'failed',
+      exitCode: null,
+      signal: null,
+      endedAt: this.deps.now(),
+    });
+    void this.send(
+      rec,
+      `${WATCH_PREFIX} "${rec.description}" was cut off when the host restarted and could not be restarted: ${String(err)}. ` +
+        `Command: ${rec.command}.`,
+    );
   }
 
   /** The resident poll: notice every RUNNING record whose process has ended. */
