@@ -10995,6 +10995,23 @@ export class Daemon {
       this.emitState(chatId);
       return;
     }
+    // A compaction boundary replaces the whole context: the reading from before
+    // it is stale. Take the reported post-count, or clear the reading until the
+    // next request reports a real one — never leave the pre-compaction figure up.
+    if (env.compaction) {
+      const { postTokens } = env.compaction;
+      const windowTokens = s.context?.windowTokens;
+      s.context =
+        postTokens === undefined
+          ? undefined
+          : {
+              usedTokens: postTokens,
+              ...(windowTokens !== undefined ? { windowTokens } : {}),
+              at: this.opts.now(),
+            };
+      this.emitState(chatId);
+      return;
+    }
     const reading = assistantContextTokens(env.raw);
     if (!reading) return;
     // One message fans out into several envelopes carrying the same reading.

@@ -195,6 +195,45 @@ describe('Host — compaction boundary on the wire', () => {
     expect(snapshots.some((m) => m.role === 'system' && m.content.includes('168k'))).toBe(true);
   });
 
+  it('resets the context reading to the post-compaction count', async () => {
+    const { daemon, sdk, folder } = setup();
+    sdk.enqueue([
+      {
+        type: 'system',
+        content: 'Context compressed · 969k → 19k',
+        compaction: { trigger: 'auto', preTokens: 969000, postTokens: 19000 },
+      },
+      { type: 'assistant', content: 'after', sessionId: 'sess-D' },
+    ]);
+    const chatId = await daemon.spawnChat({ folder, prompt: 'go' });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(daemon.chatState.get(chatId)?.context?.usedTokens).toBe(19000);
+  });
+
+  it('drops a stale context reading when the boundary reports no post-count', async () => {
+    const { daemon, sdk, folder } = setup();
+    sdk.enqueue([
+      {
+        type: 'system',
+        content: 'Context compressed · 969k → 19k',
+        compaction: { trigger: 'auto', preTokens: 969000, postTokens: 19000 },
+      },
+      { type: 'assistant', content: 'one', sessionId: 'sess-E' },
+    ]);
+    const chatId = await daemon.spawnChat({ folder, prompt: 'go' });
+    await new Promise((r) => setTimeout(r, 30));
+    sdk.enqueue([
+      {
+        type: 'system',
+        content: 'Context compressed · from 981k',
+        compaction: { trigger: 'auto', preTokens: 981000 },
+      },
+    ]);
+    await daemon.sendInput({ chatId, message: 'again' });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(daemon.chatState.get(chatId)?.context?.usedTokens).toBeUndefined();
+  });
+
   it('still drops a content-less system envelope', async () => {
     // Every other system envelope (init, stream_event leftovers) carries no
     // chat-visible content and must stay invisible.
