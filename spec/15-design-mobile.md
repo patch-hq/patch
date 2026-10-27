@@ -40,7 +40,7 @@ Bottom tabs (5), in order:
 
 Jobs are reached from their own bottom tab, not from a row on the Settings page: a job is a top-level thing you check on, not a preference. Each row on the Jobs tab opens a full editor sub-screen (§ Job editor). The Settings page carries no Jobs row — a second door onto the same screen. Notifications history is the bell on the Chats header (§ Notifications drawer).
 
-A screen's own back arrow returns to the screen the user was on before it, wherever that was. When there is nothing beneath it — a launcher shortcut or `patch://` link opened on a cold start mounts its screen alone — the arrow goes to the screen's parent instead of doing nothing: the Chats tab for a chat or the new-chat screen, the Jobs tab for the job editor, the Settings tab for a settings page, the chat for its Tools page, the host's page for its files and terminal.
+A chat's back arrow, and the phone's own back gesture or button while a chat is open, always go to the Chats tab, however the chat was reached — hopping chat to chat never builds a trail of chats to walk back through. Every other screen's own back arrow returns to the screen the user was on before it, wherever that was. When there is nothing beneath it — a launcher shortcut or `patch://` link opened on a cold start mounts its screen alone — the arrow goes to the screen's parent instead of doing nothing: the Chats tab for the new-chat screen, the Jobs tab for the job editor, the Settings tab for a settings page, the chat for its Tools page, the host's page for its files and terminal.
 
 ## Chats tab
 

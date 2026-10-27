@@ -34,6 +34,7 @@ export const routerMock = {
   navigate: vi.fn((_href: string) => assertIsReady('navigate')),
   replace: vi.fn((_href: string) => assertIsReady('replace')),
   back: vi.fn(),
+  dismissTo: vi.fn((_href: string) => assertIsReady('dismissTo')),
   canGoBack: vi.fn((): boolean => true),
   setParams: vi.fn(),
 };
@@ -44,6 +45,7 @@ export function __resetRouterMock(): void {
   routerMock.navigate.mockClear();
   routerMock.replace.mockClear();
   routerMock.back.mockClear();
+  routerMock.dismissTo.mockClear();
   routerMock.setParams.mockClear();
   routerMock.canGoBack.mockClear();
   routerMock.canGoBack.mockReturnValue(true);

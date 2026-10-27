@@ -21,6 +21,15 @@ export function goBack(router: BackRouter, parent: Href): void {
   else router.replace(parent);
 }
 
+/**
+ * Back from a chat always lands on the Chats tab, whatever chat or link the
+ * user came from. `dismissTo` pops to the tab if it is already beneath, and
+ * navigates to it when the chat was opened alone on a cold start.
+ */
+export function goHome(router: { dismissTo(href: Href): void }): void {
+  router.dismissTo('/(tabs)/chats');
+}
+
 /** A stable handler for a back control whose parent screen is `parent`. */
 export function useGoBack(parent: Href): () => void {
   const router = useRouter();
