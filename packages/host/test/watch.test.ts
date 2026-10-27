@@ -10,11 +10,18 @@
 
 import { describe, it, expect } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, mkdirSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
-import { WatchScheduler, readProgress } from '../src/watch.js';
+import { MAX_WATCH_RESTARTS, WatchScheduler, readProgress } from '../src/watch.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -216,16 +223,15 @@ describe('WatchScheduler — survives a host restart', () => {
     try {
       schedulerB.loadAll(); // logs only — nothing to arm, per the class comment
       expect(schedulerB.list('c-restart')[0]?.status).toBe('running');
-      // Kill the process out from under B, the way the real one will end.
+      // The host restart killed it: no exit sidecar was written, so B re-runs it.
       process.kill(-rec.pid, 'SIGKILL');
       await flushUntil(() => depsB.delivered.length > 0);
-      expect(depsB.delivered[0]!.message).toMatch(/^\[watch\]/);
+      expect(depsB.delivered[0]!.message).toMatch(/^\[watch\].*started again/);
       const after = schedulerB.list('c-restart')[0];
-      // Re-attached via the bare-pid liveness probe, not a live handle: no exit
-      // code/signal is knowable, which the record says honestly (null, not a
-      // guessed number).
-      expect(after?.status).toBe('exited');
-      expect(after?.exitCode).toBeNull();
+      expect(after?.status).toBe('running');
+      expect(after?.restarts).toBe(1);
+      expect(after?.pid).not.toBe(rec.pid);
+      process.kill(-after!.pid, 'SIGKILL');
     } finally {
       schedulerB.dispose();
     }
@@ -428,6 +434,67 @@ describe('WatchScheduler — timeout, progress and stall nudge', () => {
       expect(scheduler.setCheckIn('c-pw', rec.taskId, 600)).toBe(false);
     } finally {
       scheduler.dispose();
+    }
+  });
+
+  it('does not re-run a watch that finished while the host was down; reports its real exit code', async () => {
+    const depsA = makeDeps();
+    const schedulerA = mkScheduler(depsA);
+    const rec = schedulerA.start({
+      chatId: 'c-done',
+      command: 'exit 3',
+      description: 'finishes during downtime',
+      timeoutSec: 600,
+      cwd: depsA.home,
+    });
+    schedulerA.dispose();
+    await flushUntil(() => existsSync(rec.exitFile!));
+    const depsB = makeDeps({
+      home: depsA.home,
+      dirForChat: depsA.dirForChat,
+      allChatIds: () => ['c-done'],
+    });
+    const schedulerB = mkScheduler(depsB);
+    try {
+      await flushUntil(() => depsB.delivered.length > 0);
+      const after = schedulerB.list('c-done')[0];
+      expect(after?.status).toBe('failed');
+      expect(after?.exitCode).toBe(3);
+      expect(after?.restarts).toBeUndefined();
+    } finally {
+      schedulerB.dispose();
+    }
+  });
+
+  it('gives up after MAX_WATCH_RESTARTS interruptions instead of looping forever', async () => {
+    const depsA = makeDeps();
+    const schedulerA = mkScheduler(depsA);
+    const rec = schedulerA.start({
+      chatId: 'c-cap',
+      command: 'sleep 30',
+      description: 'always interrupted',
+      timeoutSec: 600,
+      cwd: depsA.home,
+    });
+    schedulerA.dispose();
+    process.kill(-rec.pid, 'SIGKILL');
+    const dir = join(depsA.home, 'c-cap', 'watch');
+    writeFileSync(
+      join(dir, `${rec.taskId}.json`),
+      JSON.stringify({ ...rec, restarts: MAX_WATCH_RESTARTS }),
+    );
+    const depsB = makeDeps({
+      home: depsA.home,
+      dirForChat: depsA.dirForChat,
+      allChatIds: () => ['c-cap'],
+    });
+    const schedulerB = mkScheduler(depsB);
+    try {
+      await flushUntil(() => depsB.delivered.length > 0);
+      expect(depsB.delivered[0]!.message).toMatch(/interrupted by host restarts/);
+      expect(schedulerB.list('c-cap')[0]?.status).toBe('failed');
+    } finally {
+      schedulerB.dispose();
     }
   });
 });
