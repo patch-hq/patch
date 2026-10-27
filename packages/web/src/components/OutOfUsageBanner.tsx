@@ -22,7 +22,7 @@
 
 import { useEffect, useState, type JSX } from 'react';
 import { Link } from 'react-router-dom';
-import { CLAUDE_BACKEND_ID, harnessForModel } from '@patch/wire';
+import { backendIdForModel, harnessForModel } from '@patch/wire';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { getModelCatalog, loadModels } from '../lib/models.js';
@@ -51,10 +51,7 @@ export function OutOfUsageBanner({
   chatId?: string;
 }): JSX.Element | null {
   const account = usePresenceStore((s) =>
-    hostId
-      ? (s.hosts[hostId]?.accounts[model?.startsWith('openai/') ? 'codex' : CLAUDE_BACKEND_ID] ??
-        null)
-      : null,
+    hostId ? (s.hosts[hostId]?.accounts[backendIdForModel(model)] ?? null) : null,
   );
   // The countdown has to count. Ten seconds is under the minute it renders, so
   // the figure is never visibly stale, and it costs one render.

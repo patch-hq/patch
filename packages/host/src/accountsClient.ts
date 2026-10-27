@@ -5,14 +5,14 @@
 
 import { randomUUID } from 'node:crypto';
 import type { WireEvent } from '@patch/wire';
-import { PatchAccountsResponseEvent } from '@patch/wire';
+import { PatchAccountsResponseEvent, type ProviderBackendId } from '@patch/wire';
 
 export type AccountsRequest =
   | { op: 'list' }
-  | { op: 'order'; backendId: 'claude-code' | 'codex'; accountIds: string[] }
+  | { op: 'order'; backendId: ProviderBackendId; accountIds: string[] }
   | {
       op: 'strategy';
-      backendId: 'claude-code' | 'codex';
+      backendId: ProviderBackendId;
       strategy: 'priority' | 'round-robin' | 'soonest-reset' | 'least-used';
     };
 

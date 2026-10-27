@@ -48,6 +48,8 @@ import {
   backSetToClear,
   deriveSnoozeOutcome,
   openSnoozeRecord,
+  providerDescriptor,
+  ChatErrorCode,
 } from '@patch/wire';
 import type {
   SnoozeRecord,
@@ -55,7 +57,6 @@ import type {
   AttachmentRef,
   AttachmentKind,
   ChatActivity,
-  ChatErrorCode,
   ChatErrorEvent,
   ChatMessageEvent,
   ChatMessageDeltaEvent,
@@ -8953,10 +8954,9 @@ export class Daemon {
         type: 'chat.error',
         chatId,
         error: {
-          code:
-            harnessOfModel(state.model) === 'codex'
-              ? 'chatgpt_login_required'
-              : 'claude_oauth_missing',
+          code: ChatErrorCode.parse(
+            providerDescriptor(harnessOfModel(state.model)).loginRequiredCode,
+          ),
           message:
             harnessOfModel(state.model) !== 'claude'
               ? oauth.reason

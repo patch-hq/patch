@@ -6,6 +6,13 @@
 // naming it, rather than changing one machine behind the others' backs.
 
 import { Command } from 'commander';
+import {
+  accountsKeyForBackend,
+  providerByName,
+  providerDescriptor,
+  PROVIDERS,
+  type ProviderBackendId,
+} from '@patch/wire';
 import type { CommonOpts } from './_common.js';
 import { emitJson, emitText, getTransport, run } from './_common.js';
 import { resolveHost } from './hosts.js';
@@ -53,10 +60,12 @@ function parseValue(raw: string): unknown {
   }
 }
 
-function backendOf(name: string): 'claude-code' | 'codex' {
-  if (name === 'claude' || name === 'claude-code') return 'claude-code';
-  if (name === 'codex' || name === 'openai' || name === 'chatgpt') return 'codex';
-  throw new Error(`no backend "${name}" (claude or codex)`);
+function backendOf(name: string): ProviderBackendId {
+  try {
+    return providerDescriptor(providerByName(name)).backendId as ProviderBackendId;
+  } catch {
+    throw new Error(`no backend "${name}" (${PROVIDERS.map((p) => p.id).join(' or ')})`);
+  }
 }
 
 /** The shared accounts in order, as `patch accounts` shows and `--json` returns them. */
@@ -86,21 +95,22 @@ const accountsApi = (opts: CommonOpts) => {
       uds
         ? t.get<AccountsView>('/accounts')
         : viewOf(await t.get<SharedState>('/api/settings/shared')),
-    order: async (id: 'claude-code' | 'codex', accountIds: string[]): Promise<AccountsView> =>
+    order: async (id: ProviderBackendId, accountIds: string[]): Promise<AccountsView> =>
       uds
         ? t.put<AccountsView>(`/accounts/${id}/order`, { accountIds })
         : viewOf(await t.put<SharedState>(`/api/accounts/${id}/order`, { accountIds })),
-    strategy: async (id: 'claude-code' | 'codex', strategy: string): Promise<AccountsView> =>
+    strategy: async (id: ProviderBackendId, strategy: string): Promise<AccountsView> =>
       uds
         ? t.put<AccountsView>(`/accounts/${id}/strategy`, { strategy })
         : viewOf(await t.put<SharedState>(`/api/accounts/${id}/strategy`, { strategy })),
   };
 };
 
-function printAccounts(view: AccountsView, backend: 'claude-code' | 'codex'): void {
-  const list = backend === 'codex' ? view.codex : view.claude;
-  const strategy = view.strategy[backend === 'codex' ? 'codex' : 'claude'];
-  emitText(`${backend === 'codex' ? 'ChatGPT' : 'Claude'} — strategy: ${strategy}`);
+function printAccounts(view: AccountsView, backend: ProviderBackendId): void {
+  const key = accountsKeyForBackend(backend);
+  const list = view[key];
+  const strategy = view.strategy[key];
+  emitText(`${providerDescriptor(providerByName(backend)).label} — strategy: ${strategy}`);
   if (list.length === 0) emitText('  (no accounts)');
   list.forEach((a, i) =>
     emitText(
@@ -169,8 +179,7 @@ export function registerSettingsCommands(program: Command): void {
         }
         if (backend !== undefined) printAccounts(view, backendOf(backend));
         else {
-          printAccounts(view, 'claude-code');
-          printAccounts(view, 'codex');
+          for (const p of PROVIDERS) printAccounts(view, p.backendId);
         }
       });
     });

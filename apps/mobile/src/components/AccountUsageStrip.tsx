@@ -7,18 +7,13 @@
 
 import React from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { rateLimitWindowState, type RateLimitWindow } from '@patch/wire';
+import { PROVIDERS, rateLimitWindowState, type RateLimitWindow } from '@patch/wire';
 import { getWs } from '../api/ws';
 import { usePresenceStore } from '../stores/presenceStore';
 import { useUiStore } from '../stores/uiStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { formatReset } from '../lib/usage';
 import { fonts, radii, space, textMin, useTheme, type ThemeColors } from '../lib/theme';
-
-const BACKENDS = [
-  { id: 'claude-code', name: 'Claude' },
-  { id: 'codex', name: 'Codex' },
-] as const;
 
 /** How many accounts show at once; the rest are a page away. */
 export const USAGE_PAGE_SIZE = 4;
@@ -44,8 +39,8 @@ export function AccountUsageStrip(): React.ReactElement | null {
   const [page, setPage] = React.useState(0);
   const asked = React.useRef(new Set<string>());
   const rows: Row[] = [];
-  for (const { id, name } of BACKENDS) {
-    const accounts = secrets ? (id === 'claude-code' ? secrets.claude : secrets.codex) : [];
+  for (const { backendId: id, label: name, accountsKey } of PROVIDERS) {
+    const accounts = secrets ? secrets[accountsKey] : [];
     for (const a of accounts) {
       if (!a.connected || ('kind' in a && a.kind === 'apiKey')) continue;
       let usage: Usage;

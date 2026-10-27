@@ -10,6 +10,14 @@ import {
   providerBuiltinCommands,
   permissionModesFor,
   HARNESS_PERMISSION_MODES,
+  BACKEND_IDS,
+  backendIdForModel,
+  accountsKeyForBackend,
+  modelSupportsEffort,
+  providerByName,
+  providerForBackendId,
+  CLAUDE_BACKEND_ID,
+  ChatErrorCode,
 } from '../src/index.js';
 
 describe('provider built-in commands', () => {
@@ -65,5 +73,37 @@ describe('provider registry', () => {
     expect(HARNESS_PERMISSION_MODES.claude).toEqual(PermissionMode.options);
     expect(permissionModesFor('openai/gpt-5')).not.toContain('auto');
     expect(permissionModesFor('claude-opus-5')).toContain('auto');
+  });
+});
+
+describe('provider account and capability facts', () => {
+  it('every provider has a unique backend id and accounts key', () => {
+    expect(new Set(PROVIDERS.map((p) => p.backendId)).size).toBe(PROVIDERS.length);
+    expect(new Set(PROVIDERS.map((p) => p.accountsKey)).size).toBe(PROVIDERS.length);
+    expect([...BACKEND_IDS]).toEqual(PROVIDERS.map((p) => p.backendId));
+    for (const p of PROVIDERS) expect(() => ChatErrorCode.parse(p.loginRequiredCode)).not.toThrow();
+  });
+
+  it('keeps the claude backend id the wire constant', () => {
+    expect(providerDescriptor('claude').backendId).toBe(CLAUDE_BACKEND_ID);
+  });
+
+  it('resolves backends, names and aliases', () => {
+    expect(providerForBackendId('claude-code')).toBe('claude');
+    expect(providerForBackendId('codex')).toBe('codex');
+    expect(providerByName('openai')).toBe('codex');
+    expect(providerByName('chatgpt')).toBe('codex');
+    expect(providerByName('claude-code')).toBe('claude');
+    expect(() => providerByName('nope')).toThrow('unknown provider');
+    expect(() => providerForBackendId('nope')).toThrow('unknown backend');
+  });
+
+  it('routes a model to its backend, accounts key and effort support', () => {
+    expect(backendIdForModel('openai/gpt-5')).toBe('codex');
+    expect(backendIdForModel(undefined)).toBe('claude-code');
+    expect(accountsKeyForBackend('codex')).toBe('codex');
+    expect(accountsKeyForBackend('claude-code')).toBe('claude');
+    expect(modelSupportsEffort('claude-opus-5')).toBe(true);
+    expect(modelSupportsEffort('openai/gpt-5')).toBe(false);
   });
 });
