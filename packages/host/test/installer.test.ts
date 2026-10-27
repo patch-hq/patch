@@ -6,6 +6,7 @@
 // regress: the platform refusal, the authority notice, the unit contents, the
 // named pairing failures, and the machine identity.
 
+import { readdirSync, utimesSync } from 'node:fs';
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import {
   lstatSync,
@@ -514,7 +515,7 @@ describe('what the install puts on the machine', () => {
     };
     const argv = ['--non-interactive', '--server', 'http://s', '--internal-token', 't'];
     await runInstaller(makeCtx({ home, serviceOps: ops, argv }));
-    const stable = join(home, '.patch', 'node');
+    const stable = join(home, '.patch', 'runtime', 'patch-host');
     expect(nodes[0]).toBe(stable);
     expect(readFileSync(stable, 'utf8')).toBe('#!/bin/sh\n');
     const first = statSync(stable).ino;
@@ -523,6 +524,24 @@ describe('what the install puts on the machine', () => {
     await runInstaller(makeCtx({ home, serviceOps: ops, argv }));
     expect(nodes[1]).toBe(stable);
     expect(statSync(stable).ino).toBe(first);
+  });
+
+  it('prunes old version folders, keeping the new install and the previous one', async () => {
+    const home = mkTmp('patch-home-');
+    const versions = join(home, '.patch', 'versions');
+    for (let i = 1; i <= 5; i++) {
+      const d = join(versions, `0.0.${i}`);
+      mkdirSync(d, { recursive: true });
+      utimesSync(d, i * 1000, i * 1000);
+    }
+    await runInstaller(
+      makeCtx({
+        home,
+        serviceOps: recordingOps(),
+        argv: ['--non-interactive', '--server', 'http://s', '--internal-token', 't'],
+      }),
+    );
+    expect(readdirSync(versions).sort()).toEqual(['0.0.5', '9.9.9']);
   });
 
   it('rewrites a clobbered skill on the next install', async () => {

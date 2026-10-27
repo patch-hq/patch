@@ -42,6 +42,8 @@ import {
   symlinkSync,
   writeFileSync,
   type ReadStream,
+  readdirSync,
+  statSync,
 } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { hostname, userInfo } from 'node:os';
@@ -111,6 +113,29 @@ export interface InstallerContext {
   provisionSandbox?: (platform: NodeJS.Platform, io: { out(line: string): void }) => Promise<void>;
   /** Login-shell PATH override — test hook, so a unit test runs no shell. */
   loginShellPath?: () => string;
+}
+
+/** How many installed versions to keep: the new one and the one still running. */
+export const VERSIONS_KEPT = 2;
+
+/** Remove all but the newest `VERSIONS_KEPT` version folders; `keep` is never removed. */
+export function pruneOldVersions(versionsDir: string, keep: string): string[] {
+  const dirs = readdirSync(versionsDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => ({
+      path: join(versionsDir, d.name),
+      mtime: statSync(join(versionsDir, d.name)).mtimeMs,
+    }))
+    .sort((a, b) => b.mtime - a.mtime);
+  const survivors = new Set([resolve(keep)]);
+  for (const d of dirs) if (survivors.size < VERSIONS_KEPT) survivors.add(resolve(d.path));
+  const removed: string[] = [];
+  for (const d of dirs) {
+    if (survivors.has(resolve(d.path))) continue;
+    rmSync(d.path, { recursive: true, force: true });
+    removed.push(d.path);
+  }
+  return removed;
 }
 
 export interface BuildInfo {
@@ -420,7 +445,12 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
   // a node at a new `versions/<v>/` path on every release showed up as another
   // "node" row to approve each time. One path, rewritten only when the binary
   // itself changes, keeps the single grant valid across updates.
-  const stableNode = join(patchHome, 'node');
+  // Named "patch-host" rather than "node", so the one entry in the privacy
+  // list is recognisably Patch's. A real file (never a symlink), overwritten
+  // in place by each update that ships a different binary.
+  const stableNode = join(patchHome, 'runtime', 'patch-host');
+  mkdirSync(dirname(stableNode), { recursive: true });
+  rmSync(join(patchHome, 'node'), { force: true });
   const bundledNode = join(installDir, 'node');
   if (existsSync(bundledNode)) {
     const same =
@@ -436,6 +466,8 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
   rmSync(current, { force: true, recursive: false });
   symlinkSync(installDir, current);
   io.out(`  installed ${build.version} (${build.gitSha}, built ${build.builtAt}) → ${installDir}`);
+  const pruned = pruneOldVersions(join(patchHome, 'versions'), installDir);
+  if (pruned.length > 0) io.out(`  removed ${pruned.length} old version folder(s)`);
 
   // ---- 4. The patch-cli skill, in the user's own skills directory -------
   // spec/17 § Skill: written on install and rewritten on every self-update, so
