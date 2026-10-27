@@ -94,10 +94,6 @@ import {
 import {
   Mic,
   ArrowUp,
-  Paperclip,
-  PenLine,
-  Image as ImageIcon,
-  Camera,
   X,
   FileText,
   Square,
@@ -107,7 +103,9 @@ import {
   ClipboardList,
   Sparkles,
   Pencil,
-  ChevronDown,
+  Plus,
+  Gauge,
+  UserRound,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -237,6 +235,9 @@ const FIELD_MIC_SIZE = 32;
 const FIELD_MIC_ICON_SIZE = 18;
 const FIELD_MIC_INSET = (COMPOSER_MIN_HEIGHT - FIELD_MIC_SIZE) / 2;
 const FIELD_PAD_RIGHT = FIELD_MIC_SIZE + FIELD_MIC_INSET + space.xs;
+// The + (what goes into the message) mirrors the mic at the field's
+// bottom-left, so the text keeps clear of it the same way.
+const FIELD_PAD_LEFT = FIELD_MIC_SIZE + FIELD_MIC_INSET + space.xs;
 // Send/Stop are the only action-row controls that paint a filled circle
 // rather than an outline glyph, so at the shared 36px token they read heavier
 // than their neighbours (Todoist 6hf2JM6695c7rhJ6 — "looks big even if it
@@ -266,15 +267,12 @@ const MIC_PRESS_RETENTION = 80;
  */
 export const MODEL_CONFIRM_TIMEOUT_MS = 8000;
 
-/** Height of the settings line's controls — quieter than the 44pt action row. */
-const SETTINGS_ROW_HEIGHT = 36;
-
 const EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 const EFFORT_LABELS: Record<EffortLevel, string> = {
   low: 'Low',
   medium: 'Medium',
   high: 'High',
-  xhigh: 'X-high',
+  xhigh: 'Extra high',
   max: 'Max',
 };
 
@@ -691,10 +689,12 @@ export function Composer({
   }, [pendingEffort]);
   const effortShown = pendingEffort !== null ? pendingEffort.value : chatEffort;
   const [effortMenuOpen, setEffortMenuOpen] = React.useState(false);
+  const [addMenuOpen, setAddMenuOpen] = React.useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = React.useState(false);
   const effortItems = [
     {
       id: 'default',
-      label: 'Default',
+      label: 'Let the model decide',
       testID: 'effort-option-default',
       selected: effortShown === null,
     },
@@ -1757,7 +1757,7 @@ export function Composer({
               ? Math.min(Math.max(COMPOSER_MIN_HEIGHT, mirrorHeight), inputMaxHeight)
               : COMPOSER_MIN_HEIGHT,
             maxHeight: inputMaxHeight,
-            paddingLeft: space.md,
+            paddingLeft: edit ? space.md : FIELD_PAD_LEFT,
             paddingRight: FIELD_PAD_RIGHT,
             paddingVertical: space.sm,
             backgroundColor: colors.paper,
@@ -1803,7 +1803,7 @@ export function Composer({
             <Text
               testID="dictation-preview"
               style={{
-                paddingLeft: space.md + 1,
+                paddingLeft: (edit ? space.md : FIELD_PAD_LEFT) + 1,
                 paddingRight: FIELD_PAD_RIGHT + 1,
                 paddingVertical: space.sm + 1,
                 fontSize: 16,
@@ -1842,7 +1842,7 @@ export function Composer({
             <Text
               testID="chip-mirror"
               style={{
-                paddingLeft: space.md + 1,
+                paddingLeft: (edit ? space.md : FIELD_PAD_LEFT) + 1,
                 paddingRight: FIELD_PAD_RIGHT + 1,
                 paddingVertical: space.sm + 1,
                 fontSize: 16,
@@ -1912,6 +1912,59 @@ export function Composer({
             }
           />
         </Pressable>
+        {/* + (spec/15 § Composer): what goes INTO the message — camera, photo,
+            any file, sketch — at the field's bottom-left, the mirror of the
+            mic. While a dictation runs it becomes Cancel, the far end of the
+            field from the mic, so stopping and cancelling are never one slip
+            apart. */}
+        {edit ? null : micState !== 'idle' || dictModeOn ? (
+          <Pressable
+            testID="dictation-cancel"
+            onPress={dictModeOn ? stopDictationMode : cancelDictation}
+            hitSlop={MIC_HIT_SLOP}
+            style={({ pressed }) => ({
+              position: 'absolute',
+              left: FIELD_MIC_INSET,
+              bottom: FIELD_MIC_INSET,
+              width: FIELD_MIC_SIZE,
+              height: FIELD_MIC_SIZE,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: FIELD_MIC_SIZE / 2,
+              backgroundColor: pressed ? colors.divider : 'transparent',
+            })}
+            accessibilityRole="button"
+            accessibilityLabel={dictModeOn ? 'Stop dictation mode' : 'Clear dictation'}
+          >
+            <X size={FIELD_MIC_ICON_SIZE} color={colors.ink2} />
+          </Pressable>
+        ) : (
+          <Pressable
+            testID="composer-add"
+            onPress={() => setAddMenuOpen(true)}
+            disabled={disabled || resolving}
+            hitSlop={MIC_HIT_SLOP}
+            style={({ pressed }) => ({
+              position: 'absolute',
+              left: FIELD_MIC_INSET,
+              bottom: FIELD_MIC_INSET,
+              width: FIELD_MIC_SIZE,
+              height: FIELD_MIC_SIZE,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: FIELD_MIC_SIZE / 2,
+              backgroundColor: pressed ? colors.divider : 'transparent',
+            })}
+            accessibilityRole="button"
+            accessibilityLabel={
+              disabled
+                ? `Attach unavailable — ${disabledReason ?? 'disconnected'}`
+                : 'Add to message'
+            }
+          >
+            <Plus size={FIELD_MIC_ICON_SIZE} color={disabled ? colors.inkFaint : colors.ink3} />
+          </Pressable>
+        )}
       </View>
       {/* Action row. Everything that acts on the message is here, left to
           right; the send button is pushed to the RIGHT edge by the flexible
@@ -1920,39 +1973,20 @@ export function Composer({
         testID="composer-actions-row"
         style={{ flexDirection: 'row', alignItems: 'center', gap: space.xs, minWidth: 0 }}
       >
-        {edit ? null : micState !== 'idle' || dictModeOn ? (
-          // Cancel takes the attach buttons' place while a dictation is in
-          // flight — the far end of the row from the mic, so stopping and
-          // cancelling are never one slip apart. Cancels via
-          // `lib/dictation.ts`'s `finish(false)`: capture stops, the preview
-          // session ends, nothing is transcribed or appended to the draft.
-          <Pressable
-            testID="dictation-cancel"
-            onPress={dictModeOn ? stopDictationMode : cancelDictation}
-            hitSlop={MIC_HIT_SLOP}
-            style={({ pressed }) => ({
-              width: ACTION_SIZE,
-              height: ACTION_SIZE,
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: radii.md,
-              backgroundColor: pressed ? colors.divider : 'transparent',
-            })}
-            accessibilityRole="button"
-            accessibilityLabel={dictModeOn ? 'Stop dictation mode' : 'Clear dictation'}
+        {/* Settings (spec/15 § Composer): the standing settings for the next
+            turn, as icons so the row stays one line — approval mode, model
+            by its short name, account, effort. Same order as web. */}
+        {sendTarget === undefined && !edit ? (
+          <View
+            testID="composer-settings-row"
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 2, flexShrink: 1 }}
           >
-            <X size={ICON_SIZE} color={colors.ink2} />
-          </Pressable>
-        ) : (
-          <>
-            {/* Three clear attach controls (spec/15 § Composer): a camera, a
-            photo/image picker and an any-type file picker. */}
             <Pressable
-              onPress={() => {
-                if (disabled || resolving) return;
-                void takePhoto();
-              }}
-              disabled={disabled || resolving}
+              testID="permission-mode-padlock"
+              onPress={() => setModeMenuOpen(true)}
+              // A mode change is a socket frame with nothing to queue it into —
+              // disabled, visibly, rather than dropped (spec/12).
+              disabled={linkDown}
               style={({ pressed }) => ({
                 width: ACTION_SIZE,
                 height: ACTION_SIZE,
@@ -1962,83 +1996,81 @@ export function Composer({
                 backgroundColor: pressed ? colors.divider : 'transparent',
               })}
               accessibilityRole="button"
-              accessibilityLabel={
-                disabled
-                  ? `Take photo unavailable — ${disabledReason ?? 'disconnected'}`
-                  : 'Take photo'
-              }
+              accessibilityLabel={`Permission mode: ${
+                permissionMode === undefined
+                  ? 'not reported yet'
+                  : permissionModeLabel(permissionMode)
+              }`}
             >
-              <Camera size={ICON_SIZE} color={disabled ? colors.inkFaint : colors.ink2} />
+              <ModeIcon
+                size={ICON_SIZE}
+                color={linkDown ? colors.inkFaint : bypass ? colors.red : colors.ink2}
+              />
             </Pressable>
-            <Pressable
-              onPress={() => {
-                if (disabled || resolving) return;
-                void pickImage();
-              }}
-              disabled={disabled || resolving}
-              style={({ pressed }) => ({
-                width: ACTION_SIZE,
-                height: ACTION_SIZE,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: radii.md,
-                backgroundColor: pressed ? colors.divider : 'transparent',
-              })}
-              accessibilityRole="button"
-              accessibilityLabel={
-                disabled
-                  ? `Attach unavailable — ${disabledReason ?? 'disconnected'}`
-                  : 'Attach photo or image'
+            <ModelPicker
+              hostId={row?.hostId ? row.hostId : null}
+              selected={pendingModel ?? chatModel}
+              pending={pendingModel !== null}
+              onSelect={chooseModel}
+              disabled={linkDown}
+              variant="compact"
+              testID="composer-model-pill"
+              note={
+                running
+                  ? 'Applies to your next message — this turn keeps its model'
+                  : 'Applies to your next message'
               }
-            >
-              <ImageIcon size={ICON_SIZE} color={disabled ? colors.inkFaint : colors.ink2} />
-            </Pressable>
-            <Pressable
-              onPress={() => {
-                if (disabled || resolving) return;
-                void pickDocument();
-              }}
-              disabled={disabled || resolving}
-              style={({ pressed }) => ({
-                width: ACTION_SIZE,
-                height: ACTION_SIZE,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: radii.md,
-                backgroundColor: pressed ? colors.divider : 'transparent',
-              })}
-              accessibilityRole="button"
-              accessibilityLabel={
-                disabled
-                  ? `Attach unavailable — ${disabledReason ?? 'disconnected'}`
-                  : 'Attach any file'
-              }
-            >
-              <Paperclip size={ICON_SIZE} color={disabled ? colors.inkFaint : colors.ink2} />
-            </Pressable>
-            <Pressable
-              onPress={() => {
-                if (disabled || resolving) return;
-                setSketching(true);
-              }}
-              disabled={disabled || resolving}
-              style={({ pressed }) => ({
-                width: ACTION_SIZE,
-                height: ACTION_SIZE,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: radii.md,
-                backgroundColor: pressed ? colors.divider : 'transparent',
-              })}
-              accessibilityRole="button"
-              accessibilityLabel={
-                disabled ? `Sketch unavailable — ${disabledReason ?? 'disconnected'}` : 'Sketch'
-              }
-            >
-              <PenLine size={ICON_SIZE} color={disabled ? colors.inkFaint : colors.ink2} />
-            </Pressable>
-          </>
-        )}
+            />
+            {row?.account ? (
+              <Pressable
+                testID="chat-account"
+                onPress={() => setAccountMenuOpen(true)}
+                style={({ pressed }) => ({
+                  width: ACTION_SIZE,
+                  height: ACTION_SIZE,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: radii.md,
+                  backgroundColor: pressed ? colors.divider : 'transparent',
+                })}
+                accessibilityRole="button"
+                accessibilityLabel={`Account: ${row.account.label}`}
+              >
+                <UserRound size={ICON_SIZE} color={colors.ink2} />
+              </Pressable>
+            ) : null}
+            {showEffort ? (
+              <Pressable
+                testID="composer-effort"
+                onPress={() => setEffortMenuOpen(true)}
+                disabled={linkDown}
+                style={({ pressed }) => ({
+                  minWidth: ACTION_SIZE,
+                  height: ACTION_SIZE,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 4,
+                  paddingHorizontal: space.xs,
+                  borderRadius: radii.md,
+                  backgroundColor: pressed ? colors.divider : 'transparent',
+                  opacity: pendingEffort !== null ? 0.55 : 1,
+                })}
+                accessibilityRole="button"
+                accessibilityLabel={`Thinking effort: ${effortShown === null ? 'the model decides' : EFFORT_LABELS[effortShown]}`}
+              >
+                <Gauge size={ICON_SIZE} color={linkDown ? colors.inkFaint : colors.ink2} />
+                {effortShown !== null ? (
+                  <Text
+                    style={{ ...typography.meta, color: linkDown ? colors.inkFaint : colors.ink3 }}
+                  >
+                    {EFFORT_LABELS[effortShown]}
+                  </Text>
+                ) : null}
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
         <View testID="composer-actions-spacer" style={{ flex: 1, minWidth: space.xs }} />
         {sendTarget === undefined && !edit ? (
           <ContextRing chatId={chatId} size={ACTION_SIZE} />
@@ -2127,107 +2159,44 @@ export function Composer({
           </Pressable>
         )}
       </View>
-      {/* Settings line (spec/15 § Composer — settings line): the standing
-          settings for the next turn, under the action buttons, on a line of
-          their own so every label reads in full. Order matches web: approval
-          mode, model, account, effort. Wraps rather than clipping. */}
-      {sendTarget === undefined && !edit ? (
-        <View
-          testID="composer-settings-row"
-          style={{
-            flexDirection: 'row',
-            flexWrap: 'wrap',
-            alignItems: 'center',
-            columnGap: space.xs,
-          }}
-        >
-          <Pressable
-            testID="permission-mode-padlock"
-            onPress={() => setModeMenuOpen(true)}
-            // A mode change is a socket frame with nothing to queue it into —
-            // disabled, visibly, rather than dropped (spec/12).
-            disabled={linkDown}
-            style={({ pressed }) => ({
-              height: SETTINGS_ROW_HEIGHT,
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: space.xs,
-              paddingHorizontal: space.xs,
-              borderRadius: radii.md,
-              backgroundColor: pressed ? colors.divider : 'transparent',
-            })}
-            accessibilityRole="button"
-            accessibilityLabel={`Permission mode: ${
-              permissionMode === undefined
-                ? 'not reported yet'
-                : permissionModeLabel(permissionMode)
-            }`}
-          >
-            <ModeIcon
-              size={ICON_SIZE}
-              color={linkDown ? colors.inkFaint : bypass ? colors.red : colors.ink2}
-            />
-            <Text
-              style={{
-                ...typography.meta,
-                color: linkDown ? colors.inkFaint : bypass ? colors.red : colors.ink3,
-              }}
-            >
-              {permissionMode === undefined ? 'Approval mode' : permissionModeLabel(permissionMode)}
-            </Text>
-          </Pressable>
-          <ModelPicker
-            hostId={row?.hostId ? row.hostId : null}
-            selected={pendingModel ?? chatModel}
-            pending={pendingModel !== null}
-            onSelect={chooseModel}
-            disabled={linkDown}
-            variant="compact"
-            testID="composer-model-pill"
-            note={
-              running
-                ? 'Applies to your next message — this turn keeps its model'
-                : 'Applies to your next message'
-            }
-          />
-          {!edit && row?.account ? (
-            <Text
-              testID="chat-account"
-              accessibilityLabel={`The latest turn ran on the ${row.account.label} account`}
-              style={{
-                ...typography.meta,
-                color: colors.ink3,
-                marginHorizontal: space.xs,
-              }}
-            >
-              {row.account.label}
-            </Text>
-          ) : null}
-          {showEffort ? (
-            <Pressable
-              testID="composer-effort"
-              onPress={() => setEffortMenuOpen(true)}
-              disabled={linkDown}
-              style={({ pressed }) => ({
-                height: SETTINGS_ROW_HEIGHT,
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 2,
-                paddingHorizontal: space.xs,
-                borderRadius: radii.md,
-                backgroundColor: pressed ? colors.divider : 'transparent',
-                opacity: pendingEffort !== null ? 0.55 : 1,
-              })}
-              accessibilityRole="button"
-              accessibilityLabel={`Thinking effort: ${effortShown === null ? 'Default' : EFFORT_LABELS[effortShown]}`}
-            >
-              <Text style={{ ...typography.meta, color: linkDown ? colors.inkFaint : colors.ink3 }}>
-                {effortShown === null ? 'Default' : EFFORT_LABELS[effortShown]}
-              </Text>
-              <ChevronDown size={14} color={linkDown ? colors.inkFaint : colors.ink3} />
-            </Pressable>
-          ) : null}
-        </View>
+      <AnchoredMenu
+        visible={addMenuOpen}
+        items={[
+          { id: 'camera', label: 'Take photo', testID: 'add-menu-camera' },
+          { id: 'image', label: 'Photo or image', testID: 'add-menu-image' },
+          { id: 'file', label: 'Any file', testID: 'add-menu-file' },
+          { id: 'sketch', label: 'Sketch', testID: 'add-menu-sketch' },
+        ]}
+        onSelect={(id) => {
+          setAddMenuOpen(false);
+          // The + is disabled while the host can't take a file; a menu left
+          // open across that change must not act on it either.
+          if (disabled || resolving) return;
+          if (id === 'camera') void takePhoto();
+          else if (id === 'image') void pickImage();
+          else if (id === 'file') void pickDocument();
+          else if (id === 'sketch') setSketching(true);
+        }}
+        onDismiss={() => setAddMenuOpen(false)}
+        placement="bottom"
+        nonModal
+      />
+      {row?.account ? (
+        <AnchoredMenu
+          visible={accountMenuOpen}
+          items={[
+            {
+              id: 'account',
+              label: `On ${row.account.label}`,
+              testID: 'account-menu-current',
+              disabled: true,
+            },
+          ]}
+          onSelect={() => setAccountMenuOpen(false)}
+          onDismiss={() => setAccountMenuOpen(false)}
+          placement="bottom"
+          nonModal
+        />
       ) : null}
       <AnchoredMenu
         visible={micMenuOpen}

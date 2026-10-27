@@ -149,25 +149,23 @@ function dictationFactory(): typeof dictationModule.startDictation {
 }
 
 describe('Composer action row — order', () => {
-  it('a dictation in flight swaps the attach buttons for Clear, far from the mic in the field', async () => {
+  it('a dictation in flight swaps the + for Clear, at the far end of the field from the mic', async () => {
     seed();
     const factory = dictationFactory();
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" dictationFactory={factory} />);
     await actAsync(() => {
       findHost(r.root, byLabel('Dictate into message')).props['onPress']();
     });
-    expect(rowOrder(r.root).slice(0, 2)).toEqual(['Clear dictation', 'composer-actions-spacer']);
-    // The mic stays where it was, inside the text field — it never moves.
     const inputRow = findHost(r.root, byTestId('composer-input-row'));
-    expect(
-      inputRow.findAll(
-        (i) =>
-          typeof i.type === 'string' && i.props['accessibilityLabel'] === 'Dictate into message',
-      ),
-    ).toHaveLength(1);
+    const inRow = (label: string): number =>
+      inputRow.findAll((i) => typeof i.type === 'string' && i.props['accessibilityLabel'] === label)
+        .length;
+    expect(inRow('Clear dictation')).toBe(1);
+    expect(inRow('Add to message')).toBe(0);
+    expect(inRow('Dictate into message')).toBe(1);
   });
 
-  it('Clear goes and the attach buttons come back once the dictation is cleared', async () => {
+  it('Clear goes and the + comes back once the dictation is cleared', async () => {
     seed();
     const factory = dictationFactory();
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" dictationFactory={factory} />);
@@ -177,48 +175,41 @@ describe('Composer action row — order', () => {
     await actAsync(() => {
       findHost(r.root, byLabel('Clear dictation')).props['onPress']();
     });
-    expect(rowOrder(r.root).slice(0, 4)).toEqual([
-      'Take photo',
-      'Attach photo or image',
-      'Attach any file',
-      'Sketch',
-    ]);
+    expect(queryHost(r.root, byLabel('Clear dictation'))).toBeNull();
+    expect(findHost(r.root, byLabel('Add to message'))).toBeTruthy();
   });
 
-  it('reads camera, image, file, sketch … send', () => {
+  it('reads settings … send on one line: approval, model, effort, then send', () => {
     seed();
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
     expect(rowOrder(r.root)).toEqual([
-      'Take photo',
-      'Attach photo or image',
-      'Attach any file',
-      'Sketch',
+      'permission-mode-padlock',
+      'composer-model-pill',
       'composer-actions-spacer',
       'Send message',
     ]);
+    const settings = findHost(r.root, byTestId('composer-settings-row'));
+    expect(queryHost(settings, byTestId('composer-effort'))).not.toBeNull();
   });
 
-  it('puts the settings on their own line: approval mode, model, effort', () => {
+  it('the + offers camera, photo, file and sketch', () => {
     seed();
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
-    const settings = findHost(r.root, byTestId('composer-settings-row'));
-    const ids = settings
-      .findAll((i) => typeof i.type === 'string' && typeof i.props['testID'] === 'string')
-      .map((i) => i.props['testID'] as string)
-      .filter((id) =>
-        ['permission-mode-padlock', 'composer-model-pill', 'composer-effort'].includes(id),
-      );
-    expect([...new Set(ids)]).toEqual([
-      'permission-mode-padlock',
-      'composer-model-pill',
-      'composer-effort',
+    const menu = r.root.findAll(
+      (i) =>
+        typeof i.type !== 'string' &&
+        Array.isArray(i.props['items']) &&
+        (i.props['items'] as { testID?: string }[]).some((it) => it.testID === 'add-menu-camera'),
+    )[0]!;
+    expect((menu.props['items'] as { label: string }[]).map((i) => i.label)).toEqual([
+      'Take photo',
+      'Photo or image',
+      'Any file',
+      'Sketch',
     ]);
-    expect(textOf(findHost(settings, byTestId('permission-mode-padlock')))).toContain(
-      'Ask before acting',
-    );
   });
 
-  it('effort: a pick sends chat.effort_request; Default sends null', () => {
+  it('effort: a pick sends chat.effort_request', () => {
     seed();
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
     actSync(() => findHost(r.root, byTestId('composer-effort')).props['onPress']());

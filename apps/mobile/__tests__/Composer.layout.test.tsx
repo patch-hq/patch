@@ -64,8 +64,6 @@ function contains(root: ReactTestInstance, needle: ReactTestInstance): boolean {
   return root.findAll((i) => i === needle).length > 0;
 }
 
-const ACTION_LABELS = ['Take photo', 'Attach photo or image', 'Attach any file', 'Send message'];
-
 describe('Composer — two-row layout', () => {
   it('renders an input row and a separate actions row, in that order', () => {
     const r = renderRN(<Composer chatId="c1" folder="work" />);
@@ -104,57 +102,42 @@ describe('Composer — two-row layout', () => {
     );
   });
 
-  it('puts the text input on its own row with no action button beside it', () => {
+  it('holds the + and the mic inside the input row, and send on the actions row', () => {
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     const inputRow = findHost(r.root, byTestId('composer-input-row'));
-    const input = findHost(r.root, byType('TextInput'));
-
-    expect(contains(inputRow, input)).toBe(true);
-    for (const label of ACTION_LABELS) {
-      const button = findHost(r.root, byLabel(label));
-      expect(contains(inputRow, button)).toBe(false);
-    }
+    const actionsRow = findHost(r.root, byTestId('composer-actions-row'));
+    expect(contains(inputRow, findHost(r.root, byLabel('Add to message')))).toBe(true);
+    expect(contains(inputRow, findHost(r.root, byTestId('composer-mic')))).toBe(true);
+    expect(contains(actionsRow, findHost(r.root, byLabel('Send message')))).toBe(true);
+    expect(contains(inputRow, findHost(r.root, byLabel('Send message')))).toBe(false);
   });
 
-  it('puts every action button on the actions row', () => {
+  it('keeps the text clear of the + at the left', () => {
     const r = renderRN(<Composer chatId="c1" folder="work" />);
-    const actionsRow = findHost(r.root, byTestId('composer-actions-row'));
+    const add = findHost(r.root, byLabel('Add to message'));
     const input = findHost(r.root, byType('TextInput'));
-
-    expect(contains(actionsRow, input)).toBe(false);
-    for (const label of ACTION_LABELS) {
-      const button = findHost(r.root, byLabel(label));
-      expect(contains(actionsRow, button)).toBe(true);
-    }
+    expect(input.props['style'].paddingLeft).toBeGreaterThanOrEqual(
+      (add.props['style'] as { width: number }).width,
+    );
   });
 
   it('keeps Send at the RIGHT of the actions row, behind a flexible spacer', () => {
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     const actionsRow = findHost(r.root, byTestId('composer-actions-row'));
-    const send = findHost(r.root, byLabel('Send message'));
     const spacer = findHost(r.root, byTestId('composer-actions-spacer'));
-
-    // The spacer grows, so everything after it is flush right.
     expect(spacer.props['style']).toMatchObject({ flex: 1 });
-
-    // Order within the row: every other control, then the spacer, then send.
     const ordered = actionsRow.findAll(
       (i) =>
         typeof i.type === 'string' &&
-        (i.props['testID'] === 'composer-actions-spacer' ||
-          ACTION_LABELS.includes(i.props['accessibilityLabel'] as string)),
+        (i.props['testID'] === 'composer-settings-row' ||
+          i.props['testID'] === 'composer-actions-spacer' ||
+          i.props['accessibilityLabel'] === 'Send message'),
     );
-    const names = ordered.map(
-      (i) => (i.props['accessibilityLabel'] as string) ?? (i.props['testID'] as string),
-    );
-    expect(names).toEqual([
-      'Take photo',
-      'Attach photo or image',
-      'Attach any file',
-      'composer-actions-spacer',
-      'Send message',
-    ]);
-    expect(contains(actionsRow, send)).toBe(true);
+    expect(
+      ordered.map(
+        (i) => (i.props['testID'] as string) ?? (i.props['accessibilityLabel'] as string),
+      ),
+    ).toEqual(['composer-settings-row', 'composer-actions-spacer', 'Send message']);
   });
 
   // the user, 9 Oct 2026 (Todoist 6hj4XqwVpJGJWHH6): the row read as crowded — the

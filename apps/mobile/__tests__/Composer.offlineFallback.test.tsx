@@ -65,7 +65,7 @@ describe('Composer — disabled-reason fallback text (defensive, normally unreac
     const attachButtons = findAllHost(r.root, byType('Pressable')).filter(
       (p) => p.props['accessibilityLabel'] === 'Attach unavailable — disconnected',
     );
-    expect(attachButtons).toHaveLength(2);
+    expect(attachButtons).toHaveLength(1);
   });
 
   it('the mic label falls back to "disconnected"', () => {

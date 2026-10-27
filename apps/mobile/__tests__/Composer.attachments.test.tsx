@@ -9,7 +9,6 @@
 // (see their stubs); each test below overrides the specific call it needs.
 
 import React from 'react';
-import { Pressable as RNPressable } from 'react-native';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { usePermissionGate, answerExplainer } from '../src/lib/permissionGate';
 import {
@@ -22,6 +21,7 @@ import {
   actSync,
   actAsync,
   flush,
+  pickFromAddMenu,
 } from './testUtils/render';
 import { usePresenceStore } from '../src/stores/presenceStore';
 import { useVoiceStore } from '../src/stores/voiceStore';
@@ -185,7 +185,7 @@ describe('Composer — image picker (attach photo/image button)', () => {
     });
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byLabel('Attach photo or image')).props['onPress']();
+      pickFromAddMenu(r.root, 'image');
       await flush();
     });
     update(r, <Composer chatId="c1" folder="work" />);
@@ -199,7 +199,7 @@ describe('Composer — image picker (attach photo/image button)', () => {
     });
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byLabel('Attach photo or image')).props['onPress']();
+      pickFromAddMenu(r.root, 'image');
       await flush();
     });
     update(r, <Composer chatId="c1" folder="work" />);
@@ -216,7 +216,7 @@ describe('Composer — image picker (attach photo/image button)', () => {
     launchLibrarySpy.mockResolvedValue({ canceled: true });
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byLabel('Attach photo or image')).props['onPress']();
+      pickFromAddMenu(r.root, 'image');
       await flush();
     });
     update(r, <Composer chatId="c1" folder="work" />);
@@ -227,7 +227,7 @@ describe('Composer — image picker (attach photo/image button)', () => {
     requestPermSpy.mockResolvedValue({ granted: false });
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byLabel('Attach photo or image')).props['onPress']();
+      pickFromAddMenu(r.root, 'image');
       await flush();
     });
     const errors = useUiStore.getState().errors.map((e) => e.message);
@@ -256,7 +256,7 @@ describe('Composer — camera (take a photo)', () => {
     });
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byLabel('Take photo')).props['onPress']();
+      pickFromAddMenu(r.root, 'camera');
       await flush();
     });
     update(r, <Composer chatId="c1" folder="work" />);
@@ -270,7 +270,7 @@ describe('Composer — camera (take a photo)', () => {
     launchCameraSpy.mockResolvedValue({ canceled: false, assets: [{ uri: 'file:///raw' }] });
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byLabel('Take photo')).props['onPress']();
+      pickFromAddMenu(r.root, 'camera');
       await flush();
     });
     update(r, <Composer chatId="c1" folder="work" />);
@@ -284,7 +284,7 @@ describe('Composer — camera (take a photo)', () => {
     launchCameraSpy.mockResolvedValue({ canceled: true });
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byLabel('Take photo')).props['onPress']();
+      pickFromAddMenu(r.root, 'camera');
       await flush();
     });
     update(r, <Composer chatId="c1" folder="work" />);
@@ -305,7 +305,7 @@ describe('Composer — camera (take a photo)', () => {
     });
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byLabel('Take photo')).props['onPress']();
+      pickFromAddMenu(r.root, 'camera');
       await flush();
     });
     expect(launchCameraSpy).not.toHaveBeenCalled();
@@ -333,7 +333,7 @@ describe('Composer — camera (take a photo)', () => {
     });
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byLabel('Take photo')).props['onPress']();
+      pickFromAddMenu(r.root, 'camera');
       await flush();
     });
     update(r, <Composer chatId="c1" folder="work" />);
@@ -348,11 +348,11 @@ describe('Composer — camera (take a photo)', () => {
     expect(refs).toEqual([expect.objectContaining({ name: 'shot.jpg', kind: 'image' })]);
   });
 
-  it('the camera button is disabled with a reason when the host is offline', () => {
+  it('the + is disabled with a reason when the host is offline', () => {
     usePresenceStore.setState({ connection: 'connected', daemon: 'offline' });
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     const btn = findAllHost(r.root, byType('Pressable')).find((p) =>
-      String(p.props['accessibilityLabel']).startsWith('Take photo unavailable'),
+      String(p.props['accessibilityLabel']).startsWith('Attach unavailable'),
     );
     expect(btn).toBeTruthy();
     expect(btn!.props['disabled']).toBe(true);
@@ -366,7 +366,7 @@ describe('Composer — phone file upload: multi-select pickers', () => {
   it('opens the document picker for ANY type in multi-select mode', async () => {
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byLabel('Attach any file')).props['onPress']();
+      pickFromAddMenu(r.root, 'file');
       await flush();
     });
     expect(getDocumentSpy).toHaveBeenCalledWith(
@@ -384,7 +384,7 @@ describe('Composer — phone file upload: multi-select pickers', () => {
     });
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byLabel('Attach any file')).props['onPress']();
+      pickFromAddMenu(r.root, 'file');
       await flush();
     });
     update(r, <Composer chatId="c1" folder="work" />);
@@ -395,7 +395,7 @@ describe('Composer — phone file upload: multi-select pickers', () => {
   it('opens the image library in multi-select mode', async () => {
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byLabel('Attach photo or image')).props['onPress']();
+      pickFromAddMenu(r.root, 'image');
       await flush();
     });
     expect(launchLibrarySpy).toHaveBeenCalledWith(
@@ -425,7 +425,7 @@ describe('Composer — phone file upload: multi-select pickers', () => {
     );
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byLabel('Attach any file')).props['onPress']();
+      pickFromAddMenu(r.root, 'file');
       await flush();
     });
     update(r, <Composer chatId="c1" folder="work" />);
@@ -450,7 +450,7 @@ describe('Composer — document picker (attach any file button)', () => {
     });
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byLabel('Attach any file')).props['onPress']();
+      pickFromAddMenu(r.root, 'file');
       await flush();
     });
     update(r, <Composer chatId="c1" folder="work" />);
@@ -468,7 +468,7 @@ describe('Composer — document picker (attach any file button)', () => {
     });
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byLabel('Attach any file')).props['onPress']();
+      pickFromAddMenu(r.root, 'file');
       await flush();
     });
     update(r, <Composer chatId="c1" folder="work" />);
@@ -482,7 +482,7 @@ describe('Composer — document picker (attach any file button)', () => {
     });
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byLabel('Attach any file')).props['onPress']();
+      pickFromAddMenu(r.root, 'file');
       await flush();
     });
     update(r, <Composer chatId="c1" folder="work" />);
@@ -494,7 +494,7 @@ describe('Composer — document picker (attach any file button)', () => {
   it('adds nothing when the file picker is cancelled', async () => {
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byLabel('Attach any file')).props['onPress']();
+      pickFromAddMenu(r.root, 'file');
       await flush();
     });
     update(r, <Composer chatId="c1" folder="work" />);
@@ -507,7 +507,7 @@ describe('Composer — document picker (attach any file button)', () => {
     getDocumentSpy.mockRejectedValue(new Error('picker crashed'));
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byLabel('Attach any file')).props['onPress']();
+      pickFromAddMenu(r.root, 'file');
       await flush();
     });
     const errors = useUiStore.getState().errors.map((e) => e.message);
@@ -522,62 +522,33 @@ describe('Composer — document picker (attach any file button)', () => {
 // Reached the same way: the RAW handler off the COMPOSITE Pressable, bypassing
 // Pressable's own disabled-gating.
 describe('Composer — attach handler internal disabled guards (defensive, normally unreachable via UI)', () => {
-  it("the camera button's guard bails without requesting permission / opening the camera", () => {
+  const offline = (): void =>
     usePresenceStore.setState({
       connection: 'connected',
       daemon: 'offline',
       accountId: null,
       surfaceId: null,
     });
+
+  it("the camera item's guard bails without requesting permission / opening the camera", () => {
+    offline();
     const r = renderRN(<Composer chatId="c1" folder="work" />);
-    const btn = r.root
-      .findAllByType(RNPressable)
-      .find(
-        (p) =>
-          p.props['accessibilityLabel'] ===
-          'Take photo unavailable — Machine offline — paused until your Hetzner box reconnects.',
-      );
-    (btn!.props['onPress'] as () => void)();
+    pickFromAddMenu(r.root, 'camera');
     expect(requestCameraPermSpy).not.toHaveBeenCalled();
     expect(launchCameraSpy).not.toHaveBeenCalled();
   });
 
-  it("the image button's guard bails without requesting permission / opening the picker", () => {
-    usePresenceStore.setState({
-      connection: 'connected',
-      daemon: 'offline',
-      accountId: null,
-      surfaceId: null,
-    });
+  it("the image item's guard bails without requesting permission / opening the picker", () => {
+    offline();
     const r = renderRN(<Composer chatId="c1" folder="work" />);
-    const btn = r.root
-      .findAllByType(RNPressable)
-      .find(
-        (p) =>
-          p.props['accessibilityLabel'] ===
-          'Attach unavailable — Machine offline — paused until your Hetzner box reconnects.',
-      );
-    (btn!.props['onPress'] as () => void)();
+    pickFromAddMenu(r.root, 'image');
     expect(requestPermSpy).not.toHaveBeenCalled();
   });
 
-  it("the file button's guard bails without opening the document picker", () => {
-    usePresenceStore.setState({
-      connection: 'connected',
-      daemon: 'offline',
-      accountId: null,
-      surfaceId: null,
-    });
+  it("the file item's guard bails without opening the document picker", () => {
+    offline();
     const r = renderRN(<Composer chatId="c1" folder="work" />);
-    const btns = r.root
-      .findAllByType(RNPressable)
-      .filter(
-        (p) =>
-          p.props['accessibilityLabel'] ===
-          'Attach unavailable — Machine offline — paused until your Hetzner box reconnects.',
-      );
-    // Both attach buttons share the label; the file button is the second one.
-    (btns[1]!.props['onPress'] as () => void)();
+    pickFromAddMenu(r.root, 'file');
     expect(getDocumentSpy).not.toHaveBeenCalled();
   });
 });
@@ -592,7 +563,7 @@ describe('Composer — removing an attachment', () => {
     });
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byLabel('Attach photo or image')).props['onPress']();
+      pickFromAddMenu(r.root, 'image');
       await flush();
     });
     update(r, <Composer chatId="c1" folder="work" />);
@@ -654,7 +625,7 @@ describe('Composer — upload-on-send', () => {
     });
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byLabel('Attach any file')).props['onPress']();
+      pickFromAddMenu(r.root, 'file');
       await flush();
     });
     update(r, <Composer chatId="c1" folder="work" />);
@@ -711,8 +682,8 @@ describe('Composer — upload-on-send', () => {
     expect(findHost(r.root, byType('TextInput')).props['editable']).toBe(true);
     expect(findAllHost(r.root, byType('Image'))).toHaveLength(0);
     expect(findAllHost(r.root, byType('ActivityIndicator'))).toHaveLength(0);
-    // The attach buttons stay live for the next message.
-    expect(findHost(r.root, byLabel('Attach photo or image')).props['disabled']).toBe(false);
+    // The + stays live for the next message.
+    expect(findHost(r.root, byLabel('Add to message')).props['disabled']).toBe(false);
 
     findHost(r.root, byType('TextInput')).props['onChangeText']('next one');
     update(r, <Composer chatId="c1" folder="work" />);

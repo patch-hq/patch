@@ -90,3 +90,5 @@ export const Pencil = icon('Pencil');
 export const Download = icon('Download');
 export const Play = icon('Play');
 export const RotateCw = icon('RotateCw');
+export const Gauge = icon('Gauge');
+export const UserRound = icon('UserRound');

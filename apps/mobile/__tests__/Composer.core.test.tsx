@@ -150,8 +150,7 @@ describe('Composer — daemon-offline / link-down disabled controls (spec/12)', 
   it('fully connected + host online: every control enabled, Send says "Send message"', () => {
     setPresence('connected', 'online');
     const r = renderRN(<Composer chatId="c1" folder="work" />);
-    expect(findHost(r.root, byLabel('Attach photo or image')).props['disabled']).toBe(false);
-    expect(findHost(r.root, byLabel('Attach any file')).props['disabled']).toBe(false);
+    expect(findHost(r.root, byLabel('Add to message')).props['disabled']).toBe(false);
     expect(findHost(r.root, byLabel('Dictate into message')).props['disabled']).toBe(false);
     const input = findHost(r.root, byType('TextInput'));
     expect(input.props['editable']).toBe(true);
@@ -164,9 +163,9 @@ describe('Composer — daemon-offline / link-down disabled controls (spec/12)', 
     setPresence('connected', 'offline');
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     const reason = 'Machine offline — paused until your Hetzner box reconnects.';
-    // Both attach buttons (image + file) share the same label text.
+    // The + in the field carries the attach controls, and the reason.
     const attachButtons = findAllHost(r.root, byLabel(`Attach unavailable — ${reason}`));
-    expect(attachButtons).toHaveLength(2);
+    expect(attachButtons).toHaveLength(1);
     for (const b of attachButtons) expect(b.props['disabled']).toBe(true);
     expect(findHost(r.root, byLabel(`Dictate unavailable — ${reason}`)).props['disabled']).toBe(
       true,
@@ -211,7 +210,7 @@ describe('Composer — daemon-offline / link-down disabled controls (spec/12)', 
     setPresence('offline', 'unknown');
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     const reason = 'Offline — no connection to the server.';
-    expect(findAllHost(r.root, byLabel(`Attach unavailable — ${reason}`))).toHaveLength(2);
+    expect(findAllHost(r.root, byLabel(`Attach unavailable — ${reason}`))).toHaveLength(1);
     expect(findHost(r.root, byType('TextInput')).props['placeholder']).toBe(reason);
     const input = findHost(r.root, byType('TextInput'));
     input.props['onChangeText']('hi');
@@ -224,7 +223,7 @@ describe('Composer — daemon-offline / link-down disabled controls (spec/12)', 
     setPresence('reconnecting', 'unknown');
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     const reason = 'Reconnecting to server…';
-    expect(findAllHost(r.root, byLabel(`Attach unavailable — ${reason}`))).toHaveLength(2);
+    expect(findAllHost(r.root, byLabel(`Attach unavailable — ${reason}`))).toHaveLength(1);
     const input = findHost(r.root, byType('TextInput'));
     input.props['onChangeText']('hi');
     update(r, <Composer chatId="c1" folder="work" />);
@@ -236,7 +235,7 @@ describe('Composer — daemon-offline / link-down disabled controls (spec/12)', 
     setPresence('connected', 'unknown');
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     const reason = 'Connecting to machine…';
-    expect(findAllHost(r.root, byLabel(`Attach unavailable — ${reason}`))).toHaveLength(2);
+    expect(findAllHost(r.root, byLabel(`Attach unavailable — ${reason}`))).toHaveLength(1);
   });
 
   it('pressing a disabled attach/mic button never opens the picker or starts a note', () => {
@@ -282,36 +281,12 @@ describe('Composer — Send pressed-style branches', () => {
 });
 
 describe('Composer — attach/mic button pressed-style branches (enabled)', () => {
-  it('shows the pressed background on the camera button', () => {
+  it('shows the pressed background on the + button', () => {
     const r = renderRN(<Composer chatId="c1" folder="work" />);
-    const btn = findHost(r.root, byLabel('Take photo'));
+    const btn = findHost(r.root, byLabel('Add to message'));
     expect((btn.props['style'] as { backgroundColor: string }).backgroundColor).toBe('transparent');
     btn.props['onPressIn']();
-    const pressed = findHost(r.root, byLabel('Take photo'));
-    expect((pressed.props['style'] as { backgroundColor: string }).backgroundColor).toBe(
-      colors.divider,
-    );
-    pressed.props['onPressOut']();
-  });
-
-  it('shows the pressed background on the image-attach button', () => {
-    const r = renderRN(<Composer chatId="c1" folder="work" />);
-    const btn = findHost(r.root, byLabel('Attach photo or image'));
-    expect((btn.props['style'] as { backgroundColor: string }).backgroundColor).toBe('transparent');
-    btn.props['onPressIn']();
-    const pressed = findHost(r.root, byLabel('Attach photo or image'));
-    expect((pressed.props['style'] as { backgroundColor: string }).backgroundColor).toBe(
-      colors.divider,
-    );
-    pressed.props['onPressOut']();
-  });
-
-  it('shows the pressed background on the file-attach button', () => {
-    const r = renderRN(<Composer chatId="c1" folder="work" />);
-    const btn = findHost(r.root, byLabel('Attach any file'));
-    expect((btn.props['style'] as { backgroundColor: string }).backgroundColor).toBe('transparent');
-    btn.props['onPressIn']();
-    const pressed = findHost(r.root, byLabel('Attach any file'));
+    const pressed = findHost(r.root, byLabel('Add to message'));
     expect((pressed.props['style'] as { backgroundColor: string }).backgroundColor).toBe(
       colors.divider,
     );

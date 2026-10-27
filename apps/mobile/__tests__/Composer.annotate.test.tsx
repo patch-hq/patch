@@ -14,6 +14,7 @@ import {
   actSync,
   actAsync,
   flush,
+  pickFromAddMenu,
 } from './testUtils/render';
 import { usePresenceStore } from '../src/stores/presenceStore';
 import { useChatStore } from '../src/stores/chatStore';
@@ -226,7 +227,7 @@ describe('Composer — sketch without a photo', () => {
   it('Sketch opens a blank annotator without reading any file', async () => {
     const r = mount();
     await actAsync(async () => {
-      findHost(r.root, byLabel('Sketch')).props['onPress']();
+      pickFromAddMenu(r.root, 'sketch');
       await flush();
     });
     const html = (
@@ -240,7 +241,7 @@ describe('Composer — sketch without a photo', () => {
     actSync(() => seed([DOC]));
     const r = mount();
     await actAsync(async () => {
-      findHost(r.root, byLabel('Sketch')).props['onPress']();
+      pickFromAddMenu(r.root, 'sketch');
       await flush();
     });
     await actAsync(async () => {
@@ -265,7 +266,7 @@ describe('Composer — sketch without a photo', () => {
   it('Cancel attaches nothing', async () => {
     const r = mount();
     await actAsync(async () => {
-      findHost(r.root, byLabel('Sketch')).props['onPress']();
+      pickFromAddMenu(r.root, 'sketch');
       await flush();
     });
     await actAsync(async () => {
