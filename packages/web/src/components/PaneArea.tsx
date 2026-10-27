@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import {
   countPanes,
+  firstLeaf,
   isTabDirty,
   useLayoutStore,
   type LeafPane,
@@ -366,10 +367,13 @@ function Pane({ pane, totalPanes }: { pane: LeafPane; totalPanes: number }): JSX
   // is nothing yet to switch between, reorder, or move. The bar earns its
   // place the moment there's a second tab, anywhere, or a second pane.
   const showTabBar = pane.tabs.length > 1 || totalPanes > 1;
+  // The pane in the window's top-left corner: its tab bar is the row the
+  // desktop shell's window controls float over (spec/05 § Window chrome).
+  const isOrigin = useLayoutStore((s) => firstLeaf(s.root).id === pane.id);
 
   return (
     <div
-      className={`pane${focused ? ' pane-focused' : ''}`}
+      className={`pane${focused ? ' pane-focused' : ''}${isOrigin ? ' pane-origin' : ''}`}
       data-testid={`pane-${pane.id}`}
       onPointerDownCapture={() => {
         if (!focused) setActivePane(pane.id);
