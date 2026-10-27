@@ -63,6 +63,8 @@ test.describe('sidebar', () => {
     const when = row.getByTestId('row-when-chat_bus');
     const tools = row.locator('.row-tools');
     const name = row.locator('.name');
+    // Measure where hovering will leave it: hover scrolls an off-screen row in.
+    await row.scrollIntoViewIfNeeded();
 
     const rowBox = (await row.boundingBox())!;
     const whenBox = (await when.boundingBox())!;
@@ -73,9 +75,13 @@ test.describe('sidebar', () => {
     await expect(tools).toBeVisible();
     const toolsBox = (await tools.boundingBox())!;
     const nameAfter = (await name.boundingBox())!;
+    // The list can reflow between the two measurements on a loaded runner (late
+    // hydrate re-sorts rows), so compare the vertical offsets within the row
+    // rather than absolute page positions.
+    const rowAfter = (await row.boundingBox())!;
 
     // Both are anchored to the row's TOP…
-    expect(Math.abs(whenBox.y - toolsBox.y)).toBeLessThanOrEqual(2);
+    expect(Math.abs(whenBox.y - rowBox.y - (toolsBox.y - rowAfter.y))).toBeLessThanOrEqual(2);
     // …and to the same RIGHT edge, so the actions land ON the time's slot
     // rather than in a column beside it.
     expect(Math.abs(whenBox.x + whenBox.width - (toolsBox.x + toolsBox.width))).toBeLessThanOrEqual(
@@ -87,7 +93,7 @@ test.describe('sidebar', () => {
     // Neither did the badge column or the name's left edge — only the name's
     // own clip width yields, and only while the pointer is on the row.
     expect(nameAfter.x).toBeCloseTo(nameBefore.x, 0);
-    expect(nameAfter.y).toBeCloseTo(nameBefore.y, 0);
+    expect(nameAfter.y - rowAfter.y).toBeCloseTo(nameBefore.y - rowBox.y, 0);
   });
 
   test('a DELETED row keeps its Restore control on hover (the tools overlay never applies)', async ({
