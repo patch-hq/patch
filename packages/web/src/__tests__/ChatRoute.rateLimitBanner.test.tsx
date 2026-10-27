@@ -274,6 +274,17 @@ describe('ChatRoute — the limit bubble', () => {
       expect(sent).toContainEqual({ type: 'chat.resume_now_request', chatId: 'c1' });
     });
 
+    it('a small retry icon in the header re-sends even while the reset is still ahead', () => {
+      const sent = setup({ resetsAt: Date.now() + 60_000 });
+      renderChat();
+      const retry = screen.getByTestId('rate-limit-retry-icon');
+      expect(retry).not.toHaveAttribute('aria-disabled');
+      expect(retry.getAttribute('aria-label')).toBe('Retry now');
+      expect(sent).not.toContainEqual({ type: 'chat.resume_now_request', chatId: 'c1' });
+      fireEvent.click(retry);
+      expect(sent).toContainEqual({ type: 'chat.resume_now_request', chatId: 'c1' });
+    });
+
     it('always shows the auto-resume toggle', () => {
       setup({ resetsAt: Date.now() + 60_000 });
       renderChat();

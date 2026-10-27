@@ -222,6 +222,14 @@ waited out:
   so three attempts a minute apart only fail three more times, each one saying
   so again everywhere a failure is reported.
 
+  A NEW MESSAGE TO A CHAT KNOWN TO BE BLOCKED JUST QUEUES. The host does not
+  re-send the owed turn because someone typed: it already knows the account is
+  blocked, and the attempt would only hit the limit again. For the person who
+  knows better (credit topped up, a limit lifted early) the limit card header
+  carries a small, subtle retry icon that is always enabled; it sends
+  `chat.resume_now_request`, the same as `Send`, and the queued messages drain
+  behind the owed turn.
+
   IT IS NOT A BANNER. The failure carries a structured `limitBlock` — which
   account, which pool, how full, when it clears — and the surface renders it as
   A MESSAGE IN THE TRANSCRIPT, under the turn it belongs to. It is about the reply that is not coming yet, so it

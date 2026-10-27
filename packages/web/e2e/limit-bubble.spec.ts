@@ -241,6 +241,19 @@ test.describe('the limit bubble', () => {
     await expect(extra).toHaveAttribute('href', /claude\.ai/);
   });
 
+  test('has a small retry icon in the header, subtle but always usable', async ({ page }) => {
+    await page.goto(HARNESS);
+    await park(page, { scope: 'session', accountLabel: 'Default' });
+
+    const retry = page.getByTestId('rate-limit-retry-icon');
+    await expect(retry).toBeVisible();
+    await expect(retry).toHaveAttribute('aria-label', 'Retry now');
+    const head = await page.locator('.limit-head').boundingBox();
+    const icon = await retry.boundingBox();
+    expect(icon!.width).toBeLessThanOrEqual(28);
+    expect(icon!.y).toBeLessThan(head!.y + head!.height);
+  });
+
   test('carries the auto-resume choice, ticked', async ({ page }) => {
     await page.goto(HARNESS);
     await park(page, { scope: 'session' });

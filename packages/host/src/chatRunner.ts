@@ -6335,15 +6335,10 @@ export class Daemon {
       // that replaced the question must not wait for the agent to finish its
       // reply to the refusal: interrupt it and let the queue drain now.
       if (questionsCancelled > 0) await this.stopChat(req.chatId);
-      // A person typing at a chat paused on a usage limit is saying the
-      // situation changed (new model, another account, credit topped up), so
-      // the message must not sit QUEUED behind a timer with nothing running.
-      // Lift the pause and re-send the owed turn now, as the Resume-now button
-      // does; this message is already queued and drains right behind it. If
-      // the limit still applies the owed turn parks again and this stays queued.
-      if (isAnswerByMessage && !req.nudge && this.creditParked(req.chatId)) {
-        this.resumeRateLimitedNow(req.chatId);
-      }
+      // A person typing at a chat paused on a usage limit just queues: the
+      // host already knows the account is blocked, so re-sending the owed turn
+      // would only hit the limit again. The retry control on the limit card
+      // (`chat.resume_now_request`) is how someone who knows better lifts it.
       return;
     }
     // Idle: run THIS turn now, then drain anything that queues up while it (and

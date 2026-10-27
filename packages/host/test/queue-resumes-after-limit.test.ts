@@ -112,20 +112,26 @@ describe('queue behind a usage limit', () => {
       vi.useRealTimers();
     }
   });
-  it('a message typed while parked retries the owed turn now instead of waiting for the timer', async () => {
+  it('a message typed while parked only queues: the known block is not retried', async () => {
     vi.useFakeTimers({ now: NOW, toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     try {
-      const { daemon, folder, state } = setup();
+      const { daemon, folder, metaStore, state } = setup();
       const chatId = await daemon.spawnChat({ folder });
       const first = daemon.sendInput({ chatId, message: 'one', localId: 'l1' });
       state.release?.();
       await first;
 
-      // The situation changed (another account, credit back); no timer has fired.
+      // Even if the limit has in fact lifted, the host does not know that: it
+      // waits for the timer or the retry control rather than re-sending.
       state.limited = false;
       await daemon.sendInput({ chatId, message: 'two', localId: 'l2' });
       await vi.advanceTimersByTimeAsync(0);
+      expect(state.ran).toEqual([]);
+      expect(metaStore.read(chatId)?.pendingTurns?.map((t) => t.message)).toEqual(['one', 'two']);
 
+      // The retry control (resume now) is how someone who knows better lifts it.
+      expect(daemon.resumeRateLimitedNow(chatId)).toBe(true);
+      await vi.advanceTimersByTimeAsync(0);
       const prompts = state.ran.map((p) => ['one', 'two'].find((m) => p.includes(m)));
       expect(prompts).toEqual(['one', 'two']);
       daemon.shutdown();

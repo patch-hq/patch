@@ -120,6 +120,24 @@ function RateLimitCardBody({ row }: { row: ChatRow }): JSX.Element {
           <p className="rate-limit-headline" data-testid="rate-limit-headline">
             {heading}
           </p>
+          <button
+            type="button"
+            className="limit-retry"
+            data-testid="rate-limit-retry-icon"
+            aria-label="Retry now"
+            title="Retry now"
+            onClick={send}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path
+                d="M13.5 8a5.5 5.5 0 1 1-1.8-4.07M13.5 2.5v3h-3"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
           {resetsAt === null ? null : (
             <span
               className="limit-when"
