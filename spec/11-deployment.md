@@ -422,10 +422,13 @@ Rules.
   drift between them, with a remedy per item. It re-reads the mounted web-dist
   and downloads dir per request, so a check reflects the box as it is now.
   `/api/healthz` stays the public, minimal LB probe.
-- Settings → Updates is one list of components, each with a version and a status, a
-  single Update control per host that is behind, Update all, and the
-  auto-update toggle. Hosts on different builds are not drift: each row says
-  whether it is behind. No standing text about signing limits or host mismatch.
+- Settings → Updates states whether Patch is up to date and offers a single
+  Update control when it is not, plus Check now, the auto-update toggle and
+  when it last checked. It shows no versions, shas, per-layer rows or drift
+  detail: Patch works out what is behind (hosts, drift, the app, the APK) and
+  the one Update acts on it. A failed read or failed shell check reads as
+  "Couldn't check", never as up to date. `GET /api/version` still carries the
+  full per-layer report for diagnostics.
 - Unknown reads as unknown. An unstamped, missing or unreadable layer is
   reported as such. A malformed report is rejected at the client boundary
   (`assertVersionReport`) so a partial response reaches the panel's error state
@@ -453,10 +456,9 @@ Rules.
   Squirrel won't apply) reaches the user, so an install that throws is recorded
   as a check failure verbatim and leaves the app running rather than half-quit.
 
-Surface. Settings → Version & updates,
-also reachable from the tray's right-click menu. Shows per-layer version/sha/time,
-drift with remedies, last-checked, a Check now button, and — in the desktop shell —
-the shell's own version and what its updater is doing. It REPORTS the shell's
+Surface. Settings → Updates,
+also reachable from the tray's right-click menu. Shows the up-to-date status,
+last-checked, a Check now button and one Update control. It REPORTS the shell's
 update state; it never asks for a restart, because updates install themselves.
 
 Desktop update feed. `electron-builder.yml` publishes with the `generic`

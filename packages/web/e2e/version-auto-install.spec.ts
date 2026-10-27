@@ -117,11 +117,10 @@ test.describe('version panel — updates wait to be taken', () => {
     await asDesktopShell(page, SHELL);
     await page.goto(SETTINGS);
 
-    const row = page.getByTestId('version-shell');
-    await expect(row).toContainText('Desktop app');
+    const row = page.getByTestId('update-status');
     // It is staged, not underway — saying "installing" would describe something
     // that is not happening.
-    await expect(row).toContainText('0.1.900 ready — restart to apply');
+    await expect(row).toContainText('restart to apply');
     await expect(row).not.toContainText('installing');
   });
 
@@ -164,22 +163,18 @@ test.describe('version panel — updates wait to be taken', () => {
     await expect(page.getByTestId('desktop-update-banner')).toHaveCount(0);
   });
 
-  test('still reports version, last update and last check, and checks on demand', async ({
+  test('still reports status and last check, without versions, and checks on demand', async ({
     page,
   }) => {
-    // House rule: every app has a page saying what it is running, when it last
-    // updated and when it last checked, plus a manual check.
     await asDesktopShell(page, { ...SHELL, lastResult: 'up-to-date', downloaded: false });
     await page.goto(SETTINGS);
 
-    // What this window runs and when it was deployed; what the shell runs; when
-    // the versions were last read.
-    await expect(page.getByTestId('version-app')).toContainText('This app');
-    await expect(page.getByTestId('version-app')).toContainText('deployed');
-    await expect(page.getByTestId('version-detail-server')).toContainText('0.1.900');
-    await expect(page.getByTestId('version-shell')).toContainText('0.1.899');
+    await expect(page.getByTestId('update-status')).toHaveText('Up to date');
     await expect(page.getByTestId('version-checked')).toContainText('Last checked');
     await expect(page.getByTestId('version-checked')).not.toContainText('—');
+    expect((await page.getByTestId('settings-version').textContent()) ?? '').not.toMatch(
+      /\d+\.\d+\.\d+/,
+    );
 
     await page.getByTestId('version-check-now').click();
     await expect
@@ -203,6 +198,6 @@ test.describe('version panel — updates wait to be taken', () => {
     await expect(page.getByTestId('version-shell-error')).toContainText(
       'Could not get code signature for running application',
     );
-    await expect(page.getByTestId('version-shell')).not.toContainText('up to date');
+    await expect(page.getByTestId('update-status')).not.toContainText('Up to date');
   });
 });

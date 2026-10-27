@@ -1,12 +1,8 @@
-// Settings → Updates (design/settings-redesign; spec/11 § Mobile OTA, § Version
-// reporting; project rule: every app surfaces its current version, the running
-// build, the last check date, and a manual check).
-//
-// Check now at the top; Behind — each thing that is behind, with the action
-// that fixes it (Restart to update, Download APK, a host's Update, and any
-// drift between layers with its remedy); Versions — every layer; and when the
-// last check ran, with what it found. The Settings list puts a pip on Updates
-// whenever something is behind (useUpdatesBehind).
+// Settings → Updates (spec/11 § Mobile OTA, § Version reporting). Says whether
+// Patch is up to date, with one action when it is not, a manual check and when it
+// last ran. Versions and per-layer detail are deliberately not shown. The
+// Settings list puts a pip on Updates whenever something is behind
+// (useUpdatesBehind).
 //
 // Three cases look alike from the OTA's own point of view and have to be told
 // apart: an update downloaded but not yet launched (`checkForUpdateAsync` then
@@ -21,7 +17,6 @@ import * as Updates from 'expo-updates';
 import { useUpdates } from 'expo-updates';
 import type { VersionReport } from '@patch/wire';
 import { api } from '../../api/rest';
-import { mobileBuildInfo } from '../../lib/buildInfo';
 import { getLastCheckedAt, runUpdateCheck, type UpdateCheckResult } from '../../lib/updateCheck';
 import { installApk, useApkInstallStore } from '../../lib/apkInstall';
 import { refreshPublishedApk, usePublishedApkStore } from '../../lib/publishedApk';
@@ -29,9 +24,9 @@ import { updateSourceProblem } from '../../lib/updateSource';
 import { usePresenceStore } from '../../stores/presenceStore';
 import { SettingsSection } from '../SettingsSection';
 import { sendToHost } from './hostSend';
-import { hostName, sortedHosts } from './HostSwitcher';
+import { sortedHosts } from './HostSwitcher';
 import { SettingsPage } from './SettingsPage';
-import { ErrorLine, Row, RowValue, SettingsButton, ToggleRow, ValueRow, WithSettings } from './ui';
+import { ErrorLine, Row, SettingsButton, ToggleRow, ValueRow, WithSettings } from './ui';
 import { patchShared } from './sharedWrite';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -43,12 +38,6 @@ export function formatWhen(iso: string): string {
   if (Number.isNaN(d.getTime())) return 'Unavailable';
   const pad = (n: number): string => String(n).padStart(2, '0');
   return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-/** `0.1.317 · 9b8635f`, or the bare version when the layer carries no sha. */
-function stamp(b: { version: string | null; gitSha: string | null }): string {
-  const v = b.version ?? 'unknown';
-  return b.gitSha ? `${v} · ${b.gitSha}` : v;
 }
 
 /**
@@ -66,9 +55,6 @@ export function useUpdatesBehind(): boolean {
 }
 
 export function UpdatesPage(): React.ReactElement {
-  // What this phone is EXECUTING. version/gitSha/builtAt are inlined into that
-  // one bundle together (buildInfo.ts), so they always agree with each other.
-  const build = React.useMemo(() => mobileBuildInfo(), []);
   const { isUpdatePending, isChecking, isDownloading, checkError } = useUpdates();
   const [lastChecked, setLastChecked] = React.useState<string | null>(() => getLastCheckedAt());
   const [checking, setChecking] = React.useState(false);
@@ -114,23 +100,57 @@ export function UpdatesPage(): React.ReactElement {
         ? checkError.message
         : null;
 
-  let sentence: string;
-  if (busy) sentence = isDownloading ? 'Downloading update…' : 'Checking for updates…';
-  else if (pending) sentence = 'An update is downloaded and ready to install.';
-  else if (install.phase === 'downloading')
-    sentence = `Downloading Patch ${install.version}${install.fraction !== null ? ` · ${Math.round(install.fraction * 100)}%` : ''}`;
-  else if (install.phase === 'installing') sentence = `Installing Patch ${install.version}`;
-  else if (apkAvailable) sentence = 'A new build needs installing.';
-  else if (sourceProblem) sentence = sourceProblem;
-  else if (failure) sentence = `Couldn't check for updates: ${failure}`;
-  else if (checkedResult?.status === 'current') sentence = 'Up to date.';
-  else sentence = '';
-
   const behindHosts = sortedHosts(hosts).filter((h) => h.host?.updateAvailable === true);
   const onlineBehind = behindHosts.filter((h) => h.online);
   const drift = report?.drift ?? [];
   const anyBehind = pending || apkAvailable || behindHosts.length > 0 || drift.length > 0;
-  const appStamp = build.gitSha ? `${build.version} · ${build.gitSha}` : build.version;
+
+  let sentence: string;
+  if (busy) sentence = isDownloading ? 'Downloading update…' : 'Checking for updates…';
+  else if (install.phase === 'downloading')
+    sentence = `Downloading update${install.fraction !== null ? ` · ${Math.round(install.fraction * 100)}%` : ''}`;
+  else if (install.phase === 'installing') sentence = 'Installing update…';
+  else if (pending) sentence = 'Update ready';
+  else if (apkAvailable) sentence = 'Update available';
+  else if (sourceProblem) sentence = sourceProblem;
+  else if (failure) sentence = `Couldn't check for updates: ${failure}`;
+  else if (reportError) sentence = `Couldn't check for updates: ${reportError}`;
+  else if (anyBehind) sentence = 'Update available';
+  else if (!report) sentence = 'Checking for updates…';
+  else sentence = 'Up to date';
+
+  // One action for the one thing that matters most; the rest follows on its own.
+  let action: React.ReactElement | null = null;
+  if (pending) {
+    action = (
+      <SettingsButton
+        testID="restart-to-update"
+        label="Restart to update"
+        onPress={() => void Updates.reloadAsync()}
+      />
+    );
+  } else if (apkAvailable && apk) {
+    action = (
+      <SettingsButton
+        testID="install-apk"
+        label={installing ? 'Installing…' : 'Update'}
+        disabled={installing}
+        onPress={() => void installApk(apk.url, apk.version)}
+      />
+    );
+  } else if (onlineBehind.length > 0) {
+    action = (
+      <SettingsButton
+        testID="update-all"
+        label="Update"
+        onPress={() =>
+          onlineBehind.forEach(
+            (h) => void sendToHost(h.hostId, { type: 'host.update', hostId: h.hostId }, 'Update'),
+          )
+        }
+      />
+    );
+  }
 
   return (
     <SettingsPage
@@ -145,158 +165,33 @@ export function UpdatesPage(): React.ReactElement {
         />
       }
     >
-      {anyBehind ? (
-        <SettingsSection title="Behind" testID="updates-behind">
-          {pending ? (
-            <Row
-              title="This app"
-              subtitle="Downloaded"
-              right={
-                <SettingsButton
-                  testID="restart-to-update"
-                  label="Restart to update"
-                  variant="quiet"
-                  onPress={() => void Updates.reloadAsync()}
-                />
-              }
-            />
-          ) : null}
-          {apkAvailable && apk ? (
-            <Row
-              title="This app"
-              subtitle={`${build.version} → ${apk.version}`}
-              right={
-                <SettingsButton
-                  testID="install-apk"
-                  label={installing ? 'Installing…' : 'Install'}
-                  variant="quiet"
-                  disabled={installing}
-                  onPress={() => void installApk(apk.url, apk.version)}
-                />
-              }
-            />
-          ) : null}
-          {behindHosts.map((h) => (
-            <Row
-              key={h.hostId}
-              testID={`updates-host-${h.hostId}`}
-              title={`${hostName(h)} host`}
-              subtitle={h.host?.hostVersion}
-              right={
-                <SettingsButton
-                  testID={`updates-host-${h.hostId}-update`}
-                  label="Update"
-                  variant="quiet"
-                  onPress={() =>
-                    void sendToHost(h.hostId, { type: 'host.update', hostId: h.hostId }, 'Update')
-                  }
-                />
-              }
-            />
-          ))}
-          {drift.map((d) => (
-            <Row
-              key={`${d.kind}-${d.detail}`}
-              testID={`version-drift-${d.kind}`}
-              title={d.detail}
-              subtitle={d.remedy}
-            />
-          ))}
-        </SettingsSection>
-      ) : null}
+      <SettingsSection testID="updates-status">
+        <Row title={sentence} titleTestID="update-status" right={action} />
+        {reportError ? (
+          <ErrorLine testID="version-error" message={reportError} onRetry={readReport} />
+        ) : null}
+      </SettingsSection>
 
       <WithSettings testID="update-mode">
         {(data) => (
           <SettingsSection testID="updates-mode">
             <ToggleRow
-              label="Update hosts automatically"
+              label="Update automatically"
               testID="auto-update"
               value={data.preferences.autoUpdateHosts}
               onChange={(next) => void patchShared('Auto-update', { autoUpdateHosts: next })}
             />
-            {onlineBehind.length > 0 ? (
-              <Row
-                title={`${onlineBehind.length} host${onlineBehind.length === 1 ? '' : 's'} behind`}
-                right={
-                  <SettingsButton
-                    testID="update-all"
-                    label="Update all"
-                    variant="quiet"
-                    onPress={() =>
-                      onlineBehind.forEach(
-                        (h) =>
-                          void sendToHost(
-                            h.hostId,
-                            { type: 'host.update', hostId: h.hostId },
-                            'Update',
-                          ),
-                      )
-                    }
-                  />
-                }
-              />
-            ) : null}
           </SettingsSection>
         )}
       </WithSettings>
 
-      <SettingsSection title="Versions" testID="updates-versions">
-        <ValueRow
-          label="This app"
-          value={appStamp}
-          subtitle={build.builtAt ? `built ${formatWhen(build.builtAt)}` : undefined}
-          testID="version-this-app"
-        />
-        {reportError ? (
-          <Row title="Other layers">
-            <ErrorLine
-              testID="version-error"
-              message={`Couldn’t read versions: ${reportError}`}
-              onRetry={readReport}
-            />
-          </Row>
-        ) : report ? (
-          layerRows(report).map((r) => (
-            <ValueRow key={r.id} label={r.name} value={r.value} testID={`version-detail-${r.id}`} />
-          ))
-        ) : (
-          <ValueRow label="Server" value={null} loading testID="version-loading" />
-        )}
-      </SettingsSection>
-
       <SettingsSection testID="updates-last-checked">
-        <Row
-          title="Last checked"
-          subtitle={sentence}
-          subtitleTestID="update-status"
-          right={
-            <RowValue testID="update-last-checked">
-              {lastChecked ? formatWhen(lastChecked) : 'Never'}
-            </RowValue>
-          }
+        <ValueRow
+          label="Last checked"
+          value={lastChecked ? formatWhen(lastChecked) : 'Never'}
+          testID="update-last-checked"
         />
       </SettingsSection>
     </SettingsPage>
   );
-}
-
-/** Every layer the server reports (`GET /api/version`), as rows. */
-function layerRows(report: VersionReport): Array<{ id: string; name: string; value: string }> {
-  return [
-    ...(report.web ? [{ id: 'web', name: 'Web UI', value: stamp(report.web) }] : []),
-    { id: 'server', name: 'Server', value: stamp(report.server) },
-    ...report.hosts.map((h) => ({
-      id: `host-${h.hostId}`,
-      name: `${h.hostName ?? h.hostId} host`,
-      value: `${stamp(h)}${h.online ? '' : ' · offline'}`,
-    })),
-    ...(report.android
-      ? [{ id: 'android', name: 'Android APK', value: stamp(report.android) }]
-      : []),
-    ...report.clients.map((c) => ({
-      id: `client-${c.surfaceId}`,
-      name: c.surfaceKind,
-      value: `${stamp(c)}${c.online ? '' : ' · offline'}`,
-    })),
-  ];
 }

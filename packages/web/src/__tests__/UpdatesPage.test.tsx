@@ -8,7 +8,7 @@
 // that cannot self-update says why, and a failed check never reads as fine.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, within, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { VersionReport } from '@patch/wire';
@@ -16,7 +16,6 @@ import { UpdatesPage } from '../routes/settings/UpdatesPage.js';
 import { SettingsRoute } from '../routes/SettingsRoute.js';
 import { useSettingsHostStore } from '../routes/settings/hostScope.js';
 import { ErrorToasts } from '../components/ErrorToasts.js';
-import { BUILD_INFO } from '../lib/buildInfo.js';
 import type { DesktopUpdaterState } from '../lib/desktopBridge.js';
 import { setActiveWs, type PatchWs } from '../api/ws.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
@@ -151,7 +150,7 @@ function renderPage(): QueryClient {
 
 /** Wait for the report itself, not just the page: the server row needs data. */
 async function loaded(): Promise<void> {
-  await waitFor(() => expect(screen.getByTestId('version-detail-server')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByTestId('version-checked')).not.toHaveTextContent('—'));
 }
 
 function fakeWs(): { send: ReturnType<typeof vi.fn> } {
@@ -178,137 +177,64 @@ afterEach(() => {
 });
 
 describe('UpdatesPage', () => {
-  it('states this window’s build and when the UI was deployed', async () => {
-    stubFetch(null);
-    renderPage();
-    await loaded();
-    const row = screen.getByTestId('version-app');
-    expect(row).toHaveTextContent('This app');
-    expect(row).toHaveTextContent(BUILD_INFO.version);
-    expect(row).toHaveTextContent('deployed');
-  });
+  const installBridge = (
+    state: DesktopUpdaterState,
+    extra: Record<string, unknown> = {},
+  ): { check: ReturnType<typeof vi.fn> } => {
+    const check = vi.fn(async () => state);
+    (window as unknown as { patch: unknown }).patch = {
+      getUpdaterState: vi.fn(async () => state),
+      checkForUpdates: check,
+      onUpdaterState: vi.fn(() => () => {}),
+      ...extra,
+    };
+    return { check };
+  };
 
-  it('shows server, hosts, feed and APK directly — no Details toggle', async () => {
-    stubFetch(null);
-    reportHost('host-a', { hostName: 'laptop', hostVersion: '0.1.300' });
-    renderPage();
-    await loaded();
-    expect(screen.queryByTestId('version-details-toggle')).toBeNull();
-    const rows = screen.getByTestId('version-rows');
-    for (const id of [
-      'version-app',
-      'version-detail-server',
-      'version-host-host-a',
-      'version-detail-feed',
-      'version-detail-android',
-    ]) {
-      expect(within(rows).getByTestId(id)).toBeInTheDocument();
-    }
-  });
-
-  it('gives every layer its version and sha', async () => {
-    // Kept because this is what exposed a stale deploy.
-    stubFetch(null);
-    reportHost('host-a', { hostName: 'laptop', hostVersion: '0.1.300' });
-    renderPage();
-    await loaded();
-    expect(screen.getByTestId('version-detail-server')).toHaveTextContent('0.1.317 · 9b8635f');
-    expect(screen.getByTestId('version-detail-server')).toHaveTextContent('up');
-    expect(screen.getByTestId('version-host-host-a')).toHaveTextContent('laptop host');
-    expect(screen.getByTestId('version-host-host-a')).toHaveTextContent('0.1.300');
-    expect(screen.getByTestId('version-detail-feed')).toHaveTextContent('0.1.317 · 9b8635f');
-    expect(screen.getByTestId('version-detail-feed')).toHaveTextContent('published');
-    expect(screen.getByTestId('version-detail-android')).toHaveTextContent('0.1.317 · 9b8635f');
-    expect(screen.getByTestId('version-detail-android')).toHaveTextContent('published');
-  });
-
-  it('says a host that has not reported is "not reported", not a guessed version', async () => {
-    stubFetch(null);
-    usePresenceStore.getState().setHostOnline('host-b', true);
-    renderPage();
-    await loaded();
-    expect(screen.getByTestId('version-host-host-b')).toHaveTextContent('host-b host');
-    expect(screen.getByTestId('version-host-host-b')).toHaveTextContent('not reported');
-  });
-
-  it('omits rows the server has nothing to report for', async () => {
-    stubFetch({ web: null, daemon: null, desktop: null, android: null, clients: [], drift: [] });
-    renderPage();
-    await loaded();
-    // This window always knows its own build — only "deployed" goes.
-    expect(screen.getByTestId('version-app')).toHaveTextContent(BUILD_INFO.version);
-    expect(screen.getByTestId('version-app')).not.toHaveTextContent('deployed');
-    expect(screen.queryByTestId('version-detail-feed')).toBeNull();
-    expect(screen.queryByTestId('version-detail-android')).toBeNull();
-    expect(screen.queryByTestId('version-host-host-a')).toBeNull();
-  });
-
-  it('renders a layer with no sha as version-only', async () => {
-    stubFetch({
-      desktop: {
-        version: 'unstamped',
-        gitSha: null,
-        builtAt: null,
-        publishedAt: '2026-07-17T15:29:00.000Z',
-        url: '/api/desktop/x.zip',
-      },
-    });
-    renderPage();
-    await loaded();
-    const row = screen.getByTestId('version-detail-feed');
-    expect(row).toHaveTextContent('unstamped');
-    expect(row.querySelector('code')?.textContent).toBe('unstamped');
-  });
-
-  it('shows Loading… in the version list before the report lands', async () => {
-    let release!: () => void;
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(
-        () =>
-          new Promise<Response>((resolve) => {
-            release = () => resolve(json(REPORT));
-          }),
-      ),
-    );
-    renderPage();
-    expect(within(screen.getByTestId('version-rows')).getByText('Loading…')).toBeInTheDocument();
-    expect(screen.getByTestId('version-checked')).toHaveTextContent('—');
-    release();
-    await loaded();
-    expect(screen.queryByText('Loading…')).toBeNull();
-  });
-
-  it('says nothing reassuring — and nothing at all — when nothing is behind', async () => {
-    // The old panel printed "All layers agree on <x>", which is a sentence about
-    // layers the user was never shown. Silence is the correct normal state.
+  it('says Up to date, with no Update button, when nothing is behind', async () => {
     stubFetch(null);
     reportHost('host-a', { hostName: 'laptop', updateAvailable: false });
     renderPage();
     await loaded();
+    expect(screen.getByTestId('update-status')).toHaveTextContent('Up to date');
+    expect(screen.queryByTestId('update-all')).toBeNull();
+  });
+
+  it('does not claim to be up to date before the check has answered', async () => {
+    stubFetch(null);
+    renderPage();
+    expect(screen.getByTestId('update-status')).toHaveTextContent('Checking…');
+    await loaded();
+  });
+
+  it('shows no versions, shas, layers or per-host rows', async () => {
+    stubFetch({ drift: DRIFT });
+    reportHost('host-a', { hostName: 'laptop', hostVersion: '0.1.300', updateAvailable: true });
+    renderPage();
+    await loaded();
+    const text = screen.getByTestId('settings-version').textContent ?? '';
+    expect(text).not.toMatch(/\d+\.\d+\.\d+/);
+    expect(text).not.toContain('9b8635f');
+    expect(screen.queryByTestId('version-rows')).toBeNull();
+    expect(screen.queryByTestId('version-host-host-a')).toBeNull();
     expect(screen.queryByTestId('version-drift')).toBeNull();
   });
 
-  it('promotes a real disagreement to the top, with its remedy', async () => {
+  it('says Update available when the report has drift, without printing it', async () => {
     stubFetch({ drift: DRIFT });
     renderPage();
-    await waitFor(() => expect(screen.getByTestId('version-drift')).toBeInTheDocument());
-    const row = screen.getByTestId('version-drift-web-server-mismatch');
-    expect(row).toHaveTextContent('is OLDER than');
-    expect(row).toHaveTextContent('pnpm ship all');
-    expect(within(screen.getByTestId('version-drift')).getByText('Behind')).toBeInTheDocument();
+    await loaded();
+    expect(screen.getByTestId('update-status')).toHaveTextContent('Update available');
+    expect(screen.getByTestId('settings-version')).not.toHaveTextContent('ship both together');
   });
 
   it('shows the check time and refetches on Check now', async () => {
     const fetchMock = stubFetch(null);
     renderPage();
-    // Wait for DATA: Check now is disabled while a fetch is in flight.
     await loaded();
-    expect(screen.getByTestId('version-checked')).toHaveTextContent('Last checked');
     expect(screen.getByTestId('version-checked')).toHaveTextContent('just now');
     const button = screen.getByTestId('version-check-now');
     expect(button).toHaveTextContent('Check now');
-    expect(button).toBeEnabled();
     const before = versionCalls(fetchMock);
     fireEvent.click(button);
     await waitFor(() => expect(versionCalls(fetchMock)).toBeGreaterThan(before));
@@ -334,19 +260,15 @@ describe('UpdatesPage', () => {
     expect(screen.getByTestId('version-check-now')).toHaveTextContent('Checking…');
     release!();
     await waitFor(() => expect(screen.getByTestId('version-check-now')).toBeEnabled());
-    expect(screen.getByTestId('version-check-now')).toHaveTextContent('Check now');
   });
 
-  it('surfaces a failed read instead of rendering an empty page', async () => {
+  it('surfaces a failed read instead of claiming to be up to date', async () => {
     stubFetch(null, 401);
     renderPage();
     await waitFor(() => expect(screen.getByTestId('version-error')).toBeInTheDocument());
-    const group = screen.getByTestId('version-error').closest('.set-row') as HTMLElement;
-    expect(group).toHaveTextContent('Could not read versions');
-    expect(group).toHaveTextContent('unauthenticated');
-    // A failed check never reads as a time it was checked.
+    expect(screen.getByTestId('settings-version')).toHaveTextContent('unauthenticated');
     expect(screen.getByTestId('version-checked')).toHaveTextContent('—');
-    expect(within(screen.getByTestId('version-rows')).queryByText('Loading…')).toBeNull();
+    expect(screen.getByTestId('update-status')).not.toHaveTextContent('Up to date');
   });
 
   it('retries after a failed read', async () => {
@@ -358,118 +280,40 @@ describe('UpdatesPage', () => {
     await waitFor(() => expect(versionCalls(fetchMock)).toBeGreaterThan(before));
   });
 
-  it('omits the desktop row entirely in a plain browser', async () => {
-    stubFetch(null);
-    renderPage();
-    await loaded();
-    expect(screen.queryByTestId('version-shell')).toBeNull();
-  });
-
   describe('a host with a newer host waiting', () => {
-    it('shows its version and status in the one component list, with an Update button', async () => {
-      stubFetch(null);
-      reportHost('host-a', { hostName: 'laptop', hostVersion: '0.1.300', updateAvailable: true });
-      usePresenceStore.getState().setHostOnline('host-a', true);
-      reportHost('host-b', { hostName: 'mac', hostVersion: '0.1.317', updateAvailable: false });
-      renderPage();
-      await loaded();
-      expect(screen.queryByTestId('version-drift')).toBeNull();
-      const rows = screen.getByTestId('version-rows');
-      const row = within(rows).getByTestId('version-host-host-a');
-      expect(row).toHaveTextContent('laptop host');
-      expect(row).toHaveTextContent('0.1.300');
-      expect(row).toHaveTextContent('behind');
-      expect(row).not.toHaveTextContent('offline');
-      expect(within(row).getByTestId('host-host-a-update')).toHaveTextContent('Update');
-      const current = within(rows).getByTestId('version-host-host-b');
-      expect(current).toHaveTextContent('up to date');
-      expect(within(current).queryByTestId('host-host-b-update')).toBeNull();
-    });
-
-    it('names the published build it would update to, once the channel is read', async () => {
-      const fetchMock = stubFetch(null);
-      const inner = fetchMock.getMockImplementation()!;
-      fetchMock.mockImplementation(async (url: string | URL) =>
-        String(url).includes('/api/daemon/host-latest.json')
-          ? json({ version: '0.1.310', artifacts: [] })
-          : inner(url),
-      );
-      reportHost('host-a', { hostName: 'laptop', hostVersion: '0.1.300', updateAvailable: true });
-      usePresenceStore.getState().setHostOnline('host-a', true);
-      renderPage();
-      await loaded();
-      await waitFor(() =>
-        expect(screen.getByTestId('version-host-host-a')).toHaveTextContent('0.1.300 → 0.1.310'),
-      );
-    });
-
-    it('Update sends host.update to that host over the live socket', async () => {
+    it('Update sends host.update to every online host that is behind, only', async () => {
       stubFetch(null);
       const ws = fakeWs();
       reportHost('host-a', { hostName: 'laptop', updateAvailable: true });
       usePresenceStore.getState().setHostOnline('host-a', true);
+      reportHost('host-b', { hostName: 'mac', updateAvailable: true });
+      usePresenceStore.getState().setHostOnline('host-b', true);
+      reportHost('host-c', { hostName: 'box', updateAvailable: false });
+      usePresenceStore.getState().setHostOnline('host-c', true);
       renderPage();
       await loaded();
-      fireEvent.click(screen.getByTestId('host-host-a-update'));
-      expect(ws.send).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId('update-status')).toHaveTextContent('Update available');
+      fireEvent.click(screen.getByTestId('update-all'));
+      expect(ws.send).toHaveBeenCalledTimes(2);
       expect(ws.send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'host-a' });
-      expect(screen.queryByTestId('error-toasts')).toBeNull();
+      expect(ws.send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'host-b' });
     });
 
-    it('an offline host is marked offline, and Update refuses, naming it', async () => {
+    it('offers no Update when the only host behind is offline', async () => {
       stubFetch(null);
-      const ws = fakeWs();
-      reportHost('host-a', { hostName: 'laptop', hostVersion: '0.1.300', updateAvailable: true });
+      reportHost('host-a', { hostName: 'laptop', updateAvailable: true });
       usePresenceStore.getState().setHostOnline('host-a', false);
       renderPage();
       await loaded();
-      expect(screen.getByTestId('version-host-host-a')).toHaveTextContent('offline');
-      fireEvent.click(screen.getByTestId('host-host-a-update'));
-      await waitFor(() =>
-        expect(screen.getByTestId('error-toasts')).toHaveTextContent(
-          'laptop is offline. It cannot be updated until it reconnects.',
-        ),
-      );
-      expect(ws.send).not.toHaveBeenCalled();
-    });
-
-    it('with no link to the server, Update says so and sends nothing', async () => {
-      stubFetch(null);
-      const ws = fakeWs();
-      usePresenceStore.getState().setConnection('reconnecting');
-      reportHost('host-a', { hostName: 'laptop', updateAvailable: true });
-      usePresenceStore.getState().setHostOnline('host-a', true);
-      renderPage();
-      await loaded();
-      fireEvent.click(screen.getByTestId('host-host-a-update'));
-      await waitFor(() =>
-        expect(screen.getByTestId('error-toasts')).toHaveTextContent(
-          'this surface has no link to the server',
-        ),
-      );
-      expect(ws.send).not.toHaveBeenCalled();
-    });
-
-    it('never prints a host-mismatch error or a Settings → Hosts hint', async () => {
-      stubFetch(null);
-      reportHost('host-a', { hostName: 'laptop', hostVersion: '0.1.300', updateAvailable: true });
-      reportHost('host-b', { hostName: 'mac', hostVersion: '0.1.317', updateAvailable: false });
-      renderPage();
-      await loaded();
-      expect(screen.getByTestId('settings-version')).not.toHaveTextContent('different host builds');
-      expect(screen.getByTestId('settings-version')).not.toHaveTextContent('Settings → Hosts');
+      expect(screen.getByTestId('update-status')).toHaveTextContent('Update available');
+      expect(screen.queryByTestId('update-all')).toBeNull();
     });
   });
 
   describe('update mode', () => {
-    function mode(autoUpdateHosts: boolean) {
-      const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
-      loadShared({ settings: { autoUpdateHosts } });
-      return server;
-    }
-
     it('is automatic by default, and the toggle writes the shared setting', async () => {
-      const server = mode(true);
+      const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
+      loadShared({ settings: { autoUpdateHosts: true } });
       const inner = stubFetch(null).getMockImplementation()!;
       vi.stubGlobal(
         'fetch',
@@ -484,225 +328,69 @@ describe('UpdatesPage', () => {
       fireEvent.click(toggle);
       await waitFor(() => expect(server.writes).toContainEqual({ autoUpdateHosts: false }));
     });
-
-    it('Update all sends host.update to every online host that is behind, only', async () => {
-      mode(false);
-      stubFetch(null);
-      const ws = fakeWs();
-      reportHost('host-a', { hostName: 'laptop', updateAvailable: true });
-      usePresenceStore.getState().setHostOnline('host-a', true);
-      reportHost('host-b', { hostName: 'mac', updateAvailable: true });
-      usePresenceStore.getState().setHostOnline('host-b', true);
-      reportHost('host-c', { hostName: 'box', updateAvailable: false });
-      usePresenceStore.getState().setHostOnline('host-c', true);
-      renderPage();
-      await loaded();
-      expect(screen.getByTestId('auto-update-toggle')).not.toBeChecked();
-      fireEvent.click(screen.getByTestId('update-all'));
-      expect(ws.send).toHaveBeenCalledTimes(2);
-      expect(ws.send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'host-a' });
-      expect(ws.send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'host-b' });
-    });
-
-    it('has no Update all when nothing is behind', async () => {
-      stubFetch(null);
-      reportHost('host-a', { hostName: 'laptop', updateAvailable: false });
-      renderPage();
-      await loaded();
-      expect(screen.queryByTestId('update-all')).toBeNull();
-    });
   });
 
   describe('inside the Electron shell', () => {
-    const installBridge = (
-      state: DesktopUpdaterState,
-      extra: Record<string, unknown> = {},
-    ): { check: ReturnType<typeof vi.fn> } => {
-      const check = vi.fn(async () => state);
-      (window as unknown as { patch: unknown }).patch = {
-        getUpdaterState: vi.fn(async () => state),
-        checkForUpdates: check,
-        onUpdaterState: vi.fn(() => () => {}),
-        ...extra,
-      };
-      return { check };
-    };
-
-    it('gets its own line, because it updates on a separate schedule', async () => {
+    it('shows no desktop row or version when the shell is current', async () => {
       stubFetch(null);
       installBridge(shellState());
       renderPage();
-      await waitFor(() => expect(screen.getByTestId('version-shell')).toBeInTheDocument());
-      const row = screen.getByTestId('version-shell');
-      expect(row).toHaveTextContent('Desktop app');
-      expect(row).toHaveTextContent('0.1.317');
-      expect(row).toHaveTextContent('up to date');
-      expect(within(screen.getByTestId('version-rows')).getByTestId('version-shell')).toBe(row);
+      await loaded();
+      expect(screen.queryByTestId('version-shell')).toBeNull();
+      expect(screen.getByTestId('update-status')).toHaveTextContent('Up to date');
     });
 
-    it('names an install failure as such, not as a failed check', async () => {
-      stubFetch(null);
-      installBridge(
-        shellState({ lastResult: 'error', lastErrorKind: 'install', lastError: 'refused: adhoc' }),
-      );
-      renderPage();
-      const err = await screen.findByTestId('version-shell-error');
-      expect(err).toHaveTextContent('Last update install failed');
-      expect(err).toHaveTextContent('refused: adhoc');
-    });
-
-    it('says when the shell last checked, so "up to date" is dated', async () => {
-      stubFetch(null);
-      const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
-      installBridge(shellState({ lastCheckedAt: ago(5 * 60_000) }));
-      renderPage();
-      await waitFor(() => expect(screen.getByTestId('version-shell')).toBeInTheDocument());
-      expect(screen.getByTestId('version-shell')).toHaveTextContent('up to date · checked 5m ago');
-    });
-
-    it('dates a failed check too, and says nothing about a check that never happened', async () => {
-      stubFetch(null);
-      installBridge(
-        shellState({
-          lastResult: 'error',
-          lastError: 'ENOTFOUND feed',
-          lastCheckedAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
-        }),
-      );
-      renderPage();
-      await waitFor(() => expect(screen.getByTestId('version-shell')).toBeInTheDocument());
-      expect(screen.getByTestId('version-shell')).toHaveTextContent(
-        'check failed · checked 3h ago',
-      );
-      cleanup();
-      installBridge(shellState({ lastResult: null, lastCheckedAt: null }));
-      renderPage();
-      await waitFor(() => expect(screen.getByTestId('version-shell')).toBeInTheDocument());
-      expect(screen.getByTestId('version-shell')).not.toHaveTextContent('checked never');
-    });
-
-    it('reports a staged update as ready, not as installing', async () => {
-      // The update sits staged until the user presses Restart on the banner
-      // (DesktopUpdateBanner) or quits Patch normally — so this row must not
-      // claim something is underway when nothing is.
+    it('reports a staged update as ready to restart', async () => {
       stubFetch(null);
       installBridge(
         shellState({ lastResult: 'downloaded', downloaded: true, availableVersion: '0.1.320' }),
       );
       renderPage();
-      await waitFor(() => expect(screen.getByTestId('version-shell')).toBeInTheDocument());
-      const row = screen.getByTestId('version-shell').textContent ?? '';
-      expect(row).toContain('0.1.320');
-      expect(row).toContain('restart to apply');
-      expect(row).not.toContain('installing');
+      await waitFor(() =>
+        expect(screen.getByTestId('update-status')).toHaveTextContent('restart to apply'),
+      );
+      expect(screen.getByTestId('settings-version')).not.toHaveTextContent('0.1.320');
     });
 
-    it('shows an in-flight download', async () => {
+    it('names an install failure as such, not as a failed check', async () => {
       stubFetch(null);
-      installBridge(shellState({ lastResult: 'update-available', availableVersion: '0.1.320' }));
+      installBridge(
+        shellState({ lastResult: 'error', lastError: 'disk full', lastErrorKind: 'install' }),
+      );
       renderPage();
-      await waitFor(() => expect(screen.getByTestId('version-shell')).toBeInTheDocument());
-      expect(screen.getByTestId('version-shell')).toHaveTextContent('downloading 0.1.320');
-      expect(screen.queryByTestId('version-shell-install')).toBeNull();
+      await waitFor(() =>
+        expect(screen.getByTestId('version-shell-error')).toHaveTextContent(
+          'Last update install failed',
+        ),
+      );
     });
 
     it('never renders a failed check as up to date', async () => {
       stubFetch(null);
-      installBridge(shellState({ lastResult: 'error', lastError: 'ENOTFOUND feed' }));
+      installBridge(shellState({ lastResult: 'error', lastError: 'offline' }));
       renderPage();
-      await waitFor(() => expect(screen.getByTestId('version-shell')).toBeInTheDocument());
-      expect(screen.getByTestId('version-shell')).toHaveTextContent('check failed');
-      expect(screen.getByTestId('version-shell')).not.toHaveTextContent('up to date');
-      // And the detail is surfaced verbatim, next to the desktop row.
-      const err = within(screen.getByTestId('version-rows')).getByTestId('version-shell-error');
-      expect(err).toHaveTextContent('Last update check failed');
-      expect(err).toHaveTextContent('ENOTFOUND feed');
-    });
-
-    it('distinguishes "never checked" from "up to date"', async () => {
-      stubFetch(null);
-      installBridge(shellState({ lastResult: null, lastCheckedAt: null }));
-      renderPage();
-      await waitFor(() => expect(screen.getByTestId('version-shell')).toBeInTheDocument());
-      expect(screen.getByTestId('version-shell')).toHaveTextContent('not checked yet');
-    });
-
-    it('shows a check in flight', async () => {
-      stubFetch(null);
-      installBridge(shellState({ checking: true }));
-      renderPage();
-      await waitFor(() => expect(screen.getByTestId('version-shell')).toBeInTheDocument());
-      expect(screen.getByTestId('version-shell')).toHaveTextContent('checking');
+      await waitFor(() => expect(screen.getByTestId('version-shell-error')).toBeInTheDocument());
+      expect(screen.getByTestId('version-shell-error')).toHaveTextContent(
+        'Last update check failed',
+      );
     });
 
     it('checks the shell too when Check now is pressed', async () => {
       stubFetch(null);
       const { check } = installBridge(shellState());
       renderPage();
-      await waitFor(() => expect(screen.getByTestId('version-shell')).toBeInTheDocument());
       await loaded();
       fireEvent.click(screen.getByTestId('version-check-now'));
       await waitFor(() => expect(check).toHaveBeenCalled());
     });
 
-    it('does not hardcode a standing "can’t self-update" card from the signing limit', async () => {
+    it('tolerates a bridge with no state-push subscription or check hook', async () => {
       stubFetch(null);
-      installBridge(
-        shellState({
-          disabledReason: 'this build has no app-update.yml, so it can never check for updates',
-        }),
-      );
+      installBridge(shellState(), { onUpdaterState: undefined, checkForUpdates: undefined });
       renderPage();
-      await waitFor(() => expect(screen.getByTestId('version-shell')).toBeInTheDocument());
-      expect(screen.queryByTestId('version-shell-disabled')).toBeNull();
-      expect(screen.getByTestId('settings-version')).not.toHaveTextContent('self-update');
-      expect(screen.queryByTestId('version-drift')).toBeNull();
-    });
-
-    it('tolerates a bridge with no state-push subscription', async () => {
-      stubFetch(null);
-      (window as unknown as { patch: unknown }).patch = {
-        getUpdaterState: vi.fn(async () => shellState()),
-        checkForUpdates: vi.fn(async () => shellState()),
-      };
-      renderPage();
-      await waitFor(() => expect(screen.getByTestId('version-shell')).toBeInTheDocument());
-    });
-
-    it('does not throw when the bridge exposes no check hook', async () => {
-      const fetchMock = stubFetch(null);
-      (window as unknown as { patch: unknown }).patch = {
-        getUpdaterState: vi.fn(async () =>
-          shellState({ downloaded: true, lastResult: 'downloaded', availableVersion: '1' }),
-        ),
-        onUpdaterState: vi.fn(() => () => {}),
-      };
-      renderPage();
-      await waitFor(() => expect(screen.getByTestId('version-shell')).toBeInTheDocument());
       await loaded();
-      const before = versionCalls(fetchMock);
       fireEvent.click(screen.getByTestId('version-check-now'));
-      // The server half of the check still runs.
-      await waitFor(() => expect(versionCalls(fetchMock)).toBeGreaterThan(before));
-    });
-
-    it('follows state pushed by the shell after mount', async () => {
-      stubFetch(null);
-      let push: ((s: DesktopUpdaterState) => void) | null = null;
-      installBridge(shellState(), {
-        onUpdaterState: vi.fn((cb: (s: DesktopUpdaterState) => void) => {
-          push = cb;
-          return () => {};
-        }),
-      });
-      renderPage();
-      await waitFor(() =>
-        expect(screen.getByTestId('version-shell')).toHaveTextContent('up to date'),
-      );
-      push!(shellState({ lastResult: 'update-available', availableVersion: '0.1.321' }));
-      await waitFor(() =>
-        expect(screen.getByTestId('version-shell')).toHaveTextContent('downloading 0.1.321'),
-      );
+      expect(screen.getByTestId('update-status')).toBeInTheDocument();
     });
   });
 });

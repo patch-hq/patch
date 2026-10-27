@@ -57,7 +57,7 @@ const VERSION_REPORT = {
   drift: [],
 };
 
-test.describe('Settings → Updates rows at phone width', () => {
+test.describe('Settings → Updates at phone width', () => {
   test.use({ viewport: PHONE });
 
   test.beforeEach(async ({ page }) => {
@@ -79,32 +79,17 @@ test.describe('Settings → Updates rows at phone width', () => {
       }),
     );
     await page.goto('/app/dev-harness.html?route=/settings/updates');
-    await expect(page.getByTestId('version-detail-server')).toBeVisible();
+    await expect(page.getByTestId('update-status')).toHaveText('Up to date');
   });
 
-  test('each version row keeps its name above one line of stamp and time, inside the page', async ({
-    page,
-  }) => {
+  test('the status row stays inside the page and shows no version numbers', async ({ page }) => {
     const pageBox = (await page.getByTestId('settings-version').boundingBox())!;
-    for (const id of ['version-app', 'version-detail-server', 'version-host-d1']) {
-      const row = page.getByTestId(id);
-      const rowBox = (await row.boundingBox())!;
-      const name = (await row.locator('.set-row-title').boundingBox())!;
-      const sub = (await row.locator('.set-sub').boundingBox())!;
-      // Name first, then the stamp line under it, left-aligned together.
-      expect(sub.y, id).toBeGreaterThanOrEqual(name.y + name.height - 0.5);
-      expect(Math.abs(sub.x - name.x), id).toBeLessThanOrEqual(0.5);
-      // "0.1.532 · 9b8635f · deployed 1w ago" is one line of text, not a wrapped
-      // column of scraps.
-      const lineHeight = await row
-        .locator('.set-sub')
-        .evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
-      expect(sub.height, id).toBeLessThan(lineHeight * 1.5);
-      // Nothing spills out of the row, and the row stays inside the page.
-      expect(sub.x + sub.width, id).toBeLessThanOrEqual(rowBox.x + rowBox.width + 0.5);
-      expect(rowBox.x + rowBox.width, id).toBeLessThanOrEqual(pageBox.x + pageBox.width + 0.5);
-      expect(rowBox.width, id).toBeLessThanOrEqual(PHONE.width);
-    }
+    const rowBox = (await page.getByTestId('version-status').boundingBox())!;
+    expect(rowBox.x + rowBox.width).toBeLessThanOrEqual(pageBox.x + pageBox.width + 0.5);
+    expect(rowBox.width).toBeLessThanOrEqual(PHONE.width);
+    expect((await page.getByTestId('settings-version').textContent()) ?? '').not.toMatch(
+      /\d+\.\d+\.\d+/,
+    );
   });
 
   test('no page-level horizontal scroll on the settings route', async ({ page }) => {

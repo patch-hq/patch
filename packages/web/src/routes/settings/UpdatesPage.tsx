@@ -1,64 +1,25 @@
-// Settings → Updates: one list of what Patch is running, a version and a status
-// for each, and how updates are applied (spec/11 § Version reporting).
+// Settings → Updates: whether Patch is up to date, and one Update button when it
+// is not. Versions, shas and per-layer detail are deliberately not shown (spec/11
+// § Version reporting) — Patch works out what is behind and updates it itself.
 //
-// Hosts update themselves by default; the toggle turns that off, and then each
-// host's Update button (or Update all) is the way. Genuine drift between layers
-// the server reports is listed first, with its remedy; otherwise there is
-// nothing above the list.
-//
-// The window runs a UI build of its own, so "This app" states the window's
-// build and "Server" the server's, side by side.
+// Hosts update themselves by default; the toggle turns that off, and then Update
+// is the way. The desktop shell's staged update is restarted from the banner
+// (DesktopUpdateBanner), never from here.
 
 import type { JSX } from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type { LayerBuild, VersionReport } from '@patch/wire';
+import type { VersionReport } from '@patch/wire';
 import { api } from '../../api/rest.js';
-import { BUILD_INFO } from '../../lib/buildInfo.js';
 import { getDesktopBridge, type DesktopUpdaterState } from '../../lib/desktopBridge.js';
 import { relativeIso } from '../../lib/relativeTime.js';
 import { Toggle } from '../../components/Toggle.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore, type HostPresence } from '../../stores/presenceStore.js';
-import { hostLabel, sortHosts } from './hostScope.js';
-import { sendToHost, useHostUpdate } from './hostWrite.js';
+import { sortHosts } from './hostScope.js';
+import { sendToHost } from './hostWrite.js';
 import { patchShared } from './sharedWrite.js';
-import { Group, Note, Row, SettingsPage } from './ui.js';
-
-/** `0.1.317 · 9b8635f`. */
-function stamp(build: Pick<LayerBuild, 'version' | 'gitSha'>): string {
-  return build.gitSha ? `${build.version} · ${build.gitSha}` : build.version;
-}
-
-/**
- * What the desktop shell's row should say. Driven by the updater's last outcome
- * rather than by comparing versions, so "I couldn't check" never reads as "current".
- *
- * A staged update is REPORTED here and offered by the banner
- * (DesktopUpdateBanner), which is the one place that restarts the app — and only
- * when pressed.
- */
-function shellStatus(state: DesktopUpdaterState): string {
-  if (state.checking) return 'checking…';
-  const result = shellResult(state);
-  // Dated, so "up to date" and "check failed" say how stale that answer is.
-  return state.lastCheckedAt ? `${result} · checked ${relativeIso(state.lastCheckedAt)}` : result;
-}
-
-function shellResult(state: DesktopUpdaterState): string {
-  switch (state.lastResult) {
-    case 'downloaded':
-      return `${state.availableVersion} ready — restart to apply`;
-    case 'update-available':
-      return `downloading ${state.availableVersion}`;
-    case 'up-to-date':
-      return 'up to date';
-    case 'error':
-      return 'check failed';
-    default:
-      return 'not checked yet';
-  }
-}
+import { Group, Row, SettingsPage } from './ui.js';
 
 function useVersionReport() {
   return useQuery<VersionReport>({ queryKey: ['version'], queryFn: () => api.version() });
@@ -109,26 +70,23 @@ export function UpdatesPage(): JSX.Element {
   const { data: report, error, isFetching, refetch, dataUpdatedAt } = useVersionReport();
   const { shell, checkShell } = useShell();
   const behind = useBehind();
-  const hosts = usePresenceStore((s) => s.hosts);
   const autoUpdate = usePreferencesStore((s) => s.preferences.autoUpdateHosts);
   const loaded = usePreferencesStore((s) => s.loaded);
-  const drift = behind.filter((b) => b.kind === 'drift');
   const updatable = behind.flatMap((b) => (b.kind === 'host' && b.host.online ? [b.host] : []));
-  // The host build the behind hosts would update TO: the published channel's
-  // version. Only read while something is behind; unread, the row states just
-  // the version the host runs rather than guessing a target.
-  const hostsBehind = behind.some((b) => b.kind === 'host');
-  const { data: published } = useQuery({
-    queryKey: ['host-manifest'],
-    queryFn: () => api.hostManifest(),
-    enabled: hostsBehind,
-    retry: false,
-  });
+  const shellReady = shell?.lastResult === 'downloaded';
+  const shellBusy = shell?.checking === true || shell?.lastResult === 'update-available';
+  const upToDate = behind.length === 0 && !shellReady && !shellBusy;
 
   const checkAll = (): void => {
     void refetch();
     checkShell();
   };
+
+  let status = 'Up to date';
+  if (error || shell?.lastResult === 'error') status = 'Couldn’t check';
+  else if (!report) status = 'Checking…';
+  else if (shellReady) status = 'Update ready — restart to apply';
+  else if (!upToDate) status = shellBusy && behind.length === 0 ? 'Checking…' : 'Update available';
 
   return (
     <SettingsPage
@@ -149,7 +107,7 @@ export function UpdatesPage(): JSX.Element {
       {error ? (
         <Group>
           <Row
-            title={<span data-testid="version-error">Could not read versions</span>}
+            title={<span data-testid="version-error">Could not check for updates</span>}
             sub={(error as Error).message}
           >
             <button type="button" className="set-btn" onClick={() => void refetch()}>
@@ -159,66 +117,21 @@ export function UpdatesPage(): JSX.Element {
         </Group>
       ) : null}
 
-      {drift.length > 0 ? (
-        <Group label="Behind" testid="version-drift">
-          {drift.map((d) => (
-            <Row
-              key={d.key}
-              title={d.detail}
-              sub={<code>{d.remedy}</code>}
-              testid={`version-drift-${d.driftKind}`}
-            />
-          ))}
-        </Group>
-      ) : null}
-
       <Group>
-        <Row title="Update hosts automatically" testid="auto-update">
-          <Toggle
-            checked={autoUpdate}
-            disabled={!loaded}
-            onChange={(next) => void patchShared('auto-update', { autoUpdateHosts: next })}
-            testid="auto-update-toggle"
-          />
-        </Row>
-        {updatable.length > 0 ? (
-          <Row title={`${updatable.length} host${updatable.length === 1 ? '' : 's'} behind`}>
+        <Row title={<span data-testid="update-status">{status}</span>} testid="version-status">
+          {updatable.length > 0 ? (
             <button
               type="button"
-              className="set-btn"
+              className="set-btn primary"
               data-testid="update-all"
               onClick={() =>
                 updatable.forEach((h) => sendToHost(h, { type: 'host.update', hostId: h.hostId }))
               }
             >
-              Update all
+              Update
             </button>
-          </Row>
-        ) : null}
-      </Group>
-
-      <Group label="Components" testid="version-rows">
-        <Row
-          title="This app"
-          testid="version-app"
-          sub={
-            <>
-              <code>{stamp(BUILD_INFO)}</code>
-              {report?.web ? ` · deployed ${relativeIso(report.web.deployedAt)}` : ''}
-            </>
-          }
-        />
-        {shell ? (
-          <Row
-            title="Desktop app"
-            testid="version-shell"
-            sub={
-              <>
-                <code>{shell.currentVersion}</code> · {shellStatus(shell)}
-              </>
-            }
-          />
-        ) : null}
+          ) : null}
+        </Row>
         {shell?.lastResult === 'error' && shell.lastError ? (
           <Row
             title={
@@ -230,68 +143,17 @@ export function UpdatesPage(): JSX.Element {
             testid="version-shell-error"
           />
         ) : null}
-        {report ? (
-          <Row
-            title="Server"
-            testid="version-detail-server"
-            sub={
-              <>
-                <code>{stamp(report.server)}</code> · up {relativeIso(report.server.startedAt)}
-              </>
-            }
-          />
-        ) : null}
-        {sortHosts(Object.values(hosts)).map((h) => {
-          const behindNow = h.host?.updateAvailable === true;
-          const target = behindNow && published?.version ? ` → ${published.version}` : '';
-          return (
-            <Row
-              key={h.hostId}
-              title={`${hostLabel(h)} host`}
-              testid={`version-host-${h.hostId}`}
-              sub={
-                h.host ? (
-                  <>
-                    <code>{`${h.host.hostVersion}${target}`}</code>
-                    {` · ${behindNow ? 'behind' : 'up to date'}${h.online ? '' : ' · offline'}`}
-                  </>
-                ) : (
-                  'not reported'
-                )
-              }
-            >
-              {behindNow ? <HostUpdateButton host={h} /> : null}
-            </Row>
-          );
-        })}
-        {report?.desktop ? (
-          <Row
-            title="Desktop on the update feed"
-            testid="version-detail-feed"
-            sub={
-              <>
-                <code>{stamp(report.desktop)}</code> · published{' '}
-                {relativeIso(report.desktop.publishedAt)}
-              </>
-            }
-          />
-        ) : null}
-        {report?.android ? (
-          <Row
-            title="Android APK"
-            testid="version-detail-android"
-            sub={
-              <>
-                <code>{stamp(report.android)}</code> · published{' '}
-                {relativeIso(report.android.publishedAt)}
-              </>
-            }
-          />
-        ) : null}
-        {!report && !error ? <Note>Loading…</Note> : null}
       </Group>
 
       <Group>
+        <Row title="Update automatically" testid="auto-update">
+          <Toggle
+            checked={autoUpdate}
+            disabled={!loaded}
+            onChange={(next) => void patchShared('auto-update', { autoUpdateHosts: next })}
+            testid="auto-update-toggle"
+          />
+        </Row>
         <Row title="Last checked" testid="version-checked">
           <span className="set-val">
             {report ? relativeIso(new Date(dataUpdatedAt).toISOString()) : '—'}
@@ -299,22 +161,5 @@ export function UpdatesPage(): JSX.Element {
         </Row>
       </Group>
     </SettingsPage>
-  );
-}
-
-/** Split out from the `behind` list's `.map` — `useHostUpdate` is a hook, and the
- * list's length varies with what is behind. */
-function HostUpdateButton({ host }: { host: HostPresence }): JSX.Element {
-  const { updating, apply } = useHostUpdate(host);
-  return (
-    <button
-      type="button"
-      className="set-btn"
-      disabled={updating}
-      data-testid={`host-${host.hostId}-update`}
-      onClick={apply}
-    >
-      {updating ? 'Updating…' : 'Update'}
-    </button>
   );
 }
