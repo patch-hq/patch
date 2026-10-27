@@ -1,9 +1,15 @@
 # Releasing Patch
 
-Push to `main`. That is the whole release process.
+Open a PR; when its tests pass it merges itself, and the merge is the release.
+`main` is protected: no direct pushes, and the `tests` check must be green.
 
-1. **GitHub Actions** (`.github/workflows/release.yml`) runs the full gate
-   (`scripts/verify.mjs`) and builds every surface: the
+0. **Tests** (`.github/workflows/test.yml`) run the full gate
+   (`scripts/verify.mjs`, four shards) on every PR and every push to `main`.
+   `pr-automerge.yml` turns on auto-merge (rebase) for each PR;
+   `pr-conflicts.yml` labels a PR `needs-rebase` and comments when main moves
+   under it, for the chat that owns it to rebase and force-push.
+1. **GitHub Actions** (`.github/workflows/release.yml`) builds every surface
+   alongside the tests and waits for that commit's `tests` check: the
    server and web release, the Linux and macOS hosts, the signed and notarised
    desktop app, the APK and the phone's over-the-air update. When all of it
    builds, it is published as the prerelease `dev-<version>`.

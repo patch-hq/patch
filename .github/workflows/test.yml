@@ -1,0 +1,76 @@
+# The test suite (scripts/verify.mjs), on its own: every push to main and every
+# pull request. release.yml does not re-run it; it waits for the `tests` check
+# this workflow reports on the commit, and branch protection on main requires
+# the same check, so main only moves to a commit that passed.
+#
+# Runs only in the project's public repository: Actions minutes are free there.
+
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to a PR makes the older run pointless. Main is never cancelled:
+# every commit on it needs its own result for release.yml to find.
+concurrency:
+  group: test-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Four runners wide. Every runner runs the cheap layers (lint, types,
+  # unit/contract/integration); the browser layer is split between them with
+  # Playwright's --shard, because the whole suite on one runner took about an hour.
+  verify:
+    if: github.repository == 'tomchambers2/patch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ['1/4', '2/4', '3/4', '4/4']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @patch/web exec playwright install --with-deps chromium
+      # The host's browser tests drive a headed Chromium on Xvfb, and its Codex
+      # tests keep credentials in the native keyring (Secret Service over D-Bus).
+      - run: sudo apt-get install -y -qq xvfb x11-utils gnome-keyring libsecret-tools dbus-x11
+      # Some suites run against built output (the server serves the web build).
+      # Not the phone: its "build" is an Expo export + prebuild that rewrites android/.
+      - run: pnpm turbo build --filter='!@patch/mobile' --output-logs=errors-only
+      # The browser layer is on here. It is off by default on the dev box, which
+      # is too small for it (verify.mjs explains); a runner is not.
+      # 40 minutes: a shard normally takes 15-25, and one that hung for longer
+      # held every later check behind it.
+      - name: The gate
+        timeout-minutes: 40
+        env:
+          PATCH_RUN_BROWSER_GATE: '1'
+          PATCH_BROWSER_SHARD: ${{ matrix.shard }}
+        run: |
+          dbus-run-session -- bash -euo pipefail -c '
+            printf "ci" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
+            node scripts/verify.mjs
+          '
+
+  # The one check that branch protection and release.yml look at: green only
+  # when every shard is. Reports on forks too, where verify is skipped, so it is
+  # failed rather than absent there.
+  tests:
+    needs: [verify]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          test "${{ needs.verify.result }}" = success || { echo "verify: ${{ needs.verify.result }}" >&2; exit 1; }

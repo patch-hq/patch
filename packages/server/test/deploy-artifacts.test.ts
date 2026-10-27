@@ -98,8 +98,19 @@ describe('H1 deploy artifacts — deploy command + backup scripts', () => {
     // Releases are built by .github/workflows/release.yml and installed by each
     // server (src/self-update.ts) — the same installer a self-hoster runs.
     const workflow = read('.github/workflows/release.yml');
-    // Nothing is published unless every surface built and the gate passed...
-    expect(workflow).toMatch(/needs: \[verify, server, host, mac, android, mobile-update\]/);
+    // Nothing is published unless every surface built and this commit's test
+    // run (test.yml) passed; the tests are not re-run here, they run alongside...
+    expect(workflow).toMatch(/needs: \[tests, server, host, mac, android, mobile-update\]/);
+    expect(workflow).not.toMatch(/PATCH_BROWSER_SHARD/);
+    const tests = read('.github/workflows/test.yml');
+    // ...on every push to main and every PR, as four shards behind one required check,
+    expect(tests).toMatch(/pull_request:/);
+    expect(tests).toMatch(/push:\s*\n\s*branches: \[main\]/);
+    expect(tests).toMatch(/shard: \['1\/4', '2\/4', '3\/4', '4\/4'\]/);
+    expect(tests).toMatch(/\n  tests:\n[\s\S]*?needs: \[verify\]/);
+    // with PRs merged by themselves once green, and conflicts handed back.
+    expect(read('.github/workflows/pr-automerge.yml')).toMatch(/gh pr merge --auto/);
+    expect(read('.github/workflows/pr-conflicts.yml')).toMatch(/needs-rebase/);
     // ...and the phone's over-the-air update is one of those surfaces: release
     // files the servers mirror, never published anywhere else first
     // (spec/11 § Mobile updates).
