@@ -1388,6 +1388,10 @@ export function autoBashDeniedMessage(reason?: string): string {
   return r ? `${AUTO_BASH_DENIED_MESSAGE}\n\nClassifier response: ${r}` : AUTO_BASH_DENIED_MESSAGE;
 }
 
+/** What a `patch_agent` child is told when it needs a decision: its parent makes those, not the user. */
+export const SUBAGENT_PERMISSION_DENIED_MESSAGE =
+  'Not run: you are a subagent and nobody is available to approve or answer this. It was denied, not approved. Do not retry the same call blind. Carry on without it where the work does not depend on it, and say plainly in your final reply what you needed and why, so your parent can decide.';
+
 /** What the agent is told when a tool approval expires. NOT a refusal. */
 export const APPROVAL_EXPIRED_MESSAGE =
   'Not approved: the approval request timed out after 60 minutes without an answer. The user did not refuse — nobody saw it, and this chat may be unattended. Do not retry the same call blind. Carry on without it where the work does not depend on it, and say plainly in your report that it was skipped.';
@@ -11867,6 +11871,13 @@ export class Daemon {
     denyMessage?: string;
     sessionAllow?: boolean;
   }> {
+    // A `patch_agent` child is managed by its parent, never by the user: a card
+    // for it would sit unseen on a chat nobody can open. Deny at once and tell
+    // the child to hand the need up in its reply, where the parent reads it.
+    if (this.chatState.get(chatId)?.subagent) {
+      this.opts.logger.warn({ chatId, tool }, 'subagent permission request denied, not raised');
+      return Promise.resolve({ approve: false, denyMessage: SUBAGENT_PERMISSION_DENIED_MESSAGE });
+    }
     // spec/02 § Permission mode: under `auto` a call the classifier will not
     // approve is DENIED, never put to a human. The SDK sometimes hands a Bash
     // call to `canUseTool` anyway when its classifier gives up, and that card

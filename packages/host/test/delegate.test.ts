@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
-import { Daemon } from '../src/chatRunner.js';
+import { Daemon, SUBAGENT_PERMISSION_DENIED_MESSAGE } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend, type SdkBackend } from '../src/sdkBackend.js';
 
@@ -411,18 +411,27 @@ describe('patch_delegate', () => {
     );
   });
 
-  it("surfaces a subagent's AskUserQuestion on the parent, labelled, and routes the answer back to unblock it", async () => {
+  it("denies a subagent's permission request at once instead of raising it to the user", async () => {
     const home = mkdtempSync(join(tmpdir(), 'patch-delegate-ask-'));
     const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-delegate-ask-folder-')));
     mkdirSync(folder, { recursive: true });
     const events: WireEvent[] = [];
+    let denyMessage: string | undefined;
+    let asked = false;
     const askingBackend: SdkBackend = {
       async *run(opts) {
+        // Only the child asks; the parent's turn that receives its result must not.
+        if (asked) {
+          yield { type: 'result' };
+          return;
+        }
+        asked = true;
         const decision = await opts.onPermissionRequest!({
           tool: 'AskUserQuestion',
           args: { question: 'Which approach?' },
           description: 'Which approach should I take?',
         });
+        denyMessage = decision.denyMessage;
         yield { type: 'assistant', content: decision.approve ? 'took approach A' : 'gave up' };
         yield { type: 'result' };
       },
@@ -442,34 +451,12 @@ describe('patch_delegate', () => {
       discoverClaudeMcpServers: () => [],
     });
     const parentChatId = await daemon.spawnChat({ folder });
-    const { id, label } = await daemon.createDelegate({ parentChatId, prompt: 'pick an approach' });
+    const { id } = await daemon.createDelegate({ parentChatId, prompt: 'pick an approach' });
 
-    // The mirrored card appears on the PARENT — labelled with the subagent's
-    // name — not on the subagent's own (invisible) chatId.
-    const mirrored = await (async () => {
-      await flushUntil(() =>
-        events.some((e) => e.type === 'chat.permission_request' && e.chatId === parentChatId),
-      );
-      return events.find(
-        (e): e is Extract<WireEvent, { type: 'chat.permission_request' }> =>
-          e.type === 'chat.permission_request' && e.chatId === parentChatId,
-      )!;
-    })();
-    expect(mirrored.request.tool).toBe('AskUserQuestion');
-    expect(mirrored.request.description).toContain(label);
-    expect(events.some((e) => e.type === 'chat.permission_request' && e.chatId === id)).toBe(false);
-    expect(daemon.chatState.get(parentChatId)?.activity).toBe('awaiting-permission');
-
-    // Answering the mirrored card (by requestId alone, exactly how a real
-    // surface answers any permission card) unblocks the REAL subagent turn.
-    daemon.submitPermissionResponse({ requestId: mirrored.requestId, decision: 'approve' });
-
-    await flushUntil(() =>
-      messagesOn(events, parentChatId).some((m) => m.content.includes('took approach A')),
-    );
-    expect(
-      events.some((e) => e.type === 'chat.permission_response' && e.chatId === parentChatId),
-    ).toBe(true);
+    await flushUntil(() => daemon.listDelegates(parentChatId)[0]?.status === 'done');
+    expect(denyMessage).toBe(SUBAGENT_PERMISSION_DENIED_MESSAGE);
+    expect(events.some((e) => e.type === 'chat.permission_request')).toBe(false);
+    expect(daemon.chatState.get(parentChatId)?.activity).not.toBe('awaiting-permission');
     expect(daemon.listDelegates(parentChatId)[0]).toMatchObject({ id, status: 'done' });
   });
 
