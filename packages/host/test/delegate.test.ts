@@ -187,6 +187,30 @@ describe('patch_delegate', () => {
     ]);
   });
 
+  it('delivers the final reply of a later turn a settled subagent runs (woken by something other than its parent)', async () => {
+    const { daemon, sdk, events, folder } = setup();
+    const parentChatId = await daemon.spawnChat({ folder });
+    sdk.enqueue([{ type: 'assistant', content: 'interim: still working' }, { type: 'result' }]);
+    const { id } = await daemon.createDelegate({ parentChatId, prompt: 'long job' });
+    await flushUntil(() =>
+      messagesOn(events, parentChatId).some((m) => m.content.includes('interim: still working')),
+    );
+
+    // A background job the child started finishes and wakes it; it posts the final report.
+    sdk.enqueue([{ type: 'assistant', content: 'FINAL REPORT' }, { type: 'result' }]);
+    await daemon.sendInput({
+      chatId: id,
+      message: 'job finished',
+      localId: 'wake-1',
+      origin: 'machine',
+    });
+
+    await flushUntil(() =>
+      messagesOn(events, parentChatId).some((m) => m.content.includes('FINAL REPORT')),
+    );
+    expect(daemon.listDelegates(parentChatId)[0]).toMatchObject({ id, status: 'done' });
+  });
+
   it('runs several delegates from the same parent in parallel, each delivering independently', async () => {
     const { daemon, sdk, events, folder } = setup();
     const parentChatId = await daemon.spawnChat({ folder });

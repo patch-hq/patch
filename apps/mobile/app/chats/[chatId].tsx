@@ -15,6 +15,7 @@ import {
   Linking,
   Modal,
   PanResponder,
+  BackHandler,
   Platform,
   Pressable,
   Text,
@@ -152,7 +153,7 @@ import { fixed, fonts, radii, space, textMin, typography, useTheme } from '../..
 import { startVoiceCall } from '../../src/lib/voiceCall';
 import { getWs } from '../../src/api/ws';
 import { ASK_USER_QUESTION, isQuestionRowCoveredByCard } from '../../src/lib/askUserQuestion';
-import { goBack } from '../../src/lib/goBack';
+import { goHome } from '../../src/lib/goBack';
 import { useLeaveWhenArchivedElsewhere } from '../../src/lib/leaveArchived';
 import { QuestionCard } from '../../src/components/QuestionCard';
 
@@ -293,6 +294,14 @@ function ChatDetailBody(): React.ReactElement {
   chatIdRef.current = chatId;
   const routerRef = React.useRef(router);
   routerRef.current = router;
+  // The hardware/gesture back goes home too, not to the previous screen.
+  React.useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      goHome(routerRef.current);
+      return true;
+    });
+    return () => sub.remove();
+  }, []);
   // Which machine the chat runs on, for the header crumb (spec/15 § Chat detail).
   const hostLabel = usePresenceStore((s) =>
     row?.hostId ? (s.hosts[row.hostId]?.host?.hostName ?? row.hostId).trim() : '',
@@ -1060,7 +1069,7 @@ function ChatDetailBody(): React.ReactElement {
         }}
       >
         <Pressable
-          onPress={() => goBack(router, '/(tabs)/chats')}
+          onPress={() => goHome(router)}
           style={{ padding: space.sm }}
           accessibilityRole="button"
           accessibilityLabel="Back"
