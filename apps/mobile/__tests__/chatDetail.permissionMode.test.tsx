@@ -91,9 +91,9 @@ describe('chat-detail — permission mode padlock', () => {
     expect(queryHost(r.root, byTestId('permission-mode-bar'))).toBeNull();
   });
 
-  it('the padlock sits in the composer action row', () => {
+  it('the padlock sits on the composer settings line', () => {
     const r = render('default');
-    const row = findHost(r.root, byTestId('composer-actions-row'));
+    const row = findHost(r.root, byTestId('composer-settings-row'));
     expect(
       row.findAll(
         (i) => typeof i.type === 'string' && i.props['testID'] === 'permission-mode-padlock',

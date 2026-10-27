@@ -7,6 +7,7 @@ import type {
   ChatActivity,
   ChatContextUsage,
   ChatStatus,
+  EffortLevel,
   PendingWake,
   PermissionMode,
   SnoozeRecord,
@@ -33,6 +34,12 @@ export interface ChatRow {
    * against, so it can only show what the host sent.
    */
   permissionMode: PermissionMode;
+  /**
+   * Claude's thinking-effort override for the next turn (spec/04 § Effort), as
+   * the host last reported it on `chat.state`; `null` is Default (no override),
+   * `undefined` is not reported yet.
+   */
+  effort?: EffortLevel | null;
   status: ChatStatus;
   pinned: boolean;
   pinnedAt: number | null;

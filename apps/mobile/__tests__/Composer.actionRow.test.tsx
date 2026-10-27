@@ -185,7 +185,7 @@ describe('Composer action row — order', () => {
     ]);
   });
 
-  it('reads camera, image, file, sketch … model pill, padlock, send', () => {
+  it('reads camera, image, file, sketch … send', () => {
     seed();
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
     expect(rowOrder(r.root)).toEqual([
@@ -194,20 +194,52 @@ describe('Composer action row — order', () => {
       'Attach any file',
       'Sketch',
       'composer-actions-spacer',
-      'composer-model-pill',
-      'permission-mode-padlock',
       'Send message',
     ]);
+  });
+
+  it('puts the settings on their own line: approval mode, model, effort', () => {
+    seed();
+    const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
+    const settings = findHost(r.root, byTestId('composer-settings-row'));
+    const ids = settings
+      .findAll((i) => typeof i.type === 'string' && typeof i.props['testID'] === 'string')
+      .map((i) => i.props['testID'] as string)
+      .filter((id) =>
+        ['permission-mode-padlock', 'composer-model-pill', 'composer-effort'].includes(id),
+      );
+    expect([...new Set(ids)]).toEqual([
+      'permission-mode-padlock',
+      'composer-model-pill',
+      'composer-effort',
+    ]);
+    expect(textOf(findHost(settings, byTestId('permission-mode-padlock')))).toContain(
+      'Ask before acting',
+    );
+  });
+
+  it('effort: a pick sends chat.effort_request; Default sends null', () => {
+    seed();
+    const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
+    actSync(() => findHost(r.root, byTestId('composer-effort')).props['onPress']());
+    actSync(() => findHost(r.root, byTestId('effort-option-high')).props['onPress']());
+    expect(wsMock.send).toHaveBeenCalledWith({
+      type: 'chat.effort_request',
+      chatId: 'c1',
+      effort: 'high',
+    });
+  });
+
+  it('effort is not offered on a chat with no Claude model', () => {
+    seed({ model: null });
+    const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
+    expect(queryHost(r.root, byTestId('composer-effort'))).toBeNull();
   });
 
   it('with a turn running and nothing typed, Stop takes Send’s place at the end', () => {
     seed({ activity: 'running' });
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
-    expect(rowOrder(r.root).slice(-3)).toEqual([
-      'composer-model-pill',
-      'permission-mode-padlock',
-      'composer-stop',
-    ]);
+    expect(rowOrder(r.root).slice(-2)).toEqual(['composer-actions-spacer', 'composer-stop']);
   });
 
   it('keeps the model pill and padlock on an existing chat the roster has not named yet', () => {

@@ -107,6 +107,7 @@ import {
   ClipboardList,
   Sparkles,
   Pencil,
+  ChevronDown,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -114,6 +115,7 @@ import {
   harnessForModel,
   providerBuiltinCommands,
   type AttachmentRef,
+  type EffortLevel,
   type PermissionMode,
 } from '@patch/wire';
 import { AnchoredMenu } from './AnchoredMenu';
@@ -263,6 +265,18 @@ const MIC_PRESS_RETENTION = 80;
  * a pill left naming a model the chat is not on is a silent failure.
  */
 export const MODEL_CONFIRM_TIMEOUT_MS = 8000;
+
+/** Height of the settings line's controls — quieter than the 44pt action row. */
+const SETTINGS_ROW_HEIGHT = 36;
+
+const EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+const EFFORT_LABELS: Record<EffortLevel, string> = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'X-high',
+  max: 'Max',
+};
 
 /** The padlock's glyph for each mode: what the next turn is allowed to do. */
 export function permissionModeIcon(mode: PermissionMode | string): typeof Lock {
@@ -649,6 +663,54 @@ export function Composer({
       return;
     }
     sendModelChange(modelId);
+  };
+
+  // Effort (spec/04 § Effort; parity with web's effort pill, spec/14 §
+  // Composer — Effort control). Claude backend only. Same pending rule as the
+  // model pill: the pick reads dimmed until the host's `chat.state` carries
+  // it, and goes back with an error if it never does (NO FALLBACK).
+  const showEffort = chatModel !== null && harnessForModel(chatModel) === 'claude';
+  const [pendingEffort, setPendingEffort] = React.useState<{ value: EffortLevel | null } | null>(
+    null,
+  );
+  const chatEffort = row?.effort ?? null;
+  React.useEffect(() => {
+    if (pendingEffort !== null && chatEffort === pendingEffort.value) setPendingEffort(null);
+  }, [pendingEffort, chatEffort]);
+  React.useEffect(() => {
+    if (pendingEffort === null) return;
+    const t = setTimeout(() => {
+      setPendingEffort(null);
+      useUiStore
+        .getState()
+        .pushError(
+          'the machine did not switch the effort level — this chat is still on the value it had',
+        );
+    }, MODEL_CONFIRM_TIMEOUT_MS);
+    return () => clearTimeout(t);
+  }, [pendingEffort]);
+  const effortShown = pendingEffort !== null ? pendingEffort.value : chatEffort;
+  const [effortMenuOpen, setEffortMenuOpen] = React.useState(false);
+  const effortItems = [
+    {
+      id: 'default',
+      label: 'Default',
+      testID: 'effort-option-default',
+      selected: effortShown === null,
+    },
+    ...EFFORT_LEVELS.map((l) => ({
+      id: l,
+      label: EFFORT_LABELS[l],
+      testID: `effort-option-${l}`,
+      selected: effortShown === l,
+    })),
+  ];
+  const onEffortSelect = (id: string): void => {
+    setEffortMenuOpen(false);
+    const effort = id === 'default' ? null : (id as EffortLevel);
+    if (effort === effortShown) return;
+    setPendingEffort({ value: effort });
+    getWs().send({ type: 'chat.effort_request', chatId, effort });
   };
 
   // Padlock (spec/15 § Composer — Permission mode padlock): the mode list,
@@ -1979,67 +2041,6 @@ export function Composer({
         )}
         <View testID="composer-actions-spacer" style={{ flex: 1, minWidth: space.xs }} />
         {sendTarget === undefined && !edit ? (
-          <ModelPicker
-            hostId={row?.hostId ? row.hostId : null}
-            selected={pendingModel ?? chatModel}
-            pending={pendingModel !== null}
-            onSelect={chooseModel}
-            disabled={linkDown}
-            variant="compact"
-            testID="composer-model-pill"
-            note={
-              running
-                ? 'Applies to your next message — this turn keeps its model'
-                : 'Applies to your next message'
-            }
-          />
-        ) : null}
-        {/* Which account the latest turn ran on (spec/10 § Backend credentials). */}
-        {!edit && row?.account ? (
-          <Text
-            testID="chat-account"
-            numberOfLines={1}
-            accessibilityLabel={`The latest turn ran on the ${row.account.label} account`}
-            style={{
-              ...typography.meta,
-              color: colors.ink3,
-              maxWidth: 96,
-              flexShrink: 1,
-              marginHorizontal: space.xs,
-            }}
-          >
-            {row.account.label}
-          </Text>
-        ) : null}
-        {sendTarget === undefined && !edit ? (
-          <Pressable
-            testID="permission-mode-padlock"
-            onPress={() => setModeMenuOpen(true)}
-            // A mode change is a socket frame with nothing to queue it into —
-            // disabled, visibly, rather than dropped (spec/12).
-            disabled={linkDown}
-            style={({ pressed }) => ({
-              width: ACTION_SIZE,
-              height: ACTION_SIZE,
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: radii.md,
-              backgroundColor: pressed ? colors.divider : 'transparent',
-            })}
-            accessibilityRole="button"
-            accessibilityLabel={`Permission mode: ${
-              permissionMode === undefined
-                ? 'not reported yet'
-                : permissionModeLabel(permissionMode)
-            }`}
-          >
-            <ModeIcon
-              size={ICON_SIZE}
-              color={linkDown ? colors.inkFaint : bypass ? colors.red : colors.ink2}
-            />
-          </Pressable>
-        ) : null}
-        {sendTarget === undefined && !edit ? (
           <ContextRing chatId={chatId} size={ACTION_SIZE} />
         ) : null}
         {edit ? (
@@ -2126,6 +2127,108 @@ export function Composer({
           </Pressable>
         )}
       </View>
+      {/* Settings line (spec/15 § Composer — settings line): the standing
+          settings for the next turn, under the action buttons, on a line of
+          their own so every label reads in full. Order matches web: approval
+          mode, model, account, effort. Wraps rather than clipping. */}
+      {sendTarget === undefined && !edit ? (
+        <View
+          testID="composer-settings-row"
+          style={{
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            columnGap: space.xs,
+          }}
+        >
+          <Pressable
+            testID="permission-mode-padlock"
+            onPress={() => setModeMenuOpen(true)}
+            // A mode change is a socket frame with nothing to queue it into —
+            // disabled, visibly, rather than dropped (spec/12).
+            disabled={linkDown}
+            style={({ pressed }) => ({
+              height: SETTINGS_ROW_HEIGHT,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: space.xs,
+              paddingHorizontal: space.xs,
+              borderRadius: radii.md,
+              backgroundColor: pressed ? colors.divider : 'transparent',
+            })}
+            accessibilityRole="button"
+            accessibilityLabel={`Permission mode: ${
+              permissionMode === undefined
+                ? 'not reported yet'
+                : permissionModeLabel(permissionMode)
+            }`}
+          >
+            <ModeIcon
+              size={ICON_SIZE}
+              color={linkDown ? colors.inkFaint : bypass ? colors.red : colors.ink2}
+            />
+            <Text
+              style={{
+                ...typography.meta,
+                color: linkDown ? colors.inkFaint : bypass ? colors.red : colors.ink3,
+              }}
+            >
+              {permissionMode === undefined ? 'Approval mode' : permissionModeLabel(permissionMode)}
+            </Text>
+          </Pressable>
+          <ModelPicker
+            hostId={row?.hostId ? row.hostId : null}
+            selected={pendingModel ?? chatModel}
+            pending={pendingModel !== null}
+            onSelect={chooseModel}
+            disabled={linkDown}
+            variant="compact"
+            testID="composer-model-pill"
+            note={
+              running
+                ? 'Applies to your next message — this turn keeps its model'
+                : 'Applies to your next message'
+            }
+          />
+          {!edit && row?.account ? (
+            <Text
+              testID="chat-account"
+              accessibilityLabel={`The latest turn ran on the ${row.account.label} account`}
+              style={{
+                ...typography.meta,
+                color: colors.ink3,
+                marginHorizontal: space.xs,
+              }}
+            >
+              {row.account.label}
+            </Text>
+          ) : null}
+          {showEffort ? (
+            <Pressable
+              testID="composer-effort"
+              onPress={() => setEffortMenuOpen(true)}
+              disabled={linkDown}
+              style={({ pressed }) => ({
+                height: SETTINGS_ROW_HEIGHT,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 2,
+                paddingHorizontal: space.xs,
+                borderRadius: radii.md,
+                backgroundColor: pressed ? colors.divider : 'transparent',
+                opacity: pendingEffort !== null ? 0.55 : 1,
+              })}
+              accessibilityRole="button"
+              accessibilityLabel={`Thinking effort: ${effortShown === null ? 'Default' : EFFORT_LABELS[effortShown]}`}
+            >
+              <Text style={{ ...typography.meta, color: linkDown ? colors.inkFaint : colors.ink3 }}>
+                {effortShown === null ? 'Default' : EFFORT_LABELS[effortShown]}
+              </Text>
+              <ChevronDown size={14} color={linkDown ? colors.inkFaint : colors.ink3} />
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
       <AnchoredMenu
         visible={micMenuOpen}
         items={[
@@ -2147,6 +2250,14 @@ export function Composer({
         placement="bottom"
         // Modal's Android focus-steal would close the keyboard mid-type
         // (Todoist 6hfvvHWp6QqVjjQ6) — see AnchoredMenu's `nonModal` doc.
+        nonModal
+      />
+      <AnchoredMenu
+        visible={effortMenuOpen}
+        items={effortItems}
+        onSelect={onEffortSelect}
+        onDismiss={() => setEffortMenuOpen(false)}
+        placement="bottom"
         nonModal
       />
       <ProviderSwitchModal

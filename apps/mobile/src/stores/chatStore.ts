@@ -823,6 +823,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // mode) — this is the only place a surface learns it, so a change made
             // on another surface lands here too.
             permissionMode: event.permissionMode,
+            // spec/04 § Effort — omitted is unchanged, `null` clears to Default.
+            effort: event.effort !== undefined ? event.effort : row.effort,
             status: event.status ?? row.status,
             pinned: event.pinned ?? row.pinned,
             pinnedAt: event.pinnedAt ?? row.pinnedAt,
