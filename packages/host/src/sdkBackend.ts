@@ -1030,6 +1030,8 @@ type StdioMcpServerConfig = {
   env: Record<string, string>;
 };
 
+const IDLE_COMPACT_NEVER_TOKENS = 1_000_000_000;
+
 /**
  * SDK env (OAuth, never an API key per spec/10) + the stdio MCP servers this
  * chat gets: `patch` (this host's own tools) always and first, then
@@ -1073,6 +1075,15 @@ export function buildSdkEnv(opts: SdkRunOptions): {
   // silent handoff to bookkeeping that dies with this process.
   env['CLAUDE_CODE_DISABLE_BACKGROUND_TASKS'] = '1';
   env['CLAUDE_CODE_DISABLE_MCP_TASK_BACKGROUND'] = '1';
+  // Claude Code compacts a 200K+ conversation left idle ~54 minutes ("idle
+  // compaction", on by default) so the next message skips a cold cache. A Patch
+  // chat is idle between turns by nature, so a 540k chat was squashed to 34k
+  // with most of its window unused. There is no env switch for it, only a
+  // minimum size, so set that above any real window. Window-fill auto-compaction
+  // is untouched. Sleep-compact is opt-in; never inherit it from the host.
+  env['CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS'] = String(IDLE_COMPACT_NEVER_TOKENS);
+  delete env['CLAUDE_CODE_SLEEP_COMPACT'];
+  delete env['CLAUDE_CODE_SLEEP_COMPACT_AFTER_MS'];
   // A cold `npx` under load misses Claude Code's 30s default and the server is
   // then gone for the session; mcpSupervisor.ts reconnects what still fails.
   env['MCP_TIMEOUT'] ??= String(MCP_START_TIMEOUT_MS);
