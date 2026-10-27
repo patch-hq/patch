@@ -64,13 +64,7 @@ function contains(root: ReactTestInstance, needle: ReactTestInstance): boolean {
   return root.findAll((i) => i === needle).length > 0;
 }
 
-const ACTION_LABELS = [
-  'Take photo',
-  'Attach photo or image',
-  'Attach any file',
-  'Dictate into message',
-  'Send message',
-];
+const ACTION_LABELS = ['Take photo', 'Attach photo or image', 'Attach any file', 'Send message'];
 
 describe('Composer — two-row layout', () => {
   it('renders an input row and a separate actions row, in that order', () => {
@@ -93,6 +87,21 @@ describe('Composer — two-row layout', () => {
       'composer-input-row',
       'composer-actions-row',
     ]);
+  });
+
+  it('puts the mic inside the text field, riding its bottom-right corner', () => {
+    const r = renderRN(<Composer chatId="c1" folder="work" />);
+    const inputRow = findHost(r.root, byTestId('composer-input-row'));
+    const actionsRow = findHost(r.root, byTestId('composer-actions-row'));
+    const mic = findHost(r.root, byLabel('Dictate into message'));
+    expect(contains(inputRow, mic)).toBe(true);
+    expect(contains(actionsRow, mic)).toBe(false);
+    expect(mic.props['style']).toMatchObject({ position: 'absolute' });
+    // The text keeps clear of it.
+    const input = findHost(r.root, byType('TextInput'));
+    expect(input.props['style'].paddingRight).toBeGreaterThanOrEqual(
+      (mic.props['style'] as { width: number }).width,
+    );
   });
 
   it('puts the text input on its own row with no action button beside it', () => {
@@ -142,7 +151,6 @@ describe('Composer — two-row layout', () => {
       'Take photo',
       'Attach photo or image',
       'Attach any file',
-      'Dictate into message',
       'composer-actions-spacer',
       'Send message',
     ]);

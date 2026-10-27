@@ -17,10 +17,12 @@
 // On gesture-end it is replaced by the committed draft text — editable and
 // sendable like anything else typed. Starting a dictation puts the keyboard
 // away (there is nothing to type while talking) and a listening strip above
-// the input names the state and counts the time. A Clear (✕) button appears AFTER the mic (never
-// before it — the mic keeps its fixed slot, Todoist 6hf6qmQc4RPxX25c) while a
-// dictation is in flight to discard it without transcribing (`lib/dictation.ts`
-// `finish(false)`) — read that file's header before touching this: the whole
+// the input names the state and counts the time. The mic lives inside the text
+// field's bottom-right corner and pulses red while it is listening; a Cancel
+// (✕) takes the attach buttons' place at the left of the action row while a
+// dictation is in flight, to discard it without transcribing — well away from
+// the mic, so stopping and cancelling are never one slip apart
+// (`lib/dictation.ts` `finish(false)`) — read that file's header before touching this: the whole
 // point of its design is that a fast tap/hold-release NEVER silently drops the
 // note, unlike the reverted streaming attempt it replaces.
 //
@@ -77,6 +79,8 @@
 import React from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   Image,
   Keyboard,
   Pressable,
@@ -217,6 +221,13 @@ const ICON_SIZE = 20;
 const ACTION_SIZE = 36;
 /** Extra touchable margin around the mic/attach targets. */
 const MIC_HIT_SLOP = 12;
+// The mic sits INSIDE the text field, at its bottom-right corner, so it rides
+// with the last line as the field grows. Drawn small and in the quiet ink at
+// rest; the field's right padding keeps text from running under it.
+const FIELD_MIC_SIZE = 32;
+const FIELD_MIC_ICON_SIZE = 18;
+const FIELD_MIC_INSET = (COMPOSER_MIN_HEIGHT - FIELD_MIC_SIZE) / 2;
+const FIELD_PAD_RIGHT = FIELD_MIC_SIZE + FIELD_MIC_INSET + space.xs;
 // Send/Stop are the only action-row controls that paint a filled circle
 // rather than an outline glyph, so at the shared 36px token they read heavier
 // than their neighbours (Todoist 6hf2JM6695c7rhJ6 — "looks big even if it
@@ -1658,7 +1669,8 @@ export function Composer({
               ? Math.min(Math.max(COMPOSER_MIN_HEIGHT, mirrorHeight), COMPOSER_MAX_HEIGHT)
               : COMPOSER_MIN_HEIGHT,
             maxHeight: COMPOSER_MAX_HEIGHT,
-            paddingHorizontal: space.md,
+            paddingLeft: space.md,
+            paddingRight: FIELD_PAD_RIGHT,
             paddingVertical: space.sm,
             backgroundColor: colors.paper,
             borderWidth: 1,
@@ -1694,12 +1706,17 @@ export function Composer({
               minHeight: COMPOSER_MIN_HEIGHT,
               maxHeight: COMPOSER_MAX_HEIGHT,
               overflow: 'hidden',
+              // Past the cap the TOP is clipped, not the bottom: the newest
+              // words are the ones being spoken, so they stay in view and the
+              // live text never runs off the end of the box.
+              justifyContent: 'flex-end',
             }}
           >
             <Text
               testID="dictation-preview"
               style={{
-                paddingHorizontal: space.md + 1,
+                paddingLeft: space.md + 1,
+                paddingRight: FIELD_PAD_RIGHT + 1,
                 paddingVertical: space.sm + 1,
                 fontSize: 16,
               }}
@@ -1712,7 +1729,6 @@ export function Composer({
                 testID="dictation-live-words"
                 style={{ color: colors.ink3, fontStyle: 'italic' }}
               >
-                {'🎤 '}
                 {livePartial}
               </Text>
             </Text>
@@ -1738,7 +1754,8 @@ export function Composer({
             <Text
               testID="chip-mirror"
               style={{
-                paddingHorizontal: space.md + 1,
+                paddingLeft: space.md + 1,
+                paddingRight: FIELD_PAD_RIGHT + 1,
                 paddingVertical: space.sm + 1,
                 fontSize: 16,
                 color: colors.ink,
@@ -1749,6 +1766,64 @@ export function Composer({
             </Text>
           </View>
         ) : null}
+        {/* Drawn after both mirrors so it sits on top of them and stays
+            tappable. */}
+        <Pressable
+          onPressIn={() => {
+            if (disabled) return;
+            // A press-in lands ~350ms before onLongPress, so this is a free
+            // second chance to warm the audio plane if the mount-time attempt
+            // ran before the permission existed.
+            void warmDictation().catch(() => undefined);
+          }}
+          onPress={() => {
+            if (disabled) return;
+            if (dictModeOn) stopDictationMode();
+            else if (micState !== 'idle') void commitDictation();
+            else void beginDictation();
+          }}
+          onLongPress={() => {
+            if (disabled) return;
+            if (dictModeOn) stopDictationMode();
+            else if (micState === 'idle') setMicMenuOpen(true);
+          }}
+          disabled={disabled || micState === 'transcribing'}
+          delayLongPress={350}
+          hitSlop={MIC_HIT_SLOP}
+          pressRetentionOffset={MIC_PRESS_RETENTION}
+          testID="composer-mic"
+          style={({ pressed }) => ({
+            position: 'absolute',
+            right: FIELD_MIC_INSET,
+            bottom: FIELD_MIC_INSET,
+            width: FIELD_MIC_SIZE,
+            height: FIELD_MIC_SIZE,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: FIELD_MIC_SIZE / 2,
+            backgroundColor: pressed ? colors.divider : 'transparent',
+          })}
+          accessibilityRole="button"
+          accessibilityLabel={
+            disabled
+              ? `Dictate unavailable — ${disabledReason ?? 'disconnected'}`
+              : micState === 'transcribing'
+                ? 'Transcribing…'
+                : 'Dictate into message'
+          }
+        >
+          <ListeningRing active={micState === 'recording' || dictModeOn} color={colors.red} />
+          <Mic
+            size={FIELD_MIC_ICON_SIZE}
+            color={
+              disabled
+                ? colors.inkFaint
+                : micState === 'recording' || dictModeOn
+                  ? colors.red
+                  : colors.ink3
+            }
+          />
+        </Pressable>
       </View>
       {/* Action row. Everything that acts on the message is here, left to
           right; the send button is pushed to the RIGHT edge by the flexible
@@ -1757,7 +1832,30 @@ export function Composer({
         testID="composer-actions-row"
         style={{ flexDirection: 'row', alignItems: 'center', gap: space.xs, minWidth: 0 }}
       >
-        {edit ? null : (
+        {edit ? null : micState !== 'idle' || dictModeOn ? (
+          // Cancel takes the attach buttons' place while a dictation is in
+          // flight — the far end of the row from the mic, so stopping and
+          // cancelling are never one slip apart. Cancels via
+          // `lib/dictation.ts`'s `finish(false)`: capture stops, the preview
+          // session ends, nothing is transcribed or appended to the draft.
+          <Pressable
+            testID="dictation-cancel"
+            onPress={dictModeOn ? stopDictationMode : cancelDictation}
+            hitSlop={MIC_HIT_SLOP}
+            style={({ pressed }) => ({
+              width: ACTION_SIZE,
+              height: ACTION_SIZE,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: radii.md,
+              backgroundColor: pressed ? colors.divider : 'transparent',
+            })}
+            accessibilityRole="button"
+            accessibilityLabel={dictModeOn ? 'Stop dictation mode' : 'Clear dictation'}
+          >
+            <X size={ICON_SIZE} color={colors.ink2} />
+          </Pressable>
+        ) : (
           <>
             {/* Three clear attach controls (spec/15 § Composer): a camera, a
             photo/image picker and an any-type file picker. */}
@@ -1853,75 +1951,6 @@ export function Composer({
             </Pressable>
           </>
         )}
-        <Pressable
-          onPressIn={() => {
-            if (disabled) return;
-            // A press-in lands ~350ms before onLongPress, so this is a free
-            // second chance to warm the audio plane if the mount-time attempt
-            // ran before the permission existed.
-            void warmDictation().catch(() => undefined);
-          }}
-          onPress={() => {
-            if (disabled) return;
-            if (dictModeOn) stopDictationMode();
-            else if (micState !== 'idle') void commitDictation();
-            else void beginDictation();
-          }}
-          onLongPress={() => {
-            if (disabled) return;
-            if (dictModeOn) stopDictationMode();
-            else if (micState === 'idle') setMicMenuOpen(true);
-          }}
-          disabled={disabled || micState === 'transcribing'}
-          delayLongPress={350}
-          hitSlop={MIC_HIT_SLOP}
-          pressRetentionOffset={MIC_PRESS_RETENTION}
-          style={({ pressed }) => ({
-            width: ACTION_SIZE,
-            height: ACTION_SIZE,
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: radii.md,
-            backgroundColor: pressed ? colors.divider : 'transparent',
-          })}
-          accessibilityRole="button"
-          accessibilityLabel={
-            disabled
-              ? `Dictate unavailable — ${disabledReason ?? 'disconnected'}`
-              : micState === 'transcribing'
-                ? 'Transcribing…'
-                : 'Dictate into message'
-          }
-        >
-          <Mic size={ICON_SIZE} color={disabled ? colors.inkFaint : colors.ink2} />
-        </Pressable>
-        {/* Clear (discard) button — only while a dictation is in flight
-            (spec ask: "a clear button to discard the current dictation if it
-            came out wrong"). Sits AFTER the mic (spec/15 § Composer —
-            "beside the mic"), never before it, so the mic keeps the fixed
-            slot it holds at rest (Todoist 6hf6qmQc4RPxX25c: putting it in
-            front used to shove the mic itself sideways the instant a
-            dictation started — the button under the user's thumb jumping
-            out from under them mid-gesture). Cancels via `lib/dictation.ts`'s
-            `finish(false)` — the mic capture stops, the preview session ends,
-            nothing is transcribed or appended to the draft. */}
-        {micState !== 'idle' || dictModeOn ? (
-          <Pressable
-            onPress={dictModeOn ? stopDictationMode : cancelDictation}
-            style={({ pressed }) => ({
-              width: ACTION_SIZE,
-              height: ACTION_SIZE,
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: radii.md,
-              backgroundColor: pressed ? colors.divider : 'transparent',
-            })}
-            accessibilityRole="button"
-            accessibilityLabel={dictModeOn ? 'Stop dictation mode' : 'Clear dictation'}
-          >
-            <X size={ICON_SIZE} color={colors.ink2} />
-          </Pressable>
-        ) : null}
         <View testID="composer-actions-spacer" style={{ flex: 1, minWidth: space.xs }} />
         {sendTarget === undefined && !edit ? (
           <ModelPicker
@@ -2119,5 +2148,46 @@ export function Composer({
         onClose={() => setPreviewSkill(null)}
       />
     </View>
+  );
+}
+
+/** A soft ring that swells and fades behind the mic while it is listening. */
+function ListeningRing({
+  active,
+  color,
+}: {
+  active: boolean;
+  color: string;
+}): React.ReactElement | null {
+  const t = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    if (!active) return;
+    t.setValue(0);
+    const loop = Animated.loop(
+      Animated.timing(t, {
+        toValue: 1,
+        duration: 1200,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [active, t]);
+  if (!active) return null;
+  return (
+    <Animated.View
+      testID="mic-listening-ring"
+      pointerEvents="none"
+      style={{
+        position: 'absolute',
+        width: FIELD_MIC_SIZE,
+        height: FIELD_MIC_SIZE,
+        borderRadius: FIELD_MIC_SIZE / 2,
+        backgroundColor: color,
+        opacity: t.interpolate({ inputRange: [0, 1], outputRange: [0.28, 0] }),
+        transform: [{ scale: t.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.15] }) }],
+      }}
+    />
   );
 }

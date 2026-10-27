@@ -118,7 +118,7 @@ Whether that is worth doing is a per-backend decision, because every pass costs 
 
 Two rules keep the interim text from costing the user the transcript that matters:
 
-- A quota reserve. A partial is refused once the requests already made in the rolling minute reach the partial budget, which sits below the provider's per-minute limit. A long sentence can spend its whole allowance on the preview and the final — the request that becomes the user's words — still has slots to run in. A final is never refused to make room for a partial.
+- A quota reserve. A partial is refused once the requests already made in the rolling minute reach the partial budget, which sits below the provider's per-minute limit. A long sentence can spend its whole allowance on the preview and the final — the request that becomes the user's words — still has slots to run in. A final is never refused to make room for a partial. A refused partial skips that pass only; the next second of speech asks again, so the preview slows down rather than freezing for the rest of the utterance.
 - A hallucination filter, on partials only. Whisper answers a short or near-silent prefix with a stock phrase ("Thank you.", "you", subtitle credits) rather than with an empty string, and one of those painted into a user's input reads as words they said. A partial whose whole text is one of those phrases is dropped and the next pass gets the chance instead. A final is never filtered: if the user did say "Thank you.", that is the turn.
 
 The interim text is a guess at a half-finished sentence, not a recognition, and each pass is independent of the last — so it rewrites itself as the user talks and a word can change after it has appeared. Every surface therefore renders it as a preview marked as in progress — the greyed placeholder ink on web/desktop; on mobile, where the words are the main thing on screen while the keyboard is away, full reading ink on an accent tint — and discards it outright the moment the authoritative transcript arrives. It is never left as text the user has to notice is wrong and edit.
@@ -338,7 +338,7 @@ The preview is the expendable half of that pair. If its session cannot open, or 
 
 A dictation that produces no text says which of three things happened: no audio was captured at all, the clip was too short to hold an utterance and was not uploaded, or the clip was transcribed and held no speech. None of the three is silent, because a dictation that appears to do nothing is indistinguishable from a broken microphone.
 
-An in-flight dictation is discarded without transcribing by `esc` on web/desktop, and by a clear control beside the mic on mobile.
+An in-flight dictation is discarded without transcribing by `esc` on web/desktop, and on mobile by a clear control at the left of the action row, which stands in for the attach buttons while a dictation is in flight.
 
 ### Dictation mode
 

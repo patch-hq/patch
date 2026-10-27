@@ -112,15 +112,16 @@ describe('Composer — dictation shown inside the input', () => {
     expect(queryHost(r.root, byTestId('dictation-preview'))).toBeNull();
   });
 
-  it('adds no status line above the input, only an italic mic and the words', async () => {
+  it('adds no status line above the input; the field mic pulses and the words show in italic', async () => {
     const { factory, partial } = makeFactory();
     const r = renderRN(<Composer chatId="c1" dictationFactory={factory} />);
     await actAsync(() => mic(r)['onPress']!());
     expect(queryHost(r.root, byTestId('dictation-status'))).toBeNull();
-    expect(textOf(findHost(r.root, byTestId('dictation-live-words')))).toBe('🎤 ');
+    expect(textOf(findHost(r.root, byTestId('dictation-live-words')))).toBe('');
+    expect(findHost(r.root, byTestId('mic-listening-ring'))).toBeTruthy();
     await actAsync(() => partial('buy oat'));
     const live = findHost(r.root, byTestId('dictation-live-words'));
-    expect(textOf(live)).toBe('🎤 buy oat');
+    expect(textOf(live)).toBe('buy oat');
     expect((live.props['style'] as { fontStyle: string }).fontStyle).toBe('italic');
   });
 
@@ -138,7 +139,7 @@ describe('Composer — dictation shown inside the input', () => {
     await actAsync(() => {
       mic(r)['onPress']!();
     });
-    expect(textOf(findHost(r.root, byTestId('dictation-live-words')))).toBe('🎤 buy oat milk');
+    expect(textOf(findHost(r.root, byTestId('dictation-live-words')))).toBe('buy oat milk');
 
     await actAsync(() => resolve({ kind: 'text', text: 'buy oat milk' }));
     expect(queryHost(r.root, byTestId('dictation-preview'))).toBeNull();

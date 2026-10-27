@@ -235,7 +235,7 @@ describe('Composer — dictation mic (tap-toggle)', () => {
     // Grey: still in progress, not yet the user's text.
     const live = findHost(r.root, (i) => i.props['testID'] === 'dictation-live-words');
     expect(live.props['style']).toMatchObject({ color: colors.ink3 });
-    expect(live.props['children']).toEqual(['🎤 ', 'buy oat']);
+    expect(live.props['children']).toBe('buy oat');
 
     // Committing clears the preview — the TextInput now owns the real text.
     sessions[0]!.finish.mockResolvedValueOnce({ kind: 'text', text: 'buy oat milk' });
@@ -473,7 +473,7 @@ describe('Composer — dictation mode (long-press the mic)', () => {
       calls[0]!.onPartial!('buy oat');
     });
     const live = findHost(r.root, (i) => i.props['testID'] === 'dictation-live-words');
-    expect(live.props['children']).toEqual(['🎤 ', 'buy oat']);
+    expect(live.props['children']).toBe('buy oat');
     await actAsync(() => {
       calls[0]!.onPartial!('');
     });
@@ -902,10 +902,10 @@ describe('Composer — dictation mic (disabled: daemon/link down)', () => {
 // SAME test would also re-render when the store changes underneath it —
 // asserting on a stale captured instance would then observe the LATER value.
 describe('Composer — mic icon color follows the disabled flag', () => {
-  it('enabled: colors.ink2', () => {
+  it('enabled: the quiet colors.ink3 — it sits inside the field, not on the action row', () => {
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     const icon = findHost(r.root, (i) => i.type === 'Icon' && i.props['name'] === 'Mic');
-    expect(icon.props['color']).toBe(colors.ink2);
+    expect(icon.props['color']).toBe(colors.ink3);
   });
 
   it('disabled: colors.inkFaint', () => {

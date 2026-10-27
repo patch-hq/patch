@@ -120,7 +120,7 @@ function rowOrder(root: ReactTestInstance): string[] {
     'Attach photo or image',
     'Attach any file',
     'Sketch',
-    'Dictate into message',
+    'Clear dictation',
     'composer-actions-spacer',
     'composer-model-pill',
     'permission-mode-padlock',
@@ -149,41 +149,43 @@ function dictationFactory(): typeof dictationModule.startDictation {
 }
 
 describe('Composer action row — order', () => {
-  it('a dictation in flight adds Clear after the mic, so the mic never moves (Todoist 6hf6qmQc4RPxX25c)', async () => {
+  it('a dictation in flight swaps the attach buttons for Clear, far from the mic in the field', async () => {
     seed();
     const factory = dictationFactory();
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" dictationFactory={factory} />);
     await actAsync(() => {
       findHost(r.root, byLabel('Dictate into message')).props['onPress']();
     });
-    const row = findHost(r.root, byTestId('composer-actions-row'));
-    const ordered = row
-      .findAll((i) => typeof i.type === 'string' && i !== row)
-      .map((i) => (i.props['accessibilityLabel'] as string) ?? (i.props['testID'] as string))
-      .filter((x): x is string => x !== undefined);
-    expect(ordered.slice(0, 6)).toEqual([
+    expect(rowOrder(r.root).slice(0, 2)).toEqual(['Clear dictation', 'composer-actions-spacer']);
+    // The mic stays where it was, inside the text field — it never moves.
+    const inputRow = findHost(r.root, byTestId('composer-input-row'));
+    expect(
+      inputRow.findAll(
+        (i) =>
+          typeof i.type === 'string' && i.props['accessibilityLabel'] === 'Dictate into message',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('Clear goes and the attach buttons come back once the dictation is cleared', async () => {
+    seed();
+    const factory = dictationFactory();
+    const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" dictationFactory={factory} />);
+    await actAsync(() => {
+      findHost(r.root, byLabel('Dictate into message')).props['onPress']();
+    });
+    await actAsync(() => {
+      findHost(r.root, byLabel('Clear dictation')).props['onPress']();
+    });
+    expect(rowOrder(r.root).slice(0, 4)).toEqual([
       'Take photo',
       'Attach photo or image',
       'Attach any file',
       'Sketch',
-      'Dictate into message',
-      'Clear dictation',
     ]);
   });
 
-  it('the mic sits at the same index whether idle or mid-dictation (it never shifts)', async () => {
-    seed();
-    const factory = dictationFactory();
-    const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" dictationFactory={factory} />);
-    const idleIndex = rowOrder(r.root).indexOf('Dictate into message');
-    await actAsync(() => {
-      findHost(r.root, byLabel('Dictate into message')).props['onPress']();
-    });
-    const dictatingIndex = rowOrder(r.root).indexOf('Dictate into message');
-    expect(dictatingIndex).toBe(idleIndex);
-  });
-
-  it('reads camera, image, file, mic … model pill, padlock, send', () => {
+  it('reads camera, image, file, sketch … model pill, padlock, send', () => {
     seed();
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
     expect(rowOrder(r.root)).toEqual([
@@ -191,7 +193,6 @@ describe('Composer action row — order', () => {
       'Attach photo or image',
       'Attach any file',
       'Sketch',
-      'Dictate into message',
       'composer-actions-spacer',
       'composer-model-pill',
       'permission-mode-padlock',

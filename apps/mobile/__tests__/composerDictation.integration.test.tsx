@@ -196,8 +196,8 @@ describe('composer dictation (real session) — a tap session end to end', () =>
       r.root.findAll(
         (i) => typeof i.type === 'string' && i.props['testID'] === 'dictation-live-words',
       )[0]?.props['children'],
-    ).toEqual(['🎤 ', 'buy oat']);
-    // No status line above the input: the mic marker in the input is the cue.
+    ).toBe('buy oat');
+    // No status line above the input: the pulsing mic in the field is the cue.
     expect(r.root.findAllByProps({ testID: 'dictation-status' })).toHaveLength(0);
 
     await actAsync(() => {

@@ -234,15 +234,19 @@ describe("Whisper's stock answer to near-silence never reaches the composer", ()
 });
 
 describe('the final is protected from the live transcript', () => {
-  test('an exhausted partial budget stops partials and leaves the turn untouched', async () => {
+  test('an exhausted partial budget skips one pass, retries, and leaves the turn untouched', async () => {
     const audio: AudioEvent[] = [];
     const submitted: string[] = [];
-    const priorities: (string | undefined)[] = [];
+    let partialCalls = 0;
     const session = makeSession({
       whisper: backendReturning(async (_pcm, opts) => {
-        priorities.push(opts?.priority);
         if (opts?.priority === 'partial') {
-          throw new PartialBudgetExhaustedError('partial skipped: 12/20 used this minute');
+          partialCalls++;
+          // The rolling minute is full for the first pass only.
+          if (partialCalls === 1) {
+            throw new PartialBudgetExhaustedError('partial skipped: 12/20 used this minute');
+          }
+          return 'what I';
         }
         return 'what I actually said';
       }),
@@ -261,12 +265,12 @@ describe('the final is protected from the live transcript', () => {
     await session.onMicFrame(new Int16Array(ONE_SECOND));
     await session.waitForSpeakDone();
 
-    expect(partials(audio)).toEqual([]);
     // The refusal is not a session error — nothing is reported to the surface.
     expect(audio.some((e) => e.type === 'audio.error')).toBe(false);
-    // Partials stop asking for the rest of the utterance rather than retrying
-    // every second, so exactly one was attempted before the final.
-    expect(priorities.filter((p) => p === 'partial')).toHaveLength(1);
+    // The live words carry on once a slot frees, rather than freezing for
+    // the rest of the utterance.
+    expect(partialCalls).toBeGreaterThan(1);
+    expect(partials(audio)).toEqual(['what I']);
     expect(submitted).toEqual(['what I actually said']);
   });
 

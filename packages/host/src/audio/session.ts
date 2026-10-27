@@ -702,22 +702,23 @@ export class VoiceSession implements VoiceSessionLike {
       })
       .catch((err: Error) => {
         // An interim transcription is an EXTRA read of audio the committed
-        // path will read again; failing it must not fail the utterance. Either
-        // way partials stop for this utterance rather than retrying every
-        // second. The committed `transcribe` in `runTurn` reports a genuinely
-        // broken STT backend to the surface as `audio.error
-        // {whisper_unavailable}`.
-        this.partialsDisabledForUtterance = true;
+        // path will read again; failing it must not fail the utterance.
         if (err.name === 'PartialBudgetExhaustedError') {
           // Not a fault: the backend deliberately kept provider quota in
-          // reserve for the final. The live overlay stops updating; the turn
-          // itself is unaffected, which is the whole point of the reserve.
+          // reserve for the final. Skip this pass only — the next second of
+          // speech tries again, and goes through as soon as the rolling
+          // minute frees a slot. Stopping for the whole utterance instead
+          // froze the live words about twelve seconds into any long dictation.
           this.deps.logger.debug(
             { sessionId: this.init.sessionId },
-            'voice-session: partials paused to keep STT quota for the final',
+            'voice-session: partial skipped to keep STT quota for the final',
           );
           return;
         }
+        // A genuine failure stops partials for this utterance rather than
+        // retrying every second. The committed `transcribe` in `runTurn`
+        // reports a broken STT backend as `audio.error {whisper_unavailable}`.
+        this.partialsDisabledForUtterance = true;
         this.deps.logger.error(
           { sessionId: this.init.sessionId, err: err.message },
           'voice-session: interim transcript failed; partials off for this utterance',
