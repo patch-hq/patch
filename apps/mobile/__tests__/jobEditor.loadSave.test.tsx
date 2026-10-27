@@ -24,7 +24,7 @@ import {
   flush,
 } from './testUtils/render';
 import { api } from '../src/api/rest';
-import { __getLastAlert, __clearLastAlert } from './stubs/react-native';
+import { __getLastAlert, __clearLastAlert, __pressBack } from './stubs/react-native';
 import { routerMock, __resetRouterMock, __setLocalSearchParams } from './stubs/expo-router';
 import { useChatStore } from '../src/stores/chatStore';
 import { useFolderStore } from '../src/stores/folderStore';
@@ -557,6 +557,85 @@ describe('JobEditor — header back', () => {
     const r = renderRN(<JobEditor />);
     await flush();
     findHost(r.root, byLabel('Back')).props.onPress();
+    expect(routerMock.back).toHaveBeenCalled();
+  });
+});
+
+describe('JobEditor — unsaved changes', () => {
+  async function openEdited(): Promise<ReturnType<typeof renderRN>> {
+    __setLocalSearchParams({ id: 'job-1' });
+    vi.mocked(api.getJob).mockResolvedValue(baseJob);
+    const r = renderRN(<JobEditor />);
+    await flush();
+    return r;
+  }
+  const discard = (): void => {
+    const buttons = __getLastAlert()?.buttons ?? [];
+    buttons.find((b) => b.text === 'Discard')!.onPress!();
+  };
+
+  it('an untouched existing job leaves without asking', async () => {
+    const r = await openEdited();
+    findHost(r.root, byLabel('Back')).props.onPress();
+    expect(__getLastAlert()).toBeNull();
+    expect(routerMock.back).toHaveBeenCalled();
+  });
+
+  it('an untouched new job leaves without asking', async () => {
+    __setLocalSearchParams({});
+    const r = renderRN(<JobEditor />);
+    await flush();
+    findHost(r.root, byLabel('Back')).props.onPress();
+    expect(__getLastAlert()).toBeNull();
+    expect(routerMock.back).toHaveBeenCalled();
+  });
+
+  it('Back after an edit asks first and stays until Discard', async () => {
+    const r = await openEdited();
+    await actSync(() => findHost(r.root, byTestId('job-name')).props.onChangeText('Renamed'));
+    findHost(r.root, byLabel('Back')).props.onPress();
+    expect(__getLastAlert()?.title).toBe('Discard changes?');
+    expect(routerMock.back).not.toHaveBeenCalled();
+    discard();
+    expect(routerMock.back).toHaveBeenCalled();
+  });
+
+  it('the system back asks too', async () => {
+    const r = await openEdited();
+    await actSync(() => findHost(r.root, byTestId('job-name')).props.onChangeText('Renamed'));
+    expect(__pressBack()).toBe(true);
+    expect(__getLastAlert()?.title).toBe('Discard changes?');
+    expect(routerMock.back).not.toHaveBeenCalled();
+  });
+
+  it('editing a field back to its saved value is not a change', async () => {
+    const r = await openEdited();
+    await actSync(() => findHost(r.root, byTestId('job-name')).props.onChangeText('Renamed'));
+    await actSync(() =>
+      findHost(r.root, byTestId('job-name')).props.onChangeText('Nightly digest'),
+    );
+    findHost(r.root, byLabel('Back')).props.onPress();
+    expect(__getLastAlert()).toBeNull();
+    expect(routerMock.back).toHaveBeenCalled();
+  });
+
+  it('a new job with typed content asks first', async () => {
+    __setLocalSearchParams({});
+    const r = renderRN(<JobEditor />);
+    await flush();
+    await actSync(() => findHost(r.root, byTestId('job-name')).props.onChangeText('Draft'));
+    findHost(r.root, byLabel('Back')).props.onPress();
+    expect(__getLastAlert()?.title).toBe('Discard changes?');
+  });
+
+  it('a successful save leaves without asking', async () => {
+    const r = await openEdited();
+    vi.mocked(api.patchJob).mockResolvedValue(baseJob);
+    await actSync(() => findHost(r.root, byTestId('job-name')).props.onChangeText('Renamed'));
+    await actAsync(async () => {
+      await findHost(r.root, byTestId('job-save')).props.onPress();
+    });
+    expect(__getLastAlert()).toBeNull();
     expect(routerMock.back).toHaveBeenCalled();
   });
 });

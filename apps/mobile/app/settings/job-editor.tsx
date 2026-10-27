@@ -13,6 +13,7 @@ import React from 'react';
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   Pressable,
   ScrollView,
   Switch,
@@ -173,6 +174,11 @@ export default function JobEditor(): React.ReactElement {
   const isNew = !id || id === 'new';
 
   const [form, setForm] = React.useState<FormState>(DEFAULT_FORM);
+  // The form as last loaded or saved, serialised: leaving with a form that
+  // differs from it asks first. The auto-seeds below (folder, host) move the
+  // baseline with the form, since they are not the user's edits.
+  const [baseline, setBaseline] = React.useState<string>(() => JSON.stringify(DEFAULT_FORM));
+  const dirty = JSON.stringify(form) !== baseline;
   // The loaded job's END CONDITION (spec/08 § One-off jobs), kept separately
   // from `form` — `oneOff`/`expiredAt` have no editable control on this page
   // (set instead through the agent tools, same as `concurrency`), so there is
@@ -283,6 +289,7 @@ export default function JobEditor(): React.ReactElement {
           f.scheduleText = describeCron(job.trigger.expression);
         }
         setForm(f);
+        setBaseline(JSON.stringify(f));
         setLoadedJob({ oneOff: job.oneOff, expiredAt: job.expiredAt });
       })
       .catch((e: Error) => Alert.alert('Failed to load job', e.message))
@@ -308,6 +315,7 @@ export default function JobEditor(): React.ReactElement {
       // running, so the `f.spawnFolder !== ''` arm is unreachable today.
       /* v8 ignore next */
       setForm((f) => (f.spawnFolder === '' ? { ...f, spawnFolder: first } : f));
+      setBaseline((b) => JSON.stringify({ ...JSON.parse(b), spawnFolder: first }));
     }
   }, [isNew, recents, jobHostId, form.spawnFolder]);
 
@@ -319,6 +327,7 @@ export default function JobEditor(): React.ReactElement {
   React.useEffect(() => {
     if (!isNew || form.spawnHostId !== '' || jobHostId === null) return;
     setForm((f) => (f.spawnHostId === '' ? { ...f, spawnHostId: jobHostId } : f));
+    setBaseline((b) => JSON.stringify({ ...JSON.parse(b), spawnHostId: jobHostId }));
   }, [isNew, jobHostId, form.spawnHostId]);
 
   // Fetch the target folder's skills for the Skill picker.
@@ -423,6 +432,24 @@ export default function JobEditor(): React.ReactElement {
       setRunning(false);
     }
   };
+
+  // Back — the header's and the system's — asks before dropping edits.
+  const leave = React.useCallback((): boolean => {
+    if (!dirty) {
+      goBack();
+      return true;
+    }
+    Alert.alert('Discard changes?', 'Your edits to this job have not been saved.', [
+      { text: 'Keep editing', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: goBack },
+    ]);
+    return true;
+  }, [dirty, goBack]);
+
+  React.useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', leave);
+    return () => sub.remove();
+  }, [leave]);
 
   const remove = (): void => {
     Alert.alert('Delete this job?', 'This cannot be undone.', [
@@ -534,7 +561,7 @@ export default function JobEditor(): React.ReactElement {
           borderColor: colors.lineSoft,
         }}
       >
-        <Pressable onPress={goBack} style={{ padding: space.sm }} accessibilityLabel="Back">
+        <Pressable onPress={leave} style={{ padding: space.sm }} accessibilityLabel="Back">
           <ChevronLeft size={22} color={colors.ink} />
         </Pressable>
         <Text
