@@ -494,6 +494,20 @@ describeRealBrowser('BrowserManager — real Chromium against a local fixture se
     expect((await manager.tabs()).map((tab) => tab.tabId)).toEqual([b.tabId]);
   }, 30_000);
 
+  it('keeps a tab that is in a hand-off when its chat completes', async () => {
+    fixture = await startFixtureServer();
+    const manager = newManager(':75');
+    const handed = await manager.open({ url: `${fixture.baseUrl}/account`, chatId: 'chat-h' });
+    const other = await manager.open({ url: `${fixture.baseUrl}/form/step1`, chatId: 'chat-h' });
+    manager.beginHandoff(handed.tabId);
+
+    await manager.closeOwnedByChat('chat-h');
+
+    expect((await manager.tabs()).map((tab) => tab.tabId)).toEqual([handed.tabId]);
+    expect(manager.ownerOf(handed.tabId)).toBe('chat-h');
+    await expect(manager.read(other.tabId)).rejects.toBeInstanceOf(TabNotFoundError);
+  }, 30_000);
+
   it('closes the new page (and a logged-out tab’s throwaway context) when navigation fails', async () => {
     const root = mkdtempSync(join(tmpdir(), 'patch-browser-goto-fails-'));
     tmpDirs.push(root);

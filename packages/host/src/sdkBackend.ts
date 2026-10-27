@@ -43,6 +43,9 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk';
 import type { Logger } from 'pino';
 
+/** A little over the longest hand-off (`timeoutSeconds` max 3600). */
+const MCP_TOOL_TIMEOUT_MS = 3_660_000;
+
 export interface SdkEnvelope {
   /** What we care about per spec/02-daemon.md "SDK emits a result message". */
   type:
@@ -1087,6 +1090,10 @@ export function buildSdkEnv(opts: SdkRunOptions): {
   // A cold `npx` under load misses Claude Code's 30s default and the server is
   // then gone for the session; mcpSupervisor.ts reconnects what still fails.
   env['MCP_TIMEOUT'] ??= String(MCP_START_TIMEOUT_MS);
+  // patch_browser_handoff blocks on a person, up to its 3600s cap; a call that
+  // outlives Claude Code's per-call limit is reported to the agent as a failure
+  // while the hand-off carries on in the host.
+  env['MCP_TOOL_TIMEOUT'] ??= String(MCP_TOOL_TIMEOUT_MS);
   const mcpServers = opts.mcpServer
     ? {
         ...(opts.patchMcpOff

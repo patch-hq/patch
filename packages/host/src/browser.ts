@@ -3103,8 +3103,10 @@ export class BrowserManager {
    * the owning chat has stopped working are released.
    */
   async closeOwnedByChat(chatId: string): Promise<void> {
+    // A tab in a hand-off is in the user's hands, mid-task (a login, a captcha):
+    // the turn that handed it over ending must not close it under them.
     const owned = [...this.tabsById]
-      .filter(([, tab]) => tab.ownerChatId === chatId)
+      .filter(([tabId, tab]) => tab.ownerChatId === chatId && !this.handoffTabs.has(tabId))
       .map(([tabId]) => tabId);
     for (const tabId of owned) {
       await this.close(tabId).catch((err: unknown) => {
