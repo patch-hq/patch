@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   automerge:
-    if: github.repository == 'tomchambers2/patch' && github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft
+    if: github.repository == 'patch-hq/patch' && github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft
     runs-on: ubuntu-latest
     steps:
       # No checkout: pull_request_target runs with write access, so it never
