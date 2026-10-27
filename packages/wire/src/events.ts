@@ -2653,11 +2653,11 @@ export const HostInfoEvent = z
      * Voice marks a cell whose backend's key is missing here as not configured
      * on this host. A missing key never stops the host; it refuses that
      * surface's sessions with `voice_key_missing`. Absent = a host older than
-     * this report, which says nothing either way.
+     * this report, which says nothing either way. Not strict: a provider added
+     * later must not make an older client reject the whole host event.
      */
     voiceKeys: z
       .object({ gemini: z.boolean(), openai: z.boolean(), deepgram: z.boolean().optional() })
-      .strict()
       .optional(),
     /**
      * spec/07 § Call cost — what this host's voice calls have cost, this
