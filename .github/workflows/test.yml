@@ -27,7 +27,7 @@ jobs:
   # unit/contract/integration); the browser layer is split between them with
   # Playwright's --shard, because the whole suite on one runner took about an hour.
   verify:
-    if: github.repository == 'tomchambers2/patch'
+    if: github.repository == 'patch-hq/patch'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

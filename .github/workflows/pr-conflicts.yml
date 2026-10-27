@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   conflicts:
-    if: github.repository == 'tomchambers2/patch'
+    if: github.repository == 'patch-hq/patch'
     runs-on: ubuntu-latest
     steps:
       - env:

@@ -46,7 +46,7 @@ jobs:
   # through a PR has normally been tested already, so the wait is short.
   tests:
     name: wait for tests
-    if: github.repository == 'tomchambers2/patch'
+    if: github.repository == 'patch-hq/patch'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
@@ -69,7 +69,7 @@ jobs:
           done
 
   server:
-    if: github.repository == 'tomchambers2/patch'
+    if: github.repository == 'patch-hq/patch'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -100,7 +100,7 @@ jobs:
             dist/server/install.sh
 
   host:
-    if: github.repository == 'tomchambers2/patch'
+    if: github.repository == 'patch-hq/patch'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -148,7 +148,7 @@ jobs:
             ${{ runner.temp }}/out/host-latest-*.json
 
   android:
-    if: github.repository == 'tomchambers2/patch'
+    if: github.repository == 'patch-hq/patch'
     runs-on: ubuntu-latest
     outputs:
       apk: ${{ steps.build.outputs.apk }}
@@ -231,7 +231,7 @@ jobs:
   # certificate; the app is notarised. One job, because the app carries this
   # very host build inside it.
   mac:
-    if: github.repository == 'tomchambers2/patch'
+    if: github.repository == 'patch-hq/patch'
     runs-on: macos-15
     # Normally ~10 minutes. Without a limit a hung step held the release queue
     # (one run at a time) for GitHub's default six hours, and every newer
@@ -347,7 +347,7 @@ jobs:
   # (spec/11 § Mobile updates). Servers mirror its manifest and serve it to the
   # phones paired to them; the files it names stay here, on the release.
   mobile-update:
-    if: github.repository == 'tomchambers2/patch'
+    if: github.repository == 'patch-hq/patch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -375,7 +375,7 @@ jobs:
           path: ${{ runner.temp }}/mobile-update/*
 
   publish:
-    if: github.repository == 'tomchambers2/patch'
+    if: github.repository == 'patch-hq/patch'
     needs: [tests, server, host, mac, android, mobile-update]
     runs-on: ubuntu-latest
     steps:
