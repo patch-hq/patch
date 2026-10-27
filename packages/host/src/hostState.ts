@@ -170,6 +170,8 @@ const HostStateFile = z
      * list and seeds it from `harnessBrowserToolsEnabled` on boot.
      */
     harnessMcpServers: McpServerList.optional(),
+    /** Whether Patch's own tools server is wired into chats. Absent means on. */
+    patchMcpEnabled: z.boolean().optional(),
     /**
      * LEGACY — the retired CLAUDE.md toggle. The shipped Manager/
      * Speakers CLAUDE.md now always loads; a persisted `false` is ignored

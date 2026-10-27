@@ -226,6 +226,12 @@ export interface SdkRunOptions {
     | Array<{ name: string; command: string; args: string[]; env: Record<string, string> }>
     | undefined;
   /**
+   * The user turned Patch's own tools server off on this host (Settings → MCP).
+   * `patch` is then left out of the wired servers; the rest of the list still
+   * goes in. Only meaningful alongside `mcpServer`.
+   */
+  patchMcpOff?: boolean | undefined;
+  /**
    * SDK `options.permissionMode` (spec/13). Defaults to `'auto'`
    * (spec/02-daemon.md) when unset.
    */
@@ -1038,9 +1044,9 @@ type StdioMcpServerConfig = {
  * the patch tools server either. The wire schema reserves `patch`, so no entry
  * can shadow it.
  */
-function buildSdkEnv(opts: SdkRunOptions): {
+export function buildSdkEnv(opts: SdkRunOptions): {
   env: Record<string, string | undefined>;
-  mcpServers: ({ patch: StdioMcpServerConfig } & Record<string, StdioMcpServerConfig>) | undefined;
+  mcpServers: Record<string, StdioMcpServerConfig> | undefined;
 } {
   const env: Record<string, string | undefined> = { ...process.env };
   delete env['ANTHROPIC_API_KEY'];
@@ -1072,12 +1078,16 @@ function buildSdkEnv(opts: SdkRunOptions): {
   env['MCP_TIMEOUT'] ??= String(MCP_START_TIMEOUT_MS);
   const mcpServers = opts.mcpServer
     ? {
-        patch: {
-          type: 'stdio' as const,
-          command: opts.mcpServer.command,
-          args: opts.mcpServer.args,
-          env: opts.mcpServer.env,
-        },
+        ...(opts.patchMcpOff
+          ? {}
+          : {
+              patch: {
+                type: 'stdio' as const,
+                command: opts.mcpServer.command,
+                args: opts.mcpServer.args,
+                env: opts.mcpServer.env,
+              },
+            }),
         ...Object.fromEntries(
           (opts.extraMcpServers ?? []).map((s) => [
             s.name,

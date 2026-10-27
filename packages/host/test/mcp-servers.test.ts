@@ -10,6 +10,7 @@ import {
   withBrowserToolsEnabled,
 } from '../src/mcpServers.js';
 import { codexMcpServers } from '../src/codexBackend.js';
+import { buildSdkEnv } from '../src/sdkBackend.js';
 
 describe('seedMcpServers', () => {
   it('is the pair the retired toggle wired, enabled as the toggle was, and a valid list', () => {
@@ -82,5 +83,28 @@ describe('codexMcpServers', () => {
     expect(
       codexMcpServers({ extraMcpServers: [{ name: 'mine', command: 'm', args: [], env: {} }] }),
     ).toBeUndefined();
+  });
+});
+
+describe('Patch tools server switched off (patchMcpOff)', () => {
+  const patch = { command: 'node', args: ['tools.js'], env: {} };
+  const extra = [{ name: 'mine', command: '/opt/m', args: [], env: { K: 'v' } }];
+  const base = { prompt: 'x', cwd: '/tmp', abortController: new AbortController() };
+
+  it('a Claude chat keeps the host list but loses patch', () => {
+    const on = buildSdkEnv({ ...base, mcpServer: patch, extraMcpServers: extra });
+    expect(Object.keys(on.mcpServers!)).toEqual(['patch', 'mine']);
+    const off = buildSdkEnv({
+      ...base,
+      mcpServer: patch,
+      extraMcpServers: extra,
+      patchMcpOff: true,
+    });
+    expect(Object.keys(off.mcpServers!)).toEqual(['mine']);
+  });
+
+  it('a Codex chat keeps the host list but loses patch', () => {
+    const off = codexMcpServers({ mcpServer: patch, extraMcpServers: extra, patchMcpOff: true });
+    expect(Object.keys(off!)).toEqual(['mine']);
   });
 });

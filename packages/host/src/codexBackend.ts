@@ -152,10 +152,12 @@ export class CodexTurnError extends TurnFailedError {
  * same way: nothing at all when the caller configured no patch tools server.
  */
 export function codexMcpServers(
-  opts: Pick<SdkRunOptions, 'mcpServer' | 'extraMcpServers'>,
+  opts: Pick<SdkRunOptions, 'mcpServer' | 'extraMcpServers' | 'patchMcpOff'>,
 ): Record<string, RpcObject> | undefined {
   if (!opts.mcpServer) return undefined;
-  const servers: Record<string, RpcObject> = { patch: { ...opts.mcpServer, enabled: true } };
+  const servers: Record<string, RpcObject> = opts.patchMcpOff
+    ? {}
+    : { patch: { ...opts.mcpServer, enabled: true } };
   for (const s of opts.extraMcpServers ?? []) {
     servers[s.name] = { command: s.command, args: s.args, env: s.env, enabled: true };
   }

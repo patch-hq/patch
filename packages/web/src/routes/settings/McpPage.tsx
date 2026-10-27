@@ -1,5 +1,5 @@
 // Settings → MCP: the MCP servers one host wires into every chat it runs,
-// beside Patch's own tools server, which is always on.
+// beside Patch's own tools server, which is on unless switched off here.
 //
 // The host holds the list (`harnessMcpServers` in `host.host`) and every
 // edit sends the WHOLE list back (`host.settings`), checked against the wire's
@@ -163,7 +163,17 @@ function ServerList({
   return (
     <Group label={`MCP servers on ${hostLabel(host)}`} testid="mcp-servers">
       <Row title="Patch tools" sub="Built-in MCP server" testid="mcp-server-patch">
-        <span className="set-val">Always on</span>
+        {host.host?.patchMcpEnabled === undefined ? (
+          <span className="set-val">Always on</span>
+        ) : (
+          <Toggle
+            checked={host.host.patchMcpEnabled}
+            testid="mcp-server-patch-enabled"
+            onChange={(next) => {
+              sendHostSettings(host, { patchMcpEnabled: next });
+            }}
+          />
+        )}
       </Row>
       {servers.map((s, i) =>
         editing === s.name ? (

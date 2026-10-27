@@ -109,6 +109,8 @@ export interface HostDescriptionInput {
   harnessBrowserToolsEnabled: boolean;
   /** The MCP servers this host adds to every chat, in order (Settings → MCP). */
   harnessMcpServers: McpServerConfig[];
+  /** Whether Patch's own tools server is wired into chats (Settings → MCP). Absent = host predates it. */
+  patchMcpEnabled?: boolean | undefined;
   /** Always true now: the shipped Manager/Speakers CLAUDE.md always loads. */
   harnessClaudeMdEnabled: boolean;
   /** spec/02 § Browser — Route through: the routing host's hostId, or null when direct. */
@@ -174,6 +176,7 @@ export function describeHost(input: HostDescriptionInput): HostInfoEvent {
     harnessMemoryEnabled: input.harnessMemoryEnabled,
     harnessBrowserToolsEnabled: input.harnessBrowserToolsEnabled,
     harnessMcpServers: input.harnessMcpServers,
+    ...(input.patchMcpEnabled !== undefined ? { patchMcpEnabled: input.patchMcpEnabled } : {}),
     harnessClaudeMdEnabled: input.harnessClaudeMdEnabled,
     browserRouteThrough: input.browserRouteThrough,
     ...(input.power !== undefined ? { power: input.power } : {}),

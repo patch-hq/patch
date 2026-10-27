@@ -710,6 +710,8 @@ export interface HostOptions {
      * after Patch's own `patch` server (Claude and Codex alike).
      */
     mcpServers?: McpServerConfig[];
+    /** Settings → MCP: false leaves Patch's own `patch` tools server out of every turn. Absent = on. */
+    patchMcpEnabled?: boolean;
     /** spec/14 § Agent behavior — CLAUDE.md toggle, off. Excluded via `settings.claudeMdExcludes`. */
     claudeMdExcludePaths?: string[];
   };
@@ -2978,6 +2980,7 @@ export class Daemon {
     skills?: string[] | 'all';
     memoryEnabled?: boolean;
     mcpServers?: McpServerConfig[];
+    patchMcpEnabled?: boolean;
     claudeMdExcludePaths?: string[];
   } = {};
 
@@ -2988,6 +2991,7 @@ export class Daemon {
     skills?: string[] | 'all';
     memoryEnabled?: boolean;
     mcpServers?: McpServerConfig[];
+    patchMcpEnabled?: boolean;
     claudeMdExcludePaths?: string[];
   }): void {
     this.harnessConfig = config;
@@ -7920,6 +7924,7 @@ export class Daemon {
           req.decisionReason,
         ),
       extraMcpServers: this.opts.discoverClaudeMcpServers(state.folder),
+      ...(this.harnessConfig.patchMcpEnabled === false ? { patchMcpOff: true } : {}),
     };
 
     let newSessionId: string | undefined;
@@ -9453,6 +9458,7 @@ export class Daemon {
         ...this.opts.discoverClaudeMcpServers(state.folder),
         ...(this.harnessConfig.mcpServers ?? []),
       ],
+      ...(this.harnessConfig.patchMcpEnabled === false ? { patchMcpOff: true } : {}),
     };
     // Record + log the resume argument so it's observable on the live host
     // (control-UDS `lastQueryDiagnostics`, `patch doctor`) — the spec/02

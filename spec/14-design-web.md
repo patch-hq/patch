@@ -1132,6 +1132,9 @@ setting that applies on every host (`01-server.md` § Settings).
   `chrome-devtools` MCP servers are wired into chats, alongside
   `patch`'s own tools. Most chats never need them; a chat that does turns this
   on rather than every chat paying for two extra MCP processes it never calls.
+- Patch tools — on by default. Settings → MCP can switch `patch`'s own tools
+  server off per host (`patchMcpEnabled`); chats there then get only the host's
+  other MCP servers, and none of the `patch_` tools.
 - Default model — the model every new chat starts on, account-wide, unless it
   names its own: opened from a surface, fired by a job, or started on a
   machine. One decision, in one place, read from the account's default

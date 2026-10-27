@@ -99,6 +99,28 @@ describe('Settings → MCP', () => {
     ).toBe(false);
   });
 
+  it('a host that reports patchMcpEnabled gets a switch that sends only that flag', async () => {
+    const { sent } = fakeWs();
+    reportHost('d1', { hostName: 'mac', harnessMcpServers: [PLAYWRIGHT], patchMcpEnabled: true });
+    await openPage();
+    expect(screen.getByTestId('mcp-server-patch')).not.toHaveTextContent('Always on');
+    expect((screen.getByTestId('mcp-server-patch-enabled') as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByTestId('mcp-server-patch-enabled'));
+    expect(sent).toEqual([{ type: 'host.settings', hostId: 'd1', patchMcpEnabled: false }]);
+    act(() =>
+      reportHost('d1', {
+        hostName: 'mac',
+        harnessMcpServers: [PLAYWRIGHT],
+        patchMcpEnabled: false,
+      }),
+    );
+    await waitFor(() =>
+      expect((screen.getByTestId('mcp-server-patch-enabled') as HTMLInputElement).checked).toBe(
+        false,
+      ),
+    );
+  });
+
   it('a host without the setting is told to update, with nothing to edit', async () => {
     reportServers(undefined);
     await openPage();

@@ -2739,6 +2739,20 @@ describe('Host ChatRunner', () => {
       expect(sdk.lastOptions()?.extraMcpServers).toEqual(servers);
     });
 
+    it('harnessConfig.patchMcpEnabled false tells the SDK to leave Patch tools out; on or absent does not', async () => {
+      const { daemon, sdk, folder } = setup();
+      sdk.enqueue([{ type: 'result', sessionId: 's1' }]);
+      daemon.setHarnessConfig({ patchMcpEnabled: false });
+      await daemon.spawnChat({ folder, prompt: 'hello' });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(sdk.lastOptions()?.patchMcpOff).toBe(true);
+      sdk.enqueue([{ type: 'result', sessionId: 's2' }]);
+      daemon.setHarnessConfig({ patchMcpEnabled: true });
+      await daemon.spawnChat({ folder, prompt: 'again' });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(sdk.lastOptions()?.patchMcpOff).toBeUndefined();
+    });
+
     it('no settings and no extra MCP servers in SDK options when harnessConfig is empty (Agent behavior toggles default off)', async () => {
       const { daemon, sdk, folder } = setup();
       sdk.enqueue([{ type: 'result', sessionId: 's1' }]);

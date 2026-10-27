@@ -2733,6 +2733,12 @@ export const HostInfoEvent = z
      */
     harnessMcpServers: McpServerList.optional(),
     /**
+     * Whether Patch's own tools server is wired into every chat on this host
+     * (Settings → MCP). Stated unconditionally once supported; absent means
+     * the host predates it.
+     */
+    patchMcpEnabled: z.boolean().optional(),
+    /**
      * LEGACY: whether the shipped, user-editable CLAUDE.md for the Manager/
      * Speakers threads is loaded on this host. It now always is, so a
      * current host states `true`; absent means the host predates it.
@@ -4817,6 +4823,8 @@ export const HostSettingsEvent = z
     harnessBrowserToolsEnabled: z.boolean().optional(),
     /** The MCP servers this host adds to every chat — machine-specific commands and paths. */
     harnessMcpServers: McpServerList.optional(),
+    /** Turn Patch's own tools server on or off for every chat on this host. */
+    patchMcpEnabled: z.boolean().optional(),
     /**
      * LEGACY, kept so older surfaces still decode: a current host always
      * loads the shipped Manager/Speakers CLAUDE.md and ignores

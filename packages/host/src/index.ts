@@ -807,6 +807,8 @@ async function startHost(
       'MCP server list seeded from the Browser tools toggle',
     );
   }
+  // Patch's own tools server. On unless the user switched it off (Settings → MCP).
+  let patchMcpEnabled = persistedHostState.patchMcpEnabled ?? true;
   // The shipped Manager/Speakers CLAUDE.md ALWAYS loads: its toggle
   // was dropped from Settings ("pick it up automatically"). A `false` left in
   // host.json, or sent by a surface that still shows the toggle, is ignored —
@@ -834,6 +836,7 @@ async function startHost(
       skills: harnessSkills,
       memoryEnabled: harnessMemoryEnabled,
       mcpServers: enabledMcpServers(harnessMcpServers),
+      patchMcpEnabled,
     });
   };
 
@@ -1097,6 +1100,7 @@ async function startHost(
       harnessMemoryEnabled,
       harnessBrowserToolsEnabled: browserToolsEnabledOf(harnessMcpServers),
       harnessMcpServers,
+      patchMcpEnabled,
       // Always true: kept on the report so a surface that still reads it
       // shows the (only) state rather than "unsupported".
       harnessClaudeMdEnabled: true,
@@ -2603,6 +2607,12 @@ async function startHost(
             { harnessBrowserToolsEnabled: event.harnessBrowserToolsEnabled },
             'browser MCP servers toggled (legacy harnessBrowserToolsEnabled)',
           );
+        }
+        if (event.patchMcpEnabled !== undefined) {
+          patchMcpEnabled = event.patchMcpEnabled;
+          hostStateStore.update({ patchMcpEnabled });
+          applyHarnessConfig();
+          logger.info({ patchMcpEnabled }, 'patch MCP server toggled');
         }
         if (event.harnessClaudeMdEnabled === false) ignoreClaudeMdOff('host.settings');
         if (event.browserRouteThrough !== undefined) {

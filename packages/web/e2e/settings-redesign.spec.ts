@@ -363,6 +363,14 @@ test.describe('Settings — behaviour', () => {
     await expect(page.getByTestId('mcp-unsupported')).toBeVisible();
     await reportHost(page, { harnessMcpServers: [PLAYWRIGHT_MCP] });
     await expect(page.getByTestId('mcp-server-patch')).toContainText('Always on');
+    await reportHost(page, { harnessMcpServers: [PLAYWRIGHT_MCP], patchMcpEnabled: true });
+    await expect(page.getByTestId('mcp-server-patch-enabled')).toBeChecked();
+    await page.getByTestId('mcp-server-patch-enabled').click({ force: true });
+    expect(await wsSent(page)).toContainEqual({
+      type: 'host.settings',
+      hostId: 'd1',
+      patchMcpEnabled: false,
+    });
     await expect(page.getByTestId('mcp-server-playwright')).toContainText(
       'npx @playwright/mcp --headless',
     );
