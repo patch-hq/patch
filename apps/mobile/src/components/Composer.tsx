@@ -88,6 +88,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import {
   Mic,
@@ -146,7 +147,11 @@ import { getWs } from '../api/ws';
 import { api } from '../api/rest';
 import { useChatStore } from '../stores/chatStore';
 import { useUiStore } from '../stores/uiStore';
-import { COMPOSER_MAX_HEIGHT, COMPOSER_MIN_HEIGHT } from '../lib/composerHeight';
+import {
+  COMPOSER_MAX_HEIGHT,
+  COMPOSER_MIN_HEIGHT,
+  dictationMaxHeight,
+} from '../lib/composerHeight';
 import { startDictation, warmDictation, type DictationHandle } from '../lib/dictation';
 import { startDictationMode, type DictationModeHandle } from '../lib/dictationMode';
 import { voiceKeyRefusal } from '../lib/voiceKeys';
@@ -709,6 +714,10 @@ export function Composer({
   const [mirrorHeight, setMirrorHeight] = React.useState(0);
   // Mic recording, or dictation mode with words being spoken: the input is painted over by the mirror.
   const livePreviewOn = micState !== 'idle' || livePartial !== '';
+  // The keyboard is away while dictating, so the field may take far more of
+  // the screen than its typing cap before the words start scrolling.
+  const { height: windowHeight } = useWindowDimensions();
+  const inputMaxHeight = livePreviewOn ? dictationMaxHeight(windowHeight) : COMPOSER_MAX_HEIGHT;
   // spec/15 § Skill autocomplete — chips: the mirror only needs to exist
   // while there's a chip to draw, and only when dictation isn't already using
   // the transparent-input trick for its own mirror — the two never overlap.
@@ -1666,9 +1675,9 @@ export function Composer({
             // While dictating, the words are drawn by the mirror, not held by
             // the input, so grow to the mirror's height like typing would.
             minHeight: livePreviewOn
-              ? Math.min(Math.max(COMPOSER_MIN_HEIGHT, mirrorHeight), COMPOSER_MAX_HEIGHT)
+              ? Math.min(Math.max(COMPOSER_MIN_HEIGHT, mirrorHeight), inputMaxHeight)
               : COMPOSER_MIN_HEIGHT,
-            maxHeight: COMPOSER_MAX_HEIGHT,
+            maxHeight: inputMaxHeight,
             paddingLeft: space.md,
             paddingRight: FIELD_PAD_RIGHT,
             paddingVertical: space.sm,
@@ -1704,7 +1713,7 @@ export function Composer({
               // at a different line from the field under it shows the user text
               // the field is still holding.
               minHeight: COMPOSER_MIN_HEIGHT,
-              maxHeight: COMPOSER_MAX_HEIGHT,
+              maxHeight: inputMaxHeight,
               overflow: 'hidden',
               // Past the cap the TOP is clipped, not the bottom: the newest
               // words are the ones being spoken, so they stay in view and the

@@ -34,3 +34,13 @@ export const COMPOSER_MIN_HEIGHT = 40;
  * shrink the field as the keyboard opened and closed.
  */
 export const COMPOSER_MAX_HEIGHT = 200;
+
+/**
+ * Cap while dictating. Starting a dictation puts the keyboard away, so the
+ * window height is stable for its whole length and the field can take close
+ * to half the screen before the oldest words scroll off the top. Never below
+ * the typing cap.
+ */
+export function dictationMaxHeight(windowHeight: number): number {
+  return Math.max(COMPOSER_MAX_HEIGHT, Math.round(windowHeight * 0.45));
+}

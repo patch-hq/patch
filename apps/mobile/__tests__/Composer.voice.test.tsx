@@ -216,7 +216,15 @@ describe('Composer — dictation mic (tap-toggle)', () => {
     });
     const preview = r.root.findAllByProps({ testID: 'dictation-preview' })[0]!;
     const box = preview.parent!.parent!;
-    expect(box.props['style']).toMatchObject({ overflow: 'hidden', maxHeight: 200 });
+    // Same cap as the field under it, and anchored to the bottom so the
+    // newest words are the ones in view.
+    const inputMax = (findHost(r.root, byType('TextInput')).props['style'] as { maxHeight: number })
+      .maxHeight;
+    expect(box.props['style']).toMatchObject({
+      overflow: 'hidden',
+      maxHeight: inputMax,
+      justifyContent: 'flex-end',
+    });
   });
 
   it('shows the live/interim transcript in grey inside the input while recording', async () => {

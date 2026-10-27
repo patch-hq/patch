@@ -9,7 +9,7 @@
 // exactly as Composer.voice.test.tsx does.
 
 import React from 'react';
-import { Keyboard } from 'react-native';
+import { Keyboard, __setWindowDimensions } from 'react-native';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   actAsync,
@@ -123,6 +123,21 @@ describe('Composer — dictation shown inside the input', () => {
     const live = findHost(r.root, byTestId('dictation-live-words'));
     expect(textOf(live)).toBe('buy oat');
     expect((live.props['style'] as { fontStyle: string }).fontStyle).toBe('italic');
+  });
+
+  it('lets the field grow to near half the screen while dictating, back to the typing cap after', async () => {
+    __setWindowDimensions({ height: 800 });
+    const { factory, finish } = makeFactory();
+    const r = renderRN(<Composer chatId="c1" dictationFactory={factory} />);
+    const maxH = (): number =>
+      (findHost(r.root, byType('TextInput')).props['style'] as { maxHeight: number }).maxHeight;
+    expect(maxH()).toBe(200);
+    await actAsync(() => mic(r)['onPress']!());
+    expect(maxH()).toBe(360);
+    finish.mockResolvedValueOnce({ kind: 'text', text: 'words' });
+    await actAsync(() => mic(r)['onPress']!());
+    expect(maxH()).toBe(200);
+    __setWindowDimensions({ height: 800 });
   });
 
   it('keeps the words on screen while transcribing, then lands them', async () => {
