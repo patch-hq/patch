@@ -557,6 +557,60 @@ describeRealBrowser('BrowserManager — real Chromium against a local fixture se
     expect(closed).toEqual(['logged-in page', 'logged-out page', 'logged-out context']);
     expect(await manager.tabs()).toEqual([]);
   });
+
+  it('keeps the tab and reports loading when the navigation only times out (a bot check never finishes)', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'patch-browser-goto-timeout-'));
+    tmpDirs.push(root);
+    const closed: string[] = [];
+    const page = {
+      on: () => undefined,
+      isClosed: () => false,
+      url: () => 'https://shop.example/my-account/',
+      title: async () => {
+        throw new Error('title would hang on a page stuck mid-load');
+      },
+      goto: async () => {
+        const e = new Error('page.goto: Timeout 30000ms exceeded.');
+        e.name = 'TimeoutError';
+        throw e;
+      },
+      close: async () => {
+        closed.push('page');
+      },
+    };
+    const manager = new BrowserManager({
+      root,
+      logger: silent,
+      virtualDisplay: ':89',
+      loadPlaywright: async () =>
+        ({
+          chromium: {
+            executablePath: () => process.execPath,
+            launchPersistentContext: async () => ({
+              addInitScript: async () => undefined,
+              route: async () => undefined,
+              on: () => undefined,
+              newPage: async () => page,
+              close: async () => undefined,
+            }),
+          },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        }) as any,
+    });
+    managers.push(manager);
+    const savedDisplay = process.env['DISPLAY'];
+    process.env['DISPLAY'] = ':fake';
+    try {
+      const res = await manager.open({ url: 'https://shop.example/my-account/' });
+      expect(res.loading).toBe(true);
+      expect(res.url).toBe('https://shop.example/my-account/');
+      expect(closed).toEqual([]);
+      expect((await manager.tabs()).map((t) => t.tabId)).toEqual([res.tabId]);
+    } finally {
+      if (savedDisplay === undefined) delete process.env['DISPLAY'];
+      else process.env['DISPLAY'] = savedDisplay;
+    }
+  });
 });
 
 describe('BrowserManager — concurrent first opens', () => {

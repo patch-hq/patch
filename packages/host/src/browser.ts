@@ -287,6 +287,12 @@ export interface OpenResult {
   url: string;
   /** The routing host's display name, present iff this tab's traffic goes via one. */
   routedVia?: string;
+  /**
+   * True iff the page had not finished loading when the navigation timed out
+   * (typically a bot check that never completes). The tab is kept and open:
+   * the user can take it over with patch_browser_handoff and click through.
+   */
+  loading?: true;
 }
 
 export interface TabInfo {
@@ -1627,28 +1633,37 @@ export class BrowserManager {
       ephemeralContext,
     });
     this.attachPage(tab, page);
+    let loading = false;
     try {
       await page.goto(opts.url, { waitUntil: 'domcontentloaded' });
     } catch (err) {
-      // The tab was never tracked, so nothing else would ever close it.
-      await page.close().catch((closeErr: unknown) => {
-        this.opts.logger.warn({ err: closeErr }, 'browser: error closing tab after failed open');
-      });
-      await ephemeralContext?.close().catch((closeErr: unknown) => {
-        this.opts.logger.warn(
-          { err: closeErr },
-          'browser: error closing context after failed open',
-        );
-      });
-      throw err;
+      if ((err as Error).name === 'TimeoutError') {
+        // Not a failure: a bot check ("verify you are human") never reaches
+        // domcontentloaded. Keep the tab so a person can see it and click through.
+        loading = true;
+      } else {
+        // The tab was never tracked, so nothing else would ever close it.
+        await page.close().catch((closeErr: unknown) => {
+          this.opts.logger.warn({ err: closeErr }, 'browser: error closing tab after failed open');
+        });
+        await ephemeralContext?.close().catch((closeErr: unknown) => {
+          this.opts.logger.warn(
+            { err: closeErr },
+            'browser: error closing context after failed open',
+          );
+        });
+        throw err;
+      }
     }
     this.tabsById.set(tabId, tab);
     this.activeTabId = tabId;
     this.notify(opts.chatId);
     return {
       tabId,
-      title: await page.title(),
+      // A page stuck mid-load may never answer for its title.
+      title: loading ? '' : await page.title(),
       url: page.url(),
+      ...(loading ? { loading: true as const } : {}),
       ...(routedVia ? { routedVia } : {}),
     };
   }
