@@ -472,6 +472,20 @@ useChatStore.getState().hydrate([
     disabled: false,
     lastUpdated: 0,
   },
+  // A running patch_agent child — drives the delegate transcript layout e2e.
+  {
+    chatId: 'chat_delegate',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'delegate-fixture',
+    folder: '/home/tom/projects/bus',
+    activity: 'idle',
+    status: 'active',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 0,
+  },
   // A run of tools whose AI summary failed — drives the failed-summary marker e2e.
   {
     chatId: 'chat_tools_failed',
@@ -1800,6 +1814,12 @@ const handoffEntries: ChatEventEntry[] = [
   },
 ];
 useChatStore.setState((s) => ({
+  delegateUpdates: {
+    ...s.delegateUpdates,
+    chat_delegate: {
+      'sub-1': { label: 'resume job', status: 'running' as const, since: Date.now() },
+    },
+  },
   timelines: {
     ...s.timelines,
     chat_handoff: handoffEntries,
@@ -1810,6 +1830,17 @@ useChatStore.setState((s) => ({
     chat_perm_mode_auto: permissionModeAutomaticEntries,
     chat_tools: toolRunEntries,
     chat_tools_failed: toolRunFailedEntries,
+    chat_delegate: [
+      { seq: 0, kind: 'message', role: 'user', content: 'run the job', at: 0 },
+      {
+        seq: 1,
+        kind: 'tool_call',
+        tool: 'mcp__patch__patch_agent',
+        toolArgs: { prompt: 'Continue an interrupted job: finish it', title: 'resume job' },
+        callId: 'call-delegate',
+        at: 1,
+      },
+    ],
     chat_plan: planEntries,
     chat_tool_rhythm: toolRhythmEntries,
     chat_voice: [

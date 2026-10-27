@@ -8319,6 +8319,14 @@ button.view-file-download {
      ink-3 alone still reads plainly as "off" beside the full-ink rows. */
   color: var(--ink-3);
 }
+.job-row.disabled {
+  /* The whole row steps back, not just the name: no card fill, a dashed edge. */
+  background: transparent;
+  border-style: dashed;
+}
+.job-row.disabled .job-row-main > :not(.toggle) {
+  color: var(--ink-3);
+}
 .job-row-main {
   display: flex;
   align-items: center;
@@ -11065,6 +11073,9 @@ button.background-task-bar-row:hover .background-task-bar-description {
 }
 .delegate-transcript-stream .msg {
   margin: 0 0 12px;
+  /* The chat column's gutter slack (see `.msg`) belongs to the main column; in
+     this narrower box it squeezed the bubble to a sliver. */
+  padding-inline: 0;
 }
 .delegate-transcript-loading,
 .delegate-transcript-error {
