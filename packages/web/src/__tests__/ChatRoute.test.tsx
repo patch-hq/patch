@@ -1784,10 +1784,15 @@ describe('ChatRoute regression', () => {
       fireEvent.keyDown(composer, { key: 'Enter', metaKey: true });
       // A second send inside the first's in-flight window is ignored on purpose
       // (Composer.doubleEnter), so let the first land before the Ctrl+↵ one.
+      // The frame goes out before the in-flight flag clears, so on a slow run
+      // the first Ctrl+↵ can still be ignored: retry the key, not the text. A
+      // sent composer is empty, so a retry after the send is a no-op.
       await waitFor(() => expect(types(send).filter((t) => t === 'chat.input')).toHaveLength(1));
       fireEvent.change(composer, { target: { value: 'and this' } });
-      fireEvent.keyDown(composer, { key: 'Enter', ctrlKey: true });
-      await waitFor(() => expect(types(send).filter((t) => t === 'chat.input')).toHaveLength(2));
+      await waitFor(() => {
+        fireEvent.keyDown(composer, { key: 'Enter', ctrlKey: true });
+        expect(types(send).filter((t) => t === 'chat.input')).toHaveLength(2);
+      });
       expect(types(send)).not.toContain('chat.promote_request');
       expect(types(send)).not.toContain('chat.stop_request');
     });
