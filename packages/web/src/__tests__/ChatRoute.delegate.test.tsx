@@ -219,6 +219,33 @@ describe('ChatRoute — patch_delegate tool row', () => {
     expect(screen.getByTestId('delegate-status-pill').textContent).toBe('Running');
   });
 
+  it('a waiting patch_agent call with no result yet opens its running child from the live update', async () => {
+    seed();
+    useChatStore.getState().applyEvent({
+      type: 'chat.tool_call',
+      chatId: 'c1',
+      seq: 1,
+      tool: 'mcp__patch__patch_agent',
+      args: { prompt: 'go do the thing', title: 'draft the email' },
+      callId: 'call-1',
+    });
+    useChatStore.getState().applyEvent({
+      type: 'chat.delegate_update',
+      chatId: 'c1',
+      delegateId: 'sub-1',
+      label: 'draft the email',
+      status: 'running',
+      seq: 2,
+    });
+    renderChat();
+    expect(screen.getByTestId('delegate-status-pill').textContent).toBe('Running');
+    fireEvent.click(screen.getByTestId('delegate-open-transcript'));
+    expect(getDelegateHistory).toHaveBeenCalledWith('c1', 'sub-1');
+    await waitFor(() => {
+      expect(screen.getAllByTestId('delegate-transcript-msg')).toHaveLength(2);
+    });
+  });
+
   it('is a collapsible row: collapsed by default, expands inline to the read-only transcript, collapses again', async () => {
     seed();
     emitDelegateCall('patch_delegate', { id: 'sub-1', label: 'draft the email' });

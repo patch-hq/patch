@@ -4449,8 +4449,13 @@ function DelegateToolCall({
   result?: ChatEventEntry;
   summary: string;
 }): JSX.Element {
-  const ack = delegateAckPayload(result?.toolResult);
-  const live = useChatStore((s) => (ack ? s.delegateUpdates[chatId]?.[ack.id] : undefined));
+  const resultAck = delegateAckPayload(result?.toolResult);
+  // A waiting `patch_agent` (the default) returns nothing until the child
+  // settles, so a RUNNING child has no ack yet: find it in the live updates by
+  // the label the host gave it (the title, else the start of the prompt).
+  const updates = useChatStore((s) => s.delegateUpdates[chatId]);
+  const ack = resultAck ?? (result ? null : liveDelegateForCall(updates ?? NO_DELEGATES, args));
+  const live = ack ? updates?.[ack.id] : undefined;
   const [open, setOpen] = useState(false);
 
   if (!ack) {
@@ -4507,6 +4512,24 @@ function DelegateToolCall({
 }
 
 const NO_DELEGATES: Record<string, DelegateUpdateInfo> = {};
+
+/** The still-running child a not-yet-answered `patch_agent` call started. */
+function liveDelegateForCall(
+  updates: Record<string, DelegateUpdateInfo>,
+  args: Record<string, unknown>,
+): { id: string; label: string } | null {
+  const title = typeof args['title'] === 'string' ? args['title'].trim() : '';
+  const prompt =
+    typeof args['prompt'] === 'string' ? args['prompt'].replace(/\s+/g, ' ').trim() : '';
+  for (const [id, d] of Object.entries(updates)) {
+    if (d.status !== 'running' && d.status !== 'awaiting-permission') continue;
+    const stem = d.label.replace(/…$/, '').trim();
+    if (title !== '' ? d.label === title : stem !== '' && prompt.startsWith(stem)) {
+      return { id, label: d.label };
+    }
+  }
+  return null;
+}
 
 /**
  * spec/14 § Main chat panel — Running delegates strip: one line per

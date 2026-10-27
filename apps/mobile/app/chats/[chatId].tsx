@@ -1937,6 +1937,24 @@ function delegateAckPayload(result: unknown): { id: string; label: string } | nu
   return null;
 }
 
+/** The still-running child a not-yet-answered `patch_agent` call started. */
+function liveDelegateForCall(
+  updates: Record<string, { label: string; status: string }>,
+  args: Record<string, unknown>,
+): { id: string; label: string } | null {
+  const title = typeof args['title'] === 'string' ? args['title'].trim() : '';
+  const prompt =
+    typeof args['prompt'] === 'string' ? args['prompt'].replace(/\s+/g, ' ').trim() : '';
+  for (const [id, d] of Object.entries(updates)) {
+    if (d.status !== 'running' && d.status !== 'awaiting-permission') continue;
+    const stem = d.label.replace(/…$/, '').trim();
+    if (title !== '' ? d.label === title : stem !== '' && prompt.startsWith(stem)) {
+      return { id, label: d.label };
+    }
+  }
+  return null;
+}
+
 /**
  * spec/15 § Chat detail — Delegate tool row: a live status pill (from
  * `chat.delegate_update`, keyed by the subagent's own chatId — the `id` its
@@ -1959,8 +1977,16 @@ function DelegateToolCallItem({
   const colors = useTheme();
   const [expanded, setExpanded] = React.useState(false);
   const [open, setOpen] = React.useState(false);
-  const ack = delegateAckPayload(result?.toolResult);
-  const live = useChatStore((s) => (ack ? s.delegateUpdates[chatId]?.[ack.id] : undefined));
+  const resultAck = delegateAckPayload(result?.toolResult);
+  // A waiting `patch_agent` returns nothing until the child settles, so a
+  // RUNNING child has no ack yet: find it in the live updates by its label.
+  const updates = useChatStore((s) => s.delegateUpdates[chatId]);
+  const ack =
+    resultAck ??
+    (result
+      ? null
+      : liveDelegateForCall(updates ?? {}, (entry.toolArgs ?? {}) as Record<string, unknown>));
+  const live = ack ? updates?.[ack.id] : undefined;
   const summary = toolCallSummary(entry.tool, entry.toolArgs);
 
   if (!ack) {

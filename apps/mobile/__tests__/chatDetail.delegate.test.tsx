@@ -106,6 +106,28 @@ describe('patch_delegate tool row', () => {
     expect(findAllHost(r.root, byTestId('delegate-tool-call'))).toHaveLength(0);
   });
 
+  it('a waiting patch_agent call with no result yet shows its running child from the live update', () => {
+    useChatStore.getState().applyEvent({
+      type: 'chat.tool_call',
+      chatId: 'c1',
+      seq: 1,
+      tool: 'mcp__patch__patch_agent',
+      args: { prompt: 'go do the thing', title: 'draft the email' },
+      callId: 'call-1',
+    });
+    useChatStore.getState().applyEvent({
+      type: 'chat.delegate_update',
+      chatId: 'c1',
+      delegateId: 'sub-1',
+      label: 'draft the email',
+      status: 'running',
+      seq: 2,
+    });
+    const r = renderRN(<ChatDetailScreen />);
+    expect(hasText(findHost(r.root, byTestId('delegate-status-pill')), 'Running')).toBe(true);
+    expect(findHost(r.root, byTestId('delegate-open-transcript'))).toBeDefined();
+  });
+
   it('updates the pill in place from chat.delegate_update, by the subagent id the ack returned', () => {
     emitDelegateCall('patch_delegate', { id: 'sub-1', label: 'draft the email' });
     const r = renderRN(<ChatDetailScreen />);
