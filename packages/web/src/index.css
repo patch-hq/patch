@@ -3128,7 +3128,7 @@ button.nav-row {
   text-overflow: ellipsis;
 }
 .workers-pill-segment[data-state='done'] {
-  color: var(--ink-3, var(--ink-2));
+  color: var(--ink-3);
 }
 .workers-pill-segment + .workers-pill-segment {
   border-left: 1px solid var(--line);

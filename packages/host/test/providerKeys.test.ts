@@ -95,6 +95,7 @@ describe('ProviderKeyStore — precedence', () => {
       { id: 'gemini', source: 'ui', last4: 'WXYZ', envSet: true },
       { id: 'openai', source: 'none', envSet: false },
       { id: 'groq', source: 'env', last4: 'G1G2', envSet: true },
+      { id: 'deepgram', source: 'none', envSet: false },
     ]);
     const json = JSON.stringify(described);
     expect(json).not.toContain(UI_GEMINI);
