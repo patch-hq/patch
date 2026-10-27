@@ -69,7 +69,7 @@ test.describe('editing a message in the main composer', () => {
   test('model and approval controls are still in the composer while editing', async ({ page }) => {
     await page.goto(FORKED);
     await openEditor(page);
-    await expect(page.getByTestId('attach-btn')).toBeVisible();
+    await expect(page.getByTestId('composer-add-btn')).toBeVisible();
   });
 });
 

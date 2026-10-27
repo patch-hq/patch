@@ -158,6 +158,7 @@ export * from './providers.js';
 // Which permission modes each model can actually run in (spec/02 § Permission
 // mode). Static, mirroring Claude Code's own denylist — see the module header.
 export * from './modelCapabilities.js';
+export * from './modelLabel.js';
 // Which of an account's rate-limit windows can actually stop work (spec/12) —
 // one copy of the rule, because the host, the usage probe and every surface
 // all render from it.

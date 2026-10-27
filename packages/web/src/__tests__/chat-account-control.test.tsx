@@ -40,12 +40,17 @@ describe('AccountControl', () => {
     expect(screen.getByTestId('chat-account')).not.toHaveAttribute('title');
   });
 
-  it('the Automatic option names the account the chat is on now', () => {
+  it('reads the account the chat is on, and the list says what each choice does', () => {
     render(<AccountControl chatId="c1" />);
-    expect(screen.getByTestId('chat-account')).toHaveTextContent('Automatic: work');
+    expect(screen.getByTestId('chat-account')).toHaveTextContent('work');
     act(() => seed({ id: 'a1', label: 'Default' }));
-    expect(screen.getByTestId('chat-account')).toHaveTextContent('Automatic: Default');
+    expect(screen.getByTestId('chat-account')).toHaveTextContent('Default');
     fireEvent.click(screen.getByTestId('chat-account'));
-    expect(screen.getAllByRole('option')[0]).toHaveTextContent('Automatic: Default');
+    const options = screen.getAllByRole('option');
+    expect(options[0]).toHaveTextContent('Switch automatically');
+    expect(options[0]).toHaveTextContent(
+      'Now on Default. Moves to another account when one runs out.',
+    );
+    expect(options.slice(1).every((o) => o.textContent?.startsWith('Always '))).toBe(true);
   });
 });

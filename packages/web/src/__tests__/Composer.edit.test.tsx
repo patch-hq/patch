@@ -135,7 +135,7 @@ describe('Composer — edit mode', () => {
   it('leaves out the controls that belong to a new turn', () => {
     renderEditor();
     for (const id of [
-      'attach-btn',
+      'composer-add-btn',
       'sketch-btn',
       'call-btn',
       'meeting-btn',

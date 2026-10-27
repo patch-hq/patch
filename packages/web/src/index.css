@@ -6091,6 +6091,38 @@ button.view-file-download {
   background: var(--voice);
   color: var(--on-accent);
 }
+/* + (spec/14 § Composer): what goes into the message — a file or image, a
+   sketch — at the field's bottom-left, the mirror of dictate on the right. */
+.composer-add-btn {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  z-index: 1;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.composer-add-btn:hover:not(:disabled) {
+  background: var(--bg-soft);
+  color: var(--ink-2);
+}
+.composer-add-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.composer-input-wrap.has-add .composer-input,
+.composer-input-wrap.has-add .composer-live-preview,
+.composer-input-wrap.has-add .composer-chip-mirror {
+  padding-left: 40px;
+}
 .composer-input-wrap .composer-input,
 .composer-input-wrap .composer-live-preview,
 .composer-input-wrap .composer-chip-mirror {
@@ -6205,45 +6237,67 @@ button.view-file-download {
   align-items: center;
   gap: 6px;
 }
-/* Three parts: tools (attach, sketch, call, meeting), the standing settings
-   (approval mode, model, account, effort) and the end group (context ring,
-   stop/send) pinned right. One line when they fit; when they do not
-   (`is-stacked`, measured in lib/composerActionsLayout.ts) the settings take a
-   full-width line of their own under the tools rather than being squeezed
-   into ellipses (spec/14 § Composer). */
+/* Always one line (spec/14 § Composer): tools (call, meeting), the standing
+   settings (approval mode, model, account, effort) and the end group (context
+   ring, stop/send) pinned right. Each setting is an icon and a short word;
+   when the words don't fit, `is-compact` (measured in
+   lib/composerActionsLayout.ts) keeps only the icons. The model has no icon
+   and keeps its short name. */
 .composer-tools,
 .composer-settings,
 .composer-actions-end {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: 0 0 auto;
 }
 .composer-settings {
-  min-width: 0;
+  gap: 2px;
 }
 .composer-settings > * {
   align-self: center;
 }
 .composer-actions-end {
-  flex: 0 0 auto;
   margin-left: auto;
 }
-.composer-actions.is-stacked {
-  flex-wrap: wrap;
-  row-gap: 2px;
+/* Call and meeting read as quiet icons, not boxed buttons. */
+.composer-tools .call-btn:not(.live):not(.mm-live) {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-3);
 }
-.composer-actions.is-stacked .composer-settings {
-  order: 3;
-  flex: 1 0 100%;
-  flex-wrap: wrap;
-  gap: 2px 6px;
+.composer-tools .call-btn:not(.live):not(.mm-live):hover:not(:disabled) {
+  background: var(--bg-soft);
+  color: var(--ink-2);
 }
-.composer-actions.is-stacked .composer-settings > *,
-.composer-actions.is-stacked .composer-settings .model-picker.as-crumb,
-.composer-actions.is-stacked .composer-settings .chat-account,
-.composer-actions.is-stacked .composer-settings .permission-mode,
-.composer-actions.is-stacked .composer-settings .model-pill.as-crumb {
-  height: 32px;
+/* A setting's word beside its icon. Compact mode zeroes it rather than removing
+   it, so its natural width can still be measured. */
+.setting-word {
+  display: inline-block;
+  margin-left: 5px;
+  overflow: hidden;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.composer-actions.is-compact .setting-word {
+  max-width: 0;
+  margin-left: 0;
+}
+.composer-actions.is-compact .composer-tools,
+.composer-actions.is-compact .composer-actions-end {
+  gap: 2px;
+}
+.composer-actions.is-compact .composer-tools .call-btn {
+  width: 32px;
+}
+/* Icons alone carry no caret: the icon is the control. */
+.composer-actions.is-compact .permission-mode.has-icon,
+.composer-actions.is-compact .model-pill.as-crumb {
+  padding: 0 6px;
+}
+.composer-actions.is-compact .permission-mode.has-icon ~ .permission-mode-caret,
+.composer-actions.is-compact .model-pill.has-icon .model-pill-caret {
+  display: none;
 }
 /* Approval mode (spec/14 § Composer — Approval mode) — the mode the next turn
    will use, LAST in the utility group of the action row under the input (attach,
@@ -6291,6 +6345,19 @@ button.view-file-download {
   text-align: left;
   white-space: nowrap;
   overflow: hidden;
+}
+.permission-mode.has-icon {
+  display: inline-flex;
+  align-items: center;
+  field-sizing: initial;
+  width: auto;
+}
+.permission-mode.has-icon > svg {
+  flex: 0 0 auto;
+}
+.permission-mode.danger,
+.permission-mode.danger ~ .permission-mode-caret {
+  color: var(--danger);
 }
 .permission-mode:hover:not(:disabled) {
   color: var(--ink-2);
@@ -11516,6 +11583,16 @@ button.background-task-bar-row:hover .background-task-bar-description {
   /* Was var(--bg-hover, var(--bg-subtle)) — neither token exists, so the
      hovered row got no highlight at all. */
   background: var(--bg-soft);
+}
+.model-option-desc {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-min);
+  font-weight: 400;
+  color: var(--ink-3);
+}
+.model-option.danger .model-option-name {
+  color: var(--danger);
 }
 .model-option.selected .model-option-name {
   font-weight: 600;

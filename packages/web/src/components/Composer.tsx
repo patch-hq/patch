@@ -42,7 +42,8 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { ContextRing } from './ContextRing.js';
-import { useStackedActions } from '../lib/composerActionsLayout.js';
+import { useCompactActions } from '../lib/composerActionsLayout.js';
+import { ApprovalIcon, approvalDescription, approvalWord } from '../lib/approvalModes.js';
 import { ChatModelControl } from './ChatModelControl.js';
 import {
   Mic,
@@ -57,6 +58,7 @@ import {
   AudioLines,
   Clock,
   Zap,
+  Plus,
 } from 'lucide-react';
 import { endMeeting } from '../lib/meetingControl.js';
 import { beginMeeting, maybeIntroduceMeetings } from '../lib/meetingSetup.js';
@@ -121,7 +123,6 @@ import {
   findChipTokens,
   spliceCompletion,
 } from '../lib/skillToken.js';
-import { permissionModeLabel } from '../lib/permissionModeLabel.js';
 import { GOAL_COMMAND_NAME, GOAL_COMMAND_DESCRIPTION } from '../lib/goalCommand.js';
 import { CLEAR_COMMAND_NAME, CLEAR_COMMAND_DESCRIPTION } from '../lib/clearCommand.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
@@ -135,6 +136,8 @@ import { failed } from '../lib/errorCopy.js';
 /** One glyph size across the action buttons so they read as a matched set and
  *  the mic/send are optically centred against their siblings (spec/14 § Composer). */
 const ICON_SIZE = 18;
+/** The settings' icons are a step smaller: they sit beside words, not alone. */
+const SETTING_ICON_SIZE = 16;
 
 /** Height cap for the auto-growing composer input, as a fraction of the window
  *  height — MUST match the CSS `max-height` (30vh) on `.composer-input`. Under
@@ -148,10 +151,9 @@ const maxInputHeight = (): number => Math.round(window.innerHeight * MAX_INPUT_H
  * The modes spec/02 § Permission mode names, in the order they are shown.
  *
  * The value is passed through unchanged to the agent SDK's own
- * `permissionMode`, so the label is the id's OWN WORDS, cased and spaced for
- * reading (`permissionModeLabel`) — never a friendlier synonym, which would
- * mean the user picks one thing and the model is told another (spec/14 §
- * Composer — Approval mode).
+ * `permissionMode`. The composer names each by a short word and says what it
+ * does (`lib/approvalModes`), so the row stays one line (spec/14 § Composer —
+ * Approval mode).
  */
 export const PERMISSION_MODES: readonly PermissionMode[] = [
   'auto',
@@ -586,7 +588,7 @@ export const Composer = forwardRef(function Composer(
         : livePartial;
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const actionsRef = useRef<HTMLDivElement>(null);
-  const stackedActions = useStackedActions(actionsRef);
+  const compactActions = useCompactActions(actionsRef);
   // Where the caret sits, kept in sync so the `/` menu (and chip rendering)
   // can reason about the token the cursor is actually IN, anywhere in the
   // message, not just about the value as a whole (spec/14 § Skill
@@ -1670,6 +1672,21 @@ export const Composer = forwardRef(function Composer(
       run: () => startDictMode(),
     },
   ];
+  const addMenu = useContextMenu();
+  const addMenuItems: ContextMenuItem[] = [
+    {
+      id: 'attach',
+      label: 'File or image',
+      icon: <Paperclip size={14} aria-hidden />,
+      run: () => fileInputRef.current?.click(),
+    },
+    {
+      id: 'sketch',
+      label: 'Sketch',
+      icon: <PenLine size={14} aria-hidden />,
+      run: () => setSketching(true),
+    },
+  ];
   const [scheduling, setScheduling] = useState<{ at: string; error: string | null } | null>(null);
 
   /** Local `YYYY-MM-DDTHH:mm` for a datetime-local input, defaulting to an hour out. */
@@ -2267,7 +2284,9 @@ export const Composer = forwardRef(function Composer(
               />
             ),
           )}
-          <div className={leading ? 'composer-input-wrap has-leading' : 'composer-input-wrap'}>
+          <div
+            className={`composer-input-wrap${leading ? ' has-leading' : ''}${edit ? '' : ' has-add'}`}
+          >
             {leading ? <div className="composer-leading">{leading}</div> : null}
             {showChipMirror ? (
               // spec/14 § Composer — chips: the same text-transparent-textarea
@@ -2494,6 +2513,24 @@ export const Composer = forwardRef(function Composer(
             >
               <Mic size={ICON_SIZE} aria-hidden />
             </button>
+            {/* + (spec/14 § Composer): the things that go INTO the message —
+                a file or image, or a sketch — sit in the field with it, at
+                its bottom-left. Call and meeting stay on the row below: they
+                start something rather than add to the message. */}
+            {edit ? null : (
+              <button
+                type="button"
+                className="composer-add-btn"
+                data-testid="composer-add-btn"
+                aria-label="add to message"
+                aria-haspopup="menu"
+                title="Add"
+                onClick={addMenu.openAt}
+                disabled={linkOrCredentialBlocked || resolving}
+              >
+                <Plus size={ICON_SIZE} aria-hidden />
+              </button>
+            )}
           </div>
         </div>
         {/* spec/14 § Copy — no helper text: an icon-only control's tooltip NAMES
@@ -2506,32 +2543,10 @@ export const Composer = forwardRef(function Composer(
             control is dead, which nothing else on screen says. */}
         <div
           ref={actionsRef}
-          className={stackedActions ? 'composer-actions is-stacked' : 'composer-actions'}
+          className={compactActions ? 'composer-actions is-compact' : 'composer-actions'}
         >
           {edit ? null : (
             <div className="composer-tools">
-              <button
-                type="button"
-                className="attach-btn"
-                data-testid="attach-btn"
-                aria-label="attach file"
-                title="Attach"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={linkOrCredentialBlocked || resolving}
-              >
-                <Paperclip size={ICON_SIZE} aria-hidden />
-              </button>
-              <button
-                type="button"
-                className="attach-btn"
-                data-testid="sketch-btn"
-                aria-label="sketch"
-                title="Sketch"
-                onClick={() => setSketching(true)}
-                disabled={linkOrCredentialBlocked || resolving}
-              >
-                <PenLine size={ICON_SIZE} aria-hidden />
-              </button>
               {/* Call (spec/14 § Composer) — starts a sustained voice call for
               this chat. Moved here from the chat header (§ Chat panel
               header): attach, dictate and call read as one family of
@@ -2603,7 +2618,16 @@ export const Composer = forwardRef(function Composer(
                 <PopupSelect
                   testId="permission-mode"
                   ariaLabel="Approval mode"
-                  title="Approval mode"
+                  title={
+                    permissionMode === undefined
+                      ? 'Approval mode'
+                      : `Approval: ${approvalWord(permissionMode)}`
+                  }
+                  icon={<ApprovalIcon mode={permissionMode} size={SETTING_ICON_SIZE} />}
+                  triggerLabel={
+                    permissionMode === undefined ? 'Approval' : approvalWord(permissionMode)
+                  }
+                  danger={permissionMode === 'bypassPermissions'}
                   value={permissionMode ?? ''}
                   disabled={offline}
                   onChange={(v) => {
@@ -2619,10 +2643,17 @@ export const Composer = forwardRef(function Composer(
                       : []),
                     ...PERMISSION_MODES.filter(
                       (m) => offeredModes.includes(m) || m === permissionMode,
-                    ).map((m) => ({
-                      value: m,
-                      label: `${permissionModeLabel(m)}${offeredModes.includes(m) ? '' : ' (not on this model)'}`,
-                    })),
+                    ).map((m) => {
+                      const description = offeredModes.includes(m)
+                        ? approvalDescription(m)
+                        : 'Not on this model';
+                      return {
+                        value: m,
+                        label: approvalWord(m),
+                        ...(description !== undefined ? { description } : {}),
+                        danger: m === 'bypassPermissions',
+                      };
+                    }),
                   ]}
                 />
               )}
@@ -2709,6 +2740,13 @@ export const Composer = forwardRef(function Composer(
           </div>
         </div>
       </div>
+      <ContextMenu
+        anchor={addMenu.anchor}
+        items={addMenuItems}
+        onClose={addMenu.close}
+        label="Add to message"
+        testId="add-menu"
+      />
       <ContextMenu
         anchor={micMenu.anchor}
         items={micMenuItems}

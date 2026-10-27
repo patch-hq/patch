@@ -121,7 +121,7 @@ describe('editing a user turn forks a track', () => {
     // No second, cut-down editor inside the turn.
     expect(screen.queryByTestId('msg-editor')).toBeNull();
     // Attachments (and the rest of the composer) stay available.
-    expect(screen.getByTestId('attach-btn')).toBeTruthy();
+    expect(screen.getByTestId('composer-add-btn')).toBeTruthy();
     expect(screen.getByTestId('send-btn').getAttribute('title')).toContain('Save edit');
   });
 

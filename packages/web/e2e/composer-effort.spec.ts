@@ -11,7 +11,9 @@ test.describe('composer effort', () => {
     await page.goto('/app/dev-harness.html?chat=chat_bus');
     const effort = page.getByTestId('chat-effort');
     await expect(effort).toBeVisible();
-    await expect(effort).toContainText('Default');
+    // Unset reads as the gauge alone; the list's first row says what that means.
+    await expect(effort.locator('.setting-word')).toHaveCount(0);
+    await expect(effort).not.toContainText('Default');
 
     const model = (await page.getByTestId('chat-model').boundingBox())!;
     const effortBox = (await effort.boundingBox())!;
@@ -34,7 +36,7 @@ test.describe('composer effort', () => {
     await expect(page.getByTestId('chat-effort')).toHaveCount(0);
   });
 
-  test('opens a list of fixed levels plus Default, with the turn-applies note', async ({
+  test('opens a list of fixed levels plus Let the model decide, with the turn-applies note', async ({
     page,
   }) => {
     await page.goto('/app/dev-harness.html?chat=chat_bus');
