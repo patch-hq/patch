@@ -1,6 +1,6 @@
 // patch-tools-server — stdio MCP server launched by every SDK query.
 //
-// Per spec/02-daemon.md "MCP server" + spec/06 ## Cross-chat tools: the SDK
+// Per spec/02-host.md "MCP server" + spec/06 ## Cross-chat tools: the SDK
 // passes inline mcpServers configuration that boots this script. The MCP
 // child reads PATCH_CHAT_ID + PATCH_DAEMON_SOCKET from env and tags every
 // tool call with chatId. Side effects round-trip back to the host over

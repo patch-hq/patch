@@ -460,7 +460,7 @@ describe('WakeScheduler', () => {
   it('a loop found `waiting` on disk re-arms fresh on boot, instead of staying stuck or redelivering', async () => {
     // Simulates a host that crashed mid-turn with an absorbed tick still
     // marked `waiting` on disk — from the fresh process's point of view that
-    // turn is over, so boot itself is what ends it (02-daemon.md § Self-wake,
+    // turn is over, so boot itself is what ends it (02-host.md § Self-wake,
     // "a waiting loop re-arms on boot").
     const h = harness();
     const dir = h.dirForChat('c1');

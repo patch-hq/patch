@@ -1,4 +1,4 @@
-// 02-daemon.md § Self-wake — `/loop` slash command.
+// 02-host.md § Self-wake — `/loop` slash command.
 //
 // Typing `/loop <interval> <message>` in the composer arms a durable recurring
 // self-wake INSTEAD of sending a chat turn — the host re-delivers `message`
@@ -70,7 +70,7 @@ function typeAndSend(text: string): void {
   fireEvent.keyDown(input, { key: 'Enter' });
 }
 
-describe('ChatRoute — /loop command (02-daemon.md § Self-wake)', () => {
+describe('ChatRoute — /loop command (02-host.md § Self-wake)', () => {
   beforeEach(() => {
     useChatStore.getState()._reset();
     useUiStore.getState().clearToasts();

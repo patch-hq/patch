@@ -1,5 +1,5 @@
 // The composer's built-in slash commands (spec/04 § Goals, § Model; patch/todo.md
-// `/remind`; 02-daemon.md § Self-wake `/loop`; `/clear`). Mirrors web's
+// `/remind`; 02-host.md § Self-wake `/loop`; `/clear`). Mirrors web's
 // ChatRoute `handleSend` + packages/web/src/lib/{goal,reminder,loop,model,clear}Command.ts
 // so a command typed on the phone does what it does on web instead of being sent
 // to the agent as a chat turn. Each runs INSTEAD of sending a turn, except

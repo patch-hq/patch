@@ -360,7 +360,7 @@ interface ChatState {
   /**
    * Apply a live `chat.permission_expiry_update` (`ws.ts`) to the matching
    * question card's countdown — focus reset it, and every open surface needs
-   * the new deadline without waiting for a replay (`02-daemon.md` § Questions
+   * the new deadline without waiting for a replay (`02-host.md` § Questions
    * are not approvals). A no-op if the card isn't in the timeline yet (the
    * request and its reset raced in the same batch window) or is already
    * resolved (a reset that lost the race with the answer).

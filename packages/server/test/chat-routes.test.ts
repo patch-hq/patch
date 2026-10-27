@@ -1536,7 +1536,7 @@ describe('chat REST routes', () => {
     }
   });
 
-  it('POST /api/chats/:id/loop forwards chat.loop_request arming a recurring wake (02-daemon.md § Self-wake)', async () => {
+  it('POST /api/chats/:id/loop forwards chat.loop_request arming a recurring wake (02-host.md § Self-wake)', async () => {
     const { registry, jwt } = await bootstrap();
     const hostLink = new InProcessHostLink();
     const built = await makeApp({ registry, hostLink });

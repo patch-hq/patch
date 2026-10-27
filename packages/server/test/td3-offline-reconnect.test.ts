@@ -10,7 +10,7 @@
 // is needed.
 //
 // Spec: 12-error-and-offline.md (all scenarios), 03-wire-protocol.md
-// ## Idempotency, 04-chats-and-folders.md ## Resume, 02-daemon.md
+// ## Idempotency, 04-chats-and-folders.md ## Resume, 02-host.md
 // ## Host restart behaviour.
 //
 // Test hooks used (HARNESS affordances, gated, never run in production):

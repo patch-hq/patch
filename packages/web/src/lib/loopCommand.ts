@@ -1,4 +1,4 @@
-// 02-daemon.md § Self-wake — `/loop` slash command. Typing `/loop <interval>
+// 02-host.md § Self-wake — `/loop` slash command. Typing `/loop <interval>
 // <message>` in the composer arms a DURABLE recurring self-wake instead of
 // sending a chat turn — the host re-delivers `message` into this chat every
 // `interval`, forever, until stopped. A bare `/loop` (no interval) CLEARS the

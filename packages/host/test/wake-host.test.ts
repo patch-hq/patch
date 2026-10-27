@@ -156,7 +156,7 @@ describe('self-wake on the host (spec/02 § Self-wake)', () => {
   });
 
   it('queues behind a running turn when the wake fires mid-turn (spec/02 § Self-wake)', async () => {
-    // spec/02-daemon.md § Self-wake: "If the chat is mid-turn, the wake QUEUES
+    // spec/02-host.md § Self-wake: "If the chat is mid-turn, the wake QUEUES
     // behind it." This is the loop case a user hits in practice — a nag wake
     // fires while the chat is still busy with the previous turn. The wake must
     // not be dropped or rejected; it queues and runs once the turn finishes.
@@ -195,7 +195,7 @@ describe('self-wake on the host (spec/02 § Self-wake)', () => {
   });
 
   it('loops: a delivered wake turn re-arms the next wake, which also fires (spec/02 § Self-wake)', async () => {
-    // spec/02-daemon.md § Self-wake "One-shot + loop": the agent re-arms a fresh
+    // spec/02-host.md § Self-wake "One-shot + loop": the agent re-arms a fresh
     // wake on each fire to build a nag loop. Simulate the agent by re-scheduling
     // from inside the delivered [wake] turn; the second wake must also fire.
     const prompts: string[] = [];

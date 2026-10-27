@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseLoopCommand } from '../lib/loopCommand.js';
 
-describe('parseLoopCommand (02-daemon.md § Self-wake — /loop)', () => {
+describe('parseLoopCommand (02-host.md § Self-wake — /loop)', () => {
   it('recognises `/loop <interval> <message>` and returns both, unparsed', () => {
     expect(parseLoopCommand('/loop 5m check on the build')).toEqual({
       isLoop: true,

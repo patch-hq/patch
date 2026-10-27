@@ -21,7 +21,7 @@ menu "Patch voice device"
         help
             Host to dial for the persistent control WSS and per-session
             audio WSS. Matches the public server URL in v1 (single-host
-            topology per spec/02-daemon.md).
+            topology per spec/02-host.md).
 
     config PATCH_DAEMON_PORT
         int "Patch daemon port"

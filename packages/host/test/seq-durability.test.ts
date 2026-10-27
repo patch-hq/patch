@@ -1,4 +1,4 @@
-// C1: sequence durability (spec/02-daemon.md "Sequence durability").
+// C1: sequence durability (spec/02-host.md "Sequence durability").
 //
 // Every seq the host hands out is recorded in the chat's history log
 // (~/.patch/chats/<chatId>/events.jsonl). On restart the seq resumes above the

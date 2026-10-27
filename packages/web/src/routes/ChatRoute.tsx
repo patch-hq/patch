@@ -1637,7 +1637,7 @@ export function ChatRoute({
       });
       return;
     }
-    // 02-daemon.md § Self-wake — `/loop <interval> <message>` arms a durable
+    // 02-host.md § Self-wake — `/loop <interval> <message>` arms a durable
     // recurring self-wake INSTEAD of sending a chat turn; a bare `/loop`
     // cancels it. Unlike `/goal`/`/remind` this is not local banner state — it
     // is a REST call straight through to the host's WakeScheduler (the same

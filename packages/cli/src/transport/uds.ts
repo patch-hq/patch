@@ -1,6 +1,6 @@
 // UDS transport: HTTP over a Unix-domain socket. Used when running on the
 // same host as the host (Hetzner box). Gated by PATCH_DAEMON_LOCAL_KEY
-// per spec/02-daemon.md. NO FALLBACKS — non-2xx responses propagate.
+// per spec/02-host.md. NO FALLBACKS — non-2xx responses propagate.
 
 import { request as httpRequest } from 'node:http';
 

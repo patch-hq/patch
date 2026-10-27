@@ -1,4 +1,4 @@
-// Terminal sessions (spec/02-daemon.md § Terminal sessions, spec/03 § Terminal
+// Terminal sessions (spec/02-host.md § Terminal sessions, spec/03 § Terminal
 // sessions, spec/14 § Terminal).
 //
 // The host owns the project filesystem, so it owns the shell. A surface opens

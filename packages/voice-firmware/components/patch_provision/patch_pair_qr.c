@@ -167,7 +167,7 @@ bool patch_pair_qr_link(const char *device_id,
     if (!pair_poll_complete(base, nonce, surface_jwt, jwt_cap)) return false;
 
     // Host host = same host as the patch server in v1 (single-host topology
-    // per spec/02-daemon.md and spec/11-deployment.md). Port + TLS from
+    // per spec/02-host.md and spec/11-deployment.md). Port + TLS from
     // Kconfig.
     snprintf(daemon_host, host_cap, "%s", CONFIG_PATCH_DAEMON_HOST);
     *daemon_port = CONFIG_PATCH_DAEMON_PORT;

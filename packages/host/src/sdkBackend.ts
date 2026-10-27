@@ -47,7 +47,7 @@ import type { Logger } from 'pino';
 const MCP_TOOL_TIMEOUT_MS = 3_660_000;
 
 export interface SdkEnvelope {
-  /** What we care about per spec/02-daemon.md "SDK emits a result message". */
+  /** What we care about per spec/02-host.md "SDK emits a result message". */
   type:
     | 'assistant'
     | 'assistant_delta'
@@ -236,7 +236,7 @@ export interface SdkRunOptions {
   patchMcpOff?: boolean | undefined;
   /**
    * SDK `options.permissionMode` (spec/13). Defaults to `'auto'`
-   * (spec/02-daemon.md) when unset.
+   * (spec/02-host.md) when unset.
    */
   permissionMode?: 'auto' | 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | undefined;
   /**

@@ -1,5 +1,5 @@
 // I1: REAL Claude backend end-to-end (spec/10-auth.md "Claude OAuth —
-// non-negotiable", spec/02-daemon.md "Session ID capture").
+// non-negotiable", spec/02-host.md "Session ID capture").
 //
 // This drives the GENUINE @anthropic-ai/claude-agent-sdk through the host's
 // real backend against the host's `claude login` OAuth credential. NO MOCKS on

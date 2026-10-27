@@ -1,4 +1,4 @@
-// C1: local control IPC (spec/02-daemon.md "Control IPC" table).
+// C1: local control IPC (spec/02-host.md "Control IPC" table).
 //
 // Loopback UDS HTTP. Spec-named endpoints: GET /list, POST /spawn-chat,
 // POST /stop-chat, POST /stop (shut host down). Auth-gated by the local

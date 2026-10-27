@@ -5,7 +5,7 @@
 //
 //   1. Local CLI (`/chats/*`) — auth-gated by PATCH_DAEMON_LOCAL_KEY.
 //   2. Cross-chat tool MCP child (`/internal/*`) — NO AUTH (per
-//      spec/02-daemon.md: "Daemon, MCP child, and `claude` query all run as
+//      spec/02-host.md: "Daemon, MCP child, and `claude` query all run as
 //      the same user on the same host, on a loopback socket"). The UDS is
 //      chmod 0600 and the only writers in the process tree are the host
 //      and its own MCP children.
@@ -311,7 +311,7 @@ export interface BuildOptions {
     sourceChatId: string;
   }) => void;
   /**
-   * Invoked by POST /stop (spec/02-daemon.md Control IPC). Shuts the host
+   * Invoked by POST /stop (spec/02-host.md Control IPC). Shuts the host
    * process down. When unset the endpoint 503s — the in-process test harness
    * has nothing to stop.
    */
@@ -477,7 +477,7 @@ const DocExportBody = z
 // spec/02 § Self-wake. The MCP child bakes `chatId` from PATCH_CHAT_ID, so a
 // wake always self-targets the calling chat. `patch_loop` posts here too —
 // same primitive, `every` is the one extra field that turns it into a loop
-// (`02-daemon.md` § Self-wake) — there is no separate internal route for it.
+// (`02-host.md` § Self-wake) — there is no separate internal route for it.
 const WakeBody = z
   .object({
     chatId: z.string().min(1),
@@ -1021,7 +1021,7 @@ const HistoryQuery = z
 
 /**
  * The single 4xx/5xx envelope every host control-surface error uses
- * (spec/02-daemon.md Control IPC): always `{ error, message }` — a stable
+ * (spec/02-host.md Control IPC): always `{ error, message }` — a stable
  * machine-readable `error` code plus a human `message`. NO divergent shapes:
  * zod failures, fastify body-parse failures, rate-limit, and not-found all
  * funnel through this so callers can parse one shape.
@@ -1343,7 +1343,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     },
   );
 
-  // --- Spec/02-daemon.md Control IPC table ----------------------------------
+  // --- Spec/02-host.md Control IPC table ----------------------------------
   // The canonical local-CLI control surface (`patch <subcommand>` on the
   // host box). Same auth gate as /chats/*. These are the spec-named
   // endpoints; /chats/* above is the richer convenience shape the TUI uses.
@@ -1427,7 +1427,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
   });
 
   // POST /clean — remove meta.json entries for chats Claude Code has lost
-  // (spec/02-daemon.md ## CLI: `patch host clean`). Auth-gated like the
+  // (spec/02-host.md ## CLI: `patch host clean`). Auth-gated like the
   // other local-CLI control endpoints. Returns { removed: chatId[] }.
   app.post('/clean', async (req, reply) => {
     const auth = checkAuth(req);

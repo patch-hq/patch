@@ -143,7 +143,7 @@ export const StatusKind = z.enum(['question', 'report', 'complete']);
 export type StatusKind = z.infer<typeof StatusKind>;
 
 /**
- * The chat's pending self-wake (`02-daemon.md` § Self-wake) as surfaces see it:
+ * The chat's pending self-wake (`02-host.md` § Self-wake) as surfaces see it:
  * the message the host will deliver back into this chat and when. Carried on
  * `chat.state` so a scheduled future turn is never invisible — surfaces render
  * it as a bar above the chat with a live countdown to `fireAt` and the message
@@ -160,7 +160,7 @@ export const PendingWake = z
     /**
      * Recurring interval (ms) — present means this is a LOOP: the host
      * re-arms `fireAt = now + every` on every fire instead of clearing it
-     * (`02-daemon.md` § Self-wake, "One-shot + loop"). Absent means the
+     * (`02-host.md` § Self-wake, "One-shot + loop"). Absent means the
      * ordinary one-shot self-wake. Surfaces use this to decide whether to
      * render a stop control — a loop is user-stoppable, a plain one-shot
      * wake is not (`14-design-web.md` § Wake bar).
@@ -168,7 +168,7 @@ export const PendingWake = z
     every: z.number().int().positive().optional(),
     /**
      * Present (and `true`) only while a loop's tick is being absorbed
-     * because the chat's turn is already running (`02-daemon.md` § Self-wake,
+     * because the chat's turn is already running (`02-host.md` § Self-wake,
      * "count the interval from the end of the turn") — `fireAt` is stale
      * until the host arms the next one once that turn ends. Surfaces show
      * "waiting for current turn" instead of a countdown to a time that
@@ -186,7 +186,7 @@ export type PendingWake = z.infer<typeof PendingWake>;
  * surfaces never mistake it for a replayable per-chat stream event (those are
  * always `>= 0`). This is the ONLY case where a wire `seq` may be negative; all
  * real stream events use the per-chat monotonic counter. See
- * `02-daemon.md` / `12-error-and-offline.md` (out-of-band control errors).
+ * `02-host.md` / `12-error-and-offline.md` (out-of-band control errors).
  */
 export const OUT_OF_BAND_SEQ = -1;
 
@@ -1203,7 +1203,7 @@ export const ChatPermissionRequestEvent = z
 export type ChatPermissionRequestEvent = z.infer<typeof ChatPermissionRequestEvent>;
 
 /**
- * A still-outstanding question's deadline moved (`02-daemon.md` § Questions
+ * A still-outstanding question's deadline moved (`02-host.md` § Questions
  * are not approvals): a surface's `chat.focus_change` named this chat, or
  * named something else after previously naming it, and the host gave the
  * question a fresh full window either way. `requestId` ties it to the
@@ -1558,7 +1558,7 @@ export const ChatStateEvent = z
      */
     todos: z.array(TodoItem).optional(),
     /**
-     * The chat's pending self-wake (`02-daemon.md` § Self-wake), or `null` when
+     * The chat's pending self-wake (`02-host.md` § Self-wake), or `null` when
      * nothing is armed. Read from the chat's `wake.json` on every state emit, so
      * it stays correct across restarts; re-emitted the moment a wake is
      * scheduled, replaced, cancelled or fires. Surfaces show it as a bar above
@@ -1958,7 +1958,7 @@ export const ChatErrorEvent = z
      * survives that reconciliation. Lets a surface attach the failure to the
      * originating message (spec/12 § Guaranteed input delivery) instead of
      * rendering a standalone error line. Optional so an older host that
-     * hasn't sent it yet still decodes — see `02-daemon.md` on hosts OTA-ing
+     * hasn't sent it yet still decodes — see `02-host.md` on hosts OTA-ing
      * independently.
      */
     causeSeq: z.number().int().gte(0).optional(),
@@ -4205,7 +4205,7 @@ export const ChatReminderRequestEvent = z
 export type ChatReminderRequestEvent = z.infer<typeof ChatReminderRequestEvent>;
 
 /**
- * Surface → host arm/cancel a self-wake LOOP (`02-daemon.md` § Self-wake).
+ * Surface → host arm/cancel a self-wake LOOP (`02-host.md` § Self-wake).
  * `/loop <interval> <message>` typed in the composer reaches the SAME
  * underlying scheduler the agent's `patch_loop` tool call reaches, just from a
  * surface instead of from the model — unlike `/goal`/`/remind`, which are pure
@@ -4213,7 +4213,7 @@ export type ChatReminderRequestEvent = z.infer<typeof ChatReminderRequestEvent>;
  * on the real `WakeScheduler` record, so this carries through to
  * `daemon.scheduleWake`/`cancelWake` exactly like the MCP path.
  * `loop: null` cancels the chat's pending wake (loop or plain one-shot — same
- * one-record-per-chat slot, `02-daemon.md` § Self-wake); otherwise `every` is
+ * one-record-per-chat slot, `02-host.md` § Self-wake); otherwise `every` is
  * the recurring interval in duration-string form (`"10m"`, `"1h30m"`, seconds
  * — the same grammar `patch_wake_me`'s `in` accepts) and `notAfter` is an
  * optional ISO-8601 validity cutoff.

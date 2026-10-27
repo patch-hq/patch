@@ -18,7 +18,7 @@ import { discoverClaudeMcpServers } from './claudeConfigMcp.js';
 // on `Daemon` are the action-execution interface used by group 7+ over the
 // server-daemon WS link, and by the loopback CLI control HTTP.
 //
-// Per spec/02-daemon.md and spec/04-chats-and-folders.md.
+// Per spec/02-host.md and spec/04-chats-and-folders.md.
 
 import {
   appendFileSync,
@@ -3164,7 +3164,7 @@ export class Daemon {
     for (const m of metas) this.hydratedFromDisk.add(m.chatId);
     for (const m of metas) this.stampMissingPermissionMode(m.chatId);
     // Resume each chat's seq above everything any store remembers
-    // (spec/02-daemon.md § Sequence durability): its history log, the meta
+    // (spec/02-host.md § Sequence durability): its history log, the meta
     // mirror, and the legacy `seq` file older hosts wrote after every emit.
     // Replay must never reuse a seq. Opening the log also repairs a torn last
     // record and closes a turn the previous process never ended.
@@ -8605,7 +8605,7 @@ export class Daemon {
   }
 
   /**
-   * `patch host clean` (spec/02-daemon.md ## CLI, spec/13 § Subcommands):
+   * `patch host clean` (spec/02-host.md ## CLI, spec/13 § Subcommands):
    * remove meta.json entries for chats Claude Code has lost. A chat is "lost"
    * when it captured a Claude session id (so it expects to RESUME from a
    * transcript) but that transcript JSONL no longer exists on disk — the

@@ -732,7 +732,7 @@ export function jsonlLineToWire(
   // injected turns — most often `No response requested.` after a turn died —
   // and stamps those replies `model: "<synthetic>"` with zero input tokens.
   // `isMeta` is not set on them, so that marker is the only one there is. The
-  // live stream already drops them (`02-daemon.md` § Per-turn process / warm
+  // live stream already drops them (`02-host.md` § Per-turn process / warm
   // sessions); replaying them put the agent's name on words it never said,
   // every time a long chat was reopened. `isModelOutput` is the one predicate
   // for this, shared with the live path so the two can't drift, and structural

@@ -1,7 +1,7 @@
 // Outbound host -> patch-server WebSocket client.
 //
 // Spec: spec/10-auth.md ("host ... thereafter authenticates to server with
-// it"), spec/02-daemon.md ("Connects to server via WebSocket. Reconnects with
+// it"), spec/02-host.md ("Connects to server via WebSocket. Reconnects with
 // exponential backoff; buffers outbound events during disconnect."),
 // spec/03-wire-protocol.md ## Auth (EdDSA-JWT in the `hello` frame).
 //

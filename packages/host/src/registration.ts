@@ -1,6 +1,6 @@
 // Host registration (~/.patch/daemon.key) + Claude OAuth bootstrap.
 //
-// Spec: spec/10-auth.md "Host registration", spec/02-daemon.md.
+// Spec: spec/10-auth.md "Host registration", spec/02-host.md.
 //
 // On first start the host has no key on disk. It emits
 // `host.unauthenticated` upstream and waits for a signed credential to

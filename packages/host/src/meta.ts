@@ -2,7 +2,7 @@
 //
 // Atomic write via temp + fsync + rename so a host crash never corrupts the
 // file or rewinds nextSeq, and the bytes are durably on disk before the rename
-// makes them visible (spec/02-daemon.md "Sequence durability" / atomic write).
+// makes them visible (spec/02-host.md "Sequence durability" / atomic write).
 // Mirrors the server's registry.ts fsync discipline. Read-modify-write callers
 // go through `update` to keep updates serialised per chatId.
 
@@ -483,7 +483,7 @@ export interface MetaStore {
   update(chatId: string, mut: (m: ChatMeta) => ChatMeta): ChatMeta;
   /**
    * Atomically persist the per-chat monotonic sequence to
-   * `~/.patch/chats/<chatId>/seq` (spec/02-daemon.md "Sequence durability").
+   * `~/.patch/chats/<chatId>/seq` (spec/02-host.md "Sequence durability").
    * Written after every emit; `readSeq` recovers it on restart. This is the
    * canonical seq location named by the spec; meta.json mirrors it as
    * `nextSeq` for the single-read hydrate path.

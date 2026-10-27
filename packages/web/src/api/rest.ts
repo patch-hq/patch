@@ -783,7 +783,7 @@ export const api = {
         since === undefined ? '' : `?since=${since}`
       }`,
     ),
-  // 02-daemon.md § Self-wake — `/loop <interval> <message>`: arm (or, with
+  // 02-host.md § Self-wake — `/loop <interval> <message>`: arm (or, with
   // `null`, cancel) a recurring self-wake from the composer, reaching the same
   // scheduler `patch_loop` reaches. `every` is a duration string ("10m", "1h30m",
   // seconds), the same grammar `patch_wake_me`'s `in` accepts.

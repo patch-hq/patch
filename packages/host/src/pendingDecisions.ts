@@ -1,5 +1,5 @@
 // Durable record of a permission request / AskUserQuestion still awaiting an
-// answer (spec/02-daemon.md § Host restart behaviour).
+// answer (spec/02-host.md § Host restart behaviour).
 //
 // A permission/question BLOCKS the turn inside the SDK's `canUseTool`
 // callback (chatRunner.ts's `requestPermission`) via an in-memory Promise

@@ -2397,7 +2397,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
   });
 
   // ---- POST /api/chats/:id/loop ----
-  // `02-daemon.md` § Self-wake — `/loop <interval> <message>` typed in the
+  // `02-host.md` § Self-wake — `/loop <interval> <message>` typed in the
   // composer arms the SAME durable scheduler the agent's `patch_loop` tool
   // call reaches; `loop: null` cancels it (one pending wake per chat, loop or
   // plain one-shot, same as the agent path — arming/cancelling here can

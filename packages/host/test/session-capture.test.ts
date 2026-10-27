@@ -1,4 +1,4 @@
-// C1: session-ID capture + rotation (spec/02-daemon.md "Session ID capture").
+// C1: session-ID capture + rotation (spec/02-host.md "Session ID capture").
 //
 // The SDK emits session_id early in the stream; the host captures it to
 // meta.json. On /clear or /compact the SDK rotates session_id mid-session;

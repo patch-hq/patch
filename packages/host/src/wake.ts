@@ -1,4 +1,4 @@
-// Durable self-wake scheduler (spec/02-daemon.md § Self-wake).
+// Durable self-wake scheduler (spec/02-host.md § Self-wake).
 //
 // A self-wake is a chat asking the host to re-invoke ITSELF after a delay —
 // "in 10 minutes, deliver this message back to me as a new turn". Distinct from
@@ -194,7 +194,7 @@ export class WakeScheduler {
       // Recurring + the chat is already busy with an unrelated turn: don't
       // deliver (and don't let `sendInput` enqueue it either — we just never
       // call `deliver`). Count the interval from the END of that turn instead
-      // of from this tick (02-daemon.md § Self-wake): mark the loop `waiting`
+      // of from this tick (02-host.md § Self-wake): mark the loop `waiting`
       // and leave it unarmed — `onTurnEnd` (called by the host once the
       // chat's pump actually empties) is what arms the next `fireAt`, so a
       // long turn absorbs every tick that lands inside it rather than queuing

@@ -285,7 +285,7 @@ function ChatsGroup(): JSX.Element {
         />
       </Row>
       {/* Default expand state a chat's provider-level context panel opens with
-          (spec/02-daemon.md § Provider-level context). Does not touch Patch's
+          (spec/02-host.md § Provider-level context). Does not touch Patch's
           own `<system-reminder>` disclosures, which stay collapsed regardless. */}
       <Row title="Provider-level context">
         <Pills
