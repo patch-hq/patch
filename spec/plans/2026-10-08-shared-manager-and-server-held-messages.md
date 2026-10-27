@@ -1,6 +1,6 @@
 # Shared Manager and server-held messages (draft for review)
 
-Draft amendments to `01-server.md`, `02-daemon.md`, `03-wire-protocol.md`, `04-chats-and-folders.md` and `06-threads-manager-speakers.md`. Written in spec voice so each section can be moved into its file once approved.
+Draft amendments to `01-server.md`, `02-host.md`, `03-wire-protocol.md`, `04-chats-and-folders.md` and `06-threads-manager-speakers.md`. Written in spec voice so each section can be moved into its file once approved.
 
 ## Status
 

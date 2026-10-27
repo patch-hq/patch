@@ -62,7 +62,7 @@ Verify: `idf.py --version` should print `ESP-IDF v5.3.2`.
 ```sh
 cd projects/patch/packages/voice-firmware
 idf.py set-target esp32s3
-idf.py menuconfig          # configure server URL, daemon host/port, GPIOs
+idf.py menuconfig          # configure server URL, host address/port, GPIOs
 idf.py build
 idf.py -p /dev/cu.usbmodem* flash monitor
 ```
@@ -76,24 +76,24 @@ slow-red-pulse pattern until the control WSS is up.
 
 The "Patch voice device" menu adds:
 
-| Key                                             | Default                     | Purpose                                                                                                      |
-| ----------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `PATCH_SERVER_URL`                              | `https://patch.example.com` | Patch HTTPS server. Used for QR-link pairing + OTA manifest.                                                 |
-| `PATCH_DAEMON_HOST`                             | `patch.example.com`         | Host for control + audio WSS. Same host as the server in v1 (single-host topology, see `spec/02-daemon.md`). |
-| `PATCH_DAEMON_PORT`                             | `443`                       | Port for host WSS.                                                                                           |
-| `PATCH_DAEMON_TLS`                              | `y`                         | Use `wss://` (TLS).                                                                                          |
-| `PATCH_LED_GPIO`                                | `21`                        | WS2812 data line (GPIO26-32 are octal-PSRAM pads — unusable).                                                |
-| `PATCH_LED_POWER_GPIO`                          | `45`                        | WS2812 ring power-rail enable (driven HIGH or the ring is dark).                                             |
-| `PATCH_LED_RING_COUNT`                          | `12`                        | LED count.                                                                                                   |
-| `PATCH_MIC_BCLK_GPIO` / `WS_GPIO` / `DIN_GPIO`  | `13` / `14` / `15`          | Codec ADC I2S input bus (clock secondary).                                                                   |
-| `PATCH_SPK_BCLK_GPIO` / `WS_GPIO` / `DOUT_GPIO` | `8` / `7` / `10`            | Codec DAC I2S output bus (clock secondary).                                                                  |
-| `PATCH_CODEC_I2C_SDA_GPIO` / `SCL_GPIO`         | `5` / `6`                   | AIC3204 codec I2C control bus.                                                                               |
-| `PATCH_CODEC_I2C_ADDR`                          | `0x18`                      | AIC3204 7-bit I2C address.                                                                                   |
-| `PATCH_XMOS_RESET_GPIO`                         | `4`                         | XMOS DSP reset (active-high pulse, then low = run).                                                          |
-| `PATCH_SPK_AMP_EN_GPIO`                         | `47`                        | Internal speaker amplifier enable (HIGH during a session).                                                   |
-| `PATCH_MUTE_SWITCH_GPIO`                        | `3`                         | Hardware mute slide switch input.                                                                            |
-| `PATCH_TOUCH_CHANNEL`                           | `5`                         | Capacitive touch channel for the button.                                                                     |
-| `PATCH_TOUCH_THRESHOLD_PCT`                     | `30`                        | % drop from baseline that registers as a press.                                                              |
+| Key                                             | Default                     | Purpose                                                                                                    |
+| ----------------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `PATCH_SERVER_URL`                              | `https://patch.example.com` | Patch HTTPS server. Used for QR-link pairing + OTA manifest.                                               |
+| `PATCH_DAEMON_HOST`                             | `patch.example.com`         | Host for control + audio WSS. Same host as the server in v1 (single-host topology, see `spec/02-host.md`). |
+| `PATCH_DAEMON_PORT`                             | `443`                       | Port for host WSS.                                                                                         |
+| `PATCH_DAEMON_TLS`                              | `y`                         | Use `wss://` (TLS).                                                                                        |
+| `PATCH_LED_GPIO`                                | `21`                        | WS2812 data line (GPIO26-32 are octal-PSRAM pads — unusable).                                              |
+| `PATCH_LED_POWER_GPIO`                          | `45`                        | WS2812 ring power-rail enable (driven HIGH or the ring is dark).                                           |
+| `PATCH_LED_RING_COUNT`                          | `12`                        | LED count.                                                                                                 |
+| `PATCH_MIC_BCLK_GPIO` / `WS_GPIO` / `DIN_GPIO`  | `13` / `14` / `15`          | Codec ADC I2S input bus (clock secondary).                                                                 |
+| `PATCH_SPK_BCLK_GPIO` / `WS_GPIO` / `DOUT_GPIO` | `8` / `7` / `10`            | Codec DAC I2S output bus (clock secondary).                                                                |
+| `PATCH_CODEC_I2C_SDA_GPIO` / `SCL_GPIO`         | `5` / `6`                   | AIC3204 codec I2C control bus.                                                                             |
+| `PATCH_CODEC_I2C_ADDR`                          | `0x18`                      | AIC3204 7-bit I2C address.                                                                                 |
+| `PATCH_XMOS_RESET_GPIO`                         | `4`                         | XMOS DSP reset (active-high pulse, then low = run).                                                        |
+| `PATCH_SPK_AMP_EN_GPIO`                         | `47`                        | Internal speaker amplifier enable (HIGH during a session).                                                 |
+| `PATCH_MUTE_SWITCH_GPIO`                        | `3`                         | Hardware mute slide switch input.                                                                          |
+| `PATCH_TOUCH_CHANNEL`                           | `5`                         | Capacitive touch channel for the button.                                                                   |
+| `PATCH_TOUCH_THRESHOLD_PCT`                     | `30`                        | % drop from baseline that registers as a press.                                                            |
 
 Run `idf.py menuconfig` → "Patch voice device" → "GPIO" / top-level keys.
 

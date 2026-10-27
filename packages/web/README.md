@@ -48,7 +48,7 @@ stub data.
 ## Dev workflow
 
 ```bash
-# 1. Bring up the test stack (server + daemon + Caddy on :13000):
+# 1. Bring up the test stack (server + host + Caddy on :13000):
 docker compose -f docker-compose.test.yml up -d --build
 
 # 2. Run the SPA dev server (proxies /api and /ws to localhost:3000):

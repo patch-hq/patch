@@ -35,7 +35,7 @@ apps/mobile/android/app/build/
 apps/mobile/ios/build/
 deploy/certs/
 
-# daemon dev runtime state + sockets (NOT all gitignored — sockets break the EAS tarball copy)
+# host dev runtime state + sockets (NOT all gitignored — sockets break the EAS tarball copy)
 .dev-data/
 .dev-data-*/
 .patch/

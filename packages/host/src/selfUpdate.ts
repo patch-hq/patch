@@ -386,7 +386,7 @@ export interface ArtifactWait {
 }
 
 /**
- * A deploy publishes the Linux daemon first and the Mac one after its SSH build
+ * A deploy publishes the Linux host first and the Mac one after its SSH build
  * (the release workflow's mac job), so for a while a Mac sees a newer version
  * with no artifact for it. That is not a failure and not worth an error: poll
  * quietly — every `pollMs`, then every `slowPollMs` once `windowMs` has passed —

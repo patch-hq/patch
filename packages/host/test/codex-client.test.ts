@@ -73,7 +73,7 @@ describe('Codex notifications without params', () => {
   // without one. CodexNotification declares `params` as always present, and
   // every subscriber reads it straight off (codexBackend's run loop opens with
   // `message.params.threadId`) — so a params-less line used to throw a
-  // TypeError out of the readline handler and take the whole daemon down with
+  // TypeError out of the readline handler and take the whole host down with
   // it, killing every chat on the host.
   const fakeServer = `
     import { createInterface } from 'node:readline';

@@ -2,9 +2,9 @@
 //
 // Per spec/16-voice-device.md §Patch-initiated calls (ringing):
 //
-//   1. Daemon sends `ring`. Device plays chime + LED rotation.
-//   2. User presses button → `ring_accepted` → daemon sends `session_start`.
-//   3. Or 30s elapses with no input → `ring_dismissed`, daemon falls through
+//   1. Host sends `ring`. Device plays chime + LED rotation.
+//   2. User presses button → `ring_accepted` → host sends `session_start`.
+//   3. Or 30s elapses with no input → `ring_dismissed`, host falls through
 //      to voicemail.
 //
 // Pure C, host-testable. Time is injected by the caller (`now_ms`) so the

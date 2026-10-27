@@ -1,5 +1,5 @@
 // Acceptance tests for the budgeted provider-switch handoff, wired through
-// Daemon (spec/04 § Provider switches — Handoff budget). The planning core is
+// Host (spec/04 § Provider switches — Handoff budget). The planning core is
 // covered in handoffPlan.test.ts; these pin the end-to-end behaviour of the
 // wiring: window from the model limits, ledger and recent window, persisted
 // handoff state, one overflow re-plan, verification and recovery. Mocks follow

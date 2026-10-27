@@ -100,7 +100,7 @@ dropped. `agent_response` checks carry no images.
 }
 ```
 
-`model` is any model from the chat's own host's catalogue (`02-daemon.md` §
+`model` is any model from the chat's own host's catalogue (`02-host.md` §
 Model catalogue) — the same catalogue a job's `action.model` is validated
 against (`08-triggers-and-jobs.md` § Action). Patch runs the check itself, as
 a single tool-less turn on whichever backend that model belongs to (Claude
@@ -220,7 +220,7 @@ agent's full reply and a deterministic tool-call tally the host already has
 without a round trip:
 
 ```
-hook.agent_response_check_request  (daemon → server)
+hook.agent_response_check_request  (host → server)
 { hostId, chatId, checkId, folder, specialThread, reply, toolCallsSummary }
 ```
 
@@ -234,7 +234,7 @@ unaggregated — the host decides what each means (§ On the agent's
 response), not the server:
 
 ```
-hook.agent_response_outcome  (server → daemon)
+hook.agent_response_outcome  (server → host)
 { hostId, chatId, checkId, results: HookRunResult[] }
 ```
 
@@ -312,7 +312,7 @@ blocking a send.
   quiet as a job's own fire into it. More than one hook blocking the SAME
   turn combines into one resubmit naming each.
 - **Advise**: no redo. The analysis is deferred — carried as a
-  `<system-reminder>` block (spec/02-daemon.md § System-reminder disclosure)
+  `<system-reminder>` block (spec/02-host.md § System-reminder disclosure)
   prepended to whichever turn the chat runs NEXT, whatever kind that turns
   out to be (a person's reply, a job's fire, another hook's own resubmit),
   consumed once the moment that turn is accepted. The row is a sibling

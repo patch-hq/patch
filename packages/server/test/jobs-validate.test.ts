@@ -83,7 +83,7 @@ describe('assertValidJobBody', () => {
   // `cron.validate('*/0 * * * *')` burns ~5 SECONDS of blocking CPU before
   // answering false — on the single-threaded Fastify event loop, so for those
   // five seconds the server answers nothing at all: no surface, no webhook, no
-  // daemon frame. Job writes come from the REST route, the daemon UDS, direct
+  // host frame. Job writes come from the REST route, the host UDS, direct
   // file loads AND the in-chat `patch_job_create` bridge, so an agent inventing
   // `*/0` freezes the box. The cheap structural check has to run first.
   it('refuses a zero-step cron without handing it to node-cron to chew on', () => {

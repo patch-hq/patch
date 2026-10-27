@@ -1,4 +1,4 @@
-// The daemon's git SSH identity (spec/02 § Terminal sessions).
+// The host's git SSH identity (spec/02 § Terminal sessions).
 //
 // HISTORY — this file used to assert a blast radius that no longer exists in
 // the form it was written for. A containerised host could only see what the
@@ -53,7 +53,7 @@ describe('daemon compose — git SSH identity', () => {
   });
 
   it.each(composeFiles)('%s declares no patch-daemon service', (file) => {
-    // Not a style preference: a patch-daemon block here would mean the daemon
+    // Not a style preference: a patch-daemon block here would mean the host
     // is being run two ways at once, both claiming ~/.patch and the control
     // socket.
     expect(readFileSync(join(repoRoot, file), 'utf8')).not.toMatch(/^\s{2}patch-daemon:\s*$/m);

@@ -4,8 +4,8 @@
 //   1. Generate Ed25519 keypair (libsodium), persist private key to NVS.
 //   2. POST /api/auth/pair/start  body: { surfacePublicKey, surfaceKind:"voice-device", deviceId, label }
 //      → receives a short pairing nonce. Display it (LED ring colour code +
-//      log it; the user prints it from the daemon's UI to confirm). The QR
-//      itself is rendered on the daemon's web UI side; the device's role
+//      log it; the user prints it from the host's UI to confirm). The QR
+//      itself is rendered on the host's web UI side; the device's role
 //      here is to publish its pubkey + nonce and wait.
 //   3. Poll /api/auth/pair/complete?nonce=...  every 1.5s for up to 5 min,
 //      until the body returns the signed credential.
@@ -166,7 +166,7 @@ bool patch_pair_qr_link(const char *device_id,
 
     if (!pair_poll_complete(base, nonce, surface_jwt, jwt_cap)) return false;
 
-    // Daemon host = same host as the patch server in v1 (single-host topology
+    // Host host = same host as the patch server in v1 (single-host topology
     // per spec/02-daemon.md and spec/11-deployment.md). Port + TLS from
     // Kconfig.
     snprintf(daemon_host, host_cap, "%s", CONFIG_PATCH_DAEMON_HOST);

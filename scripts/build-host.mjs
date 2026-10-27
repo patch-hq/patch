@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// `pnpm build:host` — the daemon's installable artifact, one per OS/arch.
+// `pnpm build:host` — the host's installable artifact, one per OS/arch.
 //
 // spec/11 § Host installation + spec/18 § Two shipping shapes. Each artifact
 // is a directory (and a tarball of it) holding exactly:

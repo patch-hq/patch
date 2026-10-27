@@ -44,7 +44,7 @@ export interface ClaudeSessionStoreOptions {
    * what Claude Code writes never crosses the SDK stream — the `No response
    * requested.` it inserts when it resumes a session that ended on an
    * unanswered turn is written straight to the transcript — so this is the
-   * only place the daemon gets to see it (spec/02 § Per-turn process).
+   * only place the host gets to see it (spec/02 § Per-turn process).
    */
   onAppend?: (entries: readonly SessionStoreEntry[]) => void;
 }

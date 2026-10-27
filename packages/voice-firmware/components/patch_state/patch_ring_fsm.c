@@ -10,7 +10,7 @@ void prf_init(prf_t *r) {
 
 prf_out_t prf_on_ring(prf_t *r, int64_t now_ms) {
     if (!r) return PRF_OUT_NONE;
-    // Re-arming a ring is allowed (daemon could re-issue if it's the same
+    // Re-arming a ring is allowed (host could re-issue if it's the same
     // chat); we just reset the timer.
     r->state = PRF_RINGING;
     r->started_at_ms = now_ms;

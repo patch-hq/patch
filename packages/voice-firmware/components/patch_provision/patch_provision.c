@@ -8,7 +8,7 @@
 // QR-link pairing: implements the surface side of spec/10-auth.md §Surface
 // linking. Generates Ed25519 keypair (mbedtls), POSTs the pubkey to
 // /api/auth/pair/start, then a paired surface signs the credential and the
-// daemon returns it via /api/auth/pair/complete; we poll.
+// host returns it via /api/auth/pair/complete; we poll.
 
 #include "patch_provision.h"
 

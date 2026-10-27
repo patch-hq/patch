@@ -279,7 +279,7 @@ describe('ChatRoute — patch_delegate tool row', () => {
     seed();
     emitDelegateCall('patch_delegate', { id: 'sub-1', label: 'draft the email' });
     getDelegateHistory.mockRejectedValueOnce(new Error('daemon_timeout'));
-    // main.tsx runs queries with retry: 1; each attempt can sit out a 5s daemon timeout.
+    // main.tsx runs queries with retry: 1; each attempt can sit out a 5s host timeout.
     renderChat(1);
     fireEvent.click(screen.getByTestId('delegate-open-transcript'));
     await waitFor(() => {

@@ -6,8 +6,8 @@ description: Drive the `patch` command line from inside a chat — chats, hosts,
 # patch CLI
 
 `patch` is the command line of the patch coordination layer. It is installed
-alongside the daemon on this machine and this skill is rewritten by the daemon
-on every install and self-update, so it always describes the daemon it sits next
+alongside the host on this machine and this skill is rewritten by the host
+on every install and self-update, so it always describes the host it sits next
 to (`spec/17-cli.md` § Skill).
 
 ## Rules
@@ -15,7 +15,7 @@ to (`spec/17-cli.md` § Skill).
 1. **Always pass `--json`.** Human-readable output is for humans; it is not a
    stable contract. Every command accepts `--json` and emits one JSON document.
 2. **The default host is this machine.** A command with no `--host` acts on the
-   daemon running here, over its local Unix socket at `~/.patch/daemon.sock`.
+   host running here, over its local Unix socket at `~/.patch/daemon.sock`.
    Naming another machine with `--host` routes through the server instead.
 3. **`<id>` takes a unique prefix.** Chat and job ids are ULIDs; any unambiguous
    prefix works.
@@ -67,7 +67,7 @@ patch accounts disconnect <backend> <accountId> --json  # take it out of every h
 patch hosts models [--host H] --json             # this machine's model catalogue
 patch hosts install <component> [--host H] --json    # e.g. kokoro (~340 MB), whisper (~1.5 GB)
 patch hosts uninstall <component> [--host H] --json
-patch hosts update [--host H] --json             # apply an available daemon update
+patch hosts update [--host H] --json             # apply an available host update
 patch hosts add --json                           # a registration code for a NEW machine
 patch hosts remove --host H --json               # revoke a machine (confirmed)
 ```
@@ -96,8 +96,8 @@ patch surfaces revoke <id> --json
 
 ```
 patch doctor --json      # server reachability, per-host status, backlog, errored chats
-patch logs [--host H]    # tail a machine's daemon log
-patch host status --json                         # is this machine's daemon reachable
+patch logs [--host H]    # tail a machine's host log
+patch host status --json                         # is this machine's host reachable
 ```
 
 Start with `patch doctor --json` whenever something is unreachable: it answers
@@ -112,4 +112,4 @@ Start with `patch doctor --json` whenever something is unreachable: it answers
   there, with that machine's files and tools.
 - **Before spawning on a machine you have not used**: `patch hosts folders
 --host H --json` to see the folders it publishes.
-- **Never** poll in a tight loop. These commands hit a live daemon.
+- **Never** poll in a tight loop. These commands hit a live host.

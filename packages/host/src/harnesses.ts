@@ -1,4 +1,4 @@
-// The daemon's harness registry (spec/02 § Agent backends).
+// The host's harness registry (spec/02 § Agent backends).
 //
 // `@patch/wire`'s PROVIDERS table holds the plain facts about a provider (id,
 // model prefix, permission modes). This holds the host-side behaviour that

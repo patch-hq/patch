@@ -2,7 +2,7 @@
 // host mid-request and the Claude Code call dies with "your computer went to
 // sleep mid-response". One shared `caffeinate` child covers every concurrent
 // turn: `-i` blocks idle sleep, `-s` blocks system sleep on AC, and `-w <pid>`
-// makes it exit by itself if the daemon dies without releasing.
+// makes it exit by itself if the host dies without releasing.
 
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import type { Logger } from 'pino';

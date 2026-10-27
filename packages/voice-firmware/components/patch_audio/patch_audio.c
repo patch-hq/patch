@@ -366,7 +366,7 @@ void patch_audio_miccap(int scale_pct) {
 }
 
 // Play the embedded speech through the FEEDER / stream-buffer path (the exact
-// path daemon TTS uses: prime → fill-then-pad → DMA), locally. A/B vs
+// path host TTS uses: prime → fill-then-pad → DMA), locally. A/B vs
 // patch_audio_play_embedded_speech() (direct path): same data, isolates whether
 // the WS/feeder pipeline is what makes streamed speech crackle.
 static void play_feeder_task(void *arg);   // defined below
@@ -386,7 +386,7 @@ void patch_audio_play_embedded_speech_via_feeder(void) {
     size_t sent = 0;
     while (sent < total && atomic_load(&s_active)) {
         size_t chunk = total - sent;
-        if (chunk > 3840) chunk = 3840;   // ~ one daemon 1920-sample frame
+        if (chunk > 3840) chunk = 3840;   // ~ one host 1920-sample frame
         size_t w = xStreamBufferSend(s_play_buf, p + sent, chunk, pdMS_TO_TICKS(200));
         sent += w;
     }
@@ -418,7 +418,7 @@ static void play_feeder_task(void *arg) {
     //      a long silence gap mid-speech, which is exactly the windy artifact);
     //   2) on a momentary underrun just emit ONE short silence frame and keep
     //      going; on a partial read play exactly what's there (never pad).
-    // Prime ~700 ms before draining: a fat cushion the daemon's burst fills up
+    // Prime ~700 ms before draining: a fat cushion the host's burst fills up
     // front, so TCP/scheduling jitter in the rest of the stream can't dry the
     // feeder (the real "windy"). Fixed, not half-the-buffer, so a big buffer
     // doesn't add a multi-second startup delay.
@@ -464,7 +464,7 @@ static void play_feeder_task(void *arg) {
             primed = true;
         }
         // HA fill-then-pad: gather ONE full DMA block, looping reads over a small
-        // budget so WS data that trickles in (the daemon's frames arrive split /
+        // budget so WS data that trickles in (the host's frames arrive split /
         // bursty over the busy WS task) is assembled into a WHOLE block instead of
         // padding the tail with silence on the first short read. A per-block
         // silence splice is inaudible as a "gap" (n>0, not counted) but stacks up
@@ -663,7 +663,7 @@ static void on_ws_event(void *handler_args, esp_event_base_t base,
             static int s_rx_frame_op = 0;
             if (d->op_code != 0) s_rx_frame_op = d->op_code;
             const int frame_op = s_rx_frame_op;
-            if (frame_op == 0x2) {  // binary frame == TTS PCM16 (48 kHz from daemon)
+            if (frame_op == 0x2) {  // binary frame == TTS PCM16 (48 kHz from host)
                 // The AIC3204 is configured for 32-bit I2S slots, so widen each
                 // PCM16 sample to a left-justified int32 before writing. Done
                 // in bounded chunks to keep stack use small on the WS task.
@@ -693,7 +693,7 @@ static void on_ws_event(void *handler_args, esp_event_base_t base,
                                      (unsigned)s_rx_csum, (unsigned)s_rx_ccnt);
                         }
                     }
-                    // The daemon sends CLEAN 48 kHz PCM (resampled host-side from
+                    // The host sends CLEAN 48 kHz PCM (resampled host-side from
                     // Kokoro's 24 kHz with a 63-tap FIR), matching the 48 kHz
                     // speaker bus. We do NOT touch the DAC here — instead push the
                     // raw mono PCM16 into the playback stream buffer and let the

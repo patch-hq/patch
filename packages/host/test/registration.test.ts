@@ -776,7 +776,7 @@ describe('registerHost (QR pairing flow)', () => {
   });
 
   it('retries (does NOT crash) when register/start returns 400 before the server is bootstrapped', async () => {
-    // Production/Docker: the daemon boots before the server has an account
+    // Production/Docker: the host boots before the server has an account
     // bootstrapped. register/start fails (400) the first 2 attempts, then the
     // round-trip succeeds. registerHost must retry — never throw — and end
     // up with the surface-signed daemonKey.

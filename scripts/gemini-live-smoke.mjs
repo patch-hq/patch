@@ -24,7 +24,7 @@
 //
 // Needs GEMINI_API_KEY in the environment, or falls back to reading it out of
 // this Hetzner host's patch-daemon systemd unit (~/.config/systemd/user/
-// patch-daemon.service), which is where it already lives for the real daemon.
+// patch-daemon.service), which is where it already lives for the real host.
 // Real spend against the `tc-patch` GCP project — kept to these two short
 // exchanges, not a loop.
 

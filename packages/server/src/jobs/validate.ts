@@ -112,8 +112,8 @@ export function assertValidJobBody(body: JobCreateBody | JobPatchBody): void {
     // zero by walking a range that never advances: `cron.validate('*/0 * * * *')`
     // burns SECONDS of blocking CPU before answering false (~5s idle, ~19s on a
     // loaded box). That happens on the single-threaded event loop, so the server
-    // answers nothing at all meanwhile — no surface, no webhook, no daemon
-    // frame — and a job write is reachable from the REST route, the daemon UDS,
+    // answers nothing at all meanwhile — no surface, no webhook, no host
+    // frame — and a job write is reachable from the REST route, the host UDS,
     // a file load and the in-chat `patch_job_create` bridge alike, so an agent
     // that invents `*/0` freezes the box for everyone.
     //

@@ -42,8 +42,8 @@ Full round trip exercised:
 ```
 surface WS client (WireTestClient)
   → server /ws hub (InboundHostLink)
-    → server ↔ daemon serverLink WS (real createServerLink)
-      → real Daemon (chatRunner) → mock SDK backend
+    → server ↔ host serverLink WS (real createServerLink)
+      → real Host (chatRunner) → mock SDK backend
     ← back out to the surface WS
 ```
 
@@ -98,7 +98,7 @@ The `test:e2e` suite above asserts on **wire events** and never renders the UI. 
 5. **multi-turn ordering** — two user turns + two replies interleave in send order.
 6. **send-while-running** — a turn sent while running renders `Queued`, drains, and both replies render.
 7. **reconnect/replay** — a socket drop + reconnect replays the persisted history; the `[voice • web]`-tagged copy reconciles against the optimistic voice echo by content (no duplicate) and the transcript is rebuilt.
-8. **daemon-offline send** — renders "queued — will send when the agent reconnects", then clears and shows the reply once the host returns (same `localId` redelivered).
+8. **host-offline send** — renders "queued — will send when the agent reconnects", then clears and shows the reply once the host returns (same `localId` redelivered).
 
 ### Run it
 

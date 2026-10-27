@@ -65,7 +65,7 @@ export const WatchRecord = z
     timeoutSec: z.number().int().positive().optional(),
     /** Set once the host killed the task for exceeding `timeoutSec`. */
     timedOut: z.boolean().optional(),
-    /** Per-watch check-in interval (seconds), set by the agent at start or by the user in the bar; absent = the daemon default. */
+    /** Per-watch check-in interval (seconds), set by the agent at start or by the user in the bar; absent = the host default. */
     checkInSec: z.number().int().positive().optional(),
     /** When the periodic check-in last went to the chat. */
     lastCheckInAt: z.number().int().optional(),

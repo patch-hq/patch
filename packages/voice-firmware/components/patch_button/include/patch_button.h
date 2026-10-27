@@ -5,7 +5,7 @@
 //     ring; long press = dismiss ring / end session). NOT a capacitive pad.
 //   - One mute switch (hardware level — when on, the I2S mic line is cut
 //     by the audio codec, but firmware also detects the GPIO state to
-//     drive LEDs and inform the daemon).
+//     drive LEDs and inform the host).
 //
 // Events are dispatched via a registered callback (`patch_button_handler_t`)
 // from a dedicated FreeRTOS task; the callback runs in that task context, not

@@ -1,5 +1,5 @@
 // The finished agent browser through the real path an agent uses: MCP tool ->
-// control socket -> Daemon -> a real Chromium. One test per capability group;
+// control socket -> Host -> a real Chromium. One test per capability group;
 // the browser behaviour itself is covered in browser-agent.test.ts, this proves
 // the tools are wired, validated and return what an agent can use. Also the
 // per-chat Stop and the status a chat's surfaces draw it from.

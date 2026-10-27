@@ -44,7 +44,7 @@ static void test_encode_buffer_overflow(void) {
 
 static void test_decode_session_start(void) {
     pcf_inbound_t inb;
-    // The daemon pushes the per-session voice token alongside sessionId
+    // The host pushes the per-session voice token alongside sessionId
     // (spec/16 §Wire protocol "Voice-token delivery") plus the accountId +
     // chatId the device must declare on audio.session_start so its identity
     // matches the token's claims. All four are required.
@@ -72,7 +72,7 @@ static void test_decode_session_start_requires_voice_token(void) {
     pcf_inbound_t inb;
     // No fallback — a session_start missing voiceToken (or accountId/chatId) is
     // a protocol error; the device would otherwise open the audio WSS with an
-    // empty token / wrong identity, which the daemon rejects with auth_failed.
+    // empty token / wrong identity, which the host rejects with auth_failed.
     const char *j = "{\"type\":\"session_start\",\"sessionId\":\"abc-123\","
                     "\"accountId\":\"a\",\"chatId\":\"c\"}";
     ASSERT_EQ_INT(pcf_decode(j, strlen(j), &inb), PCF_ERR_MISSING);

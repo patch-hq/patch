@@ -6057,7 +6057,7 @@ button.view-file-download {
   color: var(--ink-3);
 }
 /* Live-dictation mirror (spec/07 § Dictation into the composer). While the mic
-   is running, the daemon's interim transcript is drawn GREYED after the text
+   is running, the host's interim transcript is drawn GREYED after the text
    already in the field, in a box that mirrors the textarea exactly and sits
    underneath it. The textarea itself goes text-transparent rather than being
    hidden or replaced, so it keeps focus, the caret and every editing gesture
@@ -11490,7 +11490,7 @@ button.background-task-bar-row:hover .background-task-bar-description {
   margin: 0;
   padding: 0;
 }
-/* The list is loaded from the daemon's live catalogue, so the pop-up has a
+/* The list is loaded from the host's live catalogue, so the pop-up has a
    loading and an error state — NO FALLBACK list to show instead. */
 .model-popup-status {
   padding: 6px 8px;
@@ -12471,7 +12471,7 @@ button.background-task-bar-row:hover .background-task-bar-description {
 }
 
 /* ---- Terminal drawer (spec/14 § Terminal) --------------------------------
-   A shell on the DAEMON host, docked bottom-right of the chat panel. Closed by
+   A shell on the host, docked bottom-right of the chat panel. Closed by
    default as a small corner button; open, a drawer that never covers the
    composer (it sits above it, inset from the panel edge).
 

@@ -4,7 +4,7 @@
 // F1-11 is a wire-contract assertion about the device's audio-WSS handshake:
 //
 //   1. The device receives its per-session voice token on the session_start
-//      CONTROL frame from the daemon (never mints/fetches it, never calls the
+//      CONTROL frame from the host (never mints/fetches it, never calls the
 //      server's voice-token endpoint).
 //   2. The device presents that exact token, plus surfaceKind "device" and
 //      surfaceHasAec false, when opening the audio WSS.
@@ -14,9 +14,9 @@
 // pcf_encode_audio_session_start() (patch_control_frames). The firmware's
 // audio task (patch_audio.c, WEBSOCKET_EVENT_CONNECTED) calls that SAME
 // function to build the frame it sends, so asserting it here exercises the
-// exact shipped wire contract — no daemon, no flashed board, no test/ship
+// exact shipped wire contract — no host, no flashed board, no test/ship
 // drift. The token-provenance half of the contract (token comes from the
-// daemon control frame, not minted on-device) is proven by decoding a real
+// host control frame, not minted on-device) is proven by decoding a real
 // session_start control frame and feeding ITS token straight into the audio
 // envelope: the device code path has no other source for the token, and there
 // is no HTTP-mint function anywhere in the firmware tree to call.
@@ -27,7 +27,7 @@
 #include <string.h>
 
 // Build the canonical audio.session_start envelope and assert the exact bytes.
-// This is the literal wire frame the daemon's audio server validates against
+// This is the literal wire frame the host's audio server validates against
 // packages/wire/src/audio.ts AudioSessionStartEvent.
 static void test_audio_session_start_exact_wire(void) {
     char buf[1536];
@@ -75,14 +75,14 @@ static void test_audio_session_start_is_device_no_aec(void) {
 }
 
 // End-to-end token provenance: the per-session voice token the device replays
-// on the audio WSS is the token the daemon pushed on the session_start CONTROL
+// on the audio WSS is the token the host pushed on the session_start CONTROL
 // frame — decoded by pcf_decode, then handed straight to the audio encoder.
 // This is the device's ONLY source for the token (main.c copies f->voice_token
 // from the decoded control frame into the audio session cfg); there is no
 // HTTP-mint path in the firmware. So a verbatim match here proves the device
 // neither mints nor fetches its own token.
 static void test_audio_token_is_daemon_pushed_verbatim(void) {
-    // A real daemon→device session_start control frame carrying a JWT-shaped
+    // A real host→device session_start control frame carrying a JWT-shaped
     // voice token plus the accountId/chatId the token is bound to.
     const char *control =
         "{\"type\":\"session_start\",\"sessionId\":\"sess-xyz\","
@@ -115,7 +115,7 @@ static void test_audio_token_is_daemon_pushed_verbatim(void) {
 // assertion ("device makes NO direct call to the server's voice-token
 // endpoint") is structurally guaranteed: the device's only token source is the
 // control-frame field above. A long token (a real ~350-byte JWT) must survive
-// the encode intact — proving the device replays whatever the daemon pushed
+// the encode intact — proving the device replays whatever the host pushed
 // without re-minting or truncating.
 static void test_audio_token_long_jwt_roundtrip(void) {
     char token[400];
@@ -136,14 +136,14 @@ static void test_audio_token_long_jwt_roundtrip(void) {
 // Config-bug guards (no fallback, per spec/principles.md): surfaceKind=="device"
 // REQUIRES a deviceId, and the daemon-pushed token must be present before the
 // audio session can open. Empty values must fail loud — NOT emit an invalid
-// frame that the daemon would reject mid-handshake.
+// frame that the host would reject mid-handshake.
 static void test_audio_session_start_requires_device_and_token(void) {
     char buf[1536];
     size_t n = 0;
     // Empty deviceId — would violate wire validateDeviceIdCoupling.
     ASSERT_EQ_INT(pcf_encode_audio_session_start(
         buf, sizeof buf, &n, "s", "a", "sid", "", "c", "tok"), PCF_ERR_MISSING);
-    // Empty token — the daemon never pushed one yet.
+    // Empty token — the host never pushed one yet.
     ASSERT_EQ_INT(pcf_encode_audio_session_start(
         buf, sizeof buf, &n, "s", "a", "sid", "dev1", "c", ""), PCF_ERR_MISSING);
     // NULL args rejected.

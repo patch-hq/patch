@@ -1556,7 +1556,7 @@ async function startHost(
     });
     return turnDetector;
   };
-  // Meeting mode (meeting.ts). Built once the Daemon exists; the link handler and
+  // Meeting mode (meeting.ts). Built once the Host exists; the link handler and
   // the preprocessInput hook below only run after full wiring.
   let meetings: MeetingManager | undefined;
   // Host-owned folder registry (spec/04 § Folders). Assigned once the host

@@ -27,7 +27,7 @@
 #   versions/<release>/   unpacked releases (the current one and two before it)
 #   current               -> versions/<release>, swapped atomically
 #   data/                 the server's state
-#   downloads/            the update channel (daemon, APK, desktop)
+#   downloads/            the update channel (host, APK, desktop)
 #   server.env            config + secrets, mode 600
 #   logs/server.log
 #

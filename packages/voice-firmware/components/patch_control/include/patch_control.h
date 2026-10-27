@@ -1,6 +1,6 @@
 // Persistent control WSS client.
 //
-// Connects to wss://<daemon>/device/control with the device's EdDSA-JWT
+// Connects to wss://<host>/device/control with the device's EdDSA-JWT
 // surface credential as a Bearer header. On open, sends `hello`. Receives
 // session_start / ring / led / error frames per spec/16-voice-device.md.
 //
@@ -33,7 +33,7 @@ typedef struct {
 
 void patch_control_start(const patch_control_cfg_t *cfg);
 
-// Send a device→daemon control frame. Returns false if not connected.
+// Send a device→host control frame. Returns false if not connected.
 bool patch_control_send_wake_detected(void);
 bool patch_control_send_session_end(pcf_session_end_reason_t reason);
 bool patch_control_send_ring_accepted(void);

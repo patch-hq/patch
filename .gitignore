@@ -37,13 +37,13 @@ apps/mobile/android/app/build/
 apps/mobile/ios/build/
 deploy/certs/
 
-# local dev bring-up data dirs (minted credentials, daemon key). Cover every
+# local dev bring-up data dirs (minted credentials, host key). Cover every
 # per-run suffix variant (.dev-data-f1, -notify, -td2, -ui, …) — these hold
 # private keys + credentials and must NEVER be committed.
 .dev-data/
 .dev-data-*/
 
-# daemon dev runtime state (threads/sock/key created by dev runs)
+# host dev runtime state (threads/sock/key created by dev runs)
 .patch/
 **/.patch/
 

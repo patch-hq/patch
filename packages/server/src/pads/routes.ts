@@ -11,7 +11,7 @@
 //      `patch_pad_*` tools (create / update / reply / list / collect).
 //
 // Send draws a picture of every change, then delivers the batch into the
-// owning chat as a user turn over the daemon link. NO FALLBACK: a picture that
+// owning chat as a user turn over the host link. NO FALLBACK: a picture that
 // cannot be drawn or a chat that is gone fails the Send and the changes stay
 // pending.
 //

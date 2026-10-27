@@ -12,14 +12,14 @@ surfaces:
 | Server WS (TCP)     | `:3002/control` (HMAC-SHA256 over WS)                                                 | `PATCH_INTERNAL_TOKEN`                                                                    | `@patch/server` upstream link                  |
 | Audio WSS (TCP)     | `ws://daemon:3003/audio/<sessionId>` inside the box; `wss://...` externally via Caddy | one-shot voice token (HMAC over `PATCH_INTERNAL_TOKEN`, 5-min expiry, JTI replay-guarded) | surface voice overlays + voice-device firmware |
 
-See `spec/02-daemon.md` and `spec/03-wire-protocol.md` for the protocol
+See `spec/02-host.md` and `spec/03-wire-protocol.md` for the protocol
 contract; the audio WSS frame catalogue lives in `@patch/wire/audio` (see
 `spec/07-voice-app.md`).
 
 ## The installable artifact
 
 The host ships as a signed, installable artifact per OS/arch — not a container
-(`spec/02-daemon.md` § Installation, `spec/11-deployment.md` § Host
+(`spec/02-host.md` § Installation, `spec/11-deployment.md` § Host
 installation). Build them all with:
 
 ```sh
@@ -263,17 +263,17 @@ The server-daemon WS upstream link can call these on behalf of any surface
 event it receives (group 7 wires the protocol mapping; group 5 only ships
 the action layer).
 
-## File layout (daemon-local)
+## File layout (host-local)
 
 ```
 ~/.patch/
   daemon.sock              # UDS for control HTTP
-  daemon.key               # signed daemon credential, mode 0600
+  daemon.key               # signed host credential, mode 0600
   chats/
     <chatId>/
       meta.json            # { chatId, folder, name, claudeSessionId, nextSeq, … }
 ~/.claude/projects/<encoded-folder>/<sessionId>.jsonl
-                           # Claude Code's native history — daemon reads, never writes
+                           # Claude Code's native history — host reads, never writes
 ```
 
 `nextSeq` is persisted with every emit (atomic write via temp+rename), so
@@ -283,7 +283,7 @@ the action layer).
 
 ```
 client → ws://daemon:3002/control     (TCP upgrade)
-server (daemon) → { type: 'challenge', nonce: <hex> }
+server (host) → { type: 'challenge', nonce: <hex> }
 client (server) → { type: 'challenge_response', mac: HMAC-SHA256(token, nonce) }
 server → { type: 'challenge_ok' }   on success
 server → close 4401 'bad token'     on failure
@@ -300,7 +300,7 @@ implement the client side without re-deriving the construction.
 | `PATCH_INTERNAL_TOKEN`      | yes                         | Shared HMAC secret for the server-daemon WS link.                                                                            |
 | `PATCH_DAEMON_LOCAL_KEY`    | yes                         | Bearer for the UDS HTTP `/chats*` endpoints.                                                                                 |
 | `PATCH_DAEMON_SOCKET`       | no (`~/.patch/daemon.sock`) | UDS path.                                                                                                                    |
-| `PATCH_HOME`                | no (`~/.patch`)             | Override daemon-local state root (test hook).                                                                                |
+| `PATCH_HOME`                | no (`~/.patch`)             | Override host-local state root (test hook).                                                                                  |
 | `PATCH_DAEMON_HEALTHZ_PORT` | no (off)                    | TCP /healthz port; unset opens no TCP port (socket only). Docker sets it.                                                    |
 | `PATCH_DAEMON_HEALTHZ_HOST` | no (`127.0.0.1`)            | TCP /healthz host.                                                                                                           |
 | `PATCH_DAEMON_WS_PORT`      | no (`3002`)                 | TCP server-daemon WS port.                                                                                                   |
@@ -328,7 +328,7 @@ it is never the default and dev/integration must run `SDK_BACKEND=real`.)
 ## MCP server (`patch-tools-server`)
 
 A stdio MCP server is launched as a child process by the SDK on every
-`query()` (per `spec/02-daemon.md`). It connects back to the host over
+`query()` (per `spec/02-host.md`). It connects back to the host over
 the UDS HTTP `/internal/*` endpoints — same-host, mode-0600 socket, no
 auth (per spec/02 "Daemon, MCP child, and `claude` query all run as the
 same user on the same host").

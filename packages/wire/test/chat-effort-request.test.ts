@@ -6,7 +6,7 @@ import { WireDecodeError } from '../src/errors.js';
 
 // spec/04 § Effort — Claude's thinking-effort override is changeable mid-chat.
 // Two halves ride the wire: the surface's `chat.effort_request`, and the
-// daemon's acknowledgement, which is the `effort` it now carries on every
+// host's acknowledgement, which is the `effort` it now carries on every
 // `chat.state`.
 
 describe('chat.effort_request', () => {

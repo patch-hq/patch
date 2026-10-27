@@ -1,7 +1,7 @@
 // Master device state machine for the patch voice device.
 //
 // One state per row in spec/16-voice-device.md §LED ring states. The state is
-// driven by external events (wake-detected, audio session up/down, daemon
+// driven by external events (wake-detected, audio session up/down, host
 // link up/down, mute switch, ring lifecycle) and emits the LED pattern to
 // render.
 //
@@ -37,8 +37,8 @@ typedef enum {
     PDS_EV_WAKE_FIRED,
     PDS_EV_AUDIO_SESSION_OPENED,    // local mic-up streaming
     PDS_EV_AUDIO_SESSION_CLOSED,
-    PDS_EV_TTS_STARTED,             // first daemon→device PCM frame for this session
-    PDS_EV_TTS_ENDED,               // daemon finished or barge-in
+    PDS_EV_TTS_STARTED,             // first host→device PCM frame for this session
+    PDS_EV_TTS_ENDED,               // host finished or barge-in
     PDS_EV_RING_RECEIVED,
     PDS_EV_RING_ACCEPTED,
     PDS_EV_RING_DISMISSED,

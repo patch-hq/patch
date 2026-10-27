@@ -96,7 +96,7 @@ A host being unreachable is a first-class, explained UI state. When a surface kn
 - A persistent banner states that the host is unreachable and that messages will be queued and sent when it reconnects, with a tap-through to Settings → Hosts. It is scoped to that host's chats, and becomes app-level when every host is offline.
 - Navigation stays fully available — the user can read history and browse chats/settings everywhere.
 - A chat on an offline host offers Continue on another host, which moves the chat from the server's copy (`04-chats-and-folders.md` § Moving a chat to another host).
-- The composer stays usable and QUEUES. A message into an existing chat, or an editor save, sent while its host is offline is ACCEPTED, rendered in a distinct "Host offline — will send when it reconnects" state (never worded as merely "Queued", which reads as the agent being busy; a message already queued behind a turn has its chip read "Host offline" while the host is down), buffered, and delivered automatically on reconnect (see Guaranteed input delivery below). It is always accepted and always delivered. Spawning a new chat on an offline host is refused up front instead, because the folder cannot be validated (`04-chats-and-folders.md` § Spawn). Only real-time-only controls that genuinely cannot be queued — a voice note/call, where audio is ephemeral — render visibly disabled with a daemon-offline reason.
+- The composer stays usable and QUEUES. A message into an existing chat, or an editor save, sent while its host is offline is ACCEPTED, rendered in a distinct "Host offline — will send when it reconnects" state (never worded as merely "Queued", which reads as the agent being busy; a message already queued behind a turn has its chip read "Host offline" while the host is down), buffered, and delivered automatically on reconnect (see Guaranteed input delivery below). It is always accepted and always delivered. Spawning a new chat on an offline host is refused up front instead, because the folder cannot be validated (`04-chats-and-folders.md` § Spawn). Only real-time-only controls that genuinely cannot be queued — a voice note/call, where audio is ephemeral — render visibly disabled with a host-offline reason.
 - Only chat messages and document saves queue. A document save from a surface into an offline host is accepted and sent without the read-back or conflict check (they need the host), and says it will save when the host reconnects. Host settings do not queue: a machine's name, Update and Sign in are disabled while it is offline, with no error raised.
 - File browsing, file open and document history on an offline host show a calm "Host offline" in place of the content. A `host_offline` answer is a state, never an error toast or red error line.
 - This state is distinct from WS-`reconnecting` and is shown as such.
@@ -387,7 +387,7 @@ If a host stays offline through multiple cron firings, the user gets a backlog o
 
 A backlog released by a reconnect is still subject to the job's own concurrency limit (`08-triggers-and-jobs.md` § Concurrency) — a host coming back does not let a limited job run its whole backlog at once. This is the difference between the two queues: the pending buffer is per host, capped, and drops its oldest when full; the concurrency queue is per job and unbounded — a fire waits, it is never refused.
 
-In-chat timers use `patch_wake_me` (`02-daemon.md` § Self-wake), which is durable across host restarts: the pending wake is persisted to disk, re-armed on boot, and any wake that came due during downtime fires once on restart. (the agent's native `CronCreate` would NOT survive — it's scoped to one in-process query and dies with the turn — which is exactly why patch disallows it and owns the timer itself; see `principles.md` § Tool ownership.)
+In-chat timers use `patch_wake_me` (`02-host.md` § Self-wake), which is durable across host restarts: the pending wake is persisted to disk, re-armed on boot, and any wake that came due during downtime fires once on restart. (the agent's native `CronCreate` would NOT survive — it's scoped to one in-process query and dies with the turn — which is exactly why patch disallows it and owns the timer itself; see `principles.md` § Tool ownership.)
 
 ### Voice session mid-disconnect
 
@@ -411,6 +411,6 @@ In-chat timers use `patch_wake_me` (`02-daemon.md` § Self-wake), which is durab
 ## Cross-refs
 
 - Sequence numbering on events: `03-wire-protocol.md`
-- Host resume mechanics: `02-daemon.md`, `04-chats-and-folders.md`
+- Host resume mechanics: `02-host.md`, `04-chats-and-folders.md`
 - Surface heartbeat + presence: `05-surfaces.md`
 - Notification-on-disruption: `09-notifications.md`

@@ -7,8 +7,8 @@
 //
 // `boxBuildCommand` below wraps it for a capped local run: a systemd scope with a memory and CPU ceiling, at nice 19 / idle IO,
 // with gradle held to a 3g heap and two workers (the caps bin/publish uses on
-// Hetzner). `--box` makes gradle run without a daemon, so the build cannot be
-// handed to an already-running daemon OUTSIDE that scope, where no cap applies.
+// Hetzner). `--box` makes gradle run without a host, so the build cannot be
+// handed to an already-running host OUTSIDE that scope, where no cap applies.
 //
 // Why it exists: EAS's free plan runs out of Android builds partway through a
 // month, and a native change (a runtimeVersion bump) then has no way to reach a
@@ -99,7 +99,7 @@ export const BOX_CAPS = {
  *
  * `{ cmd, args, env }`; `env` is merged over the caller's environment. The
  * scope is named so the caller can stop it afterwards, taking with it anything
- * the build left running (a Kotlin daemon idles for hours otherwise).
+ * the build left running (a Kotlin host idles for hours otherwise).
  */
 export function boxBuildCommand({ node, script, info, unit, baseGradleOpts }) {
   return {
@@ -133,10 +133,10 @@ export function boxBuildCommand({ node, script, info, unit, baseGradleOpts }) {
 }
 
 /**
- * gradle's argv. On the box (`box`), no daemon — a client happily hands its
- * build to any compatible idle daemon, including one started outside the capped
- * scope — and Kotlin compiles inside that single-use daemon for the same reason.
- * On the Mac a warm daemon is the point.
+ * gradle's argv. On the box (`box`), no host — a client happily hands its
+ * build to any compatible idle host, including one started outside the capped
+ * scope — and Kotlin compiles inside that single-use host for the same reason.
+ * On the Mac a warm host is the point.
  */
 export function gradleArgs({ box }) {
   const args = ['assembleRelease', '--console=plain'];
@@ -221,10 +221,10 @@ function build(info, { box }) {
       env,
     });
   } finally {
-    // The Mac's build runs in a gradle daemon (that is the point of a warm
-    // one), and it and the Kotlin daemon it starts idle for hours holding
-    // gigabytes after the deploy is over. Stop it: the Kotlin daemon exits on
-    // its own once no gradle client is left. The box build has no daemon
+    // The Mac's build runs in a gradle host (that is the point of a warm
+    // one), and it and the Kotlin host it starts idle for hours holding
+    // gigabytes after the deploy is over. Stop it: the Kotlin host exits on
+    // its own once no gradle client is left. The box build has no host
     // (--no-daemon, inside a scope the deploy stops), so nothing to do there.
     if (!box) {
       try {

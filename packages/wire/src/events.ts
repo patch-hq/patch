@@ -1367,7 +1367,7 @@ export const ChatStateEvent = z
      * it, and it doubles as the acknowledgement of a `chat.effort_request`.
      *
      * Three-valued like `model`/`permissionMode` are two-valued, but with an
-     * extra layer: absent means "unchanged, don't guess" (a daemon predating
+     * extra layer: absent means "unchanged, don't guess" (a host predating
      * this field, or a backend with nothing to report); `null` means the chat
      * genuinely has no override set and runs at the model's own default; a
      * level means that override is in force.
@@ -4330,7 +4330,7 @@ export type ChatAccountRequestEvent = z.infer<typeof ChatAccountRequestEvent>;
  *
  * Refused with `chat.error` when the chat's current model is not on the
  * Claude backend (`effort_not_supported`) — Codex has no equivalent option.
- * The daemon answers with the chat's state carrying the new `effort`
+ * The host answers with the chat's state carrying the new `effort`
  * (`ChatStateEvent.effort`), exactly as a model change is acknowledged.
  */
 export const ChatEffortRequestEvent = z

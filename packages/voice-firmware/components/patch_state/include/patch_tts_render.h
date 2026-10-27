@@ -1,7 +1,7 @@
 // TTS playback sample conversion — the device-side rendering step that turns
-// the daemon's inbound TTS audio into the bytes the speaker codec plays.
+// the host's inbound TTS audio into the bytes the speaker codec plays.
 //
-// The daemon streams TTS back as binary PCM16 mono @ 16 kHz (spec/16
+// The host streams TTS back as binary PCM16 mono @ 16 kHz (spec/16
 // §"Audio plane"). The HA Voice PE's TLV320AIC3204 DAC is clocked with 32-bit
 // I2S slots, so every PCM16 sample must be widened to a left-justified int32
 // before it is written to the I2S TX channel — otherwise the DAC plays noise
@@ -11,7 +11,7 @@
 // AUDIBLE (TF1 / F1-audible-1). It is pure arithmetic with no ESP-IDF deps, so
 // the same function the audio task uses (patch_audio.c WEBSOCKET_EVENT_DATA
 // binary branch) is exercised in the host harness — proving the rendered
-// samples carry the daemon's audio at full scale, not zeroed/clipped/silent.
+// samples carry the host's audio at full scale, not zeroed/clipped/silent.
 //
 // NO FALLBACKS: a caller-side buffer that can't hold the block is a bug; the
 // function reports it rather than truncating.

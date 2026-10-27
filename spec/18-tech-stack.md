@@ -24,7 +24,7 @@ No JavaScript files. No Rust on the Node side.
 - Server → container. Built from this repo, deployed by the operator (`11-deployment.md`).
 - Host → native binary artifact per OS/arch. esbuild bundles the host to a single JS file, shipped alongside a pinned Node runtime and the platform's prebuilt native addons, installing on a machine with no toolchain (`11-deployment.md` § Host installation).
   - Native addon: `onnxruntime-node` (Silero VAD), shipped per platform alongside the `silero_vad.onnx` weights it runs (~2 MB — the one model file in the artifact, so VAD works on every host with nothing downloaded). The host's native surface stays at this one addon; each additional native dependency multiplies the build matrix.
-  - The agent backend, the large voice weights (Kokoro, local Whisper) and Python are provisioned on the host after install (`02-daemon.md`).
+  - The agent backend, the large voice weights (Kokoro, local Whisper) and Python are provisioned on the host after install (`02-host.md`).
   - Signed with the project's signing identity; installs an OS service (launchd / systemd user unit).
 
 ## Server
@@ -41,12 +41,12 @@ No JavaScript files. No Rust on the Node side.
 
 ## Host
 
-- @anthropic-ai/claude-agent-sdk loaded in-process, pointed at the host's own Claude Code install via `pathToClaudeCodeExecutable`, so a host runs the same `claude` the user runs (`02-daemon.md` § Agent backends).
+- @anthropic-ai/claude-agent-sdk loaded in-process, pointed at the host's own Claude Code install via `pathToClaudeCodeExecutable`, so a host runs the same `claude` the user runs (`02-host.md` § Agent backends).
 - Loopback control HTTP via Fastify on a Unix domain socket at `~/.patch/daemon.sock`.
 - MCP server (`patch-tools-server`) implemented with @modelcontextprotocol/sdk, launched per SDK query, communicates over UDS.
 - Silero VAD via onnxruntime-node, reading `silero_vad.onnx` out of the host's own install directory (§ Two shipping shapes).
 - AEC: NLMS pure-TS canceller in the host; ~12-18 dB attenuation; voice device firmware does the heavy lifting via hardware AEC.
-- Kokoro and local Whisper are provisioned after install, per host (`02-daemon.md` § Optional components). The host creates the Python environment (uv) and downloads those weights on demand.
+- Kokoro and local Whisper are provisioned after install, per host (`02-host.md` § Optional components). The host creates the Python environment (uv) and downloads those weights on demand.
 - Whisper backend is pluggable per `WHISPER_BACKEND` env var:
   - `groq` (default): direct REST call to Groq's Whisper endpoint. Nothing to install.
   - `local`: spawn faster-whisper as a long-running Python sidecar (`uv run` → FastAPI, PCM in via WS, transcript out). Model: `medium.en`.
@@ -70,9 +70,9 @@ Stays "flat files" per spec, but with explicit shape:
 - `/data/webhooks/<jobId>.jsonl` — per-job inbound webhook log.
 - `/data/undelivered.jsonl` — failed notifications.
 - `/data/broadcasts/<thread>.jsonl` — broadcast log per channel-mediating thread, written as the server routes each notify and read by the Manager host when the user replies (`09-notifications.md` § The broadcast log).
-- `~/.patch/chats/<chatId>/` — daemon-managed per-chat state (NOT under `/data` — daemon-local): `meta.json` (chat metadata), `seq` (the persisted sequence counter) and `wake.json` (a pending self-wake), per `02-daemon.md`.
+- `~/.patch/chats/<chatId>/` — host-managed per-chat state (NOT under `/data` — host-local): `meta.json` (chat metadata), `seq` (the persisted sequence counter) and `wake.json` (a pending self-wake), per `02-host.md`.
 
-A daemon-local file is written and read by the same machine. Anything one machine writes and another reads is server state under `/data`.
+A host-local file is written and read by the same machine. Anything one machine writes and another reads is server state under `/data`.
 
 Chat history itself stays in Claude Code's native `~/.claude/projects/`; we read it in place.
 
@@ -138,7 +138,7 @@ No SQLite. If we hit limits, that's a separate spec change.
 ## Deployment
 
 - Docker Compose as the reference deployment (host sizing in `11-deployment.md`).
-- Two services: `server`, `caddy`. The host is not a container — it installs on each host as an OS service (§ Two shipping shapes, `02-daemon.md` § Runtime and installation).
+- Two services: `server`, `caddy`. The host is not a container — it installs on each host as an OS service (§ Two shipping shapes, `02-host.md` § Runtime and installation).
 - Caddy as the reverse proxy (auto-TLS via Let's Encrypt). Terminates TLS and reverse-proxies everything to the server, which itself serves the web SPA at `/app` and the desktop feed at `/api/desktop/...`.
 - `pnpm deploy` runs the server via docker compose (`up -d --build`); the server image builds + serves the web SPA. No CI publish, no image registry. The host builds separately as an installable artifact (`pnpm build:host`), published for install and self-update (`11-deployment.md`). Machine-specific delivery (to a remote box / phone) lives in git-ignored `scripts/local/`.
 - Backups: restic nightly cron on `/data` to off-host object storage.

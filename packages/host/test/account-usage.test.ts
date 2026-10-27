@@ -219,7 +219,7 @@ describe('AccountUsageTracker', () => {
 
   // The timer fires `refreshAll()` with nothing awaiting it, so a probe or a
   // host callback that throws used to surface as an unhandled rejection — in a
-  // long-lived daemon, a crash — with no account named in it.
+  // long-lived host, a crash — with no account named in it.
   it('the unprompted poll logs a failing account instead of leaking a rejection', async () => {
     vi.useFakeTimers();
     try {

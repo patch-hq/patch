@@ -6,12 +6,12 @@
 # Target chip
 CONFIG_IDF_TARGET="esp32s3"
 
-# Patch server + daemon endpoint (F1 local-dev bring-up).
+# Patch server + host endpoint (F1 local-dev bring-up).
 # The boot-check fails loud on the placeholder "patch.example.com"
 # (spec/principles.md: no fallbacks), so a fresh checkout MUST build with a
-# real endpoint. These point at the F1 dev daemon on the LAN host the flashed
+# real endpoint. These point at the F1 dev host on the LAN host the flashed
 # unit is paired to (see .tmp/f1-prov/launch-f1-daemon-real.sh — control + audio
-# WSS on :3023, ws:// no TLS). On subsequent boots the daemon host/port/tls are
+# WSS on :3023, ws:// no TLS). On subsequent boots the host host/port/tls are
 # read from NVS provisioning; PATCH_SERVER_URL is still used for the OTA
 # manifest fetch + (re)pairing. Override via `idf.py menuconfig` for prod.
 CONFIG_PATCH_SERVER_URL="http://192.168.68.79:3010"

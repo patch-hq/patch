@@ -62,7 +62,7 @@ audio WSS rejects the token (B-24-2 still open) the harness reports
 One command per line:
 
 ```
-WAKE                  send wake_detected (daemon should reply with session_start)
+WAKE                  send wake_detected (host should reply with session_start)
 SESSION_END [reason]  reasons: vad-timeout | user-button | agent-finished
 MUTE                  hardware mute switch flipped on
 UNMUTE                hardware mute switch flipped off

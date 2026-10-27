@@ -5,7 +5,7 @@
 //   2. `effort: null` clears the override rather than requiring a level.
 //   3. A chat on the Codex backend refuses the change — Codex has no
 //      equivalent option — rather than silently accepting it.
-//   4. The change is persisted, so a daemon restart does not silently drop it.
+//   4. The change is persisted, so a host restart does not silently drop it.
 //   5. The new effort rides out on `chat.state`, like `model` does.
 
 import { describe, it, expect } from 'vitest';

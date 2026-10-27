@@ -4,13 +4,13 @@
 // behaviour follows spec/16-voice-device.md §Firmware responsibilities:
 //
 //   1. microWakeWord runs whenever device is unmuted + linked.
-//   2. Persistent control WSS to daemon (auto-reconnect).
+//   2. Persistent control WSS to host (auto-reconnect).
 //   3. Wake fires (or accepted ring) → open audio WSS, stream PCM16 mic up,
 //      play PCM16 down.
 //   4. LED ring renders pds_state_t.
 //   5. Button: short-press = PTT / accept ring. Long-press = end session
 //      / dismiss ring.
-//   6. Mute switch cuts wake-word + audio session, notifies daemon.
+//   6. Mute switch cuts wake-word + audio session, notifies host.
 //   7. Wi-Fi reconnect via esp_wifi auto-reconnect.
 //   8. OTA poll once an hour.
 
@@ -166,10 +166,10 @@ static void open_audio_session_now(void) {
         .daemon_port = s_prov.daemon_port,
         .use_tls     = s_prov.tls,
         .session_id  = s_active_session_id,
-        // accountId + chatId come from the daemon's session_start frame so the
+        // accountId + chatId come from the host's session_start frame so the
         // audio.session_start identity matches the voice token's claims (the
-        // daemon mints the token bound to {accountId, deviceId, chatId}). The
-        // device declares exactly what the daemon told it — it never decodes
+        // host mints the token bound to {accountId, deviceId, chatId}). The
+        // device declares exactly what the host told it — it never decodes
         // the token.
         .account_id  = s_active_account_id,
         .surface_id  = s_prov.device_id,
@@ -190,7 +190,7 @@ static void on_control_inbound(const pcf_inbound_t *f, void *user) {
     (void)user;
     switch (f->kind) {
         case PCF_FRAME_SESSION_START:
-            // The daemon mints the per-session HMAC voice token and pushes it
+            // The host mints the per-session HMAC voice token and pushes it
             // in the session_start control frame (spec/16 §Wire protocol
             // "Voice-token delivery"); the device replays it as the
             // audio.session_start `token`. pcf_decode requires both fields, so
@@ -198,11 +198,11 @@ static void on_control_inbound(const pcf_inbound_t *f, void *user) {
             snprintf(s_active_session_id, sizeof s_active_session_id, "%s", f->session_id);
             snprintf(s_voice_token, sizeof s_voice_token, "%s", f->voice_token);
             // accountId + chatId are carried on the session_start control frame
-            // (the daemon minted the voice token bound to exactly these), so the
+            // (the host minted the voice token bound to exactly these), so the
             // device replays them verbatim on audio.session_start — the audio
             // server rejects any mismatch with the token's claims. The
-            // voice-device chat is the daemon's special speakers thread
-            // (thread_speakers); the daemon, not the firmware, names it.
+            // voice-device chat is the host's special speakers thread
+            // (thread_speakers); the host, not the firmware, names it.
             snprintf(s_active_account_id, sizeof s_active_account_id, "%s", f->account_id);
             snprintf(s_active_chat_id, sizeof s_active_chat_id, "%s", f->chat_id);
             ESP_LOGI(TAG, "control: session_start sessionId=%s", s_active_session_id);
@@ -261,7 +261,7 @@ static void on_wake_word(void *u) {
     pds_dispatch(&s_state, PDS_EV_WAKE_FIRED);
     render_state();
     patch_control_send_wake_detected();
-    // The daemon responds with `session_start`; the audio WSS opens then.
+    // The host responds with `session_start`; the audio WSS opens then.
 }
 
 // ---------- button + mute ---------------------------------------------------
@@ -366,8 +366,8 @@ static void handle_diag_line(const char *line) {
                  patch_button_read_mute_gpio(), (int)patch_button_is_muted());
     } else if (strcmp(line, "wake") == 0) {
         // Fake a wake-word hit: sends wake_detected on the control WS so the
-        // daemon opens a voice session (same path the real wakeword uses). Lets
-        // us drive end-to-end daemon TTS without speaking aloud.
+        // host opens a voice session (same path the real wakeword uses). Lets
+        // us drive end-to-end host TTS without speaking aloud.
         ESP_LOGW(TAG, "diag: forcing wake_detected");
         bool ok = patch_control_send_wake_detected();
         ESP_LOGW(TAG, "diag: wake_detected sent=%d", (int)ok);

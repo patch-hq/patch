@@ -339,7 +339,7 @@ export const ChatMeta = z
              * Why this turn is still owed after its last attempt ended. Absent
              * means it was genuinely running/queued when the process died.
              * A credit wait is released only by the account-credit machinery,
-             * never merely because the daemon restarted.
+             * never merely because the host restarted.
              */
             waitingFor: z.enum(['credit', 'retry']).optional(),
           })

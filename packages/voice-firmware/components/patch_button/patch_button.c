@@ -30,7 +30,7 @@ static volatile bool s_muted = false;
 // safely drive the pad as an output to emulate the slider without contending
 // with that buffer. Overriding the *read* lets an unattended bench exercise the
 // full real on-device mute response (poll-task debounce -> PB_EV_MUTE_ON ->
-// daemon mute_changed frame, muted LED, wake/session suppression) on the flashed
+// host mute_changed frame, muted LED, wake/session suppression) on the flashed
 // unit. It is not normal operation and not the host FSM — it drives the device's
 // real button task + control WSS + LED driver.
 static volatile int s_mute_read_override = -1;

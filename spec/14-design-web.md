@@ -47,7 +47,7 @@ An em dash joining two clauses is helper text wearing punctuation. Visible copy 
 
 The one sanctioned place for a helper line is an empty state — and only a single plain sentence (`15-design-mobile.md` § Empty states). That is the deliberate exception; it is not licence to sprinkle explanatory copy anywhere else.
 
-The UI says **machine**, never host. "Host" is the protocol's word for the daemon and the computer it runs on (`02-daemon.md`); a person has a machine. Every label, message and setting that names one — the new-chat row, Settings → Machines, offline notices, confirmations — says machine, on every surface.
+The UI says **machine**, never host. "Host" is the protocol's word for the host and the computer it runs on (`02-daemon.md`); a person has a machine. Every label, message and setting that names one — the new-chat row, Settings → Machines, offline notices, confirmations — says machine, on every surface.
 
 ### Icons
 
@@ -901,7 +901,7 @@ command history, since the session itself lives on the host, not in the tab.
   scrollback. Switching chats switches sessions. A session that ends (shell
   exit, idle timeout, host restart) says so inline and offers Restart.
 - Errors are shown: a folder that does not
-  exist on the host, an unknown session, a daemon-offline send — each renders
+  exist on the host, an unknown session, a host-offline send — each renders
   in the terminal as an error line.
 - After a clone, the new folder is immediately usable: the folder picker's
   browse tree re-reads the host on open, so a repo cloned into a project root

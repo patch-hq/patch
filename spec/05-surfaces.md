@@ -72,7 +72,7 @@ The macOS desktop app (`@patch/desktop`) wraps the deployed web app in an Electr
 
 The app installs and manages a host on its own Mac as a separate OS service
 with its own lifetime, and shows that host's status alongside every other host.
-See `02-daemon.md` § Desktop app and the local host.
+See `02-host.md` § Desktop app and the local host.
 
 Only one desktop process may own a user profile. Launching another copy exits
 that copy and shows the existing window, restoring it if minimised. The saved

@@ -5,7 +5,7 @@
 //
 // JSON encode is hand-rolled (no cJSON dep) — frames are tiny and fixed-shape.
 // Decode uses a forgiving but strict-on-required-fields parser hand-coded for
-// the four daemon→device frames we care about: session_start, ring, led, error.
+// the four host→device frames we care about: session_start, ring, led, error.
 //
 // NO FALLBACKS: parse failures return PCF_ERR_*, never silently coerce.
 
@@ -74,11 +74,11 @@ typedef struct {
     // session_start — pcf_decode returns PCF_ERR_MISSING if absent.
     char voice_token[PCF_VOICE_TOKEN_MAX];
     // session_start: the accountId the device must declare on audio.session_start
-    // so its identity matches the token's claims (the daemon hands it over so
+    // so its identity matches the token's claims (the host hands it over so
     // the device never has to decode the opaque token). Required on
     // session_start.
     char account_id[PCF_ACCOUNT_ID_MAX];
-    // ring + session_start: target chatId. On session_start the daemon sends the
+    // ring + session_start: target chatId. On session_start the host sends the
     // chat the token is bound to (e.g. thread_speakers); the device replays it.
     char chat_id[PCF_CHAT_ID_MAX];
     char message[PCF_MESSAGE_MAX];
@@ -90,7 +90,7 @@ typedef struct {
     char error_message[PCF_MESSAGE_MAX];
 } pcf_inbound_t;
 
-// ---- Encoders (device → daemon) ----
+// ---- Encoders (device → host) ----
 
 // Encode { type:"hello", deviceId, fwVersion, muted }
 pcf_status_t pcf_encode_hello(char *out, size_t out_cap, size_t *written,
@@ -114,7 +114,7 @@ pcf_status_t pcf_encode_ring_dismissed(char *out, size_t out_cap, size_t *writte
 pcf_status_t pcf_encode_mute_changed(char *out, size_t out_cap, size_t *written,
                                      bool muted);
 
-// ---- Audio-plane session-start envelope (device → daemon, audio WSS) ----
+// ---- Audio-plane session-start envelope (device → host, audio WSS) ----
 //
 // The first frame the device sends after the per-session audio WSS connects.
 // Wire shape per packages/wire/src/audio.ts `AudioSessionStartEvent`:
@@ -128,12 +128,12 @@ pcf_status_t pcf_encode_mute_changed(char *out, size_t out_cap, size_t *written,
 //     session_start CONTROL frame). The device NEVER mints or fetches it and
 //     never calls the server's voice-token endpoint — it replays verbatim.
 //   - `surfaceKind` is hard-coded "device" (never web/desktop/mobile).
-//   - `surfaceHasAec` is hard-coded false (no hardware AEC; daemon runs AEC3).
+//   - `surfaceHasAec` is hard-coded false (no hardware AEC; host runs AEC3).
 //   - surfaceKind=="device" REQUIRES a non-empty deviceId (wire
 //     validateDeviceIdCoupling); a missing/empty deviceId is a config bug, so
 //     this returns PCF_ERR_MISSING rather than emitting an invalid frame.
 //   - an empty token is likewise a config bug (the device must have received
-//     the daemon's token first) and returns PCF_ERR_MISSING.
+//     the host's token first) and returns PCF_ERR_MISSING.
 //
 // Pure C, no ESP-IDF deps, so the exact bytes the device puts on the wire are
 // exercised by the host-side unit harness (TF1 F1-11) — the same function the
@@ -147,7 +147,7 @@ pcf_status_t pcf_encode_audio_session_start(char *out, size_t out_cap,
                                             const char *chat_id,
                                             const char *voice_token);
 
-// ---- Decoder (daemon → device) ----
+// ---- Decoder (host → device) ----
 
 // Parse a JSON control frame. Returns PCF_ERR_UNKNOWN_FRAME for type we
 // don't recognise (caller should ignore-with-log per spec/principles).

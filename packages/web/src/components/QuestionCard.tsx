@@ -463,7 +463,7 @@ function QuestionForm({
 
   // Answered, cancelled, or expired — the draft has done its job. Covers the
   // resolutions this surface did NOT originate too (another surface answered
-  // it, the daemon timed it out), which never pass through `submit` below.
+  // it, the host timed it out), which never pass through `submit` below.
   useEffect(() => {
     if (requestId && resolved) useQuestionDraftStore.getState().clear(requestId);
   }, [requestId, resolved]);

@@ -1010,7 +1010,7 @@ describe('ChatRegistry effort', () => {
   });
 });
 
-// spec/02 § Background task completions + spec/14 § Status badges. The daemon
+// spec/02 § Background task completions + spec/14 § Status badges. The host
 // counts each chat's still-running background commands and sub-agents; the
 // server mirrors the number so a surface that cold-starts over REST knows a
 // chat is still working before the next live `chat.state`. Without the mirror a

@@ -26,7 +26,7 @@ Each OpenAI account has an isolated Codex runtime profile. Existing credentials 
 
 Credit selection takes the first connected, eligible account for the chosen provider and model. Each turn records the account it uses. Exhausted accounts wait for their reported reset, authentication failures require reconnecting, and unknown usage is distinct from available credit. ChatGPT usage is read without generating a response. Credit-source changes do not change a chat's provider or model.
 
-An account refusal is host state, not chat state. The host persists each exhausted account and its stated reset under `~/.patch`, restores that routing gate before accepting turns after a daemon update/restart, and removes it when the reset passes or a later authoritative usage reading says credit returned. Restarting Patch must never make a known-spent account eligible.
+An account refusal is host state, not chat state. The host persists each exhausted account and its stated reset under `~/.patch`, restores that routing gate before accepting turns after a host update/restart, and removes it when the reset passes or a later authoritative usage reading says credit returned. Restarting Patch must never make a known-spent account eligible.
 
 Provider session IDs are caches owned by the account that created them. Patch records that owner. When routing selects a different account, it never sends the old account's session ID; it creates a fresh provider session and reconstructs it from Patch's own durable chat history. Account failover therefore preserves the conversation without assuming provider-session IDs are portable.
 
@@ -34,7 +34,7 @@ OpenAI API keys use the same native secure store. API models have IDs `openai/ap
 
 ## Backend credentials
 
-Each agent backend authenticates with its own credential. Credentials are shared settings, held by the server and sent to every host (`01-server.md` § Settings); the host that runs a turn uses its copy (`02-daemon.md` § Agent backends). A backend authenticates against your own subscription or account rather than a patch-held key.
+Each agent backend authenticates with its own credential. Credentials are shared settings, held by the server and sent to every host (`01-server.md` § Settings); the host that runs a turn uses its copy (`02-host.md` § Agent backends). A backend authenticates against your own subscription or account rather than a patch-held key.
 
 For Claude Code, patch piggybacks on that backend's own credential and uses your Pro / Max / Team plan over OAuth. A host can hold several named Claude credentials at once — several `claude setup-token` logins, each kept as its own account — rather than one. They are a SEQUENCE, and every host holds the same one. Every turn puts the keys in an order and runs on the first in that order that is connected and not known to be out of credit; the question is asked again for the next turn, so a key coming back needs nothing moved back onto it.
 
@@ -68,7 +68,7 @@ The one thing deliberately left behind is the ancient turn. A turn that failed d
 Which key a turn ran on is a property of THAT TURN: it is what the failure names, and what a `rate_limit_event` usage reading is attributed to. It is never stored on the chat. It is shown, though: the chat's state names the account its latest turn ran on, and a surface draws it beside the model. When a turn runs on a different account from the chat's previous turn BECAUSE that one ran out of credit, the chat gets a system line saying so — which account it moved from and to, and when the spent one comes back if the limit said, in the reader's own time. A move that is the strategy working (round-robin moving on, a reset key taking over again) is not news and writes no line.
 
 - The credential is the OAuth token Claude Code persists after `claude login`. Claude Code stores it under the key `claudeAiOauth` (`{ accessToken, refreshToken, expiresAt, … }`) in a platform-native store — `~/.claude/.credentials.json` on a Linux host and the macOS Keychain (service `Claude Code-credentials`) on a Mac host. It is not in `~/.claude.json`; that file holds account metadata under `oauthAccount` (email, plan, uuids) but no access token. The Claude Agent SDK reads its own credential from that native store directly. Patch passes no `ANTHROPIC_API_KEY` in env and leaves the credential to the backend. Those three locations (env `CLAUDE_CODE_OAUTH_TOKEN` → `~/.claude/.credentials.json` → Keychain, in that order) are that machine's own login, which Settings can adopt as a shared account (below). A host that already held accounts before settings were shared — including the one its first boot seeded from that login — sends them to the server once, the first time it connects (`01-server.md` § Settings), so a single-machine install works without touching Settings. From then on the shared accounts are what patch reads to gate queries and to pass the SDK as `CLAUDE_CODE_OAUTH_TOKEN`.
-- First run: host checks for a valid `claudeAiOauth.accessToken` on the account a chat resolves to (via the resolution order above, for the first account; from the store thereafter). If absent/expired, the host refuses to start any `query()` against that account and emits `host.unauthenticated` naming the backend; the host's other backends, and its other Claude accounts, keep running (`02-daemon.md` § Agent backends). Settings surfaces this as "not connected" on that account's row under that host, with the connect controls below.
+- First run: host checks for a valid `claudeAiOauth.accessToken` on the account a chat resolves to (via the resolution order above, for the first account; from the store thereafter). If absent/expired, the host refuses to start any `query()` against that account and emits `host.unauthenticated` naming the backend; the host's other backends, and its other Claude accounts, keep running (`02-host.md` § Agent backends). Settings surfaces this as "not connected" on that account's row under that host, with the connect controls below.
 - A credential the check accepts can still be refused by Claude when the turn runs, because a token can be revoked while its stored expiry says otherwise. That refusal means the same thing as an absent one and is reported the same way: `host.unauthenticated` for that backend, the chat told in words that the host's sign-in is no longer valid and where to renew it, and the chat left idle so it runs as soon as the credential is replaced. It is not reported as a fault of that chat, and the backend's own error text is not what the chat shows.
 - The server renews shared credentials and distributes updated access tokens. Hosts do not receive refresh tokens or renew these credentials independently.
 - `ANTHROPIC_API_KEY` is stripped from the env passed to `query()`, so the SDK uses OAuth even when the user has the key set globally. Authentication for this backend is OAuth only.
@@ -241,7 +241,7 @@ A server with no address of its own — one running on a laptop, or behind a hom
 - A device learns the relay's address, the channel and the server's public key from a pairing code (`05-surfaces.md` § Canonical QR payload). It connects to the channel; the relay tells the server a device has arrived and forwards binary frames each way, labelled so devices cannot see one another's.
 - Everything between a device and the server is end-to-end encrypted. The device sends an ephemeral X25519 key sealed to the server's static key; the server answers with its own ephemeral key; each side derives one key per direction from both Diffie-Hellman results, and every message is a XChaCha20-Poly1305 frame whose nonce is an implicit counter. Only the holder of the server's key can read the first frame or answer it, so the device knows it is talking to its server and not to the relay; a frame the relay drops, repeats, reorders or alters fails to open and ends the session. The relay sees which channel, how many devices and how many bytes — never a path, header, body or message.
 - Inside the session the device makes HTTP requests and opens WebSockets as though the server were next door, multiplexed as numbered streams. The server ends each one on its own loopback address: a request is made again, as an ordinary request, against the listening server, and a socket opened the same way. The tunnel therefore adds no access: every route needs the same credential it needs anywhere, and a device with only a pairing code can do only what the code allows.
-- Relayed access is for surfaces. A host dials the server's address directly (`02-daemon.md`).
+- Relayed access is for surfaces. A host dials the server's address directly (`02-host.md`).
 - A relay keeps no state. It limits frame size and devices per channel, and drops connections that stop answering pings. Running one is `11-deployment.md` § Relay.
 
 A server is relayed when `PATCH_RELAY_URL` names a relay; Settings → Account shows whether it is reachable that way and by how many devices.
@@ -271,7 +271,7 @@ that is already registered re-uses its stored `daemonKey` rather than creating a
 duplicate host. A machine that has been revoked pairs again from scratch.
 
 Adding a host includes provisioning an agent backend and logging it in there
-(`02-daemon.md` § Agent backends). Settings shows each host's backend accounts
+(`02-host.md` § Agent backends). Settings shows each host's backend accounts
 separately, and each host's turns depend on its own credentials.
 
 ## Revocation
@@ -292,7 +292,7 @@ Revoking a host decommissions that machine's install: its `daemonKey` is invalid
 ### The authority of a turn
 
 A turn carries the host user's authority, including `sudo` and `docker` where
-that user has them (`02-daemon.md` § Runtime and installation). Two requirements
+that user has them (`02-host.md` § Runtime and installation). Two requirements
 follow:
 
 - Every trigger ingress — Todoist, inbound webhooks, cron
@@ -305,7 +305,7 @@ follow:
 
 Provider keys — the API keys the host itself uses for hosted voice and Groq
 Whisper — are shared by every host and set and revoked from one Settings →
-Providers page (`02-daemon.md` § Provider keys). The gate is every other shared
+Providers page (`02-host.md` § Provider keys). The gate is every other shared
 setting's: a live surface credential. They are stored like every other secret
 (`01-server.md` § Settings): on the server, encrypted, sent to every host, and
 never sent back to a surface, which sees where each key comes from and its
@@ -323,7 +323,7 @@ last four characters.
 ## Cross-refs
 
 - QR flow mechanics: `05-surfaces.md`
-- Host init sequence: `02-daemon.md`
+- Host init sequence: `02-host.md`
 - Server endpoints involved: `01-server.md`
 
 The Codex Sign in action in the host list opens the same ChatGPT account form

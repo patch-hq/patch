@@ -163,7 +163,7 @@ pcf_status_t pcf_encode_audio_session_start(char *out, size_t out_cap,
     // surfaceKind is ALWAYS "device" for this firmware — never web/desktop/
     // mobile. The token is the daemon-pushed voice token, replayed verbatim;
     // the device never mints it. surfaceHasAec is ALWAYS false (no hardware
-    // AEC — the daemon runs AEC3 for device sessions).
+    // AEC — the host runs AEC3 for device sessions).
     w_puts(&w, ",\"surfaceKind\":\"device\",\"deviceId\":");
     w_quote(&w, device_id);
     w_puts(&w, ",\"chatId\":");
@@ -176,7 +176,7 @@ pcf_status_t pcf_encode_audio_session_start(char *out, size_t out_cap,
 
 // ---------- decoder --------------------------------------------------------
 //
-// Tiny JSON parser sufficient for the daemon→device frame shapes we accept.
+// Tiny JSON parser sufficient for the host→device frame shapes we accept.
 // Handles whitespace, top-level object, string/bool/object values. Numbers and
 // arrays not needed today and are rejected as PCF_ERR_PARSE.
 
@@ -446,19 +446,19 @@ pcf_status_t pcf_decode(const char *json, size_t len, pcf_inbound_t *out) {
     if (!have_type) return PCF_ERR_MISSING;
 
     if (strcmp(type, "session_start") == 0) {
-        // Both fields are mandatory: the daemon mints the per-session voice
+        // Both fields are mandatory: the host mints the per-session voice
         // token and pushes it here so the device never calls the server's
         // token endpoint itself (spec/16 §Wire protocol "Voice-token
         // delivery"). No fallback — a session_start without a token is a
         // protocol error, not an empty-token session.
         // accountId + chatId are mandatory too: the device declares them on
-        // audio.session_start to match the token's claims (the daemon sends
+        // audio.session_start to match the token's claims (the host sends
         // both so the device never decodes the token). No fallback.
         if (!have_session || !have_voice_token || !have_account || !have_chat)
             return PCF_ERR_MISSING;
         // No fallback — a present-but-empty required field is just as much a
         // protocol error as a missing one (it would open the audio WSS with an
-        // empty token / wrong identity, which the daemon rejects). This is
+        // empty token / wrong identity, which the host rejects). This is
         // symmetric with pcf_encode_audio_session_start, which rejects an empty
         // token/deviceId with PCF_ERR_MISSING.
         if (session_id[0] == '\0' || voice_token[0] == '\0' ||

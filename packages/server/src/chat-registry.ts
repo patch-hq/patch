@@ -160,7 +160,7 @@ export interface ChatSummary {
   /**
    * The Claude thinking-effort override this chat is running at (spec/04 §
    * Effort), mirrored from `chat.state`. `null` means either no override is
-   * set or the chat is on the Codex backend — same as the daemon's own
+   * set or the chat is on the Codex backend — same as the host's own
    * `ChatStateEvent.effort`, since a cold-start surface cannot tell the two
    * apart from this alone and doesn't need to: either way there is no
    * override to show.

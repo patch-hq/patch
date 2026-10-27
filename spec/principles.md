@@ -28,14 +28,14 @@ Default test: if the agent could do this without patch, don't add a patch tool f
 
 ## Tool ownership
 
-The host drives the agent through its backend, not the interactive TUI, and that breaks an assumption some native tools make. A turn runs to completion and exits, no agent process outlives the call it belongs to, and patch wires no agent cron/hooks. So Claude Code's `CronCreate` / `CronList` / `CronDelete` are inert here: an in-session cron has nothing to fire it after the turn ends. Bus-watching ("check on this in five minutes") is therefore not a native task in patch — it's a `patch_wake_me` self-wake (see `02-daemon.md` § Self-wake).
+The host drives the agent through its backend, not the interactive TUI, and that breaks an assumption some native tools make. A turn runs to completion and exits, no agent process outlives the call it belongs to, and patch wires no agent cron/hooks. So Claude Code's `CronCreate` / `CronList` / `CronDelete` are inert here: an in-session cron has nothing to fire it after the turn ends. Bus-watching ("check on this in five minutes") is therefore not a native task in patch — it's a `patch_wake_me` self-wake (see `02-host.md` § Self-wake).
 
 The rule:
 
 - The agent owns the in-session coding loop — editing, search, bash and web. Patch owns subagents through `patch_agent`, which uses Patch's durable child-chat lifecycle and reports directly to its parent. Claude Code's native `Agent`/`Task` and `Workflow` tools are disallowed.
 - Patch owns platform capabilities — durable scheduling/self-wake, work that outlives the turn that started it, cross-chat orchestration, notification routing, external triggers, voice. These get distinct `patch_`-prefixed names with distinct words (`patch_wake_me`, not `patch_cron`; `patch_job_*`, not `patch_schedule`) so the model faces no two tools with overlapping meaning. We're free to evolve them; the SDK's native tools are a moving target we don't control.
 - Never leave an inert native tool visible. A tool that's dead in the host is a trap — the model is trained to reach for it, "succeeds," and nothing happens. The host passes `disallowedTools` to every `query()` to remove them from the model's context (the `Cron*` family and `Workflow`). If we supersede another native tool with a patch capability, it joins that list.
-- A native tool that is only partly inert is corrected, not removed. Running a shell command in the background is dead here — the task belongs to the agent process and ends with the turn — but the tool itself is not, so the host refuses that one request, runs the command in the foreground, and says why (`02-daemon.md` § Background work). Removing the tool over one dead option would cost the agent its shell, and hand us a permission surface coarser than the one it replaced.
+- A native tool that is only partly inert is corrected, not removed. Running a shell command in the background is dead here — the task belongs to the agent process and ends with the turn — but the tool itself is not, so the host refuses that one request, runs the command in the foreground, and says why (`02-host.md` § Background work). Removing the tool over one dead option would cost the agent its shell, and hand us a permission surface coarser than the one it replaced.
 
 ## Configuration
 
@@ -54,7 +54,7 @@ We don't let a backend's storage decide what a chat remembers. Patch keeps each 
 - We don't wrap or transform the agent's prompts.
 - We don't layer a second permission system on top of the agent's. A human editor save is never refused on the grounds that the agent is mid-turn either — the two writers are kept apart by writing atomically, not by locking one of them out.
 - We don't summarise, abridge, or rewrite chat content. `patch_peek` returns raw messages.
-- We don't hold the agent's model API keys. The backend holds its own credentials; we inherit. (The keys the host itself calls providers with — hosted voice, Groq Whisper — are patch's own configuration, set once in Settings and shared by every host: `02-daemon.md` § Provider keys.)
+- We don't hold the agent's model API keys. The backend holds its own credentials; we inherit. (The keys the host itself calls providers with — hosted voice, Groq Whisper — are patch's own configuration, set once in Settings and shared by every host: `02-host.md` § Provider keys.)
 - We don't compete with the agent on UX. Same prompt, same rendering, same flags. Wire-level pass-through.
 
 If the agent adopts a feature, the corresponding patch feature is removed.

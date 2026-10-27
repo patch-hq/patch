@@ -1,6 +1,6 @@
 // patch_browser_handoff end to end through the MCP tool, the control socket and
-// the Daemon, against a real Chromium: the agent asks, the "surface" (here, calls
-// into the Daemon exactly as index.ts makes them for wire events) signs in and
+// the Host, against a real Chromium: the agent asks, the "surface" (here, calls
+// into the Host exactly as index.ts makes them for wire events) signs in and
 // taps Done, and the agent's tool result carries none of it.
 
 import { it, expect, vi, afterAll, beforeAll } from 'vitest';

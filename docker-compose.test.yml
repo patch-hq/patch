@@ -7,7 +7,7 @@
 #
 # After up (host ports are offset to avoid colliding with dev servers):
 #   curl http://localhost:13000/api/healthz
-#   curl http://localhost:13000/api/daemon/healthz   # 200 once the daemon links
+#   curl http://localhost:13000/api/daemon/healthz   # 200 once the host links
 #   curl http://localhost:13000/app/
 #
 # Host↔server link in the test stack: the host authenticates by dialing the
@@ -134,7 +134,7 @@ services:
       # Read the seeded daemon.key from the shared /data volume instead of
       # falling into the QR flow (no human to scan it in the test stack). The
       # control UDS still lives on tmpfs at /root/.patch/daemon.sock (set in the
-      # daemon Dockerfile via PATCH_DAEMON_SOCKET).
+      # host Dockerfile via PATCH_DAEMON_SOCKET).
       PATCH_HOME: /data/daemon-home
       # Inverted link (spec/10): the host dials INTO the server's /ws with its
       # EdDSA-JWT daemonKey. It no longer runs an inbound control server on :3002.
@@ -157,7 +157,7 @@ services:
       # audio-WSS green-path integration test (B-24-2): the test runs on the
       # host and needs to open `ws://localhost:13003/audio/<sessionId>`
       # against the running host. NOT for production — the production
-      # daemon runs behind Caddy on the same docker network.
+      # host runs behind Caddy on the same docker network.
       - '13003:3003'
     tmpfs:
       - /root/.claude

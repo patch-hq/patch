@@ -46,7 +46,7 @@ Env overrides:
 # 1. Bootstrap the account from a fresh keypair (only the FIRST surface ever does this).
 patch auth bootstrap --server https://patch.example.com --json
 
-# 2. Spawn a chat in a folder that exists on the daemon host.
+# 2. Spawn a chat in a folder that exists on the host.
 patch chats spawn /tmp/work --json
 
 # 3. Send a message into that chat (works over UDS or REST).

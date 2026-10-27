@@ -14,7 +14,7 @@
 # home (PATCH_SERVER_HOME, set by the systemd unit the installer writes):
 #
 #   data/       registry, jobs, attachments — the server's state
-#   downloads/  the update channel: daemon artifacts, APK, desktop feed
+#   downloads/  the update channel: host artifacts, APK, desktop feed
 #   server.env  secrets and config (the unit's EnvironmentFile)
 #
 # So replacing a release never touches state, and nothing here is a git

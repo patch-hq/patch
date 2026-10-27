@@ -1,6 +1,6 @@
-# patch-daemon image — multi-stage. Ships the Node daemon PLUS the real
-# Kokoro (TTS) + faster-whisper (STT) Python sidecars, which the daemon spawns
-# via `uv run python -m patch_{kokoro,whisper}_sidecar`. Exposes the daemon's
+# patch-daemon image — multi-stage. Ships the Node host PLUS the real
+# Kokoro (TTS) + faster-whisper (STT) Python sidecars, which the host spawns
+# via `uv run python -m patch_{kokoro,whisper}_sidecar`. Exposes the host's
 # UDS + TCP /healthz on :3001 and the audio WSS on :3003.
 
 # syntax=docker/dockerfile:1.7
@@ -48,7 +48,7 @@ RUN pnpm --filter @patch/host deploy --prod --legacy /out/daemon
 FROM node:${NODE_VERSION}-bookworm-slim AS runtime
 RUN apt-get update \
   # git + openssh-client are for the TERMINAL sessions (spec/02 § Terminal
-  # sessions): the whole point of a shell on the daemon is cloning a repo onto
+  # sessions): the whole point of a shell on the host is cloning a repo onto
   # it before opening a chat there, and neither is in the base image.
   && apt-get install -y --no-install-recommends tini ca-certificates python3 python3-venv curl wget musl git openssh-client \
   && rm -rf /var/lib/apt/lists/*
@@ -61,7 +61,7 @@ RUN apt-get update \
 # expects (/lib/ld-musl-x86_64.so.1) so the binary actually runs.
 RUN ln -sf /usr/lib/x86_64-linux-musl/libc.so /lib/ld-musl-x86_64.so.1 \
   || ln -sf /lib/x86_64-linux-musl/libc.so /lib/ld-musl-x86_64.so.1
-# uv: fast Python package/venv manager the daemon invokes as `uv run`.
+# uv: fast Python package/venv manager the host invokes as `uv run`.
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
   && ln -s /root/.local/bin/uv /usr/local/bin/uv
 WORKDIR /app
@@ -73,7 +73,7 @@ ARG PATCH_BUILT_AT
 ARG PATCH_SERVER_SHA
 ENV PATCH_GIT_SHA=${PATCH_GIT_SHA}
 ENV PATCH_VERSION=${PATCH_VERSION}
-# Reported on the daemon's WS hello so the panel can date the running daemon.
+# Reported on the host's WS hello so the panel can date the running host.
 ENV PATCH_BUILT_AT=${PATCH_BUILT_AT}
 ENV PATCH_SERVER_SHA=${PATCH_SERVER_SHA}
 ENV PATCH_DAEMON_HEALTHZ_HOST=0.0.0.0
@@ -82,7 +82,7 @@ ENV PATCH_DAEMON_SOCKET=/root/.patch/daemon.sock
 
 COPY --from=builder /out/daemon /app
 
-# Python voice sidecars. The daemon resolves them relative to its dist via
+# Python voice sidecars. The host resolves them relative to its dist via
 # ../../{kokoro,whisper}-sidecar, so mirror that layout under /app and warm the
 # uv venvs at build time (model weights are mounted at runtime via *_MODEL_PATH).
 COPY packages/kokoro-sidecar /app/../kokoro-sidecar
@@ -93,7 +93,7 @@ COPY packages/whisper-sidecar /app/../whisper-sidecar
 ENV UV_TORCH_BACKEND=cpu
 RUN cd /app/../kokoro-sidecar && uv venv --python 3.12 && uv pip install -e . \
   && cd /app/../whisper-sidecar && uv venv --python 3.12 && uv pip install -e .
-# Bake the spaCy English model Kokoro's misaki G2P needs. The daemon spawns the
+# Bake the spaCy English model Kokoro's misaki G2P needs. The host spawns the
 # sidecar with `uv run --no-sync`, so anything not installed here would be missing
 # at runtime (en_core_web_sm is otherwise fetched on first synthesis).
 RUN cd /app/../kokoro-sidecar && uv pip install \
@@ -104,7 +104,7 @@ ENV WHISPER_SIDECAR_CWD=/app/../whisper-sidecar
 # UDS sits under /root/.patch in the running container; ensure the dir exists.
 RUN mkdir -p /root/.patch
 
-# 3001 = TCP /healthz (compose healthcheck), 3003 = audio WSS. The daemon no
+# 3001 = TCP /healthz (compose healthcheck), 3003 = audio WSS. The host no
 # longer runs an inbound control server on 3002 — it dials the server's /ws.
 EXPOSE 3001 3003
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s \

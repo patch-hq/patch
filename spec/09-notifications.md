@@ -310,11 +310,11 @@ A chat finishing is only news if the user is the one waiting on it. Every turn t
 
 A turn is `machine` when the host started it for the chat rather than a person did:
 
-| Machine-started turn                            | Why it is silent                                                                                                 |
-| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| A self-wake firing (`02-daemon.md` § Self-wake) | This is the loop that checks something every few minutes. It is the whole reason the rule exists.                |
-| The todo list advancing to its next item        | One request the user made becomes many turns; they would get a notification per item rather than per request.    |
-| Another agent's `patch_send_to` landing         | The destination of a `send_to` is an agent, not a human (§ `notify` vs `send_to`). Nobody is waiting on the tap. |
+| Machine-started turn                          | Why it is silent                                                                                                 |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| A self-wake firing (`02-host.md` § Self-wake) | This is the loop that checks something every few minutes. It is the whole reason the rule exists.                |
+| The todo list advancing to its next item      | One request the user made becomes many turns; they would get a notification per item rather than per request.    |
+| Another agent's `patch_send_to` landing       | The destination of a `send_to` is an agent, not a human (§ `notify` vs `send_to`). Nobody is waiting on the tap. |
 
 Everything else is `user`: a composer turn from any surface, a voice turn, a fork or a side thread. Origin is a property of the turn, not of the chat — a watcher chat that loops silently all day still notifies the moment the user types into it themselves.
 
@@ -336,7 +336,7 @@ Only the stopped turn is silenced. A chat that is stopped and then given a fresh
 
 ### A chat that is not done yet
 
-A turn settling is not always the chat finishing. The chat can settle `idle` while a backgrounded command or sub-agent is still running (`backgroundTasks` on `chat.state`, `02-daemon.md` § Background task completions), or while its goal is not yet met (`04-chats-and-folders.md` § Goals). Ringing then says "finished" for a chat that is still working.
+A turn settling is not always the chat finishing. The chat can settle `idle` while a backgrounded command or sub-agent is still running (`backgroundTasks` on `chat.state`, `02-host.md` § Background task completions), or while its goal is not yet met (`04-chats-and-folders.md` § Goals). Ringing then says "finished" for a chat that is still working.
 
 So when a `user` turn settles and either holds, the notification is owed rather than sent. It goes out on the next idle frame at which neither holds — whether that frame ends a machine turn (the one that reports a background completion, or a goal continuation) or is the goal being met with no turn at all. A machine turn on its own still never starts a debt, a stop clears one, and a failure clears one. Absent `backgroundTasks` counts as none: it is not a measurement, so it holds nothing back.
 
@@ -355,7 +355,7 @@ A usage limit nobody parked is a failure here — the turn is owed but nothing w
 
 ## Waiting on you
 
-A turn that stops rather than finishes is the other thing the server notifies on unasked. When a chat's activity goes from running to `awaiting-permission` — a permission decision, or a question asked with `AskUserQuestion` (`02-daemon.md` § Permission mode) — the turn is parked until a person answers it, and never reaches idle, so § Chat completion never covers it.
+A turn that stops rather than finishes is the other thing the server notifies on unasked. When a chat's activity goes from running to `awaiting-permission` — a permission decision, or a question asked with `AskUserQuestion` (`02-host.md` § Permission mode) — the turn is parked until a person answers it, and never reaches idle, so § Chat completion never covers it.
 
 Delivery is identical to chat completion: desktop always, push only when no computer surface is active, at normal priority.
 

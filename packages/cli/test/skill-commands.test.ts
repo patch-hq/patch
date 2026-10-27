@@ -1,6 +1,6 @@
 // Every command the patch-cli skill tells an agent to run must exist.
 //
-// The skill documented `patch daemon status --json | patch daemon list --json`
+// The skill documented `patch host status --json | patch host list --json`
 // under Diagnostics; the CLI has no `daemon` group, so the first thing an agent
 // ran to diagnose a problem died with "unknown command 'daemon'".
 

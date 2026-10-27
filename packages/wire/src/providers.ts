@@ -4,7 +4,7 @@
 // host needs to know about one that is a plain fact — its id, how its models
 // are named, which permission modes it can run, how its native session ids
 // look — lives in one entry of PROVIDERS. Adding a provider is one entry here
-// plus its backend registered with the daemon's harness registry
+// plus its backend registered with the host's harness registry
 // (`packages/host/src/harnesses.ts`); no other file names a provider.
 //
 // Model routing: a provider claims a model by `modelPrefix` (`openai/gpt-5`).

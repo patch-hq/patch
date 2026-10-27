@@ -6,7 +6,7 @@
 // captures the *abstract* state).
 //
 // Disconnected (no control WSS) overrides everything except mute, since with
-// no daemon there's no point pretending we can listen.
+// no host there's no point pretending we can listen.
 
 #include "patch_device_state.h"
 

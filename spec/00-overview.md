@@ -1,12 +1,12 @@
 # Patch — Overview
 
-Patch is a thin coordination layer over LLMs. It adds multi-surface access (terminal, web, phone, standalone voice device), external triggers (cron, webhooks, Todoist), voice (daemon-hosted Whisper + Kokoro across all surfaces), and cross-chat management — without altering the agent's native UX.
+Patch is a thin coordination layer over LLMs. It adds multi-surface access (terminal, web, phone, standalone voice device), external triggers (cron, webhooks, Todoist), voice (host-hosted Whisper + Kokoro across all surfaces), and cross-chat management — without altering the agent's native UX.
 
 One server, and one host per host machine. A host is any machine whose files
 and commands the agent works with: an always-on box, a laptop, a work machine.
 The server is deployed once and is publicly reachable; a host is installed on
 each host and runs as an OS-managed service, starting at boot and running
-independently of any surface. See `02-daemon.md`.
+independently of any surface. See `02-host.md`.
 
 The two are separate because a host is usually unreachable. Hosts dial out to
 the server and hold that connection, which is what lets a laptop behind NAT be a
@@ -41,7 +41,7 @@ exists to avoid.
              WebSocket│       │WebSocket
                       ▼       ▼
         ┌───────────────┐   ┌───────────────┐
-        │ Daemon        │   │ Daemon        │   one per host machine
+        │ Host        │   │ Host        │   one per host machine
         │ "hetzner"     │   │ "Tom's Mac"   │
         │  agent        │   │  agent        │
         │  host access  │   │  host access  │
@@ -49,7 +49,7 @@ exists to avoid.
 ```
 
 - Server — one Node/Fastify process, deployed. Relay, registry, presence, push fanout, webhook ingress, voice token mint. See `01-server.md`.
-- Host — one native process per host machine. Runs agent sessions with that host's access, tracks chat_state, runs jobs. See `02-daemon.md`.
+- Host — one native process per host machine. Runs agent sessions with that host's access, tracks chat_state, runs jobs. See `02-host.md`.
 - Surfaces — terminal CLI, web, phone, desktop notifier. See `05-surfaces.md`.
 - Special threads — Manager, Speakers. Long-running chats with cross-chat tools. See `06-threads-manager-speakers.md`.
 
@@ -73,7 +73,7 @@ exists to avoid.
 | `day-in-the-life.md`             | The product test. End-to-end scenario the spec must serve.                                                                                  |
 | `00-overview.md`                 | This file. Principles, component map, glossary.                                                                                             |
 | `01-server.md`                   | Relay: auth, registry, presence, push, webhooks.                                                                                            |
-| `02-daemon.md`                   | Host: session lifecycle, chat_state, job runner.                                                                                            |
+| `02-host.md`                     | Host: session lifecycle, chat_state, job runner.                                                                                            |
 | `03-wire-protocol.md`            | Event protocol between server and clients (Happy-Wire-based).                                                                               |
 | `04-chats-and-folders.md`        | Session model, folder pinning, history, resume.                                                                                             |
 | `05-surfaces.md`                 | Terminal, web, phone, desktop. Editor. Presence.                                                                                            |
@@ -101,4 +101,4 @@ Turns run under `auto` by default, where a model classifier approves or denies
 each tool call. Every chat carries its own mode, stamped from the host default
 when the chat is created and changed only from within that chat; the host
 default is set in Settings and steers the chats created after it. A change takes
-effect on the next turn. See `02-daemon.md` § Permission mode.
+effect on the next turn. See `02-host.md` § Permission mode.

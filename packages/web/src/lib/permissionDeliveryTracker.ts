@@ -23,7 +23,7 @@
 // no announcement. But silence was the whole failure mode when it does NOT
 // land — the card greys out as though answered, the tracker retries into the
 // void forever, and nothing on screen or in any log distinguishes an answer
-// the daemon acted on from one it never received. User: "it submits, goes grey,
+// the host acted on from one it never received. User: "it submits, goes grey,
 // then nothing." A pending response that stays unacked past
 // `PERMISSION_DELIVERY_WARN_AFTER_MS` therefore says so, with a retry, and
 // says so again when it finally gets through — otherwise the optimistic
@@ -32,7 +32,7 @@
 // PERSISTED, because in-memory retry cannot survive the thing that actually
 // breaks it. Forensics on chat 01M4AWWG59CJCE8DTBK903WCX7: a question was
 // asked at 10:04:52 and the patch SERVER — the relay between surface and
-// daemon — was redeployed at 10:12:19 (0.1.1507) and restarted again at
+// host — was redeployed at 10:12:19 (0.1.1507) and restarted again at
 // 10:30:46, both inside the window the user answered in. The desktop app loads its
 // bundle from that server, so a deploy drops the link and reloads the
 // renderer; the pending map went with it, and the answer was gone with no
@@ -40,7 +40,7 @@
 // the code that would warn had been torn down too. A surface is therefore the
 // source of truth for an unacked answer ACROSS RELOADS, not merely across
 // socket blips: entries are written to localStorage and re-armed on startup.
-// The daemon dedups, and a response for a request that no longer exists is a
+// The host dedups, and a response for a request that no longer exists is a
 // logged no-op there, so a late redelivery is safe.
 
 import type { WireEvent } from '@patch/wire';
@@ -77,7 +77,7 @@ export const PERMISSION_DELIVERY_STORAGE_KEY = 'patch.permission-responses.v1';
 /**
  * How long a persisted response is still worth redelivering. Past this the
  * turn it belonged to is long gone, and replaying it would at best be a no-op
- * on the daemon; keeping it would only grow the key forever.
+ * on the host; keeping it would only grow the key forever.
  */
 const MAX_AGE_MS = 60 * 60 * 1000;
 

@@ -3416,7 +3416,7 @@ export class Daemon {
       // discriminator: a process killed mid-query leaves `interrupted` (or no
       // turn.end), whereas a retry/credit attempt that had already ended is
       // `failed`. A restart did not interrupt that failed attempt, so do not
-      // manufacture a new attempt merely because the daemon came back up.
+      // manufacture a new attempt merely because the host came back up.
       // Clear the legacy owed marker; current hosts persist an explicit reason
       // and credit waits take the branch above.
       if (waitingHead === undefined && lastTurnOutcomeByChatId.get(m.chatId) === 'failed') {
@@ -11150,7 +11150,7 @@ export class Daemon {
 
   /**
    * Show a reply Claude Code wrote itself as a muted `synthetic` system line
-   * (spec/02 § Per-turn process). It reaches the daemon one of two ways — over
+   * (spec/02 § Per-turn process). It reaches the host one of two ways — over
    * the SDK stream, or only as an entry written to the session mirror (the
    * resume placeholder never streams) — and when both carry it, the uuid keeps
    * it to one line.

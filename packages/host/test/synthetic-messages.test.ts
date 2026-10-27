@@ -132,7 +132,7 @@ describe('synthetic assistant messages', () => {
   });
 
   // The resume placeholder never crosses the SDK stream: Claude Code writes it
-  // straight into the session, so the daemon sees it only as a mirrored entry.
+  // straight into the session, so the host sees it only as a mirrored entry.
   // It must still show — once, however many ways it arrives.
   it('shows a placeholder written only to the session mirror, once', async () => {
     const { daemon, sdk, events, folder } = setup();

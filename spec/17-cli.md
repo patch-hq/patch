@@ -38,7 +38,7 @@ patch hosts backends [--host H]           # each backend's version and that host
 patch hosts models [--host H]             # that host's model catalogue across its backends
 patch hosts install <component> [--host H]  # install an optional component (e.g. kokoro)
 patch hosts uninstall <component> [--host H]
-patch hosts update [--host H]             # apply an available daemon update
+patch hosts update [--host H]             # apply an available host update
 patch hosts claude-settings [--host H]                    # that host's Claude Code settings.json text and memory entries
 patch hosts claude-settings set <file> [--host H]         # replace that host's settings.json from a file
 patch hosts memory remove <project> <file> [--host H]     # delete one Claude Code memory entry
@@ -106,9 +106,9 @@ patch surfaces revoke <id>                # revoke a linked surface (confirmed)
 patch auth bootstrap                      # get this CLI's credential from the server, for an account with no linked surface yet
 patch auth pair                           # server-minted pairing nonce as a QR + short code, for another surface to redeem
 
-patch host start | stop | status | list | clean   # the local daemon service, on this machine
+patch host start | stop | status | list | clean   # the local host service, on this machine
 
-patch logs [--host H]                     # tail a host's daemon log
+patch logs [--host H]                     # tail a host's log
 
 patch doctor                              # server reachability, per-host status, pending
                                           # webhook/cron backlog, errored-chat count
@@ -143,7 +143,7 @@ host command with no wire frame, and it is local-only for that reason
 (§ Commands).
 
 The `chats` family carries a chat's own permission mode, the counterpart to the
-default `settings set permission-mode` sets (`02-daemon.md` § Permission mode).
+default `settings set permission-mode` sets (`02-host.md` § Permission mode).
 
 Beyond the transcript- and editor-shaped gestures § Scope leaves to the surfaces
 that render them, the single control the CLI does not carry is registering an
@@ -159,7 +159,7 @@ It contains `SKILL.md` describing each command, common patterns, and how to inte
 the JSON output. Same skill any human would read in `patch --help`.
 
 Every chat on that host has it, whatever folder the chat runs in, because a user-level
-skill is available to the agent everywhere (`02-daemon.md` § Runtime and installation).
+skill is available to the agent everywhere (`02-host.md` § Runtime and installation).
 That covers the three special threads, which run in the host's own state directory
 rather than in a project (`06-threads-manager-speakers.md` § Where special
 threads run). It's how an agent learns patch's surface area.
@@ -172,16 +172,16 @@ through the server rather than the local socket.
 
 A command aimed at this machine reaches its host over that machine's local
 socket, which carries one endpoint per host-scoped control for that reason
-(`02-daemon.md` § Control IPC). Three commands go to the server even when they
+(`02-host.md` § Control IPC). Three commands go to the server even when they
 name this machine, because the server owns what they change rather than the
-daemon: `hosts add`, `hosts rename` and `hosts remove`.
+host: `hosts add`, `hosts rename` and `hosts remove`.
 
 `--host` accepts a host name or a `hostId` prefix. An ambiguous or unknown
 value is an error listing the candidates.
 
 ## Auth
 
-Local — the CLI talks to the local host over a Unix socket at `~/.patch/daemon.sock`, presenting the host's local key as a `Bearer` like every other caller of that socket. It reads that key from `~/.patch/local.key`, where the host that minted it keeps it (`02-daemon.md` § Control IPC). The `0600` socket carries the same-user boundary; the key is defence in depth over it.
+Local — the CLI talks to the local host over a Unix socket at `~/.patch/daemon.sock`, presenting the host's local key as a `Bearer` like every other caller of that socket. It reads that key from `~/.patch/local.key`, where the host that minted it keeps it (`02-host.md` § Control IPC). The `0600` socket carries the same-user boundary; the key is defence in depth over it.
 
 Remote use goes through the same HTTP API the web app uses, with the same QR-paired token (see `10-auth.md`). The `patch --server <url>` flag flips to HTTP mode. `--server` names the server; `--host` names a host (§ Hosts and the CLI).
 
@@ -189,5 +189,5 @@ Remote use goes through the same HTTP API the web app uses, with the same QR-pai
 
 - Job CRUD details: `08-triggers-and-jobs.md`
 - MCP tool surface (subset of CLI): `06-threads-manager-speakers.md`
-- Host API: `02-daemon.md`
+- Host API: `02-host.md`
 - Auth for remote use: `10-auth.md`

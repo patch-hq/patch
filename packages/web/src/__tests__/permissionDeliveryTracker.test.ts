@@ -137,7 +137,7 @@ describe('PermissionDeliveryTracker', () => {
   });
 
   // The failure the user actually hit: the card greys out as though answered, the
-  // tracker retries into the void, and NOTHING says the daemon never heard it.
+  // tracker retries into the void, and NOTHING says the host never heard it.
   // An answer that does not land must not be indistinguishable from one that
   // did (CLAUDE.md: no fallback — if something doesn't work we need to know).
   describe('an answer that is not getting through says so', () => {

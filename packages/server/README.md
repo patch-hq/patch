@@ -261,7 +261,7 @@ All authed (`Authorization: Bearer <surface-jwt>`), rate-limited at
 ### Cross-chat tool integration (task A)
 
 Job DATA lives on the server (persisted under `<dataDir>/jobs/`). The
-daemon's `patch_job_*` MCP tools forward over the existing host-link
+host's `patch_job_*` MCP tools forward over the existing host-link
 to this server's `JobsInterface` — there is no separate host-side
 copy. The interface contract is in `src/jobs/types.ts` and is the
 canonical export for both consumers.

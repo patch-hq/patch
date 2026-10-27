@@ -34,7 +34,7 @@ data
 deploy/data
 **/.patch
 
-# Published artifacts served BY the box (daemon tarballs, APKs, desktop builds).
+# Published artifacts served BY the box (host tarballs, APKs, desktop builds).
 # They live under the deploy dir on the host and are 2.7 GB and growing: pulling
 # them into the build context copied every one of them into the builder for a
 # `COPY . .`, which is what filled the disk and broke `pnpm ship server` with

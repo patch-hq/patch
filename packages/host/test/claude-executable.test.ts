@@ -4,7 +4,7 @@
 // and configuration the user gets in their terminal").
 //
 // This is the half of the backend that genuinely belongs to the MACHINE. The
-// SDK — the npm package the daemon imports — is the daemon's own dependency and
+// SDK — the npm package the host imports — is the host's own dependency and
 // travels in the artifact; the ~200 MB Claude Code binary is not something a
 // host build should be carrying, and the machine already has the one its user
 // runs. Without a path the SDK looks for a platform package that the artifact

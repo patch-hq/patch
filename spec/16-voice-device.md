@@ -48,7 +48,7 @@ device  ──control WSS──▶  patch host  (persistent, low-bandwidth)
                               │   in 07-voice-app.md
                               │
                               │   FALLBACK tier: streaming Whisper STT on the
-                              │   daemon's host → proxy model → Kokoro TTS
+                              │   host → proxy model → Kokoro TTS
                               │   streaming — same fallback stack as the app
                               │   surfaces (`07-voice-app.md`)
                               │
@@ -56,14 +56,14 @@ device  ──control WSS──▶  patch host  (persistent, low-bandwidth)
                               │   chat) when the proxy needs Patch-specific
                               │   data or action, either tier
                               ▼
-                          daemon sends audio frames to device → speaker
+                          host sends audio frames to device → speaker
 ```
 
 - Device is locked to `backend: local` for now (07-voice-app.md § Voice is a config matrix — `gemini`/`openai` on device is an accepted config cell with no implementation yet, refused loudly rather than silently downgraded). Whisper STT (default Groq hosted `large-v3-turbo`; local `faster-whisper medium.en` via Settings → Voice), Kokoro for TTS, both streaming.
 - Audio latency, `backend: local` (Groq path): device → host WAN ~80ms each way + STT (~50–100ms) + light-layer response + TTS first-byte (~200ms) → device. Total time-to-first-audio: ~600ms – 1s. Local Whisper adds ~400ms (total ~1–1.5s). `gemini`/`openai` have no separate STT/TTS stage to add latency, so the same floor applies without local-Whisper's penalty — its cost is per-minute API spend rather than compute, per `07-voice-app.md` § `local`-backend engines. Device currently only supports `backend: local` — see `07-voice-app.md` § Voice is a config matrix.
 - Either tier, a turn that needs Manager (Todoist, transit times, anything Patch-specific) adds Manager's own response time on top, off the proxy's conversational thread — the proxy speaks a bridge and stays live rather than going silent while it waits.
 
-The device pairs with one host at setup: the machine whose host does its STT and TTS, which carries the voice components (`02-daemon.md` § Optional components). The device belongs to that host, and re-pairing moves it to another.
+The device pairs with one host at setup: the machine whose host does its STT and TTS, which carries the voice components (`02-host.md` § Optional components). The device belongs to that host, and re-pairing moves it to another.
 
 Pairing runs between the device and that host, which is the only party that admits anything: `patch hosts pair-device` (`17-cli.md` § Commands), run on that host over its local control socket, opens a five-minute window there, and the host records the `deviceId` of the first device to announce itself inside it and accepts that device's control WSS from then on. An announcement outside a window is refused, so a device flashed with a host's address is still adopted deliberately rather than by arriving on the network. The server issues nothing here, because the device holds no account credential and reaches no cloud service.
 
@@ -76,9 +76,9 @@ Two WSS connections, both terminating at the host.
 JSON frames:
 
 ```
-device → daemon
+device → host
   { type: "hello", deviceId, fwVersion, muted: bool }
-  { type: "wake_detected" }                                 → daemon prepares an audio session
+  { type: "wake_detected" }                                 → host prepares an audio session
   { type: "session_end", reason: "vad-timeout"
                                 | "user-button"
                                 | "agent-finished" }
@@ -86,7 +86,7 @@ device → daemon
   { type: "ring_dismissed" }
   { type: "mute_changed", muted: bool }                     → hardware switch flipped
 
-daemon → device
+host → device
   { type: "session_start", sessionId, voiceToken,
                   accountId, chatId, conversational: bool }  → device opens audio WSS
   { type: "ring", chatId, message?: string,
@@ -137,7 +137,7 @@ When `patch_notify(channel: 'speakers')` fires and there are multiple devices, t
 
 ## Device audio path (TTS playback)
 
-The device plays daemon-relayed TTS through its I2S speaker (MAX98357A-class amp behind the AIC3204 codec, with the on-board XMOS DSP as the I2S clock master) — Kokoro on `backend: local`, the hosted session's own audio on `gemini`/`openai`, resampled to 48 kHz the same way either source. Several firmware/daemon details are load-bearing for clean playback:
+The device plays host-relayed TTS through its I2S speaker (MAX98357A-class amp behind the AIC3204 codec, with the on-board XMOS DSP as the I2S clock master) — Kokoro on `backend: local`, the hosted session's own audio on `gemini`/`openai`, resampled to 48 kHz the same way either source. Several firmware/daemon details are load-bearing for clean playback:
 
 - Speaker bus runs at 48 kHz, ESP is the I2S slave. The XMOS DSP masters the speaker bus at 48 kHz (the mic RX bus is a separate 16 kHz bus). The TX `clk_cfg` must declare the true speaker rate (`SPK_RATE` = 48 kHz), not the 16 kHz mic rate — even in slave mode the IDF uses `clk_cfg.sample_rate` to set up the peripheral's sampling, and declaring 16 kHz on the 48 kHz bus injects sampling noise into complex content. The host resamples Kokoro's 24 kHz output up to 48 kHz before sending (one linear-phase windowed-sinc pass); the device plays the raw 48 kHz frames.
 - TX `auto_clear = true`. On playback end or any mid-stream gap the TX I2S DMA underruns; with `auto_clear` the peripheral emits zeros instead of repeating the stale last buffer, killing an end-of-playback pop and hardening mid-stream gaps.
@@ -218,5 +218,5 @@ If a phone Manager call is active and another voice event lands, the device does
 - Proxy and Manager, and turn semantics this device's wake-word sessions reuse: `07-voice-app.md` § The fast voice and the chat's agent, § Session modes
 - Notification channels and presence: `09-notifications.md`
 - Voice-device chat (the chat that handles inbound conversations): `06-threads-manager-speakers.md`
-- Host stack and host sizing: `02-daemon.md`, `11-deployment.md`
+- Host stack and host sizing: `02-host.md`, `11-deployment.md`
 - Voice-token mint and the surface/host linking flows: `01-server.md`, `10-auth.md`

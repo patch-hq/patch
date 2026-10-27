@@ -2,14 +2,14 @@
 
 A job is a persistent automation — a trigger, an optional filter and gate, and one action, stored as a JSON file on the server. Jobs fire when something matches: a webhook arrives, a Todoist task lands, or a cron schedule ticks.
 
-Jobs survive sessions, host restarts, and arbitrary time. They're for cross-session automations — the weekly newsletter, the morning bus check, the alert that spawns a fresh chat at 7am. For an in-chat reminder/loop use `patch_wake_me` or `patch_loop` (`02-daemon.md` § Self-wake).
+Jobs survive sessions, host restarts, and arbitrary time. They're for cross-session automations — the weekly newsletter, the morning bus check, the alert that spawns a fresh chat at 7am. For an in-chat reminder/loop use `patch_wake_me` or `patch_loop` (`02-host.md` § Self-wake).
 
 ## Disambiguation: `patch_job_*` vs `patch_wake_me`/`patch_loop`
 
 | Situation                                                                                                 | Use                                          |
 | --------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| Re-invoke THIS chat after a delay, re-arming adaptively each time (durable across restarts)               | `patch_wake_me` (`02-daemon.md` § Self-wake) |
-| Re-invoke THIS chat on a FIXED interval, forever, without re-arming it yourself (durable across restarts) | `patch_loop` (`02-daemon.md` § Self-wake)    |
+| Re-invoke THIS chat after a delay, re-arming adaptively each time (durable across restarts)               | `patch_wake_me` (`02-host.md` § Self-wake)   |
+| Re-invoke THIS chat on a FIXED interval, forever, without re-arming it yourself (durable across restarts) | `patch_loop` (`02-host.md` § Self-wake)      |
 | Spawns a new chat, or messages a different chat                                                           | `patch_job_*`                                |
 | Recurring wall-clock schedule (cron), indefinite                                                          | `patch_job_*`                                |
 | Triggered by an external event (webhook / Todoist)                                                        | `patch_job_*`                                |
@@ -277,7 +277,7 @@ into a chat running on a different model first switches it (`04-chats-and-folder
 chats the job already owns, not only the next one it creates.
 
 A `spawn` action may also store a `permissionMode`, one of the modes in
-`02-daemon.md` § Permission mode, stamped onto the chat it spawns. Without one the
+`02-host.md` § Permission mode, stamped onto the chat it spawns. Without one the
 fire spawns under `auto` rather than the host default: a job's mode is decided by
 the job, not by whichever host it lands on, so raising a host's default to a
 blocking mode for the person sitting at it cannot silently stall every unattended

@@ -4,14 +4,14 @@
 // the clocks). 32-bit slots packed to PCM16 mono 16 kHz before transmitting,
 // per spec/16-voice-device.md. See patch_codec for codec/XMOS/amp bring-up.
 // Speaker: AIC3204 codec DAC on I2S1 (TX), clock-secondary. Plays back PCM16
-// 16 kHz from the daemon (widened to 32-bit slots for the codec).
+// 16 kHz from the host (widened to 32-bit slots for the codec).
 //
-// One audio session = one WSS connection to wss://<daemon>/audio/<sessionId>.
+// One audio session = one WSS connection to wss://<host>/audio/<sessionId>.
 // First frame is the JSON `audio.session_start` per packages/wire/src/audio.ts.
 // Then bidirectional: out are binary PCM16 frames (~20 ms each, ~640 bytes);
 // in are interleaved JSON envelopes + binary PCM16 frames.
 //
-// The daemon runs end-of-utterance VAD on its side and decides session end;
+// The host runs end-of-utterance VAD on its side and decides session end;
 // the firmware also has its own button + mute interrupt that can cut the
 // session locally (in which case it emits `session_end` on the *control*
 // WSS, not the audio one).
@@ -41,9 +41,9 @@ typedef struct {
     const char *chat_id;
     const char *voice_token;     // daemon-minted HMAC token, pushed to the
                                  // device in the control session_start frame.
-    /** Called when daemon emits `audio.tts_chunk` (start of a TTS burst). */
+    /** Called when host emits `audio.tts_chunk` (start of a TTS burst). */
     void (*on_tts_started)(void *user);
-    /** Called when daemon emits `audio.tts_end`. */
+    /** Called when host emits `audio.tts_end`. */
     void (*on_tts_ended)(void *user);
     /** Called when the WSS closes (any reason). */
     void (*on_session_closed)(void *user);
@@ -59,7 +59,7 @@ void patch_audio_init(void);
 // callers cast to i2s_chan_handle_t.
 void *patch_audio_get_rx(void);
 
-// Start streaming the mic into a fresh audio WSS to the daemon. Caller owns
+// Start streaming the mic into a fresh audio WSS to the host. Caller owns
 // the strings in `cfg` for the lifetime of the session.
 void patch_audio_session_start(const patch_audio_session_cfg_t *cfg);
 
@@ -80,7 +80,7 @@ void patch_audio_ringtone_start(void);
 void patch_audio_ringtone_stop(void);
 
 // LOCAL self-test: play a two-tone (fa + fb Hz, each at `amp_each` PCM16
-// amplitude) directly to the speaker for `ms` milliseconds, with NO daemon /
+// amplitude) directly to the speaker for `ms` milliseconds, with NO host /
 // session / Wi-Fi. Generated on-device, widened, written straight to the TX
 // channel (same path TTS uses minus the WS/stream-buffer). If fb<=0 it's a
 // single tone. Blocks the caller. Lets us measure speaker IMD (clean two-tone

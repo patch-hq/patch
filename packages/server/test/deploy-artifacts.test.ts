@@ -4,7 +4,7 @@
 // content), so we assert them by reading the checked-in files and matching the
 // structural invariants:
 //
-//   - (docker-compose.yml removed: dc38968 moved server+daemon to systemd, and
+//   - (docker-compose.yml removed: dc38968 moved server+host to systemd, and
 //     the Caddy-only remainder existed solely to serve an in-repo production
 //     site block prod never used -- prod Caddy lives on the box at /etc/caddy.)
 //     patch-server runs as a native systemd user service from an installed

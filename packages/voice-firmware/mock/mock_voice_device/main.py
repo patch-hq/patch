@@ -6,8 +6,8 @@ without real ESP32-S3 hardware. Speaks the wire protocol from
 `spec/16-voice-device.md` §Wire protocol and `packages/wire/src/audio.ts`.
 
 Two WSS connections to the daemon:
-  * Control WSS (persistent) — `<daemon>/device/control`
-  * Audio   WSS (per-session) — `<daemon>/audio/<sessionId>`
+  * Control WSS (persistent) — `<host>/device/control`
+  * Audio   WSS (per-session) — `<host>/audio/<sessionId>`
 
 Authentication: Bearer EdDSA-JWT in the `Authorization` header on the
 control WSS upgrade. The token is read from `~/.patch/devices/<deviceId>.jwt`

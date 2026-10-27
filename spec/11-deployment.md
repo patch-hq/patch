@@ -3,7 +3,7 @@
 The server is deployed once by the operator. A host is installed on each host
 machine, from a signed binary artifact, onto a machine that has only an OS on it.
 § Reference deployment covers the server; § Host installation covers the
-daemon.
+host.
 
 ## Host sizing
 
@@ -100,7 +100,7 @@ It is pure JavaScript and runs on any OS/arch with Node 20 or newer.
   versions/<release>/   the current release and the two before it (rollback)
   current               -> versions/<release>, swapped atomically
   data/                 the server's state (registry, jobs, attachments, …)
-  downloads/            the update channel: daemon artifacts, APK, desktop feed
+  downloads/            the update channel: host artifacts, APK, desktop feed
   server.env            config + secrets, mode 600 — the unit's EnvironmentFile
   logs/server.log
 ```
@@ -170,7 +170,7 @@ their servers at it.
 ## Host installation
 
 The host is built as a per-OS/arch binary artifact and installed; the runtime
-model and first-run contract are in `02-daemon.md` § Runtime and installation.
+model and first-run contract are in `02-host.md` § Runtime and installation.
 
 The artifact holds one bundled JS file (the host and its pure-JS dependencies),
 a pinned Node runtime, the platform's native addons — currently
@@ -186,13 +186,13 @@ download, so the target cannot be built. Requirements on the result:
   Hosts and the host's self-update against the server's manifest.
 
 The agent backend, the large voice weights (Kokoro TTS, local Whisper) and Python
-stay outside the artifact and are provisioned on the host (`02-daemon.md`).
+stay outside the artifact and are provisioned on the host (`02-host.md`).
 Carrying them would put CPU-torch, a spaCy model and a multi-GB weights set into
 every install on every host, ahead of any use of voice. Those two components
 install into a host-local components directory, with a Python environment the
 host provisions at that point (`18-tech-stack.md`). Silero VAD's weights are
 the exception the size test allows in: ~2 MB, needed by every host, so they ride
-in the artifact (`02-daemon.md` § Installation).
+in the artifact (`02-host.md` § Installation).
 
 Updating never waits unboundedly. Each network step of a host self-update (the
 manifest check, the artifact download) is limited to 2 minutes, extraction to 2
@@ -230,12 +230,12 @@ GROQ_API_KEY=...             # groq backend; or set it in Settings → Providers
 # GEMINI_API_KEY / OPENAI_REALTIME_API_KEY — hosted voice. Optional here:
 # provider keys can be set from Settings → Providers instead (shared by every
 # host, stored on the server), which wins over the environment
-# (02-daemon.md § Provider keys).
-# Voice model files are downloaded by the daemon on demand into its own
-# host-local components directory, which the daemon resolves itself
-# (02-daemon.md § Optional components).
+# (02-host.md § Provider keys).
+# Voice model files are downloaded by the host on demand into its own
+# host-local components directory, which the host resolves itself
+# (02-host.md § Optional components).
 
-# Agent backend credential (daemon)
+# Agent backend credential (host)
 # Optional. This machine's own login, like `claude login`: adopted as the first
 # shared account when the server holds none, and offered for adoption from
 # Settings otherwise. The shared accounts on the server are what turns use.
@@ -244,7 +244,7 @@ CLAUDE_CODE_OAUTH_TOKEN=...
 ```
 
 `WHISPER_BACKEND`, `GROQ_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` are read by the
-daemon, so they are set in the environment of each host's service rather than in
+host, so they are set in the environment of each host's service rather than in
 the server's compose env — or, for the provider keys, from Settings →
 Providers, which stores them on the host and never on the server. The rest are the
 server's.
@@ -266,14 +266,14 @@ The desktop app, the Android app and the host are builds, not
 deployments — artifacts a person installs:
 
 ```sh
-pnpm build:desktop   # Mac app → /Applications (signed release needs Apple creds); carries the server release and this Mac's daemon build
+pnpm build:desktop   # Mac app → /Applications (signed release needs Apple creds); carries the server release and this Mac's host build
 pnpm build:android   # APK — no server address is built in
-pnpm build:host    # daemon artifacts per OS/arch → published for install + self-update
+pnpm build:host    # host artifacts per OS/arch → published for install + self-update
 ```
 
 The host artifacts are published to the server, which serves them with a
 version manifest: that one channel feeds both a new host's install command and
-every existing host's self-update (`02-daemon.md`).
+every existing host's self-update (`02-host.md`).
 
 Nothing host-specific is committed. Getting a build to a particular place — a
 remote box, a phone — is machine-specific and lives in a git-ignored
@@ -487,4 +487,4 @@ Certificate setup and the failure modes around it are in `docs/desktop-packaging
 ## Cross-refs
 
 - Server config knobs: `01-server.md`
-- Host commands: `02-daemon.md`
+- Host commands: `02-host.md`

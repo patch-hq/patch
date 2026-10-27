@@ -93,4 +93,4 @@ Per-invocation flags override config defaults.
 
 - Wire events consumed: `03-wire-protocol.md`
 - Shared surface concerns (presence, linking): `05-surfaces.md`
-- Host commands: `02-daemon.md`
+- Host commands: `02-host.md`

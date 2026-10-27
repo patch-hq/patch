@@ -647,7 +647,7 @@ export function reorderClaudeAccounts(opts: {
 //   3. writeDaemonKey(patchHome, daemonKey).
 //
 // NO FALLBACK: we never proceed without a real, surface-signed daemonKey, and
-// every failure is logged. But in the production/Docker topology the daemon can
+// every failure is logged. But in the production/Docker topology the host can
 // boot BEFORE the server is reachable or BEFORE an account is bootstrapped on
 // the server. That's a TRANSIENT precondition, not a fallback: a connection
 // error, a 5xx from register/complete or register/await, or a malformed

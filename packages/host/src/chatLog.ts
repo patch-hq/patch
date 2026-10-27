@@ -448,7 +448,7 @@ export class ChatLog {
   }
 
   /**
-   * A line that does not parse is skipped, loudly in the daemon log: one
+   * A line that does not parse is skipped, loudly in the host log: one
    * damaged record must not make the whole chat unreadable, and its raw JSON
    * must never reach the person reading the chat.
    */

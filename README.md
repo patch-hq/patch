@@ -77,7 +77,7 @@ packages/
   web/              Vite + React 19 + Tailwind v4 SPA (mounts at /app/)
   desktop/          Electron + electron-builder shell (macOS)
   voice-firmware/   ESP-IDF project for the voice device (NOT a pnpm package)
-  kokoro-sidecar/   Python (uv) Kokoro TTS sidecar — daemon spawns it; 24 kHz PCM16 over WS
+  kokoro-sidecar/   Python (uv) Kokoro TTS sidecar — host spawns it; 24 kHz PCM16 over WS
   whisper-sidecar/  Python (uv) faster-whisper STT sidecar (WHISPER_BACKEND=local)
 apps/
   mobile/           Expo Android-only app
@@ -185,7 +185,7 @@ authed (spec/10 derives host liveness from the inbound connection).
 docker compose -f docker-compose.test.yml up --build -d
 
 curl -sf http://localhost:13000/api/healthz | jq
-curl -sf http://localhost:13000/api/daemon/healthz | jq   # 200 → daemon linked
+curl -sf http://localhost:13000/api/daemon/healthz | jq   # 200 → host linked
 curl -sfI http://localhost:13000/app/ | head -1
 
 # Through Caddy (reverse proxy) on host :18080 → container :80:
@@ -227,7 +227,7 @@ principle). Models are fetched with `scripts/fetch-models.sh` into `./models`.
 The two Python sidecars are real `uv` projects:
 
 ```bash
-# Kokoro (24 kHz PCM16 over WS); the daemon spawns this itself in real mode.
+# Kokoro (24 kHz PCM16 over WS); the host spawns this itself in real mode.
 cd packages/kokoro-sidecar && uv venv --python 3.12 && uv pip install -e .
 # faster-whisper STT (WHISPER_BACKEND=local):
 cd packages/whisper-sidecar && uv venv --python 3.12 && uv pip install -e .

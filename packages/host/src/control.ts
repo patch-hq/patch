@@ -1258,7 +1258,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
 
   // POST /chats/:id/model — run an existing chat on another model from its
   // NEXT turn (spec/04 § Model). Body `{model: string}`, required. A refused
-  // change (unknown model, no catalogue) is a 400 with the daemon's error code
+  // change (unknown model, no catalogue) is a 400 with the host's error code
   // and leaves the chat on the model it had — NO FALLBACK.
   app.post<{ Params: { id: string }; Body: { model?: unknown } | undefined }>(
     '/chats/:id/model',

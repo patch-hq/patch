@@ -9,7 +9,7 @@
 //
 // patch_tts_widen_pcm16() is the exact function patch_audio.c calls on every
 // inbound TTS binary frame, so asserting it proves the device converts the
-// daemon's TTS audio into speaker samples at full scale, in order, without
+// host's TTS audio into speaker samples at full scale, in order, without
 // dropping or attenuating — the rendering half of "audible".
 
 #include "patch_tts_render.h"

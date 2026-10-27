@@ -4621,7 +4621,7 @@ function DelegateTranscript({
       }
     },
     refetchInterval: live ? 2000 : false,
-    // A failed pull can already have sat out the server's 5s daemon timeout;
+    // A failed pull can already have sat out the server's 5s host timeout;
     // the app-wide retry would double that "Loading…" before the error shows.
     retry: false,
   });
