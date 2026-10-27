@@ -126,10 +126,10 @@ async function tapMic(mic: Locator): Promise<void> {
 
 const CHAT = '/app/dev-harness.html?chat=thread_manager';
 
-// A long dictation paints in the preview mirror, not in the textarea, so the
-// textarea's own content never grows. The box must still grow with the preview
-// (up to its cap) so the text never spills past it onto the toolbar.
-test('composer grows with a long live-dictation preview', async ({ page }) => {
+// A long dictation is drawn in the input itself. The box must grow with it (up
+// to its cap, then scroll inside itself) so the text never spills past it onto
+// the toolbar.
+test('composer grows with a long live dictation', async ({ page }) => {
   test.setTimeout(60_000);
   await page.setViewportSize({ width: 360, height: 640 });
   await page.addInitScript(BOOT);
@@ -138,25 +138,22 @@ test('composer grows with a long live-dictation preview', async ({ page }) => {
   const input = page.getByTestId('composer-input');
   await input.click();
   await tapMic(page.getByTestId('voice-note-btn'));
-  const preview = page.getByTestId('composer-live-preview');
-  await expect(preview).toBeVisible();
-  await expect(page.getByTestId('composer-live-partial')).toContainText('word39');
+  await expect(input).toHaveValue(/word39/);
   const m = await page.evaluate(() => {
-    const i = document.querySelector<HTMLElement>('[data-testid="composer-input"]')!;
-    const p = document.querySelector<HTMLElement>('[data-testid="composer-live-preview"]')!;
+    const i = document.querySelector<HTMLTextAreaElement>('[data-testid="composer-input"]')!;
     const row = i.closest('.composer-row')!;
     const toolbar = row.querySelector('.composer-actions, .composer-toolbar') as HTMLElement | null;
     return {
       inputH: i.offsetHeight,
       cap: Math.round(window.innerHeight * 0.3),
-      previewScroll: p.scrollHeight,
-      previewClient: p.clientHeight,
+      scroll: i.scrollHeight,
+      client: i.clientHeight,
       inputBottom: i.getBoundingClientRect().bottom,
       toolbarTop: toolbar ? toolbar.getBoundingClientRect().top : null,
     };
   });
-  // Fits entirely, or is at the cap (then the mirror scrolls inside itself).
-  expect(m.inputH >= m.cap - 1 || m.previewScroll <= m.previewClient).toBe(true);
+  // Fits entirely, or is at the cap and scrolls inside itself.
+  expect(m.inputH >= m.cap - 1 || m.scroll <= m.client).toBe(true);
   expect(m.inputH).toBeGreaterThan(60);
   if (m.toolbarTop !== null) expect(m.inputBottom).toBeLessThanOrEqual(m.toolbarTop + 1);
 });

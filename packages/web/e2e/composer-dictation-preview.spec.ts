@@ -177,15 +177,12 @@ test.describe('composer dictation — live preview', () => {
     await expect(input).toHaveValue('');
 
     await tapChord(page, 'KeyD', { meta: true, shift: true });
-    await expect(page.getByTestId('composer-live-partial')).toHaveText(
-      /^\s*🎤 remind me to water the$/,
-    );
+    await expect(input).toHaveValue('remind me to water the');
     // Not the voice-note overlay: the words are in the box, not above it.
     await expect(page.getByTestId('voice-note-overlay')).toHaveCount(0);
 
     await tapChord(page, 'KeyD', { meta: true, shift: true });
     await expect(input).toHaveValue('water the ferns');
-    await expect(page.getByTestId('composer-live-preview')).toHaveCount(0);
     // Nothing was SENT as a message. The draft sync (`composer_draft.set`)
     // rightly carries the text to other surfaces — it is what is in the box —
     // and under load its debounce fired before this read, so the check is on
@@ -238,9 +235,7 @@ test.describe('composer dictation — live preview', () => {
 
     await input.fill('please');
     await tapMic(mic);
-    await expect(page.getByTestId('composer-live-partial')).toHaveText(
-      /^\s*🎤 remind me to water the$/,
-    );
+    await expect(input).toHaveValue('please remind me to water the');
     await expect(mic).toHaveAttribute('aria-pressed', 'true');
 
     await page.getByTestId('send-btn').click();
@@ -255,10 +250,11 @@ test.describe('composer dictation — live preview', () => {
       .toContain('please water the ferns');
     await expect(input).toHaveValue('');
     await expect(mic).toHaveAttribute('aria-pressed', 'false');
-    await expect(page.getByTestId('composer-live-preview')).toHaveCount(0);
   });
 
-  test('paints the interim transcript greyed over an editable input', async ({ page }) => {
+  test('shows the interim transcript in the input after the typed text, then the final in its place', async ({
+    page,
+  }) => {
     test.setTimeout(60_000);
     await page.addInitScript(BOOT);
     await page.route('**/api/auth/me', (r) =>
@@ -287,63 +283,19 @@ test.describe('composer dictation — live preview', () => {
     const mic = page.getByTestId('voice-note-btn');
     const input = page.getByTestId('composer-input');
 
-    // Type first: the preview has to follow the user's own text, not replace it.
+    // Type first: the live words follow the user's own text, not replace it.
     await input.fill('note:');
     await tapMic(mic);
 
     // The second pass REPLACES the first rather than appending to it — the
-    // interim text is a fresh read of the whole prefix each time, and the
-    // preview must show the latest read, not a concatenation of every read.
-    const partial = page.getByTestId('composer-live-partial');
-    await expect(partial).toHaveText(/^\s*🎤 remind me to water the$/);
+    // interim text is a fresh read of the whole prefix each time.
+    await expect(input).toHaveValue('note: remind me to water the');
+    // Read-only while the words are still arriving, so a keystroke cannot
+    // land in the middle of a guess.
+    expect(await input.evaluate((el) => (el as HTMLTextAreaElement).readOnly)).toBe(true);
 
-    // The typed text is still the only REAL value — the guess is not committed.
-    await expect(input).toHaveValue('note:');
-
-    // Greyed: the partial takes the placeholder ink, the committed run does not.
-    const inkPartial = await partial.evaluate((el) => getComputedStyle(el).color);
-    const inkCommitted = await page
-      .locator('.composer-live-committed')
-      .evaluate((el) => getComputedStyle(el).color);
-    expect(inkPartial).not.toBe(inkCommitted);
-    const placeholderInk = await input.evaluate((el) =>
-      getComputedStyle(el.ownerDocument.documentElement).getPropertyValue('--ink-3').trim(),
-    );
-    expect(placeholderInk.length).toBeGreaterThan(0);
-
-    // The textarea's own glyphs are transparent so the mirror shows through,
-    // but it keeps a visible caret and stays editable.
-    const style = await input.evaluate((el) => {
-      const cs = getComputedStyle(el);
-      return {
-        color: cs.color,
-        caret: cs.caretColor,
-        disabled: (el as HTMLTextAreaElement).disabled,
-      };
-    });
-    expect(style.color).toBe('rgba(0, 0, 0, 0)');
-    expect(style.caret).not.toBe('rgba(0, 0, 0, 0)');
-    expect(style.disabled).toBe(false);
-
-    // The mirror sits exactly over the input, so the greyed words read as
-    // continuing the line rather than floating beside it.
-    const boxes = await page.evaluate(() => {
-      const ta = document.querySelector('.composer-input')!.getBoundingClientRect();
-      const mirror = document.querySelector('.composer-live-preview')!.getBoundingClientRect();
-      return {
-        ta: { x: ta.x, y: ta.y, w: ta.width },
-        mirror: { x: mirror.x, y: mirror.y, w: mirror.width },
-      };
-    });
-    expect(Math.abs(boxes.mirror.x - boxes.ta.x)).toBeLessThan(1);
-    expect(Math.abs(boxes.mirror.y - boxes.ta.y)).toBeLessThan(1);
-    expect(Math.abs(boxes.mirror.w - boxes.ta.w)).toBeLessThan(1);
-
-    // Still typeable mid-dictation.
-    await input.fill('note: typed anyway');
-    await expect(input).toHaveValue('note: typed anyway');
-
-    // Ending the dictation drops the preview entirely.
+    // Ending the dictation swaps the guess for the transcript, and the input
+    // is editable again.
     await page.route('**/api/voice/transcribe*', (r) =>
       r.fulfill({
         status: 200,
@@ -352,7 +304,8 @@ test.describe('composer dictation — live preview', () => {
       }),
     );
     await tapMic(mic);
-    await expect(page.getByTestId('composer-live-preview')).toHaveCount(0);
+    await expect(input).toHaveValue('note: water the plants');
+    expect(await input.evaluate((el) => (el as HTMLTextAreaElement).readOnly)).toBe(false);
   });
 });
 
