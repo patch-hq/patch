@@ -4380,7 +4380,6 @@ export class Daemon {
       throw new Error(`${opts.id} is not a subagent of this chat`);
     }
     if (!this.chatState.has(opts.id)) this.chatState.hydrate([meta]);
-    const state = this.chatState.get(opts.id)!;
     const result = opts.wait ? this.registerDelegateWaiter(opts.id) : undefined;
     this.rearmDelegate(opts.id);
     try {
