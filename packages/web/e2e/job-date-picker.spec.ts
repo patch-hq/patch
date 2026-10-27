@@ -31,7 +31,9 @@ for (const [name, viewport] of [
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
       await pop.locator('.dtf-day').nth(14).click();
-      await page.getByTestId('job-date-start-hour').selectOption('17');
+      // The default time is 09:00 (AM): pick 5, then flip to PM.
+      await page.getByTestId('job-date-start-time-h-5').dispatchEvent('click');
+      await page.getByTestId('job-date-start-time-pm').click();
       await expect(page.getByTestId('job-date-start')).toHaveValue(/ 17:00$/);
       await page.getByTestId('job-date-start-done').click();
       await expect(pop).toBeHidden();
