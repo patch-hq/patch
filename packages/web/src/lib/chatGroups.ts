@@ -113,10 +113,11 @@ export type ChatSort = 'last-action' | 'last-update' | 'name';
 /** Projects normally follow the chat sort; choosing a concrete value decouples them. */
 export type GroupSort = ChatSort | 'same-as-chats';
 
-export const CHAT_SORTS: ReadonlyArray<{ value: ChatSort; label: string }> = [
-  { value: 'last-action', label: 'My recent activity' },
-  { value: 'last-update', label: 'Latest updates' },
-  { value: 'name', label: 'Name' },
+/** `short` is the sidebar switch's text; `label` is its full name. */
+export const CHAT_SORTS: ReadonlyArray<{ value: ChatSort; label: string; short: string }> = [
+  { value: 'last-action', label: 'My recent activity', short: 'Mine' },
+  { value: 'last-update', label: 'Latest updates', short: 'Latest' },
+  { value: 'name', label: 'Name', short: 'A–Z' },
 ];
 
 export const DEFAULT_CHAT_SORT: ChatSort = 'last-action';

@@ -70,6 +70,7 @@ export function ChatNotFound({ chatId }: { chatId: string }): JSX.Element {
             pinnedAt: c.pinnedAt,
             disabled: c.disabled,
             lastUpdated: c.lastUpdated,
+            lastUserActivity: c.lastUserActivity,
             jobId: c.jobId,
             // A hidden chat reached by URL must stay out of the active list
             // (spec/04 § Hidden) — it is exactly the kind of row this fetch finds.

@@ -1253,6 +1253,7 @@ export function ArchivedSection({
           pinned: boolean;
           pinnedAt: number | null;
           lastUpdated: number;
+          lastUserActivity?: number;
           hostId: string;
           permissionMode: PermissionMode;
           jobId: string | null;
@@ -1278,6 +1279,7 @@ export function ArchivedSection({
         // be archived (spec/06 § Disabled).
         disabled: false,
         lastUpdated: c.lastUpdated,
+        lastUserActivity: c.lastUserActivity,
         jobId: c.jobId,
         // The server has always sent these; this mapper picked the response
         // apart field by field and left them behind, so every row in the one
@@ -1523,6 +1525,7 @@ export function DeletedSection({
           pinned: boolean;
           pinnedAt: number | null;
           lastUpdated: number;
+          lastUserActivity?: number;
           hostId: string;
           permissionMode: PermissionMode;
           jobId: string | null;
@@ -1540,6 +1543,7 @@ export function DeletedSection({
         pinnedAt: c.pinnedAt,
         disabled: false,
         lastUpdated: c.lastUpdated,
+        lastUserActivity: c.lastUserActivity,
         jobId: c.jobId,
       }));
       mergeChats(rows);
@@ -1598,6 +1602,7 @@ export function HiddenSection({
           snoozedUntil: number | null;
           hidden: boolean;
           lastUpdated: number;
+          lastUserActivity?: number;
           hostId: string;
           permissionMode: PermissionMode;
           jobId: string | null;
@@ -1620,6 +1625,7 @@ export function HiddenSection({
         snoozedUntil: c.snoozedUntil,
         hidden: c.hidden,
         lastUpdated: c.lastUpdated,
+        lastUserActivity: c.lastUserActivity,
         jobId: c.jobId,
         // A hidden chat is expected to be doing something, so the row's badge
         // is the point of the section — carry what it is drawn from.
@@ -1732,6 +1738,7 @@ export function AutomationsSection({
            */
           hidden?: boolean;
           lastUpdated: number;
+          lastUserActivity?: number;
           hostId: string;
           permissionMode: PermissionMode;
           jobId: string | null;
@@ -1757,6 +1764,7 @@ export function AutomationsSection({
         snoozedUntil: c.snoozedUntil,
         hidden: c.hidden,
         lastUpdated: c.lastUpdated,
+        lastUserActivity: c.lastUserActivity,
         jobId: c.jobId,
         // This section exists to report whether a job-spawned chat is still
         // working, and a job whose whole payload is a backgrounded build is

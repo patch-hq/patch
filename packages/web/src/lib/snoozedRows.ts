@@ -22,6 +22,7 @@ interface SnoozedApiRow {
   runningSince?: number | null;
   hidden?: boolean;
   lastUpdated: number;
+  lastUserActivity?: number;
   hostId: string;
   permissionMode: PermissionMode;
   jobId: string | null;
@@ -62,6 +63,7 @@ export function snoozedRowsForStore(chats: unknown[]): Array<
     ...(c.runningSince !== undefined ? { runningSince: c.runningSince } : {}),
     hidden: c.hidden ?? false,
     lastUpdated: c.lastUpdated,
+    lastUserActivity: c.lastUserActivity,
     jobId: c.jobId,
   }));
 }

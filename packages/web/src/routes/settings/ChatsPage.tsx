@@ -6,6 +6,8 @@
 import type { JSX } from 'react';
 import { Toggle } from '../../components/Toggle.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
+import { useUiStore } from '../../stores/uiStore.js';
+import { CHAT_SORTS, type GroupSort } from '../../lib/chatGroups.js';
 import { patchShared } from './sharedWrite.js';
 import { hourLabel } from '../../lib/snoozePresets.js';
 import { Group, Row, SettingsPage } from './ui.js';
@@ -18,6 +20,8 @@ export function ChatsPage(): JSX.Element {
   const morning = usePreferencesStore((s) => s.preferences.snoozeMorningHour);
   const evening = usePreferencesStore((s) => s.preferences.snoozeEveningHour);
   const loaded = usePreferencesStore((s) => s.loaded);
+  const groupSort = useUiStore((s) => s.groupSort);
+  const setGroupSort = useUiStore((s) => s.setGroupSort);
   return (
     <SettingsPage title="Chats" testid="settings-chats">
       <Group>
@@ -40,6 +44,23 @@ export function ChatsPage(): JSX.Element {
             }
             testid="status-generation-toggle"
           />
+        </Row>
+      </Group>
+      <Group label="Sidebar" testid="settings-sidebar">
+        <Row title="Order projects by" testid="group-sort">
+          <select
+            aria-label="Order projects by"
+            value={groupSort}
+            data-testid="group-sort-select"
+            onChange={(e) => setGroupSort(e.target.value as GroupSort)}
+          >
+            <option value="same-as-chats">Same as chats</option>
+            {CHAT_SORTS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
         </Row>
       </Group>
       <Group label="Snooze defaults" testid="settings-snooze">

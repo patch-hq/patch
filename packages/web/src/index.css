@@ -1815,15 +1815,34 @@ a.ch-row:hover {
   font-size: var(--text-min);
   color: var(--ink-3);
 }
-.sidebar-sort-note {
-  margin: -1px 8px 3px;
-  font-size: var(--text-min);
-  color: var(--ink-3);
+/* The sort switch (spec/14 § Sidebar ordering): always visible, the current
+   order is the filled segment. Same pill outline as the view trigger beside it. */
+.sidebar-sort-seg {
+  display: flex;
+  flex: 1 1 100%;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
 }
-.sidebar-sort-advanced {
-  margin-top: 3px;
-  border-top: 1px solid var(--line);
-  border-radius: 0 0 calc(var(--radius) - 3px) calc(var(--radius) - 3px);
+.sidebar-sort-seg button {
+  flex: 1;
+  padding: 3px 8px;
+  color: var(--ink-3);
+  font-size: var(--text-min);
+  font-weight: 500;
+  line-height: 1.2;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.sidebar-sort-seg button:hover {
+  color: var(--ink-2);
+}
+.sidebar-sort-seg button.on {
+  color: var(--accent-strong);
+  background: var(--accent-tint);
 }
 .sidebar-view-option-count {
   /* Never shrinks — a truncated number reads as the wrong number. */

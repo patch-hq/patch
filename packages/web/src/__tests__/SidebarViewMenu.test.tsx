@@ -266,38 +266,23 @@ describe('SidebarSortMenu (outside the view dropdown)', () => {
     );
     fireEvent.click(screen.getByTestId('sidebar-view-trigger'));
     expect(screen.queryByTestId('sidebar-chat-sort')).toBeNull();
-    expect(screen.queryByTestId('sidebar-sort-advanced')).toBeNull();
   });
 
-  it('explains the stable default and keeps projects following chats by default', () => {
+  it('shows every order at once with the current one checked', () => {
     render(
       <MemoryRouter>
         <SidebarSortMenu />
       </MemoryRouter>,
     );
-    fireEvent.click(screen.getByTestId('sidebar-sort-trigger'));
-    expect(screen.getByTestId('sidebar-chat-sort-last-action')).toBeTruthy();
-    expect(screen.getByText('Agent updates won’t move conversations')).toBeTruthy();
-    expect(screen.queryByTestId('sidebar-group-sort-last-update')).toBeNull();
-    fireEvent.click(screen.getByTestId('sidebar-chat-sort-name'));
-    expect(screen.queryByText('Agent updates won’t move conversations')).toBeNull();
-    expect(useUiStore.getState().groupSort).toBe('same-as-chats');
-  });
-
-  it('reveals and persists an independent project sort under Advanced', () => {
-    render(
-      <MemoryRouter>
-        <SidebarSortMenu />
-      </MemoryRouter>,
-    );
-    fireEvent.click(screen.getByTestId('sidebar-sort-trigger'));
-    fireEvent.click(screen.getByTestId('sidebar-sort-advanced'));
-    expect(screen.getByTestId('sidebar-group-sort-same-as-chats')).toHaveAttribute(
-      'aria-selected',
+    expect(screen.getByTestId('sidebar-chat-sort-last-action')).toHaveAttribute(
+      'aria-checked',
       'true',
     );
-    fireEvent.click(screen.getByTestId('sidebar-group-sort-last-update'));
-    expect(useUiStore.getState().groupSort).toBe('last-update');
-    expect(localStorage.getItem('patch.sidebar.groupSort')).toBe('last-update');
+    expect(screen.getByTestId('sidebar-chat-sort-last-update')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('sidebar-chat-sort-name'));
+    expect(screen.getByTestId('sidebar-chat-sort-name')).toHaveAttribute('aria-checked', 'true');
+    expect(useUiStore.getState().chatSort).toBe('name');
+    expect(localStorage.getItem('patch.sidebar.chatSort')).toBe('name');
+    expect(useUiStore.getState().groupSort).toBe('same-as-chats');
   });
 });

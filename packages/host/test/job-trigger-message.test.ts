@@ -218,4 +218,24 @@ describe('Pad delivery is system input', () => {
     expect(o.jobTrigger).toBe(true);
     expect(o.fromUser).toBeUndefined();
   });
+  it("an agent's CLI send-to is not the user, so it does not move the chat", () => {
+    const o = chatInputToSendOptions({
+      type: 'chat.input',
+      chatId: 'c',
+      message: 'x',
+      localId: 'l',
+      origin: 'machine',
+    });
+    expect(o.fromUser).toBeUndefined();
+    expect(o.origin).toBe('machine');
+  });
+  it('a surface send is the user', () => {
+    const o = chatInputToSendOptions({
+      type: 'chat.input',
+      chatId: 'c',
+      message: 'x',
+      localId: 'l',
+    });
+    expect(o.fromUser).toBe(true);
+  });
 });

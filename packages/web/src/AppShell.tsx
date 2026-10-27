@@ -154,6 +154,7 @@ export function AppShell(): JSX.Element {
           pinnedAt: c.pinnedAt,
           disabled: c.disabled,
           lastUpdated: c.lastUpdated,
+          lastUserActivity: c.lastUserActivity,
           jobId: c.jobId,
           // spec/02 § Background task completions — a chat can cold-start idle
           // with a background command still running, and the next live

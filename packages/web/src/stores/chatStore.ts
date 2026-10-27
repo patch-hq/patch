@@ -909,6 +909,20 @@ function updateDeliveryEntry(
   set({ timelines: { ...get().timelines, [chatId]: list } });
 }
 
+/**
+ * The sidebar's sort key for a row arriving from a REST snapshot (spec/14 §
+ * Sidebar ordering). It only ever moves forward — a person's last send cannot
+ * un-happen — so a snapshot fetched before a newer live `chat.state` landed
+ * must not drag the row back down. An older server omits the field, which
+ * reads as `lastUpdated`, the order before this field existed.
+ */
+function snapshotUserActivity(
+  r: { lastUserActivity?: number; lastUpdated: number },
+  existing: ChatRow | undefined,
+): number {
+  return Math.max(r.lastUserActivity ?? r.lastUpdated, existing?.lastUserActivity ?? 0);
+}
+
 function emptyRow(chatId: string, folder: string): ChatRow {
   return {
     chatId,
@@ -1117,6 +1131,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const backgroundTasks =
         r.backgroundTasks !== undefined ? r.backgroundTasks : (existing?.backgroundTasks ?? null);
       const context = r.context !== undefined ? r.context : (existing?.context ?? null);
+      const lastUserActivity = snapshotUserActivity(r, existing);
       if (existing) {
         // Keep the live-stream + local fields; refresh the server-authoritative
         // ones (name, folder, activity, status, pinned, lastUpdated) from REST.
@@ -1160,6 +1175,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           statusDeclared,
           backgroundTasks,
           context,
+          lastUserActivity,
           lastReadSeq,
         };
       } else {
@@ -1188,6 +1204,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           statusDeclared,
           backgroundTasks,
           context,
+          lastUserActivity,
         };
         next[r.chatId] =
           persisted !== undefined
@@ -1252,6 +1269,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const backgroundTasks =
         r.backgroundTasks !== undefined ? r.backgroundTasks : (existing?.backgroundTasks ?? null);
       const context = r.context !== undefined ? r.context : (existing?.context ?? null);
+      const lastUserActivity = snapshotUserActivity(r, existing);
       if (existing) {
         const lastReadSeq =
           persisted !== undefined
@@ -1283,6 +1301,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           statusDeclared,
           backgroundTasks,
           context,
+          lastUserActivity,
           lastReadSeq,
         };
       } else {
@@ -1311,6 +1330,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           statusDeclared,
           backgroundTasks,
           context,
+          lastUserActivity,
         };
         next[r.chatId] =
           persisted !== undefined
