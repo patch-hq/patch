@@ -29,6 +29,7 @@ vi.mock('../src/api/rest', () => ({
     disableJob: vi.fn(),
     patchJob: vi.fn(),
     deleteJob: vi.fn(),
+    runJob: vi.fn(),
   },
 }));
 
@@ -51,6 +52,7 @@ beforeEach(() => {
   vi.mocked(api.disableJob).mockReset().mockResolvedValue(undefined);
   vi.mocked(api.patchJob).mockReset().mockResolvedValue({});
   vi.mocked(api.deleteJob).mockReset().mockResolvedValue(undefined);
+  vi.mocked(api.runJob).mockReset().mockResolvedValue({ status: 'sent', fireId: 'f1' });
   __clearLastAlert();
   __resetRouterMock();
   __clearAllMmkv();
@@ -281,6 +283,32 @@ describe('Jobs tab — archive', () => {
     expect(api.patchJob).toHaveBeenCalledWith('j1', { archived: true });
     expect(__getLastAlert()).toBeNull();
     expect(hasText(r.root, 'Archived')).toBe(true);
+  });
+
+  it('run now fires the job and opens it, with no alert', async () => {
+    vi.mocked(api.listJobs).mockResolvedValue({ jobs: [JOB] });
+    const r = renderRN(<Jobs />);
+    await flush();
+    await actAsync(async () => {
+      findHost(r.root, byTestId('job-run-now-j1')).props.onPress();
+      await flush();
+    });
+    expect(api.runJob).toHaveBeenCalledWith('j1');
+    expect(__getLastAlert()).toBeNull();
+    expect(routerMock.push).toHaveBeenCalledWith('/settings/job-editor?id=j1');
+  });
+
+  it('a failed run now alerts and stays on the list', async () => {
+    vi.mocked(api.listJobs).mockResolvedValue({ jobs: [JOB] });
+    vi.mocked(api.runJob).mockRejectedValue(new Error('offline'));
+    const r = renderRN(<Jobs />);
+    await flush();
+    await actAsync(async () => {
+      findHost(r.root, byTestId('job-run-now-j1')).props.onPress();
+      await flush();
+    });
+    expect(__getLastAlert()?.title).toBe('Run now failed');
+    expect(routerMock.push).not.toHaveBeenCalled();
   });
 
   it('a failed archive reverts and alerts', async () => {

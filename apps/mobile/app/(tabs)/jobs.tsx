@@ -15,7 +15,15 @@
 import React from 'react';
 import { Alert, Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
 import { useFocusEffect, useRouter, type Href } from 'expo-router';
-import { Archive, ArchiveRestore, Clock, MessageCircle, Plus, Trash2 } from 'lucide-react-native';
+import {
+  Archive,
+  ArchiveRestore,
+  Clock,
+  MessageCircle,
+  Play,
+  Plus,
+  Trash2,
+} from 'lucide-react-native';
 import { api } from '../../src/api/rest';
 import { EmptyState } from '../../src/components/EmptyState';
 import { OptionPicker } from '../../src/components/OptionPicker';
@@ -199,6 +207,15 @@ export default function Jobs(): React.ReactElement {
     });
   };
 
+  // Run now (spec/08 § Manual run): no success alert — landing on the job is
+  // the confirmation, as on web.
+  const run = (job: JobShape): void => {
+    void api
+      .runJob(job.id)
+      .then(() => openEditor(job.id))
+      .catch((e: Error) => Alert.alert('Run now failed', e.message));
+  };
+
   // Delete is permanent and asks first, the same confirmation the editor's
   // Delete asks for.
   const remove = (job: JobShape): void => {
@@ -263,7 +280,7 @@ export default function Jobs(): React.ReactElement {
   const openChat = (chatId: string): void => {
     router.push(`/chats/${chatId}`);
   };
-  const rowActions: RowActions = { toggle, archive, remove, openEditor, openChat, colors };
+  const rowActions: RowActions = { toggle, run, archive, remove, openEditor, openChat, colors };
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
@@ -449,6 +466,7 @@ type Row = Omit<JobShape, 'name'> & {
 
 interface RowActions {
   toggle: (job: JobShape, on: boolean) => void;
+  run: (job: JobShape) => void;
   archive: (job: JobShape, next: boolean) => void;
   remove: (job: JobShape) => void;
   openEditor: (jobId?: string) => void;
@@ -637,6 +655,18 @@ function JobRow({ job: j, actions }: { job: Row; actions: RowActions }): React.R
           </Pressable>
         ) : null}
         <View style={{ flex: 1 }} />
+        {dead ? null : (
+          <Pressable
+            onPress={() => actions.run(j)}
+            testID={`job-run-now-${j.id}`}
+            accessibilityLabel="Run now"
+            hitSlop={8}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: space.xs }}
+          >
+            <Play size={14} color={colors.leaf} />
+            <Text style={{ ...typography.meta, color: colors.leaf }}>run now</Text>
+          </Pressable>
+        )}
         <Pressable
           onPress={() => actions.archive(j, !archived)}
           testID={`job-archive-${j.id}`}
