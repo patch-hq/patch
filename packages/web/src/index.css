@@ -8448,7 +8448,7 @@ button.view-file-download {
 .job-row .runs-toggle:hover,
 .job-row .job-archive:hover,
 .job-row .job-delete:hover {
-  background: var(--bg-hover, var(--line-soft));
+  background: var(--line-soft);
   color: var(--ink-2);
 }
 .job-row .job-run-now {
