@@ -8,7 +8,9 @@
 import React from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { rateLimitWindowState, type RateLimitWindow } from '@patch/wire';
+import { getWs } from '../api/ws';
 import { usePresenceStore } from '../stores/presenceStore';
+import { useUiStore } from '../stores/uiStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { formatReset } from '../lib/usage';
 import { fonts, radii, space, textMin, useTheme, type ThemeColors } from '../lib/theme';
@@ -30,6 +32,7 @@ type Usage = { session?: RateLimitWindow; week?: RateLimitWindow; at?: number } 
 interface Row {
   key: string;
   label: string;
+  backendId: string;
   backend: string;
   usage: Usage;
 }
@@ -39,10 +42,10 @@ export function AccountUsageStrip(): React.ReactElement | null {
   const secrets = useSettingsStore((s) => s.data?.shared?.secrets);
   const hosts = usePresenceStore((s) => s.hosts);
   const [page, setPage] = React.useState(0);
-  if (!secrets) return null;
+  const asked = React.useRef(new Set<string>());
   const rows: Row[] = [];
   for (const { id, name } of BACKENDS) {
-    const accounts = id === 'claude-code' ? secrets.claude : secrets.codex;
+    const accounts = secrets ? (id === 'claude-code' ? secrets.claude : secrets.codex) : [];
     for (const a of accounts) {
       if (!a.connected || ('kind' in a && a.kind === 'apiKey')) continue;
       let usage: Usage;
@@ -54,9 +57,35 @@ export function AccountUsageStrip(): React.ReactElement | null {
           readAt = u.at ?? 0;
         }
       }
-      rows.push({ key: `${id}-${a.id}`, label: a.label, backend: name, usage });
+      rows.push({ key: `${id}-${a.id}`, label: a.label, backendId: id, backend: name, usage });
     }
   }
+  // Usage is always available: an account no host has a reading for yet makes
+  // every online host read its backend now, once per (host, backend), rather
+  // than waiting for the host's own poll.
+  const unread = rows.filter((r) => r.usage === undefined).map((r) => r.backendId);
+  const wanted = [...new Set(unread)].flatMap((backendId) =>
+    Object.values(hosts)
+      .filter((h) => h.online)
+      .map((h) => ({ hostId: h.hostId, backendId })),
+  );
+  const wantedKey = wanted.map((w) => `${w.hostId}/${w.backendId}`).join(',');
+  React.useEffect(() => {
+    for (const w of wanted) {
+      const key = `${w.hostId}/${w.backendId}`;
+      if (asked.current.has(key)) continue;
+      asked.current.add(key);
+      try {
+        getWs().send({
+          type: 'host.backend_usage_refresh',
+          hostId: w.hostId,
+          backendId: w.backendId,
+        });
+      } catch (e) {
+        useUiStore.getState().pushError(`usage refresh failed: ${(e as Error).message}`);
+      }
+    }
+  }, [wantedKey]);
   if (rows.length === 0) return null;
   const pages = Math.ceil(rows.length / USAGE_PAGE_SIZE);
   // An account disconnected while a later page was showing: stay on a real one.

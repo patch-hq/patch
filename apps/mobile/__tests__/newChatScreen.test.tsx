@@ -973,4 +973,40 @@ describe('NewChat — account usage', () => {
     );
     expect(findAllHost(r.root, byTestId('new-chat-usage-claude-code-c2'))).toHaveLength(0);
   });
+
+  it('asks the online hosts to read usage when an account has no reading, once per backend', async () => {
+    useSettingsStore.setState({
+      data: {
+        preferences: {},
+        shared: {
+          version: 1,
+          secrets: {
+            claude: [{ id: 'c1', label: 'Home', connected: true }],
+            codex: [],
+            providerKeys: [],
+          },
+          hosts: [],
+        },
+      } as never,
+    });
+    wsSend.mockClear();
+    const r = await renderReady();
+    const refreshes = wsSend.mock.calls
+      .map((c) => c[0])
+      .filter((e) => e?.type === 'host.backend_usage_refresh');
+    expect(refreshes).toEqual([
+      { type: 'host.backend_usage_refresh', hostId: HOST, backendId: 'claude-code' },
+    ]);
+    // A re-render with the account still unread does not ask again.
+    await actAsync(async () => {
+      usePresenceStore.setState({ hosts: { [HOST]: host(HOST) } });
+      await flush();
+    });
+    expect(
+      wsSend.mock.calls.filter((c) => c[0]?.type === 'host.backend_usage_refresh'),
+    ).toHaveLength(1);
+    expect(textOf(findHost(r.root, byTestId('new-chat-usage-claude-code-c1')))).toContain(
+      'not read',
+    );
+  });
 });
