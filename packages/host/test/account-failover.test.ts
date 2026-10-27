@@ -552,6 +552,24 @@ describe('AccountRotation — strategies (spec/10 § Backend credentials — acc
     expect(r.startTurn([A, B, C], { strategy: 'priority' })).toBe('a');
   });
 
+  it('with auto-resume on, a spent lock is walked past to the account that has credit', () => {
+    const r = new AccountRotation();
+    r.markExhausted('c', 'spent');
+    const route = { strategy: 'priority', preferred: 'c', resumeOnAnyAccount: true } as const;
+    expect(r.usableAccount([A, B, C], route)).toBe('a');
+    expect(r.startTurn([A, B, C], route)).toBe('a');
+    // The lock is only set aside while its key is spent: once it resets the chat is back on it.
+    r.clear('c');
+    expect(r.usableAccount([A, B, C], route)).toBe('c');
+    // A lock whose key has credit is still the only candidate.
+    expect(ids(r.order([A, B, C], route))).toEqual(['c']);
+    // Nothing else has credit either: nowhere to go, wait for the reset.
+    r.markExhausted('a', 'spent');
+    r.markExhausted('b', 'spent');
+    r.markExhausted('c', 'spent');
+    expect(r.usableAccount([A, B, C], route)).toBeUndefined();
+  });
+
   it('a chat with a preferred account does not move the round-robin', () => {
     const r = new AccountRotation();
     r.startTurn([A, B, C], { strategy: 'round-robin', preferred: 'c' });

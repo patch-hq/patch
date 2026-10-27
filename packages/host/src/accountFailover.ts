@@ -362,6 +362,13 @@ export interface RouteOptions {
    */
   preferred?: string;
   /**
+   * Auto-resume is on, so a lock does not hold a turn back while its key is
+   * spent: the chat runs on whichever other key has credit now, rather than
+   * waiting for its own key's reset. The lock itself is untouched — the order is
+   * recomputed every turn, so the chat is back on its key the moment it resets.
+   */
+  resumeOnAnyAccount?: boolean;
+  /**
    * When each key's WEEKLY window resets, for `soonest-reset`. The week is the
    * window whose leftover allowance is actually lost at the reset — the 5-hour
    * session comes round again before anyone would notice. Undefined for a key
@@ -612,7 +619,13 @@ export class AccountRotation {
       }
     }
     const locked = ordered.find((a) => a.id === route.preferred);
-    return locked ? [locked] : ordered;
+    if (!locked) return ordered;
+    if (route.resumeOnAnyAccount === true && this.isExhausted(locked.id)) {
+      // Locked key first, so a host with nothing spendable still fails with the
+      // locked key's own message; the usable lookups skip it while it is spent.
+      return [locked, ...ordered.filter((a) => a.id !== locked.id)];
+    }
+    return [locked];
   }
 
   /**

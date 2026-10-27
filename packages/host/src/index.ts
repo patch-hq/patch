@@ -3551,6 +3551,7 @@ async function startHost(
     route: {
       strategy: accountStrategy.claude,
       ...(preferredAccountId !== undefined ? { preferred: preferredAccountId } : {}),
+      resumeOnAnyAccount: autoResumeRateLimit,
       weekResetsAt: (id) => accountUsage?.get(id)?.reading.windows.week?.resetsAt,
       utilization: (id) => {
         const w = accountUsage?.get(id)?.reading.windows;
