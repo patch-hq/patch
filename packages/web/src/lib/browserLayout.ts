@@ -2,6 +2,7 @@
 // in the chat, the small floating preview, or the large view — a pane beside
 // the chat on a wide window, the whole screen on a narrow one.
 
+import { sendBrowser } from './browserView.js';
 import { useBrowserHandoffStore } from '../stores/browserHandoffStore.js';
 import { useLayoutStore, type PaneNode, type TabDescriptor } from '../stores/layoutStore.js';
 
@@ -67,4 +68,25 @@ export function closeBrowserLarge(chatId: string, next: 'mini' | undefined): voi
   const found = store.findTab(browserTab(chatId));
   if (found) store.closeTab(found.pane.id, found.tab.id);
   useBrowserHandoffStore.getState().setView(chatId, next);
+}
+
+/**
+ * Dismiss the chat's browser outright: cancel any hand-off waiting on the user,
+ * close the chat's tabs on the host, and drop every view of it here — including
+ * a stale one whose tab the host no longer has.
+ */
+export function dismissBrowser(chatId: string): void {
+  const store = useBrowserHandoffStore.getState();
+  const handoff = store.handoffs[chatId];
+  if (handoff) {
+    sendBrowser({
+      type: 'patch.browser_handoff.control',
+      chatId,
+      handoffId: handoff.handoffId,
+      action: 'cancel',
+    });
+  }
+  sendBrowser({ type: 'patch.browser_view.stop', chatId });
+  closeBrowserLarge(chatId, undefined);
+  store.dismiss(chatId);
 }

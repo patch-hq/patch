@@ -123,9 +123,6 @@ describe('the bar', () => {
       );
       expect(screen.getByTestId('browser-watch-bar').textContent).toContain('gwr.com');
       expect(screen.getByTestId('browser-elapsed').textContent).toBe('1:42');
-      fireEvent.click(screen.getByTestId('browser-stop'));
-      expect(sent).toContainEqual({ type: 'patch.browser_view.stop', chatId: 'c1' });
-
       // Watch opens the small preview, which asks the host for pictures at the tab's own size.
       fireEvent.click(screen.getByTestId('browser-watch'));
       expect(screen.getByTestId('browser-handoff')).toBeTruthy();
@@ -136,6 +133,13 @@ describe('the bar', () => {
       expect(watch).toMatchObject({ chatId: 'c1', tabId: 't1', watch: true });
       expect(watch.viewerId).toBeTruthy();
       expect(watch.viewport).toBeUndefined();
+
+      // Closing the preview leaves the bar; dismissing from the bar stops the browser and clears it.
+      fireEvent.click(screen.getByTestId('browser-watch-close'));
+      fireEvent.click(screen.getByTestId('browser-stop'));
+      expect(sent).toContainEqual({ type: 'patch.browser_view.stop', chatId: 'c1' });
+      expect(screen.queryByTestId('browser-handoff')).toBeNull();
+      expect(screen.queryByTestId('browser-watch-bar')).toBeNull();
     } finally {
       vi.useRealTimers();
     }

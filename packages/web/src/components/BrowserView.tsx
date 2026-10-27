@@ -58,7 +58,7 @@ import {
   useBrowserWatch,
   type ViewerViewport,
 } from '../lib/browserView.js';
-import { closeBrowserLarge } from '../lib/browserLayout.js';
+import { closeBrowserLarge, dismissBrowser } from '../lib/browserLayout.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { getDesktopBridge } from '../lib/desktopBridge.js';
 import { ContextMenu, useContextMenu, type ContextMenuItem } from './ContextMenu.js';
@@ -751,7 +751,7 @@ export function BrowserView({
     handoff !== undefined &&
     !usePage;
 
-  const close = (): void => closeBrowserLarge(chatId, undefined);
+  const close = (): void => dismissBrowser(chatId);
   const shrink = (): void => closeBrowserLarge(chatId, 'mini');
 
   return (

@@ -25,7 +25,6 @@ import { useChatStore } from '../stores/chatStore.js';
 import { useLayoutStore, type PaneNode } from '../stores/layoutStore.js';
 import {
   browsingSummary,
-  canStopBrowser,
   clampPreview,
   clampPreviewWidth,
   driveState,
@@ -39,8 +38,8 @@ import {
   viewedTab,
   type PreviewPosition,
 } from '../lib/browserHandoff.js';
-import { sendBrowser, useBrowserWatch, useNow } from '../lib/browserView.js';
-import { BROWSER_PANE_MIN_WINDOW, openBrowserLarge } from '../lib/browserLayout.js';
+import { useBrowserWatch, useNow } from '../lib/browserView.js';
+import { BROWSER_PANE_MIN_WINDOW, dismissBrowser, openBrowserLarge } from '../lib/browserLayout.js';
 import { BrowserView, DriveAction, DriveChip, SiteTile } from './BrowserView.js';
 
 /** A press that moves further than this is a drag of the preview, not a tap on it. */
@@ -122,7 +121,6 @@ export function BrowserHandoffPanel({ chatId }: { chatId: string }): JSX.Element
   }
   if (view === 'large' && paneShowing) return null;
 
-  const stoppable = canStopBrowser(status);
   return (
     <div className={`browser-bar is-${state}`} data-testid="browser-watch-bar">
       {site ? <SiteTile site={site} /> : null}
@@ -171,18 +169,16 @@ export function BrowserHandoffPanel({ chatId }: { chatId: string }): JSX.Element
           <Eye size={16} aria-hidden />
         </button>
       )}
-      {stoppable ? (
-        <button
-          type="button"
-          className="bv-icon"
-          aria-label="Stop browsing"
-          title="Stop browsing"
-          data-testid="browser-stop"
-          onClick={() => sendBrowser({ type: 'patch.browser_view.stop', chatId })}
-        >
-          <X size={16} aria-hidden />
-        </button>
-      ) : null}
+      <button
+        type="button"
+        className="bv-icon"
+        aria-label="Dismiss browser"
+        title="Dismiss browser"
+        data-testid="browser-stop"
+        onClick={() => dismissBrowser(chatId)}
+      >
+        <X size={16} aria-hidden />
+      </button>
     </div>
   );
 }

@@ -59,6 +59,8 @@ interface BrowserHandoffStoreState {
   applyForm(event: PatchBrowserViewFormEvent): void;
   setView(chatId: string, mode: BrowserViewMode | undefined): void;
   clearFrame(chatId: string): void;
+  /** Forget everything shown for a chat's browser (the user dismissed it). */
+  dismiss(chatId: string): void;
   reset(): void;
 }
 
@@ -118,5 +120,19 @@ export const useBrowserHandoffStore = create<BrowserHandoffStoreState>((set) => 
     })),
   setView: (chatId, mode) => set((s) => ({ views: { ...s.views, [chatId]: mode } })),
   clearFrame: (chatId) => set((s) => ({ frames: { ...s.frames, [chatId]: undefined } })),
+  dismiss: (chatId) =>
+    set((s) => {
+      const without = <T>(m: Record<string, T | undefined>): Record<string, T | undefined> => ({
+        ...m,
+        [chatId]: undefined,
+      });
+      return {
+        status: without(s.status),
+        frames: without(s.frames),
+        handoffs: without(s.handoffs),
+        forms: without(s.forms),
+        views: without(s.views),
+      };
+    }),
   reset: () => set({ frames: {}, handoffs: {}, status: {}, forms: {}, views: {} }),
 }));
