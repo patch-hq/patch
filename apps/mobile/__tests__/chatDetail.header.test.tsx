@@ -24,6 +24,7 @@ import {
 } from './testUtils/render';
 import { useChatStore } from '../src/stores/chatStore';
 import { usePresenceStore } from '../src/stores/presenceStore';
+import { __pressBack } from './stubs/react-native';
 import { __resetRouterMock, __setLocalSearchParams, routerMock } from './stubs/expo-router';
 
 const apiMocks = {
@@ -267,26 +268,25 @@ describe('chat-detail header', () => {
     );
   });
 
-  it('back button navigates back', () => {
+  // Home is the Chats tab, whatever chat the user hopped from: a chain of
+  // chat -> chat links must not make back walk through the earlier chats
+  // (spec/15 § Navigation shell).
+  it('back button goes to the chat list, not the previous screen', () => {
     seedChat('c1');
     __setLocalSearchParams({ chatId: 'c1' });
-    const r = renderRN(<ChatDetailScreen />);
-    const back = findAllHost(r.root, (i) => i.type === 'Pressable')[0]!;
-    back.props.onPress();
-    expect(routerMock.back).toHaveBeenCalled();
-  });
-
-  // Opened on a cold start from a patch://chats/<id> link, the chat is the only
-  // screen in the stack and `router.back()` would do nothing: the arrow goes to
-  // the chat list instead (spec/15 § Navigation shell).
-  it('back with nothing beneath it goes to the chat list', () => {
-    seedChat('c1');
-    __setLocalSearchParams({ chatId: 'c1' });
-    routerMock.canGoBack.mockReturnValueOnce(false);
     const r = renderRN(<ChatDetailScreen />);
     findHost(r.root, byLabel('Back')).props.onPress();
+    expect(routerMock.dismissTo).toHaveBeenCalledWith('/(tabs)/chats');
     expect(routerMock.back).not.toHaveBeenCalled();
-    expect(routerMock.replace).toHaveBeenCalledWith('/(tabs)/chats');
+  });
+
+  it('the hardware back press goes to the chat list too', () => {
+    seedChat('c1');
+    __setLocalSearchParams({ chatId: 'c1' });
+    renderRN(<ChatDetailScreen />);
+    expect(__pressBack()).toBe(true);
+    expect(routerMock.dismissTo).toHaveBeenCalledWith('/(tabs)/chats');
+    expect(routerMock.back).not.toHaveBeenCalled();
   });
 
   it('shows the "waiting on you" pill only when awaitingPermission', () => {
