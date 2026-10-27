@@ -207,6 +207,8 @@ test.describe('snooze sheet', () => {
     page,
   }) => {
     const calls = await stubSnooze(page);
+    // Pinned: near 08:00 the wall clock hides 1 day / Tomorrow 8am as duplicates.
+    await page.clock.setFixedTime(new Date('2026-10-21T10:00:00Z'));
     await seed(page, THREE());
     await page.getByTestId(`folder-snooze-${FOLDER}`).click({ force: true });
     await page.getByTestId('snooze-sheet-preset-1-day').click();
