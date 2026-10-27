@@ -188,6 +188,41 @@ async function requireEditableFile(path: string): Promise<void> {
   }
 }
 
+async function readTail(path: string, tailBytes: number): Promise<Ok> {
+  let info;
+  try {
+    info = await stat(path);
+  } catch (err) {
+    throw fsError(err, path);
+  }
+  if (!info.isFile()) throw new HostFileError('not_a_file', `not a file: ${path}`);
+  const start = Math.max(0, info.size - tailBytes);
+  let bytes: Buffer;
+  try {
+    const fh = await open(path, 'r');
+    try {
+      const buf = Buffer.alloc(info.size - start);
+      const { bytesRead } = await fh.read(buf, 0, buf.length, start);
+      bytes = buf.subarray(0, bytesRead);
+    } finally {
+      await fh.close();
+    }
+  } catch (err) {
+    throw fsError(err, path);
+  }
+  // Start on a line boundary so a cut mid-line (or mid-character) is dropped.
+  if (start > 0) {
+    const nl = bytes.indexOf(0x0a);
+    bytes = nl === -1 ? Buffer.alloc(0) : bytes.subarray(nl + 1);
+  }
+  return {
+    path,
+    content: bytes.toString('utf8'),
+    size: info.size,
+    version: contentVersion(bytes),
+  };
+}
+
 async function read(path: string): Promise<Ok> {
   await requireEditableFile(path);
   let bytes: Buffer;
@@ -301,8 +336,10 @@ export async function handleHostFilesRequest(
         result = event.recursive
           ? await listRecursive(path, event.maxEntries ?? HOST_FILES_RECURSIVE_DEFAULT_CAP)
           : await list(path);
-      } else if (event.op === 'read') result = await read(path);
-      else {
+      } else if (event.op === 'read') {
+        result =
+          event.tailBytes !== undefined ? await readTail(path, event.tailBytes) : await read(path);
+      } else {
         if (event.content === undefined || event.baseVersion === undefined) {
           throw new HostFileError('path_invalid', 'a write needs content and baseVersion');
         }

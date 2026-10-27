@@ -7366,6 +7366,12 @@ export const PatchHostFilesRequestEvent = z
     recursive: z.boolean().optional(),
     /** `recursive` only: caps the walk (spec/02 § Host files). */
     maxEntries: z.number().int().positive().optional(),
+    /**
+     * `read` only: return just the last N bytes (from a line boundary),
+     * exempt from the size cap — backs `patch logs --host`, whose daemon.log
+     * grows past the editor's 1 MiB limit.
+     */
+    tailBytes: z.number().int().positive().optional(),
   })
   .strict();
 export type PatchHostFilesRequestEvent = z.infer<typeof PatchHostFilesRequestEvent>;

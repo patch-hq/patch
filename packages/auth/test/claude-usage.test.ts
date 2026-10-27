@@ -45,6 +45,17 @@ describe('readUsageHeaders', () => {
     expect(r.windows.session).toEqual({ status: 'allowed' });
   });
 
+  it('clamps a utilization over 1 so the wire schema accepts it', () => {
+    const r = readUsageHeaders(
+      new Headers({
+        'anthropic-ratelimit-unified-5h-status': 'rejected',
+        'anthropic-ratelimit-unified-5h-utilization': '1.01',
+      }),
+      1_000,
+    );
+    expect(r.windows.session?.utilization).toBe(1);
+  });
+
   it('reads all three windows, converting resets from seconds to ms', () => {
     const r = readUsageHeaders(new Headers(LIVE_429_HEADERS), 1_000);
     expect(r.organizationId).toBe('add21334-bb51-4fcd-8220-9badd3a4aeda');

@@ -166,13 +166,19 @@ export function registerHostFilesRoutes(app: FastifyInstance, deps: HostFilesRou
       .send({ path: res.path, parent: res.parent ?? null, entries: res.entries ?? [] });
   });
 
-  app.get<{ Params: { hostId: string }; Querystring: { path?: string } }>(
+  app.get<{ Params: { hostId: string }; Querystring: { path?: string; tailBytes?: string } }>(
     '/api/hosts/:hostId/files/content',
     async (req, reply) => {
       const path = (req.query?.path ?? '').toString();
-      const res = await roundTrip(req, reply, () =>
-        path ? { op: 'read', path } : 'path is required',
-      );
+      const tailRaw = req.query?.tailBytes;
+      const tailBytes = tailRaw ? Number(tailRaw) : undefined;
+      const res = await roundTrip(req, reply, () => {
+        if (!path) return 'path is required';
+        if (tailBytes !== undefined && !(Number.isInteger(tailBytes) && tailBytes > 0)) {
+          return 'tailBytes must be a positive integer';
+        }
+        return { op: 'read', path, ...(tailBytes !== undefined ? { tailBytes } : {}) };
+      });
       if (!res) return reply;
       return reply
         .code(200)

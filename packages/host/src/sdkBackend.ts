@@ -2306,7 +2306,10 @@ export function translateSdkMessage(
         scope &&
         (status === 'allowed' || status === 'allowed_warning' || status === 'rejected')
       ) {
-        const utilization = typeof i['utilization'] === 'number' ? i['utilization'] : undefined;
+        const utilization =
+          typeof i['utilization'] === 'number'
+            ? Math.min(1, Math.max(0, i['utilization']))
+            : undefined;
         const resetsAt = typeof i['resetsAt'] === 'number' ? toEpochMs(i['resetsAt']) : undefined;
         return [
           {

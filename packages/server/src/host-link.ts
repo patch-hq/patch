@@ -203,9 +203,23 @@ const UNKNOWN_CHAT_HOST_POLL_MS = 200;
 // "Message will resend" is true when the host comes back.
 const UNKNOWN_CHAT_HOST_RESEND_MS = 10 * 60_000;
 
-/** Ping a host every 5s; no sign of life for 15s and it is offline. */
+/**
+ * Ping a host every 5s; no sign of life for 60s and it is offline. 15s was
+ * shorter than a host daemon stalling under memory pressure (seen up to 81s),
+ * so such a host flapped offline. Override with PATCH_HOST_SILENCE_TIMEOUT_MS.
+ */
 const HOST_PING_INTERVAL_MS = 5_000;
-const HOST_PONG_TIMEOUT_MS = 15_000;
+const HOST_PONG_TIMEOUT_DEFAULT_MS = 60_000;
+
+export function hostSilenceTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.PATCH_HOST_SILENCE_TIMEOUT_MS;
+  if (raw === undefined || raw === '') return HOST_PONG_TIMEOUT_DEFAULT_MS;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1000) {
+    throw new Error(`PATCH_HOST_SILENCE_TIMEOUT_MS must be an integer >= 1000, got "${raw}"`);
+  }
+  return n;
+}
 
 /**
  * Told to the requesting surface when a chat's host still hasn't registered
@@ -353,7 +367,7 @@ export class InboundHostLink implements HostLink {
     // Liveness: any frame or pong counts as a sign of life.
     const { pingIntervalMs, pongTimeoutMs } = this.opts.keepalive ?? {
       pingIntervalMs: HOST_PING_INTERVAL_MS,
-      pongTimeoutMs: HOST_PONG_TIMEOUT_MS,
+      pongTimeoutMs: hostSilenceTimeoutMs(),
     };
     let lastAlive = Date.now();
     const keepalive = setInterval(() => {

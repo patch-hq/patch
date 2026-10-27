@@ -10,7 +10,7 @@ import { EventEmitter } from 'node:events';
 import { WebSocketServer, WebSocket as WsClient, type WebSocket } from 'ws';
 import pino from 'pino';
 import { encode, decode, type WireEvent } from '@patch/wire';
-import { InboundHostLink, InProcessHostLink } from '../src/host-link.js';
+import { InboundHostLink, InProcessHostLink, hostSilenceTimeoutMs } from '../src/host-link.js';
 
 const silentLogger = pino({ level: 'silent' });
 
@@ -100,6 +100,12 @@ describe('InboundHostLink', () => {
     link.attach(await serverSocketPromise, 'd1');
     expect(link.isOnline('d1')).toBe(true);
     await waitFor(() => !link!.isOnline('d1'), 2000);
+  });
+
+  it('tolerates 60s of host silence by default and reads an env override', () => {
+    expect(hostSilenceTimeoutMs({})).toBe(60_000);
+    expect(hostSilenceTimeoutMs({ PATCH_HOST_SILENCE_TIMEOUT_MS: '90000' })).toBe(90_000);
+    expect(() => hostSilenceTimeoutMs({ PATCH_HOST_SILENCE_TIMEOUT_MS: 'abc' })).toThrow();
   });
 
   it('keeps a responsive host online across many ping intervals', async () => {

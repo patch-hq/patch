@@ -168,7 +168,10 @@ function status(headers: Headers, name: string): ClaudeUsageWindow['status'] | u
 function readWindow(headers: Headers, prefix: string): ClaudeUsageWindow | undefined {
   const s = status(headers, `${prefix}-status`);
   if (s === undefined) return undefined;
-  const utilization = num(headers, `${prefix}-utilization`);
+  // Anthropic can report slightly over 1 (1.01); the wire schema caps at 1.
+  const rawUtilization = num(headers, `${prefix}-utilization`);
+  const utilization =
+    rawUtilization === undefined ? undefined : Math.min(1, Math.max(0, rawUtilization));
   const resetsAtSec = num(headers, `${prefix}-reset`);
   const disabledReason = text(headers, `${prefix}-disabled-reason`);
   return {

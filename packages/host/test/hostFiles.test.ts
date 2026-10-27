@@ -182,6 +182,16 @@ describe('read', () => {
     });
   });
 
+  it('tails the end of a file past the size cap, from a line boundary', async () => {
+    const lines = Array.from({ length: 200_000 }, (_, i) => `line ${i}`).join('\n') + '\n';
+    writeFileSync(join(dir, 'daemon.log'), lines);
+    const res = await ask({ op: 'read', path: join(dir, 'daemon.log'), tailBytes: 100 });
+    expect(res.ok).toBe(true);
+    expect(res.content!.endsWith('line 199999\n')).toBe(true);
+    expect(res.content!.startsWith('line ')).toBe(true);
+    expect(res.content!.length).toBeLessThanOrEqual(100);
+  });
+
   it('refuses a directory, a binary file, an oversized file and a missing path', async () => {
     mkdirSync(join(dir, 'd'));
     writeFileSync(join(dir, 'bin'), Buffer.from([1, 2, 0, 3]));
