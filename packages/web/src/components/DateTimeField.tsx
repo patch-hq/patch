@@ -5,6 +5,7 @@
 // also accepts typing; the calendar button opens the popover.
 
 import { useEffect, useRef, useState, type JSX } from 'react';
+import { TimeDial } from './TimeDial.js';
 
 const MONTHS = [
   'January',
@@ -42,9 +43,17 @@ export interface DateTimeFieldProps {
   value: string;
   onChange: (value: string) => void;
   testId: string;
+  /** Show the calendar and dial open under the box, with no toggle button. */
+  inline?: boolean;
 }
 
-export function DateTimeField({ label, value, onChange, testId }: DateTimeFieldProps): JSX.Element {
+export function DateTimeField({
+  label,
+  value,
+  onChange,
+  testId,
+  inline = false,
+}: DateTimeFieldProps): JSX.Element {
   const parsed = parse(value);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
@@ -84,16 +93,12 @@ export function DateTimeField({ label, value, onChange, testId }: DateTimeFieldP
     onChange(`${ymd(y, m, d)}T${time}`);
   }
 
-  function setTime(part: 'hh' | 'mm', n: string): void {
+  function setTime(hh: number, mm: number): void {
     const base = parsed ?? {
       y: today.getFullYear(),
       m: today.getMonth(),
       d: today.getDate(),
-      hh: 9,
-      mm: 0,
     };
-    const hh = part === 'hh' ? Number(n) : base.hh;
-    const mm = part === 'mm' ? Number(n) : base.mm;
     setDraft(null);
     onChange(`${ymd(base.y, base.m, base.d)}T${pad(hh)}:${pad(mm)}`);
   }
@@ -135,21 +140,23 @@ export function DateTimeField({ label, value, onChange, testId }: DateTimeFieldP
             onChange={(e) => typed(e.target.value)}
             data-testid={testId}
           />
-          <button
-            type="button"
-            className="dtf-open"
-            aria-label={`Pick ${label.toLowerCase()} date`}
-            aria-expanded={open}
-            data-testid={`${testId}-open`}
-            onClick={() => (open ? setOpen(false) : openPopover())}
-          >
-            ▾
-          </button>
+          {inline ? null : (
+            <button
+              type="button"
+              className="dtf-open"
+              aria-label={`Pick ${label.toLowerCase()} date`}
+              aria-expanded={open}
+              data-testid={`${testId}-open`}
+              onClick={() => (open ? setOpen(false) : openPopover())}
+            >
+              ▾
+            </button>
+          )}
         </span>
       </label>
-      {open ? (
+      {open || inline ? (
         <div
-          className="dtf-popover"
+          className={inline ? 'dtf-popover dtf-inline' : 'dtf-popover'}
           role="dialog"
           aria-label={`${label} picker`}
           data-testid={`${testId}-popover`}
@@ -160,77 +167,60 @@ export function DateTimeField({ label, value, onChange, testId }: DateTimeFieldP
             }
           }}
         >
-          <div className="dtf-head">
-            <button
-              type="button"
-              aria-label="Previous month"
-              data-testid={`${testId}-prev`}
-              onClick={() => shift(-1)}
-            >
-              ‹
-            </button>
-            <span data-testid={`${testId}-month`}>
-              {MONTHS[view.m]} {view.y}
-            </span>
-            <button
-              type="button"
-              aria-label="Next month"
-              data-testid={`${testId}-next`}
-              onClick={() => shift(1)}
-            >
-              ›
-            </button>
-          </div>
-          <div className="dtf-grid">
-            {WEEKDAYS.map((w) => (
-              <span key={w} className="dtf-wd">
-                {w}
-              </span>
-            ))}
-            {cells.map((d, i) => {
-              if (d === null) return <span key={`b${i}`} />;
-              const key = ymd(view.y, view.m, d);
-              return (
+          <div className="dtf-body">
+            <div className="dtf-cal">
+              <div className="dtf-head">
                 <button
-                  key={key}
                   type="button"
-                  className={`dtf-day${key === selectedKey ? ' is-selected' : ''}${key === todayKey ? ' is-today' : ''}`}
-                  data-testid={`${testId}-day-${key}`}
-                  onClick={() => pickDay(view.y, view.m, d)}
+                  aria-label="Previous month"
+                  data-testid={`${testId}-prev`}
+                  onClick={() => shift(-1)}
                 >
-                  {d}
+                  ‹
                 </button>
-              );
-            })}
+                <span data-testid={`${testId}-month`}>
+                  {MONTHS[view.m]} {view.y}
+                </span>
+                <button
+                  type="button"
+                  aria-label="Next month"
+                  data-testid={`${testId}-next`}
+                  onClick={() => shift(1)}
+                >
+                  ›
+                </button>
+              </div>
+              <div className="dtf-grid">
+                {WEEKDAYS.map((w) => (
+                  <span key={w} className="dtf-wd">
+                    {w}
+                  </span>
+                ))}
+                {cells.map((d, i) => {
+                  if (d === null) return <span key={`b${i}`} />;
+                  const key = ymd(view.y, view.m, d);
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      className={`dtf-day${key === selectedKey ? ' is-selected' : ''}${key === todayKey ? ' is-today' : ''}`}
+                      data-testid={`${testId}-day-${key}`}
+                      onClick={() => pickDay(view.y, view.m, d)}
+                    >
+                      {d}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <TimeDial
+              hh={Number(time.slice(0, 2))}
+              mm={Number(time.slice(3))}
+              onChange={setTime}
+              testId={`${testId}-time`}
+            />
           </div>
           <div className="dtf-foot">
-            <span className="dtf-time">
-              <select
-                aria-label="Hour"
-                value={time.slice(0, 2)}
-                data-testid={`${testId}-hour`}
-                onChange={(e) => setTime('hh', e.target.value)}
-              >
-                {Array.from({ length: 24 }, (_, i) => (
-                  <option key={i} value={pad(i)}>
-                    {pad(i)}
-                  </option>
-                ))}
-              </select>
-              :
-              <select
-                aria-label="Minute"
-                value={time.slice(3)}
-                data-testid={`${testId}-minute`}
-                onChange={(e) => setTime('mm', e.target.value)}
-              >
-                {Array.from({ length: 60 }, (_, i) => (
-                  <option key={i} value={pad(i)}>
-                    {pad(i)}
-                  </option>
-                ))}
-              </select>
-            </span>
             <button
               type="button"
               data-testid={`${testId}-clear`}
@@ -242,14 +232,16 @@ export function DateTimeField({ label, value, onChange, testId }: DateTimeFieldP
             >
               Clear
             </button>
-            <button
-              type="button"
-              className="dtf-done"
-              data-testid={`${testId}-done`}
-              onClick={() => setOpen(false)}
-            >
-              Done
-            </button>
+            {inline ? null : (
+              <button
+                type="button"
+                className="dtf-done"
+                data-testid={`${testId}-done`}
+                onClick={() => setOpen(false)}
+              >
+                Done
+              </button>
+            )}
           </div>
         </div>
       ) : null}

@@ -163,6 +163,15 @@ test.describe('snooze sheet', () => {
     await page.getByTestId('snooze-sheet-preset-custom').click();
     const input = page.getByTestId('snooze-sheet-custom-input');
     await expect(input).toBeVisible();
+    await expect(input).not.toHaveValue('');
+    await page.screenshot({ path: '/tmp/snooze-dial-hours.png' });
+    // A real tap on the dial: 3 o'clock is hour 3, and the dial moves on to minutes.
+    const face = page.getByTestId('snooze-sheet-custom-input-time-face');
+    await face.click({ position: { x: 108 + 82, y: 108 } });
+    await expect(page.getByTestId('snooze-sheet-custom-input-time-hour')).toHaveText('03');
+    await face.click({ position: { x: 108, y: 108 + 82 } });
+    await expect(page.getByTestId('snooze-sheet-custom-input-time-minute')).toHaveText('30');
+    await page.screenshot({ path: '/tmp/snooze-dial-minutes.png' });
     await input.fill('2020-01-01T09:00');
     await page.getByTestId('snooze-sheet-confirm').click();
     await expect(page.getByText('snooze: pick a time in the future')).toBeVisible();

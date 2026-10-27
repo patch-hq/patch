@@ -28,6 +28,7 @@
 // start opens a skill autocomplete sourced from the chat's folder (spec/14 §
 // Composer — skill autocomplete).
 
+import { DateTimeField } from './DateTimeField.js';
 import { LONG_PASTE_CHARS, pastedTextName } from '../lib/pastedText';
 import type { JSX, ReactNode, Ref } from 'react';
 import {
@@ -2689,12 +2690,11 @@ export const Composer = forwardRef(function Composer(
       />
       {scheduling ? (
         <div className="composer-schedule" data-testid="schedule-send">
-          <input
-            type="datetime-local"
-            data-testid="schedule-at"
-            aria-label="send at"
+          <DateTimeField
+            label="Send at"
             value={scheduling.at}
-            onChange={(e) => setScheduling({ at: e.target.value, error: null })}
+            onChange={(at) => setScheduling({ at, error: null })}
+            testId="schedule-at"
           />
           <button
             type="button"

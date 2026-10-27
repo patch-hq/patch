@@ -16,6 +16,7 @@ import { useSelectionStore } from '../stores/selectionStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { useUiStore, type SnoozeSheetTarget } from '../stores/uiStore.js';
 import { ModalOverlay } from './ModalOverlay.js';
+import { DateTimeField } from './DateTimeField.js';
 import { chatsInProject } from '../lib/chatGroups.js';
 import { deriveChatTitle } from '../lib/chatTitle.js';
 import { stripMarkdown } from '../lib/stripMarkdown.js';
@@ -32,6 +33,14 @@ import type { ChatRow } from '../stores/types.js';
 
 const CUSTOM = 'custom';
 
+/** A sensible starting point for Custom: an hour out, rounded up to the next quarter hour. */
+function suggestedCustom(): string {
+  const d = new Date(Date.now() + 60 * 60_000);
+  d.setMinutes(Math.ceil(d.getMinutes() / 15) * 15, 0, 0);
+  const p = (n: number): string => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 /** The wake time for the chosen option, or null while there is none to show. */
 function wakeFor(
   selected: string | null,
@@ -40,7 +49,7 @@ function wakeFor(
 ): number | null {
   if (selected === null) return null;
   if (selected === CUSTOM) {
-    // `datetime-local` gives a LOCAL wall-clock string; Date parses it in the
+    // The picker gives a LOCAL wall-clock string; Date parses it in the
     // user's own zone, which is what "snooze until 9am" means to them.
     const at = new Date(customValue).getTime();
     return customValue === '' || Number.isNaN(at) ? null : at;
@@ -96,13 +105,6 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
   useEffect(() => {
     rootRef.current?.focus();
   }, []);
-
-  // Custom opens the browser's own date-time picker straight away — one click,
-  // not "choose Custom, then click the field".
-  const customRef = useRef<HTMLInputElement | null>(null);
-  useEffect(() => {
-    if (selected === CUSTOM) customRef.current?.showPicker();
-  }, [selected]);
 
   function confirm(): void {
     if (!canConfirm) return;
@@ -216,21 +218,21 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
             className={`snooze-preset${selected === CUSTOM ? ' on' : ''}`}
             data-testid="snooze-sheet-preset-custom"
             aria-pressed={selected === CUSTOM}
-            onClick={() => setSelected(CUSTOM)}
+            onClick={() => {
+              setSelected(CUSTOM);
+              setCustomValue((v) => (v === '' ? suggestedCustom() : v));
+            }}
           >
             <span>Custom…</span>
           </button>
         </div>
         {selected === CUSTOM ? (
-          <input
-            type="datetime-local"
-            className="snooze-custom-input"
-            data-testid="snooze-sheet-custom-input"
-            aria-label={isProject ? 'snooze all until' : 'snooze until'}
+          <DateTimeField
+            inline
+            label={isProject ? 'Snooze all until' : 'Snooze until'}
             value={customValue}
-            ref={customRef}
-            autoFocus
-            onChange={(e) => setCustomValue(e.target.value)}
+            onChange={setCustomValue}
+            testId="snooze-sheet-custom-input"
           />
         ) : null}
 

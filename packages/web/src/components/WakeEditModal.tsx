@@ -7,6 +7,7 @@ import { api } from '../api/rest.js';
 import { useUiStore } from '../stores/uiStore.js';
 import type { ChatRow } from '../stores/types.js';
 import { failed } from '../lib/errorCopy.js';
+import { DateTimeField } from './DateTimeField.js';
 import { ModalOverlay } from './ModalOverlay.js';
 import { formatEvery } from './WakeBar.js';
 
@@ -99,16 +100,7 @@ export function WakeEditModal({
             />
           </label>
         ) : (
-          <label className="wake-edit-field">
-            <span>Wakes at</span>
-            <input
-              data-testid="wake-edit-at"
-              className="prompt-modal-input"
-              type="datetime-local"
-              value={at}
-              onChange={(e) => setAt(e.target.value)}
-            />
-          </label>
+          <DateTimeField label="Wakes at" value={at} onChange={setAt} testId="wake-edit-at" />
         )}
         <div className="modal-actions">
           <button

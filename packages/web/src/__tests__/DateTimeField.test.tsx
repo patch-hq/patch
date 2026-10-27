@@ -43,8 +43,12 @@ describe('DateTimeField', () => {
     fireEvent.click(screen.getByTestId('dt-open'));
     fireEvent.click(screen.getAllByRole('button', { name: /^\d+$/ })[9]!);
     expect(screen.getByTestId('out').textContent).toMatch(/T09:00$/);
-    fireEvent.change(screen.getByTestId('dt-hour'), { target: { value: '17' } });
-    fireEvent.change(screen.getByTestId('dt-minute'), { target: { value: '45' } });
+    // 09:00 is AM: pick 5 (05:00), flip to PM (17:00), then the minutes step is up.
+    fireEvent.click(screen.getByTestId('dt-time-h-5'));
+    expect(screen.getByTestId('out').textContent).toMatch(/T05:00$/);
+    fireEvent.click(screen.getByTestId('dt-time-pm'));
+    expect(screen.getByTestId('out').textContent).toMatch(/T17:00$/);
+    fireEvent.click(screen.getByTestId('dt-time-m-45'));
     expect(screen.getByTestId('out').textContent).toMatch(/T17:45$/);
   });
 

@@ -3338,26 +3338,6 @@ button.nav-row {
   display: inline-flex;
   flex-shrink: 0;
 }
-.snooze-custom-input {
-  flex: 1 1 auto;
-  min-width: 0;
-  width: 100%;
-  box-sizing: border-box;
-  font: inherit;
-  font-variant-numeric: tabular-nums;
-  color: var(--ink);
-  background: var(--bg-elevated);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  padding: 9px 12px;
-  margin-top: 6px;
-  color-scheme: light dark;
-  cursor: pointer;
-}
-.snooze-custom-input:focus {
-  outline: none;
-  border-color: var(--ink);
-}
 .files-btn {
   display: inline-flex;
   align-items: center;
@@ -6156,6 +6136,11 @@ button.view-file-download {
   align-items: center;
   gap: 8px;
   padding: 6px 12px;
+}
+.composer-schedule .dtf-popover {
+  top: auto;
+  bottom: 100%;
+  margin: 0 0 4px;
 }
 .composer-schedule [role='alert'] {
   color: var(--danger, #d33);
@@ -15211,7 +15196,7 @@ select.permission-mode.is-pending {
   top: 100%;
   left: 0;
   margin-top: 4px;
-  width: min(320px, calc(100vw - 32px));
+  width: min(500px, calc(100vw - 32px));
   box-sizing: border-box;
   padding: 12px;
   background: var(--bg-elevated);
@@ -15219,6 +15204,22 @@ select.permission-mode.is-pending {
   border-radius: var(--radius);
   box-shadow: 0 8px 24px rgb(0 0 0 / 14%);
   color: var(--ink);
+}
+.dtf-popover.dtf-inline {
+  position: static;
+  width: auto;
+  margin-top: 8px;
+  box-shadow: none;
+}
+.dtf-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: center;
+}
+.dtf-cal {
+  flex: 1 1 230px;
+  min-width: 230px;
 }
 .dtf-head {
   display: flex;
@@ -15259,19 +15260,100 @@ select.permission-mode.is-pending {
 .dtf-foot {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px solid var(--line-soft);
 }
-.dtf-time {
+
+/* TimeDial — clock-face time picker. */
+.tdial {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.tdial-head {
   display: flex;
   align-items: center;
   gap: 4px;
-  margin-right: auto;
 }
-.dtf-time select {
-  padding: 6px 8px;
+.tdial-colon {
+  font-size: 34px;
+  color: var(--ink-3);
+}
+.dtf .tdial-seg {
+  min-width: 60px;
+  min-height: 52px;
+  font-size: 34px;
+  font-variant-numeric: tabular-nums;
+  background: var(--bg-soft);
+  border-color: transparent;
+}
+.dtf .tdial-seg.on {
+  background: var(--accent-tint);
+  color: var(--accent-strong);
+}
+.tdial-ampm {
+  display: flex;
+  flex-direction: column;
+  margin-left: 8px;
+}
+.dtf .tdial-ampm button {
+  min-height: 26px;
+  min-width: 44px;
+  padding: 0 8px;
+  font-size: var(--text-min);
+  border-radius: 0;
+}
+.dtf .tdial-ampm button:first-child {
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+.dtf .tdial-ampm button:last-child {
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  border-top: 0;
+}
+.dtf .tdial-ampm button.on {
+  background: var(--accent-tint);
+  color: var(--accent-strong);
+}
+.tdial-face {
+  position: relative;
+  border-radius: 50%;
+  background: var(--bg-soft);
+  touch-action: none;
+  cursor: pointer;
+  user-select: none;
+}
+.tdial-face svg {
+  position: absolute;
+  inset: 0;
+}
+.tdial-hand {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.tdial-pin,
+.tdial-knob {
+  fill: var(--accent);
+}
+.dtf .tdial-n {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 36px;
+  height: 36px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.dtf .tdial-n.on {
+  color: var(--on-accent);
 }
 
 /* Settings → Computer use: Patch is driving this machine right now. */
