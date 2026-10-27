@@ -29,9 +29,10 @@ test('a tool row sits evenly between the prose around it and the working dots', 
   await expect(page.locator('[data-testid="tool-group-summary"]').first()).toHaveText(
     '▸Searched for 1 pattern, read 1 file',
   );
-  const size = await page
-    .locator('.tool-group .tool-summary-text')
-    .first()
-    .evaluate((el) => getComputedStyle(el).fontSize);
-  expect(size).toBe('16px');
+  // Tool rows use the transcript's body size, the same as the prose around them.
+  const sizes = await page.evaluate(() => ({
+    row: getComputedStyle(document.querySelector('.tool-group .tool-summary-text')!).fontSize,
+    body: getComputedStyle(document.body).fontSize,
+  }));
+  expect(sizes.row).toBe(sizes.body);
 });
