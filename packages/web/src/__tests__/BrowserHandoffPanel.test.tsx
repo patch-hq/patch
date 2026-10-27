@@ -14,6 +14,7 @@ import {
   browsingSummary,
   canStopBrowser,
   clampPreview,
+  clampPreviewWidth,
   driveState,
   fitSize,
   formatElapsed,
@@ -72,6 +73,15 @@ const inputs = (sent: WireEvent[]) =>
   sent
     .filter((e) => e.type === 'patch.browser_view.input')
     .map((e) => (e as Extract<WireEvent, { type: 'patch.browser_view.input' }>).input);
+
+describe('clampPreviewWidth', () => {
+  it('keeps the preview between the smallest card and the window', () => {
+    expect(clampPreviewWidth(100, 1200)).toBe(240);
+    expect(clampPreviewWidth(500, 1200)).toBe(500);
+    expect(clampPreviewWidth(5000, 1200)).toBe(1176);
+    expect(clampPreviewWidth(500, 300)).toBe(276);
+  });
+});
 
 describe('the bar', () => {
   beforeEach(() => {

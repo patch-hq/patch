@@ -139,6 +139,33 @@ export function savePreviewPosition(pos: PreviewPosition): void {
   }
 }
 
+export const PREVIEW_MIN_WIDTH = 240;
+export const PREVIEW_DEFAULT_WIDTH = 360;
+const PREVIEW_WIDTH_KEY = 'patch.browserPreview.width';
+
+/** A preview width kept between the smallest legible card and the window less its margins. */
+export function clampPreviewWidth(width: number, windowWidth: number, margin = 12): number {
+  const max = Math.max(PREVIEW_MIN_WIDTH, windowWidth - margin * 2);
+  return Math.min(max, Math.max(PREVIEW_MIN_WIDTH, Math.round(width)));
+}
+
+export function loadPreviewWidth(): number | null {
+  try {
+    const n = Number(localStorage.getItem(PREVIEW_WIDTH_KEY));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+export function savePreviewWidth(width: number): void {
+  try {
+    localStorage.setItem(PREVIEW_WIDTH_KEY, String(width));
+  } catch {
+    // Storage full or blocked: the preview still resizes, it just forgets the size.
+  }
+}
+
 /** The site of an address, as a person names it ("gwr.com"); '' when it has none. */
 export function siteOf(url: string): string {
   try {

@@ -27,10 +27,14 @@ import {
   browsingSummary,
   canStopBrowser,
   clampPreview,
+  clampPreviewWidth,
   driveState,
   formatElapsed,
   loadPreviewPosition,
+  loadPreviewWidth,
+  PREVIEW_DEFAULT_WIDTH,
   savePreviewPosition,
+  savePreviewWidth,
   siteOf,
   viewedTab,
   type PreviewPosition,
@@ -217,6 +221,10 @@ function BrowserMini({
     from: PreviewPosition;
     moved: boolean;
   } | null>(null);
+  const [width, setWidth] = useState(() =>
+    clampPreviewWidth(loadPreviewWidth() ?? PREVIEW_DEFAULT_WIDTH, window.innerWidth),
+  );
+  const resize = useRef<{ id: number; startX: number; from: number } | null>(null);
   const size = (): { width: number; height: number } => {
     const r = cardRef.current?.getBoundingClientRect();
     return { width: r?.width ?? 0, height: r?.height ?? 0 };
@@ -239,8 +247,10 @@ function BrowserMini({
 
   // Stay on screen as the window or the picture changes size.
   useEffect(() => {
-    const keep = (): void =>
+    const keep = (): void => {
+      setWidth((w) => clampPreviewWidth(w, window.innerWidth));
       setPos((p) => (p ? clampPreview(p, size(), win(), PREVIEW_MARGIN_PX) : p));
+    };
     window.addEventListener('resize', keep);
     const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(keep) : null;
     if (cardRef.current) ro?.observe(cardRef.current);
@@ -282,13 +292,33 @@ function BrowserMini({
     }
   };
 
+  const onResizeDown = (e: ReactPointerEvent<HTMLElement>): void => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    resize.current = { id: e.pointerId, startX: e.clientX, from: size().width };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+  const onResizeMove = (e: ReactPointerEvent<HTMLElement>): void => {
+    const r = resize.current;
+    if (!r || r.id !== e.pointerId) return;
+    e.stopPropagation();
+    setWidth(clampPreviewWidth(r.from + e.clientX - r.startX, window.innerWidth));
+  };
+  const onResizeUp = (e: ReactPointerEvent<HTMLElement>): void => {
+    const r = resize.current;
+    if (!r || r.id !== e.pointerId) return;
+    e.stopPropagation();
+    resize.current = null;
+    savePreviewWidth(width);
+  };
+
   return (
     <section
       ref={cardRef}
       className={`browser-mini is-${state}${pos ? '' : ' is-placing'}`}
       data-testid="browser-handoff"
       aria-label="Agent browser"
-      style={pos ? { left: pos.x, top: pos.y } : undefined}
+      style={pos ? { left: pos.x, top: pos.y, width } : { width }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -351,6 +381,16 @@ function BrowserMini({
           onTakeOver={() => openBrowserLarge(chatId)}
         />
       </footer>
+      <div
+        className="browser-mini-grip"
+        data-testid="browser-mini-resize"
+        role="separator"
+        aria-label="Resize browser preview"
+        onPointerDown={onResizeDown}
+        onPointerMove={onResizeMove}
+        onPointerUp={onResizeUp}
+        onPointerCancel={() => (resize.current = null)}
+      />
     </section>
   );
 }

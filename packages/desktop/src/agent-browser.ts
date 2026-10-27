@@ -49,6 +49,8 @@ import {
   type CdpCookieParam,
 } from './agent-browser-cdp';
 
+import { stripAppTokens } from './agent-user-agent';
+
 /** The agent's signed-in profile: kept across restarts, shared by every chat. */
 export const AGENT_PROFILE_PARTITION = 'persist:patch-agent-browser';
 /** Where a tab is laid out while no view shows it. */
@@ -455,7 +457,7 @@ export class AgentBrowser {
     const ctx: AgentContext = { id, ses, grants: [], temporary };
     this.contexts.set(id, ctx);
     // A normal Chrome: no app or Electron token in what sites see.
-    ses.setUserAgent(ses.getUserAgent().replace(/ (Electron|patch|Patch)\/\S+/g, ''));
+    ses.setUserAgent(stripAppTokens(ses.getUserAgent()));
     ses.setPermissionRequestHandler((wc, permission, callback, details) => {
       const origin = safeOrigin(details.requestingUrl ?? wc?.getURL() ?? '');
       callback(permissionGranted(ctx.grants, origin, permission));

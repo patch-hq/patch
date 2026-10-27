@@ -15667,6 +15667,16 @@ select.permission-mode.is-pending {
   touch-action: none;
   user-select: none;
 }
+.browser-mini-grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  touch-action: none;
+  background: linear-gradient(135deg, transparent 55%, var(--ink-faint) 55% 62%, transparent 62% 76%, var(--ink-faint) 76% 83%, transparent 83%);
+}
 .browser-mini.is-placing {
   visibility: hidden;
   right: 20px;
@@ -16002,9 +16012,6 @@ select.permission-mode.is-pending {
 }
 
 @media (max-width: 640px) {
-  .browser-mini {
-    width: min(320px, calc(100vw - 24px));
-  }
   .browser-bar {
     width: calc(100% - 24px);
   }
