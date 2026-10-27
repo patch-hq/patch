@@ -124,3 +124,22 @@ export async function flushMicrotasks(): Promise<void> {
     for (let i = 0; i < 10; i++) await Promise.resolve();
   });
 }
+
+/**
+ * Pick an item from the composer's + menu (spec/15 § Composer): camera,
+ * image, file or sketch. Calls the menu's own `onSelect`, as a tap on the row
+ * would, without needing the menu open first.
+ */
+export function pickFromAddMenu(
+  root: ReactTestInstance,
+  id: 'camera' | 'image' | 'file' | 'sketch',
+): void {
+  const menus = root.findAll(
+    (i) =>
+      typeof i.type !== 'string' &&
+      Array.isArray(i.props['items']) &&
+      (i.props['items'] as { testID?: string }[]).some((it) => it.testID === `add-menu-${id}`),
+  );
+  if (menus.length === 0) throw new Error('pickFromAddMenu: no + menu rendered');
+  (menus[0]!.props['onSelect'] as (id: string) => void)(id);
+}
