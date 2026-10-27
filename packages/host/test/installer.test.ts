@@ -16,6 +16,7 @@ import {
   rmSync,
   statSync,
   writeFileSync,
+  existsSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -85,6 +86,7 @@ function makeCtx(over: Partial<InstallerContext> & { home: string }): InstallerC
     uid: over.uid ?? 501,
     ...(over.fetchImpl ? { fetchImpl: over.fetchImpl } : {}),
     ...(over.serviceOps ? { serviceOps: over.serviceOps } : {}),
+    ...(over.appBinary ? { appBinary: over.appBinary } : {}),
     ...(over.loginShellPath ? { loginShellPath: over.loginShellPath } : {}),
     // The suite provisions no sandbox: installing packages and loading an
     // AppArmor profile is the machine's business, not a unit test's. The step
@@ -525,6 +527,58 @@ describe('what the install puts on the machine', () => {
     expect(statSync(stable).ino).toBe(first);
   });
 
+  it('on a Mac runs the service under Patch.app with ELECTRON_RUN_AS_NODE and copies no node', async () => {
+    const home = mkTmp('patch-home-');
+    const appDir = mkTmp('patch-app-');
+    const app = join(appDir, 'Patch');
+    writeFileSync(app, '#!/bin/sh\n');
+    const defs: ServiceDefinition[] = [];
+    const ops = recordingOps();
+    const register = ops.register.bind(ops);
+    ops.register = async (def: ServiceDefinition) => {
+      defs.push(def);
+      return register();
+    };
+    const argv = ['--non-interactive', '--server', 'http://s', '--internal-token', 't'];
+    // A node left by an earlier version is removed.
+    mkdirSync(join(home, '.patch'), { recursive: true });
+    writeFileSync(join(home, '.patch', 'node'), 'old');
+    const artifact = makeArtifact('darwin-arm64');
+    const ctx = makeCtx({
+      home,
+      serviceOps: ops,
+      argv,
+      platform: 'darwin',
+      arch: 'arm64',
+      artifactDir: artifact,
+      appBinary: app,
+      loginShellPath: () => '/usr/bin',
+    });
+    // Pairing is not the subject here; the definition is registered before it.
+    await runInstaller(ctx);
+    expect(defs[0]?.nodePath).toBe(app);
+    expect(defs[0]?.env['ELECTRON_RUN_AS_NODE']).toBe('1');
+    expect(existsSync(join(home, '.patch', 'node'))).toBe(false);
+  });
+
+  it('on a Mac without Patch.app refuses loudly rather than falling back to a stock node', async () => {
+    const home = mkTmp('patch-home-');
+    const ops = recordingOps();
+    const ctx = makeCtx({
+      home,
+      serviceOps: ops,
+      argv: ['--non-interactive', '--server', 'http://s', '--internal-token', 't'],
+      platform: 'darwin',
+      arch: 'arm64',
+      artifactDir: makeArtifact('darwin-arm64'),
+      appBinary: join(home, 'nope', 'Patch'),
+      loginShellPath: () => '/usr/bin',
+    });
+    expect((await runInstaller(ctx)).code).toBe(69);
+    expect(streams(ctx).err).toContain('Patch.app is not installed');
+    expect(ops.registered).toBe(0);
+  });
+
   it('rewrites a clobbered skill on the next install', async () => {
     const home = mkTmp('patch-home-');
     const skill = join(home, '.claude', 'skills', 'patch-cli');
@@ -735,6 +789,13 @@ describe('a machine added with only a pairing code (no --internal-token)', () =>
 });
 
 describe("a Mac's service PATH", () => {
+  function fakeApp(): string {
+    const dir = mkTmp('patch-app-');
+    const app = join(dir, 'Patch');
+    writeFileSync(app, '#!/bin/sh\n');
+    return app;
+  }
+
   function capture(): { ops: ReturnType<typeof recordingOps>; envs: Record<string, string>[] } {
     const envs: Record<string, string>[] = [];
     const ops = recordingOps();
@@ -753,6 +814,7 @@ describe("a Mac's service PATH", () => {
       home,
       serviceOps: ops,
       platform: 'darwin',
+      appBinary: fakeApp(),
       arch: 'arm64',
       artifactDir: makeArtifact('darwin-arm64'),
       argv: ['--non-interactive', '--server', 'http://s', '--internal-token', 't'],
@@ -769,6 +831,7 @@ describe("a Mac's service PATH", () => {
       home,
       serviceOps: ops,
       platform: 'darwin',
+      appBinary: fakeApp(),
       arch: 'arm64',
       artifactDir: makeArtifact('darwin-arm64'),
       argv: ['--non-interactive', '--server', 'http://s', '--internal-token', 't'],

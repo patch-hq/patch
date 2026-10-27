@@ -111,6 +111,15 @@ export interface InstallerContext {
   provisionSandbox?: (platform: NodeJS.Platform, io: { out(line: string): void }) => Promise<void>;
   /** Login-shell PATH override — test hook, so a unit test runs no shell. */
   loginShellPath?: () => string;
+  /** Patch.app's executable override — test hook; macOS only. */
+  appBinary?: string;
+}
+
+/** Where the desktop app's executable sits, for each place a Mac installs it. */
+export function patchAppBinaryCandidates(home: string): string[] {
+  return ['/Applications', join(home, 'Applications')].map((d) =>
+    join(d, 'Patch.app', 'Contents', 'MacOS', 'Patch'),
+  );
 }
 
 export interface BuildInfo {
@@ -415,21 +424,44 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
     const p = join(installDir, exe);
     if (existsSync(p)) chmodSync(p, 0o755);
   }
-  // The service and the `patch` launcher run THIS node, not the per-version
-  // copy. macOS grants Screen Recording / Accessibility per executable path, so
-  // a node at a new `versions/<v>/` path on every release showed up as another
-  // "node" row to approve each time. One path, rewritten only when the binary
-  // itself changes, keeps the single grant valid across updates.
+  // The service and the `patch` launcher run ONE stable executable, not the
+  // per-version copy. macOS grants Full Disk Access / Screen Recording per
+  // executable, and a stock node is listed as just "node" — indistinguishable
+  // from every other Node on the machine. On a Mac the host therefore runs
+  // under Patch.app's own Electron binary (ELECTRON_RUN_AS_NODE=1): the grant is
+  // a single "Patch" entry, made once, and it survives updates because the
+  // app's path and signature do not change. No node is copied on a Mac.
+  // Elsewhere there is no such grant, and one path rewritten only when the
+  // binary changes is enough.
   const stableNode = join(patchHome, 'node');
-  const bundledNode = join(installDir, 'node');
-  if (existsSync(bundledNode)) {
-    const same =
-      existsSync(stableNode) && readFileSync(stableNode).equals(readFileSync(bundledNode));
-    if (!same) {
-      const tmp = `${stableNode}.new-${process.pid}`;
-      copyFileSync(bundledNode, tmp);
-      chmodSync(tmp, 0o755);
-      renameSync(tmp, stableNode);
+  let hostRuntime = stableNode;
+  const runtimeEnv: Record<string, string> = {};
+  if (ctx.platform === 'darwin') {
+    const candidates = ctx.appBinary ? [ctx.appBinary] : patchAppBinaryCandidates(home);
+    const app = candidates.find((c) => existsSync(c));
+    if (!app) {
+      io.err(
+        `patch install: Patch.app is not installed (looked for ${candidates.join(', ')}). ` +
+          'On a Mac the host runs under the Patch app so macOS privacy grants are made once, ' +
+          'to "Patch". Install Patch.app and run this again.',
+      );
+      return { code: 69 };
+    }
+    hostRuntime = app;
+    runtimeEnv['ELECTRON_RUN_AS_NODE'] = '1';
+    // A node left by an earlier version would only be another "node" to approve.
+    rmSync(stableNode, { force: true });
+  } else {
+    const bundledNode = join(installDir, 'node');
+    if (existsSync(bundledNode)) {
+      const same =
+        existsSync(stableNode) && readFileSync(stableNode).equals(readFileSync(bundledNode));
+      if (!same) {
+        const tmp = `${stableNode}.new-${process.pid}`;
+        copyFileSync(bundledNode, tmp);
+        chmodSync(tmp, 0o755);
+        renameSync(tmp, stableNode);
+      }
     }
   }
   const current = join(patchHome, 'current');
@@ -465,7 +497,7 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
     const launcherTmp = `${launcher}.new-${process.pid}`;
     writeFileSync(
       launcherTmp,
-      `#!/bin/sh\nexec ${JSON.stringify(stableNode)} ${JSON.stringify(cliBundle)} "$@"\n`,
+      `#!/bin/sh\n${ctx.platform === 'darwin' ? 'ELECTRON_RUN_AS_NODE=1 ' : ''}exec ${JSON.stringify(hostRuntime)} ${JSON.stringify(cliBundle)} "$@"\n`,
       { encoding: 'utf8', mode: 0o755 },
     );
     // Replace a legacy symlink itself, never follow it into the CLI bundle.
@@ -559,7 +591,7 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
     return { code: 69 };
   }
   const def: ServiceDefinition = {
-    nodePath: stableNode,
+    nodePath: hostRuntime,
     programPath: join(installDir, 'host.mjs'),
     home,
     uid: ctx.uid,
@@ -567,6 +599,7 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
       HOME: home,
       USER: user,
       PATH: servicePath,
+      ...runtimeEnv,
       PATCH_SERVER_URL: serverUrl,
       PATCH_SERVER_WS_URL: wsUrlFor(serverUrl),
       PATCH_HOST_NAME: machine,
