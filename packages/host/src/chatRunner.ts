@@ -7214,6 +7214,58 @@ export class Daemon {
   }
 
   /**
+   * Fork point for a user turn Patch logged but Claude never persisted — the
+   * turn was stopped before the session wrote it, so it is in this chat's own
+   * log and missing from the transcript. The prefix it shares is everything up
+   * to the event before it on this track, which IS in the transcript: resume
+   * just after that event. No such earlier event means an empty prefix.
+   *
+   * Returns `null` (and the edit is refused) when `seq` is not a user turn in
+   * Patch's own log, or when the event before it cannot be found in the
+   * transcript either — that is a real mismatch, not a stopped turn.
+   */
+  private unpersistedForkPoint(
+    chatId: string,
+    sessionId: string,
+    seq: number,
+  ): { resumeAtUuid: string | null } | null {
+    const meta = this.opts.metaStore.read(chatId);
+    const state = this.chatState.get(chatId);
+    if (!meta || !state) return null;
+    const records = readTrackRecords(
+      this.chatLog,
+      chatId,
+      meta,
+      meta.activeBranchId ?? this.branchIdFor(chatId),
+    );
+    let target: WireEvent | undefined;
+    let previousSeq: number | undefined;
+    for (const record of records) {
+      if (record.rec.k !== 'event') continue;
+      const ev = record.rec.event;
+      if (record.seq === seq) {
+        target = ev;
+        break;
+      }
+      if (record.seq > seq) continue;
+      const fromTranscript =
+        (ev.type === 'chat.message' && (ev.role === 'user' || ev.role === 'assistant')) ||
+        ev.type === 'chat.tool_call' ||
+        ev.type === 'chat.tool_result';
+      if (fromTranscript) previousSeq = record.seq;
+    }
+    if (!(target?.type === 'chat.message' && target.role === 'user')) return null;
+    if (previousSeq === undefined) return { resumeAtUuid: null };
+    return this.historyReader.sidePoint({
+      folder: state.folder,
+      sessionId,
+      seq: previousSeq,
+      seqIndex: this.canonicalSeqIndex(chatId),
+      nativeDir: this.nativeClaudeDirFor(chatId),
+    });
+  }
+
+  /**
    * Edit a user turn, forking a new TRACK from it (spec/04 § Branching).
    *
    * The prefix up to the turn BEFORE `seq` is shared; `message` replaces the
@@ -7255,13 +7307,13 @@ export class Daemon {
     // the surface shows it at seq 0. It is the one turn that can exist without a
     // transcript, and its fork point is an empty context.
     const point: { resumeAtUuid: string | null } | null = hasSession
-      ? this.historyReader.forkPoint({
+      ? (this.historyReader.forkPoint({
           folder: state.folder,
           sessionId,
           seq: req.seq,
           seqIndex: this.canonicalSeqIndex(req.chatId),
           nativeDir: this.nativeClaudeDirFor(req.chatId),
-        })
+        }) ?? this.unpersistedForkPoint(req.chatId, sessionId, req.seq))
       : req.seq === 0
         ? { resumeAtUuid: null }
         : null;
