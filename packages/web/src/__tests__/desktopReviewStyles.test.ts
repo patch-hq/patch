@@ -34,6 +34,26 @@ describe('DESKTOP-REVIEW styles', () => {
     }
   });
 
+  // The UA stylesheet gives <code> a monospace family, so "does not name mono"
+  // is not enough: the rule must actively inherit the prose face.
+  it('B2: .md-inline-code inherits the prose font family', () => {
+    const blocks = blocksMentioning('.md-inline-code').filter((b) => b.includes('font-size'));
+    expect(blocks.length).toBeGreaterThan(0);
+    for (const body of blocks) {
+      expect(body).toMatch(/font-family:\s*inherit/);
+    }
+  });
+
+  // Tool rows are furniture in the same transcript as the prose: same face AND
+  // same size as the body, not a hard-coded px that drifts from it.
+  it('B3: tool rows use the body font size', () => {
+    const blocks = blocksMentioning('.tool-call').filter((b) => b.includes('Figtree Variable'));
+    expect(blocks.length).toBeGreaterThan(0);
+    for (const body of blocks) {
+      expect(body).toMatch(/font-size:\s*inherit/);
+    }
+  });
+
   it('B2: fenced code blocks (.md-pre code) still use the mono font', () => {
     const preBlocks = blocksMentioning('code').filter((b) => b.includes('JetBrains Mono'));
     // At least one `code` rule (the fenced-block rule) keeps mono.
