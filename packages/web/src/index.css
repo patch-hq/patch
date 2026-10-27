@@ -8343,7 +8343,49 @@ button.view-file-download {
   min-width: 0;
 }
 .job-row .job-name {
-  font-size: 16px;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+/* Defaults for all jobs: same left edge and heading style as the section
+   heads (Recurring, One-off), with its own chevron in place of the browser's
+   triangle. */
+.job-defaults {
+  padding: 18px 28px 0;
+}
+.job-defaults > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+  cursor: pointer;
+  color: var(--ink-3);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.job-defaults > summary::-webkit-details-marker {
+  display: none;
+}
+.job-defaults > summary::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.15s;
+}
+.job-defaults[open] > summary::before {
+  transform: rotate(45deg);
+}
+.job-defaults > summary:hover {
+  color: var(--ink-2);
+}
+.job-defaults > .set-group {
+  margin-top: 12px;
+  margin-bottom: 0;
 }
 /* The job defaults card reuses the settings row classes, whose text sits at
    the app-wide floor; the jobs page carries its own higher one. */
@@ -8395,10 +8437,22 @@ button.view-file-download {
 .recent-runs .job-chat-link {
   font-size: 15px;
   background: none;
-  border: 1px solid var(--line);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  padding: 2px 8px;
+  padding: 6px 10px;
   cursor: pointer;
+  color: var(--ink-3);
+}
+/* Row actions are quiet text buttons; the border only appears on hover. Run
+   now keeps its outline as the one action worth reaching for. */
+.job-row .runs-toggle:hover,
+.job-row .job-archive:hover,
+.job-row .job-delete:hover {
+  background: var(--bg-hover, var(--line-soft));
+  color: var(--ink-2);
+}
+.job-row .job-run-now {
+  border-color: var(--line);
   color: var(--ink-2);
 }
 .job-row .job-run-now,
@@ -8408,7 +8462,6 @@ button.view-file-download {
 }
 .job-row .job-delete:hover {
   color: var(--danger);
-  border-color: var(--danger);
 }
 /* The "open chat" link reads as the primary affordance — tint it green. */
 .job-row .job-chat-link,
