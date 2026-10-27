@@ -174,7 +174,9 @@ export async function startVoiceNote(
 export async function sendVoiceNote(): Promise<void> {
   const store = useVoiceStore.getState();
   const note = store.note;
-  if (!note) return;
+  // A second commit (⏎ and the mic, key repeat) while one is uploading would
+  // send the same note twice.
+  if (!note || note.sending) return;
   const chatId = note.chatId;
   store.setNoteSending(true);
   const rec = activeRecording;

@@ -506,11 +506,13 @@ export function AppShell(): JSX.Element {
           .catch((err) => pushError(`editor: ${(err as Error).message}`));
       },
       onVoiceHoldStart: (at) => {
-        if (!activeChatId) return;
-        // The dictate chord dictates into the open chat's composer, exactly like
-        // its mic button (lib/composerMic.ts). Only with no such composer on
-        // screen is it a press-and-hold voice note (mode 1, PTT gesture: release sends).
-        if (!composerHotkeyDown(activeChatId, at)) void startVoiceNote(activeChatId, 'ptt');
+        // The dictate chord dictates into the composer on screen, exactly like
+        // its mic button (lib/composerMic.ts): the new-chat screen's composer is
+        // registered as 'new'. Only with a chat open and no such composer is it a
+        // press-and-hold voice note (mode 1, PTT gesture: release sends).
+        if (!composerHotkeyDown(activeChatId ?? 'new', at) && activeChatId) {
+          void startVoiceNote(activeChatId, 'ptt');
+        }
       },
       onVoiceHoldEnd: (heldMs, at) => {
         if (composerHotkeyUp(at)) return;

@@ -246,6 +246,22 @@ describe('voiceController', () => {
     expect(useVoiceStore.getState().note).toBeNull();
   });
 
+  it('a second commit while the note is uploading does not send it twice', async () => {
+    let resolveUpload!: (v: { ok: true; transcript: string; text: string }) => void;
+    voiceNoteSpy.mockReturnValue(
+      new Promise((res) => {
+        resolveUpload = res;
+      }),
+    );
+    await startVoiceNote('c1', 'toggle');
+    const first = sendVoiceNote();
+    await sendVoiceNote();
+    resolveUpload({ ok: true, transcript: 'hi', text: 'hi' });
+    await first;
+    expect(voiceNoteSpy).toHaveBeenCalledOnce();
+    expect(recStopSpy).toHaveBeenCalledOnce();
+  });
+
   it('APPEARS LIVE: the voice message shows a transcribing bubble the instant sending begins, then fills in when the upload returns', async () => {
     // The point of "appear live" (the user, patch/todo.md): the bubble must show the
     // moment the user finishes speaking — NOT only after the (slow, on train
