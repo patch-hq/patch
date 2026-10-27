@@ -347,7 +347,7 @@ test.describe('sidebar', () => {
     // `aside` scrolled, so the Archived/Deleted controls and the + New chat
     // button scrolled off the bottom and had to be hunted for (spec/14 § Sidebar
     // → Scroll regions).
-    await page.setViewportSize({ width: 1280, height: 540 });
+    await page.setViewportSize({ width: 1280, height: 600 });
     await page.goto(HARNESS);
 
     const sidebar = page.getByTestId('sidebar');
