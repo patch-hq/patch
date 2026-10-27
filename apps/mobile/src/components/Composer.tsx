@@ -89,7 +89,6 @@ import {
   TextInput,
   View,
   useWindowDimensions,
-  Platform,
 } from 'react-native';
 import {
   Mic,
@@ -819,13 +818,24 @@ export function Composer({
   );
 
   function beginDictation(): void {
-    // spec/07 § Dictation engines. Settings are loaded at launch; before they
-    // are, the upload path runs, and the host still transcribes with whatever
-    // engine the account chose — only the phone recogniser waits for them.
-    const dictationConfig = useSettingsStore.getState().data?.preferences.voiceConfig.dictation;
-    const { engine, tidy } = dictationConfig
-      ? dictationEngineFor(dictationConfig, Platform.OS)
-      : { engine: 'whisper' as const, tidy: false };
+    // spec/07 § Dictation engines: the engine is an account setting. It is
+    // loaded at launch; a press that beats it waits for it.
+    const settings = useSettingsStore.getState().data;
+    if (settings === null) {
+      void useSettingsStore
+        .getState()
+        .load()
+        .then(() => {
+          if (useSettingsStore.getState().data === null) {
+            const why = useSettingsStore.getState().error ?? 'unknown error';
+            useUiStore.getState().pushError(`voice: could not load settings: ${why}`);
+            return;
+          }
+          beginDictation();
+        });
+      return;
+    }
+    const { engine, tidy } = dictationEngineFor(settings.preferences.voiceConfig.dictation);
     // Dictation on a backend this chat's host has no key for is refused at the
     // press, not after the user has spoken (the host refuses it too). The
     // phone's recogniser needs no key.

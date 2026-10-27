@@ -694,9 +694,8 @@ describe('Settings → Voice', () => {
       usePreferencesStore.setState({
         preferences: {
           ...usePreferencesStore.getState().preferences,
-          // the user's live config, 2026-09-24.
           voiceConfig: {
-            dictation: { backend: 'gemini', phone: false, tidy: false },
+            dictation: { phone: 'deepgram', computer: 'whisper', tidy: false },
             device: { backend: 'openai', layer: 'light', handoff: 'auto' },
             handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
             call: { backend: 'local', layer: 'direct', handoff: 'auto' },
@@ -705,18 +704,23 @@ describe('Settings → Voice', () => {
         loaded: true,
       });
       vi.stubGlobal('fetch', makeFetch());
-      reportHost('d1', { hostName: 'hetzner', voiceKeys: { gemini: false, openai: false } });
+      reportHost('d1', {
+        hostName: 'hetzner',
+        voiceKeys: { gemini: false, openai: false, deepgram: false },
+      });
       reportHost('d2', {
         hostName: 'mac',
         runsManager: false,
-        voiceKeys: { gemini: true, openai: false },
+        voiceKeys: { gemini: true, openai: false, deepgram: true },
       });
       reportHost('d3', { hostName: 'old-daemon', runsManager: false });
       renderSettings('/settings/voice');
-      await waitFor(() => expect(screen.getByTestId('voice-dictation-keys')).toBeInTheDocument());
-      expect(screen.getByTestId('voice-dictation-keys')).toHaveTextContent(
-        'Not configured on hetzner: GEMINI_API_KEY is missing. Sessions there are refused.',
+      await waitFor(() => expect(screen.getByTestId('dictation-phone-keys')).toBeInTheDocument());
+      expect(screen.getByTestId('dictation-phone-keys')).toHaveTextContent(
+        'Not configured on hetzner: DEEPGRAM_API_KEY is missing. Sessions there are refused.',
       );
+      // Whisper on the computer needs no key.
+      expect(screen.queryByTestId('dictation-computer-keys')).toBeNull();
       expect(screen.getByTestId('voice-device-keys')).toHaveTextContent(
         'Not configured on hetzner, mac: OPENAI_REALTIME_API_KEY is missing. Sessions there are refused.',
       );
@@ -731,7 +735,7 @@ describe('Settings → Voice', () => {
         preferences: {
           ...usePreferencesStore.getState().preferences,
           voiceConfig: {
-            dictation: { backend: 'gemini', phone: false, tidy: false },
+            dictation: { phone: 'whisper', computer: 'deepgram', tidy: false },
             device: { backend: 'local', layer: 'direct', handoff: 'auto' },
             handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
             call: { backend: 'local', layer: 'direct', handoff: 'auto' },
@@ -740,25 +744,29 @@ describe('Settings → Voice', () => {
         loaded: true,
       });
       vi.stubGlobal('fetch', makeFetch());
-      reportHost('d1', { hostName: 'hetzner', voiceKeys: { gemini: false, openai: false } });
+      reportHost('d1', {
+        hostName: 'hetzner',
+        voiceKeys: { gemini: false, openai: false, deepgram: false },
+      });
       renderSettings('/settings/voice');
-      await waitFor(() => expect(screen.getByTestId('voice-dictation-keys')).toBeInTheDocument());
-      act(() =>
-        reportHost('d1', { hostName: 'hetzner', voiceKeys: { gemini: true, openai: false } }),
+      await waitFor(() =>
+        expect(screen.getByTestId('dictation-computer-keys')).toBeInTheDocument(),
       );
-      await waitFor(() => expect(screen.queryByTestId('voice-dictation-keys')).toBeNull());
+      act(() =>
+        reportHost('d1', {
+          hostName: 'hetzner',
+          voiceKeys: { gemini: false, openai: false, deepgram: true },
+        }),
+      );
+      await waitFor(() => expect(screen.queryByTestId('dictation-computer-keys')).toBeNull());
     });
   });
 
   describe('Engine', () => {
-    it('shows each surface as one engine choice, with no layer axis', async () => {
+    it('shows each conversation surface as one engine choice, with no layer axis', async () => {
       vi.stubGlobal('fetch', makeFetch());
       renderSettings('/settings/voice');
-      await waitFor(() => expect(screen.getByTestId('voice-dictation')).toBeInTheDocument());
-      expect(screen.getByTestId('voice-dictation-engine-local')).toHaveAttribute(
-        'aria-pressed',
-        'true',
-      );
+      await waitFor(() => expect(screen.getByTestId('voice-call')).toBeInTheDocument());
       expect(screen.getByTestId('voice-call-engine-local')).toHaveAttribute('aria-pressed', 'true');
       expect(screen.queryByTestId('voice-call-layer')).toBeNull();
       expect(screen.getByTestId('voice-call-engine-gemini-thinking')).toHaveTextContent(
@@ -774,7 +782,7 @@ describe('Settings → Voice', () => {
       await waitFor(() => expect(server.writes).toHaveLength(1));
       const cfg = server.writes[0]!.voiceConfig as Record<string, unknown>;
       expect(cfg.call).toEqual({ backend: 'openai', layer: 'light', handoff: 'auto' });
-      expect(cfg.dictation).toEqual({ backend: 'local', phone: false, tidy: false });
+      expect(cfg.dictation).toEqual({ phone: 'device', computer: 'whisper', tidy: false });
       await waitFor(() =>
         expect(screen.getByTestId('voice-call-engine-openai-mini')).toHaveAttribute(
           'aria-pressed',
@@ -783,28 +791,33 @@ describe('Settings → Voice', () => {
       );
     });
 
-    it('dictation offers Deepgram and keeps its two switches when the engine changes', async () => {
+    it('dictation: the phone and the computer each choose their own engine', async () => {
       const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
       vi.stubGlobal('fetch', makeFetch({}, server.handler));
       renderSettings('/settings/voice');
-      fireEvent.click(await screen.findByTestId('voice-dictation-engine-deepgram'));
+      expect(await screen.findByTestId('dictation-phone-engine-device')).toHaveTextContent(
+        'Built-in',
+      );
+      // A computer has no recogniser of its own.
+      expect(screen.queryByTestId('dictation-computer-engine-device')).toBeNull();
+      fireEvent.click(screen.getByTestId('dictation-computer-engine-deepgram'));
       await waitFor(() => expect(server.writes).toHaveLength(1));
       expect((server.writes[0]!.voiceConfig as Record<string, unknown>).dictation).toEqual({
-        backend: 'deepgram',
-        phone: false,
+        phone: 'device',
+        computer: 'deepgram',
         tidy: false,
       });
     });
 
-    it('the phone recogniser and Whisper tidy-up are switches on the dictation cell', async () => {
+    it('tidy-up with Whisper is one switch for both', async () => {
       const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
       vi.stubGlobal('fetch', makeFetch({}, server.handler));
       renderSettings('/settings/voice');
       fireEvent.click(await screen.findByTestId('dictation-tidy-toggle'));
       await waitFor(() => expect(server.writes).toHaveLength(1));
       expect((server.writes[0]!.voiceConfig as Record<string, unknown>).dictation).toEqual({
-        backend: 'local',
-        phone: false,
+        phone: 'device',
+        computer: 'whisper',
         tidy: true,
       });
     });
@@ -866,7 +879,7 @@ describe('Settings → Voice', () => {
         preferences: {
           ...usePreferencesStore.getState().preferences,
           voiceConfig: {
-            dictation: { backend: 'local', phone: false, tidy: false },
+            dictation: { phone: 'device', computer: 'whisper', tidy: false },
             device: { backend: 'gemini', layer: 'light', handoff: 'auto' },
             handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
             call: { backend: 'local', layer: 'direct', handoff: 'auto' },
@@ -893,7 +906,7 @@ describe('Settings → Voice', () => {
         ),
       );
       renderSettings('/settings/voice');
-      fireEvent.click(await screen.findByTestId('voice-dictation-engine-gemini'));
+      fireEvent.click(await screen.findByTestId('voice-call-engine-gemini-flash'));
       await waitFor(() => expect(errors()).toContain('Settings failed. Try again.'));
     });
   });
@@ -906,7 +919,6 @@ describe('Settings → Voice', () => {
     // Gemini hands-free enforces the address word on the host, so there is nothing to warn about.
     expect(voiceCellStatus('handsFree', 'gemini', 'light')).toBeNull();
     expect(voiceCellStatus('call', 'local', 'direct')).toBeNull();
-    expect(voiceCellStatus('dictation', 'openai')).toBeNull();
   });
 
   it('Dictation mode: shows the pause and writes the chosen one', async () => {

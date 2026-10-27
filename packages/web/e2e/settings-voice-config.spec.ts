@@ -13,9 +13,11 @@ async function expectChosen(page: Page, testid: string, label: string): Promise<
 }
 
 // Real-browser e2e for the per-surface voice config (spec/07 § Voice is a
-// config matrix). Four surfaces (dictation / device / hands-free / call), each
+// config matrix). Three conversation surfaces (device / hands-free / call), each
 // ONE choice of engine — the backend and layer it maps to are not shown — with
-// an honest status for a cell the host would refuse at connect time.
+// an honest status for a cell the host would refuse at connect time. Dictation
+// has its own group: an engine for the phone, one for the computer, and tidy-up
+// (spec/07 § Dictation engines).
 test.describe('Settings — Voice engines', () => {
   test.beforeEach(async ({ page }) => {
     await stubSettingsApi(page);
@@ -26,7 +28,7 @@ test.describe('Settings — Voice engines', () => {
   test('each surface is one engine choice, named for people, with no layer axis', async ({
     page,
   }) => {
-    for (const surface of ['dictation', 'device', 'handsFree', 'call']) {
+    for (const surface of ['device', 'handsFree', 'call']) {
       await expect(page.getByTestId(`voice-${surface}-engine`)).toBeVisible();
       await expect(page.getByTestId(`voice-${surface}-layer`)).toHaveCount(0);
     }
@@ -37,17 +39,23 @@ test.describe('Settings — Voice engines', () => {
       'OpenAI mini',
       'OpenAI',
     ]);
-    await expect(page.getByTestId('voice-dictation-engine').locator('button')).toHaveText([
-      'Whisper',
-      'Gemini',
-      'OpenAI',
+    // Dictation: the phone has its own recogniser; a computer does not.
+    await expect(page.getByTestId('dictation-phone-engine').locator('button')).toHaveText([
+      'Built-in',
       'Deepgram',
+      'Whisper',
+    ]);
+    await expect(page.getByTestId('dictation-computer-engine').locator('button')).toHaveText([
+      'Deepgram',
+      'Whisper',
     ]);
     await expect(page.getByText(/\b(direct|light|heavy)\b/)).toHaveCount(0);
   });
 
   test('defaults to Local everywhere, no status hint shown', async ({ page }) => {
-    await expectChosen(page, 'voice-dictation-engine', 'Whisper');
+    await expectChosen(page, 'dictation-phone-engine', 'Built-in');
+    await expectChosen(page, 'dictation-computer-engine', 'Whisper');
+    await expect(page.getByTestId('dictation-tidy-toggle')).not.toBeChecked();
     for (const surface of ['device', 'handsFree', 'call']) {
       await expectChosen(page, `voice-${surface}-engine`, 'Local');
     }
@@ -119,14 +127,14 @@ test.describe('Settings — Voice engines', () => {
       store.getState().setHostReport({
         ...host,
         type: 'host.host',
-        voiceKeys: { gemini: false, openai: true },
+        voiceKeys: { gemini: false, openai: true, deepgram: false },
       });
     });
-    await expect(page.getByTestId('voice-dictation-keys')).toHaveCount(0);
-    await page.getByTestId('voice-dictation-engine-gemini').click();
-    const line = page.getByTestId('voice-dictation-keys');
+    await expect(page.getByTestId('dictation-computer-keys')).toHaveCount(0);
+    await page.getByTestId('dictation-computer-engine-deepgram').click();
+    const line = page.getByTestId('dictation-computer-keys');
     await expect(line).toHaveText(
-      'Not configured on dev-host: GEMINI_API_KEY is missing. Sessions there are refused.',
+      'Not configured on dev-host: DEEPGRAM_API_KEY is missing. Sessions there are refused.',
     );
     await expect(line).toBeVisible();
     // It reads as an error, not as a muted hint.

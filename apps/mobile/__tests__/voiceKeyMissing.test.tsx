@@ -33,15 +33,15 @@ import { startVoiceNote } from '../src/lib/voiceNote';
 import { Composer } from '../src/components/Composer';
 import { useComposerDraftStore } from '../src/lib/composerDraft';
 
-// the user's live config, 2026-09-24.
+// The phone dictating on Deepgram, which needs a key on the chat's host.
 const TOMS_CONFIG: VoiceConfig = {
-  dictation: { backend: 'gemini' },
+  dictation: { phone: 'deepgram', computer: 'whisper', tidy: false },
   device: { backend: 'openai', layer: 'light', handoff: 'auto' },
   handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
   call: { backend: 'local', layer: 'direct', handoff: 'auto' },
 };
 const REFUSAL =
-  'Dictation is set to gemini, but GEMINI_API_KEY is not set on this host. ' +
+  'Dictation is set to deepgram, but DEEPGRAM_API_KEY is not set on this host. ' +
   'Switch Dictation to another backend in Settings → Voice.';
 
 function seedConfig(voiceConfig: VoiceConfig): void {
@@ -65,8 +65,11 @@ beforeEach(() => {
   useVoiceStore.setState({ voiceNoteChatId: null, voiceNoteState: 'idle' });
   resetHosts();
   usePresenceStore.setState({ daemon: 'online' });
-  reportHost('hetzner', { hostName: 'hetzner', voiceKeys: { gemini: false, openai: false } });
-  reportHost('mac', { hostName: 'mac', voiceKeys: { gemini: true, openai: true } });
+  reportHost('hetzner', {
+    hostName: 'hetzner',
+    voiceKeys: { gemini: false, openai: false, deepgram: false },
+  });
+  reportHost('mac', { hostName: 'mac', voiceKeys: { gemini: true, openai: true, deepgram: true } });
   seedConfig(TOMS_CONFIG);
   pinChat('c1', 'hetzner');
   voiceNoteSpy.mockReset();
@@ -75,7 +78,7 @@ beforeEach(() => {
 describe('voiceKeyRefusal', () => {
   it('names the key when the chat’s host lacks it', () => {
     expect(voiceKeyRefusal('c1', 'dictation')).toBe(REFUSAL);
-    expect(REFUSAL).toBe(voiceKeyMissingMessage('dictation', 'gemini'));
+    expect(REFUSAL).toBe(voiceKeyMissingMessage('dictation', 'deepgram'));
   });
   it('says nothing for a local surface, a host that has the key, or what it cannot know', () => {
     expect(voiceKeyRefusal('c1', 'call')).toBeNull();

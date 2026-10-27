@@ -7,11 +7,11 @@ import { NO_SECRETS, reportHost, settingsUrl, stubSettingsApi } from './settings
 // key only a host's environment supplies names that host and can be adopted.
 // The REST writes are answered by the harness's fake server; the dev harness
 // seeds host `d1` ("dev-host") with Groq in its environment.
-const FAKE_KEY = 'fake-gemini-key-for-e2e-000000-LAST';
+const FAKE_KEY = 'fake-deepgram-key-for-e2e-0000-LAST';
 
-const GEMINI_ON_DICTATION = {
+const DEEPGRAM_ON_DICTATION = {
   voiceConfig: {
-    dictation: { backend: 'gemini' },
+    dictation: { phone: 'deepgram', computer: 'deepgram', tidy: false },
     device: { backend: 'local', layer: 'direct', handoff: 'auto' },
     handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
     call: { backend: 'local', layer: 'direct', handoff: 'auto' },
@@ -22,7 +22,7 @@ test.describe('Settings — Providers', () => {
   test('shows whether each key is set, and names the host whose environment supplies one', async ({
     page,
   }) => {
-    await stubSettingsApi(page, { preferences: GEMINI_ON_DICTATION });
+    await stubSettingsApi(page, { preferences: DEEPGRAM_ON_DICTATION });
     await page.goto(settingsUrl('providers'));
     await expect(page.getByTestId('provider-key-gemini-status')).toHaveText('Not set');
     await expect(page.getByTestId('provider-key-groq-status')).toHaveText(
@@ -36,47 +36,48 @@ test.describe('Settings — Providers', () => {
     page,
   }) => {
     const server = await stubSettingsApi(page, {
-      preferences: GEMINI_ON_DICTATION,
+      preferences: DEEPGRAM_ON_DICTATION,
       answer: (w, srv) => {
-        if (w.method === 'PUT' && w.path === '/api/providers/keys/gemini') {
+        if (w.method === 'PUT' && w.path === '/api/providers/keys/deepgram') {
           srv.secrets = {
             ...srv.secrets,
             providerKeys: srv.secrets.providerKeys.map((k) =>
-              k.id === 'gemini' ? { id: 'gemini', set: true, last4: 'LAST' } : k,
+              k.id === 'deepgram' ? { id: 'deepgram', set: true, last4: 'LAST' } : k,
             ),
           };
         }
       },
     });
     await page.goto(settingsUrl('voice'));
-    await expect(page.getByTestId('voice-dictation-keys')).toContainText(
-      'GEMINI_API_KEY is missing',
+    await expect(page.getByTestId('dictation-phone-keys')).toContainText(
+      'DEEPGRAM_API_KEY is missing',
     );
     await page.getByTestId('settings-nav-providers').click();
 
-    await page.getByTestId('provider-key-gemini-edit').click();
-    const input = page.getByTestId('provider-key-gemini-input');
+    await page.getByTestId('provider-key-deepgram-edit').click();
+    const input = page.getByTestId('provider-key-deepgram-input');
     await expect(input).toHaveAttribute('type', 'password');
     await input.fill(FAKE_KEY);
-    await page.getByTestId('provider-key-gemini-save').click();
+    await page.getByTestId('provider-key-deepgram-save').click();
     await expect(input).toHaveCount(0);
     expect(server.writes).toEqual([
-      { method: 'PUT', path: '/api/providers/keys/gemini', body: { value: FAKE_KEY } },
+      { method: 'PUT', path: '/api/providers/keys/deepgram', body: { value: FAKE_KEY } },
     ]);
-    await expect(page.getByTestId('provider-key-gemini-status')).toHaveText('Set · ends LAST');
+    await expect(page.getByTestId('provider-key-deepgram-status')).toHaveText('Set · ends LAST');
 
     // The host applies the snapshot and republishes; Voice follows its report.
     await reportHost(page, {
-      voiceKeys: { gemini: true, openai: false },
+      voiceKeys: { gemini: false, openai: false, deepgram: true },
       providerKeys: [
-        { id: 'gemini', source: 'ui', last4: 'LAST', envSet: false },
+        { id: 'gemini', source: 'none', envSet: false },
         { id: 'openai', source: 'none', envSet: false },
         { id: 'groq', source: 'env', last4: 'q9Zk', envSet: true },
+        { id: 'deepgram', source: 'ui', last4: 'LAST', envSet: false },
       ],
     });
     await page.getByTestId('settings-nav-voice').click();
     await expect(page.getByTestId('settings-voice-config')).toBeVisible();
-    await expect(page.getByTestId('voice-dictation-keys')).toHaveCount(0);
+    await expect(page.getByTestId('dictation-phone-keys')).toHaveCount(0);
     expect(await page.content()).not.toContain(FAKE_KEY);
   });
 

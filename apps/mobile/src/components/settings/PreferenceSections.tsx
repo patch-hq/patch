@@ -13,17 +13,16 @@
 
 import React from 'react';
 import { Alert, Text, View } from 'react-native';
-import type {
-  AccountPreferences,
-  DictationBackend,
-  VoiceBackend,
-  VoiceHandoff,
-  VoiceLayer,
-} from '../../api/rest';
+import type { AccountPreferences, VoiceBackend, VoiceHandoff, VoiceLayer } from '../../api/rest';
 import { space, typography, useTheme } from '../../lib/theme';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { usePresenceStore } from '../../stores/presenceStore';
-import { voiceKeyHostStatus } from '@patch/wire/audio';
+import {
+  voiceKeyHostStatus,
+  type ComputerDictationEngine,
+  type DictationConfig,
+  type PhoneDictationEngine,
+} from '@patch/wire/audio';
 import { DICTATION_PAUSE_CHOICES } from '@patch/wire';
 type DictationPauseChoice = (typeof DICTATION_PAUSE_CHOICES)[number];
 import { OptionPicker } from '../OptionPicker';
@@ -187,15 +186,20 @@ function ManagerControls({ preferences }: { preferences: AccountPreferences }): 
 // ── Voice ────────────────────────────────────────────────────────────────────
 
 const VOICE_BACKENDS: readonly VoiceBackend[] = ['local', 'gemini', 'openai'];
-/** Dictation adds `deepgram`, the one engine that streams its words. */
-const DICTATION_BACKENDS: readonly DictationBackend[] = ['local', 'gemini', 'openai', 'deepgram'];
+/** spec/07 § Dictation engines — a computer has no recogniser of its own. */
+const PHONE_DICTATION: readonly PhoneDictationEngine[] = ['device', 'deepgram', 'whisper'];
+const COMPUTER_DICTATION: readonly ComputerDictationEngine[] = ['deepgram', 'whisper'];
+const DICTATION_LABELS: Record<PhoneDictationEngine, string> = {
+  device: 'Built-in',
+  deepgram: 'Deepgram',
+  whisper: 'Whisper',
+};
 const VOICE_LAYERS: readonly VoiceLayer[] = ['direct', 'light', 'heavy'];
 const VOICE_HANDOFFS: readonly VoiceHandoff[] = ['auto', 'always', 'never'];
-type VoiceSurfaceKey = 'dictation' | 'device' | 'handsFree' | 'call';
-/** The design's order: Dictation, Hands-free, Call, Voice device. */
-const VOICE_SURFACES: readonly VoiceSurfaceKey[] = ['dictation', 'handsFree', 'call', 'device'];
+type VoiceSurfaceKey = 'device' | 'handsFree' | 'call';
+/** The design's order: Hands-free, Call, Voice device. */
+const VOICE_SURFACES: readonly VoiceSurfaceKey[] = ['handsFree', 'call', 'device'];
 const VOICE_SURFACE_LABELS: Record<VoiceSurfaceKey, string> = {
-  dictation: 'Dictation',
   device: 'Voice device',
   handsFree: 'Hands-free',
   call: 'Call',
@@ -209,7 +213,7 @@ const VOICE_SURFACE_LABELS: Record<VoiceSurfaceKey, string> = {
  */
 export function voiceCellStatus(
   surface: VoiceSurfaceKey,
-  backend: DictationBackend,
+  backend: VoiceBackend,
   layer?: VoiceLayer,
 ): string | null {
   if (backend !== 'local' && surface === 'device') {
@@ -230,6 +234,9 @@ export function voiceCellStatus(
 export function VoicePage(): React.ReactElement {
   return (
     <SettingsPage title="Voice" testID="settings-page-voice">
+      <SettingsSection title="Dictation" testID="settings-voice-dictation-engines">
+        <DictationEngines />
+      </SettingsSection>
       <SettingsSection title="Engine" testID="settings-voice-config">
         <VoiceEngine />
       </SettingsSection>
@@ -307,27 +314,13 @@ function VoiceEngine(): React.ReactElement {
         };
         const write = (
           surface: VoiceSurfaceKey,
-          backend: DictationBackend,
-          layer: VoiceLayer | undefined,
-          handoff: VoiceHandoff | undefined,
-        ): void => {
-          // Dictation keeps its own two switches when its engine changes.
-          const cell =
-            surface === 'dictation'
-              ? { ...voiceConfig.dictation, backend }
-              : layer === undefined || handoff === undefined
-                ? { backend }
-                : { backend, layer, handoff };
-          save({ ...voiceConfig, [surface]: cell } as AccountPreferences['voiceConfig']);
-        };
-        const dictation = voiceConfig.dictation;
-        const writeDictation = (patch: { phone?: boolean; tidy?: boolean }): void =>
-          save({ ...voiceConfig, dictation: { ...dictation, ...patch } });
+          backend: VoiceBackend,
+          layer: VoiceLayer,
+          handoff: VoiceHandoff,
+        ): void => save({ ...voiceConfig, [surface]: { backend, layer, handoff } });
         return VOICE_SURFACES.map((surface) => {
           const cell = voiceConfig[surface];
-          const backend = cell.backend;
-          const layer = 'layer' in cell ? cell.layer : undefined;
-          const handoff = 'handoff' in cell ? cell.handoff : undefined;
+          const { backend, layer, handoff } = cell;
           const status = voiceCellStatus(surface, backend, layer);
           const keyStatus = voiceKeyHostStatus(backend, hostReports);
           return (
@@ -340,24 +333,22 @@ function VoiceEngine(): React.ReactElement {
               <View style={{ gap: space.xs }}>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.md }}>
                   <Chips
-                    options={surface === 'dictation' ? DICTATION_BACKENDS : VOICE_BACKENDS}
+                    options={VOICE_BACKENDS}
                     selected={backend}
                     disabled={busy}
                     testIDPrefix={`voice-${surface}-backend`}
                     labelPrefix={`${VOICE_SURFACE_LABELS[surface]} backend`}
-                    onSelect={(b: DictationBackend) => write(surface, b, layer, handoff)}
+                    onSelect={(b) => write(surface, b, layer, handoff)}
                   />
-                  {layer !== undefined ? (
-                    <Chips
-                      options={VOICE_LAYERS}
-                      selected={layer}
-                      disabled={busy}
-                      testIDPrefix={`voice-${surface}-layer`}
-                      labelPrefix={`${VOICE_SURFACE_LABELS[surface]} layer`}
-                      onSelect={(l) => write(surface, backend, l, handoff)}
-                    />
-                  ) : null}
-                  {layer !== undefined && backend !== 'local' && handoff !== undefined ? (
+                  <Chips
+                    options={VOICE_LAYERS}
+                    selected={layer}
+                    disabled={busy}
+                    testIDPrefix={`voice-${surface}-layer`}
+                    labelPrefix={`${VOICE_SURFACE_LABELS[surface]} layer`}
+                    onSelect={(l) => write(surface, backend, l, handoff)}
+                  />
+                  {backend !== 'local' ? (
                     <Chips
                       options={VOICE_HANDOFFS}
                       selected={handoff}
@@ -369,22 +360,6 @@ function VoiceEngine(): React.ReactElement {
                   ) : null}
                 </View>
                 {status ? <Muted testID={`voice-${surface}-status`}>{status}</Muted> : null}
-                {surface === 'dictation' ? (
-                  <>
-                    <ToggleRow
-                      label="Use this phone's own recogniser"
-                      testID="dictation-phone-recogniser"
-                      value={dictation.phone}
-                      onChange={(next) => writeDictation({ phone: next })}
-                    />
-                    <ToggleRow
-                      label="Tidy up with Whisper"
-                      testID="dictation-tidy"
-                      value={dictation.tidy}
-                      onChange={(next) => writeDictation({ tidy: next })}
-                    />
-                  </>
-                ) : null}
                 {keyStatus ? (
                   <Text
                     testID={`voice-${surface}-keys`}
@@ -397,6 +372,90 @@ function VoiceEngine(): React.ReactElement {
             </Row>
           );
         });
+      }}
+    </WithSettings>
+  );
+}
+
+/**
+ * Where dictation's words come from (spec/07 § Dictation engines): one engine
+ * for this app, one for web and desktop, and whether Whisper tidies up a live
+ * engine's words as dictation goes on.
+ */
+function DictationEngines(): React.ReactElement {
+  const colors = useTheme();
+  const [busy, setBusy] = React.useState(false);
+  const hosts = usePresenceStore((s) => s.hosts);
+  const hostReports = Object.values(hosts).flatMap((h) =>
+    h.host ? [{ hostName: h.host.hostName, voiceKeys: h.host.voiceKeys }] : [],
+  );
+  return (
+    <WithSettings testID="voice-dictation-engines">
+      {(data) => {
+        const voiceConfig = data.preferences.voiceConfig;
+        const dictation = voiceConfig.dictation;
+        const write = (patch: Partial<DictationConfig>): void => {
+          setBusy(true);
+          void useSettingsStore
+            .getState()
+            .updatePreferences({
+              voiceConfig: { ...voiceConfig, dictation: { ...dictation, ...patch } },
+            })
+            .catch((e: Error) => Alert.alert('Settings failed', e.message))
+            .finally(() => setBusy(false));
+        };
+        // A Deepgram choice names each host that holds no key for it.
+        const keys = (engine: PhoneDictationEngine, testID: string): React.ReactNode => {
+          const status = voiceKeyHostStatus(engine, hostReports);
+          return status ? (
+            <Text testID={testID} style={{ ...typography.meta, color: colors.red }}>
+              {status}
+            </Text>
+          ) : undefined;
+        };
+        return (
+          <>
+            <Row
+              title="Phone"
+              testID="dictation-phone"
+              subtitle={keys(dictation.phone, 'dictation-phone-keys')}
+              stack
+            >
+              <Chips
+                options={PHONE_DICTATION}
+                selected={dictation.phone}
+                labelOf={(e) => DICTATION_LABELS[e]}
+                disabled={busy}
+                testIDPrefix="dictation-phone"
+                labelPrefix="Phone dictation"
+                onSelect={(phone) => write({ phone })}
+              />
+            </Row>
+            <Row
+              title="Computer"
+              testID="dictation-computer"
+              subtitle={keys(dictation.computer, 'dictation-computer-keys')}
+              stack
+            >
+              <Chips
+                options={COMPUTER_DICTATION}
+                selected={dictation.computer}
+                labelOf={(e) => DICTATION_LABELS[e]}
+                disabled={busy}
+                testIDPrefix="dictation-computer"
+                labelPrefix="Computer dictation"
+                onSelect={(computer) => write({ computer })}
+              />
+            </Row>
+            <ToggleRow
+              label="Tidy up with Whisper"
+              testID="dictation-tidy"
+              value={dictation.tidy}
+              disabled={busy}
+              onChange={(tidy) => write({ tidy })}
+            />
+          </>
+        );
       }}
     </WithSettings>
   );

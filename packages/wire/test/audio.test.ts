@@ -12,6 +12,8 @@ import {
   voiceSurfacesMissingKey,
   voiceKeyHostStatus,
   DEFAULT_VOICE_CONFIG,
+  DictationSetting,
+  dictationEngineFor,
   type AudioEvent,
   type AudioEventType,
   type AudioSessionStartEvent,
@@ -250,12 +252,10 @@ describe('chat.input.source — voice-app discriminator (group 13)', () => {
 describe('voiceCellFor / modesShareVoiceEngine (spec/07 § Voice — a config matrix)', () => {
   const config = {
     ...DEFAULT_VOICE_CONFIG,
-    dictation: { backend: 'openai' as const },
     call: { backend: 'gemini' as const, layer: 'light' as const, handoff: 'auto' as const },
     handsFree: { backend: 'local' as const, layer: 'direct' as const, handoff: 'auto' as const },
   };
   test('each surface reads its own cell', () => {
-    expect(voiceCellFor(config, 'dictation')).toEqual({ backend: 'openai' });
     expect(voiceCellFor(config, 'call')).toEqual({
       backend: 'gemini',
       layer: 'light',
@@ -293,9 +293,8 @@ describe('voiceCellFor / modesShareVoiceEngine (spec/07 § Voice — a config ma
 });
 
 describe('a voice surface whose backend has no key on the host', () => {
-  // the user's live config, 2026-09-24.
   const config = {
-    dictation: { backend: 'gemini' as const },
+    dictation: { phone: 'deepgram' as const, computer: 'whisper' as const, tidy: false },
     device: { backend: 'openai' as const, layer: 'light' as const, handoff: 'auto' as const },
     handsFree: { backend: 'local' as const, layer: 'direct' as const, handoff: 'auto' as const },
     call: { backend: 'local' as const, layer: 'direct' as const, handoff: 'auto' as const },
@@ -312,12 +311,12 @@ describe('a voice surface whose backend has no key on the host', () => {
   });
   test('lists every surface on a provider the host has no key for, and only those', () => {
     expect(voiceSurfacesMissingKey(config, { gemini: false, openai: false })).toEqual([
-      { surface: 'dictation', backend: 'gemini', env: 'GEMINI_API_KEY' },
+      { surface: 'dictation', backend: 'deepgram', env: 'DEEPGRAM_API_KEY' },
       { surface: 'device', backend: 'openai', env: 'OPENAI_REALTIME_API_KEY' },
     ]);
-    expect(voiceSurfacesMissingKey(config, { gemini: true, openai: false })).toEqual([
-      { surface: 'device', backend: 'openai', env: 'OPENAI_REALTIME_API_KEY' },
-    ]);
+    expect(
+      voiceSurfacesMissingKey(config, { gemini: false, openai: false, deepgram: true }),
+    ).toEqual([{ surface: 'device', backend: 'openai', env: 'OPENAI_REALTIME_API_KEY' }]);
     expect(voiceSurfacesMissingKey(DEFAULT_VOICE_CONFIG, { gemini: false, openai: false })).toEqual(
       [],
     );
@@ -335,6 +334,12 @@ describe('a voice surface whose backend has no key on the host', () => {
       'Not configured on hetzner, mac: OPENAI_REALTIME_API_KEY is missing. Sessions there are refused.',
     );
     expect(voiceKeyHostStatus('local', hosts)).toBeNull();
+    // Neither the phone's recogniser nor the host's Whisper needs a key.
+    expect(voiceKeyHostStatus('device', hosts)).toBeNull();
+    expect(voiceKeyHostStatus('whisper', hosts)).toBeNull();
+    expect(voiceKeyHostStatus('deepgram', hosts)).toBe(
+      'Not configured on hetzner, mac: DEEPGRAM_API_KEY is missing. Sessions there are refused.',
+    );
     expect(
       voiceKeyHostStatus('gemini', [
         { hostName: 'mac', voiceKeys: { gemini: true, openai: true } },
@@ -348,5 +353,42 @@ describe('a voice surface whose backend has no key on the host', () => {
       message: voiceKeyMissingMessage('call', 'openai'),
     };
     expect(decodeAudio(encodeAudio(ev))).toEqual(ev);
+  });
+});
+
+describe('the dictation setting (spec/07 § Dictation engines)', () => {
+  test('the phone app runs the phone engine; web and desktop run the computer one', () => {
+    const d = { phone: 'device', computer: 'deepgram', tidy: true } as const;
+    expect(dictationEngineFor(d, 'mobile')).toBe('device');
+    expect(dictationEngineFor(d, 'web')).toBe('deepgram');
+    expect(dictationEngineFor(d, 'desktop')).toBe('deepgram');
+  });
+
+  test('a computer has no recogniser of its own', () => {
+    expect(() =>
+      DictationSetting.parse({ phone: 'whisper', computer: 'device', tidy: false }),
+    ).toThrow();
+  });
+
+  test('a setting saved before the phone and computer had their own engines still reads', () => {
+    expect(DictationSetting.parse({ backend: 'deepgram', phone: false, tidy: true })).toEqual({
+      phone: 'deepgram',
+      computer: 'deepgram',
+      tidy: true,
+    });
+    // The phone recogniser switch becomes the phone's Built-in engine.
+    expect(DictationSetting.parse({ backend: 'deepgram', phone: true, tidy: false })).toEqual({
+      phone: 'device',
+      computer: 'deepgram',
+      tidy: false,
+    });
+    // The retired hosted transcribers become the host's Whisper.
+    for (const backend of ['local', 'gemini', 'openai']) {
+      expect(DictationSetting.parse({ backend })).toEqual({
+        phone: 'whisper',
+        computer: 'whisper',
+        tidy: false,
+      });
+    }
   });
 });

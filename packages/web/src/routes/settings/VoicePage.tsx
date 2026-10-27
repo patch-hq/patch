@@ -4,14 +4,14 @@
 
 import type { JSX } from 'react';
 import { Fragment, useEffect, useState } from 'react';
-import { voiceKeyHostStatus } from '@patch/wire/audio';
-import { DICTATION_PAUSE_CHOICES } from '@patch/wire';
 import {
-  type DictationBackend,
-  type VoiceBackend,
-  type VoiceHandoff,
-  type VoiceLayer,
-} from '../../api/rest.js';
+  voiceKeyHostStatus,
+  type ComputerDictationEngine,
+  type DictationConfig,
+  type PhoneDictationEngine,
+} from '@patch/wire/audio';
+import { DICTATION_PAUSE_CHOICES } from '@patch/wire';
+import { type VoiceBackend, type VoiceHandoff, type VoiceLayer } from '../../api/rest.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
@@ -51,9 +51,8 @@ const ENGINE_CELL: Record<ConversationEngine, { backend: VoiceBackend; layer: Vo
   openai: { backend: 'openai', layer: 'heavy' },
 };
 /** The engine a stored cell runs. A hosted `direct` runs as `light`. */
-function engineOf(backend: DictationBackend, layer: VoiceLayer): ConversationEngine {
-  // `deepgram` is dictation-only; a conversation cell never holds it.
-  if (backend === 'local' || backend === 'deepgram') return 'local';
+function engineOf(backend: VoiceBackend, layer: VoiceLayer): ConversationEngine {
+  if (backend === 'local') return 'local';
   if (backend === 'gemini') return layer === 'heavy' ? 'gemini-thinking' : 'gemini-flash';
   return layer === 'heavy' ? 'openai' : 'openai-mini';
 }
@@ -63,12 +62,13 @@ const HANDOFF_LABELS: Record<VoiceHandoff, string> = {
   always: 'Always',
   never: 'Never',
 };
-const DICTATION_ENGINES: readonly DictationBackend[] = ['local', 'gemini', 'openai', 'deepgram'];
-const DICTATION_LABELS: Record<DictationBackend, string> = {
-  local: 'Whisper',
-  gemini: 'Gemini',
-  openai: 'OpenAI',
+/** spec/07 § Dictation engines — a computer has no recogniser of its own. */
+const PHONE_DICTATION: readonly PhoneDictationEngine[] = ['device', 'deepgram', 'whisper'];
+const COMPUTER_DICTATION: readonly ComputerDictationEngine[] = ['deepgram', 'whisper'];
+const DICTATION_LABELS: Record<PhoneDictationEngine, string> = {
+  device: 'Built-in',
   deepgram: 'Deepgram',
+  whisper: 'Whisper',
 };
 
 /** Dollars, to the penny that matters: two significant figures under 10 cents. */
@@ -79,9 +79,8 @@ function formatUsd(usd: number): string {
 }
 const calls = (n: number): string => `${n} ${n === 1 ? 'call' : 'calls'}`;
 
-type VoiceSurfaceKey = 'dictation' | 'device' | 'handsFree' | 'call';
+type VoiceSurfaceKey = 'device' | 'handsFree' | 'call';
 const SURFACES: { key: VoiceSurfaceKey; label: string }[] = [
-  { key: 'dictation', label: 'Dictation' },
   { key: 'handsFree', label: 'Hands-free' },
   { key: 'call', label: 'Call' },
   { key: 'device', label: 'Voice device' },
@@ -97,7 +96,7 @@ const SURFACES: { key: VoiceSurfaceKey; label: string }[] = [
  */
 export function voiceCellStatus(
   surface: VoiceSurfaceKey,
-  backend: DictationBackend,
+  backend: VoiceBackend,
   layer?: VoiceLayer,
 ): string | null {
   if (backend !== 'local' && surface === 'device') {
@@ -112,6 +111,7 @@ export function voiceCellStatus(
 export function VoicePage(): JSX.Element {
   return (
     <SettingsPage title="Voice" testid="settings-voice">
+      <DictationEnginesGroup />
       <EngineGroup />
       <DictationGroup />
       <ShortcutGroup />
@@ -206,6 +206,79 @@ function ShortcutGroup(): JSX.Element {
 }
 
 /**
+ * Where dictation's words come from (spec/07 § Dictation engines): one engine
+ * for the phone app, one for web and desktop, and whether Whisper tidies up a
+ * live engine's words as dictation goes on.
+ */
+function DictationEnginesGroup(): JSX.Element {
+  const dictation = usePreferencesStore((s) => s.preferences.voiceConfig.dictation);
+  const voiceConfig = usePreferencesStore((s) => s.preferences.voiceConfig);
+  const loaded = usePreferencesStore((s) => s.loaded);
+  const update = usePreferencesStore((s) => s.update);
+  const pushError = useUiStore((s) => s.pushError);
+  const hosts = usePresenceStore((s) => s.hosts);
+  const hostReports = Object.values(hosts).flatMap((h) =>
+    h.host ? [{ hostName: h.host.hostName, voiceKeys: h.host.voiceKeys }] : [],
+  );
+  const write = (patch: Partial<DictationConfig>): void => {
+    void update({ voiceConfig: { ...voiceConfig, dictation: { ...dictation, ...patch } } }).catch(
+      (e: Error) => pushError(failed('settings'), undefined, e.message),
+    );
+  };
+  // A Deepgram choice names each host that holds no key for it.
+  const keys = (engine: PhoneDictationEngine, testid: string): JSX.Element | undefined => {
+    const status = voiceKeyHostStatus(engine, hostReports);
+    return status ? (
+      <span className="set-sub-line set-sub-error" data-testid={testid}>
+        {status}
+      </span>
+    ) : undefined;
+  };
+  return (
+    <Group label="Dictation" testid="settings-voice-dictation-engines">
+      <Row
+        title="Phone"
+        sub={keys(dictation.phone, 'dictation-phone-keys')}
+        testid="dictation-phone"
+      >
+        <Pills
+          label="Phone dictation"
+          options={PHONE_DICTATION}
+          labels={DICTATION_LABELS}
+          value={dictation.phone}
+          disabled={!loaded}
+          testid="dictation-phone-engine"
+          onChange={(phone) => write({ phone })}
+        />
+      </Row>
+      <Row
+        title="Computer"
+        sub={keys(dictation.computer, 'dictation-computer-keys')}
+        testid="dictation-computer"
+      >
+        <Pills
+          label="Computer dictation"
+          options={COMPUTER_DICTATION}
+          labels={DICTATION_LABELS}
+          value={dictation.computer}
+          disabled={!loaded}
+          testid="dictation-computer-engine"
+          onChange={(computer) => write({ computer })}
+        />
+      </Row>
+      <Row title="Tidy up with Whisper" testid="dictation-tidy-row">
+        <Toggle
+          checked={dictation.tidy}
+          disabled={!loaded}
+          onChange={(tidy) => write({ tidy })}
+          testid="dictation-tidy-toggle"
+        />
+      </Row>
+    </Group>
+  );
+}
+
+/**
  * Per-surface voice config (spec/07 § Voice — a config matrix). Four surfaces,
  * each independently choosing an engine and (for the three conversational ones)
  * a front layer — deliberately a matrix to test against, not a fixed
@@ -231,9 +304,7 @@ function EngineGroup(): JSX.Element {
     <Group label="Engine" testid="settings-voice-config">
       {SURFACES.map(({ key: surface, label }) => {
         const cell = voiceConfig[surface];
-        const backend = cell.backend;
-        const layer = 'layer' in cell ? cell.layer : undefined;
-        const handoff = 'handoff' in cell ? cell.handoff : undefined;
+        const { backend, layer, handoff } = cell;
         const status = voiceCellStatus(surface, backend, layer);
         const keyStatus = voiceKeyHostStatus(backend, hostReports);
         const sub =
@@ -254,77 +325,24 @@ function EngineGroup(): JSX.Element {
         return (
           <Fragment key={surface}>
             <Row title={label} sub={sub} testid={`voice-${surface}`}>
-              {layer === undefined ? (
-                <Pills
-                  label={`${label} engine`}
-                  options={DICTATION_ENGINES}
-                  labels={DICTATION_LABELS}
-                  value={backend}
-                  disabled={!loaded}
-                  testid={`voice-${surface}-engine`}
-                  onChange={(next) =>
-                    write({
-                      voiceConfig: {
-                        ...voiceConfig,
-                        dictation: { ...voiceConfig.dictation, backend: next },
-                      },
-                    })
-                  }
-                />
-              ) : (
-                <Pills
-                  label={`${label} engine`}
-                  options={CONVERSATION_ENGINES}
-                  labels={ENGINE_LABELS}
-                  value={engineOf(backend, layer)}
-                  disabled={!loaded}
-                  testid={`voice-${surface}-engine`}
-                  onChange={(next) =>
-                    write({
-                      voiceConfig: {
-                        ...voiceConfig,
-                        [surface]: { ...ENGINE_CELL[next], handoff: handoff ?? 'auto' },
-                      },
-                    })
-                  }
-                />
-              )}
+              <Pills
+                label={`${label} engine`}
+                options={CONVERSATION_ENGINES}
+                labels={ENGINE_LABELS}
+                value={engineOf(backend, layer)}
+                disabled={!loaded}
+                testid={`voice-${surface}-engine`}
+                onChange={(next) =>
+                  write({
+                    voiceConfig: {
+                      ...voiceConfig,
+                      [surface]: { ...ENGINE_CELL[next], handoff },
+                    },
+                  })
+                }
+              />
             </Row>
-            {surface === 'dictation' ? (
-              <>
-                <Row title="Phone's own recogniser (Android)" testid="dictation-phone-row">
-                  <Toggle
-                    checked={voiceConfig.dictation.phone}
-                    disabled={!loaded}
-                    onChange={(next) =>
-                      write({
-                        voiceConfig: {
-                          ...voiceConfig,
-                          dictation: { ...voiceConfig.dictation, phone: next },
-                        },
-                      })
-                    }
-                    testid="dictation-phone-toggle"
-                  />
-                </Row>
-                <Row title="Tidy up with Whisper" testid="dictation-tidy-row">
-                  <Toggle
-                    checked={voiceConfig.dictation.tidy}
-                    disabled={!loaded}
-                    onChange={(next) =>
-                      write({
-                        voiceConfig: {
-                          ...voiceConfig,
-                          dictation: { ...voiceConfig.dictation, tidy: next },
-                        },
-                      })
-                    }
-                    testid="dictation-tidy-toggle"
-                  />
-                </Row>
-              </>
-            ) : null}
-            {layer !== undefined && backend !== 'local' && handoff !== undefined ? (
+            {backend !== 'local' ? (
               <Row title={`${label} hand-off`} testid={`voice-${surface}-handoff-row`}>
                 <Pills
                   label={`${label} hand-off`}

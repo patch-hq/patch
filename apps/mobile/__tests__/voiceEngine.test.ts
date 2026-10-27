@@ -97,7 +97,7 @@ describe('voiceConfigOrNull', () => {
     await loadPreferences();
     expect(voiceConfigOrNull()).toEqual(boot);
     expect(addressWordOrNull()).toBe('patch');
-    const later = cfg({ dictation: { backend: 'gemini' } });
+    const later = cfg({ dictation: { phone: 'deepgram', computer: 'whisper', tidy: true } });
     useSettingsStore.setState({
       data: {
         preferences: { addressWord: 'hey', voiceConfig: later },

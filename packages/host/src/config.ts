@@ -133,6 +133,8 @@ export interface HostConfig {
      * unless one is set from Settings → Hosts → Keys, which wins).
      */
     groqApiKey: string | undefined;
+    /** DEEPGRAM_API_KEY — needed only while dictation is on the deepgram engine. */
+    deepgramApiKey: string | undefined;
     whisperLocalSidecarUrl: string | undefined;
     /** faster-whisper model dir (medium.en) — used to spawn the local sidecar. */
     whisperModelPath: string | undefined;
@@ -185,11 +187,9 @@ export interface HostConfig {
     geminiLiveModel: string | undefined;
     /** Overrides `DEFAULT_GEMINI_LIVE_HEAVY_MODEL` — the `layer: heavy` model. GEMINI_LIVE_MODEL_HEAVY env. */
     geminiLiveModelHeavy: string | undefined;
-    /** Overrides `DEFAULT_GEMINI_TRANSCRIBE_MODEL` (hosted-stt.ts, dictation). GEMINI_TRANSCRIBE_MODEL env. */
-    geminiTranscribeModel: string | undefined;
     /**
      * OPENAI_REALTIME_API_KEY — the OpenAI key voice uses (Realtime sessions for
-     * hands-free/call, the transcription endpoint for dictation), required only
+     * hands-free/call), required only
      * when a `voiceConfig` surface selects `backend: 'openai'`. Deliberately NOT
      * `OPENAI_API_KEY`: that name is what the Codex agent backend and any tool a
      * chat runs would pick up and bill against, and this key is voice's alone.
@@ -200,8 +200,6 @@ export interface HostConfig {
     openaiRealtimeModelLight: string | undefined;
     /** Overrides `DEFAULT_OPENAI_REALTIME_MODELS.heavy`. OPENAI_REALTIME_MODEL_HEAVY env. */
     openaiRealtimeModelHeavy: string | undefined;
-    /** Overrides `DEFAULT_OPENAI_TRANSCRIBE_MODEL` (hosted-stt.ts). OPENAI_TRANSCRIBE_MODEL env. */
-    openaiTranscribeModel: string | undefined;
   };
 }
 
@@ -348,6 +346,7 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
       relayHost: audioRelayHost,
       whisperBackend: whisperBackendRaw,
       groqApiKey: env['GROQ_API_KEY'],
+      deepgramApiKey: env['DEEPGRAM_API_KEY'],
       whisperLocalSidecarUrl: env['WHISPER_LOCAL_SIDECAR_URL'],
       whisperModelPath: env['WHISPER_MODEL_PATH'],
       kokoroBackend: kokoroBackendRaw,
@@ -371,11 +370,9 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
       geminiApiKey: env['GEMINI_API_KEY'],
       geminiLiveModel: env['GEMINI_LIVE_MODEL'],
       geminiLiveModelHeavy: env['GEMINI_LIVE_MODEL_HEAVY'],
-      geminiTranscribeModel: env['GEMINI_TRANSCRIBE_MODEL'],
       openaiApiKey: env['OPENAI_REALTIME_API_KEY'],
       openaiRealtimeModelLight: env['OPENAI_REALTIME_MODEL_LIGHT'],
       openaiRealtimeModelHeavy: env['OPENAI_REALTIME_MODEL_HEAVY'],
-      openaiTranscribeModel: env['OPENAI_TRANSCRIBE_MODEL'],
     },
   };
 }

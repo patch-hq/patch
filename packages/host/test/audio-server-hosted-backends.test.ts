@@ -1,11 +1,12 @@
 // audio/server.ts × hosted voice backends (spec/07 § Voice — a config matrix).
 //
-// Every surface a phone/web/desktop can open — dictation, hands-free, call —
+// Every conversation surface a phone/web/desktop can open — hands-free, call —
 // on every backend — local, gemini, openai — over a REAL audio WSS against
 // fully faked providers: the Gemini Live and OpenAI Realtime sockets are
-// in-memory fakes (the `geminiWsCtor` / `openaiWsCtor` hooks) and the hosted
-// dictation transcribers are fakes too. No request leaves this process — both
-// providers are paid APIs and this suite must never spend.
+// in-memory fakes (the `geminiWsCtor` / `openaiWsCtor` hooks), and Whisper is a
+// fake transcriber. No request leaves this process — both providers are paid
+// APIs and this suite must never spend. Dictation on Deepgram is covered in
+// audio-server-native-tier.test.ts.
 
 import { describe, test, expect, afterEach, vi } from 'vitest';
 import pino from 'pino';
@@ -34,7 +35,6 @@ import {
   type AudioEvent,
   type AudioSessionMode,
   type AudioSessionRole,
-  type VoiceBackend,
   type VoiceConfig,
 } from '@patch/wire/audio';
 
@@ -168,8 +168,6 @@ describe('audio server — hosted backends on every app surface', () => {
   const submitted: Array<{ chatId: string; message: string }> = [];
   const transcribers = {
     local: fakeTranscriber('local words'),
-    gemini: fakeTranscriber('gemini words'),
-    openai: fakeTranscriber('openai words'),
   };
 
   afterEach(async () => {
@@ -202,11 +200,6 @@ describe('audio server — hosted backends on every app surface', () => {
       },
       chatExists: () => true,
       getVoiceConfig: () => cfg,
-      dictationTranscribers: {
-        local: transcribers.local,
-        ...(keys.gemini ? { gemini: transcribers.gemini } : {}),
-        ...(keys.openai ? { openai: transcribers.openai } : {}),
-      },
       ...(keys.gemini ? { geminiApiKey: 'g-key' } : {}),
       ...(keys.openai ? { openaiApiKey: 'o-key' } : {}),
       geminiWsCtor: function (this: unknown, url: string) {
@@ -233,44 +226,20 @@ describe('audio server — hosted backends on every app surface', () => {
 
   // --- dictation × backend -------------------------------------------------
 
-  const DICTATION: Array<[VoiceBackend, keyof typeof transcribers]> = [
-    ['local', 'local'],
-    ['gemini', 'gemini'],
-    ['openai', 'openai'],
-  ];
-  for (const [backend, which] of DICTATION) {
-    test(`dictation on ${backend}: a committed note is transcribed by ${backend} and nothing else`, async () => {
-      const s = await start({ dictation: { backend } });
-      const surface = await openSurface(s.port, `d-${backend}`, 'voice-note');
-      await until(() => expect(surface.events.some((e) => e.type === 'audio.state')).toBe(true));
-      surface.ws.send(Buffer.alloc(960), { binary: true });
-      surface.ws.send(Buffer.alloc(960), { binary: true });
-      await new Promise((r) => setTimeout(r, 20));
-      surface.ws.send(encodeAudio({ type: 'audio.session_end', reason: 'committed' }));
-      await until(() => expect(submitted).toHaveLength(1));
-      expect(submitted[0]!.message).toContain(`${which} words`);
-      for (const [name, t] of Object.entries(transcribers)) {
-        expect(t.calls, name).toBe(name === which ? 1 : 0);
-      }
-      // A hosted dictation never dials a realtime session.
-      expect(gemini).toHaveLength(0);
-      expect(openai).toHaveLength(0);
-      surface.ws.close();
-    });
-  }
-
-  test('dictation on openai with no key on the host is refused, naming the key and the fix', async () => {
-    const s = await start({ dictation: { backend: 'openai' } }, { gemini: true });
-    const surface = await openSurface(s.port, 'd-nokey', 'voice-note');
-    await surface.closed;
-    expect(surface.events[0]).toEqual({
-      type: 'audio.error',
-      code: 'voice_key_missing',
-      message:
-        'Dictation is set to openai, but OPENAI_REALTIME_API_KEY is not set on this host. ' +
-        'Switch Dictation to another backend in Settings → Voice.',
-    });
-    expect(transcribers.local.calls).toBe(0);
+  test('dictation on Whisper: a committed note is transcribed by the host and dials no realtime session', async () => {
+    const s = await start({ dictation: { phone: 'whisper', computer: 'whisper', tidy: false } });
+    const surface = await openSurface(s.port, 'd-whisper', 'voice-note');
+    await until(() => expect(surface.events.some((e) => e.type === 'audio.state')).toBe(true));
+    surface.ws.send(Buffer.alloc(960), { binary: true });
+    surface.ws.send(Buffer.alloc(960), { binary: true });
+    await new Promise((r) => setTimeout(r, 20));
+    surface.ws.send(encodeAudio({ type: 'audio.session_end', reason: 'committed' }));
+    await until(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.message).toContain('local words');
+    expect(transcribers.local.calls).toBe(1);
+    expect(gemini).toHaveLength(0);
+    expect(openai).toHaveLength(0);
+    surface.ws.close();
   });
 
   // --- one conversation with the chat, and call cost (spec/07) -------------
@@ -335,7 +304,7 @@ describe('audio server — hosted backends on every app surface', () => {
 
   test('a dictation is never costed as a call', async () => {
     const ended: unknown[] = [];
-    const s = await start({ dictation: { backend: 'local' } }, undefined, {
+    const s = await start({}, undefined, {
       onCallEnded: (info) => ended.push(info),
     });
     const surface = await openSurface(s.port, 'dict', 'voice-note');

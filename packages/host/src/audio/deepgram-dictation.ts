@@ -113,6 +113,9 @@ export class DeepgramDictationSession implements VoiceSessionLike {
       this.fail('DEEPGRAM_API_KEY is no longer set on this host');
       return;
     }
+    // Accepted: the mic is live from here, and audio is held until the stream
+    // opens — the same 'listening' the host's own pipeline says on start.
+    this.deps.sendAudio({ type: 'audio.state', sessionId: this.sessionId, state: 'listening' });
     const params = new URLSearchParams({
       model: DEEPGRAM_MODEL,
       language: 'en',

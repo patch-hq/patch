@@ -54,7 +54,7 @@ const BASE_PREFERENCES = {
   rotationEnabled: true,
   rotationTime: '02:00',
   voiceConfig: {
-    dictation: { backend: 'local' as const },
+    dictation: { phone: 'device' as const, computer: 'whisper' as const, tidy: false },
     device: { backend: 'local' as const, layer: 'direct' as const, handoff: 'auto' as const },
     handsFree: { backend: 'local' as const, layer: 'direct' as const, handoff: 'auto' as const },
     call: { backend: 'local' as const, layer: 'direct' as const, handoff: 'auto' as const },

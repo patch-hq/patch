@@ -13,6 +13,7 @@
 
 import React from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { seedDictation } from './testUtils/settingsFixtures';
 import type { ReactTestInstance } from 'react-test-renderer';
 import {
   renderRN,
@@ -67,6 +68,8 @@ import {
 let submitSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
+  // The upload path these tests drive is the phone's Whisper engine.
+  seedDictation('whisper');
   __clearAllMmkv();
   useComposerDraftStore.getState()._reset();
   vi.clearAllMocks();

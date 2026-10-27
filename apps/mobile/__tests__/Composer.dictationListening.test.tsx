@@ -9,7 +9,7 @@
 // exactly as Composer.voice.test.tsx does.
 
 import React from 'react';
-import { Keyboard, Platform, __setWindowDimensions } from 'react-native';
+import { Keyboard, __setWindowDimensions } from 'react-native';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   actAsync,
@@ -25,7 +25,7 @@ import { usePresenceStore } from '../src/stores/presenceStore';
 import { useChatStore } from '../src/stores/chatStore';
 import { useUiStore } from '../src/stores/uiStore';
 import { useSettingsStore } from '../src/stores/settingsStore';
-import { settingsFixture } from './testUtils/settingsFixtures';
+import { seedDictation, settingsFixture } from './testUtils/settingsFixtures';
 import { __clearAllMmkv } from './stubs/mmkv';
 import type { DictationHandle, DictationOutcome } from '../src/lib/dictation';
 import type * as dictationModule from '../src/lib/dictation';
@@ -81,49 +81,54 @@ const mic = (r: ReturnType<typeof renderRN>): Record<string, () => void> =>
   findHost(r.root, byLabel('Dictate into message')).props as Record<string, () => void>;
 
 describe('Composer — the dictation engine follows the account setting', () => {
-  function withDictation(dictation: {
-    backend: 'local' | 'deepgram';
-    phone: boolean;
-    tidy: boolean;
-  }): void {
-    const data = settingsFixture();
-    data.preferences = {
-      ...data.preferences,
-      voiceConfig: { ...data.preferences.voiceConfig, dictation },
-    };
-    useSettingsStore.setState({ data, error: null });
-  }
-  afterEach(() => {
-    Platform.OS = 'test';
-  });
+  const started = (factory: ReturnType<typeof makeFactory>['factory']): unknown =>
+    (factory as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[4];
 
-  it('on Android with the phone recogniser on, the phone dictates with tidy-up as set', async () => {
-    Platform.OS = 'android';
-    withDictation({ backend: 'local', phone: true, tidy: true });
+  it('Built-in: the phone dictates on its own recogniser, with tidy-up as set', async () => {
+    seedDictation('device', true);
     const { factory } = makeFactory();
     const r = renderRN(<Composer chatId="c1" dictationFactory={factory} />);
     await actAsync(() => mic(r)['onPress']!());
-    expect(factory).toHaveBeenCalledWith(
-      'c1',
-      expect.any(Function),
-      expect.any(Function),
-      expect.any(Function),
-      { engine: 'phone', tidy: true },
-    );
+    expect(started(factory)).toEqual({ engine: 'phone', tidy: true });
   });
 
-  it('Deepgram streams, and the phone switch means nothing off Android', async () => {
-    withDictation({ backend: 'deepgram', phone: true, tidy: false });
+  it('Deepgram streams; Whisper uploads and has nothing to tidy', async () => {
+    seedDictation('deepgram', false);
+    const dg = makeFactory();
+    const r = renderRN(<Composer chatId="c1" dictationFactory={dg.factory} />);
+    await actAsync(() => mic(r)['onPress']!());
+    expect(started(dg.factory)).toEqual({ engine: 'stream', tidy: false });
+    r.unmount();
+
+    seedDictation('whisper', true);
+    const w = makeFactory();
+    const r2 = renderRN(<Composer chatId="c1" dictationFactory={w.factory} />);
+    await actAsync(() => mic(r2)['onPress']!());
+    expect(started(w.factory)).toEqual({ engine: 'whisper', tidy: false });
+  });
+
+  it('a press before settings have loaded waits for them, and says so if they cannot load', async () => {
+    const realLoad = useSettingsStore.getState().load;
+    const load = vi.fn(async () => {
+      useSettingsStore.setState({ error: 'offline' });
+    });
+    useSettingsStore.setState({ data: null, error: null, load });
     const { factory } = makeFactory();
     const r = renderRN(<Composer chatId="c1" dictationFactory={factory} />);
     await actAsync(() => mic(r)['onPress']!());
-    expect(factory).toHaveBeenCalledWith(
-      'c1',
-      expect.any(Function),
-      expect.any(Function),
-      expect.any(Function),
-      { engine: 'stream', tidy: false },
+    expect(load).toHaveBeenCalled();
+    expect(factory).not.toHaveBeenCalled();
+    expect(useUiStore.getState().errors.at(-1)?.message).toContain(
+      'could not load settings: offline',
     );
+
+    load.mockImplementationOnce(async () => {
+      seedDictation('device');
+    });
+    useSettingsStore.setState({ data: null, error: null });
+    await actAsync(() => mic(r)['onPress']!());
+    expect(started(factory)).toEqual({ engine: 'phone', tidy: false });
+    useSettingsStore.setState({ load: realLoad });
   });
 });
 
