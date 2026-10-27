@@ -6,7 +6,7 @@
 import type { JSX } from 'react';
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
-import { MemoryRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import { NavHistoryControls, resetNavHistory } from '../components/NavHistoryControls.js';
 
 function CurrentPath(): JSX.Element {
@@ -193,5 +193,68 @@ describe('NavHistoryControls', () => {
     expect(forward()).not.toBeDisabled();
     fireEvent.click(forward());
     expect(current()).toBe('/settings');
+  });
+
+  it("stays in step when something else steps the router back (a page's own Back control)", () => {
+    function PageBack(): JSX.Element {
+      const navigate = useNavigate();
+      return (
+        <button type="button" onClick={() => navigate(-1)}>
+          page back
+        </button>
+      );
+    }
+    render(
+      <MemoryRouter initialEntries={['/chats/a']}>
+        <NavHistoryControls />
+        <PageBack />
+        <nav>
+          <Link to="/chats/b">go b</Link>
+          <Link to="/chats/c">go c</Link>
+        </nav>
+        <Routes>
+          <Route path="/chats/:id" element={<CurrentPath />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByText('go b'));
+    fireEvent.click(screen.getByText('go c'));
+    fireEvent.click(screen.getByText('page back'));
+    expect(current()).toBe('/chats/b');
+    expect(forward()).not.toBeDisabled();
+    fireEvent.click(back());
+    expect(current()).toBe('/chats/a');
+    fireEvent.click(forward());
+    fireEvent.click(forward());
+    expect(current()).toBe('/chats/c');
+  });
+
+  it('a replace navigation overwrites the current entry instead of adding one', () => {
+    function Replace(): JSX.Element {
+      const navigate = useNavigate();
+      return (
+        <button type="button" onClick={() => navigate('/chats/z', { replace: true })}>
+          replace
+        </button>
+      );
+    }
+    render(
+      <MemoryRouter initialEntries={['/chats/a']}>
+        <NavHistoryControls />
+        <Replace />
+        <nav>
+          <Link to="/chats/b">go b</Link>
+        </nav>
+        <Routes>
+          <Route path="/chats/:id" element={<CurrentPath />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByText('go b'));
+    fireEvent.click(screen.getByText('replace'));
+    expect(current()).toBe('/chats/z');
+    fireEvent.click(back());
+    expect(current()).toBe('/chats/a');
+    expect(back()).toBeDisabled();
   });
 });

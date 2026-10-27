@@ -3,16 +3,16 @@
 // history"; later, "cmd left right should go back and forward in pages").
 //
 // react-router v6 exposes navigate(-1)/navigate(+1) but not whether a
-// back/forward step is possible, nor the stack itself — so we keep our own
-// ordered stack of visited locations plus a cursor. Every organic navigation
-// (a Link click, a programmatic navigate()) pushes onto the stack, truncating
-// any forward entries first (browser semantics). Going Back/Forward (click or
-// chord) moves the cursor and replays that entry via navigate(); a suppress
-// flag stops the resulting location change from being re-pushed.
+// back/forward step is possible, so we mirror the router's own history: an
+// ordered stack of location keys plus a cursor. PUSH truncates forward entries
+// and appends, REPLACE overwrites the current entry, POP (Back/Forward here,
+// a page's own Back control, the mouse button) moves the cursor to the entry
+// with that key. Back/Forward themselves call navigate(-1)/navigate(1), so the
+// router's history and this mirror cannot drift apart.
 
 import type { JSX } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { shortcutTitle, useActionGlyphs } from '../lib/shortcuts.js';
 import { matchesAction } from '../lib/keymap.js';
@@ -39,7 +39,8 @@ export function resetNavHistory(): void {
 export function NavHistoryControls(): JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
-  const key = location.pathname + location.search;
+  const navType = useNavigationType();
+  const key = location.key;
   const backGlyphs = useActionGlyphs('historyBack');
   const forwardGlyphs = useActionGlyphs('historyForward');
 
@@ -49,29 +50,31 @@ export function NavHistoryControls(): JSX.Element {
     navHistory.stack = [key];
     navHistory.index = 0;
   }
-  // Set immediately before a Back/Forward navigate() so the ensuing location
-  // change is recognised as internal and not pushed as a new entry.
-  const suppressRef = useRef(false);
   const [, bump] = useState(0);
   const rerender = useCallback(() => bump((n) => n + 1), []);
 
   useEffect(() => {
-    if (suppressRef.current) {
-      // This change came from a Back/Forward click — cursor already moved.
-      suppressRef.current = false;
-      rerender();
-      return;
+    // Every route mounts its own instance, so each runs this for a location
+    // another instance has already recorded.
+    if (navHistory.stack[navHistory.index] !== key) {
+      if (navType === 'POP') {
+        const at = navHistory.stack.indexOf(key);
+        if (at >= 0) navHistory.index = at;
+        else {
+          // A history entry we never saw (reload, deep link): start afresh.
+          navHistory.stack = [key];
+          navHistory.index = 0;
+        }
+      } else if (navType === 'REPLACE') {
+        navHistory.stack[navHistory.index] = key;
+      } else {
+        navHistory.stack = navHistory.stack.slice(0, navHistory.index + 1);
+        navHistory.stack.push(key);
+        navHistory.index = navHistory.stack.length - 1;
+      }
     }
-    // Ignore no-op navigations to the location we are already sitting on
-    // (e.g. clicking the link for the current chat) — they must not spawn a
-    // duplicate history entry.
-    if (navHistory.stack[navHistory.index] === key) return;
-    // Organic navigation: drop any forward history, then push.
-    navHistory.stack = navHistory.stack.slice(0, navHistory.index + 1);
-    navHistory.stack.push(key);
-    navHistory.index = navHistory.stack.length - 1;
     rerender();
-  }, [key, rerender]);
+  }, [key, navType, rerender]);
 
   const canBack = navHistory.index > 0;
   const canForward = navHistory.index < navHistory.stack.length - 1;
@@ -80,24 +83,14 @@ export function NavHistoryControls(): JSX.Element {
     // Reachable at index 0 via ⌘← even though the Back button is `disabled`
     // there — a chord has no disabled state to stop it firing.
     if (navHistory.index <= 0) return;
-    const target = navHistory.stack[navHistory.index - 1];
-    /* v8 ignore next -- defensive: the bounds check above guarantees an entry. */
-    if (target === undefined) return;
-    suppressRef.current = true;
-    navHistory.index -= 1;
-    navigate(target);
+    navigate(-1);
   }, [navigate]);
 
   const goForward = useCallback(() => {
     // Reachable at the tip via ⌘→ even though the Forward button is
     // `disabled` there — a chord has no disabled state to stop it firing.
     if (navHistory.index >= navHistory.stack.length - 1) return;
-    const target = navHistory.stack[navHistory.index + 1];
-    /* v8 ignore next -- defensive: the bounds check above guarantees an entry. */
-    if (target === undefined) return;
-    suppressRef.current = true;
-    navHistory.index += 1;
-    navigate(target);
+    navigate(1);
   }, [navigate]);
 
   // ⌘←/⌘→ walk the same stack as the buttons (Todoist: "cmd left right should
