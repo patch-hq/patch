@@ -1833,9 +1833,13 @@ export const Composer = forwardRef(function Composer(
     // trips for a not-yet-spawned new chat or a missing credential; an
     // existing chat sent to while offline proceeds and queues.
     if (sendBlocked) return false;
+    // A send's attachments stay in the draft until the host accepts it, so a
+    // second ⏎ in that window would send the same message again.
+    if (sendInFlightRef.current) return false;
     const trimmed = text.trim();
     // A turn is sendable when there's text OR at least one attachment.
     if (!trimmed && attachments.length === 0) return false;
+    sendInFlightRef.current = true;
 
     const pending = attachments;
     if (pending.length > 0 && resolveChatId) {
@@ -1852,7 +1856,10 @@ export const Composer = forwardRef(function Composer(
         } finally {
           setResolving(false);
         }
-        if (!target) return;
+        if (!target) {
+          sendInFlightRef.current = false;
+          return;
+        }
         const realChatId = target;
         // Step 3 of 3 — move whatever this draft ALREADY has uploaded
         // server-side into the real chat + do the host hand-off, right
@@ -1917,6 +1924,8 @@ export const Composer = forwardRef(function Composer(
   // render's submit (current attachments, blocked state) rather than its own.
   const submitRef = useRef(submitText);
   submitRef.current = submitText;
+  // Set from the moment a send starts until `onSend` settles (see submitText).
+  const sendInFlightRef = useRef(false);
 
   /** Fire onSend, detach a successful send's attachments from the draft
    *  (bookkeeping only — the files now belong to the sent message, so this
@@ -1952,16 +1961,26 @@ export const Composer = forwardRef(function Composer(
       setPendingSend(false);
       setValue((cur) => (cur.length === 0 ? trimmed : cur));
     };
-    const result = onSend(...args);
+    let result: ReturnType<ComposerProps['onSend']>;
+    try {
+      result = onSend(...args);
+    } catch (err) {
+      sendInFlightRef.current = false;
+      throw err;
+    }
     if (result instanceof Promise) {
-      void result.then((ok) => {
-        if (ok === false) restore();
-        else onAccepted();
-      });
-    } else if (result === false) {
-      restore();
+      void result
+        .then((ok) => {
+          if (ok === false) restore();
+          else onAccepted();
+        })
+        .finally(() => {
+          sendInFlightRef.current = false;
+        });
     } else {
-      onAccepted();
+      sendInFlightRef.current = false;
+      if (result === false) restore();
+      else onAccepted();
     }
   }
 
