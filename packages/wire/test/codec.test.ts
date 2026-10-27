@@ -1763,6 +1763,13 @@ describe('codec', () => {
     expect(decoded).toEqual(evt);
   });
 
+  test('decode tolerates a provider key this build does not know in host.host.voiceKeys', () => {
+    const evt = structuredClone(FIXTURES['host.host']) as Record<string, any>;
+    evt.voiceKeys = { gemini: true, openai: true, deepgram: false, someFutureProvider: true };
+    const decoded = decode(JSON.stringify(evt)) as Record<string, any>;
+    expect(decoded.voiceKeys).toMatchObject({ gemini: true, openai: true, deepgram: false });
+  });
+
   test('decode rejects chat.input disabledTools that is not a string[]', () => {
     const bad = {
       type: 'chat.input',
