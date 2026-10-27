@@ -9927,7 +9927,13 @@ export class Daemon {
             // nothing. The prose parse stays as the fallback for a provider
             // that states a reset but carries no structured field.
             const stated = limit?.resetsAt ?? parseLimitResetsAt(errMsg, now);
-            const candidates = [scopes?.session, scopes?.week, stated].filter(
+            // The account's own window is what the limit card counts down to
+            // (`setLimitBlock` prefers it), so it arms the resume too — else a
+            // card can promise a reset nothing is waiting for.
+            const accountReset = this.opts.accountLimitInfo?.(
+              this.runningOnAccount.get(chatId),
+            )?.resetsAt;
+            const candidates = [scopes?.session, scopes?.week, stated, accountReset].filter(
               (t): t is number => t !== undefined && t > now,
             );
             const soonest = candidates.length > 0 ? Math.min(...candidates) : undefined;
