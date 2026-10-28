@@ -1,5 +1,5 @@
-// ContextRing — how full the open chat's context window is, as a ring on the
-// composer's action row (spec/14 § Composer — context ring). Tapping it opens a
+// ContextRing — how full the open chat's context window is, as a gauge ring with its
+// percentage on the composer's action row (spec/14 § Composer — context ring). Tapping it opens a
 // small sheet with the figures and a way to the account's Usage page. Drawn
 // only once the host has measured the chat.
 
@@ -39,18 +39,17 @@ export function ContextRing({
         accessibilityRole="button"
         accessibilityLabel={`Context ${ctx.percent}`}
         onPress={() => setOpen(true)}
-        style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}
+        style={{
+          minWidth: size,
+          height: size,
+          flexDirection: 'row',
+          gap: space.xs,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
       >
         <Svg width={SIZE} height={SIZE} viewBox="0 0 22 22">
-          <Circle
-            cx={11}
-            cy={11}
-            r={R}
-            fill="none"
-            stroke={colors.divider}
-            strokeWidth={2.5}
-            strokeDasharray={ctx.level === 'unknown' ? '3 3' : undefined}
-          />
+          <Circle cx={11} cy={11} r={R} fill="none" stroke={colors.divider} strokeWidth={2.5} />
           <Circle
             cx={11}
             cy={11}
@@ -64,6 +63,9 @@ export function ContextRing({
             transform="rotate(-90 11 11)"
           />
         </Svg>
+        <Text testID="context-ring-label" style={{ ...typography.secondary, color: colors.ink3 }}>
+          {ctx.percent}
+        </Text>
       </Pressable>
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable

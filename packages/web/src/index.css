@@ -13813,9 +13813,13 @@ button.chat-usage-crumb:hover {
 }
 .context-ring {
   flex: 0 0 auto;
-  width: 40px;
+  min-width: 40px;
   height: 40px;
-  padding: 0;
+  padding: 0 6px;
+  gap: 4px;
+  color: var(--ink-3);
+  font-size: var(--text-min);
+  font-variant-numeric: tabular-nums;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -13831,6 +13835,9 @@ button.chat-usage-crumb:hover {
 .composer-actions .context-ring + .stop-btn,
 .composer-actions .context-ring + .send-btn {
   margin-left: 0;
+}
+.context-ring-label {
+  line-height: 1;
 }
 .context-ring-track {
   fill: none;
@@ -13848,9 +13855,6 @@ button.chat-usage-crumb:hover {
 }
 .context-ring.blocked .context-ring-fill {
   stroke: var(--danger);
-}
-.context-ring.unknown .context-ring-track {
-  stroke-dasharray: 3 3;
 }
 .usage-pop {
   z-index: 60;
