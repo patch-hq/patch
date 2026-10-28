@@ -959,7 +959,7 @@ export function createMockSdkBackend(opts: MockSdkBackendOptions = {}): MockSdkB
               ...queued,
               {
                 type: 'result' as const,
-                sessionId: queued.findLast((e) => e.sessionId)?.sessionId ?? sessionId,
+                sessionId: [...queued].reverse().find((e) => e.sessionId)?.sessionId ?? sessionId,
               },
             ];
 
