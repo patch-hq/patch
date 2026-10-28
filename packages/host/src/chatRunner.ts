@@ -185,6 +185,7 @@ import {
   QUESTION_EXPIRY_SECONDS_MAX,
   LOGGED_EVENT_TYPES,
   SPECIAL_THREAD_IDS,
+  type ManagerSweepAction,
   type ManagerSweepCandidate,
   type ManagerSweepResultEvent,
 } from '@patch/wire';
@@ -2145,6 +2146,8 @@ export class Daemon {
    * the pump in arrival order once the current turn finishes.
    */
   private readonly turnQueues = new Map<string, QueuedTurn[]>();
+  /** Bumped when the sweep is switched off; a run that started under an older one stops delivering. */
+  private sweepEpoch = 0;
   /**
    * Chats with an active serial pump — a turn is running OR its queue is
    * draining. This is the SINGLE guard that gates "enqueue behind the running
@@ -5104,6 +5107,7 @@ export class Daemon {
       return;
     }
     state.disabled = disabled;
+    if (disabled && chatId === SPECIAL_THREAD_IDS.manager) this.cancelManagerSweep();
     state.lastUpdated = this.opts.now();
     this.opts.metaStore.update(chatId, (m) => ({
       ...m,
@@ -5363,7 +5367,10 @@ export class Daemon {
         ].join('\n');
       }),
     );
-    return `${candidates.length} chat${candidates.length === 1 ? '' : 's'} changed:\n\n${sections.join('\n\n')}`;
+    return (
+      `${candidates.length} chat${candidates.length === 1 ? '' : 's'} changed:\n\n${sections.join('\n\n')}` +
+      '\n\nFor every nudge or wake, give the chat\'s "chatId" and its "folder" exactly as listed above.'
+    );
   }
 
   /** Deliver a sweep's nudge/wake message — local chats via `sendInput`, a
@@ -5403,6 +5410,16 @@ export class Daemon {
       );
       return false;
     }
+  }
+
+  /**
+   * The sweep has been switched off (the sweep setting, or Manager disabled):
+   * a run already deciding stops short of delivering, and every nudge still
+   * waiting in a chat's queue is dropped rather than arriving later.
+   */
+  cancelManagerSweep(): void {
+    this.sweepEpoch++;
+    for (const chatId of [...this.turnQueues.keys()]) this.flushQueuedNudges(chatId);
   }
 
   private managerDisabled(): boolean {
@@ -5460,10 +5477,17 @@ export class Daemon {
     const idle = (tokensUsed: number): ManagerSweepResultEvent => ({
       type: 'manager.sweep_result',
       runId: req.runId,
-      actions: req.candidates.map((c) => ({ chatId: c.chatId, action: 'leave' as const })),
+      actions: req.candidates.map((c) => ({
+        chatId: c.chatId,
+        action: 'leave' as const,
+        edge: c.edge,
+        detail: 'sweep is off',
+      })),
       tokensUsed,
     });
-    if (this.managerDisabled()) return idle(0);
+    const epoch = this.sweepEpoch;
+    const cancelled = (): boolean => this.sweepEpoch !== epoch || this.managerDisabled();
+    if (cancelled()) return idle(0);
     const digest = await this.buildSweepDigest(req.candidates, req.messagesPerChat);
     const result = await this.opts.decideSweep({
       digest,
@@ -5479,10 +5503,10 @@ export class Daemon {
         error: 'manager-sweep: decision call failed or returned an unparseable reply',
       };
     }
-    // Disabled while the decision call was running.
-    if (this.managerDisabled()) return idle(result.tokensUsed);
+    // Switched off while the decision call was running.
+    if (cancelled()) return idle(result.tokensUsed);
     const byChatId = new Map(req.candidates.map((c) => [c.chatId, c]));
-    const actions: { chatId: string; action: 'nudge' | 'wake' | 'flag' | 'leave' }[] = [];
+    const actions: ManagerSweepAction[] = [];
     const seen = new Set<string>();
     for (const decision of result.decisions) {
       const candidate = byChatId.get(decision.chatId);
@@ -5495,21 +5519,48 @@ export class Daemon {
           : decision.action;
       // "Still working?" only makes sense for a chat that was running; a chat
       // that settled has finished, whatever the decision call said.
+      const edge = candidate.edge;
+      const leave = (detail: string): void => {
+        actions.push({ chatId: candidate.chatId, action: 'leave', edge, detail });
+      };
       if (action === 'wake' && candidate.edge !== 'stalled') {
-        actions.push({ chatId: candidate.chatId, action: 'leave' });
+        leave('chat had finished, not stalled');
       } else if (action === 'nudge' || action === 'wake') {
+        // The reply must name the chat it means by its folder as well as its id,
+        // and both must be the chat the digest listed: a message written for one
+        // chat is never delivered to another.
+        if (decision.folder !== candidate.folder) {
+          this.opts.logger.warn(
+            { chatId: candidate.chatId, expected: candidate.folder, got: decision.folder },
+            'manager-sweep: decision does not match its target chat; not delivered',
+          );
+          leave(
+            `not sent: reply named folder ${decision.folder ?? '(none)'}, chat is ${candidate.folder}`,
+          );
+          continue;
+        }
+        const localFolder = this.chatState.get(candidate.chatId)?.folder;
+        if (candidate.hostId === this.opts.hostId && localFolder !== candidate.folder) {
+          leave(`not sent: chat folder is now ${localFolder ?? '(gone)'}`);
+          continue;
+        }
+        if (cancelled()) {
+          leave('not sent: sweep was switched off');
+          continue;
+        }
         const message =
           decision.message?.trim() ||
           (action === 'nudge' ? 'Carry on.' : 'Checking in — still working?');
         const delivered = await this.deliverSweepMessage(candidate, message);
-        actions.push({ chatId: candidate.chatId, action: delivered ? action : 'leave' });
+        if (delivered) actions.push({ chatId: candidate.chatId, action, edge, detail: message });
+        else leave(`not sent: chat was busy or unreachable (${message})`);
       } else if (action === 'flag') {
-        this.flagOnManager(
-          decision.flagText?.trim() || `${candidate.chatId} (${candidate.folder}) needs a look`,
-        );
-        actions.push({ chatId: candidate.chatId, action: 'flag' });
+        const text =
+          decision.flagText?.trim() || `${candidate.chatId} (${candidate.folder}) needs a look`;
+        this.flagOnManager(text);
+        actions.push({ chatId: candidate.chatId, action: 'flag', edge, detail: text });
       } else {
-        actions.push({ chatId: candidate.chatId, action: 'leave' });
+        leave('nothing needed');
       }
     }
     // Anything the decision call never addressed: a person-blocked candidate
@@ -5517,10 +5568,21 @@ export class Daemon {
     for (const candidate of req.candidates) {
       if (seen.has(candidate.chatId)) continue;
       if (candidate.edge === 'permission' || candidate.edge === 'question') {
-        this.flagOnManager(`${candidate.chatId} (${candidate.folder}) needs a look`);
-        actions.push({ chatId: candidate.chatId, action: 'flag' });
+        const text = `${candidate.chatId} (${candidate.folder}) needs a look`;
+        this.flagOnManager(text);
+        actions.push({
+          chatId: candidate.chatId,
+          action: 'flag',
+          edge: candidate.edge,
+          detail: text,
+        });
       } else {
-        actions.push({ chatId: candidate.chatId, action: 'leave' });
+        actions.push({
+          chatId: candidate.chatId,
+          action: 'leave',
+          edge: candidate.edge,
+          detail: 'no decision returned',
+        });
       }
     }
     return {

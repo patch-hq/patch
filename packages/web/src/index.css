@@ -17147,3 +17147,8 @@ select.permission-mode.is-pending {
     padding: 6px 8px;
   }
 }
+
+.sweep-status-detail-text,
+.sweep-status-earlier {
+  opacity: 0.7;
+}

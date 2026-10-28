@@ -106,7 +106,7 @@ describe('runManagerSweep', () => {
       model: 'claude-sonnet-5',
     });
     expect(out.error).toMatch(/no decider configured/i);
-    expect(out.actions).toEqual([]);
+    expect(out.actions).toMatchObject([]);
   });
 
   it('reports an error when the decision call itself fails (NO FALLBACK)', async () => {
@@ -119,13 +119,13 @@ describe('runManagerSweep', () => {
       model: 'claude-sonnet-5',
     });
     expect(out.error).toMatch(/decision call failed/i);
-    expect(out.actions).toEqual([]);
+    expect(out.actions).toMatchObject([]);
   });
 
   it('nudge: delivers the message into a LOCAL candidate chat as a machine turn', async () => {
     let chatId = '';
     const decide = vi.fn(async () =>
-      result([{ chatId, action: 'nudge', message: 'carry on please' }]),
+      result([{ chatId, action: 'nudge', folder, message: 'carry on please' }]),
     );
     const { daemon, folder, sdk } = setup(decide);
     sdk.enqueue([
@@ -140,7 +140,7 @@ describe('runManagerSweep', () => {
       prompt: 'decide',
       model: 'claude-sonnet-5',
     });
-    expect(out.actions).toEqual([{ chatId, action: 'nudge' }]);
+    expect(out.actions).toMatchObject([{ chatId, action: 'nudge' }]);
     await new Promise((r) => setTimeout(r, 20));
     const history = daemon.readHistory({ chatId });
     expect(
@@ -151,7 +151,7 @@ describe('runManagerSweep', () => {
   it('nudge/wake: a chat mid-turn is left alone — the message would only queue behind the turn and go stale', async () => {
     let chatId = '';
     const decide = vi.fn(async () =>
-      result([{ chatId, action: 'wake', message: 'still working?' }]),
+      result([{ chatId, action: 'wake', folder, message: 'still working?' }]),
     );
     const { daemon, folder, sdk } = setup(decide, {
       sdkBackend: createMockSdkBackend({ turnDelayMs: 300 }),
@@ -170,8 +170,8 @@ describe('runManagerSweep', () => {
         model: 'claude-sonnet-5',
       });
     // Two sweeps while the turn runs: neither may park a message in the queue.
-    expect((await sweep()).actions).toEqual([{ chatId, action: 'leave' }]);
-    expect((await sweep()).actions).toEqual([{ chatId, action: 'leave' }]);
+    expect((await sweep()).actions).toMatchObject([{ chatId, action: 'leave' }]);
+    expect((await sweep()).actions).toMatchObject([{ chatId, action: 'leave' }]);
     await running;
     await new Promise((r) => setTimeout(r, 400));
     const history = daemon.readHistory({ chatId });
@@ -195,13 +195,15 @@ describe('runManagerSweep', () => {
       prompt: 'decide',
       model: 'claude-sonnet-5',
     });
-    expect(out.actions).toEqual([{ chatId: 'chat-remote', action: 'leave' }]);
+    expect(out.actions).toMatchObject([{ chatId: 'chat-remote', action: 'leave' }]);
     expect(sendToRemoteChat).not.toHaveBeenCalled();
   });
 
   it('wake: delivers a cross-host candidate via sendToRemoteChat, never sendInput', async () => {
     const decide = vi.fn(async () =>
-      result([{ chatId: 'chat-remote', action: 'wake', message: 'still working?' }]),
+      result([
+        { chatId: 'chat-remote', action: 'wake', folder: '/elsewhere', message: 'still working?' },
+      ]),
     );
     const sendToRemoteChat = vi.fn(async () => undefined);
     const { daemon } = setup(decide, { sendToRemoteChat });
@@ -212,7 +214,7 @@ describe('runManagerSweep', () => {
       prompt: 'decide',
       model: 'claude-sonnet-5',
     });
-    expect(out.actions).toEqual([{ chatId: 'chat-remote', action: 'wake' }]);
+    expect(out.actions).toMatchObject([{ chatId: 'chat-remote', action: 'wake' }]);
     expect(sendToRemoteChat).toHaveBeenCalledWith({
       sourceChatId: SPECIAL_THREAD_IDS.manager,
       targetChatId: 'chat-remote',
@@ -233,7 +235,7 @@ describe('runManagerSweep', () => {
       prompt: 'decide',
       model: 'claude-sonnet-5',
     });
-    expect(out.actions).toEqual([{ chatId: 'chat-x', action: 'flag' }]);
+    expect(out.actions).toMatchObject([{ chatId: 'chat-x', action: 'flag' }]);
     const flagMsg = events.find(
       (e) => e.type === 'chat.message' && e.chatId === SPECIAL_THREAD_IDS.manager,
     );
@@ -261,7 +263,7 @@ describe('runManagerSweep', () => {
       model: 'claude-sonnet-5',
     });
     expect(decide).not.toHaveBeenCalled();
-    expect(out.actions).toEqual([{ chatId: 'chat-x', action: 'leave' }]);
+    expect(out.actions).toMatchObject([{ chatId: 'chat-x', action: 'leave' }]);
     expect(sendToRemoteChat).not.toHaveBeenCalled();
     expect(events.filter((e) => e.type === 'chat.message')).toEqual([]);
   });
@@ -290,7 +292,7 @@ describe('runManagerSweep', () => {
       prompt: 'decide',
       model: 'claude-sonnet-5',
     });
-    expect(out.actions).toEqual([
+    expect(out.actions).toMatchObject([
       { chatId: 'chat-remote', action: 'leave' },
       { chatId: 'chat-x', action: 'leave' },
     ]);
@@ -308,7 +310,7 @@ describe('runManagerSweep', () => {
       prompt: 'decide',
       model: 'claude-sonnet-5',
     });
-    expect(out.actions).toEqual([{ chatId: 'chat-x', action: 'leave' }]);
+    expect(out.actions).toMatchObject([{ chatId: 'chat-x', action: 'leave' }]);
     expect(events).toEqual([]);
   });
 
@@ -325,7 +327,7 @@ describe('runManagerSweep', () => {
       prompt: 'decide',
       model: 'claude-sonnet-5',
     });
-    expect(out.actions).toEqual([{ chatId: 'chat-x', action: 'flag' }]);
+    expect(out.actions).toMatchObject([{ chatId: 'chat-x', action: 'flag' }]);
     expect(events.some((e) => e.type === 'chat.input')).toBe(false);
     const flagMsg = events.find(
       (e) => e.type === 'chat.message' && e.chatId === SPECIAL_THREAD_IDS.manager,
@@ -346,7 +348,7 @@ describe('runManagerSweep', () => {
       prompt: 'decide',
       model: 'claude-sonnet-5',
     });
-    expect(out.actions).toEqual([{ chatId: 'chat-x', action: 'flag' }]);
+    expect(out.actions).toMatchObject([{ chatId: 'chat-x', action: 'flag' }]);
   });
 
   it('a permission/question candidate the decider never addressed is still flagged deterministically', async () => {
@@ -360,7 +362,7 @@ describe('runManagerSweep', () => {
       prompt: 'decide',
       model: 'claude-sonnet-5',
     });
-    expect(out.actions).toEqual([{ chatId: 'chat-x', action: 'flag' }]);
+    expect(out.actions).toMatchObject([{ chatId: 'chat-x', action: 'flag' }]);
     expect(events.some((e) => e.type === 'chat.message')).toBe(true);
   });
 
@@ -374,7 +376,7 @@ describe('runManagerSweep', () => {
       prompt: 'decide',
       model: 'claude-sonnet-5',
     });
-    expect(out.actions).toEqual([{ chatId: 'chat-x', action: 'leave' }]);
+    expect(out.actions).toMatchObject([{ chatId: 'chat-x', action: 'leave' }]);
     expect(events).toEqual([]);
   });
 
@@ -407,5 +409,86 @@ describe('runManagerSweep', () => {
       model: 'claude-sonnet-5',
     });
     expect(out.tokensUsed).toBe(777);
+  });
+
+  it('a reply naming a different folder than the chat it targets is not delivered', async () => {
+    let chatId = '';
+    const decide = vi.fn(async () =>
+      result([{ chatId, action: 'nudge', folder: '/some/other/project', message: 'wrong chat' }]),
+    );
+    const { daemon, folder } = setup(decide);
+    chatId = await daemon.spawnChat({ folder });
+    const out = await daemon.runManagerSweep({
+      runId: 'r1',
+      candidates: [candidate({ chatId, hostId: 'd1', folder })],
+      messagesPerChat: 3,
+      prompt: 'decide',
+      model: 'claude-sonnet-5',
+    });
+    expect(out.actions).toMatchObject([
+      { chatId, action: 'leave', detail: expect.stringMatching(/not sent/) },
+    ]);
+    const history = daemon.readHistory({ chatId });
+    expect(
+      history.events.some((e) => e.type === 'chat.message' && e.content === 'wrong chat'),
+    ).toBe(false);
+  });
+
+  it('a nudge reply with no folder is not delivered (no fallback)', async () => {
+    const decide = vi.fn(async () =>
+      result([{ chatId: 'chat-remote', action: 'nudge', message: 'hi' }]),
+    );
+    const sendToRemoteChat = vi.fn(async () => undefined);
+    const { daemon } = setup(decide, { sendToRemoteChat });
+    const out = await daemon.runManagerSweep({
+      runId: 'r1',
+      candidates: [candidate({ chatId: 'chat-remote', hostId: 'd2', folder: '/elsewhere' })],
+      messagesPerChat: 3,
+      prompt: 'decide',
+      model: 'claude-sonnet-5',
+    });
+    expect(out.actions).toMatchObject([{ action: 'leave' }]);
+    expect(sendToRemoteChat).not.toHaveBeenCalled();
+  });
+
+  it('records what was sent and why, so the UI can show it', async () => {
+    const decide = vi.fn(async () =>
+      result([{ chatId: 'chat-remote', action: 'nudge', folder: '/elsewhere', message: 'go on' }]),
+    );
+    const { daemon } = setup(decide, { sendToRemoteChat: vi.fn(async () => undefined) });
+    const out = await daemon.runManagerSweep({
+      runId: 'r1',
+      candidates: [
+        candidate({ chatId: 'chat-remote', hostId: 'd2', folder: '/elsewhere', edge: 'settled' }),
+      ],
+      messagesPerChat: 3,
+      prompt: 'decide',
+      model: 'claude-sonnet-5',
+    });
+    expect(out.actions).toEqual([
+      { chatId: 'chat-remote', action: 'nudge', edge: 'settled', detail: 'go on' },
+    ]);
+  });
+
+  it('cancelManagerSweep mid-decision: nothing is delivered', async () => {
+    const sendToRemoteChat = vi.fn(async () => undefined);
+    let cancel: () => void = () => {};
+    const decide = vi.fn(async () => {
+      cancel();
+      return result([
+        { chatId: 'chat-remote', action: 'nudge', folder: '/elsewhere', message: 'late' },
+      ]);
+    });
+    const { daemon } = setup(decide, { sendToRemoteChat });
+    cancel = () => daemon.cancelManagerSweep();
+    const out = await daemon.runManagerSweep({
+      runId: 'r1',
+      candidates: [candidate({ chatId: 'chat-remote', hostId: 'd2', folder: '/elsewhere' })],
+      messagesPerChat: 3,
+      prompt: 'decide',
+      model: 'claude-sonnet-5',
+    });
+    expect(out.actions).toMatchObject([{ action: 'leave' }]);
+    expect(sendToRemoteChat).not.toHaveBeenCalled();
   });
 });

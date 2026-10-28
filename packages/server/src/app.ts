@@ -679,6 +679,12 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       if (!id) return;
       hostLink.sendTo(id, 'manager-sweep', { type: 'manager.sweep_run', ...req });
     },
+    cancelSweep: () => {
+      const id = specialThreadHost();
+      if (!id) return false;
+      hostLink.sendTo(id, 'manager-sweep', { type: 'manager.sweep_cancel' });
+      return true;
+    },
     runs: sweepRuns,
     logger: log.child({ component: 'manager-sweep' }),
     idGenerator,

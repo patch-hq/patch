@@ -27,6 +27,8 @@ export interface SweepDecision {
   action: 'nudge' | 'wake' | 'flag' | 'leave';
   message?: string;
   flagText?: string;
+  /** The target chat's folder, echoed back; delivery checks it matches. */
+  folder?: string;
 }
 
 export interface SweepDecisionResult {
@@ -74,16 +76,18 @@ export function parseSweepDecisions(raw: string): SweepDecision[] | null {
   const VALID_ACTIONS = new Set(['nudge', 'wake', 'flag', 'leave']);
   for (const d of raw_decisions) {
     if (typeof d !== 'object' || d === null) return null;
-    const { chatId, action, message, flagText } = d as Record<string, unknown>;
+    const { chatId, action, message, flagText, folder } = d as Record<string, unknown>;
     if (typeof chatId !== 'string' || chatId === '') return null;
     if (typeof action !== 'string' || !VALID_ACTIONS.has(action)) return null;
     if (message !== undefined && typeof message !== 'string') return null;
     if (flagText !== undefined && typeof flagText !== 'string') return null;
+    if (folder !== undefined && typeof folder !== 'string') return null;
     out.push({
       chatId,
       action: action as SweepDecision['action'],
       ...(typeof message === 'string' ? { message } : {}),
       ...(typeof flagText === 'string' ? { flagText } : {}),
+      ...(typeof folder === 'string' ? { folder } : {}),
     });
   }
   return out;

@@ -6837,6 +6837,10 @@ export async function handleServerEvent(
         sender(result);
         return;
       }
+      case 'manager.sweep_cancel': {
+        daemon.cancelManagerSweep();
+        return;
+      }
       case 'chat.snooze_request': {
         // spec/04 § Snooze — absolute wake time, or null to unsnooze.
         await daemon.setSnoozed(event.chatId, event.snoozedUntil, {

@@ -73,6 +73,11 @@ export interface ManagerSweeperDeps {
     prompt: string;
     model: string;
   }) => void;
+  /**
+   * Tell the Manager host the sweep is switched off, so it abandons a run in
+   * flight and drops queued nudges. Returns whether the host was reached.
+   */
+  cancelSweep: () => boolean;
   runs: SweepRunStore;
   logger: Pick<Logger, 'info' | 'warn'>;
   now?: () => number;
@@ -89,6 +94,9 @@ export class ManagerSweeper {
   private readonly lastStatusKind = new Map<string, string | null>();
   /** When a chat currently `running` entered that activity — the clock `checkStalled` compares against. */
   private readonly runningSince = new Map<string, number>();
+  /** When each chat last showed real activity — any event on it other than queue bookkeeping or an unchanged state echo. */
+  private readonly lastActivityAt = new Map<string, number>();
+  private readonly lastUpdatedSeen = new Map<string, number>();
   private readonly lastBackgroundTasks = new Map<string, number | null>();
   /** When `stalled` was last raised for a chat — the next one needs another full threshold of silence. */
   private readonly lastStalledAt = new Map<string, number>();
@@ -98,6 +106,8 @@ export class ManagerSweeper {
   /** When a sweep last actually ran; 0 until one has, unlike `lastSweepAt` which boot also sets. */
   private lastRunAt = 0;
   private lastEventWakeAt = 0;
+  /** True once the host has been told the sweep is off; cleared when it is back on. */
+  private cancelSent = false;
   private eventWakeArmed = false;
   /** Set while a run's result hasn't come back yet — only one sweep in flight at a time. */
   private inFlightRunId: string | undefined;
@@ -118,11 +128,10 @@ export class ManagerSweeper {
   /** True when the chat is pending afterwards; false when the edge was dropped. */
   private raise(chatId: string, edge: SweepEdge): boolean {
     if (chatId === SPECIAL_THREAD_IDS.manager) return false; // the sweep is never a candidate on itself
-    // Disabled (spec/06 § Disabled) is Manager's real "off" switch — a
-    // disabled Manager gets no sweep traffic either, same as it gets no
-    // watch turns, rather than silently building a backlog that floods in
-    // the moment it's re-enabled.
-    if (this.deps.chats.get(SPECIAL_THREAD_IDS.manager)?.disabled) return false;
+    // Off, by either switch (the Manager's Power icon — spec/06 § Disabled —
+    // or the sweep's own Enabled setting), means no sweep traffic and no
+    // backlog that floods in the moment it is turned back on.
+    if (this.isOff()) return false;
     // A chat that already holds a sweep message has been told; another one
     // would only stack behind it. Real needs (a question or permission) still
     // come through, because they are the user's, not the sweep's.
@@ -132,6 +141,28 @@ export class ManagerSweeper {
     if (existing !== undefined && EDGE_RANK[existing] <= EDGE_RANK[edge]) return true;
     this.pending.set(chatId, edge);
     return true;
+  }
+
+  /** The sweep is switched off: Manager disabled, or the sweep setting off. */
+  private isOff(): boolean {
+    return (
+      this.deps.chats.get(SPECIAL_THREAD_IDS.manager)?.disabled === true ||
+      !this.deps.settings().sweepEnabled
+    );
+  }
+
+  private dropPending(): void {
+    this.pending.clear();
+    this.eventWakeArmed = false;
+  }
+
+  /** Off: forget what was queued up, and (once) tell the host to stop what it has in hand. */
+  private handleOff(): void {
+    this.dropPending();
+    if (this.cancelSent) return;
+    if (this.deps.managerHostId() === undefined) return;
+    this.inFlightRunId = undefined;
+    this.cancelSent = this.deps.cancelSweep();
   }
 
   /**
@@ -148,12 +179,33 @@ export class ManagerSweeper {
 
   /** Observe the chat stream and raise the edges a sweep cares about. */
   observe(event: WireEvent): void {
+    this.noteActivity(event);
     if (event.type === 'chat.dequeued') {
       this.awaitingSweepMessage.delete(event.chatId);
       return;
     }
     if (event.type !== 'chat.state') return;
     this.observeState(event);
+  }
+
+  /**
+   * Stall detection measures silence, so every sign a chat is alive resets it:
+   * messages, tool calls, output deltas, state changes. Queue bookkeeping is not
+   * the chat working, and a `chat.state` echo whose `lastUpdated` has not moved
+   * is not either.
+   */
+  private noteActivity(event: WireEvent): void {
+    if (!('chatId' in event) || typeof event.chatId !== 'string') return;
+    if (event.type === 'chat.queued' || event.type === 'chat.dequeued') return;
+    if (event.type === 'chat.state') {
+      const seen = this.lastUpdatedSeen.get(event.chatId);
+      if (typeof event.lastUpdated === 'number')
+        this.lastUpdatedSeen.set(event.chatId, event.lastUpdated);
+      const becameRunning =
+        event.activity === 'running' && this.lastActivity.get(event.chatId) !== 'running';
+      if (!becameRunning && (event.lastUpdated === undefined || event.lastUpdated === seen)) return;
+    }
+    this.lastActivityAt.set(event.chatId, this.now());
   }
 
   private observeState(event: ChatStateEvent): void {
@@ -228,9 +280,16 @@ export class ManagerSweeper {
   private toCandidate(chatId: string, edge: SweepEdge): ManagerSweepCandidate | undefined {
     const chat = this.deps.chats.get(chatId);
     if (!chat) return undefined; // vanished since it was raised — nothing to ask about
-    const since = this.runningSince.get(chatId) ?? chat.lastUpdated;
+    const since = this.quietSince(chatId) ?? chat.lastUpdated;
     const idleMinutes = Math.max(0, (this.now() - since) / 60_000);
     return { chatId, hostId: chat.hostId, folder: chat.folder, edge, idleMinutes };
+  }
+
+  /** The moment the running chat last did anything — the later of its turn starting and its last activity. */
+  private quietSince(chatId: string): number | undefined {
+    const since = this.runningSince.get(chatId);
+    if (since === undefined) return undefined;
+    return Math.max(since, this.lastActivityAt.get(chatId) ?? 0);
   }
 
   /**
@@ -243,10 +302,15 @@ export class ManagerSweeper {
   private checkStalled(thresholdMinutes: number): void {
     const thresholdMs = thresholdMinutes * 60_000;
     const now = this.now();
-    for (const [chatId, since] of this.runningSince) {
-      // `stalled` fires once per quiet stretch: the clock restarts from the
-      // last time it was raised, so a long step is not re-raised every tick.
-      const quietSince = Math.max(since, this.lastStalledAt.get(chatId) ?? 0);
+    for (const chatId of this.runningSince.keys()) {
+      // A chat still producing tool calls or output is working, not stalled:
+      // the clock runs from its last activity. `stalled` fires once per quiet
+      // stretch: it also restarts from the last time it was raised, so a long
+      // silent step is not re-raised every tick.
+      const quietSince = Math.max(
+        this.quietSince(chatId) ?? 0,
+        this.lastStalledAt.get(chatId) ?? 0,
+      );
       if (now - quietSince < thresholdMs) continue;
       const chat = this.deps.chats.get(chatId);
       if (chat?.activity !== 'running') continue;
@@ -256,15 +320,13 @@ export class ManagerSweeper {
   }
 
   private attemptFire(): boolean {
-    if (this.pending.size === 0) return false; // NOTHING CHANGED = no model call
-    // Edges queued before Manager was disabled must not fire after it.
-    if (this.deps.chats.get(SPECIAL_THREAD_IDS.manager)?.disabled) {
-      this.pending.clear();
-      this.eventWakeArmed = false;
+    // Edges queued before the sweep was turned off must not fire after it.
+    if (this.isOff()) {
+      this.handleOff();
       return false;
     }
+    if (this.pending.size === 0) return false; // NOTHING CHANGED = no model call
     const settings = this.deps.settings();
-    if (!settings.sweepEnabled) return false;
     if (this.inFlightRunId !== undefined) {
       if (this.now() - this.inFlightSince < IN_FLIGHT_STALE_MS) return false;
       this.deps.logger.warn(
@@ -304,7 +366,11 @@ export class ManagerSweeper {
    */
   tick(): boolean {
     const settings = this.deps.settings();
-    if (!settings.sweepEnabled) return false;
+    if (this.isOff()) {
+      this.handleOff();
+      return false;
+    }
+    this.cancelSent = false;
     this.checkStalled(settings.stalledThresholdMinutes);
     const intervalMs = settings.sweepIntervalMinutes * 60_000;
     const dueByInterval = this.now() - this.lastSweepAt >= intervalMs;

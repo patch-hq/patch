@@ -4053,11 +4053,25 @@ export const ManagerSweepRunEvent = z
   .strict();
 export type ManagerSweepRunEvent = z.infer<typeof ManagerSweepRunEvent>;
 
+/**
+ * Server → Manager host: the sweep is switched off (sweep setting off, or
+ * Manager disabled). Abandon any run in flight and drop every sweep nudge still
+ * queued on a chat. Fire-and-forget.
+ */
+export const ManagerSweepCancelEvent = z
+  .object({ type: z.literal('manager.sweep_cancel') })
+  .strict();
+export type ManagerSweepCancelEvent = z.infer<typeof ManagerSweepCancelEvent>;
+
 /** One action the sweep took (or chose not to) on one candidate chat. */
 export const ManagerSweepAction = z
   .object({
     chatId: z.string().min(1),
     action: z.enum(['nudge', 'wake', 'flag', 'leave']),
+    /** Why the chat was a candidate. */
+    edge: ManagerSweepCandidate.shape.edge.optional(),
+    /** What the sweep sent or wrote (nudge/wake/flag), or why it left the chat alone. */
+    detail: z.string().optional(),
   })
   .strict();
 export type ManagerSweepAction = z.infer<typeof ManagerSweepAction>;
@@ -9186,6 +9200,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   ChatDisableRequestEvent,
   ChatRotateRequestEvent,
   ManagerSweepRunEvent,
+  ManagerSweepCancelEvent,
   ManagerSweepResultEvent,
   ChatSnoozeRequestEvent,
   ChatSnoozeBackClearRequestEvent,
@@ -9494,6 +9509,7 @@ export const EVENT_SCHEMAS = {
   'chat.disable_request': ChatDisableRequestEvent,
   'chat.rotate_request': ChatRotateRequestEvent,
   'manager.sweep_run': ManagerSweepRunEvent,
+  'manager.sweep_cancel': ManagerSweepCancelEvent,
   'manager.sweep_result': ManagerSweepResultEvent,
   'chat.snooze_request': ChatSnoozeRequestEvent,
   'chat.snooze_back_clear_request': ChatSnoozeBackClearRequestEvent,

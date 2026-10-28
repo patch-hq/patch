@@ -69,6 +69,15 @@ describe('sweep nudges do not stack', () => {
     await t.running;
   });
 
+  it('cancelManagerSweep drops a nudge already queued on a chat', async () => {
+    const t = await runningChat();
+    await t.nudge('n1');
+    expect(t.queued()).toEqual(['n1']);
+    t.daemon.cancelManagerSweep();
+    expect(t.cancelled()).toEqual(['n1']);
+    await t.running;
+  });
+
   it('setGoal(null) flushes a queued nudge', async () => {
     const t = await runningChat();
     await t.daemon.setGoal(t.chatId, 'ship it');

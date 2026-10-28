@@ -598,6 +598,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     prompt: 'Decide whether to nudge, wake, flag or leave each candidate.',
     model: 'claude-opus-4',
   },
+  'manager.sweep_cancel': { type: 'manager.sweep_cancel' },
   'manager.sweep_result': {
     type: 'manager.sweep_result',
     runId: 'run-1',

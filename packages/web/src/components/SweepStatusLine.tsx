@@ -26,21 +26,48 @@ function hhmm(at: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+const RUNS_SHOWN = 10;
+
+function ActionRows({ run, first }: { run: SweepRun; first: boolean }): JSX.Element {
+  const navigate = useNavigate();
+  if (run.error) return <div className="sweep-status-error">{run.error}</div>;
+  if (run.actions.length === 0) return <div className="sweep-status-empty">Nothing changed.</div>;
+  return (
+    <>
+      {run.actions.map((a) => (
+        <button
+          type="button"
+          key={a.chatId}
+          className="sweep-status-row"
+          data-testid={
+            first ? `sweep-status-row-${a.chatId}` : `sweep-status-row-${run.runId}-${a.chatId}`
+          }
+          onClick={() => navigate(`/chats/${a.chatId}`)}
+        >
+          {a.action} · {a.chatId}
+          {a.edge ? ` · ${a.edge}` : ''}
+          {a.detail ? <span className="sweep-status-detail-text"> — {a.detail}</span> : null}
+        </button>
+      ))}
+    </>
+  );
+}
+
 export function SweepStatusLine(): JSX.Element {
-  const [last, setLast] = useState<SweepRun | null | undefined>(undefined); // undefined = loading
+  const [runs, setRuns] = useState<SweepRun[] | undefined>(undefined); // undefined = loading
   const [expanded, setExpanded] = useState(false);
   const [checking, setChecking] = useState(false);
   const pushError = useUiStore((s) => s.pushError);
-  const navigate = useNavigate();
 
   const load = (): void => {
     void api
-      .getSweepRuns(1)
-      .then((res) => setLast(res.runs[0] ?? null))
+      .getSweepRuns(RUNS_SHOWN)
+      .then((res) => setRuns(res.runs))
       .catch((e: Error) => pushError(failed('sweep status'), undefined, e.message));
   };
 
   useEffect(load, []);
+  const last = runs === undefined ? undefined : (runs[0] ?? null);
 
   const checkNow = (): void => {
     setChecking(true);
@@ -75,25 +102,18 @@ export function SweepStatusLine(): JSX.Element {
       >
         Check now
       </button>
-      {expanded && last ? (
+      {expanded && runs && last ? (
         <div className="sweep-status-detail" data-testid="sweep-status-detail">
-          {last.error ? (
-            <div className="sweep-status-error">{last.error}</div>
-          ) : last.actions.length === 0 ? (
-            <div className="sweep-status-empty">Nothing changed.</div>
-          ) : (
-            last.actions.map((a) => (
-              <button
-                type="button"
-                key={a.chatId}
-                className="sweep-status-row"
-                data-testid={`sweep-status-row-${a.chatId}`}
-                onClick={() => navigate(`/chats/${a.chatId}`)}
-              >
-                {a.action} · {a.chatId}
-              </button>
-            ))
-          )}
+          <ActionRows run={last} first />
+          {runs.slice(1).map((run) => (
+            <div key={run.runId} data-testid={`sweep-status-earlier-${run.runId}`}>
+              <div className="sweep-status-earlier">
+                {hhmm(run.at)} · {summarize(run)}
+                {run.error ? ' · failed' : ''}
+              </div>
+              <ActionRows run={run} first={false} />
+            </div>
+          ))}
         </div>
       ) : null}
     </div>
