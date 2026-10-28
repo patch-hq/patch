@@ -358,6 +358,42 @@ export function buildTrackNav(
   return out;
 }
 
+/**
+ * An edit fork logs its replacement turn under a fresh seq, so the turn on
+ * screen is not at the fork point's own seq (that one belongs to the track it
+ * replaced). Move each fork point's switcher onto the replacement it produced:
+ * walking the active path from the root, the replacement of the fork made at
+ * `S` is the first user turn in `[S, S')`, where `S'` is the next fork down the
+ * path (the deeper fork's cut-off). A replacement a deeper fork has itself
+ * replaced is not on screen, so it gets no switcher.
+ */
+export function placeTrackNav(
+  nav: Map<number, TrackNav>,
+  branches: ChatBranch[],
+  activeBranchId: string,
+  timeline: readonly ChatEventEntry[],
+): Map<number, TrackNav> {
+  const byId = new Map(branches.map((b) => [b.branchId, b]));
+  const forks: number[] = [];
+  const seen = new Set<string>();
+  let cursor = byId.get(activeBranchId);
+  while (cursor && !seen.has(cursor.branchId)) {
+    seen.add(cursor.branchId);
+    if (cursor.forkFromSeq !== null && !cursor.sideThread) forks.unshift(cursor.forkFromSeq);
+    cursor = cursor.parentBranchId === null ? undefined : byId.get(cursor.parentBranchId);
+  }
+  const out = new Map(nav);
+  forks.forEach((from, i) => {
+    const to = forks[i + 1] ?? Number.POSITIVE_INFINITY;
+    const replacement = timeline.find(
+      (e) => e.kind === 'message' && e.role === 'user' && e.seq >= from && e.seq < to,
+    );
+    const here = nav.get(from);
+    if (replacement && here && !out.has(replacement.seq)) out.set(replacement.seq, here);
+  });
+  return out;
+}
+
 export function ChatRoute({
   ws,
   chatId: chatIdProp,
@@ -1447,12 +1483,19 @@ export function ChatRoute({
 
   // spec/04 § Branching — one stable TrackNav per fork point, rebuilt only when
   // the graph itself changes so the transcript's memoisation survives.
-  const trackNav = useMemo(
+  const baseTrackNav = useMemo(
     () =>
       branchGraph
         ? buildTrackNav(branchGraph.branches, branchGraph.activeBranchId)
         : new Map<number, TrackNav>(),
     [branchGraph],
+  );
+  const trackNav = useMemo(
+    () =>
+      branchGraph
+        ? placeTrackNav(baseTrackNav, branchGraph.branches, branchGraph.activeBranchId, timeline)
+        : baseTrackNav,
+    [baseTrackNav, branchGraph, timeline],
   );
 
   const handleFork = useCallback(

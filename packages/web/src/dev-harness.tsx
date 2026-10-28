@@ -1954,8 +1954,10 @@ useChatStore.setState((s) => ({
     chat_forked: [
       { seq: 0, kind: 'message', role: 'user', content: 'the shared prefix turn', at: 0 },
       { seq: 1, kind: 'message', role: 'assistant', content: 'prefix reply', at: 1 },
-      { seq: 2, kind: 'message', role: 'user', content: 'the edited turn', at: 2 },
-      { seq: 3, kind: 'message', role: 'assistant', content: 'reply on this track', at: 3 },
+      // The edit's replacement is logged under a fresh seq; the turn it replaced
+      // (the fork point, seq 2) belongs to the other track.
+      { seq: 6, kind: 'message', role: 'user', content: 'the edited turn', at: 2 },
+      { seq: 7, kind: 'message', role: 'assistant', content: 'reply on this track', at: 3 },
     ],
     chat_image: [
       {
