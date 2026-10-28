@@ -1325,32 +1325,6 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     code: 'folder_not_found',
     message: 'folder does not exist on the host: /nope',
   },
-  'patch.browser_tunnel.open': {
-    type: 'patch.browser_tunnel.open',
-    streamId: 'stream-1',
-    hostId: 'd1',
-    host: 'example.com',
-    port: 443,
-  },
-  'patch.browser_tunnel.ready': {
-    type: 'patch.browser_tunnel.ready',
-    streamId: 'stream-1',
-  },
-  'patch.browser_tunnel.data': {
-    type: 'patch.browser_tunnel.data',
-    streamId: 'stream-1',
-    data: 'aGVsbG8=',
-  },
-  'patch.browser_tunnel.close': {
-    type: 'patch.browser_tunnel.close',
-    streamId: 'stream-1',
-  },
-  'patch.browser_tunnel.error': {
-    type: 'patch.browser_tunnel.error',
-    streamId: 'stream-1',
-    code: 'host_offline',
-    message: 'routing host d2 is offline',
-  },
   'web_bot_auth.sign_request': {
     type: 'web_bot_auth.sign_request',
     hostId: 'd1',

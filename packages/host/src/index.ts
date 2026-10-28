@@ -198,7 +198,6 @@ import {
   handleWatchStopRequest,
 } from './watchRequests.js';
 import { HostStateStore } from './hostState.js';
-import { BrowserTunnelClient, BrowserTunnelRelay } from './browser-tunnel.js';
 import { AudioRelayBridge } from './audio-relay-bridge.js';
 import { webBotAuthFromServer } from './webBotAuth.js';
 import { appBrowserLink } from './appBrowser.js';
@@ -755,12 +754,6 @@ async function startHost(
   let goalModel: string = persistedHostState.goalModel ?? DEFAULT_GOAL_MODEL;
   let goalRefusalLimit: number = persistedHostState.goalRefusalLimit ?? DEFAULT_GOAL_REFUSAL_LIMIT;
   /**
-   * spec/02 § Browser — Route through: the hostId of another of the user's
-   * hosts this host's `patch_browser_*` traffic egresses through. Undefined
-   * means direct, the default.
-   */
-  let browserRouteThrough: string | undefined = persistedHostState.browserRouteThrough;
-  /**
    * Whether this host auto-resumes turns blocked by a Claude API usage/rate
    * limit (spec/10 § Usage limits). Persisted in host.json; ON unless the user
    * has explicitly turned it off.
@@ -1132,7 +1125,6 @@ async function startHost(
       // Always true: kept on the report so a surface that still reads it
       // shows the (only) state rather than "unsupported".
       harnessClaudeMdEnabled: true,
-      browserRouteThrough: browserRouteThrough ?? null,
     });
 
   /**
@@ -1253,13 +1245,6 @@ async function startHost(
    * to fail INSIDE the turn rather than buffer (spec/03 § Cross-chat tools).
    */
   const onlineHosts = new Set<string>();
-  /**
-   * Display names for other known hosts, from the greeting's roster
-   * (spec/02 § Browser — Route through). Only used for a human-readable
-   * name on the RoutingHostOfflineError / the `routedVia` indicator — the
-   * hostId itself, which is always correct, is the fallback.
-   */
-  const hostNames = new Map<string, string>();
   /**
    * In-flight `patch.list_chats.request` calls, keyed by the chat that asked.
    * The server owns the account-wide chat list: only it sees every machine's
@@ -1463,19 +1448,6 @@ async function startHost(
       .then((result) => result.headers),
   );
 
-  // spec/02 § Browser — Route through. This host's two independent roles:
-  // the BROWSING half (its own `patch_browser_*` traffic egressing via
-  // another host, when `browserRouteThrough` names one) and the ROUTING
-  // half (answering another host's `open` for ITS browser, whenever one
-  // names THIS host — both can be true of the same machine at once).
-  const browserTunnelClient = new BrowserTunnelClient({
-    logger: logger.child({ component: 'browser-tunnel-client' }),
-    sender: (_hostId, event) => emit(event),
-  });
-  const browserTunnelRelay = new BrowserTunnelRelay({
-    logger: logger.child({ component: 'browser-tunnel-relay' }),
-    sender: (event) => emit(event),
-  });
   // spec/07 § Voice is a per-host capability, spec/03 § Audio relay over the
   // host link: this host's half of the cross-host audio relay, bridging a
   // session the server has tunnelled over THIS link to this host's own local
@@ -2048,7 +2020,6 @@ async function startHost(
       onlineHosts.clear();
       for (const host of greeting.hosts) {
         if (host.online && host.hostId !== selfHostId) onlineHosts.add(host.hostId);
-        if (host.host?.hostName) hostNames.set(host.hostId, host.host.hostName);
       }
       // Group 8 fix (DX-M1): the server's ChatRegistry is purely in-memory and
       // gated to admit `chat.state` only for chatIds it has previously seen
@@ -2667,22 +2638,6 @@ async function startHost(
           logger.info({ patchMcpEnabled }, 'patch MCP server toggled');
         }
         if (event.harnessClaudeMdEnabled === false) ignoreClaudeMdOff('host.settings');
-        if (event.browserRouteThrough !== undefined) {
-          // null clears it (direct again). A value naming THIS host is not a
-          // valid "another of the user's hosts" (spec/02 § Browser — Route
-          // through) — the Settings picker never offers it, so this is a
-          // stale/bad write rather than something to honour silently.
-          if (event.browserRouteThrough === selfHostId) {
-            logger.warn(
-              { hostId: event.browserRouteThrough },
-              'host.settings: browserRouteThrough named this host itself; ignored',
-            );
-          } else {
-            browserRouteThrough = event.browserRouteThrough ?? undefined;
-            hostStateStore.update({ browserRouteThrough });
-            logger.info({ browserRouteThrough }, 'browser route-through changed');
-          }
-        }
         sender(describeHost());
         return;
       }
@@ -3128,42 +3083,6 @@ async function startHost(
         // fail INSIDE the turn, which means knowing it is down without asking.
         if (event.type === 'host.online') onlineHosts.add(event.hostId);
         else onlineHosts.delete(event.hostId);
-        return;
-      }
-      if (event.type === 'patch.browser_tunnel.open') {
-        // spec/02 § Browser — Route through: another host's browser asked
-        // THIS host to make a real outbound connection on its behalf.
-        browserTunnelRelay.handleOpen(event);
-        return;
-      }
-      if (
-        event.type === 'patch.browser_tunnel.ready' ||
-        event.type === 'patch.browser_tunnel.error'
-      ) {
-        // These only ever travel routing → browsing, so only the browsing
-        // half (the client) ever receives one.
-        browserTunnelClient.handleEvent(event);
-        return;
-      }
-      if (
-        event.type === 'patch.browser_tunnel.data' ||
-        event.type === 'patch.browser_tunnel.close'
-      ) {
-        // Travels in BOTH directions, so this host could be EITHER half for
-        // it — exactly one of the two will actually be tracking the stream
-        // (a host is never both the browsing and routing end of the same
-        // one), so whichever recognises the streamId owns the frame.
-        if (browserTunnelRelay.hasStream(event.streamId)) {
-          if (event.type === 'patch.browser_tunnel.data') browserTunnelRelay.handleData(event);
-          else browserTunnelRelay.handleClose(event);
-        } else if (browserTunnelClient.hasStream(event.streamId)) {
-          browserTunnelClient.handleEvent(event);
-        } else {
-          logger.warn(
-            { streamId: event.streamId },
-            'browser tunnel frame for an unknown stream; dropping',
-          );
-        }
         return;
       }
       if (event.type === 'patch.audio_relay.open') {
@@ -4237,13 +4156,6 @@ async function startHost(
       home: homedir(),
       logger: logger.child({ component: 'app-browser' }),
     }),
-    // spec/02 § Browser — Route through.
-    browserRouting: {
-      target: () => browserRouteThrough,
-      isOnline: (hostId) => onlineHosts.has(hostId),
-      hostName: (hostId) => hostNames.get(hostId) ?? hostId,
-      proxyServerFor: (hostId) => browserTunnelClient.proxyServerFor(hostId),
-    },
     // Initialized from persisted state; toggled by `host.settings`.
     // Not passed here — `setAutoResumeRateLimit` is called after construction.
     // spec/10 § Backend credentials — multiple accounts: validates/resolves a
@@ -5248,10 +5160,6 @@ async function startHost(
     // Host searches die with the host too — a surface mid-search just gets
     // no more frames for that `searchId`, same as a cancel.
     hostSearch.cancelAll();
-    // spec/02 § Browser — Route through: close every SOCKS listener/outbound
-    // socket this host holds, on either half, rather than leaking them.
-    browserTunnelClient.dispose();
-    browserTunnelRelay.dispose();
     audioRelayBridge.dispose();
     await audioServer.close().catch(() => undefined);
     await kokoro.close().catch(() => undefined);

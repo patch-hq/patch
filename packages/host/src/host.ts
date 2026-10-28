@@ -115,8 +115,6 @@ export interface HostDescriptionInput {
   patchMcpEnabled?: boolean | undefined;
   /** Always true now: the shipped Manager/Speakers CLAUDE.md always loads. */
   harnessClaudeMdEnabled: boolean;
-  /** spec/02 § Browser — Route through: the routing host's hostId, or null when direct. */
-  browserRouteThrough: string | null;
   /** Battery state (`host.host.power`); absent when the machine has no readable battery. */
   power?: { onBattery: boolean; percent: number } | undefined;
 }
@@ -181,7 +179,6 @@ export function describeHost(input: HostDescriptionInput): HostInfoEvent {
     harnessMcpServers: input.harnessMcpServers,
     ...(input.patchMcpEnabled !== undefined ? { patchMcpEnabled: input.patchMcpEnabled } : {}),
     harnessClaudeMdEnabled: input.harnessClaudeMdEnabled,
-    browserRouteThrough: input.browserRouteThrough,
     ...(input.power !== undefined ? { power: input.power } : {}),
   };
 }

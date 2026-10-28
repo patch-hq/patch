@@ -2763,16 +2763,6 @@ export const HostInfoEvent = z
      */
     harnessClaudeMdEnabled: z.boolean().optional(),
     /**
-     * Agent browser routing (spec/02 § Browser — Route through): the
-     * `hostId` of another of the user's hosts whose network this host's
-     * `patch_browser_*` traffic egresses through, or `null` when the browser
-     * goes direct. Stated unconditionally once a host supports it, same
-     * discipline as `questionExpiry` above — absent means this host
-     * predates the setting, and a surface must read that as "not routed",
-     * never as the field being merely unset.
-     */
-    browserRouteThrough: z.string().min(1).nullable().optional(),
-    /**
      * The machine's power state: whether it is running on battery, and the
      * charge, 0-100. Absent when the host has no battery (a desktop, a server)
      * or cannot read one — absent never means "plugged in".
@@ -4849,16 +4839,6 @@ export const HostSettingsEvent = z
      * `false` here (logging it).
      */
     harnessClaudeMdEnabled: z.boolean().optional(),
-    /**
-     * Set this host's agent-browser routing (spec/02 § Browser — Route
-     * through): a `hostId` routes `patch_browser_*` traffic through that
-     * host's network instead of this one's; `null` turns routing off (direct
-     * again); absent leaves the current setting unchanged. Changing this
-     * value (either direction) closes this host's open browser tabs — the
-     * underlying Chromium only picks up a new proxy on launch, so there is no
-     * way to re-route a tab already in flight.
-     */
-    browserRouteThrough: z.string().min(1).nullable().optional(),
   })
   .strict();
 export type HostSettingsEvent = z.infer<typeof HostSettingsEvent>;
@@ -7014,87 +6994,6 @@ export const PatchTerminalErrorEvent = z
   .strict();
 export type PatchTerminalErrorEvent = z.infer<typeof PatchTerminalErrorEvent>;
 
-// ---------------------------------------------------------------------------
-// Browser tunnel (spec/02 § Browser — Route through, spec/03 § Browser
-// tunnel). Daemon-to-daemon, relayed by the server exactly like `patch.spawn`
-// (never surface-addressed — a surface sets `browserRouteThrough` via
-// `host.settings` and the two hosts do the rest).
-//
-// A host whose Browser settings name another host as "Route through" opens a
-// local, loopback-only SOCKS5 listener that its own Chromium is launched
-// against (`browser.ts`); each CONNECT that listener gets becomes one of
-// these streams. No port is opened on either machine — only the existing
-// host↔server WS links carry the bytes. Shaped like `patch.terminal.*`
-// (open/data/close over a `sessionId`-like correlator) because it is the same
-// problem: a persistent byte stream multiplexed over frames, not a
-// request/response RPC.
-//
-// Lifecycle: `open` (browsing host → routing host) → `ready` or `error`
-// (routing host → browsing host) → any number of `data` in EITHER direction →
-// `close` from either side, which the server relays to the other and then
-// forgets. There is no requestId: `streamId` alone correlates every frame of
-// one stream, in both directions, for the stream's whole life.
-
-export const PatchBrowserTunnelOpenEvent = z
-  .object({
-    type: z.literal('patch.browser_tunnel.open'),
-    /** Minted by the browsing host; every later frame of this stream carries it. */
-    streamId: z.string().min(1),
-    /** The ROUTING host asked to make the real outbound connection. */
-    ...hostIdField,
-    /** Destination the browsing host's Chromium asked its SOCKS proxy for. */
-    host: z.string().min(1),
-    port: z.number().int().min(1).max(65535),
-  })
-  .strict();
-export type PatchBrowserTunnelOpenEvent = z.infer<typeof PatchBrowserTunnelOpenEvent>;
-
-/** The routing host made the real connection; the browsing host may now send `data`. */
-export const PatchBrowserTunnelReadyEvent = z
-  .object({
-    type: z.literal('patch.browser_tunnel.ready'),
-    streamId: z.string().min(1),
-  })
-  .strict();
-export type PatchBrowserTunnelReadyEvent = z.infer<typeof PatchBrowserTunnelReadyEvent>;
-
-/** Raw bytes, base64, in either direction. */
-export const PatchBrowserTunnelDataEvent = z
-  .object({
-    type: z.literal('patch.browser_tunnel.data'),
-    streamId: z.string().min(1),
-    data: z.string().min(1),
-  })
-  .strict();
-export type PatchBrowserTunnelDataEvent = z.infer<typeof PatchBrowserTunnelDataEvent>;
-
-/** Either side ending the stream cleanly. The server relays it once, then drops the route. */
-export const PatchBrowserTunnelCloseEvent = z
-  .object({
-    type: z.literal('patch.browser_tunnel.close'),
-    streamId: z.string().min(1),
-  })
-  .strict();
-export type PatchBrowserTunnelCloseEvent = z.infer<typeof PatchBrowserTunnelCloseEvent>;
-
-/**
- * NO FALLBACK: the one frame that answers a stream the server or the routing
- * host refused — an unregistered or offline routing host (server-raised,
- * `host_not_registered` / `host_offline`), or that host's own outbound
- * connect failing (`connect_failed`). Always ends the stream; the browsing
- * host's SOCKS listener fails the CONNECT it is holding open rather than
- * ever trying the destination itself.
- */
-export const PatchBrowserTunnelErrorEvent = z
-  .object({
-    type: z.literal('patch.browser_tunnel.error'),
-    streamId: z.string().min(1),
-    code: z.enum(['host_not_registered', 'host_offline', 'connect_failed']),
-    message: z.string().min(1),
-  })
-  .strict();
-export type PatchBrowserTunnelErrorEvent = z.infer<typeof PatchBrowserTunnelErrorEvent>;
-
 // A browser host asks its own authenticated Patch server to sign one outbound
 // authority. The deployment private key never crosses the host link.
 export const WebBotAuthSignRequestEvent = z
@@ -7145,7 +7044,7 @@ export type WebBotAuthSignResponseEvent = z.infer<typeof WebBotAuthSignResponseE
 // unmodified on the other end, same discipline as the direct-dial path in
 // `audio-relay.ts`.
 //
-// Shaped like `patch.browser_tunnel.*` (open/frame/close over a session-scoped
+// Shaped like `patch.terminal.*` (open/frame/close over a session-scoped
 // correlator) — same underlying problem, a persistent byte stream multiplexed
 // over frames — with one addition: `frame.binary` marks whether the inner WS
 // frame it carries was text or binary, because a voice session's inner stream
@@ -9314,12 +9213,6 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchTerminalCommandExitEvent,
   PatchTerminalExitEvent,
   PatchTerminalErrorEvent,
-  // Browser tunnel
-  PatchBrowserTunnelOpenEvent,
-  PatchBrowserTunnelReadyEvent,
-  PatchBrowserTunnelDataEvent,
-  PatchBrowserTunnelCloseEvent,
-  PatchBrowserTunnelErrorEvent,
   WebBotAuthSignRequestEvent,
   WebBotAuthSignResponseEvent,
   // Audio relay over the host link
@@ -9620,11 +9513,6 @@ export const EVENT_SCHEMAS = {
   'patch.terminal.command-exit': PatchTerminalCommandExitEvent,
   'patch.terminal.exit': PatchTerminalExitEvent,
   'patch.terminal.error': PatchTerminalErrorEvent,
-  'patch.browser_tunnel.open': PatchBrowserTunnelOpenEvent,
-  'patch.browser_tunnel.ready': PatchBrowserTunnelReadyEvent,
-  'patch.browser_tunnel.data': PatchBrowserTunnelDataEvent,
-  'patch.browser_tunnel.close': PatchBrowserTunnelCloseEvent,
-  'patch.browser_tunnel.error': PatchBrowserTunnelErrorEvent,
   'web_bot_auth.sign_request': WebBotAuthSignRequestEvent,
   'web_bot_auth.sign_response': WebBotAuthSignResponseEvent,
   'patch.audio_relay.open': PatchAudioRelayOpenEvent,

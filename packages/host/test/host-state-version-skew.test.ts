@@ -46,6 +46,12 @@ describe('HostStateStore — a file from another version of the host', () => {
     expect(store.get().permissionModeDefault).toBe('bypassPermissions');
   });
 
+  it('boots past browserRouteThrough, retired with the browser Route through feature', () => {
+    write({ hostName: 'box', browserRouteThrough: 'host-b' });
+    const store = new HostStateStore(home, logger);
+    expect(store.get().hostName).toBe('box');
+  });
+
   it('keeps every key it DOES know from that same file', () => {
     write({
       hostName: 'box',

@@ -1251,13 +1251,6 @@ reports the key, which Settings → Providers sets without a restart.
     that machine distinct from the Memory switch in Agent behavior. Remove
     writes through to that host and settles when its `claude_settings.updated`
     arrives; aimed at an offline host it is refused up front naming it.
-  - Browser — Route through: None, or any OTHER registered host (never this
-    one), picking which network this host's `patch_browser_*` traffic
-    egresses from (`02-host.md` § Route through). Written through to that
-    host on the same terms as Voice above. While it names a host,
-    this row states "via &lt;host&gt;"; if that host is offline, the row says
-    so plainly, naming it, since browsing from here will fail until it
-    reconnects.
   - Remove host — confirmed, naming how many chats live on it
     (`10-auth.md` § Revocation).
 

@@ -16,11 +16,9 @@ import {
   BrowserManager,
   BrowserNotInstalledError,
   RefNotFoundError,
-  RoutingHostOfflineError,
   TabNotFoundError,
 } from '../src/browser.js';
 import { describeRealBrowser } from './helpers/realBrowser.js';
-import { BrowserTunnelClient, BrowserTunnelRelay } from '../src/browser-tunnel.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -121,12 +119,6 @@ function startFixtureServer(): Promise<{ server: Server; baseUrl: string }> {
         html(
           `<h1 role="status">Thanks ${q.get('name')} (${q.get('country')}, subscribed=${q.get('subscribe') ? 'yes' : 'no'})</h1>`,
         );
-        return;
-      }
-      if (url.pathname === '/whoami') {
-        // The "exit IP" check: whichever socket actually reached this
-        // server, surfaced in the page so a test can read it back.
-        html(`<h1 role="status" id="addr">${req.socket.remoteAddress}</h1>`);
         return;
       }
       if (url.pathname === '/pointer') {
@@ -675,134 +667,4 @@ describe('BrowserManager — concurrent first opens', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
-});
-
-describeRealBrowser('BrowserManager — Route through (spec/02 § Browser — Route through)', () => {
-  let fixture: { server: Server; baseUrl: string } | undefined;
-  let managers: BrowserManager[] = [];
-  let tunnels: Array<BrowserTunnelClient | BrowserTunnelRelay> = [];
-  let tmpDirs: string[] = [];
-
-  afterEach(async () => {
-    for (const m of managers) await m.dispose();
-    managers = [];
-    for (const t of tunnels) t.dispose();
-    tunnels = [];
-    if (fixture) {
-      const server = fixture.server;
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    }
-    fixture = undefined;
-    for (const d of tmpDirs) rmSync(d, { recursive: true, force: true });
-    tmpDirs = [];
-  });
-
-  function newManager(virtualDisplay: string): BrowserManager {
-    const root = mkdtempSync(join(tmpdir(), 'patch-browser-route-'));
-    tmpDirs.push(root);
-    const m = new BrowserManager({ root, logger: silent, virtualDisplay });
-    managers.push(m);
-    return m;
-  }
-
-  /** A client+relay pair wired directly to each other, `relay`'s outbound egress pinned to `localAddress`. */
-  function wireTunnel(localAddress: string): { client: BrowserTunnelClient } {
-    const relay = new BrowserTunnelRelay({
-      logger: silent,
-      localAddress,
-      sender: (event) => client.handleEvent(event),
-    });
-    const client = new BrowserTunnelClient({
-      logger: silent,
-      sender: (_hostId, event) => {
-        if (event.type === 'patch.browser_tunnel.open') relay.handleOpen(event);
-        else if (event.type === 'patch.browser_tunnel.data') relay.handleData(event);
-        else relay.handleClose(event);
-      },
-    });
-    tunnels.push(client, relay);
-    return { client };
-  }
-
-  function whoamiAddr(snapshot: { role: string; name: string }[]): string | undefined {
-    return snapshot.find((n) => n.role === 'status')?.name;
-  }
-
-  it('a page really loads VIA the routing host — the origin sees that host, not this one (exit-IP check)', async () => {
-    fixture = await startFixtureServer();
-    const { client } = wireTunnel('127.0.0.3');
-    const manager = newManager(':94');
-
-    const { tabId, routedVia } = await manager.open({
-      url: `${fixture.baseUrl}/whoami`,
-      routeThrough: {
-        hostId: 'host-b',
-        hostName: 'Tom’s Mac',
-        online: true,
-        proxyServer: await client.proxyServerFor('host-b'),
-      },
-    });
-    expect(routedVia).toBe('Tom’s Mac');
-    const { snapshot } = await manager.read(tabId);
-    expect(whoamiAddr(snapshot)).toBe('127.0.0.3');
-
-    const tabs = await manager.tabs();
-    expect(tabs.find((t) => t.tabId === tabId)?.routedVia).toBe('Tom’s Mac');
-  }, 30_000);
-
-  it('with no routeThrough, the page loads direct — no routedVia, origin sees this host', async () => {
-    fixture = await startFixtureServer();
-    const manager = newManager(':95');
-    const { tabId, routedVia } = await manager.open({ url: `${fixture.baseUrl}/whoami` });
-    expect(routedVia).toBeUndefined();
-    const { snapshot } = await manager.read(tabId);
-    expect(whoamiAddr(snapshot)).toBe('127.0.0.1');
-  }, 30_000);
-
-  it('routing host OFFLINE fails the open loudly, naming the host — no fallback to direct', async () => {
-    fixture = await startFixtureServer();
-    const manager = newManager(':96');
-    await expect(
-      manager.open({
-        url: `${fixture.baseUrl}/whoami`,
-        routeThrough: { hostId: 'host-b', hostName: 'Tom’s Mac', online: false },
-      }),
-    ).rejects.toThrow(RoutingHostOfflineError);
-    await expect(
-      manager.open({
-        url: `${fixture.baseUrl}/whoami`,
-        routeThrough: { hostId: 'host-b', hostName: 'Tom’s Mac', online: false },
-      }),
-    ).rejects.toThrow(/Tom’s Mac/);
-    // NO FALLBACK: not even one tab was opened.
-    expect(await manager.tabs()).toEqual([]);
-  }, 30_000);
-
-  it('turning routing OFF goes direct again — closing the previously-routed tab', async () => {
-    fixture = await startFixtureServer();
-    const { client } = wireTunnel('127.0.0.4');
-    const manager = newManager(':97');
-
-    const routed = await manager.open({
-      url: `${fixture.baseUrl}/whoami`,
-      routeThrough: {
-        hostId: 'host-b',
-        hostName: 'Tom’s Mac',
-        online: true,
-        proxyServer: await client.proxyServerFor('host-b'),
-      },
-    });
-    expect((await manager.read(routed.tabId)).snapshot.find((n) => n.role === 'status')?.name).toBe(
-      '127.0.0.4',
-    );
-
-    // Off: a fresh open with no routeThrough relaunches direct, and the
-    // previously-routed tab — on the context that just closed — is gone.
-    const direct = await manager.open({ url: `${fixture.baseUrl}/whoami` });
-    expect(direct.routedVia).toBeUndefined();
-    expect((await manager.read(direct.tabId)).snapshot.find((n) => n.role === 'status')?.name).toBe(
-      '127.0.0.1',
-    );
-    await expect(manager.read(routed.tabId)).rejects.toThrow(TabNotFoundError);
-  }, 30_000);
 });

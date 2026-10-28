@@ -2732,58 +2732,6 @@ describe('src/index.ts main() — full host boot', () => {
     }
   });
 
-  it('spec/02 § Browser — Route through: host.settings sets/clears it, reported and persisted; naming itself is refused', async () => {
-    const boot = await bootMain({});
-    const hostJson = (): Record<string, unknown> =>
-      JSON.parse(readFileSync(join(boot.home, 'host.json'), 'utf8')) as Record<string, unknown>;
-    type HostReport = { browserRouteThrough?: string | null };
-    const lastHost = (): HostReport =>
-      boot.fakeServer.received.filter((e) => e.type === 'host.host').at(-1) as HostReport;
-    try {
-      await boot.fakeServer.waitForHello();
-      boot.fakeServer.authNow();
-      await boot.fakeServer.waitForFrame((e) => e.type === 'host.host');
-      expect(lastHost().browserRouteThrough).toBeNull();
-      expect(hostJson()['browserRouteThrough']).toBeUndefined();
-
-      const before = boot.fakeServer.received.length;
-      boot.fakeServer.send({
-        type: 'host.settings',
-        hostId: 'd1',
-        browserRouteThrough: 'host-b',
-      });
-      await boot.fakeServer.waitForFrame(
-        (e) =>
-          e.type === 'host.host' &&
-          boot.fakeServer.received.indexOf(e) >= before &&
-          e.browserRouteThrough === 'host-b',
-      );
-      expect(hostJson()['browserRouteThrough']).toBe('host-b');
-
-      // Naming THIS host itself is not a valid "another of the user's hosts"
-      // — ignored, the prior value survives.
-      const before2 = boot.fakeServer.received.length;
-      boot.fakeServer.send({ type: 'host.settings', hostId: 'd1', browserRouteThrough: 'd1' });
-      await boot.fakeServer.waitForFrame(
-        (e) => e.type === 'host.host' && boot.fakeServer.received.indexOf(e) >= before2,
-      );
-      expect(lastHost().browserRouteThrough).toBe('host-b');
-
-      // null clears it — direct again.
-      const before3 = boot.fakeServer.received.length;
-      boot.fakeServer.send({ type: 'host.settings', hostId: 'd1', browserRouteThrough: null });
-      await boot.fakeServer.waitForFrame(
-        (e) =>
-          e.type === 'host.host' &&
-          boot.fakeServer.received.indexOf(e) >= before3 &&
-          e.browserRouteThrough === null,
-      );
-      expect(hostJson()['browserRouteThrough']).toBeUndefined();
-    } finally {
-      await boot.cleanup();
-    }
-  });
-
   // The CLAUDE.md toggle is gone from Settings: the shipped Manager/
   // Speakers CLAUDE.md always loads. A `false` persisted by an older build, or
   // sent by a surface that still shows the toggle, is ignored and said once.
