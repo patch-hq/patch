@@ -1911,6 +1911,7 @@ describe('Composer', () => {
       onLevel: (cb: (l: number) => void) => void;
       /** Captured live-preview tee; call `emitPcm` to drive it from a test. */
       onPcm: (cb: (pcm: Int16Array) => void) => void;
+      onSilent: (cb: (reason: string) => void) => void;
       emitPcm: (pcm: Int16Array) => void;
       stop: Mock;
       cancel: Mock;
@@ -1919,6 +1920,7 @@ describe('Composer', () => {
       let pcmCb: ((pcm: Int16Array) => void) | null = null;
       return {
         onLevel: () => {},
+        onSilent: () => {},
         onPcm: (cb) => {
           pcmCb = cb;
         },

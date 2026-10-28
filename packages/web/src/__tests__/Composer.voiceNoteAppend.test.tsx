@@ -42,6 +42,7 @@ describe('voice note — the typed message is appended to, never erased', () => 
   const clip = new Blob(['x'], { type: 'audio/wav' });
   let rec: {
     onLevel: (cb: (l: number) => void) => void;
+    onSilent: () => void;
     stop: ReturnType<typeof vi.fn>;
     cancel: ReturnType<typeof vi.fn>;
   };
@@ -57,6 +58,7 @@ describe('voice note — the typed message is appended to, never erased', () => 
     useChatStore.setState({ timelines: { c1: [] } });
     rec = {
       onLevel: () => {},
+      onSilent: () => {},
       stop: vi.fn(async () => clip),
       cancel: vi.fn(),
     };
@@ -259,6 +261,7 @@ describe('voice note — the typed message is appended to, never erased', () => 
       const dictationRec = {
         onLevel: () => {},
         onPcm: () => {},
+        onSilent: () => {},
         stop: vi.fn(async () => clip),
         cancel: vi.fn(),
       };
