@@ -32,6 +32,11 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # The account's runners are one shared pool. Eight open PRs at four shards
+      # each filled it, and a fully built release sat an hour waiting for the
+      # runner its publish job needs. A PR takes two at a time (its shards run
+      # in two waves), so the pool keeps headroom; main still runs all four.
+      max-parallel: ${{ github.event_name == 'pull_request' && 2 || 4 }}
       matrix:
         shard: ['1/4', '2/4', '3/4', '4/4']
     steps:

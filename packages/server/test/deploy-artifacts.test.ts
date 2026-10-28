@@ -108,6 +108,11 @@ describe('H1 deploy artifacts — deploy command + backup scripts', () => {
     expect(tests).toMatch(/push:\s*\n\s*branches: \[main\]/);
     expect(tests).toMatch(/shard: \['1\/4', '2\/4', '3\/4', '4\/4'\]/);
     expect(tests).toMatch(/\n  tests:\n[\s\S]*?needs: \[verify\]/);
+    // PR runs take only two runners each, so a pile of open PRs leaves the shared
+    // pool headroom for a release's publish job instead of queueing it.
+    expect(tests).toMatch(
+      /max-parallel: \$\{\{ github\.event_name == 'pull_request' && 2 \|\| 4 \}\}/,
+    );
     // with PRs merged by themselves once green, and conflicts handed back.
     expect(read('.github/workflows/pr-automerge.yml')).toMatch(/gh pr merge --auto/);
     // The merge queue sets the method and refuses -d/--delete-branch.
