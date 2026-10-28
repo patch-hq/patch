@@ -97,7 +97,7 @@ test.describe('background task bar', () => {
     const box = await bar.boundingBox();
     const stream = await page.getByTestId('chat-stream').boundingBox();
     if (!head || !box || !stream) throw new Error('missing layout boxes');
-    expect(box.y).toBeGreaterThan(head.y);
+    expect(box.y).toBeGreaterThanOrEqual(head.y); // the header is above chat-main now
     expect(box.y + box.height).toBeLessThanOrEqual(stream.y + 1);
     expect(box.width).toBeGreaterThan(300);
 

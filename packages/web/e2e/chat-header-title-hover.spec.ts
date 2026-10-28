@@ -33,20 +33,20 @@ test.describe('chat header title hover', () => {
     await expect(page.getByTestId('chat-title')).not.toHaveAttribute('title', /^\s*·|·\s*$/);
   });
 
-  // `.chat-head-left` and `.chat-head-actions` are both `flex: 1 1 0` so
-  // `.chat-head-title` sits on the header's centre line.
+  // A group header (spec/14 § Groups) is left-aligned: badge · name start right
+  // after Back / Forward, and the actions take the right-hand end.
   for (const [label, chatId] of [
     ['unknown-folder', 'chat_no_folder'],
     ['known-folder', 'chat_bus'],
   ] as const) {
-    test(`the chat title stays centred for a ${label} chat`, async ({ page }) => {
+    test(`the chat title leads the header, after Back / Forward, for a ${label} chat`, async ({
+      page,
+    }) => {
       await page.goto(`/app/dev-harness.html?chat=${chatId}`);
       await expect(page.getByTestId('chat-title')).toBeVisible();
-      const headBox = (await page.getByTestId('chat-head').boundingBox())!;
+      const nav = (await page.getByTestId('nav-history').boundingBox())!;
       const titleBox = (await page.locator('.chat-head-title').boundingBox())!;
-      const headCentre = headBox.x + headBox.width / 2;
-      const titleCentre = titleBox.x + titleBox.width / 2;
-      expect(Math.abs(titleCentre - headCentre)).toBeLessThan(4);
+      expect(titleBox.x - (nav.x + nav.width)).toBeLessThan(24);
     });
   }
 });

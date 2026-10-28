@@ -912,6 +912,7 @@ function newTabItems(chatId: string | null): ContextMenuItem[] {
     ...(chatId === null
       ? []
       : [
+          item('new-chat', 'Chat', { kind: 'chat', chatId }),
           item('new-terminal', 'Terminal', { kind: 'terminal', chatId }),
           item('new-files', 'Files', { kind: 'page', page: 'files', chatId }),
           item('new-browser', 'Browser', { kind: 'browser', chatId }),
