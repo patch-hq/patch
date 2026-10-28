@@ -595,7 +595,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
       },
     ],
     messagesPerChat: 20,
-    prompt: 'Answer only what the principles cover.',
+    prompt: 'Answer only what the standing instructions cover.',
     model: 'claude-opus-4',
   },
   'manager.sweep_cancel': { type: 'manager.sweep_cancel' },

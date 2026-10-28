@@ -1299,10 +1299,11 @@ reports the key, which Settings → Providers sets without a restart.
 #### Special threads
 
 - **Sweep** (`06-threads-manager-speakers.md` § The sweep) — an Enabled
-  switch (off by default; the one switch that stops everything); the interval
-  (minutes, default 30); messages per chat (how many of each idle chat's recent
+  switch (off by default; the one switch that stops everything); the delivery slider
+  (Instant, then 5 minutes up to a day; default 30 minutes — how soon a question the
+  Manager could not answer reaches him); messages per chat (how many of each idle chat's recent
   messages the sweep reads, default 1); the model the sweep's one decision
-  call runs on (default a mid-size model); and the principles prompt — a text
+  call runs on (default a mid-size model); and the standing instructions — a text
   field showing the full default, editable, with a Reset to default (same
   pattern as the Patch tools prompt, § Agent behavior above). Account-wide, not
   per-surface: the sweep runs on the server and the Manager host.

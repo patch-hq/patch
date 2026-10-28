@@ -1,10 +1,10 @@
 // The Manager sweep's one decision call (spec/06 § The sweep).
 //
-// A cheap, tool-free, one-shot query: given the principles prompt and the
+// A cheap, tool-free, one-shot query: given the standing instructions and the
 // facts (chats that went idle, with their last messages), the model returns
 // exactly one action per chat — answer, digest or leave — as JSON. No tool
 // loop, so it cannot approve a permission; whether a question is covered by
-// Tom's principles is the prompt's call, not code's.
+// Tom's standing instructions is the prompt's call, not code's.
 //
 // NO FALLBACK: any failure — OAuth miss, SDK error, timeout, unparseable
 // reply — resolves to null, and the sweep records the run as a failure
@@ -26,6 +26,8 @@ export interface SweepDecision {
   message?: string;
   /** The open question, in one plain line (digest). */
   question?: string;
+  /** Why the Manager couldn't answer it itself (digest). */
+  reason?: string;
   /** The target chat's folder, echoed back; delivery checks it matches. */
   folder?: string;
 }
@@ -39,7 +41,7 @@ export interface SweepDecisionResult {
 export interface GenerateSweepDecisionsInput {
   /** The rendered digest text — candidates, their edge, idle time, and recent messages. */
   digest: string;
-  /** The (possibly user-edited) principles prompt — spec/06 § Settings. */
+  /** The (possibly user-edited) standing instructions — spec/06 § Settings. */
   prompt: string;
   model: string;
 }
@@ -75,17 +77,19 @@ export function parseSweepDecisions(raw: string): SweepDecision[] | null {
   const VALID_ACTIONS = new Set(['answer', 'digest', 'leave']);
   for (const d of raw_decisions) {
     if (typeof d !== 'object' || d === null) return null;
-    const { chatId, action, message, question, folder } = d as Record<string, unknown>;
+    const { chatId, action, message, question, reason, folder } = d as Record<string, unknown>;
     if (typeof chatId !== 'string' || chatId === '') return null;
     if (typeof action !== 'string' || !VALID_ACTIONS.has(action)) return null;
     if (message !== undefined && typeof message !== 'string') return null;
     if (question !== undefined && typeof question !== 'string') return null;
+    if (reason !== undefined && typeof reason !== 'string') return null;
     if (folder !== undefined && typeof folder !== 'string') return null;
     out.push({
       chatId,
       action: action as SweepDecision['action'],
       ...(typeof message === 'string' ? { message } : {}),
       ...(typeof question === 'string' ? { question } : {}),
+      ...(typeof reason === 'string' ? { reason } : {}),
       ...(typeof folder === 'string' ? { folder } : {}),
     });
   }

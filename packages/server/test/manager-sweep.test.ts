@@ -130,6 +130,34 @@ describe('ManagerSweeper', () => {
     expect(sweeper.pendingChats()).toEqual([]);
   });
 
+  test('instant (interval 0): a run starts as the chat goes idle, no waiting for a tick', () => {
+    settings = { ...settings, sweepIntervalMinutes: 0 };
+    goIdle('c1');
+    expect(requested).toHaveLength(1);
+    expect(requested[0]!.candidates.map((c) => c.chatId)).toEqual(['c1']);
+  });
+
+  test('instant: a chat going idle while a run is in flight is picked up once it reports back', () => {
+    settings = { ...settings, sweepIntervalMinutes: 0 };
+    goIdle('c1');
+    goIdle('c2');
+    expect(requested).toHaveLength(1);
+    sweeper.onResult({ runId: 'run-0', actions: [], tokensUsed: 0 });
+    expect(sweeper.tick()).toBe(true);
+    expect(requested[1]!.candidates.map((c) => c.chatId)).toEqual(['c2']);
+  });
+
+  test('instant: nothing is sent while the sweep is off', () => {
+    settings = { ...settings, sweepIntervalMinutes: 0, sweepEnabled: false };
+    goIdle('c1');
+    expect(requested).toEqual([]);
+  });
+
+  test('batched: a chat going idle waits for the interval', () => {
+    goIdle('c1');
+    expect(requested).toEqual([]);
+  });
+
   test('a chat is reported once: nothing new going idle means no second run', () => {
     goIdle('c1');
     nowMs += 30 * 60_000;

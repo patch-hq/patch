@@ -268,7 +268,7 @@ export function PromptsPage(): JSX.Element {
         />
         <PromptRow
           id="sweep"
-          title="Manager principles"
+          title="Manager standing instructions"
           sub="Which questions the Manager may answer for you when a chat goes idle."
           defaultText={DEFAULT_SWEEP_PROMPT}
           current={p.sweepPrompt}

@@ -2086,13 +2086,13 @@ export const SharedSettings = z
       .strict(),
     /** Whether the Manager sweep runs at all (spec/06 § The sweep). Off by default; the one switch that stops everything. */
     sweepEnabled: z.boolean(),
-    /** How often the sweep checks for chats that went idle, and posts the digest. */
-    sweepIntervalMinutes: z.number().int().positive(),
+    /** How soon a question the Manager can't answer reaches Tom: 0 = at once (a notification as the chat goes idle), otherwise batched into one digest every N minutes. */
+    sweepIntervalMinutes: z.number().int().nonnegative(),
     /** How many of each idle chat's most recent messages the sweep reads. */
     sweepMessagesPerChat: z.number().int().positive(),
     /** The Manager's own bounded context window (spec/06 § Manager conversation). */
     managerContextWindow: z.number().int().positive(),
-    /** The Manager's principles prompt — what it may answer on Tom's behalf; "Reset to default" writes `DEFAULT_SWEEP_PROMPT` back. */
+    /** The Manager's standing instructions — written guidance Tom edits, which the sweep reads to decide what it may answer on his behalf; "Reset to default" writes `DEFAULT_SWEEP_PROMPT` back. */
     sweepPrompt: z.string().min(1),
     /** The model the sweep's one decision call runs on. */
     sweepModel: z.string().min(1),

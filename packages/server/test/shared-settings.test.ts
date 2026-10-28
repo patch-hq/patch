@@ -121,6 +121,11 @@ describe('SharedSettingsService', () => {
     });
   });
 
+  it('accepts 0 for the sweep interval (Instant) and refuses a negative one', () => {
+    expect(service.update({ sweepIntervalMinutes: 0 }).sweepIntervalMinutes).toBe(0);
+    expect(() => service.update({ sweepIntervalMinutes: -5 })).toThrow();
+  });
+
   it('has the sweep off by default', () => {
     expect(service.current().sweepEnabled).toBe(false);
   });

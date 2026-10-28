@@ -1,11 +1,11 @@
 // The Manager sweep (spec/06 § The sweep) — the periodic half of the
-// Manager's two automatic jobs: answer the rote questions its principles
-// prompt covers, and batch the rest into a digest.
+// Manager's two automatic jobs: answer the rote questions its standing
+// instructions cover, and batch the rest into a digest.
 //
 // Code here supplies only facts: which chats went idle since the last check,
 // and when a check is due (the interval, or "Check now"). Everything that is
-// judgement — is this a question, does a principle cover it — is the
-// principles prompt's, run on the Manager host (`managerSweepGen.ts`,
+// judgement — is this a question, do the standing instructions cover it — is the
+// model's, run on the Manager host (`managerSweepGen.ts`,
 // `ChatRunner.runManagerSweep`), the one component with both local and
 // cross-host read access and the account's OAuth. This module never reads a
 // transcript or calls a model; it decides whether to ask for a run and
@@ -139,6 +139,9 @@ export class ManagerSweeper {
     if (event.activity === 'idle' && previousActivity === 'running' && event.turnStopped !== true) {
       this.pending.add(chatId);
       this.idleSince.set(chatId, this.now());
+      // Instant (interval 0): the question goes out as the chat goes idle,
+      // not at the next tick.
+      if (this.deps.settings().sweepIntervalMinutes === 0) this.attemptFire();
     }
     // It started working again before the check: whatever it asked is stale.
     if (event.activity === 'running') this.pending.delete(chatId);
@@ -192,7 +195,8 @@ export class ManagerSweeper {
 
   /**
    * Called on a steady tick. Fires when something went idle AND the interval
-   * has elapsed. Returns whether a run was requested, which is what the tests
+   * has elapsed (interval 0 = instant: always due, which also retries chats
+   * held back by a run still in flight). Returns whether a run was requested, which is what the tests
    * assert on.
    */
   tick(): boolean {

@@ -40,9 +40,11 @@ describe('parseSweepDecisions', () => {
 
   it('parses a digest decision with its question', () => {
     const out = parseSweepDecisions(
-      '{"decisions": [{"chatId": "c1", "action": "digest", "question": "which database?"}]}',
+      '{"decisions": [{"chatId": "c1", "action": "digest", "question": "which database?", "reason": "needs a person"}]}',
     );
-    expect(out).toEqual([{ chatId: 'c1', action: 'digest', question: 'which database?' }]);
+    expect(out).toEqual([
+      { chatId: 'c1', action: 'digest', question: 'which database?', reason: 'needs a person' },
+    ]);
   });
 
   it('returns null for invalid JSON', () => {
