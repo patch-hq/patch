@@ -15417,36 +15417,8 @@ select.permission-mode.is-pending {
   cursor: default;
 }
 
-.delegate-strip {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 4px 12px;
-  border-top: 1px solid var(--line-soft);
-}
-.delegate-strip-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  background: transparent;
-  border: 0;
-  font: inherit;
-  color: var(--ink-2);
-  text-align: left;
-  cursor: pointer;
-}
-.delegate-strip-label {
+.delegate-strip-item {
   min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.delegate-strip-time {
-  flex: none;
-  color: var(--ink-3);
-  font-variant-numeric: tabular-nums;
 }
 
 /* Find in chat (spec/14 § Find in chat) */

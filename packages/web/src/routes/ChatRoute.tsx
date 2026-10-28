@@ -2098,6 +2098,7 @@ export function ChatRoute({
       <ProviderContextPanel row={row} />
       <WakeBar row={row} />
       <BackgroundTaskBar chatId={chatId} />
+      <DelegateStrip chatId={chatId} />
       <BrowserHandoffPanel chatId={chatId} />
       <ArtifactBar chatId={chatId} />
       <ArchivedBanner row={row} />
@@ -2201,7 +2202,6 @@ export function ChatRoute({
                 onSendAnyway={handleHookSendAnyway}
               />
             ) : null}
-            <DelegateStrip chatId={chatId} />
             <Composer
               key={chatId}
               ref={composerRef}
@@ -4533,8 +4533,8 @@ function liveDelegateForCall(
 
 /**
  * spec/14 § Main chat panel — Running delegates strip: one line per
- * `patch_delegate` subagent still going (label + running time) above the
- * composer, so it stays on screen after the tool-call row has scrolled away.
+ * `patch_delegate` subagent still going (label + running time) in the
+ * top bars (under the background task bar, drawn like it), so it stays on screen after the tool-call row has scrolled away.
  * Each line opens the subagent's read-only transcript; a subagent leaves the
  * strip the moment it is no longer running or awaiting permission.
  */
@@ -4553,26 +4553,29 @@ function DelegateStrip({ chatId }: { chatId: string }): JSX.Element | null {
   }, [any]);
   if (!any) return null;
   return (
-    <div className="delegate-strip" data-testid="delegate-strip">
-      {running.map(([id, d]) => (
-        <div key={id} className="delegate-strip-item" data-testid="delegate-strip-item">
-          <button
-            type="button"
-            className="delegate-strip-row"
-            data-testid="delegate-strip-open"
-            aria-expanded={openId === id}
-            onClick={() => setOpenId(openId === id ? null : id)}
-          >
-            <span className="delegate-strip-label">{d.label}</span>
-            <span className="delegate-strip-time" data-testid="delegate-strip-time">
-              {formatElapsed(d.since, now)}
-            </span>
-          </button>
-          {openId === id ? (
-            <DelegateTranscript parentId={chatId} delegateId={id} status={d.status} />
-          ) : null}
-        </div>
-      ))}
+    <div className="delegate-strip background-task-bar" data-testid="delegate-strip">
+      <div className="background-task-bar-rows">
+        {running.map(([id, d]) => (
+          <div key={id} className="delegate-strip-item" data-testid="delegate-strip-item">
+            <button
+              type="button"
+              className="background-task-bar-row"
+              data-testid="delegate-strip-open"
+              aria-expanded={openId === id}
+              onClick={() => setOpenId(openId === id ? null : id)}
+            >
+              <LoaderCircle className="background-task-bar-spinner" size={16} aria-hidden />
+              <span className="background-task-bar-description">{d.label}</span>
+              <span className="background-task-bar-elapsed" data-testid="delegate-strip-time">
+                {formatElapsed(d.since, now)}
+              </span>
+            </button>
+            {openId === id ? (
+              <DelegateTranscript parentId={chatId} delegateId={id} status={d.status} />
+            ) : null}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
