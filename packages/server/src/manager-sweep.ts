@@ -196,7 +196,10 @@ export class ManagerSweeper {
       else if (
         event.activity === 'idle' &&
         previousActivity === 'running' &&
-        event.turnStopped !== true
+        event.turnStopped !== true &&
+        // A turn the sweep's own nudge or wake started settling is not news.
+        // Raising it would nudge the chat again, forever.
+        event.turnOrigin !== 'machine'
       ) {
         this.raise(chatId, 'settled');
       }

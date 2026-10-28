@@ -192,6 +192,13 @@ describe('ManagerSweeper', () => {
     expect(sweeper.tick()).toBe(false);
   });
 
+  test('a turn started by a machine message settling is not a settled edge', () => {
+    emit(spawned('c1'));
+    emit(state('c1', { activity: 'running', turnOrigin: 'machine' }));
+    emit(state('c1', { activity: 'idle', turnOrigin: 'machine' }));
+    expect(sweeper.pendingEdges()).toEqual([]);
+  });
+
   test('a chat holding an unacted sweep message is not a candidate again', () => {
     emit(spawned('c1'));
     emit(state('c1', { activity: 'running' }));

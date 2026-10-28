@@ -5279,7 +5279,8 @@ export class Daemon {
     const sections = await Promise.all(
       candidates.map(async (c) => {
         const messages = await this.recentMessagesFor(c, messagesPerChat);
-        const lines = messages.map((m) => `  ${m.role}: ${m.content.slice(0, 400)}`);
+        // The tail, not the head: a chat asking for a decision asks at the end.
+        const lines = messages.map((m) => `  ${m.role}: ${m.content.slice(-400)}`);
         return [
           `- ${c.chatId} (${c.folder} on ${c.hostId}) — ${c.edge}, idle ${Math.round(c.idleMinutes)}m`,
           ...lines,
@@ -5416,7 +5417,11 @@ export class Daemon {
         blocked && (decision.action === 'nudge' || decision.action === 'wake')
           ? 'flag'
           : decision.action;
-      if (action === 'nudge' || action === 'wake') {
+      // "Still working?" only makes sense for a chat that was running; a chat
+      // that settled has finished, whatever the decision call said.
+      if (action === 'wake' && candidate.edge !== 'stalled') {
+        actions.push({ chatId: candidate.chatId, action: 'leave' });
+      } else if (action === 'nudge' || action === 'wake') {
         const message =
           decision.message?.trim() ||
           (action === 'nudge' ? 'Carry on.' : 'Checking in — still working?');
