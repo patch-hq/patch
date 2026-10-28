@@ -415,21 +415,21 @@ describe('MeetingManager', () => {
     m.start('c1');
     clock += 10_000;
     await m.ingestAudio('c1', 'mic', Buffer.from('a'));
-    clock += 10_000;
+    clock += 600_000;
     analyse.mockResolvedValueOnce(
       analysis({
         topics: [
-          { id: null, title: 'Late', points: [], decided: false, atSeconds: 99 },
+          { id: null, title: 'Late', points: [], decided: false, atSeconds: 99_999 },
           { id: null, title: 'Early', points: [], decided: false, atSeconds: 1 },
-          { id: null, title: 'Mid', points: [], decided: false, atSeconds: 15 },
+          { id: null, title: 'Mid', points: [], decided: false, atSeconds: 400 },
         ],
       }),
     );
     await m.tick('c1');
     expect(m.get('c1')!.topics.map((t) => [t.title, t.at])).toEqual([
       ['Early', 10_000],
-      ['Mid', 15_000],
-      ['Late', 20_000],
+      ['Mid', 400_000],
+      ['Late', 610_000],
     ]);
   });
 
@@ -604,6 +604,7 @@ describe('MeetingManager', () => {
     await m.ingestAudio('c1', 'mic', Buffer.from('a'));
     await m.tick('c1'); // id1 at 5s
     await m.ingestAudio('c1', 'mic', Buffer.from('b'));
+    clock += 100_000;
     analyse.mockResolvedValueOnce(
       analysis({
         topics: [
@@ -619,6 +620,7 @@ describe('MeetingManager', () => {
     );
     await m.tick('c1');
     await m.ingestAudio('c1', 'mic', Buffer.from('c'));
+    clock += 400_000;
     analyse.mockResolvedValueOnce(
       analysis({
         topics: [
@@ -637,6 +639,7 @@ describe('MeetingManager', () => {
     const m = make();
     m.start('c1');
     await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    clock += 300_000;
     analyse.mockResolvedValueOnce(
       analysis({
         topics: [
