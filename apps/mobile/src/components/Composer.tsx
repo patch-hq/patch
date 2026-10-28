@@ -1456,7 +1456,9 @@ export function Composer({
   return (
     <View
       style={{
-        padding: space.md,
+        paddingTop: space.md,
+        paddingHorizontal: 20,
+        paddingBottom: 14,
         gap: space.xs,
         backgroundColor: colors.paperRaised,
         borderTopWidth: 1,
@@ -1981,7 +1983,14 @@ export function Composer({
           spacer, keeping it where the thumb already expects it. */}
       <View
         testID="composer-actions-row"
-        style={{ flexDirection: 'row', alignItems: 'center', gap: space.xs, minWidth: 0 }}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: space.xs,
+          minWidth: 0,
+          // With the column's 4 gap, 8 between the field and this row.
+          marginTop: space.xs,
+        }}
       >
         {/* Settings (spec/15 § Composer): the standing settings for the next
             turn, as icons so the row stays one line — approval mode, model
