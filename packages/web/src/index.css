@@ -692,6 +692,149 @@ body {
 
 /* ---------- Panes and tabs (spec/14 § Panes and tabs) ---------- */
 
+/* ---------- Groups (spec/14 § Groups) ---------- */
+
+/* `PaneArea`'s root: a row of groups filling the slot `.chat-main` once held.
+   With one group there is no card chrome and it looks as it always did. */
+.group-row {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.group-row-cards {
+  gap: 0;
+  padding: 8px;
+  background: var(--bg-app);
+}
+.group-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.group-card-framed {
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  position: relative;
+}
+.group-card-framed.group-card-focused {
+  border-color: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent-tint);
+}
+.group-row-cards > .pane-divider {
+  flex-basis: 8px;
+  width: 8px;
+}
+.group-body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 44px;
+  box-sizing: border-box;
+  padding: 0 8px 0 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.group-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  font-family: 'Fraunces Variable', Fraunces, serif;
+  font-size: 17px;
+  font-weight: 500;
+}
+.group-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.group-close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+.group-close:hover {
+  background: var(--bg-soft);
+  color: var(--ink);
+}
+/* The fixed set of group colours. `.onscreen` is the number in a sidebar row
+   or a group's header. */
+.g1 {
+  --g: #46802f;
+  --gt: #e7f0dd;
+  --gs: #2f5521;
+}
+.g2 {
+  --g: #4a6fa5;
+  --gt: #e1e9f4;
+  --gs: #2d4c78;
+}
+.g3 {
+  --g: #9a5b8a;
+  --gt: #f1e3ee;
+  --gs: #6c3a61;
+}
+.g4 {
+  --g: #b07a12;
+  --gt: #f6ead0;
+  --gs: #7a5208;
+}
+.g5 {
+  --g: #3f8a86;
+  --gt: #dcefed;
+  --gs: #245f5c;
+}
+.onscreen,
+.group-num {
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 5px;
+  display: grid;
+  place-items: center;
+  font:
+    600 11px/1 Inter,
+    system-ui,
+    sans-serif;
+  background: var(--gt);
+  color: var(--gs);
+  cursor: pointer;
+}
+.group-num {
+  cursor: default;
+}
+.name.has-onscreen {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.name.has-onscreen .name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.name.has-onscreen .onscreen {
+  margin-right: 0;
+}
+
 /* `PaneArea`'s own root fills the same flex slot `.chat-main` used to occupy
    directly in `.three-col`. */
 .pane-split {

@@ -137,7 +137,7 @@ describe('job page: runs open beside the job', () => {
     expect(tabKeys(useLayoutStore.getState().root)).toEqual([['page:job:j1'], ['chat:chat-live']]);
   });
 
-  it('middle-click is a new tab in the active pane; a modified click is left to the browser', async () => {
+  it('middle-click opens the chat in a new group; a modified click is left to the browser', async () => {
     renderJob();
     await screen.findByTestId('job-queue-running');
     await waitFor(() =>
@@ -150,6 +150,9 @@ describe('job page: runs open beside the job', () => {
     expect(countPanes(useLayoutStore.getState().root)).toBe(1);
     expect(tabKeys(useLayoutStore.getState().root)).toEqual([['page:job:j1']]);
     fireEvent(link, new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }));
-    expect(tabKeys(useLayoutStore.getState().root)).toEqual([['page:job:j1', 'chat:chat-a']]);
+    const { groups, focusedGroupId } = useLayoutStore.getState();
+    expect(groups).toHaveLength(2);
+    expect(groups.find((g) => g.id === focusedGroupId)?.chatId).toBe('chat-a');
+    expect(tabKeys(groups[0]!.root)).toEqual([['page:job:j1']]);
   });
 });
