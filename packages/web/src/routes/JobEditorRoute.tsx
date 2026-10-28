@@ -4,6 +4,7 @@
 // webhook/todoist) + JSONata filter textarea + two-axis action picker.
 
 import { DateTimeField } from '../components/DateTimeField.js';
+import { PromptEditor } from '../components/PromptEditor.js';
 import type { JSX, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { flushSync } from 'react-dom';
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
@@ -2285,19 +2286,14 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   label="Send agent trigger payload"
                   testid="job-include-payload"
                 />
-                <label>
+                <div className="field-group">
                   Prompt
-                  <textarea
-                    className="job-prompt"
-                    rows={12}
+                  <PromptEditor
                     value={form.spawnPrompt}
-                    onChange={(e) => {
-                      const next = e.target.value;
-                      setForm((f) => ({ ...f, spawnPrompt: next }));
-                    }}
-                    data-testid="job-spawn-prompt"
+                    onChange={(next) => setForm((f) => ({ ...f, spawnPrompt: next }))}
+                    testid="job-spawn-prompt"
                   />
-                </label>
+                </div>
                 <label>
                   Goal
                   <textarea
@@ -2413,19 +2409,14 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   label="Send agent trigger payload"
                   testid="job-include-payload"
                 />
-                <label>
+                <div className="field-group">
                   Prompt
-                  <textarea
-                    className="job-prompt"
-                    rows={12}
+                  <PromptEditor
                     value={form.messagePrompt}
-                    onChange={(e) => {
-                      const next = e.target.value;
-                      setForm((f) => ({ ...f, messagePrompt: next }));
-                    }}
-                    data-testid="job-message-prompt"
+                    onChange={(next) => setForm((f) => ({ ...f, messagePrompt: next }))}
+                    testid="job-message-prompt"
                   />
-                </label>
+                </div>
               </>
             )}
             {/* No Enabled checkbox: a job is created enabled. Enable/disable an
