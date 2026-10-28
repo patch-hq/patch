@@ -15,7 +15,7 @@
 // that must be mutually exclusive, and only the caller knows about its
 // siblings; owning `open` here would let two lists overlap.
 
-import { useLayoutEffect, useState, type RefObject } from 'react';
+import { useLayoutEffect, useState, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { compactModelLabel } from '@patch/wire';
 import { useModelCatalog } from '../lib/models.js';
@@ -74,6 +74,8 @@ export interface ModelPickerProps {
    * model.
    */
   triggerLabel?: string;
+  /** Glyph drawn before the name. */
+  icon?: ReactNode;
   /**
    * True when the pill itself is what shows the chosen model — the new-chat
    * row draws it filled then, like a pressed chip, because no chip beside it
@@ -102,6 +104,7 @@ export function ModelPicker({
   note = null,
   pending = false,
   triggerLabel,
+  icon,
   active = false,
   compact = false,
 }: ModelPickerProps): JSX.Element {
@@ -237,6 +240,7 @@ export function ModelPicker({
         disabled={disabled}
         onClick={onToggle}
       >
+        {icon}
         <span className={`model-pill-label ${triggerLabel || compact ? '' : 'mono'}`}>
           {triggerLabel ?? label}
         </span>
