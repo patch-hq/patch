@@ -319,6 +319,38 @@ describe('patch_delegate', () => {
     await flushUntil(() => lastCount() === 0);
   });
 
+  it('builds a chat.state without scanning every chat on disk (reconnect sends one per chat)', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'patch-delegate-scan-'));
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-delegate-scan-folder-')));
+    const store = createMetaStore(home);
+    let listCalls = 0;
+    const metaStore = {
+      ...store,
+      list: () => {
+        listCalls++;
+        return store.list();
+      },
+    };
+    let n = 0;
+    const daemon = new Daemon({
+      hostId: 'd1',
+      metaStore,
+      sdkBackend: hangingBackend(),
+      oauthAccessToken: 'tok',
+      emit: () => {},
+      logger: silent,
+      now: () => 1_700_000_000_000,
+      generateChatId: () => `scan-${++n}`,
+      discoverClaudeMcpServers: () => [],
+    });
+    const parentChatId = await daemon.spawnChat({ folder });
+    await daemon.createDelegate({ parentChatId, prompt: 'a slow task' });
+
+    listCalls = 0;
+    expect(daemon.currentStateEvent(parentChatId)?.backgroundTasks).toBe(1);
+    expect(listCalls).toBe(0);
+  });
+
   it("stopping a parent aborts the parent's own turn at once, not after its subagents settle", async () => {
     const aborted = new Map<string, number>();
     const backend: SdkBackend = {

@@ -4993,11 +4993,19 @@ export class Daemon {
     return this.countRunningDelegates(parentChatId) > 0;
   }
 
+  /**
+   * Counted from the in-memory chat states, never `metaStore.list()`: this runs
+   * inside every state event, and on reconnect a state event goes out for every
+   * chat — a disk scan here made reconnect chats × chats file reads and froze
+   * a 9,000-chat host for an hour. `state.subagent` mirrors `meta.subagent`,
+   * outcome included (`settleDelegate`, `clearDelegateOutcome`).
+   */
   private countRunningDelegates(parentChatId: string): number {
-    return this.opts.metaStore
-      .list()
-      .filter((m) => m.subagent?.parentChatId === parentChatId && m.subagent.outcome === undefined)
-      .length;
+    let n = 0;
+    for (const s of this.chatState.list()) {
+      if (s.subagent?.parentChatId === parentChatId && s.subagent.outcome === undefined) n++;
+    }
+    return n;
   }
 
   /**
