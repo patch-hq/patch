@@ -1,4 +1,5 @@
-# Turns on auto-merge for every PR from the repository owner's chats. The merge
+# Turns on auto-merge for every PR into main from the repository owner's chats
+# (a PR stacked on another branch merges into that branch by hand). The merge
 # queue then merges it, with the method the queue sets, the moment the required
 # `tests` check is green; until then it waits. Branches are tidied by the
 # repo's "delete branch on merge" setting.
@@ -15,7 +16,7 @@ permissions:
 
 jobs:
   automerge:
-    if: github.repository == 'patch-hq/patch' && github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft
+    if: github.repository == 'patch-hq/patch' && github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft && github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
     steps:
       # No checkout: pull_request_target runs with write access, so it never
