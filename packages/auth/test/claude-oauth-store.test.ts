@@ -77,7 +77,7 @@ describe('readPatchStore', () => {
     expect(store?.accounts).toEqual([
       {
         id: DEFAULT_ACCOUNT_ID,
-        label: 'Default',
+        label: 'a@b.c',
         credential: { accessToken: 'tok', refreshToken: 'ref', expiresAt: 123, email: 'a@b.c' },
       },
     ]);
@@ -120,7 +120,7 @@ describe('readPatchStore', () => {
     expect(store?.accounts).toEqual([
       {
         id: DEFAULT_ACCOUNT_ID,
-        label: 'Default',
+        label: 'legacy@example.com',
         credential: { accessToken: 'legacy-tok', email: 'legacy@example.com' },
       },
     ]);
@@ -207,7 +207,7 @@ describe('seedPatchStore', () => {
     const store = readPatchStore(opts());
     expect(store?.seededFrom).toBe('CLAUDE_CODE_OAUTH_TOKEN');
     expect(store?.accounts).toEqual([
-      { id: DEFAULT_ACCOUNT_ID, label: 'Default', credential: { accessToken: 'seed-me' } },
+      { id: DEFAULT_ACCOUNT_ID, label: 'Account 1', credential: { accessToken: 'seed-me' } },
     ]);
     expect(store?.activeAccountId).toBe(DEFAULT_ACCOUNT_ID);
   });
@@ -257,7 +257,7 @@ describe('disconnect / connect round trip', () => {
     expect(existsSync(storePath)).toBe(true);
     const store = readPatchStore(opts());
     expect(store?.accounts).toEqual([
-      { id: DEFAULT_ACCOUNT_ID, label: 'Default', credential: null },
+      { id: DEFAULT_ACCOUNT_ID, label: 'Account 1', credential: null },
     ]);
   });
 
@@ -411,5 +411,17 @@ describe('persistClaudeOAuth with a store credential', () => {
     expect(store?.accounts.find((a) => a.id === second.id)?.credential?.accessToken).toBe(
       'second-new',
     );
+  });
+});
+
+describe('new account labels', () => {
+  it('names a connected first account by its email when known', () => {
+    connectPatchStore({ accessToken: 't', email: 'me@example.com' }, opts());
+    expect(listPatchStoreAccounts(opts())[0]?.label).toBe('me@example.com');
+  });
+
+  it('numbers accounts when no email is known, never "Default"', () => {
+    connectPatchStore({ accessToken: 't' }, opts());
+    expect(listPatchStoreAccounts(opts())[0]?.label).toBe('Account 1');
   });
 });

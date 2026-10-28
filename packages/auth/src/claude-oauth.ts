@@ -445,7 +445,7 @@ export function readPatchStore(opts: LoadClaudeOAuthOptions = {}): PatchStoreCon
   if (cred === null || cred === undefined) return { accounts: [], activeAccountId: null };
   const credential = parseStoredCredential(cred, path);
   return {
-    accounts: [{ id: DEFAULT_ACCOUNT_ID, label: 'Default', credential }],
+    accounts: [{ id: DEFAULT_ACCOUNT_ID, label: deriveAccountLabel(credential, 0), credential }],
     activeAccountId: DEFAULT_ACCOUNT_ID,
     ...(typeof obj['seededFrom'] === 'string' ? { seededFrom: obj['seededFrom'] } : {}),
   };
@@ -510,7 +510,14 @@ export function connectPatchStore(
   const accounts =
     idx >= 0
       ? existing.accounts.map((a, i) => (i === idx ? { ...a, credential } : a))
-      : [...existing.accounts, { id: targetId, label: 'Default', credential }];
+      : [
+          ...existing.accounts,
+          {
+            id: targetId,
+            label: deriveAccountLabel(credential, existing.accounts.length),
+            credential,
+          },
+        ];
   writePatchStore(
     {
       accounts,
@@ -625,7 +632,7 @@ export function seedPatchStore(opts: LoadClaudeOAuthOptions = {}): PatchStoredCr
   };
   writePatchStore(
     {
-      accounts: [{ id: DEFAULT_ACCOUNT_ID, label: 'Default', credential }],
+      accounts: [{ id: DEFAULT_ACCOUNT_ID, label: deriveAccountLabel(credential, 0), credential }],
       activeAccountId: DEFAULT_ACCOUNT_ID,
       seededFrom: legacy.sourcePath,
     },
