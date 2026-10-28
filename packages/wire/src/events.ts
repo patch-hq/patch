@@ -3932,12 +3932,12 @@ export const NewChatDraftAttachmentsListEvent = z
   .strict();
 export type NewChatDraftAttachmentsListEvent = z.infer<typeof NewChatDraftAttachmentsListEvent>;
 
-/** Surface → host: start, pause, resume or end the meeting in a chat, or `delete` an ended one (the host answers `meeting.state` with `null`). */
+/** Surface → host: start, pause, resume or end the meeting in a chat. */
 export const MeetingControlRequestEvent = z
   .object({
     type: z.literal('meeting.control_request'),
     chatId: z.string().min(1),
-    action: z.enum(['start', 'pause', 'resume', 'end', 'tune', 'name_voice', 'delete']),
+    action: z.enum(['start', 'pause', 'resume', 'end', 'tune', 'name_voice']),
     /** With `start` and `tune`: how often the notes update. */
     settings: MeetingSettings.optional(),
     /** With `name_voice`: which `them` voice, and the name to show for it. */
