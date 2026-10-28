@@ -117,6 +117,22 @@ const DISPATCH_SURFACE_ID = 'jobs-dispatcher';
  * an "is anyone home" bound, not a turn-duration one.
  */
 const DEFAULT_ACK_TIMEOUT_MS = 20_000;
+/**
+ * How many times a fire the host never answered is sent again before it is
+ * recorded as a dispatch-error. A host that was frozen, or reconnecting, when
+ * the fire went out has not refused it; the first silence is not a verdict.
+ */
+const DEFAULT_ACK_RETRIES = 2;
+/** How long a fire the host did not answer waits before it is sent again. */
+const DEFAULT_ACK_RETRY_DELAY_MS = 5_000;
+/**
+ * How many fires one host may have sent and not yet answered. A backlog
+ * released into a host that has just come back (it has been down all night and
+ * is catching up on everything at once) goes out this many at a time, each
+ * answer releasing the next, instead of all at once into a host that cannot
+ * answer them inside the ack window.
+ */
+const DEFAULT_MAX_UNACKED_PER_HOST = 3;
 /** How often fires held by a run window are checked against the clock. */
 const HELD_CHECK_MS = 60_000;
 /** The host's stand-in chatId for a spawn that failed before a chat existed. */
@@ -287,6 +303,12 @@ export interface DispatcherOptions {
   autonomyPrompt?: () => string;
   /** Ack window override (tests). */
   ackTimeoutMs?: number;
+  /** Resends of an unanswered fire before it is a dispatch-error (default 2). */
+  ackRetries?: number;
+  /** Wait before an unanswered fire is resent (tests). */
+  ackRetryDelayMs?: number;
+  /** Fires one host may have outstanding at once when releasing a backlog (default 3). */
+  maxUnackedPerHost?: number;
   nowMs?: () => number;
   /** Held-slot timeout override (tests). */
   slotTimeoutMs?: number;
@@ -476,6 +498,10 @@ interface PendingEntry {
   ensureInput?: ChatInputEvent;
   /** The job's stored model on a `continue` fire — what the chat should run on. */
   model?: string;
+  /** How many times the host has already failed to answer this fire. */
+  ackAttempt?: number;
+  /** Not to be sent again before this time (ms) — the wait after an unanswered attempt. */
+  retryAfter?: number;
 }
 
 /** The queue a fire or slot counts against: its keyed scope, else the whole job. */
@@ -562,6 +588,8 @@ interface AwaitedOutcome {
   ts: number;
   /** A passing gate's output, shown as this run's verdict (spec/08 § Gate). */
   gateOutput?: string;
+  /** What to send again if the host never answers; absent when the fire cannot be resent. */
+  resend?: PendingEntry;
   timer: NodeJS.Timeout;
 }
 
@@ -626,6 +654,11 @@ export class JobDispatcher {
   private readonly chatModel: (chatId: string) => string | null;
   private readonly hostReported: (hostId: string) => boolean;
   private readonly ackTimeoutMs: number;
+  private readonly ackRetries: number;
+  private readonly ackRetryDelayMs: number;
+  private readonly maxUnackedPerHost: number;
+  private pumpScheduled = false;
+  private closed = false;
   private readonly nowMs: () => number;
   /**
    * Fires waiting on their host's answer, keyed by the chatId the fire names.
@@ -712,6 +745,9 @@ export class JobDispatcher {
     this.chatLinks = opts.chatLinks;
     this.jobs = opts.jobs;
     this.ackTimeoutMs = opts.ackTimeoutMs ?? DEFAULT_ACK_TIMEOUT_MS;
+    this.ackRetries = opts.ackRetries ?? DEFAULT_ACK_RETRIES;
+    this.ackRetryDelayMs = opts.ackRetryDelayMs ?? DEFAULT_ACK_RETRY_DELAY_MS;
+    this.maxUnackedPerHost = opts.maxUnackedPerHost ?? DEFAULT_MAX_UNACKED_PER_HOST;
     this.nowMs = opts.nowMs ?? ((): number => Date.now());
     this.onLate = opts.onLate;
     this.lateAfterMs = opts.lateAfterMs ?? DEFAULT_LATE_AFTER_MS;
@@ -754,6 +790,7 @@ export class JobDispatcher {
   }
 
   close(): void {
+    this.closed = true;
     if (this.heldTimer) {
       clearInterval(this.heldTimer);
       this.heldTimer = null;
@@ -796,6 +833,10 @@ export class JobDispatcher {
     const timer = setTimeout(() => {
       const w = this.take(entry.chatId, entry.localId);
       if (!w) return;
+      if (w.resend !== undefined && (w.resend.ackAttempt ?? 0) < this.ackRetries) {
+        this.resendUnanswered(w, w.resend);
+        return;
+      }
       this.writeRun(w, {
         status: 'dispatch-error',
         error: `no answer from host ${w.hostId ?? 'unknown'} within ${bound}ms — the fire was sent but never confirmed`,
@@ -816,6 +857,55 @@ export class JobDispatcher {
     this.awaiting.set(entry.chatId, list);
   }
 
+  /**
+   * The host did not answer a fire inside the ack window. It may have been
+   * frozen or mid-reconnect rather than gone, so the fire goes back to the
+   * host's buffer to be sent again after a short wait, and the slot it took
+   * goes back with it. Only when the resends run out is it a dispatch-error.
+   */
+  private resendUnanswered(w: AwaitedOutcome, entry: PendingEntry): void {
+    const attempt = (entry.ackAttempt ?? 0) + 1;
+    writeFileSync(
+      join(this.pendingDir, entry.filename),
+      `${JSON.stringify({ ...entry, ackAttempt: attempt, retryAfter: this.nowMs() + this.ackRetryDelayMs })}\n`,
+      'utf8',
+    );
+    this.logger.warn(
+      { jobId: w.jobId, hostId: w.hostId, chatId: w.chatId, attempt, of: this.ackRetries },
+      'jobs: host did not answer the fire, will send it again',
+    );
+    const slot = this.takeSlot(w.chatId, w.localId);
+    if (slot) this.drain(scopeOf(slot));
+    const wake = setTimeout(() => this.schedulePump(), this.ackRetryDelayMs);
+    wake.unref?.();
+  }
+
+  /** Fires sent to a host that it has not yet answered. A script answers when its command ends, so it is not counted. */
+  private unackedFor(hostId: string | null): number {
+    let n = 0;
+    for (const list of this.awaiting.values()) {
+      for (const w of list) if (w.hostId === hostId && w.actionType !== 'script') n += 1;
+    }
+    return n;
+  }
+
+  /** Whether a host has room for another fire before it has answered the ones it has. */
+  private hostHasRoom(hostId: string | null): boolean {
+    return hostId === null || this.unackedFor(hostId) < this.maxUnackedPerHost;
+  }
+
+  /** Release whatever was waiting on an answer or a retry delay, once, on the next tick. */
+  private schedulePump(): void {
+    if (this.pumpScheduled || this.closed) return;
+    this.pumpScheduled = true;
+    queueMicrotask(() => {
+      this.pumpScheduled = false;
+      if (this.closed) return;
+      this.flush();
+      this.drainAll();
+    });
+  }
+
   /** Remove and return the oldest waiter for a chat (optionally by localId). */
   private take(chatId: string, localId?: string): AwaitedOutcome | null {
     const list = this.awaiting.get(chatId);
@@ -826,6 +916,8 @@ export class JobDispatcher {
     if (list.length === 0) this.awaiting.delete(chatId);
     if (!w) return null;
     clearTimeout(w.timer);
+    // An answer frees the host's next buffered fire.
+    this.schedulePump();
     return w;
   }
 
@@ -1653,6 +1745,7 @@ export class JobDispatcher {
       const next = this.listQueuedForJob(scope)[0];
       if (!next) return;
       if (!this.hostOnline(next.hostId)) return;
+      if (!this.hostHasRoom(next.hostId)) return;
       try {
         rmSync(join(this.queuedDir, next.filename));
       } catch (err) {
@@ -1731,6 +1824,7 @@ export class JobDispatcher {
         hostId: entry.hostId,
         ...(entry.folder !== undefined ? { folder: entry.folder } : {}),
         ts: entry.createdAt,
+        ...(entry.event.type !== 'job.exec_request' ? { resend: entry } : {}),
       },
       // A script answers only when its command finishes: give it its own
       // timeout plus the ack bound to get the result frame back.
@@ -2531,6 +2625,11 @@ export class JobDispatcher {
       // Only release a fire to the machine it was queued FOR. Another host
       // coming online says nothing about this one.
       if (entry.hostId !== null && !this.hostLink.isOnline(entry.hostId)) continue;
+      if (entry.retryAfter !== undefined && this.nowMs() < entry.retryAfter) continue;
+      // A host catching up on a backlog gets it a few at a time: each answer
+      // releases the next (`take` pumps), so it is never asked for more than it
+      // can answer inside the ack window.
+      if (!this.hostHasRoom(entry.hostId)) continue;
       // An undecided `ensure` waits for its host's chat list, not just its link:
       // the link comes up before the chats are re-announced.
       if (entry.ensureInput !== undefined) {

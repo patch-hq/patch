@@ -1471,7 +1471,14 @@ describe('JobDispatcher', () => {
   describe('run outcomes come from the host', () => {
     const JOB_ID = 'j_00000000000000000000000099';
 
-    function setup(opts: { offline?: boolean } = {}) {
+    function setup(
+      opts: {
+        offline?: boolean;
+        ackRetries?: number;
+        maxUnackedPerHost?: number;
+        ids?: () => string;
+      } = {},
+    ) {
       const link = new InProcessHostLink();
       if (opts.offline) link.setStatus('offline');
       const logs = new JobLogs(dir);
@@ -1480,8 +1487,13 @@ describe('JobDispatcher', () => {
         logs,
         hostLink: link,
         logger: silentLogger,
-        idGenerator: () => 'fire1',
+        idGenerator: opts.ids ?? (() => 'fire1'),
         ackTimeoutMs: 50,
+        ackRetryDelayMs: 10,
+        ...(opts.ackRetries !== undefined ? { ackRetries: opts.ackRetries } : {}),
+        ...(opts.maxUnackedPerHost !== undefined
+          ? { maxUnackedPerHost: opts.maxUnackedPerHost }
+          : {}),
       });
       return { link, logs, disp };
     }
@@ -1528,14 +1540,83 @@ describe('JobDispatcher', () => {
       disp.close();
     });
 
-    it('a host that answers nothing at all → dispatch-error naming it (never a silent ok)', async () => {
-      const { logs, disp } = setup();
+    it('a host that answers nothing at all → dispatch-error naming it once the resends run out (never a silent ok)', async () => {
+      const { link, logs, disp } = setup({ ackRetries: 0 });
+      const sent = link.sent;
       disp.dispatch(makeJob({ id: JOB_ID }), {}, 'webhook');
       await new Promise((r) => setTimeout(r, 120));
       const runs = logs.readRuns(JOB_ID);
       expect(runs).toHaveLength(1);
       expect(runs[0]?.status).toBe('dispatch-error');
       expect(runs[0]?.error).toContain('d1');
+      expect(sent).toHaveLength(1);
+      disp.close();
+    });
+
+    it('an unanswered fire is sent again, and settles ok when the host answers the resend', async () => {
+      const { link, logs, disp } = setup();
+      const sentEvents = (): Array<{ chatId?: string }> => link.sent.map((x) => x.event);
+      const result = disp.dispatch(makeJob({ id: JOB_ID }), {}, 'webhook');
+      const chatId = result.event.chatId as string;
+      await new Promise((r) => setTimeout(r, 110));
+      // Nothing is recorded as failed while a resend is still to come.
+      expect(logs.readRuns(JOB_ID)).toHaveLength(0);
+      expect(sentEvents().length).toBeGreaterThanOrEqual(2);
+      link.emit({ type: 'chat.spawned', chatId, hostId: 'd1', folder: '/work' });
+      const runs = logs.readRuns(JOB_ID);
+      expect(runs).toHaveLength(1);
+      expect(runs[0]?.status).toBe('ok');
+      disp.close();
+    });
+
+    it('goes on retrying until the resends are spent: 1 send + N resends, then one dispatch-error', async () => {
+      const { link, logs, disp } = setup({ ackRetries: 2 });
+      const sent = link.sent;
+      disp.dispatch(makeJob({ id: JOB_ID }), {}, 'webhook');
+      await new Promise((r) => setTimeout(r, 400));
+      expect(sent).toHaveLength(3);
+      const runs = logs.readRuns(JOB_ID);
+      expect(runs).toHaveLength(1);
+      expect(runs[0]?.status).toBe('dispatch-error');
+      disp.close();
+    });
+
+    it('releases a buffered backlog a few at a time, each answer freeing the next', async () => {
+      let id = 0;
+      const { link, logs, disp } = setup({
+        offline: true,
+        maxUnackedPerHost: 2,
+        ackRetries: 0,
+        ids: () => `fire${++id}`,
+      });
+      const sent = (): Array<{ chatId?: string }> => link.sent.map((x) => x.event);
+      for (let i = 0; i < 5; i++) disp.dispatch(makeJob({ id: JOB_ID }), { n: i }, 'webhook');
+      expect(sent()).toHaveLength(0);
+      link.setStatus('online');
+      disp.flush();
+      expect(sent()).toHaveLength(2);
+      // One answer frees exactly one place.
+      link.emit({
+        type: 'chat.spawned',
+        chatId: sent()[0]?.chatId as string,
+        hostId: 'd1',
+        folder: '/work',
+      });
+      await new Promise((r) => setTimeout(r, 5));
+      expect(sent()).toHaveLength(3);
+      let answered = 1;
+      while (answered < 5) {
+        link.emit({
+          type: 'chat.spawned',
+          chatId: sent()[answered]?.chatId as string,
+          hostId: 'd1',
+          folder: '/work',
+        });
+        answered += 1;
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      expect(sent()).toHaveLength(5);
+      expect(logs.readRuns(JOB_ID).filter((r) => r.status === 'ok')).toHaveLength(5);
       disp.close();
     });
 
