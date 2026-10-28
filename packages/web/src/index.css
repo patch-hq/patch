@@ -2406,6 +2406,26 @@ a.ch-row:hover {
   border-radius: 2px;
   padding: 0 1px;
 }
+/* A hit drawn as the list's own chat row (spec/14 § Chat search): the wrapper
+   adds no box, and the snippet sits under the name like a preview. */
+.search-hit-wrap {
+  display: contents;
+}
+.sb-row .search-snippet {
+  grid-column: 2 / -1;
+}
+.sb-row .search-snippet mark {
+  background: var(--accent-tint);
+  color: var(--accent-strong);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.sb-row .name mark {
+  background: var(--accent-tint);
+  color: var(--accent-strong);
+  border-radius: 2px;
+  padding: 0 1px;
+}
 /* On the active (accent-tint) row the tint would vanish; step up one shade. */
 .sb-row.search-hit.active mark {
   background: var(--accent-soft);

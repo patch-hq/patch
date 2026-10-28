@@ -99,8 +99,8 @@ import {
 } from '../lib/chatGroups.js';
 import { navigateAfterArchive } from '../lib/archiveNav.js';
 import { isNearScrollBottom } from '../lib/scrollPaging.js';
-import { searchableQuery } from '../lib/chatSearch.js';
-import { ChatSearchField, ChatSearchResults } from './ChatSearch.js';
+import { searchableQuery, searchHitPath } from '../lib/chatSearch.js';
+import { ChatSearchField, ChatSearchResults, SearchMatchLine } from './ChatSearch.js';
 import { newChatPath } from '../lib/newChat.js';
 import {
   openChatInNewWindow,
@@ -608,7 +608,21 @@ function RegularSidebar({
           many chats there are. */}
       <div className="sb-scroll" data-testid="sb-scroll">
         {activeSearch !== null ? (
-          <ChatSearchResults query={activeSearch} activeChatId={activeChatId} />
+          <ChatSearchResults
+            query={activeSearch}
+            activeChatId={activeChatId}
+            renderRow={(row, hit) => (
+              <ChatRowView
+                key={row.chatId}
+                row={row}
+                active={activeChatId === row.chatId}
+                archived={row.status === 'archived'}
+                to={searchHitPath(hit)}
+                matchLine={<SearchMatchLine hit={hit} />}
+                onOpened={() => useUiStore.getState().setSearchQuery('')}
+              />
+            )}
+          />
         ) : (
           <>
             {/* Pinned chats — sorted by pinnedAt desc. */}
@@ -1956,8 +1970,17 @@ const ChatRowView = memo(function ChatRowView({
   hidden,
   automations,
   project,
+  to,
+  matchLine,
+  onOpened,
 }: {
   row: ChatRow;
+  /** Search results (spec/14 § Chat search): open at the matched message, not just the chat. */
+  to?: string;
+  /** Search results: the matched snippet, drawn as the row's secondary line. */
+  matchLine?: JSX.Element | null;
+  /** Search results: called when the row opens its chat, to clear the search. */
+  onOpened?: () => void;
   /** Project name shown under the title when rows are grouped by status. */
   project?: string;
   /** Whether this row is the open chat. A boolean, not the open id, so a switch re-renders two rows rather than all of them. */
@@ -2331,6 +2354,7 @@ const ChatRowView = memo(function ChatRowView({
     // re-focus. Calling it here makes the open unconditional on what the URL
     // happens to say.
     useLayoutStore.getState().openTab({ kind: 'chat', chatId: row.chatId });
+    onOpened?.();
   }
 
   // Middle-click opens the chat as a new tab in the active pane (spec/14 §
@@ -2349,7 +2373,7 @@ const ChatRowView = memo(function ChatRowView({
   return (
     <>
       <Link
-        to={`/chats/${row.chatId}`}
+        to={to ?? `/chats/${row.chatId}`}
         className={cls}
         data-testid={`chat-row-${row.chatId}`}
         onClick={handleRowClick}
@@ -2409,6 +2433,7 @@ const ChatRowView = memo(function ChatRowView({
             {preview}
           </span>
         ) : null}
+        {matchLine ?? null}
         {back?.line ? (
           <span
             className={`snooze-back-line is-${back.line.tone}`}

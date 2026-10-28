@@ -59,8 +59,9 @@ import {
   searchableQuery,
   useChatSearch,
   type ChatSearchState,
+  searchHitRoute,
 } from '../../src/lib/chatSearch';
-import { ChatSearchHitRow } from '../../src/components/ChatSearchHitRow';
+import { ChatSearchHitRow, SearchMatchLine } from '../../src/components/ChatSearchHitRow';
 import { connectionDotColor } from '../../src/lib/connection';
 import { usePresenceStore } from '../../src/stores/presenceStore';
 import { fonts, radii, space, textMin, typography, useTheme } from '../../src/lib/theme';
@@ -785,7 +786,22 @@ function SearchResults({
                 {CHATS_SEARCHING}
               </Text>
             );
-          case 'hit':
+          case 'hit': {
+            // A chat the app holds is the list's own row (same swipe tray and
+            // actions) with the snippet under it; any other hit is a plain card.
+            const row = chats[item.hit.chatId];
+            if (row !== undefined) {
+              return (
+                <View testID={item.local ? 'chat-search-local-hit' : 'chat-search-hit'}>
+                  <ChatRowItem
+                    row={row}
+                    to={searchHitRoute(item.hit)}
+                    matchLine={<SearchMatchLine hit={item.hit} />}
+                    onOpened={onHitPress}
+                  />
+                </View>
+              );
+            }
             return (
               <ChatSearchHitRow
                 hit={item.hit}
@@ -794,6 +810,7 @@ function SearchResults({
                 onPress={onHitPress}
               />
             );
+          }
           case 'empty':
             return (
               <EmptyState

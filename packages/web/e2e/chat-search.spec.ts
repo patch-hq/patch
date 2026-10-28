@@ -125,14 +125,17 @@ test.describe('sidebar chat search', () => {
 
     // Hosts are named as the rest of the app names them — the harness's d1
     // reports itself as `dev-host`, which wins over the server's `hetzner`.
+    // A hit the list holds is the list's own chat row — same buttons — with
+    // the matched snippet under the title.
     const first = hits.nth(0);
     await expect(first.locator('.search-snippet mark')).toHaveText('lorem');
-    await expect(first.locator('.search-meta')).toHaveText('dev-host · bus · 2h ago · +1 more');
+    await expect(first.locator('a.sb-row')).toHaveAttribute('data-testid', 'chat-row-chat_scroll');
+    await expect(first.getByTestId('archive-btn-chat_scroll')).toBeAttached();
+    await expect(first.locator('.search-hit')).toHaveCount(0);
     const second = hits.nth(1);
-    await expect(second.locator('.name mark')).toHaveText('lorem');
-    await expect(second.locator('.search-meta')).toHaveText(
-      'dev-host · Archived · Automation · 5h ago',
-    );
+    await expect(second.locator('a.sb-row')).toHaveAttribute('data-testid', 'chat-row-chat_md');
+    await expect(second.getByTestId('archive-btn-chat_md')).toBeAttached();
+
     // The mark is a visible tint, not the browser's yellow.
     const bg = await first.locator('mark').evaluate((el) => getComputedStyle(el).backgroundColor);
     expect(bg).not.toBe('rgb(255, 255, 0)');
@@ -160,8 +163,8 @@ test.describe('sidebar chat search', () => {
     await page.locator('.sb-row').first().waitFor();
     await page.getByTestId('chat-search').fill('lorem');
     const hit = page.locator('[data-testid="chat-search-hit"][data-chat-id="chat_scroll"]');
-    await expect(hit).toHaveAttribute('href', /\/chats\/chat_scroll\?seq=5$/);
-    await hit.click();
+    await expect(hit.locator('a')).toHaveAttribute('href', /\/chats\/chat_scroll\?seq=5$/);
+    await hit.locator('a').click();
 
     const target = page.locator('.chat-stream [data-testid="msg"][data-seq="5"]');
     await expect(target).toHaveClass(/msg-jump-target/);

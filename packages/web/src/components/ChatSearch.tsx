@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { OpenableLink } from './OpenableLink.js';
 import type { ChatSearchHit, ChatSearchHostResult } from '@patch/wire';
 import { api } from '../api/rest.js';
+import type { ChatRow } from '../stores/chatStore.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -108,8 +109,15 @@ export function ChatSearchResults({
   query,
   activeChatId,
   section,
+  renderRow,
 }: {
   query: string;
+  /**
+   * Draws a hit as the list's own chat row (same buttons and menu) when the
+   * chat is one this surface holds. A hit it holds no row for is drawn as a
+   * plain result row.
+   */
+  renderRow?: (row: ChatRow, hit: ChatSearchHit) => JSX.Element;
   activeChatId: string | null;
   /** Keep only hits living in this chat-list section (the Lifecycle pages). */
   section?: ChatSearchHit['section'];
@@ -231,6 +239,28 @@ export function ChatSearchResults({
   const hostName = (hostId: string): string =>
     presence[hostId]?.host?.hostName ?? serverNames.get(hostId) ?? hostId;
 
+  const drawHit = (hit: ChatSearchHit, testId: string): JSX.Element => {
+    const row = chats[hit.chatId];
+    return row !== undefined && renderRow !== undefined ? (
+      <div
+        key={hit.chatId}
+        data-testid={testId}
+        data-chat-id={hit.chatId}
+        className="search-hit-wrap"
+      >
+        {renderRow(row, hit)}
+      </div>
+    ) : (
+      <SearchHitRow
+        key={hit.chatId}
+        hit={hit}
+        hostName={hostName(hit.hostId)}
+        active={activeChatId}
+        testId={testId}
+      />
+    );
+  };
+
   const errorRow =
     failed === null ? null : (
       <div className="empty-hint" data-testid="chat-search-error">
@@ -265,15 +295,7 @@ export function ChatSearchResults({
           <div className="sb-search-status" data-testid="chat-search-searching">
             Searching…
           </div>
-          {local.map((hit) => (
-            <SearchHitRow
-              key={hit.chatId}
-              hit={hit}
-              hostName={hostName(hit.hostId)}
-              active={activeChatId}
-              testId="chat-search-local-hit"
-            />
-          ))}
+          {local.map((hit) => drawHit(hit, 'chat-search-local-hit'))}
         </>
       ) : null}
       {settled === null ? errorRow : null}
@@ -284,15 +306,7 @@ export function ChatSearchResults({
               No chats match “{query}”.
             </div>
           ) : (
-            settledHits.map((hit) => (
-              <SearchHitRow
-                key={hit.chatId}
-                hit={hit}
-                hostName={hostName(hit.hostId)}
-                active={activeChatId}
-                testId="chat-search-hit"
-              />
-            ))
+            settledHits.map((hit) => drawHit(hit, 'chat-search-hit'))
           )}
           {settled.nextOffset !== null ? (
             <button
@@ -338,6 +352,17 @@ function Marked({
         seg.marked ? <mark key={i}>{seg.text}</mark> : <span key={i}>{seg.text}</span>,
       )}
     </>
+  );
+}
+
+/** The matched snippet, drawn as a chat row's secondary line. Nothing for a name-only hit. */
+export function SearchMatchLine({ hit }: { hit: ChatSearchHit }): JSX.Element | null {
+  if (hit.snippet === null) return null;
+  return (
+    <span className="search-snippet" data-testid="chat-search-snippet">
+      {hit.snippet.role === 'user' ? <span className="search-role">You: </span> : null}
+      <Marked text={hit.snippet.text} ranges={hit.snippet.highlights} />
+    </span>
   );
 }
 
