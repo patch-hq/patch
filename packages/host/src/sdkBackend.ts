@@ -7,6 +7,7 @@
 // entirely. SDK_BACKEND=real loads it.
 
 import { spawnClaudeInGroup } from './claudeSpawn.js';
+import { DurableTurn, type DurableTurnRequest } from './durableTurn.js';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -40,6 +41,8 @@ import type {
   SDKUserMessage,
   SessionStoreEntry,
   SettingSource,
+  SpawnedProcess,
+  SpawnOptions,
 } from '@anthropic-ai/claude-agent-sdk';
 import type { Logger } from 'pino';
 
@@ -167,6 +170,12 @@ export interface SdkRunOptions {
    * processes may still be running. See claudeSpawn.ts.
    */
   onReapRefused?: ((message: string) => void) | undefined;
+  /**
+   * Run claude under a detached per-turn runner so the turn outlives a host
+   * restart, or — with `attach` — carry on a turn a previous host started
+   * (durableTurn.ts, spec/02 § Turns outlive the host). One-shot path only.
+   */
+  durableTurn?: DurableTurnRequest | undefined;
   /**
    * Run this turn as the first turn of a FORK of `resumeSessionId` (spec/04 §
    * Branching — editing a user turn starts a new track). The resumed session is
@@ -1268,14 +1277,20 @@ function claudeExecutablePath(): string | undefined {
 }
 
 /** SDK options shared by both run paths, including the machine's CLI. */
-function machineOpts(opts: SdkRunOptions): {
+function machineOpts(
+  opts: SdkRunOptions,
+  durable?: DurableTurn,
+): {
   pathToClaudeCodeExecutable?: string;
-  spawnClaudeCodeProcess: typeof spawnClaudeInGroup;
+  spawnClaudeCodeProcess: (spawnOpts: SpawnOptions) => SpawnedProcess;
 } {
   const exe = claudeExecutablePath();
-  // Own process group per claude, reaped whole: see claudeSpawn.ts.
-  const spawnClaudeCodeProcess: typeof spawnClaudeInGroup = (spawnOpts) =>
-    spawnClaudeInGroup(spawnOpts, opts.onReapRefused);
+  // Own process group per claude, reaped whole: see claudeSpawn.ts. A durable
+  // turn's runner does the same reaping on the far side of its socket.
+  const spawnClaudeCodeProcess = durable
+    ? durable.spawn
+    : (spawnOpts: SpawnOptions): SpawnedProcess =>
+        spawnClaudeInGroup(spawnOpts, opts.onReapRefused);
   return exe === undefined
     ? { spawnClaudeCodeProcess }
     : { pathToClaudeCodeExecutable: exe, spawnClaudeCodeProcess };
@@ -1898,6 +1913,7 @@ export function skillsMissingFromInit(msg: unknown, cwd: string): string[] {
 async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   const { query } = await loadSdk();
   const { env, mcpServers } = buildSdkEnv(opts);
+  const durable = opts.durableTurn ? new DurableTurn(opts.durableTurn) : undefined;
   const sup = mcpServers === undefined ? undefined : new McpSupervisor({});
   // The chat's mode can change while this process is running (the composer's
   // mode control, or "Approve & resume bypass" on a plan-mode card). `live`
@@ -1930,7 +1946,7 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
           }
         : {}),
       ...SHARED_OPTS,
-      ...machineOpts(opts),
+      ...machineOpts(opts, durable),
       ...withMcpSupervisor(boundaryHooks(boundaryOpts), sup),
       disallowedTools: disallowedToolsFor(opts),
       env,
@@ -1949,18 +1965,35 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   const limitEvents = createLimitEventMemory();
   try {
     for await (const msg of q) {
+      // A reattached turn replays claude's whole output so the per-turn state
+      // below is rebuilt; what the previous host already handled is skipped.
+      const plan = durable?.plan(msg) ?? { offset: undefined, skip: 0 };
       limitEvents.note(msg);
+      const envs = translateSdkMessage(msg, toolNames);
+      if (plan.skip === -1) continue;
       // A process that listed its skills before one was added would answer
       // "unknown command" for it; reload now, before the prompt is handled.
       if (skillsMissingFromInit(msg, opts.cwd).length > 0) await q.reloadPlugins();
       const mismatch = permissionModeMismatch(msg, live.mode);
       limitEvents.assertNotAnError(msg);
-      if (mismatch !== undefined) yield permissionModeMismatchEnvelope(live.mode, mismatch);
-      const envs = translateSdkMessage(msg, toolNames);
-      yield* envs;
+      if (mismatch !== undefined && plan.skip === 0) {
+        yield permissionModeMismatchEnvelope(live.mode, mismatch);
+      }
+      // Recorded as each envelope is handled — the consumer handles it before
+      // asking for the next — so a restart resumes exactly after it. Streaming
+      // deltas are only kept in memory (written out as this process exits):
+      // losing one to a hard kill re-sends a fragment of live text, nothing more.
+      const persist = (msg as { type?: unknown }).type !== 'stream_event';
+      for (const [i, env] of envs.entries()) {
+        if (i < plan.skip) continue;
+        yield env;
+        if (plan.offset !== undefined) durable?.noteConsumed(plan.offset, i + 1, persist);
+      }
+      if (plan.offset !== undefined) durable?.noteConsumed(plan.offset, -1, persist);
       await returnFromPlanMode(q, envs, live.mode);
     }
   } finally {
+    durable?.release();
     sup?.stop();
     if (opts.chatId !== undefined && liveRuns.get(opts.chatId) === live) {
       liveRuns.delete(opts.chatId);
