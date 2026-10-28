@@ -45,6 +45,22 @@ function Marked({
   );
 }
 
+/** The matched snippet as a line under a chat row's title; nothing for a name-only hit. */
+export function SearchMatchLine({ hit }: { hit: ChatSearchHit }): React.ReactElement | null {
+  const colors = useTheme();
+  if (hit.snippet === null) return null;
+  return (
+    <Text
+      testID="chat-search-snippet"
+      numberOfLines={2}
+      style={{ ...typography.secondary, color: colors.ink2, marginTop: 2 }}
+    >
+      {hit.snippet.role === 'user' ? <Text style={{ color: colors.ink3 }}>You: </Text> : null}
+      <Marked text={hit.snippet.text} ranges={hit.snippet.highlights} />
+    </Text>
+  );
+}
+
 export function ChatSearchHitRow({
   hit,
   hostName,
@@ -85,16 +101,7 @@ export function ChatSearchHitRow({
       <Text numberOfLines={1} style={{ ...typography.rowTitle, color: colors.ink }}>
         {name !== null ? <Marked text={name} ranges={hit.nameHighlights} /> : title}
       </Text>
-      {hit.snippet !== null ? (
-        <Text
-          testID="chat-search-snippet"
-          numberOfLines={2}
-          style={{ ...typography.secondary, color: colors.ink2, marginTop: 2 }}
-        >
-          {hit.snippet.role === 'user' ? <Text style={{ color: colors.ink3 }}>You: </Text> : null}
-          <Marked text={hit.snippet.text} ranges={hit.snippet.highlights} />
-        </Text>
-      ) : null}
+      <SearchMatchLine hit={hit} />
       <Text numberOfLines={1} style={{ ...typography.meta, color: colors.ink3, marginTop: 2 }}>
         {hitMetaLine(hit, hostName)}
         {hit.messageMatches > 1 ? ` · +${hit.messageMatches - 1} more` : ''}

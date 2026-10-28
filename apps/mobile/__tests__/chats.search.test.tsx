@@ -426,6 +426,39 @@ describe('server search — results', () => {
     });
   });
 
+  it("a hit for a chat the app holds is the list's own row, with the snippet under it", async () => {
+    useChatStore.getState().hydrate([row({ chatId: 'held1', name: 'Held chat' })]);
+    searchSpy.mockResolvedValue(
+      answer([
+        hit({
+          chatId: 'held1',
+          name: 'Held chat',
+          snippet: {
+            text: 'pancake batter',
+            highlights: [[0, 7]],
+            role: 'assistant',
+            seq: 7,
+            createdAt: null,
+          },
+        }),
+      ]),
+    );
+    const r = renderRN(<ChatsScreen />);
+    openSearch(r);
+    type(r, 'pancake');
+    await settle();
+    const wrap = findHost(r.root, byTestId('chat-search-hit'));
+    // The list row's own press target (swipe tray, long-press sheet), not the plain result card.
+    expect(queryHost(wrap, byLabel('Open chat Held chat'))).not.toBeNull();
+    expect(textOf(findHost(wrap, byTestId('chat-search-snippet')))).toBe('pancake batter');
+    actSync(() => findHost(wrap, byLabel('Open chat Held chat')).props.onPress());
+    expect(routerMock.push).toHaveBeenLastCalledWith({
+      pathname: '/chats/[chatId]',
+      params: { chatId: 'held1', seq: '7' },
+    });
+    expect(queryHost(r.root, byTestId('chat-search-results'))).toBeNull();
+  });
+
   it('tapping a hit also closes search, so coming back shows the normal list', async () => {
     hydrateEverySection();
     searchSpy.mockResolvedValue(answer([hit({ chatId: 'c1', name: 'With seq' })]));

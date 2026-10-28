@@ -19,7 +19,7 @@
 
 import React from 'react';
 import { Animated, PanResponder, Pressable, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
 import {
   AlarmClock,
   AlarmClockOff,
@@ -51,6 +51,12 @@ import {
 
 interface Props {
   row: ChatRowT;
+  /** Search results (spec/03 § Chat search): the route to open — at the matched message. */
+  to?: Href;
+  /** Search results: the matched snippet, drawn as a line under the title. */
+  matchLine?: React.ReactElement | null;
+  /** Search results: called when the row opens its chat, to clear the search. */
+  onOpened?: () => void;
 }
 
 // How long a row's preview must be QUIET before we show its new value.
@@ -109,7 +115,7 @@ function TrayButton({
   );
 }
 
-export function ChatRowItem({ row }: Props): React.ReactElement {
+export function ChatRowItem({ row, to, matchLine, onOpened }: Props): React.ReactElement {
   const colors = useTheme();
   const router = useRouter();
   const badge = useChatBadge(row);
@@ -273,7 +279,10 @@ export function ChatRowItem({ row }: Props): React.ReactElement {
         }}
       >
         <Pressable
-          onPress={() => router.push(`/chats/${row.chatId}`)}
+          onPress={() => {
+            onOpened?.();
+            router.push(to ?? `/chats/${row.chatId}`);
+          }}
           onLongPress={() => showChatLongPressSheet(row)}
           delayLongPress={350}
           style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}
@@ -332,6 +341,7 @@ export function ChatRowItem({ row }: Props): React.ReactElement {
               ) : null}
               {preview}
             </Text>
+            {matchLine ?? null}
           </View>
         </Pressable>
 
