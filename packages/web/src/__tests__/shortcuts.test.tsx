@@ -363,19 +363,65 @@ describe('useShortcuts — chat-view scope', () => {
     });
   }
 
-  it('⌘↑/⌘↓ still step chats from the chat composer, where a chat opens with the cursor', () => {
+  it('⌘↑/⌘↓ in the chat composer move the caret and never step chats', () => {
     renderWithScope(true);
     const composer = document.createElement('textarea');
     composer.setAttribute('data-testid', 'composer-input');
     document.body.appendChild(composer);
     const up = fire({ key: 'ArrowUp', metaKey: true }, composer);
     const down = fire({ key: 'ArrowDown', metaKey: true }, composer);
-    expect(handlers.onPrevChat).toHaveBeenCalledTimes(1);
-    expect(handlers.onNextChat).toHaveBeenCalledTimes(1);
-    expect(up.defaultPrevented).toBe(true);
-    expect(down.defaultPrevented).toBe(true);
+    expect(handlers.onPrevChat).not.toHaveBeenCalled();
+    expect(handlers.onNextChat).not.toHaveBeenCalled();
+    expect(up.defaultPrevented).toBe(false);
+    expect(down.defaultPrevented).toBe(false);
     document.body.removeChild(composer);
   });
+
+  // Default text-editing chords must reach every kind of text field untouched.
+  const EDIT_CHORDS: Array<[string, Partial<KeyboardEventInit>]> = [
+    ['⌘↑', { key: 'ArrowUp', metaKey: true }],
+    ['⌘↓', { key: 'ArrowDown', metaKey: true }],
+    ['⌘⇧↑', { key: 'ArrowUp', metaKey: true, shiftKey: true }],
+    ['⌘⇧↓', { key: 'ArrowDown', metaKey: true, shiftKey: true }],
+    ['⌘←', { key: 'ArrowLeft', metaKey: true }],
+    ['⌘→', { key: 'ArrowRight', metaKey: true }],
+    ['⌥←', { key: 'ArrowLeft', altKey: true }],
+    ['⌥→', { key: 'ArrowRight', altKey: true }],
+    ['⌃↑', { key: 'ArrowUp', ctrlKey: true }],
+    ['⌃↓', { key: 'ArrowDown', ctrlKey: true }],
+    ['⌘⌫', { key: 'Backspace', metaKey: true }],
+    ['⌥⌫', { key: 'Backspace', altKey: true }],
+    ['⌘A', { key: 'a', metaKey: true }],
+    ['⌘Z', { key: 'z', metaKey: true }],
+    ['⌘C', { key: 'c', metaKey: true }],
+    ['⌘V', { key: 'v', metaKey: true }],
+    ['⌘X', { key: 'x', metaKey: true }],
+  ];
+  const FIELDS: Array<[string, () => HTMLElement]> = [
+    [
+      'composer textarea',
+      () => {
+        const t = document.createElement('textarea');
+        t.setAttribute('data-testid', 'composer-input');
+        return t;
+      },
+    ],
+    ['plain textarea', () => document.createElement('textarea')],
+    ['text input', () => document.createElement('input')],
+  ];
+  for (const [fieldName, make] of FIELDS) {
+    for (const [chordName, init] of EDIT_CHORDS) {
+      it(`${chordName} in a ${fieldName} is left to the browser and fires no handler`, () => {
+        renderWithScope(true);
+        const el = make();
+        document.body.appendChild(el);
+        const ev = fire(init, el);
+        for (const h of Object.values(handlers)) expect(h).not.toHaveBeenCalled();
+        expect(ev.defaultPrevented).toBe(false);
+        document.body.removeChild(el);
+      });
+    }
+  }
 
   it('⌘⇧↑ (folders) does NOT fire from the composer', () => {
     renderWithScope(true);

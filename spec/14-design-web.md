@@ -1354,7 +1354,7 @@ The state a project and its chats show after a snooze ends (`04-chats-and-folder
 | `⌘ W`            | Close the active pane's active tab (§ Panes and tabs)                                                                                                                                             | Anywhere                           |
 | `⌘ N`            | New chat in the current or most-recently-used (host, folder) pair                                                                                                                                 | Anywhere                           |
 | `⌘ ⇧ N`          | New chat with folder picker                                                                                                                                                                       | Anywhere                           |
-| `⌘ ↑ / ⌘ ↓`      | Prev / next chat in sidebar. In the composer specifically (a chat opens with the cursor there), the bare chord still does this instead of moving the caret — § Discoverability                    | Chat view                          |
+| `⌘ ↑ / ⌘ ↓`      | Prev / next chat in sidebar. Never fires from a text field, the composer included: there it moves the caret to the start / end of the text — § Discoverability                                    | Chat view                          |
 | `⌘ ⇧ ↑ / ⌘ ⇧ ↓`  | Jump to prev / next folder section                                                                                                                                                                | Chat view                          |
 | `⌘ 1`            | Jump to Manager                                                                                                                                                                                   | Chat view                          |
 | `⌘ 2`            | Toggle Channels (expand/collapse)                                                                                                                                                                 | Chat view                          |
@@ -1401,9 +1401,7 @@ does its normal OS/browser thing instead. A chord scoped Chat view fires only on
 a chat, new chat, or the empty "no chat open" state, and does nothing on Jobs,
 the job editor, Settings, or the file editor. A text field keeps its native keys
 even inside a Chat view chord's scope — a job's prompt, a settings field, a
-search box — with two exceptions: the bare (no-shift) `⌘ ↑ / ⌘ ↓` still switches
-chats from inside the composer specifically, since a chat opens with the cursor
-already there and that is how keyboard switching is reached at all; and the
+search box, and the composer — with one exception: the
 panes-and-tabs chords (`⌘ ⌥ ← / ⌘ ⌥ →`, `⌘ \`, `⌥ E`, `` ⌃ ` ``, `⌘ ⇧ '`, and
 `⌘ W` — the latter scoped Anywhere, not Chat view — § Panes and tabs §
 Keyboard) read past any field, since none of them collides with a field's own
