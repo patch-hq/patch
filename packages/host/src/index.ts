@@ -855,6 +855,8 @@ async function startHost(
   let updateAvailable = false;
   // A newer build is published but this machine's artifact is still being built.
   let updatePending = false;
+  let updateHeld = false;
+  let forceInstall = false;
 
   // See `createUpdateGate` — joins every caller (the `host.update` wire event
   // and `patch hosts update`'s local control command) onto one in-flight
@@ -904,12 +906,28 @@ async function startHost(
             currentVersion: VERSION,
             target: BUILD_TARGET,
             patchHome: config.patchHome,
-            untilIdle: () =>
-              waitUntilNoRunningTurns({
-                runningChats,
-                logger,
-                onIdle: () => daemon.commitToInstall(),
-              }),
+            untilIdle: async () => {
+              // Surfaces read this to say "waiting for chats" instead of "behind".
+              const held = runningChats().length > 0;
+              if (held) {
+                updateHeld = true;
+                emit(describeHost());
+              }
+              try {
+                await waitUntilNoRunningTurns({
+                  runningChats,
+                  logger,
+                  onIdle: () => daemon.commitToInstall(),
+                  force: () => forceInstall,
+                });
+              } finally {
+                forceInstall = false;
+                if (held) {
+                  updateHeld = false;
+                  emit(describeHost());
+                }
+              }
+            },
             logger,
           });
         } finally {
@@ -1060,6 +1078,7 @@ async function startHost(
       // no newer build" rather than a claim that none exists.
       updateAvailable,
       updatePending,
+      updateHeld,
       permissionModeDefault: daemon.permissionModeDefault(),
       permissionOverrides: daemon.permissionOverrideCount(),
       ...(defaultModel !== undefined ? { defaultModel } : {}),
@@ -2669,6 +2688,13 @@ async function startHost(
       }
       if (event.type === 'host.update') {
         if (!isForThisHost(event.hostId, event.type)) return;
+        if (event.force === true && updateHeld) {
+          // The install is already waiting on chats; the hold loop sees this on
+          // its next poll and installs over them.
+          logger.warn('host.update forced: installing over running turns');
+          forceInstall = true;
+          return;
+        }
         // Apply the published build. A successful apply ends with the service
         // manager restarting this process, so the frames below are only ever
         // reached on refusal — which is exactly when the surface needs words.

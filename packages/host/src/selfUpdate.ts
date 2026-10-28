@@ -289,6 +289,8 @@ export async function waitUntilNoRunningTurns(opts: {
    * can resume a turn between "idle" and the caller acting on it.
    */
   onIdle?: () => void;
+  /** True when the user chose to install over running turns (`host.update` force). */
+  force?: () => boolean;
 }): Promise<void> {
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const now = opts.now ?? Date.now;
@@ -297,7 +299,10 @@ export async function waitUntilNoRunningTurns(opts: {
   let logged = false;
   for (;;) {
     const running = opts.runningChats();
-    if (running.length === 0) {
+    if (running.length === 0 || opts.force?.()) {
+      if (running.length > 0) {
+        opts.logger.warn({ chats: running }, 'self-update: installing over running turns (forced)');
+      }
       opts.onIdle?.();
       return;
     }

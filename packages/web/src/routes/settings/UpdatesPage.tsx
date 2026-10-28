@@ -1,6 +1,7 @@
 // Settings → Updates: whether Patch is up to date, and one Update button when it
-// is not. Versions, shas and per-layer detail are deliberately not shown (spec/11
-// § Version reporting) — Patch works out what is behind and updates it itself.
+// is not. Each host is listed with its plain version (no shas, no layers, no
+// developer commands — spec/11 § Version reporting). A host that is behind only
+// because its chats are mid-turn says so: it updates itself once they finish.
 //
 // Hosts update themselves by default; the toggle turns that off, and then Update
 // is the way. The desktop shell's staged update is restarted from the banner
@@ -16,7 +17,7 @@ import { relativeIso } from '../../lib/relativeTime.js';
 import { Toggle } from '../../components/Toggle.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore, type HostPresence } from '../../stores/presenceStore.js';
-import { sortHosts } from './hostScope.js';
+import { hostLabel, sortHosts } from './hostScope.js';
 import { sendToHost } from './hostWrite.js';
 import { patchShared } from './sharedWrite.js';
 import { Group, Row, SettingsPage } from './ui.js';
@@ -54,7 +55,11 @@ export function useBehind(): BehindItem[] {
   const items: BehindItem[] = sortHosts(Object.values(hosts))
     .filter((h) => h.host?.updateAvailable === true)
     .map((host) => ({ kind: 'host' as const, host }));
+  const hostRowsExplain = items.length > 0;
   for (const d of report?.drift ?? []) {
+    // The agent lagging the server is the same fact as a host being behind; the
+    // host row already says it (and whether it is only waiting on chats).
+    if (d.kind === 'daemon-server-mismatch' && hostRowsExplain) continue;
     items.push({
       kind: 'drift',
       key: `${d.kind}-${d.detail}`,
@@ -66,16 +71,29 @@ export function useBehind(): BehindItem[] {
   return items;
 }
 
+function hostStatus(h: HostPresence): string {
+  if (!h.online) return 'Offline';
+  if (h.host?.updateHeld) return 'Update waiting for chats to finish';
+  if (h.host?.updatePending) return 'Update on its way';
+  return h.host?.updateAvailable ? 'Update available' : 'Up to date';
+}
+
 export function UpdatesPage(): JSX.Element {
   const { data: report, error, isFetching, refetch, dataUpdatedAt } = useVersionReport();
   const { shell, checkShell } = useShell();
   const behind = useBehind();
   const autoUpdate = usePreferencesStore((s) => s.preferences.autoUpdateHosts);
   const loaded = usePreferencesStore((s) => s.loaded);
-  const updatable = behind.flatMap((b) => (b.kind === 'host' && b.host.online ? [b.host] : []));
+  const updatable = behind.flatMap((b) =>
+    b.kind === 'host' && b.host.online && b.host.host?.updateHeld !== true ? [b.host] : [],
+  );
   const shellReady = shell?.lastResult === 'downloaded';
   const shellBusy = shell?.checking === true || shell?.lastResult === 'update-available';
   const upToDate = behind.length === 0 && !shellReady && !shellBusy;
+  const hosts = sortHosts(Object.values(usePresenceStore((s) => s.hosts)));
+  // Behind only because chats are running: nothing for the user to do.
+  const onlyWaiting =
+    behind.length > 0 && behind.every((b) => b.kind === 'host' && b.host.host?.updateHeld === true);
 
   const checkAll = (): void => {
     void refetch();
@@ -86,6 +104,7 @@ export function UpdatesPage(): JSX.Element {
   if (error || shell?.lastResult === 'error') status = 'Couldn’t check';
   else if (!report) status = 'Checking…';
   else if (shellReady) status = 'Update ready — restart to apply';
+  else if (onlyWaiting) status = 'Updating when your chats are idle';
   else if (!upToDate) status = shellBusy && behind.length === 0 ? 'Checking…' : 'Update available';
 
   return (
@@ -144,6 +163,39 @@ export function UpdatesPage(): JSX.Element {
           />
         ) : null}
       </Group>
+
+      {hosts.length > 0 ? (
+        <Group label="Hosts" testid="version-hosts">
+          {hosts.map((h) => (
+            <Row
+              key={h.hostId}
+              title={hostLabel(h)}
+              testid={`version-host-${h.hostId}`}
+              sub={h.host ? hostStatus(h) : 'not reported'}
+            >
+              {h.host?.updateHeld && h.online ? (
+                <button
+                  type="button"
+                  className="set-btn"
+                  data-testid={`update-now-${h.hostId}`}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Update ${hostLabel(h)} now? Chats running on it will be stopped mid-turn.`,
+                      )
+                    ) {
+                      sendToHost(h, { type: 'host.update', hostId: h.hostId, force: true });
+                    }
+                  }}
+                >
+                  Update now
+                </button>
+              ) : null}
+              {h.host ? <span className="set-val">{h.host.hostVersion}</span> : null}
+            </Row>
+          ))}
+        </Group>
+      ) : null}
 
       <Group>
         <Row title="Update automatically" testid="auto-update">

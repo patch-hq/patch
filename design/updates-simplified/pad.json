@@ -1,0 +1,5 @@
+{"screens":[
+{"id":"current","name":"Up to date","path":"index.html"},
+{"id":"available","name":"Update available","path":"available.html"},
+{"id":"problem","name":"Something wrong","path":"problem.html"}
+]}

@@ -1,0 +1,149 @@
+/* Proposed pane/tab chrome, layered over Patch's real stylesheet (real.css). */
+html,body{height:100%;margin:0;overflow:hidden}
+.shell{display:flex;height:100vh}
+.cols{flex:1;display:flex;min-width:0;background:var(--bg-app)}
+.col{flex:1;min-width:0;display:flex;flex-direction:column;border-left:1px solid var(--line)}
+.col:first-child{border-left:0}
+/* tab strip — Chrome-shaped */
+.strip{height:40px;flex:none;display:flex;align-items:flex-end;padding:0 8px 0 10px;background:var(--bg-app);gap:0}
+.ctab{position:relative;height:33px;flex:0 1 190px;min-width:40px;display:flex;align-items:center;gap:8px;padding:0 6px 0 12px;font:500 12.5px/1 Inter,var(--font-ui,system-ui),sans-serif;color:var(--ink-3);border-radius:9px 9px 0 0;white-space:nowrap;cursor:default}
+.ctab .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.ctab svg{flex:none;width:15px;height:15px}
+.ctab .x{flex:none;width:18px;height:18px;border-radius:50%;display:grid;place-items:center;color:var(--ink-faint)}
+.ctab .x svg{width:11px;height:11px}
+.ctab+.ctab::before{content:"";position:absolute;left:0;top:10px;height:14px;width:1px;background:var(--line)}
+.ctab.on::before,.ctab.on+.ctab::before,.grp+.ctab::before{display:none}
+.ctab:not(.on):hover{color:var(--ink-2)}
+.ctab:not(.on):hover::after{content:"";position:absolute;inset:3px 3px 4px 3px;border-radius:8px;background:rgba(40,30,15,.06);z-index:-1}
+.ctab.on{background:var(--bg-elevated);color:var(--ink);z-index:1}
+.ctab.on .fl{position:absolute;bottom:0;width:10px;height:10px}
+.ctab.on .fl.l{left:-10px;background:radial-gradient(circle at 0 0,transparent 9.5px,var(--bg-elevated) 10px)}
+.ctab.on .fl.r{right:-10px;background:radial-gradient(circle at 100% 0,transparent 9.5px,var(--bg-elevated) 10px)}
+.col.focus .ctab.on{box-shadow:inset 0 2px 0 var(--accent)}
+.ctab.in-grp:not(.on){box-shadow:inset 0 -2px 0 var(--g)}
+.ctab.split{background:var(--bg-elevated);color:var(--ink)}
+/* group chip (one chat) */
+.grp{flex:none;align-self:center;margin:0 4px 3px 4px;height:24px;display:flex;align-items:center;gap:7px;padding:0 9px 0 8px;border-radius:7px;background:var(--gt);color:var(--gs);font:600 12px/1 Inter,system-ui,sans-serif;white-space:nowrap}
+.grp .badge{flex:none}
+.grp .n{font-weight:500;opacity:.75}
+.grp.closed{background:transparent;box-shadow:inset 0 0 0 1px var(--line);color:var(--ink-2)}
+.g1{--g:#46802f;--gt:#e7f0dd;--gs:#2f5521}
+.g2{--g:#4a6fa5;--gt:#e1e9f4;--gs:#2d4c78}
+.g3{--g:#9a5b8a;--gt:#f1e3ee;--gs:#6c3a61}
+.g4{--g:#b07a12;--gt:#f6ead0;--gs:#7a5208}
+.g5{--g:#3f8a86;--gt:#dcefed;--gs:#245f5c}
+.newtab{flex:none;align-self:center;margin:0 0 3px 6px;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;color:var(--ink-3)}
+.newtab.open{background:rgba(40,30,15,.08);color:var(--ink)}
+.newtab svg{width:16px;height:16px}
+/* toolbar under the strip */
+.bar{height:46px;flex:none;display:flex;align-items:center;gap:6px;padding:0 10px;background:var(--bg-elevated);border-bottom:1px solid var(--line-soft)}
+.bar .navb{width:28px;height:28px;display:grid;place-items:center;color:var(--ink-faint);border-radius:6px}
+.bar .ttl{font-family:"Fraunces Variable",Fraunces,serif;font-size:18px;font-weight:500;color:var(--ink);margin-left:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar .addr{flex:1;min-width:0;height:30px;display:flex;align-items:center;gap:8px;padding:0 12px;border-radius:999px;background:var(--bg-soft);font-size:13px;color:var(--ink-3);white-space:nowrap;overflow:hidden}
+.bar .addr b{color:var(--ink);font-weight:500}
+.bar .sp{flex:1}
+.tools{display:flex;gap:2px;flex:none}
+.tool{height:30px;display:flex;align-items:center;gap:6px;padding:0 8px;border-radius:7px;color:var(--ink-3);font-size:12.5px;white-space:nowrap}
+.tool svg{width:16px;height:16px}
+.tool.on{background:var(--accent-tint);color:var(--accent-strong)}
+.tools.iconly .tool .l{display:none}
+/* bodies */
+.body{flex:1;min-height:0;display:flex;background:var(--bg-elevated);position:relative}
+.body>.chat-main{flex:1}
+.half{flex:1;min-width:0;display:flex;flex-direction:column;border-left:1px solid var(--line-soft)}
+.half:first-child{border-left:0}
+.art{flex:1;overflow:hidden;padding:28px 32px;font-family:Inter,system-ui,sans-serif;background:#fff}
+.art h2{font-family:"Fraunces Variable",serif;font-weight:600;font-size:24px;margin:0 0 4px}
+.art .sub{color:var(--ink-3);font-size:13px;margin-bottom:20px}
+.dep{display:grid;grid-template-columns:70px 1fr 90px;gap:0;font-size:14px;border-top:1px solid var(--line-soft)}
+.dep div{padding:11px 4px;border-bottom:1px solid var(--line-soft)}
+.dep .tm{font-family:"JetBrains Mono Variable",monospace;font-weight:600}
+.dep .gap{color:var(--waiting);font-weight:600}
+.dep .r{text-align:right;color:var(--ink-3)}
+.term{flex:1;background:var(--term-bg);color:var(--term-ink);font:13px/1.65 "JetBrains Mono Variable",monospace;padding:14px 18px;overflow:hidden}
+.term .p{color:var(--accent-strong)}
+.term .d{color:var(--term-ink-dim)}
+.tree{flex:1;padding:12px 10px;font-size:13.5px;color:var(--ink-2);font-family:Inter,system-ui,sans-serif}
+.tree div{padding:5px 10px;border-radius:6px}
+.tree .on{background:var(--accent-tint);color:var(--ink)}
+/* drop targets while dragging */
+.drop{position:absolute;inset:0;display:flex;gap:10px;padding:12px;background:rgba(255,255,255,.72);z-index:4}
+.drop .z{flex:1;border:2px dashed var(--accent-soft);border-radius:12px;display:grid;place-items:center;font:600 13px Inter,sans-serif;color:var(--accent-strong)}
+.drop .z.edge{flex:0 0 22%}
+.drop .z.hot{background:var(--accent-tint);border:2px solid var(--accent)}
+.dragrow{position:fixed;z-index:9;display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:9px;background:var(--bg-elevated);box-shadow:var(--shadow-lg);font:500 13.5px Inter,sans-serif;transform:rotate(-1.5deg)}
+.sb-row.ghost{opacity:.35}
+/* + menu */
+.menu{position:absolute;z-index:6;width:360px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow-lg);overflow:hidden;font-family:Inter,system-ui,sans-serif}
+.menu input{width:100%;box-sizing:border-box;border:0;border-bottom:1px solid var(--line-soft);padding:13px 14px;font:inherit;font-size:14px;outline:0;background:transparent}
+.menu .h{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);padding:10px 14px 4px}
+.menu .i{display:flex;align-items:center;gap:10px;padding:7px 14px;font-size:13.5px;color:var(--ink-2)}
+.menu .i svg{width:15px;height:15px}
+.menu .i.on{background:var(--accent-tint);color:var(--ink)}
+.menu .i kbd{margin-left:auto;font:11px Inter,sans-serif;color:var(--ink-faint)}
+/* v3: the chat is the first tab of its group; terminal docks at the bottom */
+.ctab.chat .t{font-weight:600}
+.ctab.chat:not(.on){color:var(--gs)}
+.ctab .badge{flex:none}
+.stack{flex:1;min-width:0;display:flex;flex-direction:column}
+.stack>.top{flex:1;min-height:0;display:flex}
+.stack>.top>.chat-main{flex:1}
+.dock{flex:none;height:230px;display:flex;flex-direction:column;border-top:1px solid var(--line);position:relative}
+.dock::before{content:"";position:absolute;left:50%;top:-3px;width:36px;height:5px;margin-left:-18px;border-radius:3px;background:var(--line)}
+.dock .dh{height:32px;flex:none;display:flex;align-items:center;gap:8px;padding:0 8px 0 14px;background:var(--term-bg);border-bottom:1px solid var(--term-line);font:500 12.5px Inter,sans-serif;color:var(--ink-2)}
+.dock .dh svg{width:14px;height:14px}
+.dock .dh .cwd{color:var(--ink-faint);font-family:"JetBrains Mono Variable",monospace;font-size:12px}
+.dock .dh .sp{flex:1}
+.dock .dh .db{width:24px;height:24px;display:grid;place-items:center;border-radius:5px;color:var(--ink-3)}
+.dock .term{padding:8px 14px}
+.onscreen{flex:none;min-width:18px;height:18px;padding:0 4px;box-sizing:border-box;border-radius:5px;display:grid;place-items:center;font:600 11px/1 Inter,sans-serif;background:var(--gt);color:var(--gs);margin-right:6px}
+/* v4: two levels. A group (one chat) is a card; inside it, fixed zones: main tabs, right, bottom. */
+.cols.groups{gap:8px;padding:8px;background:var(--bg-app)}
+.gcard{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--bg-elevated);border:1px solid var(--line);border-radius:12px;overflow:hidden;position:relative}
+.gcard.focus{border-color:var(--accent-soft);box-shadow:0 0 0 2px var(--accent-tint)}
+.ghead{height:44px;flex:none;display:flex;align-items:center;gap:6px;padding:0 8px 0 14px;border-bottom:1px solid var(--line-soft);background:var(--bg-elevated)}
+.ghead .gname{display:flex;align-items:center;gap:8px;font-family:"Fraunces Variable",serif;font-size:17px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:grab}
+.ghead .onscreen{margin:0}
+.gbody{flex:1;min-height:0;display:flex;flex-direction:column}
+.grow{flex:1;min-height:0;display:flex}
+.gmain{flex:1;min-width:0;display:flex;flex-direction:column}
+.gmain .strip{background:var(--bg-soft)}
+.gmain>.content{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--bg-elevated)}
+.gmain>.content>.chat-main{flex:1}
+.zone{display:flex;flex-direction:column;min-width:0;background:var(--bg-elevated)}
+.zone.right{width:38%;flex:none;border-left:1px solid var(--line)}
+.zone.bottom{height:220px;flex:none;border-top:1px solid var(--line)}
+.zstrip{height:32px;flex:none;display:flex;align-items:stretch;gap:2px;padding:0 6px;border-bottom:1px solid var(--line-soft);background:var(--bg-soft)}
+.ztab{display:flex;align-items:center;gap:6px;padding:0 10px;font:500 12px Inter,sans-serif;color:var(--ink-3);border-bottom:2px solid transparent;cursor:grab}
+.ztab svg{width:14px;height:14px}
+.ztab.on{color:var(--ink);border-bottom-color:var(--accent)}
+.zstrip .sp{flex:1}
+.zstrip .db{align-self:center;width:24px;height:24px;display:grid;place-items:center;border-radius:5px;color:var(--ink-3)}
+.zstrip .db svg{width:13px;height:13px}
+.zone .term{flex:1}
+.zone .art{padding:20px 22px}
+/* drop targets for the two levels */
+.gdrop{position:absolute;inset:44px 0 0 0;z-index:4;background:rgba(255,255,255,.7);display:grid;place-items:center}
+.gdrop .z{position:absolute;border:2px dashed var(--accent-soft);border-radius:10px;display:grid;place-items:center;font:600 12.5px Inter,sans-serif;color:var(--accent-strong)}
+.gdrop .z.hot{background:var(--accent-tint);border:2px solid var(--accent)}
+.gap-drop{flex:none;width:56px;margin:0 -4px;border:2px dashed var(--accent-soft);border-radius:10px;display:grid;place-items:center;font:600 12px Inter,sans-serif;color:var(--accent-strong);writing-mode:vertical-rl;background:rgba(255,255,255,.4)}
+.gap-drop.hot{background:var(--accent-tint);border:2px solid var(--accent)}
+/* v5: group > panes > tabs. No special zones: every pane is the same, terminal is just a tab. */
+.split{flex:1;min-width:0;min-height:0;display:flex}
+.split.v{flex-direction:column}
+.pane5{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;position:relative}
+.split>.pane5+.pane5,.split>.split+.pane5,.split>.pane5+.split{border-left:1px solid var(--line)}
+.split.v>.pane5+.pane5,.split.v>.split+.pane5,.split.v>.pane5+.split{border-left:0;border-top:1px solid var(--line)}
+.pane5 .strip{background:var(--bg-soft);height:38px}
+.pane5 .ctab{height:31px}
+.pane5>.content{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--bg-elevated)}
+.pane5>.content>.chat-main{flex:1}
+.pane5.short{flex:none;height:230px}
+.pane5.narrow{flex:none;width:36%}
+.pane5 .art{padding:22px 26px}
+.ctxmenu{position:fixed;z-index:8;min-width:230px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow-lg);padding:5px;font:13.5px Inter,sans-serif}
+.ctxmenu .i{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:6px;color:var(--ink-2)}
+.ctxmenu .i svg{width:15px;height:15px}
+.ctxmenu .i.on{background:var(--accent-tint);color:var(--ink)}
+.ctxmenu .i kbd{margin-left:auto;font:11.5px Inter,sans-serif;color:var(--ink-faint)}
+.ctxmenu hr{border:0;border-top:1px solid var(--line-soft);margin:4px 2px}

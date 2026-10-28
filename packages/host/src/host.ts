@@ -42,6 +42,8 @@ export interface HostDescriptionInput {
   updateAvailable: boolean;
   /** A newer build is published but not yet built for this machine. */
   updatePending?: boolean | undefined;
+  /** An update is held until this machine's running turns finish. */
+  updateHeld?: boolean | undefined;
   permissionModeDefault: SdkPermissionMode;
   permissionOverrides: number;
   /**
@@ -132,6 +134,7 @@ export function describeHost(input: HostDescriptionInput): HostInfoEvent {
     ...(input.builtAt !== undefined ? { builtAt: input.builtAt } : {}),
     updateAvailable: input.updateAvailable,
     ...(input.updatePending ? { updatePending: true } : {}),
+    ...(input.updateHeld ? { updateHeld: true } : {}),
     permissionModeDefault: input.permissionModeDefault,
     permissionOverrides: input.permissionOverrides,
     ...(input.defaultModel !== undefined ? { defaultModel: input.defaultModel } : {}),
