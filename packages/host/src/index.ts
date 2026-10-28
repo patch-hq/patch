@@ -4123,7 +4123,15 @@ async function startHost(
       return block + (req.voicePrefix ? `${req.voicePrefix}${req.message}` : req.message);
     },
     sleepGuard: createSleepGuard({ logger }),
-    sleepWatch: createSleepWatch({ logger }),
+    sleepWatch: createSleepWatch({
+      logger,
+      // Whatever the server link held across the gap is stale: re-handshake now
+      // rather than waiting for a heartbeat to notice, so fires held for this
+      // host are released as soon as it is running again.
+      onGap: () => {
+        link.dropLink();
+      },
+    }),
     onTurnCommitted: (chatId) => {
       if (!(SPECIAL_THREAD_IDS as readonly string[]).includes(chatId)) return;
       const threadId = chatId as SpecialThreadId;

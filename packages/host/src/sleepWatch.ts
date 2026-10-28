@@ -13,6 +13,7 @@
 // failed across such a gap died of the sleep, not of anything it did.
 
 import { execFileSync } from 'node:child_process';
+import { loadavg } from 'node:os';
 import type { Logger } from 'pino';
 
 export interface SleepWatch {
@@ -34,6 +35,14 @@ export interface SleepWatchOptions {
   gapMs?: number;
   /** The output of `pmset -g systemstate`. */
   readSystemState?: () => string;
+  /** CPU time this process has used, in ms (tests). */
+  cpuMs?: () => number;
+  /**
+   * Called when a tick lands far later than it was due. The sockets this
+   * process held across the gap are not to be trusted: the caller should make
+   * them re-handshake rather than wait for them to notice.
+   */
+  onGap?: (gap: { sleptMs: number }) => void;
 }
 
 const CAPABILITIES = /Current System Capabilities are:(.*)/;
@@ -47,16 +56,46 @@ export function createSleepWatch(opts: SleepWatchOptions): SleepWatch {
     opts.readSystemState ??
     (() =>
       execFileSync('/usr/bin/pmset', ['-g', 'systemstate'], { encoding: 'utf8', timeout: 5_000 }));
+  const cpuMs =
+    opts.cpuMs ??
+    ((): number => {
+      const u = process.cpuUsage();
+      return (u.user + u.system) / 1000;
+    });
   let lastTick = now();
+  let lastCpu = cpuMs();
   let lastWakeAt: number | null = null;
 
   const check = (): void => {
     const t = now();
+    const cpu = cpuMs();
     if (t - lastTick > tickMs + gapMs) {
       lastWakeAt = t;
-      opts.logger.info({ sleptMs: t - lastTick }, 'sleep watch: machine was asleep');
+      const sleptMs = t - lastTick;
+      if (platform === 'darwin') {
+        opts.logger.info({ sleptMs }, 'sleep watch: machine was asleep');
+      } else {
+        // A server does not sleep, so a gap here is this process not running:
+        // either its event loop was blocked (it used the CPU the whole time) or
+        // it was stopped or starved (it used almost none). Say which, with the
+        // machine's load, so the next one is diagnosed from the log rather than
+        // guessed at from its symptoms.
+        const cpuUsedMs = Math.round(cpu - lastCpu);
+        opts.logger.error(
+          {
+            sleptMs,
+            cpuUsedMs,
+            kind: cpuUsedMs >= sleptMs / 2 ? 'event loop blocked' : 'process stopped or starved',
+            loadavg: loadavg().map((n) => Math.round(n * 100) / 100),
+            rssMb: Math.round(process.memoryUsage.rss() / 1048576),
+          },
+          'sleep watch: this process did not run for a long gap',
+        );
+      }
+      opts.onGap?.({ sleptMs });
     }
     lastTick = t;
+    lastCpu = cpu;
   };
 
   const isFullyAwake = (): boolean => {

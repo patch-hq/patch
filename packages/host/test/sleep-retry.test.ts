@@ -138,6 +138,50 @@ describe('sleepWatch', () => {
     w.dispose();
   });
 
+  it('off macOS a long gap is a stall, named by whether the process was using the CPU, and reported to onGap', () => {
+    vi.useFakeTimers();
+    try {
+      const error = vi.fn();
+      const info = vi.fn();
+      const logger = { ...silent, error, info } as unknown as pino.Logger;
+      let clock = 1_000_000;
+      let cpu = 0;
+      const onGap = vi.fn();
+      const w = createSleepWatch({
+        logger,
+        platform: 'linux',
+        now: () => clock,
+        cpuMs: () => cpu,
+        onGap,
+      });
+      // An hour passes in which the process used almost no CPU: stopped, not busy.
+      clock += 3_600_000;
+      cpu += 50;
+      w.check();
+      expect(info).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledOnce();
+      expect(error.mock.calls[0]?.[0]).toMatchObject({
+        sleptMs: 3_600_000,
+        cpuUsedMs: 50,
+        kind: 'process stopped or starved',
+      });
+      expect(onGap).toHaveBeenCalledWith({ sleptMs: 3_600_000 });
+      expect(w.sleptSince(1_000_000)).toBe(true);
+      // The same gap spent spinning is a blocked event loop.
+      clock += 3_600_000;
+      cpu += 3_500_000;
+      w.check();
+      expect(error.mock.calls[1]?.[0]).toMatchObject({ kind: 'event loop blocked' });
+      // An ordinary tick says nothing.
+      clock += 5_000;
+      w.check();
+      expect(error).toHaveBeenCalledTimes(2);
+      w.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('is always awake off macOS', () => {
     const read = vi.fn(() => DARK);
     const w = createSleepWatch({ logger: silent, platform: 'linux', readSystemState: read });
