@@ -180,6 +180,25 @@ describe('runManagerSweep', () => {
     ).toBe(false);
   });
 
+  it('wake: a candidate that settled rather than stalled is left alone', async () => {
+    const decide = vi.fn(async () =>
+      result([{ chatId: 'chat-remote', action: 'wake', message: 'still working?' }]),
+    );
+    const sendToRemoteChat = vi.fn(async () => undefined);
+    const { daemon } = setup(decide, { sendToRemoteChat });
+    const out = await daemon.runManagerSweep({
+      runId: 'r1',
+      candidates: [
+        candidate({ chatId: 'chat-remote', hostId: 'd2', folder: '/elsewhere', edge: 'settled' }),
+      ],
+      messagesPerChat: 3,
+      prompt: 'decide',
+      model: 'claude-sonnet-5',
+    });
+    expect(out.actions).toEqual([{ chatId: 'chat-remote', action: 'leave' }]);
+    expect(sendToRemoteChat).not.toHaveBeenCalled();
+  });
+
   it('wake: delivers a cross-host candidate via sendToRemoteChat, never sendInput', async () => {
     const decide = vi.fn(async () =>
       result([{ chatId: 'chat-remote', action: 'wake', message: 'still working?' }]),
