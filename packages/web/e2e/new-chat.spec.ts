@@ -543,4 +543,48 @@ test.describe('new chat header', () => {
     await expect(page.getByTestId('usage-pop-context')).toHaveCount(0);
     await expect(page.getByTestId('usage-pop-account')).toContainText('42%');
   });
+
+  // Todoist: "patch flickers to full width for new message briefly when
+  // sending in new chat". The pending message was drawn straight into the
+  // stream, outside the measured column, so for a frame or two it spanned the
+  // whole panel before the chat route took over at the reading width. The
+  // message text must sit in the same place in every painted frame.
+  test('the sent message text does not move when the chat route takes over', async ({ page }) => {
+    await page.setViewportSize({ width: 1800, height: 900 });
+    await page.route('**/api/chats', (r) =>
+      r.fulfill({
+        status: 202,
+        contentType: 'application/json',
+        body: JSON.stringify({ chatId: 'c-e2e-width', folder: '/home/tom/x', status: 'pending' }),
+      }),
+    );
+    await page.goto(NEW);
+    const composer = page.getByTestId('composer-input');
+    await composer.fill('hello from a brand new chat');
+    await page.evaluate(() => {
+      const spans: Array<[number, number]> = [];
+      (window as unknown as { __spans: typeof spans }).__spans = spans;
+      const sample = (): void => {
+        for (const c of document.querySelectorAll('.msg-user .content')) {
+          const r = c.getBoundingClientRect();
+          spans.push([Math.round(r.left), Math.round(r.right)]);
+        }
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+    await composer.press('Enter');
+    await expect(page.getByTestId('chat-main')).toBeVisible();
+    await expect(page.locator('.msg-user')).toBeVisible();
+    await page.waitForTimeout(300);
+    const spans = await page.evaluate(
+      () => (window as unknown as { __spans: Array<[number, number]> }).__spans,
+    );
+    expect(spans.length).toBeGreaterThan(0);
+    const settled = spans[spans.length - 1];
+    for (const [left, right] of spans) {
+      expect(Math.abs(left - settled[0])).toBeLessThanOrEqual(1);
+      expect(Math.abs(right - settled[1])).toBeLessThanOrEqual(1);
+    }
+  });
 });

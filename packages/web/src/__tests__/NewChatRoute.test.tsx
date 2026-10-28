@@ -449,6 +449,11 @@ describe('/chats/new', () => {
     expect(screen.getByTestId('new-chat-pending-message').textContent).toContain(
       'immediate message',
     );
+    // In the same measured column the real transcript uses, so it does not
+    // flash full width before the chat route takes over.
+    expect(
+      screen.getByTestId('new-chat-pending-message').closest('.chat-stream-content'),
+    ).not.toBeNull();
     // Then the new chat's route takes over, with the message in its transcript.
     await waitFor(() => expect(screen.getByTestId('chat-main')).toBeInTheDocument());
     expect(document.querySelector('.msg-user')?.textContent).toContain('immediate message');

@@ -1401,28 +1401,32 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
       </div>
       {terminalTakesPanel ? null : (
         <section className="chat-stream" data-testid="chat-stream">
-          {/* The empty state and the setup row centre TOGETHER as one block, so
-            the pickers sit directly under the "New chat" title rather than
-            drifting to the foot of the panel. */}
-          <div className="new-chat-intro">
-            <EmptyChat title="New chat" />
-            {signedOut ? (
-              <div className="new-chat-blocked" data-testid="new-chat-blocked" role="alert">
-                <p className="new-chat-blocked-title">
-                  Not signed in to {effectiveModel?.startsWith('openai/') ? 'Codex' : 'Claude'}
-                </p>
-                <Link to="/settings/usage">Sign in</Link>
+          {/* Same measured column as the real transcript, so the pending message
+            does not flash full width before the chat route takes over. */}
+          <div className="chat-stream-content">
+            {/* The empty state and the setup row centre TOGETHER as one block, so
+              the pickers sit directly under the "New chat" title rather than
+              drifting to the foot of the panel. */}
+            <div className="new-chat-intro">
+              <EmptyChat title="New chat" />
+              {signedOut ? (
+                <div className="new-chat-blocked" data-testid="new-chat-blocked" role="alert">
+                  <p className="new-chat-blocked-title">
+                    Not signed in to {effectiveModel?.startsWith('openai/') ? 'Codex' : 'Claude'}
+                  </p>
+                  <Link to="/settings/usage">Sign in</Link>
+                </div>
+              ) : null}
+              {setupRow}
+            </div>
+            {pendingFirst !== null ? (
+              <div className="msg msg-user sending" data-testid="new-chat-pending-message">
+                <div className="msg-content-row">
+                  <div className="content md">{pendingFirst}</div>
+                </div>
               </div>
             ) : null}
-            {setupRow}
           </div>
-          {pendingFirst !== null ? (
-            <div className="msg msg-user sending" data-testid="new-chat-pending-message">
-              <div className="msg-content-row">
-                <div className="content md">{pendingFirst}</div>
-              </div>
-            </div>
-          ) : null}
         </section>
       )}
       {/* A new chat cannot run without a credential, so say so here too — this is
