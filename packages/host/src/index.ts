@@ -1627,6 +1627,19 @@ async function startHost(
   let accountStrategy: SharedSettings['accountStrategy'] = DEFAULT_SHARED_SETTINGS.accountStrategy;
   let webBotAuthEnabled = false;
 
+  // The account's Manager and Speakers model (Settings → Manager). Undefined
+  // until the server's first settings push; applied again whenever it changes
+  // and once the threads exist, so neither order loses it.
+  let specialThreadModel: string | undefined;
+  const applySpecialThreadModel = (): void => {
+    if (specialThreadModel === undefined || !runsManager) return;
+    const model = specialThreadModel;
+    daemon.applySpecialThreadModel(model).then(
+      () => logger.info({ model }, 'special thread model applied'),
+      (err: unknown) =>
+        logger.warn({ model, err: (err as Error).message }, 'special thread model refused'),
+    );
+  };
   const applySharedHostSettings = (shared: SharedSettings): void => {
     if (shared.agentIdentity.enabled !== webBotAuthEnabled) {
       webBotAuthEnabled = shared.agentIdentity.enabled;
@@ -1643,6 +1656,10 @@ async function startHost(
     }
     daemon.setProviderPermissionDefaults(shared.providerPermissionDefaults);
     setDefaultModel(shared.defaultModel);
+    if (shared.specialThreadModel !== specialThreadModel) {
+      specialThreadModel = shared.specialThreadModel;
+      applySpecialThreadModel();
+    }
     if (JSON.stringify(shared.voiceConfig) !== JSON.stringify(voiceConfig)) {
       voiceConfig = shared.voiceConfig;
       hostStateStore.update({ voiceConfig });
@@ -4301,6 +4318,7 @@ async function startHost(
       logger,
       permissionModeDefault: daemon.permissionModeDefault(),
     });
+    applySpecialThreadModel();
   }
   if (runsManager) createSpecialThreads();
   // A Manager handoff that was waiting when this host last stopped.
