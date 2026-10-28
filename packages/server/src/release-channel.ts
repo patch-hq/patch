@@ -16,7 +16,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /** The project's public home on GitHub. */
-export const RELEASE_REPO = 'tomchambers2/patch';
+export const RELEASE_REPO = 'patch-hq/patch';
 
 export const CHANNELS = ['stable', 'dev', 'off'] as const;
 export type FollowedChannel = (typeof CHANNELS)[number];

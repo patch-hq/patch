@@ -14,7 +14,7 @@ On a fresh Linux box with systemd, one command installs a server with HTTPS
 `<ip>.sslip.io`), makes the account and prints a QR to scan with the app:
 
 ```bash
-curl -fsSL https://github.com/tomchambers2/patch/releases/latest/download/install.sh | sudo sh
+curl -fsSL https://github.com/patch-hq/patch/releases/latest/download/install.sh | sudo sh
 patch-server pair            # another QR, whenever you want one
 ```
 

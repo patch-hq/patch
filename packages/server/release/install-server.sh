@@ -1,8 +1,8 @@
 #!/bin/sh
 # Your own Patch server, on a fresh Linux box, in one command, with HTTPS.
 #
-#   curl -fsSL https://github.com/tomchambers2/patch/releases/latest/download/install.sh | sudo sh
-#   curl -fsSL https://github.com/tomchambers2/patch/releases/latest/download/install.sh | sudo sh -s -- --domain patch.example.com
+#   curl -fsSL https://github.com/patch-hq/patch/releases/latest/download/install.sh | sudo sh
+#   curl -fsSL https://github.com/patch-hq/patch/releases/latest/download/install.sh | sudo sh -s -- --domain patch.example.com
 #
 # What it does, and nothing you have to answer:
 #   1. Makes a `patch` user and installs the server release into
@@ -35,7 +35,7 @@
 # certificate that does not arrive — each stops here and says why.
 set -eu
 
-DEFAULT_RELEASE_URL="https://github.com/tomchambers2/patch/releases/latest/download/patch-server.tar.gz"
+DEFAULT_RELEASE_URL="https://github.com/patch-hq/patch/releases/latest/download/patch-server.tar.gz"
 RELEASE_URL="${PATCH_RELEASE_URL:-${DEFAULT_RELEASE_URL}}"
 DOMAIN=""
 EMAIL=""
