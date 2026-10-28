@@ -40,6 +40,16 @@ test('phone: settings drop to icons, still one line, model keeps its short name'
   await expect(page.getByTestId('chat-model')).not.toHaveText(/Claude/);
 });
 
+test('narrow phone (320px): still one line, send/stop inside the row', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.goto(CHAT);
+  await expect(page.locator('.composer-actions')).toHaveClass(/is-compact/);
+  await oneLine(page);
+  const field = (await page.getByTestId('composer-input').boundingBox())!;
+  const stop = (await page.getByTestId('stop-btn').boundingBox())!;
+  expect(stop.x + stop.width).toBeLessThanOrEqual(field.x + field.width + 0.5);
+});
+
 test('the + in the field offers a file or image, and a sketch', async ({ page }) => {
   await page.goto(CHAT);
   const input = (await page.getByTestId('composer-input').boundingBox())!;
