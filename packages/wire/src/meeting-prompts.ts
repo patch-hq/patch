@@ -5,9 +5,9 @@
 
 export const DEFAULT_MEETING_NOW_PROMPT = `"now": a one-line headline on what is being discussed right now, at most 3 short bullets, and who has been speaking (or empty).`;
 
-export const DEFAULT_MEETING_NOTES_PROMPT = `"topics": each topic is one stretch of the conversation about one subject. Its title summarises that stretch in one line: what was discussed, who said what, and where it landed (for example "Discussed moving to the new platform: Joel for it, Peter against; left for another meeting"). Use the speaker's name, and Tom for Tom. Write in plain language a newcomer can follow: spell out acronyms and jargon the first time, and say what a thing is rather than only naming it (write "the regional authority's five-year transport plan" rather than an acronym or a code name). Points within and across topics must be distinct: never repeat or rephrase a point already in the notes; fold new detail into the existing point instead.
+export const DEFAULT_MEETING_NOTES_PROMPT = `"topics": each topic is one stretch of the conversation about one subject, and a topic is a real subject that runs for several minutes, never a one-minute fragment: a 30 minute meeting has a handful of topics (about 4 to 8), not dozens. When the new transcript continues or revisits a subject already in the notes, update that topic by its id and fold the detail into its points; never start a new topic for a subject already in the notes. Greetings, small talk, filler, and lines too garbled to understand belong in no topic and in no point: drop them, or fold anything useful into the nearest real topic. Its title summarises that stretch in one line: what was discussed, who said what, and where it landed (for example "Discussed moving to the new platform: Joel for it, Peter against; left for another meeting"). Use the speaker's name, and Tom for Tom. Write in plain language a newcomer can follow: spell out acronyms and jargon the first time, and say what a thing is rather than only naming it (write "the regional authority's five-year transport plan" rather than an acronym or a code name). Points within and across topics must be distinct: never repeat or rephrase a point already in the notes; fold new detail into the existing point instead.
 When the meeting clearly agrees something, start that title with "Decision: " and set decided true; otherwise decided is false.
-Each topic's points are 1 to 3 short bullets of supporting detail in the same plain language.
+Each topic's points are 1 to 4 short bullets of supporting detail in the same plain language.
 Detail tapers with age: recent topics get fuller bullets; older topics (by atSeconds, against the meeting time so far) get shorter and higher level, so re-send an older topic with its id and fewer, broader bullets as it recedes. Keep enough to answer "what did that person say 20 minutes ago".
 Only list topics that appear in the transcript; return only topics that are new, changed or condensed.`;
 
@@ -28,6 +28,7 @@ export const MEETING_NOTES_FRAME: readonly string[] = [
   'and write who said or asked what by name in topics, actions and "who"; refer to Tom as Tom, never "the user".',
   'Where a speaker has no name yet, tell different voices apart from context as "someone" or a role, not just "Them".',
   'Transcripts are machine-made and can contain mistakes. Update the notes from the NEW transcript below.',
+  'When the new transcript continues a subject already in the notes, return that topic with its id (never a new topic), keeping its atSeconds.',
 ];
 
 export const MEETING_CLEANUP_INSTRUCTIONS: readonly string[] = [

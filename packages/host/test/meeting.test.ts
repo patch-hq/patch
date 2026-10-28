@@ -549,6 +549,28 @@ describe('MeetingManager', () => {
     ).toThrow(/no bullet 9/);
   });
 
+  it('the default notes prompt asks for a few topic-sized sections, not minute-long fragments', () => {
+    expect(DEFAULT_MEETING_NOTES_PROMPT).toMatch(/several minutes/);
+    expect(DEFAULT_MEETING_NOTES_PROMPT).toMatch(/handful/);
+    expect(DEFAULT_MEETING_NOTES_PROMPT).toMatch(
+      /never start a new topic for a subject already in the notes/,
+    );
+    expect(DEFAULT_MEETING_NOTES_PROMPT).toMatch(/filler/);
+  });
+
+  it('the fixed notes frame tells the model to keep extending an existing topic by id', () => {
+    const p = buildMeetingPrompt({
+      chatId: 'c',
+      previous: { now: null, topics: [], actions: [] },
+      newLines: [],
+      final: false,
+      elapsedMs: 5000,
+      myNotes: '',
+      prompts: PROMPTS,
+    });
+    expect(p).toMatch(/continues a subject already in the notes, return that topic with its id/);
+  });
+
   it('the default notes prompt asks for topic summaries naming who said what, in plain language that spell out acronyms', () => {
     expect(DEFAULT_MEETING_NOTES_PROMPT).toMatch(/title summarises that stretch[^]*who said what/);
     expect(DEFAULT_MEETING_NOTES_PROMPT).toMatch(/plain language/);
