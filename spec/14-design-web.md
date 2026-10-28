@@ -127,6 +127,8 @@ Opening something that is not a chat — a page, a file, a Pad, a link to one �
 - Dragging a tab out past the edge of the window and releasing it there does the same: the tab leaves its pane and opens in a window of its own. A drag released over the window, or accepted by a tab bar or pane edge, never detaches.
 - On a job's page, a plain click on a run's chat link (Recent runs, or a running fire in the Queue panel) shows that chat in a group rather than navigating away, and the job page stays open as a tab in the group it was in. ↑/↓ with focus on a run's chat link steps to the previous/next run that has a chat and shows it. The chat there is the ordinary live chat, so it can be replied to. Middle click shows it in a new group; a modified click and the browser's own context menu keep the link's new-window meaning.
 
+Terminal, Files, Browser and Editor are ordinary tabs opened from the group header buttons (and `` ⌃ ` ``, `⌥ E`, `⌘ ⇧ '`), each toggling: open, or focus if open, or close if already the active tab. They have a default placement only, never a fixed area. Where one opens: the pane the user last moved a tab of that kind to, while it still exists; else the pane already holding one (Terminal with Terminal; Files, Browser and Editor together); else a new pane along the bottom of the group for the Terminal (about 30% of its height), or on the right for Files, Browser and Editor (about 36% of its width).
+
 A tab is dragged by its bar. Dropped on the same bar it reorders; dropped on a different pane's tab bar it moves there, at the position dropped; dropped on a different pane's content area it moves there as a new tab; dropped on the edge of any pane's content area (the outer quarter of that pane, on whichever side the pointer is nearest) it splits that pane there, arriving as the tab of a new pane on that side. A pane split on the same axis as the one it is already inside grows that split by one child rather than nesting a new one inside it, so repeated splits in the same direction read as one row or column of panes, not a tree of them.
 
 Every divider between two panes (and between two groups) is drag-resizable, on the same convention as the sidebar's own divider (§ Layout — desktop): a thin hit area that widens on hover, dragged to reapportion the space between the panes either side of it.
@@ -869,15 +871,14 @@ no other route from a surface. Contract in `02-host.md` § Terminal sessions;
 wire frames in `03-wire-protocol.md` § Terminal sessions.
 
 A terminal session is a pane tab (§ Panes and tabs), like a chat, a file or a
-page: `` ⌃ ` `` toggles it (open/focus, or close if it's already the active
-tab) for the active chat, from anywhere in that chat view. Opening it follows
-the same opening rules as any other tab (§ Panes and tabs § Opening things) —
-a plain open replaces the active tab, a middle-click/"Open in new tab" adds it
-beside what's there, "Open to the side" splits a pane for it. There is no
-separate drawer form and no on-screen toggle button: closing the tab (`⌘ W`,
-or the tab's own close control) hides the session; `` ⌃ ` `` or reopening it
-through any of the usual entry points brings back the same scrollback and
-command history, since the session itself lives on the host, not in the tab.
+page: the group header's Terminal button and `` ⌃ ` `` toggle it (open/focus,
+or close if it's already the active tab) for the group's chat. It opens by the
+default placement in § Opening things (a pane along the bottom of the group,
+about 30% of its height), and closes, reorders, splits and drags like any other
+tab. There is no drawer form: closing the tab (`⌘ W`, or its own close
+control) hides the session; `` ⌃ ` `` or reopening it brings back the same
+scrollback and command history, since the session lives on the host, not in
+the tab.
 
 - Rooted at the chat's folder, on the chat's host — and available on
   `/chats/new` too, where it matters most: you are on that screen precisely
