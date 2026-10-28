@@ -8,9 +8,13 @@ const quiet = (): Int16Array => new Int16Array(FRAME);
 
 function fakeRecorder() {
   let pcmCb: ((p: Int16Array) => void) | null = null;
+  let silentCb: ((reason: string) => void) | null = null;
   const cancel = vi.fn();
   const rec: VoiceRecording = {
     onLevel: () => {},
+    onSilent: (cb) => {
+      silentCb = cb;
+    },
     onPcm: (cb) => {
       pcmCb = cb;
     },

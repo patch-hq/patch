@@ -150,6 +150,9 @@ export async function startVoiceNote(
       }
       rec.onLevel((l) => useVoiceStore.getState().setNoteLevel(l));
       activeRecording = rec;
+      rec.onSilent((reason) =>
+        useUiStore.getState().pushError(`voice note: ${reason}. Check the mic and try again.`),
+      );
       startNotePreview(chatId, rec);
     } catch (err) {
       activeRecording = null;

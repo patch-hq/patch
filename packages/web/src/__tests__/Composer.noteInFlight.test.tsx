@@ -31,6 +31,7 @@ describe('Composer — a voice note already in flight', () => {
   const clip = new Blob(['x'], { type: 'audio/wav' });
   let rec: {
     onLevel: (cb: (l: number) => void) => void;
+    onSilent: () => void;
     stop: ReturnType<typeof vi.fn>;
     cancel: ReturnType<typeof vi.fn>;
   };
@@ -44,6 +45,7 @@ describe('Composer — a voice note already in flight', () => {
     useUiStore.getState().clearToasts();
     rec = {
       onLevel: () => {},
+      onSilent: () => {},
       stop: vi.fn(async () => clip),
       cancel: vi.fn(),
     };

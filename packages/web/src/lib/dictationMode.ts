@@ -148,6 +148,7 @@ export function startDictationMode(
       return;
     }
     rec = r;
+    r.onSilent((reason) => cb.onError(`voice: ${reason}. Check the mic and try again.`));
     r.onPcm((pcm) => {
       if (stopped) return;
       const utterance = segmenter.push(pcm);

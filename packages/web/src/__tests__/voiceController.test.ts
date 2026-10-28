@@ -80,6 +80,7 @@ function stubRecording(): VoiceRecording {
     onLevel: (cb) => {
       lastLevelCb = cb;
     },
+    onSilent: () => {},
     onPcm: (cb) => {
       recPcmCb = cb;
     },
