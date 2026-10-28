@@ -170,6 +170,14 @@ export class ServerQueue {
       return event;
     }
     if (event.activity !== 'idle' || !this.hasWaiting(chatId)) return event;
+    // A host that cannot be reached cannot be handed the message, and nothing
+    // would ever turn a `running` report back into idle: report the truth and
+    // let `hostOnline` send the message when the host returns.
+    const reach = fromHostId ?? this.deps.chats.get(chatId)?.hostId ?? null;
+    if (reach === null || !this.deps.isOnline(reach)) {
+      this.deps.logger.warn({ chatId }, 'server-queue: host not reachable; message stays queued');
+      return event;
+    }
     // Defer the release: this frame has not been seen by the registry yet, and
     // the release looks the chat's host up.
     const host = fromHostId ?? this.deps.chats.get(chatId)?.hostId ?? null;
@@ -197,6 +205,15 @@ export class ServerQueue {
     if (!ids) return;
     ids.delete(requestId);
     if (ids.size === 0) this.openQuestions.delete(chatId);
+  }
+
+  /** A host attached: send the next message of every idle chat of its that was left waiting. */
+  hostOnline(hostId: string): void {
+    for (const chatId of [...this.queues.keys()]) {
+      const chat = this.deps.chats.get(chatId);
+      if (chat?.hostId !== hostId || this.busy(chatId, chat.activity)) continue;
+      this.release(chatId, hostId);
+    }
   }
 
   /** The host asked, at a tool boundary: everything waiting for this chat, oldest first. */

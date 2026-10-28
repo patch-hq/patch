@@ -315,6 +315,61 @@ describe('ServerQueue', () => {
     ).toEqual([1, 2]);
   });
 
+  describe('a message left waiting when the chat idles with the host unreachable', () => {
+    test('the idle report passes through as idle, not as a running chat with nothing running', async () => {
+      const q = make();
+      hostFrame(q, state('running'));
+      expect(q.enqueueIfBusy('srf-1', input('L1'))).toBe(true);
+      online = false;
+      const out = hostFrame(q, state('idle'));
+      await Promise.resolve();
+      expect(sent).toEqual([]);
+      expect((out as { activity: string }).activity).toBe('idle');
+      expect(chats.get('c1')?.activity).toBe('idle');
+    });
+
+    test('the waiting message goes the moment the host is reachable again', async () => {
+      const q = make();
+      hostFrame(q, state('running'));
+      q.enqueueIfBusy('srf-1', input('L1'));
+      q.enqueueIfBusy('srf-1', input('L2'));
+      online = false;
+      hostFrame(q, state('idle'));
+      await Promise.resolve();
+      online = true;
+      q.hostOnline('d1');
+      expect(sent.map((s) => (s.event as ChatInputEvent).localId)).toEqual(['L1']);
+    });
+
+    test('a host coming back does not release into a chat that is running a turn', () => {
+      const q = make();
+      hostFrame(q, state('running'));
+      q.enqueueIfBusy('srf-1', input('L1'));
+      q.hostOnline('d1');
+      expect(sent).toEqual([]);
+      expect(q.hasWaiting('c1')).toBe(true);
+    });
+
+    test('a host coming back leaves other hosts chats alone', () => {
+      chats.observe({
+        type: 'chat.spawned',
+        chatId: 'c2',
+        hostId: 'd2',
+        folder: '/w',
+        seq: 1,
+        ts: 0,
+      } as WireEvent);
+      const q = make();
+      hostFrame(q, state('running'));
+      q.enqueueIfBusy('srf-1', input('L1'));
+      online = false;
+      hostFrame(q, state('idle'));
+      online = true;
+      q.hostOnline('d2');
+      expect(sent).toEqual([]);
+    });
+  });
+
   describe('edges', () => {
     test('a host going offline lets go of the chats it was starting, and only those', () => {
       chats.observe({
