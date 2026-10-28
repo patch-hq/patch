@@ -366,6 +366,21 @@ describe('ChatRoute — patch_delegate tool row', () => {
       expect(screen.queryByTestId('delegate-strip')).toBeNull();
     });
 
+    it('sits with the other top bars, not above the composer, and is drawn like the task bar', () => {
+      seed();
+      const { container } = renderChat();
+      update('sub-1', 'draft the email', 'running', 1);
+      const strip = screen.getByTestId('delegate-strip');
+      expect(strip.classList.contains('background-task-bar')).toBe(true);
+      expect(strip.closest('.composer')).toBeNull();
+      const composer = container.querySelector('textarea, [contenteditable="true"]');
+      expect(composer).not.toBeNull();
+      expect(
+        strip.compareDocumentPosition(composer!) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(strip.querySelector('.background-task-bar-spinner')).not.toBeNull();
+    });
+
     it('opens the subagent read-only transcript from the strip', async () => {
       seed();
       renderChat();
