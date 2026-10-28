@@ -261,6 +261,29 @@ describe('createRealSdkBackend — one-shot path: translateSdkMessage branches',
     expect(out[2]).toMatchObject({ type: 'result' });
   });
 
+  it('throws when the stream ends without a result, instead of settling as complete', async () => {
+    const { createRealSdkBackend } = await loadRealBackend(() => {
+      return (async function* () {
+        yield {
+          type: 'assistant',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Working.' }] },
+          session_id: 'sess1',
+        };
+      })();
+    });
+    const backend = createRealSdkBackend();
+    await expect(
+      drain(
+        backend.run({
+          prompt: 'hi',
+          cwd: '/tmp',
+          abortController: new AbortController(),
+          oauthAccessToken: 'tok',
+        }),
+      ),
+    ).rejects.toThrow(/ended mid-turn without finishing/);
+  });
+
   it('splits a multi-tool_use assistant message into one tool_use envelope per block', async () => {
     const { createRealSdkBackend } = await loadRealBackend(() => {
       return (async function* () {
@@ -274,6 +297,7 @@ describe('createRealSdkBackend — one-shot path: translateSdkMessage branches',
             ],
           },
         };
+        yield { type: 'result', session_id: 'sess1' };
       })();
     });
     const backend = createRealSdkBackend();
@@ -307,6 +331,7 @@ describe('createRealSdkBackend — one-shot path: translateSdkMessage branches',
             ],
           },
         };
+        yield { type: 'result', session_id: 'sess1' };
       })();
     });
     const backend = createRealSdkBackend();
@@ -314,7 +339,7 @@ describe('createRealSdkBackend — one-shot path: translateSdkMessage branches',
     const out = await drain(
       backend.run({ prompt: 'hi', cwd: '/tmp', abortController: ac, oauthAccessToken: 'tok' }),
     );
-    expect(out).toHaveLength(1);
+    expect(out).toHaveLength(2);
     expect(out[0]).toMatchObject({
       type: 'tool_result',
       toolResult: { name: 'tool', callId: 'toolu_1', result: 'file 1\nfile 2' },
@@ -339,6 +364,7 @@ describe('createRealSdkBackend — one-shot path: translateSdkMessage branches',
             content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'a\nb' }],
           },
         };
+        yield { type: 'result', session_id: 'sess1' };
       })();
     });
     const backend = createRealSdkBackend();
@@ -362,6 +388,7 @@ describe('createRealSdkBackend — one-shot path: translateSdkMessage branches',
             ],
           },
         };
+        yield { type: 'result', session_id: 'sess1' };
       })();
     });
     const backend = createRealSdkBackend();
