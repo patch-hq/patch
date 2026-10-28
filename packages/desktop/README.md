@@ -65,7 +65,7 @@ The shell checks the feed at launch and hourly in packaged builds, and
 check immediately. Anything downloaded installs itself and relaunches —
 there is no restart prompt and no renderer-side install control (see
 `quitAndInstallNow` in `src/updater.ts`). The publish target in
-`electron-builder.yml` points at `tomchambers2/patch` — `pnpm dist`
+`electron-builder.yml` points at `patch-hq/patch` — `pnpm dist`
 attaches the `.dmg` + `latest-mac.yml` artifacts to the matching release.
 
 ## Manual smoke (not in CI)

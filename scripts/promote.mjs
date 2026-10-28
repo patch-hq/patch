@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isMain } from './lib/is-main.mjs';
 
-const REPO = 'tomchambers2/patch';
+const REPO = 'patch-hq/patch';
 
 const gh = (args, opts = {}) =>
   execFileSync('gh', [...args, '--repo', REPO], { encoding: 'utf8', ...opts }).trim();

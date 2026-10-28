@@ -51,8 +51,8 @@ Versions are `<major>.<minor>.<commit count>` (`scripts/version.mjs`); bump
 
 | Question                      | Look at                                                                     |
 | ----------------------------- | --------------------------------------------------------------------------- |
-| Did it build?                 | `gh run list -R tomchambers2/patch`                                         |
-| Is it published?              | `gh release list -R tomchambers2/patch`                                     |
+| Did it build?                 | `gh run list -R patch-hq/patch`                                         |
+| Is it published?              | `gh release list -R patch-hq/patch`                                     |
 | Did my server pick it up?     | `release mirror` / `self-update` lines in `~/.patch-server/logs/server.log` |
 | Did the install work?         | `journalctl --user -u patch-server-update-*`                                |
 | What is each surface running? | Settings → Updates                                                          |

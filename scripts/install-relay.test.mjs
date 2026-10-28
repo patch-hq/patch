@@ -17,7 +17,7 @@ test('the installer defaults to the latest release the project publishes on GitH
   );
   assert.match(
     sh,
-    /DEFAULT_RELEASE_URL="https:\/\/github\.com\/tomchambers2\/patch\/releases\/latest\/download\/patch-server\.tar\.gz"/,
+    /DEFAULT_RELEASE_URL="https:\/\/github\.com\/patch-hq\/patch\/releases\/latest\/download\/patch-server\.tar\.gz"/,
   );
 });
 

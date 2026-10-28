@@ -165,7 +165,7 @@ export function systemdUnit(def: ServiceDefinition): string {
       : '';
   return `[Unit]
 Description=Patch daemon
-Documentation=https://github.com/tomchambers2/patch
+Documentation=https://github.com/patch-hq/patch
 After=network-online.target
 
 [Service]
