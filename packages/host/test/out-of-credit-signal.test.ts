@@ -55,6 +55,34 @@ describe('rate_limit_event attached to the failing turn', () => {
     expect(isAccountExhausted(limit)).toBe(true);
   });
 
+  it('ignores a rejected event for a different window than the failure names', () => {
+    // 28 Oct: "session limit · resets 7pm" arrived after a rejected seven_day
+    // event; the weekly reset (a Tuesday) was shown as when the account returns.
+    const mem = createLimitEventMemory();
+    mem.note({
+      type: 'rate_limit_event',
+      rate_limit_info: { status: 'rejected', rateLimitType: 'seven_day', resetsAt: 1788804000 },
+    });
+    let thrown: unknown;
+    try {
+      mem.assertNotAnError({
+        type: 'assistant',
+        error: 'rate_limit',
+        message: {
+          content: [
+            { type: 'text', text: "You've hit your session limit · resets 7pm (Europe/London)" },
+          ],
+        },
+      });
+    } catch (e) {
+      thrown = e;
+    }
+    const limit = (thrown as TurnFailedError).limit;
+    expect(limit?.resetsAt).toBeUndefined();
+    expect(limit?.status).toBeUndefined();
+    expect(isAccountExhausted(limit)).toBe(false);
+  });
+
   it('does not override a status the failure itself states', () => {
     expect(mergeRejectedLimit({ status: 'allowed' }, { status: 'rejected' })?.status).toBe(
       'allowed',
