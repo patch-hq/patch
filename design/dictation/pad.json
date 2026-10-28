@@ -1,0 +1,29 @@
+{
+  "screens": [
+    {
+      "id": "index",
+      "name": "Composer at rest",
+      "path": "index.html"
+    },
+    {
+      "id": "dictating",
+      "name": "Dictating",
+      "path": "dictating.html"
+    },
+    {
+      "id": "long",
+      "name": "Long dictation",
+      "path": "long.html"
+    },
+    {
+      "id": "voice",
+      "name": "Settings \u00b7 Voice",
+      "path": "voice.html"
+    },
+    {
+      "id": "keys",
+      "name": "Settings \u00b7 Keys",
+      "path": "keys.html"
+    }
+  ]
+}
