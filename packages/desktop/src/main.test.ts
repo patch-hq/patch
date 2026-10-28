@@ -728,6 +728,20 @@ test('install-to-applications refuses to replace a bundle that is still running'
   assert.match(between, /process\.exit\(1\)/);
 });
 
+test('install-to-applications re-registers the fresh bundle with Launch Services and Spotlight', () => {
+  // The install deletes and re-creates /Applications/Patch.app. Spotlight drops
+  // the old entry with the delete and does not reliably index the replacement,
+  // so Patch vanishes from search. Re-register and re-import after the copy, and
+  // fail loudly if either step fails (no fallback).
+  const src = readFileSync(join(here, '..', 'scripts', 'install-to-applications.cjs'), 'utf8');
+  const copyAt = src.indexOf("execFileSync('ditto'");
+  assert.ok(copyAt >= 0);
+  const after = src.slice(copyAt);
+  assert.match(after, /lsregister/);
+  assert.match(after, /'-f',\s*dest/, 'lsregister must force-register the installed bundle');
+  assert.match(after, /mdimport/);
+});
+
 test('a deploy tells the shell to CHECK now instead of waiting for the hourly check', () => {
   // web/lib/liveUpdate.ts sends this the moment the server reports a new bundle
   // hash on `auth.ok` — which happens on the post-deploy WS reconnect. It makes

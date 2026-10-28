@@ -76,6 +76,16 @@ if (runningPids().length > 0) {
 fs.rmSync(dest, { recursive: true, force: true });
 execFileSync('ditto', [src, dest]);
 
+// The delete above makes Spotlight drop Patch, and it does not reliably index
+// the replacement — so Patch keeps disappearing from search. Re-register the
+// bundle with Launch Services and ask Spotlight to import it. Both throw on
+// failure: a half-registered app is the bug we are fixing.
+const lsregister =
+  '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework' +
+  '/Support/lsregister';
+execFileSync(lsregister, ['-f', dest], { stdio: 'inherit' });
+execFileSync('mdimport', [dest], { stdio: 'inherit' });
+
 // Stamp the installed bundle with the git sha it was built from, so
 // scripts/deploy.sh can tell whether the installed app is stale relative to
 // HEAD (a COMMITTED desktop-shell change is invisible to a working-tree diff).
