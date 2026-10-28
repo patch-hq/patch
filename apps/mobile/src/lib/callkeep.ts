@@ -24,7 +24,7 @@ export async function initCallKeep(): Promise<void> {
   if (_initialised) return;
   await RNCallKeep.setup({
     ios: {
-      // iOS is out of scope per spec/15, but the callkeep type forces a
+      // iOS is built per spec/15 § iOS (CallKit parity pending), but the callkeep type forces a
       // value here. Empty appName is harmless on Android-only builds.
       appName: 'Patch',
     },

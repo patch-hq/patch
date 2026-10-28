@@ -1,6 +1,6 @@
 # Mobile App Design
 
-Android-native via Expo / React Native. Code shared with the web app where practical (chat stream rendering, wire-protocol client, voice bridge).
+Android-native via Expo / React Native, with an iOS build (`## iOS`). Code shared with the web app where practical (chat stream rendering, wire-protocol client, voice bridge).
 
 Reference mocks: `design/mobile-hi-fi.html`, `design/mobile-hi-fi-all-screens.html`. Visual system identical to web (see `14-design-web.md` § Visual system); § Visual language below is how the phone carries it.
 
@@ -609,3 +609,9 @@ Differences in how the phone does them:
 - Image annotator: a pencil on an image chip in the composer opens a full-screen markup page (box, arrow, freehand, text, five colours, undo) drawn on a canvas in a WebView; Done replaces the attachment with a flattened `<name>-annotated.png`.
 - Link previews: an eye beside an http(s) link in a message expands title, description, image and an excerpt of the page's text; the open icon sends the link to the browser.
 - Document editor: Documents in a chat's ⋯ menu browses the chat folder; a `.md` opens in a plain text editor (verbatim, explicit Save) with mode, Suggestions, Comments and History panels, Ask about this, Comment and export. A `.docx` is converted first. Save goes over the chat's `file.write` and is confirmed by reading the file back. Export is written to a folder the user picks.
+
+## iOS
+
+An iPhone build of the same app ships through TestFlight. It is built by CI (`.github/workflows/ios.yml`, manual trigger) from the shared Expo code; the `ios/` project is generated, never committed. The bundle id equals the Android package. Apple requires a paid developer account, so the build cannot run until Tom enrols (`docs/ios.md`).
+
+Until each has an iOS counterpart, the Android-only native modules (voice mic and TTS, phone speech, paste, share, crash capture, the foreground audio service) report themselves absent on iOS and their features are off, with the absence shown, never faked. Parity with Android is the goal and every remaining gap is a task, not a decision. Updates reach iPhone as TestFlight builds and expo-updates OTA; the in-app APK installer is Android only. Notification actions and the incoming-call UI use UNNotificationCategory and CallKit.
