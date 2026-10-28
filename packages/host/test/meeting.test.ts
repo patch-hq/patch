@@ -293,6 +293,7 @@ describe('MeetingManager', () => {
       chatId: 'c',
       previous: { now: null, topics: [], actions: [] },
       newLines: [{ clock: '00:05', speaker: 'Them', text: "Hi, I'm Priya" }],
+      earlierLines: [],
       final: false,
       elapsedMs: 5000,
       myNotes: '',
@@ -949,6 +950,55 @@ describe('MeetingManager', () => {
       ]);
     });
 
+    it('marks an owner who never spoke as not in the meeting, and an owner who did as present', async () => {
+      diarise = true;
+      const m = make();
+      m.start('c1');
+      transcribeVoices.mockResolvedValueOnce([{ text: 'I will build it', voice: 1 }]);
+      await m.ingestAudio('c1', 'system', Buffer.from('a'));
+      m.nameVoice('c1', 1, 'Priya');
+      analyse.mockResolvedValueOnce(
+        analysis({
+          actions: [
+            { kind: 'other', owner: 'Priya', title: 'Priya builds it', why: 'w' },
+            { kind: 'other', owner: 'Marcus', title: 'Marcus reviews it', why: 'w' },
+            { kind: 'other', owner: 'Everyone', title: 'All read it', why: 'w' },
+          ],
+        }),
+      );
+      await m.tick('c1');
+      expect(m.get('c1')!.actions.map((a) => [a.owner, a.absent])).toEqual([
+        ['Priya', undefined],
+        ['Marcus', true],
+        ['Everyone', undefined],
+      ]);
+    });
+
+    it("turns an owner of Tom's own name into Tom's action", async () => {
+      const m = make();
+      m.start('c1');
+      await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+      analyse.mockResolvedValueOnce(
+        analysis({ actions: [{ kind: 'other', owner: 'Tom', title: 'Join the build', why: 'w' }] }),
+      );
+      await m.tick('c1');
+      const [a] = m.get('c1')!.actions;
+      expect([a!.kind, a!.owner, a!.absent]).toEqual(['mine', undefined, undefined]);
+    });
+
+    it('gives the analysis the lines it already analysed as context', async () => {
+      const m = make();
+      m.start('c1');
+      await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+      await m.tick('c1');
+      await m.ingestAudio('c1', 'mic', Buffer.from('b'));
+      await m.tick('c1');
+      const second = analyse.mock.calls[1]![0];
+      expect(second.earlierLines).toHaveLength(1);
+      expect(second.newLines).toHaveLength(1);
+      expect(buildMeetingPrompt(second)).toContain('Earlier transcript');
+    });
+
     it('rejects an analysis action for someone else with no owner, and one with no kind', () => {
       expect(() =>
         MeetingAnalysis.parse(analysis({ actions: [{ kind: 'other', title: 't', why: 'w' }] })),
@@ -1117,6 +1167,7 @@ describe('meetingGen', () => {
       chatId: 'c',
       previous: { now: null, topics: [], actions: [] },
       newLines: [],
+      earlierLines: [],
       final: true,
       elapsedMs: 5000,
       myNotes: '',
@@ -1130,6 +1181,7 @@ describe('meetingGen', () => {
       chatId: 'c',
       previous: { now: null, topics: [], actions: [] },
       newLines: [{ clock: '00:05', speaker: 'You', text: 'hi' }],
+      earlierLines: [],
       final: false,
       elapsedMs: 5000,
       myNotes: '',
@@ -1149,6 +1201,7 @@ describe('meetingGen', () => {
         actions: [],
       },
       newLines: [{ clock: '20:00', speaker: 'Them', text: 'x' }],
+      earlierLines: [],
       final: false,
       elapsedMs: 1_200_000,
       myNotes: '',
@@ -1166,6 +1219,7 @@ describe('editable meeting prompts', () => {
     chatId: 'c',
     previous: { now: null, topics: [], actions: [] },
     newLines: [{ clock: '00:05', speaker: 'You', text: 'hi' }],
+    earlierLines: [],
     final: false,
     elapsedMs: 5000,
     myNotes: '',
@@ -1216,6 +1270,7 @@ describe('meeting action restraint', () => {
       chatId: 'c',
       previous: { now: null, topics: [], actions: [] },
       newLines: [{ clock: '00:05', speaker: 'Them', text: 'x' }],
+      earlierLines: [],
       final: false,
       elapsedMs: 5000,
       myNotes: '',
@@ -1233,6 +1288,7 @@ describe('makeMeetingAnalyser', () => {
     chatId: 'c',
     previous: { now: null, topics: [], actions: [] },
     newLines: [{ clock: '00:05', speaker: 'Them', text: 'ship monday' }],
+    earlierLines: [],
     final: false,
     elapsedMs: 5000,
     myNotes: '',
