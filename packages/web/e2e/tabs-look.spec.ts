@@ -38,8 +38,12 @@ test('tabs are Chrome-shaped: rounded top, accent on the active tab of the focus
 }) => {
   await page.setViewportSize({ width: 1400, height: 800 });
   await page.goto(HARNESS);
-  await page.getByTestId('group-tool-terminal').click();
-  await page.getByTestId('group-tool-browser').click();
+  // The + menu opens ordinary tabs in this pane; the header buttons place
+  // theirs in panes of their own (spec/14 § Opening things).
+  for (const label of ['Terminal', 'Browser']) {
+    await page.locator('.pane-tab-new').click();
+    await page.locator('[role="menu"]').getByText(label, { exact: true }).click();
+  }
   const tabs = page.locator('.pane-tab');
   await expect(tabs).toHaveCount(3);
   const active = page.locator('.pane-tab.active');

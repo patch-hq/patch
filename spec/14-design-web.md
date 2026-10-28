@@ -92,6 +92,8 @@ The chat panel header's action icon row (§ Chat panel header) collapses into a 
 
 A group is one chat's workspace. The group area is an ordered row of groups sharing its width, and each group shows exactly one chat. Every group is drawn as a card: a 1px border, rounded corners, a small gap between neighbouring cards, and a header row. The header IS the chat panel header (§ Chat panel header) — back/forward, the chat's status badge and name, the per-chat controls, and the group's tool buttons; while more than one group is on screen it also carries the group's coloured number and a close control. The focused group's border is tinted with the accent. Clicking anywhere in a group focuses it.
 
+Below 768px, where the sidebar is a drawer, the card drops its margin, border and rounding and fills the window edge to edge.
+
 Each group has a colour from a small fixed set of five, by position in the row, and a number (1, 2, …). When more than one group is on screen, the sidebar row of every chat that is showing carries a small number chip in its group's colour (channel rows included), so a glance says where each chat is; clicking the chip focuses that group. A lone group has no number.
 
 Showing a chat — a sidebar row, a channel, a search result, any chat link or button:
