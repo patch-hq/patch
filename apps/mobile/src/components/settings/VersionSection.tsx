@@ -13,6 +13,7 @@
 // genuinely current: that build is INSTALLED in place, from here.
 
 import React from 'react';
+import { Alert } from 'react-native';
 import * as Updates from 'expo-updates';
 import { useUpdates } from 'expo-updates';
 import type { VersionReport } from '@patch/wire';
@@ -21,12 +22,12 @@ import { getLastCheckedAt, runUpdateCheck, type UpdateCheckResult } from '../../
 import { installApk, useApkInstallStore } from '../../lib/apkInstall';
 import { refreshPublishedApk, usePublishedApkStore } from '../../lib/publishedApk';
 import { updateSourceProblem } from '../../lib/updateSource';
-import { usePresenceStore } from '../../stores/presenceStore';
+import { usePresenceStore, type HostPresence } from '../../stores/presenceStore';
 import { SettingsSection } from '../SettingsSection';
 import { sendToHost } from './hostSend';
 import { sortedHosts } from './HostSwitcher';
 import { SettingsPage } from './SettingsPage';
-import { ErrorLine, Row, SettingsButton, ToggleRow, ValueRow, WithSettings } from './ui';
+import { ErrorLine, Row, RowValue, SettingsButton, ToggleRow, ValueRow, WithSettings } from './ui';
 import { patchShared } from './sharedWrite';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -52,6 +53,13 @@ export function useUpdatesBehind(): boolean {
     Object.values(s.hosts).some((h) => h.host?.updateAvailable === true),
   );
   return isUpdatePending || (apk?.needsInstall ?? false) || hostBehind;
+}
+
+function hostStatus(h: HostPresence): string {
+  if (!h.online) return 'Offline';
+  if (h.host?.updateHeld) return 'Update waiting for chats to finish';
+  if (h.host?.updatePending) return 'Update on its way';
+  return h.host?.updateAvailable ? 'Update available' : 'Up to date';
 }
 
 export function UpdatesPage(): React.ReactElement {
@@ -101,8 +109,14 @@ export function UpdatesPage(): React.ReactElement {
         : null;
 
   const behindHosts = sortedHosts(hosts).filter((h) => h.host?.updateAvailable === true);
-  const onlineBehind = behindHosts.filter((h) => h.online);
-  const drift = report?.drift ?? [];
+  const heldHosts = behindHosts.filter((h) => h.host?.updateHeld === true);
+  // A held host updates itself once its chats finish; pressing Update would only defer again.
+  const onlineBehind = behindHosts.filter((h) => h.online && h.host?.updateHeld !== true);
+  const onlyWaiting = behindHosts.length > 0 && heldHosts.length === behindHosts.length;
+  // The agent lagging the server is the same fact a host row already states.
+  const drift = (report?.drift ?? []).filter(
+    (d) => !(d.kind === 'daemon-server-mismatch' && behindHosts.length > 0),
+  );
   const anyBehind = pending || apkAvailable || behindHosts.length > 0 || drift.length > 0;
 
   let sentence: string;
@@ -115,6 +129,8 @@ export function UpdatesPage(): React.ReactElement {
   else if (sourceProblem) sentence = sourceProblem;
   else if (failure) sentence = `Couldn't check for updates: ${failure}`;
   else if (reportError) sentence = `Couldn't check for updates: ${reportError}`;
+  else if (onlyWaiting && !pending && !apkAvailable && drift.length === 0)
+    sentence = 'Updating when your chats are idle';
   else if (anyBehind) sentence = 'Update available';
   else if (!report) sentence = 'Checking for updates…';
   else sentence = 'Up to date';
@@ -171,6 +187,48 @@ export function UpdatesPage(): React.ReactElement {
           <ErrorLine testID="version-error" message={reportError} onRetry={readReport} />
         ) : null}
       </SettingsSection>
+
+      {sortedHosts(hosts).length > 0 ? (
+        <SettingsSection testID="version-hosts" title="Hosts">
+          {sortedHosts(hosts).map((h) => (
+            <Row
+              key={h.hostId}
+              title={h.host?.hostName ?? h.hostId}
+              subtitle={hostStatus(h)}
+              testID={`version-host-${h.hostId}`}
+              right={
+                h.host?.updateHeld && h.online ? (
+                  <SettingsButton
+                    testID={`update-now-${h.hostId}`}
+                    label="Update now"
+                    onPress={() =>
+                      Alert.alert(
+                        `Update ${h.host?.hostName ?? h.hostId} now?`,
+                        'Chats running on it will be stopped mid-turn.',
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          {
+                            text: 'Update now',
+                            style: 'destructive',
+                            onPress: () =>
+                              void sendToHost(
+                                h.hostId,
+                                { type: 'host.update', hostId: h.hostId, force: true },
+                                'Update',
+                              ),
+                          },
+                        ],
+                      )
+                    }
+                  />
+                ) : h.host ? (
+                  <RowValue>{h.host.hostVersion}</RowValue>
+                ) : null
+              }
+            />
+          ))}
+        </SettingsSection>
+      ) : null}
 
       <WithSettings testID="update-mode">
         {(data) => (

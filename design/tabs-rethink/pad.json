@@ -1,0 +1,58 @@
+{
+ "screens": [
+  {
+   "id": "index",
+   "name": "Laptop \u00b7 terminal is a tab in a pane at the bottom",
+   "path": "index.html",
+   "width": 1440
+  },
+  {
+   "id": "artifact",
+   "name": "Laptop \u00b7 artifact tab; Files is a tab in a right pane",
+   "path": "artifact.html",
+   "width": 1440
+  },
+  {
+   "id": "wide",
+   "name": "Wide group \u00b7 artifact opens in a pane beside the chat",
+   "path": "wide.html",
+   "width": 2560
+  },
+  {
+   "id": "groups",
+   "name": "Several groups \u00b7 one per chat, numbered in the sidebar",
+   "path": "groups.html",
+   "width": 1920
+  },
+  {
+   "id": "switch",
+   "name": "Sidebar click \u00b7 the focused group switches to that chat",
+   "path": "switch.html",
+   "width": 1920
+  },
+  {
+   "id": "menu",
+   "name": "Right-click a chat \u00b7 here, new group or new window",
+   "path": "menu.html",
+   "width": 1440
+  },
+  {
+   "id": "drag",
+   "name": "Drag a chat \u00b7 onto a group, or into a gap for a new group",
+   "path": "drag.html",
+   "width": 1920
+  },
+  {
+   "id": "dragtab",
+   "name": "Drag a tab \u00b7 pane edge splits, middle adds a tab, gap makes a group",
+   "path": "dragtab.html",
+   "width": 1920
+  },
+  {
+   "id": "plus",
+   "name": "+ opens anything as a tab",
+   "path": "plus.html",
+   "width": 1440
+  }
+ ]
+}

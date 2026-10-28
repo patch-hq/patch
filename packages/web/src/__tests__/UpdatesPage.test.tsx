@@ -207,17 +207,69 @@ describe('UpdatesPage', () => {
     await loaded();
   });
 
-  it('shows no versions, shas, layers or per-host rows', async () => {
+  it('lists each host with its plain version, never shas or developer commands', async () => {
     stubFetch({ drift: DRIFT });
     reportHost('host-a', { hostName: 'laptop', hostVersion: '0.1.300', updateAvailable: true });
     renderPage();
     await loaded();
+    expect(screen.getByTestId('version-host-host-a')).toHaveTextContent('0.1.300');
     const text = screen.getByTestId('settings-version').textContent ?? '';
-    expect(text).not.toMatch(/\d+\.\d+\.\d+/);
     expect(text).not.toContain('9b8635f');
+    expect(text).not.toContain('pnpm');
     expect(screen.queryByTestId('version-rows')).toBeNull();
-    expect(screen.queryByTestId('version-host-host-a')).toBeNull();
     expect(screen.queryByTestId('version-drift')).toBeNull();
+  });
+
+  it('says a host is waiting for chats, with no Update button, when its update is held', async () => {
+    stubFetch(null);
+    reportHost('host-a', { hostName: 'laptop', updateAvailable: true, updateHeld: true });
+    usePresenceStore.getState().setHostOnline('host-a', true);
+    renderPage();
+    await loaded();
+    expect(screen.getByTestId('update-status')).toHaveTextContent(
+      'Updating when your chats are idle',
+    );
+    expect(screen.getByTestId('version-host-host-a')).toHaveTextContent(
+      'Update waiting for chats to finish',
+    );
+    expect(screen.queryByTestId('update-all')).toBeNull();
+  });
+
+  it('Update now on a held host forces the install, but only after confirming', async () => {
+    stubFetch(null);
+    reportHost('host-a', { hostName: 'laptop', updateAvailable: true, updateHeld: true });
+    usePresenceStore.getState().setHostOnline('host-a', true);
+    const send = vi.fn();
+    setActiveWs({ send } as unknown as PatchWs);
+    const confirm = vi
+      .spyOn(window, 'confirm')
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    renderPage();
+    await loaded();
+    fireEvent.click(screen.getByTestId('update-now-host-a'));
+    expect(send).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('update-now-host-a'));
+    expect(send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'host-a', force: true });
+    confirm.mockRestore();
+  });
+
+  it('does not double-report the agent lagging the server when a host row already says so', async () => {
+    stubFetch({
+      drift: [
+        {
+          kind: 'daemon-server-mismatch',
+          detail: 'the agent (1.1.580) is a different build to the server (1.1.594)',
+          remedy: 'pnpm ship server',
+        },
+      ],
+    });
+    reportHost('host-a', { hostName: 'laptop', updateAvailable: true, updateHeld: true });
+    renderPage();
+    await loaded();
+    expect(screen.getByTestId('update-status')).toHaveTextContent(
+      'Updating when your chats are idle',
+    );
   });
 
   it('says Update available when the report has drift, without printing it', async () => {

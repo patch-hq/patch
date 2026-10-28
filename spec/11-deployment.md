@@ -424,9 +424,14 @@ Rules.
   `/api/healthz` stays the public, minimal LB probe.
 - Settings → Updates states whether Patch is up to date and offers a single
   Update control when it is not, plus Check now, the auto-update toggle and
-  when it last checked. It shows no versions, shas, per-layer rows or drift
-  detail: Patch works out what is behind (hosts, drift, the app, the APK) and
-  the one Update acts on it. A failed read or failed shell check reads as
+  when it last checked. Each host is listed with its plain version and a
+  status; the page shows no shas, per-layer rows, drift detail or developer
+  commands. Patch works out what is behind (hosts, drift, the app, the APK) and
+  the one Update acts on it. A host that is behind only because its chats are
+  mid-turn reports `updateHeld` and reads "waiting for chats to finish" with no
+  Update control: the install applies itself once they finish. That row offers
+  "Update now" behind a confirmation, which sends `host.update` with `force` and
+  installs over the running turns, stopping them. A failed read or failed shell check reads as
   "Couldn't check", never as up to date. `GET /api/version` still carries the
   full per-layer report for diagnostics.
 - Unknown reads as unknown. An unstamped, missing or unreadable layer is

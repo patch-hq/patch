@@ -1,0 +1,20 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="style.css">
+<style>
+body{background:var(--bg-elevated)}
+.wrap{max-width:560px;margin:0 auto;padding:48px 24px}
+.hero{border:1px solid var(--line-soft);border-radius:var(--radius-lg);padding:28px;display:flex;gap:18px;align-items:center}
+.hero h3{font:600 22px Fraunces,serif;margin:0 0 2px}
+.hero p{margin:0;color:var(--ink-3)}
+.badge{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;font-size:22px;flex:none;background:var(--accent-tint);color:var(--accent-strong)}
+.badge.warn{background:#f8e6d0;color:var(--waiting)}.badge.bad{background:var(--danger-tint);color:var(--danger)}
+.hero .grow{flex:1}
+.foot{margin-top:14px;color:var(--ink-faint);font-size:12.5px;display:flex;justify-content:space-between;align-items:center}
+.foot a{color:var(--ink-3);cursor:pointer;text-decoration:underline}
+.sect{margin-top:28px}
+</style></head><body><div class="wrap">
+<div class="phead"><h3>Updates</h3></div>
+<div class="hero"><div class="badge">✓</div><div class="grow"><h3>Patch is up to date</h3><p>Everything is on the latest version.</p></div><button class="btn">Check now</button></div>
+<div class="sect"><div class="card"><div class="row"><div class="t"><b>Update automatically</b><small>Patch updates itself in the background and tells you if it needs a restart.</small></div><div class="tog on"></div></div></div></div>
+<div class="foot"><span>Last checked 2 minutes ago</span><a>Version details</a></div>
+</div></body></html>

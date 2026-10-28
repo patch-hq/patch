@@ -299,6 +299,24 @@ describe('requestUpdate: never restarts under a running turn', () => {
     expect(sleep).toHaveBeenCalledTimes(2);
   });
 
+  it('waitUntilNoRunningTurns installs over running turns once forced, and says so', async () => {
+    const { waitUntilNoRunningTurns } = await import('../src/selfUpdate.js');
+    let forced = false;
+    const onIdle = vi.fn();
+    const sleep = vi.fn(async () => {
+      forced = true;
+    });
+    await waitUntilNoRunningTurns({
+      runningChats: () => ['a'],
+      logger,
+      sleep,
+      onIdle,
+      force: () => forced,
+    });
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(onIdle).toHaveBeenCalledTimes(1);
+  });
+
   it('applyUpdate holds the installer on untilIdle, after the artifact verifies', async () => {
     const { applyUpdate } = await import('../src/selfUpdate.js');
     const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } = await import('node:fs');

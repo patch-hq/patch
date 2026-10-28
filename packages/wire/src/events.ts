@@ -2596,6 +2596,8 @@ export const HostInfoEvent = z
     updateAvailable: z.boolean(),
     /** A newer build is published but this host's artifact is still being built; it applies on its own when it lands. */
     updatePending: z.boolean().optional(),
+    /** An update is accepted but held: chats on this host are mid-turn and a restart would kill them. It applies once they finish. */
+    updateHeld: z.boolean().optional(),
     /** Applies to NEW chats on this host (spec/02 § Permission mode). */
     permissionModeDefault: PermissionMode,
     /** How many of this host's chats carry a per-chat override. */
@@ -4915,6 +4917,11 @@ export const HostUpdateEvent = z
   .object({
     type: z.literal('host.update'),
     ...hostIdField,
+    /**
+     * Install now even though chats are mid-turn, killing them. Only sent from
+     * an explicit "Update now" on a host reporting `updateHeld`.
+     */
+    force: z.boolean().optional(),
   })
   .strict();
 export type HostUpdateEvent = z.infer<typeof HostUpdateEvent>;
