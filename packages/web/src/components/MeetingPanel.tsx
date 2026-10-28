@@ -19,6 +19,7 @@ import {
   Plus,
   SlidersHorizontal,
   Square,
+  Trash2,
 } from 'lucide-react';
 import {
   DEFAULT_MEETING_ACTIONS_PROMPT,
@@ -47,6 +48,7 @@ import {
   addNote,
   editMeetingNotes,
   editNote,
+  deleteMeeting,
   endMeeting,
   getMeetingSpeed,
   listenHere,
@@ -415,6 +417,22 @@ function MeetingHead({ chatId, meeting }: { chatId: string; meeting: MeetingStat
       >
         <SlidersHorizontal size={16} aria-hidden="true" />
       </button>
+      {ended ? (
+        <button
+          type="button"
+          className="mm-icon"
+          data-testid="meeting-delete"
+          aria-label="Delete the meeting"
+          title="Delete the meeting"
+          onClick={() => {
+            if (!window.confirm('Delete this meeting, its notes and its transcript?')) return;
+            setSettingsOpen(false);
+            deleteMeeting(chatId);
+          }}
+        >
+          <Trash2 size={16} aria-hidden="true" />
+        </button>
+      ) : null}
       {ended ? (
         <button
           type="button"

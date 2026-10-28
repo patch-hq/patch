@@ -9,7 +9,7 @@
 // a window is hidden. NO FALLBACK: a failed transcription or analysis is
 // logged and put on `state.error` for the panel to show; it is never swallowed.
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { nameFixes } from './meetingVocab.js';
@@ -366,6 +366,22 @@ export class MeetingManager {
       await this.analyse(chatId, rt, true);
       await this.writeUp(chatId, rt);
     });
+  }
+
+  /** Removes an ended meeting and its stored transcript from the chat; waits for any final pass still writing it. */
+  async delete(chatId: string): Promise<void> {
+    const rt = this.load(chatId);
+    if (!rt) throw new MeetingError(`chat ${chatId} has no meeting to delete`);
+    if (rt.state.status !== 'ended') {
+      throw new MeetingError(
+        `chat ${chatId}'s meeting is ${rt.state.status}: end it before deleting`,
+      );
+    }
+    await rt.txChain;
+    await rt.chain;
+    this.runtimes.delete(chatId);
+    rmSync(this.file(chatId), { force: true });
+    this.deps.emit({ type: 'meeting.state', chatId, meeting: null });
   }
 
   /** Writes the final write-up again from the transcript and My notes as they are now. */

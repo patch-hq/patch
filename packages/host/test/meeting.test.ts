@@ -475,6 +475,60 @@ describe('MeetingManager', () => {
     expect(() => m.setMyNotes('nope', 'x')).toThrow(/no meeting/);
   });
 
+  it('deletes an ended meeting: gone from memory and disk, and surfaces are told there is none', async () => {
+    const m = make();
+    m.start('c1');
+    await m.end('c1');
+    events.length = 0;
+    await m.delete('c1');
+    expect(m.get('c1')).toBeNull();
+    expect(make().get('c1')).toBeNull();
+    expect(readdirSync(dir).filter((f) => f.endsWith('.json'))).toEqual([]);
+    expect(events).toEqual([{ type: 'meeting.state', chatId: 'c1', meeting: null }]);
+    m.start('c1');
+    expect(m.get('c1')!.transcript).toEqual([]);
+  });
+
+  it('refuses to delete a meeting that is still running, or one that does not exist', async () => {
+    const m = make();
+    await expect(m.delete('nope')).rejects.toThrow(/no meeting/);
+    m.start('c1');
+    await expect(m.delete('c1')).rejects.toThrow(/end it before deleting/);
+    expect(m.get('c1')).not.toBeNull();
+  });
+
+  it('waits for the final write-up to finish, so it cannot write the file back after the delete', async () => {
+    let release!: () => void;
+    writeup.mockImplementation(
+      () =>
+        new Promise((res) => {
+          release = () => res({ title: 't', sections: [] });
+        }),
+    );
+    const m = make();
+    m.start('c1');
+    void m.end('c1');
+    await vi.waitFor(() => expect(writeup).toHaveBeenCalled());
+    const deleted = m.delete('c1');
+    release();
+    await deleted;
+    expect(readdirSync(dir).filter((f) => f.endsWith('.json'))).toEqual([]);
+  });
+
+  it('deletes through the wire request', async () => {
+    const m = make();
+    m.start('c1');
+    await m.end('c1');
+    await handleServerEvent(
+      { type: 'meeting.control_request', chatId: 'c1', action: 'delete' },
+      {} as never,
+      () => undefined,
+      logger,
+      { meetings: m } as never,
+    );
+    expect(m.get('c1')).toBeNull();
+  });
+
   it('an edited point survives a later analysis pass that tries to rewrite it', async () => {
     const m = make();
     m.start('c1');

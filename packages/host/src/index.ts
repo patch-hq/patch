@@ -6734,6 +6734,7 @@ export async function handleServerEvent(
           m.nameVoice(event.chatId, event.voice, event.name);
         } else if (event.action === 'pause') m.pause(event.chatId);
         else if (event.action === 'resume') m.resume(event.chatId);
+        else if (event.action === 'delete') await m.delete(event.chatId);
         else await m.end(event.chatId);
         return;
       }
