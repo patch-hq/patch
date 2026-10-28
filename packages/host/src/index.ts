@@ -4175,6 +4175,9 @@ async function startHost(
         // which is also how the host knows the child is one it started —
         // identity is plumbing, not the key.
         PATCH_DAEMON_LOCAL_KEY: localKey,
+        // The child outlives a host restart (which rotates the key), so it
+        // re-reads the current key from here on every call.
+        PATCH_DAEMON_LOCAL_KEY_FILE: localKeyPath(config.patchHome),
         // PATCH_CHAT_ID is injected per-query in chatRunner.runQuery —
         // the MCP child needs the *current* chatId, not a static one.
         // See group 10 BLOCKER A.2.

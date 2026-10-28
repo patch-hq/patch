@@ -10,6 +10,7 @@
 // The tools are thin wrappers over the host's
 // `/internal/*` endpoints. The heavy lifting lives host-side.
 
+import { readFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -23,9 +24,11 @@ export interface PatchToolsServerOptions {
   /**
    * The host's current local key (PATCH_DAEMON_LOCAL_KEY), presented as a
    * Bearer on every socket call (spec/02 § MCP server). The host minted it
-   * and put it in this child's environment; the child does not read the file.
+   * and put it in this child's environment. The host rotates the key on every
+   * start, but this child outlives a host restart, so a string is only the
+   * value at launch: pass a function to read the current key on each call.
    */
-  localKey: string;
+  localKey: string | (() => string);
   /**
    * Which branch this turn is running on (spec/04 § Branching — PATCH_BRANCH_ID).
    * Absent for a turn on the chat's active branch (every turn before parallel
@@ -102,7 +105,8 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
   };
 
   function uds<T>(req: UdsRequestOptions): Promise<T> {
-    return udsRequest<T>(opts.hostSocketPath, { ...req, localKey: opts.localKey });
+    const localKey = typeof opts.localKey === 'function' ? opts.localKey() : opts.localKey;
+    return udsRequest<T>(opts.hostSocketPath, { ...req, localKey });
   }
 
   function toolResult(payload: unknown): { content: { type: 'text'; text: string }[] } {
@@ -1544,7 +1548,9 @@ export function udsRequest<T>(socketPath: string, opts: UdsRequestOptions): Prom
       headers['content-length'] = String(bodyBuf.length);
     }
     const req = httpRequest(
-      { socketPath, method: opts.method, path: opts.path, headers },
+      // agent:false = a fresh connection per call. The shared keep-alive agent
+      // would reuse a socket the host closed when it restarted (EPIPE).
+      { socketPath, method: opts.method, path: opts.path, headers, agent: false },
       (res) => {
         const chunks: Buffer[] = [];
         res.on('data', (c: Buffer) => chunks.push(c));
@@ -1576,6 +1582,10 @@ export async function runPatchToolsServerStdio(): Promise<void> {
   const chatId = process.env['PATCH_CHAT_ID'];
   const hostSocketPath = process.env['PATCH_HOST_SOCKET'] ?? process.env['PATCH_DAEMON_SOCKET'];
   const localKey = process.env['PATCH_DAEMON_LOCAL_KEY'];
+  // Where the host writes its current key. This process outlives a host
+  // restart and the host mints a new key on every start, so the launch-time
+  // env value goes stale; the file is re-read on each call.
+  const localKeyFile = process.env['PATCH_DAEMON_LOCAL_KEY_FILE'];
   // Which branch this turn is running on (spec/04 § Branching). Unset for
   // every turn predating parallel branches — reads as the chat's active
   // branch, which has no send-back of its own to make (`patch_send_back`
@@ -1597,7 +1607,16 @@ export async function runPatchToolsServerStdio(): Promise<void> {
   const server = buildPatchToolsServer({
     hostSocketPath,
     chatId,
-    localKey,
+    localKey:
+      localKeyFile && localKeyFile.length > 0
+        ? () => {
+            const key = readFileSync(localKeyFile, 'utf8').trim();
+            if (key.length === 0) {
+              throw new Error(`patch-tools-server: ${localKeyFile} is empty (NO FALLBACK)`);
+            }
+            return key;
+          }
+        : localKey,
     ...(branchId && branchId.length > 0 ? { branchId } : {}),
   });
   const transport = new StdioServerTransport();
