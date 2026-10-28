@@ -386,68 +386,6 @@ describe('Settings → Hosts', () => {
     });
   });
 
-  it('spec/02 § Browser — Route through: picker offers every OTHER host, not itself', () => {
-    reportHost('host-a', { hostName: 'laptop' });
-    reportHost('host-b', { hostName: 'beta-box', runsManager: false });
-    usePresenceStore.getState().setHostOnline('host-a', true);
-    usePresenceStore.getState().setHostOnline('host-b', true);
-    renderPage('hosts');
-    openRow('host-a');
-    const select = screen.getByTestId('host-host-a-route-through') as HTMLSelectElement;
-    const optionLabels = Array.from(select.options).map((o) => o.textContent);
-    expect(optionLabels).toEqual(['None', 'beta-box']);
-  });
-
-  it('picking a host to route through sends host.settings, and the row says "via <host>"', () => {
-    reportHost('host-a', { hostName: 'laptop' });
-    reportHost('host-b', { hostName: 'beta-box', runsManager: false });
-    usePresenceStore.getState().setHostOnline('host-a', true);
-    usePresenceStore.getState().setHostOnline('host-b', true);
-    renderPage('hosts');
-    openRow('host-a');
-    expect(screen.queryByTestId('host-host-a-routed-via')).toBeNull();
-
-    fireEvent.change(screen.getByTestId('host-host-a-route-through'), {
-      target: { value: 'host-b' },
-    });
-    expect(send).toHaveBeenCalledWith({
-      type: 'host.settings',
-      hostId: 'host-a',
-      browserRouteThrough: 'host-b',
-    });
-
-    // The row settles from the next report, same discipline as every other
-    // host-scoped edit here — never patched locally ahead of it.
-    act(() => reportHost('host-a', { hostName: 'laptop', browserRouteThrough: 'host-b' }));
-    expect(screen.getByTestId('host-host-a-routed-via')).toHaveTextContent('via beta-box');
-  });
-
-  it('the routing host OFFLINE shows a plain warning that browsing will fail, no fallback implied', () => {
-    reportHost('host-a', { hostName: 'laptop', browserRouteThrough: 'host-b' });
-    reportHost('host-b', { hostName: 'beta-box', runsManager: false });
-    usePresenceStore.getState().setHostOnline('host-a', true);
-    usePresenceStore.getState().setHostOnline('host-b', false);
-    renderPage('hosts');
-    expect(screen.getByTestId('host-host-a-route-through-offline')).toHaveTextContent(
-      'beta-box is offline',
-    );
-  });
-
-  it('picking "None" sends browserRouteThrough: null, turning routing off', () => {
-    reportHost('host-a', { hostName: 'laptop', browserRouteThrough: 'host-b' });
-    reportHost('host-b', { hostName: 'beta-box', runsManager: false });
-    usePresenceStore.getState().setHostOnline('host-a', true);
-    usePresenceStore.getState().setHostOnline('host-b', true);
-    renderPage('hosts');
-    openRow('host-a');
-    fireEvent.change(screen.getByTestId('host-host-a-route-through'), { target: { value: '' } });
-    expect(send).toHaveBeenCalledWith({
-      type: 'host.settings',
-      hostId: 'host-a',
-      browserRouteThrough: null,
-    });
-  });
-
   it('states plainly when no machine is registered, and still offers to add one', () => {
     renderPage('hosts');
     // The empty state must point at the next action, not just report a void.

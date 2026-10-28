@@ -183,12 +183,6 @@ const HostStateFile = z
      */
     harnessClaudeMdEnabled: z.boolean().optional(),
     /**
-     * Agent browser routing (`host.settings` → `browserRouteThrough`): the
-     * `hostId` of another of the user's hosts this host's `patch_browser_*`
-     * traffic egresses through. Absent means direct (the default).
-     */
-    browserRouteThrough: z.string().min(1).optional(),
-    /**
      * Computer use — the coordinate `patch_browser_mouse` / `patch_browser_key`
      * tools — is off until the user says otherwise: each chat's first use asks
      * Deny / Allow / Always allow. Always allow lands here. Absent means never

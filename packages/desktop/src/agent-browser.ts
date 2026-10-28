@@ -424,16 +424,6 @@ export class AgentBrowser {
         for (const c of await ses.cookies.get({})) await ses.cookies.remove(cookieUrl(c), c.name);
         return {};
       }
-      case 'Patch.setProxy': {
-        // The signed-in profile's route (spec/02 § Route through): this app is
-        // not launched with a proxy the way a Chromium would be.
-        const ses = this.context('default').ses;
-        const server = params['proxyServer'];
-        await ses.setProxy(
-          typeof server === 'string' ? { proxyRules: server } : { mode: 'direct' },
-        );
-        return {};
-      }
       default:
         throw new Error(`the Patch app's browser does not support ${method}`);
     }

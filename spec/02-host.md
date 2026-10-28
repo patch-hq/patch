@@ -466,8 +466,7 @@ closed, is rebuilt the next time the agent uses it: same `tabId`, relaunching th
 browser if needed, reopened at the address it was on, with no action from the
 user. The page's in-memory state is lost, so the next `patch_browser_read` carries
 a one-time `notice` saying so. A tab the user closed by hand stays closed
-(`tab_not_found`). Recovery of a routed tab obeys § Route through: with the
-routing host offline it fails rather than reconnecting direct. A host restart
+(`tab_not_found`). A host restart
 is the same: the host keeps the list of open logged-in tabs on disk (`tabs.json`
 beside the profile), and the first use of a `tabId` from before the restart
 reopens it at its last address with the same notice. Closing a tab, Stop, and a
@@ -506,8 +505,7 @@ copy and paste are the browser's own — rather than a picture of it.
   not answer fails naming it.
 - **Profiles.** The signed-in profile is the app's own persistent partition,
   shared by every chat; a throwaway profile is an in-memory context of its own.
-  Route through re-points the signed-in profile's proxy and gives a throwaway
-  context its own. The user agent carries no app or Electron token.
+  The user agent carries no app or Electron token.
 - **Tabs.** A tab no view shows lives in a window that is open but never seen
   (borderless, transparent, off every screen, taking no input), so its page
   keeps drawing for screenshots and the live view; a large view moves it into
@@ -622,34 +620,6 @@ timeoutSeconds? })` blocks the tool call. The host emits
   is returned. The listener must already be running.
 - **Surfaces.** Web and phone show the same bar in the chat (`14-design-web.md`
   § Browser hand-off, `15-design-mobile.md` § Browser hand-off).
-
-### Route through
-
-Settings → Hosts → &lt;host&gt; → Browser → "Route through" sends that host's
-`patch_browser_*` traffic out through another of the user's hosts instead of
-its own network: none (the default, direct) or any other registered host. The
-IP a routed host ends up browsing from is otherwise the user's own concern —
-this is an option, not a default, and nothing else about the host (its other
-tools, its shell, its files) is affected.
-
-Traffic goes browsing host → server → routing host → internet, carried over
-the existing host↔server WS links each already holds — no open port on
-either machine. The browsing host runs a loopback-only SOCKS5 listener that
-its own Chromium launches against (`proxy.server`); each CONNECT it accepts
-becomes one stream, relayed by the server to the named routing host, which
-makes the real outbound connection and pumps the bytes back the same way
-(`03-wire-protocol.md` § Browser tunnel). Changing the setting (on, off, or to
-a different host) closes that host's open browser tabs and relaunches
-Chromium with the new proxy (or none) the next time one opens — a running
-browser's proxy cannot be repointed without relaunching it.
-
-The user is always aware routing is on: the host's row and its browser detail
-state "via &lt;host&gt;" for as long as the setting is active, read from the
-same `browserRouteThrough` the host reports on `host.host`.
-
-The routing host being offline fails the open outright, naming it — browsing
-never falls back to going direct. Naming the routing host as itself is
-refused; the Settings picker never offers it as an option.
 
 ### Web Bot Auth
 

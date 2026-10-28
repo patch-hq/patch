@@ -19,7 +19,7 @@ import { isSubmitChord } from '../../lib/submitChord.js';
 import { getDesktopBridge } from '../../lib/desktopBridge.js';
 import { shortcutTitle } from '../../lib/shortcuts.js';
 import { hostLabel, sortHosts, useSettingsHost } from './hostScope.js';
-import { agoLabel, sendHostSettings, sendToHost, useHostUpdate } from './hostWrite.js';
+import { agoLabel, sendToHost, useHostUpdate } from './hostWrite.js';
 import { writeShared } from './sharedWrite.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { Group, Note, OnlineDot, Row, SettingsPage } from './ui.js';
@@ -384,8 +384,6 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
         </div>
       ) : null}
 
-      {report ? <BrowserRouteThrough host={host} /> : null}
-
       <div className="set-card set-card-gap">
         <Row title="Remove this machine">
           <button
@@ -427,65 +425,6 @@ function SettingsVersionRow({ host }: { host: HostPresence }): JSX.Element | nul
       testid={`host-${host.hostId}-settings-version`}
       sub={<span data-testid={`host-${host.hostId}-settings-state`}>{text}</span>}
     />
-  );
-}
-
-/**
- * Settings → Hosts → <host> → Browser → "Route through" (spec/02 § Browser —
- * Route through). The picker offers every OTHER host that has reported — not
- * this one, and not one that has never reported (there is nothing to route
- * through yet). Picking one, or picking "None", writes straight through via
- * `host.settings`; the row never guesses, it shows whatever this host's next
- * `host.host` report says. While it is on, this host's browsing is "via
- * <that host>" everywhere that matters (the live view's later step reads the
- * same field) — stated here too, so it is never a surprise that pages are
- * loading from somewhere else.
- */
-function BrowserRouteThrough({ host }: { host: HostPresence }): JSX.Element {
-  const hosts = usePresenceStore((s) => s.hosts);
-  const report = host.host!;
-  const current = report.browserRouteThrough ?? null;
-  const otherHosts = sortHosts(Object.values(hosts)).filter(
-    (h) => h.hostId !== host.hostId && h.host !== null,
-  );
-  const routingHost = current === null ? null : (hosts[current] ?? null);
-  const routingHostName = current === null ? null : routingHost ? hostLabel(routingHost) : current;
-
-  return (
-    <div className="set-card set-card-gap" data-testid={`host-${host.hostId}-browser`}>
-      <Row
-        title="Route through"
-        sub={
-          current !== null ? (
-            <span data-testid={`host-${host.hostId}-routed-via`}>via {routingHostName}</span>
-          ) : undefined
-        }
-      >
-        <select
-          aria-label="Route through"
-          data-testid={`host-${host.hostId}-route-through`}
-          value={current ?? ''}
-          onChange={(e) =>
-            sendHostSettings(host, {
-              browserRouteThrough: e.target.value === '' ? null : e.target.value,
-            })
-          }
-        >
-          <option value="">None</option>
-          {otherHosts.map((h) => (
-            <option key={h.hostId} value={h.hostId}>
-              {hostLabel(h)}
-            </option>
-          ))}
-        </select>
-      </Row>
-      {current !== null && routingHost && !routingHost.online ? (
-        <Note testid={`host-${host.hostId}-route-through-offline`}>
-          {routingHostName} is offline — browsing on {hostLabel(host)} will fail until it
-          reconnects. It never falls back to going direct.
-        </Note>
-      ) : null}
-    </div>
   );
 }
 

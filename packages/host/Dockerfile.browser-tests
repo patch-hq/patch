@@ -32,4 +32,4 @@ COPY . .
 RUN pnpm --filter @patch/wire --filter @patch/auth build
 
 WORKDIR /repo/packages/host
-CMD ["pnpm", "exec", "vitest", "run", "test/browser.test.ts", "test/browser-tunnel.test.ts"]
+CMD ["pnpm", "exec", "vitest", "run", "test/browser.test.ts"]
