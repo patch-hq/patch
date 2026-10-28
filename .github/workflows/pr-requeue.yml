@@ -1,0 +1,60 @@
+# Puts a PR back in the merge queue once when its tests fail there. The browser
+# layer has the odd flaky test, and a PR ejected by one would otherwise sit
+# green and unmerged with nobody watching. A second failure is real: the PR is
+# labelled `queue-failed`, with the failing run linked, for its chat to fix.
+#
+# Ejections for any other reason (a conflict, a manual removal) are left alone;
+# pr-conflicts.yml handles conflicts.
+#
+# Acts with AUTOMERGE_TOKEN (Tom's account) for the same reason as
+# pr-automerge.yml: GitHub ignores a merge-queue entry the Actions bot asks for.
+
+name: pr-requeue
+
+on:
+  pull_request_target:
+    types: [dequeued]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  requeue:
+    if: github.repository == 'patch-hq/patch' && !github.event.pull_request.merged
+    runs-on: ubuntu-latest
+    steps:
+      # No checkout: pull_request_target runs with write access, so it never
+      # touches the PR's code.
+      - env:
+          GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          NODE_ID: ${{ github.event.pull_request.node_id }}
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY%/*}"; repo="${GITHUB_REPOSITORY#*/}"
+          reasons=$(gh api graphql -f owner="$owner" -f repo="$repo" -F number="$NUMBER" -f query='
+            query($owner: String!, $repo: String!, $number: Int!) {
+              repository(owner: $owner, name: $repo) {
+                pullRequest(number: $number) {
+                  timelineItems(last: 100, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) {
+                    nodes { ... on RemovedFromMergeQueueEvent { reason } }
+                  }
+                }
+              }
+            }' --jq '.data.repository.pullRequest.timelineItems.nodes[].reason')
+          last=$(printf '%s\n' "$reasons" | tail -n 1)
+          failures=$(printf '%s\n' "$reasons" | grep -c -E 'fail|timeout' || true)
+          echo "last ejection: $last; test-failure ejections so far: $failures"
+          case "$last" in *fail*|*timeout*) ;; *) echo "not a test failure: left alone"; exit 0;; esac
+          if [ "$failures" -le 1 ]; then
+            gh api graphql -f id="$NODE_ID" -f query='
+              mutation($id: ID!) { enqueuePullRequest(input: { pullRequestId: $id }) { mergeQueueEntry { position } } }'
+            echo "re-queued"
+          else
+            run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow test --event merge_group --limit 20 \
+              --json url,headBranch,conclusion \
+              --jq "[.[] | select(.conclusion == \"failure\" and (.headBranch | contains(\"/pr-$NUMBER-\")))][0].url // \"\"")
+            gh label create queue-failed --color b60205 --description "Tests failed twice in the merge queue" --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
+            gh pr edit "$NUMBER" --add-label queue-failed --repo "$GITHUB_REPOSITORY"
+            gh pr comment "$NUMBER" --repo "$GITHUB_REPOSITORY" --body "Tests failed in the merge queue twice, so this is not a flaky test. Failing run: ${run:-see the test workflow}. Fix it and push; the PR goes back in the queue once its own tests pass."
+          fi

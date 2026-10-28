@@ -1,15 +1,25 @@
-# The test suite (scripts/verify.mjs), on its own: every push to main and every
-# pull request. release.yml does not re-run it; it waits for the `tests` check
-# this workflow reports on the commit, and branch protection on main requires
-# the same check, so main only moves to a commit that passed.
+# The test suite (scripts/verify.mjs), on its own. Each change runs it twice:
+#
+#   pull request  the cheap layers (lint, types, unit, contract, integration)
+#                 on one runner: quick feedback, and the `tests` check the
+#                 ruleset needs before a PR may enter the merge queue
+#   merge queue   the full gate, four shards, browser layer on, against main
+#                 plus everything queued ahead of it
+#
+# The heavy run is in the queue because the queue caps how many entries it
+# builds at once (the ruleset's max_entries_to_build), so it can never fill the
+# runner pool. Run on every PR instead, a burst of agent PRs took all 20
+# runners and the queue's and the release's own jobs waited half an hour.
+#
+# There is no run on push to main: main only moves through the queue, which
+# fast-forwards it to the commit it tested, so that commit already carries the
+# `tests` check release.yml waits for.
 #
 # Runs only in the project's public repository: Actions minutes are free there.
 
 name: test
 
 on:
-  push:
-    branches: [main]
   pull_request:
   merge_group:
   workflow_dispatch:
@@ -17,23 +27,24 @@ on:
 permissions:
   contents: read
 
-# A newer push to a PR makes the older run pointless. Main is never cancelled:
-# every commit on it needs its own result for release.yml to find.
+# A newer push to a PR makes the older run pointless. A merge-queue run is never
+# cancelled: its commit becomes main, and release.yml needs its result.
 concurrency:
   group: test-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Four runners wide. Every runner runs the cheap layers (lint, types,
-  # unit/contract/integration); the browser layer is split between them with
-  # Playwright's --shard, because the whole suite on one runner took about an hour.
+  # In the queue, four runners wide: every runner runs the cheap layers, and the
+  # browser layer is split between them with Playwright's --shard, because the
+  # whole suite on one runner took about an hour. On a PR, one runner, cheap
+  # layers only.
   verify:
     if: github.repository == 'patch-hq/patch'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: ['1/4', '2/4', '3/4', '4/4']
+        shard: ${{ fromJSON(github.event_name == 'merge_group' && '["1/4", "2/4", "3/4", "4/4"]' || '["1/1"]') }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,7 +68,7 @@ jobs:
       - name: The gate
         timeout-minutes: 40
         env:
-          PATCH_RUN_BROWSER_GATE: '1'
+          PATCH_RUN_BROWSER_GATE: ${{ github.event_name == 'merge_group' && '1' || '0' }}
           PATCH_BROWSER_SHARD: ${{ matrix.shard }}
         run: |
           dbus-run-session -- bash -euo pipefail -c '
