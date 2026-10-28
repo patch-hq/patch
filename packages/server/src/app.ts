@@ -477,6 +477,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   hostLink.onHostStatus((hostId, status) => {
     if (status === 'online') {
       hostLink.sendTo(hostId, '_server', { type: 'server.queue_mode', enabled: true });
+      serverQueue.hostOnline(hostId);
       // The server decides which machine runs the Manager; each machine is told as it attaches.
       const manager = registry.managerHostId();
       if (manager !== null) {
