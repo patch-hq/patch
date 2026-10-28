@@ -82,13 +82,13 @@ test.describe('Settings → Updates at phone width', () => {
     await expect(page.getByTestId('update-status')).toHaveText('Up to date');
   });
 
-  test('the status row stays inside the page and shows no version numbers', async ({ page }) => {
+  test('the status row stays inside the page and shows no shas', async ({ page }) => {
     const pageBox = (await page.getByTestId('settings-version').boundingBox())!;
     const rowBox = (await page.getByTestId('version-status').boundingBox())!;
     expect(rowBox.x + rowBox.width).toBeLessThanOrEqual(pageBox.x + pageBox.width + 0.5);
     expect(rowBox.width).toBeLessThanOrEqual(PHONE.width);
     expect((await page.getByTestId('settings-version').textContent()) ?? '').not.toMatch(
-      /\d+\.\d+\.\d+/,
+      /[0-9a-f]{7,}/,
     );
   });
 
