@@ -136,8 +136,8 @@ import { failed } from '../lib/errorCopy.js';
 /** One glyph size across the action buttons so they read as a matched set and
  *  the mic/send are optically centred against their siblings (spec/14 § Composer). */
 const ICON_SIZE = 18;
-/** The settings' icons are a step smaller: they sit beside words, not alone. */
-const SETTING_ICON_SIZE = 16;
+/** The settings' icons match the action buttons'. */
+const SETTING_ICON_SIZE = ICON_SIZE;
 
 /** Height cap for the auto-growing composer input, as a fraction of the window
  *  height — MUST match the CSS `max-height` (30vh) on `.composer-input`. Under

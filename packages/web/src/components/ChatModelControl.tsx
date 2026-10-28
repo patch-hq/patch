@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { harnessForModel } from '@patch/wire';
-import { UserRound } from 'lucide-react';
+import { Cpu, UserRound } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -89,7 +89,7 @@ export function AccountControl({
         data-testid="chat-account"
         title={`The latest turn ran on the ${row.account.label} account`}
       >
-        <UserRound size={16} aria-hidden />
+        <UserRound size={18} aria-hidden />
         <span className="setting-word" data-collapsible="">
           {row.account.label}
         </span>
@@ -105,7 +105,7 @@ export function AccountControl({
     <PopupSelect
       testId={testId}
       ariaLabel="Account"
-      icon={<UserRound size={16} aria-hidden />}
+      icon={<UserRound size={18} aria-hidden />}
       {...(changeLabel === undefined ? { triggerLabel: onNow ?? 'Account' } : {})}
       // No native tooltip: one already showing when the list opens draws over it,
       // and the Automatic option already names the account in use.
@@ -238,6 +238,7 @@ export function ModelControl({
         placement={modelPlacement}
         testId={testId}
         triggerLabel={triggerLabel}
+        {...(triggerLabel === undefined ? { icon: <Cpu size={18} aria-hidden /> } : {})}
         compact
         variant="crumb"
         // A switch lands on the NEXT turn, so while one is running the pop-up

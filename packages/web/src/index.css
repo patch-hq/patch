@@ -6340,6 +6340,14 @@ button.view-file-download {
 .composer-actions.is-compact .model-pill.has-icon .model-pill-caret {
   display: none;
 }
+.composer-actions.is-compact .permission-mode.has-icon,
+.composer-actions.is-compact .model-pill.as-crumb.has-icon {
+  padding: 0 4px;
+}
+/* The model keeps its name on a phone, so its icon yields the room instead. */
+.composer-actions.is-compact .model-pill.as-crumb:not(.has-icon) > svg {
+  display: none;
+}
 /* Approval mode (spec/14 § Composer — Approval mode) — the mode the next turn
    will use, LAST in the utility group of the action row under the input (attach,
    mic, then this; stop and send stay pinned to the right edge). Deliberately
@@ -13888,6 +13896,7 @@ button.chat-usage-crumb:hover {
 }
 .composer-actions .model-pill.as-crumb {
   height: 40px;
+  gap: 5px;
   padding: 0 8px;
   border-radius: var(--radius-sm);
   max-width: 100%;
