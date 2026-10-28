@@ -727,6 +727,29 @@ test('doctor --json: REST probe reads a 503 as hostOnline false', async () => {
   );
 });
 
+test('doctor --json: reports per-host status from /api/hosts', async () => {
+  await withSetup(
+    (req) => {
+      if (req.url === '/api/healthz') return { status: 200, body: { ok: true, version: 'v' } };
+      if (req.url === '/api/daemon/healthz') return { status: 200, body: { ok: true } };
+      if (req.url === '/api/chats') return { status: 200, body: { chats: [] } };
+      if (req.url === '/api/auth/me') return { status: 200, body: { ok: true } };
+      if (req.url === '/api/hosts')
+        return {
+          status: 200,
+          body: { hosts: [{ hostId: 'h1', hostName: 'Netcup', online: true }] },
+        };
+      return { status: 404, body: { error: 'not found' } };
+    },
+    async (env) => {
+      const r = await runCli(['doctor', '--json'], env);
+      assert.equal(r.code, 0, `stderr=${r.stderr}`);
+      const parsed = JSON.parse(r.stdout) as { hosts: Array<{ name: string; online: boolean }> };
+      assert.deepEqual(parsed.hosts, [{ hostId: 'h1', name: 'Netcup', online: true }]);
+    },
+  );
+});
+
 // C2-d1: notify delivery failures are logged to <dataDir>/undelivered.jsonl
 // (spec/09 L113 & L221: "Failures … logged to /data/undelivered.jsonl and
 // surfaced via patch doctor"). `patch doctor` must read that file from

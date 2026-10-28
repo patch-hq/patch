@@ -4,6 +4,7 @@
 //   - server reachability (GET /api/healthz)
 //   - host online/offline state (UDS /healthz when daemon-local, else the
 //     server's GET /api/daemon/healthz which mirrors the host-link state)
+//   - per-host status (GET /api/hosts)
 //   - errored-chat count (chats whose activity === 'errored')
 //   - the chat history log's replay comparison (daemon-local only)
 //   - pending cron/webhook backlog (buffered fires in <dataDir>/pending/, the
@@ -169,6 +170,23 @@ export function registerDoctorCommand(program: Command): void {
           }
         }
         checks['hostOnline'] = hostOnline;
+
+        // --- per-host status (every machine on the account) ---
+        // spec/17: doctor reports per-host status. The probe above only covers
+        // the machine the CLI talks to; the registry lists every host.
+        try {
+          const t = buildTransport(config, { forceRest: true });
+          const res = await t.get<{
+            hosts: Array<{ hostId: string; hostName: string | null; online: boolean }>;
+          }>('/api/hosts');
+          checks['hosts'] = res.hosts.map((h) => ({
+            hostId: h.hostId,
+            name: h.hostName,
+            online: h.online,
+          }));
+        } catch (err) {
+          checks['hosts'] = `error: ${(err as Error).message}`;
+        }
 
         // --- errored-chat count ---
         try {
