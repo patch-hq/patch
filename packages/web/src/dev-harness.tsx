@@ -742,6 +742,35 @@ useChatStore.getState().hydrate([
     disabled: false,
     lastUpdated: 0,
   },
+  // A chat another chat launched with patch_spawn. `?chat=chat_launched` opens
+  // it to verify the "Started by" bar.
+  {
+    chatId: 'chat_launcher',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'release planner',
+    folder: '/home/tom/projects/portfolio',
+    activity: 'idle',
+    status: 'active',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 0,
+  },
+  {
+    chatId: 'chat_launched',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'changelog draft',
+    folder: '/home/tom/projects/portfolio',
+    activity: 'idle',
+    status: 'active',
+    parentChatId: 'chat_launcher',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 0,
+  },
   // Hidden chat (spec/04 § Hidden) — running, but out of the active list, so it
   // lives only in the collapsed Hidden section and leaves every other list as
   // it was. `?chat=chat_hidden` opens it to verify the Hidden banner + Show.

@@ -169,6 +169,11 @@ export interface ChatRow {
    */
   jobId: string | null;
   /**
+   * The chat whose `patch_spawn` created this one, from `chat.spawned`; absent
+   * for a chat a person or a job started. Drives the "Started by" banner.
+   */
+  parentChatId?: string;
+  /**
    * The model this chat is running on: what it spawned with (`chat.spawned`),
    * then whatever a later change made it (`chat.state`, spec/04 § Model). Shown
    * in the header's folder crumb, which is also the control that changes it.

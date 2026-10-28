@@ -251,6 +251,36 @@ describe('UDS internal endpoints — patch_spawn', () => {
   });
 });
 
+describe('patch_spawn records the chat that launched the new one', () => {
+  it('announces parentChatId on chat.spawned, replays it, and keeps it in meta', async () => {
+    const { daemon, jobs, folder, events } = setup();
+    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/spawn',
+        headers: AUTH,
+        payload: { folder, callerChatId: 'caller-chat' },
+      });
+      const { chatId } = res.json();
+      const spawned = events.find((e) => e.type === 'chat.spawned' && e.chatId === chatId);
+      expect(spawned).toMatchObject({ parentChatId: 'caller-chat' });
+      expect(daemon.chatState.get(chatId)?.spawnedByChatId).toBe('caller-chat');
+
+      const replayed: WireEvent[] = [];
+      daemon.replayChat(chatId, 0, (e) => replayed.push(e));
+      expect(replayed[0]).toMatchObject({ type: 'chat.spawned', parentChatId: 'caller-chat' });
+
+      // A chat nobody spawned carries no parent.
+      const plain = await daemon.spawnChat({ folder });
+      const plainSpawned = events.find((e) => e.type === 'chat.spawned' && e.chatId === plain);
+      expect(plainSpawned).not.toHaveProperty('parentChatId');
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 describe('UDS internal endpoints — patch_history', () => {
   it('returns empty events for chat with no claudeSessionId', async () => {
     const { daemon, jobs, folder } = setup();

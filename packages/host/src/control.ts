@@ -2917,6 +2917,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         ...(model !== undefined ? { model } : {}),
         ...(permissionMode !== undefined ? { permissionMode } : {}),
         ...(preferredAccountId !== undefined ? { preferredAccountId } : {}),
+        ...(callerChatId !== undefined ? { spawnedByChatId: callerChatId } : {}),
       };
       const chatId = await opts.daemon!.spawnChat(spawnReq);
       if (opts.emitWire && callerChatId) {

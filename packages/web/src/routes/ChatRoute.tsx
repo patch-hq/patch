@@ -57,6 +57,7 @@ import { ChatFind } from '../components/ChatFind.js';
 import { ArchivedBanner } from '../components/ArchivedBanner.js';
 import { SnoozedBanner } from '../components/SnoozedBanner.js';
 import { HiddenBanner } from '../components/HiddenBanner.js';
+import { ParentChatBar } from '../components/ParentChatBar.js';
 import { FinishedGoalBanner, GoalBanner } from '../components/GoalBanner.js';
 import { TaskBar } from '../components/TaskBar.js';
 import { ReminderBanner } from '../components/ReminderBanner.js';
@@ -2090,6 +2091,9 @@ export function ChatRoute({
       />
       {row.jobId ? (
         <JobBar chatId={row.chatId} jobId={row.jobId} at={row.lastUserActivity} />
+      ) : null}
+      {row.parentChatId ? (
+        <ParentChatBar chatId={row.chatId} parentChatId={row.parentChatId} />
       ) : null}
       <GoalBanner row={row} />
       <FinishedGoalBanner row={row} />

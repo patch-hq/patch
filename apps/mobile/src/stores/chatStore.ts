@@ -799,6 +799,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // Set once at spawn by the server; a frame without it (a user's
             // chat, or an older server) never clears one already known.
             jobId: event.jobId ?? row.jobId,
+            ...(event.parentChatId !== undefined ? { parentChatId: event.parentChatId } : {}),
           };
           break;
         }
