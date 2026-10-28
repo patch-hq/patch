@@ -94,6 +94,7 @@ import { JobDispatcher } from './jobs/dispatcher.js';
 import { JobChatLinks } from './jobs/chat-links.js';
 import { JobLogs } from './jobs/logs.js';
 import { JobAlerts, describeFailure } from './jobs/alerts.js';
+import { lateFireHandler } from './jobs/late-fire.js';
 import { CronScheduler } from './jobs/cron.js';
 import { HostWaker } from './jobs/host-wake.js';
 import { RecurrenceScheduler } from './jobs/recurrence.js';
@@ -2080,24 +2081,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     logs: jobLogs,
     // A fire waiting on a host that is down or asleep is announced once it is
     // 10 minutes late, naming the host and how long it has been due.
-    onLate: (info) => {
-      const since = new Intl.DateTimeFormat('en-GB', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hourCycle: 'h23',
-        ...(info.timezone !== undefined ? { timeZone: info.timezone } : {}),
-      }).format(info.dueAt);
-      void notificationRouter
-        .route({
-          type: 'notify',
-          chatId: info.chatId,
-          message: `${info.jobName} has not run: host ${info.hostId ?? 'unknown'} unreachable since ${since}. It will run when the host is back.`,
-          priority: 'normal',
-        })
-        .catch((err: unknown) => {
-          log.warn({ err: (err as Error).message }, 'late-fire notify failed');
-        });
-    },
+    onLate: lateFireHandler(notificationLog),
     // `ensure` (upsert) actions key on whether their persistent chat already
     // exists in the registry mirror to decide spawn-vs-message.
     chatExists: (chatId) => chatRegistry.get(chatId) !== undefined,
