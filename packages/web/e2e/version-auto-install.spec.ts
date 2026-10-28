@@ -163,7 +163,7 @@ test.describe('version panel — updates wait to be taken', () => {
     await expect(page.getByTestId('desktop-update-banner')).toHaveCount(0);
   });
 
-  test('still reports status and last check, without versions, and checks on demand', async ({
+  test('still reports status and last check, without shas, and checks on demand', async ({
     page,
   }) => {
     await asDesktopShell(page, { ...SHELL, lastResult: 'up-to-date', downloaded: false });
@@ -172,8 +172,9 @@ test.describe('version panel — updates wait to be taken', () => {
     await expect(page.getByTestId('update-status')).toHaveText('Up to date');
     await expect(page.getByTestId('version-checked')).toContainText('Last checked');
     await expect(page.getByTestId('version-checked')).not.toContainText('—');
+    // Hosts are listed with a plain version, never a sha.
     expect((await page.getByTestId('settings-version').textContent()) ?? '').not.toMatch(
-      /\d+\.\d+\.\d+/,
+      /[0-9a-f]{7,}/,
     );
 
     await page.getByTestId('version-check-now').click();
