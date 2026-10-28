@@ -385,6 +385,29 @@ describe('MeetingManager', () => {
     expect(m.get('c1')?.transcript).toEqual([]);
   });
 
+  it('pulls a topic time outside the analysed lines back into them and keeps points in time order', async () => {
+    const m = make();
+    m.start('c1');
+    clock += 10_000;
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    clock += 10_000;
+    analyse.mockResolvedValueOnce(
+      analysis({
+        topics: [
+          { id: null, title: 'Late', points: [], decided: false, atSeconds: 99 },
+          { id: null, title: 'Early', points: [], decided: false, atSeconds: 1 },
+          { id: null, title: 'Mid', points: [], decided: false, atSeconds: 15 },
+        ],
+      }),
+    );
+    await m.tick('c1');
+    expect(m.get('c1')!.topics.map((t) => [t.title, t.at])).toEqual([
+      ['Early', 10_000],
+      ['Mid', 15_000],
+      ['Late', 20_000],
+    ]);
+  });
+
   it('puts a transcription failure on state.error and clears it on the next success', async () => {
     const m = make();
     m.start('c1');
@@ -398,7 +421,9 @@ describe('MeetingManager', () => {
   it('tick analyses only new lines and merges topics and actions once', async () => {
     const m = make();
     m.start('c1');
+    clock += 3000;
     await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    clock += 6000;
     await m.tick('c1');
     const s = m.get('c1')!;
     expect(s.now?.headline).toBe('Ledger split timing');

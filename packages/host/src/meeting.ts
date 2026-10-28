@@ -969,7 +969,7 @@ export class MeetingManager {
         prompts: this.deps.prompts(),
       });
       const a = MeetingAnalysis.parse(raw);
-      this.merge(rt, a, final);
+      this.merge(rt, a, final, newLines[0]?.at);
       rt.analysedUpTo = upTo;
       rt.state.error = null;
     } catch (err) {
@@ -979,14 +979,23 @@ export class MeetingManager {
     this.commit(chatId, rt);
   }
 
-  private merge(rt: Runtime, a: MeetingAnalysis, final: boolean): void {
+  private merge(rt: Runtime, a: MeetingAnalysis, final: boolean, batchStart?: number): void {
     const s = rt.state;
+    const elapsed = meetingElapsedMs(s, this.now());
+    // A topic arose in the lines this pass was given, so its start lies between
+    // the first of them and now. The model misreads clocks (a 27:15 point in a
+    // 17:xx meeting), so an `atSeconds` outside that window is pulled into it.
+    const startOf = (atSeconds: number | undefined): number => {
+      if (atSeconds === undefined) return elapsed;
+      const lo = Math.min(batchStart ?? 0, elapsed);
+      return Math.min(Math.max(atSeconds * 1000, lo), elapsed);
+    };
     if (!final && META_TEXT.test(`${a.now.headline} ${a.now.bullets.join(' ')}`))
       throw new MeetingError(`analysis returned model commentary: ${a.now.headline}`);
     s.now = final ? s.now : a.now;
     for (const t of a.topics) {
       const existing = t.id ? s.topics.find((x) => x.id === t.id) : undefined;
-      const at = t.atSeconds !== undefined ? t.atSeconds * 1000 : meetingElapsedMs(s, this.now());
+      const at = startOf(t.atSeconds);
       // Tom's own words are fixed input: a later pass never rewrites them.
       if (existing?.fixed) continue;
       if (existing) {
@@ -1003,6 +1012,8 @@ export class MeetingManager {
         });
       }
     }
+    // Points read oldest first however the model or an edit left them.
+    s.topics.sort((x, y) => x.at - y.at);
     for (const v of a.voices ?? []) {
       const name = v.name.trim();
       if (name === '' || s.voices?.[String(v.voice)] !== undefined) continue;
