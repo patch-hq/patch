@@ -12,6 +12,13 @@
         "buildType": "apk"
       }
     },
+    "ios": {
+      "channel": "ios",
+      "distribution": "store",
+      "ios": {
+        "buildConfiguration": "Release"
+      }
+    },
     "production": {
       "channel": "production",
       "android": {
@@ -20,6 +27,9 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {},
+    "ios": {
+      "ios": {}
+    }
   }
 }

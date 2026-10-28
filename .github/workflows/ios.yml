@@ -1,0 +1,86 @@
+# Builds the iOS app and uploads it to TestFlight. Manual only: it needs the
+# paid Apple Developer account and the secrets below, none of which exist until
+# Tom enrols (docs/ios.md). Missing secrets fail the run on purpose, naming the
+# first one absent; nothing falls back.
+#
+# Secrets:
+#   APPLE_API_KEY_P8, APPLE_API_KEY_ID, APPLE_API_ISSUER   App Store Connect API key
+#   PATCH_IOS_CERT_P12_B64, PATCH_IOS_CERT_PASSWORD        Apple Distribution certificate, base64 .p12
+#   PATCH_IOS_PROFILE_B64                                   App Store provisioning profile, base64
+#   APPLE_TEAM_ID
+#   PATCH_IOS_GOOGLE_SERVICE_INFO_B64                       GoogleService-Info.plist (push), base64
+
+name: ios
+
+on:
+  workflow_dispatch:
+
+jobs:
+  testflight:
+    if: github.repository == 'patch-hq/patch'
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      CERT_B64: ${{ secrets.PATCH_IOS_CERT_P12_B64 }}
+      CERT_PASSWORD: ${{ secrets.PATCH_IOS_CERT_PASSWORD }}
+      PROFILE_B64: ${{ secrets.PATCH_IOS_PROFILE_B64 }}
+      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      PLIST_B64: ${{ secrets.PATCH_IOS_GOOGLE_SERVICE_INFO_B64 }}
+    steps:
+      - name: require secrets
+        run: |
+          for v in APPLE_API_KEY_P8 APPLE_API_KEY_ID APPLE_API_ISSUER CERT_B64 CERT_PASSWORD PROFILE_B64 TEAM_ID PLIST_B64; do
+            [ -n "${!v}" ] || { echo "missing secret for $v (see docs/ios.md)" >&2; exit 1; }
+          done
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: prebuild
+        working-directory: apps/mobile
+        run: |
+          printf '%s' "$PLIST_B64" | base64 -d > GoogleService-Info.plist
+          npx expo prebuild --platform ios --no-install
+          # a CI build number that always rises, so TestFlight accepts every upload
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" ios/Patch/Info.plist
+      - name: signing
+        run: |
+          KC="$RUNNER_TEMP/ci.keychain-db"
+          security create-keychain -p ci "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p ci "$KC"
+          printf '%s' "$CERT_B64" | base64 -d > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KC"
+          security set-key-partition-list -S apple-tool:,apple: -k ci "$KC"
+          security list-keychains -d user -s "$KC" login.keychain-db
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          printf '%s' "$PROFILE_B64" | base64 -d > "$HOME/Library/MobileDevice/Provisioning Profiles/patch.mobileprovision"
+      - name: archive and export
+        working-directory: apps/mobile/ios
+        run: |
+          cat > "$RUNNER_TEMP/export.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+          </dict></plist>
+          PLIST
+          xcodebuild -workspace Patch.xcworkspace -scheme Patch -configuration Release \
+            -archivePath "$RUNNER_TEMP/Patch.xcarchive" DEVELOPMENT_TEAM="$TEAM_ID" archive
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Patch.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/export.plist" -exportPath "$RUNNER_TEMP/out"
+      - name: upload to TestFlight
+        run: |
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          printf '%s' "$APPLE_API_KEY_P8" > "$HOME/.appstoreconnect/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8"
+          xcrun altool --upload-app --type ios -f "$RUNNER_TEMP"/out/*.ipa \
+            --apiKey "$APPLE_API_KEY_ID" --apiIssuer "$APPLE_API_ISSUER"
+          rm -rf "$HOME/.appstoreconnect/private_keys"

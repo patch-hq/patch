@@ -1,10 +1,10 @@
 # @patch/mobile
 
-Android-only Expo app for Patch. Three bottom tabs (Chats, Voice,
+Expo app (Android shipped as an APK; iOS via TestFlight, see docs/ios.md) for Patch. Three bottom tabs (Chats, Voice,
 Settings), Manager incoming-call UX via Android `ConnectionService`, Expo
 push, voice-note + voice-call overlays.
 
-iOS is explicitly out of scope (per `spec/15-design-mobile.md`).
+iOS is built in CI and shipped through TestFlight (`docs/ios.md`).
 
 ## Tech stack
 
@@ -46,7 +46,7 @@ apps/mobile/
 ├── maestro/flows/smoke.yml    # smoke flow
 ├── testing/manual.md          # manual test plan (incl. ConnectionService)
 ├── __tests__/                 # vitest pure-logic tests
-├── app.config.ts              # Expo config (Android-only)
+├── app.config.ts              # Expo config (Android + iOS)
 └── eas.json                   # preview + production build profiles
 ```
 
