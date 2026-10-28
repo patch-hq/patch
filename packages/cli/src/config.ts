@@ -1,7 +1,7 @@
 // CLI configuration loader.
 //
 // Reads ~/.patch/config.json (server URL, default folder, voice prefs) and
-// allows env overrides via PATCH_SERVER_URL / PATCH_DAEMON_SOCKET /
+// falls back to the host's machine.json serverUrl, and allows env overrides via PATCH_SERVER_URL / PATCH_DAEMON_SOCKET /
 // PATCH_DAEMON_LOCAL_KEY. NO FALLBACKS: a malformed config crashes loud.
 
 import { readFileSync, existsSync, statSync } from 'node:fs';
@@ -24,8 +24,6 @@ export interface ResolvedConfig {
   defaultFolder: string | null;
   configHome: string;
 }
-
-const DEFAULT_SERVER = 'http://localhost:3000';
 
 export function configHomeDir(): string {
   const home = process.env.PATCH_HOME;
@@ -102,8 +100,19 @@ export function loadConfig(): ResolvedConfig {
     serverUrl = fileConfig.serverUrl;
     serverUrlSource = `serverUrl in ${path}`;
   } else {
-    serverUrl = DEFAULT_SERVER;
-    serverUrlSource = 'the default';
+    // A host with no config.json is still connected to a server: the host
+    // installer records it in machine.json. No hardcoded default.
+    const machinePath = join(configHomeDir(), 'machine.json');
+    const machineUrl = existsSync(machinePath)
+      ? (JSON.parse(readFileSync(machinePath, 'utf8')) as { serverUrl?: unknown }).serverUrl
+      : undefined;
+    if (typeof machineUrl !== 'string' || machineUrl.length === 0) {
+      throw new Error(
+        `config: no server URL configured. Set PATCH_SERVER_URL, serverUrl in ${path}, or serverUrl in ${machinePath}`,
+      );
+    }
+    serverUrl = machineUrl;
+    serverUrlSource = `serverUrl in ${machinePath}`;
   }
   try {
     new URL(serverUrl);

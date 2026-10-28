@@ -36,10 +36,37 @@ function withTempPatchHome(fn: (dir: string) => void): void {
   }
 }
 
-test('loadConfig: returns defaults when no file', () => {
+test('loadConfig: no server URL configured anywhere throws', () => {
   withTempPatchHome(() => {
+    assert.throws(() => loadConfig(), /no server URL/);
+  });
+});
+
+test('loadConfig: falls back to the host machine.json serverUrl', () => {
+  withTempPatchHome((dir) => {
+    writeFileSync(
+      join(dir, 'machine.json'),
+      JSON.stringify({ serverUrl: 'https://machine.example' }),
+    );
+    assert.equal(loadConfig().serverUrl, 'https://machine.example');
+  });
+});
+
+test('loadConfig: config.json outranks machine.json', () => {
+  withTempPatchHome((dir) => {
+    writeFileSync(
+      join(dir, 'machine.json'),
+      JSON.stringify({ serverUrl: 'https://machine.example' }),
+    );
+    writeFileSync(join(dir, 'config.json'), JSON.stringify({ serverUrl: 'https://cfg.example' }));
+    assert.equal(loadConfig().serverUrl, 'https://cfg.example');
+  });
+});
+
+test('loadConfig: socket and key defaults when a server URL is set', () => {
+  withTempPatchHome(() => {
+    process.env.PATCH_SERVER_URL = 'https://x.example';
     const c = loadConfig();
-    assert.equal(c.serverUrl, 'http://localhost:3000');
     assert.equal(c.hostSocket, null);
     assert.equal(c.daemonLocalKey, null);
     assert.deepEqual(c.defaultFlags, []);
@@ -138,10 +165,10 @@ test('loadConfig: empty PATCH_SERVER_URL is treated as unset (file wins)', () =>
   });
 });
 
-test('loadConfig: empty PATCH_SERVER_URL with no file gives the default', () => {
+test('loadConfig: empty PATCH_SERVER_URL with no file throws', () => {
   withTempPatchHome(() => {
     process.env.PATCH_SERVER_URL = '';
-    assert.equal(loadConfig().serverUrl, 'http://localhost:3000');
+    assert.throws(() => loadConfig(), /no server URL/);
   });
 });
 
