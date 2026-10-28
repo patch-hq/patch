@@ -1420,7 +1420,7 @@ describe('Settings → Manager (account-wide)', () => {
     fireEvent.change(screen.getByTestId('rotation-time'), { target: { value: '03:00' } });
     await waitFor(() => expect(server.writes).toHaveLength(5));
     expect(server.writes).toEqual([
-      { sweepEnabled: false },
+      { sweepEnabled: true },
       { quietHoursStart: '22:30' },
       { quietHoursEnd: '06:15' },
       { rotationEnabled: false },

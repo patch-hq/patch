@@ -364,7 +364,7 @@ The reach setting sits in the Manager view's own header, as a switch between `no
 
 The strip has no scope picker. The Manager's sweep considers everything (`06-threads-manager-speakers.md` § The sweep), and a view that showed less than the thing doing the sweeping would be lying about what it can see.
 
-Above the rows sits the sweep's own slim status line: "Last sweep 14:30 · nudged 2 · flagged 1" (or "No sweeps yet" before the first one, or "… · failed" when the last run's decision call errored). Clicking the line expands it into one row per chat the sweep acted on — the action it took and the chat's name, each opening that chat. A "Check now" button beside it forces an attempt immediately (`06-threads-manager-speakers.md` § The sweep — Triggers); nothing pending still reports no change rather than pretending to have swept. Sweep runs are also listed like job runs (`08-triggers-and-jobs.md` § Logs) via the same account-wide list the status line's expansion reads from — there is no separate "sweep runs" page.
+Above the rows sits the sweep's own slim status line: "Last sweep 14:30 · answered 2 · digest 1" (or "No sweeps yet" before the first one, or "… · failed" when the last run's decision call errored). Clicking the line expands it into one row per chat the sweep acted on — the action it took and the chat's name, each opening that chat. A "Check now" button beside it forces an attempt immediately (`06-threads-manager-speakers.md` § The sweep — Triggers); nothing gone idle still reports no change rather than pretending to have swept. Sweep runs are also listed like job runs (`08-triggers-and-jobs.md` § Logs) via the same account-wide list the status line's expansion reads from — there is no separate "sweep runs" page.
 
 ## Main chat panel
 
@@ -1280,13 +1280,12 @@ reports the key, which Settings → Providers sets without a restart.
 #### Special threads
 
 - **Sweep** (`06-threads-manager-speakers.md` § The sweep) — an Enabled
-  switch (on by default); the interval (minutes, default 30); the stalled
-  threshold (minutes of no new output before a running chat counts as stalled,
-  default 15); messages per chat (how many of each changed chat's recent
-  messages go into the digest, default 3); the model the sweep's one decision
-  call runs on (default a mid-size model); and the sweep prompt — a text field
-  showing the full default, editable, with a Reset to default (same pattern as
-  the Patch tools prompt, § Agent behavior above). Account-wide, not
+  switch (off by default; the one switch that stops everything); the interval
+  (minutes, default 30); messages per chat (how many of each idle chat's recent
+  messages the sweep reads, default 1); the model the sweep's one decision
+  call runs on (default a mid-size model); and the principles prompt — a text
+  field showing the full default, editable, with a Reset to default (same
+  pattern as the Patch tools prompt, § Agent behavior above). Account-wide, not
   per-surface: the sweep runs on the server and the Manager host.
 - **Manager** — the quiet hours during which no sweep flag is delivered, the
   context window (how many of the Manager's own messages the model sees,

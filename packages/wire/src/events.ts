@@ -2084,17 +2084,15 @@ export const SharedSettings = z
         contact: z.string().trim().max(200),
       })
       .strict(),
-    /** Whether the Manager sweep runs at all (spec/06 § Sweep). */
+    /** Whether the Manager sweep runs at all (spec/06 § The sweep). Off by default; the one switch that stops everything. */
     sweepEnabled: z.boolean(),
-    /** How often the interval trigger fires, subject to the gate. */
+    /** How often the sweep checks for chats that went idle, and posts the digest. */
     sweepIntervalMinutes: z.number().int().positive(),
-    /** How long a RUNNING chat may go without output before the gate calls it stalled. */
-    stalledThresholdMinutes: z.number().int().positive(),
-    /** How many of each changed chat's most recent messages go into the digest. */
+    /** How many of each idle chat's most recent messages the sweep reads. */
     sweepMessagesPerChat: z.number().int().positive(),
     /** The Manager's own bounded context window (spec/06 § Manager conversation). */
     managerContextWindow: z.number().int().positive(),
-    /** The sweep's decision-call prompt; "Reset to default" writes `DEFAULT_SWEEP_PROMPT` back. */
+    /** The Manager's principles prompt — what it may answer on Tom's behalf; "Reset to default" writes `DEFAULT_SWEEP_PROMPT` back. */
     sweepPrompt: z.string().min(1),
     /** The model the sweep's one decision call runs on. */
     sweepModel: z.string().min(1),
@@ -2226,10 +2224,9 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
     operator: '',
     contact: '',
   },
-  sweepEnabled: true,
+  sweepEnabled: false,
   sweepIntervalMinutes: 30,
-  stalledThresholdMinutes: 15,
-  sweepMessagesPerChat: 3,
+  sweepMessagesPerChat: 1,
   managerContextWindow: 40,
   sweepPrompt: DEFAULT_SWEEP_PROMPT,
   // Mid-size by default (spec/06 § Settings).
@@ -4019,7 +4016,9 @@ export const ManagerSweepCandidate = z
     chatId: z.string().min(1),
     hostId: z.string().min(1),
     folder: z.string().min(1),
-    edge: z.enum(['settled', 'stalled', 'permission', 'question', 'job-failed', 'task-ended']),
+    // The sweep has one reason to look at a chat: it went idle. Kept as a field
+    // so an older host still parses the candidate.
+    edge: z.literal('settled'),
     idleMinutes: z.number().nonnegative(),
   })
   .strict();
@@ -4057,10 +4056,10 @@ export type ManagerSweepCancelEvent = z.infer<typeof ManagerSweepCancelEvent>;
 export const ManagerSweepAction = z
   .object({
     chatId: z.string().min(1),
-    action: z.enum(['nudge', 'wake', 'flag', 'leave']),
+    action: z.enum(['answer', 'digest', 'leave']),
     /** Why the chat was a candidate. */
     edge: ManagerSweepCandidate.shape.edge.optional(),
-    /** What the sweep sent or wrote (nudge/wake/flag), or why it left the chat alone. */
+    /** What the sweep sent (answer), the open question it listed (digest), or why it left the chat alone. */
     detail: z.string().optional(),
   })
   .strict();

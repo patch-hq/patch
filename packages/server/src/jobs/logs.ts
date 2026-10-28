@@ -133,21 +133,6 @@ export interface WebhookLogEntry {
   error?: string;
 }
 
-/** `status` values that are a genuine failure — a job that stopped producing,
- * not an expected non-fire (spec/06 § Sweep — "a job run failed" is one of
- * the gate's changed conditions; `filter-rejected`/`buffered`/`queued`/
- * `slot-timeout`/`gate-held` are all the job declining to fire, not failing). */
-const FAILURE_STATUSES: ReadonlySet<JobRunStatus> = new Set([
-  'filter-error',
-  'dispatch-error',
-  'chat-error',
-  'gate-error',
-]);
-
-export function isJobRunFailure(status: JobRunStatus): boolean {
-  return FAILURE_STATUSES.has(status);
-}
-
 export class JobLogs {
   private readonly runsDir: string;
   private readonly webhooksDir: string;
@@ -165,9 +150,8 @@ export class JobLogs {
     assertValidJobId(entry.jobId);
     const path = join(this.runsDir, `${entry.jobId}.jsonl`);
     appendFileSync(path, `${JSON.stringify(entry)}\n`, 'utf8');
-    // spec/06 § Sweep — a job failure both changes the gate AND wakes a
-    // sweep early. Fired after the write, so a listener that reads the log
-    // back never races the append.
+    // Fired after the write, so a listener that reads the log back never
+    // races the append.
     this.onRun?.(entry);
   }
 

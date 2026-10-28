@@ -268,8 +268,8 @@ export function PromptsPage(): JSX.Element {
         />
         <PromptRow
           id="sweep"
-          title="Manager sweep"
-          sub="How the Manager decides what to do with chats that changed."
+          title="Manager principles"
+          sub="Which questions the Manager may answer for you when a chat goes idle."
           defaultText={DEFAULT_SWEEP_PROMPT}
           current={p.sweepPrompt}
           onSave={(text) => patchShared('sweep prompt', { sweepPrompt: text })}

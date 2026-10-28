@@ -1,4 +1,4 @@
-// spec/06 § Sweep — check-in nudges must not stack. A nudge that has to queue
+// spec/06 § The sweep — answers must not stack. A nudge that has to queue
 // behind a running turn replaces any nudge already queued; it is not queued at
 // all when the chat already has a real queued message; and queued nudges are
 // flushed when the chat's goal is met or cleared.

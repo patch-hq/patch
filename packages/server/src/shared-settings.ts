@@ -315,6 +315,16 @@ export class SharedSettingsService {
     // host's own file (spec/02 § Claude Code settings), so the retired key is
     // dropped on read and gone from the file at the next write.
     delete raw['claudeSettings'];
+    // The Manager redesign (spec/06 § The sweep) retired the stall threshold
+    // and changed what the sweep prompt must return. A file that still has the
+    // threshold predates it: the sweep goes back to off (its new default) and
+    // the old prompt, whose nudge/wake/flag replies the sweep no longer
+    // accepts, gives way to the default.
+    if ('stalledThresholdMinutes' in raw) {
+      delete raw['stalledThresholdMinutes'];
+      delete raw['sweepPrompt'];
+      raw['sweepEnabled'] = false;
+    }
     const parsed = SharedSettings.partial().strict().safeParse(raw);
     if (!parsed.success) {
       throw new Error(`${this.settingsPath} is not valid settings: ${parsed.error.message}`);

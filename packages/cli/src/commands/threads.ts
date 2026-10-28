@@ -70,14 +70,16 @@ export function registerThreadsCommands(program: Command): void {
   // transport once that's set).
   threads
     .command('sweep-now')
-    .description("Force the Manager sweep's gate to check right now (spec/06 § Sweep)")
+    .description(
+      'Check now for chats that went idle and run the Manager sweep (spec/06 § The sweep)',
+    )
     .option('--json', 'JSON output')
     .action(async (opts: CommonOpts) => {
       await run(opts, async () => {
         const t = getTransport({ ...opts, remote: true });
         const res = await t.post<{ fired: boolean }>('/api/manager/sweep/check-now', {});
         if (opts.json) emitJson(res);
-        else emitText(res.fired ? 'sweep fired' : 'nothing changed — no sweep run');
+        else emitText(res.fired ? 'sweep fired' : 'nothing went idle — no sweep run');
       });
     });
 
