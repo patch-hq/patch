@@ -59,10 +59,23 @@ export const TARGETS = {
 
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 
-async function download(url) {
-  const res = await fetch(url, { signal: AbortSignal.timeout(300_000) });
-  if (!res.ok) throw new Error(`${url} answered ${res.status}`);
-  return Buffer.from(await res.arrayBuffer());
+/**
+ * A stalled connection from a CI runner is the usual failure here, so each
+ * attempt gets a short timeout and a few are made against the same pinned URL.
+ * Every attempt is logged and the last error is thrown: nothing is swallowed.
+ */
+async function download(url, attempts = 4) {
+  for (let i = 1; ; i++) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(90_000) });
+      if (!res.ok) throw new Error(`${url} answered ${res.status}`);
+      return Buffer.from(await res.arrayBuffer());
+    } catch (err) {
+      console.error(`download ${url} attempt ${i}/${attempts} failed: ${err.message}`);
+      if (i >= attempts) throw err;
+      await new Promise((r) => setTimeout(r, 5_000 * i));
+    }
+  }
 }
 
 /** The checksum line for `file` in a nodejs.org SHASUMS256.txt, or throw. */
