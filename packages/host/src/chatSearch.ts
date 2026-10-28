@@ -314,7 +314,7 @@ export class ChatSearchIndex {
    * Search `chats` for `query`, returning the top `limit` hits. Deleted chats
    * are never searched. Brings every chat up to date with its transcript first,
    * so a message written a moment ago is findable. Archived chats are left out
-   * unless `includeArchived`. With `fullText` false only
+   * unless `includeArchived`, hidden ones unless `includeHidden`. With `fullText` false only
    * chat names are searched and no transcript is read.
    */
   search(
@@ -323,12 +323,16 @@ export class ChatSearchIndex {
     limit: number,
     fullText = true,
     includeArchived = false,
+    includeHidden = false,
   ): ChatSearchResult {
     const terms = queryTerms(query);
     const now = this.opts.now();
     const idQuery = idQueryOf(query);
     const live = chats.filter(
-      (c) => c.status !== 'deleted' && (includeArchived || c.status !== 'archived'),
+      (c) =>
+        c.status !== 'deleted' &&
+        (includeArchived || c.status !== 'archived') &&
+        (includeHidden || !c.hidden),
     );
     const liveIds = new Set(live.map((c) => c.chatId));
     for (const id of [...this.entries.keys()]) if (!liveIds.has(id)) this.entries.delete(id);
@@ -444,6 +448,7 @@ export async function handleChatSearchRequest(
       event.limit,
       event.fullText !== false,
       event.includeArchived === true,
+      event.includeHidden === true,
     );
     deps.logger.info(
       {

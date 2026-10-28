@@ -282,4 +282,28 @@ test.describe('sidebar chat search', () => {
     await expect(page.getByTestId('chat-search-hit')).toHaveCount(2);
     expect(scopes).toEqual(['false', 'true']);
   });
+
+  test('a Hidden box, unticked by default, asks for hidden chats when ticked', async ({ page }) => {
+    const scopes: (string | null)[] = [];
+    await stubSearch(page, (route, q) => {
+      scopes.push(new URL(route.request().url()).searchParams.get('includeHidden'));
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(searchBody(q)),
+      });
+    });
+    await page.goto(HARNESS);
+    await page.locator('.sb-row').first().waitFor();
+
+    await page.getByTestId('chat-search').fill('"lorem ipsum"');
+    await expect(page.getByTestId('chat-search-hit')).toHaveCount(2);
+    const box = page.getByTestId('chat-search-hidden');
+    await expect(box).not.toBeChecked();
+    expect(scopes).toEqual(['false']);
+
+    await box.check();
+    await expect(page.getByTestId('chat-search-hit')).toHaveCount(2);
+    expect(scopes).toEqual(['false', 'true']);
+  });
 });

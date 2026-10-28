@@ -65,6 +65,7 @@ function chat(over: Partial<SearchableChat> & { chatId: string }): SearchableCha
     preview: null,
     folder: FOLDER,
     status: 'active',
+    hidden: false,
     pinned: false,
     snoozedUntil: null,
     lastUpdated: NOW - 1000,
@@ -207,6 +208,21 @@ describe('chat search index', () => {
         .hits.map((h) => h.chatId)
         .sort(),
     ).toEqual(['live', 'old']);
+  });
+
+  it('leaves hidden chats out unless includeHidden is set', () => {
+    const live = chat({ chatId: 'live', name: 'Garden live' });
+    const tucked = chat({ chatId: 'tucked', name: 'Garden tucked', hidden: true });
+    writeTranscript(live, [user('nothing')]);
+    writeTranscript(tucked, [user('nothing')]);
+    const idx = index();
+    expect(idx.search([live, tucked], 'garden', 20).hits.map((h) => h.chatId)).toEqual(['live']);
+    expect(
+      idx
+        .search([live, tucked], 'garden', 20, true, false, true)
+        .hits.map((h) => h.chatId)
+        .sort(),
+    ).toEqual(['live', 'tucked']);
   });
 
   it('does not search tool calls, tool output or thinking', () => {

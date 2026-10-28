@@ -7705,6 +7705,8 @@ export const PatchChatSearchRequestEvent = z
     fullText: z.boolean().optional(),
     /** true = archived chats are searched too; absent or false = they are left out. */
     includeArchived: z.boolean().optional(),
+    /** true = hidden chats are searched too; absent or false = they are left out. */
+    includeHidden: z.boolean().optional(),
   })
   .strict();
 export type PatchChatSearchRequestEvent = z.infer<typeof PatchChatSearchRequestEvent>;

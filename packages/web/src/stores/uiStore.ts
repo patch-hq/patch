@@ -813,6 +813,7 @@ interface UiState {
    */
   searchFullText: boolean;
   searchIncludeArchived: boolean;
+  searchIncludeHidden: boolean;
   sidebarWidth: number;
   /** spec/14 § Side threads panel — resizable right-docked column width (px). */
   threadsPanelWidth: number;
@@ -941,6 +942,7 @@ interface UiState {
   setSearchQuery(q: string): void;
   setSearchFullText(v: boolean): void;
   setSearchIncludeArchived(v: boolean): void;
+  setSearchIncludeHidden(v: boolean): void;
   setSidebarWidth(w: number): void;
   setThreadsPanelWidth(w: number): void;
   setToolsPanelWidth(w: number): void;
@@ -1067,6 +1069,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   searchQuery: '',
   searchFullText: false,
   searchIncludeArchived: false,
+  searchIncludeHidden: false,
   sidebarWidth: loadWidth(SIDEBAR_W_KEY, DEFAULT_SIDEBAR_W),
   threadsPanelWidth: loadWidth(THREADS_PANEL_W_KEY, DEFAULT_THREADS_PANEL_W),
   toolsPanelWidth: loadWidth(TOOLS_PANEL_W_KEY, DEFAULT_TOOLS_PANEL_W),
@@ -1181,6 +1184,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   setSearchIncludeArchived(v) {
     set({ searchIncludeArchived: v });
+  },
+  setSearchIncludeHidden(v) {
+    set({ searchIncludeHidden: v });
   },
   setSidebarMini(v) {
     persistBool(SIDEBAR_MINI_KEY, v);

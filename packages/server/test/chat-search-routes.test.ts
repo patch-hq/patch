@@ -191,6 +191,27 @@ describe('chat search route', () => {
     }
   });
 
+  it('leaves hidden chats out unless includeHidden=true, and refuses nonsense', async () => {
+    const link = new FakeSearchHosts(() => ({ ok: true, hits: [], total: 0 }));
+    const { built, auth } = await boot(link);
+    try {
+      const get = (qs: string) =>
+        built.app.inject({ method: 'GET', url: search(qs), headers: auth });
+      expect((await get('q=boiler')).statusCode).toBe(200);
+      const defaults = link.asked.length;
+      expect(defaults).toBeGreaterThan(0);
+      expect(link.asked.every((a) => a.event.includeHidden !== true)).toBe(true);
+      expect((await get('q=boiler&includeHidden=true')).statusCode).toBe(200);
+      const withHidden = link.asked.slice(defaults);
+      expect(withHidden).toHaveLength(defaults);
+      expect(withHidden.every((a) => a.event.includeHidden === true)).toBe(true);
+      expect((await get('q=boiler&includeHidden=maybe')).statusCode).toBe(400);
+      expect(link.asked).toHaveLength(defaults * 2);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('asks every online host, merges by recency, and names the offline one', async () => {
     const link = new FakeSearchHosts((hostId) =>
       hostId === 'd1'

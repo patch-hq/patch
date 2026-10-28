@@ -171,7 +171,9 @@ describe('api.* — every method call shape', () => {
   it('searchChats() with just a query', async () => {
     await api.searchChats('pan cakes & syrup');
     const [url, init] = lastCall();
-    expect(url).toBe(`${SERVER_URL}/api/chats/search?q=pan+cakes+%26+syrup&includeArchived=true`);
+    expect(url).toBe(
+      `${SERVER_URL}/api/chats/search?q=pan+cakes+%26+syrup&includeArchived=true&includeHidden=true`,
+    );
     expect(init.signal ?? undefined).toBeUndefined();
   });
   it('searchChats() with a page and a signal', async () => {
@@ -179,7 +181,7 @@ describe('api.* — every method call shape', () => {
     await api.searchChats('pan', { limit: 20, offset: 40, signal: ctrl.signal });
     const [url, init] = lastCall();
     expect(url).toBe(
-      `${SERVER_URL}/api/chats/search?q=pan&limit=20&offset=40&includeArchived=true`,
+      `${SERVER_URL}/api/chats/search?q=pan&limit=20&offset=40&includeArchived=true&includeHidden=true`,
     );
     expect(init.signal).toBe(ctrl.signal);
   });

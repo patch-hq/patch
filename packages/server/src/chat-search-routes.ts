@@ -1,9 +1,9 @@
 // Chat search REST (spec/01 § Endpoints, spec/03 § Chat search).
 //
 //   GET /api/chats/search?q=<query>&limit=<n>&offset=<n>&fullText=<true|false>
-//                         &includeArchived=<true|false>
+//                         &includeArchived=<true|false>&includeHidden=<true|false>
 //
-// Searches every chat on every host (archived ones only on request) — names and the full text of what was
+// Searches every chat on every host (archived and hidden ones only on request) — names and the full text of what was
 // said. The transcripts live on the hosts (the server holds none), so this
 // fans one `patch.chat_search.request` out to each ONLINE host, merges what
 // comes back under the one shared ranking (`compareChatSearchHits`), and pages
@@ -140,6 +140,7 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
     query: string,
     fullText: boolean,
     includeArchived: boolean,
+    includeHidden: boolean,
   ): HostOutcome {
     const hostName = deps.registry.hostName(hostId) ?? null;
     const offline = { hostId, hostName, state: 'offline' as const };
@@ -152,6 +153,7 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
     for (const chat of deps.chatRegistry.list({ includeArchived: true, includeSnoozed: true })) {
       if (chat.hostId !== hostId || chat.status === 'deleted') continue;
       if (chat.status === 'archived' && !includeArchived) continue;
+      if (chat.hidden && !includeHidden) continue;
       if (!mirrored.has(chat.chatId) && chat.name === null) continue;
       mirroredChats++;
       const name = chat.name ?? '';
@@ -195,10 +197,11 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
     depth: number,
     fullText: boolean,
     includeArchived: boolean,
+    includeHidden: boolean,
   ): Promise<HostOutcome> {
     const hostName = deps.registry.hostName(hostId) ?? null;
     if (!deps.hostLink.isOnline(hostId)) {
-      return searchMirror(hostId, query, fullText, includeArchived);
+      return searchMirror(hostId, query, fullText, includeArchived, includeHidden);
     }
     const requestId = deps.idGenerator();
     const result = await new Promise<Response | 'timeout'>((resolve) => {
@@ -215,6 +218,7 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
         limit: depth,
         fullText,
         ...(includeArchived ? { includeArchived } : {}),
+        ...(includeHidden ? { includeHidden } : {}),
       });
     });
     if (result === 'timeout') {
@@ -248,6 +252,7 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
       offset?: string;
       fullText?: string;
       includeArchived?: string;
+      includeHidden?: string;
     };
   }>('/api/chats/search', async (req, reply) => {
     let auth;
@@ -300,12 +305,23 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
         .send({ error: 'invalid_query', message: 'includeArchived must be true or false' });
     }
     const includeArchived = archivedRaw === 'true' || archivedRaw === '1';
+    const hiddenRaw = req.query?.includeHidden;
+    if (
+      hiddenRaw !== undefined &&
+      hiddenRaw !== '' &&
+      !['true', 'false', '1', '0'].includes(hiddenRaw)
+    ) {
+      return reply
+        .code(400)
+        .send({ error: 'invalid_query', message: 'includeHidden must be true or false' });
+    }
+    const includeHidden = hiddenRaw === 'true' || hiddenRaw === '1';
     // Each host sends its own top `depth`; the merged top `depth` is always
     // inside their union, so this page is exact.
     const depth = Math.min(offset + limit, CHAT_SEARCH_MAX_DEPTH);
     const outcomes = await Promise.all(
       hostIds().map((hostId) =>
-        askHost(hostId, auth.surfaceId, query, depth, fullText, includeArchived),
+        askHost(hostId, auth.surfaceId, query, depth, fullText, includeArchived, includeHidden),
       ),
     );
     const merged = outcomes
