@@ -103,10 +103,18 @@ describe('H1 deploy artifacts — deploy command + backup scripts', () => {
     expect(workflow).toMatch(/needs: \[tests, server, host, mac, android, mobile-update\]/);
     expect(workflow).not.toMatch(/PATCH_BROWSER_SHARD/);
     const tests = read('.github/workflows/test.yml');
-    // ...on every push to main and every PR, as four shards behind one required check,
+    // ...the cheap layers on every PR and the full gate, four shards, in the merge
+    // queue, behind one required check. Nothing re-runs on main: the queue moves
+    // it to the commit it tested.
     expect(tests).toMatch(/pull_request:/);
-    expect(tests).toMatch(/push:\s*\n\s*branches: \[main\]/);
-    expect(tests).toMatch(/shard: \['1\/4', '2\/4', '3\/4', '4\/4'\]/);
+    expect(tests).toMatch(/merge_group:/);
+    expect(tests).not.toMatch(/^\s*push:/m);
+    expect(tests).toMatch(
+      /github\.event_name == 'merge_group' && '\["1\/4", "2\/4", "3\/4", "4\/4"\]' \|\| '\["1\/1"\]'/,
+    );
+    expect(tests).toMatch(
+      /PATCH_RUN_BROWSER_GATE: \$\{\{ github\.event_name == 'merge_group' && '1' \|\| '0' \}\}/,
+    );
     expect(tests).toMatch(/\n  tests:\n[\s\S]*?needs: \[verify\]/);
     // with PRs merged by themselves once green, and conflicts handed back.
     expect(read('.github/workflows/pr-automerge.yml')).toMatch(/gh pr merge --auto/);
@@ -120,6 +128,15 @@ describe('H1 deploy artifacts — deploy command + backup scripts', () => {
       /--delete-branch|--rebase|\s-d\s/,
     );
     expect(read('.github/workflows/pr-conflicts.yml')).toMatch(/needs-rebase/);
+    // A PR ejected from the queue by a failing test goes back once, then is
+    // labelled for its chat; a re-run of a queue run is pointless (its branch is gone).
+    const requeue = read('.github/workflows/pr-requeue.yml');
+    expect(requeue).toMatch(/types: \[dequeued\]/);
+    expect(requeue).toMatch(/enqueuePullRequest/);
+    expect(requeue).toMatch(/queue-failed/);
+    expect(read('.github/workflows/test-retry.yml')).toMatch(
+      /github\.event\.workflow_run\.event == 'pull_request'/,
+    );
     // ...and the phone's over-the-air update is one of those surfaces: release
     // files the servers mirror, never published anywhere else first
     // (spec/11 § Mobile updates).

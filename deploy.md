@@ -3,8 +3,12 @@
 Open a PR; when its tests pass it merges itself, and the merge is the release.
 `main` is protected: no direct pushes, and the `tests` check must be green.
 
-0. **Tests** (`.github/workflows/test.yml`) run the full gate
-   (`scripts/verify.mjs`, four shards) on every PR and every push to `main`.
+0. **Tests** (`.github/workflows/test.yml`) run the cheap layers of the gate
+   (`scripts/verify.mjs`) on one runner for every PR, and the full gate (four
+   shards, browser layer on) in the merge queue, which builds at most three
+   entries at once so it can't fill the runner pool. Nothing re-runs on `main`.
+   A PR ejected from the queue by a failing test is put back once
+   (`pr-requeue.yml`); a second failure labels it `queue-failed`.
    `pr-automerge.yml` turns on auto-merge for each PR as Tom, using the `AUTOMERGE_TOKEN` PAT secret because the Actions bot never gets a PR queued (the merge queue sets the method; the PAT expires and must be renewed);
    `pr-conflicts.yml` labels a PR `needs-rebase` and comments when main moves
    under it, for the chat that owns it to rebase and force-push.
