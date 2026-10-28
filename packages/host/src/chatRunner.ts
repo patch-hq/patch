@@ -5950,6 +5950,21 @@ export class Daemon {
       }
     }
     emitToSurface(this.branchesEvent(chatId));
+    // Delegate status pings are live-only (never in the log), so a surface that
+    // reloads or reconnects mid-run would lose every running subagent: no
+    // strip, no header pill, a row stuck on its first guess. Restate each one
+    // from its stored outcome. The seq is the chat's latest, never a new one.
+    const lastSeq = (this.chatState.get(chatId)?.nextSeq ?? 0) - 1;
+    for (const d of this.listDelegates(chatId).reverse()) {
+      emitToSurface({
+        type: 'chat.delegate_update',
+        chatId,
+        delegateId: d.id,
+        label: d.label,
+        status: d.status,
+        seq: lastSeq,
+      });
+    }
     // Top the replay up with the CURRENT chat.state — a reconnecting surface
     // may have missed the live running -> idle edge entirely while
     // disconnected, and the message history it just replayed carries no
