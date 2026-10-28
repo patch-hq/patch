@@ -8984,8 +8984,11 @@ export class Daemon {
     // preference and never persisted — it is re-decided next turn — but a
     // failure has to name the key that spent, or a host whose first key is out
     // marks the wrong one and never learns.
+    let movedAccount = false;
     if (oauth.ok) {
       const previous = this.runningOnAccount.get(chatId);
+      movedAccount =
+        previous !== undefined && oauth.accountId !== undefined && previous !== oauth.accountId;
       if (oauth.accountId === undefined) this.runningOnAccount.delete(chatId);
       else this.runningOnAccount.set(chatId, oauth.accountId);
       if (previous !== undefined && oauth.accountId !== undefined && previous !== oauth.accountId) {
@@ -9046,13 +9049,16 @@ export class Daemon {
     // A credit failover is a complete account switch: retain Patch's transcript
     // but never hand account B account A's session id. The native rebuild below
     // reseeds a fresh session from Patch's history.
+    // A chat whose last turn never recorded a session id still switched: with
+    // nothing to resume, only the rebuild carries the transcript across.
     const switchedClaudeAccount =
       this.harnessOf(chatId) === 'claude' &&
-      state.claudeSessionId !== undefined &&
-      state.claudeSessionAccountId !== undefined &&
-      oauth.accountId !== undefined &&
-      state.claudeSessionAccountId !== oauth.accountId;
-    if (switchedClaudeAccount) {
+      ((state.claudeSessionId !== undefined &&
+        state.claudeSessionAccountId !== undefined &&
+        oauth.accountId !== undefined &&
+        state.claudeSessionAccountId !== oauth.accountId) ||
+        movedAccount);
+    if (switchedClaudeAccount && state.claudeSessionId !== undefined) {
       const previousSessionId = state.claudeSessionId;
       state.claudeSessionId = undefined;
       state.claudeSessionAccountId = undefined;
