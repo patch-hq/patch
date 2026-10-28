@@ -2526,7 +2526,12 @@ export const Composer = forwardRef(function Composer(
                 aria-label="add to message"
                 aria-haspopup="menu"
                 title="Add"
-                onClick={addMenu.openAt}
+                onClick={(e) =>
+                  addMenu.openAbove(
+                    e.currentTarget,
+                    e.currentTarget.closest('.composer-input-wrap') ?? e.currentTarget,
+                  )
+                }
                 disabled={linkOrCredentialBlocked || resolving}
               >
                 <Plus size={ICON_SIZE} aria-hidden />
