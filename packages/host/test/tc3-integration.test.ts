@@ -91,6 +91,7 @@ async function startHost(devices: MockDevice[] = []): Promise<HostStack> {
       run: async function* (opts: { prompt: string }) {
         capturedPrompts.push(opts.prompt);
         yield { type: 'assistant', content: 'ok', sessionId: 'S1' };
+        yield { type: 'result', sessionId: 'S1' };
       },
     },
     oauthAccessToken: 'x',
@@ -451,6 +452,7 @@ describe('TC3 [test-runner] broadcast sidecar injection + flush over real host t
         run: async function* () {
           throw new Error('simulated SDK failure');
           yield { type: 'assistant', content: 'x', sessionId: 'S' };
+          yield { type: 'result', sessionId: 'S' };
         },
       },
       oauthAccessToken: 'x',
@@ -555,6 +557,7 @@ describe('TC3 [test-runner] special-thread first turn after a host RESTART (real
         run: async function* (opts: { prompt: string }) {
           capturedPrompts.push(opts.prompt);
           yield { type: 'assistant', content: 'got it', sessionId: 'sess-tg-1' };
+          yield { type: 'result', sessionId: 'sess-tg-1' };
         },
       },
       oauthAccessToken: 'x',

@@ -948,7 +948,20 @@ export function createMockSdkBackend(opts: MockSdkBackendOptions = {}): MockSdkB
           { type: 'result' as const, sessionId },
         );
       }
-      const script: SdkEnvelope[] = queue.shift() ?? defaultScript;
+      // The real SDK closes every turn with a `result`, and the host treats a
+      // stream that ends without one as a dropped connection. A script that
+      // ends without one is given the same closing frame.
+      const queued = queue.shift();
+      const script: SdkEnvelope[] =
+        queued === undefined || queued.some((e) => e.type === 'result')
+          ? (queued ?? defaultScript)
+          : [
+              ...queued,
+              {
+                type: 'result' as const,
+                sessionId: queued.findLast((e) => e.sessionId)?.sessionId ?? sessionId,
+              },
+            ];
 
       // Persist this turn to the on-disk transcript BEFORE streaming, so a
       // mid-turn `patch_history` (and post-turn pagination) see real older

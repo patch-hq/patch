@@ -28,6 +28,7 @@ function failsThenSucceeds(errMsg: string, failures: number) {
     async *run() {
       calls++;
       if (calls <= failures) throw new Error(errMsg);
+      yield { type: 'result', sessionId: 'S' };
     },
   };
   return { backend, calls: () => calls };
