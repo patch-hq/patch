@@ -42,7 +42,7 @@ export function openChatBesideJob(jobId: string, chatId: string): void {
   if (!jobFound) {
     // The job page is not in the tree (a detached window): nothing to sit
     // beside, so it is an ordinary open.
-    store.openTab(chatTab);
+    store.showChat(chatId);
     return;
   }
   const jobPane = jobFound.pane;
@@ -63,7 +63,7 @@ export function openChatBesideJob(jobId: string, chatId: string): void {
   }
 }
 
-/** Middle-click: a new tab in the active pane, the same as a sidebar row. */
+/** Middle-click: a group of its own, the same as a sidebar row. */
 export function openChatInNewTab(chatId: string): void {
-  useLayoutStore.getState().openTab({ kind: 'chat', chatId }, { placement: 'tab' });
+  useLayoutStore.getState().showChat(chatId, { newGroup: true });
 }
