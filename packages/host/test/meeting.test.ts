@@ -668,6 +668,7 @@ describe('MeetingManager', () => {
       chatId: 'c',
       previous: { now: null, topics: [], actions: [] },
       newLines: [],
+      earlierLines: [],
       final: false,
       elapsedMs: 5000,
       myNotes: '',
