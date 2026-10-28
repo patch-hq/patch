@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ChatRoute } from '../routes/ChatRoute.js';
+import { ChatRoute, buildTrackNav, placeTrackNav } from '../routes/ChatRoute.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useComposerDraftStore } from '../stores/composerDraftStore.js';
 import { api } from '../api/rest.js';
@@ -454,6 +454,32 @@ describe('switching between tracks at a fork point', () => {
     expect(requestReplay).toHaveBeenCalledWith('c-fork', { force: true });
   });
 
+  it('the edited turn on the new track carries the switcher too, and ‹ returns to the original', () => {
+    const send = vi.fn();
+    const requestReplay = vi.fn();
+    // The replacement is logged with a fresh seq (9), not the seq (4) of the
+    // turn it replaced, which is no longer on this track.
+    seedChat('c-fork', [
+      { seq: 2, kind: 'message', role: 'user', content: 'ask zero', at: 0 },
+      { seq: 3, kind: 'message', role: 'assistant', content: 'answer zero', at: 0 },
+      { seq: 9, kind: 'message', role: 'user', content: 'ask one, rephrased', at: 0 },
+    ]);
+    useChatStore.getState().applyEvent(TWO_TRACKS);
+    renderChat('c-fork', { send, requestReplay } as unknown as Parameters<
+      typeof ChatRoute
+    >[0]['ws']);
+    const switchers = screen.getAllByTestId('track-switcher');
+    expect(switchers).toHaveLength(1);
+    expect(switchers[0]!.textContent).toContain('2/2');
+
+    fireEvent.click(screen.getByTestId('track-prev'));
+    expect(send).toHaveBeenCalledWith({
+      type: 'chat.branch_switch_request',
+      chatId: 'c-fork',
+      branchId: 'b0',
+    });
+  });
+
   it('a chat with a single root track shows no switcher at all', () => {
     seedChat('c-fork', [{ seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 }]);
     useChatStore.getState().applyEvent({
@@ -565,5 +591,38 @@ describe('Retry on the message hover button and context menu', () => {
     fireEvent.contextMenu(screen.getAllByTestId('msg')[1]!);
     fireEvent.click(screen.getByText('Retry'));
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ message: 'ask one' }));
+  });
+});
+
+describe('placeTrackNav — which turn carries a fork point switcher', () => {
+  const branches = [
+    { branchId: 'b0', parentBranchId: null, forkFromSeq: null, label: 'main', createdAt: 0 },
+    { branchId: 'b1', parentBranchId: 'b0', forkFromSeq: 4, label: 'edit 1', createdAt: 1 },
+    { branchId: 'b2', parentBranchId: 'b1', forkFromSeq: 9, label: 'edit 2', createdAt: 2 },
+  ];
+  const user = (seq: number): ChatEventEntry => ({
+    seq,
+    kind: 'message',
+    role: 'user',
+    content: `u${seq}`,
+    at: 0,
+  });
+
+  it('a fork of a fork: only the turn that replaced the other edit carries the switcher', () => {
+    // On b2 the first edit's replacement (seq 9) is itself replaced (seq 12).
+    const nav = buildTrackNav(branches, 'b2');
+    const placed = placeTrackNav(nav, branches, 'b2', [user(2), user(12)]);
+    expect(placed.get(12)).toMatchObject({ index: 1, total: 2, prevBranchId: 'b1' });
+    expect(placed.has(2)).toBe(false);
+    expect(placed.get(12)).not.toBe(placed.get(4));
+  });
+
+  it('an edit kept under a later fork keeps its own switcher', () => {
+    // b2 forked at seq 11, after b1's replacement at seq 9, so seq 9 stays.
+    const kept = [branches[0]!, branches[1]!, { ...branches[2]!, forkFromSeq: 11 }];
+    const nav = buildTrackNav(kept, 'b2');
+    const placed = placeTrackNav(nav, kept, 'b2', [user(2), user(9), user(14)]);
+    expect(placed.get(9)).toMatchObject({ index: 1, total: 2, prevBranchId: 'b0' });
+    expect(placed.get(14)).toMatchObject({ index: 1, total: 2, prevBranchId: 'b1' });
   });
 });
