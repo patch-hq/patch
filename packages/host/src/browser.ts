@@ -130,21 +130,6 @@ export class RefNotFoundError extends Error {
 }
 
 /**
- * spec/02 § Browser — Route through. NO FALLBACK: a routing host that is
- * offline fails the open outright, naming the host, rather than silently
- * going direct — that would make routing look like it is on when it is not.
- */
-export class RoutingHostOfflineError extends Error {
-  readonly code = 'routing_host_offline' as const;
-  constructor(hostName: string) {
-    super(
-      `can't open the browser: the routing host "${hostName}" is offline, and browsing never falls back to going direct. Turn off "Route through" to browse from this host instead, or wait for "${hostName}" to come back online.`,
-    );
-    this.name = 'RoutingHostOfflineError';
-  }
-}
-
-/**
  * Thrown to an agent's in-flight (or racing) browser call when the user pressed
  * "Stop" in Settings → Computer use. NO FALLBACK: the call fails and says why,
  * so the agent doesn't retry blindly or carry on as if the click had landed.
@@ -285,8 +270,6 @@ export interface OpenResult {
   tabId: string;
   title: string;
   url: string;
-  /** The routing host's display name, present iff this tab's traffic goes via one. */
-  routedVia?: string;
   /**
    * True iff the page had not finished loading when the navigation timed out
    * (typically a bot check that never completes). The tab is kept and open:
@@ -304,8 +287,6 @@ export interface TabInfo {
   openerTabId?: string;
   /** True for the tab the browser last brought to the front. */
   active?: boolean;
-  /** The routing host's display name, present iff this tab's traffic goes via one. */
-  routedVia?: string;
 }
 
 /** What survives a host restart of an open logged-in tab. */
@@ -322,9 +303,6 @@ interface Tab {
   ephemeralContext?: BrowserContext;
   /** The chat that opened this tab, for a future "Browsing <site>" status row. */
   ownerChatId?: string;
-  /** spec/02 § Browser — Route through: the routing host's display name, this tab's whole life. */
-  routedVia?: string;
-  routeThrough?: RouteThrough;
   openerTabId?: string;
   /** Last top-level address, what a recovery reloads. */
   lastUrl: string;
@@ -371,22 +349,6 @@ interface Tab {
   };
   frameNumbers: WeakMap<Frame, number>;
   nextFrameNumber: number;
-}
-
-/**
- * What `open()` was asked to route through, resolved by the CALLER (the
- * host knows which hosts are online and what they're called; this module
- * stays ignorant of hosts, the server, and the wire — same discipline as
- * every other BrowserManager option). `online: false` is a deliberate
- * input, not an edge case to guess at: the caller already knows the routing
- * host is down, and `open()` must refuse rather than silently going direct.
- */
-export interface RouteThrough {
-  hostId: string;
-  hostName: string;
-  online: boolean;
-  /** `socks5://127.0.0.1:<port>` — the caller's already-running tunnel listener for this host. Required iff `online`. */
-  proxyServer?: string;
 }
 
 export interface BrowserManagerOptions {
@@ -623,15 +585,10 @@ function setLocalStorageExpr(entries: Array<[string, string]>): string {
 
 const LAUNCH_ARGS = ['--disable-blink-features=AutomationControlled', '--disable-gpu'];
 
-/** `'direct'` or the routing host's hostId — what a launched context/browser's `proxy` was set from. */
-type ProxyKey = 'direct' | string;
-
 export class BrowserManager {
   private readonly tabsById = new Map<string, Tab>();
   private loggedInContext: BrowserContext | null = null;
-  private loggedInContextProxyKey: ProxyKey | null = null;
   private ephemeralBrowser: Browser | null = null;
-  private ephemeralBrowserProxyKey: ProxyKey | null = null;
   private xvfb: ChildProcess | null = null;
   private display: string | undefined;
   private playwrightMod: typeof import('playwright') | null = null;
@@ -639,7 +596,6 @@ export class BrowserManager {
   private appConnection: Browser | null = null;
   private appConnecting: Promise<Browser> | null = null;
   /** A throwaway context's route in the app: a context's own proxy, not a launch option. */
-  private appThrowawayProxy: { server: string } | undefined;
 
   /** Tabs the user has taken over: the agent's tools refuse them until the hand-off ends. */
   private readonly handoffTabs = new Set<string>();
@@ -940,23 +896,6 @@ export class BrowserManager {
   }
 
   /**
-   * spec/02 § Browser — Route through. A launched context/browser's `proxy`
-   * is fixed for its whole life — Playwright has no way to re-point a
-   * running one — so a `routeThrough` that differs from whichever key the
-   * current one launched with closes it first. Closing takes every open tab
-   * on that profile with it: there is no way to keep one running while its
-   * network changes underneath it.
-   */
-  private async proxyFor(routeThrough?: RouteThrough): Promise<{
-    key: ProxyKey;
-    launchOpt: { server: string } | undefined;
-  }> {
-    if (!routeThrough) return { key: 'direct', launchOpt: undefined };
-    if (!routeThrough.online) throw new RoutingHostOfflineError(routeThrough.hostName);
-    return { key: routeThrough.hostId, launchOpt: { server: routeThrough.proxyServer! } };
-  }
-
-  /**
    * Closes every currently-tracked tab on `profile` (so `tabsById` and
    * reality agree — a bare `context.close()`/`browser.close()` leaves a
    * dangling entry whose `read`/`click`/etc. then throws Playwright's own
@@ -967,10 +906,7 @@ export class BrowserManager {
     for (const [tabId, tab] of [...this.tabsById]) {
       if (tab.profile !== profile) continue;
       await this.close(tabId).catch((err: unknown) => {
-        this.opts.logger.warn(
-          { tabId, err },
-          'browser: error closing tab while re-launching for Route through',
-        );
+        this.opts.logger.warn({ tabId, err }, 'browser: error closing tab while re-launching');
       });
     }
   }
@@ -1030,9 +966,7 @@ export class BrowserManager {
         if (this.appConnection !== browser) return;
         this.appConnection = null;
         this.loggedInContext = null;
-        this.loggedInContextProxyKey = null;
         this.ephemeralBrowser = null;
-        this.ephemeralBrowserProxyKey = null;
         this.markContextDead('logged-in', undefined, browser);
         this.markContextDead('logged-out', undefined, browser);
       });
@@ -1060,40 +994,25 @@ export class BrowserManager {
     }
   }
 
-  private getLoggedInContext(routeThrough?: RouteThrough): Promise<BrowserContext> {
-    return this.serialised('logged-in', () => this.launchLoggedInContext(routeThrough));
+  private getLoggedInContext(): Promise<BrowserContext> {
+    return this.serialised('logged-in', () => this.launchLoggedInContext());
   }
 
-  private async launchLoggedInContext(routeThrough?: RouteThrough): Promise<BrowserContext> {
-    const { key, launchOpt } = await this.proxyFor(routeThrough);
-    if (this.loggedInContext && this.loggedInContextProxyKey !== key) {
-      await this.closeTabsFor('logged-in');
-      await this.loggedInContext.close();
-      this.loggedInContext = null;
-    }
+  private async launchLoggedInContext(): Promise<BrowserContext> {
     if (this.loggedInContext) return this.loggedInContext;
     if (this.usingApp()) {
       const browser = await this.connectApp();
       const context = browser.contexts()[0];
       if (!context) throw new AppBrowserUnavailableError('it offered no signed-in profile');
-      // The app is not launched with a proxy: its profile is re-pointed instead.
-      const session = await browser.newBrowserCDPSession();
-      await session.send(
-        'Patch.setProxy' as never,
-        (launchOpt ? { proxyServer: launchOpt.server } : {}) as never,
-      );
-      await session.detach();
       await context.addInitScript(PATCH_WEBDRIVER_INIT_SCRIPT);
       await this.installSigning(context);
       context.on('close', () => {
         if (this.loggedInContext === context) {
           this.loggedInContext = null;
-          this.loggedInContextProxyKey = null;
         }
         this.markContextDead('logged-in', context);
       });
       this.loggedInContext = context;
-      this.loggedInContextProxyKey = key;
       return context;
     }
     await this.checkChromiumInstalled();
@@ -1105,44 +1024,28 @@ export class BrowserManager {
       headless: false,
       args: LAUNCH_ARGS,
       ...(env ? { env } : {}),
-      ...(launchOpt ? { proxy: launchOpt } : {}),
     });
     await context.addInitScript(PATCH_WEBDRIVER_INIT_SCRIPT);
     await this.installSigning(context);
     context.on('close', () => {
       if (this.loggedInContext === context) {
         this.loggedInContext = null;
-        this.loggedInContextProxyKey = null;
       }
       this.markContextDead('logged-in', context);
     });
     this.loggedInContext = context;
-    this.loggedInContextProxyKey = key;
     return context;
   }
 
-  private getEphemeralBrowser(routeThrough?: RouteThrough): Promise<Browser> {
-    return this.serialised('logged-out', () => this.launchEphemeralBrowser(routeThrough));
+  private getEphemeralBrowser(): Promise<Browser> {
+    return this.serialised('logged-out', () => this.launchEphemeralBrowser());
   }
 
-  private async launchEphemeralBrowser(routeThrough?: RouteThrough): Promise<Browser> {
-    const { key, launchOpt } = await this.proxyFor(routeThrough);
+  private async launchEphemeralBrowser(): Promise<Browser> {
     if (this.usingApp()) {
-      // One app browser for both profiles: a new route closes the throwaway
-      // tabs, never the browser (that would take the signed-in tabs with it).
-      if (this.ephemeralBrowser && this.ephemeralBrowserProxyKey !== key) {
-        await this.closeTabsFor('logged-out');
-      }
       const browser = await this.connectApp();
-      this.appThrowawayProxy = launchOpt;
       this.ephemeralBrowser = browser;
-      this.ephemeralBrowserProxyKey = key;
       return browser;
-    }
-    if (this.ephemeralBrowser && this.ephemeralBrowserProxyKey !== key) {
-      await this.closeTabsFor('logged-out');
-      await this.ephemeralBrowser.close();
-      this.ephemeralBrowser = null;
     }
     if (this.ephemeralBrowser) return this.ephemeralBrowser;
     await this.checkChromiumInstalled();
@@ -1152,17 +1055,14 @@ export class BrowserManager {
       headless: false,
       args: LAUNCH_ARGS,
       ...(env ? { env } : {}),
-      ...(launchOpt ? { proxy: launchOpt } : {}),
     });
     browser.on('disconnected', () => {
       if (this.ephemeralBrowser === browser) {
         this.ephemeralBrowser = null;
-        this.ephemeralBrowserProxyKey = null;
       }
       this.markContextDead('logged-out', undefined, browser);
     });
     this.ephemeralBrowser = browser;
-    this.ephemeralBrowserProxyKey = key;
     return browser;
   }
 
@@ -1301,9 +1201,7 @@ export class BrowserManager {
     const oldPage = tab.page;
     let page: Page;
     if (tab.profile === 'logged-in') {
-      const context = tab.contextDead
-        ? await this.getLoggedInContext(tab.routeThrough)
-        : oldPage.context();
+      const context = tab.contextDead ? await this.getLoggedInContext() : oldPage.context();
       page = await context.newPage();
     } else if (tab.contextDead) {
       if (!tab.ephemeralContext) {
@@ -1311,7 +1209,7 @@ export class BrowserManager {
         this.notify(tab.ownerChatId);
         throw new TabNotFoundError(tab.tabId);
       }
-      const browser = await this.getEphemeralBrowser(tab.routeThrough);
+      const browser = await this.getEphemeralBrowser();
       const context = await this.newThrowawayContext(browser);
       tab.ephemeralContext = context;
       page = await context.newPage();
@@ -1364,9 +1262,7 @@ export class BrowserManager {
   }
 
   private async newThrowawayContext(browser: Browser): Promise<BrowserContext> {
-    const context = await browser.newContext(
-      this.usingApp() && this.appThrowawayProxy ? { proxy: this.appThrowawayProxy } : {},
-    );
+    const context = await browser.newContext();
     await context.addInitScript(PATCH_WEBDRIVER_INIT_SCRIPT);
     await this.installSigning(context);
     return context;
@@ -1379,8 +1275,6 @@ export class BrowserManager {
     page: Page;
     profile: BrowserProfile;
     ownerChatId?: string | undefined;
-    routedVia?: string | undefined;
-    routeThrough?: RouteThrough | undefined;
     openerTabId?: string | undefined;
     ephemeralContext?: BrowserContext | undefined;
   }): Tab {
@@ -1390,8 +1284,6 @@ export class BrowserManager {
       profile: init.profile,
       ...(init.ephemeralContext ? { ephemeralContext: init.ephemeralContext } : {}),
       ...(init.ownerChatId ? { ownerChatId: init.ownerChatId } : {}),
-      ...(init.routedVia ? { routedVia: init.routedVia } : {}),
-      ...(init.routeThrough ? { routeThrough: init.routeThrough } : {}),
       ...(init.openerTabId ? { openerTabId: init.openerTabId } : {}),
       lastUrl: init.page.url(),
       crashed: false,
@@ -1532,8 +1424,6 @@ export class BrowserManager {
       page: popup,
       profile: opener.profile,
       ownerChatId: opener.ownerChatId,
-      routedVia: opener.routedVia,
-      routeThrough: opener.routeThrough,
       openerTabId: opener.tabId,
     });
     this.attachPage(tab, popup);
@@ -1607,29 +1497,24 @@ export class BrowserManager {
     url: string;
     profile?: BrowserProfile;
     chatId?: string;
-    /** spec/02 § Browser — Route through. Omitted = direct, as always. */
-    routeThrough?: RouteThrough;
   }): Promise<OpenResult> {
     const profile = opts.profile ?? 'logged-in';
     let page: Page;
     let ephemeralContext: BrowserContext | undefined;
     if (profile === 'logged-in') {
-      const context = await this.getLoggedInContext(opts.routeThrough);
+      const context = await this.getLoggedInContext();
       page = await context.newPage();
     } else {
-      const browser = await this.getEphemeralBrowser(opts.routeThrough);
+      const browser = await this.getEphemeralBrowser();
       ephemeralContext = await this.newThrowawayContext(browser);
       page = await ephemeralContext.newPage();
     }
     const tabId = randomUUID();
-    const routedVia = opts.routeThrough?.hostName;
     const tab = this.newTab({
       tabId,
       page,
       profile,
       ownerChatId: opts.chatId,
-      routedVia,
-      routeThrough: opts.routeThrough,
       ephemeralContext,
     });
     this.attachPage(tab, page);
@@ -1664,7 +1549,6 @@ export class BrowserManager {
       title: loading ? '' : await page.title(),
       url: page.url(),
       ...(loading ? { loading: true as const } : {}),
-      ...(routedVia ? { routedVia } : {}),
     };
   }
 
@@ -3073,7 +2957,6 @@ export class BrowserManager {
         profile: tab.profile,
         ...(tab.openerTabId ? { openerTabId: tab.openerTabId } : {}),
         ...(tab.tabId === this.activeTabId ? { active: true } : {}),
-        ...(tab.routedVia ? { routedVia: tab.routedVia } : {}),
       });
     }
     return out;
@@ -3154,12 +3037,10 @@ export class BrowserManager {
     if (this.loggedInContext) {
       await this.loggedInContext.close().catch(() => undefined);
       this.loggedInContext = null;
-      this.loggedInContextProxyKey = null;
     }
     if (this.ephemeralBrowser) {
       await this.ephemeralBrowser.close().catch(() => undefined);
       this.ephemeralBrowser = null;
-      this.ephemeralBrowserProxyKey = null;
     }
     if (this.xvfb) {
       this.xvfb.kill();

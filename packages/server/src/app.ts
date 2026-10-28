@@ -56,7 +56,6 @@ import { registerAuthRoutes } from './auth-routes.js';
 import type { RelayService } from './relay-service.js';
 import { ChatRegistry } from './chat-registry.js';
 import { registerCrossHostBridge } from './cross-host.js';
-import { registerBrowserTunnelBridge } from './browser-tunnel-bridge.js';
 import { registerChatRoutes } from './chat-routes.js';
 import { BatchStore } from './batch/store.js';
 import { registerBatchRoutes } from './batch/routes.js';
@@ -887,15 +886,6 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     registry,
     activity,
     chatLogStore,
-  });
-
-  // spec/02 § Browser — Route through: relay a browsing host's SOCKS stream
-  // to the routing host it names, and every later frame of that stream back
-  // and forth, for as long as it stays open.
-  registerBrowserTunnelBridge({
-    logger: log.child({ component: 'browser-tunnel' }),
-    hostLink,
-    registry,
   });
 
   // Backfill the wsHub references on the router + orchestrator (cycle).

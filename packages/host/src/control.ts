@@ -74,7 +74,6 @@ import {
   BrowserNotInstalledError,
   RefNotFoundError,
   BrowserStoppedError,
-  RoutingHostOfflineError,
   TabNotFoundError,
   type BrowserProfile,
   TabInHandoffError,
@@ -795,11 +794,6 @@ function sendBrowserError(reply: FastifyReply, err: unknown): FastifyReply {
   }
   if (err instanceof BrowserStoppedError) {
     return reply.code(409).send({ error: err.code, message: err.message });
-  }
-  if (err instanceof RoutingHostOfflineError) {
-    // spec/02 § Browser — Route through. NO FALLBACK: never 200 into a
-    // direct connection just because the routing host didn't answer.
-    return reply.code(503).send({ error: err.code, message: err.message });
   }
   return reply
     .code(400)

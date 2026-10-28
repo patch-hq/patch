@@ -128,7 +128,6 @@ import {
   type BrowserProfile,
   type OpenResult,
   type PointerRequest,
-  type RouteThrough,
   type ReadResult,
   type StorageState,
   type TabInfo,
@@ -734,14 +733,6 @@ export interface HostOptions {
   /** spec/02 § Browser — In the Patch app: the app on this machine hosts the agent's browser. */
   appBrowser?: AppBrowserLink;
   /**
-   * spec/02 § Browser — Route through: resolves THIS host's current routing
-   * target (if any) into what `BrowserManager.open` needs — whether that
-   * host is online, its display name, and a ready SOCKS proxy address.
-   * Omitted → browsing is always direct, same as before this existed (the
-   * in-process control smoke tests have no other hosts to route through).
-   */
-  browserRouting?: BrowserRoutingDeps;
-  /**
    * Computer use (`patch_browser_mouse` / `patch_browser_key`) is off by
    * default: without a standing grant the first use in a chat asks the user
    * Deny / Allow / Always allow. Omitted → no standing grant can be stored, so
@@ -764,16 +755,6 @@ export interface HostOptions {
  * "Always allow" wording off this exact string (ChatRoute.tsx).
  */
 export const COMPUTER_USE_TOOL = 'Computer use';
-
-export interface BrowserRoutingDeps {
-  /** This host's current `browserRouteThrough` setting, or undefined when off. */
-  target: () => string | undefined;
-  isOnline: (hostId: string) => boolean;
-  /** Display name for a hostId, falling back to the id itself if unknown. */
-  hostName: (hostId: string) => string;
-  /** Starts (or reuses) a SOCKS listener for this target; resolves to its `socks5://127.0.0.1:<port>`. */
-  proxyServerFor: (hostId: string) => Promise<string>;
-}
 
 /** `Daemon.estimateProviderSwitch`'s result (spec/04 § History — the switch
  * confirmation's cost line). */
@@ -3742,29 +3723,11 @@ export class Daemon {
 
   /** `patch_browser_open`. */
   async browserOpen(chatId: string, url: string, profile?: BrowserProfile): Promise<OpenResult> {
-    const routeThrough = await this.resolveRouteThrough();
     return this.browser.open({
       url,
       ...(profile ? { profile } : {}),
       chatId,
-      ...(routeThrough ? { routeThrough } : {}),
     });
-  }
-
-  /** spec/02 § Browser — Route through: this host's current setting, resolved into what `BrowserManager.open` needs. */
-  private async resolveRouteThrough(): Promise<RouteThrough | undefined> {
-    const routing = this.opts.browserRouting;
-    if (!routing) return undefined;
-    const hostId = routing.target();
-    if (!hostId) return undefined;
-    const hostName = routing.hostName(hostId);
-    if (!routing.isOnline(hostId)) return { hostId, hostName, online: false };
-    return {
-      hostId,
-      hostName,
-      online: true,
-      proxyServer: await routing.proxyServerFor(hostId),
-    };
   }
 
   /** `patch_browser_read`. */

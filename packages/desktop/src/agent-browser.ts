@@ -351,14 +351,6 @@ export class AgentBrowser {
         // No `persist:` prefix: an in-memory profile, gone with the context.
         const ses = electronSession.fromPartition(`agent-temp-${id}`);
         const ctx = this.prepareContext(id, ses, true);
-        if (typeof params['proxyServer'] === 'string') {
-          await ses.setProxy({
-            proxyRules: params['proxyServer'],
-            ...(typeof params['proxyBypassList'] === 'string'
-              ? { proxyBypassRules: params['proxyBypassList'] }
-              : {}),
-          });
-        }
         return { browserContextId: ctx.id };
       }
       case 'Target.disposeBrowserContext': {
@@ -422,16 +414,6 @@ export class AgentBrowser {
       case 'Storage.clearCookies': {
         const ses = this.context(params['browserContextId']).ses;
         for (const c of await ses.cookies.get({})) await ses.cookies.remove(cookieUrl(c), c.name);
-        return {};
-      }
-      case 'Patch.setProxy': {
-        // The signed-in profile's route (spec/02 § Route through): this app is
-        // not launched with a proxy the way a Chromium would be.
-        const ses = this.context('default').ses;
-        const server = params['proxyServer'];
-        await ses.setProxy(
-          typeof server === 'string' ? { proxyRules: server } : { mode: 'direct' },
-        );
         return {};
       }
       default:

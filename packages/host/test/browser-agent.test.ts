@@ -841,21 +841,4 @@ describeRealBrowser('agent browser — a crashed tab or a closed browser heals i
       rmSync(root, { recursive: true, force: true });
     }
   }, 40_000);
-
-  it('a routing host that is offline still refuses to recover through a direct connection', async () => {
-    const mm = fresh(':76');
-    try {
-      const routed = {
-        hostId: 'h1',
-        hostName: 'Other box',
-        online: false,
-      };
-      await expect(mm.open({ url: `${fx.base}/nav1`, routeThrough: routed })).rejects.toThrow(
-        /Other box/,
-      );
-    } finally {
-      await mm.dispose();
-      rmSync(root, { recursive: true, force: true });
-    }
-  }, 30_000);
 });
