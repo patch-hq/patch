@@ -70,3 +70,17 @@ test('the + menu opens above the field and does not cover its placeholder', asyn
   const menu = (await page.getByTestId('add-menu').boundingBox())!;
   expect(menu.y + menu.height).toBeLessThanOrEqual(field.y + 1);
 });
+
+test('the call icon lines up under the + in the field', async ({ page }) => {
+  for (const width of [1280, 360]) {
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto(CHAT);
+    const centre = async (id: string): Promise<number> => {
+      const b = (await page.getByTestId(id).boundingBox())!;
+      return b.x + b.width / 2;
+    };
+    expect(Math.abs((await centre('call-btn')) - (await centre('composer-add-btn')))).toBeLessThan(
+      0.5,
+    );
+  }
+});
