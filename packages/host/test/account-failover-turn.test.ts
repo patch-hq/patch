@@ -262,7 +262,7 @@ describe('a spent account moves the chat on and the turn runs again', () => {
 });
 
 describe('which account a turn ran on is said (spec/10 § Backend credentials)', () => {
-  function switching(opts: { spent: boolean; until?: number }) {
+  function switching(opts: { spent: boolean; until?: number; bothSpent?: boolean }) {
     const home = mkdtempSync(join(tmpdir(), 'patch-switch-'));
     const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-switch-folder-')));
     const events: WireEvent[] = [];
@@ -281,9 +281,11 @@ describe('which account a turn ran on is said (spec/10 § Backend credentials)',
       },
       accountLabel: (_model, id) => ({ a1: 'work', a2: 'personal' })[id],
       accountSpent: (_model, id) =>
-        id === 'a1' && opts.spent
-          ? { spent: true, ...(opts.until ? { until: opts.until } : {}) }
-          : { spent: false },
+        opts.bothSpent
+          ? { spent: true, until: 1_700_000_500_000 }
+          : id === 'a1' && opts.spent
+            ? { spent: true, ...(opts.until ? { until: opts.until } : {}) }
+            : { spent: false },
       nextAccountAfterExhausted: () => 'a2',
       emit: (e) => events.push(e),
       logger: silent,
@@ -312,6 +314,19 @@ describe('which account a turn ran on is said (spec/10 § Backend credentials)',
       content: 'Switched from work to personal — work is out of credit',
       accountSwitch: { from: 'work', to: 'personal', until: 1_700_000_500_000 },
     });
+  });
+
+  it('a move onto an account that is itself spent is not announced as a switch', async () => {
+    const { daemon, events, folder } = switching({ spent: true, bothSpent: true });
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.sendInput({ chatId, message: 'go' });
+    await vi.waitFor(() =>
+      expect(events.some((e) => e.type === 'chat.idle' || e.type === 'chat.state')).toBe(true),
+    );
+    await new Promise((r) => setTimeout(r, 100));
+    expect(events.some((e) => e.type === 'chat.message' && e.accountSwitch !== undefined)).toBe(
+      false,
+    );
   });
 
   it('a move that is the strategy working, not a spent account, says nothing', async () => {

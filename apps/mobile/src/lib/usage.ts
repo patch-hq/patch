@@ -43,14 +43,15 @@ export function formatUtilization(win: RateLimitWindow | undefined): string {
 }
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const pad = (n: number): string => String(n).padStart(2, '0');
 
-/** A reset instant in the phone's zone — `10:40`, or `Wed 17:58` when not today. */
+/** A reset instant in the phone's zone — `10:40`, or `Tue 3 Nov 15:00` when not today. */
 export function formatReset(at: number, now: number = Date.now()): string {
   const d = new Date(at);
   const time = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
   if (new Date(now).toDateString() === d.toDateString()) return time;
-  return `${WEEKDAYS[d.getDay()]} ${time}`;
+  return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} ${time}`;
 }
 
 /** How long until an instant, coarsely — `in 28 min`, `in 3 h`, `now`. */

@@ -15173,6 +15173,10 @@ export class Daemon {
   ): void {
     const reason = this.opts.accountSpent?.(model, fromId);
     if (!reason?.spent) return;
+    // Both accounts spent (a shared pool, or a rotation walking a spent host):
+    // nothing has credit to move to, so "switched" would be a false claim that
+    // flips back and forth every turn. The turn fails with its own limit message.
+    if (this.opts.accountSpent?.(model, toId)?.spent) return;
     const from = this.opts.accountLabel?.(model, fromId) ?? fromId;
     const to = this.opts.accountLabel?.(model, toId) ?? toId;
     this.emit({

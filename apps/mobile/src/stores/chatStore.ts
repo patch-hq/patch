@@ -22,6 +22,7 @@ import {
   type ProviderContextEntry,
 } from './types';
 import { apiUrl } from '../config';
+import { formatReset } from '../lib/usage';
 import { refreshArtifactViewer } from '../components/ArtifactViewer';
 import { saveResolution } from '../lib/transcriptCache';
 import { loadCachedChatList, saveCachedChatList } from '../lib/chatListCache';
@@ -649,10 +650,7 @@ function toListRow(row: ChatRow): ChatListRow {
 
 /** A turn's move to another account, with when the spent one comes back. */
 export function accountSwitchLine(sw: { from: string; to: string; until?: number }): string {
-  const back =
-    sw.until !== undefined
-      ? ` until ${new Date(sw.until).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`
-      : ' of credit';
+  const back = sw.until !== undefined ? ` until ${formatReset(sw.until)}` : ' of credit';
   return `Switched from ${sw.from} to ${sw.to} — ${sw.from} is out${back}`;
 }
 

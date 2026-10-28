@@ -31,7 +31,7 @@ describe('usage wording', () => {
 
   it('names a reset by time today and by weekday otherwise', () => {
     expect(formatReset(Date.UTC(2026, 8, 24, 13, 5), now)).toBe('13:05');
-    expect(formatReset(Date.UTC(2026, 8, 26, 9, 0), now)).toBe('Sat 09:00');
+    expect(formatReset(Date.UTC(2026, 8, 26, 9, 0), now)).toBe('Sat 26 Sep 09:00');
   });
 
   it('says how long until, coarsely', () => {
