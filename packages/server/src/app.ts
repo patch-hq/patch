@@ -169,6 +169,8 @@ export interface BuildOptions {
   spawnErrorWaitMs?: number;
   /** Override POST /api/jobs/recurrence/translate's daemon-wait window (tests). */
   recurrenceTranslateTimeoutMs?: number;
+  /** Wait for the host's voice-note transcript (tests). */
+  voiceNoteTimeoutMs?: number;
   /** Inject a jobs store (tests); otherwise constructed from dataDir. */
   jobsStore?: JobsInterface;
   /** Inject a composer-draft store (tests); otherwise constructed from dataDir. */
@@ -1916,6 +1918,9 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     chatRegistry,
     hostLink,
     idGenerator,
+    ...(opts.voiceNoteTimeoutMs !== undefined
+      ? { transcribeTimeoutMs: opts.voiceNoteTimeoutMs }
+      : {}),
   });
 
   // ---- composer attachments (spec/14 & spec/15 § Composer) ----
