@@ -26,6 +26,19 @@ const LABELS: Record<PermissionMode, string> = {
   bypassPermissions: 'Bypass — no checks',
 };
 
+/** The one-word name shown beside the mode icon on the composer's action row. */
+const SHORT_LABELS: Record<PermissionMode, string> = {
+  default: 'Ask',
+  acceptEdits: 'Edits',
+  plan: 'Plan',
+  auto: 'Auto',
+  bypassPermissions: 'Bypass',
+};
+
+export function permissionModeShortLabel(mode: string): string {
+  return (SHORT_LABELS as Record<string, string>)[mode] ?? mode;
+}
+
 /**
  * The on-screen name for a mode. A mode this build has never heard of (a newer
  * SDK's) reads as its own id rather than being dressed up as a known one.
