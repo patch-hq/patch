@@ -62,3 +62,11 @@ test('the + in the field offers a file or image, and a sketch', async ({ page })
   await expect(page.getByTestId('add-menu-attach')).toHaveText('File or image');
   await expect(page.getByTestId('add-menu-sketch')).toHaveText('Sketch');
 });
+
+test('the + menu opens above the field and does not cover its placeholder', async ({ page }) => {
+  await page.goto(CHAT);
+  const field = (await page.getByTestId('composer-input').boundingBox())!;
+  await page.getByTestId('composer-add-btn').click();
+  const menu = (await page.getByTestId('add-menu').boundingBox())!;
+  expect(menu.y + menu.height).toBeLessThanOrEqual(field.y + 1);
+});

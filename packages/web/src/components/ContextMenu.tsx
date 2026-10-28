@@ -45,6 +45,8 @@ export interface ContextMenuAnchor {
   y: number;
   /** The element the menu was opened on; only scrolling IT away closes the menu. */
   source?: Element;
+  /** Open with the menu's bottom edge at `y` instead of its top, so it grows upward. */
+  above?: boolean;
 }
 
 /** Clear space kept between the menu and the window edges. */
@@ -61,6 +63,8 @@ const EDGE = 6;
 export function useContextMenu(): {
   anchor: ContextMenuAnchor | null;
   openAt: (e: ReactMouseEvent) => void;
+  /** Opens the menu above `target`, left-aligned, so it never covers it. */
+  openAbove: (source: Element, target?: Element) => void;
   close: () => void;
 } {
   const [anchor, setAnchor] = useState<ContextMenuAnchor | null>(null);
@@ -80,9 +84,14 @@ export function useContextMenu(): {
     setAnchor({ x: e.clientX, y: e.clientY, source: e.currentTarget });
   }, []);
 
+  const openAbove = useCallback((source: Element, target: Element = source): void => {
+    const box = target.getBoundingClientRect();
+    setAnchor({ x: box.left, y: box.top, source, above: true });
+  }, []);
+
   const close = useCallback((): void => setAnchor(null), []);
 
-  return { anchor, openAt, close };
+  return { anchor, openAt, openAbove, close };
 }
 
 export function ContextMenu({
@@ -122,7 +131,10 @@ export function ContextMenu({
     const maxTop = window.innerHeight - height - EDGE;
     setPos({
       left: Math.max(EDGE, Math.min(anchor.x, maxLeft)),
-      top: anchor.y > maxTop ? Math.max(EDGE, Math.min(anchor.y - height, maxTop)) : anchor.y,
+      top:
+        anchor.above === true || anchor.y > maxTop
+          ? Math.max(EDGE, Math.min(anchor.y - height, maxTop))
+          : anchor.y,
     });
   }, [anchor, items.length, expanded]);
 
