@@ -24,6 +24,9 @@ function fakeRecorder() {
   return {
     factory: async () => rec,
     cancel,
+    goSilent(reason: string) {
+      silentCb?.(reason);
+    },
     feed(frame: () => Int16Array, ms: number) {
       for (let t = 0; t < ms; t += 40) pcmCb!(frame());
     },
@@ -33,6 +36,21 @@ function fakeRecorder() {
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 describe('dictation mode', () => {
+  it('shows a silent mic as an error instead of recording nothing', async () => {
+    const r = fakeRecorder();
+    const onError = vi.fn();
+    const mode = startDictationMode(
+      { recorderFactory: r.factory, transcribe: async () => ({ transcript: '' }) },
+      { onText: () => {}, onBusy: () => {}, onError },
+    );
+    await mode.ready;
+    r.goSilent('the microphone is only returning silence');
+    expect(onError).toHaveBeenCalledWith(
+      'voice: the microphone is only returning silence. Check the mic and try again.',
+    );
+    mode.stop();
+  });
+
   it('opens a live preview per utterance, feeds it, and closes it when the utterance ends', async () => {
     const r = fakeRecorder();
     const partials: string[] = [];
