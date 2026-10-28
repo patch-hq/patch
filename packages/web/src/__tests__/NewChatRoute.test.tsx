@@ -47,6 +47,7 @@ import { useComposerAttachmentStore } from '../stores/composerAttachmentStore.js
 import { useUiStore } from '../stores/uiStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
+import { useMeetingStore } from '../stores/meetingStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { __setAudioOpenerForTests } from '../lib/voiceController.js';
 import type { PatchWs } from '../api/ws.js';
@@ -591,6 +592,34 @@ describe('/chats/new', () => {
     await waitFor(() => expect(screen.getByTestId('navigated')).toBeInTheDocument());
     await waitFor(() => expect(startMeeting).toHaveBeenCalledWith('c-meet'));
     expect(useChatStore.getState().chats['c-meet']?.folder).toBe('~/x');
+  });
+
+  it('a requested meeting (call toast) starts itself in a fresh chat once a folder is set', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ chatId: 'c-invite', folder: '~/x', status: 'pending' }), {
+            status: 202,
+            headers: { 'content-type': 'application/json' },
+          }),
+      ),
+    );
+    usePresenceStore.getState().setConnection('connected');
+    useMeetingStore.getState().requestNewChatMeeting(true);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={['/chats/new?folder=~/x']}>
+          <Routes>
+            <Route path="/chats/new" element={<NewChatRoute ws={null} />} />
+            <Route path="/chats/:chatId" element={<div data-testid="navigated" />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(startMeeting).toHaveBeenCalledWith('c-invite'));
+    expect(useMeetingStore.getState().newChatMeetingRequested).toBe(false);
   });
 
   // ---- Folder picker: simplified dropdown (spec/14 § Sidebar §8) ----

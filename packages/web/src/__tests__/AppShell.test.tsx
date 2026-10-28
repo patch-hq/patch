@@ -15,6 +15,7 @@ import { SPECIAL_THREAD_IDS } from '@patch/wire';
 import { AppShell } from '../AppShell.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useSelectionStore } from '../stores/selectionStore.js';
+import { useMeetingStore } from '../stores/meetingStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useBatchStore } from '../stores/batchStore.js';
 import { permissionDeliveryTracker } from '../lib/permissionDeliveryTracker.js';
@@ -504,6 +505,22 @@ describe('AppShell', () => {
     unmount();
     expect(unsubNote).toHaveBeenCalled();
     expect(unsubCall).toHaveBeenCalled();
+  });
+
+  it('desktop bridge: a call toast starts the meeting in a NEW chat, not the open one', async () => {
+    let sigCb: ((e: { phase: 'started' | 'ended'; app: string }) => void) | undefined;
+    (window as unknown as { patch?: unknown }).patch = {
+      onMeetingSignal: (cb: typeof sigCb) => {
+        sigCb = cb;
+        return vi.fn();
+      },
+    };
+    const { unmount } = await renderShell('/chats/known', [makeRow('known')]);
+    await waitFor(() => expect(useChatStore.getState().chats['known']).toBeDefined());
+    sigCb!({ phase: 'started', app: 'Zoom' });
+    expect(useMeetingStore.getState().newChatMeetingRequested).toBe(true);
+    unmount();
+    useMeetingStore.getState().reset();
   });
 
   it('desktop bridge: the web panel insets the app so it is a SIDE panel, not an overlay', async () => {

@@ -65,8 +65,8 @@ import { useChatStore, deriveBadge } from './stores/chatStore.js';
 import { useSelectionStore } from './stores/selectionStore.js';
 import { stepVisibleChat } from './lib/chatGroups.js';
 import { useUiStore, SIDEBAR_MINI_WIDTH } from './stores/uiStore.js';
-import { isMeetingOpen, useMeetingStore } from './stores/meetingStore.js';
-import { endMeeting, startMeeting } from './lib/meetingControl.js';
+import { useMeetingStore } from './stores/meetingStore.js';
+import { endMeeting } from './lib/meetingControl.js';
 import { usePreferencesStore } from './stores/preferencesStore.js';
 import { focusedChatId, resolvePane, useLayoutStore } from './stores/layoutStore.js';
 import { useVoiceStore } from './stores/voiceStore.js';
@@ -333,22 +333,16 @@ export function AppShell(): JSX.Element {
             if (capturing) endMeeting(capturing);
             return;
           }
-          const chatId = useChatStore.getState().activeChatId;
-          if (!chatId) {
-            useUiStore.getState().pushError('Open a chat first, then start the meeting from it');
-            return;
-          }
-          if (chatId === SPECIAL_THREAD_IDS.manager) {
-            useUiStore.getState().pushError('The Manager does not take meeting notes');
-            return;
-          }
-          if (isMeetingOpen(useMeetingStore.getState().byChat[chatId])) return;
-          void startMeeting(chatId);
+          // The invite starts the meeting in a new chat, never whichever one
+          // happens to be open.
+          if (useMeetingStore.getState().capturingChatId) return;
+          useMeetingStore.getState().requestNewChatMeeting(true);
+          navigate('/chats/new');
         }),
       );
     }
     return () => offs.forEach((off) => off());
-  }, []);
+  }, [navigate]);
 
   // spec/09 § Notification actions — wires the desktop shell's
   // `onNotificationSend` once: a Reply/Approve-Deny/question answer tapped on

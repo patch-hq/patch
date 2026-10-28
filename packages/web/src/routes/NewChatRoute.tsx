@@ -42,6 +42,7 @@ import {
   usePreferencesStore,
 } from '../stores/preferencesStore.js';
 import { startVoiceCall } from '../lib/voiceController.js';
+import { useMeetingStore } from '../stores/meetingStore.js';
 import { startMeeting } from '../lib/meetingControl.js';
 import { sendMessage, type OutgoingFile } from '../lib/sendQueue.js';
 import { usePopupPlacement } from '../lib/popupPlacement.js';
@@ -622,6 +623,15 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
       setChosenHostId(mruPair.hostId);
     }
   }, [mruPair, folder]);
+
+  // A call's toast asked for a meeting: start it in the chat this screen
+  // creates. Waits for a folder (the MRU can resolve a tick late).
+  const newChatMeetingRequested = useMeetingStore((s) => s.newChatMeetingRequested);
+  useEffect(() => {
+    if (!newChatMeetingRequested || !folder.trim()) return;
+    useMeetingStore.getState().requestNewChatMeeting(false);
+    void createThenRun((id) => void startMeeting(id));
+  }, [newChatMeetingRequested, folder]);
 
   // Persist the chosen folder into the active draft (survives navigation +
   // reload).
