@@ -27,6 +27,16 @@ import {
 
 export const MEETING_MODEL = DEFAULT_MEETING_MODEL;
 const MEETING_TIMEOUT_MS = 60_000;
+/** Every existing topic is sent back and rewritten each pass, so the pass grows with the notes. */
+const MEETING_TIMEOUT_PER_TOPIC_MS = 2_000;
+const MEETING_TIMEOUT_MAX_MS = 240_000;
+
+export function meetingTimeoutMs(topicCount: number): number {
+  return Math.min(
+    MEETING_TIMEOUT_MAX_MS,
+    MEETING_TIMEOUT_MS + topicCount * MEETING_TIMEOUT_PER_TOPIC_MS,
+  );
+}
 
 export function buildMeetingPrompt(input: AnalyseInput): string {
   const transcript = input.newLines.map((l) => `[${l.clock} ${l.speaker}] ${l.text}`).join('\n');
@@ -100,7 +110,10 @@ export function makeMeetingAnalyser(opts: {
       `meeting ${input.chatId}`,
       async (accessToken) => {
         const abortController = new AbortController();
-        const timer = setTimeout(() => abortController.abort(), MEETING_TIMEOUT_MS);
+        const timer = setTimeout(
+          () => abortController.abort(),
+          meetingTimeoutMs(input.previous.topics.length),
+        );
         try {
           let finalText = '';
           let deltaText = '';

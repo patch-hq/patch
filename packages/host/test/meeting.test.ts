@@ -1445,3 +1445,13 @@ describe('meeting corrector (small model)', () => {
     expect(sdkBackend.lastOptions()?.model).toBe('claude-sonnet-5');
   });
 });
+
+describe('meetingTimeoutMs', () => {
+  it('scales with topic count, from 60s up to a 240s cap', async () => {
+    const { meetingTimeoutMs } = await import('../src/meetingGen.js');
+    expect(meetingTimeoutMs(0)).toBe(60_000);
+    expect(meetingTimeoutMs(90)).toBe(240_000);
+    expect(meetingTimeoutMs(30)).toBe(120_000);
+    expect(meetingTimeoutMs(1000)).toBe(240_000);
+  });
+});
