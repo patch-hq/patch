@@ -4,11 +4,12 @@
 // actions list.
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { MeetingCard, MeetingState, MeetingTopic } from '@patch/wire';
 import {
   ActionsList,
+  actionSource,
   MeetingSwitches,
   feedTopics,
   justSaid,
@@ -146,5 +147,60 @@ describe('ActionsList', () => {
     show(meeting('live'));
     expect(screen.queryAllByTestId('meeting-action')).toHaveLength(0);
     expect(screen.getByTestId('meeting-action-add')).toBeTruthy();
+  });
+});
+
+describe('action source', () => {
+  afterEach(cleanup);
+  const m = {
+    status: 'live',
+    researchOn: true,
+    topics: [topic('Pricing', 10_000), topic('Hiring', 100_000)],
+    voices: {},
+    transcript: [
+      { at: 5_000, speaker: 'you', text: 'too early' },
+      { at: 65_000, speaker: 'them', name: 'Priya', text: 'Can you top up the credit by Friday?' },
+      { at: 70_000, speaker: 'you', text: 'Sure.' },
+      { at: 200_000, speaker: 'you', text: 'much later' },
+    ],
+    actions: [
+      {
+        id: 'a1',
+        kind: 'mine',
+        title: 'Top up credit',
+        why: 'Priya asked',
+        at: 66_000,
+        status: 'pending',
+      },
+    ],
+  } as unknown as MeetingState;
+
+  it('finds the nearby lines, who said the nearest, and the topic it arose in', () => {
+    const src = actionSource(m, { at: 66_000 });
+    expect(src.lines.map((l) => l.text)).toEqual(['Can you top up the credit by Friday?', 'Sure.']);
+    expect(src.speaker).toBe('Priya');
+    expect(src.topic?.title).toBe('Pricing');
+  });
+
+  it('has no speaker or lines when nothing was kept around the moment', () => {
+    const src = actionSource({ ...m, transcript: [] }, { at: 66_000 });
+    expect(src.lines).toEqual([]);
+    expect(src.speaker).toBeUndefined();
+  });
+
+  it('expands an action to show why, when, who, the discussion and the excerpt', () => {
+    render(
+      <MemoryRouter>
+        <ActionsList chatId="c1" meeting={m} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId('meeting-action-source')).toBeNull();
+    fireEvent.click(screen.getByTestId('meeting-action-toggle'));
+    expect(screen.getByTestId('meeting-action-why').textContent).toBe('Priya asked');
+    expect(screen.getByTestId('meeting-action-when').textContent).toBe('01:06 · Priya');
+    expect(screen.getByTestId('meeting-action-topic').textContent).toContain('Pricing');
+    expect(screen.getByTestId('meeting-action-excerpt').textContent).toContain('top up the credit');
+    fireEvent.click(screen.getByTestId('meeting-action-toggle'));
+    expect(screen.queryByTestId('meeting-action-source')).toBeNull();
   });
 });

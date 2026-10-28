@@ -1375,104 +1375,175 @@ function knownPeople(meeting: MeetingState): string[] {
   return [...new Set(named), MEETING_OWNER_EVERYONE];
 }
 
+/** How far before an action the transcript excerpt reaches, and how far past it. */
+const SOURCE_BEFORE_MS = 30_000;
+const SOURCE_AFTER_MS = 5_000;
+const MAX_SOURCE_LINES = 6;
+
+/** Where an action came from: the moment, the lines said around it, who said the nearest, and the topic it arose in. */
+export function actionSource(
+  meeting: Pick<MeetingState, 'transcript' | 'topics' | 'voices'>,
+  action: Pick<MeetingAction, 'at'>,
+) {
+  const lines = meeting.transcript
+    .filter((l) => l.at >= action.at - SOURCE_BEFORE_MS && l.at <= action.at + SOURCE_AFTER_MS)
+    .slice(-MAX_SOURCE_LINES);
+  const before = lines.filter((l) => l.at <= action.at);
+  const said = before.length > 0 ? before[before.length - 1] : lines[0];
+  let topic: MeetingTopic | undefined;
+  for (const t of [...meeting.topics].sort((a, b) => a.at - b.at)) if (t.at <= action.at) topic = t;
+  return {
+    lines,
+    topic,
+    speaker: said ? meetingSpeakerLabel(said, meeting.voices) : undefined,
+  };
+}
+
+/** Why an action exists: its reason, when and who, the transcript around it, and the discussion point. */
+function ActionSource({ meeting, action }: { meeting: MeetingState; action: MeetingAction }) {
+  const src = actionSource(meeting, action);
+  return (
+    <div className="mm-act-src" data-testid="meeting-action-source">
+      {action.why !== '' ? <div data-testid="meeting-action-why">{action.why}</div> : null}
+      <div className="mm-act-src-meta" data-testid="meeting-action-when">
+        {formatMeetingClock(action.at)}
+        {src.speaker ? ` · ${src.speaker}` : ''}
+      </div>
+      {src.topic ? (
+        <div data-testid="meeting-action-topic">Discussion: {src.topic.title}</div>
+      ) : null}
+      {src.lines.length > 0 ? (
+        <div className="mm-act-src-lines" data-testid="meeting-action-excerpt">
+          {src.lines.map((l, i) => (
+            <div key={i} className="mm-act-src-line">
+              <span className="mm-act-src-at">{formatMeetingClock(l.at)}</span>{' '}
+              <b>{meetingSpeakerLabel(l, meeting.voices)}:</b> {l.text}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div data-testid="meeting-action-excerpt-none">
+          No transcript was kept around this moment.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ActionRow({
   chatId,
+  meeting,
   action,
   people,
 }: {
   chatId: string;
+  meeting: MeetingState;
   action: MeetingAction;
   people: string[];
 }) {
+  const [open, setOpen] = useState(false);
   const done = action.status === 'done';
   return (
-    <div
-      className="mm-act"
-      data-testid="meeting-action"
-      data-kind={action.kind}
-      data-status={action.status}
-    >
-      <input
-        type="checkbox"
-        className="mm-act-done"
-        data-testid="meeting-action-done"
-        aria-label={done ? 'Mark not done' : 'Mark done'}
-        checked={done}
-        onChange={() => decideAction(chatId, action.id, done ? 'reopen' : 'done')}
-      />
-      <select
-        className="mm-act-owner"
-        data-testid="meeting-action-owner"
-        aria-label="Who"
-        title="Change who"
+    <div className="mm-act-wrap" data-testid="meeting-action-wrap">
+      <div
+        className="mm-act"
+        data-testid="meeting-action"
         data-kind={action.kind}
-        value={ownerValue(action)}
-        onChange={(e) => {
-          const v = e.target.value;
-          if (v === 'mine' || v === 'agent') assignAction(chatId, action.id, v);
-          else assignAction(chatId, action.id, 'other', v.slice('other:'.length));
-        }}
+        data-status={action.status}
       >
-        <option value="mine">You</option>
-        <option value="agent">Agent</option>
-        {people.map((p) => (
-          <option key={p} value={`other:${p}`}>
-            {p}
-          </option>
-        ))}
-      </select>
-      <span className="mm-act-t" title={action.why !== '' ? action.why : undefined}>
-        <Editable
-          value={action.title}
-          testid="meeting-action-title"
-          label="Action"
-          placeholder="Action"
-          autoFocus={false}
-          onFocused={() => {}}
-          onCommit={(text) => {
-            if (text !== '' && text !== action.title) setActionTitle(chatId, action.id, text);
-          }}
-          onEnter={() => (document.activeElement as HTMLElement | null)?.blur()}
+        <button
+          type="button"
+          className="mm-chev"
+          data-testid="meeting-action-toggle"
+          aria-expanded={open}
+          aria-label={open ? 'Hide source' : 'Show source'}
+          onClick={() => setOpen(!open)}
+        >
+          <ChevronRight size={14} aria-hidden="true" />
+        </button>
+        <input
+          type="checkbox"
+          className="mm-act-done"
+          data-testid="meeting-action-done"
+          aria-label={done ? 'Mark not done' : 'Mark done'}
+          checked={done}
+          onChange={() => decideAction(chatId, action.id, done ? 'reopen' : 'done')}
         />
-      </span>
-      {action.chatId ? <ActionChatStatus chatId={action.chatId} /> : null}
-      {action.chatId ? (
-        <Link
-          className="mm-act-btn"
-          data-testid="meeting-action-open"
-          to={`/chats/${action.chatId}`}
+        <select
+          className="mm-act-owner"
+          data-testid="meeting-action-owner"
+          aria-label="Who"
+          title="Change who"
+          data-kind={action.kind}
+          value={ownerValue(action)}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === 'mine' || v === 'agent') assignAction(chatId, action.id, v);
+            else assignAction(chatId, action.id, 'other', v.slice('other:'.length));
+          }}
         >
-          Open chat
-        </Link>
-      ) : done ? null : action.kind === 'agent' ? (
+          <option value="mine">You</option>
+          <option value="agent">Agent</option>
+          {people.map((p) => (
+            <option key={p} value={`other:${p}`}>
+              {p}
+            </option>
+          ))}
+        </select>
+        <span className="mm-act-t" title={action.why !== '' ? action.why : undefined}>
+          <Editable
+            value={action.title}
+            testid="meeting-action-title"
+            label="Action"
+            placeholder="Action"
+            autoFocus={false}
+            onFocused={() => {}}
+            onCommit={(text) => {
+              if (text !== '' && text !== action.title) setActionTitle(chatId, action.id, text);
+            }}
+            onEnter={() => (document.activeElement as HTMLElement | null)?.blur()}
+          />
+        </span>
+        {action.chatId ? <ActionChatStatus chatId={action.chatId} /> : null}
+        {action.chatId ? (
+          <Link
+            className="mm-act-btn"
+            data-testid="meeting-action-open"
+            to={`/chats/${action.chatId}`}
+          >
+            Open chat
+          </Link>
+        ) : done ? null : action.kind === 'agent' ? (
+          <button
+            type="button"
+            className="mm-act-btn go"
+            data-testid="meeting-action-do"
+            onClick={() => decideAction(chatId, action.id, 'do')}
+          >
+            Approve
+          </button>
+        ) : action.kind === 'mine' ? (
+          <button
+            type="button"
+            className="mm-act-btn"
+            data-testid="meeting-action-chat"
+            onClick={() => decideAction(chatId, action.id, 'chat')}
+          >
+            Start chat
+          </button>
+        ) : null}
         <button
           type="button"
-          className="mm-act-btn go"
-          data-testid="meeting-action-do"
-          onClick={() => decideAction(chatId, action.id, 'do')}
+          className="mm-act-x"
+          data-testid="meeting-action-dismiss"
+          aria-label="Dismiss"
+          title="Dismiss"
+          onClick={() => decideAction(chatId, action.id, 'dismiss')}
         >
-          Approve
+          ✕
         </button>
-      ) : action.kind === 'mine' ? (
-        <button
-          type="button"
-          className="mm-act-btn"
-          data-testid="meeting-action-chat"
-          onClick={() => decideAction(chatId, action.id, 'chat')}
-        >
-          Start chat
-        </button>
-      ) : null}
-      <button
-        type="button"
-        className="mm-act-x"
-        data-testid="meeting-action-dismiss"
-        aria-label="Dismiss"
-        title="Dismiss"
-        onClick={() => decideAction(chatId, action.id, 'dismiss')}
-      >
-        ✕
-      </button>
+      </div>
+      {open ? <ActionSource meeting={meeting} action={action} /> : null}
     </div>
   );
 }
@@ -1529,7 +1600,7 @@ export function ActionsList({ chatId, meeting }: { chatId: string; meeting: Meet
     <div className="mm-actions" data-testid="meeting-actions">
       <div className="mm-sect">Actions</div>
       {open.map((a) => (
-        <ActionRow key={a.id} chatId={chatId} action={a} people={people} />
+        <ActionRow key={a.id} chatId={chatId} meeting={meeting} action={a} people={people} />
       ))}
       <AddLine
         label="Add action"

@@ -484,6 +484,30 @@ test.describe('meeting mode — live', () => {
       .not.toBe(a);
   });
 
+  test('an action expands to show where it came from, and folds again', async ({ page }) => {
+    await page.goto(URL_LIVE);
+    await applyMeeting(page, {
+      transcript: [
+        {
+          at: 22 * 60_000 + 3000,
+          speaker: 'them',
+          name: 'Priya',
+          text: 'I can send the Q3 retention deck over.',
+        },
+      ],
+    });
+    const row = page.getByTestId('meeting-actions').getByTestId('meeting-action-wrap').nth(1);
+    await expect(row.getByTestId('meeting-action-source')).toHaveCount(0);
+    await row.getByTestId('meeting-action-toggle').click();
+    const src = row.getByTestId('meeting-action-source');
+    await expect(src).toBeVisible();
+    await expect(src.getByTestId('meeting-action-when')).toContainText(':');
+    await expect(src.getByTestId('meeting-action-excerpt')).toContainText('retention deck');
+    await expect(src.getByTestId('meeting-action-when')).toContainText('Priya');
+    await row.getByTestId('meeting-action-toggle').click();
+    await expect(src).toHaveCount(0);
+  });
+
   test('actions are one line each, oldest first: tick, who, what, and Approve for the agent', async ({
     page,
   }) => {

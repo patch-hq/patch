@@ -14252,6 +14252,21 @@ select.permission-mode.is-pending {
   padding: 2px 0;
   font-size: 14px;
 }
+.mm-act-src {
+  margin: 2px 0 6px 26px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  display: grid;
+  gap: 2px;
+}
+.mm-act-src-meta,
+.mm-act-src-at {
+  color: var(--ink-faint);
+}
+.mm-act-src-lines {
+  display: grid;
+  gap: 1px;
+}
 .mm-act-done {
   flex: none;
   margin: 0;
