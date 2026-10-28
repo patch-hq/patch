@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 // spec/14 § Discoverability — the chat-list chords (prev/next chat, folder
 // jump, jump-unread, archive, …) fire only while a chat view is showing, and
-// a text field keeps its native keys except the composer's own ⌘↑/⌘↓.
+// a text field, the composer included, keeps its native keys.
 //
 // jsdom can't answer this: "did the app take the chord" (defaultPrevented)
 // and "did it reach the real route/composer" are both real-browser facts.
@@ -145,18 +145,24 @@ test.describe('chat-view chords fire in a chat view', () => {
     expect(fired).toContain('toggleArchived');
   });
 
-  test('⌘↑ in the composer switches chat (spec/14)', async ({ page }) => {
-    await page.goto('/app/dev-harness.html?chat=chat_bus');
-    const composer = page.getByTestId('composer-input');
-    await expect(composer).toBeVisible();
-    await composer.click();
-    await watchDefaultPrevented(page, 'ArrowUp');
+  for (const key of ['ArrowUp', 'ArrowDown']) {
+    test(`⌘${key} in the composer moves the caret and does not switch chat`, async ({ page }) => {
+      await page.goto('/app/dev-harness.html?chat=chat_bus');
+      const composer = page.getByTestId('composer-input');
+      await expect(composer).toBeVisible();
+      await composer.click();
+      await composer.fill('line one\nline two\nline three');
+      await watchDefaultPrevented(page, key);
 
-    await page.keyboard.press(`${MOD}+ArrowUp`);
+      await page.keyboard.press(`${MOD}+${key}`);
 
-    expect(await calls(page)).toContain('prevChat');
-    expect(await preventedFlags(page)).toEqual([true]);
-  });
+      const fired = await calls(page);
+      expect(fired).not.toContain('prevChat');
+      expect(fired).not.toContain('nextChat');
+      expect(await preventedFlags(page)).toEqual([false]);
+      await expect(composer).toHaveValue('line one\nline two\nline three');
+    });
+  }
 
   test('⌘↑ in the sidebar search field (not the composer) is left to the browser', async ({
     page,

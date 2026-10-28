@@ -160,7 +160,7 @@ export function shortcutTitle(
  *     search, new chat, sidebar, cheat-sheet, file picker).
  *   - `chat-view` — fires only while a chat view is showing (`/`, `/chats/new`,
  *     `/chats/:id` — NOT Jobs, the job editor, Settings, or a popped-out
- *     window), and only when no text field other than the composer owns the
+ *     window), and only when no text field owns the
  *     keystroke — a text field, the composer included, keeps its native
  *     keys (⌘↑/⌘↓ move the caret to the start/end of the text).
  *   - `{ other: '<label>' }` — scope this file does not itself check, because
@@ -344,14 +344,6 @@ function isTextFieldTarget(e: KeyboardEvent): boolean {
   return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable;
 }
 
-/** The chat composer specifically — a chat opens with the cursor there, so a
- *  chord that must work "while typing" has to read past it (spec/14 §
- *  Discoverability). Any other field keeps its native keys. */
-function isComposerTarget(e: KeyboardEvent): boolean {
-  const el = e.target as HTMLElement | null;
-  return !!el && el.tagName === 'TEXTAREA' && el.getAttribute('data-testid') === 'composer-input';
-}
-
 /** Enforces `scope` (spec/14 § Discoverability): `anywhere` always passes;
  *  `chat-view` needs a chat view on screen AND no text field (the composer
  *  included) in the way, so a field keeps its native keys. */
@@ -437,8 +429,7 @@ export function useShortcuts(handlers: ShortcutHandlers, scope: ShortcutScopeSta
         return;
       }
       if (is('prevChat')) {
-        if (!scope.isChatView) return;
-        if (!isComposerTarget(e) && !scopeAllows(CHAT_VIEW, e, scope)) return;
+        if (!scopeAllows(CHAT_VIEW, e, scope)) return;
         e.preventDefault();
         handlers.onPrevChat();
         return;
@@ -450,8 +441,7 @@ export function useShortcuts(handlers: ShortcutHandlers, scope: ShortcutScopeSta
         return;
       }
       if (is('nextChat')) {
-        if (!scope.isChatView) return;
-        if (!isComposerTarget(e) && !scopeAllows(CHAT_VIEW, e, scope)) return;
+        if (!scopeAllows(CHAT_VIEW, e, scope)) return;
         e.preventDefault();
         handlers.onNextChat();
         return;
