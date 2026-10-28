@@ -36,6 +36,13 @@ async function openEditorOnNewChat(page: Page): Promise<void> {
   await expect(page.getByTestId(`chat-row-${CREATED}`)).toBeVisible();
 }
 
+// The chat's group has no chat tab once Editor replaced it: the + menu's Chat
+// item brings it back (a chat tab already open is focused, not duplicated).
+async function openChatTab(page: Page): Promise<void> {
+  await page.locator('.pane-tab-new').click();
+  await page.locator('[data-testid$="-new-chat"]').click();
+}
+
 test.describe('a new chat left without typing leaves nothing behind', () => {
   test('opened via Editor and left with nothing typed, the chat is deleted', async ({ page }) => {
     const deletes = await stubCreate(page);
@@ -51,8 +58,8 @@ test.describe('a new chat left without typing leaves nothing behind', () => {
     const deletes = await stubCreate(page);
     await openEditorOnNewChat(page);
     // Editor replaced the view with the chat's Files tab (spec/14 § Panes
-    // and tabs) — switch to the chat itself before typing into its composer.
-    await page.getByTestId(`chat-row-${CREATED}`).click();
+    // and tabs) — reopen the chat itself before typing into its composer.
+    await openChatTab(page);
     await page.getByTestId('composer-input').fill('look at the router');
 
     await page.getByTestId('chat-row-chat_md').click();
@@ -74,10 +81,10 @@ test.describe('a new chat left without typing leaves nothing behind', () => {
     await expect(page.getByTestId('new-chat-main')).toHaveCount(0);
     // Editor replaces the view with the new chat's Files tab (spec/14 §
     // Panes and tabs — a plain click replaces the active tab, same as a live
-    // chat's own Editor button) — switch back to the chat itself to see its
-    // composer carry the draft.
+    // chat's own Editor button) — reopen the chat itself to see its composer
+    // carry the draft.
     await expect(page.getByTestId(`chat-row-${CREATED}`)).toBeVisible();
-    await page.getByTestId(`chat-row-${CREATED}`).click();
+    await openChatTab(page);
     await expect(page.getByTestId('composer-input')).toHaveValue('start here');
 
     await page.getByTestId('chat-row-chat_md').click();
