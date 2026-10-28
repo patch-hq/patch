@@ -17,6 +17,7 @@ import type { Logger } from 'pino';
 import {
   meetingElapsedMs,
   meetingSpeakerLabel,
+  MEETING_OWNER_EVERYONE,
   formatMeetingClock,
   DEFAULT_MEETING_SETTINGS,
   MeetingSettings,
@@ -116,11 +117,18 @@ export interface MeetingPrompts {
   actions: string;
 }
 
+/** How many already-analysed lines each pass re-reads as context. */
+const EARLIER_CONTEXT_LINES = 40;
+/** Names an `other` owner can take that actually mean Tom. */
+const TOM_NAMES = new Set(['tom', 'you', 'me']);
+
 export interface AnalyseInput {
   chatId: string;
   /** What the panel already shows, so the model updates rather than restarts. */
   previous: { now: MeetingNow | null; topics: MeetingTopic[]; actions: MeetingAction[] };
   newLines: { clock: string; speaker: string; text: string }[];
+  /** The lines before `newLines`, already in the notes: context so an owner or commitment is read in the whole conversation. */
+  earlierLines: { clock: string; speaker: string; text: string }[];
   /** The meeting has ended: also return `summary`. */
   final: boolean;
   elapsedMs: number;
@@ -819,6 +827,7 @@ export class MeetingManager {
     if (action.kind !== 'other') throw new MeetingError(`action ${actionId} has no owner to set`);
     if (action.owner === owner) return;
     action.owner = owner;
+    delete action.absent;
     this.commit(chatId, rt);
   }
 
@@ -836,6 +845,7 @@ export class MeetingManager {
     action.kind = to.kind;
     if (to.owner !== undefined) action.owner = to.owner;
     else delete action.owner;
+    delete action.absent;
     this.commit(chatId, rt);
   }
 
@@ -1035,14 +1045,20 @@ export class MeetingManager {
     try {
       await this.correctLines(chatId, rt);
       const newLines = rt.state.transcript.slice(rt.analysedUpTo, upTo);
+      const earlierLines = rt.state.transcript.slice(
+        Math.max(0, rt.analysedUpTo - EARLIER_CONTEXT_LINES),
+        rt.analysedUpTo,
+      );
+      const toInput = (l: (typeof newLines)[number]) => ({
+        clock: formatMeetingClock(l.at),
+        speaker: meetingSpeakerLabel(l, rt.state.voices),
+        text: l.text,
+      });
       const raw = await this.deps.analyse({
         chatId,
         previous: { now: rt.state.now, topics: rt.state.topics, actions: rt.state.actions },
-        newLines: newLines.map((l) => ({
-          clock: formatMeetingClock(l.at),
-          speaker: meetingSpeakerLabel(l, rt.state.voices),
-          text: l.text,
-        })),
+        newLines: newLines.map(toInput),
+        earlierLines: earlierLines.map(toInput),
         final,
         elapsedMs: meetingElapsedMs(rt.state, this.now()),
         myNotes: rt.state.myNotes ?? '',
@@ -1101,12 +1117,29 @@ export class MeetingManager {
       s.voices = { ...s.voices, [String(v.voice)]: name };
     }
     const norm = (x: string): string => x.toLowerCase().replace(/\s+/g, ' ').trim();
+    const present = new Set(
+      [
+        ...s.transcript.map((l) => meetingSpeakerLabel(l, s.voices)),
+        ...Object.values(s.voices ?? {}),
+      ].map(norm),
+    );
     for (const act of a.actions) {
       if (s.actions.some((x) => norm(x.title) === norm(act.title))) continue;
+      // The model's owner is only a claim: Tom's own name means the action is Tom's,
+      // and a name nobody spoke under means someone who was not in the meeting.
+      const owner = act.owner?.trim();
+      const toTom = act.kind === 'other' && owner !== undefined && TOM_NAMES.has(norm(owner));
+      const kind = toTom ? 'mine' : act.kind;
+      const absent =
+        kind === 'other' &&
+        owner !== undefined &&
+        norm(owner) !== norm(MEETING_OWNER_EVERYONE) &&
+        !present.has(norm(owner));
       s.actions.push({
         id: this.newId(),
-        kind: act.kind,
-        ...(act.owner !== undefined ? { owner: act.owner } : {}),
+        kind,
+        ...(kind === 'other' && owner !== undefined ? { owner } : {}),
+        ...(absent ? { absent: true } : {}),
         title: act.title,
         why: act.why,
         at: act.atSeconds !== undefined ? act.atSeconds * 1000 : meetingElapsedMs(s, this.now()),
