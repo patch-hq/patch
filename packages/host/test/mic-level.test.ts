@@ -19,6 +19,16 @@ describe('MicLevelWatch', () => {
     expect(fired).toEqual([false, false, false, false, true, false, false]);
   });
 
+  it('flags the near-zero dither a muted Android mic returns, which is not exact zeros', () => {
+    const w = new MicLevelWatch();
+    const dither = second(0);
+    dither[100] = 8; // the -72 dBFS peak two phone dictation sessions recorded
+    dither[200] = -8;
+    const fired: boolean[] = [];
+    for (let i = 0; i < 7; i++) fired.push(w.feed(dither));
+    expect(fired).toEqual([false, false, false, false, true, false, false]);
+  });
+
   it('never flags a microphone that carried any sound, however quiet', () => {
     const w = new MicLevelWatch();
     const quiet = second(0);
