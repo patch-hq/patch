@@ -49,14 +49,14 @@ test.describe('panes and tabs — opening', () => {
     page,
   }) => {
     await page.goto(HARNESS);
-    // The common case: one group, one pane, one tab — no tab bar, no card.
-    await expect(paneTabs(page)).toHaveCount(0);
+    // The common case: one group, one pane, one tab — the tab row is drawn all the same.
+    await expect(paneTabs(page)).toHaveCount(1);
     await expect(page.locator('.group-card')).toHaveCount(1);
 
     await page.getByTestId('chat-row-chat_md').click();
     // Still one group and one tab — the click SWITCHED the group's chat, it did
     // not add a tab — and it's the chat just clicked, not the harness's own.
-    await expect(paneTabs(page)).toHaveCount(0);
+    await expect(paneTabs(page)).toHaveCount(1);
     await expect(page.locator('.chat-head-title .chat-title')).toHaveText('July Seasonal Food');
     // The row click also navigates the router; wait for that to land (the row
     // goes active) so its route effect can't run after the middle-click below
@@ -221,7 +221,7 @@ test.describe('panes and tabs — keyboard', () => {
     await page.getByTestId('nav-jobs').click({ button: 'middle' });
     await expect(paneTabs(page)).toHaveCount(2);
     await page.keyboard.press('Meta+w');
-    await expect(paneTabs(page)).toHaveCount(0); // back to one tab, no bar
+    await expect(paneTabs(page)).toHaveCount(1); // back to one tab, bar still drawn
   });
 
   test('⌘⌥→ switches to the next tab', async ({ page }) => {
