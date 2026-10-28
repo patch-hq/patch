@@ -99,4 +99,34 @@ describe('SweepStatusLine', () => {
       ),
     );
   });
+
+  it('shows what each action sent and why, and earlier runs', async () => {
+    vi.spyOn(rest.api, 'getSweepRuns').mockResolvedValue({
+      runs: [
+        {
+          at: 0,
+          runId: 'r2',
+          candidateCount: 1,
+          actions: [
+            { chatId: 'chat-abc', action: 'nudge', edge: 'settled', detail: 'carry on please' },
+          ],
+          tokensUsed: 10,
+        },
+        {
+          at: 0,
+          runId: 'r1',
+          candidateCount: 1,
+          actions: [
+            { chatId: 'chat-old', action: 'leave', edge: 'stalled', detail: 'nothing needed' },
+          ],
+          tokensUsed: 10,
+        },
+      ],
+    });
+    renderLine();
+    fireEvent.click(await screen.findByTestId('sweep-status-summary'));
+    expect(screen.getByTestId('sweep-status-row-chat-abc')).toHaveTextContent('carry on please');
+    expect(screen.getByTestId('sweep-status-row-chat-abc')).toHaveTextContent('settled');
+    expect(screen.getByTestId('sweep-status-row-r1-chat-old')).toHaveTextContent('nothing needed');
+  });
 });

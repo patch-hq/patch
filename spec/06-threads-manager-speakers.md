@@ -213,7 +213,7 @@ The host that was running it is sent `host.manager_release` and lets go whenever
 
 Special threads hold fixed sidebar slots and have no "off the home screen" state to hold — `archive`/`snooze`/`delete` are all refused for them (enforced server-side and host-side, not just by the UI hiding the affordance; a hand-crafted CLI/API call is refused the same way). Instead each of the two can be individually **disabled**: a chat-level `disabled` flag (`chat.state`, spec/03), toggled from the header's Power icon (replacing Archive in that slot for a special thread) or `patch chats disable/enable <id>`.
 
-Disabling stops the thread's own ingress — the sweep drops candidates for a disabled Manager rather than banking them for later delivery, and Speakers stops delivering inbound turns — without touching anything else: the chat still exists, is still openable, and its history is untouched. The composer shows read-only with a note to re-enable from the header, and the sidebar row/Channels entry greys out (the same visual treatment archived rows get).
+Disabling stops the thread's own ingress — the sweep drops candidates for a disabled Manager rather than banking them for later delivery, abandons a run already deciding, and drops any sweep nudge still queued on a chat (the server tells the Manager host with `manager.sweep_cancel`; the same happens when the sweep's own Enabled setting is turned off), and Speakers stops delivering inbound turns — without touching anything else: the chat still exists, is still openable, and its history is untouched. The composer shows read-only with a note to re-enable from the header, and the sidebar row/Channels entry greys out (the same visual treatment archived rows get).
 
 This exists because archiving used to be the only affordance offered for "I don't want this running right now," and there was nothing stopping it from being applied to a special thread — which does not mean what it means for a regular chat: the (now-removed) per-event watch kept delivering turns into an archived Manager regardless, since nothing gated on its own status.
 
@@ -257,15 +257,15 @@ PURPOSE: chats stop and ask "done half of it, shall I do the next bit?" and some
 
 **Gate.** A sweep only runs if something changed since the last one:
 
-| Changed condition                                                    | Edge                      |
-| -------------------------------------------------------------------- | ------------------------- |
-| a chat settled (went idle from running, not stopped by the user)     | `settled`                 |
-| a chat has been running with no new output for the stalled threshold | `stalled`                 |
-| a monitor / `patch_watch` / background task ended                    | `task-ended`              |
-| a job run failed                                                     | `job-failed`              |
-| a permission or `AskUserQuestion` is waiting                         | `permission` / `question` |
+| Changed condition                                                                                      | Edge                      |
+| ------------------------------------------------------------------------------------------------------ | ------------------------- |
+| a chat settled (went idle from running, not stopped by the user)                                       | `settled`                 |
+| a chat has been running with no activity (output, tool calls, state changes) for the stalled threshold | `stalled`                 |
+| a monitor / `patch_watch` / background task ended                                                      | `task-ended`              |
+| a job run failed                                                                                       | `job-failed`              |
+| a permission or `AskUserQuestion` is waiting                                                           | `permission` / `question` |
 
-`stalled` is raised once per quiet stretch: a chat still running is raised again only after another full stalled threshold since the last time, so one long step is not nudged on every tick. A chat that holds a nudge or wake the sweep sent, which has not yet been delivered or acted on, is not a candidate for `stalled` or `settled` until it has been; a permission or question still comes through.
+Stall is measured from the chat's last activity, not from when its turn started, so a long build that keeps producing tool calls or output is never stalled. `stalled` is raised once per quiet stretch: a chat still running is raised again only after another full stalled threshold since the last time, so one long step is not nudged on every tick. A chat that holds a nudge or wake the sweep sent, which has not yet been delivered or acted on, is not a candidate for `stalled` or `settled` until it has been; a permission or question still comes through.
 
 Nothing changed since the last sweep means no model call, full stop — the gate is checked before anything else, and a tick with an empty pending set returns immediately. `stalled` exists because a chat can go quiet for reasons that look identical from the outside — genuinely done, or stuck — and "running with no output for N minutes" may need a wake-up even though it "expected" to stop on its own.
 
@@ -286,9 +286,11 @@ It never answers a real question and never approves a tool permission, and this 
 
 A nudge or wake is only delivered to a chat that is idle. A chat with a turn running or a queue draining is left alone (recorded as `leave`): the message would only park in its queue until the turn ends, stale by then, and each later sweep would stack another behind it. The next sweep reconsiders once the chat settles. Enforced in code in `deliverSweepMessage`.
 
+A nudge or wake must also reach the chat it was written for: the decision names the target's folder as well as its id, and a reply whose folder differs from the candidate's (or has none) is not delivered, recorded as `leave` with the reason.
+
 **Settings** (Manager settings page, `14-design-web.md` § `/settings` details): sweep enabled, interval, stalled threshold, messages per chat, Manager context window (below), the sweep prompt, and the model it runs on (default a mid-size model — cheap enough to run often, capable enough to read intent off a handful of short transcripts). The prompt is editable in Settings as plain text, with a Reset to default, the same pattern as the Patch tools prompt (`14-design-web.md` § Agent behavior) — a built-in default shown and editable rather than a hidden directive (`principles.md` § No system-prompt injection).
 
-**Visible.** The Manager view shows a slim line — "Last sweep 14:30 · nudged 2 · flagged 1" — expandable to what it did to which chat, with links to open them. Sweep runs are also recorded and listed like job runs (`08-triggers-and-jobs.md` § Logs).
+**Visible.** The Manager view shows a slim line — "Last sweep 14:30 · nudged 2 · flagged 1" — expandable to what it did to which chat — the edge that raised it and the message sent, flag written or reason it was left — for the last ten runs, with links to open each chat. Sweep runs are also recorded and listed like job runs (`08-triggers-and-jobs.md` § Logs).
 
 ### Manager conversation — bounded context
 

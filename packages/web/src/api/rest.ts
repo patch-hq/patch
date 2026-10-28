@@ -1453,7 +1453,12 @@ export interface SweepRun {
   at: number;
   runId: string;
   candidateCount: number;
-  actions: { chatId: string; action: 'nudge' | 'wake' | 'flag' | 'leave' }[];
+  actions: {
+    chatId: string;
+    action: 'nudge' | 'wake' | 'flag' | 'leave';
+    edge?: string;
+    detail?: string;
+  }[];
   tokensUsed: number;
   error?: string;
 }

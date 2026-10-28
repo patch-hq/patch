@@ -60,6 +60,7 @@ describe('ManagerSweeper', () => {
   let requested: { runId: string; candidates: { chatId: string; edge: string }[] }[];
   let sweeper: ManagerSweeper;
   let nowMs: number;
+  let cancels: number;
 
   // Production feeds the SAME wire-event stream into both observers
   // (`app.ts`'s `hostLink.onEvent`) — the registry for state, the sweeper
@@ -73,6 +74,7 @@ describe('ManagerSweeper', () => {
   beforeEach(() => {
     chats = new ChatRegistry({ logger });
     requested = [];
+    cancels = 0;
     settings = { ...DEFAULT_SETTINGS, sweepIntervalMinutes: 30, stalledThresholdMinutes: 15 };
     nowMs = 1_700_000_000_000;
     sweeper = new ManagerSweeper({
@@ -80,6 +82,10 @@ describe('ManagerSweeper', () => {
       settings: () => settings,
       managerHostId: () => 'd1',
       runSweep: (req) => requested.push({ runId: req.runId, candidates: req.candidates }),
+      cancelSweep: () => {
+        cancels++;
+        return true;
+      },
       runs: memoryRunStore(),
       logger,
       now: () => nowMs,
@@ -163,6 +169,73 @@ describe('ManagerSweeper', () => {
     nowMs += 6 * 60_000;
     expect(sweeper.tick()).toBe(true);
     expect(requested[0]!.candidates.map((c) => c.chatId)).toEqual(['c1']);
+  });
+
+  test('a long turn that keeps producing tool calls is not stalled', () => {
+    emit(spawned('c1'));
+    emit(state('c1', { activity: 'running' }));
+    for (let i = 0; i < 4; i++) {
+      nowMs += 10 * 60_000; // 40 min running, but something arrives every 10
+      emit({
+        type: 'chat.message',
+        chatId: 'c1',
+        role: 'assistant',
+        content: 'building',
+        seq: 5 + i,
+        ts: nowMs,
+      } as WireEvent);
+      expect(sweeper.tick()).toBe(false);
+    }
+    expect(requested).toEqual([]);
+    nowMs += 16 * 60_000; // then genuine silence
+    expect(sweeper.tick()).toBe(true);
+    expect(requested[0]!.candidates[0]).toMatchObject({ chatId: 'c1', edge: 'stalled' });
+    // idle time is the silence, not the turn's age
+    expect(requested[0]!.candidates[0]!.idleMinutes).toBeCloseTo(16, 0);
+  });
+
+  test('an unchanged chat.state echo is not activity', () => {
+    emit(spawned('c1'));
+    emit(state('c1', { activity: 'running', lastUpdated: 5 }));
+    nowMs += 10 * 60_000;
+    emit(state('c1', { activity: 'running', lastUpdated: 5 }));
+    nowMs += 6 * 60_000;
+    expect(sweeper.tick()).toBe(true);
+  });
+
+  test('sweep setting off: pending is dropped, host told once, nothing fires on re-enable', () => {
+    emit(spawned('c1'));
+    emit(state('c1', { activity: 'running' }));
+    emit(state('c1', { activity: 'idle' }));
+    expect(sweeper.pendingEdges()).toHaveLength(1);
+    settings = { ...settings, sweepEnabled: false };
+    nowMs += 40 * 60_000;
+    expect(sweeper.tick()).toBe(false);
+    expect(sweeper.tick()).toBe(false);
+    expect(sweeper.checkNow()).toBe(false);
+    expect(cancels).toBe(1);
+    expect(sweeper.pendingEdges()).toEqual([]);
+    settings = { ...settings, sweepEnabled: true };
+    nowMs += 40 * 60_000;
+    expect(sweeper.tick()).toBe(false);
+    expect(requested).toEqual([]);
+  });
+
+  test('turning the sweep off while a run is in flight cancels it on the host', () => {
+    emit(spawned('c1'));
+    emit(state('c1', { activity: 'running' }));
+    nowMs += 16 * 60_000;
+    expect(sweeper.tick()).toBe(true);
+    settings = { ...settings, sweepEnabled: false };
+    sweeper.tick();
+    expect(cancels).toBe(1);
+  });
+
+  test('Manager disabled counts as off too', () => {
+    emit(spawned(SPECIAL_THREAD_IDS.manager));
+    emit(state(SPECIAL_THREAD_IDS.manager, { disabled: true }));
+    sweeper.tick();
+    expect(cancels).toBe(1);
   });
 
   test('an early wake cannot fire sooner than the debounce after a sweep ran', () => {
@@ -362,6 +435,10 @@ describe('ManagerSweeper', () => {
       settings: () => settings,
       managerHostId: () => undefined,
       runSweep: (req) => requested.push({ runId: req.runId, candidates: req.candidates }),
+      cancelSweep: () => {
+        cancels++;
+        return true;
+      },
       runs: memoryRunStore(),
       logger,
       now: () => nowMs,
@@ -392,6 +469,10 @@ describe('ManagerSweeper', () => {
       settings: () => settings,
       managerHostId: () => 'd1',
       runSweep: (req) => requested.push({ runId: req.runId, candidates: req.candidates }),
+      cancelSweep: () => {
+        cancels++;
+        return true;
+      },
       runs,
       logger,
       now: () => nowMs,
