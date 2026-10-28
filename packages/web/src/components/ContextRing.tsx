@@ -1,7 +1,8 @@
 // ContextRing — how full the open chat's context window is, as a ring just left
-// of Send (spec/14 § Composer — context ring). Pressing it opens the usage
-// popover. It remains present before the host has measured the chat, using the
-// dashed unknown treatment, so usage details always have one stable home.
+// of Send (spec/14 § Composer — context ring), read as a gauge: a solid track
+// that fills clockwise, with the percentage said beside it. Pressing it opens
+// the usage popover. It remains present before the host has measured the chat
+// (empty track, `–`), so usage details always have one stable home.
 
 import { useRef, useState, type JSX } from 'react';
 import { useChatStore } from '../stores/chatStore.js';
@@ -43,6 +44,9 @@ export function ContextRing({ chatId }: { chatId: string }): JSX.Element {
             transform="rotate(-90 11 11)"
           />
         </svg>
+        <span className="context-ring-label" data-testid="context-ring-label">
+          {ctx?.percent ?? '–'}
+        </span>
       </button>
       {open ? (
         <UsagePopover

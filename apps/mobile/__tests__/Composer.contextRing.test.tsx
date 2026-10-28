@@ -50,6 +50,7 @@ describe('context ring', () => {
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     const ring = findHost(r.root, byTestId('context-ring'));
     expect(ring.props['accessibilityLabel']).toBe('Context 42%');
+    expect(hasText(findHost(r.root, byTestId('context-ring-label')), '42%')).toBe(true);
     actSync(() => ring.props['onPress']());
     expect(hasText(findHost(r.root, byTestId('context-sheet-figures')), '42% · 84k / 200k')).toBe(
       true,

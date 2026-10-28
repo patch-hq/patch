@@ -110,6 +110,22 @@ test.describe('usage popover', () => {
     expect(Math.abs(r!.y + r!.height / 2 - (s!.y + s!.height / 2))).toBeLessThan(2);
   });
 
+  test('the ring reads as a gauge: solid track with the percentage said beside it', async ({
+    page,
+  }) => {
+    await page.goto(HARNESS);
+    await seed(page, { usedTokens: 50_000, windowTokens: 200_000, at: Date.now() });
+    const ring = page.getByTestId('context-ring');
+    await expect(ring.getByTestId('context-ring-label')).toHaveText('25%');
+    await expect(ring.locator('.context-ring-track')).toHaveCSS('stroke-dasharray', 'none');
+    await seed(page, { usedTokens: 50_000, at: Date.now() });
+    await expect(ring.getByTestId('context-ring-label')).toHaveText('?');
+    await expect(ring.locator('.context-ring-track')).toHaveCSS('stroke-dasharray', 'none');
+    await seed(page, null);
+    await expect(ring.getByTestId('context-ring-label')).toHaveText('–');
+    await expect(ring.locator('.context-ring-track')).toHaveCSS('stroke-dasharray', 'none');
+  });
+
   test('usage stays out of the header and in the bottom control', async ({ page }) => {
     await page.goto(HARNESS);
     await seed(page, { usedTokens: 50_000, windowTokens: 200_000, at: Date.now() });
