@@ -27,6 +27,19 @@ test('classifyLabels: names speakers and participants, drops the local user', ()
   assert.deepEqual(got.participants, ['Dev', 'Marta', 'Priya Shah']);
 });
 
+test('classifyLabels: control labels are not people', () => {
+  const got = classifyLabels([
+    'Start speaking',
+    'Start talking',
+    'Stop speaking',
+    'Start, speaking',
+    'Start, Muted',
+    'Priya, Muted',
+  ]);
+  assert.deepEqual(got.speaking, []);
+  assert.deepEqual(got.participants, ['Priya']);
+});
+
 test('classifyLabels: ignores labels that merely contain the word', () => {
   assert.deepEqual(classifyLabels(['Speaking notes', 'Start talking points']), {
     participants: [],
