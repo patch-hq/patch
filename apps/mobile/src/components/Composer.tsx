@@ -125,6 +125,7 @@ import {
   PERMISSION_MODE_ORDER,
   offeredPermissionModes,
   permissionModeLabel,
+  permissionModeShortLabel,
 } from '../lib/permissionModes';
 import { receiveImagePaste } from '../lib/nativePaste';
 import * as FileSystem from 'expo-file-system';
@@ -1998,10 +1999,13 @@ export function Composer({
               // disabled, visibly, rather than dropped (spec/12).
               disabled={linkDown}
               style={({ pressed }) => ({
-                width: ACTION_SIZE,
+                minWidth: ACTION_SIZE,
                 height: ACTION_SIZE,
+                flexDirection: 'row',
                 alignItems: 'center',
                 justifyContent: 'center',
+                gap: 4,
+                paddingHorizontal: space.xs,
                 borderRadius: radii.md,
                 backgroundColor: pressed ? colors.divider : 'transparent',
               })}
@@ -2016,6 +2020,16 @@ export function Composer({
                 size={ICON_SIZE}
                 color={linkDown ? colors.inkFaint : bypass ? colors.red : colors.ink2}
               />
+              {permissionMode !== undefined ? (
+                <Text
+                  style={{
+                    ...typography.meta,
+                    color: linkDown ? colors.inkFaint : bypass ? colors.red : colors.ink3,
+                  }}
+                >
+                  {permissionModeShortLabel(permissionMode)}
+                </Text>
+              ) : null}
             </Pressable>
             <ModelPicker
               hostId={row?.hostId ? row.hostId : null}
@@ -2070,13 +2084,11 @@ export function Composer({
                 accessibilityLabel={`Thinking effort: ${effortShown === null ? 'the model decides' : EFFORT_LABELS[effortShown]}`}
               >
                 <Gauge size={ICON_SIZE} color={linkDown ? colors.inkFaint : colors.ink2} />
-                {effortShown !== null ? (
-                  <Text
-                    style={{ ...typography.meta, color: linkDown ? colors.inkFaint : colors.ink3 }}
-                  >
-                    {EFFORT_LABELS[effortShown]}
-                  </Text>
-                ) : null}
+                <Text
+                  style={{ ...typography.meta, color: linkDown ? colors.inkFaint : colors.ink3 }}
+                >
+                  {effortShown !== null ? EFFORT_LABELS[effortShown] : 'Effort'}
+                </Text>
               </Pressable>
             ) : null}
           </View>

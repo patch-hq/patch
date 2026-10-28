@@ -195,6 +195,16 @@ describe('Composer action row — order', () => {
     expect(queryHost(settings, byTestId('composer-effort'))).not.toBeNull();
   });
 
+  it('labels the mode and effort icons in words so they are not icon-only', () => {
+    seed();
+    const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
+    const mode = findHost(r.root, byTestId('permission-mode-padlock'));
+    const effort = findHost(r.root, byTestId('composer-effort'));
+    expect(textOf(mode)).not.toBe('');
+    // No effort chosen yet: the gauge still says what it is.
+    expect(textOf(effort)).toBe('Effort');
+  });
+
   it('the + offers camera, photo, file and sketch', () => {
     seed();
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
