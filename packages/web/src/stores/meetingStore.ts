@@ -63,6 +63,9 @@ interface MeetingStoreState {
   openPromptEditor(key: MeetingPromptKey | null): void;
   apply(chatId: string, meeting: MeetingState | null): void;
   setCapturing(chatId: string | null): void;
+  /** A call's toast was clicked: the new-chat screen starts a meeting in a fresh chat. */
+  newChatMeetingRequested: boolean;
+  requestNewChatMeeting(requested: boolean): void;
   reset(): void;
 }
 
@@ -93,10 +96,13 @@ export const useMeetingStore = create<MeetingStoreState>((set) => ({
     set(promptEditor ? { promptEditor, settingsOpen: true } : { promptEditor }),
   apply: (chatId, meeting) => set((s) => ({ byChat: { ...s.byChat, [chatId]: meeting } })),
   setCapturing: (capturingChatId) => set({ capturingChatId }),
+  newChatMeetingRequested: false,
+  requestNewChatMeeting: (newChatMeetingRequested) => set({ newChatMeetingRequested }),
   reset: () =>
     set({
       byChat: {},
       capturingChatId: null,
+      newChatMeetingRequested: false,
       promptEditor: null,
       settingsOpen: false,
       view: {},
