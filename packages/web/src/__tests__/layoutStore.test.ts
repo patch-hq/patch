@@ -579,3 +579,63 @@ describe('layoutStore — groups (spec/14 § Groups)', () => {
     expect(loaded.groups[1]!.layouts['b']).toBeDefined();
   });
 });
+
+describe('layoutStore — terminal, files, browser and editor tabs', () => {
+  const term = { kind: 'terminal', chatId: 'a' } as const;
+  const files = { kind: 'page', page: 'files', chatId: 'a' } as const;
+  const browser = { kind: 'browser', chatId: 'a' } as const;
+
+  function split(): SplitPane {
+    expect(store().root.type).toBe('split');
+    return store().root as SplitPane;
+  }
+
+  beforeEach(() => {
+    store().openTab({ kind: 'chat', chatId: 'a' });
+  });
+
+  it('the terminal opens in a pane along the bottom, about 30% tall', () => {
+    store().openTab(term);
+    const s = split();
+    expect(s.direction).toBe('column');
+    expect(s.children[1]!.size).toBeCloseTo(0.3);
+    expect((s.children[1]!.pane as LeafPane).tabs[0]!.id).toBe('terminal:a');
+  });
+
+  it('files open in a pane on the right, about 36% wide, and browser joins it', () => {
+    store().openTab(files);
+    const s = split();
+    expect(s.direction).toBe('row');
+    expect(s.children[1]!.size).toBeCloseTo(0.36);
+    store().openTab(browser);
+    const right = split().children[1]!.pane as LeafPane;
+    expect(right.tabs.map((t) => t.id)).toEqual(['page:files:a', 'browser:a']);
+  });
+
+  it('toggle closes the tab when it is already the active one', () => {
+    store().toggleTab(term);
+    expect(store().findTab(term)).not.toBeNull();
+    store().toggleTab(term);
+    expect(store().findTab(term)).toBeNull();
+    expect(store().root.type).toBe('leaf');
+  });
+
+  it('opens where the user last moved it', () => {
+    store().openTab(files);
+    const chatPane = (split().children[0]!.pane as LeafPane).id;
+    const filesPane = (split().children[1]!.pane as LeafPane).id;
+    store().moveTab(filesPane, 'page:files:a', chatPane, 1);
+    expect(store().root.type).toBe('leaf');
+    store().closeTab(chatPane, 'page:files:a');
+    store().openTab(files);
+    expect((store().root as LeafPane).tabs.map((t) => t.id)).toEqual(['chat:a', 'page:files:a']);
+  });
+
+  it('persists where a tool tab was moved', () => {
+    store().openTab(term);
+    const top = (split().children[0]!.pane as LeafPane).id;
+    const bottom = (split().children[1]!.pane as LeafPane).id;
+    store().moveTab(bottom, 'terminal:a', top, 1);
+    expect(loadLayout().groups[0]!.toolHomes).toEqual({ bottom: top });
+  });
+});
