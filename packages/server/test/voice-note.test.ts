@@ -633,7 +633,7 @@ describe('POST /api/voice/note', () => {
       issuedAt: 1,
     });
     const hostLink = new InProcessHostLink();
-    const built = await buildAll({ logger: false, registry, hostLink });
+    const built = await buildAll({ logger: false, registry, hostLink, voiceNoteTimeoutMs: 50 });
     hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/tmp/c1' });
     const jwt = await mintSurfaceCredential({
       userPrivateKey: user.privateKey,

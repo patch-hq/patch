@@ -30,7 +30,11 @@ import type { Registry } from '../registry.js';
 import type { ChatRegistry } from '../chat-registry.js';
 import type { HostLink } from '../host-link.js';
 
-const TRANSCRIBE_REQUEST_TIMEOUT_MS = 30_000;
+/**
+ * A clip is minutes of speech, uploaded and transcribed in one request, so it
+ * needs far longer than the short utterances the shorter timeouts are sized for.
+ */
+const TRANSCRIBE_REQUEST_TIMEOUT_MS = 150_000;
 /**
  * A turn check is asked at a pause in speech, so a slow answer is a pause the
  * speaker notices. A host that predates the check never answers at all.
@@ -80,6 +84,8 @@ export interface VoiceNoteRouteDeps {
   chatRegistry: ChatRegistry;
   hostLink: HostLink;
   idGenerator: () => string;
+  /** Override the wait for the host's transcript (tests). */
+  transcribeTimeoutMs?: number;
 }
 
 export function registerVoiceNoteRoute(app: FastifyInstance, deps: VoiceNoteRouteDeps): void {
@@ -110,7 +116,7 @@ export function registerVoiceNoteRoute(app: FastifyInstance, deps: VoiceNoteRout
       const timeout = setTimeout(() => {
         pending.delete(requestId);
         resolveP('timeout');
-      }, TRANSCRIBE_REQUEST_TIMEOUT_MS);
+      }, deps.transcribeTimeoutMs ?? TRANSCRIBE_REQUEST_TIMEOUT_MS);
       pending.set(requestId, { resolve: resolveP, timeout });
       deps.hostLink.send(surfaceId, build(requestId));
     });

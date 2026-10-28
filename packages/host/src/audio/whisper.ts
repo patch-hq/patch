@@ -288,6 +288,11 @@ const FINAL_RETRIES = 3;
  * with nothing to show for it.
  */
 const GROQ_REQUEST_TIMEOUT_MS = 20_000;
+/**
+ * Ceiling on an uploaded clip. A voice note can be minutes long, so uploading
+ * and transcribing it takes far longer than a streamed utterance.
+ */
+const GROQ_CLIP_REQUEST_TIMEOUT_MS = 120_000;
 
 /** Seconds Groq asks us to wait, from its "Please try again in 3s" message. */
 export function parseRetryAfterMs(body: string, header: string | null): number | null {
@@ -437,7 +442,7 @@ export class GroqWhisperBackend implements WhisperBackend {
         method: 'POST',
         headers: { authorization: `Bearer ${apiKey}` },
         body: form,
-        signal: AbortSignal.timeout(this.opts.requestTimeoutMs ?? GROQ_REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(this.opts.requestTimeoutMs ?? GROQ_CLIP_REQUEST_TIMEOUT_MS),
       });
       if (r.ok) {
         res = r;
