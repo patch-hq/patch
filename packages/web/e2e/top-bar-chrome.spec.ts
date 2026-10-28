@@ -133,13 +133,12 @@ test.describe('the chat panel header', () => {
     expect(Math.abs(nav.y + nav.height / 2 - (head.y + head.height / 2))).toBeLessThanOrEqual(1);
   });
 
-  test('taking the left zone does not pull the chat name off centre', async ({ page }) => {
+  test('the chat name leads the header, right after the left zone', async ({ page }) => {
     await page.goto(HARNESS);
-    const head = (await page.getByTestId('chat-head').boundingBox())!;
+    const left = (await page.locator('.chat-head-left').boundingBox())!;
     const title = (await page.locator('.chat-head-title').boundingBox())!;
-    // The nav controls live INSIDE the left zone that carries the centring
-    // share; as a fourth flex child they would shift the title by ~27px.
-    expect(Math.abs(title.x + title.width / 2 - (head.x + head.width / 2))).toBeLessThanOrEqual(2);
+    // A group header is left-aligned (spec/14 § Groups), not centred.
+    expect(title.x - (left.x + left.width)).toBeLessThanOrEqual(8);
   });
 
   test('in the shell the header drags the window, but Back still takes its click', async ({

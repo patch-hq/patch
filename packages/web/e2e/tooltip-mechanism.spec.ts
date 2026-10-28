@@ -14,7 +14,7 @@ test.describe('the app tooltip', () => {
     page,
   }) => {
     await page.goto(HARNESS);
-    const editorBtn = page.getByTestId('action-editor');
+    const editorBtn = page.getByTestId('group-tool-editor');
     await expect(editorBtn).toBeVisible();
     await expect(editorBtn).toHaveAttribute('title', 'Editor');
 
@@ -34,7 +34,7 @@ test.describe('the app tooltip', () => {
 
   test('appears on keyboard focus, for a control reached without a pointer', async ({ page }) => {
     await page.goto(HARNESS);
-    const editorBtn = page.getByTestId('action-editor');
+    const editorBtn = page.getByTestId('group-tool-editor');
     await expect(editorBtn).toBeVisible();
 
     await editorBtn.focus();
@@ -69,7 +69,7 @@ test.describe('the app tooltip', () => {
 
   test('dismisses on Escape and on scroll', async ({ page }) => {
     await page.goto(HARNESS);
-    const editorBtn = page.getByTestId('action-editor');
+    const editorBtn = page.getByTestId('group-tool-editor');
     await editorBtn.hover();
     const tooltip = page.getByTestId('app-tooltip');
     await expect(tooltip).toBeVisible();
