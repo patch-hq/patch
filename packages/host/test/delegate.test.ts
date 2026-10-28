@@ -402,6 +402,32 @@ describe('patch_delegate', () => {
     await stopping;
   });
 
+  it("replays each subagent's live state to a surface that (re)connects, so a running one stays visible", async () => {
+    const { daemon, folder } = setupHanging();
+    const parentChatId = await daemon.spawnChat({ folder });
+    const { id } = await daemon.createDelegate({ parentChatId, prompt: 'a slow task' });
+    await new Promise((r) => setTimeout(r, 20));
+
+    const replayed: WireEvent[] = [];
+    daemon.replayChat(parentChatId, -1, (e) => replayed.push(e));
+    const updates = replayed.filter(
+      (e): e is Extract<WireEvent, { type: 'chat.delegate_update' }> =>
+        e.type === 'chat.delegate_update',
+    );
+    expect(updates).toEqual([
+      expect.objectContaining({ chatId: parentChatId, delegateId: id, status: 'running' }),
+    ]);
+
+    await daemon.stopDelegate(parentChatId, id);
+    const after: WireEvent[] = [];
+    daemon.replayChat(parentChatId, -1, (e) => after.push(e));
+    expect(
+      after
+        .filter((e) => e.type === 'chat.delegate_update')
+        .map((e) => (e as { status: string }).status),
+    ).toEqual(['stopped']);
+  });
+
   it("a chat cannot stop another chat's delegate", async () => {
     const { daemon, folder } = setupHanging();
     const parentChatId = await daemon.spawnChat({ folder });
