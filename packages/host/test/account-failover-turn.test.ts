@@ -398,3 +398,40 @@ describe('an account switch carries the conversation over', () => {
     ).toBe(true);
   });
 });
+
+describe('an account switch on a chat with no recorded session id', () => {
+  it('still reseeds the new account’s session from the chat log', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'patch-switch-nosess-'));
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-switch-nosessf-')));
+    const seen: SdkRunOptions[] = [];
+    let account = 'a1';
+    let id = 0;
+    const daemon = new Daemon({
+      hostId: 'd1',
+      metaStore: createMetaStore(home),
+      sdkBackend: {
+        run: (opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> => {
+          seen.push(opts);
+          async function* gen(): AsyncGenerator<SdkEnvelope> {
+            // The first turn answers but the provider never hands back a session id.
+            yield { type: 'assistant', content: 'reply', raw: {} };
+            yield { type: 'result', content: 'reply', raw: {} };
+          }
+          return gen();
+        },
+      },
+      resolveOAuth: () => ({ ok: true as const, accessToken: 'tok', accountId: account }),
+      emit: () => {},
+      logger: silent,
+      now: () => Date.now(),
+      generateChatId: () => `chat-${++id}`,
+    });
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
+    await vi.waitFor(() => expect(seen.length).toBe(1));
+    account = 'a2';
+    await daemon.sendInput({ chatId, message: 'follow up', localId: 'l2' });
+    await vi.waitFor(() => expect(seen.length).toBe(2));
+    expect(seen[1]!.claudeSessionStore?.reseed?.events.length ?? 0).toBeGreaterThan(0);
+  });
+});
