@@ -666,6 +666,20 @@ useChatStore.getState().hydrate([
     disabled: false,
     lastUpdated: 0,
   },
+  // A published artifact (spec/14 § Artifacts) — drives the artifact-as-tab e2e.
+  {
+    chatId: 'chat_artifact',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'artifact-fixture',
+    folder: '/home/tom/projects/portfolio',
+    activity: 'idle',
+    status: 'active',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 0,
+  },
   // A `view_file` call showing a page inline (spec/14 § Viewing files).
   {
     chatId: 'chat_view_file',
@@ -2057,6 +2071,18 @@ useChatStore.setState((s) => ({
         toolResult: { content: [{ type: 'text', text: 'export const poll = 1;' }] },
         callId: 'call-paired-1',
         at: 1,
+      },
+    ],
+    // spec/14 § Artifacts — a published page, opened as a tab.
+    chat_artifact: [
+      {
+        seq: 0,
+        kind: 'artifact',
+        artifactId: 'art001',
+        artifactTitle: 'Bus times',
+        artifactUrl: '/api/chats/chat_artifact/artifact/art001?sig=s',
+        artifactPath: 'out/buses.html',
+        at: 0,
       },
     ],
     // spec/14 § Viewing files — the row IS the file, in a sandboxed frame.

@@ -117,7 +117,6 @@ import {
 } from '../lib/sideThreadActions.js';
 import { openDiffForFile } from '../lib/openDiff.js';
 import { openArtifact } from '../lib/openArtifact.js';
-import { closeArtifactPanel, notePanelInset, showArtifactFor } from '../lib/artifactPanel.js';
 import { PadCard, padIdOfArtifact } from '../components/PadCard.js';
 import { getDesktopBridge } from '../lib/desktopBridge.js';
 import { useComposerDraftStore } from '../stores/composerDraftStore.js';
@@ -421,8 +420,7 @@ export function ChatRoute({
   /**
    * Whether this is the focused pane's active tab. With several `ChatRoute`s
    * mounted at once, only the focused one may claim `chatStore.activeChatId`
-   * and the desktop artifact panel — both are singular, app-wide "the chat
-   * you're looking at right now" concepts (spec/14 § Panes and tabs).
+   * — a singular, app-wide "the chat you're looking at right now" concept (spec/14 § Panes and tabs).
    * Defaults to true so every pre-existing render site (still one `ChatRoute`
    * at a time) is unaffected.
    */
@@ -520,30 +518,6 @@ export function ChatRoute({
     if (!focused) return;
     void api.markBatchOpened(chatId).catch(() => undefined);
   }, [chatId, focused]);
-
-  // spec/14 § Artifacts — the desktop web panel shows the artifact belonging to
-  // the chat you are looking at. Opening a chat shows its artifact (or closes
-  // the panel if it has none), and a width-0 inset we did not drive is the user
-  // closing the panel themselves, which makes this chat forget its artifact.
-  // The browser surface has no panel and no bridge, so all of this no-ops.
-  // Gated on `focused` for the same reason as `activeChatId` above — the panel
-  // is one Electron view shared across every pane, not one per tab.
-  useEffect(() => {
-    if (!focused) return;
-    const bridge = getDesktopBridge();
-    const off = bridge?.onPanelInset?.(({ width }) => notePanelInset(chatId, width));
-    showArtifactFor(chatId);
-    return off;
-  }, [chatId, focused]);
-
-  // Leaving the chat route entirely (settings, jobs, a new chat) — or losing
-  // focus to a different pane — puts the panel away; regaining it re-opens
-  // the chat's artifact through the effect above. Separate from it so a chat
-  // SWITCH (same focused tab, different chatId) does not close-then-reopen.
-  useEffect(() => {
-    if (!focused) return;
-    return closeArtifactPanel;
-  }, [focused]);
 
   // Load this chat's transcript on open. The connect-time replay loop only
   // covers chats known when the socket opened; a chat that first appears

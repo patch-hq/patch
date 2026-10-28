@@ -103,6 +103,9 @@ addEventListener('pagehide',function(){if(timer!==null){clearTimeout(timer);flus
 Object.defineProperty(window,'localStorage',{value:ls,configurable:true});
 Object.defineProperty(window,'sessionStorage',{value:ss,configurable:true});
 addEventListener('click',function(e){var a=e.target&&e.target.closest&&e.target.closest('a[href]');if(!a||e.defaultPrevented)return;var h=a.getAttribute('href');if(!h||h.charAt(0)==='#'||!/^(https?:|mailto:|tel:)/i.test(a.href))return;e.preventDefault();window.open(a.href,'_blank','noopener')});
+function nav(){parent.postMessage({type:'patch:artifact-nav',canGoBack:navigation.canGoBack,canGoForward:navigation.canGoForward},'*')}
+addEventListener('message',function(e){var d=e.data;if(!d||d.type!=='patch:artifact-go')return;if(d.dir==='back')history.back();else if(d.dir==='forward')history.forward()});
+if(window.navigation){nav();navigation.addEventListener('navigatesuccess',nav)}
 })();</script>`;
 }
 
