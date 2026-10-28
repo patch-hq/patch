@@ -15,6 +15,7 @@ import { ChatSearchIndex, handleChatSearchRequest } from './chatSearch.js';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { acquireHomeLock, type HomeLock } from './homeLock.js';
+import { detachDurableTurns, type DurableTurnConfig } from './durableTurn.js';
 import { SHUTDOWN_DEADLINE_MS, shutdownThenExit } from './shutdownDeadline.js';
 import { linkLegacySocket, isNamedPipe } from './legacySocket.js';
 import {
@@ -3464,6 +3465,33 @@ async function startHost(
       `patch-daemon: MCP server not found at ${built} or ${source} — every chat would lose its patch_* tools`,
     );
   })();
+  /**
+   * The per-turn runner every Claude turn is started under (spec/02 § Turns
+   * outlive the host). Resolved like the MCP server, and for the same reason:
+   * a missing runner must stop the boot, not fail every turn later. Only the
+   * real backend runs claude, so only it needs one.
+   */
+  const durableTurns = ((): DurableTurnConfig | undefined => {
+    if (config.sdkBackend !== 'real') return undefined;
+    const here = dirname(fileURLToPath(import.meta.url));
+    const built = resolve(here, 'bin', 'turn-runner.js');
+    const source = resolve(here, 'bin', 'turn-runner.ts');
+    const turnsDir = join(config.patchHome, 'turns');
+    if (existsSync(built)) {
+      return { turnsDir, runner: { command: process.execPath, args: [built] } };
+    }
+    if (existsSync(source)) {
+      const tsxLoader = createRequire(import.meta.url).resolve('tsx');
+      return {
+        turnsDir,
+        runner: {
+          command: process.execPath,
+          args: ['--import', pathToFileURL(tsxLoader).href, source],
+        },
+      };
+    }
+    throw new Error(`patch-daemon: turn runner not found at ${built} or ${source}`);
+  })();
   // Prove the resolved MCP child actually STARTS from an arbitrary cwd — the
   // SDK launches it with the chat folder as its working directory, and a child
   // that dies on startup costs every chat its patch_* tools with no error
@@ -3880,6 +3908,7 @@ async function startHost(
   const summariseLink = makeLinkSummariser({ sdkBackend, runOnAccountWithCredit });
   let pullQueuedFromServer: ((chatId: string) => Promise<ChatInputEvent[]>) | undefined;
   const daemon: Daemon = new Daemon({
+    ...(durableTurns ? { durableTurns } : {}),
     pullQueued: (chatId) => pullQueuedFromServer?.(chatId) ?? Promise.resolve([]),
     onHandoffConsumed: () => hostStateStore.update({ managerHandoff: undefined }),
     hostId: selfHostId,
@@ -5148,6 +5177,10 @@ async function startHost(
 
   // 9. Graceful shutdown.
   const shutdown = async (): Promise<void> => {
+    // Turns outlive the host (spec/02): let go of each one's runner first, so
+    // nothing below ends a turn that is meant to carry on under the next host.
+    const detached = detachDurableTurns();
+    if (detached > 0) logger.info({ turns: detached }, 'patch-daemon: left turns running');
     homeLock.release();
     await codexAccounts.close();
     logger.info('patch-daemon: shutting down');

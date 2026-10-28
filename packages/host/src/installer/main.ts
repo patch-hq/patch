@@ -53,6 +53,7 @@ import { loadOrCreateHostIdentity } from '../identity.js';
 import { readDaemonKey, writeDaemonKey } from '../registration.js';
 import { redeemPairingCode } from './pairing.js';
 import { provisionSandbox, SandboxProvisionError } from './sandbox.js';
+import { versionDirsInUse } from '../durableTurn.js';
 import {
   opsFor,
   hostLogTail,
@@ -119,7 +120,11 @@ export interface InstallerContext {
 export const VERSIONS_KEPT = 2;
 
 /** Remove all but the newest `VERSIONS_KEPT` version folders; `keep` is never removed. */
-export function pruneOldVersions(versionsDir: string, keep: string): string[] {
+export function pruneOldVersions(
+  versionsDir: string,
+  keep: string,
+  inUse: ReadonlySet<string> = new Set(),
+): string[] {
   const dirs = readdirSync(versionsDir, { withFileTypes: true })
     .filter((d) => d.isDirectory())
     .map((d) => ({
@@ -127,8 +132,14 @@ export function pruneOldVersions(versionsDir: string, keep: string): string[] {
       mtime: statSync(join(versionsDir, d.name)).mtimeMs,
     }))
     .sort((a, b) => b.mtime - a.mtime);
-  const survivors = new Set([resolve(keep)]);
-  for (const d of dirs) if (survivors.size < VERSIONS_KEPT) survivors.add(resolve(d.path));
+  const survivors = new Set([resolve(keep), ...[...inUse].map((d) => resolve(d))]);
+  const retained = new Set([resolve(keep)]);
+  for (const d of dirs) {
+    if (retained.size < VERSIONS_KEPT) {
+      retained.add(resolve(d.path));
+      survivors.add(resolve(d.path));
+    }
+  }
   const removed: string[] = [];
   for (const d of dirs) {
     if (survivors.has(resolve(d.path))) continue;
@@ -466,7 +477,11 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
   rmSync(current, { force: true, recursive: false });
   symlinkSync(installDir, current);
   io.out(`  installed ${build.version} (${build.gitSha}, built ${build.builtAt}) → ${installDir}`);
-  const pruned = pruneOldVersions(join(patchHome, 'versions'), installDir);
+  const pruned = pruneOldVersions(
+    join(patchHome, 'versions'),
+    installDir,
+    versionDirsInUse(join(patchHome, 'turns'), join(patchHome, 'versions')),
+  );
   if (pruned.length > 0) io.out(`  removed ${pruned.length} old version folder(s)`);
 
   // ---- 4. The patch-cli skill, in the user's own skills directory -------

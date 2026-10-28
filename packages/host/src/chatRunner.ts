@@ -4,6 +4,15 @@ import {
   harnessTraitsForModel,
   harnessModesInclude,
 } from './harnesses.js';
+import {
+  hasDurableTurn,
+  inspectTurnDir,
+  listTurnDirs,
+  retireTurn,
+  turnDirFor,
+  type Consumed,
+  type DurableTurnConfig,
+} from './durableTurn.js';
 import type { SleepGuard } from './sleepGuard.js';
 import type { SleepWatch } from './sleepWatch.js';
 import { expandHome } from './expandHome.js';
@@ -288,6 +297,12 @@ export interface HostOptions {
   knownModelIds?: () => Promise<ReadonlySet<string>>;
   metaStore: MetaStore;
   sdkBackend: SdkBackend;
+  /**
+   * Run every Claude turn under a detached per-turn runner so it outlives a
+   * host restart (spec/02 § Turns outlive the host). Absent (mock backend,
+   * most tests) runs turns as children of the host, as before.
+   */
+  durableTurns?: DurableTurnConfig;
   /**
    * Which SDK backend is wired (`'real'` | `'mock'`). The real Claude Agent
    * SDK `query({ resume })` HANGS forever (no first message, no result, no
@@ -3376,6 +3391,29 @@ export class Daemon {
     lastTurnOutcomeByChatId: Map<string, TurnOutcome | null>,
     lastTurnLocalIdByChatId: Map<string, string | undefined>,
   ): void {
+    const durable = this.opts.durableTurns;
+    // Every turn directory the previous host left. Each is claimed below by the
+    // chat whose head turn it is, and whatever is left over is retired.
+    const unclaimed = new Set(durable ? listTurnDirs(durable) : []);
+    try {
+      this.resumeEach(metas, lastTurnOutcomeByChatId, lastTurnLocalIdByChatId, unclaimed);
+    } finally {
+      for (const chatId of unclaimed) {
+        this.opts.logger.warn(
+          { chatId },
+          'resume: a durable turn on disk belongs to no owed turn; ending it',
+        );
+        if (durable) retireTurn(turnDirFor(durable, chatId));
+      }
+    }
+  }
+
+  private resumeEach(
+    metas: ChatMeta[],
+    lastTurnOutcomeByChatId: Map<string, TurnOutcome | null>,
+    lastTurnLocalIdByChatId: Map<string, string | undefined>,
+    unclaimed: Set<string>,
+  ): void {
     for (const m of metas) {
       const recorded = m.pendingTurns;
       if (!recorded || recorded.length === 0) continue;
@@ -3483,8 +3521,37 @@ export class Daemon {
       // conversation, so a stale on-disk copy would only mislead a later
       // restart into repeating context the agent has already seen.
       const chatDir = dirname(this.opts.metaStore.pathFor(m.chatId));
-      const pendingDecisions = readPendingDecisions(chatDir);
-      if (pendingDecisions.length > 0) clearAllPendingDecisions(chatDir);
+      // spec/02 § Turns outlive the host — the head turn may still be running
+      // under its runner. Then it is carried on, not cut off: it goes back
+      // verbatim and reattaches, and a permission it was waiting on is asked
+      // again by the reattached turn itself.
+      let reattach = false;
+      const turnsConfig = this.opts.durableTurns;
+      if (
+        turnsConfig &&
+        unclaimed.has(m.chatId) &&
+        !headAlreadySettled &&
+        waitingHead !== 'retry'
+      ) {
+        const disk = inspectTurnDir(turnDirFor(turnsConfig, m.chatId));
+        const head = pending[0];
+        if (disk && disk.state !== 'lost' && disk.localId === head?.localId) {
+          unclaimed.delete(m.chatId);
+          this.durableAttach.set(m.chatId, disk.consumed);
+          reattach = true;
+          this.opts.logger.info(
+            { chatId: m.chatId, state: disk.state },
+            'resume: the turn survived the restart; reattaching to it',
+          );
+        } else {
+          this.opts.logger.warn(
+            { chatId: m.chatId, state: disk?.state, diskLocalId: disk?.localId },
+            'resume: the durable turn on disk is not carried on (runner gone or another turn); it was cut off',
+          );
+        }
+      }
+      const pendingDecisions = reattach ? [] : readPendingDecisions(chatDir);
+      if (pendingDecisions.length > 0 || reattach) clearAllPendingDecisions(chatDir);
       // `pending[0]` is the genuinely-interrupted head only when the chat log
       // shows no terminal outcome at all for the last turn — a crash really
       // did cut it off mid-flight. Whenever the log instead shows the last
@@ -3493,7 +3560,7 @@ export class Daemon {
       // or it survived the drop because it is a genuinely different, queued
       // turn (the race `headAlreadySettled` now accounts for) — both go back
       // verbatim, not with the cut-off framing.
-      const headIsInterrupted = !settledTerminally && waitingHead !== 'retry';
+      const headIsInterrupted = !settledTerminally && waitingHead !== 'retry' && !reattach;
       for (const [i, turn] of pending.entries()) {
         const reminder =
           pendingDecisions.length > 0
@@ -6452,7 +6519,36 @@ export class Daemon {
    * a card nobody answers would otherwise hold the install forever.
    */
   runningChatIds(): string[] {
-    return [...this.pumping].filter((chatId) => !this.isParkedOnPermission(chatId));
+    return [...this.pumping].filter(
+      (chatId) => !this.isParkedOnPermission(chatId) && !hasDurableTurn(chatId),
+    );
+  }
+
+  /**
+   * Chats whose turn the previous host left running under its runner, mapped to
+   * how far that host got through the turn's output. The next turn this chat
+   * starts is that same turn, reattached (`durableTurn.ts`), not a new claude.
+   */
+  private readonly durableAttach = new Map<string, Consumed | null>();
+
+  private durableTurnFor(
+    chatId: string,
+    harness: HarnessId,
+    localId: string | undefined,
+  ): Pick<SdkRunOptions, 'durableTurn'> {
+    const config = this.opts.durableTurns;
+    if (!config || harness !== 'claude') return {};
+    const attach = this.durableAttach.get(chatId);
+    this.durableAttach.delete(chatId);
+    return {
+      durableTurn: {
+        config,
+        chatId,
+        localId,
+        ...(attach !== undefined ? { attach: { consumed: attach } } : {}),
+        log: this.opts.logger,
+      },
+    };
   }
 
   /**
@@ -9518,6 +9614,7 @@ export class Daemon {
       // forever, so patch no longer omits this for any mode — it trusts the
       // SDK's own gating instead.
       onReapRefused: (message: string) => this.announceReapRefused(chatId, message),
+      ...this.durableTurnFor(chatId, targetHarness, localId),
       onPermissionRequest: (req: {
         tool: string;
         args: Record<string, unknown>;

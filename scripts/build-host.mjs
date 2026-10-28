@@ -377,6 +377,11 @@ async function buildTarget(t, ctx) {
     join(DAEMON, 'src', 'bin', 'patch-tools-server.ts'),
     join(outDir, 'bin', 'patch-tools-server.js'),
   );
+  await bundle(
+    esb,
+    join(DAEMON, 'src', 'bin', 'turn-runner.ts'),
+    join(outDir, 'bin', 'turn-runner.js'),
+  );
   await bundle(esb, join(DAEMON, 'src', 'installer', 'entry.ts'), join(outDir, 'install.mjs'));
 
   // 2. the pinned Node runtime

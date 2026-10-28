@@ -71,10 +71,29 @@ behind the current version shows an update control in Settings → Updates. The 
 to by the server when it connects, and stays put until Update (one host) or Update all is pressed. A
 host whose server greeting it cannot read still updates. A failed
 update leaves the running version in place and reports the failure to surfaces.
-The restart never lands under a running turn: it would kill the turn and every
-command it is running. An update asked for while any chat on the host is mid-turn
-is accepted as deferred at once (the asker is often one of those turns), and the
-install waits until no chat is running, checked again after the download.
+A restart does not end a Claude turn (§ Turns outlive the host), so the install
+does not wait for those. An update asked for while any chat on the host is running
+something that would not survive — a turn on another harness — is accepted as
+deferred at once (the asker is often one of those turns), and the install waits
+until no such chat is running, checked again after the download.
+
+### Turns outlive the host
+
+Every Claude turn runs under its own detached runner process rather than as a
+child of the host. The runner owns claude's stdio and keeps everything claude says
+and is told on disk, under `<patchHome>/turns/<chatId>/`. The host talks to the
+runner over a socket, so a host restart — a self-update, a service restart —
+leaves the turn running.
+
+On start the host reads those directories against the chats' owed turns
+(`pendingTurns`). A turn whose runner is still up, or whose claude finished while
+no host was attached, is reattached: its prompt goes back verbatim (not as "cut
+off"), everything claude said is replayed, and what the previous host had already
+handled is skipped. A permission the turn was waiting on is asked again. A turn
+whose runner is gone (a reboot) is cut off and re-sent with the reminder, as
+before. A directory belonging to no owed turn is ended and removed. A finished
+turn's directory is removed. An install never prunes a version folder a live
+runner started from.
 
 ### Desktop app and the local host
 
