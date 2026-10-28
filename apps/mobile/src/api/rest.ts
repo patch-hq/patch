@@ -438,6 +438,8 @@ export const api = {
     if (opts.offset !== undefined) params.set('offset', String(opts.offset));
     // The Chats tab lists Archived as its own section and searches it too.
     params.set('includeArchived', 'true');
+    // …and Hidden, which it also lists as its own section.
+    params.set('includeHidden', 'true');
     return request<ChatSearchResponse>(
       `/api/chats/search?${params.toString()}`,
       opts.signal === undefined ? {} : { signal: opts.signal },

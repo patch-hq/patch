@@ -447,6 +447,7 @@ export const api = {
       offset?: number;
       fullText?: boolean;
       includeArchived?: boolean;
+      includeHidden?: boolean;
       signal?: AbortSignal;
     } = {},
   ) => {
@@ -456,6 +457,9 @@ export const api = {
     if (opts.fullText !== undefined) params.set('fullText', String(opts.fullText));
     if (opts.includeArchived !== undefined) {
       params.set('includeArchived', String(opts.includeArchived));
+    }
+    if (opts.includeHidden !== undefined) {
+      params.set('includeHidden', String(opts.includeHidden));
     }
     return request<ChatSearchResponse>(
       `/api/chats/search?${params.toString()}`,

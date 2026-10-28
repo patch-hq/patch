@@ -80,6 +80,7 @@ interface Loaded {
   query: string;
   fullText: boolean;
   includeArchived: boolean;
+  includeHidden: boolean;
   hits: ChatSearchHit[];
   hosts: ChatSearchHostResult[];
   nextOffset: number | null;
@@ -121,6 +122,10 @@ export function ChatSearchResults({
   // The Archived page is searching archived chats by definition; elsewhere the
   // box decides.
   const includeArchived = section === 'archived' || archivedBox;
+  const hiddenBox = useUiStore((s) => s.searchIncludeHidden);
+  const setHiddenBox = useUiStore((s) => s.setSearchIncludeHidden);
+  // Likewise the Hidden page searches hidden chats by definition.
+  const includeHidden = section === 'hidden' || hiddenBox;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
   // The query a "More results" fetch is running for — keyed by query so a new
@@ -137,36 +142,46 @@ export function ChatSearchResults({
     const ctrl = new AbortController();
     const timer = setTimeout(() => {
       setFailure(null);
-      api.searchChats(query, { limit: PAGE, fullText, includeArchived, signal: ctrl.signal }).then(
-        (r) => {
-          if (genRef.current !== gen) return;
-          setLoaded({
-            query,
-            fullText,
-            includeArchived,
-            hits: r.hits,
-            hosts: r.hosts,
-            nextOffset: r.nextOffset,
-          });
-        },
-        (e: unknown) => {
-          if (genRef.current !== gen) return;
-          setFailure({ query, message: messageOf(e) });
-        },
-      );
+      api
+        .searchChats(query, {
+          limit: PAGE,
+          fullText,
+          includeArchived,
+          includeHidden,
+          signal: ctrl.signal,
+        })
+        .then(
+          (r) => {
+            if (genRef.current !== gen) return;
+            setLoaded({
+              query,
+              fullText,
+              includeArchived,
+              includeHidden,
+              hits: r.hits,
+              hosts: r.hosts,
+              nextOffset: r.nextOffset,
+            });
+          },
+          (e: unknown) => {
+            if (genRef.current !== gen) return;
+            setFailure({ query, message: messageOf(e) });
+          },
+        );
     }, SEARCH_DEBOUNCE_MS);
     return () => {
       clearTimeout(timer);
       ctrl.abort();
     };
-  }, [query, fullText, includeArchived]);
+  }, [query, fullText, includeArchived, includeHidden]);
 
   // A result set is for one query AND one scope; flipping the box orphans it.
   const settled =
     loaded !== null &&
     loaded.query === query &&
     loaded.fullText === fullText &&
-    loaded.includeArchived === includeArchived
+    loaded.includeArchived === includeArchived &&
+    loaded.includeHidden === includeHidden
       ? loaded
       : null;
   const failed = failure !== null && failure.query === query ? failure : null;
@@ -176,29 +191,38 @@ export function ChatSearchResults({
     const gen = genRef.current;
     const q = settled.query;
     setMoreFor(q);
-    api.searchChats(q, { limit: PAGE, offset: settled.nextOffset, fullText, includeArchived }).then(
-      (r) => {
-        if (genRef.current !== gen) return;
-        setLoaded((prev) =>
-          prev !== null && prev.query === q
-            ? {
-                query: q,
-                fullText,
-                includeArchived,
-                hits: appendHits(prev.hits, r.hits),
-                hosts: r.hosts,
-                nextOffset: r.nextOffset,
-              }
-            : prev,
-        );
-        setMoreFor(null);
-      },
-      (e: unknown) => {
-        if (genRef.current !== gen) return;
-        setFailure({ query: q, message: messageOf(e) });
-        setMoreFor(null);
-      },
-    );
+    api
+      .searchChats(q, {
+        limit: PAGE,
+        offset: settled.nextOffset,
+        fullText,
+        includeArchived,
+        includeHidden,
+      })
+      .then(
+        (r) => {
+          if (genRef.current !== gen) return;
+          setLoaded((prev) =>
+            prev !== null && prev.query === q
+              ? {
+                  query: q,
+                  fullText,
+                  includeArchived,
+                  includeHidden,
+                  hits: appendHits(prev.hits, r.hits),
+                  hosts: r.hosts,
+                  nextOffset: r.nextOffset,
+                }
+              : prev,
+          );
+          setMoreFor(null);
+        },
+        (e: unknown) => {
+          if (genRef.current !== gen) return;
+          setFailure({ query: q, message: messageOf(e) });
+          setMoreFor(null);
+        },
+      );
   }
 
   const chats = useChatStore((s) => s.chats);
@@ -213,10 +237,11 @@ export function ChatSearchResults({
         ? localSearchHits(Object.values(chats), query, fullText).filter(
             (h) =>
               (section === undefined || h.section === section) &&
-              (includeArchived || h.section !== 'archived'),
+              (includeArchived || h.section !== 'archived') &&
+              (includeHidden || h.section !== 'hidden'),
           )
         : [],
-    [waiting, chats, query, fullText, includeArchived, section],
+    [waiting, chats, query, fullText, includeArchived, includeHidden, section],
   );
 
   // A host is named by what the surface already calls it (its self-reported
@@ -258,6 +283,17 @@ export function ChatSearchResults({
             onChange={(e) => setArchivedBox(e.target.checked)}
           />
           Archived
+        </label>
+      ) : null}
+      {section === undefined ? (
+        <label className="sb-search-scope">
+          <input
+            type="checkbox"
+            data-testid="chat-search-hidden"
+            checked={hiddenBox}
+            onChange={(e) => setHiddenBox(e.target.checked)}
+          />
+          Hidden
         </label>
       ) : null}
       {waiting ? (

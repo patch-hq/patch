@@ -243,6 +243,23 @@ describe('sidebar chat search', () => {
     expect(search.mock.calls[0]![1]).toMatchObject({ includeArchived: true });
   });
 
+  it('a Hidden box, unticked by default, re-runs the search including hidden chats when ticked', async () => {
+    search.mockResolvedValue(response({ hits: [hit({ chatId: 'srv' })], total: 1 }));
+    renderSidebar();
+    type('bus');
+    await settle();
+    const box = screen.getByTestId('chat-search-hidden');
+    expect(box).not.toBeChecked();
+    expect(search.mock.calls[0]![1]).toMatchObject({ includeHidden: false });
+
+    search.mockClear();
+    fireEvent.click(box);
+    expect(box).toBeChecked();
+    await settle();
+    expect(search).toHaveBeenCalledTimes(1);
+    expect(search.mock.calls[0]![1]).toMatchObject({ includeHidden: true });
+  });
+
   it('only the latest query’s response renders — a late answer to an older one is dropped', async () => {
     const first = deferred<ChatSearchResponse>();
     const second = deferred<ChatSearchResponse>();
