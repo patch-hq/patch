@@ -1963,8 +1963,10 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   if (opts.chatId !== undefined) liveRuns.set(opts.chatId, live);
   const toolNames = new Map<string, string>();
   const limitEvents = createLimitEventMemory();
+  let sawResult = false;
   try {
     for await (const msg of q) {
+      if ((msg as { type?: unknown } | null)?.type === 'result') sawResult = true;
       // A reattached turn replays claude's whole output so the per-turn state
       // below is rebuilt; what the previous host already handled is skipped.
       const plan = durable?.plan(msg) ?? { offset: undefined, skip: 0 };
@@ -1991,6 +1993,14 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
       }
       if (plan.offset !== undefined) durable?.noteConsumed(plan.offset, -1, persist);
       await returnFromPlanMode(q, envs, live.mode);
+    }
+    // A stream that closes without Claude's `result` was cut (the process was
+    // killed, the connection dropped), not finished. Said out loud so the turn
+    // is retried or reported, never settled as complete with no reason.
+    if (!sawResult && !opts.abortController.signal.aborted) {
+      throw new Error(
+        'The Claude Code process ended mid-turn without finishing (no result message). The stream was cut, not completed.',
+      );
     }
   } finally {
     durable?.release();
@@ -2204,6 +2214,11 @@ async function* persistentRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> 
       const next = await s.query.next();
       if (next.done === true) {
         persistSessions.delete(chatId);
+        if (!opts.abortController.signal.aborted) {
+          throw new Error(
+            'The Claude Code process ended mid-turn without finishing (no result message). The stream was cut, not completed.',
+          );
+        }
         return;
       }
       const msg: unknown = next.value;
