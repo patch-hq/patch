@@ -20,6 +20,11 @@ jobs:
     steps:
       # No checkout: pull_request_target runs with write access, so it never
       # touches the PR's code.
+      # GitHub never queues a PR whose auto-merge was switched on by the
+      # Actions bot, so this acts as Tom with a fine-grained PAT (this repo,
+      # pull requests + contents write). It expires: the run then fails on
+      # each new PR, visibly. Renew it in 1Password (Agents, patch-automerge-token)
+      # and the AUTOMERGE_TOKEN repo secret.
       - env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
         run: gh pr merge --auto "${{ github.event.pull_request.number }}" --repo "$GITHUB_REPOSITORY"

@@ -110,6 +110,11 @@ describe('H1 deploy artifacts — deploy command + backup scripts', () => {
     expect(tests).toMatch(/\n  tests:\n[\s\S]*?needs: \[verify\]/);
     // with PRs merged by themselves once green, and conflicts handed back.
     expect(read('.github/workflows/pr-automerge.yml')).toMatch(/gh pr merge --auto/);
+    // It acts as Tom: the bot's own token never gets a PR into the merge queue.
+    expect(read('.github/workflows/pr-automerge.yml')).toMatch(
+      /GH_TOKEN: \$\{\{ secrets\.AUTOMERGE_TOKEN \}\}/,
+    );
+    expect(read('.github/workflows/pr-automerge.yml')).not.toMatch(/github\.token/);
     // The merge queue sets the method and refuses -d/--delete-branch.
     expect(read('.github/workflows/pr-automerge.yml')).not.toMatch(
       /--delete-branch|--rebase|\s-d\s/,
