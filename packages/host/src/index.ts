@@ -2869,6 +2869,7 @@ async function startHost(
             ...(event.preferredAccountId !== undefined
               ? { preferredAccountId: event.preferredAccountId }
               : {}),
+            spawnedByChatId: event.sourceChatId,
           })
           .then((chatId) => {
             logger.info(

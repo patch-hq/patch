@@ -349,6 +349,8 @@ export interface ChatState {
   hidden: boolean;
   /** Hidden only until the running work completes (spec/04 § Hidden). */
   hideUntilComplete: boolean;
+  /** The chat whose `patch_spawn` created this one, mirrored from `meta.spawnedByChatId`. */
+  spawnedByChatId?: string;
   createdAt: number;
   /**
    * ms epoch of the user's own last activity on this chat (spec/14 § Sidebar
@@ -466,6 +468,7 @@ export function chatStateFromMeta(meta: ChatMeta): ChatState {
       meta.status === 'errored' ? ((meta.lastError as ChatLastError | null) ?? null) : null,
     context: meta.context ?? null,
     subagent: meta.subagent,
+    ...(meta.spawnedByChatId !== undefined ? { spawnedByChatId: meta.spawnedByChatId } : {}),
   };
 }
 

@@ -890,6 +890,11 @@ export interface SpawnChatOptions {
    * patch_delegate). Stamped onto `meta.subagent` and never cleared.
    */
   subagent?: { parentChatId: string; label: string; disallowedTools?: string[] };
+  /**
+   * The chat whose `patch_spawn` is creating this one. Stamped onto
+   * `meta.spawnedByChatId` and announced as `parentChatId` on `chat.spawned`.
+   */
+  spawnedByChatId?: string;
 }
 
 /**
@@ -4253,6 +4258,7 @@ export class Daemon {
         ? { preferredAccountId: req.preferredAccountId }
         : {}),
       ...(req.subagent ? { subagent: { ...req.subagent } } : {}),
+      ...(req.spawnedByChatId !== undefined ? { spawnedByChatId: req.spawnedByChatId } : {}),
       createdAt: now,
       updatedAt: now,
       lastUserActivity: now,
@@ -4314,6 +4320,7 @@ export class Daemon {
       lastUserActivity: now,
       lastError: null,
       subagent: req.subagent ? { ...req.subagent } : undefined,
+      ...(req.spawnedByChatId !== undefined ? { spawnedByChatId: req.spawnedByChatId } : {}),
     });
 
     if (req.localId !== undefined) {
@@ -4325,6 +4332,7 @@ export class Daemon {
       chatId,
       hostId: this.opts.hostId,
       folder,
+      ...(req.spawnedByChatId !== undefined ? { parentChatId: req.spawnedByChatId } : {}),
       // The model the chat STARTS on (spec/04 § Spawn); it can be changed later
       // (§ Model), and a change is announced on `chat.state`, not by re-emitting
       // this. Absent when this host has no model catalogue support configured
@@ -5900,6 +5908,7 @@ export class Daemon {
       chatId,
       hostId: this.opts.hostId,
       folder: state.folder,
+      ...(state.spawnedByChatId !== undefined ? { parentChatId: state.spawnedByChatId } : {}),
     });
     const activeBranchId = meta.activeBranchId ?? this.branchIdFor(chatId);
     const targetBranchId = branchId ?? activeBranchId;
@@ -8711,6 +8720,7 @@ export class Daemon {
       chatId,
       hostId: this.opts.hostId,
       folder,
+      ...(state.spawnedByChatId !== undefined ? { parentChatId: state.spawnedByChatId } : {}),
       ...(state.model !== undefined ? { model: state.model } : {}),
     });
     this.emitState(chatId);

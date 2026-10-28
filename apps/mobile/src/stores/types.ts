@@ -137,6 +137,11 @@ export interface ChatRow {
    */
   jobId: string | null;
   /**
+   * The chat whose `patch_spawn` created this one, from `chat.spawned`; absent
+   * for a chat a person or a job started. Drives the "Started by" bar.
+   */
+  parentChatId?: string;
+  /**
    * The chat's one-line status summary and what it is to the user (spec/06 §
    * The watch loop), mirrored from `chat.state` and the roster exactly as web
    * holds them. The Manager's Chats tab ranks and describes rows by them

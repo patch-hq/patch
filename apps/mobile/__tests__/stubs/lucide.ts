@@ -47,6 +47,7 @@ export const ListChecks = icon('ListChecks');
 export const MessageCircle = icon('MessageCircle');
 export const MessageCirclePlus = icon('MessageCirclePlus');
 export const MessageSquare = icon('MessageSquare');
+export const MessageSquareShare = icon('MessageSquareShare');
 export const Mic = icon('Mic');
 export const MicOff = icon('MicOff');
 export const MoreHorizontal = icon('MoreHorizontal');

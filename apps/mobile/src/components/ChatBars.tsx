@@ -23,6 +23,7 @@ import { ClaudeDisconnectedBar } from './chatBars/ClaudeDisconnectedBar';
 import { ArtifactBar } from './chatBars/ArtifactBar';
 import { BrowserHandoffBar } from './chatBars/BrowserHandoffBar';
 import { JobBar } from './chatBars/JobBar';
+import { ParentChatBar } from './chatBars/ParentChatBar';
 
 export function ChatBars({
   chatId,
@@ -38,6 +39,7 @@ export function ChatBars({
       <OfflineBanner />
       <HostOfflineBanner />
       {row ? <JobBar row={row} /> : null}
+      {row ? <ParentChatBar row={row} /> : null}
       {row ? <GoalBar row={row} /> : null}
       {row ? <TaskBar key={`tasks-${row.chatId}`} row={row} /> : null}
       {row ? <ReminderBar row={row} /> : null}

@@ -587,6 +587,8 @@ A search button in the chat header opens a bar under it: one input, an `n/total`
 
 Job bar. Mirrors web's: a job-created chat carries a bar after the connection banners reading `Run by "<job name>" job · <date, time>` (the job is fetched by id; while it loads the bar reads "Loading job…", and a failed fetch shows the error) with an Open job link to the job editor and a dismiss (×) that hides the bar for that chat until the app restarts. No bar on other chats.
 
+Parent chat bar. Mirrors web's: a chat another chat launched with `patch_spawn` carries a one-line bar after the job bar reading `Started by "<chat name>" chat` (`Started by another chat` when unknown on the device); tapping opens that chat, and a dismiss (×) hides it for that chat until the app restarts. No bar on other chats.
+
 ## Parity with web and desktop
 
 The desktop shell loads the web app, so every web feature is on desktop; what the shell adds (menu bar, global dictation hotkey, OS notifications with Reply/action buttons on macOS, the local host) is in `05-surfaces.md`. The phone is held to web feature for feature, and the things below are the only differences. Anything not listed here and missing from the phone is a bug.

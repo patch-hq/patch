@@ -409,6 +409,12 @@ export const ChatMeta = z
      */
     hideUntilComplete: z.boolean().optional(),
     /**
+     * The chat whose `patch_spawn` created this one; absent for a chat a person
+     * or a job started. Set once at spawn and never changed — surfaces show it
+     * as a "started by" banner.
+     */
+    spawnedByChatId: z.string().min(1).optional(),
+    /**
      * ms epoch the chat is snoozed until (spec/04 § Snooze), or `null`/absent
      * when it is not snoozed. Persisted so a snooze survives a host restart —
      * on hydrate a future value re-arms its wake timer and a lapsed one clears.

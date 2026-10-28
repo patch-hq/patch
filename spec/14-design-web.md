@@ -1633,3 +1633,5 @@ A chat can listen to a meeting. A **Meeting** button sits beside Call in the com
 - Job shape: `08-triggers-and-jobs.md`
 
 Job bar. A chat a job created (`jobId` set — `08-triggers-and-jobs.md` § Action) carries a bar directly under the chat header reading `Run by "<job name>" job · <date, time>` (the chat's last user activity, local, e.g. `21 Oct, 12:53`) (the job is fetched by id; while it loads the bar reads "Loading job…", and a failed fetch shows the error) with an Open job link to `/jobs/:id` and a dismiss (×) that hides the bar for that chat until the page reloads. A chat no job created has no bar.
+
+Parent chat bar. A chat another chat launched with `patch_spawn` carries a bar directly under the job bar's position reading `Started by "<chat name>" chat` (`Started by another chat` when that chat is not known to the surface) with an Open chat link to `/chats/:id` and a dismiss (×) that hides the bar for that chat until the page reloads. The host records the launching chat on the new chat's `meta.spawnedByChatId` and announces it as `parentChatId` on `chat.spawned`, on every replay too. A chat nobody launched, or a job or a person did, has no bar.

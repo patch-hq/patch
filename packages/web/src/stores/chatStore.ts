@@ -1657,6 +1657,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // either way `null` (never a job) is correct — an old host never
             // spawns jobs of its own for this field to be lying about.
             jobId: event.jobId ?? row.jobId ?? null,
+            ...(event.parentChatId !== undefined ? { parentChatId: event.parentChatId } : {}),
             // spec/04 § Spawn: set ONCE, at spawn, never re-derived later.
             // `event.model` is absent for an old-daemon frame (wire back-compat)
             // or a host with no model catalogue support — either way `null`
