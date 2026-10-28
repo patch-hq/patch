@@ -31,7 +31,7 @@ export function ContextRing({ chatId }: { chatId: string }): JSX.Element {
         title={title}
         onClick={() => setOpen((v) => !v)}
       >
-        <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden>
+        <svg width="18" height="18" viewBox="0 0 22 22" aria-hidden>
           <circle className="context-ring-track" cx="11" cy="11" r={R} />
           <circle
             className="context-ring-fill"

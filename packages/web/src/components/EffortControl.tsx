@@ -132,7 +132,7 @@ function Control({ chatId }: { chatId: string }): JSX.Element {
         }
         onClick={() => setOpen((v) => !v)}
       >
-        <Gauge size={16} aria-hidden />
+        <Gauge size={18} aria-hidden />
         {label !== '' ? (
           <span className="model-pill-label setting-word" data-collapsible="">
             {label}

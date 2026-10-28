@@ -6304,6 +6304,10 @@ button.view-file-download {
 .composer-actions.is-compact .composer-tools .call-btn {
   width: 32px;
 }
+/* The 32px call button's centre sits under the + in the field (left 4px, 32px). */
+.composer-actions.is-compact .composer-tools {
+  margin-left: 4px;
+}
 /* Icons alone carry no caret: the icon is the control. */
 .composer-actions.is-compact .permission-mode.has-icon,
 .composer-actions.is-compact .model-pill.as-crumb {
@@ -6311,6 +6315,14 @@ button.view-file-download {
 }
 .composer-actions.is-compact .permission-mode.has-icon ~ .permission-mode-caret,
 .composer-actions.is-compact .model-pill.has-icon .model-pill-caret {
+  display: none;
+}
+.composer-actions.is-compact .permission-mode.has-icon,
+.composer-actions.is-compact .model-pill.as-crumb.has-icon {
+  padding: 0 4px;
+}
+/* The model keeps its name on a phone, so its icon yields the room instead. */
+.composer-actions.is-compact .model-pill.as-crumb:not(.has-icon) > svg {
   display: none;
 }
 /* Approval mode (spec/14 § Composer — Approval mode) — the mode the next turn
@@ -6481,17 +6493,16 @@ button.view-file-download {
    fainter than the greyed out send next to it while running"). It was a plain
    ghost button sitting 6px from a filled accent-green Send: the one button you
    could not press dominated the one you urgently might. Stop now gets the
-   danger tint + border at rest, and Send drops to a flat outline while it is
+   solid danger fill (the same solid shape as an enabled Send, in the halt
+   colour, so the two read as one control in two states), and Send drops to a flat outline while it is
    merely a queue target (see .send-btn:disabled below). */
 .stop-btn {
-  color: var(--danger, #b4462f);
-  background: var(--danger-tint);
+  color: var(--on-accent);
+  background: var(--danger, #b4462f);
   border-color: var(--danger, #b4462f);
 }
 .stop-btn:hover {
-  background: var(--danger, #b4462f);
-  color: var(--on-accent);
-  border-color: var(--danger, #b4462f);
+  filter: brightness(0.92);
 }
 .kbd-hint {
   font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
@@ -13862,6 +13873,7 @@ button.chat-usage-crumb:hover {
 }
 .composer-actions .model-pill.as-crumb {
   height: 40px;
+  gap: 5px;
   padding: 0 8px;
   border-radius: var(--radius-sm);
   max-width: 100%;
