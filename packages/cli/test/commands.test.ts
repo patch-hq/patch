@@ -1072,6 +1072,7 @@ test('activity --limit and --messages-cursor go through the shared contract, nev
 
 test('activity --json: over the host socket it asks /internal/activity as the calling chat, no credential needed', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'patch-cli-act-'));
+  writeFileSync(join(dir, 'machine.json'), JSON.stringify({ serverUrl: 'http://127.0.0.1:1' }));
   const sock = join(dir, 'host.sock');
   let seen = '';
   const server: Server = createServer((req, res) => {

@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type IncomingMessage } from 'node:http';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Command } from 'commander';
@@ -42,6 +42,8 @@ async function withHostSocket(
     });
   });
   const dir = mkdtempSync(join(tmpdir(), 'patch-acct-cli-'));
+  // A host machine always has machine.json; the CLI reads the server URL from it.
+  writeFileSync(join(dir, 'machine.json'), JSON.stringify({ serverUrl: 'http://127.0.0.1:1' }));
   const socket = join(dir, 'host.sock');
   await new Promise<void>((r) => server.listen(socket, r));
   const saved = { ...process.env };
