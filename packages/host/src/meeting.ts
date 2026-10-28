@@ -291,6 +291,44 @@ export function isMicEcho(systemText: string, micTexts: string[]): boolean {
 /** The model complaining about its input instead of writing notes. */
 const META_TEXT = /\bno (new )?transcript\b|nothing (new )?to (process|summari[sz]e)/i;
 
+/** A topic that starts sooner than this after the one before it is a fragment of it. */
+const MIN_TOPIC_MS = 3 * 60_000;
+
+/**
+ * What Whisper emits for silence and noise: bracketed sound tags, bare
+ * punctuation, and its stock sign-offs. None of it is something anyone said.
+ */
+const TRANSCRIPT_NOISE =
+  /^(?:[[(][^\])]*[\])]|[\s.,!?…-]*|(?:you|thank you|thanks|thanks for watching|bye|okay|oh)[\s.!]*)$/i;
+
+const normText = (x: string): string => x.toLowerCase().replace(/\s+/g, ' ').trim();
+
+/**
+ * Folds each unfixed topic that begins within MIN_TOPIC_MS of the unfixed one
+ * before it into that one: its title and points become points there, so nothing
+ * said is lost, but one subject is no longer listed as a run of one-minute lines.
+ * Tom's fixed topics are never merged into or out of.
+ */
+function consolidateTopics(topics: MeetingTopic[]): void {
+  topics.sort((a, b) => a.at - b.at);
+  for (let i = 1; i < topics.length; ) {
+    const prev = topics[i - 1]!;
+    const t = topics[i]!;
+    if (prev.fixed || t.fixed || t.at - prev.at >= MIN_TOPIC_MS) {
+      i++;
+      continue;
+    }
+    const seen = new Set(prev.points.map(normText));
+    for (const point of [t.title, ...t.points]) {
+      if (seen.has(normText(point))) continue;
+      seen.add(normText(point));
+      prev.points.push(point);
+    }
+    prev.decided = prev.decided || t.decided;
+    topics.splice(i, 1);
+  }
+}
+
 export class MeetingError extends Error {
   override readonly name = 'MeetingError';
 }
@@ -526,7 +564,7 @@ export class MeetingManager {
           .filter((l) => l.speaker === 'you' && Math.abs(at - l.at) <= ECHO_WINDOW_MS)
           .map((l) => l.text);
       for (const { text, voice } of pieces) {
-        if (text === '') continue;
+        if (text === '' || TRANSCRIPT_NOISE.test(text)) continue;
         // Voice 0 is the owner's print; any other voice is someone else, even on the mic.
         const lineSpeaker =
           printed && voice !== undefined ? (voice === 0 ? 'you' : 'them') : speaker;
@@ -1109,7 +1147,7 @@ export class MeetingManager {
       }
     }
     // Points read oldest first however the model or an edit left them.
-    s.topics.sort((x, y) => x.at - y.at);
+    consolidateTopics(s.topics);
     for (const v of a.voices ?? []) {
       const name = v.name.trim();
       if (name === '' || s.voices?.[String(v.voice)] !== undefined) continue;
