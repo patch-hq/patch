@@ -1983,7 +1983,7 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
       // asking for the next — so a restart resumes exactly after it. Streaming
       // deltas are only kept in memory (written out as this process exits):
       // losing one to a hard kill re-sends a fragment of live text, nothing more.
-      const persist = (msg as { type?: unknown }).type !== 'stream_event';
+      const persist = (msg as { type?: unknown } | null)?.type !== 'stream_event';
       for (const [i, env] of envs.entries()) {
         if (i < plan.skip) continue;
         yield env;
