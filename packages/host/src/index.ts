@@ -31,6 +31,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import pino from 'pino';
+import { installCrashGuard } from './crashGuard.js';
 import {
   Daemon,
   chatInputToSendOptions,
@@ -471,6 +472,7 @@ async function startHost(
   const logger = testHooks?.logStream
     ? pino(loggerOptions, testHooks.logStream)
     : pino(loggerOptions);
+  installCrashGuard(logger);
 
   // 0. TCP /healthz — bound FIRST, before anything touches shared state. This
   //    port is the single-instance lock: a second host (launchd respawning
