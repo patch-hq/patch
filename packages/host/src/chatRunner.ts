@@ -15217,6 +15217,20 @@ export class Daemon {
   }
 
   /**
+   * Put the Manager and Speakers on the account's `specialThreadModel`
+   * (Settings → Manager; spec/06 § Session rotation). Each thread already on it
+   * is left alone; the rest switch like any mid-chat model change, from their
+   * next turn. A model this host does not offer is refused, naming it.
+   */
+  async applySpecialThreadModel(model: string): Promise<void> {
+    for (const chatId of Object.values(SPECIAL_THREAD_IDS)) {
+      const s = this.chatState.get(chatId);
+      if (!s || s.model === model) continue;
+      await this.setChatModel(chatId, model);
+    }
+  }
+
+  /**
    * Lock this chat to another shared account from its next turn, or (`null`)
    * hand the choice back to the account strategy (spec/10 § Backend
    * credentials — preferred account). Written through to meta so it outlives
