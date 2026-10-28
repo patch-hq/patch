@@ -6267,6 +6267,9 @@ button.view-file-download {
 }
 .composer-settings {
   gap: 2px;
+  /* Lets the model's name ellipsise rather than push stop/send off a narrow row. */
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .composer-settings > * {
   align-self: center;
@@ -13855,7 +13858,7 @@ button.chat-usage-crumb:hover {
 .composer-actions .model-picker.as-crumb {
   display: inline-flex;
   align-items: center;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   height: 40px;
   min-width: 0;
   max-width: 100%;
