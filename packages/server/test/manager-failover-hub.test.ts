@@ -3,7 +3,7 @@
 // Manager afterwards still sees what the new host's own log is missing.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
@@ -94,6 +94,8 @@ describe('Manager failover through the hub', () => {
     registry.bootstrapAccount({ keypair: user });
     registry.setDaemonKey({ hostId: 'home', publicKey: user.publicKey, issuedAt: 1 });
     registry.setDaemonKey({ hostId: 'other', publicKey: user.publicKey, issuedAt: 1 });
+    // The sweep is off until switched on.
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ sweepEnabled: true }));
     const link = new InProcessHostLink();
     link.setHostId(null);
     link.addOnlineHost('home');

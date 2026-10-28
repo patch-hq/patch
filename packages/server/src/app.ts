@@ -68,10 +68,10 @@ import { ChatMirror } from './chat-mirror.js';
 import { registerChatSearchRoutes } from './chat-search-routes.js';
 
 /**
- * How often the Manager sweep checks whether it's due (spec/06 § Sweep —
- * Gate). Well under the shortest realistic interval setting, so a due sweep
- * goes out promptly; the gate itself (interval + event-wake) is what
- * actually decides, this is just the clock resolution.
+ * How often the Manager sweep checks whether it's due (spec/06 § The
+ * sweep). Well under the shortest realistic interval setting, so a due sweep
+ * goes out promptly; the interval is what actually decides, this is just the
+ * clock resolution.
  */
 const MANAGER_SWEEP_TICK_MS = 10_000;
 // Minute-granularity (spec/06 § Session rotation compares HH:MM), so a much
@@ -87,7 +87,7 @@ import { registerSecretsRoutes } from './secrets-routes.js';
 import { registerWebBotAuthRoutes } from './web-bot-auth-routes.js';
 import { AccountConflictError } from './registry.js';
 import { FilterError } from './jobs/filter.js';
-import { InvalidJobIdError, isJobRunFailure } from './jobs/logs.js';
+import { InvalidJobIdError } from './jobs/logs.js';
 import { JobStore } from './jobs/store.js';
 import { JobDispatcher } from './jobs/dispatcher.js';
 import { JobChatLinks } from './jobs/chat-links.js';
@@ -2055,9 +2055,6 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     log.child({ component: 'job-alerts' }),
   );
   const jobLogs = new JobLogs(jobsDataDir, {
-    // spec/06 § Sweep — a job run failure wakes a sweep early (debounced)
-    // AND is itself a gate-changed condition, naming the chat it failed on
-    // (a dispatch failure with no chat landed has nothing to flag).
     onRun: (entry) => {
       if (jobAlerts.onRun(entry)) {
         // The sidebar banner is also a bell entry, linking the job and the run.
@@ -2070,7 +2067,6 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
           runTs: entry.ts,
         });
       }
-      if (isJobRunFailure(entry.status)) managerSweeper.jobRunFailed(entry.action?.chatId ?? null);
     },
   });
   jobDispatcher = new JobDispatcher({

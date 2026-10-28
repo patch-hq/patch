@@ -57,19 +57,9 @@ export function ManagerPage(): JSX.Element {
           />
           <span className="set-unit">min</span>
         </Row>
-        <Row title="Stalled after">
-          <PositiveNumberInput
-            ariaLabel="Stalled threshold (minutes)"
-            value={preferences.stalledThresholdMinutes}
-            disabled={!loaded}
-            testid="sweep-stalled-threshold"
-            onCommit={(next) => write({ stalledThresholdMinutes: next })}
-          />
-          <span className="set-unit">min with no new output</span>
-        </Row>
         <Row title="Messages per chat">
           <PositiveNumberInput
-            ariaLabel="Messages per chat in the digest"
+            ariaLabel="Messages read per chat"
             value={preferences.sweepMessagesPerChat}
             disabled={!loaded}
             testid="sweep-messages-per-chat"
@@ -92,7 +82,7 @@ export function ManagerPage(): JSX.Element {
           </select>
         </Row>
         <LayerEditor
-          title="Sweep prompt"
+          title="Principles"
           sub={preferences.sweepPrompt.split('\n')[0] ?? ''}
           initial={preferences.sweepPrompt}
           testid="sweep-prompt"
