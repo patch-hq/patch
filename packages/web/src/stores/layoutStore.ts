@@ -181,7 +181,7 @@ interface Found {
 }
 
 /** Depth-first search for a tab by key, anywhere under `node`. */
-function findTabByKey(node: PaneNode, key: string): Found | null {
+export function findTabByKey(node: PaneNode, key: string): Found | null {
   if (node.type === 'leaf') {
     const index = node.tabs.findIndex((t) => t.id === key);
     return index === -1 ? null : { pane: node, tab: node.tabs[index] as Tab, index };
@@ -327,7 +327,7 @@ interface LayoutState {
    * focused pane, in which case close it instead — a toggle, for a keyboard
    * chord that used to open/close a docked rail (⌥E, ⌃\`).
    */
-  toggleTab(descriptor: TabDescriptor): void;
+  toggleTab(descriptor: TabDescriptor, opts?: OpenTabOptions): void;
   clearPendingSeq(tabId: string): void;
   /** Close every tab in every pane whose descriptor matches `pred` — used
    *  when the thing a tab points at is gone (spec/04 § Delete). */
@@ -727,7 +727,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
       return findTabByKey(get().root, tabKey(descriptor));
     },
 
-    toggleTab(descriptor) {
+    toggleTab(descriptor, opts) {
       const state = get();
       const found = findTabByKey(state.root, tabKey(descriptor));
       if (
@@ -737,7 +737,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
       ) {
         get().closeTab(found.pane.id, found.tab.id);
       } else {
-        get().openTab(descriptor);
+        get().openTab(descriptor, opts);
       }
     },
 
