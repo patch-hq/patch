@@ -6327,7 +6327,11 @@ button.view-file-download {
 .composer-actions.is-compact .composer-tools .call-btn {
   width: 32px;
 }
-/* The 32px call button's centre sits under the + in the field (left 4px, 32px). */
+/* The 32px call button's centre sits under the + in the field (left 4px, 32px);
+   the row gap tightens to pay for that 4px so the row still fits. */
+.composer-actions.is-compact {
+  gap: 4px;
+}
 .composer-actions.is-compact .composer-tools {
   margin-left: 4px;
 }
