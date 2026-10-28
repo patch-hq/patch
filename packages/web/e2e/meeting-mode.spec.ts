@@ -710,6 +710,36 @@ test.describe('meeting mode — after', () => {
     );
   });
 
+  test('Delete asks first, then tells the host and the meeting leaves the chat', async ({
+    page,
+  }) => {
+    await page.goto(URL_ENDED);
+    page.once('dialog', (d) => d.dismiss());
+    await page.getByTestId('meeting-delete').click();
+    expect(await sent(page, 'meeting.control_request')).toEqual([]);
+    await expect(page.getByTestId('meeting-panel')).toBeVisible();
+
+    page.once('dialog', (d) => d.accept());
+    await page.getByTestId('meeting-delete').click();
+    expect(await sent(page, 'meeting.control_request')).toMatchObject([
+      { chatId: 'chat_tools', action: 'delete' },
+    ]);
+    // the host's answer: no meeting
+    await page.evaluate(() =>
+      (window as unknown as { __meetingStore: any }).__meetingStore
+        .getState()
+        .apply('chat_tools', null),
+    );
+    await expect(page.getByTestId('meeting-panel')).toHaveCount(0);
+    await expect(page.getByTestId('meeting-bar')).toHaveCount(0);
+    await expect(page.getByTestId('chat-stream')).toBeVisible();
+  });
+
+  test('a live meeting has no Delete; end it first', async ({ page }) => {
+    await page.goto(URL_LIVE);
+    await expect(page.getByTestId('meeting-delete')).toHaveCount(0);
+  });
+
   test('a live meeting cannot be folded', async ({ page }) => {
     await page.goto(URL_LIVE);
     await expect(page.getByTestId('meeting-fold')).toHaveCount(0);

@@ -245,6 +245,11 @@ export function endMeeting(chatId: string): void {
   ws().send({ type: 'meeting.control_request', chatId, action: 'end' });
 }
 
+/** Removes an ended meeting from the chat; the host answers with `meeting.state` null. */
+export function deleteMeeting(chatId: string): void {
+  ws().send({ type: 'meeting.control_request', chatId, action: 'delete' });
+}
+
 export function decideAction(
   chatId: string,
   actionId: string,
