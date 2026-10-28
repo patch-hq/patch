@@ -15,10 +15,15 @@ export interface SpeakerSnapshot {
   speaking: string[];
 }
 
+const CONTROL_WORD =
+  /^(start|stop|begin|end|turn on|turn off|mute|unmute|join|leave|share|open|close)(\s|$)/i;
+
 /** "Priya (Host)", "Priya (Guest)" → "Priya". Null for the local user. */
 function cleanName(raw: string): string | null {
   let name = raw.trim();
   if (/\((me|you)\)/i.test(name) || /^(you|me)$/i.test(name)) return null;
+  // Button and menu text from the call UI ("Start speaking"), not a person.
+  if (CONTROL_WORD.test(name)) return null;
   name = name.replace(
     /\s*\((host|co-host|guest|organizer|presenter|external|unverified)\)\s*$/i,
     '',
