@@ -1790,9 +1790,33 @@ function assertResultNotAnError(msg: unknown, rejected?: LimitFacts): void {
   if (text !== undefined) {
     throw new TurnFailedError(
       `Claude Code returned an error result: ${text}`,
-      mergeRejectedLimit(limitFactsOf(msg), rejected),
+      mergeRejectedLimit(limitFactsOf(msg), rejectedForWindowNamedIn(text, rejected)),
     );
   }
+}
+
+/**
+ * The earlier rejected event, unless the failure's own text names a DIFFERENT
+ * window. "You've hit your session limit · resets 7pm" after a rejected
+ * `seven_day` event is about the five-hour window; borrowing the event's reset
+ * put a weekly Tuesday on the account switch banner and sidelined accounts
+ * that were not out (28 Oct 2026). Text that names no window keeps the event.
+ */
+export function rejectedForWindowNamedIn(
+  text: string,
+  rejected: LimitFacts | undefined,
+): LimitFacts | undefined {
+  const type = rejected?.rateLimitType;
+  if (type === undefined) return rejected;
+  const named = /session limit/i.test(text)
+    ? 'five_hour'
+    : /(?:weekly|week) limit/i.test(text)
+      ? 'seven_day'
+      : undefined;
+  if (named === undefined) return rejected;
+  const eventWindow =
+    type === 'five_hour' ? 'five_hour' : type.startsWith('seven_day') ? 'seven_day' : type;
+  return eventWindow === named ? rejected : undefined;
 }
 
 /**
