@@ -7897,11 +7897,14 @@ export class Daemon {
    * ordinary `stopChat`; every other branch through `stopBranch`.
    */
   async stopAllBranches(chatId: string): Promise<void> {
-    await this.stopChat(chatId);
+    // Side branches are aborted first: `stopChat` waits for the active turn to
+    // wind down, and a side turn must not keep running meanwhile (or for ever,
+    // if that wait throws).
     const meta = this.opts.metaStore.read(chatId);
     for (const b of meta?.branches ?? []) {
       if (b.branchId !== meta?.activeBranchId) this.stopBranch(chatId, b.branchId);
     }
+    await this.stopChat(chatId);
   }
 
   /**
@@ -8843,6 +8846,14 @@ export class Daemon {
       });
     }
 
+    // Register the abort controller BEFORE the first await (the session load
+    // below, then the OAuth gate, which may await a token refresh) so a
+    // `stopChat` issued in the window between sendInput and the SDK call still
+    // aborts the in-flight query. Without this, a stop landing during either
+    // would find no aborter and silently no-op, and the turn would run on.
+    const abortController = new AbortController();
+    this.aborters.set(chatId, abortController);
+
     // spec/02 § Per-turn process / warm sessions — a session with no
     // conversation left once harness-written turns are stripped (a chat whose
     // only turn died: one prompt, answered by nothing or by a placeholder).
@@ -8858,10 +8869,16 @@ export class Daemon {
       typeof state.claudeSessionId === 'string' &&
       state.claudeSessionId.length > 0
     ) {
-      const loaded = await this.claudeSessionStoreFor(chatId, state.folder).load({
-        projectKey: chatId,
-        sessionId: state.claudeSessionId,
-      });
+      let loaded: Awaited<ReturnType<ReturnType<typeof createClaudeSessionStore>['load']>>;
+      try {
+        loaded = await this.claudeSessionStoreFor(chatId, state.folder).load({
+          projectKey: chatId,
+          sessionId: state.claudeSessionId,
+        });
+      } catch (err) {
+        this.aborters.delete(chatId);
+        throw err;
+      }
       if (loaded !== null && !hasConversation(loaded)) {
         this.opts.logger.info(
           { chatId, emptySessionId: state.claudeSessionId },
@@ -8876,14 +8893,6 @@ export class Daemon {
         });
       }
     }
-
-    // Register the abort controller BEFORE the (now async) OAuth gate so a
-    // `stopChat` issued in the window between sendInput and the SDK call still
-    // aborts the in-flight query (the OAuth gate may await a token refresh).
-    // Without this, a stop landing during OAuth resolution would find no
-    // aborter and silently no-op.
-    const abortController = new AbortController();
-    this.aborters.set(chatId, abortController);
 
     // A turn never starts while the machine is in a dark wake: it would die when
     // the machine drops back to sleep. Before the credential is read, so a long
