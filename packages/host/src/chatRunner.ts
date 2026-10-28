@@ -9702,6 +9702,7 @@ export class Daemon {
       state.claudeSessionId ? 'starting SDK query (resume)' : 'starting SDK query (fresh session)',
     );
 
+    let sawResult = false;
     const run = (async (): Promise<boolean> => {
       try {
         for (;;) {
@@ -9711,7 +9712,18 @@ export class Daemon {
               abortController.signal,
               (env) => env.type === 'tool_result',
             )) {
+              if (env.type === 'result' || env.type === 'error') sawResult = true;
               this.handleEnvelope(chatId, env, userMessageSeq);
+            }
+            // A stream that closes without the provider's final `result` (or an error
+            // it has already reported) did not
+            // finish the turn: the connection dropped or the process went away
+            // mid-work. Counting that as completed ended the turn in silence with
+            // the work half done, so it fails here, loudly, and takes the retry
+            // ladder like any other dropped stream. A stop closes the stream
+            // early on purpose.
+            if (!sawResult && !abortController.signal.aborted) {
+              throw new Error('Model stream ended before the turn finished (no final result)');
             }
             break;
           } catch (err) {

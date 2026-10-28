@@ -67,6 +67,7 @@ describe('C1 activity-transition matrix', () => {
         // submit the response below.
         await new Promise((r) => setTimeout(r, 50));
         yield { type: 'assistant' as const, content: 'done', sessionId: 'S' };
+        yield { type: 'result' as const, sessionId: 'S' };
       },
     };
     const { daemon, events, folder } = setup(sdk);
@@ -103,6 +104,7 @@ describe('C1 activity-transition matrix', () => {
             args: { file_path: 'f.txt', old_string: 'a', new_string: 'b' },
           },
         };
+        yield { type: 'result' as const, sessionId: 'S' };
         // No hold — the iterator returns immediately after the permission.
       },
     };

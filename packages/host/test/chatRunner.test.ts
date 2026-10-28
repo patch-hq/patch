@@ -3854,6 +3854,7 @@ describe('Host ChatRunner', () => {
           if (call === 1) {
             await new Promise((r) => setTimeout(r, 30));
             yield { type: 'assistant', content: 'ok', sessionId: 's1' };
+            yield { type: 'result', sessionId: 's1' };
             return;
           }
           // Triggers failing.run's synchronous throw on the first .next().
@@ -3889,6 +3890,7 @@ describe('Host ChatRunner', () => {
         async *run(opts) {
           await new Promise((r) => setTimeout(r, 20));
           yield { type: 'assistant', content: `reply:${opts.prompt}`, sessionId: 's1' };
+          yield { type: 'result', sessionId: 's1' };
         },
       };
       const daemon = new Daemon({
@@ -3919,6 +3921,7 @@ describe('Host ChatRunner', () => {
         async *run(opts) {
           await new Promise((r) => setTimeout(r, 20));
           yield { type: 'assistant', content: `reply:${opts.prompt}`, sessionId: 's1' };
+          yield { type: 'result', sessionId: 's1' };
         },
       };
       const committed: string[] = [];

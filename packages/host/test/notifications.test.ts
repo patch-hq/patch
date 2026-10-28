@@ -576,6 +576,7 @@ describe('preprocessInput injects <system-reminder> on next user reply', () => {
         run: async function* (opts) {
           captured.push(opts.prompt);
           yield { type: 'assistant', content: 'ok', sessionId: 'S' };
+          yield { type: 'result', sessionId: 'S' };
         },
       },
       oauthAccessToken: 'x',

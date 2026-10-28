@@ -91,6 +91,7 @@ async function startHost(opts: { home?: string; cwd?: string } = {}): Promise<St
       run: async function* (runOpts: { prompt: string }) {
         capturedPrompts.push(runOpts.prompt);
         yield { type: 'assistant', content: 'ok', sessionId: 'S1' };
+        yield { type: 'result', sessionId: 'S1' };
       },
     },
     oauthAccessToken: 'x',
