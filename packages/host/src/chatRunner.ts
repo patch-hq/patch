@@ -5323,9 +5323,9 @@ export class Daemon {
     return (
       `${candidates.length} chat${candidates.length === 1 ? '' : 's'} went idle:\n\n${sections.join('\n\n')}` +
       '\n\nReply with ONLY a JSON object, one entry per chat above:\n' +
-      '{"decisions": [{"chatId": "...", "folder": "...", "action": "answer|digest|leave", "message": "...", "question": "..."}]}\n' +
-      '"answer": a principle covers the question; "message" is what to send the chat. ' +
-      '"digest": it ends in a question no principle covers; "question" is that question in one plain line. ' +
+      '{"decisions": [{"chatId": "...", "folder": "...", "action": "answer|digest|leave", "message": "...", "question": "...", "reason": "..."}]}\n' +
+      '"answer": the standing instructions cover the question; "message" is what to send the chat. ' +
+      '"digest": it ends in a question you cannot answer; "question" is that question in one plain line and "reason" says why you could not answer it (e.g. the standing instructions do not cover it, or it needs a person to decide). ' +
       '"leave": no question. Give "chatId" and "folder" exactly as listed above. No prose outside the JSON.'
     );
   }
@@ -5413,7 +5413,7 @@ export class Daemon {
    * nothing. NO FALLBACK: no decider configured, or the decision call itself
    * failing, ends the run with `error` set and touches nothing.
    *
-   * Whether a question is one the principles cover is the prompt's call;
+   * Whether a question is one the standing instructions cover is the prompt's call;
    * nothing here ranks or second-guesses it. Code only checks that a message
    * reaches the chat it was written for, and that the chat is idle.
    */
@@ -5469,6 +5469,7 @@ export class Daemon {
     const byChatId = new Map(req.candidates.map((c) => [c.chatId, c]));
     const actions: ManagerSweepAction[] = [];
     const digestLines: string[] = [];
+    const digestPlain: string[] = [];
     const seen = new Set<string>();
     for (const decision of result.decisions) {
       const candidate = byChatId.get(decision.chatId);
@@ -5519,8 +5520,17 @@ export class Daemon {
           leave('no question given');
           continue;
         }
-        digestLines.push(`- ${this.chatLink(candidate)}: ${question}`);
-        actions.push({ chatId: candidate.chatId, action: 'digest', edge, detail: question });
+        // Every question passed on says why it was not answered; a reply that
+        // gives none is shown as having given none, not left out.
+        const reason = decision.reason?.trim() || 'no reason given';
+        digestLines.push(`- ${this.chatLink(candidate)}: ${question} (not answered: ${reason})`);
+        digestPlain.push(`${candidate.folder}: ${question} (not answered: ${reason})`);
+        actions.push({
+          chatId: candidate.chatId,
+          action: 'digest',
+          edge,
+          detail: `${question} (not answered: ${reason})`,
+        });
       } else {
         leave('nothing needed');
       }
@@ -5536,11 +5546,18 @@ export class Daemon {
         detail: 'no decision returned',
       });
     }
-    // One message listing everything open, batched (spec/06 § The sweep — job 3).
+    // One message listing everything open, however the run was timed: with the
+    // slider at "instant" it is a run per idle chat, so a list of one; batched,
+    // it is the whole interval's questions (spec/06 § The sweep — job 3). The
+    // same list goes on the Manager thread and out as a notification that opens it.
     if (digestLines.length > 0 && !cancelled()) {
-      this.noteOnManager(
-        `${digestLines.length} open question${digestLines.length === 1 ? '' : 's'}:\n${digestLines.join('\n')}`,
-      );
+      const heading = `${digestLines.length} open question${digestLines.length === 1 ? '' : 's'}`;
+      this.noteOnManager(`${heading}:\n${digestLines.join('\n')}`);
+      this.emit({
+        type: 'notify',
+        chatId: SPECIAL_THREAD_IDS.manager,
+        message: `${heading}:\n${digestPlain.join('\n')}`,
+      });
     }
     return {
       type: 'manager.sweep_result',

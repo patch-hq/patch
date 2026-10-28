@@ -9290,6 +9290,14 @@ button.set-row-open:focus-visible {
   color: var(--ink-3);
   font-size: 14px;
 }
+.set-slider {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.set-slider input[type='range'] {
+  width: 160px;
+}
 .set-chev {
   color: var(--ink-faint);
   font-size: 18px;

@@ -2,7 +2,7 @@
 // decision call: answer by delivering a message (locally or cross-host) and
 // noting it on the Manager thread, digest by one batched note listing the open
 // questions with links to their chats, leave by doing nothing. Whether a
-// question is covered by the principles is the prompt's call: nothing here
+// question is covered by the standing instructions is the prompt's call: nothing here
 // ranks or overrides what the decider returns, beyond checking the message
 // reaches the chat it was written for.
 
@@ -227,8 +227,18 @@ describe('runManagerSweep', () => {
   it('digest: open questions from several chats are ONE note on the Manager thread, each linking to its chat', async () => {
     const decide = vi.fn(async () =>
       result([
-        { chatId: 'chat-a', action: 'digest', question: 'Which database should this use?' },
-        { chatId: 'chat-b', action: 'digest', question: 'Delete the old branch?' },
+        {
+          chatId: 'chat-a',
+          action: 'digest',
+          question: 'Which database should this use?',
+          reason: 'needs a person to decide',
+        },
+        {
+          chatId: 'chat-b',
+          action: 'digest',
+          question: 'Delete the old branch?',
+          reason: 'the standing instructions do not cover it',
+        },
         { chatId: 'chat-c', action: 'leave' },
       ]),
     );
@@ -242,8 +252,16 @@ describe('runManagerSweep', () => {
       ]),
     );
     expect(out.actions).toMatchObject([
-      { chatId: 'chat-a', action: 'digest', detail: 'Which database should this use?' },
-      { chatId: 'chat-b', action: 'digest', detail: 'Delete the old branch?' },
+      {
+        chatId: 'chat-a',
+        action: 'digest',
+        detail: 'Which database should this use? (not answered: needs a person to decide)',
+      },
+      {
+        chatId: 'chat-b',
+        action: 'digest',
+        detail: 'Delete the old branch? (not answered: the standing instructions do not cover it)',
+      },
       { chatId: 'chat-c', action: 'leave' },
     ]);
     const notes = managerNotes(events);
@@ -253,9 +271,40 @@ describe('runManagerSweep', () => {
     expect(notes[0]).toContain('Which database should this use?');
     expect(notes[0]).toContain('(patch://chats/chat-b)');
     expect(notes[0]).toContain('Delete the old branch?');
+    expect(notes[0]).toContain('(not answered: needs a person to decide)');
+    expect(notes[0]).toContain('(not answered: the standing instructions do not cover it)');
     expect(notes[0]).not.toContain('chat-c');
+    // The same list goes out as one notification that opens the Manager thread.
+    const notifies = events.filter((e) => e.type === 'notify');
+    expect(notifies).toHaveLength(1);
+    expect(notifies[0]).toMatchObject({ type: 'notify', chatId: SPECIAL_THREAD_IDS.manager });
+    const text = (notifies[0] as { message: string }).message;
+    expect(text).toContain('2 open questions');
+    expect(text).toContain(
+      '/work/a: Which database should this use? (not answered: needs a person to decide)',
+    );
+    expect(text).not.toContain('patch://');
     // a note, never a turn
     expect(events.some((e) => e.type === 'chat.input')).toBe(false);
+  });
+
+  it('digest: a question with no reason is listed as having none, not dropped or invented', async () => {
+    const decide = vi.fn(async () =>
+      result([{ chatId: 'chat-x', action: 'digest', question: 'Ship it?' }]),
+    );
+    const { daemon, events, folder } = setupWithManager(decide);
+    await daemon.spawnChat({ folder });
+    await daemon.runManagerSweep(sweepReq([candidate({ chatId: 'chat-x' })]));
+    expect(managerNotes(events).join('\n')).toContain('Ship it? (not answered: no reason given)');
+  });
+
+  it('the reply format asks for a reason on every digest entry', async () => {
+    const decide = vi.fn(async () => result([]));
+    const { daemon } = setup(decide);
+    await daemon.runManagerSweep(sweepReq([candidate({ chatId: 'chat-x' })]));
+    const arg = decide.mock.calls[0]![0];
+    expect(arg.digest).toContain('"reason"');
+    expect(arg.digest).toContain('why you could not answer it');
   });
 
   it('digest: no open questions means no note at all', async () => {
@@ -264,6 +313,7 @@ describe('runManagerSweep', () => {
     await daemon.spawnChat({ folder });
     await daemon.runManagerSweep(sweepReq([candidate({ chatId: 'chat-x' })]));
     expect(managerNotes(events)).toEqual([]);
+    expect(events.some((e) => e.type === 'notify')).toBe(false);
   });
 
   it('digest: a digest entry with no question is left, not listed blank', async () => {
@@ -335,18 +385,18 @@ describe('runManagerSweep', () => {
     expect(events).toEqual([]);
   });
 
-  it('passes the principles prompt + model through, and the digest carries only facts and the reply format', async () => {
+  it('passes the standing instructions + model through, and the digest carries only facts and the reply format', async () => {
     const decide = vi.fn(async () => result([]));
     const { daemon } = setup(decide);
     await daemon.runManagerSweep(
       sweepReq([candidate({ chatId: 'chat-x', idleMinutes: 17 })], {
-        prompt: 'MY PRINCIPLES',
+        prompt: 'MY STANDING INSTRUCTIONS',
         model: 'claude-haiku-4-5-20251001',
       }),
     );
     expect(decide).toHaveBeenCalledTimes(1);
     const arg = decide.mock.calls[0]![0];
-    expect(arg.prompt).toBe('MY PRINCIPLES');
+    expect(arg.prompt).toBe('MY STANDING INSTRUCTIONS');
     expect(arg.model).toBe('claude-haiku-4-5-20251001');
     expect(arg.digest).toContain('chat-x');
     expect(arg.digest).toContain('went idle');

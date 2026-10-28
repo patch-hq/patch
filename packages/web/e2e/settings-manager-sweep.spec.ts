@@ -21,8 +21,20 @@ test.describe('Settings → Manager sweep', () => {
     expect((await patch).postDataJSON()).toEqual({ sweepEnabled: true });
   });
 
-  test('has interval, messages, model and principles, and no stall threshold', async ({ page }) => {
-    await expect(page.getByTestId('sweep-interval-minutes')).toHaveValue('30');
+  test('the delivery slider goes from Instant to batched digests', async ({ page }) => {
+    const slider = page.getByTestId('sweep-delivery');
+    const patch = page.waitForRequest(
+      (r) => r.method() === 'PATCH' && new URL(r.url()).pathname === '/api/settings',
+    );
+    await slider.fill('0');
+    await expect(page.getByTestId('sweep-delivery-label')).toHaveText('Instant');
+    expect((await patch).postDataJSON()).toEqual({ sweepIntervalMinutes: 0 });
+  });
+
+  test('has the delivery slider, messages, model and standing instructions, and no stall threshold', async ({
+    page,
+  }) => {
+    await expect(page.getByTestId('sweep-delivery-label')).toHaveText('Digest every 30 min');
     await expect(page.getByTestId('sweep-messages-per-chat')).toBeVisible();
     await expect(page.getByTestId('sweep-model')).toBeVisible();
     await expect(page.getByTestId('sweep-prompt-edit')).toBeVisible();
