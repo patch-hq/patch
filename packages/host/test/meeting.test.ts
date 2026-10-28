@@ -598,6 +598,72 @@ describe('MeetingManager', () => {
     expect(buildMeetingPrompt(analyse.mock.calls[1]![0])).toContain('"fixed":true');
   });
 
+  it('folds a topic that starts within three minutes of the one before into it, keeping its detail', async () => {
+    const m = make();
+    m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    await m.tick('c1'); // id1 at 5s
+    await m.ingestAudio('c1', 'mic', Buffer.from('b'));
+    analyse.mockResolvedValueOnce(
+      analysis({
+        topics: [
+          {
+            id: null,
+            title: 'Decision: January',
+            points: ['Own service', 'Sign-off'],
+            decided: true,
+            atSeconds: 90,
+          },
+        ],
+      }),
+    );
+    await m.tick('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('c'));
+    analyse.mockResolvedValueOnce(
+      analysis({
+        topics: [
+          { id: null, title: 'Registry', points: ['Skills list'], decided: false, atSeconds: 400 },
+        ],
+      }),
+    );
+    await m.tick('c1');
+    const topics = m.get('c1')!.topics;
+    expect(topics.map((t) => t.title)).toEqual(['Points ledger', 'Registry']);
+    expect(topics[0]).toMatchObject({ decided: true });
+    expect(topics[0]!.points).toEqual(['Own service', 'Decision: January', 'Sign-off']);
+  });
+
+  it('merges existing fragments when a pass lands, never touching fixed topics', async () => {
+    const m = make();
+    m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    analyse.mockResolvedValueOnce(
+      analysis({
+        topics: [
+          { id: null, title: 'A', points: ['a1'], decided: false, atSeconds: 0 },
+          { id: null, title: 'B', points: ['b1'], decided: false, atSeconds: 60 },
+          { id: null, title: 'C', points: ['c1'], decided: false, atSeconds: 120 },
+          { id: null, title: 'D', points: ['d1'], decided: false, atSeconds: 200 },
+        ],
+      }),
+    );
+    await m.tick('c1');
+    expect(m.get('c1')!.topics.map((t) => [t.at, t.title, t.points])).toEqual([
+      [0, 'A', ['a1', 'B', 'b1', 'C', 'c1']],
+      [200_000, 'D', ['d1']],
+    ]);
+  });
+
+  it('drops transcription noise lines', async () => {
+    const m = make();
+    m.start('c1');
+    for (const t of ['[Music]', '(silence)', 'Thank you.', '...', 'you', 'Real sentence here']) {
+      transcribe.mockResolvedValueOnce(t);
+      await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    }
+    expect(m.get('c1')!.transcript.map((l) => l.text)).toEqual(['Real sentence here']);
+  });
+
   it('an edit made while analysis is running still wins', async () => {
     const m = make();
     m.start('c1');
