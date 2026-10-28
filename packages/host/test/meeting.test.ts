@@ -126,6 +126,42 @@ describe('MeetingManager', () => {
     await tick;
   });
 
+  it('drops a system line that is the mic speech returning, in either clip order', async () => {
+    const m = make();
+    m.start('c1');
+    transcribe.mockResolvedValueOnce('so the ledger split needs to land before black friday');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    transcribe.mockResolvedValueOnce('So the ledger split needs to land before Black Fridy');
+    await m.ingestAudio('c1', 'system', Buffer.from('b'));
+    expect(m.get('c1')!.transcript.map((l) => l.speaker)).toEqual(['you']);
+
+    // System clip first, mic text arrives after.
+    transcribe.mockResolvedValueOnce('can we move the launch review to thursday afternoon');
+    await m.ingestAudio('c1', 'system', Buffer.from('c'));
+    expect(m.get('c1')!.transcript.map((l) => l.speaker)).toEqual(['you', 'them']);
+    transcribe.mockResolvedValueOnce('can we move the launch review to Thursday afternoon');
+    await m.ingestAudio('c1', 'mic', Buffer.from('d'));
+    expect(m.get('c1')!.transcript.map((l) => [l.speaker, l.text])).toEqual([
+      ['you', 'so the ledger split needs to land before black friday'],
+      ['you', 'can we move the launch review to Thursday afternoon'],
+    ]);
+  });
+
+  it('keeps genuine remote speech, short replies, and echo-like text outside the window', async () => {
+    const m = make();
+    m.start('c1');
+    transcribe.mockResolvedValueOnce('so the ledger split needs to land before black friday');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    transcribe.mockResolvedValueOnce('I think the sandbox tests are failing again');
+    await m.ingestAudio('c1', 'system', Buffer.from('b'));
+    transcribe.mockResolvedValueOnce('black friday');
+    await m.ingestAudio('c1', 'system', Buffer.from('c'));
+    clock += 60_000;
+    transcribe.mockResolvedValueOnce('so the ledger split needs to land before black friday');
+    await m.ingestAudio('c1', 'system', Buffer.from('d'));
+    expect(m.get('c1')!.transcript.map((l) => l.speaker)).toEqual(['you', 'them', 'them', 'them']);
+  });
+
   it("splits a Them clip into numbered voices and merges a voice's consecutive stretches", async () => {
     diarise = true;
     const m = make();
@@ -250,17 +286,6 @@ describe('MeetingManager', () => {
       ['you', undefined],
       ['them', undefined],
     ]);
-  });
-
-  it('does no text matching between sources: echo is removed from the audio before it arrives', async () => {
-    const m = make();
-    m.start('c1');
-    transcribe.mockResolvedValueOnce('So we should move the ledger split to January');
-    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
-    clock += 2000;
-    transcribe.mockResolvedValueOnce('So we should move the ledger split to January');
-    await m.ingestAudio('c1', 'system', Buffer.from('b'));
-    expect(m.get('c1')?.transcript.map((l) => l.speaker)).toEqual(['you', 'them']);
   });
 
   it('prompt asks for names and never calls the speaker "the user"', () => {
