@@ -110,7 +110,8 @@ test.describe('meeting mode — live', () => {
       await expect(page.getByTestId(id)).toHaveText('');
       await expect(page.getByTestId(id).locator('svg')).toHaveCount(1);
     }
-    await expect(page.getByRole('tablist')).toHaveCount(0);
+    // No Notes/Transcript tabs (the panes' own tab row is not one).
+    await expect(page.locator('[role="tablist"]:not([aria-label="Tabs"])')).toHaveCount(0);
     await expect(page.getByTestId('meeting-view-notes')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByTestId('meeting-pill')).toHaveText(/^3\d:\d\d$/);
     await expect(page.getByTestId('meeting-pill').locator('.mm-dot')).toBeVisible();

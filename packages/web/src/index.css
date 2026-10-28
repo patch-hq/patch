@@ -567,12 +567,12 @@ body {
 /* A single tab detached into its own window (`/tab-window`): the tab bar is the
    window's top row, so on the desktop shell the traffic lights float over the
    first tab's title. Same treatment as `.sb-brand` — clear the lights, seat the
-   tabs on the lights' centre-line (a 34px tab, so 20px above it puts its centre
-   at `--overlay-titlebar-lights-centre`), and make the bar the drag region with
-   the tabs punched back out. */
+   tabs on the lights' centre-line (a 31px tab sitting on the bar's bottom edge,
+   so a 53px bar puts its centre at `--overlay-titlebar-lights-centre`), and make
+   the bar the drag region with the tabs punched back out. */
 .overlay-titlebar [data-testid='tab-window'] .pane-tab-bar {
   padding-left: var(--overlay-titlebar-inset);
-  padding-top: 20px;
+  height: 53px;
   -webkit-app-region: drag;
 }
 .overlay-titlebar [data-testid='tab-window'] .pane-tab {
@@ -581,7 +581,7 @@ body {
 /* The top-left group's header is the row the lights float over once the
    sidebar is hidden: clear them (and the expand chevron). */
 .overlay-titlebar .three-col.sidebar-collapsed .chat-head.chat-head-group {
-  padding-left: 10px;
+  padding-left: 14px;
 }
 .overlay-titlebar
   .three-col.sidebar-collapsed
@@ -722,6 +722,16 @@ body {
   border-radius: 12px;
   overflow: hidden;
   position: relative;
+}
+/* A phone has no width to spare for gutters: the cards go full-bleed. */
+@media (max-width: 640px) {
+  .group-row {
+    padding: 0;
+  }
+  .group-card-framed {
+    border-radius: 0;
+    border-width: 1px 0;
+  }
 }
 .group-card-framed.group-card-focused {
   border-color: var(--accent-soft);
@@ -17377,7 +17387,8 @@ select.permission-mode.is-pending {
 .chat-head.chat-head-group {
   flex: 0 0 44px;
   box-sizing: border-box;
-  padding: 0 8px 0 10px;
+  /* Back/Forward pull themselves 12px left, so 14px keeps them inside it. */
+  padding: 0 8px 0 14px;
   gap: 6px;
   border-bottom: 1px solid var(--line-soft);
   background: var(--bg-elevated);
@@ -17410,8 +17421,17 @@ select.permission-mode.is-pending {
   container-type: normal;
   gap: 4px;
 }
-.chat-head-group .head-hamburger {
-  display: none;
+/* A group header is wider than its rail alone (it carries the tool buttons), so
+   it cannot be its own query container; the group card is. Narrow (the tool
+   buttons have already dropped to icons by 640px): the rail gives way to the
+   hamburger. */
+@container group (max-width: 480px) {
+  .chat-head-group .head-action-rail {
+    display: none;
+  }
+  .chat-head-group .head-hamburger {
+    display: inline-flex;
+  }
 }
 .group-tools {
   display: flex;
