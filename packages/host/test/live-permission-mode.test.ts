@@ -16,6 +16,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
       setPermissionMode,
       async *[Symbol.asyncIterator]() {
         await gate;
+        yield { type: 'result', subtype: 'success', is_error: false, result: 'done' };
       },
     };
   },
@@ -56,6 +57,7 @@ describe('setLiveRunPermissionMode', () => {
 
     release();
     await first;
+    while (!(await it.next()).done);
     await setLiveRunPermissionMode('c1', 'plan');
     expect(setPermissionMode).toHaveBeenCalledTimes(1);
   });
