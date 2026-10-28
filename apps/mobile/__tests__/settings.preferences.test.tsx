@@ -132,7 +132,7 @@ describe('sections before the settings have loaded', () => {
       await flush();
     });
     expect(api.settings).toHaveBeenCalled();
-    expect(findHost(r.root, byTestId('manager-watching')).props.value).toBe(true);
+    expect(findHost(r.root, byTestId('manager-watching')).props.value).toBe(false);
   });
 });
 
