@@ -51,6 +51,14 @@ describe('formatReset', () => {
   });
 });
 
+describe('formatReset on a distant day', () => {
+  it('carries the date, so "Tue" cannot be read as the Tuesday just gone', () => {
+    const wed = Date.UTC(2026, 9, 28, 14, 0); // Wed 28 Oct 2026
+    const nextTue = Date.UTC(2026, 10, 3, 15, 0);
+    expect(formatReset(nextTue, wed)).toMatch(/Tue.*(3 Nov|Nov 3)/);
+  });
+});
+
 describe('formatResetDetail', () => {
   it('carries the UTC alongside the local time, both labelled', () => {
     const detail = formatResetDetail(AT);
