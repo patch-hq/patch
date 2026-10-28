@@ -243,6 +243,43 @@ function mergeVoiceRuns(
   return out;
 }
 
+/** How far apart (ms of meeting time) a mic line and a system line can be and still be one utterance. */
+const ECHO_WINDOW_MS = 30_000;
+/** Shorter lines are too easily genuine ("yes", "right, thanks"), so they are never treated as echo. */
+const ECHO_MIN_WORDS = 4;
+const ECHO_MIN_OVERLAP = 0.6;
+
+const echoWords = (t: string): string[] =>
+  t
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s']/gu, ' ')
+    .split(/\s+/)
+    .filter((w) => w !== '');
+
+/** Within one edit: Whisper garbles a word rather than replacing it. */
+function nearWord(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (a.length < 4 || b.length < 4 || Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  if (a.length === b.length) return a.slice(i + 1) === b.slice(i + 1);
+  const [long, short] = a.length > b.length ? [a, b] : [b, a];
+  return long.slice(i + 1) === short.slice(i);
+}
+
+/**
+ * True when a system-audio line is the owner's own mic speech coming back through the
+ * speakers: most of its words appear in the mic text from the same few seconds.
+ */
+export function isMicEcho(systemText: string, micTexts: string[]): boolean {
+  const words = echoWords(systemText);
+  if (words.length < ECHO_MIN_WORDS) return false;
+  const pool = micTexts.flatMap(echoWords);
+  if (pool.length === 0) return false;
+  const hit = words.filter((w) => pool.some((p) => nearWord(w, p))).length;
+  return hit / words.length >= ECHO_MIN_OVERLAP;
+}
+
 /** The model complaining about its input instead of writing notes. */
 const META_TEXT = /\bno (new )?transcript\b|nothing (new )?to (process|summari[sz]e)/i;
 
@@ -476,11 +513,38 @@ export class MeetingManager {
         return;
       }
       let added = false;
+      const recentMic = () =>
+        rt.state.transcript
+          .filter((l) => l.speaker === 'you' && Math.abs(at - l.at) <= ECHO_WINDOW_MS)
+          .map((l) => l.text);
       for (const { text, voice } of pieces) {
         if (text === '') continue;
         // Voice 0 is the owner's print; any other voice is someone else, even on the mic.
         const lineSpeaker =
           printed && voice !== undefined ? (voice === 0 ? 'you' : 'them') : speaker;
+        // The owner's voice returning through system audio is not a second speaker.
+        if (lineSpeaker === 'them' && source === 'system' && isMicEcho(text, recentMic())) continue;
+        if (lineSpeaker === 'you' && source === 'mic') {
+          // The system clip can land first: retract its echo now the mic text is known.
+          // Only lines no pass has consumed yet, so the progress markers stay valid.
+          const floor = Math.max(
+            rt.analysedUpTo,
+            rt.deliveredUpTo,
+            rt.correctedUpTo,
+            rt.researchedUpTo,
+          );
+          const before = rt.state.transcript.length;
+          rt.state.transcript = rt.state.transcript.filter(
+            (l, i) =>
+              !(
+                l.speaker === 'them' &&
+                i >= floor &&
+                Math.abs(at - l.at) <= ECHO_WINDOW_MS &&
+                isMicEcho(l.text, [text])
+              ),
+          );
+          if (rt.state.transcript.length !== before) added = true;
+        }
         rt.state.transcript.push({
           at,
           speaker: lineSpeaker,
