@@ -27,6 +27,7 @@ import { readKey, type KeySource } from './keySource.js';
 export interface WhisperCredentialConfig {
   whisperBackend: WhisperBackendKind;
   groqApiKey?: string | undefined;
+  elevenlabsApiKey?: string | undefined;
   whisperLocalSidecarUrl?: string | undefined;
   whisperModelPath?: string | undefined;
 }
@@ -54,6 +55,15 @@ export function validateWhisperCredentials(config: WhisperCredentialConfig): voi
         throw new Error(
           'Speech-to-text is set to groq (the default) but no Groq key is set. ' +
             'Add it in Settings → Providers, or switch to local speech-to-text. ' +
+            'Refusing to start in a degraded mode (NO SILENT FALLBACK).',
+        );
+      }
+      return;
+    case 'elevenlabs':
+      if (!config.elevenlabsApiKey || config.elevenlabsApiKey.length === 0) {
+        throw new Error(
+          'WHISPER_BACKEND=elevenlabs but ELEVEN_LABS_API_KEY is missing. ' +
+            'Set ELEVEN_LABS_API_KEY, or switch WHISPER_BACKEND. ' +
             'Refusing to start in a degraded mode (NO SILENT FALLBACK).',
         );
       }
@@ -110,7 +120,24 @@ export class PartialBudgetExhaustedError extends Error {
   override readonly name = 'PartialBudgetExhaustedError';
 }
 
+/** A live transcription of one utterance, fed PCM as it is spoken. */
+export interface LiveTranscriptStream {
+  push(pcm: Int16Array): void;
+  close(): void;
+  /** Audio seconds sent, which is what the provider bills. */
+  readonly audioSeconds: number;
+}
+
 export interface WhisperBackend {
+  /**
+   * Streaming live words for an utterance (ElevenLabs Scribe). When present the
+   * voice session uses it instead of re-reading the growing prefix, which on a
+   * paid provider would bill that prefix again every second.
+   */
+  openLiveStream?(
+    onText: (text: string) => void,
+    onError: (message: string) => void,
+  ): LiveTranscriptStream;
   /**
    * Whether interim transcripts of an utterance still in progress are worth
    * attempting on this backend. NOT a claim that the backend streams — none of
@@ -172,10 +199,11 @@ export class UnsupportedClipFormatError extends Error {
   }
 }
 
-export type WhisperBackendKind = 'off' | 'groq' | 'local' | 'mock';
+export type WhisperBackendKind = 'off' | 'groq' | 'elevenlabs' | 'local' | 'mock';
 
 export interface CreateWhisperOptions {
-  backend: WhisperBackendKind;
+  /** `elevenlabs` is built by index.ts (elevenlabs-stt.ts imports this file). */
+  backend: Exclude<WhisperBackendKind, 'elevenlabs'>;
   logger: Logger;
   /**
    * GROQ_API_KEY (only required when backend === 'groq'). Read per request, so

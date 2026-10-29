@@ -63,14 +63,15 @@ export type VoiceBackend = z.infer<typeof VoiceBackend>;
 /**
  * Where dictation's words come from (spec/07 § Dictation engines), named by
  * where the work happens: `device` — the phone's own speech recogniser, on the
- * phone; `deepgram` — streamed to Deepgram as it is spoken; `whisper` — the
+ * phone; `deepgram` / `elevenlabs` — streamed to Deepgram or ElevenLabs Scribe
+ * as it is spoken; `whisper` — the
  * host's Whisper, which re-reads the recording so far for the live words and
  * the whole clip once it ends.
  */
-export const PhoneDictationEngine = z.enum(['device', 'deepgram', 'whisper']);
+export const PhoneDictationEngine = z.enum(['device', 'deepgram', 'elevenlabs', 'whisper']);
 export type PhoneDictationEngine = z.infer<typeof PhoneDictationEngine>;
 /** A computer has no recogniser of its own. */
-export const ComputerDictationEngine = z.enum(['deepgram', 'whisper']);
+export const ComputerDictationEngine = z.enum(['deepgram', 'elevenlabs', 'whisper']);
 export type ComputerDictationEngine = z.infer<typeof ComputerDictationEngine>;
 export type DictationEngine = PhoneDictationEngine;
 
@@ -208,7 +209,7 @@ export function modesShareVoiceEngine(
 }
 
 /** A backend that runs on a provider's API and so needs a key on the host. */
-export type HostedVoiceBackend = Exclude<VoiceBackend, 'local'> | 'deepgram';
+export type HostedVoiceBackend = Exclude<VoiceBackend, 'local'> | 'deepgram' | 'elevenlabs';
 
 /** The env var each hosted backend's key may come from on a host. Logs only — never shown to a person. */
 export const VOICE_BACKEND_KEY_ENV: Record<HostedVoiceBackend, string> = {
@@ -243,7 +244,7 @@ export const VOICE_SURFACE_LABEL: Record<VoiceSurface, string> = {
 export interface VoiceKeys {
   gemini: boolean;
   openai: boolean;
-  /** Absent on a host older than ElevenLabs Agents, which cannot run it. */
+  /** Absent on a host older than ElevenLabs (Agents, Scribe), which cannot run it. */
   elevenlabs?: boolean;
   /** Absent on a host older than Deepgram dictation, which cannot run it. */
   deepgram?: boolean;
@@ -291,6 +292,13 @@ export function voiceSurfacesMissingKey(
   const { phone, computer } = config.dictation;
   if ((phone === 'deepgram' || computer === 'deepgram') && keys.deepgram !== true) {
     out.push({ surface: 'dictation', backend: 'deepgram', env: VOICE_BACKEND_KEY_ENV.deepgram });
+  }
+  if ((phone === 'elevenlabs' || computer === 'elevenlabs') && keys.elevenlabs !== true) {
+    out.push({
+      surface: 'dictation',
+      backend: 'elevenlabs',
+      env: VOICE_BACKEND_KEY_ENV.elevenlabs,
+    });
   }
   const surfaces: ConversationSurface[] = ['device', 'hands-free', 'call'];
   for (const surface of surfaces) {
@@ -640,6 +648,8 @@ export const AudioErrorCode = z.enum([
    * answered by quietly transcribing with another engine.
    */
   'deepgram_unavailable',
+  /** The same, for dictation on the `elevenlabs` (Scribe) engine. */
+  'elevenlabs_unavailable',
 ]);
 export type AudioErrorCode = z.infer<typeof AudioErrorCode>;
 

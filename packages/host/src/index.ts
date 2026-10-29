@@ -250,6 +250,7 @@ import {
   pickDictationTranscriber,
   type DictationTranscribers,
 } from './audio/hosted-stt.js';
+import { ElevenLabsScribeBackend } from './audio/elevenlabs-stt.js';
 import { createSileroVadFactory, validateVadModel, MockVad, type Vad } from './audio/vad.js';
 import { DeviceRegistry } from './devices/registry.js';
 import { PresenceRegistry } from './devices/presence.js';
@@ -437,8 +438,19 @@ async function startHost(
     ...(config.audio.whisperBackend === 'groq'
       ? { requiredToStart: { groq: 'This host transcribes with Groq (WHISPER_BACKEND=groq)' } }
       : {}),
+    ...(config.audio.whisperBackend === 'elevenlabs'
+      ? {
+          requiredToStart: {
+            elevenlabs: 'This host transcribes with ElevenLabs (WHISPER_BACKEND=elevenlabs)',
+          },
+        }
+      : {}),
   });
-  validateWhisperCredentials({ ...config.audio, groqApiKey: providerKeys.get('groq') });
+  validateWhisperCredentials({
+    ...config.audio,
+    groqApiKey: providerKeys.get('groq'),
+    elevenlabsApiKey: providerKeys.get('elevenlabs'),
+  });
   // spec/07 § Python sidecar lifecycle: KOKORO_MODEL_PATH must be validated at
   // startup — a missing model file aborts boot with a clear error rather than
   // silently 500ing the first TTS turn. Same fail-loud contract as Whisper.
@@ -4871,32 +4883,41 @@ async function startHost(
   // 8. Voice infrastructure (group 13): audio WSS at :3003/audio/<sessionId>.
   //    (The server-link dial happens earlier — right after the host graph is
   //    wired — so surfaces connect promptly rather than waiting on this stack.)
-  whisper = createWhisper({
-    backend: config.audio.whisperBackend,
-    logger: logger.child({ component: 'whisper' }),
-    groqApiKey: () => providerKeys.get('groq'),
-    ...(config.audio.whisperLocalSidecarUrl !== undefined
-      ? { localSidecarUrl: config.audio.whisperLocalSidecarUrl }
-      : {}),
-    ...(config.audio.whisperModelPath !== undefined
-      ? { localModelPath: config.audio.whisperModelPath }
-      : {}),
-    // Spawn the faster-whisper sidecar from its package dir when local mode is
-    // self-hosted (no external URL). WHISPER_SIDECAR_CWD overrides for docker.
-    ...(config.audio.whisperBackend === 'local' && config.audio.whisperLocalSidecarUrl === undefined
-      ? {
-          localSidecarCwd:
-            process.env['WHISPER_SIDECAR_CWD'] ??
-            resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'whisper-sidecar'),
-        }
-      : {}),
-  });
+  const whisperLog = logger.child({ component: 'whisper' });
+  if (config.audio.whisperBackend === 'elevenlabs') {
+    whisper = new ElevenLabsScribeBackend({
+      logger: whisperLog,
+      apiKey: () => providerKeys.get('elevenlabs'),
+    });
+  } else
+    whisper = createWhisper({
+      backend: config.audio.whisperBackend,
+      logger: logger.child({ component: 'whisper' }),
+      groqApiKey: () => providerKeys.get('groq'),
+      ...(config.audio.whisperLocalSidecarUrl !== undefined
+        ? { localSidecarUrl: config.audio.whisperLocalSidecarUrl }
+        : {}),
+      ...(config.audio.whisperModelPath !== undefined
+        ? { localModelPath: config.audio.whisperModelPath }
+        : {}),
+      // Spawn the faster-whisper sidecar from its package dir when local mode is
+      // self-hosted (no external URL). WHISPER_SIDECAR_CWD overrides for docker.
+      ...(config.audio.whisperBackend === 'local' &&
+      config.audio.whisperLocalSidecarUrl === undefined
+        ? {
+            localSidecarCwd:
+              process.env['WHISPER_SIDECAR_CWD'] ??
+              resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'whisper-sidecar'),
+          }
+        : {}),
+    });
   // Shared settings may have landed before the backend existed.
   if (meetingTranscriptionModel !== '') whisper.useModel?.(meetingTranscriptionModel);
   dictationTranscribers = createDictationTranscribers({
     logger: logger.child({ component: 'hosted-stt' }),
     local: whisper,
     deepgramApiKey: () => providerKeys.get('deepgram'),
+    elevenlabsApiKey: () => providerKeys.get('elevenlabs'),
   });
   // spec/02 § Optional components: voice is a component the user installs on a
   // machine, and installing it is what turns it ON. A machine that has installed
@@ -5149,6 +5170,7 @@ async function startHost(
     getVoiceConfig: () => voiceConfig,
     geminiApiKey: () => providerKeys.get('gemini'),
     deepgramApiKey: () => providerKeys.get('deepgram'),
+    elevenlabsApiKey: () => providerKeys.get('elevenlabs'),
     ...(config.audio.geminiLiveModel ? { geminiLiveModel: config.audio.geminiLiveModel } : {}),
     ...(config.audio.geminiLiveModelHeavy
       ? { geminiLiveModelHeavy: config.audio.geminiLiveModelHeavy }
