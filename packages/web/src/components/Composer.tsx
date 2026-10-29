@@ -1435,8 +1435,15 @@ export const Composer = forwardRef(function Composer(
     // The preview's job is over the moment the gesture ends: from here the
     // authoritative transcript is the only text that may reach the input. The
     // last interim words stay drawn until it lands (cleared in `finally`).
-    stopPreview();
+    // On a streaming engine the live session IS the transcript, so it stays
+    // open until the host has answered the finish below.
+    const streaming =
+      usePreferencesStore.getState().preferences.voiceConfig.dictation.computer === 'deepgram';
+    const livePreview = streaming ? previewRef.current : null;
+    if (livePreview) previewRef.current = null;
+    else stopPreview();
     if (!rec) {
+      livePreview?.stop();
       setLivePartial('');
       setMicState('idle');
       pushError('voice: nothing recorded (released too quickly?). Hold a beat longer.');
@@ -1445,8 +1452,20 @@ export const Composer = forwardRef(function Composer(
     setMicState('transcribing');
     try {
       const clip = await rec.stop();
-      const doTranscribe = transcribeClip ?? ((c: Blob) => api.voiceTranscribe(c));
-      const { transcript } = await doTranscribe(clip);
+      let transcript: string;
+      if (streaming) {
+        // NO FALLBACK: a stream that is gone fails the dictation; the clip is
+        // not read by another engine.
+        if (!livePreview) throw new Error('the live dictation never opened');
+        try {
+          transcript = await livePreview.finish();
+        } finally {
+          livePreview.stop();
+        }
+      } else {
+        const doTranscribe = transcribeClip ?? ((c: Blob) => api.voiceTranscribe(c));
+        ({ transcript } = await doTranscribe(clip));
+      }
       const t = transcript.trim();
       const cur = valueRef.current;
       const next = t && cur.trim().length > 0 ? `${cur.trimEnd()} ${t}` : t || cur;
