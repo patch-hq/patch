@@ -74,7 +74,7 @@ export type ChatActivity = z.infer<typeof ChatActivity>;
 /**
  * Who started a turn (spec/09 § Whose turn it was). `user` is a person putting
  * a turn in — any surface's composer, voice, a fork or a side thread.
- * `machine` is the host starting a turn for the chat on its own: a self-wake
+ * `host` is the host starting a turn for the chat on its own: a self-wake
  * firing, the todo list advancing, another agent's `patch_send_to` landing.
  *
  * It exists so the server can tell a chat finishing work the user is waiting on
@@ -228,9 +228,9 @@ export const ChatErrorCode = z.enum([
   // chat does not have, or one whose first turn hasn't produced a session id
   // yet, so there is no track to switch TO.
   'branch_not_found',
-  // spec/04 § Spawn — a host-addressed frame named a machine this account has
+  // spec/04 § Spawn — a host-addressed frame named a host this account has
   // not registered. Refused at the server ingress with the offending id in the
-  // message. NO FALLBACK to the only/attached host: with one machine online
+  // message. NO FALLBACK to the only/attached host: with one host online
   // that substitution is invisible, and with two it silently runs the work on
   // the wrong filesystem.
   'host_not_registered',
@@ -239,21 +239,21 @@ export const ChatErrorCode = z.enum([
   // dropped at the ingress is indistinguishable from an edit that did not save.
   'invalid_frame',
   // spec/02 § Optional components — a component operation named a component
-  // that machine does not offer. Named, never ignored.
+  // that host does not offer. Named, never ignored.
   'component_not_offered',
   // spec/10 § Backend credentials — a credential operation named a backend that
-  // machine does not have.
+  // host does not have.
   'backend_not_found',
   // spec/04 § Folders — a folder-registry edit named a path that is empty or
-  // does not exist on that machine.
+  // does not exist on that host.
   'folder_invalid',
-  // spec/04 § Spawn — a spawn naming no model landed on a machine that has
+  // spec/04 § Spawn — a spawn naming no model landed on a host that has
   // never read a model catalogue, so it has no last-used model to take. Said
   // out loud; NEVER silently defaulted to a hard-coded model id.
   'no_model_catalogue',
   // spec/02 § Claude Code settings — a `host.claude_settings_set` wrote text
   // that does not parse as JSON, or a `host.claude_memory_delete` named a
-  // memory entry that machine does not have.
+  // memory entry that host does not have.
   'claude_settings_invalid',
   // RETIRED. A spawn used to be able to name the Claude account its chat ran
   // on, and this refused an id the host had no stored account for. A chat has
@@ -488,7 +488,7 @@ const forSurfaceIdField = { forSurfaceId: z.string().min(1).optional() };
 // Host addressing (spec/03 § Host events, spec/02 § Host identity)
 //
 // There is no longer "the host" — there are N hosts, each running one. Every
-// event that describes, addresses, or originates from a machine names it with
+// event that describes, addresses, or originates from a host names it with
 // `hostId`. A frame that omits it is rejected by validation rather than
 // routed to whichever host happens to be attached (NO FALLBACK): silently
 // picking a host is how a chat ends up running on the wrong filesystem.
@@ -501,7 +501,7 @@ export type HostId = z.infer<typeof HostId>;
 const hostIdField = { hostId: HostId };
 
 /**
- * Host addressing on a frame whose chat ALREADY pinned its machine at
+ * Host addressing on a frame whose chat ALREADY pinned its host at
  * `chat.spawned`. Producers always set it — it is optional only so a consumer
  * decoding a frame from a peer that predates it is not left unable to read the
  * rest of the state.
@@ -1314,9 +1314,9 @@ export const ChatStateEvent = z
      */
     lastSeq: z.number().int().nonnegative().optional(),
     /**
-     * The machine this chat is pinned to (spec/03 § Host events). `chat.spawned`
+     * The host this chat is pinned to (spec/03 § Host events). `chat.spawned`
      * establishes it for the chat's life; carrying it here too means a surface
-     * that groups its sidebar by machine never has to hold a chatId → machine
+     * that groups its sidebar by host never has to hold a chatId → host
      * map of its own, and the server's mirror never has to guess when a
      * `chat.state` is the first thing it hears about a chat.
      */
@@ -1377,7 +1377,7 @@ export const ChatStateEvent = z
     /**
      * Who started the turn this state belongs to (spec/09 § Whose turn it was).
      * The server reads it on the running → idle edge to decide whether the turn
-     * settling is worth a chat-completion notification: a `machine` turn — a
+     * settling is worth a chat-completion notification: a `host` turn — a
      * self-wake tick, a todo auto-advance, an agent's `send_to` — is silent.
      *
      * Optional, and absent means `user`. A host predating the field never
@@ -1535,7 +1535,7 @@ export const ChatStateEvent = z
      * back-compat.
      *
      * A `question` or `report` set by the agent's own tool call is DECLARED and
-     * outlives further machine turns — see `chatRunner.declareStatus`. Only a
+     * outlives further host turns — see `chatRunner.declareStatus`. Only a
      * user turn clears it, because only a user turn is evidence the user saw it.
      */
     statusKind: StatusKind.nullable().optional(),
@@ -1631,9 +1631,9 @@ export const ChatStateEvent = z
      */
     resumeKind: z.enum(['rate_limit', 'overloaded']).optional(),
     /**
-     * ms-epoch since when this chat's turn has been held because its machine is
+     * ms-epoch since when this chat's turn has been held because its host is
      * in a dark wake (a Mac with its lid shut, waking briefly for maintenance).
-     * The turn runs as soon as the machine is fully awake; `null` when nothing
+     * The turn runs as soon as the host is fully awake; `null` when nothing
      * is held. Optional for back-compat: absent means the host predates it.
      */
     waitingForWakeSince: z.number().int().nullable().optional(),
@@ -1989,7 +1989,7 @@ export type HostOfflineEvent = z.infer<typeof HostOfflineEvent>;
 
 /**
  * Host → server: one backend's credential on one host is missing or expired
- * (spec/10 § Backend credentials). Names BOTH the machine and the backend —
+ * (spec/10 § Backend credentials). Names BOTH the host and the backend —
  * a host with two backends can be authenticated on one and not the other, and
  * Settings offers that backend's routes to a credential.
  */
@@ -2063,7 +2063,7 @@ export type SendToPhoneAfter = z.infer<typeof SendToPhoneAfter>;
 const TimeOfDay = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 
 /**
- * Every setting that is not tied to one machine (spec/01 § Settings). The
+ * Every setting that is not tied to one host (spec/01 § Settings). The
  * server stores it, every host runs from the copy in the last snapshot.
  */
 export const DICTATION_PAUSE_SECONDS_MIN = 1;
@@ -2483,7 +2483,7 @@ export type SettingsSecretUpdateEvent = z.infer<typeof SettingsSecretUpdateEvent
  * What the server can ask a host to send up (spec/01 § Settings — values that
  * start on a host):
  * - `import` — everything this host held before settings were shared, once.
- * - `claude-login` / `codex-login` — the backend's own login on this machine.
+ * - `claude-login` / `codex-login` — the backend's own login on this host.
  * - `codex-signin` — run a ChatGPT device sign-in here and send its result.
  * - `provider-key` — the key of `id` in the host's environment.
  */
@@ -2559,7 +2559,7 @@ export type HostClaudeSettingsSetEvent = z.infer<typeof HostClaudeSettingsSetEve
 
 /**
  * Host → server: a ChatGPT sign-in run on this host (`host.backend_add_account`)
- * completed. The login is the account's, not the machine's, so it goes to the
+ * completed. The login is the account's, not the host's, so it goes to the
  * server to be stored as a shared Codex account.
  */
 export const SettingsAccountSignedInEvent = z
@@ -2582,18 +2582,18 @@ export const HostInfoEvent = z
   .object({
     type: z.literal('host.host'),
     ...hostIdField,
-    /** User-editable label, defaulted from the machine's hostname. */
+    /** User-editable label, defaulted from the host's hostname. */
     hostName: z.string().min(1),
     platform: z.string().min(1),
     arch: z.string().min(1),
     hostVersion: z.string().min(1),
     /**
-     * The source commit and build instant stamped into this machine's artifact
+     * The source commit and build instant stamped into this host's artifact
      * (spec/11 § Version reporting: "the host carries the same three stamped
      * into its artifact and reports them on `host.host`"). Optional because a
      * host run from a source checkout has no build stamp — an installed
      * artifact always carries both, and version reporting needs all three to
-     * show drift between machines.
+     * show drift between hosts.
      */
     gitSha: z.string().min(1).optional(),
     builtAt: z.string().min(1).optional(),
@@ -2609,7 +2609,7 @@ export const HostInfoEvent = z
     permissionOverrides: z.number().int().nonnegative(),
     /**
      * The model a spawn that names none runs on — the ACCOUNT's `defaultModel`,
-     * mirrored down to this host so a spawn started ON the machine (`patch chats
+     * mirrored down to this host so a spawn started ON the host (`patch chats
      * new`, `patch_spawn`) resolves the same model a spawn from a surface does.
      *
      * This replaced `lastUsedModel`, which was derived rather than chosen: it
@@ -2723,7 +2723,7 @@ export const HostInfoEvent = z
     autoResumeRateLimit: z.boolean().optional(),
     /**
      * This host's question-expiry setting (`host.settings`), reported back so
-     * the Settings surface shows what the machine actually holds rather than
+     * the Settings surface shows what the host actually holds rather than
      * what it last sent. BOTH are absent only on a host older than the
      * setting — a surface must not read that as "off", it has no control to
      * offer that host at all.
@@ -2785,7 +2785,7 @@ export const HostInfoEvent = z
      */
     harnessClaudeMdEnabled: z.boolean().optional(),
     /**
-     * The machine's power state: whether it is running on battery, and the
+     * The host's power state: whether it is running on battery, and the
      * charge, 0-100. Absent when the host has no battery (a desktop, a server)
      * or cannot read one — absent never means "plugged in".
      */
@@ -2881,7 +2881,7 @@ export type HostAccountSummary = z.infer<typeof HostAccountSummary>;
 
 /**
  * The credential state of ONE backend on ONE host (spec/10 § Backend
- * credentials). Replaces the account-wide single-backend report: a machine can
+ * credentials). Replaces the account-wide single-backend report: a host can
  * be connected on one backend and logged out on another, and the surface must
  * be able to say which. Cached per host and replayed in the auth greeting.
  */
@@ -3363,7 +3363,7 @@ export const ChatSpawnRequestEvent = z
      * OPTIONAL at every spawn site. From the NAMED host's catalogue, fixed for
      * the chat's life, and it selects the backend the chat runs on. Omitted,
      * the chat takes that host's last-used model (spec/04 § Spawn) — resolving
-     * it belongs to the machine, not to the protocol, so the contract must not
+     * it belongs to the host, not to the protocol, so the contract must not
      * oblige any caller to supply one. A host that has never read a catalogue
      * has no last-used model, and a spawn there naming none is an error saying
      * so — resolved on the host, not defaulted here.
@@ -3671,7 +3671,7 @@ export type ComposerDraftClearedEvent = z.infer<typeof ComposerDraftClearedEvent
 
 /**
  * Server → surface, once, right after `auth.ok`: every draft the account
- * currently has. Composer drafts are account-wide, not per-machine, so unlike
+ * currently has. Composer drafts are account-wide, not per-host, so unlike
  * `folders.list` this is sent once per connection rather than once per
  * registered host.
  */
@@ -4492,7 +4492,7 @@ export const PatchBrowserViewStatusEvent = z
           driver: z.enum(['agent', 'user']).optional(),
           /**
            * The tab's DevTools target in the Patch app, when the host on that
-           * app's machine keeps its browser there: the app shows the tab itself.
+           * app's host keeps its browser there: the app shows the tab itself.
            */
           appTarget: z.string().min(1).optional(),
           /** Where the agent last pointed, in viewport CSS pixels, and when (ms epoch). */
@@ -4772,7 +4772,7 @@ export type SurfaceHeartbeatAckEvent = z.infer<typeof SurfaceHeartbeatAckEvent>;
 //
 // Every host-scoped control a surface can change has a surface-originated
 // frame HERE carrying `hostId` — no exceptions. A surface with no frame to
-// send renders a read-only list instead, which is exactly how a machine
+// send renders a read-only list instead, which is exactly how a host
 // setting ends up changeable from the web app and not from the phone. The
 // host-owned lists are therefore PAIRED: a snapshot and a change push
 // outward (`folders.list` / `folders.updated`, `host.account`), and an edit
@@ -4780,8 +4780,8 @@ export type SurfaceHeartbeatAckEvent = z.infer<typeof SurfaceHeartbeatAckEvent>;
 // outward-only.
 //
 // One of these goes to the SERVER rather than to a host, because the server owns
-// the registry entry rather than the machine: renaming a host. The rest are
-// addressed to the named machine.
+// the registry entry rather than the host: renaming a host. The rest are
+// addressed to the named host.
 
 /** Surface → server: set a host's user-editable label. */
 export const HostRenameEvent = z
@@ -4790,7 +4790,7 @@ export const HostRenameEvent = z
     ...hostIdField,
     /**
      * Non-empty. An empty name is rejected naming the offending value rather
-     * than falling back to the machine hostname — a host that silently renames
+     * than falling back to the host hostname — a host that silently renames
      * itself back is indistinguishable from an edit that did not save.
      */
     hostName: z.string().min(1),
@@ -4799,8 +4799,8 @@ export const HostRenameEvent = z
 export type HostRenameEvent = z.infer<typeof HostRenameEvent>;
 
 /**
- * Server → host: this machine does (or does not) run the Manager and Speakers.
- * The server decides, sent as each machine attaches and when the Manager moves
+ * Server → host: this host does (or does not) run the Manager and Speakers.
+ * The server decides, sent as each host attaches and when the Manager moves
  * (spec/06); no surface can send it.
  */
 export const HostSetManagerEvent = z
@@ -4855,7 +4855,7 @@ export const SigninResolvedEvent = z
   .strict();
 export type SigninResolvedEvent = z.infer<typeof SigninResolvedEvent>;
 
-/** Surface → host: the settings that stay with one machine (spec/01 § Settings). */
+/** Surface → host: the settings that stay with one host (spec/01 § Settings). */
 export const HostSettingsEvent = z
   .object({
     type: z.literal('host.settings'),
@@ -4865,7 +4865,7 @@ export const HostSettingsEvent = z
      * the two browser servers. Ignored when the same frame carries the list.
      */
     harnessBrowserToolsEnabled: z.boolean().optional(),
-    /** The MCP servers this host adds to every chat — machine-specific commands and paths. */
+    /** The MCP servers this host adds to every chat — host-specific commands and paths. */
     harnessMcpServers: McpServerList.optional(),
     /** Turn Patch's own tools server on or off for every chat on this host. */
     patchMcpEnabled: z.boolean().optional(),
@@ -5120,7 +5120,7 @@ export type SurfaceBackgroundedEvent = z.infer<typeof SurfaceBackgroundedEvent>;
 
 /**
  * Surface → server: how long since the user last touched this computer
- * (spec/09 § Presence heuristic). The desktop app reports the whole machine's
+ * (spec/09 § Presence heuristic). The desktop app reports the whole host's
  * input idle time, so typing in any app counts; a browser tab can only see
  * input on its own page. Sent every 15s whether or not Patch is on screen —
  * it is how the server tells "at the computer" from "a window left open".
@@ -5129,11 +5129,11 @@ export const SurfaceInputEvent = z
   .object({
     type: z.literal('surface.input'),
     idleMs: z.number().int().nonnegative(),
-    /** `system`: any input on the machine. `page`: input on this page only. */
+    /** `system`: any input on the host. `page`: input on this page only. */
     scope: z.enum(['system', 'page']),
     /**
-     * Set when the surface knows nobody is at the machine: the screen is
-     * locked or the machine is asleep. Absent otherwise. A server that does
+     * Set when the surface knows nobody is at the host: the screen is
+     * locked or the host is asleep. Absent otherwise. A server that does
      * not know the field reads `idleMs` alone.
      */
     away: z.enum(['locked', 'asleep']).optional(),
@@ -5251,7 +5251,7 @@ export const PatchSpawnEvent = z
     sourceChatId: z.string().min(1),
     /**
      * The host the new chat is created on. Required, exactly as on the surface
-     * spawn request — an agent spawning a chat is choosing a machine whether it
+     * spawn request — an agent spawning a chat is choosing a host whether it
      * realises it or not, so the contract makes it say which.
      */
     ...hostIdField,
@@ -5280,8 +5280,8 @@ export type PatchSpawnEvent = z.infer<typeof PatchSpawnEvent>;
  * NO FALLBACK: without this frame a spawn the target REFUSED (no model
  * catalogue, unknown folder, SDK failure) left the calling agent's tool call
  * reporting success for a chat that does not exist. `ok:false` carries the
- * machine's own reason, and `hostId` is required so the error can name the
- * machine that refused rather than leaving the agent to guess which of its
+ * host's own reason, and `hostId` is required so the error can name the
+ * host that refused rather than leaving the agent to guess which of its
  * hosts failed.
  */
 export const PatchSpawnResponseEvent = z
@@ -5289,15 +5289,15 @@ export const PatchSpawnResponseEvent = z
     type: z.literal('patch.spawn.response'),
     /** Echoed from the request, so a chat with several spawns in flight can tell them apart. */
     requestId: z.string().min(1),
-    /** The chat that called `patch_spawn` — the machine the answer is relayed back to. */
+    /** The chat that called `patch_spawn` — the host the answer is relayed back to. */
     sourceChatId: z.string().min(1),
-    /** The machine that handled the spawn. Required, exactly as on the request. */
+    /** The host that handled the spawn. Required, exactly as on the request. */
     ...hostIdField,
     folder: z.string().min(1),
     ok: z.boolean(),
     /** The new chat, present iff `ok`. */
     chatId: z.string().min(1).optional(),
-    /** The target machine's own refusal, present iff `!ok`. */
+    /** The target host's own refusal, present iff `!ok`. */
     error: z
       .object({
         code: ChatErrorCode,
@@ -5362,7 +5362,7 @@ export const PatchListChatsResponseEvent = z
     sourceChatId: z.string().min(1),
     chatCount: z.number().int().nonnegative(),
     /**
-     * Every listed chat names the machine it lives on. Without this the caller
+     * Every listed chat names the host it lives on. Without this the caller
      * gets a flat list of ids it cannot address: `patch_send_to` and
      * `patch_peek` need to know which host owns a chat before the server can
      * relay to it, and two chats on two hosts can share a folder string.
@@ -5374,7 +5374,7 @@ export const PatchListChatsResponseEvent = z
           ...hostIdField,
           /**
            * What the server's chat mirror knows about the chat, so a listing is
-           * the same whichever machine the chat lives on. Optional only so a
+           * the same whichever host the chat lives on. Optional only so a
            * server older than this field still validates.
            */
           name: z.string().nullable().optional(),
@@ -5522,14 +5522,14 @@ export const PatchActivityResponseEvent = z
   .strict();
 export type PatchActivityResponseEvent = z.infer<typeof PatchActivityResponseEvent>;
 
-/** Server → host: read the user messages in this machine's own chat logs for a window. */
+/** Server → host: read the user messages in this host's own chat logs for a window. */
 export const PatchActivityReadRequestEvent = z
   .object({
     type: z.literal('patch.activity.read.request'),
     requestId: z.string().min(1),
     since: z.number().int().nonnegative(),
     until: z.number().int().nonnegative(),
-    /** Most rows the machine may return — the oldest `limit` in the window. */
+    /** Most rows the host may return — the oldest `limit` in the window. */
     limit: z.number().int().positive(),
   })
   .strict();
@@ -5556,7 +5556,7 @@ export type PatchActivityReadResponseEvent = z.infer<typeof PatchActivityReadRes
 
 /**
  * Settings → Computer use (spec/06 § Browser tools). Server → host: report
- * whether this machine's agent browser is driving it, or stop it.
+ * whether this host's agent browser is driving it, or stop it.
  */
 export const PatchBrowserUseRequestEvent = z
   .object({
@@ -5606,14 +5606,14 @@ export const ToolLogEntry = z
   .strict();
 export type ToolLogEntry = z.infer<typeof ToolLogEntry>;
 
-/** Server → host: read this machine's own cross-chat tool-call log for a window. */
+/** Server → host: read this host's own cross-chat tool-call log for a window. */
 export const PatchToolLogReadRequestEvent = z
   .object({
     type: z.literal('patch.tool_log.read.request'),
     requestId: z.string().min(1),
     since: z.number().int().nonnegative(),
     until: z.number().int().nonnegative(),
-    /** Most rows the machine may return — the oldest `limit` in the window. */
+    /** Most rows the host may return — the oldest `limit` in the window. */
     limit: z.number().int().positive(),
   })
   .strict();
@@ -5656,7 +5656,7 @@ export const ChatTokenUsage = z
   .strict();
 export type ChatTokenUsage = z.infer<typeof ChatTokenUsage>;
 
-/** Server → host: this machine's usage history and per-chat tokens for a window. */
+/** Server → host: this host's usage history and per-chat tokens for a window. */
 export const PatchUsageReadRequestEvent = z
   .object({
     type: z.literal('patch.usage.read.request'),
@@ -6190,7 +6190,7 @@ export type PatchDocExportResponseEvent = z.infer<typeof PatchDocExportResponseE
 //
 // `patch.background_task_stats.request` is server-originated and backs the
 // surface's background task bar: it names the background ids the surface can
-// see still running and asks the host what each is costing the machine
+// see still running and asks the host what each is costing the host
 // (spec/02 § Background task completions). Routed to the chat's own host by
 // `chatId`, because the processes only exist there.
 //
@@ -6607,10 +6607,10 @@ export const PatchSkillsRequestEvent = z
     folder: z.string().min(1),
     /**
      * The host whose filesystem is being asked. Skills are PER HOST — a
-     * folder's `.claude/skills` only exists on the machine that has it
-     * checked out, and a machine-level skill (e.g. one that lives in
+     * folder's `.claude/skills` only exists on the host that has it
+     * checked out, and a host-level skill (e.g. one that lives in
      * `~/.claude/skills` only where a particular tool is installed) only
-     * exists on that one machine. Required so the request is routed to the
+     * exists on that one host. Required so the request is routed to the
      * caller's actual folder/host rather than falling back to "whichever
      * host last attached" (NO FALLBACK — see `hostIdField` above).
      */
@@ -6846,7 +6846,7 @@ export const PatchTerminalOpenEvent = z
     type: z.literal('patch.terminal.open'),
     /** Surface-minted session id; every later frame correlates on it. */
     sessionId: z.string().min(1),
-    /** The host the shell starts on — a terminal is a shell on ONE machine. */
+    /** The host the shell starts on — a terminal is a shell on ONE host. */
     ...hostIdField,
     /**
      * Absolute host-side directory the shell starts in. Validated exactly
@@ -7242,8 +7242,8 @@ export type PatchFoldersBrowseResponseEvent = z.infer<typeof PatchFoldersBrowseR
 // than resolved through a chat's folder.
 //
 // The chat-scoped `patch.files.*` pair can only reach inside a chat's pinned
-// folder, so editing a skill in `~/.claude/skills` — or anything on a machine
-// with no chat open on it — needed a chat first. This pair names the machine
+// folder, so editing a skill in `~/.claude/skills` — or anything on a host
+// with no chat open on it — needed a chat first. This pair names the host
 // and an ABSOLUTE path instead. It is deliberately not confined to the project
 // roots the way the folder browser is: the same surface can already open a
 // shell on the host (`patch.terminal.open`), which reaches every file the
@@ -7519,7 +7519,7 @@ export type PatchHostSearchDoneEvent = z.infer<typeof PatchHostSearchDoneEvent>;
 // ---------------------------------------------------------------------------
 // Moving a chat between hosts (spec/04 § Moving a chat to another host)
 //
-// A chat lives on one machine, but it is not welded to it. The SERVER drives a
+// A chat lives on one host, but it is not welded to it. The SERVER drives a
 // move as three round trips, each one `patch.chat_move.request` to one host:
 //
 //   1. `export` on the chat's current host: everything the chat IS on disk —
@@ -8379,7 +8379,7 @@ export type PatchPadResponseEvent = z.infer<typeof PatchPadResponseEvent>;
 // ---------------------------------------------------------------------------
 // Shared accounts RPC: a host asks the server for the shared accounts (the
 // order and strategy every host draws from) or changes that order/strategy.
-// The server owns them, so a machine's own CLI and agents go through this
+// The server owns them, so a host's own CLI and agents go through this
 // link rather than needing a separate login (spec/17 § Commands).
 // Consumed by the server's accounts bridge; never fanned out to surfaces.
 
@@ -8417,7 +8417,7 @@ export const PatchAccountsResponseEvent = z
 export type PatchAccountsResponseEvent = z.infer<typeof PatchAccountsResponseEvent>;
 
 // ---------------------------------------------------------------------------
-// Server API relay: the CLI on a host machine calls the server's REST API
+// Server API relay: the CLI on a host host calls the server's REST API
 // through the host's link instead of holding its own paired credential. The
 // server answers as the account, for a short allowlist of management paths.
 // Consumed by the server's API bridge; never fanned out to surfaces.
@@ -8928,7 +8928,7 @@ export type AuthExpiredEvent = z.infer<typeof AuthExpiredEvent>;
  *
  * `host` and `accounts` are null/empty for a host that has never connected
  * since the server started — the server caches what a host told it, and has
- * nothing to say about a machine that has not spoken. A surface renders such a
+ * nothing to say about a host that has not spoken. A surface renders such a
  * host as offline-and-unknown rather than inventing a description for it.
  */
 export const AuthOkHost = z
@@ -8939,7 +8939,7 @@ export const AuthOkHost = z
     lastSeenAt: z.number().int().nullable(),
     /** The cached `host.host` payload, minus its envelope. */
     host: HostInfoEvent.omit({ type: true }).nullable(),
-    /** The name the registry holds for this machine, for hosts that have not reported one since the server started. */
+    /** The name the registry holds for this host, for hosts that have not reported one since the server started. */
     registeredName: z.string().nullable().optional(),
     /** The cached per-backend `host.account` payloads, minus their envelopes. */
     accounts: z.array(HostAccountEvent.omit({ type: true })),
@@ -8954,7 +8954,7 @@ export const AuthOkEvent = z
     surfaceId: z.string().min(1),
     /**
      * EVERY registered host, not just the connected ones. A surface must be
-     * able to render the full Hosts list — including the machines that are
+     * able to render the full Hosts list — including the hosts that are
      * asleep — from the greeting alone, without a second round trip and
      * without waiting for a `host.online` that may never come.
      */
@@ -8970,7 +8970,7 @@ export const AuthOkEvent = z
 export type AuthOkEvent = z.infer<typeof AuthOkEvent>;
 
 /**
- * Every surface-originated frame that names a machine (spec/03 § Host events).
+ * Every surface-originated frame that names a host (spec/03 § Host events).
  *
  * The contract's rule is "every host-scoped control a surface changes has a
  * surface-originated frame carrying `hostId`, no exceptions" — this is that

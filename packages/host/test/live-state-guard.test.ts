@@ -1,4 +1,4 @@
-// A test must never create state in the machine's own Patch directory. This
+// A test must never create state in the host's own Patch directory. This
 // covers the guard that enforces that, so it is proven without needing the
 // live Claude credential the real-SDK suite is gated on.
 
@@ -28,7 +28,7 @@ afterAll(() => {
   for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
 });
 
-/** A stand-in for the machine's own ~/.patch, with a chats/ store inside it. */
+/** A stand-in for the host's own ~/.patch, with a chats/ store inside it. */
 function fakeLiveHome(): { home: string; env: NodeJS.ProcessEnv } {
   const home = tmp('live-state-guard-home-');
   mkdirSync(join(home, 'chats'), { recursive: true });
@@ -84,7 +84,7 @@ describe('assertIsolatedPath', () => {
 
 // The observed leak: with no built MCP server the session had no patch_ tools,
 // and the agent ran `patch chats spawn <tmpdir>` over Bash instead, which hit
-// the machine's own host and created a real chat there.
+// the host's own host and created a real chat there.
 describe('assertToolsServerBuilt', () => {
   it('rejects a missing server, naming the path', () => {
     const missing = join(tmp('tools-server-'), 'patch-tools-server.js');
@@ -104,14 +104,14 @@ describe('assertToolsServerBuilt', () => {
 });
 
 describe('liveChatIds', () => {
-  it('lists the chat ids in the machine store', () => {
+  it('lists the chat ids in the host store', () => {
     const { home, env } = fakeLiveHome();
     seedLiveChat(home, 'chat-a', '/tmp/a');
     seedLiveChat(home, 'chat-b', '/tmp/b');
     expect(liveChatIds(env)).toEqual(new Set(['chat-a', 'chat-b']));
   });
 
-  it('is empty when the machine has no chat store at all', () => {
+  it('is empty when the host has no chat store at all', () => {
     expect(liveChatIds({ PATCH_HOME: join(tmpdir(), 'live-state-guard-absent') })).toEqual(
       new Set(),
     );

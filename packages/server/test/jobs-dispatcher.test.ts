@@ -1914,7 +1914,7 @@ describe('JobDispatcher', () => {
         idGenerator: () => 'fire2',
         ackTimeoutMs: 50,
       });
-      // 'd1' (the action's host) is NOT the machine on this link.
+      // 'd1' (the action's host) is NOT the host on this link.
       const res = disp.dispatch(makeJob({ id: JOB_ID }), {}, 'cron');
       expect(res.status).toBe('buffered');
       expect(disp.flush()).toEqual({ flushed: 0 });
@@ -2042,7 +2042,7 @@ describe('JobDispatcher', () => {
 //
 // A job that names no model used to send no `model` field at all, which
 // resolved through the HOST's `lastUsedModel` — the model the last chat on that
-// machine happened to pick. So one throwaway cheap-model chat silently moved
+// host happened to pick. So one throwaway cheap-model chat silently moved
 // every unattended job onto it, and it stayed there across deploys, purchases
 // and feature work until someone happened to pick something else. The model a
 // job runs on is now sent explicitly on every fire.

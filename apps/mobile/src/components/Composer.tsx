@@ -640,7 +640,7 @@ export function Composer({
       useUiStore
         .getState()
         .pushError(
-          `the machine did not switch the model — this chat is still on ${chatModel ?? 'its previous model'}`,
+          `the host did not switch the model — this chat is still on ${chatModel ?? 'its previous model'}`,
         );
     }, MODEL_CONFIRM_TIMEOUT_MS);
     return () => clearTimeout(t);
@@ -685,7 +685,7 @@ export function Composer({
       useUiStore
         .getState()
         .pushError(
-          'the machine did not switch the effort level — this chat is still on the value it had',
+          'the host did not switch the effort level — this chat is still on the value it had',
         );
     }, MODEL_CONFIRM_TIMEOUT_MS);
     return () => clearTimeout(t);

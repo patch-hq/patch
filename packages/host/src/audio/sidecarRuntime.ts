@@ -1,4 +1,4 @@
-// Provisioning a voice sidecar's Python runtime, on demand, per machine
+// Provisioning a voice sidecar's Python runtime, on demand, per host
 // (spec/02 § Optional components).
 //
 // The voice sidecars are Python: a few KB of source the artifact carries, and
@@ -30,10 +30,10 @@ export interface RunCommand {
 export interface ProvisionSidecarOptions {
   /** The sidecar package (pyproject.toml + uv.lock + its module). */
   sourceDir: string;
-  /** Where this machine's venv for that sidecar goes. */
+  /** Where this host's venv for that sidecar goes. */
   venvDir: string;
   run: RunCommand;
-  /** Resolve `uv`, installing it for this machine if it is missing. */
+  /** Resolve `uv`, installing it for this host if it is missing. */
   resolveUv: () => Promise<string>;
   /** Progress line for the surface (spec/02 § Optional components). */
   onProgress?: (note: string) => void;
@@ -67,7 +67,7 @@ export function venvPython(venvDir: string): string | undefined {
  */
 const PROVISIONED_STAMP = '.patch-runtime-complete';
 
-/** Whether this machine has a FINISHED runtime for a sidecar. */
+/** Whether this host has a FINISHED runtime for a sidecar. */
 export function sidecarRuntimeReady(venvDir: string): boolean {
   return existsSync(join(venvDir, PROVISIONED_STAMP));
 }
@@ -79,7 +79,7 @@ export function sidecarRuntimeReady(venvDir: string): boolean {
  *
  * `UV_TORCH_BACKEND=cpu` is not an optimisation — the default Linux torch wheel
  * drags in multi-GB CUDA libraries that a CPU box cannot use and, on a small
- * machine, cannot even store.
+ * host, cannot even store.
  */
 export async function provisionSidecarRuntime(opts: ProvisionSidecarOptions): Promise<string> {
   const existing = venvPython(opts.venvDir);
@@ -143,7 +143,7 @@ export async function provisionSidecarRuntime(opts: ProvisionSidecarOptions): Pr
 export interface ResolveUvOptions {
   /** Candidate paths tried in order before anything is installed. */
   candidates: string[];
-  /** Where a freshly installed `uv` is put (its own directory, per machine). */
+  /** Where a freshly installed `uv` is put (its own directory, per host). */
   installDir: string;
   run: RunCommand;
   onProgress?: (note: string) => void;
@@ -152,11 +152,11 @@ export interface ResolveUvOptions {
 }
 
 /**
- * Find `uv`, installing it for this machine if the machine hasn't got one.
+ * Find `uv`, installing it for this host if the host hasn't got one.
  *
  * Voice is meant to install itself when the user asks for it, so "you need to
  * install uv first" is not an acceptable outcome of pressing Install. The
- * installer is Astral's own, pinned to this machine's patch home — it touches
+ * installer is Astral's own, pinned to this host's patch home — it touches
  * nothing outside it and no shell profile.
  */
 export async function resolveUv(opts: ResolveUvOptions): Promise<string> {
@@ -179,7 +179,7 @@ export async function resolveUv(opts: ResolveUvOptions): Promise<string> {
   if (result.code !== 0) {
     throw new SidecarRuntimeError(
       `could not install uv (exit ${result.code}): ${(result.stderr || result.stdout).trim()}. ` +
-        'Install uv on this machine (https://docs.astral.sh/uv/) and install the component again.',
+        'Install uv on this host (https://docs.astral.sh/uv/) and install the component again.',
     );
   }
   if (!exists(installed)) {

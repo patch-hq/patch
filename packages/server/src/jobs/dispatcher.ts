@@ -14,7 +14,7 @@
 //      dispatch time (spec/08 ## Execution model step 6).
 //
 // TWO QUEUES, deliberately opposite (spec/08 ## Concurrency, spec/12):
-//   - `pending/` is per HOST: the machine can't be reached. Full → drop the
+//   - `pending/` is per HOST: the host can't be reached. Full → drop the
 //     OLDEST, because the stalest undelivered work is the least worth keeping.
 //   - `queued/` is per JOB: the job asked to run its fires N at a time.
 //     Unbounded — a fire waits, it is never refused — because here the oldest
@@ -33,7 +33,7 @@
 //    reach the host, or the host took it and refused it (a folder it does not
 //    have, a backend with no credential) — and the entry names the host and
 //    carries its error text, since a job that silently does nothing on one
-//    machine is the failure this log exists to catch."
+//    host is the failure this log exists to catch."
 // So a fire is NOT `ok` until the host says so, and a fire that never landed
 // carries no chatId (a dead "open chat" link is exactly the silent failure the
 // log exists to catch). A host that answers nothing at all inside the ack
@@ -236,7 +236,7 @@ export interface DispatcherOptions {
   /**
    * Called once per buffered fire when it has waited more than `lateAfterMs`
    * for its host (spec/12 § Cron fires while a host is down). Without it a fire
-   * for a sleeping machine sits unseen until the machine wakes.
+   * for a sleeping host sits unseen until the host wakes.
    */
   onLate?: (info: LateFireInfo) => void;
   lateAfterMs?: number;
@@ -283,9 +283,9 @@ export interface DispatcherOptions {
    * account's `defaultModel` (spec/08 § Action).
    *
    * Sent EXPLICITLY on every fire, for the same reason the permission mode is:
-   * omitting the field leaves the model to be resolved on the machine. It used
+   * omitting the field leaves the model to be resolved on the host. It used
    * to resolve through the host's `lastUsedModel` — whatever model the last chat
-   * on that machine happened to use — which made every unattended job's model a
+   * on that host happened to use — which made every unattended job's model a
    * side effect of the last human choice at that keyboard, drifting silently
    * across deploys and purchases.
    *
@@ -410,7 +410,7 @@ interface GatePassed {
  * Every trigger wraps its own payload as `{ payload }` before dispatching
  * (`cron.ts`, `webhooks.ts`, `todoist.ts`), which is why prompts say
  * `{{payload.…}}`. A gate's words arrive alongside it, not inside it — the
- * payload is what the world sent, the gate is what this machine made of it:
+ * payload is what the world sent, the gate is what this host made of it:
  *
  *   {{gate.stdout}}   everything the gate printed, trimmed
  *   {{gate.verdict}}  its last line — the verdict, by the same convention the
@@ -679,7 +679,7 @@ export class JobDispatcher {
    * the account default, else nothing at all.
    *
    * "Nothing at all" only happens with no settings store wired (tests), and it
-   * is the one case left to the machine's own default — kept so nothing here has
+   * is the one case left to the host's own default — kept so nothing here has
    * to invent a model id of its own.
    */
   private spawnModelField(actionModel: string | undefined): { model?: string } {
@@ -1033,7 +1033,7 @@ export class JobDispatcher {
         return;
       }
       // spec/08 ## Logs: name the host and carry ITS error text. `fromHostId`
-      // is the machine that actually raised it (authoritative); the addressed
+      // is the host that actually raised it (authoritative); the addressed
       // host is the fallback label when the link could not attribute it.
       const host = fromHostId ?? w.hostId ?? 'unknown';
       this.writeRun(w, {
@@ -2063,7 +2063,7 @@ export class JobDispatcher {
     // A gate we cannot ASK has not said hold — it has said nothing, and a fire
     // must never proceed on a signal nobody read (`gateVerdict`, NO FALLBACK).
     // Deliberately not `buffered` either, which the action path uses for the
-    // same offline host: replaying a gate when the machine comes back would be
+    // same offline host: replaying a gate when the host comes back would be
     // answering "is this due?" hours after it was asked.
     if (!this.hostOnline(gate.hostId)) {
       this.logs.appendRun({
@@ -2225,7 +2225,7 @@ export class JobDispatcher {
         localId,
         // spec/08 § Action. The job's own model where it names one, otherwise
         // the ACCOUNT's `defaultModel` — never left off. Omitting the field
-        // leaves it to the machine. That used to mean the host's `lastUsedModel`
+        // leaves it to the host. That used to mean the host's `lastUsedModel`
         // — the model the last chat there happened to run on — which made every
         // job's model a side effect of the last human choice at that keyboard.
         ...this.spawnModelField(action.model),
@@ -2238,7 +2238,7 @@ export class JobDispatcher {
         // spec/08 § Action. Always sent, and `auto` when the action stores
         // nothing — the opposite of `model` above. Omitting the field would
         // resolve the mode through the HOST's default, so raising that default
-        // to a blocking mode (a person sitting at that machine choosing to be
+        // to a blocking mode (a person sitting at that host choosing to be
         // asked) would silently park every unattended job there instead. The
         // job's mode belongs to the job.
         permissionMode: action.permissionMode ?? 'auto',
@@ -2369,9 +2369,9 @@ export class JobDispatcher {
 
     // The host THIS fire is addressed to. For a folder-addressed action that is
     // the action's own `hostId`; for a `message` it is the host its target
-    // chat lives on. Whether that ONE machine is reachable decides sent vs
-    // buffered — "any host is attached" would queue a fire for a machine that
-    // is up while the machine the job names is down (spec/08 ## Action).
+    // chat lives on. Whether that ONE host is reachable decides sent vs
+    // buffered — "any host is attached" would queue a fire for a host that
+    // is up while the host the job names is down (spec/08 ## Action).
     const hostId = action.type === 'message' ? this.chatHost(action.chatId) : action.hostId;
     const folder = action.type === 'message' ? undefined : action.folder;
     const ts = this.nowMs();
@@ -2622,7 +2622,7 @@ export class JobDispatcher {
     if (this.hostLink.status() !== 'online') return { flushed: 0 };
     let flushed = 0;
     for (let entry of this.listPending()) {
-      // Only release a fire to the machine it was queued FOR. Another host
+      // Only release a fire to the host it was queued FOR. Another host
       // coming online says nothing about this one.
       if (entry.hostId !== null && !this.hostLink.isOnline(entry.hostId)) continue;
       if (entry.retryAfter !== undefined && this.nowMs() < entry.retryAfter) continue;

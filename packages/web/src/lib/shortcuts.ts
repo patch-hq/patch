@@ -19,7 +19,7 @@
 //   ⌘↵   send, same as ↵, in the composer (never interrupts a running turn)
 //   ⌘↵   commit the field being typed in, everywhere else (lib/submitChord.ts)
 //   ⌘⇧D  dictate (hold to talk; a tap opens a sustained session) — the
-//        chord is set per machine in Settings → Voice (lib/dictateChord.ts)
+//        chord is set per host in Settings → Voice (lib/dictateChord.ts)
 //   ⌃Space  global voice to Manager (window-level handler)
 //
 // Component-local handlers (not registered here) live next to their
@@ -152,7 +152,7 @@ export function shortcutTitle(
 }
 
 /**
- * A shortcut's scope, machine-checkable where this file itself dispatches the
+ * A shortcut's scope, host-checkable where this file itself dispatches the
  * chord (spec/14 § Discoverability — "each shortcut declares its scope in
  * code... the handler enforces it"):
  *

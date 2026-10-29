@@ -1,7 +1,7 @@
 // `patch hosts *` (spec/17 § Hosts and the CLI).
 //
-// There was no `hosts` command group at all, so machines were unreachable from
-// the machine a person was sitting on.
+// There was no `hosts` command group at all, so hosts were unreachable from
+// the host a person was sitting on.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -56,7 +56,7 @@ test('hosts remove REQUIRES --host, so a revocation is never aimed by default', 
   assert.equal(hostOpt.required, true, '--host is required on remove');
 });
 
-test('the host-scoped commands take --host, defaulting to this machine', () => {
+test('the host-scoped commands take --host, defaulting to this host', () => {
   const hosts = hostsCmd(build());
   for (const name of ['get', 'backends', 'models', 'update']) {
     const cmd = hosts.commands.find((c) => c.name() === name);
@@ -109,7 +109,7 @@ test('memory has remove under it, taking --host', () => {
   );
 });
 
-// spec/01 § Settings: shared settings are not a machine's to change.
+// spec/01 § Settings: shared settings are not a host's to change.
 test('no hosts command changes a shared setting', () => {
   const names = hostsCmd(build()).commands.map((c) => c.name());
   for (const gone of ['permission-mode', 'connect', 'disconnect']) {
@@ -117,7 +117,7 @@ test('no hosts command changes a shared setting', () => {
   }
 });
 
-test('pickHost: an empty --host names no machine, even with one host registered', async () => {
+test('pickHost: an empty --host names no host, even with one host registered', async () => {
   const { pickHost } = await import('../src/commands/hosts.js');
   const hosts = [{ hostId: 'd-abc', hostName: 'mac', online: true, runsManager: true }];
   assert.throws(() => pickHost(hosts, ''), /--host must not be empty/);

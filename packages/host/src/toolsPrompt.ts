@@ -54,8 +54,8 @@ editing or process spawning.`;
  * The patch-tools guidance: a DEFAULT the user can see and edit in Settings,
  * shown as `harnessToolsPromptDefault` and appended when no per-host override
  * is set. It says only what patch's own tools are for. Anything about a
- * particular machine — "this box is headless, never hand out localhost URLs" —
- * belongs to that machine's own agent instructions (its `~/.claude/CLAUDE.md`),
+ * particular host — "this box is headless, never hand out localhost URLs" —
+ * belongs to that host's own agent instructions (its `~/.claude/CLAUDE.md`),
  * which the user owns, rather than being decided here by platform.
  */
 export function getPatchToolsPrompt(): string {

@@ -8,7 +8,7 @@
 // holds.
 //
 // Voice — the engine matrix (account-wide), how the host picked in the switcher
-// speaks (its Kokoro voice and how often it says the chat's name, per machine
+// speaks (its Kokoro voice and how often it says the chat's name, per host
 // over `host.settings`), and voice devices.
 
 import React from 'react';
@@ -517,7 +517,7 @@ function Speaking({ preferences }: { preferences: AccountPreferences }): React.R
       <Row
         title="Voice"
         testID="voice-settings"
-        subtitle={currentVoice === undefined ? 'Each machine’s Kokoro default' : undefined}
+        subtitle={currentVoice === undefined ? 'Each host’s Kokoro default' : undefined}
         right={
           <OptionPicker
             testID="kokoro-voice"

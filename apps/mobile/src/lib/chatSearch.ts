@@ -222,7 +222,7 @@ export function searchHitRoute(hit: Pick<ChatSearchHit, 'chatId' | 'snippet'>): 
 
 /**
  * The line naming a host whose chats are NOT in the results, or null for one
- * that was searched. Every unsearched host is named — a machine that could not
+ * that was searched. Every unsearched host is named — a host that could not
  * be searched must never read as "nothing there".
  */
 export function hostMarkerText(host: ChatSearchHostResult, name: string): string | null {

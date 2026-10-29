@@ -137,7 +137,7 @@ export function assertValidJobBody(body: JobCreateBody | JobPatchBody): void {
       );
     }
     // The zone is what node-cron evaluates the expression in. A zone this
-    // machine's ICU cannot resolve makes node-cron throw at REGISTRATION
+    // host's ICU cannot resolve makes node-cron throw at REGISTRATION
     // time — after the job is already persisted and looking healthy — so
     // refuse it at write time instead. NO FALLBACK: never demote to UTC.
     if (trigger.timezone !== undefined && !isValidTimeZone(trigger.timezone)) {

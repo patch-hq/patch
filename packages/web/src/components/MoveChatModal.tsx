@@ -1,10 +1,10 @@
 // Move a chat to another host (spec/04 § Moving a chat to another host,
-// spec/14 § Chat header). Pick the machine, then the folder the chat will run
-// in there — offered from that machine's own folders, the one with the same
+// spec/14 § Chat header). Pick the host, then the folder the chat will run
+// in there — offered from that host's own folders, the one with the same
 // name as the chat's current folder chosen first, else the first it offers —
 // or type a path. The chat
 // stays where it is until the server says it has arrived; a refusal keeps the
-// dialog open with the reason. When the chat's own machine is offline the
+// dialog open with the reason. When the chat's own host is offline the
 // same-named folder is only suggested, never filled in.
 
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
@@ -54,7 +54,7 @@ export function MoveChatModal({
   const foldersKey = folders.join('\n');
   const typed = useRef(false);
 
-  // A new machine offers its own folder — never the path typed for another one.
+  // A new host offers its own folder — never the path typed for another one.
   useEffect(() => {
     typed.current = false;
     setFolder(takeover ? '' : (defaultMoveFolder(row.folder, foldersRef.current) ?? ''));
@@ -106,7 +106,7 @@ export function MoveChatModal({
         <p className="modal-message move-chat-from" data-testid="move-chat-from">
           {current ? hostName(current) : row.hostId} · {row.folder}
         </p>
-        <div className="move-chat-hosts" role="radiogroup" aria-label="Machine">
+        <div className="move-chat-hosts" role="radiogroup" aria-label="Host">
           {targets.map((h) => (
             <button
               key={h.hostId}
@@ -125,7 +125,7 @@ export function MoveChatModal({
         </div>
         {targets.length === 0 ? (
           <p className="modal-message" data-testid="move-chat-no-hosts">
-            No other machine
+            No other host
           </p>
         ) : null}
         <input
@@ -134,7 +134,7 @@ export function MoveChatModal({
           type="text"
           list="move-chat-folders"
           value={folder}
-          placeholder="Folder on that machine"
+          placeholder="Folder on that host"
           aria-label="Folder"
           disabled={!hostId || moving}
           onChange={(e) => {

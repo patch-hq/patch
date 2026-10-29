@@ -2,7 +2,7 @@
 // `folders.list` / `folders.updated` events and exposes the latest registry
 // PER HOST for `GET /api/folders`.
 //
-// The mirror is keyed by host because two machines can publish the same path
+// The mirror is keyed by host because two hosts can publish the same path
 // string meaning two different directories. A flat union would collapse them
 // into one picker entry, and the chat spawned from it would land on a folder
 // the chosen host does not have.
@@ -50,7 +50,7 @@ describe('FolderRegistry (server mirror)', () => {
     });
   });
 
-  // The whole reason the mirror is keyed by host: two machines that share a
+  // The whole reason the mirror is keyed by host: two hosts that share a
   // path string are two entries, and one publishing must not disturb the other.
   it('keeps two hosts separate, including when they share a path string', () => {
     const reg = new FolderRegistry();

@@ -3,8 +3,8 @@
 // installation, spec/14 § `/settings` details).
 //
 // The section did not exist once: Settings showed a single "Daemon" status
-// line, so an account with several machines could see none of them, and a
-// machine that was registered but had never reported rendered as a bare id on a
+// line, so an account with several hosts could see none of them, and a
+// host that was registered but had never reported rendered as a bare id on a
 // permanent "Checking…". Settings is now one page per address; the host list,
 // its detail and removal live on Hosts, a host's settings.json and permission
 // mode on Agent, and its memory entries on Memories.
@@ -111,7 +111,7 @@ afterEach(() => {
 });
 
 describe('Settings → Hosts', () => {
-  it('lists EVERY registered machine, not just one', () => {
+  it('lists EVERY registered host, not just one', () => {
     reportHost('host-a', { hostName: 'laptop' });
     reportHost('host-b', { hostName: 'beta-box', runsManager: false });
     renderPage('hosts');
@@ -119,7 +119,7 @@ describe('Settings → Hosts', () => {
     expect(screen.getByTestId('host-host-b-label')).toHaveTextContent('beta-box');
   });
 
-  it('says a machine is awaiting its first report rather than inventing a name for it', () => {
+  it('says a host is awaiting its first report rather than inventing a name for it', () => {
     // Registered and present in the greeting, but has never spoken.
     usePresenceStore.setState({
       hosts: {
@@ -147,13 +147,13 @@ describe('Settings → Hosts', () => {
     expect(screen.queryByTestId('host-host-quiet-name-input')).toBeNull();
   });
 
-  it('offers an update control only on a machine that has one', () => {
+  it('offers an update control only on a host that has one', () => {
     reportHost('host-a', { hostName: 'laptop' });
     renderPage('hosts');
     expect(screen.queryByTestId('host-host-a-update')).toBeNull();
   });
 
-  it('shows a neutral "Update pending" while the build for this machine is still being made', () => {
+  it('shows a neutral "Update pending" while the build for this host is still being made', () => {
     reportHost('host-a', { hostName: 'laptop', updatePending: true });
     renderPage('hosts');
     expect(screen.getByTestId('host-host-a-update-pending').textContent).toBe('Update pending');
@@ -161,7 +161,7 @@ describe('Settings → Hosts', () => {
     expect(errors()).toEqual([]);
   });
 
-  it('Update on a machine that has one sends host.update to it', () => {
+  it('Update on a host that has one sends host.update to it', () => {
     reportHost('host-a', { hostName: 'laptop', updateAvailable: true });
     usePresenceStore.getState().setHostOnline('host-a', true);
     renderPage('hosts');
@@ -169,7 +169,7 @@ describe('Settings → Hosts', () => {
     expect(send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'host-a' });
   });
 
-  it('Update on an OFFLINE machine is disabled, with no error', () => {
+  it('Update on an OFFLINE host is disabled, with no error', () => {
     reportHost('host-a', { hostName: 'laptop', updateAvailable: true });
     renderPage('hosts');
     const btn = screen.getByTestId('host-host-a-update');
@@ -179,7 +179,7 @@ describe('Settings → Hosts', () => {
     expect(errors()).toEqual([]);
   });
 
-  it('the name field of an OFFLINE machine is disabled', () => {
+  it('the name field of an OFFLINE host is disabled', () => {
     reportHost('host-a', { hostName: 'laptop' });
     renderPage('hosts');
     expect(screen.getByTestId('host-host-a-name-input')).toBeDisabled();
@@ -205,13 +205,13 @@ describe('Settings → Hosts', () => {
     // What the host's async chat.error becomes once ws.ts routes it — see
     // ws.test.ts for that routing itself.
     act(() =>
-      useUiStore.getState().pushError('host.update: machine host-a did not update — no update'),
+      useUiStore.getState().pushError('host.update: host host-a did not update — no update'),
     );
     expect(button).not.toBeDisabled();
     expect(button).toHaveTextContent('Update');
   });
 
-  it('with no single online machine it opens the first by name, and clicking a row switches the detail', () => {
+  it('with no single online host it opens the first by name, and clicking a row switches the detail', () => {
     reportHost('host-a', { hostName: 'alpha', runsManager: false });
     reportHost('host-b', { hostName: 'beta', runsManager: false });
     renderPage('hosts');
@@ -228,7 +228,7 @@ describe('Settings → Hosts', () => {
 
   // A backend that is logged out is the one state a person must act on. The row
   // reported it and offered nothing to click, so the only apparent fix was to
-  // SSH into the machine and run `claude login` — for a credential the wire can
+  // SSH into the host and run `claude login` — for a credential the wire can
   // set directly.
   it('offers a sign-in on a backend that is not signed in', () => {
     reportHost('host-a', {
@@ -271,7 +271,7 @@ describe('Settings → Hosts', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('Sign in with no token adopts the login already on that machine', async () => {
+  it('Sign in with no token adopts the login already on that host', async () => {
     reportHost('host-a', {
       hostName: 'laptop',
       backends: [{ id: 'claude-code', label: 'Claude Code', version: null, state: 'logged-out' }],
@@ -386,10 +386,10 @@ describe('Settings → Hosts', () => {
     });
   });
 
-  it('states plainly when no machine is registered, and still offers to add one', () => {
+  it('states plainly when no host is registered, and still offers to add one', () => {
     renderPage('hosts');
     // The empty state must point at the next action, not just report a void.
-    expect(screen.getByTestId('hosts-empty')).toHaveTextContent('No machines yet');
+    expect(screen.getByTestId('hosts-empty')).toHaveTextContent('No hosts yet');
     expect(screen.getByTestId('add-host')).toHaveTextContent('Add a host');
   });
 
@@ -419,8 +419,8 @@ describe('Settings → Hosts', () => {
   });
 });
 
-// spec/02 § Host identity — a machine always has a name, and renaming it is
-// said to that machine, not patched locally.
+// spec/02 § Host identity — a host always has a name, and renaming it is
+// said to that host, not patched locally.
 describe('Settings → Hosts → rename', () => {
   beforeEach(() => {
     reportHost('host-a', { hostName: 'laptop' });
@@ -445,12 +445,12 @@ describe('Settings → Hosts → rename', () => {
     expect(renames()).toEqual([{ type: 'host.rename', hostId: 'host-a', hostName: 'desk' }]);
   });
 
-  it('refuses an empty name, saying so, rather than leaving a nameless machine', () => {
+  it('refuses an empty name, saying so, rather than leaving a nameless host', () => {
     fireEvent.change(field(), { target: { value: '   ' } });
     fireEvent.keyDown(field(), { key: 'Enter' });
     fireEvent.blur(field());
     expect(renames()).toEqual([]);
-    expect(errors()).toContain('a machine name cannot be empty');
+    expect(errors()).toContain('a host name cannot be empty');
   });
 
   it('Escape restores the reported name and sends nothing', () => {
@@ -468,11 +468,11 @@ describe('Settings → Hosts → rename', () => {
   });
 });
 
-describe('Settings → Hosts → a machine that reports while its page is open', () => {
+describe('Settings → Hosts → a host that reports while its page is open', () => {
   it('fills the name field with the name it reports', () => {
-    // Opened before the machine had said anything, the field had nothing to
+    // Opened before the host had said anything, the field had nothing to
     // show. Once it reports, the field must hold its name — not stay empty and
-    // then refuse the blur as "a machine name cannot be empty".
+    // then refuse the blur as "a host name cannot be empty".
     usePresenceStore.getState().setHostOnline('host-z', true);
     renderPage('hosts');
     expect(screen.getByTestId('host-host-z-unreported')).toBeInTheDocument();
@@ -480,7 +480,7 @@ describe('Settings → Hosts → a machine that reports while its page is open',
     const field = screen.getByTestId('host-host-z-name-input') as HTMLInputElement;
     expect(field).toHaveValue('desk');
     fireEvent.blur(field);
-    expect(errors()).not.toContain('a machine name cannot be empty');
+    expect(errors()).not.toContain('a host name cannot be empty');
     expect(send).not.toHaveBeenCalled();
   });
 
@@ -494,9 +494,9 @@ describe('Settings → Hosts → a machine that reports while its page is open',
   });
 });
 
-// Removing a machine from the account (spec/11 § Host installation). It is
+// Removing a host from the account (spec/11 § Host installation). It is
 // the one irreversible thing on the page, so it is confirmed first, and it is a
-// server call — the machine may well be offline when someone gives up on it.
+// server call — the host may well be offline when someone gives up on it.
 describe('Settings → Hosts → remove', () => {
   beforeEach(() => {
     reportHost('host-a', { hostName: 'laptop' });
@@ -529,7 +529,7 @@ describe('Settings → Hosts → remove', () => {
     expect(hostRemoveCalls()).toEqual([{ url: '/api/hosts/host-a', method: 'DELETE' }]);
     expect(usePresenceStore.getState().hosts['host-a']).toBeUndefined();
     expect(screen.queryByTestId('host-detail-host-a')).toBeNull();
-    // The other machine is untouched.
+    // The other host is untouched.
     expect(screen.getByTestId('host-host-b')).toBeInTheDocument();
     expect(errors()).toEqual([]);
   });
@@ -647,7 +647,7 @@ describe('Settings → Memories → Claude Code memory entries', () => {
   });
 });
 
-// Settings → Hosts → Project folders used to add and remove a machine's
+// Settings → Hosts → Project folders used to add and remove a host's
 // designated project roots (`host.folder_add` / `host.folder_remove`). The
 // reorganised Settings dropped the feature: folders are chosen where a chat is
 // started. These pin that it is gone rather than half-present — a control that
@@ -682,11 +682,11 @@ describe('Settings no longer manages project folders', () => {
   });
 });
 
-// spec/04 § Spawn: the same folder string on two machines is two different
-// directories, so a chat must say which machine it is running on. Nothing in
-// the chat UI named the machine at all.
-describe('chat header names its machine', () => {
-  it('names the machine in the title hover, alongside the folder', async () => {
+// spec/04 § Spawn: the same folder string on two hosts is two different
+// directories, so a chat must say which host it is running on. Nothing in
+// the chat UI named the host at all.
+describe('chat header names its host', () => {
+  it('names the host in the title hover, alongside the folder', async () => {
     reportHost('host-b', { hostName: 'beta-box' });
     const { ChatHeader } = await import('../components/ChatHeader.js');
     render(
@@ -709,7 +709,7 @@ describe('chat header names its machine', () => {
     expect(screen.getByTestId('chat-title')).toHaveAttribute('title', 'proj · beta-box');
   });
 
-  it('falls back to the machine id while that machine has not reported a name', async () => {
+  it('falls back to the host id while that host has not reported a name', async () => {
     const { ChatHeader } = await import('../components/ChatHeader.js');
     render(
       <MemoryRouter>
@@ -728,12 +728,12 @@ describe('chat header names its machine', () => {
         />
       </MemoryRouter>,
     );
-    // Shown, not hidden — "which machine" has no safe default answer.
+    // Shown, not hidden — "which host" has no safe default answer.
     expect(screen.getByTestId('chat-title')).toHaveAttribute('title', 'proj · host-unknown');
   });
 });
 
-// The new-chat screen must announce a machine that cannot run a turn, not let
+// The new-chat screen must announce a host that cannot run a turn, not let
 // someone discover it by opening the model picker. Everything on that screen
 // depends on it, so it is answered once and stated loudly.
 describe('no connected account blocks the new-chat screen', () => {

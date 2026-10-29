@@ -25,7 +25,7 @@ import {
 } from './presenceHelpers.js';
 
 // What the HOST reports as its last-used model (spec/03 § `host.host`). A
-// spawn that names no model resolves to exactly this, on the machine.
+// spawn that names no model resolves to exactly this, on the host.
 const ACCOUNT_DEFAULT_MODEL = 'claude-opus-5';
 
 // The picker's list is LIVE (spec/14 § Model selector) — the host reads it
@@ -445,7 +445,7 @@ describe('/chats/new', () => {
     // On screen in the very render that cleared the composer — before the
     // create request has even returned, let alone the spawn been confirmed.
     // Asserted with no clock: a stopwatch here ("under 400 ms") measured the
-    // machine as much as the app.
+    // host as much as the app.
     expect(screen.getByTestId('new-chat-pending-message').textContent).toContain(
       'immediate message',
     );
@@ -638,7 +638,7 @@ describe('/chats/new', () => {
     models?: readonly ModelOption[] | 'error';
   }): void {
     const projectFolders = opts?.folders ?? ['/home/tom/projects/portfolio'];
-    // The route loads the model catalogue for the chosen machine on mount, so
+    // The route loads the model catalogue for the chosen host on mount, so
     // this router has to answer it too. Default is whatever the test seeded, so
     // the load is a no-op rather than an async wipe landing mid-assertion.
     const models = opts?.models ?? getModelCatalog().models;
@@ -1242,7 +1242,7 @@ describe('/chats/new', () => {
     expect(screen.queryByTestId('folder-popup')).not.toBeInTheDocument();
   });
 
-  it("choosing a machine offers only that machine's projects, and the spawn goes there", async () => {
+  it("choosing a host offers only that host's projects, and the spawn goes there", async () => {
     // Two hosts: the MRU chat is on d1, the other project lives on d2.
     usePresenceStore.getState().setHostOnline('d2', true);
     reportHost('d2', { hostName: 'mac' });
@@ -1262,7 +1262,7 @@ describe('/chats/new', () => {
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
     renderPicker();
 
-    // Starts on the most recent chat's machine, offering only its project.
+    // Starts on the most recent chat's host, offering only its project.
     expect(await screen.findByTestId('new-chat-host')).toHaveAttribute('data-selected', 'd1');
     expect(screen.getByTestId('folder-quick-/home/tom/projects/alpha')).toBeInTheDocument();
     expect(screen.queryByTestId('folder-quick-/srv/bravo')).not.toBeInTheDocument();
@@ -1340,7 +1340,7 @@ describe('/chats/new', () => {
     expect(pillLabel()).toBe('bravo');
   });
 
-  it("offers a machine's own registered roots once it is chosen", async () => {
+  it("offers a host's own registered roots once it is chosen", async () => {
     usePresenceStore.getState().setHostOnline('d2', true);
     usePresenceStore.getState().setHostFolders('d2', ['/Users/tom/code'], []);
     useChatStore.setState({ chats: { c1: makeRow('c1', '/home/tom/projects/alpha', 300, 'd1') } });
@@ -1352,7 +1352,7 @@ describe('/chats/new', () => {
     expect(await screen.findByTestId('folder-quick-/Users/tom/code')).toBeInTheDocument();
   });
 
-  it('lists an offline machine but does not let it be chosen', async () => {
+  it('lists an offline host but does not let it be chosen', async () => {
     usePresenceStore.getState().setHostOnline('d2', false);
     reportHost('d2', { hostName: 'mac' });
     useChatStore.setState({ chats: { c1: makeRow('c1', '/home/tom/projects/alpha', 300, 'd1') } });
@@ -1380,7 +1380,7 @@ describe('/chats/new', () => {
     expect(screen.getByTestId('host-option-d2')).toHaveTextContent('mac');
   });
 
-  it('shows no machine choice when there is only one machine', async () => {
+  it('shows no host choice when there is only one host', async () => {
     useChatStore.setState({ chats: { c1: makeRow('c1', '/home/tom/projects/alpha', 300, 'd1') } });
     stubPickerFetch({ folders: [] });
     renderPicker();
@@ -1389,7 +1389,7 @@ describe('/chats/new', () => {
     expect(screen.queryByTestId('new-chat-machines')).not.toBeInTheDocument();
   });
 
-  it("browses the chosen machine's disk, not the one browsed before", async () => {
+  it("browses the chosen host's disk, not the one browsed before", async () => {
     usePresenceStore.getState().setHostOnline('d2', true);
     useChatStore.setState({ chats: { c1: makeRow('c1', '/home/tom/projects/alpha', 300, 'd1') } });
     stubPickerFetch({ folders: [] });
@@ -1637,7 +1637,7 @@ describe('/chats/new', () => {
 
   // ---- The rows (spec/14 §8): one labelled row per decision, in order ----
 
-  it('lays the setup out as labelled rows — Machine, Account, Project, Model — in that order', async () => {
+  it('lays the setup out as labelled rows — Host, Account, Project, Model — in that order', async () => {
     usePresenceStore.getState().setHostOnline('d2', true);
     reportHost('d2', { hostName: 'mac' });
     setSharedAccounts({ claude: [{ connected: true }, { connected: true }] });
@@ -1648,9 +1648,9 @@ describe('/chats/new', () => {
     const labels = Array.from(
       screen.getByTestId('new-chat-setup-grid').querySelectorAll('.new-chat-setup-label'),
     ).map((l) => l.textContent);
-    expect(labels).toEqual(['Machine', 'Project', 'Model', 'Account']);
-    // The machine control is labelled by the row, and says Machine, never host.
-    expect(screen.getByTestId('new-chat-host')).toHaveAttribute('aria-label', 'Machine');
+    expect(labels).toEqual(['Host', 'Project', 'Model', 'Account']);
+    // The host control is labelled by the row, and says Host, never host.
+    expect(screen.getByTestId('new-chat-host')).toHaveAttribute('aria-label', 'Host');
     expect(screen.getByTestId('new-chat-host')).not.toHaveAttribute('title');
     expect(screen.getByTestId('host-option-d2')).not.toHaveAttribute('title');
   });
@@ -1664,8 +1664,8 @@ describe('/chats/new', () => {
     ).toHaveLength(0);
   });
 
-  // A machine with no registered project roots browsed as "No subfolders here."
-  // — which blames the folder for the machine having none, and offers no way
+  // A host with no registered project roots browsed as "No subfolders here."
+  // — which blames the folder for the host having none, and offers no way
   // out. The two emptinesses are different problems with different fixes.
   it('an empty browse view points at typing a path, not at registering a root first', async () => {
     const fetchMock = vi.fn(async (path: string) => {
@@ -2079,7 +2079,7 @@ describe('/chats/new', () => {
     fireEvent.change(composer, { target: { value: 'hi' } });
     fireEvent.keyDown(composer, { key: 'Enter', metaKey: true });
 
-    const SENTENCE = 'That folder isn’t on that machine. Pick another project.';
+    const SENTENCE = 'That folder isn’t on that host. Pick another project.';
     await waitFor(() => {
       expect(screen.getByTestId('error-toasts')).toHaveTextContent(SENTENCE);
     });
@@ -2285,7 +2285,7 @@ describe('/chats/new', () => {
     fireEvent.keyDown(composer, { key: 'Enter', metaKey: true });
     await waitFor(() => {
       expect(screen.getByTestId('error-toasts')).toHaveTextContent(
-        'That folder isn’t on that machine. Pick another project.',
+        'That folder isn’t on that host. Pick another project.',
       );
     });
     // The code is not lost — it is the detail, and it is not in the sentence.
@@ -2505,8 +2505,8 @@ describe('/chats/new', () => {
   // The host's own wording for a spawn it refused — written for whoever wrote
   // the host, which is exactly why the surface must not repeat it verbatim.
   const HOST_PARAGRAPH =
-    'machine dev-daemon-1 has never read a model catalogue, so it has no last-used model; ' +
-    'name a model on the spawn or connect the backend credential on that machine';
+    'host dev-daemon-1 has never read a model catalogue, so it has no last-used model; ' +
+    'name a model on the spawn or connect the backend credential on that host';
 
   // ---- Zombie-chat guard: WS spawn failure after a 202 response ----
   // When the server accepts the spawn HTTP request (202) but the host then
@@ -2667,7 +2667,7 @@ describe('/chats/new', () => {
     expect(chosenFolderLabel()).toBe('typed');
   });
 
-  // ---- The folder picker NEVER browses the surface's own machine ----
+  // ---- The folder picker NEVER browses the surface's own host ----
   // spec/04 § Browsing: the browsed filesystem is always the HOST's, on every
   // surface including the Electron shell. A folder picked from the user's own
   // Mac is a path the (remote) host does not have, and every chat spawned
@@ -2746,7 +2746,7 @@ describe('/chats/new model defaulting', () => {
   // spec/14 § Model selector: "there is no synthetic Default model row; the
   // picker preselects the draft's model, else the chosen host's last-used one".
   // The surface holds NO default id of its own — one is exactly what overwrote
-  // the machine's last-used model on every spawn.
+  // the host's last-used model on every spawn.
   it("preselects the chosen HOST's last-used model, not a surface constant", () => {
     renderNewChat();
     fireEvent.click(screen.getByTestId('new-chat-model'));
@@ -2791,7 +2791,7 @@ describe('/chats/new model defaulting', () => {
       (c) => String(c[0]).endsWith('/api/chats') && c[1]?.method === 'POST',
     )!;
     const body = JSON.parse(String((call[1] as RequestInit).body)) as Record<string, unknown>;
-    // The machine resolves it (spec/03 § chat.spawn_request). Sending the
+    // The host resolves it (spec/03 § chat.spawn_request). Sending the
     // surface's idea of a default here is what clobbered the host's value.
     expect('model' in body).toBe(false);
     expect(body['hostId']).toBe('d1');
@@ -2823,7 +2823,7 @@ describe('/chats/new model defaulting', () => {
     )!;
     const body = JSON.parse(String((call[1] as RequestInit).body)) as Record<string, unknown>;
     expect(body['model']).toBe(target);
-    // Still nothing persisted browser-side: last-used lives on the machine.
+    // Still nothing persisted browser-side: last-used lives on the host.
     expect(localStorage.getItem('patch.model.lastUsed')).toBeNull();
   });
 });
@@ -2906,7 +2906,7 @@ describe('/chats/new model picker treatment', () => {
     fireEvent.click(screen.getByTestId('new-chat-model'));
     const box = screen.getByTestId('model-popup-error');
     expect(box.querySelector('span')?.textContent).toBe(
-      'Couldn’t load the model list for that machine. Try again in a moment.',
+      'Couldn’t load the model list for that host. Try again in a moment.',
     );
     expect(box.querySelector('span')?.textContent).not.toContain('upstream');
     // Kept — collapsed by default, so it is not in anyone's face.
@@ -2921,7 +2921,7 @@ describe('/chats/new model picker treatment', () => {
     fireEvent.click(screen.getByTestId('new-chat-model'));
     const box = screen.getByTestId('model-popup-error');
     expect(box.querySelector('span')?.textContent).toBe(
-      'That machine isn’t signed in to Claude. Sign in from Settings → Hosts.',
+      'That host isn’t signed in to Claude. Sign in from Settings → Hosts.',
     );
     expect(screen.getByTestId('model-popup-error-detail-text')).toHaveTextContent(
       'oauth_unavailable',

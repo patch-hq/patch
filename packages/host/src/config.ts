@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 /**
  * `silero_vad.onnx` as SHIPPED IN THE ARTIFACT, beside the bundled host
  * (spec/11 § What ships). Unlike the Kokoro weights, VAD is small enough to
- * ride along, so a freshly installed machine already has the model on disk —
+ * ride along, so a freshly installed host already has the model on disk —
  * it just had no way to say where. Resolving it here is not a fallback: it is
  * the known location of a file the build put there. Returns undefined from a
  * source checkout, where the rig names VAD_MODEL_PATH explicitly.
@@ -35,7 +35,7 @@ function bundledVadModelPath(): string | undefined {
 }
 
 /**
- * What a new machine is called until someone renames it (spec/02 § Host
+ * What a new host is called until someone renames it (spec/02 § Host
  * identity). A Mac's network hostname is a mangled, numbered copy of its name
  * (`Toms-MacBook-Pro-7.local`), so a Mac reports the name its owner gave it in
  * Sharing settings ("the user's MacBook Pro"). Anywhere else it is the hostname
@@ -54,7 +54,7 @@ export function defaultHostName(
   return host.replace(/\.local$/, '').split('.')[0] || host;
 }
 
-/** True for the handful of hostnames that only ever mean "this machine" to itself. */
+/** True for the handful of hostnames that only ever mean "this host" to itself. */
 function isLoopbackHost(hostname: string): boolean {
   return (
     hostname === 'localhost' ||
@@ -66,7 +66,7 @@ function isLoopbackHost(hostname: string): boolean {
 
 export interface HostConfig {
   /**
-   * This machine's user-editable label (spec/02 § Host identity). Defaults to
+   * This host's user-editable label (spec/02 § Host identity). Defaults to
    * the name a person recognises the box by (`defaultHostName`);
    * `PATCH_HOST_NAME` overrides it, and a rename from a surface persists
    * through the server registry.
@@ -144,7 +144,7 @@ export interface HostConfig {
     kokoroSidecarUrl: string | undefined;
     /**
      * Where the Kokoro weights are. KOKORO_MODEL_PATH when an operator names one
-     * (the deployed box mounts them); otherwise this machine's own optional-
+     * (the deployed box mounts them); otherwise this host's own optional-
      * components directory, which the host resolves itself (spec/11 § Env,
      * spec/02 § Optional components) and which is empty until the ~340 MB
      * component is downloaded on demand.
@@ -274,7 +274,7 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
 
   const audioPort = intRequired('PATCH_DAEMON_AUDIO_PORT', env['PATCH_DAEMON_AUDIO_PORT'], 3003);
   const audioHost = env['PATCH_DAEMON_AUDIO_HOST'] ?? '0.0.0.0';
-  // Where the SERVER (not a surface) can reach THIS machine's audio WSS
+  // Where the SERVER (not a surface) can reach THIS host's audio WSS
   // DIRECTLY, as an optimisation over relaying it through the host's own
   // outbound link (`host.host.audioRelayHost` — spec/07 § Voice is a per-host
   // capability, spec/03 § Audio relay over the host link). Declaring nothing
@@ -294,9 +294,9 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
     (isLoopbackHost(new URL(serverWsUrl).hostname) ? `127.0.0.1:${audioPort}` : undefined);
   // Voice is an OPTIONAL COMPONENT (spec/02 § Optional components), and the
   // artifact ships no STT credential and no TTS weights. Defaulting these to a
-  // real backend made a freshly installed machine abort at boot on a missing
+  // real backend made a freshly installed host abort at boot on a missing
   // GROQ_API_KEY / KOKORO_MODEL_PATH, contradicting spec/11's "installs and
-  // runs on a machine carrying only an OS". Unset therefore means 'off' — the
+  // runs on a host carrying only an OS". Unset therefore means 'off' — the
   // component is not installed — NOT a quiet downgrade to a stub. Naming a
   // backend without its credential still aborts loudly below.
   const whisperBackendRaw = env['WHISPER_BACKEND'] ?? 'off';

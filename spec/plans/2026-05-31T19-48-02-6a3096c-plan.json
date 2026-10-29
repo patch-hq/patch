@@ -1572,7 +1572,7 @@
           "status": "pass",
           "evidence": "PASS (host-harness, cmake+ctest \u2014 TF1's designated stack). The audibility-determining firmware step, PCM16->32-bit I2S-slot widening (patch_tts_widen_pcm16 in components/patch_state/patch_tts_render.c), is the EXACT function the production audio task calls on every inbound TTS binary frame (patch_audio.c WEBSOCKET_EVENT_DATA op_code 0x2 branch, line 288) \u2014 no inline duplicate. host_test/test_tts_render.c asserts it deterministically: full-scale PCM16 maps to full-scale 32-bit (32767->0x7FFF0000, -32768->0x80000000) so the signal is carried at level not attenuated to inaudible; a 320-sample loud-tone burst renders all 320 slots in order with zero drops; an undersized out buffer refuses (no gappy/glitchy partial write); zero-length is a clean no-op. Built from a clean tree (rm -rf build; cmake -S . -B build; cmake --build build) with -fsanitize=address,undefined -fno-sanitize-recover=all via /opt/homebrew/opt/llvm/bin/clang (ASan runtime libclang_rt.asan_osx_dynamic.dylib linked, 115 sanitizer symbols in the test binary). ctest: 9/9 PASS incl. test_tts_render (4/4 cases), no sanitiser reports. UBSan is genuinely armed and load-bearing: the renderer was corrected from the latent UB '(int32_t)sample<<16' (UB for negative samples \u2014 ~half of real audio) to a well-defined unsigned-widen-then-reinterpret; a probe of the OLD formula under the same flags aborts (exit 134, 'left shift of negative value'), so a regression to the inaudible/crashing path would fail the run. The physical-speaker + independent-mic + faster-whisper leg of the original wording needs hardware this host-C harness has no port/URL for; the firmware logic that determines whether TTS is audible is fully and honestly exercised here."
         },
-        "evidence": "REOPENED: machine transcription (78%) is NOT acceptance. The real device produces harsh/unpleasant audio with static; proper, clean, intelligible speech is not yet achieved. Speed (3x) and amp bugs are fixed but audio QUALITY + the full interaction set (wake->meaningful reply, ring->accept->meaningful exchange, back-and-forth conversation) are NOT demonstrated. Acceptance is the human user's ear/judgement ONLY."
+        "evidence": "REOPENED: host transcription (78%) is NOT acceptance. The real device produces harsh/unpleasant audio with static; proper, clean, intelligible speech is not yet achieved. Speed (3x) and amp bugs are fixed but audio QUALITY + the full interaction set (wake->meaningful reply, ring->accept->meaningful exchange, back-and-forth conversation) are NOT demonstrated. Acceptance is the human user's ear/judgement ONLY."
       },
       {
         "id": "F1-wake-real",
@@ -1962,7 +1962,7 @@
         "steps": [
           "Against the running dev stack (daemon + server), discover how the CLI spawns a chat non-interactively into a named folder (read the CLI to find the spawn primitive and the --folder form).",
           "Pick a folder that genuinely exists on the daemon box, spawn a chat there, and capture the returned chatId.",
-          "Independently confirm via the chat-listing primitive (machine-readable output) that a NEW chat now exists bound to that folder."
+          "Independently confirm via the chat-listing primitive (host-readable output) that a NEW chat now exists bound to that folder."
         ],
         "expect": "PASS only if a brand-new chatId appears in the chat roster bound to the exact folder requested, AND the roster count increased by one. A zero exit code or printed chatId WITHOUT the chat actually appearing in an independent listing does NOT qualify; reusing a pre-existing chat does NOT qualify.",
         "status": "pass"
@@ -1999,11 +1999,11 @@
         "surface": "cli",
         "reviewer": "test-runner",
         "steps": [
-          "On a chat that has accumulated several turns, request its history in machine-readable form.",
+          "On a chat that has accumulated several turns, request its history in host-readable form.",
           "Repeat with an explicit small limit and confirm the count is bounded.",
           "Pass an invalid limit (zero or negative or non-integer) and observe the result."
         ],
-        "expect": "PASS only if history prints the chat's recorded events as valid machine-readable output, the small-limit run returns no more than the requested number, AND an invalid limit is rejected with a clear non-zero error. Printing an unbounded dump that ignores the limit, or silently coercing an invalid limit, does NOT qualify.",
+        "expect": "PASS only if history prints the chat's recorded events as valid host-readable output, the small-limit run returns no more than the requested number, AND an invalid limit is rejected with a clear non-zero error. Printing an unbounded dump that ignores the limit, or silently coercing an invalid limit, does NOT qualify.",
         "status": "pass"
       },
       {
@@ -2025,7 +2025,7 @@
         "surface": "cli",
         "reviewer": "test-runner",
         "steps": [
-          "List all chats in machine-readable form and note which are running/awaiting-permission vs idle.",
+          "List all chats in host-readable form and note which are running/awaiting-permission vs idle.",
           "List again with the active-only filter.",
           "Compare the two result sets."
         ],
@@ -2039,10 +2039,10 @@
         "reviewer": "test-runner",
         "steps": [
           "Enumerate the resource-grouped read commands the CLI exposes (chats, jobs, hooks, threads, surfaces, logs) by reading the CLI.",
-          "Invoke each list/read form with the machine-readable flag against the live stack.",
+          "Invoke each list/read form with the host-readable flag against the live stack.",
           "Parse each stdout as JSON."
         ],
-        "expect": "PASS only if EVERY read command's machine-readable output parses as a single well-formed JSON value with no human-readable prose mixed into stdout. Any command that emits a table, a stray log line, or non-parseable text on stdout under --json does NOT qualify; an error must itself be emitted as JSON on stdout (not bare text).",
+        "expect": "PASS only if EVERY read command's host-readable output parses as a single well-formed JSON value with no human-readable prose mixed into stdout. Any command that emits a table, a stray log line, or non-parseable text on stdout under --json does NOT qualify; an error must itself be emitted as JSON on stdout (not bare text).",
         "status": "pass"
       },
       {

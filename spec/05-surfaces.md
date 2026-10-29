@@ -12,12 +12,12 @@ This doc covers shared surface concerns: presence, editor, QR linking, lifecycle
 
 ## Terminal (`patch` CLI)
 
-Portable Node binary. Runs on any machine the user has — it talks over WebSocket to the server, which routes to the host that owns the chat. Run on a host itself, it also reaches that host over the local socket (`17-cli.md` § Hosts and the CLI).
+Portable Node binary. Runs on any host the user has — it talks over WebSocket to the server, which routes to the host that owns the chat. Run on a host itself, it also reaches that host over the local socket (`17-cli.md` § Hosts and the CLI).
 
 The commands are listed once, in `17-cli.md` § Commands: chats, hosts, jobs,
 hooks, threads, surfaces, auth, the local host service, logs and diagnostics.
-Host management works from any machine, with each `hosts` subcommand defaulting
-to the machine the CLI is running on.
+Host management works from any host, with each `hosts` subcommand defaulting
+to the host the CLI is running on.
 
 The TUI renders the wire event stream inline — messages, tool calls, tool results, permission prompts. Same UX feel as `claude` native; we just render events from a remote source.
 

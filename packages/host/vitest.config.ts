@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     include: ['test/**/*.test.ts'],
     // I/O-integration suite (spawns real sidecars, boots UDS/WSS). Transient
-    // timing misses under machine load retry rather than fail the whole run; a
+    // timing misses under host load retry rather than fail the whole run; a
     // real regression still fails every attempt.
     retry: 2,
     coverage: {

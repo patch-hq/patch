@@ -2,7 +2,7 @@
 //
 //   POST /api/chats/:id/move   {hostId, folder}
 //
-// The server is the only party that can reach both machines, so it drives the
+// The server is the only party that can reach both hosts, so it drives the
 // move as three round trips — `export` on the chat's host, `import` on the
 // target with what came back, `retire` on the old host — and then points its
 // own chat mirror at the new host, which is what routes every later frame for
@@ -240,7 +240,7 @@ export function registerChatMoveRoutes(app: FastifyInstance, deps: ChatMoveRoute
     if (event.hostId !== w.hostId || (from !== null && from !== w.hostId)) {
       deps.logger.warn(
         { requestId: event.requestId, asked: w.hostId, answered: event.hostId, from },
-        'chat move: response from a machine that was not asked; ignoring',
+        'chat move: response from a host that was not asked; ignoring',
       );
       return;
     }
@@ -300,12 +300,12 @@ export function registerChatMoveRoutes(app: FastifyInstance, deps: ChatMoveRoute
     if (typeof target !== 'string' || target.length === 0) {
       return reply
         .code(400)
-        .send({ error: 'hostId_required', message: 'name the machine to move it to' });
+        .send({ error: 'hostId_required', message: 'name the host to move it to' });
     }
     if (typeof folder !== 'string' || !folder.startsWith('/')) {
       return reply.code(400).send({
         error: 'folder_required',
-        message: 'name the absolute folder it will run in on that machine',
+        message: 'name the absolute folder it will run in on that host',
       });
     }
     const unknownHost = checkRegisteredHost(deps.registry, target);

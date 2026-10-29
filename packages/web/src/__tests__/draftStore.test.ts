@@ -52,7 +52,7 @@ describe('draftStore', () => {
     expect(raw.order).toContain(id);
   });
 
-  it('comes back on the machine it was typed against after a reload', async () => {
+  it('comes back on the host it was typed against after a reload', async () => {
     const id = useDraftStore.getState().create('/Users/tom/code');
     useDraftStore.getState().update(id, { text: 'on the mac', hostId: 'mac-1' });
     vi.resetModules();

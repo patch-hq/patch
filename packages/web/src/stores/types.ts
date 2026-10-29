@@ -26,7 +26,7 @@ export interface ChatRow {
    * The host this chat is pinned to (`chat.spawned`), fixed for its life.
    * Empty only for a row the surface created optimistically before the
    * host's `chat.spawned` reconciled it — every host-scoped action on the
-   * chat refuses while it is empty rather than guessing a machine.
+   * chat refuses while it is empty rather than guessing a host.
    */
   hostId: string;
   folder: string;
@@ -202,7 +202,7 @@ export interface ChatRow {
    * when no resume is pending. Optional for back-compat with older hosts.
    */
   resumeKind: 'rate_limit' | 'overloaded' | null;
-  /** Since when the turn has been held for its machine to wake fully; `null` when not held. */
+  /** Since when the turn has been held for its host to wake fully; `null` when not held. */
   waitingForWakeSince?: number | null;
   /**
    * Why the chat is blocked, in figures — which account, which pool, how full,

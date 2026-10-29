@@ -21,7 +21,7 @@ describe('real OpenAI backend', () => {
       });
       const history = new CodexHistory(join(root, 'history'));
       try {
-        // This machine's own Codex login, as the server would send it back (spec/01 § Settings).
+        // This host's own Codex login, as the server would send it back (spec/01 § Settings).
         await accounts.applyShared([await accounts.exportMachineLogin()]);
         const resolved = await accounts.resolve();
         expect((await resolved.client.request('account/read')).account.type).toBe('chatgpt');
@@ -118,7 +118,7 @@ it.skipIf(process.env['PATCH_REAL_CODEX'] !== '1')(
     const controller = new AbortController();
     const deadline = setTimeout(() => controller.abort(), 60000);
     try {
-      // This machine's own Codex login, as the server would send it back (spec/01 § Settings).
+      // This host's own Codex login, as the server would send it back (spec/01 § Settings).
       await accounts.applyShared([await accounts.exportMachineLogin()]);
       const models = await accounts.models();
       const model = models.find((m) => /mini|luna/.test(m.id)) ?? models[0]!;

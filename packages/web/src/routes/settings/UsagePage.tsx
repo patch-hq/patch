@@ -2,7 +2,7 @@
 // accounts every host draws from — one card per provider, each drawn the same
 // way from its entry in `providers.tsx` — with whether a turn stopped by a
 // limit resumes on its own. All shared settings (spec/01 § Settings): nothing
-// here is about one machine.
+// here is about one host.
 
 import type { JSX } from 'react';
 import { Toggle } from '../../components/Toggle.js';

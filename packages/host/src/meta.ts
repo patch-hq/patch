@@ -381,7 +381,7 @@ export const ChatMeta = z
      *
      * `text` is what the row shows: for a `question` the task as an instruction
      * the user could act on without opening the chat. Cleared by a USER turn
-     * and nothing else (see `chatRunner.sendInput`) — a machine turn is the
+     * and nothing else (see `chatRunner.sendInput`) — a host turn is the
      * chat carrying on, not evidence anybody read it.
      */
     declaredStatus: z
@@ -398,7 +398,7 @@ export const ChatMeta = z
     /**
      * Running out of the active list (spec/04 § Hidden). Orthogonal to
      * `status`, and deliberately NOT cleared by archiving: while archived it
-     * has no effect, and it is where a machine message starting the chat again
+     * has no effect, and it is where a host message starting the chat again
      * returns it to. Cleared by a user message, a declared status, a
      * permission block, or Show. Absent ⇒ not hidden.
      */

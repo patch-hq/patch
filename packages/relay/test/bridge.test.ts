@@ -1,6 +1,6 @@
 // The desktop's way in to a relayed server: a loopback HTTP/WebSocket listener
 // whose every request is carried through the encrypted session. The page loads
-// from it as though the server were on this machine.
+// from it as though the server were on this host.
 
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';

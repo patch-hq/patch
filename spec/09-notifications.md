@@ -208,7 +208,7 @@ Speakers are paired to one host (`16-voice-device.md` § Connection model), so t
 3. All devices at low volume → general announcement.
 4. All devices offline / cascade exhausted → that host re-issues the message to the server as a `push` notify carrying the text and a deep-link. Voicemail.
 
-Step 4 hands back to the server rather than that host reaching Expo's push API itself, so one machine holds the account's push tokens and one machine records the outcome.
+Step 4 hands back to the server rather than that host reaching Expo's push API itself, so one host holds the account's push tokens and one host records the outcome.
 
 `speakers` is one-way only — speak and end. No listening window after; if the user wants to reply, they wake-word the device or pick up a separate voice session.
 
@@ -228,11 +228,11 @@ For the thread that mediates a channel (Speakers), the server keeps an append-on
 /data/broadcasts/speakers.jsonl
 ```
 
-Each entry: `{ ts, sourceChatName, message }`. The server appends one as it routes a notify on that channel, whichever machine goes on to deliver it. Never read by the agent directly.
+Each entry: `{ ts, sourceChatName, message }`. The server appends one as it routes a notify on that channel, whichever host goes on to deliver it. Never read by the agent directly.
 
-The log lives on the server because delivery is spread across machines while the thread that reads it is on one: the bot post happens on the server, a speakers announcement on the machine those devices are paired with, and the thread runs on the Manager host (`06-threads-manager-speakers.md` § Where special threads run). The server is on the path of every notify (`03-wire-protocol.md` § Notifications), so it is the one machine that can record them all, and an announcement made while the Manager host is offline is still context when that machine returns.
+The log lives on the server because delivery is spread across hosts while the thread that reads it is on one: the bot post happens on the server, a speakers announcement on the host those devices are paired with, and the thread runs on the Manager host (`06-threads-manager-speakers.md` § Where special threads run). The server is on the path of every notify (`03-wire-protocol.md` § Notifications), so it is the one host that can record them all, and an announcement made while the Manager host is offline is still context when that host returns.
 
-A record is written as the notify is routed rather than on a machine's confirmation that it spoke or posted: an announcement that fell through to voicemail reached the user too, and a reply to it needs the same context.
+A record is written as the notify is routed rather than on a host's confirmation that it spoke or posted: an announcement that fell through to voicemail reached the user too, and a reply to it needs the same context.
 
 ### Injection on user reply
 
@@ -241,7 +241,7 @@ When the user sends a real reply into the Speakers thread (transcribed voice utt
 ```
 <system-reminder>
 Recent broadcasts delivered on this thread (newest last):
-- 5 min ago: "washing machine done" (from chat: washing-machine-watcher)
+- 5 min ago: "washing host done" (from chat: washing-host-watcher)
 - 1 min ago: "bus arriving in 8 min" (from chat: bus-watch)
 </system-reminder>
 
@@ -275,7 +275,7 @@ Broadcast text injected into a turn is capped at 10k chars; the server returns t
 When a chat's turn settles — its activity goes from running to idle — the server notifies the user without any agent asking it to. This, § A turn that failed, § Waiting on you and § Batch check-in are the four notifications Patch raises on its own; everything else on this page starts with a `patch_notify` call.
 
 - Desktop fires on every desktop surface except one that already has this exact chat open — it is already in front of the user, so the toast would only repeat what the screen already shows. If Patch is open on the computer at all the toast appears there; if it isn't, the notification is simply not delivered anywhere.
-- Push fires only when no computer surface is active — the user is somewhere other than the machine Patch is on. A live phone surface does not suppress it, since being on the phone is exactly when the push is the point.
+- Push fires only when no computer surface is active — the user is somewhere other than the host Patch is on. A live phone surface does not suppress it, since being on the phone is exactly when the push is the point.
 - Archived and deleted chats are skipped, snoozed ones are silent (§ Snoozed chats), as are the special threads — Manager and Speakers each already reach the user through their own channel, and a Manager sweep ending is caused by other chats finishing rather than being news of its own.
 - A chat a job created is skipped when that job's action sets `notifyOnComplete: false` (`08-triggers-and-jobs.md` § Action). Absent — the default — the job's chats notify like any other.
 - A chat that is a member of the currently-running batch (`14-design-web.md` § Batch mode) is skipped, and so is § A turn that failed below for the same chat — that is the suppression the feature is for. It applies for as long as the batch is running, check-in included: the one check-in notification already said what there was to say, and a member finishing afterwards must not go back to pinging one at a time. § Waiting on you is unaffected — a permission ask is not a finish, and stays live.
@@ -306,11 +306,11 @@ It is optional on the wire, and its absence changes nothing: a host too old to s
 
 ### Whose turn it was
 
-A chat finishing is only news if the user is the one waiting on it. Every turn therefore carries an origin — `user` or `machine` — and only a `user` turn rings the doorbell.
+A chat finishing is only news if the user is the one waiting on it. Every turn therefore carries an origin — `user` or `host` — and only a `user` turn rings the doorbell.
 
-A turn is `machine` when the host started it for the chat rather than a person did:
+A turn is `host` when the host started it for the chat rather than a person did:
 
-| Machine-started turn                          | Why it is silent                                                                                                 |
+| Host-started turn                             | Why it is silent                                                                                                 |
 | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | A self-wake firing (`02-host.md` § Self-wake) | This is the loop that checks something every few minutes. It is the whole reason the rule exists.                |
 | The todo list advancing to its next item      | One request the user made becomes many turns; they would get a notification per item rather than per request.    |
@@ -338,7 +338,7 @@ Only the stopped turn is silenced. A chat that is stopped and then given a fresh
 
 A turn settling is not always the chat finishing. The chat can settle `idle` while a backgrounded command or sub-agent is still running (`backgroundTasks` on `chat.state`, `02-host.md` § Background task completions), or while its goal is not yet met (`04-chats-and-folders.md` § Goals). Ringing then says "finished" for a chat that is still working.
 
-So when a `user` turn settles and either holds, the notification is owed rather than sent. It goes out on the next idle frame at which neither holds — whether that frame ends a machine turn (the one that reports a background completion, or a goal continuation) or is the goal being met with no turn at all. A machine turn on its own still never starts a debt, a stop clears one, and a failure clears one. Absent `backgroundTasks` counts as none: it is not a measurement, so it holds nothing back.
+So when a `user` turn settles and either holds, the notification is owed rather than sent. It goes out on the next idle frame at which neither holds — whether that frame ends a host turn (the one that reports a background completion, or a goal continuation) or is the goal being met with no turn at all. A host turn on its own still never starts a debt, a stop clears one, and a failure clears one. Absent `backgroundTasks` counts as none: it is not a measurement, so it holds nothing back.
 
 ## A turn that failed
 
@@ -361,7 +361,7 @@ Delivery is identical to chat completion: desktop always, push only when no comp
 
 It fires on the transition into `awaiting-permission`, so a re-sent state frame is silent while a chat that blocks a second time in the same turn rings again. Deleted and snoozed chats are skipped, as are the special threads. Archived is not a case that arises: a chat blocking on the user leaves Archived as it does so (`04-chats-and-folders.md` § Lifecycle).
 
-Origin is deliberately not consulted here. A machine turn is silent when it finishes because nobody was waiting on it; a machine turn that stops to ask is the opposite — it is the run nobody is watching, and it stays stopped until a human answers. This is the same judgement that unarchives such a chat.
+Origin is deliberately not consulted here. A host turn is silent when it finishes because nobody was waiting on it; a host turn that stops to ask is the opposite — it is the run nobody is watching, and it stays stopped until a human answers. This is the same judgement that unarchives such a chat.
 
 The message names the chat and what is being asked: the question text itself for `AskUserQuestion`, otherwise the tool being requested and the description carried with it.
 
@@ -381,10 +381,10 @@ When a host pauses an AI account because its sign-in expired, the server notifie
 
 Implemented in the server (see `01-server.md`). The question is whether the user is at a computer, and only evidence from that computer answers it: a Patch window can be open on a desk nobody is sitting at.
 
-- Web and desktop surfaces send `surface.input { idleMs, scope, away? }` every 15s, whether or not their window is visible, and at once whenever `away` changes. `idleMs` is the time since the last input; `away` is `'locked'` or `'asleep'` when the surface knows nobody is at the machine.
-- The desktop app reports the whole machine (`scope: 'system'`): input in any app counts, and it reports `away: 'locked'` while the screen is locked or the session is switched out, and `away: 'asleep'` as the machine goes to sleep, including on a closed lid. On wake or unlock it reports again straight away.
-- A browser tab reports the whole machine too (`scope: 'system'`) once the user has granted idle detection in Settings → Notifications, which is offered only in browsers that support it and never in the desktop app. Otherwise it can see only its own page (`scope: 'page'`) and never reports `away`.
-- A computer is active when it reported within the last 45s, did not report `away`, and its `idleMs` is under the away threshold. The threshold is the account setting `Send to my phone after` (`01-server.md` § Settings): 1 minute (the default), 5 minutes, or `Only when I lock`, which never lets idle time alone make a computer inactive. Page-scope evidence uses 5 minutes whenever the setting is 1 minute, because time away from one browser tab is not time away from the machine.
+- Web and desktop surfaces send `surface.input { idleMs, scope, away? }` every 15s, whether or not their window is visible, and at once whenever `away` changes. `idleMs` is the time since the last input; `away` is `'locked'` or `'asleep'` when the surface knows nobody is at the host.
+- The desktop app reports the whole host (`scope: 'system'`): input in any app counts, and it reports `away: 'locked'` while the screen is locked or the session is switched out, and `away: 'asleep'` as the host goes to sleep, including on a closed lid. On wake or unlock it reports again straight away.
+- A browser tab reports the whole host too (`scope: 'system'`) once the user has granted idle detection in Settings → Notifications, which is offered only in browsers that support it and never in the desktop app. Otherwise it can see only its own page (`scope: 'page'`) and never reports `away`.
+- A computer is active when it reported within the last 45s, did not report `away`, and its `idleMs` is under the away threshold. The threshold is the account setting `Send to my phone after` (`01-server.md` § Settings): 1 minute (the default), 5 minutes, or `Only when I lock`, which never lets idle time alone make a computer inactive. Page-scope evidence uses 5 minutes whenever the setting is 1 minute, because time away from one browser tab is not time away from the host.
 - `isComputerActive(account)`: any web or desktop surface is active. A terminal surface never reports.
 - Phones still use `surface.heartbeat`, sent every 10s while the app is in the foreground. `isActive(account)` is `isComputerActive` or a phone heartbeat within 30s.
 - Push routing reads one or the other before dispatching: `patch_notify` uses `isActive`, and the notifications the server raises itself use `isComputerActive`. At the computer, a notification is a desktop toast and the phone stays quiet; away from it, it's a push with its own message and deep link. Urgent follows the same rule. A notification shown on a computer counts as seen: there is no catching up, bundling or second delivery when the user later leaves.

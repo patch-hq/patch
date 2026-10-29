@@ -706,7 +706,7 @@ export class PatchWs {
       usePresenceStore.getState().setIdentity(event.accountId, event.surfaceId);
       // The greeting carries EVERY registered host with its presence and the
       // server's cached reports, so the Hosts list is complete from the first
-      // frame — including machines that are asleep and will never announce
+      // frame — including hosts that are asleep and will never announce
       // themselves.
       usePresenceStore.getState().setHosts(event.hosts);
       // Live update (spec/14 § Live updates): the server reports the bundle it
@@ -785,7 +785,7 @@ export class PatchWs {
       // refused query. Dropping it is what once produced a silent app: you
       // could open a chat, type and send, and the turn simply never ran. It is
       // authoritative "not connected" for that (host, backend) pair only —
-      // another machine's credential is unaffected.
+      // another host's credential is unaffected.
       usePresenceStore.getState().setHostAccount({
         type: 'host.account',
         hostId: event.hostId,
@@ -836,8 +836,8 @@ export class PatchWs {
         void import('../lib/models.js').then((m) => m.refreshModelsForHost(event.hostId));
 
       // Addressed to ONE (host, backend) pair and stored as such. Flattening it
-      // into an account-wide slot is what let a logged-out machine block sending
-      // in a chat pinned to a machine whose credential was fine.
+      // into an account-wide slot is what let a logged-out host block sending
+      // in a chat pinned to a host whose credential was fine.
       usePresenceStore.getState().setHostAccount(event);
       return;
     }

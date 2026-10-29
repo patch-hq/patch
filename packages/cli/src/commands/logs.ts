@@ -19,7 +19,7 @@ export function registerLogsCommands(program: Command): void {
     .option('--json', 'JSON output')
     .option('--limit <n>', 'exit after N events')
     .option('--server <url>', 'override server URL')
-    .option('--host <h>', "print that machine's daemon.log instead (name or hostId prefix)")
+    .option('--host <h>', "print that host's daemon.log instead (name or hostId prefix)")
     .option('--lines <n>', 'with --host: last N lines (default 200)')
     .action(
       async (
@@ -81,7 +81,7 @@ export function registerLogsCommands(program: Command): void {
     );
 }
 
-/** Read another machine's daemon.log through the server's host-files route. */
+/** Read another host's daemon.log through the server's host-files route. */
 async function printRemoteDaemonLog(
   opts: CommonOpts,
   host: string,

@@ -1,5 +1,5 @@
 // A `patch_agent` / `patch_delegate` child finishing in the background. The host
-// delivers its reply into the parent as a machine turn; this is the one format
+// delivers its reply into the parent as a host turn; this is the one format
 // for it, written by the host and read by every surface so the turn renders
 // as a quiet system row ("Agent returned: <title>") rather than a user bubble.
 

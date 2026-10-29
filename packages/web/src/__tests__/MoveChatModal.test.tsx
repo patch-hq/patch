@@ -1,5 +1,5 @@
 // spec/04 § Moving a chat to another host, spec/14 § Chat panel header — the
-// Move dialog: pick the machine, get its folder with the same name offered,
+// Move dialog: pick the host, get its folder with the same name offered,
 // and a refusal keeps the dialog open with the server's own reason.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -41,7 +41,7 @@ describe('MoveChatModal', () => {
   });
   afterEach(() => cleanup());
 
-  it('offers the other machines, the online one chosen, with its same-named folder filled in', () => {
+  it('offers the other hosts, the online one chosen, with its same-named folder filled in', () => {
     render(<MoveChatModal row={row} onClose={() => undefined} />);
     expect(screen.getByTestId('move-chat-from').textContent).toBe('Mac · /Users/tom/wpp/Unite');
     expect(screen.queryByTestId('move-chat-host-mac')).toBeNull();
@@ -64,7 +64,7 @@ describe('MoveChatModal', () => {
     expect(input.value).toBe('/my/typed/path');
   });
 
-  it('moves to the chosen machine and folder, then closes', async () => {
+  it('moves to the chosen host and folder, then closes', async () => {
     vi.mocked(api.moveChat).mockResolvedValue({
       ok: true,
       chatId: 'c1',
@@ -91,7 +91,7 @@ describe('MoveChatModal', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('with no folder of that name, the first folder the machine offers is selected', () => {
+  it('with no folder of that name, the first folder the host offers is selected', () => {
     usePresenceStore.setState({
       hosts: {
         mac: host('mac', 'Mac', true, []),
@@ -116,7 +116,7 @@ describe('MoveChatModal', () => {
     expect((screen.getByTestId('move-chat-confirm') as HTMLButtonElement).disabled).toBe(false);
   });
 
-  describe("when the chat's own machine is offline", () => {
+  describe("when the chat's own host is offline", () => {
     beforeEach(() => {
       usePresenceStore.setState({
         hosts: {
@@ -153,7 +153,7 @@ describe('MoveChatModal', () => {
       expect(api.moveChat).toHaveBeenCalledWith('c1', 'box', '/home/tom/Unite');
     });
 
-    it('a machine that is online shows no suggestion button', () => {
+    it('a host that is online shows no suggestion button', () => {
       usePresenceStore.setState({
         hosts: {
           mac: host('mac', 'Mac', true, ['/Users/tom/wpp/Unite']),

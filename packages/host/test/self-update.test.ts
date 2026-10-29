@@ -98,7 +98,7 @@ describe('checkForUpdate', () => {
     }
   });
 
-  it('says WHY when this machine has no artifact for its platform', async () => {
+  it('says WHY when this host has no artifact for its platform', async () => {
     const res = await checkForUpdate({
       serverUrl: 'http://s',
       currentVersion: '0.1.0',
@@ -567,7 +567,7 @@ describe('update path: every step is bounded, a stall is reported not awaited', 
 });
 
 describe('describeUpdateRefusal', () => {
-  it('turns a missing artifact into plain words with no machine id or target', async () => {
+  it('turns a missing artifact into plain words with no host id or target', async () => {
     const { describeUpdateRefusal } = await import('../src/selfUpdate.js');
     const text = describeUpdateRefusal('the published build has no artifact for darwin-arm64');
     expect(text).toBe(

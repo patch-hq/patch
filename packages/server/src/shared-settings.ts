@@ -3,7 +3,7 @@ import { hostSecrets, tokenExpiry, refreshOpenAI, refreshClaude } from './provid
 // Shared settings (spec/01 § Settings).
 //
 // The server is the source of truth for every setting that is not tied to one
-// machine — backend accounts, provider keys, agent behaviour, voice — and every host runs from the copy in the
+// host — backend accounts, provider keys, agent behaviour, voice — and every host runs from the copy in the
 // last `settings.snapshot` it was sent. A host never changes a shared setting
 // itself: a change starts here, is committed here, and is then pushed.
 //

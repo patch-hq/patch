@@ -53,7 +53,7 @@ import {
 } from './helpers/live-state.js';
 
 /**
- * Tools that let a session act on the machine outside its own host. The
+ * Tools that let a session act on the host outside its own host. The
  * `patch` CLI on PATH talks to the MACHINE's host, so an agent that cannot
  * find `patch_spawn` and still wants to obey its instructions will run
  * `patch chats spawn` over Bash and create a real chat in the user's account.
@@ -123,8 +123,8 @@ maybe(
     const localKey = 'real-sdk-integration-local-key';
 
     // Every path is created in beforeAll, not at module scope: this suite skips
-    // on a machine with no Claude login, and a module-scope mkdtemp litters that
-    // machine with empty directories on every run of the whole host suite.
+    // on a host with no Claude login, and a module-scope mkdtemp litters that
+    // host with empty directories on every run of the whole host suite.
     let home: string;
     let socketPath: string;
     // The caller chat's folder carries a CLAUDE.md that deterministically steers
@@ -157,7 +157,7 @@ maybe(
       ownedFolders.push(callerFolder, targetFolder, spawnTargetFolder);
 
       // This suite drives a REAL agent that really calls patch_spawn. If any of
-      // the state it is given resolves into the machine's own ~/.patch, the run
+      // the state it is given resolves into the host's own ~/.patch, the run
       // creates chats in the user's actual account. Refuse before booting.
       assertIsolatedPath('host home', home);
       assertIsolatedPath('control socket', socketPath);
@@ -217,7 +217,7 @@ maybe(
       await app?.close();
       daemon?.shutdown();
       for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
-      // Nothing above touches the machine's own store, so anything that landed
+      // Nothing above touches the host's own store, so anything that landed
       // there came from the host under test reaching the live socket. Those
       // chats are the user's; name them, never delete them.
       if (liveChatsBefore !== undefined) {
@@ -279,7 +279,7 @@ maybe(
       // aborted teardown takes the leak report with it. Inside the test body the
       // check runs on the test's own clock and fails as a normal assertion.
       // It also has to come before the side-effect assertions below — if the
-      // agent's spawn landed on the machine's host then the host under test
+      // agent's spawn landed on the host's host then the host under test
       // has no such chat, and "expected undefined to be defined" hides the cause.
       assertNoLiveChatsCreated(liveChatsBefore!, ownedFolders);
 

@@ -1,6 +1,6 @@
-// Keeps the machine's Claude Code CLI current (spec/02 § Agent backends).
+// Keeps the host's Claude Code CLI current (spec/02 § Agent backends).
 //
-// The host drives the machine's own `claude` binary rather than carrying one
+// The host drives the host's own `claude` binary rather than carrying one
 // (see claudeExecutable.ts). That binary updates itself — but only from an
 // INTERACTIVE session, and a host that exists to run unattended jobs never has
 // one. So the binary silently stops moving: ubuntu-4gb-hel1-1 sat on 2.1.92
@@ -39,7 +39,7 @@ const UPDATE_TIMEOUT_MS = 10 * 60 * 1000;
 const VERSION_TIMEOUT_MS = 30_000;
 
 export interface ClaudeCliUpdateOptions {
-  /** The machine's `claude`, as resolved by `resolveClaudeExecutable`. */
+  /** The host's `claude`, as resolved by `resolveClaudeExecutable`. */
   executable: string;
   logger: Logger;
   /** Injected in tests; defaults to running the real binary. */
@@ -69,11 +69,11 @@ export function parseClaudeVersion(stdout: string): string | null {
 }
 
 /**
- * Bring the machine's Claude Code up to date, and say what moved.
+ * Bring the host's Claude Code up to date, and say what moved.
  *
  * Reads the version, runs the CLI's own updater, reads it again. The two reads
  * are what make this reportable: "already current" and "updated 2.1.92 →
- * 2.1.246" are different facts about the machine, and only one of them is worth
+ * 2.1.246" are different facts about the host, and only one of them is worth
  * a person's attention.
  */
 export async function updateClaudeCli(

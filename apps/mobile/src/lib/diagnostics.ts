@@ -80,7 +80,7 @@ async function checkServer(): Promise<DiagnosticCheck> {
 }
 
 async function checkAgent(): Promise<DiagnosticCheck> {
-  const base = { id: 'agent' as const, label: 'Agent (machine) link' };
+  const base = { id: 'agent' as const, label: 'Agent (host) link' };
   const cred = loadCredential();
   if (cred === null) {
     // The probe is authed; without a credential it can only 401, which would

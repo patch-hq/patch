@@ -3,7 +3,7 @@
 Run and steer Claude Code agents from anywhere: a thin coordination layer over
 Claude Code across the terminal, web, phone, desktop and a voice device, with
 triggers (cron, webhooks, Todoist) and hosts you run yourself. A host does the
-work on a machine you choose; a server connects your devices to your hosts.
+work on a host you choose; a server connects your devices to your hosts.
 
 The design is written up in `spec/`. Licensed under the MIT licence.
 

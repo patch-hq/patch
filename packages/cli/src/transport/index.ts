@@ -64,9 +64,9 @@ export function buildTransport(
     };
   }
 
-  // A server call from a machine that runs a host: relay it over the host's
+  // A server call from a host that runs a host: relay it over the host's
   // socket and its link to the server, so the CLI needs no credential of its
-  // own. Chosen up front by what is on this machine, never retried the other
+  // own. Chosen up front by what is on this host, never retried the other
   // way; an explicit bearer or fetch (tests, scripts) keeps REST.
   if (
     opts.forceRest &&

@@ -107,7 +107,7 @@ describe('chat-detail header', () => {
   });
 
   // Todoist "Patch mobile show host": web's crumb reads `folder · host`; with
-  // several registered hosts the phone's header must say which machine the
+  // several registered hosts the phone's header must say which host the
   // chat runs on, each segment only when known.
   it('crumb reads `folder · host` when the chat has a known host', () => {
     seedChat('c1', { hostId: 'd1' });
@@ -239,12 +239,12 @@ describe('chat-detail header', () => {
       type: 'chat.error',
       chatId: 'c_new',
       seq: 0,
-      error: { code: 'no_model_catalogue', message: 'that machine has no last-used model' },
+      error: { code: 'no_model_catalogue', message: 'that host has no last-used model' },
     });
     __setLocalSearchParams({ chatId: 'c_new' });
     const r = renderRN(<ChatDetailScreen />);
     expect(findHost(r.root, byTestId('turn-error'))).toBeTruthy();
-    expect(hasText(r.root, 'that machine has no last-used model')).toBe(true);
+    expect(hasText(r.root, 'that host has no last-used model')).toBe(true);
     expect(hasText(r.root, 'no_model_catalogue')).toBe(true);
   });
 
@@ -495,7 +495,7 @@ describe('chat-detail — kebab menu', () => {
     await Promise.resolve();
     expect(apiMocks.createChat).not.toHaveBeenCalled();
     const { useUiStore } = await import('../src/stores/uiStore');
-    expect(useUiStore.getState().errors.at(-1)?.message).toMatch(/machine isn't known/);
+    expect(useUiStore.getState().errors.at(-1)?.message).toMatch(/host isn't known/);
   });
 
   it('Call in the menu starts the same voice call as the header button', () => {

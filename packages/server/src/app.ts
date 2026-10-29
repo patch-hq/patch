@@ -405,7 +405,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // The host connects INTO the server's /ws and authenticates with its
   // EdDSA-JWT daemonKey (spec/10). The InboundHostLink owns the single live
   // host socket once the WS hello gate hands it over via `attachHost`.
-  // Forward-declared: the link routes a chat-scoped frame to the machine that
+  // Forward-declared: the link routes a chat-scoped frame to the host that
   // chat lives on, and the mirror that knows is built just below.
   let chatRegistryRef: ChatRegistry | undefined;
   const hostLink: HostLink =
@@ -479,7 +479,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     if (status === 'online') {
       hostLink.sendTo(hostId, '_server', { type: 'server.queue_mode', enabled: true });
       serverQueue.hostOnline(hostId);
-      // The server decides which machine runs the Manager; each machine is told as it attaches.
+      // The server decides which host runs the Manager; each host is told as it attaches.
       const manager = registry.managerHostId();
       if (manager !== null) {
         hostLink.sendTo(hostId, '_server', { type: 'host.set_manager', hostId: manager });
@@ -555,21 +555,21 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   if (chatMirror) hostLink.onEvent((event) => chatMirror.observe(event));
 
   // The user's own messages (`patch_activity`, spec/06 § Cross-chat toolset),
-  // read through every machine's chat logs.
+  // read through every host's chat logs.
   // Chat dwell sessions are the one part no host keeps: the server records every
   // surface's focus/visibility frames itself (ws-hub.ts) into this log.
   const activityLog = new ActivityLog(opts.dataDir ?? registry.dataDir);
   const activity = createActivityReader({ hostLink, chatRegistry, log: activityLog });
   app.addHook('onClose', async () => activity.close());
 
-  // Settings → Computer use: is an agent driving a machine's browser, and Stop.
+  // Settings → Computer use: is an agent driving a host's browser, and Stop.
   const browserUse = createBrowserUseReader({
     hostLink,
     hostName: (id) => registry.hostName(id),
   });
   app.addHook('onClose', async () => browserUse.close());
   // Every cross-chat tool call, account-wide (Settings → Activity), read
-  // through each machine's own bounded tool-calls.jsonl the same way.
+  // through each host's own bounded tool-calls.jsonl the same way.
   const toolLog = createToolLogReader({ hostLink });
   app.addHook('onClose', async () => toolLog.close());
   const usageReader = createUsageReader({
@@ -884,10 +884,10 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     clearInterval(hostRecheck);
   });
 
-  // spec/03 § Cross-chat tools: relay an agent's `patch.spawn` to the machine
+  // spec/03 § Cross-chat tools: relay an agent's `patch.spawn` to the host
   // it names, answer `patch.list_chats.request` from the account-wide chat
-  // mirror and `patch.activity.request` by reading every machine's chat logs
-  // (only the server sees every machine's chats).
+  // mirror and `patch.activity.request` by reading every host's chat logs
+  // (only the server sees every host's chats).
   registerCrossHostBridge({
     logger: log.child({ component: 'cross-host' }),
     hostLink,
@@ -1137,7 +1137,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // and every existing host's self-update").
   //
   // Unauthenticated on purpose: install route 1 is a shell command pasted into
-  // a machine that has nothing on it — no credential, no patch install, often
+  // a host that has nothing on it — no credential, no patch install, often
   // no account of its own yet. The pairing code is what gates joining the
   // account, and that is redeemed later, against an authenticated route.
   //
@@ -1321,11 +1321,11 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       ).replace(/\/+$/, '');
       if (publicUrl.length === 0) {
         // NO FALLBACK: a command pointing at a placeholder would fail on the
-        // machine being added, with nothing to say why.
+        // host being added, with nothing to say why.
         return reply.code(409).send({
           error: 'no_public_url',
           message:
-            'this server has no public URL configured, so it cannot state where a new machine should fetch from',
+            'this server has no public URL configured, so it cannot state where a new host should fetch from',
         });
       }
       return {
@@ -1336,10 +1336,10 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       };
     });
 
-  // The host registry (spec/01 § Endpoints): every registered machine with its
+  // The host registry (spec/01 § Endpoints): every registered host with its
   // presence and what the server knows about it — the SAME roster the `auth.ok`
   // greeting carries, so REST and the wire can never disagree about which
-  // machines exist.
+  // hosts exist.
   //
   // Authed by a daemonKey AS WELL AS a surface credential, because a host
   // reads this to answer `patch_list_hosts` for its own chats (spec/06
@@ -1363,7 +1363,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         const claims = await verifyDaemonKey(credential, {
           userPublicKey: account.userPublicKey,
         });
-        // A revoked machine's key must not read either.
+        // A revoked host's key must not read either.
         return (
           registry.registeredHostIds().includes(claims.daemon_id) &&
           !registry.isDaemonKeySuperseded(claims.daemon_id, claims.iat)
@@ -1381,7 +1381,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     return {
       hosts: wsHub.hosts().map((h) => ({
         hostId: h.hostId,
-        // A machine that has never spoken has no self-description; report what
+        // A host that has never spoken has no self-description; report what
         // is known and do not invent a name for it.
         hostName: h.host?.hostName ?? null,
         online: h.online,
@@ -1463,7 +1463,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
 
   // Every cross-chat tool call, account-wide (Settings → Activity — "things
   // agents did"). Same shape as `/api/activity` just above: a read-through
-  // across every online machine's own log, merged and paged the same way.
+  // across every online host's own log, merged and paged the same way.
   app.get('/api/tool-log', async (req, reply) => {
     if (!(await authSurfaceOrHost(req.headers.authorization))) {
       return reply.code(401).send({ error: 'unauthenticated' });
@@ -1501,7 +1501,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   });
 
   // Settings → Usage: account limit history (for the burndown) and per-chat
-  // token totals, read through every online machine and merged. A named
+  // token totals, read through every online host and merged. A named
   // `period` (day/week/month) comes from the server's cache, so the page
   // draws at once; `since`/`until` is a live read.
   app.get('/api/usage-report', async (req, reply) => {
@@ -1542,18 +1542,18 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     }
   });
 
-  // Remove a machine from the account (Settings → Hosts → "Remove this host").
+  // Remove a host from the account (Settings → Hosts → "Remove this host").
   //
   //   DELETE /api/hosts/:hostId   → 200 {ok, hosts}   | 404 unknown_host
   //
   // Surface-authenticated like the other host routes. In order: the registry
-  // revokes the machine's credential (so its next hello is answered
+  // revokes the host's credential (so its next hello is answered
   // `auth.revoked` and it wipes its key), its live link is closed and its
   // buffered frames dropped, the hub forgets every cached report about it and
   // tells every surface `host.removed {hostId}`. If it ran the Manager,
-  // the Manager passes to the next registered one and every machine and surface is
+  // the Manager passes to the next registered one and every host and surface is
   // told, as any Manager move would. Chats that ran on it are left as they
-  // are: their history is the account's, not the machine's.
+  // are: their history is the account's, not the host's.
   app.delete<{ Params: { hostId: string } }>('/api/hosts/:hostId', async (req, reply) => {
     let auth;
     try {
@@ -1567,7 +1567,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     if (!registry.isRegisteredHost(hostId)) {
       return reply.code(404).send({
         error: 'unknown_host',
-        message: `no machine registered with hostId: ${hostId}`,
+        message: `no host registered with hostId: ${hostId}`,
         hostId,
         knownHosts: registry.registeredHostIds(),
       });
@@ -1590,8 +1590,8 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     return { ok: true, hosts: wsHub.hosts() };
   });
 
-  // Renaming a machine is SERVER-owned, even when the CLI naming it runs on
-  // that very machine (spec/17 § Hosts and the CLI). The registry holds the
+  // Renaming a host is SERVER-owned, even when the CLI naming it runs on
+  // that very host (spec/17 § Hosts and the CLI). The registry holds the
   // name, so it must be written here and pushed to every surface — a
   // daemon-local write would leave other surfaces stale.
   for (const route of ['/api/hosts/rename']) {
@@ -1617,14 +1617,14 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       if (typeof hostId !== 'string' || hostId.length === 0) {
         return reply
           .code(400)
-          .send({ error: 'hostId_required', message: 'name the machine this applies to' });
+          .send({ error: 'hostId_required', message: 'name the host this applies to' });
       }
       if (!registry.registeredHostIds().includes(hostId)) {
-        // Named, not swallowed — acting on an unregistered machine is the
+        // Named, not swallowed — acting on an unregistered host is the
         // failure the host-addressing gate exists to prevent.
         return reply.code(404).send({
           error: 'unknown_host',
-          message: `no machine registered with hostId: ${hostId}`,
+          message: `no host registered with hostId: ${hostId}`,
           hostId,
           knownHosts: registry.registeredHostIds(),
         });
@@ -1632,13 +1632,13 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
 
       const hostName = req.body?.hostName;
       if (typeof hostName !== 'string' || hostName.trim().length === 0) {
-        // A machine must always have a name; an empty rename is refused.
+        // A host must always have a name; an empty rename is refused.
         return reply
           .code(400)
-          .send({ error: 'invalid_name', message: 'a machine name cannot be empty' });
+          .send({ error: 'invalid_name', message: 'a host name cannot be empty' });
       }
       registry.setHostName(hostId, hostName.trim());
-      // The machine keeps its own self-description in step (and persists the
+      // The host keeps its own self-description in step (and persists the
       // rename so a restart does not revert it); every surface is told too.
       hostLink.sendTo(hostId, 'server', {
         type: 'host.rename',
@@ -1696,8 +1696,8 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
             online: hostLink.status() === 'online',
           }
         : null,
-      // Per machine, from each one's own `host.host` report — so drift
-      // BETWEEN machines is visible instead of collapsing into one number.
+      // Per host, from each one's own `host.host` report — so drift
+      // BETWEEN hosts is visible instead of collapsing into one number.
       hosts: wsHub.hosts().map((h) => ({
         hostId: h.hostId,
         hostName: h.host?.hostName ?? null,
@@ -2104,7 +2104,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     // exists in the registry mirror to decide spawn-vs-message.
     chatExists: (chatId) => chatRegistry.get(chatId) !== undefined,
     // A `message` action's host is the host its target chat lives on — that is
-    // the machine whose reachability decides send-vs-buffer.
+    // the host whose reachability decides send-vs-buffer.
     chatHost: (chatId) => chatRegistry.get(chatId)?.hostId ?? null,
     chatModel: (chatId) => chatRegistry.get(chatId)?.model ?? null,
     // After a restart the mirror is empty until each host re-announces its

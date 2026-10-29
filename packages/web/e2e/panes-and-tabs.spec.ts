@@ -21,7 +21,7 @@ function paneTabs(page: Page): Locator {
  * scroll-into-view inside `click` dispatches its `scroll` event a frame later —
  * after the menu has opened — and the menu correctly closes when the list
  * under it scrolls. Whether the row needs scrolling depends on the sidebar's
- * time-based order, which is why this only failed on some machines.
+ * time-based order, which is why this only failed on some hosts.
  */
 async function openRowMenu(page: Page, testId: string): Promise<void> {
   const row = page.getByTestId(testId);

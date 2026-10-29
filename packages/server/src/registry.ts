@@ -43,10 +43,10 @@ const DaemonKeyRecord = z
     issuedAt: z.number().int(),
     revoked: z.boolean().optional(),
     /**
-     * User-editable label for the machine (spec/03 § Host events —
+     * User-editable label for the host (spec/03 § Host events —
      * `host.rename` is surface → SERVER, because the server owns the registry
-     * entry rather than the machine). Absent until the machine is renamed, in
-     * which case the machine's own reported `hostName` stands.
+     * entry rather than the host). Absent until the host is renamed, in
+     * which case the host's own reported `hostName` stands.
      */
     hostName: z.string().min(1).optional(),
   })
@@ -114,14 +114,14 @@ const RegistryFile = z
     account: StoredAccountRecord.nullable(),
     surfaces: z.array(SurfaceRecord),
     /**
-     * Every machine registered against this account (spec/01 § "a relay for any
-     * number of machines"). One record per machine, in registration order.
+     * Every host registered against this account (spec/01 § "a relay for any
+     * number of hosts"). One record per host, in registration order.
      */
     daemonKeys: z.array(DaemonKeyRecord),
     /**
-     * The machine running the Manager and Speakers (spec/06). The server
-     * moves it when that machine is away; `null` until chosen, in which case
-     * the first registered machine holds it so exactly one always does.
+     * The host running the Manager and Speakers (spec/06). The server
+     * moves it when that host is away; `null` until chosen, in which case
+     * the first registered host holds it so exactly one always does.
      */
     managerHostId: z.string().min(1).nullable(),
     /** Group 11: Expo push tokens per surface. */
@@ -208,7 +208,7 @@ export class Registry implements RevocationStoreInterface {
   /** Atomic write: temp + fsync + rename. */
   private flush(): void {
     const tmp = `${this.path}.tmp.${process.pid}.${Date.now()}`;
-    // registry.json holds daemonKeys (the credential machines authenticate
+    // registry.json holds daemonKeys (the credential hosts authenticate
     // with) and the account private key. Owner-only. The mode goes on the tmp
     // file because rename() preserves it from there.
     writeFileSync(tmp, JSON.stringify(this.state, null, 2), { encoding: 'utf8', mode: 0o600 });
@@ -299,18 +299,18 @@ export class Registry implements RevocationStoreInterface {
     return record;
   }
 
-  // --- host keys (one record per registered machine) ---
+  // --- host keys (one record per registered host) ---
 
-  /** The record for one machine, or null if that machine is not registered. */
+  /** The record for one host, or null if that host is not registered. */
   getDaemonKey(hostId: string): DaemonKeyRecord | null {
     return this.state.daemonKeys.find((d) => d.hostId === hostId) ?? null;
   }
 
   /**
-   * Was a host key minted (`iat`, unix seconds) before this machine's current
-   * registration? Pairing a machine again replaces its record but a daemonKey
-   * carries only the machine's id and never expires, so without this an old key
-   * — one that was revoked, or stolen — would work again the moment the machine
+   * Was a host key minted (`iat`, unix seconds) before this host's current
+   * registration? Pairing a host again replaces its record but a daemonKey
+   * carries only the host's id and never expires, so without this an old key
+   * — one that was revoked, or stolen — would work again the moment the host
    * re-registered under the same id.
    */
   isDaemonKeySuperseded(hostId: string, iat: number): boolean {
@@ -323,19 +323,19 @@ export class Registry implements RevocationStoreInterface {
     return iat + SUPERSEDE_SLACK_SECONDS < registeredAt;
   }
 
-  /** Every machine's record, in registration order (revoked ones included). */
+  /** Every host's record, in registration order (revoked ones included). */
   listDaemonKeys(): DaemonKeyRecord[] {
     return this.state.daemonKeys.slice();
   }
 
   /**
-   * Register a machine, or replace its record on re-pair. Keyed by `hostId`,
-   * so a second machine ADDS a record rather than overwriting the first — the
-   * account is a relay for any number of machines (spec/01).
+   * Register a host, or replace its record on re-pair. Keyed by `hostId`,
+   * so a second host ADDS a record rather than overwriting the first — the
+   * account is a relay for any number of hosts (spec/01).
    */
   setDaemonKey(record: DaemonKeyRecord): void {
     const idx = this.state.daemonKeys.findIndex((d) => d.hostId === record.hostId);
-    // A re-pair must not silently discard the machine's user-editable name.
+    // A re-pair must not silently discard the host's user-editable name.
     const keptName = idx >= 0 ? this.state.daemonKeys[idx]?.hostName : undefined;
     const merged: DaemonKeyRecord = {
       ...record,
@@ -347,8 +347,8 @@ export class Registry implements RevocationStoreInterface {
   }
 
   /**
-   * Set a machine's user-editable label (spec/03 `host.rename`). Throws when
-   * the machine is not registered or the name is empty — the offending value is
+   * Set a host's user-editable label (spec/03 `host.rename`). Throws when
+   * the host is not registered or the name is empty — the offending value is
    * named rather than silently defaulted.
    */
   setHostName(hostId: string, hostName: string): void {
@@ -356,20 +356,20 @@ export class Registry implements RevocationStoreInterface {
       throw new Error(`Registry.setHostName: empty hostName for hostId ${hostId}`);
     }
     const idx = this.state.daemonKeys.findIndex((d) => d.hostId === hostId);
-    if (idx < 0) throw new Error(`Registry.setHostName: no machine registered as ${hostId}`);
+    if (idx < 0) throw new Error(`Registry.setHostName: no host registered as ${hostId}`);
     const rec = this.state.daemonKeys[idx] as DaemonKeyRecord;
     this.state.daemonKeys[idx] = { ...rec, hostName: hostName.trim() };
     this.flush();
   }
 
-  /** The machine's user-editable label, or undefined when never renamed. */
+  /** The host's user-editable label, or undefined when never renamed. */
   hostName(hostId: string): string | undefined {
     return this.getDaemonKey(hostId)?.hostName;
   }
 
   /**
-   * The machine running the Manager (spec/06). Defaults to the first registered
-   * machine so exactly one machine holds it as soon as one exists.
+   * The host running the Manager (spec/06). Defaults to the first registered
+   * host so exactly one host holds it as soon as one exists.
    */
   managerHostId(): string | null {
     const explicit = this.state.managerHostId;
@@ -377,17 +377,17 @@ export class Registry implements RevocationStoreInterface {
     return this.registeredHostIds()[0] ?? null;
   }
 
-  /** Make one machine the one running the Manager. Throws if unregistered. */
+  /** Make one host the one running the Manager. Throws if unregistered. */
   setManagerHostId(hostId: string): void {
     if (!this.isRegisteredHost(hostId)) {
-      throw new Error(`Registry.setManagerHostId: no machine registered as ${hostId}`);
+      throw new Error(`Registry.setManagerHostId: no host registered as ${hostId}`);
     }
     this.state.managerHostId = hostId;
     this.flush();
   }
 
   /**
-   * Every machine registered against this account, in registration order
+   * Every host registered against this account, in registration order
    * (spec/03 § Host events — a host-addressed frame names one of these).
    */
   registeredHostIds(): string[] {
@@ -395,11 +395,11 @@ export class Registry implements RevocationStoreInterface {
   }
 
   /**
-   * Is `hostId` a machine this account has registered?
+   * Is `hostId` a host this account has registered?
    *
    * The gate for every host-addressed ingress. A frame naming an unregistered
-   * machine is REFUSED naming the offending id — never relayed to whichever
-   * host happens to be attached (spec/03 § Host events). With one machine
+   * host is REFUSED naming the offending id — never relayed to whichever
+   * host happens to be attached (spec/03 § Host events). With one host
    * online that difference is invisible; with two it silently runs the work on
    * the wrong filesystem, which is why the check lives at the ingress rather
    * than at the routing layer.
@@ -409,21 +409,21 @@ export class Registry implements RevocationStoreInterface {
   }
 
   /**
-   * Take a machine off the account (Settings → Hosts → "Remove this host").
+   * Take a host off the account (Settings → Hosts → "Remove this host").
    *
    * The record is kept as a REVOKED tombstone rather than deleted: an unknown
    * hostId's hello is merely refused, whereas a revoked one is told
-   * `auth.revoked` and wipes its key — so the machine learns it was removed
+   * `auth.revoked` and wipes its key — so the host learns it was removed
    * instead of retrying forever. It drops out of `registeredHostIds()` (and
    * so out of every roster and the host-addressing gate) at once. Pairing the
-   * machine again replaces the tombstone (`setDaemonKey`). An explicit home
-   * choice naming it is cleared, so `managerHostId()` falls to the next machine.
+   * host again replaces the tombstone (`setDaemonKey`). An explicit home
+   * choice naming it is cleared, so `managerHostId()` falls to the next host.
    *
-   * Throws naming the id when it is not a registered machine.
+   * Throws naming the id when it is not a registered host.
    */
   removeHost(hostId: string): void {
     if (!this.isRegisteredHost(hostId)) {
-      throw new Error(`Registry.removeHost: no machine registered as ${hostId}`);
+      throw new Error(`Registry.removeHost: no host registered as ${hostId}`);
     }
     const idx = this.state.daemonKeys.findIndex((d) => d.hostId === hostId);
     const rec = this.state.daemonKeys[idx] as DaemonKeyRecord;

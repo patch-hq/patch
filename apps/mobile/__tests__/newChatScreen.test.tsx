@@ -601,7 +601,7 @@ describe('NewChat — folder picker sheet', () => {
     await press(r, 'folder-sheet-browse');
     expect(api.browseFolders).not.toHaveBeenCalled();
     expect(
-      hasText(findHost(r.root, byTestId('folder-sheet-error')), 'Choose which machine to browse.'),
+      hasText(findHost(r.root, byTestId('folder-sheet-error')), 'Choose which host to browse.'),
     ).toBe(true);
   });
 });
@@ -664,7 +664,7 @@ describe('NewChat — folder picker sheet, several hosts', () => {
     await send(r);
     expect(api.createChat).not.toHaveBeenCalled();
     expect(useUiStore.getState().errors[0]?.message).toBe(
-      'Choose which machine to start the chat on.',
+      'Choose which host to start the chat on.',
     );
   });
 });

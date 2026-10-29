@@ -17,8 +17,8 @@
 //   - detach(): becomes offline. Surface→host events buffer (cap 10k per
 //     surface, drop-oldest with a logged warning) until the host reconnects
 //     (spec/12 offline behaviour).
-//   - One socket PER MACHINE: attaching a second socket for the same machine
-//     closes the older; a socket for a different machine is independent.
+//   - One socket PER MACHINE: attaching a second socket for the same host
+//     closes the older; a socket for a different host is independent.
 //
 // For tests we expose `HostLink` as an interface; `InProcessHostLink` is
 // the in-memory fake injected by unit/integration tests.
@@ -38,38 +38,38 @@ export interface HostLink {
   /**
    * The host on the other end of this link (spec/02 § Host identity).
    *
-   * Presence frames name the machine they describe, and the authority on which
-   * machine that is has to be the link itself — reading it back from a registry
+   * Presence frames name the host they describe, and the authority on which
+   * host that is has to be the link itself — reading it back from a registry
    * lookup is how an anonymous `host.offline` gets attributed to the wrong
    * host once there is more than one. `null` before any host has ever
    * attached, in which case there is nothing truthful to announce.
    *
-   * With several machines linked this is the ACCOUNT-DEFAULT machine (the one
+   * With several hosts linked this is the ACCOUNT-DEFAULT host (the one
    * running the Manager): the one an unaddressed, chat-less frame belongs to. Anything
    * host-specific must use `sendTo` / `onlineHostIds` instead.
    */
   hostId(): string | null;
-  /** Every machine with a live link right now. */
+  /** Every host with a live link right now. */
   onlineHostIds(): string[];
-  /** Is this machine's link live? */
+  /** Is this host's link live? */
   isOnline(hostId: string): boolean;
   /**
-   * Send an event to ONE named machine. Buffered (per host, per surface) while
-   * that machine is offline, exactly as `send` is.
+   * Send an event to ONE named host. Buffered (per host, per surface) while
+   * that host is offline, exactly as `send` is.
    */
   sendTo(hostId: string, surfaceId: string, event: WireEvent): void;
   /** Subscribe to per-host online/offline transitions. Returns unsub. */
   onHostStatus(handler: (hostId: string, status: 'online' | 'offline') => void): () => void;
   /**
-   * Send an event from a surface up to the host that owns it: the machine the
-   * frame names, else the machine the frame's chat lives on, else the machine
+   * Send an event from a surface up to the host that owns it: the host the
+   * frame names, else the host the frame's chat lives on, else the host
    * running the Manager.
    */
   send(surfaceId: string, event: WireEvent): void;
   /**
    * Subscribe to events arriving from any host. The handler is told WHICH
-   * machine sent the frame — a cross-host relay has to know the source to avoid
-   * bouncing a frame back to the machine that raised it. Returns unsub.
+   * host sent the frame — a cross-host relay has to know the source to avoid
+   * bouncing a frame back to the host that raised it. Returns unsub.
    */
   onEvent(handler: (event: WireEvent, fromHostId: string | null) => void): () => void;
   /** Subscribe to online/offline transitions. Returns unsub. */
@@ -97,7 +97,7 @@ export interface HostLink {
    */
   setEventGate?(gate: (event: WireEvent, fromHostId: string | null) => WireEvent | null): void;
   /**
-   * Drop a machine that was removed from the account: close its live socket
+   * Drop a host that was removed from the account: close its live socket
    * if any (which announces it offline like any drop), then discard its link
    * state, including frames buffered for it — they can never be delivered.
    * Returns true if a live socket was closed.
@@ -135,34 +135,34 @@ export interface InboundHostLinkOptions {
    */
   heldInputs?: HeldInputStore;
   /**
-   * The machine that runs the Manager and Speakers right now. The server moves it to
-   * another machine when the one running it has been offline a while.
+   * The host that runs the Manager and Speakers right now. The server moves it to
+   * another host when the one running it has been offline a while.
    */
   specialThreadHost?: () => string | null;
   /**
-   * Which machine a chat lives on (the server's ChatRegistry mirror). A frame
-   * that names no machine but names a chat belongs to that chat's machine —
+   * Which host a chat lives on (the server's ChatRegistry mirror). A frame
+   * that names no host but names a chat belongs to that chat's host —
    * routing it to "whichever host is attached" is the exact bug host
    * addressing exists to prevent. Absent before the registry is wired.
    */
   resolveChatHost?: (chatId: string) => string | null;
   /**
-   * The machine running the Manager (spec/06) — where a frame that names neither a
-   * machine nor a chat belongs (special threads, job dispatch, locks).
+   * The host running the Manager (spec/06) — where a frame that names neither a
+   * host nor a chat belongs (special threads, job dispatch, locks).
    */
   managerHostId?: () => string | null;
   /**
-   * Every machine this account has ever registered (`Registry.registeredHostIds`)
+   * Every host this account has ever registered (`Registry.registeredHostIds`)
    * — NOT just the ones with a live link right now. Lets `send()` tell "the
-   * Manager machine is this account's only possible answer" from "there is more
-   * than one machine this chat could actually live on, and guessing risks
+   * Manager host is this account's only possible answer" from "there is more
+   * than one host this chat could actually live on, and guessing risks
    * asking the wrong one." Absent (or a single id) preserves the old
-   * behaviour exactly: guess the Manager machine and let `sendTo`'s own buffering carry it
-   * until that machine reconnects, which is always correct when it is the
-   * only machine there is.
+   * behaviour exactly: guess the Manager host and let `sendTo`'s own buffering carry it
+   * until that host reconnects, which is always correct when it is the
+   * only host there is.
    */
   registeredHostIds?: () => string[];
-  /** A machine's display name (`Registry.hostName`), falling back to its id. */
+  /** A host's display name (`Registry.hostName`), falling back to its id. */
   hostName?: (hostId: string) => string | undefined;
   /**
    * Liveness probing of host sockets (spec/12 § Host → server disconnect). A
@@ -182,20 +182,20 @@ export interface InboundHostLinkOptions {
 
 /**
  * How long a chat-scoped frame waits for the registry mirror to learn which
- * machine the chat lives on, before giving up (spec/12 § Reconnect races). A
+ * host the chat lives on, before giving up (spec/12 § Reconnect races). A
  * server restart empties the mirror; the owning host repopulates it a few
  * seconds later, on reconnect (`onAuthed` replays `chat.spawned` +
  * `chat.state` for every chat it holds — see host/src/index.ts). Guessing
- * the Manager machine in that gap is the exact bug host addressing
+ * the Manager host in that gap is the exact bug host addressing
  * exists to prevent everywhere else in this file: a chat that actually lives
- * on a DIFFERENT machine would be misrouted to the Manager one and come back
+ * on a DIFFERENT host would be misrouted to the Manager one and come back
  * `chat_not_found` from a host that never owned it — a real, live chat
  * reported as gone (the reported bug: a redeploy's reconnect window showed
  * this on a chat that was fine).
  */
 // Long enough for a host to redial after a deploy restarts the server (its
 // reconnect backoff plus the resync) — 3s was shorter than that, so a live
-// chat on a second machine got "Connection to this chat's host was lost."
+// chat on a second host got "Connection to this chat's host was lost."
 // during every deploy. The frame is only held, never dropped, in the meantime.
 const UNKNOWN_CHAT_HOST_WAIT_MS = 15_000;
 const UNKNOWN_CHAT_HOST_POLL_MS = 200;
@@ -240,20 +240,20 @@ function chatHostUnknownMessage(names: string[]): string {
  */
 const PER_SURFACE_BUFFER_CAP = 10_000;
 
-/** One machine's live link state. */
+/** One host's live link state. */
 interface HostLinkState {
   socket: WebSocket | null;
   status: 'online' | 'offline';
   connectedAt: number | null;
-  /** surfaceId → events queued while this machine is offline. */
+  /** surfaceId → events queued while this host is offline. */
   buffers: Map<string, WireEvent[]>;
 }
 
 /**
- * Inbound-connection-backed HostLink for ANY NUMBER of machines. Each host
+ * Inbound-connection-backed HostLink for ANY NUMBER of hosts. Each host
  * dials `/ws` and the hello gate hands us its authenticated socket via
- * `attach(socket, hostId)`; this object keeps one entry per machine and
- * routes each surface frame to the machine it is about.
+ * `attach(socket, hostId)`; this object keeps one entry per host and
+ * routes each surface frame to the host it is about.
  */
 export class InboundHostLink implements HostLink {
   private readonly hosts = new Map<string, HostLinkState>();
@@ -263,7 +263,7 @@ export class InboundHostLink implements HostLink {
     (hostId: string, s: 'online' | 'offline') => void
   >();
   private eventGate: ((e: WireEvent, from: string | null) => WireEvent | null) | null = null;
-  /** Last machine to attach — the account default when nothing else names one. */
+  /** Last host to attach — the account default when nothing else names one. */
   private lastAttachedHostId: string | null = null;
   private closed = false;
 
@@ -291,10 +291,10 @@ export class InboundHostLink implements HostLink {
   }
 
   /**
-   * The Manager and Speakers threads are the account's, and live on the machine
+   * The Manager and Speakers threads are the account's, and live on the host
    * running the Manager (spec/06 § Where special threads run). A copy a different
-   * machine still carries, from before the Manager moved, is not the account's
-   * thread, so nothing it says about one is passed on. Without this two machines
+   * host still carries, from before the Manager moved, is not the account's
+   * thread, so nothing it says about one is passed on. Without this two hosts
    * both announce `thread_manager` and whichever spoke last is "the Manager".
    */
   private isStraySpecialThreadEvent(event: WireEvent, fromHostId: string): boolean {
@@ -305,9 +305,9 @@ export class InboundHostLink implements HostLink {
   }
 
   /**
-   * The account-default machine: the Manager machine when the registry names one
-   * (and it is known here), else the machine that most recently attached, else
-   * any machine we have ever seen. `null` when no machine has ever attached.
+   * The account-default host: the Manager host when the registry names one
+   * (and it is known here), else the host that most recently attached, else
+   * any host we have ever seen. `null` when no host has ever attached.
    */
   hostId(): string | null {
     const manager = this.opts.managerHostId?.() ?? null;
@@ -325,10 +325,10 @@ export class InboundHostLink implements HostLink {
   }
 
   /**
-   * Bind an authenticated host socket for ONE machine. Frames arriving on it
-   * feed `onEvent`; socket close detaches that machine only. Buffered frames
-   * for that machine flush immediately. A second socket for the SAME machine
-   * closes the older one; a socket for a DIFFERENT machine is independent.
+   * Bind an authenticated host socket for ONE host. Frames arriving on it
+   * feed `onEvent`; socket close detaches that host only. Buffered frames
+   * for that host flush immediately. A second socket for the SAME host
+   * closes the older one; a socket for a DIFFERENT host is independent.
    */
   attach(socket: WebSocket, hostId: string): void {
     if (this.closed) {
@@ -461,13 +461,13 @@ export class InboundHostLink implements HostLink {
       }
       // The registry mirror doesn't know this chat's host — most commonly the
       // few seconds right after a server restart, before the host that owns
-      // it has reconnected and resynced. With only ONE machine ever
-      // registered on this account, the Manager-machine fallback below IS that chat's
+      // it has reconnected and resynced. With only ONE host ever
+      // registered on this account, the Manager-host fallback below IS that chat's
       // host, whatever the mirror currently thinks — guess it and let
       // `sendTo`'s own offline buffering carry the frame until it reconnects,
-      // exactly as before. It is only with more than one registered machine
+      // exactly as before. It is only with more than one registered host
       // that a guess can be WRONG: a chat living on a different one would be
-      // misrouted to the Manager machine and come back a false `chat_not_found` from a
+      // misrouted to the Manager host and come back a false `chat_not_found` from a
       // host that never owned it — hold the frame instead and give the
       // real host a chance to register.
       const registered = this.opts.registeredHostIds?.() ?? [];
@@ -480,7 +480,7 @@ export class InboundHostLink implements HostLink {
     if (fallback === null) {
       this.opts.logger.error(
         { type: event.type, surfaceId },
-        'host-link: no machine to route this frame to; dropping',
+        'host-link: no host to route this frame to; dropping',
       );
       return;
     }
@@ -521,7 +521,7 @@ export class InboundHostLink implements HostLink {
     // that method — it is a documented dev/test seam, and this is a genuine
     // production notice) so it reaches the requesting surface exactly like
     // any other addressed reply (`chat.replay`'s own `forSurfaceId` tagging).
-    // The chat's host is unknown, so name every machine it could be on that
+    // The chat's host is unknown, so name every host it could be on that
     // is not connected right now.
     const names = (this.opts.registeredHostIds?.() ?? [])
       .filter((id) => !this.isOnline(id))
@@ -604,7 +604,7 @@ export class InboundHostLink implements HostLink {
     };
   }
 
-  /** Account-wide: online while ANY machine is linked. */
+  /** Account-wide: online while ANY host is linked. */
   status(): 'online' | 'offline' {
     return this.onlineHostIds().length > 0 ? 'online' : 'offline';
   }
@@ -630,8 +630,8 @@ export class InboundHostLink implements HostLink {
   }
 
   /**
-   * spec/10 ## Revocation — sever one machine's live socket (if any) without
-   * permanently closing the link. A revoked machine's next hello is rejected by
+   * spec/10 ## Revocation — sever one host's live socket (if any) without
+   * permanently closing the link. A revoked host's next hello is rejected by
    * the gate; this just stops the currently-open socket from relaying. Returns
    * true if a live socket was closed.
    */
@@ -699,12 +699,12 @@ export class InboundHostLink implements HostLink {
 export class InProcessHostLink implements HostLink {
   /**
    * The host this stand-in link represents. Settable so a test can run two
-   * links as two distinct machines, which is what every multi-host assertion
+   * links as two distinct hosts, which is what every multi-host assertion
    * needs.
    */
   private attachedHostId: string | null = 'd1';
   /**
-   * Extra machines this fake reports as online, so a test can exercise
+   * Extra hosts this fake reports as online, so a test can exercise
    * multi-host routing without two real sockets. The primary
    * `attachedHostId` is always included while status is online.
    */
@@ -717,10 +717,10 @@ export class InProcessHostLink implements HostLink {
   private currentStatus: 'online' | 'offline' = 'online';
   private connectedAt: number | null = Date.now();
   /**
-   * Frames this fake link "sent". `hostId` records the machine the frame was
+   * Frames this fake link "sent". `hostId` records the host the frame was
    * ADDRESSED to (null when it went through the routing `send()` rather than
    * `sendTo()`), so a test can assert a reply went back to the requester and
-   * not to the Manager machine.
+   * not to the Manager host.
    */
   readonly sent: Array<{ surfaceId: string; event: WireEvent; hostId?: string }> = [];
 
@@ -733,13 +733,13 @@ export class InProcessHostLink implements HostLink {
     this.attachedHostId = id;
   }
 
-  /** Test helper: report an ADDITIONAL machine as linked. */
+  /** Test helper: report an ADDITIONAL host as linked. */
   addOnlineHost(id: string): void {
     this.extraOnline.add(id);
     for (const h of this.hostStatusHandlers) h(id, 'online');
   }
 
-  /** Test helper: take one ADDITIONAL machine offline. */
+  /** Test helper: take one ADDITIONAL host offline. */
   dropOnlineHost(id: string): void {
     if (!this.extraOnline.delete(id)) return;
     for (const h of this.hostStatusHandlers) h(id, 'offline');
@@ -794,7 +794,7 @@ export class InProcessHostLink implements HostLink {
     );
   }
 
-  /** Machines `forget` was called for, in order — for tests to assert on. */
+  /** Hosts `forget` was called for, in order — for tests to assert on. */
   readonly forgotten: string[] = [];
 
   forget(hostId: string): boolean {

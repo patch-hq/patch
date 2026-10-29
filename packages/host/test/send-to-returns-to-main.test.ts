@@ -1,6 +1,6 @@
 // An agent's `patch_send_to` landing in a chat that is out of the main list —
 // hidden, snoozed or archived — brings it back to the main list (spec/04 §
-// Hidden, § Snooze, § Lifecycle). Machine sends that are not an agent writing
+// Hidden, § Snooze, § Lifecycle). Host sends that are not an agent writing
 // (a self-wake, a job tick) leave it where it was.
 
 import { describe, it, expect } from 'vitest';
@@ -91,7 +91,7 @@ describe('patch_send_to returns a chat to the main view', () => {
     expect(daemon.chatState.get(chatId)?.hidden).toBe(false);
   });
 
-  it('a machine send that is not an agent writing leaves hidden and snoozed alone', async () => {
+  it('a host send that is not an agent writing leaves hidden and snoozed alone', async () => {
     const { daemon, folder } = setup();
     const chatId = await daemon.spawnChat({ folder, hidden: true });
     await daemon.setSnoozed(chatId, NOW + 3_600_000);

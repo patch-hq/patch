@@ -180,7 +180,7 @@ test('--utc and --timezone together: exit 1, server untouched', async () => {
   });
 });
 
-// NO FALLBACK: a zone this machine cannot resolve is a caller error, named
+// NO FALLBACK: a zone this host cannot resolve is a caller error, named
 // client-side, never silently demoted to UTC and never forwarded for an
 // opaque server-side `invalid_input`.
 test('an unresolvable --timezone: exit 1 naming the zone, server untouched', async () => {

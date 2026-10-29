@@ -293,7 +293,7 @@ describe('formatReadAt', () => {
   });
 });
 
-describe('hostOutage — is there any credit left on this machine at all', () => {
+describe('hostOutage — is there any credit left on this host at all', () => {
   const spent = (resetsAt?: number) => ({
     session: { status: 'rejected' as const, utilization: 1, ...(resetsAt ? { resetsAt } : {}) },
   });

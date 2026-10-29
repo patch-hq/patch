@@ -144,7 +144,7 @@ describe('a message sent into a live chat', () => {
     receive({
       type: 'chat.error',
       chatId: CHAT,
-      error: { code: 'sdk_error', message: 'the agent backend is not installed on this machine' },
+      error: { code: 'sdk_error', message: 'the agent backend is not installed on this host' },
       seq: 1,
       causeSeq: 0,
     });
@@ -155,9 +155,7 @@ describe('a message sent into a live chat', () => {
       .getState()
       .timelines[CHAT]!.find((e) => e.kind === 'message' && e.seq === 0);
     expect(failedMessage?.turnFailed).toBe(true);
-    expect(failedMessage?.turnErrorMessage).toBe(
-      'the agent backend is not installed on this machine',
-    );
+    expect(failedMessage?.turnErrorMessage).toBe('the agent backend is not installed on this host');
 
     renderChat();
     expect(screen.getByTestId('turn-failed')).toBeInTheDocument();

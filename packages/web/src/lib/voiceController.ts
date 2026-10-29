@@ -319,9 +319,9 @@ export async function startVoiceCall(
 ): Promise<void> {
   // Voice happens on a MACHINE (plan H1): the chat's own. Refuse before opening
   // an audio session that would fail at the moment of speaking, and name both
-  // the machine and what it needs — the machine is the thing the user can't see.
-  // Only refuse on what is KNOWN: a machine that has reported and is missing
-  // the speech components. A machine that has not reported yet is not blocked —
+  // the host and what it needs — the host is the thing the user can't see.
+  // Only refuse on what is KNOWN: a host that has reported and is missing
+  // the speech components. A host that has not reported yet is not blocked —
   // presence may simply not have arrived, and the audio session fails loudly on
   // its own if voice really is unavailable. Refusing on "unknown" would stop a
   // legitimate call every time the greeting was slow.

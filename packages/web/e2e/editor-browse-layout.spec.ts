@@ -17,7 +17,7 @@ const HARNESS = '/app/dev-harness.html?chat=chat_bus&editor=browse';
 
 // Monaco is a big lazy chunk: ~2s to first paint on an idle box, against the 5s
 // default expect timeout. That 2.4x margin does not survive four Playwright
-// workers sharing a machine that is also running a host, so this assertion
+// workers sharing a host that is also running a host, so this assertion
 // failed under the full suite while passing every time on its own. Waiting for
 // the chunk is not what either test is about — the layout assertions below keep
 // the default timeout, and only the mount gets the headroom.

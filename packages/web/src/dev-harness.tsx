@@ -102,7 +102,7 @@ const queryClient = new QueryClient({
 const openingJobTriggerFixture =
   new URLSearchParams(window.location.search).get('chat') === 'chat_job_trigger';
 
-// `?recency=machine` gives the new-chat screen's recently used models
+// `?recency=host` gives the new-chat screen's recently used models
 // something to ignore: a job-spawned chat and the Manager thread, both NEWER
 // than the one chat a person started (`chat_bus`), each on a model of its own
 // (spec/14 § Sidebar §8). Scoped to the param for the same reason as
@@ -2899,9 +2899,9 @@ usePresenceStore.getState().setHosts([
   },
 ]);
 
-// `?hosts=two` adds a second machine, so the new-chat screen has a choice of
+// `?hosts=two` adds a second host, so the new-chat screen has a choice of
 // where to run (spec/14 §8). It publishes its own folder registry, as a real
-// host does, so choosing it offers that machine's folders and nobody else's.
+// host does, so choosing it offers that host's folders and nobody else's.
 if (new URLSearchParams(window.location.search).get('hosts') === 'two') {
   const home = usePresenceStore.getState().hosts['d1'];
   usePresenceStore.getState().setHosts([

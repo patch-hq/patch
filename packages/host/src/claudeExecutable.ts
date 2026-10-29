@@ -5,7 +5,7 @@
 //   the SDK      `@anthropic-ai/claude-agent-sdk` — the host's own library
 //                dependency, imported in-process. It travels IN the artifact.
 //   the CLI      the ~200 MB Claude Code binary it drives. That is the
-//                machine's, installed the way its user installs it, and the
+//                host's, installed the way its user installs it, and the
 //                host runs whichever one they get in their terminal.
 //
 // Passing the resolved path as `pathToClaudeCodeExecutable` is what makes that
@@ -25,8 +25,8 @@ export interface ResolveClaudeOptions {
   override?: string | undefined;
   /**
    * The absolute install locations to try after `home` and `pathEnv`. Part of
-   * the machine like the other two, so it is passed in like the other two: when
-   * these were baked in as literals, "the machine has no Claude Code" was not a
+   * the host like the other two, so it is passed in like the other two: when
+   * these were baked in as literals, "the host has no Claude Code" was not a
    * describable state — a caller could hand over an empty home and an empty
    * PATH and still get `/usr/local/bin/claude` back off the real filesystem.
    */
@@ -48,9 +48,9 @@ function usable(path: string): boolean {
 }
 
 /**
- * The machine's `claude`, or `undefined` when it hasn't got one. Not an error
+ * The host's `claude`, or `undefined` when it hasn't got one. Not an error
  * here — the caller decides what that means: `host.host` reports the backend
- * `absent`, and a turn that cannot run says so naming the machine.
+ * `absent`, and a turn that cannot run says so naming the host.
  */
 export function resolveClaudeExecutable(opts: ResolveClaudeOptions): string | undefined {
   if (opts.override !== undefined && usable(opts.override)) return opts.override;

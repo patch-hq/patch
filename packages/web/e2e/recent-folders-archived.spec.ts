@@ -75,7 +75,7 @@ test.describe('Recent projects survives archiving a project’s last chat', () =
     // "Choose a folder…" state.
     const pill = page.getByTestId('new-chat-folder-pill');
     // The new-chat route mounts the editor stack behind it, which on a loaded
-    // machine takes longer than the 5s default to first paint.
+    // host takes longer than the 5s default to first paint.
     await expect(pill).toBeVisible({ timeout: 15_000 });
     await expect(pill).toContainText('retired');
     await expect(pill).not.toContainText('Choose a folder');

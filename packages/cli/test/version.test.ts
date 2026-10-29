@@ -3,9 +3,9 @@
 //
 // The artifact ships the CLI as one bundled `bin/patch.js` with no package.json
 // anywhere near it, and `readVersion` looked for nothing else — so on a freshly
-// installed machine EVERY `patch` command died at startup with "@patch/cli:
+// installed host EVERY `patch` command died at startup with "@patch/cli:
 // package.json version not found", before parsing a single argument. The
-// patch-cli skill tells every chat on that machine to run `patch chats list`,
+// patch-cli skill tells every chat on that host to run `patch chats list`,
 // so its very first instruction failed.
 //
 // The artifact does stamp itself: `build-info.json` sits at its root, beside the

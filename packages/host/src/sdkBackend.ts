@@ -1029,12 +1029,12 @@ let sdkModule: SdkModule | undefined;
  * A bare specifier, because the SDK is the host's own library dependency and
  * TRAVELS WITH IT: the artifact carries it in a `node_modules` beside
  * `host.mjs` (scripts/build-host.mjs), and a source checkout has it in the
- * monorepo's. It is not something a machine is expected to have, and nothing
+ * monorepo's. It is not something a host is expected to have, and nothing
  * installs it per host any more.
  *
- * What the machine DOES supply is the Claude Code binary the SDK drives — see
+ * What the host DOES supply is the Claude Code binary the SDK drives — see
  * `claudeExecutable.ts`. The two are separate on purpose: ~4 MB of library in
- * the artifact, ~200 MB of CLI already on the machine.
+ * the artifact, ~200 MB of CLI already on the host.
  */
 async function loadSdk(): Promise<SdkModule> {
   if (sdkModule) return sdkModule;
@@ -1277,7 +1277,7 @@ function inferenceProfileOptions(opts: SdkRunOptions): Partial<Options> {
  * The Claude Code binary every query runs, as `pathToClaudeCodeExecutable`
  * (spec/02 § Agent backends — "so a host runs the same `claude` the user runs").
  *
- * Resolved ONCE per process: it is a property of the machine, not of a turn.
+ * Resolved ONCE per process: it is a property of the host, not of a turn.
  * Absent, the option is omitted and the SDK says what it looked for — the
  * artifact carries the library, never the ~200 MB CLI, so there is nothing for
  * it to fall back to and nothing here should pretend otherwise.
@@ -1294,7 +1294,7 @@ function claudeExecutablePath(): string | undefined {
   return claudeExecutable;
 }
 
-/** SDK options shared by both run paths, including the machine's CLI. */
+/** SDK options shared by both run paths, including the host's CLI. */
 function machineOpts(
   opts: SdkRunOptions,
   durable?: DurableTurn,

@@ -6,12 +6,12 @@ import { test, expect } from '@playwright/test';
 // take the account's `defaultModel` (spec/08 § Action).
 //
 // That row used to read `Host default` and meant the host's last-used model —
-// whatever chat last ran on that machine — so a job's model drifted with
+// whatever chat last ran on that host — so a job's model drifted with
 // unrelated activity. One account setting replaced it.
 //
 // This is the real browser rather than jsdom because the thing under test is
 // the catalogue RELOADING when the folder picker moves the job to a different
-// machine — a genuine effect/refetch sequence against two hosts.
+// host — a genuine effect/refetch sequence against two hosts.
 
 const NEW_JOB = '/app/dev-harness.html?route=/jobs/new';
 
@@ -26,7 +26,7 @@ const HOSTS = {
 // 'claude-opus-5'` — one of d1's own catalogue entries below, so picking d1
 // exercises the real label lookup rather than falling back to the raw id.
 
-/** Each machine serves a DIFFERENT catalogue, so a stale one is visible. */
+/** Each host serves a DIFFERENT catalogue, so a stale one is visible. */
 const CATALOGUE: Record<string, Array<{ id: string; label: string }>> = {
   d1: [
     { id: 'claude-opus-5', label: 'Opus 5' },
@@ -100,7 +100,7 @@ test.describe('job editor — model picker', () => {
     await expect(model.locator('option[value="claude-opus-5"]')).toHaveCount(1);
 
     // d2 serves a different catalogue. Leaving d1's models on screen is how an
-    // id the target machine cannot run gets stored.
+    // id the target host cannot run gets stored.
     await folder.selectOption(JSON.stringify(['d2', '/home/tom/beta']));
     await expect(model.locator('option[value="claude-sonnet-4-6"]')).toHaveCount(1);
     await expect(model.locator('option[value="claude-opus-5"]')).toHaveCount(0);

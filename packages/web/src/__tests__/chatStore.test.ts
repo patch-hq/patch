@@ -900,7 +900,7 @@ describe('chatStore reducer', () => {
     useChatStore.getState().applyEvent({
       type: 'chat.error',
       chatId: 'pending-spawn',
-      error: { code: 'invalid_frame', message: 'host.update: machine d1 did not update' },
+      error: { code: 'invalid_frame', message: 'host.update: host d1 did not update' },
       seq: -1,
     });
     expect(useChatStore.getState().chats['pending-spawn']).toBeUndefined();

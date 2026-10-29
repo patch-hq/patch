@@ -189,7 +189,7 @@ export function HostSwitch(): JSX.Element | null {
   const { options, hostId, select } = useSettingsHost();
   if (options.length < 2) return null;
   return (
-    <div className="set-seg" role="tablist" aria-label="Machine" data-testid="settings-host-switch">
+    <div className="set-seg" role="tablist" aria-label="Host" data-testid="settings-host-switch">
       {options.map((h) => (
         <button
           key={h.hostId}
@@ -225,7 +225,7 @@ export function useHostGate(): { host: HostPresence | null; gate: JSX.Element | 
       host: null,
       gate: (
         <Group>
-          <Note testid="settings-no-hosts">No machines yet</Note>
+          <Note testid="settings-no-hosts">No hosts yet</Note>
         </Group>
       ),
     };

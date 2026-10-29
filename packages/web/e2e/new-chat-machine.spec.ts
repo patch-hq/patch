@@ -1,11 +1,11 @@
 import { test, expect } from '@playwright/test';
 
 // Real-browser e2e for choosing where a new chat runs (spec/14 §8), against the
-// dev harness with two machines registered.
+// dev harness with two hosts registered.
 const NEW = '/app/dev-harness.html?chat=new&hosts=two';
 
-test.describe('new chat — which machine', () => {
-  test('choosing a machine offers its own folders and spawns there', async ({ page }) => {
+test.describe('new chat — which host', () => {
+  test('choosing a host offers its own folders and spawns there', async ({ page }) => {
     let spawnBody: Record<string, unknown> | null = null;
     await page.route('**/api/chats', async (r) => {
       if (r.request().method() !== 'POST') return r.fallback();
@@ -40,16 +40,16 @@ test.describe('new chat — which machine', () => {
     await expect.poll(() => spawnBody).toMatchObject({ hostId: 'd2', folder: '/Users/dev/code' });
   });
 
-  test('the machine row sits above the project row, each with its label', async ({ page }) => {
+  test('the host row sits above the project row, each with its label', async ({ page }) => {
     await page.goto(NEW);
     const machines = (await page.getByTestId('new-chat-machines').boundingBox())!;
     const pill = (await page.getByTestId('new-chat-folder-pill').boundingBox())!;
-    expect(machines.y + machines.height).toBeLessThanOrEqual(pill.y + 1);
+    expect(hosts.y + hosts.height).toBeLessThanOrEqual(pill.y + 1);
     await expect(
       page.getByTestId('new-chat-setup-grid').locator('.new-chat-setup-label'),
-    ).toHaveText(['Machine', 'Project', 'Model']);
-    // Says Machine, never host — and nothing hides in a tooltip.
-    await expect(page.getByTestId('new-chat-host')).toHaveAttribute('aria-label', 'Machine');
+    ).toHaveText(['Host', 'Project', 'Model']);
+    // Says Host, never host — and nothing hides in a tooltip.
+    await expect(page.getByTestId('new-chat-host')).toHaveAttribute('aria-label', 'Host');
     await expect(page.getByTestId('host-option-d2')).not.toHaveAttribute('title', /.*/);
   });
 });

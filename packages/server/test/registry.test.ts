@@ -54,7 +54,7 @@ describe('Registry', () => {
   });
 
   it('writes registry.json owner-only (0600) on every flush, not just at create', () => {
-    // registry.json holds daemonKeys (the credential machines authenticate
+    // registry.json holds daemonKeys (the credential hosts authenticate
     // with) and the account private key. spec/10-auth keeps credential stores
     // owner-only. The write is tmp-then-rename, so the mode must be set on the
     // tmp file — chmod'ing the destination afterwards would not survive the
@@ -223,7 +223,7 @@ describe('Registry', () => {
     expect(() => r.revoke(undefined as unknown as string)).toThrowError(/id required/);
   });
 
-  it('a host key minted before the machine was registered again is superseded, so an old key does not come back to life', () => {
+  it('a host key minted before the host was registered again is superseded, so an old key does not come back to life', () => {
     const r = Registry.load(dir);
     r.bootstrapAccount({ keypair: KP_A });
     r.setDaemonKey({ hostId: 'daemon-1', publicKey: KP_A.publicKey, issuedAt: 1000 });
@@ -257,7 +257,7 @@ describe('Registry', () => {
     expect(r.getDaemonKey('daemon-1')?.revoked).toBe(true);
   });
 
-  it('removeHost tombstones the machine (revoked), drops it from the roster, and clears it as home', () => {
+  it('removeHost tombstones the host (revoked), drops it from the roster, and clears it as home', () => {
     const r = Registry.load(dir);
     r.bootstrapAccount({ keypair: KP_A });
     r.setDaemonKey({ hostId: 'daemon-1', publicKey: KP_A.publicKey, issuedAt: 1 });
@@ -271,10 +271,10 @@ describe('Registry', () => {
     const reloaded = Registry.load(dir);
     expect(reloaded.registeredHostIds()).toEqual(['daemon-1']);
     expect(reloaded.snapshot().managerHostId).toBeNull();
-    // Removing it again, or a machine never registered, is refused naming it.
+    // Removing it again, or a host never registered, is refused naming it.
     expect(() => r.removeHost('daemon-2')).toThrow(/daemon-2/);
     expect(() => r.removeHost('nope')).toThrow(/nope/);
-    // Pairing the machine again brings it back.
+    // Pairing the host again brings it back.
     r.setDaemonKey({ hostId: 'daemon-2', publicKey: KP_A.publicKey, issuedAt: 2 });
     expect(r.registeredHostIds()).toEqual(['daemon-1', 'daemon-2']);
   });

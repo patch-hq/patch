@@ -1,7 +1,7 @@
 // Settings → Usage: how the weekly allowance went down over a period, and
 // which chats spent the tokens. A named period (Day / Week / Month) is read
 // from the server's cache, so it draws at once and is re-read behind the
-// page; a custom range is read live through every online machine
+// page; a custom range is read live through every online host
 // (GET /api/usage-report).
 
 import { useState, type JSX } from 'react';

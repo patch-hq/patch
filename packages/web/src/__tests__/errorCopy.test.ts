@@ -1,5 +1,5 @@
-// lib/errorCopy — a machine's failure said in one plain sentence, with the
-// machine-readable original kept as detail. The rules under test are the ones
+// lib/errorCopy — a host's failure said in one plain sentence, with the
+// host-readable original kept as detail. The rules under test are the ones
 // that keep jargon off the screen: never interpolate a code into the sentence,
 // never repeat a daemon-authored paragraph, never drop either.
 
@@ -8,15 +8,15 @@ import { humaniseError } from '../lib/errorCopy.js';
 
 // The real wording a host sends when a host has no model catalogue.
 const HOST_PARAGRAPH =
-  'machine dev-daemon-1 has never read a model catalogue, so it has no last-used model; ' +
-  'name a model on the spawn or connect the backend credential on that machine';
+  'host dev-daemon-1 has never read a model catalogue, so it has no last-used model; ' +
+  'name a model on the spawn or connect the backend credential on that host';
 
 describe('humaniseError', () => {
   it('never puts an unrecognised code in the sentence, but keeps it as detail', () => {
     const models = humaniseError({ code: 'upstream' }, 'models');
     expect(models.sentence).not.toContain('upstream');
     expect(models.sentence).toBe(
-      'Couldn’t load the model list for that machine. Try again in a moment.',
+      'Couldn’t load the model list for that host. Try again in a moment.',
     );
     expect(models.detail).toBe('upstream');
 
@@ -58,7 +58,7 @@ describe('humaniseError', () => {
 
   it('gives the same code a different next step where the site demands one', () => {
     expect(humaniseError({ code: 'no_model_catalogue' }, 'models').sentence).toBe(
-      'That machine hasn’t read a model list yet.',
+      'That host hasn’t read a model list yet.',
     );
     expect(humaniseError({ code: 'no_model_catalogue' }, 'spawn').sentence).toBe(
       'Pick a model before starting the chat.',
@@ -71,16 +71,14 @@ describe('humaniseError', () => {
       'models',
     );
     expect(out.sentence).toBe(
-      'That machine isn’t signed in to Claude. Sign in from Settings → Hosts.',
+      'That host isn’t signed in to Claude. Sign in from Settings → Hosts.',
     );
     expect(out.detail).toBe('GET /api/models failed: oauth_unavailable on d1');
   });
 
   it('has an empty detail when there was nothing to keep', () => {
     const out = humaniseError({}, 'models');
-    expect(out.sentence).toBe(
-      'Couldn’t load the model list for that machine. Try again in a moment.',
-    );
+    expect(out.sentence).toBe('Couldn’t load the model list for that host. Try again in a moment.');
     expect(out.detail).toBe('');
   });
 

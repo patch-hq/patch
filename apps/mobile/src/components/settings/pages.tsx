@@ -41,7 +41,7 @@ export const SETTINGS_PAGES: readonly SettingsPageEntry[] = [
   { id: 'voice', title: 'Voice', group: 'Agents', Page: VoicePage },
   { id: 'hooks', title: 'Hooks', group: 'Agents', Page: HooksPage },
   { id: 'computer', title: 'Computer use', group: 'Agents', Page: ComputerUsePage },
-  { id: 'hosts', title: 'Machines', group: 'Setup', Page: HostsPage },
+  { id: 'hosts', title: 'Hosts', group: 'Setup', Page: HostsPage },
   { id: 'identity', title: 'Agent identity', group: 'Setup', Page: AgentIdentityPage },
   { id: 'providers', title: 'Providers', group: 'Setup', Page: ProvidersPage },
   { id: 'devices', title: 'Devices', group: 'Setup', Page: DevicesPage },

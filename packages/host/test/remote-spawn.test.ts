@@ -1,5 +1,5 @@
-// The calling machine's half of a cross-machine `patch_spawn`: it waits for
-// the named machine's answer and turns a refusal into a real error.
+// The calling host's half of a cross-host `patch_spawn`: it waits for
+// the named host's answer and turns a refusal into a real error.
 //
 // This is the code path the live defect went through: the spawn frame left
 // host-a, host-logged-out refused it ("has never read a model catalogue"), and
@@ -58,7 +58,7 @@ describe('remote spawn coordinator', () => {
     await p;
   });
 
-  it('REJECTS on a refusal, naming the machine and quoting its reason', async () => {
+  it('REJECTS on a refusal, naming the host and quoting its reason', async () => {
     const { coord } = harness();
     const p = coord.spawn({ host: 'host-logged-out', sourceChatId: 'mgr', folder: '/work/qa' });
     coord.resolve({
@@ -67,7 +67,7 @@ describe('remote spawn coordinator', () => {
       error: {
         code: 'no_model_catalogue',
         message:
-          'machine host-logged-out has never read a model catalogue, so it has no last-used model',
+          'host host-logged-out has never read a model catalogue, so it has no last-used model',
       },
     });
     await expect(p).rejects.toThrow(RemoteSpawnError);
@@ -78,12 +78,12 @@ describe('remote spawn coordinator', () => {
     });
   });
 
-  it('an expiry is a loud error naming the machine, never a silent success', async () => {
+  it('an expiry is a loud error naming the host, never a silent success', async () => {
     vi.useFakeTimers();
     try {
       const { coord } = harness(50);
       const p = coord.spawn({ host: 'host-b', sourceChatId: 'mgr', folder: '/work/qa' });
-      const assertion = expect(p).rejects.toThrow(/machine host-b did not answer/);
+      const assertion = expect(p).rejects.toThrow(/host host-b did not answer/);
       await vi.advanceTimersByTimeAsync(51);
       await assertion;
     } finally {

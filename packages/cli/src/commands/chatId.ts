@@ -19,7 +19,7 @@ export async function resolveChatId(t: Transport, id: string): Promise<string> {
   const { chats } = await t.get<{ chats: { chatId: string }[] }>(`${path}?archived=include`);
   const matches = chats.map((c) => c.chatId).filter((c) => c.startsWith(upper));
   if (matches.length === 1) return matches[0]!;
-  const where = t.kind === 'uds' ? 'on this machine' : 'on this account';
+  const where = t.kind === 'uds' ? 'on this host' : 'on this account';
   if (matches.length === 0) {
     throw new Error(`no chat ${where} has an id starting ${id}`);
   }

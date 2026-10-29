@@ -54,7 +54,7 @@ async function surfaceBearer(
  * their NO-FALLBACK rethrow-as-500 behavior is exercised for real.
  */
 /**
- * A machine's own Ed25519 public key, base64url. spec/10 § Host registration
+ * A host's own Ed25519 public key, base64url. spec/10 § Host registration
  * step 2 — "The host on the new host submits the nonce and its public key" —
  * so `publicKey` is a REQUIRED field of `POST /api/auth/daemon/register/complete`.
  */
@@ -1207,10 +1207,10 @@ describe('host registration REST routes: edge cases (current flow)', () => {
     }
   });
 
-  it('registers a SECOND machine, and refuses re-registering a live one', async () => {
-    // spec/01 — an account has any number of machines, so an existing
+  it('registers a SECOND host, and refuses re-registering a live one', async () => {
+    // spec/01 — an account has any number of hosts, so an existing
     // registration is not a reason to refuse a new one. Re-registering an id
-    // that is already live IS refused: it would decommission a running machine
+    // that is already live IS refused: it would decommission a running host
     // nobody asked to replace.
     const { registry, jwt } = await bootstrapWithSurface(121);
     registry.setDaemonKey({ hostId: 'existing-daemon', publicKey: 'pk', issuedAt: 1 });
@@ -1241,11 +1241,11 @@ describe('host registration REST routes: edge cases (current flow)', () => {
     }
   });
 
-  it('a code that has already registered a machine is refused as USED, not as unknown', async () => {
+  it('a code that has already registered a host is refused as USED, not as unknown', async () => {
     // spec/11 unhappy paths — the installer reports "expired" and "already
     // used" as exactly that, so the server has to tell them apart. A spent slot
     // is kept (the host long-polls it for its credential), so without this it
-    // would happily register a SECOND machine on one code.
+    // would happily register a SECOND host on one code.
     const { registry, jwt } = await bootstrapWithSurface(129);
     const { app } = await makeApp(registry);
     try {
@@ -1258,19 +1258,19 @@ describe('host registration REST routes: edge cases (current flow)', () => {
       const first = await app.inject({
         method: 'POST',
         url: '/api/auth/daemon/register/complete',
-        payload: { nonce, hostId: 'machine-1', label: 'm1', publicKey: daemonPublicKey(29) },
+        payload: { nonce, hostId: 'host-1', label: 'm1', publicKey: daemonPublicKey(29) },
       });
       expect(first.statusCode).toBe(200);
 
       const second = await app.inject({
         method: 'POST',
         url: '/api/auth/daemon/register/complete',
-        payload: { nonce, hostId: 'machine-2', label: 'm2', publicKey: daemonPublicKey(30) },
+        payload: { nonce, hostId: 'host-2', label: 'm2', publicKey: daemonPublicKey(30) },
       });
       expect(second.statusCode).toBe(400);
       expect(second.json()).toMatchObject({ error: 'code already used', code: 'nonce_used' });
-      // The second machine was never registered.
-      expect(registry.getDaemonKey('machine-2')).toBeNull();
+      // The second host was never registered.
+      expect(registry.getDaemonKey('host-2')).toBeNull();
     } finally {
       await app.close();
     }
@@ -1393,7 +1393,7 @@ describe('host registration REST routes: edge cases (current flow)', () => {
       });
       expect(retry.statusCode).toBe(200);
       expect(registry.getDaemonKey('d1')?.hostId).toBe('d1');
-      // The registry recorded WHICH machine took the slot.
+      // The registry recorded WHICH host took the slot.
       expect(registry.getDaemonKey('d1')?.publicKey).toBe(daemonPublicKey(25));
     } finally {
       await app.close();
@@ -1499,7 +1499,7 @@ describe('host registration REST routes: edge cases (current flow)', () => {
       expect((await awaitKey()).statusCode).toBe(200);
 
       // Its own window over, the credential is no longer handed out, while a
-      // second machine trying the code is still told it was used.
+      // second host trying the code is still told it was used.
       clock = start + 10 * 60 * 1000;
       const late = await awaitKey();
       expect(late.statusCode).toBe(410);
@@ -1602,7 +1602,7 @@ describe('surface-initiated add-daemon pairing (G4-9)', () => {
     }
   });
 
-  it("register/await hands the new machine the server's voice-session secret with its key", async () => {
+  it("register/await hands the new host the server's voice-session secret with its key", async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(94));
     const registry = Registry.load(dir);
     bootstrap(registry, user);

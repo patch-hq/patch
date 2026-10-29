@@ -212,11 +212,11 @@ describe('InboundHostLink', () => {
   });
 
   it('buffers surface→host events while detached and flushes on attach', async () => {
-    // The chat's machine is known from the server's registry mirror even while
-    // that machine is detached — that is what makes buffering addressable
+    // The chat's host is known from the server's registry mirror even while
+    // that host is detached — that is what makes buffering addressable
     // rather than "send it to whichever host turns up".
     link = new InboundHostLink({ logger: silentLogger, resolveChatHost: () => 'd1' });
-    // Detached: events buffer for THAT machine.
+    // Detached: events buffer for THAT host.
     link.send('srf-1', { type: 'chat.input', chatId: 'c1', message: 'a', localId: 'L1' });
     link.send('srf-1', { type: 'chat.input', chatId: 'c1', message: 'b', localId: 'L2' });
 
@@ -233,9 +233,9 @@ describe('InboundHostLink', () => {
   // Todoist: "Server says chat_not_found while a host is reconnecting after a
   // server redeploy" — a restart empties the registry mirror; `resolveChatHost`
   // returns null for every chat until each chat's owning host reconnects and
-  // resyncs. With more than one machine registered on the account, guessing
+  // resyncs. With more than one host registered on the account, guessing
   // the home one in that gap can misroute a request for a chat that lives on
-  // a DIFFERENT machine, and that machine (correctly, from its own
+  // a DIFFERENT host, and that host (correctly, from its own
   // perspective) answers `chat_not_found` for a chat it never owned — a real,
   // live chat reported as gone.
   it('holds a chat-scoped frame (not guess the Manager host) while the mirror does not know the chat yet, and routes it once the mirror catches up', async () => {
@@ -249,7 +249,7 @@ describe('InboundHostLink', () => {
       unknownChatHostPollMs: 10,
     });
 
-    // The chat's REAL host, a different machine than home.
+    // The chat's REAL host, a different host than home.
     const { server, client } = await makePair(wss, url);
     sockets.push(client);
     const got: WireEvent[] = [];
@@ -362,7 +362,7 @@ describe('InboundHostLink', () => {
     expect(received[0]).toMatchObject({ type: 'chat.input', localId: 'L1' });
   });
 
-  it('with only ONE registered machine, still guesses home for an unresolved chat and buffers rather than waiting (unchanged single-host behaviour)', async () => {
+  it('with only ONE registered host, still guesses home for an unresolved chat and buffers rather than waiting (unchanged single-host behaviour)', async () => {
     link = new InboundHostLink({
       logger: silentLogger,
       resolveChatHost: () => null,
@@ -400,7 +400,7 @@ describe('InboundHostLink', () => {
     expect(statuses).toEqual(['online', 'offline']);
   });
 
-  it('closes the previous socket when the SAME machine re-attaches', async () => {
+  it('closes the previous socket when the SAME host re-attaches', async () => {
     link = new InboundHostLink({ logger: silentLogger });
     const p1 = await makePair(wss, url);
     const p2 = await makePair(wss, url);
@@ -414,7 +414,7 @@ describe('InboundHostLink', () => {
     expect(link.status()).toBe('online');
   });
 
-  it('re-attach with a DIFFERENT socket for the same machine fires a genuine offline->online cycle', () => {
+  it('re-attach with a DIFFERENT socket for the same host fires a genuine offline->online cycle', () => {
     // The reported bug: a host process crashes and a new process for the
     // SAME hostId reconnects fast. attach() used to swap `link.socket`
     // in-place without ever calling setStatus('offline'), so the trailing
@@ -456,7 +456,7 @@ describe('InboundHostLink', () => {
     expect(link.terminateHostSocket()).toBe(false); // nothing live now
   });
 
-  it("forget closes the machine's socket, goes offline, and drops frames buffered for it", async () => {
+  it("forget closes the host's socket, goes offline, and drops frames buffered for it", async () => {
     link = new InboundHostLink({ logger: silentLogger });
     const { server, client } = await makePair(wss, url);
     sockets.push(client);
@@ -472,7 +472,7 @@ describe('InboundHostLink', () => {
     expect(link.hostId()).toBeNull();
 
     // A frame queued for it afterwards, then forgotten again, is never
-    // delivered to a machine that later attaches under the same id.
+    // delivered to a host that later attaches under the same id.
     link.sendTo('d1', 'srf-1', { type: 'chat.stop_request', chatId: 'c1' });
     expect(link.forget('d1')).toBe(false);
     const again = await makePair(wss, url);

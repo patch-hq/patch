@@ -1,7 +1,7 @@
 // Host self-update (spec/02 § Installation, spec/11 § Host installation).
 //
-// The server is the single channel a machine gets its host from: the same
-// manifest that feeds a brand-new install feeds every existing machine's
+// The server is the single channel a host gets its host from: the same
+// manifest that feeds a brand-new install feeds every existing host's
 // update, so publishing a build is what makes both see it.
 //
 // What this module will NOT do:
@@ -106,7 +106,7 @@ export function compareVersions(a: string, b: string): number | null {
 }
 
 /**
- * Is a newer build published for THIS machine's os/arch? A machine that is not
+ * Is a newer build published for THIS host's os/arch? A host that is not
  * running from a built artifact has no target to match and no version to
  * compare, so it reports "no update" with that as the stated reason — never a
  * silent false.
@@ -214,7 +214,7 @@ function redactToken(text: string, token: string): string {
   return text.split(token).join('<internal-token>');
 }
 
-/** The version `~/.patch/current` points at — what this machine will run next. */
+/** The version `~/.patch/current` points at — what this host will run next. */
 /**
  * Run the installer in a new process group (see applyUpdate), writing to
  * `fd`, and resolve when it exits. A non-zero exit rejects with its code.
@@ -262,14 +262,14 @@ export interface ApplyResult {
   applied: boolean;
   message: string;
   /**
-   * The update is real and will apply, but not yet: chats on this machine are
+   * The update is real and will apply, but not yet: chats on this host are
    * mid-turn, and the installer's restart would kill them (see `requestUpdate`).
    */
   deferred?: boolean;
 }
 
 /**
- * Resolves once no chat on this machine is running a turn. The installer
+ * Resolves once no chat on this host is running a turn. The installer
  * restarts the service, which kills every turn in flight and every command
  * those turns are running (2026-09-29: an update clicked at 00:06 BST killed a
  * chat's long-running command 18s later), so nothing may reach it while a turn
@@ -333,7 +333,7 @@ export async function waitUntilNoRunningTurns(opts: {
  * often one of those turns (a deploy run from a chat), and waiting on its own
  * turn to end would never return — so it confirms there IS an update, starts
  * the apply in the background (which holds before the installer until the
- * machine is idle) and reports it as deferred. No update to apply is refused
+ * host is idle) and reports it as deferred. No update to apply is refused
  * immediately, exactly as before.
  */
 export async function requestUpdate(opts: {
@@ -351,7 +351,7 @@ export async function requestUpdate(opts: {
       return {
         applied: false,
         deferred: true,
-        message: `${early.version ?? 'the published build'} is still being built for this machine — will update as soon as it is published`,
+        message: `${early.version ?? 'the published build'} is still being built for this host — will update as soon as it is published`,
       };
     }
   }
@@ -492,7 +492,7 @@ export async function applyUpdate(opts: {
   internalToken: string;
   currentVersion: string;
   target: string | undefined;
-  /** `~/.patch` — where `current` says which version this machine will run. */
+  /** `~/.patch` — where `current` says which version this host will run. */
   patchHome: string;
   /**
    * Awaited after the artifact is verified and immediately before the
@@ -631,7 +631,7 @@ export async function applyUpdate(opts: {
     return {
       applied: false,
       message:
-        `self-update did not take: this machine is still on ${installed ?? 'an unknown version'}. ` +
+        `self-update did not take: this host is still on ${installed ?? 'an unknown version'}. ` +
         redactToken(installerOutput, opts.internalToken),
     };
   } catch (err) {

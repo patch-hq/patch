@@ -1,7 +1,7 @@
 // Every surface→host `host.*` frame actually reaches the host
 // (spec/03 § Host events).
 //
-// A frame relayed to a machine needs FOUR things: a wire type, a UI sender, a
+// A frame relayed to a host needs FOUR things: a wire type, a UI sender, a
 // host handler, and a `case` in the hub's relay list. Three of those four are
 // no use, and the fourth is the one that gets forgotten — it lives in a
 // different package from the other three.
@@ -26,7 +26,7 @@ import { Registry } from '../src/registry.js';
 import { InProcessHostLink } from '../src/host-link.js';
 
 /**
- * One representative frame per surface→host `host.*` type the machine owns.
+ * One representative frame per surface→host `host.*` type the host owns.
  * A new one belongs here as well as in the hub — that is the point of the file.
  */
 const HOST_FRAMES: { type: string; frame: Record<string, unknown> }[] = [
@@ -62,7 +62,7 @@ afterEach(() => {
 });
 
 describe('WS hub — surface→host frames are relayed, not dropped', () => {
-  it('forwards every one of them to the machine they name', async () => {
+  it('forwards every one of them to the host they name', async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(77));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });

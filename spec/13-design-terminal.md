@@ -18,7 +18,7 @@ No args: interactive picker. Lists recent folders grouped by host, this host fir
 $ patch --folder /home/tom/projects/bed-planner
 ```
 
-Non-interactive. `--folder` is mandatory in this form — no implicit cwd inference. Folder must exist on the target host (`--host`, defaulting to the machine the CLI runs on); that host validates and errors loudly if not. Tab-completion for `--folder` is host-mediated (the CLI asks the host what's there) so it works regardless of which host the CLI itself is on.
+Non-interactive. `--folder` is mandatory in this form — no implicit cwd inference. Folder must exist on the target host (`--host`, defaulting to the host the CLI runs on); that host validates and errors loudly if not. Tab-completion for `--folder` is host-mediated (the CLI asks the host what's there) so it works regardless of which host the CLI itself is on.
 
 ## Rendering
 

@@ -5,7 +5,7 @@
 // is merged in. A Mac host reads the same manifest and looks for its own
 // target, so a darwin entry from a DIFFERENT build than the one the manifest
 // names would install code that says it is a version it is not. Hence every
-// mismatch here is a refusal, never a best effort. The two machines abbreviate
+// mismatch here is a refusal, never a best effort. The two hosts abbreviate
 // shas to different lengths, so the commit check is sameCommit's prefix match.
 
 import { sameCommit } from './same-commit.mjs';

@@ -700,7 +700,7 @@ describe('WS hub relay', () => {
       expect(ev.type).toBe('host.offline');
       // Fix 4 (TB1): wire spec documents daemon.offline as `{}` — no `reason`.
       expect((ev as { reason?: unknown }).reason).toBeUndefined();
-      // Presence names the machine it describes — an anonymous offline frame
+      // Presence names the host it describes — an anonymous offline frame
       // tells a surface nothing about WHICH host went away.
       expect(Object.keys(ev).sort()).toEqual(['hostId', 'type']);
       expect(ev).toMatchObject({ hostId: 'd1' });
@@ -752,12 +752,12 @@ describe('WS hub relay', () => {
     // webBundleHash}` where `hosts[]` is `{hostId, online, lastSeenAt, host,
     // accounts[]}` per REGISTERED host. That roster is the authoritative
     // presence carrier — a surface renders the whole Hosts list from the
-    // greeting alone, including machines that are down.
+    // greeting alone, including hosts that are down.
     //
     // The roster is keyed off the REGISTRY, so a host only appears once it is
     // actually registered against the account. An offline link contributes no
     // id of its own (it is not in `onlineHostIds()`), which is exactly right:
-    // an unregistered, offline machine is not a host of this account.
+    // an unregistered, offline host is not a host of this account.
     const user = generateUserKeypair(() => new Uint8Array(32).fill(34));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
@@ -786,8 +786,8 @@ describe('WS hub relay', () => {
       const okPromise = client.waitFor('auth.ok');
       const offlinePromise = client.waitFor('host.offline');
 
-      // 1. The auth.ok roster names the machine and says it is down. The server
-      //    invents no description for a machine it has never heard from.
+      // 1. The auth.ok roster names the host and says it is down. The server
+      //    invents no description for a host it has never heard from.
       const ok = await okPromise;
       expect(ok.hosts).toEqual([
         {
@@ -800,7 +800,7 @@ describe('WS hub relay', () => {
         },
       ]);
 
-      // 2. The standalone presence frame agrees, and names the machine it
+      // 2. The standalone presence frame agrees, and names the host it
       //    describes — an anonymous offline frame tells a surface nothing about
       //    WHICH host went away. No `reason`: spec/03 documents no such field.
       const ev = await offlinePromise;
@@ -1275,9 +1275,9 @@ describe('WS hub host gate', () => {
   // server redeploy" — full stack (real WS host + surface sockets, real
   // Registry, real InboundHostLink) proof that a chat-scoped frame whose
   // host the registry mirror doesn't know yet is held rather than guessed at
-  // an ONLINE-but-wrong registered machine, and that the requesting surface
+  // an ONLINE-but-wrong registered host, and that the requesting surface
   // is told plainly (`daemon_unavailable`) rather than left hanging.
-  it('a chat-scoped frame whose host is unknown is not misrouted to a different, already-connected registered machine, and the surface is told daemon_unavailable if it never resolves', async () => {
+  it('a chat-scoped frame whose host is unknown is not misrouted to a different, already-connected registered host, and the surface is told daemon_unavailable if it never resolves', async () => {
     const { registry, user } = bootstrappedRegistry(69);
     registry.setDaemonKey({ hostId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
     registry.setDaemonKey({ hostId: 'daemon-2', publicKey: user.publicKey, issuedAt: 1 });
@@ -1301,9 +1301,9 @@ describe('WS hub host gate', () => {
       });
       const surface = new WireTestClient({ url: h.url, auth: surfaceJwt });
       await surface.connect();
-      await surface.waitFor('host.offline'); // greeting — neither machine connected yet
+      await surface.waitFor('host.offline'); // greeting — neither host connected yet
 
-      // daemon-1 is this account's home/default machine (registered first)
+      // daemon-1 is this account's home/default host (registered first)
       // and IS connected — but it has never heard of 'c1'; it lives on
       // daemon-2, which stays offline for the whole test.
       const host1 = new WireTestClient({ url: h.url, clientType: 'host', auth: daemon1Key });

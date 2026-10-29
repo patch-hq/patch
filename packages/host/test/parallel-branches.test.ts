@@ -103,7 +103,7 @@ describe('spec/04 § Branching — parallel branches', () => {
     const firstTurn = userMessages(replay(daemon, chatId))[0]!;
 
     // Count the turns in flight at once, rather than timing them: "faster than
-    // two turns back to back" measured the machine as much as the host, and
+    // two turns back to back" measured the host as much as the host, and
     // a loaded runner failed it with both turns running together. Concurrent
     // means both were mid-turn at the same moment.
     let inFlight = 0;

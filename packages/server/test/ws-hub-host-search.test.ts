@@ -1,7 +1,7 @@
 // Host search frame routing through the hub (spec/03 § Host search).
 //
 // Same contract as terminal sessions: `patch.host_search.request` is the only
-// frame naming a machine, so it is where the search's host is recorded for the
+// frame naming a host, so it is where the search's host is recorded for the
 // `cancel` that routes by searchId alone; results and `done` route back to the
 // one surface that asked.
 
@@ -87,7 +87,7 @@ describe('WsHub — host search frames', () => {
     expect(socket.closed).toHaveLength(0);
   });
 
-  it('drops a cancel for a searchId it never opened, instead of guessing a machine', () => {
+  it('drops a cancel for a searchId it never opened, instead of guessing a host', () => {
     const { hub, link } = makeHub();
     const socket = new FakeSocket();
     // @ts-expect-error — private method

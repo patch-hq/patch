@@ -358,7 +358,7 @@ describe('Voice devices', () => {
     const r = renderRN(<VoiceDevicesSection />);
     expect(hasText(r.root, 'Voice devices')).toBe(true);
     expect(textOf(findHost(r.root, byTestId('voice-devices-no-machines')))).toBe(
-      'Add a machine first',
+      'Add a host first',
     );
     expect(queryHost(r.root, byTestId('voice-devices-empty'))).toBeNull();
   });
@@ -370,7 +370,7 @@ describe('Voice devices', () => {
     expect(findHost(r.root, byTestId('voice-devices-no-machines'))).toBeTruthy();
   });
 
-  it('says how a device is adopted once a machine exists — no code or QR', () => {
+  it('says how a device is adopted once a host exists — no code or QR', () => {
     resetHosts();
     reportHost('d1');
     const r = renderRN(<VoiceDevicesSection />);

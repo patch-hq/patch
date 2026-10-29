@@ -62,7 +62,7 @@ describe('a declared status survives what would erase a generated one', () => {
     expect(state?.status, 'and it must not go back into hiding').toBe('active');
   });
 
-  it('is NOT cleared by a machine turn — the chat carrying on is not somebody reading it', async () => {
+  it('is NOT cleared by a host turn — the chat carrying on is not somebody reading it', async () => {
     const { daemon, chatId } = await setup();
     await daemon.declareStatus(chatId, 'question', 'sign the form');
     await daemon.sendInput({

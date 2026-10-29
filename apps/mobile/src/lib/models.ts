@@ -3,7 +3,7 @@
 //
 // The catalogue is PER MACHINE — `/api/models` is addressed to the host whose
 // backends are being read — so this hook takes the hostId and re-reads when
-// it changes. Showing one machine's models for a spawn pinned to another is how
+// it changes. Showing one host's models for a spawn pinned to another is how
 // an unrunnable model id gets sent.
 //
 // NO FALLBACK: a failed read leaves the list empty and carries the reason, for
@@ -13,7 +13,7 @@
 //
 // There is likewise no default model id here. A spawn that names no model is
 // resolved by the HOST (spec/04 § Spawn), so a surface-local default would
-// silently overwrite the machine's own answer.
+// silently overwrite the host's own answer.
 
 import React from 'react';
 import { api } from '../api/rest';

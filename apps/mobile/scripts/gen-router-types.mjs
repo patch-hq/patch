@@ -7,7 +7,7 @@
 // written as a side effect of `expo start`. A checkout that has never run the
 // dev server therefore has no union at all and every typed route fails to
 // compile — which is exactly what a fresh deploy worktree is, and why this
-// typechecked on a laptop and failed on the machine that actually ships.
+// typechecked on a laptop and failed on the host that actually ships.
 //
 // So generate it from the route files rather than depending on a dev server
 // having been run: same source, same output, no side conditions. NO FALLBACK —

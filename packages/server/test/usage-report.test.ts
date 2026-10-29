@@ -1,5 +1,5 @@
 // Settings → Usage: GET /api/usage-report fans out `patch.usage.read.request`
-// to every online machine and merges samples and per-chat tokens.
+// to every online host and merges samples and per-chat tokens.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -117,7 +117,7 @@ describe('GET /api/usage-report', () => {
       expect(body.until - body.since).toBe(24 * 60 * 60 * 1000);
       expect(typeof body.at).toBe('number');
       const asked = readRequests().length;
-      // Within the TTL: the same answer, and nothing asked of any machine.
+      // Within the TTL: the same answer, and nothing asked of any host.
       const second = await get('period=day');
       expect(second.statusCode).toBe(200);
       expect(second.json().at).toBe(body.at);

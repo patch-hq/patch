@@ -2,7 +2,7 @@
 // personal-check — keeps one person's setup out of a public product.
 //
 // Patch is distributed to anyone. A hostname, account name or app id that only
-// means something on the user's machines does not belong in product code: it belongs
+// means something on the user's hosts does not belong in product code: it belongs
 // in configuration, or in the private overlay that deploys his own setup.
 //
 // This is a ratchet, not a purge. `personal-check.baseline.json` records how

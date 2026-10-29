@@ -11,7 +11,7 @@
 // while this is the unconditional doorbell.
 //
 // Desktop always fires; push fires only when no computer surface is active. The
-// asymmetry is the whole feature: the toast is free when you are at the machine
+// asymmetry is the whole feature: the toast is free when you are at the host
 // (and delivered nowhere when you aren't), the push is what reaches you when
 // you have walked away.
 
@@ -69,7 +69,7 @@ export class ChatCompletionNotifier {
   /**
    * Chats whose user turn has settled but which still owe work (spec/09 § A
    * chat that is not done yet). The ring waits for the real finish, which may
-   * arrive on a machine turn or on no turn at all (a goal being met).
+   * arrive on a host turn or on no turn at all (a goal being met).
    */
   private readonly owed = new Set<string>();
 
@@ -117,7 +117,7 @@ export class ChatCompletionNotifier {
 
     // spec/09 § Whose turn it was. A chat finishing is only news if the user is
     // waiting on it. A turn the host started for itself — a self-wake tick, a
-    // todo auto-advance, another agent's `send_to` — is the machine talking to
+    // todo auto-advance, another agent's `send_to` — is the host talking to
     // itself, and a watcher on a five-minute loop would otherwise ring the
     // doorbell all day. Absent means `user`: a host predating the field never
     // sends one, and reading that as `user` keeps the behaviour it already had
@@ -146,7 +146,7 @@ export class ChatCompletionNotifier {
 
     // spec/09 § A chat that is not done yet. The turn settled, but a backgrounded
     // command or sub-agent is still running, or the chat's goal is not yet met:
-    // the chat has not finished, and what finishes it is a machine turn (or
+    // the chat has not finished, and what finishes it is a host turn (or
     // nothing) that is silent on its own. Hold the ring until nothing is owed.
     // Absent `backgroundTasks` is not a count, so it holds nothing back.
     if (!this.owed.has(chatId)) return;

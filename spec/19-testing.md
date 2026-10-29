@@ -56,11 +56,11 @@ So a surface test reads the navigation the app paints, opens whatever it finds, 
 
 ## Isolation
 
-A test never reads or writes the machine's own Patch state. Every test that boots a host supplies its own state directory and its own control socket, and a test whose state resolves inside the machine's own directory fails naming that path rather than running.
+A test never reads or writes the host's own Patch state. Every test that boots a host supplies its own state directory and its own control socket, and a test whose state resolves inside the host's own directory fails naming that path rather than running.
 
-A test removes what it creates when it finishes, including after a failing assertion, and creates nothing at all on a machine where it does not run. A test that drives a real agent is held to this too: the chats that agent creates are the test's to remove. Anything that reaches the machine's own store is reported and left in place, because it belongs to the user and deleting it is not the suite's call.
+A test removes what it creates when it finishes, including after a failing assertion, and creates nothing at all on a host where it does not run. A test that drives a real agent is held to this too: the chats that agent creates are the test's to remove. Anything that reaches the host's own store is reported and left in place, because it belongs to the user and deleting it is not the suite's call.
 
-A test that drives a real agent gives that agent no route off its own host. The tools it is told to use are present before the run starts, and a missing one fails the run rather than degrading it, because an agent that cannot find the tool it was told to call reaches for whatever else looks equivalent — and the command line tool on the machine's path acts on the machine's host. The shell is withheld from such a session, since instructions in a prompt constrain what an agent intends, not what it can do.
+A test that drives a real agent gives that agent no route off its own host. The tools it is told to use are present before the run starts, and a missing one fails the run rather than degrading it, because an agent that cannot find the tool it was told to call reaches for whatever else looks equivalent — and the command line tool on the host's path acts on the host's host. The shell is withheld from such a session, since instructions in a prompt constrain what an agent intends, not what it can do.
 
 ## Which layers a change requires
 

@@ -119,7 +119,7 @@ describe('bootstrap()', () => {
       ],
     });
     // `GET /api/folders` is grouped BY HOST (spec/04 § Folders) — a flat
-    // union would make two machines' identical paths indistinguishable.
+    // union would make two hosts' identical paths indistinguishable.
     apiMocks.folders.mockResolvedValue({
       hosts: [{ hostId: 'd1', roots: ['~/x'], recent: ['~/y'] }],
     });

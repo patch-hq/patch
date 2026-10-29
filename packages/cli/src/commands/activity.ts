@@ -1,7 +1,7 @@
 // `patch activity` — the user's own messages (spec/17 § CLI, spec/06 §
 // Cross-chat toolset).
 //
-// On a host machine this goes over UDS to the host's `/internal/activity`, which asks the
+// On a host host this goes over UDS to the host's `/internal/activity`, which asks the
 // server on the host's behalf (the same path as the `patch_activity` tool) — so a paired host
 // needs no CLI credential. The host wants the calling chat to correlate the server round
 // trip, so UDS needs PATCH_CHAT_ID (set inside every chat). Off-host it is REST with the CLI

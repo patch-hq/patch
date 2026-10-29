@@ -5,7 +5,7 @@ const CRASH =
   'Claude Code returned an error result: [session_crash] error_name=AbortError api_error_status=none cause_name=none';
 
 describe('describeTurnFailure', () => {
-  it('says the machine slept, whatever the provider said', () => {
+  it('says the host slept, whatever the provider said', () => {
     expect(describeTurnFailure(CRASH, { sleptThrough: true })).toBe(SLEPT_THROUGH_MESSAGE);
   });
 

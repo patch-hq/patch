@@ -215,7 +215,7 @@ describe('TerminalSessions', () => {
     sessions.handle({ type: 'patch.terminal.open', hostId: 'd1', sessionId: 's1', folder: dir });
     await sink.waitFor((e) => e.type === 'patch.terminal.ready', 'ready');
     // Signal once the command says it is running — a fixed wait raced the
-    // shell on a slow machine, and an interrupt with no child yet hit nothing.
+    // shell on a slow host, and an interrupt with no child yet hit nothing.
     sessions.handle({
       type: 'patch.terminal.input',
       sessionId: 's1',

@@ -202,7 +202,7 @@ describe('parseBackgroundTaskNotice', () => {
 });
 
 // The outcomes a real Claude Code session actually reports. Captured from this
-// machine's own session logs: of ~2,300 notification blocks, `completed` is
+// host's own session logs: of ~2,300 notification blocks, `completed` is
 // 1,806, `failed` 396, `stopped` 66 and `killed` 47 — so the three that are not
 // "completed" are a fifth of every background task that has ever run here, and
 // a sentence one of them cannot be read out of is a task nothing can ever close.

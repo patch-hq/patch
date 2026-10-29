@@ -115,7 +115,7 @@ export function resolveAccountRef(
   throw new AccountRefError(
     byLabel.length > 1
       ? `account "${ref}" matches more than one account (${byLabel.map((a) => a.id).join(', ')}); use the id`
-      : `no account "${ref}" on this machine (holds: ${names})`,
+      : `no account "${ref}" on this host (holds: ${names})`,
   );
 }
 

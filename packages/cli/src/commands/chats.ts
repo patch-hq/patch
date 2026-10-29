@@ -11,7 +11,7 @@
 //   archive   → POST /chats/:id/archive (uds) | POST /api/chats/:id/archive (rest)
 //   pin       → POST /api/chats/:id/pin (rest)
 //   rename    → POST /api/chats/:id/rename (rest)
-//   move      → POST /api/chats/:id/move (rest — the server drives both machines)
+//   move      → POST /api/chats/:id/move (rest — the server drives both hosts)
 //
 // All commands accept `--json`. Without `--json`, output is a small table.
 
@@ -96,7 +96,7 @@ export function registerChatsCommands(program: Command): void {
     .option('--model <model>', 'SDK model override (pass-through to host spawn)')
     .option(
       '--account <account>',
-      'Stored account the chat starts on: id or label (label only on a machine with a host; REST needs the id)',
+      'Stored account the chat starts on: id or label (label only on a host with a host; REST needs the id)',
     )
     .option(
       '--dangerously-skip-permissions',
@@ -298,15 +298,15 @@ export function registerChatsCommands(program: Command): void {
   chats
     .command('move <id>')
     .description(
-      'Move a chat to another machine, to run in --folder there (spec/04 § Moving a chat to another host)',
+      'Move a chat to another host, to run in --folder there (spec/04 § Moving a chat to another host)',
     )
-    .requiredOption('--host <host>', 'The machine to move it to: a host name or hostId prefix')
-    .requiredOption('--folder <folder>', 'Absolute folder on that machine')
+    .requiredOption('--host <host>', 'The host to move it to: a host name or hostId prefix')
+    .requiredOption('--folder <folder>', 'Absolute folder on that host')
     .option('--json', 'JSON output')
     .action(async (rawId: string, opts: CommonOpts & { host: string; folder: string }) => {
       await run(opts, async () => {
-        // Only the server can reach both machines, so this is REST even from
-        // the machine the chat is on.
+        // Only the server can reach both hosts, so this is REST even from
+        // the host the chat is on.
         const hostId = await resolveHost(opts);
         const t = getTransport({ ...opts, remote: true });
         const id = await resolveChatId(t, rawId);

@@ -860,12 +860,12 @@ describe('mobile chatStore', () => {
         .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/new' });
       expect(useChatStore.getState().chats['c1']!.folder).toBe('~/new');
       // Dropping `hostId` left every mobile chat row without a host, so
-      // nothing could ask which machine's credential gates it, or whose disk
+      // nothing could ask which host's credential gates it, or whose disk
       // the folder is on (spec/04 § Spawn — paths are scoped to their host).
       expect(useChatStore.getState().chats['c1']!.hostId).toBe('d1');
     });
 
-    it('keeps each row on its OWN host when two chats spawn on different machines', () => {
+    it('keeps each row on its OWN host when two chats spawn on different hosts', () => {
       useChatStore
         .getState()
         .applyEvent({ type: 'chat.spawned', hostId: 'host-a', chatId: 'ca', folder: '/work' });

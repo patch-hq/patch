@@ -1,10 +1,10 @@
 // Settings → Hosts on mobile (design/settings-redesign; spec/15 § Settings tab,
 // spec/02 § Host identity).
 //
-// Hosts is a page: Add a host in its header, then one row per machine that
-// opens that machine's own page (HostDetail) — its name, Update,
+// Hosts is a page: Add a host in its header, then one row per host that
+// opens that host's own page (HostDetail) — its name, Update,
 // agent backends with Sign in, optional components, Files and Terminal, and
-// Remove this machine. Every edit is addressed to that one machine and refused
+// Remove this host. Every edit is addressed to that one host and refused
 // up front, naming it, when it cannot hear it.
 
 import React from 'react';
@@ -103,7 +103,7 @@ beforeEach(() => {
 // ── the list ────────────────────────────────────────────────────────────────
 
 describe('mobile Settings → Hosts → the list', () => {
-  it('lists EVERY registered machine, not just the default one, by name', () => {
+  it('lists EVERY registered host, not just the default one, by name', () => {
     reportHost('host-b', { hostName: 'beta-box' });
     reportHost('host-a', { hostName: 'alpha' });
     const r = render(<HostsSection />);
@@ -116,7 +116,7 @@ describe('mobile Settings → Hosts → the list', () => {
     expect(rows).toEqual(['host-host-a', 'host-host-b']);
   });
 
-  it('says a machine is awaiting its first report rather than naming it falsely', () => {
+  it('says a host is awaiting its first report rather than naming it falsely', () => {
     usePresenceStore.setState({ hosts: { quiet: unreported('quiet') } });
     const r = render(<HostsSection />);
     expect(textOf(findHost(r.root, byTestId('host-quiet-name')))).toBe('quiet');
@@ -157,7 +157,7 @@ describe('mobile Settings → Hosts → the list', () => {
     expect(hostSubtitle(unreported('q'))).toBe('awaiting first report');
   });
 
-  it('offers Update only where a machine has one, and it sends host.update', async () => {
+  it('offers Update only where a host has one, and it sends host.update', async () => {
     reportHost('host-a', { hostName: 'laptop', updateAvailable: false });
     reportHost('host-b', { hostName: 'beta', updateAvailable: true });
     const r = render(<HostsSection />);
@@ -166,7 +166,7 @@ describe('mobile Settings → Hosts → the list', () => {
     expect(wsMock.send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'host-b' });
   });
 
-  it('Update on an offline machine is disabled, with no alert', () => {
+  it('Update on an offline host is disabled, with no alert', () => {
     reportHost('h1', { hostName: 'laptop', updateAvailable: true }, false);
     const r = render(<HostsSection />);
     expect(findHost(r.root, byTestId('host-h1-update')).props.disabled).toBe(true);
@@ -192,7 +192,7 @@ describe('mobile Settings → Hosts → the list', () => {
       pathname: '/hosts/[hostId]',
       params: { hostId: 'host-a' },
     });
-    // A machine that has not reported still opens (to be removed, if nothing else).
+    // A host that has not reported still opens (to be removed, if nothing else).
     findHost(r.root, byTestId('host-quiet')).props.onPress();
     expect(routerMock.push).toHaveBeenLastCalledWith({
       pathname: '/hosts/[hostId]',
@@ -200,9 +200,9 @@ describe('mobile Settings → Hosts → the list', () => {
     });
   });
 
-  it('states plainly when no machine is registered', () => {
+  it('states plainly when no host is registered', () => {
     const r = render(<HostsSection />);
-    expect(textOf(findHost(r.root, byTestId('hosts-empty')))).toBe('No machines yet');
+    expect(textOf(findHost(r.root, byTestId('hosts-empty')))).toBe('No hosts yet');
   });
 });
 
@@ -236,7 +236,7 @@ describe('mobile Settings → Hosts → Add a host', () => {
   it('is a page titled Hosts, with the host list under it', () => {
     reportHost('h1', { hostName: 'laptop' });
     const r = render(<HostsPage />);
-    expect(textOf(findHost(r.root, byTestId('settings-page-title')))).toBe('Machines');
+    expect(textOf(findHost(r.root, byTestId('settings-page-title')))).toBe('Hosts');
     expect(findHost(r.root, byTestId('host-h1'))).toBeTruthy();
   });
 
@@ -304,11 +304,8 @@ describe('mobile Settings → Hosts → Add a host', () => {
 
   it('each install-command refusal code is said in words', async () => {
     for (const [code, words] of [
-      ['nothing_published', 'No machine build has been published yet.'],
-      [
-        'no_build_for_os: macos',
-        'No machine build has been published for that operating system yet.',
-      ],
+      ['nothing_published', 'No host build has been published yet.'],
+      ['no_build_for_os: macos', 'No host build has been published for that operating system yet.'],
       ['something else', 'something else'],
     ] as const) {
       vi.mocked(api.hostInstallCommand).mockRejectedValueOnce(new Error(code));
@@ -334,7 +331,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
   it('an unknown or removed host says it is gone', () => {
     const r = render(<HostDetail hostId="nope" />);
     expect(textOf(findHost(r.root, byTestId('host-detail-gone')))).toBe(
-      'This machine is no longer on the account',
+      'This host is no longer on the account',
     );
     expect(queryHost(r.root, byTestId('host-nope-remove'))).toBeNull();
     // Not having removed it here, it does not navigate away on its own.
@@ -369,7 +366,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
   });
 
   describe('Name', () => {
-    it('renames the machine; Save appears only once the name changes', async () => {
+    it('renames the host; Save appears only once the name changes', async () => {
       reportHost('h1', { hostName: 'laptop' });
       const r = render(<HostDetail hostId="h1" />);
       const input = (): ReturnType<typeof findHost> =>
@@ -399,7 +396,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
       await actAsync(() => input().props.onSubmitEditing());
       expect(__getLastAlert()).toMatchObject({
         title: 'Rename failed',
-        message: 'A machine name cannot be empty.',
+        message: 'A host name cannot be empty.',
       });
       expect(input().props.value).toBe('laptop');
       expect(wsMock.send).not.toHaveBeenCalled();
@@ -418,7 +415,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
       expect(__getLastAlert()).toBeNull();
     });
 
-    it('the name of an offline machine cannot be edited, with no alert', () => {
+    it('the name of an offline host cannot be edited, with no alert', () => {
       reportHost('h1', { hostName: 'laptop' }, false);
       const r = render(<HostDetail hostId="h1" />);
       expect(findHost(r.root, byTestId('host-h1-name-input')).props.editable).toBe(false);
@@ -482,7 +479,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
       expect(queryHost(r.root, byTestId('host-h1-signin-token'))).toBeNull();
     });
 
-    it('an empty token uses the machine’s own login; Sign in again closes the form', async () => {
+    it('an empty token uses the host’s own login; Sign in again closes the form', async () => {
       reportHost('h1', {
         hostName: 'laptop',
         backends: [{ id: 'claude-code', label: 'Claude Code', version: null, state: 'absent' }],
@@ -509,7 +506,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
       expect(queryHost(r.root, byTestId('host-h1-claude-drift-discard'))).toBeNull();
     });
 
-    it('Sign in on an offline machine is disabled, with no alert', async () => {
+    it('Sign in on an offline host is disabled, with no alert', async () => {
       reportHost(
         'h1',
         {
@@ -528,7 +525,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
       expect(queryHost(r.root, byTestId('host-h1-signin-token'))).toBeNull();
     });
 
-    it('Sign in on a codex backend hands off to Usage’s ChatGPT form for that machine', async () => {
+    it('Sign in on a codex backend hands off to Usage’s ChatGPT form for that host', async () => {
       reportHost('h1', {
         hostName: 'laptop',
         backends: [{ id: 'codex', label: 'Codex', version: null, state: 'absent' }],
@@ -595,7 +592,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
       ]);
     });
 
-    it('Install on an offline machine is refused, naming it', async () => {
+    it('Install on an offline host is refused, naming it', async () => {
       reportHost('h1', { hostName: 'laptop', components: [...COMPONENTS] }, false);
       const r = render(<HostDetail hostId="h1" />);
       await actAsync(() =>
@@ -629,10 +626,10 @@ describe('mobile Settings → Hosts → a host’s page', () => {
     });
   });
 
-  // spec/15 § Host files and terminal — a machine's files and a shell on it,
+  // spec/15 § Host files and terminal — a host's files and a shell on it,
   // straight from its page, with no chat in between.
   describe('Tools', () => {
-    it('opens that machine’s Files and Terminal', () => {
+    it('opens that host’s Files and Terminal', () => {
       reportHost('host-a', { hostName: 'laptop' });
       const r = render(<HostDetail hostId="host-a" />);
       findHost(r.root, byTestId('host-host-a-files')).props.onPress();
@@ -647,7 +644,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
       });
     });
 
-    it('are unpressable while the machine is offline or the link is down', () => {
+    it('are unpressable while the host is offline or the link is down', () => {
       reportHost('host-a', { hostName: 'laptop' }, false);
       const offline = render(<HostDetail hostId="host-a" />);
       expect(findHost(offline.root, byTestId('host-host-a-files')).props.onPress).toBeUndefined();
@@ -664,7 +661,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
     });
   });
 
-  describe('Remove this machine', () => {
+  describe('Remove this host', () => {
     beforeEach(() => {
       reportHost('h1', { hostName: 'laptop' });
       reportHost('h2', { hostName: 'other' });
@@ -674,7 +671,7 @@ describe('mobile Settings → Hosts → a host’s page', () => {
       await actAsync(() => findHost(r.root, byTestId('host-h1-remove')).props.onPress());
     }
 
-    it('asks first, naming the machine; Cancel does nothing', async () => {
+    it('asks first, naming the host; Cancel does nothing', async () => {
       const r = render(<HostDetail hostId="h1" />);
       await askToRemove(r);
       expect(__getLastAlert()).toMatchObject({

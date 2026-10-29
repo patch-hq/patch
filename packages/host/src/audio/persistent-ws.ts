@@ -85,7 +85,7 @@ export class PersistentWsClient {
     this.requestTimeoutMs = opts.requestTimeoutMs ?? 300_000;
     // A STATIC import, not a runtime `require('ws')`. The bundled host has no
     // node_modules to require from, so a runtime resolve fails on every
-    // installed machine ("Cannot find module 'ws'") while working fine from a
+    // installed host ("Cannot find module 'ws'") while working fine from a
     // source checkout — the exact shape of bug an artifact must not carry.
     this.wsCtor = opts.wsCtor ?? (WsImpl as unknown as new (url: string) => WsSocket);
   }

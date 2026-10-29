@@ -92,9 +92,9 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
   // Otherwise spec/04 § Name: the AI-generated title; until it lands, the folder
   // basename, then "New chat" — never the raw first message or ULID.
   const title = specialThreadLabel(row.chatId) ?? deriveChatTitle(row.name);
-  // The machine this chat is pinned to, by its user-editable name. Falls back
-  // to the raw hostId only while that machine has yet to report a name —
-  // shown rather than hidden, because "which machine is this running on" has no
+  // The host this chat is pinned to, by its user-editable name. Falls back
+  // to the raw hostId only while that host has yet to report a name —
+  // shown rather than hidden, because "which host is this running on" has no
   // safe default answer. An optimistically-seeded row has neither yet
   // (chatStore's `emptyRow` uses `hostId: ''`), and there is nothing to draw.
   const hostReport = usePresenceStore((s) => s.hosts[row.hostId]?.host ?? null);
@@ -266,7 +266,7 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
     }
   }
 
-  // Folder and machine live in the title's hover tooltip (spec/14 § Chat panel
+  // Folder and host live in the title's hover tooltip (spec/14 § Chat panel
   // header), not on screen: the message already names them and a second line
   // cost the bar its height. Each part is included only where genuinely known,
   // so an optimistic row (no host, no folder) gets no tooltip rather than a

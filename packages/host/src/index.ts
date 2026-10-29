@@ -347,7 +347,7 @@ function runProcess(
 }
 
 /**
- * Where `uv` might already be on this machine, before one is installed for it:
+ * Where `uv` might already be on this host, before one is installed for it:
  * a previous provision's copy, the user's own install, the usual system paths.
  */
 function uvCandidates(patchHome: string): string[] {
@@ -404,7 +404,7 @@ async function startHost(
   // transcript-history root the host already resolves; reusing that root
   // means PATCH_CLAUDE_PROJECTS_ROOT sandboxes this too (see claudeSettings.ts).
   const claudeHome = claudeHomeFromProjectsRoot(config.claudeProjectsRoot);
-  // settings.json is this machine's own file (spec/02 § Claude Code settings):
+  // settings.json is this host's own file (spec/02 § Claude Code settings):
   // read as it is each time it is reported, written only by a surface's edit.
   const claudeSettingsSnapshot = (): {
     settingsJson: string;
@@ -534,7 +534,7 @@ async function startHost(
   // The credential store sits in the host's own state dir, beside daemon.key.
   // Deriving it from patchHome (PATCH_HOME) rather than hardcoding ~/.patch is what
   // keeps tests off the developer's real home — a disconnect driven through boot
-  // wrote ~/.patch/claude-oauth.json on this machine before it did.
+  // wrote ~/.patch/claude-oauth.json on this host before it did.
   const oauthOpts: LoadClaudeOAuthOptions = {
     storePath: join(config.patchHome, 'claude-oauth.json'),
     ...(config.claudeCredentialsPath !== undefined ? { path: config.claudeCredentialsPath } : {}),
@@ -619,7 +619,7 @@ async function startHost(
     if (typeof payload.sub !== 'string' || payload.sub.length === 0) {
       throw new Error('daemon.key: payload has no `sub` (account public key)');
     }
-    // Every frame this host emits names the machine it is about, so a host
+    // Every frame this host emits names the host it is about, so a host
     // that cannot state its own id must not start — an unaddressed frame would
     // be attributed to whichever host the surface guessed. NO FALLBACK.
     if (typeof payload.daemon_id !== 'string' || payload.daemon_id.length === 0) {
@@ -650,7 +650,7 @@ async function startHost(
       link.send(codexAccounts.report());
       publishHost();
     },
-    // A ChatGPT sign-in run here is the account's, not this machine's: it goes
+    // A ChatGPT sign-in run here is the account's, not this host's: it goes
     // to the server, which sends it back to every host (spec/01 § Settings).
     onSignedIn: (requestId, account) =>
       link.send({ type: 'settings.account_signed_in', hostId: selfHostId, requestId, account }),
@@ -682,9 +682,9 @@ async function startHost(
   };
 
   /**
-   * Reject a host-scoped frame that names a different machine. Reaching this
+   * Reject a host-scoped frame that names a different host. Reaching this
    * host at all means the server mis-routed it; acting on it would apply the
-   * user's change to the wrong machine, which is strictly worse than dropping
+   * user's change to the wrong host, which is strictly worse than dropping
    * it with a warning that names both ids.
    */
   const isForThisHost = (hostId: string, frameType: string): boolean => {
@@ -697,15 +697,15 @@ async function startHost(
   };
 
   /**
-   * Everything a surface can CHANGE about this machine, persisted so the change
+   * Everything a surface can CHANGE about this host, persisted so the change
    * outlives the process (spec/02 § Host identity). A rename that reverts on
    * restart is indistinguishable from an edit that never saved.
    */
   const hostStateStore = new HostStateStore(config.patchHome, logger);
   const persistedHostState = hostStateStore.get();
-  /** This machine's user-editable label (`host.rename`). */
+  /** This host's user-editable label (`host.rename`). */
   let hostName = persistedHostState.hostName ?? config.hostName;
-  /** Does the server have this machine running the Manager (`host.set_manager`)? */
+  /** Does the server have this host running the Manager (`host.set_manager`)? */
   let runsManager = persistedHostState.runsManager ?? false;
   /** Currently selected Kokoro TTS voice (`host.settings` → `kokoroVoice`). */
   let kokoroVoice: string | undefined = persistedHostState.kokoroVoice;
@@ -867,11 +867,11 @@ async function startHost(
   /**
    * Whether the server has published a build newer than the one running here
    * (spec/02 § Optional components / spec/11 § Host installation). Starts
-   * false and becomes true only when a check has actually found one — a machine
+   * false and becomes true only when a check has actually found one — a host
    * must never claim an update it has not seen.
    */
   let updateAvailable = false;
-  // A newer build is published but this machine's artifact is still being built.
+  // A newer build is published but this host's artifact is still being built.
   let updatePending = false;
   let updateHeld = false;
   let forceInstall = false;
@@ -880,10 +880,10 @@ async function startHost(
   // and `patch hosts update`'s local control command) onto one in-flight
   // attempt rather than letting a second click race the installer.
   const applyUpdateGated = createUpdateGate();
-  // Never restart under a running turn: the installer waits for the machine to
+  // Never restart under a running turn: the installer waits for the host to
   // go idle, and a request made mid-turn is answered as deferred at once.
   const runningChats = (): string[] => daemon.runningChatIds();
-  // A deploy publishes this machine's artifact a minute or two after the
+  // A deploy publishes this host's artifact a minute or two after the
   // version bump. Wait that out quietly; only a build that
   // is STILL missing after the window is shown to the user.
   const artifactWait = createArtifactWait({
@@ -956,7 +956,7 @@ async function startHost(
     });
 
   /**
-   * Whether this machine's backend credential actually WORKS — not merely
+   * Whether this host's backend credential actually WORKS — not merely
    * whether a token file exists. Seeded from the boot check, then corrected by
    * a real resolve. Reporting the boot snapshot meant an expired token still
    * read as "Connected" on every surface until someone tried to send, which is
@@ -1063,7 +1063,7 @@ async function startHost(
     };
   };
 
-  /** The accounts this machine holds for the backend `model` runs on, in the shared order. */
+  /** The accounts this host holds for the backend `model` runs on, in the shared order. */
   const heldAccountsFor = (model: string | undefined): Array<{ id: string; label: string }> =>
     isCodexModel(model)
       ? (codexAccounts.report().accounts ?? []).map((a) => ({ id: a.id, label: a.label }))
@@ -1086,13 +1086,13 @@ async function startHost(
       hostVersion: VERSION,
       // spec/11 § Version reporting: all THREE stamps travel, not just the
       // version — without the commit and build instant a surface cannot tell
-      // two machines on the same version number apart, which is exactly the
+      // two hosts on the same version number apart, which is exactly the
       // drift the version report exists to show.
       gitSha: GIT_SHA,
       builtAt: BUILT_AT,
-      // Whether the server has published a NEWER build for this machine's
+      // Whether the server has published a NEWER build for this host's
       // os/arch. Refreshed by the periodic check below; false until the first
-      // check completes, which is the honest reading of "this machine knows of
+      // check completes, which is the honest reading of "this host knows of
       // no newer build" rather than a claim that none exists.
       updateAvailable,
       updatePending,
@@ -1154,13 +1154,13 @@ async function startHost(
     });
 
   /**
-   * Refuse a credential frame naming a backend this machine does not have
+   * Refuse a credential frame naming a backend this host does not have
    * (spec/03 § Host events — "a credential operation naming a backend that
-   * machine does not have" is rejected with the offending value named).
+   * host does not have" is rejected with the offending value named).
    *
    * Returns true when the frame was refused, so the caller stops. A silent
    * drop here is the failure mode this exists to prevent: the surface's
-   * Connect button would appear to work and the machine would stay logged out,
+   * Connect button would appear to work and the host would stay logged out,
    * which is indistinguishable from a credential that did not take.
    */
   const refuseUnknownBackend = (
@@ -1175,7 +1175,7 @@ async function startHost(
   ): boolean => {
     const offered = describeHost().backends.map((b) => b.id);
     if (offered.includes(backendId)) return false;
-    const message = `${frameType}: this machine has no backend with id: ${backendId} (has: ${offered.join(', ')})`;
+    const message = `${frameType}: this host has no backend with id: ${backendId} (has: ${offered.join(', ')})`;
     logger.warn({ backendId, offered }, message);
     send({
       type: 'chat.error',
@@ -1193,14 +1193,14 @@ async function startHost(
    * inherit a guess.
    */
   /**
-   * The model this machine's model-less spawns run on: the ACCOUNT's
+   * The model this host's model-less spawns run on: the ACCOUNT's
    * `defaultModel`, mirrored down by the server over `host.settings`.
    *
    * Persisted, so a host restarting before the server's first push still has
-   * it. Nothing on this machine derives it — that is the whole change. It used
+   * it. Nothing on this host derives it — that is the whole change. It used
    * to be `lastUsedModel`, seeded from the newest entry of the first catalogue
    * read and then overwritten by every spawn that named a model, which meant
-   * the machine's default was the trailing edge of whatever anyone last ran.
+   * the host's default was the trailing edge of whatever anyone last ran.
    * One throwaway cheap-model chat moved every unattended job onto it.
    */
   let defaultModel: string | undefined = persistedHostState.defaultModel;
@@ -1214,7 +1214,7 @@ async function startHost(
     publishHost();
   };
 
-  /** Re-publish this machine's self-description to every surface. */
+  /** Re-publish this host's self-description to every surface. */
   const publishHost = (): void => {
     link.send(describeHost());
   };
@@ -1264,7 +1264,7 @@ async function startHost(
 
   /**
    * Optional components (spec/02 § Optional components) — real downloads onto
-   * this machine's disk, with live progress.
+   * this host's disk, with live progress.
    */
   const components = new ComponentManager({
     root: join(config.patchHome, 'components'),
@@ -1275,7 +1275,7 @@ async function startHost(
     // spec/02 § Optional components: a voice component's weights are useless
     // without the Python sidecar that reads them, and the artifact carries that
     // sidecar's source and none of its wheels. Installing the component is where
-    // the runtime gets built — on demand, per machine, never in the host
+    // the runtime gets built — on demand, per host, never in the host
     // install itself.
     provisionRuntime: async (spec, onProgress) => {
       const runtime = spec.runtime;
@@ -1302,15 +1302,15 @@ async function startHost(
   // Whether the server link is authed (used by RemoteJobsStore to gate RPC).
   let linkOnline = false;
   /**
-   * Which OTHER machines are linked right now. The server pushes presence to
-   * every machine, because a cross-chat call naming a machine that is down has
+   * Which OTHER hosts are linked right now. The server pushes presence to
+   * every host, because a cross-chat call naming a host that is down has
    * to fail INSIDE the turn rather than buffer (spec/03 § Cross-chat tools).
    */
   const onlineHosts = new Set<string>();
   /**
    * In-flight `patch.list_chats.request` calls, keyed by the chat that asked.
-   * The server owns the account-wide chat list: only it sees every machine's
-   * chats, and each entry it returns names the machine that chat lives on.
+   * The server owns the account-wide chat list: only it sees every host's
+   * chats, and each entry it returns names the host that chat lives on.
    */
   type AccountChat = { chatId: string; hostId: string } & Record<string, unknown>;
   const listChatsWaiters = new Map<string, Array<(chats: AccountChat[]) => void>>();
@@ -1323,16 +1323,16 @@ async function startHost(
   };
   const LIST_CHATS_TIMEOUT_MS = 10_000;
   /**
-   * Ask the server for every chat on the account with the machine each lives
-   * on. NO FALLBACK to this machine's own chats: a list that silently omits the
-   * other machines' chats is worse than an error saying the link is down.
+   * Ask the server for every chat on the account with the host each lives
+   * on. NO FALLBACK to this host's own chats: a list that silently omits the
+   * other hosts' chats is worse than an error saying the link is down.
    */
   const requestAccountChats = async (
     sourceChatId: string,
     archived?: 'only' | 'include',
   ): Promise<AccountChat[]> => {
     if (!linkOnline) {
-      throw new Error('patch_list_chats: the server link is offline; cannot list other machines');
+      throw new Error('patch_list_chats: the server link is offline; cannot list other hosts');
     }
     return await new Promise((resolve, reject) => {
       const waiters = listChatsWaiters.get(sourceChatId) ?? [];
@@ -1390,7 +1390,7 @@ async function startHost(
   };
   /**
    * `patch_activity` (spec/06 § Cross-chat toolset): the user's own messages
-   * are read through every machine's chat logs, which only the server can
+   * are read through every host's chat logs, which only the server can
    * gather, so this is a plain account-wide ask — same waiter-map shape as `requestAccountChats`, no
    * per-chat host resolution needed.
    */
@@ -1402,7 +1402,7 @@ async function startHost(
     if (waiters.length === 0) activityWaiters.delete(event.sourceChatId);
     next?.(event);
   };
-  // Must outlast the server's own per-machine retries (ACTIVITY_READ_ATTEMPTS x timeout).
+  // Must outlast the server's own per-host retries (ACTIVITY_READ_ATTEMPTS x timeout).
   const ACTIVITY_TIMEOUT_MS = 45_000;
   const requestActivity = async (
     sourceChatId: string,
@@ -1443,8 +1443,8 @@ async function startHost(
     });
   };
   /**
-   * Cross-machine `patch_spawn`: emits the request and waits for the NAMED
-   * machine's own `patch.spawn.response` (see remote-spawn.ts for why a
+   * Cross-host `patch_spawn`: emits the request and waits for the NAMED
+   * host's own `patch.spawn.response` (see remote-spawn.ts for why a
    * fire-and-forget spawn was a silent-failure hole).
    */
   const remoteSpawns = createRemoteSpawnCoordinator({
@@ -1673,7 +1673,7 @@ async function startHost(
   // live once authed.
   /**
    * Run on the shared settings (spec/01 § Settings): every setting the snapshot
-   * carries replaces this host's, so the machine does what Settings says rather
+   * carries replaces this host's, so the host does what Settings says rather
    * than what it was last told locally.
    */
   /**
@@ -1906,7 +1906,7 @@ async function startHost(
   };
 
   /**
-   * Send a value this machine holds up to the server (spec/01 § Settings —
+   * Send a value this host holds up to the server (spec/01 § Settings —
    * values that start on a host). `import` is everything held before settings
    * were shared, asked once per host.
    */
@@ -2090,8 +2090,8 @@ async function startHost(
     },
     onAuthed: (sender, greeting) => {
       linkOnline = true;
-      // Adopt the account's machine roster from the greeting, so a cross-chat
-      // call naming another machine knows whether that machine is up.
+      // Adopt the account's host roster from the greeting, so a cross-chat
+      // call naming another host knows whether that host is up.
       onlineHosts.clear();
       for (const host of greeting.hosts) {
         if (host.online && host.hostId !== selfHostId) onlineHosts.add(host.hostId);
@@ -2114,7 +2114,7 @@ async function startHost(
       // replays it in every later surface's auth.ok greeting.
       sender(describeHost());
       // spec/10 § Backend credentials — per (host, backend) credential state,
-      // so Settings can say which backend on which machine needs a login.
+      // so Settings can say which backend on which host needs a login.
       sender(buildAccountReport());
       sender(codexAccounts.report());
       for (const state of daemon.list()) announceChat(state);
@@ -2133,7 +2133,7 @@ async function startHost(
       // spec/02 § Agent backends — warm the catalogue on connect so a picker
       // opens on a real list rather than an empty one. It no longer SEEDS
       // anything: the model a model-less spawn takes is the account default the
-      // server pushes, not the newest entry of whatever catalogue this machine
+      // server pushes, not the newest entry of whatever catalogue this host
       // happened to read first.
       void modelCatalog.get().catch((err: unknown) => {
         logger.warn(
@@ -2147,10 +2147,10 @@ async function startHost(
     },
     onFrame: async (event, sender) => {
       // Host addressing, checked once for the whole inbound stream: ANY frame
-      // carrying a `hostId` names one machine, and this host acts on it only
-      // when that machine is this one. Reaching here otherwise means the server
+      // carrying a `hostId` names one host, and this host acts on it only
+      // when that host is this one. Reaching here otherwise means the server
       // mis-routed, and obeying it would spawn a chat / edit a registry / open a
-      // shell on the wrong machine — strictly worse than refusing with both ids
+      // shell on the wrong host — strictly worse than refusing with both ids
       // named. NO FALLBACK.
       const addressed = isHostAddressedSurfaceEvent(event.type)
         ? (event as { hostId?: unknown }).hostId
@@ -2164,7 +2164,7 @@ async function startHost(
             chatId: event.chatId ?? 'pending-spawn',
             error: {
               code: 'host_not_registered',
-              message: `chat.spawn_request addressed to ${addressed}, but this machine is ${selfHostId}`,
+              message: `chat.spawn_request addressed to ${addressed}, but this host is ${selfHostId}`,
             },
             seq: OUT_OF_BAND_SEQ,
           });
@@ -2438,7 +2438,7 @@ async function startHost(
       }
       if (event.type === 'patch.host_files.request') {
         // spec/03 § Host files — the phone's Files screen: read / list / write
-        // by absolute path on this machine, with no chat in between.
+        // by absolute path on this host, with no chat in between.
         void handleHostFilesRequest(event, sender, logger, selfHostId, {
           onWritten: (absPath) => daemon.noteHostFileWritten(absPath),
         });
@@ -2602,7 +2602,7 @@ async function startHost(
       }
       if (event.type === 'host.backend_add_account') {
         if (!isForThisHost(event.hostId, event.type)) return;
-        // Only a ChatGPT sign-in runs on a machine. A Claude account is added
+        // Only a ChatGPT sign-in runs on a host. A Claude account is added
         // through the server, which holds the accounts (spec/01 § Settings).
         const message = `host.backend_add_account: ${event.backendId} accounts are added in Settings → Credit sources, not on a host`;
         logger.warn({ backendId: event.backendId }, message);
@@ -2616,7 +2616,7 @@ async function startHost(
       }
       if (event.type === 'host.rename') {
         // The SERVER owns the registry entry and has already recorded the new
-        // name; this keeps the machine's own self-description and CLI in step,
+        // name; this keeps the host's own self-description and CLI in step,
         // and persists it so a restart does not revert the rename.
         if (!isForThisHost(event.hostId, event.type)) return;
         hostName = event.hostName;
@@ -2651,8 +2651,8 @@ async function startHost(
         return;
       }
       if (event.type === 'host.set_manager') {
-        // Sent to a machine as it attaches and whenever the server moves the
-        // Manager: the named machine runs it, the rest do not.
+        // Sent to a host as it attaches and whenever the server moves the
+        // Manager: the named host runs it, the rest do not.
         const nowHome = event.hostId === selfHostId;
         if (nowHome !== runsManager) {
           runsManager = nowHome;
@@ -2670,8 +2670,8 @@ async function startHost(
       }
       if (event.type === 'host.settings') {
         if (!isForThisHost(event.hostId, event.type)) return;
-        // Only what stays with this machine (spec/01 § Settings): its MCP
-        // servers name commands and paths on this machine. Everything else
+        // Only what stays with this host (spec/01 § Settings): its MCP
+        // servers name commands and paths on this host. Everything else
         // arrives in the shared settings snapshot.
         if (event.harnessMcpServers !== undefined) {
           // Already validated against `McpServerList` by the wire decode (the
@@ -2786,7 +2786,7 @@ async function startHost(
           });
         };
         if (event.type === 'host.folder_add') {
-          // A designated project root has to BE a directory on this machine —
+          // A designated project root has to BE a directory on this host —
           // a path that does not exist would publish a picker entry whose every
           // spawn fails with folder_not_found. NO FALLBACK.
           let isDir = false;
@@ -2863,14 +2863,14 @@ async function startHost(
       }
       if (event.type === 'patch.spawn') {
         // A cross-host spawn relayed by the server (spec/03 § Cross-chat
-        // tools): another machine's agent asked for a chat on THIS machine.
+        // tools): another host's agent asked for a chat on THIS host.
         if (!isForThisHost(event.hostId, event.type)) return;
-        // The outcome goes BACK to the calling machine. NO FALLBACK: a refusal
-        // that only reaches this machine's log leaves the calling agent
+        // The outcome goes BACK to the calling host. NO FALLBACK: a refusal
+        // that only reaches this host's log leaves the calling agent
         // believing it spawned a chat that does not exist (spec/03 § Cross-chat
         // tools — the call resolves inside the turn, success or failure).
         const spawnRequestId = event.requestId;
-        // A preference this machine does not hold is refused, never ignored: a
+        // A preference this host does not hold is refused, never ignored: a
         // chat that quietly ran on another account is the failure this stops.
         if (
           event.preferredAccountId !== undefined &&
@@ -2939,13 +2939,13 @@ async function startHost(
         return;
       }
       if (event.type === 'patch.spawn.response') {
-        // Another machine answered THIS machine's cross-host `patch_spawn`.
+        // Another host answered THIS host's cross-host `patch_spawn`.
         remoteSpawns.resolve(event);
         return;
       }
       if (event.type === 'patch.list_chats.response') {
-        // The server answered this machine's account-wide chat listing (only
-        // the server sees every machine's chats).
+        // The server answered this host's account-wide chat listing (only
+        // the server sees every host's chats).
         resolveListChats(event);
         return;
       }
@@ -2957,13 +2957,13 @@ async function startHost(
         return;
       }
       if (event.type === 'patch.activity.response') {
-        // The server answered this machine's `patch_activity` ask.
+        // The server answered this host's `patch_activity` ask.
         resolveActivity(event);
         return;
       }
       if (event.type === 'patch.activity.read.request') {
         // The server is assembling a `patch_activity` answer and wants this
-        // machine's share: the user messages in its own chat logs.
+        // host's share: the user messages in its own chat logs.
         sender({
           type: 'patch.activity.read.response',
           requestId: event.requestId,
@@ -2977,7 +2977,7 @@ async function startHost(
         return;
       }
       if (event.type === 'patch.browser_use.request') {
-        // Settings → Computer use: report whether this machine's agent browser
+        // Settings → Computer use: report whether this host's agent browser
         // is driving it, or (action 'stop') close its windows and cancel it.
         const { requestId, action } = event;
         void (async () => {
@@ -3000,7 +3000,7 @@ async function startHost(
       }
       if (event.type === 'patch.tool_log.read.request') {
         // The server is assembling a Settings → Activity answer and wants this
-        // machine's share: its own cross-chat tool-call log.
+        // host's share: its own cross-chat tool-call log.
         sender({
           type: 'patch.tool_log.read.response',
           requestId: event.requestId,
@@ -3010,7 +3010,7 @@ async function startHost(
         return;
       }
       if (event.type === 'patch.usage.read.request') {
-        // Settings → Usage: this machine's probe history and per-chat tokens.
+        // Settings → Usage: this host's probe history and per-chat tokens.
         sender({
           type: 'patch.usage.read.response',
           requestId: event.requestId,
@@ -3022,7 +3022,7 @@ async function startHost(
       }
       if (event.type === 'patch.peek.request') {
         // A cross-host `patch_peek` relayed by the server (spec/03 § Cross-chat
-        // tools): another machine's agent asked about a chat that lives HERE.
+        // tools): another host's agent asked about a chat that lives HERE.
         // No requestId means the frame is a same-host audit record, which the
         // server never relays (cross-host.ts) — unreachable in practice.
         const requestId = event.requestId;
@@ -3051,8 +3051,8 @@ async function startHost(
         return;
       }
       if (event.type === 'patch.peek.response') {
-        // Another machine answered THIS machine's cross-host `patch_peek`. No
-        // requestId is a stray frame this machine never sent a request for.
+        // Another host answered THIS host's cross-host `patch_peek`. No
+        // requestId is a stray frame this host never sent a request for.
         if (event.requestId !== undefined)
           remotePeeks.resolve({ ...event, requestId: event.requestId });
         return;
@@ -3092,7 +3092,7 @@ async function startHost(
         return;
       }
       if (event.type === 'patch.history.response') {
-        // No requestId is a stray frame this machine never sent a request for.
+        // No requestId is a stray frame this host never sent a request for.
         if (event.requestId !== undefined)
           remoteHistories.resolve({ ...event, requestId: event.requestId });
         return;
@@ -3114,7 +3114,7 @@ async function startHost(
             // The Manager's sweep reaches a remote chat through this same relay.
             // Otherwise the origin host already decided whether its caller was
             // visible — carried over the wire as `revealTarget` rather than
-            // re-derived here, since this machine cannot see that chat's state.
+            // re-derived here, since this host cannot see that chat's state.
             // Absent (a sender on an older build) must NOT default to reveal —
             // the whole point of this field is that an unknown caller stays
             // hidden rather than leaking into the main list.
@@ -3154,7 +3154,7 @@ async function startHost(
         return;
       }
       if (event.type === 'host.online' || event.type === 'host.offline') {
-        // Roster upkeep: a cross-chat call naming a machine that is down has to
+        // Roster upkeep: a cross-chat call naming a host that is down has to
         // fail INSIDE the turn, which means knowing it is down without asking.
         if (event.type === 'host.online') onlineHosts.add(event.hostId);
         else onlineHosts.delete(event.hostId);
@@ -3211,7 +3211,7 @@ async function startHost(
           { chatId: event.chatId, permissionMode: event.permissionMode },
           'chat permission mode set',
         );
-        // The off-default COUNT is part of this machine's self-description.
+        // The off-default COUNT is part of this host's self-description.
         sender(describeHost());
         return;
       }
@@ -3230,7 +3230,7 @@ async function startHost(
           (err: unknown) => {
             // NO FALLBACK: a refused change leaves the chat on the model it was
             // already running, and says so, rather than rounding to a near
-            // match or dropping to this machine's last-used model.
+            // match or dropping to this host's last-used model.
             const code = (err as { code?: string }).code ?? 'chat_not_found';
             logger.warn(
               { chatId, model, err: (err as Error).message },
@@ -3417,7 +3417,7 @@ async function startHost(
 
   // 4. Host (chat_state owner).
   const metaStore = createMetaStore(config.patchHome);
-  // Durable record of every cross-chat tool call this machine has made or
+  // Durable record of every cross-chat tool call this host has made or
   // served (Settings → Activity, spec/06 § Cross-chat toolset).
   const toolLogStore = new ToolLogStore(config.patchHome);
   const usageHistory = new UsageHistoryStore(config.patchHome);
@@ -3436,7 +3436,7 @@ async function startHost(
   // Constructed here so the speakers cascade (buildControl, below) can route
   // its ring frames through it; `isPhoneCallActive` reads the live audio server
   // lazily (forward-declared `audioServer`, assigned by the time a frame lands).
-  // The five-minute voice-device adoption window this machine's command line
+  // The five-minute voice-device adoption window this host's command line
   // opens on it (spec/16 § F2). In-memory by design: a window is a live,
   // attended act and must not survive a restart.
   const deviceAdoption = new DeviceAdoption();
@@ -3952,11 +3952,11 @@ async function startHost(
     pullQueued: (chatId) => pullQueuedFromServer?.(chatId) ?? Promise.resolve([]),
     onHandoffConsumed: () => hostStateStore.update({ managerHandoff: undefined }),
     hostId: selfHostId,
-    // spec/04 § Spawn — a spawn naming no model takes THIS machine's last-used
+    // spec/04 § Spawn — a spawn naming no model takes THIS host's last-used
     // model, and every spawn that names one sets it.
     defaultModel: () => defaultModel,
     // spec/04 § Model — a mid-chat model change is checked against the model
-    // list THIS machine actually offers, so an id it cannot run is refused
+    // list THIS host actually offers, so an id it cannot run is refused
     // naming it rather than handed to the backend to fail obscurely later. The
     // catalogue is cached (6h TTL), so this is a memory read in the normal case.
     knownModelIds: async () => {
@@ -3971,7 +3971,7 @@ async function startHost(
         );
       return new Set(models.map((m) => m.id));
     },
-    // This machine's DEFAULT permission mode, as last set from a surface
+    // This host's DEFAULT permission mode, as last set from a surface
     // (`host.settings`). Persisted, so the setting is not silently undone by a
     // restart.
     ...(persistedHostState.permissionModeDefault !== undefined
@@ -4229,7 +4229,7 @@ async function startHost(
       setAlwaysAllowed: () => hostStateStore.update({ computerUseAlwaysAllowed: true }),
     },
     // spec/02 § Browser — In the Patch app: when the app is installed on this
-    // machine, the agent's browser lives in it.
+    // host, the agent's browser lives in it.
     appBrowser: appBrowserLink({
       home: homedir(),
       logger: logger.child({ component: 'app-browser' }),
@@ -4363,8 +4363,8 @@ async function startHost(
     },
     onChange: (registry) => link.send({ type: 'folders.updated', hostId: selfHostId, ...registry }),
   });
-  // The Manager and Speakers are the account's and live on the machine the server has running them
-  // (spec/06 § Where special threads run), so only that machine creates them.
+  // The Manager and Speakers are the account's and live on the host the server has running them
+  // (spec/06 § Where special threads run), so only that host creates them.
   function createSpecialThreads(): void {
     ensureSpecialThreads({
       patchHome: hostCwd,
@@ -4449,7 +4449,7 @@ async function startHost(
   // POST /stop (control IPC) calls this; assigned once the graceful-shutdown
   // closure is defined below. Until then the endpoint 503s.
   let shutdownHook: (() => void) | undefined;
-  // Is a newer build published for this machine? Checked on boot and hourly,
+  // Is a newer build published for this host? Checked on boot and hourly,
   // so `host.host.updateAvailable` reflects the channel rather than a
   // hard-coded false. A failed check leaves the flag alone and logs why — an
   // unreachable update channel is not evidence that no update exists.
@@ -4504,7 +4504,7 @@ async function startHost(
     // (2026-09-30 — this host ran over 30h behind a published build with
     // nothing to show for the "schedule" but the Hosts badge). `applyUpdateOnce`
     // already knows how to do this safely: nothing happens with no update
-    // published, and a busy machine defers until idle rather than killing a
+    // published, and a busy host defers until idle rather than killing a
     // running turn.
     if (autoUpdateHosts && (check.available || check.awaitingArtifact)) {
       const result = await applyUpdateOnce();
@@ -4528,7 +4528,7 @@ async function startHost(
   // Never hold the process open for a version check.
   updateCheckTimer.unref?.();
 
-  // The machine's Claude Code, on the same cadence as the host's own version
+  // The host's Claude Code, on the same cadence as the host's own version
   // check (spec/02 § Agent backends). The CLI only self-updates from an
   // INTERACTIVE session, and a host that exists to run jobs never has one — so
   // it silently stops moving, and an old enough build starts substituting
@@ -4544,7 +4544,7 @@ async function startHost(
       override: process.env['CLAUDE_CODE_PATH'],
     });
     if (executable === undefined) {
-      logger.debug('claude-cli-update: this machine has no Claude Code to update');
+      logger.debug('claude-cli-update: this host has no Claude Code to update');
       return;
     }
     await updateClaudeCli({ executable, logger });
@@ -4637,7 +4637,7 @@ async function startHost(
     jobs,
     // spec/02 § Control IPC — every host-scoped control this host owns, over
     // the local socket, driving the SAME operations as the `host.*` wire frames
-    // so `patch` on the machine itself needs no round trip through the server.
+    // so `patch` on the host itself needs no round trip through the server.
     host: {
       describe: () => describeHost(),
       folders: {
@@ -4724,17 +4724,17 @@ async function startHost(
         return result;
       },
     },
-    // spec/03 § Cross-chat tools — the machine roster the server pushes, so an
-    // agent's `patch_spawn` naming a machine that is down fails inside the turn
+    // spec/03 § Cross-chat tools — the host roster the server pushes, so an
+    // agent's `patch_spawn` naming a host that is down fails inside the turn
     // instead of buffering.
     isHostOnline: (hostId: string) => hostId === selfHostId || onlineHosts.has(hostId),
-    // spec/03 § Cross-chat tools — a spawn on ANOTHER machine resolves on that
-    // machine's own answer, so a refusal there fails the tool call here.
+    // spec/03 § Cross-chat tools — a spawn on ANOTHER host resolves on that
+    // host's own answer, so a refusal there fails the tool call here.
     spawnOnRemoteHost,
-    // The account-wide chat list (every machine's chats, each naming its own).
+    // The account-wide chat list (every host's chats, each naming its own).
     listAccountChats: (sourceChatId, archived) => requestAccountChats(sourceChatId, archived),
     searchAccountChats: (sourceChatId, query, limit) => requestSearch(sourceChatId, query, limit),
-    // `patch_activity` — the user's own messages (gathered by the server from every machine's chat logs) and, on request, chat dwell sessions.
+    // `patch_activity` — the user's own messages (gathered by the server from every host's chat logs) and, on request, chat dwell sessions.
     getActivity: (
       sourceChatId,
       since,
@@ -4753,8 +4753,8 @@ async function startHost(
         includeSessions,
         sessionsCursor,
       ),
-    // spec/03 § Cross-chat tools — a chat not found among THIS machine's own
-    // resolves on the OWNING machine's own answer, exactly like a cross-host
+    // spec/03 § Cross-chat tools — a chat not found among THIS host's own
+    // resolves on the OWNING host's own answer, exactly like a cross-host
     // spawn, once the server's chat mirror says where it actually lives.
     peekRemoteChat,
     historyRemoteChat,
@@ -4901,11 +4901,11 @@ async function startHost(
     elevenlabsApiKey: () => providerKeys.get('elevenlabs'),
   });
   // spec/02 § Optional components: voice is a component the user installs on a
-  // machine, and installing it is what turns it ON. A machine that has installed
+  // host, and installing it is what turns it ON. A host that has installed
   // Kokoro — weights verified AND its Python runtime built — can speak, whether
   // or not anything set KOKORO_BACKEND, because the install IS the explicit
   // choice the env var otherwise stands for. (An env var still wins: `mock` for
-  // tests, `off` to hold a machine quiet.) This is what the docker image gets
+  // tests, `off` to hold a host quiet.) This is what the docker image gets
   // from baking the venv at build time; an artifact-installed host now gets it
   // from having been asked for it.
   // `installed` already requires the runtime stamp (components.ts settledState).
@@ -4918,7 +4918,7 @@ async function startHost(
   if (kokoroBackend !== config.audio.kokoroBackend) {
     logger.info(
       { component: 'kokoro' },
-      'TTS enabled: the Kokoro component is installed on this machine',
+      'TTS enabled: the Kokoro component is installed on this host',
     );
   }
   const kokoro = createKokoro({
@@ -4950,10 +4950,10 @@ async function startHost(
       ? {
           /* v8 ignore next 3 */
           sidecarCwd: process.env['KOKORO_SIDECAR_CWD'] ?? bundledSidecarDir('kokoro'),
-          // The venv the component install built for this machine. `uv run
+          // The venv the component install built for this host. `uv run
           // --no-sync` uses it as-is; without it, `uv` would resolve a fresh
           // environment inside the artifact — read-only on some installs, and
-          // several GB of wheels the machine already has.
+          // several GB of wheels the host already has.
           sidecarEnv: {
             UV_PROJECT_ENVIRONMENT: components.runtimeDir('kokoro'),
             // Import the sidecar from THIS host version's source. The venv's
@@ -4967,7 +4967,7 @@ async function startHost(
               'src',
             ),
           },
-          // A machine that had no `uv` got one during the install, in the patch
+          // A host that had no `uv` got one during the install, in the patch
           // home rather than on PATH — so name it rather than hoping.
           uvPath: uvCandidates(config.patchHome).find((p) => existsSync(p)) ?? 'uv',
         }
@@ -5281,12 +5281,12 @@ async function startHost(
 // the job-editor's Skill picker too (the host owns the project filesystem;
 // the server round-trips this RPC). A folder with none is NOT an error.
 //
-// Two places, because a skill is either the project's or the machine's, and a
-// machine-level skill applies in every folder on it — so the picker offered
+// Two places, because a skill is either the project's or the host's, and a
+// host-level skill applies in every folder on it — so the picker offered
 // less than the agent behind it would actually run:
 //
 //   <folder>/.claude/skills      the project's own
-//   ~/.claude/skills             the machine's, which apply in every folder
+//   ~/.claude/skills             the host's, which apply in every folder
 //
 // SKILLS ONLY — `.claude/commands` is deliberately not read. A command is a
 // different thing from a skill and the picker is not a list of everything that
@@ -6507,7 +6507,7 @@ export async function handleServerEvent(
   try {
     switch (event.type) {
       case 'chat.spawn_request': {
-        // A machine with no usable backend credential cannot run the turn it is
+        // A host with no usable backend credential cannot run the turn it is
         // being asked to run. Spawning anyway emitted `chat.spawned`, which the
         // server settles as a run status of `ok` — so the inbound log claimed
         // success for a turn that never happened, with a chat link to nothing.
@@ -6528,7 +6528,7 @@ export async function handleServerEvent(
           });
           // CORRECT THE SELF-REPORT. `connected` was computed once at boot, so a
           // credential that expired since left every surface believing this
-          // machine was signed in — no banner, no warning, and a composer that
+          // host was signed in — no banner, no warning, and a composer that
           // looked ready right up until the send failed. Say what is true now.
           // The refusal means the host could not produce a usable key at all —
           // it resolves them in order and takes the first that works — so it is
@@ -6546,7 +6546,7 @@ export async function handleServerEvent(
           sender(report);
           logger.error(
             { op, folder: event.folder, reason: spawnAuth.reason },
-            'chat.spawn_request refused: no backend credential on this machine',
+            'chat.spawn_request refused: no backend credential on this host',
           );
           sender({
             type: 'chat.error',

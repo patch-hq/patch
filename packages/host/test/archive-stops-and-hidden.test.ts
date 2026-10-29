@@ -6,7 +6,7 @@
 // each of which, being a message, un-archived it again. So "archived" never
 // meant finished. Now archiving ends everything the chat has in motion, and the
 // state a job's background run needs — running, but not in the inbox — is
-// Hidden, a separate flag that survives archiving so a machine message starting
+// Hidden, a separate flag that survives archiving so a host message starting
 // the chat again puts it back where it was.
 
 import { describe, it, expect } from 'vitest';
@@ -140,7 +140,7 @@ describe('a message into an archived chat starts it again, where it was', () => 
     expect(prompts).toEqual(['back to this']);
   });
 
-  it('a machine message into an ordinary archived chat brings it into view', async () => {
+  it('a host message into an ordinary archived chat brings it into view', async () => {
     const { daemon, folder } = setup();
     const chatId = await daemon.spawnChat({ folder });
     await daemon.setArchived(chatId, true);
@@ -232,7 +232,7 @@ describe('a hidden chat never archives itself, including with a subagent running
 });
 
 describe('Hidden', () => {
-  it('a hidden chat stays hidden for machine messages', async () => {
+  it('a hidden chat stays hidden for host messages', async () => {
     const { daemon, folder } = setup();
     const chatId = await daemon.spawnChat({ folder, hidden: true });
     // A wake keeps it from finishing, so it stays hidden rather than archiving.

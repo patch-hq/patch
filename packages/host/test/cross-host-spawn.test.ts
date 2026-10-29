@@ -1,8 +1,8 @@
-// A cross-machine `patch_spawn` resolves on the TARGET machine's own answer
+// A cross-host `patch_spawn` resolves on the TARGET host's own answer
 // (spec/03 § Cross-chat tools).
 //
 // The defect: `/internal/spawn` returned `{host, folder, created:'remote'}` the
-// instant the `patch.spawn` frame left this machine. A target that refused the
+// instant the `patch.spawn` frame left this host. A target that refused the
 // spawn — "has never read a model catalogue, so it has no last-used model" —
 // created nothing, and the calling agent was told it had succeeded. Every case
 // here asserts the tool call ends in the real outcome.
@@ -40,8 +40,8 @@ function setup() {
   return { daemon, jobs: new MemoryJobsStore({ now: () => 1_700_000_000_000 }), folder };
 }
 
-describe('/internal/spawn — cross-machine', () => {
-  it('returns the chat the TARGET machine created, not a bare "remote"', async () => {
+describe('/internal/spawn — cross-host', () => {
+  it('returns the chat the TARGET host created, not a bare "remote"', async () => {
     const { daemon, jobs, folder } = setup();
     const calls: unknown[] = [];
     const app = await buildControl({
@@ -159,7 +159,7 @@ describe('/internal/spawn — cross-machine', () => {
     }
   });
 
-  it('refuses a cross-machine spawn with no calling chat — nothing to answer to', async () => {
+  it('refuses a cross-host spawn with no calling chat — nothing to answer to', async () => {
     const { daemon, jobs, folder } = setup();
     const app = await buildControl({
       localKey: LOCAL_KEY,
@@ -182,7 +182,7 @@ describe('/internal/spawn — cross-machine', () => {
     }
   });
 
-  it('fails the tool call when the target REFUSED, naming the machine and the reason', async () => {
+  it('fails the tool call when the target REFUSED, naming the host and the reason', async () => {
     const { daemon, jobs, folder } = setup();
     const app = await buildControl({
       localKey: LOCAL_KEY,
@@ -192,7 +192,7 @@ describe('/internal/spawn — cross-machine', () => {
       spawnOnRemoteHost: async () => {
         throw new RemoteSpawnError(
           'no_model_catalogue',
-          'patch_spawn: machine host-logged-out refused: machine host-logged-out has never read a model catalogue',
+          'patch_spawn: host host-logged-out refused: host host-logged-out has never read a model catalogue',
         );
       },
     });
@@ -222,7 +222,7 @@ describe('/internal/spawn — cross-machine', () => {
       spawnOnRemoteHost: async () => {
         throw new RemoteSpawnError(
           'folder_not_found',
-          'patch_spawn: machine host-b refused: no such folder',
+          'patch_spawn: host host-b refused: no such folder',
         );
       },
     });
@@ -240,7 +240,7 @@ describe('/internal/spawn — cross-machine', () => {
     }
   });
 
-  it('a TIMEOUT is a loud failure naming the machine, never a silent success', async () => {
+  it('a TIMEOUT is a loud failure naming the host, never a silent success', async () => {
     const { daemon, jobs, folder } = setup();
     const app = await buildControl({
       localKey: LOCAL_KEY,
@@ -250,7 +250,7 @@ describe('/internal/spawn — cross-machine', () => {
       spawnOnRemoteHost: async () => {
         throw new RemoteSpawnError(
           'sdk_error',
-          'patch_spawn: machine host-b did not answer within 30s; the chat may or may not have been created there',
+          'patch_spawn: host host-b did not answer within 30s; the chat may or may not have been created there',
         );
       },
     });
@@ -291,7 +291,7 @@ describe('/internal/spawn — cross-machine', () => {
     }
   });
 
-  it('still refuses an offline machine inside the turn, without going near the wire', async () => {
+  it('still refuses an offline host inside the turn, without going near the wire', async () => {
     const { daemon, jobs, folder } = setup();
     let relayed = false;
     const app = await buildControl({
@@ -319,7 +319,7 @@ describe('/internal/spawn — cross-machine', () => {
     }
   });
 
-  it("short-circuits a spawn naming the CALLER's own machine, in-process", async () => {
+  it("short-circuits a spawn naming the CALLER's own host, in-process", async () => {
     const { daemon, jobs, folder } = setup();
     let relayed = false;
     const upstream: WireEvent[] = [];

@@ -89,7 +89,7 @@ describe('model catalogue', () => {
 });
 
 // Last-used follows the MACHINE, not this browser (spec/04 § Spawn: "the
-// last-used value follows the machine rather than the surface that asked"). A
+// last-used value follows the host rather than the surface that asked"). A
 // browser-local copy plus a hard-coded starting id is what made a fresh SPA send
 // `claude-opus-5` on every spawn and overwrite the host's real last-used model.
 describe('no surface-local model default', () => {
@@ -125,8 +125,8 @@ describe('no surface-local model default', () => {
 // The catalogue is per MACHINE. The web asked `/api/models` with no hostId,
 // which the server rejects (`ModelsQuery` is strict), so the picker showed
 // "Couldn't load models — invalid query" and offered nothing.
-describe('the catalogue is per machine', () => {
-  it('names the machine in the request', async () => {
+describe('the catalogue is per host', () => {
+  it('names the host in the request', async () => {
     const fetchMock = vi.fn(
       async (_url: string | URL | Request) =>
         new Response(JSON.stringify({ models: [{ id: 'm', label: 'M' }] }), {
@@ -139,7 +139,7 @@ describe('the catalogue is per machine', () => {
     expect(String(fetchMock.mock.lastCall?.[0])).toContain('hostId=host-b');
   });
 
-  it('refuses to ask without a machine, and says why', async () => {
+  it('refuses to ask without a host, and says why', async () => {
     const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
     await loadModels(null);
@@ -148,7 +148,7 @@ describe('the catalogue is per machine', () => {
     expect(getModelCatalog().error).toContain('machine');
   });
 
-  it('re-fetches when the machine changes — a cached list must not be shown for another', async () => {
+  it('re-fetches when the host changes — a cached list must not be shown for another', async () => {
     const fetchMock = vi.fn(
       async (_url: string | URL | Request) =>
         new Response(JSON.stringify({ models: [{ id: 'm', label: 'M' }] }), {
@@ -163,7 +163,7 @@ describe('the catalogue is per machine', () => {
     expect(String(fetchMock.mock.lastCall?.[0])).toContain('hostId=host-b');
   });
 
-  it('ignores a slower answer for a machine that is no longer the current one', async () => {
+  it('ignores a slower answer for a host that is no longer the current one', async () => {
     const pending = new Map<string, (models: { id: string; label: string }[]) => void>();
     const fetchMock = vi.fn(
       (url: string | URL | Request) =>
@@ -186,7 +186,7 @@ describe('the catalogue is per machine', () => {
     expect(getModelCatalog().models.map((m) => m.id)).toEqual(['b-model']);
   });
 
-  it("does not let a superseded load clear the current machine's in-flight request", async () => {
+  it("does not let a superseded load clear the current host's in-flight request", async () => {
     const pending = new Map<string, (models: { id: string; label: string }[]) => void>();
     const fetchMock = vi.fn(
       (url: string | URL | Request) =>

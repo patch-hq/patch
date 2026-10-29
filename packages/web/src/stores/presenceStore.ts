@@ -60,7 +60,7 @@ export interface HostPresence {
 /**
  * One backend's credential state on one host, or `null` when that host has not
  * reported it yet. The ONLY way to ask "is Claude connected?" — the question is
- * meaningless without naming a machine, so the answer always takes one.
+ * meaningless without naming a host, so the answer always takes one.
  */
 export function hostAccount(
   hosts: Record<string, HostPresence>,
@@ -95,7 +95,7 @@ interface PresenceState {
   connection: ConnectionState;
   /**
    * Every registered host, keyed by hostId. Seeded from the `auth.ok`
-   * greeting so the list is complete — including machines that are asleep and
+   * greeting so the list is complete — including hosts that are asleep and
    * will never send a `host.online` — then kept live by presence and report
    * frames.
    */
@@ -155,7 +155,7 @@ interface PresenceState {
  * No host is special: hosts come and go. A single registered host is
  * unambiguous, and so is a single online one. With several candidates there is
  * no right answer, so this returns null and the caller refuses with a message
- * rather than picking one — sending a host-scoped edit to a guessed machine is
+ * rather than picking one — sending a host-scoped edit to a guessed host is
  * the exact failure `hostId` was added to the wire to prevent.
  *
  * E1's Hosts UI replaces this with an explicit selection; until then it is the
@@ -164,8 +164,8 @@ interface PresenceState {
 export function defaultHostId(hosts: Record<string, HostPresence>): string | null {
   const all = Object.values(hosts);
   if (all.length === 1) return (all[0] as HostPresence).hostId;
-  // Hosts come and go: with several registered, the one live machine is the
-  // unambiguous target; two live machines are a choice, not a guess.
+  // Hosts come and go: with several registered, the one live host is the
+  // unambiguous target; two live hosts are a choice, not a guess.
   const online = all.filter((h) => h.online);
   return online.length === 1 ? (online[0] as HostPresence).hostId : null;
 }

@@ -1,9 +1,9 @@
-// A model choice read from the account's default machine's catalogue, as a row —
+// A model choice read from the account's default host's catalogue, as a row —
 // used by Settings → Agent (Model for new chats, the account's default) and by
 // Settings → Manager (the Manager and Speakers threads' model).
 //
 // The catalogue is per host, so it is read from the account's default machine,
-// the same rule every other host-scoped edit uses. With no unambiguous machine there
+// the same rule every other host-scoped edit uses. With no unambiguous host there
 // is nothing to read a list FROM, and the row says that rather than offering a
 // guessed list. The saved value is always kept as an option, so a catalogue
 // that changed can never unpin it.
@@ -35,9 +35,7 @@ export function ModelChoice({
   return (
     <Row
       title={label}
-      subtitle={
-        catalogueHost === null ? 'No single machine to read the model list from' : undefined
-      }
+      subtitle={catalogueHost === null ? 'No single host to read the model list from' : undefined}
       subtitleTestID={`${testID}-no-host`}
       right={
         <OptionPicker

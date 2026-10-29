@@ -30,7 +30,7 @@ const PAGES = [
   { id: 'manager', title: 'Manager', testid: 'settings-manager-page' },
   { id: 'voice', title: 'Voice', testid: 'settings-voice' },
   { id: 'hooks', title: 'Hooks', testid: 'settings-hooks-page' },
-  { id: 'hosts', title: 'Machines', testid: 'settings-hosts' },
+  { id: 'hosts', title: 'Hosts', testid: 'settings-hosts' },
   { id: 'providers', title: 'Providers', testid: 'settings-providers' },
   { id: 'devices', title: 'Devices', testid: 'settings-devices' },
   { id: 'updates', title: 'Updates', testid: 'settings-version' },
@@ -159,7 +159,7 @@ test.describe('Settings — desktop', () => {
       'Hooks',
       'Computer use',
       'Activity',
-      'Machines',
+      'Hosts',
       'Agent identity',
       'Providers',
       'Notifications',
@@ -266,7 +266,7 @@ test.describe('Settings — behaviour', () => {
     server = await stubSettingsApi(page);
   });
 
-  // Only what belongs to a machine is chosen per host (spec/01 § Settings):
+  // Only what belongs to a host is chosen per host (spec/01 § Settings):
   // Memories and MCP. Usage, Agent, Voice and Providers are the account's.
   test('the host switcher appears on per-host pages once two hosts have reported', async ({
     page,

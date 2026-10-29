@@ -24,7 +24,7 @@ describe('project skill discovery for Codex turns', () => {
     expect(skillCatalogueText(after)).toContain('photo-access: does pixelunion');
   });
 
-  it('prefers the project copy and includes machine skills', () => {
+  it('prefers the project copy and includes host skills', () => {
     const proj = mkdtempSync(join(tmpdir(), 'ps-'));
     const home = mkdtempSync(join(tmpdir(), 'psh-'));
     skill(proj, 'a', 'a');

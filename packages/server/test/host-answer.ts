@@ -38,7 +38,7 @@ export function hostConfirms(link: InProcessHostLink): void {
 
 /**
  * Answer the most recent spawn as a host that REFUSED it (the folder is not on
- * that machine), so the run lands as `dispatch-error` naming the host.
+ * that host), so the run lands as `dispatch-error` naming the host.
  */
 export function hostRefusesLastSpawn(link: InProcessHostLink, message: string): void {
   for (let i = link.sent.length - 1; i >= 0; i--) {

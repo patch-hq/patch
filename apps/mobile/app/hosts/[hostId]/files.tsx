@@ -1,6 +1,6 @@
 // Host Files browser (spec/15 § Host files and terminal, spec/03 § Host files).
 //
-// Browse ONE machine's filesystem and open a text file in the editor — no
+// Browse ONE host's filesystem and open a text file in the editor — no
 // chat needed, which is the point: editing a skill in `~/.claude/skills` or a
 // dotfile used to mean opening a chat whose folder happened to contain it.
 //

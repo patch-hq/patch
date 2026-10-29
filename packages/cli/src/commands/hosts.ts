@@ -1,20 +1,20 @@
-// `patch hosts *` — machines as a resource (spec/17 § Hosts and the CLI).
+// `patch hosts *` — hosts as a resource (spec/17 § Hosts and the CLI).
 //
-// There was no `hosts` command at all, so from the machine a person was sitting
-// on there was no way to ask what machines existed, what they were running, or
+// There was no `hosts` command at all, so from the host a person was sitting
+// on there was no way to ask what hosts existed, what they were running, or
 // to drive any host-scoped control — even though the host's local socket is
 // exactly where those controls belong.
 //
 // Routing follows the spec's split, and it matters:
-//   - Controls the HOST owns reach this machine over its own local socket, so
+//   - Controls the HOST owns reach this host over its own local socket, so
 //     they work with no round trip through the server (and while the server is
 //     unreachable).
-//   - Three commands go to the SERVER even when they name this machine, because
+//   - Three commands go to the SERVER even when they name this host, because
 //     the server owns what they change rather than the host: `add`, `rename`
 //     and `remove`.
 //
-// `--host` names another machine and forces the REST path, since another
-// machine's host is not reachable over this one's socket.
+// `--host` names another host and forces the REST path, since another
+// host's host is not reachable over this one's socket.
 
 import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
@@ -35,7 +35,7 @@ export interface HostSummary {
 /**
  * Resolve `--host` against the registry: a host NAME or a `hostId` prefix.
  * An ambiguous or unknown value is an error listing the candidates, rather than
- * a silent pick — acting on the wrong machine is the failure this prevents.
+ * a silent pick — acting on the wrong host is the failure this prevents.
  */
 export async function resolveHost(opts: HostsOpts): Promise<string> {
   const t = getTransport({ ...opts, remote: true });
@@ -45,7 +45,7 @@ export async function resolveHost(opts: HostsOpts): Promise<string> {
 
 /** The matching half of `resolveHost`, on a list already fetched. */
 export function pickHost(hosts: HostSummary[], needle: string): string {
-  // An empty needle is a prefix of every id; it names no machine at all.
+  // An empty needle is a prefix of every id; it names no host at all.
   if (needle === '') throw new Error('--host must not be empty');
   const byName = hosts.filter((h) => h.hostName === needle);
   if (byName.length === 1) return byName[0]!.hostId;
@@ -57,7 +57,7 @@ export function pickHost(hosts: HostSummary[], needle: string): string {
   throw new Error(
     candidates.length > 0
       ? `--host "${needle}" is ambiguous — candidates: ${candidates}`
-      : `--host "${needle}" matches no registered machine (known: ${hosts
+      : `--host "${needle}" matches no registered host (known: ${hosts
           .map((h) => h.hostName ?? h.hostId)
           .join(', ')})`,
   );
@@ -65,7 +65,7 @@ export function pickHost(hosts: HostSummary[], needle: string): string {
 
 /**
  * Where a host-owned control should go. With no `--host` it is this machine,
- * over its local socket. With `--host` it is another machine, so it must route
+ * over its local socket. With `--host` it is another host, so it must route
  * through the server.
  */
 async function hostRoute(
@@ -82,11 +82,11 @@ async function hostRoute(
 }
 
 export function registerHostsCommands(program: Command): void {
-  const hosts = program.command('hosts').description('Machines this account runs on');
+  const hosts = program.command('hosts').description('Hosts this account runs on');
 
   hosts
     .command('list')
-    .description('Every registered machine: name, status, version')
+    .description('Every registered host: name, status, version')
     .option('--json', 'JSON output')
     .action(async (opts: CommonOpts) => {
       await run(opts, async () => {
@@ -97,7 +97,7 @@ export function registerHostsCommands(program: Command): void {
           return;
         }
         for (const h of res.hosts) {
-          // A machine that has never reported has no name — say so rather than
+          // A host that has never reported has no name — say so rather than
           // printing an id dressed up as one.
           const name = h.hostName ?? `${h.hostId} (no report yet)`;
           emitText(`${h.online ? '●' : '○'} ${name}  ${h.hostId}`);
@@ -107,8 +107,8 @@ export function registerHostsCommands(program: Command): void {
 
   hosts
     .command('get')
-    .description('One machine: platform, backends, components')
-    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
+    .description('One host: platform, backends, components')
+    .option('--host <h>', 'host name or hostId prefix (default: this host)')
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
       await run(opts, async () => {
@@ -122,12 +122,12 @@ export function registerHostsCommands(program: Command): void {
       });
     });
 
-  const folders = hosts.command('folders').description("That machine's project-folder registry");
+  const folders = hosts.command('folders').description("That host's project-folder registry");
 
   folders
     .command('list', { isDefault: true })
     .description('List the project roots')
-    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
+    .option('--host <h>', 'host name or hostId prefix (default: this host)')
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
       await run(opts, async () => {
@@ -138,8 +138,8 @@ export function registerHostsCommands(program: Command): void {
 
   folders
     .command('add <path>')
-    .description('Designate a project root on that machine')
-    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
+    .description('Designate a project root on that host')
+    .option('--host <h>', 'host name or hostId prefix (default: this host)')
     .option('--json', 'JSON output')
     .action(async (folderPath: string, opts: HostsOpts) => {
       await run(opts, async () => {
@@ -151,7 +151,7 @@ export function registerHostsCommands(program: Command): void {
   folders
     .command('remove <path>')
     .description('Drop a designated project root')
-    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
+    .option('--host <h>', 'host name or hostId prefix (default: this host)')
     .option('--json', 'JSON output')
     .action(async (folderPath: string, opts: HostsOpts) => {
       await run(opts, async () => {
@@ -162,8 +162,8 @@ export function registerHostsCommands(program: Command): void {
 
   hosts
     .command('backends')
-    .description("Each backend's version and that machine's view of the shared accounts")
-    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
+    .description("Each backend's version and that host's view of the shared accounts")
+    .option('--host <h>', 'host name or hostId prefix (default: this host)')
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
       await run(opts, async () => {
@@ -174,7 +174,7 @@ export function registerHostsCommands(program: Command): void {
 
   hosts
     .command('devices')
-    .description('The voice devices registered on this machine, with live presence (online, muted)')
+    .description('The voice devices registered on this host, with live presence (online, muted)')
     .option('--json', 'JSON output')
     .action(async (opts: CommonOpts) => {
       await run(opts, async () => {
@@ -182,7 +182,7 @@ export function registerHostsCommands(program: Command): void {
         const t = getTransport(opts);
         if (t.kind !== 'uds') {
           throw new Error(
-            'hosts devices: needs the host running on this machine (no host socket found)',
+            'hosts devices: needs the host running on this host (no host socket found)',
           );
         }
         const res = await t.get<{
@@ -203,8 +203,8 @@ export function registerHostsCommands(program: Command): void {
 
   hosts
     .command('models')
-    .description("That machine's model catalogue across its backends")
-    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
+    .description("That host's model catalogue across its backends")
+    .option('--host <h>', 'host name or hostId prefix (default: this host)')
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
       await run(opts, async () => {
@@ -219,8 +219,8 @@ export function registerHostsCommands(program: Command): void {
 
   hosts
     .command('install <component>')
-    .description('Install an optional component on that machine')
-    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
+    .description('Install an optional component on that host')
+    .option('--host <h>', 'host name or hostId prefix (default: this host)')
     .option('--json', 'JSON output')
     .action(async (component: string, opts: HostsOpts) => {
       await run(opts, async () => {
@@ -235,8 +235,8 @@ export function registerHostsCommands(program: Command): void {
 
   hosts
     .command('uninstall <component>')
-    .description('Delete an installed component from that machine')
-    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
+    .description('Delete an installed component from that host')
+    .option('--host <h>', 'host name or hostId prefix (default: this host)')
     .option('--json', 'JSON output')
     .action(async (component: string, opts: HostsOpts) => {
       await run(opts, async () => {
@@ -256,7 +256,7 @@ export function registerHostsCommands(program: Command): void {
   claudeSettings
     .command('get', { isDefault: true })
     .description('Show settings.json text and memory entries')
-    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
+    .option('--host <h>', 'host name or hostId prefix (default: this host)')
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
       await run(opts, async () => {
@@ -272,7 +272,7 @@ export function registerHostsCommands(program: Command): void {
   claudeSettings
     .command('set <file>')
     .description("Replace that host's settings.json from a file")
-    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
+    .option('--host <h>', 'host name or hostId prefix (default: this host)')
     .option('--json', 'JSON output')
     .action(async (file: string, opts: HostsOpts) => {
       await run(opts, async () => {
@@ -290,7 +290,7 @@ export function registerHostsCommands(program: Command): void {
   memory
     .command('remove <project> <file>')
     .description('Delete one memory entry')
-    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
+    .option('--host <h>', 'host name or hostId prefix (default: this host)')
     .option('--json', 'JSON output')
     .action(async (project: string, file: string, opts: HostsOpts) => {
       await run(opts, async () => {
@@ -305,8 +305,8 @@ export function registerHostsCommands(program: Command): void {
 
   hosts
     .command('update')
-    .description('Apply an available host update on that machine')
-    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
+    .description('Apply an available host update on that host')
+    .option('--host <h>', 'host name or hostId prefix (default: this host)')
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
       await run(opts, async () => {
@@ -317,7 +317,7 @@ export function registerHostsCommands(program: Command): void {
 
   hosts
     .command('pair-device')
-    .description('On this machine only: open a five-minute window for a voice device')
+    .description('On this host only: open a five-minute window for a voice device')
     .option('--json', 'JSON output')
     .action(async (opts: CommonOpts) => {
       await run(opts, async () => {
@@ -325,17 +325,17 @@ export function registerHostsCommands(program: Command): void {
         // local-only and has no wire frame (spec/02 § Control IPC).
         const t = getTransport(opts);
         if (t.kind !== 'uds') {
-          throw new Error('hosts pair-device runs on the machine itself, over its local socket');
+          throw new Error('hosts pair-device runs on the host itself, over its local socket');
         }
         emitJson(await t.post<unknown>('/pair-device', {}));
       });
     });
 
-  // --- Server-owned, even when they name this machine ----------------------
+  // --- Server-owned, even when they name this host ----------------------
 
   hosts
     .command('add')
-    .description('Mint a registration code for a new machine, with the install command')
+    .description('Mint a registration code for a new host, with the install command')
     .option('--os <os>', 'target operating system for the install command (macos|linux)', 'macos')
     .option('--json', 'JSON output')
     .action(async (opts: CommonOpts & { os: string }) => {
@@ -355,18 +355,18 @@ export function registerHostsCommands(program: Command): void {
           return;
         }
         emitText(`code: ${code.code}`);
-        emitText(`run on the new machine: ${install.command}`);
+        emitText(`run on the new host: ${install.command}`);
       });
     });
 
   hosts
     .command('rename <name>')
-    .description('Rename a machine (server-owned)')
-    .option('--host <h>', 'machine name or hostId prefix (default: this machine)')
+    .description('Rename a host (server-owned)')
+    .option('--host <h>', 'host name or hostId prefix (default: this host)')
     .option('--json', 'JSON output')
     .action(async (name: string, opts: HostsOpts) => {
       await run(opts, async () => {
-        if (name.trim().length === 0) throw new Error('a machine name cannot be empty');
+        if (name.trim().length === 0) throw new Error('a host name cannot be empty');
         const t = getTransport({ ...opts, remote: true });
         const hostId = opts.host !== undefined ? await resolveHost(opts) : undefined;
         emitJson(
@@ -380,13 +380,13 @@ export function registerHostsCommands(program: Command): void {
 
   hosts
     .command('remove')
-    .description('Revoke a machine (requires --host)')
-    .requiredOption('--host <h>', 'machine name or hostId prefix — never defaulted')
+    .description('Revoke a host (requires --host)')
+    .requiredOption('--host <h>', 'host name or hostId prefix — never defaulted')
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
       await run(opts, async () => {
         // `--host` is REQUIRED here: an irreversible revocation must never be
-        // aimed at a machine by default (spec/17 § Hosts and the CLI).
+        // aimed at a host by default (spec/17 § Hosts and the CLI).
         const hostId = await resolveHost(opts);
         const t = getTransport({ ...opts, remote: true });
         emitJson(await t.post<unknown>('/api/auth/revoke', { id: hostId }));

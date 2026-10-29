@@ -72,7 +72,7 @@ export function TerminalPanel({
   focused = true,
 }: TerminalPanelProps): JSX.Element {
   // The chat's own host — the terminal exists to work on that chat's files, so
-  // the shell belongs on that machine and nowhere else. `/chats/new` has no
+  // the shell belongs on that host and nowhere else. `/chats/new` has no
   // chat yet, hence the fall-through to the account's default host below.
   const chatHostId = useChatStore((s) => s.chats[chatId]?.hostId ?? null) || null;
   const session = useTerminalStore((s) => s.sessions[chatId]);
@@ -102,7 +102,7 @@ export function TerminalPanel({
 
   /** Open a shell for this chat (first open, or an explicit restart). */
   function startShell(): void {
-    // A shell runs on ONE machine. The chat's own host is the only right answer
+    // A shell runs on ONE host. The chat's own host is the only right answer
     // — the terminal exists to work on the files that chat works on — so this
     // refuses rather than opening a shell on some other box.
     const hostId = chatHostId ?? defaultHostId(usePresenceStore.getState().hosts);
@@ -115,7 +115,7 @@ export function TerminalPanel({
         type: 'patch.terminal.error',
         sessionId,
         code: 'internal',
-        message: 'no machine to open a shell on',
+        message: 'no host to open a shell on',
       });
       return;
     }

@@ -71,7 +71,7 @@ describe('input presence', () => {
     expect(idleMs).toBeLessThan(1000);
   });
 
-  it('in the desktop app, reports input anywhere on the machine', async () => {
+  it('in the desktop app, reports input anywhere on the host', async () => {
     (window as unknown as { patch: unknown }).patch = { getSystemIdleMs: async () => 4200.4 };
     __setLastPageInputAt(0);
     expect(await readInputReport(10 * 60_000)).toEqual({
@@ -145,7 +145,7 @@ describe('away reports from the desktop shell', () => {
     delete (window as unknown as { patch?: unknown }).patch;
   });
 
-  it('carries away: locked or asleep from the machine', async () => {
+  it('carries away: locked or asleep from the host', async () => {
     for (const away of ['locked', 'asleep'] as const) {
       (window as unknown as { patch: unknown }).patch = {
         getSystemPresence: async () => ({ idleMs: 1200, away }),
@@ -159,14 +159,14 @@ describe('away reports from the desktop shell', () => {
     }
   });
 
-  it('leaves away out when the machine is in use', async () => {
+  it('leaves away out when the host is in use', async () => {
     (window as unknown as { patch: unknown }).patch = {
       getSystemPresence: async () => ({ idleMs: 50 }),
     };
     expect(await readInputReport()).toEqual({ type: 'surface.input', idleMs: 50, scope: 'system' });
   });
 
-  it('reports at once when the shell says the machine locked, without waiting for the tick', async () => {
+  it('reports at once when the shell says the host locked, without waiting for the tick', async () => {
     let away: 'locked' | undefined;
     let fire: () => void = () => undefined;
     const unsubscribe = vi.fn();
@@ -262,11 +262,11 @@ describe('browser idle detection', () => {
     expect(await readInputReport(5000)).toMatchObject({ scope: 'page', idleMs: 5000 });
   });
 
-  it('once granted, reports the whole machine at the browser’s 60s minimum threshold', async () => {
+  it('once granted, reports the whole host at the browser’s 60s minimum threshold', async () => {
     await startIdleDetection(() => 1_000_000);
     expect(FakeDetector.last?.started).toEqual({ threshold: 60_000 });
     __setLastPageInputAt(0);
-    // The machine saw input within a minute, so however long the page has been quiet it is under it.
+    // The host saw input within a minute, so however long the page has been quiet it is under it.
     const active = await readInputReport(1_000_000);
     expect(active).toMatchObject({ scope: 'system' });
     expect(active.idleMs).toBeLessThan(60_000);

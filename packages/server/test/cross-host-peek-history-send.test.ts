@@ -7,7 +7,7 @@
 // registered host, but asking about it any other way 404'd — even though the
 // wire protocol relays `patch.spawn` to a named host just fine. These three
 // tools take only a chatId, never a host, so the server resolves the owning
-// machine from the chat mirror and relays there, the same way it already
+// host from the chat mirror and relays there, the same way it already
 // does for `patch.spawn`.
 
 import { describe, it, expect, vi } from 'vitest';
@@ -62,8 +62,8 @@ function harness(opts: { owners?: Record<string, string>; online?: string[] } = 
   };
 }
 
-describe('cross-host patch.peek.request — relayed to the owning machine', () => {
-  it('relays to the machine the chat mirror says owns the chat', () => {
+describe('cross-host patch.peek.request — relayed to the owning host', () => {
+  it('relays to the host the chat mirror says owns the chat', () => {
     const h = harness();
     h.feed(
       {
@@ -80,7 +80,7 @@ describe('cross-host patch.peek.request — relayed to the owning machine', () =
     h.dispose();
   });
 
-  it("routes the owning machine's response back to the caller", () => {
+  it("routes the owning host's response back to the caller", () => {
     const h = harness();
     h.feed(
       {
@@ -109,7 +109,7 @@ describe('cross-host patch.peek.request — relayed to the owning machine', () =
     h.dispose();
   });
 
-  it('refuses a chatId no machine has ever reported, naming chat_not_found', () => {
+  it('refuses a chatId no host has ever reported, naming chat_not_found', () => {
     const h = harness({ owners: {} });
     h.feed(
       {
@@ -130,7 +130,7 @@ describe('cross-host patch.peek.request — relayed to the owning machine', () =
     h.dispose();
   });
 
-  it('refuses when the owning machine is offline, naming it', () => {
+  it('refuses when the owning host is offline, naming it', () => {
     const h = harness({ online: ['host-a'] });
     h.feed(
       {
@@ -211,7 +211,7 @@ describe('cross-host patch.peek.request — relayed to the owning machine', () =
 });
 
 describe('cross-host patch.history.request — relayed the same way', () => {
-  it('relays to the owning machine and routes the response back', () => {
+  it('relays to the owning host and routes the response back', () => {
     const h = harness();
     h.feed(
       {
@@ -265,7 +265,7 @@ describe('cross-host patch.history.request — relayed the same way', () => {
 });
 
 describe('cross-host patch.send_to — relayed and acknowledged', () => {
-  it('relays to the owning machine, carrying the requestId', () => {
+  it('relays to the owning host, carrying the requestId', () => {
     const h = harness();
     h.feed(
       {
@@ -283,7 +283,7 @@ describe('cross-host patch.send_to — relayed and acknowledged', () => {
     h.dispose();
   });
 
-  it("routes the owning machine's ack back to the caller", () => {
+  it("routes the owning host's ack back to the caller", () => {
     const h = harness();
     h.feed(
       {

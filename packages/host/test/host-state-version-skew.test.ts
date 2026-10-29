@@ -2,7 +2,7 @@
 //
 // This file is read in the HostStateStore constructor, before anything is
 // listening and before the service is up. It used to be parsed `.strict()`, so
-// retiring a field was enough to take a whole machine offline: every host on a
+// retiring a field was enough to take a whole host offline: every host on a
 // host whose `host.json` still carried `lastUsedModel` threw
 // `Unrecognized key(s) in object: 'lastUsedModel'` out of `main()` and
 // crash-looped under systemd. A host that will not boot cannot be reached to

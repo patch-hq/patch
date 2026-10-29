@@ -100,7 +100,7 @@ export interface RouteOptions {
    *
    * `any` (default) is spec/09 § Presence heuristic as `patch_notify` obeys it.
    * `computer` narrows it to web/desktop, for the chat-completion notifier whose
-   * whole point is reaching the phone when the user is away from the machine —
+   * whole point is reaching the phone when the user is away from the host —
    * the phone being in hand must not suppress it.
    *
    * Server-internal: deliberately NOT a field on `NotifyEvent`. It is a routing

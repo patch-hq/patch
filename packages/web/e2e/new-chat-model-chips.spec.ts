@@ -3,10 +3,10 @@ import { test, expect } from '@playwright/test';
 // Real-browser e2e for spec/14 § Sidebar §8: the new-chat screen's model chips
 // are the account's default model first, marked, then the head of the live
 // catalogue in its own order — never the models recent chats happened to run
-// on. `?recency=machine` seeds a job-spawned chat and the Manager thread, both
+// on. `?recency=host` seeds a job-spawned chat and the Manager thread, both
 // newer than the one chat a person started, each on a model of its own; none
 // of that moves a chip.
-const NEW = '/app/dev-harness.html?chat=new&recency=machine';
+const NEW = '/app/dev-harness.html?chat=new&recency=host';
 
 test('the model chips are the default, then the catalogue head, whatever the chats ran on', async ({
   page,
@@ -31,7 +31,7 @@ test('the model chips are the default, then the catalogue head, whatever the cha
   const quick = page.getByTestId('new-chat-quick-models').locator('[data-testid^="model-quick-"]');
   await expect(quick).toHaveCount(4);
   const ids = await quick.evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')));
-  // The harness machine's default (Opus 5) leads, marked; then the catalogue
+  // The harness host's default (Opus 5) leads, marked; then the catalogue
   // in its order, with the fifth left to the pop-up.
   expect(ids).toEqual([
     'model-quick-claude-opus-5',

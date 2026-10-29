@@ -3,7 +3,7 @@
 // The live defect ended here: `mcp__patch__patch_spawn` returned
 // `{"host":"host-logged-out","created":"remote"}` for a spawn the target had
 // refused. The tool result IS the agent's only view, so it has to carry the
-// failure — named machine, real reason — not a success shape.
+// failure — named host, real reason — not a success shape.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, mkdirSync } from 'node:fs';
@@ -56,7 +56,7 @@ describe('patch_spawn as the agent sees it', () => {
         if (req.host === 'host-logged-out') {
           throw new RemoteSpawnError(
             'no_model_catalogue',
-            `patch_spawn: machine ${req.host} refused: machine ${req.host} has never read a model catalogue, so it has no last-used model`,
+            `patch_spawn: host ${req.host} refused: host ${req.host} has never read a model catalogue, so it has no last-used model`,
           );
         }
         return { chatId: 'chat-on-b' };
@@ -78,7 +78,7 @@ describe('patch_spawn as the agent sees it', () => {
     await app?.close();
   });
 
-  it('a refused cross-machine spawn is a tool ERROR naming the machine and the reason', async () => {
+  it('a refused cross-host spawn is a tool ERROR naming the host and the reason', async () => {
     const res = (await client.callTool({
       name: 'patch_spawn',
       arguments: { folder, host: 'host-logged-out' },
@@ -92,7 +92,7 @@ describe('patch_spawn as the agent sees it', () => {
     expect(text).not.toContain('"created":"remote"');
   });
 
-  it('a successful cross-machine spawn still returns the chat it made', async () => {
+  it('a successful cross-host spawn still returns the chat it made', async () => {
     const res = (await client.callTool({
       name: 'patch_spawn',
       arguments: { folder, host: 'host-b' },
@@ -105,7 +105,7 @@ describe('patch_spawn as the agent sees it', () => {
     });
   });
 
-  it('a same-machine spawn returns the new chatId (short-circuit, no host named)', async () => {
+  it('a same-host spawn returns the new chatId (short-circuit, no host named)', async () => {
     const res = (await client.callTool({
       name: 'patch_spawn',
       arguments: { folder },

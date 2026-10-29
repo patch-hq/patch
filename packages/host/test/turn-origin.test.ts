@@ -129,7 +129,7 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
   });
 
   // the user's own example: "some things are silent, like a loop to check something".
-  it('a self-wake turn settles as a machine turn', async () => {
+  it('a self-wake turn settles as a host turn', async () => {
     const b = recordingBackend();
     const { daemon, folder, events } = setup(b.backend);
     const chatId = await daemon.spawnChat({ folder });
@@ -159,7 +159,7 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
     expect(origins.every((o) => o === 'machine')).toBe(true);
   });
 
-  it('a todo auto-advance turn settles as a machine turn, the user turn that started it does not', async () => {
+  it('a todo auto-advance turn settles as a host turn, the user turn that started it does not', async () => {
     const backend = todoBackend({
       'do my chores': [
         ['sweep', 'pending'],
@@ -185,7 +185,7 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
     expect(settledOrigins(events, chatId)).toEqual(['user', 'machine', 'machine']);
   });
 
-  it("an agent's send_to lands as a machine turn in the receiving chat", async () => {
+  it("an agent's send_to lands as a host turn in the receiving chat", async () => {
     const b = recordingBackend();
     const { daemon, folder, events } = setup(b.backend);
     const chatId = await daemon.spawnChat({ folder });
@@ -204,7 +204,7 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
     expect(settledOrigins(events, chatId)).toEqual(['machine']);
   });
 
-  it('a machine turn does not make the next user turn silent', async () => {
+  it('a host turn does not make the next user turn silent', async () => {
     const b = recordingBackend();
     const { daemon, folder, events } = setup(b.backend);
     const chatId = await daemon.spawnChat({ folder });
@@ -236,7 +236,7 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
       };
     };
 
-    // Machine turn running, the user's message queued behind it.
+    // Host turn running, the user's message queued behind it.
     {
       const g = gated();
       const { daemon, folder, events } = setup(g.backend);
@@ -244,7 +244,7 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
       await tick();
       const first = daemon.sendInput({
         chatId,
-        message: 'from the machine',
+        message: 'from the host',
         localId: 'm1',
         origin: 'machine',
       });
@@ -271,7 +271,7 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
       await tick();
       const second = daemon.sendInput({
         chatId,
-        message: 'from the machine',
+        message: 'from the host',
         localId: 'm1',
         origin: 'machine',
       });
@@ -285,7 +285,7 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
     }
   });
 
-  it('a drain of nothing but machine turns still settles as a machine turn', async () => {
+  it('a drain of nothing but host turns still settles as a host turn', async () => {
     const gates: Array<() => void> = [];
     const backend: SdkBackend = {
       async *run(opts): AsyncIterable<Env> {
@@ -383,9 +383,9 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
       expect(settledOrigins(events, chatId)).toEqual(['user']);
     }
 
-    // A machine turn (self-wake / send_to) interrupted by the user's promoted
+    // A host turn (self-wake / send_to) interrupted by the user's promoted
     // message. The interrupted turn's own origin must not settle either — it
-    // would be a `machine` frame the notifier silently drops, splitting one
+    // would be a `host` frame the notifier silently drops, splitting one
     // drain into two settles.
     {
       const g = abortableGated();
@@ -394,7 +394,7 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
       await tick();
       void daemon.sendInput({
         chatId,
-        message: 'from the machine',
+        message: 'from the host',
         localId: 'm1',
         origin: 'machine',
       });
@@ -453,7 +453,7 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
     });
     await tick(80);
 
-    // The turn is on disk as owed, tagged machine.
+    // The turn is on disk as owed, tagged host.
     expect(metaStore.read(chatId)?.pendingTurns?.[0]?.origin).toBe('machine');
 
     // A fresh host over the same home re-sends it.

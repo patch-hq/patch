@@ -554,7 +554,7 @@ export class PatchWs {
       usePresenceStore.getState().setIdentity(event.accountId, event.surfaceId);
       // The greeting carries EVERY registered host with its presence and the
       // server's cached reports, so the phone's Hosts list is complete from the
-      // first frame — asleep machines included.
+      // first frame — asleep hosts included.
       usePresenceStore.getState().setHosts(event.hosts);
       // spec/14 § Composer — push every draft the server never confirmed
       // (typed while offline, or a save that failed mid-flight) now that the
@@ -600,7 +600,7 @@ export class PatchWs {
     if (event.type === 'host.unauthenticated') {
       // ONE backend's credential on ONE host is missing/expired (spec/10
       // § Backend credentials). NOT a presence fact: the host emitted this over
-      // its own live link, so it stays online — a machine that is up and simply
+      // its own live link, so it stays online — a host that is up and simply
       // logged out of a backend must not be rendered as down.
       usePresenceStore.getState().setHostAccount({
         type: 'host.account',
@@ -616,7 +616,7 @@ export class PatchWs {
       // spec/10 § Surface in Settings — a backend's credential on a NAMED host
       // is switchable from ANY surface, so the phone tracks the same live state
       // the desktop does. Stored against the (host, backend) pair it names:
-      // flattening it into an account-wide slot let one logged-out machine make
+      // flattening it into an account-wide slot let one logged-out host make
       // every host look logged out.
       usePresenceStore.getState().setHostAccount(event);
       return;
@@ -642,7 +642,7 @@ export class PatchWs {
     if (event.type === 'claude_settings.list' || event.type === 'claude_settings.updated') {
       // spec/02 § Claude Code settings — that host's settings.json + memory
       // entries, sent whole on connect and after every edit, so Settings →
-      // Hosts settles on what the machine actually holds.
+      // Hosts settles on what the host actually holds.
       usePresenceStore
         .getState()
         .setClaudeSettings(event.hostId, event.settingsJson, event.memories);

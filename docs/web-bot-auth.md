@@ -1,7 +1,7 @@
 # Web Bot Auth — Cloudflare / Akamai verified-agent registration
 
 Each Patch deployment creates and stores its own identity. No environment
-variable, bundled key or machine setup is involved. Registration is external:
+variable, bundled key or host setup is involved. Registration is external:
 the deployment operator submits its live directory from its own dashboard.
 Patch exposes the complete setup under Settings → Agent identity on web,
 desktop and Android.

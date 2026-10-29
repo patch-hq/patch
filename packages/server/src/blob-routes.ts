@@ -65,12 +65,12 @@ export function registerBlobRoutes(app: FastifyInstance, deps: BlobRoutesDeps): 
     if (event.type !== 'patch.blob.response') return;
     const w = pending.get(event.requestId);
     if (!w) return;
-    // Only the machine that was asked may answer — a reply naming another
+    // Only the host that was asked may answer — a reply naming another
     // host is a routing bug, not an answer.
     if (event.hostId !== w.hostId || (from !== null && from !== w.hostId)) {
       deps.logger.warn(
         { requestId: event.requestId, asked: w.hostId, answered: event.hostId, from },
-        'blob: response from a machine that was not asked; ignoring',
+        'blob: response from a host that was not asked; ignoring',
       );
       return;
     }

@@ -125,7 +125,7 @@ describe('Settings tab — the list', () => {
       'Voice',
       'Hooks',
       'Computer use',
-      'Machines',
+      'Hosts',
       'Agent identity',
       'Providers',
       'Devices',
@@ -149,7 +149,7 @@ describe('Settings tab — the list', () => {
       'Hooks',
       'Computer use',
     ]);
-    expect(inGroup('Setup')).toEqual(['Machines', 'Agent identity', 'Providers', 'Devices']);
+    expect(inGroup('Setup')).toEqual(['Hosts', 'Agent identity', 'Providers', 'Devices']);
     expect(inGroup('System')).toEqual(['Updates', 'Account']);
   });
 
@@ -329,7 +329,7 @@ describe('/settings/[page]', () => {
   });
 
   it('the host switcher appears on per-host pages once two hosts have reported', async () => {
-    // Memories is per host (its entries live on each machine).
+    // Memories is per host (its entries live on each host).
     __setLocalSearchParams({ page: 'memories' });
     let r = render(<SettingsPageScreen />);
     await flush();

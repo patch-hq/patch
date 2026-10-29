@@ -6,7 +6,7 @@
 #
 # --home        the install home (default ~/.patch-server)
 # --no-service  lay the release out and stop there: no systemd unit, no start.
-#               For machines without systemd — run <home>/current/patch-server
+#               For hosts without systemd — run <home>/current/patch-server
 #               yourself with PATCH_SERVER_HOME and PATCH_NODE set.
 # --system      a system-wide unit (/etc/systemd/system) running as --user
 #               (default: the user running this), for a server box. Needs root.

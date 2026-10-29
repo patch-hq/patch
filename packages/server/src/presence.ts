@@ -8,15 +8,15 @@
 // heartbeats whenever it is visible, which says nothing about whether anyone
 // is sitting in front of it — a window left open on an empty desk used to hold
 // every push back. Web and desktop surfaces report `surface.input` instead:
-// the desktop app the whole machine's idle time, a browser tab its own page's
-// unless the user has granted idle detection. A report may also say the machine
+// the desktop app the whole host's idle time, a browser tab its own page's
+// unless the user has granted idle detection. A report may also say the host
 // is `away` (locked, asleep), which beats any idle time.
 
 import type { SendToPhoneAfter } from '@patch/wire';
 
 export type PresenceStatus = 'online' | 'stale' | 'offline';
 
-/** What a surface knows about nobody being at the machine. */
+/** What a surface knows about nobody being at the host. */
 export type AwayReason = 'locked' | 'asleep';
 
 export type InputScope = 'system' | 'page';
@@ -52,9 +52,9 @@ export interface PresenceRecord {
   lastInputAt?: number;
   /** When that report arrived — a surface that stops reporting says nothing. */
   inputReportedAt?: number;
-  /** Whether the report covered the whole machine or only this page. */
+  /** Whether the report covered the whole host or only this page. */
   inputScope?: InputScope;
-  /** Set when the surface said nobody is at the machine; cleared by the next report without it. */
+  /** Set when the surface said nobody is at the host; cleared by the next report without it. */
   away?: AwayReason;
 }
 
@@ -88,7 +88,7 @@ export const AWAY_THRESHOLD_MS: Record<SendToPhoneAfter, number> = {
   lock: Number.POSITIVE_INFINITY,
 };
 
-/** A page can't see the machine, so its idle time counts for more before it says anything. */
+/** A page can't see the host, so its idle time counts for more before it says anything. */
 export const PAGE_SCOPE_THRESHOLD_MS = 300_000;
 
 /** Surfaces report input every 15s; three missed reports and it is no evidence. */
@@ -229,7 +229,7 @@ export class PresenceTracker {
 
   /**
    * spec/09 ## Presence heuristic — true when some web or desktop surface
-   * reported within 45s, did not say the machine is away, and has been idle for
+   * reported within 45s, did not say the host is away, and has been idle for
    * less than the `Send to my phone after` threshold. A visible window on its
    * own is not enough — only input says someone is there. The terminal never
    * reports, so it never counts.

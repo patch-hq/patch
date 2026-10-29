@@ -14,7 +14,7 @@
 // past 1320 green unit tests, a clean typecheck, a clean lint, and a deploy gate
 // that verified only that an APK had been uploaded and a manifest returned 200.
 //
-// A headless emulator boots on this machine in about a minute (`-no-window`),
+// A headless emulator boots on this host in about a minute (`-no-window`),
 // so the premise was simply wrong: the surface layer CAN run unattended, and
 // this is it.
 //
@@ -812,7 +812,7 @@ async function relaunch() {
 
 /**
  * The AVD to boot. `--avd`/`PATCH_SMOKE_AVD` wins; otherwise the first one this
- * machine has. NOT hardcoded to any particular device name — a committed script
+ * host has. NOT hardcoded to any particular device name — a committed script
  * that assumes one developer's emulator list fails for everyone else, and fails
  * as "no device attached", which reads like a broken app.
  */
@@ -822,7 +822,7 @@ export function pickAvd(explicit, available) {
   if (explicit) {
     if (!available.includes(explicit)) {
       return {
-        why: `no AVD named "${explicit}". This machine has: ${available.join(', ') || 'none'}`,
+        why: `no AVD named "${explicit}". This host has: ${available.join(', ') || 'none'}`,
       };
     }
     return { avd: explicit };
@@ -830,13 +830,13 @@ export function pickAvd(explicit, available) {
   if (available.length === 0) {
     return {
       why:
-        'this machine has no Android emulator. Create one (Android Studio → Device Manager) or ' +
+        'this host has no Android emulator. Create one (Android Studio → Device Manager) or ' +
         `run \`avdmanager create avd -n ${DEDICATED_AVD} …\`; the surface layer cannot be judged ` +
         'without one.',
     };
   }
   // An AVD kept for this harness wins, when there is one. Otherwise a deploy
-  // reaches for whatever is first on the machine — which is the emulator
+  // reaches for whatever is first on the host — which is the emulator
   // someone is working in, and this harness uninstalls the app and taps
   // through it.
   if (available.includes(DEDICATED_AVD)) return { avd: DEDICATED_AVD };

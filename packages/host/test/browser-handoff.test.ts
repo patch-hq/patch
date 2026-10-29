@@ -93,7 +93,7 @@ async function setApproveHref(browser: BrowserManager, tabId: string, href: stri
 }
 
 describeRealBrowser('Browser hand-off — real Chromium', () => {
-  // A real Chromium on a shared, busy machine: the default 5 s is a guess about an idle one.
+  // A real Chromium on a shared, busy host: the default 5 s is a guess about an idle one.
   vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
   let managers: BrowserManager[] = [];
   let handoffs: BrowserHandoff[] = [];

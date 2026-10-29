@@ -1,5 +1,5 @@
 // spec/02 § Background task completions — what a running background task is
-// costing the machine, for the surface's background task bar.
+// costing the host, for the surface's background task bar.
 //
 // There is no pid anywhere in the wire protocol or the host's own state, so
 // the task's output file is the handle: every process in a backgrounded

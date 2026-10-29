@@ -80,7 +80,7 @@ describe('Settings → MCP', () => {
       'mcp-server-chrome-devtools',
     ]);
     expect(screen.getByTestId('mcp-server-patch')).toHaveTextContent('Always on');
-    // Wording keeps three things apart: the host (machine), its MCP servers,
+    // Wording keeps three things apart: the host (host), its MCP servers,
     // and Patch's built-in tools server — never just "Patch" or "servers".
     expect(screen.getByTestId('mcp-server-patch')).toHaveTextContent('Patch tools');
     expect(screen.getByTestId('mcp-server-patch')).toHaveTextContent('Built-in MCP server');

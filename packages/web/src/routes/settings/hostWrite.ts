@@ -1,10 +1,10 @@
 // Sending a change to one host, shared by every Settings page.
 //
-// A host-scoped edit goes over the live socket to the named machine and is
-// never patched locally: the row settles when that machine answers with a fresh
-// report, so what is shown is always what the machine holds. The server
+// A host-scoped edit goes over the live socket to the named host and is
+// never patched locally: the row settles when that host answers with a fresh
+// report, so what is shown is always what the host holds. The server
 // BUFFERS surface→host frames while a host is down and flushes them on its
-// next connect, so an edit aimed at an offline machine is refused here, naming
+// next connect, so an edit aimed at an offline host is refused here, naming
 // it, rather than appearing to do nothing and applying hours later (NO
 // FALLBACK).
 
@@ -75,7 +75,7 @@ export function sendHostSettings(
  * the ack window.
  *
  * "did not respond" was the whole message, and it was wrong twice over. It
- * blamed the machine for a silence with three genuinely different causes, and
+ * blamed the host for a silence with three genuinely different causes, and
  * it reported FAILURE for something we cannot know failed: the frame is sent,
  * the host acts on it locally the moment it lands, and only the report back
  * is missing — so the credential may well be gone while the toast says it
@@ -122,7 +122,7 @@ export function readySocket(
   const ws = getActiveWs();
   const { connection, hosts } = usePresenceStore.getState();
   // Name WHICH link is down. "not connected to the server" read as a verdict
-  // on the machine, which is the one thing it says nothing about.
+  // on the host, which is the one thing it says nothing about.
   if (!ws || connection !== 'connected') {
     pushError(
       `${what} failed: this surface has no link to the server (${connection}), so nothing was sent to ${label}`,
@@ -132,14 +132,14 @@ export function readySocket(
   // The server BUFFERS surface→host frames while a host is down and
   // flushes them on its next connect, so sending here would look like nothing
   // happened and then apply minutes later. Refuse instead — and say when the
-  // machine was last heard from, since "offline" alone gives no idea whether
+  // host was last heard from, since "offline" alone gives no idea whether
   // this is a blip or a box that has been down since yesterday.
   const hostPresence = hosts[hostId];
   if (!hostPresence?.online) {
     pushError(
       `${what} failed: ${label} is offline (last seen ${agoLabel(
         hostPresence?.lastSeenAt ?? null,
-      )}), so its Claude credential can only be changed on the machine itself`,
+      )}), so its Claude credential can only be changed on the host itself`,
     );
     return null;
   }
@@ -157,7 +157,7 @@ export function readySocket(
  * clears three ways, all real signals rather than a guessed duration: success
  * drops `updateAvailable` and the button unmounts with it; a refusal —
  * synchronous ("offline") or the host's async `chat.error` — names this
- * machine in a `pushError` toast; and a reconnect gives a machine whose
+ * host in a `pushError` toast; and a reconnect gives a host whose
  * update never announced either outcome (no host left to send one) another
  * go once it is seen again.
  */

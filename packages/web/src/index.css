@@ -2992,7 +2992,7 @@ button.nav-row {
   margin: 0;
   padding: 0 24px;
 }
-/* New-chat setup (spec/14 §8): one labelled row per decision — Machine,
+/* New-chat setup (spec/14 §8): one labelled row per decision — Host,
    Project, Model, Account — as a two-column grid, labels in a quiet right-
    aligned column so the rows scan as a form rather than a cloud of pills. The
    usage block sits beneath, apart from the selections. */
@@ -10147,7 +10147,7 @@ button.set-row-open:focus-visible {
   }
 }
 
-/* The new-chat screen when the machine cannot run a turn. Stated ABOVE the
+/* The new-chat screen when the host cannot run a turn. Stated ABOVE the
    setup row: this was previously discoverable only by opening the model picker,
    so the app looked usable and failed at the send. */
 .new-chat-blocked {
@@ -10614,10 +10614,10 @@ main.empty-state p {
   text-decoration: underline;
 }
 
-/* Out of usage everywhere on this machine. A WARNING colour, not an error one:
+/* Out of usage everywhere on this host. A WARNING colour, not an error one:
    nothing is broken, and it comes back on its own at the time the banner
    states. Same shape as the disconnected banner above it, because they are the
-   same kind of fact about the same machine. */
+   same kind of fact about the same host. */
 .out-of-usage-banner {
   display: flex;
   align-items: center;
@@ -11582,7 +11582,7 @@ button.background-task-bar-row:hover .background-task-bar-description {
 /* The 50% fade that marks an unavailable pill as unavailable washes out the
    SELECTED fill instead: white-on-accent and the dimming both converge toward
    the page's own background, so a selected-but-offline host (you can be
-   pointed at a machine that then drops, spec/14 §8 "offline is listed so its
+   pointed at a host that then drops, spec/14 §8 "offline is listed so its
    absence is visible") reads as a nearly blank blob instead of a legible one.
    Unselected disabled pills still fade; the fill communicates state on its
    own and doesn't need to. */
@@ -15800,7 +15800,7 @@ select.permission-mode.is-pending {
   color: var(--on-accent);
 }
 
-/* Settings → Computer use: Patch is driving this machine right now. */
+/* Settings → Computer use: Patch is driving this host right now. */
 .set-computer-live {
   display: flex;
   flex-direction: column;

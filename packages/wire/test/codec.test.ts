@@ -1969,7 +1969,7 @@ describe('codec', () => {
   });
 
   test('the rejected value is named, bounded, and reachable at a nested path', () => {
-    // An empty machine name is one of the enumerated unhappy paths: the refusal
+    // An empty host name is one of the enumerated unhappy paths: the refusal
     // must say WHICH field held WHAT, or it is indistinguishable from an edit
     // that silently did not save.
     try {

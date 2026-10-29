@@ -58,7 +58,7 @@ describe('chat REST routes', () => {
       surfaceKind: 'terminal',
       label: 'cli',
     });
-    // `d1` must be a REGISTERED machine: every host-addressed route refuses an
+    // `d1` must be a REGISTERED host: every host-addressed route refuses an
     // id that is not (spec/04 § Spawn), so a fixture that skipped this would be
     // testing the refusal path instead of the route.
     registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
@@ -3773,7 +3773,7 @@ describe('chat REST routes', () => {
 
   // The catalogue is PER HOST. Without a host there is nothing to ask, and
   // asking whichever host happens to be attached would offer the wrong
-  // machine's models for a chat about to be pinned to a different one.
+  // host's models for a chat about to be pinned to a different one.
   it('GET /api/models without a hostId is 400, not a guess', async () => {
     const { registry, jwt } = await bootstrap();
     const built = await makeApp({ registry, hostLink: new InProcessHostLink() });

@@ -96,7 +96,7 @@ test.describe('the host-link-lost card disappears once the link is back', () => 
     await applyEvent(page, {
       type: 'chat.error',
       chatId: CHAT_ID,
-      error: { code: 'claude_oauth_missing', message: 'No Claude credential on this machine.' },
+      error: { code: 'claude_oauth_missing', message: 'No Claude credential on this host.' },
       seq: 1,
     } as WireEvent);
     await expect(page.getByTestId('turn-error')).toHaveCount(1);

@@ -1,7 +1,7 @@
 // Test helpers for the per-host presence store.
 //
 // Credentials are per host per backend (spec/10 § Surface in Settings), so a
-// test that wants "Claude is connected" has to say WHICH machine — there is no
+// test that wants "Claude is connected" has to say WHICH host — there is no
 // account-wide slot to set. These wrap the `host.account` report the host
 // really sends.
 

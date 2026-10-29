@@ -1,8 +1,8 @@
 // Serving one blob's bytes (spec/04 § History — blobs).
 //
 // The server's half is a gate and a relay: check the sha's shape, find which
-// machine owns the chat, refuse one that is offline, round-trip exactly one
-// `patch.blob.request` to THAT machine, and turn its answer (or its silence)
+// host owns the chat, refuse one that is offline, round-trip exactly one
+// `patch.blob.request` to THAT host, and turn its answer (or its silence)
 // into an HTTP status with the right caching. The host half — what is
 // actually on disk — is covered in packages/host/test/chat-log.test.ts.
 
@@ -23,7 +23,7 @@ type Res = Extract<WireEvent, { type: 'patch.blob.response' }>;
 const SHA = 'a'.repeat(64);
 const PAYLOAD = Buffer.from('tool output nobody has opened yet');
 
-/** A host link whose machine answers blob requests with `respond`. */
+/** A host link whose host answers blob requests with `respond`. */
 class FakeBlobHost extends InProcessHostLink {
   readonly asked: Req[] = [];
   constructor(
@@ -83,7 +83,7 @@ describe('blob routes', () => {
     expect(res.headers['content-type']).toBe('image/png');
     expect(res.headers['cache-control']).toBe('public, max-age=31536000, immutable');
     expect(res.rawPayload.equals(PAYLOAD)).toBe(true);
-    // Addressed to the machine that owns the chat, carrying the chat it is for.
+    // Addressed to the host that owns the chat, carrying the chat it is for.
     expect(link.asked).toHaveLength(1);
     expect(link.asked[0]!.sha).toBe(SHA);
     expect(link.asked[0]!.chatId).toBe('c1');
@@ -164,7 +164,7 @@ describe('blob routes', () => {
     expect(res.json()).toMatchObject({ error: 'host_timeout' });
   });
 
-  it('ignores an answer from a machine that was not asked', async () => {
+  it('ignores an answer from a host that was not asked', async () => {
     vi.useFakeTimers();
     const link = new FakeBlobHost(() => ({ ok: true, data: 'AA==' }), 'someone-else');
     const built = await boot(link);

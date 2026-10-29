@@ -67,19 +67,19 @@ The one thing deliberately left behind is the ancient turn. A turn that failed d
 
 Which key a turn ran on is a property of THAT TURN: it is what the failure names, and what a `rate_limit_event` usage reading is attributed to. It is never stored on the chat. It is shown, though: the chat's state names the account its latest turn ran on, and a surface draws it beside the model. When a turn runs on a different account from the chat's previous turn BECAUSE that one ran out of credit, the chat gets a system line saying so — which account it moved from and to, and when the spent one comes back if the limit said, in the reader's own time. A move that is the strategy working (round-robin moving on, a reset key taking over again) is not news and writes no line.
 
-- The credential is the OAuth token Claude Code persists after `claude login`. Claude Code stores it under the key `claudeAiOauth` (`{ accessToken, refreshToken, expiresAt, … }`) in a platform-native store — `~/.claude/.credentials.json` on a Linux host and the macOS Keychain (service `Claude Code-credentials`) on a Mac host. It is not in `~/.claude.json`; that file holds account metadata under `oauthAccount` (email, plan, uuids) but no access token. The Claude Agent SDK reads its own credential from that native store directly. Patch passes no `ANTHROPIC_API_KEY` in env and leaves the credential to the backend. Those three locations (env `CLAUDE_CODE_OAUTH_TOKEN` → `~/.claude/.credentials.json` → Keychain, in that order) are that machine's own login, which Settings can adopt as a shared account (below). A host that already held accounts before settings were shared — including the one its first boot seeded from that login — sends them to the server once, the first time it connects (`01-server.md` § Settings), so a single-machine install works without touching Settings. From then on the shared accounts are what patch reads to gate queries and to pass the SDK as `CLAUDE_CODE_OAUTH_TOKEN`.
+- The credential is the OAuth token Claude Code persists after `claude login`. Claude Code stores it under the key `claudeAiOauth` (`{ accessToken, refreshToken, expiresAt, … }`) in a platform-native store — `~/.claude/.credentials.json` on a Linux host and the macOS Keychain (service `Claude Code-credentials`) on a Mac host. It is not in `~/.claude.json`; that file holds account metadata under `oauthAccount` (email, plan, uuids) but no access token. The Claude Agent SDK reads its own credential from that native store directly. Patch passes no `ANTHROPIC_API_KEY` in env and leaves the credential to the backend. Those three locations (env `CLAUDE_CODE_OAUTH_TOKEN` → `~/.claude/.credentials.json` → Keychain, in that order) are that host's own login, which Settings can adopt as a shared account (below). A host that already held accounts before settings were shared — including the one its first boot seeded from that login — sends them to the server once, the first time it connects (`01-server.md` § Settings), so a single-host install works without touching Settings. From then on the shared accounts are what patch reads to gate queries and to pass the SDK as `CLAUDE_CODE_OAUTH_TOKEN`.
 - First run: host checks for a valid `claudeAiOauth.accessToken` on the account a chat resolves to (via the resolution order above, for the first account; from the store thereafter). If absent/expired, the host refuses to start any `query()` against that account and emits `host.unauthenticated` naming the backend; the host's other backends, and its other Claude accounts, keep running (`02-host.md` § Agent backends). Settings surfaces this as "not connected" on that account's row under that host, with the connect controls below.
 - A credential the check accepts can still be refused by Claude when the turn runs, because a token can be revoked while its stored expiry says otherwise. That refusal means the same thing as an absent one and is reported the same way: `host.unauthenticated` for that backend, the chat told in words that the host's sign-in is no longer valid and where to renew it, and the chat left idle so it runs as soon as the credential is replaced. It is not reported as a fault of that chat, and the backend's own error text is not what the chat shows.
 - The server renews shared credentials and distributes updated access tokens. Hosts do not receive refresh tokens or renew these credentials independently.
 - `ANTHROPIC_API_KEY` is stripped from the env passed to `query()`, so the SDK uses OAuth even when the user has the key set globally. Authentication for this backend is OAuth only.
 
-Provider accounts have NO host tie. Whether a chat can run — the composer, the new-chat screen, the "not signed in" banner — is answered from the server's shared accounts for the chat's model (any connected Claude account; any connected ChatGPT or API-key account of the right kind), never from what one host reports and never naming a machine. A host that is offline, or has not yet applied the latest settings, does not make an account look signed out: it receives the account on reconnect, and a chat sent to it queues until then. Until the shared state has loaded nothing is blocked.
+Provider accounts have NO host tie. Whether a chat can run — the composer, the new-chat screen, the "not signed in" banner — is answered from the server's shared accounts for the chat's model (any connected Claude account; any connected ChatGPT or API-key account of the right kind), never from what one host reports and never naming a host. A host that is offline, or has not yet applied the latest settings, does not make an account look signed out: it receives the account on reconnect, and a chat sent to it queues until then. Until the shared state has loaded nothing is blocked.
 
 Surface in Settings (`design/web-lo-fi-settings.html` § Claude subscription), once per backend for the whole account — the accounts are shared settings, held by the server and sent to every host (`01-server.md` § Settings):
 
-- Each stored account gets its own row: connected state shows the account's label and account email (from `~/.claude.json` `oauthAccount.emailAddress` at the time it connected) plus a `Sign out` action; signed-out shows a `Sign in` action. The row's actions sit behind a ⋯ that opens a small panel beside the row — it floats over the rows below rather than pushing them — and each action that is not self-evident carries one line saying what it does: `Sign in again` replaces the stored login with a fresh token; `Sign out` keeps the row and forgets the login; `Remove` forgets the account everywhere. No row names a machine: an account is every host's, and a host is only ever the reader of its usage.
+- Each stored account gets its own row: connected state shows the account's label and account email (from `~/.claude.json` `oauthAccount.emailAddress` at the time it connected) plus a `Sign out` action; signed-out shows a `Sign in` action. The row's actions sit behind a ⋯ that opens a small panel beside the row — it floats over the rows below rather than pushing them — and each action that is not self-evident carries one line saying what it does: `Sign in again` replaces the stored login with a fresh token; `Sign out` keeps the row and forgets the login; `Remove` forgets the account everywhere. No row names a host: an account is every host's, and a host is only ever the reader of its usage.
 - An `Add account` action under the rows starts the same paste-a-token flow as sign-in, but always creates a new row rather than replacing one. There is no control to mark an account "active" or "default"; the sequence's order is the only ranking.
-- The `adopt` call (take the backend's own login on a machine and add it as an account) stays as a REST and CLI operation, but Settings does not offer it per host: a host that holds accounts the server does not sends them on its first connect (`01-server.md` § Settings), so there is nothing for a person to pick a machine for.
+- The `adopt` call (take the backend's own login on a host and add it as an account) stays as a REST and CLI operation, but Settings does not offer it per host: a host that holds accounts the server does not sends them on its first connect (`01-server.md` § Settings), so there is nothing for a person to pick a host for.
 - EVERY PROVIDER IS ONE ENTRY IN A LIST, not a branch in the page. The web page keeps a registry (`providers.tsx`) in which each provider declares its name, which shared strategy setting ranks its accounts, which limit windows it reports and in what order, where its extra-usage add-on is managed, whether a login can be replaced by pasting a token, and the control that adds an account. The page walks the list and draws every entry the same way — strategy row, ranked accounts, add control — so a new provider (a local model server, say) is a new entry and never a change to the page.
 - A strategy control per backend, over the rows (§ above).
 - ONE ROW IS ONE CLAUDE ACCOUNT. Every stored credential records the Anthropic organisation it authenticates as, read from the `anthropic-organization-id` header on the call that validates it. (`GET /api/oauth/profile` answers 403 `oauth_scope_insufficient` for a `claude setup-token` token; the header is stamped on every response, including the free `/v1/models` 200.) A token whose organisation matches an account already stored is REFUSED, naming the row it clashes with — a second credential for the same account is not somewhere to fail over to, it is the same pool of credit under a second label. A re-connect of a row is exempt: replacing a row's own token with a fresh one for the same organisation is a rotation. An organisation that could not be established is "not known", never "different", so an unidentified token is still stored.
@@ -161,7 +161,7 @@ one-line summary beside the model instead (`14-design-web.md` §8 New-chat setup
 row), with every window in its tooltip.
 
 WHEN EVERY ACCOUNT ON A MACHINE IS SPENT, EVERY CHAT ON IT SAYS SO. A warning
-banner in the chat chrome names the spent accounts, the machine, and the first
+banner in the chat chrome names the spent accounts, the host, and the first
 account to come back, counting down. This is a different fact from the per-chat
 limit notice, and the per-chat notice cannot carry it: that one reaches only the
 chat you happen to have open, and says nothing about the twenty others that are
@@ -169,12 +169,12 @@ equally parked or the jobs that will fire into them and park too.
 
 It is a WARNING colour, not an error one — nothing is broken and it clears on
 its own at the stated time — and it is per host, like the credential banner
-beside it, because credit belongs to a machine's accounts and says nothing about
+beside it, because credit belongs to a host's accounts and says nothing about
 a chat running elsewhere.
 
 IT STAYS SILENT UNLESS IT IS CERTAIN. Three states read as uncertain and show
 nothing: no connected account (the sign-in banner's story, and two warnings
-about one machine is noise), any account without a reading yet (unknown is not
+about one host is noise), any account without a reading yet (unknown is not
 spent — every cold start passes through this, and warning there would mean
 warning on every load), and any account still usable (one account with credit
 means work continues). A banner that cries wolf is worth nothing on the day it
@@ -183,9 +183,9 @@ is right.
 Usage is per host per account: it is that host's view of that account's limits,
 and it is not re-aggregated into one account-wide figure.
 
-The server owns backend credentials, as an ordered list of named accounts per backend in its secrets store (`01-server.md` § Settings). A host reads only its copy from the last settings snapshot at query time; it never reads the backend's own login on that machine except to offer it for adoption.
+The server owns backend credentials, as an ordered list of named accounts per backend in its secrets store (`01-server.md` § Settings). A host reads only its copy from the last settings snapshot at query time; it never reads the backend's own login on that host except to offer it for adoption.
 
-- Disconnect empties an account's credential, leaving the account's entry and every machine's own login in place.
+- Disconnect empties an account's credential, leaving the account's entry and every host's own login in place.
 - Connect sets an account's credential: a pasted token, or a host's own login.
 - Add account creates a new account entry from a pasted token, leaving every existing account untouched.
 - The server alone renews provider credentials, serializing renewal and persisting each rotated refresh token before publishing new access credentials. Hosts never receive refresh tokens. Codex uses externally managed authentication. Signing in once makes the provider available on every linked host, including hosts that reconnect later. Renewal failures appear in Settings.
@@ -248,8 +248,8 @@ A server is relayed when `PATCH_RELAY_URL` names a relay; Settings → Account s
 
 ## Host registration (adding a host)
 
-Every host machine registers its own host, opened from a linked surface. Hosts
-are peers and any number may be registered; a second machine follows the same
+Every host host registers its own host, opened from a linked surface. Hosts
+are peers and any number may be registered; a second host follows the same
 flow as the first.
 
 1. On a linked surface, the user opens Add host; the surface requests a single-use daemon-registration nonce from the server and renders it as a QR and as a short code, for a host where the code is typed rather than scanned. The QR and the short code carry the same nonce, so a host that scans and a host where it is typed submit the same value.
@@ -266,9 +266,9 @@ server prints a pairing code that makes the account the first time it is run
 (`17-cli.md` § Commands) does the same from a terminal, before any host can be
 added.
 
-Registration is per machine and idempotent: re-running the installer on a host
+Registration is per host and idempotent: re-running the installer on a host
 that is already registered re-uses its stored `daemonKey` rather than creating a
-duplicate host. A machine that has been revoked pairs again from scratch.
+duplicate host. A host that has been revoked pairs again from scratch.
 
 Adding a host includes provisioning an agent backend and logging it in there
 (`02-host.md` § Agent backends). Settings shows each host's backend accounts
@@ -278,7 +278,7 @@ separately, and each host's turns depend on its own credentials.
 
 Any linked surface can be revoked from the app (Settings → Devices). Server invalidates the JWT and terminates the WebSocket.
 
-Revoking a host decommissions that machine's install: its `daemonKey` is invalidated, its WebSocket dropped, and its chats become unreachable while their history is retained (`04-chats-and-folders.md`). Removing a host is confirmed, and the confirmation names how many chats live on it. Other hosts continue as they were.
+Revoking a host decommissions that host's install: its `daemonKey` is invalidated, its WebSocket dropped, and its chats become unreachable while their history is retained (`04-chats-and-folders.md`). Removing a host is confirmed, and the confirmation names how many chats live on it. Other hosts continue as they were.
 
 ## What's trusted vs untrusted
 
@@ -298,7 +298,7 @@ follow:
 - Every trigger ingress — Todoist, inbound webhooks, cron
   (`08-triggers-and-jobs.md`) — is an entry point to that authority, and each is
   authenticated or secret-gated.
-- The installer states what the host will be able to do on the machine, once,
+- The installer states what the host will be able to do on the host, once,
   before it registers.
 
 ## Provider keys

@@ -4,10 +4,10 @@
 // range it supports, and a host outside that range is shown as needing an
 // update").
 //
-// Without this, a machine running a host too old to speak the current wire
+// Without this, a host running a host too old to speak the current wire
 // shape simply misbehaved — decoding frames it did not understand, or omitting
 // fields a surface then rendered as absent. Stating the range turns that into a
-// visible "this machine needs updating".
+// visible "this host needs updating".
 //
 // The comparison itself lives in version-report.ts; this module holds only the
 // range and the verdict so there is ONE version comparator in the server.

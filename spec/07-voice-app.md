@@ -102,7 +102,7 @@ The Groq transcription request pins `language=en` and `temperature=0`.
 
 On `backend: local`, time-to-first-audio for a reply is dominated by the same floor as before — the model's own response latency plus CPU-bound Kokoro synthesis, roughly ~600ms–1s — because the agent's turn is the reply. Two optimisations still apply:
 
-- Kokoro kept warm — a host that has the Kokoro component installed synthesises a throwaway phrase at startup, and again on a slow timer while it is idle, so the model load never lands on a call's critical path. Warming only at startup is not enough: the weights get paged out while the machine does something else, and the first call after a quiet hour then waits out the whole load before it can say anything, which the user experiences as a call that never speaks.
+- Kokoro kept warm — a host that has the Kokoro component installed synthesises a throwaway phrase at startup, and again on a slow timer while it is idle, so the model load never lands on a call's critical path. Warming only at startup is not enough: the weights get paged out while the host does something else, and the first call after a quiet hour then waits out the whole load before it can say anything, which the user experiences as a call that never speaks.
 - Warm agent session for the duration of a call (`02-host.md` § Per-turn process / warm sessions) — the agent process is opened when the call starts and kept alive across turns instead of being re-spawned every utterance. Barge-in interrupts the current turn without killing it.
 
 On `backend: gemini`/`openai` there is no separate STT/TTS stage to warm — the hosted session is already speech-to-speech — so the same floor applies without needing either optimisation, and a hand-off to the chat's agent is the only thing that can add real latency.
@@ -313,7 +313,7 @@ This addressed-or-continuing rule — what counts as a turn once a session is op
 
 #### Which surface it reaches
 
-A deliberate interrupt goes to the surface the user is actually at. When a sustained session is open, that session is the answer. When several are, it is the one whose surface most recently showed activity — a heartbeat, a keystroke, an utterance — because that is the machine the user is in front of. With no session open at all, what happens is the reach setting's business (`09-notifications.md` § Reaching the user).
+A deliberate interrupt goes to the surface the user is actually at. When a sustained session is open, that session is the answer. When several are, it is the one whose surface most recently showed activity — a heartbeat, a keystroke, an utterance — because that is the host the user is in front of. With no session open at all, what happens is the reach setting's business (`09-notifications.md` § Reaching the user).
 
 #### Speaking with no session open
 

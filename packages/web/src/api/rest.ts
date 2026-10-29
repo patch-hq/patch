@@ -334,7 +334,7 @@ export type ComputerUseHost = {
   tabs?: number;
   lastStoppedAt?: number;
   closed?: number;
-  /** Present when the machine did not answer. */
+  /** Present when the host did not answer. */
   error?: string;
 };
 
@@ -388,7 +388,7 @@ export const api = {
     }>('/api/auth/me'),
   createChat: (body: {
     /**
-     * The host to run on. Required — the same folder string on two machines is
+     * The host to run on. Required — the same folder string on two hosts is
      * two different directories, so a spawn without a host has nowhere correct
      * to go (spec/04 § Spawn).
      */
@@ -507,7 +507,7 @@ export const api = {
   patchJob: (id: string, body: unknown) =>
     request<unknown>(`/api/jobs/${id}`, { method: 'PATCH', body }),
   deleteJob: (id: string) => request<unknown>(`/api/jobs/${id}`, { method: 'DELETE' }),
-  /** Settings → Computer use: is an agent driving each machine's browser. */
+  /** Settings → Computer use: is an agent driving each host's browser. */
   computerUse: () => request<{ hosts: ComputerUseHost[] }>('/api/browser-use'),
   stopComputerUse: (hostId: string) =>
     request<ComputerUseHost>(`/api/browser-use/${encodeURIComponent(hostId)}/stop`, {
@@ -695,7 +695,7 @@ export const api = {
     try {
       return await move(false);
     } catch (e) {
-      // The old machine would not let go of the chat (mid-turn, a timer armed,
+      // The old host would not let go of the chat (mid-turn, a timer armed,
       // a Codex session): continue from the server's copy, which has no such limit.
       const code = e instanceof ApiError ? (e.body as { error?: unknown } | null)?.error : null;
       if (code === 'busy' || code === 'unsupported') return move(true);
@@ -1249,8 +1249,8 @@ export const api = {
   // the host reads it from Anthropic with its Claude OAuth credential, so a
   // newly released model is offered without a redeploy. NO FALLBACK: a failure
   // throws and the picker shows it.
-  // Per MACHINE: the server requires the machine whose catalogue is read and
-  // rejects a call naming none — the same folder path on two machines is two
+  // Per MACHINE: the server requires the host whose catalogue is read and
+  // rejects a call naming none — the same folder path on two hosts is two
   // different directories, and their model lists differ too.
   models: (hostId: string) =>
     request<{ models: { id: string; label: string }[]; fetchedAt?: string }>(
@@ -1267,8 +1267,8 @@ export const api = {
   // description/preview rather than guess/invent one (spec/01 §
   // GET /api/skills).
   // Per MACHINE, same as `models` above: skills are per-host (a folder's
-  // `.claude/skills`, or a machine-level skill that only lives on one
-  // machine), so the caller must say which — omitting it let the request
+  // `.claude/skills`, or a host-level skill that only lives on one
+  // host), so the caller must say which — omitting it let the request
   // fall through to "whichever host last attached" and come back missing a
   // skill that is real on the caller's actual host.
   skills: (folder: string, hostId: string) =>
@@ -1332,7 +1332,7 @@ export const api = {
   // `folders.updated`); this serves a surface without a live socket.
   /**
    * Every host's published registry, grouped by host (spec/04 § Folders). A
-   * flat union would make two machines' identical paths indistinguishable.
+   * flat union would make two hosts' identical paths indistinguishable.
    */
   folders: () =>
     request<{ hosts: Array<{ hostId: string; roots: string[]; recent: string[] }> }>(
@@ -1352,7 +1352,7 @@ export const api = {
         dir ? `&dir=${encodeURIComponent(dir)}` : ''
       }`,
     ),
-  // Host files (spec/03 § Host files, spec/14 § File browser): a machine's
+  // Host files (spec/03 § Host files, spec/14 § File browser): a host's
   // filesystem by ABSOLUTE path, with no chat in between — climbing above a
   // chat's folder, or browsing without a chat at all. No `path` lists the
   // host user's home, and the answer says where that is.
@@ -1381,7 +1381,7 @@ export const api = {
       { method: 'PUT', body },
     ),
   /**
-   * The one-line install command for a new machine, per target OS. The SERVER
+   * The one-line install command for a new host, per target OS. The SERVER
    * is its single source (spec/11 § Host installation) — this surface renders
    * what it is handed and never composes a command from its own idea of the
    * server's address or of how a build is named.

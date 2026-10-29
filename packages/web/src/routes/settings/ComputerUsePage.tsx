@@ -1,4 +1,4 @@
-// Settings → Computer use: whether an agent is driving a machine's browser
+// Settings → Computer use: whether an agent is driving a host's browser
 // right now, and a Stop button that closes its windows and cancels the action.
 
 import type { JSX } from 'react';
@@ -115,9 +115,9 @@ export function ComputerUsePage(): JSX.Element {
       ) : data === undefined ? (
         <Note>Checking…</Note>
       ) : data.hosts.length === 0 ? (
-        <Note>No machines are online.</Note>
+        <Note>No hosts are online.</Note>
       ) : (
-        <Group label="Machines">
+        <Group label="Hosts">
           {data.hosts.map((h) => (
             <HostCard
               key={h.hostId}

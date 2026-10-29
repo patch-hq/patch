@@ -1,8 +1,8 @@
 // Wake host — the host half (spec/08 § Wake host).
 //
-// `host.wake_request` asks this machine to be awake by `at`. On macOS that is
+// `host.wake_request` asks this host to be awake by `at`. On macOS that is
 // `pmset schedule wake`, which needs root: the host runs it through `sudo -n`,
-// so a machine without passwordless sudo for pmset reports exactly that rather
+// so a host without passwordless sudo for pmset reports exactly that rather
 // than pretending. A Mac on battery is refused too — a scheduled wake on
 // battery drains it overnight and many lids stay shut anyway.
 //

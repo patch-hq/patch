@@ -1,21 +1,21 @@
 // The five-minute voice-device adoption window (spec/16 § F2, spec/02
 // § Control IPC, spec/17 § Commands).
 //
-// A physical speaker belongs to ONE machine, and it carries no account
-// credential — so nothing in this exchange reaches the server. The machine's
+// A physical speaker belongs to ONE host, and it carries no account
+// credential — so nothing in this exchange reaches the server. The host's
 // own command line opens a window on its own host; the first device to
 // announce itself inside that window is recorded, and its control link is
 // accepted from then on.
 //
 // The rules that matter, and why:
 //   - The window is time-boxed. An always-open adoption would let any device on
-//     the network claim a machine.
+//     the network claim a host.
 //   - Exactly ONE device per window. Otherwise a burst of announcements could
 //     enrol several unattended.
 //   - An announcement OUTSIDE a window is refused. Being previously adopted is
 //     not a reason to accept a re-announcement with a new key.
-//   - Re-pairing MOVES a device to another machine rather than duplicating it:
-//     the machine that adopts it last owns it.
+//   - Re-pairing MOVES a device to another host rather than duplicating it:
+//     the host that adopts it last owns it.
 
 export const ADOPTION_WINDOW_MS = 5 * 60 * 1000;
 
@@ -29,7 +29,7 @@ export type AdoptionOutcome =
   | { adopted: false; reason: string };
 
 /**
- * The adoption window for ONE machine. Deliberately in-memory: a window is a
+ * The adoption window for ONE host. Deliberately in-memory: a window is a
  * live, attended act — a person ran the command and is holding the device — and
  * must not survive a host restart.
  */
@@ -72,7 +72,7 @@ export class DeviceAdoption {
       return {
         adopted: false,
         reason:
-          'no adoption window is open on this machine — run `patch hosts pair-device` there first',
+          'no adoption window is open on this host — run `patch hosts pair-device` there first',
       };
     }
     if (this.consumedBy !== null) {

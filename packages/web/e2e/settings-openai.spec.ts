@@ -8,7 +8,7 @@ import {
 } from './settingsHarness.js';
 
 // Settings → Usage → ChatGPT: the shared ChatGPT accounts (spec/01 § Settings),
-// their usage as a host reads it, and the one flow that runs on a machine — a
+// their usage as a host reads it, and the one flow that runs on a host — a
 // ChatGPT sign-in, which Codex does as a device flow on an online host and
 // whose login then goes to the server.
 

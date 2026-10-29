@@ -70,7 +70,7 @@ export interface ClientBuild extends LayerBuild {
  * the update panel — the whole point is that drift is loud, not inferred.
  */
 export interface VersionDrift {
-  /** Machine-readable kind, e.g. `web-behind-server`, `surface-behind-deployed`. */
+  /** Host-readable kind, e.g. `web-behind-server`, `surface-behind-deployed`. */
   kind: string;
   /** One-line human explanation, e.g. "the deployed SPA is 12 commits behind the server". */
   detail: string;
@@ -100,7 +100,7 @@ export function assertVersionReport(body: unknown): VersionReport {
   if (!Array.isArray(r.drift)) return bad('missing drift');
   if (!Array.isArray(r.clients)) return bad('missing clients');
   // A partial response must reach the panel's error state rather than render as
-  // "all layers agree" — an absent host roster would read as "no machines".
+  // "all layers agree" — an absent host roster would read as "no hosts".
   if (!Array.isArray(r.hosts)) return bad('missing hosts');
   return r as VersionReport;
 }
@@ -118,15 +118,15 @@ export interface VersionReport {
   web: WebLayer | null;
   /**
    * The host, from its authenticated link, or null when it has never
-   * connected. RETAINED for the single-machine panel; `hosts` is the per-machine
+   * connected. RETAINED for the single-host panel; `hosts` is the per-host
    * truth now that an account has several.
    */
   daemon: (LayerBuild & { online: boolean }) | null;
   /**
-   * Every registered machine and the build it is actually on (spec/11: "the
+   * Every registered host and the build it is actually on (spec/11: "the
    * host layer can differ from host to host"). Reporting one `daemon` made
-   * drift BETWEEN machines invisible — five hosts on one version and four on
-   * another looked like universal agreement. A machine that has never reported
+   * drift BETWEEN hosts invisible — five hosts on one version and four on
+   * another looked like universal agreement. A host that has never reported
    * a build has nulls: unknown reads as unknown, never as "same as the rest".
    */
   hosts: {

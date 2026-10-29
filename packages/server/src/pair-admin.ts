@@ -15,7 +15,7 @@ import { encodePairingUri } from '@patch/wire';
 
 export interface PairAdminOptions {
   /**
-   * The running server, as this machine reaches it (`http://127.0.0.1:3970`), or
+   * The running server, as this host reaches it (`http://127.0.0.1:3970`), or
    * `unix:/run/patch/server.sock` for a server listening on a Unix socket.
    */
   baseUrl: string;
@@ -90,7 +90,7 @@ export async function pairNewSurface(opts: PairAdminOptions): Promise<PairAdminR
     );
     if (made.status === 409) {
       throw new Error(
-        'This server already has an owner, and it is not this machine. Pair a new device from one that is already linked (Settings → Devices → Link a device).',
+        'This server already has an owner, and it is not this host. Pair a new device from one that is already linked (Settings → Devices → Link a device).',
       );
     }
     if (made.status !== 200 || !made.json.credential) {

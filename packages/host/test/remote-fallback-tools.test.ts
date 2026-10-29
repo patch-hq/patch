@@ -139,7 +139,7 @@ describe('patch_peek — falls back to the owning host when not local', () => {
       daemon,
       jobs,
       peekRemoteChat: async () => {
-        throw new RemoteRelayError('host_not_registered', 'machine host-b is offline');
+        throw new RemoteRelayError('host_not_registered', 'host host-b is offline');
       },
     });
     try {

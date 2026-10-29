@@ -3,8 +3,8 @@
 // dropped back to sleep; the retry ladder spent its three rungs in the next
 // three and left a 3am job errored by morning.
 //
-// Now a turn is held until the machine is fully awake (macOS says which wake it
-// is in), and a turn the machine slept through goes round again, held the same
+// Now a turn is held until the host is fully awake (macOS says which wake it
+// is in), and a turn the host slept through goes round again, held the same
 // way, without being reported as an error or taking a rung of the ladder.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -104,7 +104,7 @@ describe('the wake gate', () => {
     daemon.shutdown();
   });
 
-  it('a turn the machine slept through goes round again with no error and no rung spent', async () => {
+  it('a turn the host slept through goes round again with no error and no rung spent', async () => {
     const { backend, calls } = failsThenSucceeds(SLEPT, 6);
     const { daemon, folder, events } = makeHost(backend, fakeWatch({ v: true }), 'slept');
     await daemon.spawnChat({ folder, prompt: 'x' });
