@@ -57,11 +57,10 @@ test('manual removals and closed or merged PRs are skipped', () => {
   assert.equal(handleDequeue({ ...base, ...fakes({ state: 'CLOSED' }) }).action, 'skipped');
 });
 
-test('merge conflicts are recorded without a run link; unknown reasons fail loudly', () => {
+test('merge conflicts are left to needs-rebase, auto-merge untouched; unknown reasons fail loudly', () => {
   const f = fakes({ reason: 'MERGE_CONFLICT' });
-  handleDequeue({ ...base, gh: f.gh, td: f.td });
-  const add = f.calls.find((c) => c.args?.[0] === 'task' && c.args?.[1] === 'add');
-  assert.doesNotMatch(add.args[add.args.indexOf('--description') + 1], /run\/7/);
+  assert.equal(handleDequeue({ ...base, gh: f.gh, td: f.td }).action, 'skipped');
+  assert.equal(f.calls.filter((c) => c.args || c.gh?.includes('--disable-auto')).length, 0);
   assert.throws(() => handleDequeue({ ...base, ...fakes({ reason: 'WEIRD' }) }), /unknown merge-queue removal reason/);
 });
 
