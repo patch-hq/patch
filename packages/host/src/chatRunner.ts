@@ -2781,6 +2781,12 @@ export class Daemon {
   private readonly owedResend = new Set<string>();
   /** Chats whose pump is re-sending a turn a host restart cut off (as "carry on"). */
   private readonly interruptedResend = new Set<string>();
+  /**
+   * Chats whose provider session was found dead (e.g. it belongs to another
+   * account after a switch). Their next turn rebuilds a fresh session from
+   * Patch's log instead of starting contextless.
+   */
+  private readonly rebuildFromLog = new Set<string>();
 
   /** Put a chat's owed turn at the back of the resume line, once. */
   private enqueueResume(chatId: string, start: () => Promise<void> | undefined): void {
@@ -9435,7 +9441,7 @@ export class Daemon {
     // instead of starting a contextless session that only sees this prompt.
     const isNativeRebuild =
       !isProviderSwitch &&
-      (isResume || switchedClaudeAccount) &&
+      (isResume || switchedClaudeAccount || this.rebuildFromLog.has(chatId)) &&
       !fork &&
       !state.claudeSessionId &&
       this.hasPriorTrack(chatId, userMessageSeq) &&
@@ -9443,6 +9449,7 @@ export class Daemon {
       // carries its prompt itself and starts fresh. Only a restart's "carry on"
       // re-send leans on the log for the prompt it never repeats.
       (this.hasAnsweredTrack(chatId, userMessageSeq) || this.interruptedResend.has(chatId));
+    this.rebuildFromLog.delete(chatId);
     // spec/04 § History — preserve the cached prefix: a return to a harness
     // this track used before resumes ITS OWN prior session and hands over
     // only the delta (everything that happened elsewhere since), so the
@@ -10366,6 +10373,7 @@ export class Daemon {
             return { ...rest, updatedAt: this.opts.now() };
           });
           this.hydratedFromDisk.delete(chatId);
+          this.rebuildFromLog.add(chatId);
           this.opts.logger.warn(
             { chatId, deadSessionId: deadSessionId ?? null, error: errMsg },
             'resumed onto a session with no transcript — re-sending the owed turn as a fresh session',
@@ -10405,6 +10413,7 @@ export class Daemon {
           // from the hydrated set so the recovery turn is treated as a
           // legitimate first turn (spec/04 line 46: "starts fresh").
           this.hydratedFromDisk.delete(chatId);
+          this.rebuildFromLog.add(chatId);
         }
         // A LIMIT THE PROVIDER STATED, THAT NOBODY PARKED — auto-resume off, or
         // its retry budget spent. Patch renders its own structured account of
