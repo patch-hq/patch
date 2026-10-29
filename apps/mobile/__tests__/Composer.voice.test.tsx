@@ -31,6 +31,7 @@ import {
   flush,
 } from './testUtils/render';
 import { lightColors as colors } from '../src/lib/theme';
+import { routerMock } from './stubs/expo-router';
 import { usePresenceStore } from '../src/stores/presenceStore';
 import { useVoiceStore } from '../src/stores/voiceStore';
 import { useChatStore } from '../src/stores/chatStore';
@@ -449,6 +450,19 @@ describe('Composer — dictation mode (long-press the mic)', () => {
     });
     expect(factory).not.toHaveBeenCalled();
     expect(findHost(r.root, byTestId('mic-menu-keep-dictating'))).toBeTruthy();
+  });
+
+  it('long-press also offers Voice settings, which opens the Voice page', async () => {
+    const { factory } = makeModeFactory();
+    const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
+    await actAsync(() => {
+      mic(r)['onLongPress']!();
+    });
+    await actAsync(() => {
+      findHost(r.root, byTestId('mic-menu-voice-settings')).props['onPress']();
+    });
+    expect(routerMock.push).toHaveBeenCalledWith('/settings/voice');
+    expect(factory).not.toHaveBeenCalled();
   });
 
   function makeModeFactory() {

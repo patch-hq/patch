@@ -423,6 +423,7 @@ export function ChatRoute({
   onSeqConsumed?: () => void;
 }): JSX.Element {
   const { chatId: paramChatId = '' } = useParams<{ chatId: string }>();
+  const navigate = useNavigate();
   const chatId = chatIdProp ?? paramChatId;
   // `?seq=N` — a sidebar search result asking for this chat opened AT that
   // message rather than at its latest (see the jump-to effects below). In
@@ -2251,6 +2252,7 @@ export function ChatRoute({
               chatId={chatId}
               hostId={row.hostId}
               folder={row.folder}
+              onOpenVoiceSettings={() => navigate('/settings/voice')}
               // spec/14 § Composer — unsent text belongs to the chat it was
               // typed in. Read non-reactively: `initialValue` is seeded once
               // per mount and the `key={chatId}` remount above is what re-seeds

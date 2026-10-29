@@ -116,6 +116,7 @@ import {
   type EffortLevel,
   type PermissionMode,
 } from '@patch/wire';
+import { useRouter, type Href } from 'expo-router';
 import { AnchoredMenu } from './AnchoredMenu';
 import { ImageAnnotatorModal, type AnnotatedImage } from './ImageAnnotatorModal';
 import { ModelPicker } from './ModelPicker';
@@ -966,6 +967,7 @@ export function Composer({
   }
   // Long-press the mic: the ways to dictate beyond a plain tap.
   const [micMenuOpen, setMicMenuOpen] = React.useState(false);
+  const router = useRouter();
   function startDictMode(): void {
     // The pause is a shared setting; the store is normally loaded at launch.
     if (useSettingsStore.getState().data === null) {
@@ -2234,10 +2236,12 @@ export function Composer({
         visible={micMenuOpen}
         items={[
           { id: 'keep-dictating', label: 'Keep dictating', testID: 'mic-menu-keep-dictating' },
+          { id: 'voice-settings', label: 'Voice settings', testID: 'mic-menu-voice-settings' },
         ]}
         onSelect={(id) => {
           setMicMenuOpen(false);
           if (id === 'keep-dictating') startDictMode();
+          else if (id === 'voice-settings') router.push('/settings/voice' as Href);
         }}
         onDismiss={() => setMicMenuOpen(false)}
         placement="bottom"
