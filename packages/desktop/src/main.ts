@@ -66,7 +66,7 @@ import { AgentBrowser, agentBrowserEndpointFile } from './agent-browser';
 import { PANEL_WIDTH_FRACTION } from './in-app-browser-layout';
 import { routeLink, routeWindowOpen } from './link-policy';
 import { parseWindowSize, type ChildWindowSize } from './window-size';
-import { windowChrome } from './window-chrome';
+import { overlayTitleBarSupported, trafficLightPositionFor, windowChrome } from './window-chrome';
 import { parseSavedPlacement, resolvePlacement, type DisplayInfo } from './window-bounds';
 import { decideTrayClick } from './tray-toggle';
 import { configurePermissions } from './permissions';
@@ -1286,6 +1286,14 @@ function registerIpc(): void {
   // malformed payload is a no-op, matching `patch:panel:open`'s handling of a
   // bad URL — there is no user-supplied string here to refuse loudly over,
   // only a caller bug.
+  // A top banner is the title bar while it is up, so the lights sit inside it
+  // (window-chrome.ts trafficLightPositionFor). Per window: each one reports
+  // its own top row.
+  ipcMain.on('patch:window:seat-lights', (e, centre: unknown) => {
+    if (!overlayTitleBarSupported(process.platform)) return;
+    const win = BrowserWindow.fromWebContents(e.sender);
+    win?.setWindowButtonPosition(trafficLightPositionFor(centre));
+  });
   ipcMain.on('patch:window:open', (_e, payload: { path?: string; size?: unknown }) => {
     const path = payload?.path;
     if (typeof path === 'string' && path.startsWith('/'))
@@ -1382,8 +1390,12 @@ export function getUpdaterState(): UpdaterState | null {
 /** Squirrel.Mac's error since the last download; see `pendingError` in updater.ts. */
 let errorSinceDownload: string | null = null;
 
+/** Set once `will-quit` fires: the process is on its way out. */
+let shuttingDown = false;
+
 const installUpdate = createInstaller({
   app: app as unknown as { isQuitting: boolean },
+  shuttingDown: () => shuttingDown,
   autoUpdater,
   // Squirrel.Mac's ShipIt helper can wedge holding the install request; kill
   // it so the retry starts a fresh one instead of asking the user to quit.
@@ -1824,6 +1836,15 @@ export function bootstrap(): void {
     return;
   }
   app.on('second-instance', () => {
+    // A copy launched while this one is closing down — the relaunch after an
+    // update arriving before the old process has finished stopping its local
+    // server. It found the lock held and handed over to us; showing a window
+    // here only to quit a moment later was the "closes, opens, closes again".
+    // Start again once this process is gone, so the user still gets the app.
+    if ((app as unknown as { isQuitting?: boolean }).isQuitting) {
+      app.relaunch();
+      return;
+    }
     void app.whenReady().then(() => {
       const win = ensureMainWindow();
       if (win.isMinimized()) win.restore();
@@ -1911,6 +1932,7 @@ export function bootstrap(): void {
   });
 
   app.on('will-quit', (e) => {
+    shuttingDown = true;
     // The agent browser's endpoint file is cleared and its tabs closed at once;
     // its socket closes with the process. Never hold the quit for it: a second
     // app.quit() while this one is still unwinding is ignored, and the app hangs.

@@ -10,6 +10,7 @@
 // NO FALLBACKS: malformed frame → close(4400). Auth failure → close(4401).
 // Hello timeout → close(4408).
 
+import { shutdownReason } from './shutdown-reason.js';
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
 import type WebSocket from 'ws';
@@ -453,10 +454,18 @@ export class WsHub {
     }
   }
 
+  /** `host.offline`, carrying the reason the machine gave when it had one. */
+  private hostOfflineEvent(hostId: string): WireEvent {
+    const reason = this.deps.hostLink.offlineReason?.(hostId);
+    return reason === undefined
+      ? { type: 'host.offline', hostId }
+      : { type: 'host.offline', hostId, reason };
+  }
+
   /** Tell every surface and machine a host's status changed; on offline, resolve what died with it. */
   private announceHostStatus(hostId: string, status: 'online' | 'offline'): void {
     const ev: WireEvent =
-      status === 'online' ? { type: 'host.online', hostId } : { type: 'host.offline', hostId };
+      status === 'online' ? { type: 'host.online', hostId } : this.hostOfflineEvent(hostId);
     for (const conn of this.allConns()) {
       conn.socket.send(encode(ev));
     }
@@ -647,7 +656,7 @@ export class WsHub {
     this.newChatAttachmentsUnsub?.();
     for (const conn of this.allConns()) {
       try {
-        conn.socket.close(CLOSE_SERVER_RESTARTING, 'server restarting');
+        conn.socket.close(CLOSE_SERVER_RESTARTING, shutdownReason());
       } catch {
         // ignore — socket already gone
         // (intentional swallow during teardown only)
@@ -1065,7 +1074,7 @@ export class WsHub {
         encode(
           this.deps.hostLink.isOnline(hostId)
             ? { type: 'host.online', hostId }
-            : { type: 'host.offline', hostId },
+            : this.hostOfflineEvent(hostId),
         ),
       );
       // Each machine's folder registry, from the greeting alone (spec/03 §

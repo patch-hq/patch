@@ -32,6 +32,7 @@ import {
   isReservedSpecialThread,
   OUT_OF_BAND_SEQ,
   type WireEvent,
+  CLOSE_HOST_UPDATING,
 } from '@patch/wire';
 
 export interface HostLink {
@@ -53,6 +54,8 @@ export interface HostLink {
   onlineHostIds(): string[];
   /** Is this machine's link live? */
   isOnline(hostId: string): boolean;
+  /** Why an offline machine went, if it said ('updating'). */
+  offlineReason?(hostId: string): string | undefined;
   /**
    * Send an event to ONE named machine. Buffered (per host, per surface) while
    * that machine is offline, exactly as `send` is.
@@ -245,6 +248,8 @@ interface HostLinkState {
   socket: WebSocket | null;
   status: 'online' | 'offline';
   connectedAt: number | null;
+  /** Why it last went offline, when it said: 'updating' (CLOSE_HOST_UPDATING). */
+  offlineReason?: string;
   /** surfaceId → events queued while this machine is offline. */
   buffers: Map<string, WireEvent[]>;
 }
@@ -320,6 +325,9 @@ export class InboundHostLink implements HostLink {
     return [...this.hosts.entries()].filter(([, l]) => l.status === 'online').map(([id]) => id);
   }
 
+  offlineReason(hostId: string): string | undefined {
+    return this.hosts.get(hostId)?.offlineReason;
+  }
   isOnline(hostId: string): boolean {
     return this.hosts.get(hostId)?.status === 'online';
   }
@@ -416,6 +424,7 @@ export class InboundHostLink implements HostLink {
       if (link.socket !== socket) return;
       this.opts.logger.warn({ hostId, code, reason: reason.toString() }, 'host socket closed');
       link.socket = null;
+      link.offlineReason = code === CLOSE_HOST_UPDATING ? 'updating' : undefined;
       this.setStatus(hostId, 'offline');
     });
 

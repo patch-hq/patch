@@ -995,3 +995,24 @@ test('createLatestInstaller: a failed check is reported and nothing installs', a
   })();
   assert.deepEqual(errors, ['feed down']);
 });
+
+test('a quit that is already under way is not mistaken for a stalled installer', () => {
+  // Stopping the local server can hold the quit past the watchdog. Treating
+  // that as a stall killed ShipIt — the helper waiting to relaunch the app.
+  const app = { isQuitting: false };
+  let fire: (() => void) | null = null;
+  let calls = 0;
+  let recovered = false;
+  quitAndInstallNow({
+    app,
+    autoUpdater: { quitAndInstall: () => void calls++ },
+    recoverStall: () => (recovered = true),
+    shuttingDown: () => true,
+    onError: (err) => assert.fail(`unexpected install failure: ${err.message}`),
+    setTimer: (fn) => ((fire = fn), {}),
+  });
+  fire!();
+  assert.equal(recovered, false, 'ShipIt must be left alone');
+  assert.equal(calls, 1, 'no second install request');
+  assert.equal(app.isQuitting, true, 'still quitting');
+});
