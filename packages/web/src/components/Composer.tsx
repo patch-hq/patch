@@ -47,6 +47,7 @@ import { ApprovalIcon, approvalDescription, approvalWord } from '../lib/approval
 import { ChatModelControl } from './ChatModelControl.js';
 import {
   Mic,
+  Settings,
   ListPlus,
   Send,
   Square,
@@ -357,6 +358,8 @@ export interface ComposerProps {
    * the chat and open it before a meeting can bind to it.
    */
   onStartMeeting?(): void;
+  /** When provided, the mic's right-click menu offers Voice settings and calls this. */
+  onOpenVoiceSettings?(): void;
   /** Test seam (transcribe mode): inject the mic recorder factory. */
   recorderFactory?(deps?: VoiceRecorderDeps): Promise<VoiceRecording>;
   /** Test seam (transcribe mode): inject the clip→transcript upload call. */
@@ -495,6 +498,7 @@ export const Composer = forwardRef(function Composer(
     onStartVoiceNote,
     onStartCall,
     onStartMeeting,
+    onOpenVoiceSettings,
     recorderFactory,
     transcribeClip,
     previewFactory,
@@ -1672,6 +1676,16 @@ export const Composer = forwardRef(function Composer(
       icon: <Mic size={14} aria-hidden />,
       run: () => startDictMode(),
     },
+    ...(onOpenVoiceSettings
+      ? [
+          {
+            id: 'voice-settings',
+            label: 'Voice settings',
+            icon: <Settings size={14} aria-hidden />,
+            run: onOpenVoiceSettings,
+          },
+        ]
+      : []),
   ];
   const addMenu = useContextMenu();
   const addMenuItems: ContextMenuItem[] = [
