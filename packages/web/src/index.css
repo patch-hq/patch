@@ -3284,32 +3284,6 @@ button.nav-row {
   font-size: var(--text-min);
   font-weight: 500;
 }
-.workers-pill {
-  align-self: flex-start;
-  margin-top: 6px;
-  background: var(--line-soft);
-  color: var(--ink-2);
-  display: inline-flex;
-  max-width: 100%;
-  overflow: hidden;
-  border-radius: var(--radius-pill);
-  font-size: var(--text-min);
-  font-weight: 500;
-  white-space: nowrap;
-}
-.workers-pill-segment {
-  padding: 3px 10px;
-  min-width: 0;
-  max-width: 260px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.workers-pill-segment[data-state='done'] {
-  color: var(--ink-3);
-}
-.workers-pill-segment + .workers-pill-segment {
-  border-left: 1px solid var(--line);
-}
 .chat-head-actions {
   /* Same 1fr basis as the crumb (so the title stays centred). This used to
      carry `min-width: fit-content` — never shrink below the icons — which

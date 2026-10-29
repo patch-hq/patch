@@ -17,7 +17,7 @@
 
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { usePresenceStore } from '../stores/presenceStore.js';
-import { useChatStore, type DelegateUpdateInfo } from '../stores/chatStore.js';
+import { useChatStore } from '../stores/chatStore.js';
 import { clearComposerDraft } from '../stores/composerDraftStore.js';
 import { api } from '../api/rest.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -25,7 +25,6 @@ import { useLayoutStore } from '../stores/layoutStore.js';
 import type { ChatRow } from '../stores/types.js';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
 import { isHidden } from '../stores/types.js';
-import { formatReset } from '../lib/usage.js';
 import {
   Edit3,
   Archive,
@@ -67,48 +66,6 @@ function specialThreadLabel(chatId: string): string | null {
 }
 
 const ICON = 18;
-
-const NO_DELEGATES: Record<string, DelegateUpdateInfo> = {};
-
-/**
- * spec/14 § Chat panel header — Background workers: while any `patch_delegate`
- * subagent of this chat is running or awaiting permission, one pill beside the
- * title, a segment per agent, so the work stays visible without scrolling to
- * the strip above the composer.
- */
-function WorkersIndicator({ chatId }: { chatId: string }): JSX.Element | null {
-  const updates = useChatStore((s) => s.delegateUpdates[chatId] ?? NO_DELEGATES);
-  const shown = Object.entries(updates).filter(
-    ([, d]) => d.status === 'running' || d.status === 'awaiting-permission' || d.status === 'done',
-  );
-  if (!shown.some(([, d]) => d.status !== 'done')) return null;
-  return (
-    <span className="workers-pill" data-testid="header-workers">
-      {shown.map(([id, d]) => {
-        const state = d.outOfCredit
-          ? d.outOfCredit.resetsAt !== undefined
-            ? `out of credit until ${formatReset(d.outOfCredit.resetsAt)}`
-            : 'out of credit'
-          : d.status === 'done'
-            ? 'done'
-            : d.status === 'awaiting-permission'
-              ? 'waiting on you'
-              : 'running';
-        return (
-          <span
-            key={id}
-            className="workers-pill-segment"
-            data-testid="header-worker"
-            data-state={d.outOfCredit ? 'out-of-credit' : d.status}
-            title={`${d.label} — ${state}`}
-          >
-            {d.label} · {state}
-          </span>
-        );
-      })}
-    </span>
-  );
-}
 
 export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
   const archiveGlyphs = useActionGlyphs('archiveCurrent');
@@ -377,7 +334,6 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
                 ! waiting on you
               </span>
             ) : null}
-            <WorkersIndicator chatId={row.chatId} />
             {/* Open in new window sits beside the title (spec/14 § Chat panel
               header) — shown for every chat including special threads. */}
             <button
