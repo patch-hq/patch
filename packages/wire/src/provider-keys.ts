@@ -115,5 +115,5 @@ export function providerKeyStatusText(key: HostProviderKey): string {
  */
 export function providerKeyEnvOnlyNote(key: HostProviderKey): string | null {
   if (key.source !== 'env') return null;
-  return `From ${providerKeyInfo(key.id).envVar} in this host's environment; can't be revoked here.`;
+  return `From this host's environment; can't be revoked here.`;
 }

@@ -138,7 +138,7 @@ test.describe('Settings — Voice engines', () => {
     await page.getByTestId('dictation-computer-engine-deepgram').click();
     const line = page.getByTestId('dictation-computer-keys');
     await expect(line).toHaveText(
-      'Not configured on dev-host: DEEPGRAM_API_KEY is missing. Sessions there are refused.',
+      'Not configured on dev-host: no Deepgram key is set. Sessions there are refused.',
     );
     await expect(line).toBeVisible();
     // It reads as an error, not as a muted hint.

@@ -53,8 +53,8 @@ export function validateWhisperCredentials(config: WhisperCredentialConfig): voi
     case 'groq':
       if (!config.groqApiKey || config.groqApiKey.length === 0) {
         throw new Error(
-          'WHISPER_BACKEND=groq (the default) but GROQ_API_KEY is missing. ' +
-            'Set GROQ_API_KEY in .env, or switch WHISPER_BACKEND=local (+ WHISPER_LOCAL_SIDECAR_URL). ' +
+          'Speech-to-text is set to groq (the default) but no Groq key is set. ' +
+            'Add it in Settings → Providers, or switch to local speech-to-text. ' +
             'Refusing to start in a degraded mode (NO SILENT FALLBACK).',
         );
       }
@@ -258,8 +258,7 @@ class UnconfiguredWhisperBackend implements WhisperBackend {
   private refuse(): never {
     throw new Error(
       'Speech-to-text is not configured on this machine. Voice is an optional component: ' +
-        'install it from Settings → Hosts, or set WHISPER_BACKEND (groq + GROQ_API_KEY, or local ' +
-        '+ WHISPER_MODEL_PATH). Refusing to return a fabricated transcript.',
+        'install it from Settings → Hosts and choose a speech-to-text engine. Refusing to return a fabricated transcript.',
     );
   }
   async transcribe(): Promise<string> {
@@ -384,9 +383,7 @@ export class GroqWhisperBackend implements WhisperBackend {
   async transcribe(pcm: Int16Array, opts?: TranscribeOptions): Promise<string> {
     const apiKey = readKey(this.opts.groqApiKey);
     if (apiKey === undefined) {
-      throw new Error(
-        'GROQ_API_KEY missing — set it in Settings → Hosts → Keys or switch WHISPER_BACKEND (NO FALLBACKS).',
-      );
+      throw new Error('No Groq key is set — add it in Settings → Providers (NO FALLBACKS).');
     }
     const priority = opts?.priority ?? 'final';
     const fetchFn = this.opts.fetchImpl ?? fetch;
@@ -455,9 +452,7 @@ export class GroqWhisperBackend implements WhisperBackend {
   async transcribeClip(audio: Buffer, format: 'm4a' | 'wav', opts?: ClipOptions): Promise<string> {
     const apiKey = readKey(this.opts.groqApiKey);
     if (apiKey === undefined) {
-      throw new Error(
-        'GROQ_API_KEY missing — set it in Settings → Hosts → Keys or switch WHISPER_BACKEND (NO FALLBACKS).',
-      );
+      throw new Error('No Groq key is set — add it in Settings → Providers (NO FALLBACKS).');
     }
     const fetchFn = this.opts.fetchImpl ?? fetch;
     const mime = format === 'm4a' ? 'audio/mp4' : 'audio/wav';

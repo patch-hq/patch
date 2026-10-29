@@ -66,7 +66,10 @@ export class DeepgramTranscribeBackend implements WhisperBackend {
   async transcribeClip(audio: Buffer, format: 'm4a' | 'wav'): Promise<string> {
     const apiKey = readKey(this.opts.apiKey);
     if (apiKey === undefined) {
-      throw new HostedSttError('deepgram', 'DEEPGRAM_API_KEY is no longer set on this host');
+      throw new HostedSttError(
+        'deepgram',
+        'The Deepgram key is no longer set on this host; add it in Settings → Providers',
+      );
     }
     const url = `${DEEPGRAM_LISTEN_URL}?${new URLSearchParams({
       model: this.opts.model ?? DEEPGRAM_MODEL,
