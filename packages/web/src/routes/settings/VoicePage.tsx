@@ -77,11 +77,21 @@ const HANDOFF_LABELS: Record<VoiceHandoff, string> = {
   never: 'Never',
 };
 /** spec/07 § Dictation engines — a computer has no recogniser of its own. */
-const PHONE_DICTATION: readonly PhoneDictationEngine[] = ['device', 'deepgram', 'whisper'];
-const COMPUTER_DICTATION: readonly ComputerDictationEngine[] = ['deepgram', 'whisper'];
+const PHONE_DICTATION: readonly PhoneDictationEngine[] = [
+  'device',
+  'deepgram',
+  'elevenlabs',
+  'whisper',
+];
+const COMPUTER_DICTATION: readonly ComputerDictationEngine[] = [
+  'deepgram',
+  'elevenlabs',
+  'whisper',
+];
 const DICTATION_LABELS: Record<PhoneDictationEngine, string> = {
   device: 'Built-in',
   deepgram: 'Deepgram',
+  elevenlabs: 'ElevenLabs',
   whisper: 'Whisper',
 };
 

@@ -4061,13 +4061,14 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
       await boot.fakeServer.waitForAuthed();
       await boot.fakeServer.waitForFrame((e) => e.type === 'host.host');
       expect(boot.fakeServer.received.find((e) => e.type === 'host.host')).toMatchObject({
-        voiceKeys: { gemini: false, openai: false, deepgram: false },
+        voiceKeys: { gemini: false, openai: false, deepgram: false, elevenlabs: false },
         providerKeys: [
           { id: 'gemini', source: 'none', envSet: false },
           { id: 'openai', source: 'none', envSet: false },
           { id: 'elevenlabs', source: 'none', envSet: false },
           { id: 'groq', source: 'none', envSet: false },
           { id: 'deepgram', source: 'none', envSet: false },
+          { id: 'elevenlabs', source: 'none', envSet: false },
         ],
       });
       const spawnRes = await boot.ready.app.inject({
@@ -4123,6 +4124,7 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
           { id: 'elevenlabs', source: 'none', envSet: false },
           { id: 'groq', source: 'none', envSet: false },
           { id: 'deepgram', source: 'ui', last4: 'LAST', envSet: false },
+          { id: 'elevenlabs', source: 'none', envSet: false },
         ],
       });
       // Nothing the host sent anywhere carries the value.

@@ -115,7 +115,13 @@ export interface SttUsage {
   billedSeconds: number;
 }
 
-export function sttCostUsd(stt: SttUsage): number {
+/**
+ * Dollar cost of `stt` on `model`. Only Groq's price is in the table: ElevenLabs
+ * Scribe is billed in plan credits whose dollar rate is not published per hour,
+ * so its usage is recorded and its cost is `null` (price unknown), never guessed.
+ */
+export function sttCostUsd(stt: SttUsage, model: string): number | null {
+  if (model === 'scribe_v2') return null;
   return stt.billedSeconds * GROQ_WHISPER_USD_PER_SECOND;
 }
 
@@ -159,7 +165,7 @@ export function costCall(args: {
   const { engine } = args;
   let engineUsd: number | null;
   if (engine.backend === 'local') {
-    engineUsd = engine.stt ? sttCostUsd(engine.stt) : 0;
+    engineUsd = engine.stt ? sttCostUsd(engine.stt, engine.model) : 0;
   } else if (engine.backend === 'elevenlabs') {
     engineUsd = elevenLabsCostUsd(engine.model, engine.agentSeconds ?? 0);
   } else {
@@ -182,6 +188,7 @@ export function costCall(args: {
 }
 
 const ENGINE_NAMES: Record<string, string> = {
+  scribe_v2: 'ElevenLabs Scribe',
   'gemini-2.5-flash-native-audio-preview-12-2025': 'Gemini Flash',
   'gemini-3.8-live-extended-thinking': 'Gemini Thinking',
   'gpt-realtime-2.1': 'OpenAI',
@@ -191,7 +198,7 @@ const ENGINE_NAMES: Record<string, string> = {
 };
 
 function engineName(c: CallCosting): string {
-  if (c.backend === 'local') return 'Local';
+  if (c.backend === 'local') return c.model === 'scribe_v2' ? 'ElevenLabs Scribe' : 'Local';
   return ENGINE_NAMES[modelKey(c.model)] ?? modelKey(c.model);
 }
 
