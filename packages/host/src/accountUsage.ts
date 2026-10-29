@@ -45,6 +45,9 @@ export const USAGE_TICK_MS = 30_000;
 const LOOKBACK_MS = { session: 45 * 60_000, week: 6 * 3_600_000 } as const;
 const KEEP_SAMPLES_MS = 6 * 3_600_000;
 
+/** From this utilisation an account is re-read after every turn, not every ten minutes. */
+export const USAGE_CLOSE_UTILIZATION = 0.85;
+
 /**
  * The floor between two probes of the SAME account.
  *
@@ -257,6 +260,19 @@ export class AccountUsageTracker {
     const run = this.probeOnce(accountId).finally(() => this.inFlight.delete(accountId));
     this.inFlight.set(accountId, run);
     return run;
+  }
+
+  /**
+   * A turn just ended on this account. Near its limit (the last reading is at
+   * or above `USAGE_CLOSE_UTILIZATION` on either pool) re-read it now, so a
+   * limit is seen as it is reached rather than up to ten minutes later.
+   * Forced past the floor: this is the point of reading after every turn.
+   */
+  async refreshAfterTurn(accountId: string): Promise<void> {
+    const { session, week } = this.entries.get(accountId)?.reading.windows ?? {};
+    const used = Math.max(session?.utilization ?? 0, week?.utilization ?? 0);
+    if (used < USAGE_CLOSE_UTILIZATION) return;
+    await this.refresh(accountId, true);
   }
 
   /** Probe every stored account that has a credential. */

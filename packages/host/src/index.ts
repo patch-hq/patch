@@ -4327,6 +4327,9 @@ async function startHost(
     // spec/06 § Manager conversation — persisted global preference.
     managerContextWindow,
     onRateLimit: reportUsage,
+    onTurnEnd: (_chatId, accountId) => {
+      if (accountId !== undefined) void accountUsage?.refreshAfterTurn(accountId);
+    },
     // Computer use is off until granted; Always allow persists to host.json.
     computerUse: {
       alwaysAllowed: () => hostStateStore.get().computerUseAlwaysAllowed === true,
