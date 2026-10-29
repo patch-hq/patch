@@ -49,7 +49,8 @@ export const PROVIDER_KEYS: readonly ProviderKeyInfo[] = [
     id: 'elevenlabs',
     label: 'ElevenLabs',
     envVar: 'ELEVEN_LABS_API_KEY',
-    usedFor: 'Voice on the elevenlabs backend, and speech out when ElevenLabs is the chosen voice',
+    usedFor:
+      'Voice on the elevenlabs backend, speech out when ElevenLabs is the chosen voice, and Scribe transcription (elevenlabs dictation engine, WHISPER_BACKEND=elevenlabs)',
   },
   {
     id: 'groq',
@@ -62,13 +63,6 @@ export const PROVIDER_KEYS: readonly ProviderKeyInfo[] = [
     label: 'Deepgram',
     envVar: 'DEEPGRAM_API_KEY',
     usedFor: 'Live dictation on the deepgram engine',
-  },
-  {
-    id: 'elevenlabs',
-    label: 'ElevenLabs',
-    envVar: 'ELEVEN_LABS_API_KEY',
-    usedFor:
-      'Scribe transcription: dictation on the elevenlabs engine, or WHISPER_BACKEND=elevenlabs',
   },
 ];
 
