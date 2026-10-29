@@ -198,6 +198,8 @@ export interface CreateWhisperOptions {
   nowMs?: () => number;
   /** Override the per-request timeout (tests). */
   requestTimeoutMs?: number;
+  /** Override the total clip budget across all attempts (tests). */
+  clipDeadlineMs?: number;
 }
 
 /** Default loopback port the spawned faster-whisper sidecar listens on. */
@@ -293,6 +295,13 @@ const GROQ_REQUEST_TIMEOUT_MS = 20_000;
  * and transcribing it takes far longer than a streamed utterance.
  */
 const GROQ_CLIP_REQUEST_TIMEOUT_MS = 120_000;
+/**
+ * Total budget across every attempt at one clip, retries and waits included.
+ * The server gives up on the host's transcript at 150s
+ * (packages/server/src/voice/note.ts), so the host must fail first: work that
+ * outlives the server's wait is discarded and its Groq quota wasted.
+ */
+const GROQ_CLIP_DEADLINE_MS = 140_000;
 
 /** Seconds Groq asks us to wait, from its "Please try again in 3s" message. */
 export function parseRetryAfterMs(body: string, header: string | null): number | null {
@@ -434,16 +443,30 @@ export class GroqWhisperBackend implements WhisperBackend {
     // A clip is audio that cannot be re-recorded (a meeting's minutes): a 429
     // carries a stated wait, so wait it out like a final does rather than
     // dropping the clip. Persistent 429s still throw.
+    const budgetMs = this.opts.clipDeadlineMs ?? GROQ_CLIP_DEADLINE_MS;
+    const deadline = Date.now() + budgetMs;
+    const deadlineError = () =>
+      new Error(`groq whisper: clip transcription exceeded its ${budgetMs}ms budget`);
     let lastError = '';
     let res: Response | undefined;
     for (let attempt = 0; attempt < FINAL_RETRIES; attempt++) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw deadlineError();
       this.admit('final');
-      const r = await fetchFn('https://api.groq.com/openai/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: { authorization: `Bearer ${apiKey}` },
-        body: form,
-        signal: AbortSignal.timeout(this.opts.requestTimeoutMs ?? GROQ_CLIP_REQUEST_TIMEOUT_MS),
-      });
+      let r: Response;
+      try {
+        r = await fetchFn('https://api.groq.com/openai/v1/audio/transcriptions', {
+          method: 'POST',
+          headers: { authorization: `Bearer ${apiKey}` },
+          body: form,
+          signal: AbortSignal.timeout(
+            Math.min(remaining, this.opts.requestTimeoutMs ?? GROQ_CLIP_REQUEST_TIMEOUT_MS),
+          ),
+        });
+      } catch (err) {
+        if (Date.now() >= deadline) throw deadlineError();
+        throw err;
+      }
       if (r.ok) {
         res = r;
         break;
@@ -451,8 +474,13 @@ export class GroqWhisperBackend implements WhisperBackend {
       const text = await r.text();
       lastError = `groq whisper ${r.status}: ${text}`;
       if (r.status !== 429 || attempt === FINAL_RETRIES - 1) throw new Error(lastError);
-      const waitMs = parseRetryAfterMs(text, r.headers.get('retry-after')) ?? 2_000;
-      await new Promise((resolve) => setTimeout(resolve, Math.min(waitMs, 10_000)));
+      const waitMs = Math.min(
+        parseRetryAfterMs(text, r.headers.get('retry-after')) ?? 2_000,
+        10_000,
+      );
+      // A wait that cannot leave time for another attempt is not worth taking.
+      if (waitMs >= deadline - Date.now()) throw new Error(lastError);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
     }
     if (!res) throw new Error(lastError);
     const body = (await res.json()) as { text?: string };
