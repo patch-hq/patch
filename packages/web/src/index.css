@@ -7981,6 +7981,9 @@ button.view-file-download {
 .modal-overlay {
   position: fixed;
   inset: 0;
+  /* The web panel is a native view above the page: stop at its edge so the
+     modal is centred in what is visible, not half hidden under the panel. */
+  right: var(--panel-inset, 0px);
   z-index: 3000;
   display: flex;
   align-items: center;

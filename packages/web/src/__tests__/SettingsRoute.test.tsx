@@ -957,6 +957,25 @@ describe('Settings → Voice', () => {
       await waitFor(() => expect(server.writes).toContainEqual({ kokoroVoice: 'bm_george' }));
     });
 
+    it('chooses ElevenLabs as the speech engine and writes it to the account', async () => {
+      const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
+      vi.stubGlobal('fetch', makeFetch({}, server.handler));
+      loadShared();
+      renderSettings('/settings/voice');
+      await screen.findByTestId('kokoro-voice');
+      fireEvent.click(within(screen.getByTestId('tts-backend')).getByText('ElevenLabs'));
+      await waitFor(() => expect(server.writes).toContainEqual({ ttsBackend: 'elevenlabs' }));
+    });
+
+    it('with ElevenLabs chosen and no key on any host, says why there are no voices', async () => {
+      vi.stubGlobal('fetch', makeFetch());
+      loadShared({ settings: { ttsBackend: 'elevenlabs' } });
+      renderSettings('/settings/voice');
+      const select = (await screen.findByTestId('elevenlabs-voice')) as HTMLSelectElement;
+      expect(select.disabled).toBe(true);
+      expect(screen.getByTestId('voice-speaking')).toHaveTextContent('Add an ElevenLabs key');
+    });
+
     it('says each host uses its own default until a voice is chosen', async () => {
       vi.stubGlobal('fetch', makeFetch());
       loadShared();

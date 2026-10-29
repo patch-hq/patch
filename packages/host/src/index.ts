@@ -244,6 +244,7 @@ import {
   type WhisperBackend,
 } from './audio/whisper.js';
 import { createKokoro, validateKokoroModel } from './audio/kokoro.js';
+import { createElevenLabs, createRoutedTts, type ElevenLabsVoice } from './audio/elevenlabs.js';
 import {
   createDictationTranscribers,
   pickDictationTranscriber,
@@ -696,6 +697,13 @@ async function startHost(
   let runsManager = persistedHostState.runsManager ?? false;
   /** Currently selected Kokoro TTS voice (`host.settings` → `kokoroVoice`). */
   let kokoroVoice: string | undefined = persistedHostState.kokoroVoice;
+  /** Which engine speaks (`host.settings` → `ttsBackend`); absent is Kokoro. */
+  let ttsBackend: 'kokoro' | 'elevenlabs' = persistedHostState.ttsBackend ?? 'kokoro';
+  /** The ElevenLabs voice id in use (`host.settings` → `elevenLabsVoice`). */
+  let elevenLabsVoice: string | undefined = persistedHostState.elevenLabsVoice;
+  /** The account's ElevenLabs voices, or why they could not be listed. */
+  let elevenLabsVoices: ElevenLabsVoice[] | undefined;
+  let elevenLabsVoicesError: string | undefined;
   /**
    * Account's per-surface voice config (`host.settings` → `voiceConfig`,
    * spec/07 § Voice — a config matrix). Independently selects the STT/TTS/
@@ -1104,6 +1112,10 @@ async function startHost(
       ],
       components: components.describe(),
       ...(kokoroVoice !== undefined ? { kokoroVoice } : {}),
+      ttsBackend,
+      ...(elevenLabsVoice !== undefined ? { elevenLabsVoice } : {}),
+      ...(elevenLabsVoices !== undefined ? { elevenLabsVoices } : {}),
+      ...(elevenLabsVoicesError !== undefined ? { elevenLabsVoicesError } : {}),
       voiceKeys: voiceKeys(),
       voiceUsage: voiceLedger.totals(Date.now()),
       providerKeys: providerKeys.describe(),
@@ -1197,10 +1209,46 @@ async function startHost(
   // A provider key set or revoked from Settings: every surface's Keys block and
   // Settings → Voice's "not configured" line follow from the fresh report, and
   // the log says which configured surfaces are now without a key.
+  // ElevenLabs speech out. One backend serves every place Patch speaks (see
+  // `tts` below); the host also lists the account's voices for Settings, and says
+  // so loudly when it cannot.
+  const elevenlabs = createElevenLabs({
+    apiKey: () => providerKeys.get('elevenlabs'),
+    logger: logger.child({ component: 'elevenlabs' }),
+    onUsage: (usage) => {
+      voiceLedger.recordSpeech(usage);
+      publishHost();
+    },
+  });
+  const refreshElevenLabsVoices = (): void => {
+    if (!providerKeys.has('elevenlabs')) {
+      elevenLabsVoices = undefined;
+      elevenLabsVoicesError = undefined;
+      publishHost();
+      return;
+    }
+    void elevenlabs
+      .listVoices()
+      .then((voices) => {
+        elevenLabsVoices = voices;
+        elevenLabsVoicesError = undefined;
+      })
+      .catch((err: Error) => {
+        elevenLabsVoices = undefined;
+        elevenLabsVoicesError = err.message;
+        logger.error(
+          { component: 'elevenlabs', err: err.message },
+          'elevenlabs: voice list failed',
+        );
+      })
+      .finally(publishHost);
+  };
   providerKeys.onChange(() => {
     logVoiceKeysMissing(logger, voiceConfig, voiceKeys());
     publishHost();
+    refreshElevenLabsVoices();
   });
+  if (providerKeys.has('elevenlabs')) refreshElevenLabsVoices();
 
   /**
    * Optional components (spec/02 § Optional components) — real downloads onto
@@ -1667,6 +1715,17 @@ async function startHost(
       hostStateStore.update({ kokoroVoice });
       logger.info({ kokoroVoice }, 'kokoro voice changed');
     }
+    if (shared.ttsBackend !== undefined && shared.ttsBackend !== ttsBackend) {
+      ttsBackend = shared.ttsBackend;
+      hostStateStore.update({ ttsBackend });
+      logger.info({ ttsBackend }, 'speech engine changed');
+      if (ttsBackend === 'elevenlabs') refreshElevenLabsVoices();
+    }
+    if (shared.elevenLabsVoice !== undefined && shared.elevenLabsVoice !== elevenLabsVoice) {
+      elevenLabsVoice = shared.elevenLabsVoice;
+      hostStateStore.update({ elevenLabsVoice });
+      logger.info({ elevenLabsVoice }, 'elevenlabs voice changed');
+    }
     if (shared.managerContextWindow !== managerContextWindow) {
       managerContextWindow = shared.managerContextWindow;
       daemon.setManagerContextWindow(managerContextWindow);
@@ -1857,6 +1916,8 @@ async function startHost(
               : {}),
             ...(state.voiceConfig ? { voiceConfig: state.voiceConfig } : {}),
             ...(state.kokoroVoice ? { kokoroVoice: state.kokoroVoice } : {}),
+            ...(state.ttsBackend ? { ttsBackend: state.ttsBackend } : {}),
+            ...(state.elevenLabsVoice ? { elevenLabsVoice: state.elevenLabsVoice } : {}),
             chatNameInterval,
             titleGenerationEnabled,
             statusGenerationEnabled,
@@ -4981,7 +5042,9 @@ async function startHost(
     logger: logger.child({ component: 'audio' }),
     internalToken: config.internalToken,
     whisper,
-    kokoro,
+    // Every place that speaks goes through this: the voice session (calls, house
+    // speakers, announcements) takes whichever engine Settings chose.
+    kokoro: createRoutedTts({ kokoro, elevenlabs, choice: () => ttsBackend }),
     makeVad,
     maxConcurrentSessions: config.audio.maxConcurrentSessions,
     // E1-d3: a voice session must bind to a chat that exists. Check live
@@ -5080,7 +5143,8 @@ async function startHost(
       daemon.submitPermissionResponse({ requestId, decision: approve ? 'approve' : 'deny' }),
     // Voice-in-settings: read the live value so a settings change takes effect
     // on the next utterance without restarting an open session.
-    getKokoroVoice: () => kokoroVoice,
+    // The voice for whichever engine is chosen: read per utterance.
+    getKokoroVoice: () => (ttsBackend === 'elevenlabs' ? elevenLabsVoice : kokoroVoice),
     // spec/07 § Voice — live read, same pattern as getKokoroVoice above.
     getVoiceConfig: () => voiceConfig,
     geminiApiKey: () => providerKeys.get('gemini'),
@@ -5150,6 +5214,7 @@ async function startHost(
   const shutdown = async (): Promise<void> => {
     // Turns outlive the host (spec/02): let go of each one's runner first, so
     // nothing below ends a turn that is meant to carry on under the next host.
+    daemon.beginShutdown();
     const detached = detachDurableTurns();
     if (detached > 0) logger.info({ turns: detached }, 'patch-daemon: left turns running');
     homeLock.release();

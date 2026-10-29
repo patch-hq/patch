@@ -235,3 +235,36 @@ export function callSummaryLine(c: CallCosting): string {
 export function callTotalUsd(c: CallCosting): number {
   return c.engineUsd ?? 0;
 }
+
+/**
+ * Text-to-speech on ElevenLabs. The account is on the Starter plan, $5 for
+ * 30,000 credits a month. Flash and Turbo models bill half a credit a
+ * character, the others one. A model not in the table is `null` — price
+ * unknown — never guessed (NO FALLBACK).
+ */
+export const ELEVENLABS_USD_PER_CREDIT = 5 / 30_000;
+const ELEVENLABS_CREDITS_PER_CHAR: Record<string, number> = {
+  eleven_flash_v2_5: 0.5,
+  eleven_flash_v2: 0.5,
+  eleven_turbo_v2_5: 0.5,
+  eleven_turbo_v2: 0.5,
+  eleven_multilingual_v2: 1,
+  eleven_v3: 1,
+};
+
+/** One synthesis request to a paid speech provider, as the ledger keeps it. */
+export interface SpeechUsage {
+  kind: 'tts';
+  provider: 'elevenlabs';
+  model: string;
+  characters: number;
+  at: number;
+  /** `null` = the model's price is unknown. */
+  usd: number | null;
+}
+
+export function speechCostUsd(model: string, characters: number): number | null {
+  const perChar = ELEVENLABS_CREDITS_PER_CHAR[model];
+  if (perChar === undefined) return null;
+  return characters * perChar * ELEVENLABS_USD_PER_CREDIT;
+}

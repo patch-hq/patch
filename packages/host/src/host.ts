@@ -69,6 +69,10 @@ export interface HostDescriptionInput {
    * or the voice has never been explicitly set.
    */
   kokoroVoice?: string | undefined;
+  ttsBackend?: 'kokoro' | 'elevenlabs' | undefined;
+  elevenLabsVoice?: string | undefined;
+  elevenLabsVoices?: { id: string; name: string; category?: string }[] | undefined;
+  elevenLabsVoicesError?: string | undefined;
   /** Which hosted-voice provider keys this host holds (`host.host.voiceKeys`). */
   voiceKeys?: { gemini: boolean; openai: boolean; deepgram?: boolean } | undefined;
   /** What this host's voice calls have cost (`host.host.voiceUsage`, spec/07 § Call cost). */
@@ -142,6 +146,12 @@ export function describeHost(input: HostDescriptionInput): HostInfoEvent {
     backends: input.backends,
     components: input.components,
     ...(input.kokoroVoice !== undefined ? { kokoroVoice: input.kokoroVoice } : {}),
+    ...(input.ttsBackend !== undefined ? { ttsBackend: input.ttsBackend } : {}),
+    ...(input.elevenLabsVoice !== undefined ? { elevenLabsVoice: input.elevenLabsVoice } : {}),
+    ...(input.elevenLabsVoices !== undefined ? { elevenLabsVoices: input.elevenLabsVoices } : {}),
+    ...(input.elevenLabsVoicesError !== undefined
+      ? { elevenLabsVoicesError: input.elevenLabsVoicesError }
+      : {}),
     ...(input.voiceKeys !== undefined ? { voiceKeys: input.voiceKeys } : {}),
     ...(input.voiceUsage !== undefined ? { voiceUsage: input.voiceUsage } : {}),
     ...(input.providerKeys !== undefined ? { providerKeys: input.providerKeys } : {}),

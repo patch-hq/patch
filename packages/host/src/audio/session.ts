@@ -101,7 +101,8 @@ export interface SessionDeps {
     onAccepted?: () => void;
   }) => Promise<string>;
   /**
-   * Returns the currently configured Kokoro voice name for this host, or
+   * Returns the currently configured voice for this host's speech engine (a
+   * Kokoro voice name, or an ElevenLabs voice id when that engine is chosen), or
    * undefined to use the sidecar's own default. Read on every synthesis call
    * so a settings change takes effect on the next utterance without a session
    * restart.
@@ -1157,7 +1158,11 @@ export class VoiceSession implements VoiceSessionLike {
     const ttsStart = Date.now();
     let stream: KokoroSynthesis;
     try {
-      stream = await this.deps.kokoro.synthesize(text, this.deps.getKokoroVoice?.());
+      // A turn in a conversation wants its first audio fast; a one-off
+      // announcement (a house speaker, a spoken briefing) wants quality.
+      stream = await this.deps.kokoro.synthesize(text, this.deps.getKokoroVoice?.(), {
+        purpose: this.streamingTurn || this.init.role === 'voice-call' ? 'live' : 'announce',
+      });
     } catch (err) {
       this.deps.sendAudio({
         type: 'audio.error',
