@@ -5008,7 +5008,7 @@ async function startHost(
       wss: deviceControlWss,
       logger: logger.child({ component: 'device-control' }),
     }),
-    submitUserTurn: async ({ chatId, message, source, onReplyText, handoff }) => {
+    submitUserTurn: async ({ chatId, message, source, onReplyText, handoff, onAccepted }) => {
       // Tag the turn by its ingress. Physical voice devices get
       // `[voice • device:<deviceId>]` (spec/06 ## Speakers thread) so the
       // agent knows which room it's hearing; app surfaces get
@@ -5035,7 +5035,7 @@ async function startHost(
       // Register BEFORE the input is sent, so the bridge sees this turn's very
       // first message and every delta after it. Armed by that message only: the chat
       // may be running some other turn right now, with this one queued behind it.
-      const replyPromise = voiceReplies.awaitReply(chatId, onReplyText, localId);
+      const replyPromise = voiceReplies.awaitReply(chatId, onReplyText, localId, onAccepted);
       // Mark a hand-off in the chat, so a spoken "I've passed that on" can be checked against it.
       if (handoff === true) {
         chatVoice.handoffSent({ sessionId: localIdSuffix, chatId, request: message });
