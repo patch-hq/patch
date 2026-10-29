@@ -4588,7 +4588,6 @@ async function startHost(
   const armCreditRetryFromDisk = (): void => {
     const now = Date.now();
     let soonest: number | undefined;
-    let failedAt = now;
     for (const state of daemon.chatState.list()) {
       // Off META, and with no filter on the lifecycle status. This read used to
       // be `state.status === 'errored'` and then `state.lastError`, and neither
@@ -4604,7 +4603,6 @@ async function startHost(
       if (at === undefined || at <= now) continue;
       if (soonest === undefined || at < soonest) {
         soonest = at;
-        failedAt = last.at;
       }
     }
     if (soonest === undefined) {
@@ -4614,29 +4612,12 @@ async function startHost(
       if (daemon.hasOrphanedCreditParks()) void accountUsage?.refreshAll(true);
       return;
     }
-    // WHICH key that chat spent is not on disk and is not worth inventing: a
-    // chat has no account, and the turn that failed is long gone. What matters
-    // is the instant to retry at, so the first stored key carries the record —
-    // it is the one every turn resolves to first, so it is the one that has to
-    // be seen as spent for the others to be tried at all.
-    const first = readPatchStore(oauthOpts)?.accounts[0]?.id;
-    if (first === undefined) return;
-    //
-    // It is a GUESS, so it is stamped with the failure's own time, not the
-    // boot's: a usage probe a refresh cycle after that failure is then believed
-    // and clears it. Stamped "now" it would hold the priority-first key out for
-    // the whole reset while the key that really ran out was another one — every
-    // key sidelined, the turn stopped, nothing to switch to.
-    accountRotation.markExhausted(
-      first,
-      'restored from a failed chat after restart',
-      soonest,
-      failedAt,
-    );
-    // And ask now, so the guess is checked at boot rather than 10 minutes on.
+    // WHICH key that chat spent is not on disk, so none is sidelined: a guess
+    // blamed the wrong account for the whole host. The reset is armed without
+    // an account, and the probe below says what each account really has.
     void accountUsage?.refreshAll(true);
     logger.info({ at: soonest }, 'credit retry: re-armed after restart from a failed chat on disk');
-    creditResume.arm();
+    creditResume.arm(soonest);
   };
 
   // Boot: an event-driven retry needs its event armed, and a restart forgot it.
