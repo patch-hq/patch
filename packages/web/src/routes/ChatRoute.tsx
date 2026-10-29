@@ -2165,16 +2165,18 @@ export function ChatRoute({
       {row.parentChatId ? (
         <ParentChatBar chatId={row.chatId} parentChatId={row.parentChatId} />
       ) : null}
-      <GoalBanner row={row} />
-      <FinishedGoalBanner row={row} />
-      <TaskBar key={`tasks-${row.chatId}`} row={row} />
+      <div className="status-list" data-testid="status-list">
+        <GoalBanner row={row} />
+        <FinishedGoalBanner row={row} />
+        <TaskBar key={`tasks-${row.chatId}`} row={row} />
+        <BackgroundTaskBar chatId={chatId} />
+        <DelegateStrip chatId={chatId} />
+        <ArtifactBar chatId={chatId} />
+      </div>
       <ReminderBanner row={row} />
       <ProviderContextPanel row={row} />
       <WakeBar row={row} />
-      <BackgroundTaskBar chatId={chatId} />
-      <DelegateStrip chatId={chatId} />
       <BrowserHandoffPanel chatId={chatId} />
-      <ArtifactBar chatId={chatId} />
       <ArchivedBanner row={row} />
       <HiddenBanner row={row} />
       <SnoozedBanner row={row} />
