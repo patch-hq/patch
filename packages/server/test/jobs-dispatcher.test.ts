@@ -49,6 +49,20 @@ vi.mock('node:fs', async (importOriginal) => {
 // declaration order, but importing dynamically here keeps intent explicit).
 const { JobDispatcher } = await import('../src/jobs/dispatcher.js');
 
+// A dispatcher keeps retry timers and queued pumps alive until closed; one a
+// test never closed would scan its data dir after afterEach has deleted it.
+const { JobDispatcher: BaseJobDispatcher } = { JobDispatcher };
+const opened: Array<InstanceType<typeof BaseJobDispatcher>> = [];
+class TrackedJobDispatcher extends BaseJobDispatcher {
+  constructor(...args: ConstructorParameters<typeof BaseJobDispatcher>) {
+    super(...args);
+    opened.push(this);
+  }
+}
+afterEach(() => {
+  for (const d of opened.splice(0)) d.close();
+});
+
 const silentLogger = pino({ level: 'silent' });
 
 function makeJob(overrides: Partial<Job> = {}): Job {
@@ -271,7 +285,7 @@ describe('JobDispatcher', () => {
 
   it('spawn → host-link send when online', () => {
     const link = new InProcessHostLink();
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -298,7 +312,7 @@ describe('JobDispatcher', () => {
     const payload = { payload: { event_data: { id: 'abc' } } };
     const sentPrompt = (action: Job['action']): string => {
       const link = new InProcessHostLink();
-      const disp = new JobDispatcher({
+      const disp = new TrackedJobDispatcher({
         dataDir: dir,
         logs: new JobLogs(dir),
         hostLink: link,
@@ -327,7 +341,7 @@ describe('JobDispatcher', () => {
 
   it('spawn with action.startHidden spawns into Hidden (spec/08 ## Action)', () => {
     const link = new InProcessHostLink();
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -350,7 +364,7 @@ describe('JobDispatcher', () => {
 
   it('spawn with action.goal forwards it on the chat.spawn_request (spec/04 § Goals, spec/08 ## Action)', () => {
     const link = new InProcessHostLink();
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -375,7 +389,7 @@ describe('JobDispatcher', () => {
 
   it('spawn with no action.goal sends no goal field at all', () => {
     const link = new InProcessHostLink();
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -399,7 +413,7 @@ describe('JobDispatcher', () => {
   it('spawn with action.notifyOnComplete sends a frame identical to one without it', () => {
     function frameFor(action: Record<string, unknown>): unknown {
       const link = new InProcessHostLink();
-      const disp = new JobDispatcher({
+      const disp = new TrackedJobDispatcher({
         dataDir: dir,
         logs: new JobLogs(dir),
         hostLink: link,
@@ -423,7 +437,7 @@ describe('JobDispatcher', () => {
 
   it('a continue action keeps the flag off the wire on both the spawn and the input', () => {
     const link = new InProcessHostLink();
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -458,7 +472,7 @@ describe('JobDispatcher', () => {
   it('a silenced job still records its chatId → jobId link', () => {
     const link = new InProcessHostLink();
     const recorded: Array<[string, string]> = [];
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -488,7 +502,7 @@ describe('JobDispatcher', () => {
   // unattended job running there.
   it('spawn without action.permissionMode sends auto (spec/08 § Action)', () => {
     const link = new InProcessHostLink();
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -505,7 +519,7 @@ describe('JobDispatcher', () => {
 
   it('spawn forwards action.permissionMode onto the spawn request (spec/08 § Action)', () => {
     const link = new InProcessHostLink();
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -533,7 +547,7 @@ describe('JobDispatcher', () => {
   // field at all rather than a null/empty placeholder.
   it('spawn forwards action.model onto the spawn request (spec/08 § Action)', () => {
     const link = new InProcessHostLink();
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -557,7 +571,7 @@ describe('JobDispatcher', () => {
 
   it('spawn with no action.model omits the field entirely (host last-used wins)', () => {
     const link = new InProcessHostLink();
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -577,7 +591,7 @@ describe('JobDispatcher', () => {
   it('ensure forwards action.model on the fire that CREATES the durable chat', () => {
     const link = new InProcessHostLink();
     let n = 0;
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -612,7 +626,7 @@ describe('JobDispatcher', () => {
     const link = new InProcessHostLink();
     const recorded: Array<[string, string]> = [];
     const chatLinks = { record: (chatId: string, jobId: string) => recorded.push([chatId, jobId]) };
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -629,7 +643,7 @@ describe('JobDispatcher', () => {
     const link = new InProcessHostLink();
     const recorded: Array<[string, string]> = [];
     const chatLinks = { record: (chatId: string, jobId: string) => recorded.push([chatId, jobId]) };
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -656,7 +670,7 @@ describe('JobDispatcher', () => {
     const link = new InProcessHostLink();
     const recorded: Array<[string, string]> = [];
     const chatLinks = { record: (chatId: string, jobId: string) => recorded.push([chatId, jobId]) };
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -690,7 +704,7 @@ describe('JobDispatcher', () => {
   // `chat.input` into a chat that already has a home.
   it('ensure with action.startHidden creates its durable chat in Hidden', () => {
     const link = new InProcessHostLink();
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -723,7 +737,7 @@ describe('JobDispatcher', () => {
   // spec/04 § Goals, spec/08 ## Action — same creation-only rule as `hidden`.
   it('continue with action.goal sets it on the durable chat it creates, never on a later input', () => {
     const link = new InProcessHostLink();
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -757,7 +771,7 @@ describe('JobDispatcher', () => {
   // chat per Todoist task is one inbox row per task.
   it('a keyed ensure hides each subject chat it creates', () => {
     const link = new InProcessHostLink();
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -789,7 +803,7 @@ describe('JobDispatcher', () => {
   // creates its chat in the active inbox.
   it('ensure without hidden still creates its chat in the active inbox', () => {
     const link = new InProcessHostLink();
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -812,7 +826,7 @@ describe('JobDispatcher', () => {
 
   it('message action → chat.input event', () => {
     const link = new InProcessHostLink();
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -839,7 +853,7 @@ describe('JobDispatcher', () => {
   it('ensure action: first fire SPAWNS the durable chat, later fires MESSAGE the same chat', () => {
     const link = new InProcessHostLink();
     let n = 0;
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -874,7 +888,7 @@ describe('JobDispatcher', () => {
 
   it('ensure action: a chat already in the registry is messaged, never re-spawned', () => {
     const link = new InProcessHostLink();
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -904,7 +918,7 @@ describe('JobDispatcher', () => {
     const id = 'jobchat-j_00000000000000000000000015';
     const run = (chatModel: string | null): string[] => {
       const link = new InProcessHostLink();
-      const disp = new JobDispatcher({
+      const disp = new TrackedJobDispatcher({
         dataDir: dir,
         logs: new JobLogs(dir),
         hostLink: link,
@@ -936,7 +950,7 @@ describe('JobDispatcher', () => {
   it('buffers when host offline, flushes on reconnect', () => {
     const link = new InProcessHostLink();
     link.setStatus('offline');
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -958,7 +972,7 @@ describe('JobDispatcher', () => {
     const link = new InProcessHostLink();
     link.setStatus('offline');
     let counter = 0;
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -980,7 +994,7 @@ describe('JobDispatcher', () => {
 
   it('an action with neither skill nor prompt renders no prompt at all (spawn)', () => {
     const link = new InProcessHostLink();
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -1001,7 +1015,7 @@ describe('JobDispatcher', () => {
 
   it('an action with neither skill nor prompt renders no prompt at all (ensure)', () => {
     const link = new InProcessHostLink();
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -1022,7 +1036,7 @@ describe('JobDispatcher', () => {
 
   it('keyed ensure: different subjects get their own durable chats', () => {
     const link = new InProcessHostLink();
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -1056,7 +1070,7 @@ describe('JobDispatcher', () => {
 
   it('keyed ensure: a second fire for the SAME subject messages that subject’s chat', () => {
     const link = new InProcessHostLink();
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -1096,7 +1110,7 @@ describe('JobDispatcher', () => {
   it('shareKey: a second job fire for the same subject continues the first job’s chat, not a new one', () => {
     const link = new InProcessHostLink();
     const links = new Map<string, string>();
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -1139,7 +1153,7 @@ describe('JobDispatcher', () => {
       const link = new InProcessHostLink();
       const links = new Map<string, string>();
       const existing = new Set<string>();
-      const disp = new JobDispatcher({
+      const disp = new TrackedJobDispatcher({
         dataDir: dir,
         logs: new JobLogs(dir),
         hostLink: link,
@@ -1213,7 +1227,7 @@ describe('JobDispatcher', () => {
   it('without shareKey, two jobs on the same subject keep separate chats', () => {
     const link = new InProcessHostLink();
     const links = new Map<string, string>();
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -1249,7 +1263,7 @@ describe('JobDispatcher', () => {
   it('keyed ensure: a key that renders empty is REFUSED, never collapsed onto the job-wide chat', () => {
     const link = new InProcessHostLink();
     const logs = new JobLogs(dir);
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs,
       hostLink: link,
@@ -1286,7 +1300,7 @@ describe('JobDispatcher', () => {
   it('flush() called directly while offline is a no-op (public API guard)', () => {
     const link = new InProcessHostLink();
     link.setStatus('offline');
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       hostLink: link,
       logger: silentLogger,
@@ -1300,7 +1314,7 @@ describe('JobDispatcher', () => {
     const link = new InProcessHostLink();
     link.setStatus('offline');
     let counter = 0;
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -1321,7 +1335,7 @@ describe('JobDispatcher', () => {
   it('flush skips a non-.jsonl stray file and an empty .jsonl file in the pending dir', () => {
     const link = new InProcessHostLink();
     link.setStatus('offline');
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       hostLink: link,
       logger: silentLogger,
@@ -1346,7 +1360,7 @@ describe('JobDispatcher', () => {
       const link = new InProcessHostLink();
       link.setStatus('offline');
       let counter = 0;
-      const disp = new JobDispatcher({
+      const disp = new TrackedJobDispatcher({
         dataDir: dir,
         logs: new JobLogs(dir),
         hostLink: link,
@@ -1375,7 +1389,7 @@ describe('JobDispatcher', () => {
       const link = new InProcessHostLink();
       link.setStatus('offline');
       let counter = 0;
-      const disp = new JobDispatcher({
+      const disp = new TrackedJobDispatcher({
         dataDir: dir,
         logs: new JobLogs(dir),
         hostLink: link,
@@ -1396,7 +1410,7 @@ describe('JobDispatcher', () => {
       const link = new InProcessHostLink();
       link.setStatus('offline');
       let counter = 0;
-      const disp = new JobDispatcher({
+      const disp = new TrackedJobDispatcher({
         dataDir: dir,
         logs: new JobLogs(dir),
         hostLink: link,
@@ -1421,7 +1435,7 @@ describe('JobDispatcher', () => {
     it('flush logs and continues when removing a flushed entry fails', () => {
       const link = new InProcessHostLink();
       link.setStatus('offline');
-      const disp = new JobDispatcher({
+      const disp = new TrackedJobDispatcher({
         dataDir: dir,
         hostLink: link,
         logger: silentLogger,
@@ -1444,7 +1458,7 @@ describe('JobDispatcher', () => {
       const link = new InProcessHostLink();
       link.setStatus('offline');
       let counter = 0;
-      const disp = new JobDispatcher({
+      const disp = new TrackedJobDispatcher({
         dataDir: dir,
         logs: new JobLogs(dir),
         hostLink: link,
@@ -1482,7 +1496,7 @@ describe('JobDispatcher', () => {
       const link = new InProcessHostLink();
       if (opts.offline) link.setStatus('offline');
       const logs = new JobLogs(dir);
-      const disp = new JobDispatcher({
+      const disp = new TrackedJobDispatcher({
         dataDir: dir,
         logs,
         hostLink: link,
@@ -1792,7 +1806,7 @@ describe('JobDispatcher', () => {
       const links = new Map<string, string>();
       const link = new InProcessHostLink();
       const logs = new JobLogs(dir);
-      const disp = new JobDispatcher({
+      const disp = new TrackedJobDispatcher({
         dataDir: dir,
         logs,
         hostLink: link,
@@ -1825,7 +1839,7 @@ describe('JobDispatcher', () => {
       const links = new Map<string, string>();
       const link = new InProcessHostLink();
       const logs = new JobLogs(dir);
-      const disp = new JobDispatcher({
+      const disp = new TrackedJobDispatcher({
         dataDir: dir,
         logs,
         hostLink: link,
@@ -1885,7 +1899,7 @@ describe('JobDispatcher', () => {
       const link = new InProcessHostLink();
       link.setHostId('other-host');
       const logs = new JobLogs(dir);
-      const disp = new JobDispatcher({
+      const disp = new TrackedJobDispatcher({
         dataDir: dir,
         logs,
         hostLink: link,
@@ -1912,7 +1926,7 @@ describe('JobDispatcher', () => {
       const clock = { now: Date.UTC(2026, 9, 16, 3, 0, 0) };
       const late: Array<{ jobId: string; hostId: string | null; dueAt: number; jobName: string }> =
         [];
-      const disp = new JobDispatcher({
+      const disp = new TrackedJobDispatcher({
         dataDir: dir,
         logs: new JobLogs(dir),
         hostLink: link,
@@ -1957,7 +1971,7 @@ describe('JobDispatcher', () => {
       const late2: unknown[] = [];
       const link = new InProcessHostLink();
       link.setStatus('offline');
-      const disp2 = new JobDispatcher({
+      const disp2 = new TrackedJobDispatcher({
         dataDir: dir,
         logs: new JobLogs(dir),
         hostLink: link,
@@ -2037,7 +2051,7 @@ describe('JobDispatcher — the model a job runs on', () => {
 
   function spawnFrom(job: Job, defaultModel?: () => string | undefined) {
     const link = new InProcessHostLink();
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
@@ -2109,7 +2123,7 @@ describe('JobDispatcher — ensure before its host has reported', () => {
 
   function setup(state: { reported: boolean; exists: boolean }, link = new InProcessHostLink()) {
     let n = 0;
-    const disp = new JobDispatcher({
+    const disp = new TrackedJobDispatcher({
       dataDir: dir,
       logs: new JobLogs(dir),
       hostLink: link,
