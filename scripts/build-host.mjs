@@ -42,7 +42,7 @@ import {
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as ed from '@noble/ed25519';
 import { sha512 } from '@noble/hashes/sha512';
@@ -327,6 +327,8 @@ export function copyPlaywrightCore(outDir) {
  * `allow-jit` the signed Node dies at startup with "Failed to reserve virtual
  * memory for CodeRange" while still passing `codesign --verify`.
  */
+const HOST_CODESIGN_IDENTIFIER = 'dev.patch.host';
+
 function codesignMacArtifact(outDir, machos) {
   const identity = process.env.PATCH_CODESIGN_IDENTITY ?? process.env.CSC_NAME;
   if (!identity) {
@@ -352,6 +354,10 @@ function codesignMacArtifact(outDir, machos) {
       '--timestamp=none',
       '--options',
       'runtime',
+      // A stable identifier of our own: the copied Node binary otherwise signs
+      // as `node`, and macOS keys a privacy decision on it, so one Don't Allow
+      // would not stick across updates (and would collide with any other node).
+      ...(basename(file) === 'node' ? ['--identifier', HOST_CODESIGN_IDENTIFIER] : []),
       '--entitlements',
       entitlements,
       '--sign',
