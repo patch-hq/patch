@@ -1,6 +1,7 @@
 // Fastify app factory — exported separately from the listener so tests can
 // `await build()` and call `app.inject()` without binding a port.
 
+import { shutdownReason } from './shutdown-reason.js';
 import { multipartByteRanges, parseByteRanges } from './byte-range.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve as resolvePath, sep } from 'node:path';
@@ -350,7 +351,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       }
     ).websocketServer;
     for (const client of server?.clients ?? [])
-      client.close(CLOSE_SERVER_RESTARTING, 'server restarting');
+      client.close(CLOSE_SERVER_RESTARTING, shutdownReason());
     done();
   });
   await app.register(websocketPlugin, {
