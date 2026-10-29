@@ -76,6 +76,14 @@ describe('HostOfflineBanner', () => {
       expect(banner).toHaveTextContent('queued');
     });
 
+    it('says why the host dropped off when the server could tell', () => {
+      usePresenceStore.getState().setHostOnline('b', false, 'asleep');
+      render(<HostOfflineBanner hostId="b" />);
+      expect(screen.getByTestId('daemon-offline-banner')).toHaveTextContent(
+        'hetzner went to sleep',
+      );
+    });
+
     it('uses the registry name when the offline host has not reported one', () => {
       usePresenceStore.setState({
         hosts: {

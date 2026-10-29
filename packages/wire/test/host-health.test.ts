@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { assessHostHealth, describeHostCondition } from '../src/host-health.js';
+import {
+  assessHostHealth,
+  describeHostCondition,
+  describeHostOffline,
+} from '../src/host-health.js';
 
 const GB = 1024 ** 3;
 const base = {
@@ -56,5 +60,34 @@ describe('describeHostCondition', () => {
     expect(
       describeHostCondition('Netcup', { reasons: ['memory'], critical: true, topProcesses: [] }),
     ).toBe('Netcup is low on memory — new turns are on hold');
+  });
+});
+
+describe('battery and offline wording', () => {
+  it('flags a low, discharging battery but not a charging one', () => {
+    expect(assessHostHealth({ ...base, power: { onBattery: true, percent: 10 } }).reasons).toEqual([
+      'battery',
+    ]);
+    expect(assessHostHealth({ ...base, power: { onBattery: false, percent: 10 } }).reasons).toEqual(
+      [],
+    );
+    expect(assessHostHealth({ ...base, power: { onBattery: true, percent: 60 } }).reasons).toEqual(
+      [],
+    );
+  });
+
+  it('words a battery warning and the reasons a host dropped', () => {
+    expect(
+      describeHostCondition('Mac', {
+        reasons: ['battery'],
+        critical: false,
+        topProcesses: [],
+        batteryPercent: 10,
+      }),
+    ).toBe('Mac battery at 10%, not charging');
+    expect(describeHostOffline('Mac', 'battery')).toBe('Mac ran out of battery');
+    expect(describeHostOffline('Mac', 'asleep')).toBe('Mac went to sleep');
+    expect(describeHostOffline('Mac', 'unresponsive')).toBe('Mac stopped responding');
+    expect(describeHostOffline('Mac', undefined)).toBe('Mac is offline');
   });
 });

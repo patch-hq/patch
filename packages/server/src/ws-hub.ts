@@ -173,6 +173,10 @@ export interface WsHubDeps {
   hostOfflineGraceMs?: number;
   /** A host's current struggling condition, if any, to greet a new surface with. */
   hostCondition?: (hostId: string) => HostConditionEvent | null;
+  /** Why a host that is down went down (`describeHostOffline`), if known. */
+  hostOfflineReason?: (hostId: string) => string | undefined;
+  /** A surface on a host's own machine said the machine is going to sleep, or is awake. */
+  onMachineSleep?: (hostId: string, asleep: boolean) => void;
   /** Told of each chat forced to `errored` by a host-link loss (chat completion notifier). */
   onChatLinkLost?: (chatId: string) => void;
   /**
@@ -456,10 +460,15 @@ export class WsHub {
     }
   }
 
+  private hostOfflineEvent(hostId: string): WireEvent {
+    const reason = this.deps.hostOfflineReason?.(hostId);
+    return { type: 'host.offline', hostId, ...(reason !== undefined ? { reason } : {}) };
+  }
+
   /** Tell every surface and machine a host's status changed; on offline, resolve what died with it. */
   private announceHostStatus(hostId: string, status: 'online' | 'offline'): void {
     const ev: WireEvent =
-      status === 'online' ? { type: 'host.online', hostId } : { type: 'host.offline', hostId };
+      status === 'online' ? { type: 'host.online', hostId } : this.hostOfflineEvent(hostId);
     for (const conn of this.allConns()) {
       conn.socket.send(encode(ev));
     }
@@ -1068,7 +1077,7 @@ export class WsHub {
         encode(
           this.deps.hostLink.isOnline(hostId)
             ? { type: 'host.online', hostId }
-            : { type: 'host.offline', hostId },
+            : this.hostOfflineEvent(hostId),
         ),
       );
       const condition = this.deps.hostCondition?.(hostId);
@@ -1379,6 +1388,9 @@ export class WsHub {
         return;
       }
       case 'surface.input': {
+        if (event.machineHostId !== undefined) {
+          this.deps.onMachineSleep?.(event.machineHostId, event.away === 'asleep');
+        }
         this.deps.presence.input(conn.accountId, conn.surfaceId, event.idleMs, Date.now(), {
           scope: event.scope,
           ...(event.away ? { away: event.away } : {}),

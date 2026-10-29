@@ -5,6 +5,7 @@
 // not only inside an open chat (spec/12 § Host-offline UX).
 
 import type { JSX } from 'react';
+import { describeHostOffline } from '@patch/wire';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 
@@ -22,6 +23,9 @@ export function HostOfflineBanner({ hostId }: { hostId?: string } = {}): JSX.Ele
       ? ''
       : (s.hosts[hostId]?.host?.hostName ?? s.hosts[hostId]?.registeredName ?? hostId).trim(),
   );
+  const offlineReason = usePresenceStore((s) =>
+    hostId === undefined ? undefined : (s.hosts[hostId]?.offlineReason ?? undefined),
+  );
   const setDiagnosticsOpen = useUiStore((s) => s.setDiagnosticsOpen);
   const hostsSeeded = usePresenceStore((s) => s.hostsSeeded);
   // Until the auth.ok greeting seeds the roster, hostOnline is unknown, not false.
@@ -35,7 +39,7 @@ export function HostOfflineBanner({ hostId }: { hostId?: string } = {}): JSX.Ele
       <span>
         {hostId === undefined
           ? 'Agent offline. Messages are queued and sent when it reconnects.'
-          : `${hostName} is offline. Messages to this chat are queued and sent when it reconnects.`}
+          : `${describeHostOffline(hostName, offlineReason)}. Messages to this chat are queued and sent when it reconnects.`}
       </span>
       {/* Diagnose, not a dead end: opens the diagnostics screen as a dismissible
           overlay (spec/12 § Connection diagnostics screen). The app stays

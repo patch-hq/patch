@@ -6,6 +6,7 @@
 import React from 'react';
 import { Pressable, Text } from 'react-native';
 import { useRouter } from 'expo-router';
+import { describeHostOffline } from '@patch/wire';
 import { usePresenceStore } from '../stores/presenceStore';
 import { useUiStore } from '../stores/uiStore';
 import { hostOfflineBannerText } from '../lib/connection';
@@ -16,6 +17,15 @@ export function HostOfflineBanner(): React.ReactElement | null {
   const router = useRouter();
   const daemon = usePresenceStore((s) => s.daemon);
   const setDiagnosticsOpen = useUiStore((s) => s.setDiagnosticsOpen);
+  // Why each machine dropped off, where the server could tell from its last heartbeat.
+  const why = usePresenceStore((s) =>
+    Object.values(s.hosts)
+      .filter((h) => !h.online && h.offlineReason)
+      .map((h) =>
+        describeHostOffline((h.host?.hostName ?? h.hostId).trim(), h.offlineReason ?? undefined),
+      )
+      .join('. '),
+  );
   const text = hostOfflineBannerText(daemon);
   if (text === null) return null;
   return (
@@ -35,6 +45,11 @@ export function HostOfflineBanner(): React.ReactElement | null {
       }}
     >
       <Text style={{ color: colors.waiting, ...typography.meta }}>{text}</Text>
+      {why !== '' ? (
+        <Text style={{ color: colors.waiting, fontSize: textMin, marginTop: space.xs }}>
+          {why}.
+        </Text>
+      ) : null}
       <Text style={{ color: colors.waiting, fontSize: textMin, marginTop: space.xs }}>
         Tap for Settings → Hosts.
       </Text>

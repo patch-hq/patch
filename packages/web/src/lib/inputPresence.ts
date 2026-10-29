@@ -112,11 +112,15 @@ export async function readInputReport(now: number = Date.now()): Promise<InputRe
   const bridge = getDesktopBridge();
   if (bridge?.getSystemPresence) {
     const { idleMs, away } = await bridge.getSystemPresence();
+    // The host on this same machine, so the server can say "went to sleep"
+    // if that host drops off after this machine reports sleeping.
+    const machineHostId = (await bridge.localHost?.status())?.hostId ?? null;
     return {
       type: 'surface.input',
       idleMs: Math.max(0, Math.round(idleMs)),
       scope: 'system',
       ...(away ? { away } : {}),
+      ...(machineHostId !== null ? { machineHostId } : {}),
     };
   }
   if (bridge?.getSystemIdleMs) {

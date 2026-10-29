@@ -13,11 +13,15 @@ import {
   describeHostCondition,
   HOST_HEALTH_INTERVAL_MS,
   HOST_HEALTH_LATE_INTERVALS,
+  BATTERY_FLAT_PERCENT,
   type HostConditionEvent,
   type HostHealthEvent,
   type HostReason,
   type WireEvent,
 } from '@patch/wire';
+
+/** A sleep report this close to (or after) the last heartbeat explains the host dropping off. */
+const SLEEP_SLACK_MS = 30_000;
 
 /** Don't tell the user about the same host struggling again within this long. */
 const NOTIFY_COOLDOWN_MS = 10 * 60_000;
@@ -45,6 +49,10 @@ interface HostRecord {
 
 export class HostHealthTracker {
   private readonly hosts = new Map<string, HostRecord>();
+  /** When each machine's own desktop app said it was going to sleep; gone again once it wakes. */
+  private readonly asleepAt = new Map<string, number>();
+  /** Why each host that is down went down, as far as we could tell. */
+  private readonly offlineReasons = new Map<string, string>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly now: () => number;
 
@@ -64,7 +72,12 @@ export class HostHealthTracker {
   }
 
   observe(event: WireEvent): void {
+    if (event.type === 'host.online') {
+      this.offlineReasons.delete(event.hostId);
+      return;
+    }
     if (event.type === 'host.offline') {
+      this.noteOffline(event.hostId);
       this.hosts.delete(event.hostId);
       return;
     }
@@ -80,6 +93,33 @@ export class HostHealthTracker {
       lastNotifiedAt: prev?.lastNotifiedAt ?? null,
     });
     this.publish(report.hostId);
+  }
+
+  /** The machine's own desktop app reported going to sleep, or being awake again. */
+  noteAsleep(hostId: string, asleep: boolean): void {
+    if (asleep) {
+      if (!this.asleepAt.has(hostId)) this.asleepAt.set(hostId, this.now());
+    } else {
+      this.asleepAt.delete(hostId);
+    }
+  }
+
+  /** Why a host that is down went down: its last heartbeat, and whether its machine said it slept. */
+  offlineReason(hostId: string): string | undefined {
+    return this.offlineReasons.get(hostId);
+  }
+
+  private noteOffline(hostId: string): void {
+    const rec = this.hosts.get(hostId);
+    if (rec === undefined) return; // never reported: nothing to explain it with
+    const slept = this.asleepAt.get(hostId);
+    const reason =
+      rec.report.power?.onBattery && rec.report.power.percent <= BATTERY_FLAT_PERCENT
+        ? 'battery'
+        : slept !== undefined && slept >= rec.lastReportAt - SLEEP_SLACK_MS
+          ? 'asleep'
+          : 'unresponsive';
+    this.offlineReasons.set(hostId, reason);
   }
 
   /** The condition to greet a newly connected surface with; null when the host is fine. */
@@ -101,6 +141,9 @@ export class HostHealthTracker {
       state: all.length > 0 ? 'struggling' : 'online',
       critical,
       reasons: all,
+      ...(all.includes('battery') && rec.report.power
+        ? { batteryPercent: rec.report.power.percent }
+        : {}),
       topProcesses: all.includes('memory') ? rec.report.topProcesses : [],
     };
   }

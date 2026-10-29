@@ -15,6 +15,10 @@ const MEMORY_CRITICAL_FRACTION = 0.04;
 const SWAP_EXHAUSTED_FRACTION = 0.9;
 const LOAD_PER_CPU = 4;
 const EVENT_LOOP_LAG_MS = 1000;
+/** Battery at or below this, and not charging, is worth saying. */
+const BATTERY_LOW_PERCENT = 15;
+/** At or below this and discharging when it drops off, a host is taken to have run flat. */
+export const BATTERY_FLAT_PERCENT = 10;
 
 export type HostReason = HostConditionEvent['reasons'][number];
 
@@ -35,6 +39,7 @@ export function assessHostHealth(
     | 'load1'
     | 'cpuCount'
     | 'eventLoopLagMs'
+    | 'power'
   >,
 ): HostAssessment {
   const reasons: HostReason[] = [];
@@ -52,6 +57,8 @@ export function assessHostHealth(
       critical = free < MEMORY_CRITICAL_FRACTION || swapGone;
     }
   }
+  if (report.power?.onBattery && report.power.percent <= BATTERY_LOW_PERCENT)
+    reasons.push('battery');
   if (report.load1 / report.cpuCount > LOAD_PER_CPU) reasons.push('load');
   if (report.eventLoopLagMs > EVENT_LOOP_LAG_MS) reasons.push('lag');
   return { reasons, critical };
@@ -70,9 +77,14 @@ export function describeProcessGroup(g: HostProcessGroup): string {
 /** The line a surface shows on a struggling host's chats. */
 export function describeHostCondition(
   hostName: string,
-  c: Pick<HostConditionEvent, 'reasons' | 'critical' | 'topProcesses'>,
+  c: Pick<HostConditionEvent, 'reasons' | 'critical' | 'topProcesses' | 'batteryPercent'>,
 ): string {
   const [first] = c.reasons;
+  if (first === 'battery') {
+    return c.batteryPercent === undefined
+      ? `${hostName} battery is low, not charging`
+      : `${hostName} battery at ${c.batteryPercent}%, not charging`;
+  }
   const cause =
     first === 'memory'
       ? 'low on memory'
@@ -85,4 +97,12 @@ export function describeHostCondition(
   const tail = c.critical ? 'new turns are on hold' : 'chats may be slow';
   const culprits = c.topProcesses.slice(0, 2).map(describeProcessGroup);
   return `${lead} — ${tail}${culprits.length > 0 ? ` (${culprits.join('; ')})` : ''}`;
+}
+
+/** Why a host dropped off, in a sentence fragment: "Mac went to sleep". */
+export function describeHostOffline(hostName: string, reason: string | undefined): string {
+  if (reason === 'battery') return `${hostName} ran out of battery`;
+  if (reason === 'asleep') return `${hostName} went to sleep`;
+  if (reason === 'unresponsive') return `${hostName} stopped responding`;
+  return `${hostName} is offline`;
 }
