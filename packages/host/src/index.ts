@@ -1021,9 +1021,12 @@ async function startHost(
     if (!entry) return undefined;
     const { session, week, overage } = entry.reading.windows;
     if (session === undefined && week === undefined && overage === undefined) return undefined;
+    const runsOut = accountUsage?.runOutAt(accountId) ?? {};
     return {
-      ...(session ? { session } : {}),
-      ...(week ? { week } : {}),
+      ...(session
+        ? { session: { ...session, ...(runsOut.session ? { runsOutAt: runsOut.session } : {}) } }
+        : {}),
+      ...(week ? { week: { ...week, ...(runsOut.week ? { runsOutAt: runsOut.week } : {}) } } : {}),
       ...(overage ? { overage } : {}),
       at: entry.reading.at,
     };
@@ -3622,6 +3625,7 @@ async function startHost(
       ...(preferredAccountId !== undefined ? { preferred: preferredAccountId } : {}),
       resumeOnAnyAccount: autoResumeRateLimit,
       weekResetsAt: (id) => accountUsage?.get(id)?.reading.windows.week?.resetsAt,
+      nearlyOut: (id) => accountUsage?.nearlyOut(id) === true,
       utilization: (id) => {
         const w = accountUsage?.get(id)?.reading.windows;
         const values = [w?.session?.utilization, w?.week?.utilization].filter(

@@ -2812,6 +2812,12 @@ export const RateLimitWindow = z
     utilization: z.number().min(0).max(1).optional(),
     resetsAt: z.number().optional(),
     /**
+     * When the host estimates this window will run out at its current burn rate
+     * (ms-epoch). Absent when there is no burn to extrapolate or the window
+     * resets first.
+     */
+    runsOutAt: z.number().optional(),
+    /**
      * Why this window is refusing, in Anthropic's own words, when it says.
      * `org_level_disabled_until` on the overage window means extra usage is
      * not enabled on the account — nothing has been overspent, there was

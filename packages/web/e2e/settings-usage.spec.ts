@@ -100,6 +100,27 @@ test.describe('settings — Claude usage (session/week/reset)', () => {
     await expect(session).toContainText('resets');
   });
 
+  test('shows when an account is estimated to run out', async ({ page }) => {
+    await page.goto(SETTINGS);
+    await expect(page.getByTestId('account-claude-code-a1')).toBeVisible();
+    const now = Date.now();
+    await reading(page, {
+      session: {
+        status: 'allowed',
+        utilization: 0.6,
+        resetsAt: now + 3 * 3_600_000,
+        runsOutAt: now + 40 * 60_000,
+      },
+      week: { status: 'allowed', utilization: 0.4, resetsAt: now + 3 * 86_400_000 },
+    });
+    await expect(page.getByTestId('account-usage-session-claude-code-a1')).toContainText(
+      'runs out ~',
+    );
+    await expect(page.getByTestId('account-usage-week-claude-code-a1')).not.toContainText(
+      'runs out',
+    );
+  });
+
   // The window patch used to discard. Its refusal is what Claude Code prints as
   // "You've hit your monthly spend limit", and `org_level_disabled_until` means
   // the extra-usage add-on was never taken out — nothing was overspent. Here

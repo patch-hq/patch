@@ -16,6 +16,13 @@
 
 import type { RateLimitWindow } from './events.js';
 
+/**
+ * Utilization at or above which a pool counts as empty, whatever its status
+ * says. The reading rounds: it showed 99% while Claude was already refusing, so
+ * waiting for `rejected` means finding out by being refused.
+ */
+export const EMPTY_UTILIZATION = 0.98;
+
 /** The pools a person draws down. Overage is not one of them. */
 export const SPENDABLE_RATE_LIMIT_SCOPES = ['session', 'week'] as const;
 
@@ -65,8 +72,15 @@ export function rateLimitWindowBlocks(
   window: RateLimitWindow | undefined,
   now: number = Date.now(),
 ): boolean {
-  if (window?.status !== 'rejected' || scope === 'overage') return false;
-  return window.resetsAt === undefined || window.resetsAt > now;
+  if (!window || scope === 'overage') return false;
+  if (window.status === 'rejected') return window.resetsAt === undefined || window.resetsAt > now;
+  // Nearly spent counts as spent, but only against a stated reset still ahead:
+  // a figure with no reset to lift it would block an account for ever.
+  return (
+    (window.utilization ?? 0) >= EMPTY_UTILIZATION &&
+    window.resetsAt !== undefined &&
+    window.resetsAt > now
+  );
 }
 
 /** Fraction of a pool used at which it is drawn as a warning. */
