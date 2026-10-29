@@ -1982,6 +1982,12 @@ export const HostOfflineEvent = z
   .object({
     type: z.literal('host.offline'),
     ...hostIdField,
+    /**
+     * Why, when the server can tell from the host's last heartbeat: `battery`
+     * (it was nearly flat and discharging), `asleep` (the machine reported going
+     * to sleep) or `unresponsive`. Absent when it was not worked out, e.g. the
+     * host was removed. See `describeHostOffline`.
+     */
     reason: z.string().optional(),
   })
   .strict();
@@ -2018,6 +2024,11 @@ export const HostHealthEvent = z
     eventLoopLagMs: z.number().gte(0),
     /** Milliseconds between reports, so the server knows when one is late. */
     intervalMs: z.number().int().gte(1),
+    /** Battery state; absent on a machine with no battery. */
+    power: z
+      .object({ onBattery: z.boolean(), percent: z.number().gte(0).lte(100) })
+      .strict()
+      .optional(),
     topProcesses: z.array(HostProcessGroup).max(5),
   })
   .strict();
@@ -2034,7 +2045,9 @@ export const HostConditionEvent = z
     ...hostIdField,
     state: z.enum(['online', 'struggling']),
     critical: z.boolean(),
-    reasons: z.array(z.enum(['memory', 'load', 'lag', 'slow-link'])),
+    reasons: z.array(z.enum(['memory', 'battery', 'load', 'lag', 'slow-link'])),
+    /** The charge, when `battery` is a reason. */
+    batteryPercent: z.number().gte(0).lte(100).optional(),
     topProcesses: z.array(HostProcessGroup).max(5),
   })
   .strict();
@@ -5195,6 +5208,12 @@ export const SurfaceInputEvent = z
      * not know the field reads `idleMs` alone.
      */
     away: z.enum(['locked', 'asleep']).optional(),
+    /**
+     * The host running on the same machine as this surface (the desktop app's
+     * local host). Lets the server tie `away: 'asleep'` to a host, so it can say
+     * "went to sleep" when that host drops. Absent when the machine has none.
+     */
+    machineHostId: z.string().min(1).optional(),
   })
   .strict();
 export type SurfaceInputEvent = z.infer<typeof SurfaceInputEvent>;

@@ -2096,7 +2096,15 @@ async function startHost(
       );
       if (!critical) daemon.releaseHeldTurns();
     }
-    if (linkOnline) link.send({ type: 'host.health', hostId: selfHostId, ...sample });
+    const power = powerWatcher.current();
+    if (linkOnline) {
+      link.send({
+        type: 'host.health',
+        hostId: selfHostId,
+        ...sample,
+        ...(power ? { power } : {}),
+      });
+    }
   };
   const healthTimer = setInterval(() => void reportHealth(), HOST_HEALTH_INTERVAL_MS);
   healthTimer.unref();

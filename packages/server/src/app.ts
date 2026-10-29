@@ -838,13 +838,15 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   });
   hostLink.onEvent((event) => hostHealth.observe(event));
   hostLink.onHostStatus((hostId, status) => {
-    if (status === 'offline') hostHealth.observe({ type: 'host.offline', hostId });
+    hostHealth.observe({ type: status === 'online' ? 'host.online' : 'host.offline', hostId });
   });
   hostHealth.start();
   app.addHook('onClose', async () => hostHealth.stop());
 
   const wsHub = new WsHub({
     hostCondition: (hostId) => hostHealth.conditionFor(hostId),
+    hostOfflineReason: (hostId) => hostHealth.offlineReason(hostId),
+    onMachineSleep: (hostId, asleep) => hostHealth.noteAsleep(hostId, asleep),
     logger: log.child({ component: 'ws-hub' }),
     onChatLinkLost: (chatId) => chatCompletionNotifier.hostLinkLost(chatId),
     ...(accountSettings ? { sharedSettings: () => accountSettings.changedEvent() } : {}),
