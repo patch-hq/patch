@@ -31,6 +31,34 @@ describe('createWhisper', () => {
     await expect(w.close()).resolves.toBeUndefined();
   });
 
+  test('groq clip retries share one deadline: 429 then a stall fails inside the budget', async () => {
+    let calls = 0;
+    const fakeFetch = (async (_url: string | URL, init?: RequestInit) => {
+      calls++;
+      if (calls === 1) {
+        return new Response('rate limited', { status: 429, headers: { 'retry-after': '0' } });
+      }
+      // Stall until the attempt's signal aborts.
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+      });
+    }) as typeof fetch;
+    const w = new GroqWhisperBackend({
+      backend: 'groq',
+      logger,
+      groqApiKey: 'gsk_test',
+      fetchImpl: fakeFetch,
+      clipDeadlineMs: 300,
+      requestTimeoutMs: 60_000,
+    });
+    const started = Date.now();
+    await expect(w.transcribeClip(Buffer.from('x'), 'm4a')).rejects.toThrow(
+      /exceeded its 300ms budget/,
+    );
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(calls).toBe(2);
+  });
+
   test('groq backend lazy-fails when GROQ_API_KEY is missing (undefined or empty string)', async () => {
     const w = createWhisper({ backend: 'groq', logger });
     await expect(w.transcribe(new Int16Array(160))).rejects.toThrow(/GROQ_API_KEY missing/);
