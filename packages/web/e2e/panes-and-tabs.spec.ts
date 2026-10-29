@@ -33,17 +33,29 @@ async function openRowMenu(page: Page, testId: string): Promise<void> {
   await page.locator('[role="menu"]').waitFor({ state: 'visible' });
 }
 
+/** Open a page as a second tab, then split it off to the side through its own
+ *  tab's context menu — the way to get two panes now that chats open as groups,
+ *  not tabs (spec/14 § Groups). */
+async function splitViaTabMenu(page: Page): Promise<void> {
+  await page.getByTestId('nav-jobs').click({ button: 'middle' });
+  await expect(paneTabs(page)).toHaveCount(2);
+  await paneTabs(page).last().click({ button: 'right' });
+  await page.getByText('Open to the side').click();
+  await expect(page.locator('.pane')).toHaveCount(2);
+}
+
 test.describe('panes and tabs — opening', () => {
-  test('a sidebar click replaces the active pane’s tab; middle-click opens a new one', async ({
+  test('a sidebar click switches the group’s chat; middle-click shows a chat in a new group', async ({
     page,
   }) => {
     await page.goto(HARNESS);
-    // The common case: one pane, one tab, no tab bar at all.
+    // The common case: one group, one pane, one tab — no tab bar, no card.
     await expect(paneTabs(page)).toHaveCount(0);
+    await expect(page.locator('.group-card')).toHaveCount(1);
 
     await page.getByTestId('chat-row-chat_md').click();
-    // Still a single tab — the click REPLACED it, not added a second one —
-    // and it's the one just clicked, not the one the harness opened with.
+    // Still one group and one tab — the click SWITCHED the group's chat, it did
+    // not add a tab — and it's the chat just clicked, not the harness's own.
     await expect(paneTabs(page)).toHaveCount(0);
     await expect(page.locator('.chat-head-title .chat-title')).toHaveText('July Seasonal Food');
     // The row click also navigates the router; wait for that to land (the row
@@ -52,23 +64,33 @@ test.describe('panes and tabs — opening', () => {
     await expect(page.getByTestId('chat-row-chat_md')).toHaveClass(/active/);
 
     await page.getByTestId('chat-row-chat_table').click({ button: 'middle' });
-    const tabs = paneTabs(page);
-    await expect(tabs).toHaveCount(2);
-    await expect(tabs.last()).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('.group-card')).toHaveCount(2);
+    await expect(paneTabs(page)).toHaveCount(0);
   });
 
-  test('right-click → Open in new tab, then opening the SAME chat again focuses it rather than duplicating', async ({
+  test('a page opens as a tab: middle-click adds one, and a plain click on it again focuses it rather than duplicating', async ({
+    page,
+  }) => {
+    await page.goto(HARNESS);
+    await page.getByTestId('nav-jobs').click({ button: 'middle' });
+    await expect(paneTabs(page)).toHaveCount(2);
+
+    await page.getByTestId('nav-jobs').click();
+    await expect(paneTabs(page)).toHaveCount(2); // not duplicated
+    await expect(paneTabs(page).last()).toHaveAttribute('aria-selected', 'true');
+  });
+
+  test('right-click → Open in new group shows the chat beside the focused one; showing it again focuses that group', async ({
     page,
   }) => {
     await page.goto(HARNESS);
     await openRowMenu(page, 'chat-row-chat_md');
-    await page.getByText('Open in new tab').click();
-    await expect(paneTabs(page)).toHaveCount(2);
+    await page.getByText('Open in new group').click();
+    await expect(page.locator('.group-card')).toHaveCount(2);
 
     await page.getByTestId('chat-row-chat_bus').click();
-    const tabs = paneTabs(page);
-    await expect(tabs).toHaveCount(2); // not duplicated
-    await expect(tabs.filter({ hasText: 'bus-watch' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('.group-card')).toHaveCount(2); // not duplicated
+    await expect(page.locator('.group-card-focused .group-title')).toHaveText('bus-watch');
   });
 
   test('right-click → Open in new window pops a real window at /chats/:id', async ({ page }) => {
@@ -86,8 +108,8 @@ test.describe('panes and tabs — opening', () => {
 test.describe('panes and tabs — drag and drop', () => {
   test('dragging a tab reorders it within the bar', async ({ page }) => {
     await page.goto(HARNESS);
-    await page.getByTestId('chat-row-chat_md').click({ button: 'middle' });
-    await page.getByTestId('chat-row-chat_table').click({ button: 'middle' });
+    await page.getByTestId('nav-jobs').click({ button: 'middle' });
+    await page.getByTestId('nav-pads').click({ button: 'middle' });
     const tabs = paneTabs(page);
     await expect(tabs).toHaveCount(3);
     const order = async (): Promise<(string | null)[]> =>
@@ -106,8 +128,8 @@ test.describe('panes and tabs — drag and drop', () => {
     page,
   }) => {
     await page.goto(HARNESS);
-    await page.getByTestId('chat-row-chat_md').click({ button: 'middle' });
-    await page.getByTestId('chat-row-chat_table').click({ button: 'middle' });
+    await page.getByTestId('nav-jobs').click({ button: 'middle' });
+    await page.getByTestId('nav-pads').click({ button: 'middle' });
     const tabs = paneTabs(page);
     await expect(tabs).toHaveCount(3);
     const ids = await tabs.evaluateAll((els) => els.map((el) => el.getAttribute('data-testid')));
@@ -121,8 +143,7 @@ test.describe('panes and tabs — drag and drop', () => {
 
   test('dragging a tab onto another pane moves it there', async ({ page }) => {
     await page.goto(HARNESS);
-    await openRowMenu(page, 'chat-row-chat_md');
-    await page.getByText('Open to the side').click();
+    await splitViaTabMenu(page);
     await expect(page.locator('.pane')).toHaveCount(2);
 
     const leftPane = page.locator('.pane').first();
@@ -142,7 +163,7 @@ test.describe('panes and tabs — drag and drop', () => {
 
   test('dragging a tab onto a pane edge splits it', async ({ page }) => {
     await page.goto(HARNESS);
-    await page.getByTestId('chat-row-chat_md').click({ button: 'middle' });
+    await page.getByTestId('nav-jobs').click({ button: 'middle' });
     const tabs = paneTabs(page);
     await expect(tabs).toHaveCount(2);
 
@@ -162,8 +183,7 @@ test.describe('panes and tabs — drag and drop', () => {
 
   test('a divider drag resizes the two panes', async ({ page }) => {
     await page.goto(HARNESS);
-    await openRowMenu(page, 'chat-row-chat_md');
-    await page.getByText('Open to the side').click();
+    await splitViaTabMenu(page);
 
     const panes = page.locator('.pane');
     const beforeLeft = (await panes.first().boundingBox())!;
@@ -183,9 +203,8 @@ test.describe('panes and tabs — drag and drop', () => {
 test.describe('panes and tabs — persistence', () => {
   test('the whole layout survives a reload', async ({ page }) => {
     await page.goto(HARNESS);
-    await openRowMenu(page, 'chat-row-chat_md');
-    await page.getByText('Open to the side').click();
-    await page.getByTestId('chat-row-chat_table').click({ button: 'middle' });
+    await splitViaTabMenu(page);
+    await page.getByTestId('nav-pads').click({ button: 'middle' });
     await expect(page.locator('.pane')).toHaveCount(2);
     await expect(paneTabs(page)).toHaveCount(3);
 
@@ -199,7 +218,7 @@ test.describe('panes and tabs — persistence', () => {
 test.describe('panes and tabs — keyboard', () => {
   test('⌘W closes the active tab', async ({ page }) => {
     await page.goto(HARNESS);
-    await page.getByTestId('chat-row-chat_md').click({ button: 'middle' });
+    await page.getByTestId('nav-jobs').click({ button: 'middle' });
     await expect(paneTabs(page)).toHaveCount(2);
     await page.keyboard.press('Meta+w');
     await expect(paneTabs(page)).toHaveCount(0); // back to one tab, no bar
@@ -207,7 +226,7 @@ test.describe('panes and tabs — keyboard', () => {
 
   test('⌘⌥→ switches to the next tab', async ({ page }) => {
     await page.goto(HARNESS);
-    await page.getByTestId('chat-row-chat_md').click({ button: 'middle' });
+    await page.getByTestId('nav-jobs').click({ button: 'middle' });
     const tabs = paneTabs(page);
     // The just-opened (second) tab is the active one; switch back to the
     // first before exercising the chord.

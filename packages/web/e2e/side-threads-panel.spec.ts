@@ -58,10 +58,11 @@ test('docked, the panel sits inside its chat and goes with it; popped out, it st
   await expect(page.locator('.chat-tab-host [data-testid="side-threads-panel"]')).toHaveCount(1);
 
   // Switching chats closes the docked panel, and it stays closed on return.
-  await page.getByTestId('chat-row-chat_md').click({ button: 'middle' });
-  await expect(page.locator('.pane-tab')).toHaveCount(2);
+  await page.getByTestId('chat-row-chat_md').click();
+  await expect(page.getByTestId('chat-row-chat_md')).toHaveClass(/active/);
   await expect(panel).toHaveCount(0);
-  await page.locator('.pane-tab', { hasText: 'forked-fixture' }).click();
+  await page.getByTestId('chat-row-chat_forked').click();
+  await expect(page.getByTestId('chat-row-chat_forked')).toHaveClass(/active/);
   await expect(panel).toHaveCount(0);
   await page.getByTestId('action-threads').click();
   await expect(panel).toBeVisible();
@@ -71,7 +72,8 @@ test('docked, the panel sits inside its chat and goes with it; popped out, it st
   await page.getByTestId('stp-pop-toggle').click();
   await expect(panel).toHaveAttribute('data-mode', 'floating');
   expect((await panel.boundingBox())!.width).toBeCloseTo(dockedWidth, 0);
-  await page.locator('.pane-tab').filter({ hasNotText: 'forked-fixture' }).first().click();
+  await page.getByTestId('chat-row-chat_md').click();
+  await expect(page.getByTestId('chat-row-chat_md')).toHaveClass(/active/);
   await expect(panel).toBeVisible();
   await expect(page.getByTestId('stp-tab-chat_forked-b2')).toBeVisible();
 

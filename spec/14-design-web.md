@@ -96,7 +96,7 @@ Each group has a colour from a small fixed set of five, by position in the row, 
 
 Showing a chat — a sidebar row, a channel, a search result, any chat link or button:
 
-- If the chat is already showing in a group, that group is focused. Nothing else changes.
+- If the chat is already showing in a group, that group is focused and the chat's own tab is brought forward (opened if only its pages are left in the group).
 - Otherwise the focused group switches to that chat, restoring the panes and tabs that group last had for it, or just the chat's own tab the first time. Clicking never adds a tab for another chat: a chat is what a group is about, not a tab inside another chat's group.
 - Middle-click, or right-click → "Open in new group", shows the chat in a new group beside the focused one. ⌘/Ctrl-click and "Open in new window" detach it as before (§ New windows).
 

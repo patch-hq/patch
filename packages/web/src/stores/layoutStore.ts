@@ -601,10 +601,9 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
       const showing = opts.newGroup ? undefined : s.groups.find((g) => g.chatId === chatId);
       if (showing) {
         commitGroups(s.groups, showing.id);
-        if (opts.seq !== undefined) {
-          const found = findTabByKey(showing.root, tabKey({ kind: 'chat', chatId }));
-          if (found) get().openTab({ kind: 'chat', chatId }, { seq: opts.seq });
-        }
+        // Bring the chat's own tab forward (or open it when only its pages —
+        // Files, say — are left), so a click on its row always lands on the chat.
+        get().openTab({ kind: 'chat', chatId }, opts.seq !== undefined ? { seq: opts.seq } : {});
         return;
       }
       const chatTab = (): Tab => ({
