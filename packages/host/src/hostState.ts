@@ -130,6 +130,14 @@ const HostStateFile = z
     /** Whether this host installs a published build on its own (shared `autoUpdateHosts`). */
     autoUpdateHosts: z.boolean().optional(),
     /**
+     * This machine's own auto-update override (`host.set_auto_update`), which
+     * beats the shared default until its `until` (epoch ms) lapses.
+     */
+    autoUpdateOverride: z
+      .object({ enabled: z.boolean(), until: z.number().int().positive().optional() })
+      .strict()
+      .optional(),
+    /**
      * Whether an unanswered `AskUserQuestion` on this host expires
      * (`host.settings` → `questionExpiry`), and the window in seconds it is
      * given. Absent means the host's own default: on, at

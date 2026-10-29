@@ -534,6 +534,21 @@ describe('Settings → Hosts → remove', () => {
     expect(errors()).toEqual([]);
   });
 
+  it("shows a machine's auto-update override and sets it per host", async () => {
+    const set = vi.spyOn(api, 'setHostAutoUpdate').mockResolvedValue({ ok: true });
+    renderPage('hosts');
+    openRow('host-a');
+    expect(screen.getByTestId('host-host-a-auto-update-state')).toHaveTextContent(
+      'follows the shared setting',
+    );
+    fireEvent.change(screen.getByTestId('host-host-a-auto-update'), { target: { value: 'off' } });
+    await waitFor(() => expect(set).toHaveBeenCalledWith('host-a', { enabled: false }));
+    fireEvent.change(screen.getByTestId('host-host-a-auto-update'), {
+      target: { value: 'default' },
+    });
+    await waitFor(() => expect(set).toHaveBeenCalledWith('host-a', null));
+  });
+
   it('goes through api.removeHost naming that host', async () => {
     const remove = vi.spyOn(api, 'removeHost').mockResolvedValue({ ok: true, hosts: [] });
     renderPage('hosts');

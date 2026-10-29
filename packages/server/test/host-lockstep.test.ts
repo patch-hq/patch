@@ -119,6 +119,7 @@ describe('host hello brings a stale host in step', () => {
   async function connectHost(
     clientVersion: string,
     settings?: Record<string, unknown>,
+    override?: { enabled: boolean; until?: number },
   ): Promise<{
     frames: string[];
     recheck: () => void;
@@ -129,6 +130,7 @@ describe('host hello brings a stale host in step', () => {
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
     registry.setDaemonKey({ hostId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
+    if (override) registry.setAutoUpdateOverride('daemon-1', override);
     const built = await buildAll({ logger: false, registry });
     await built.app.listen({ port: 0, host: '127.0.0.1' });
     const addr = built.app.server.address() as AddressInfo;
@@ -177,6 +179,49 @@ describe('host hello brings a stale host in step', () => {
       c.recheck();
       await new Promise((r) => setTimeout(r, 100));
       expect(c.frames).toEqual([]);
+    } finally {
+      await c.close();
+    }
+  });
+
+  it("a machine's own off beats the shared default of on", async () => {
+    publish(VERSION);
+    const c = await connectHost('0.0.1', undefined, { enabled: false });
+    try {
+      expect(c.frames).toEqual([]);
+    } finally {
+      await c.close();
+    }
+  });
+
+  it("a machine's own on beats the shared default of off", async () => {
+    publish(VERSION);
+    const c = await connectHost('0.0.1', { autoUpdateHosts: false }, { enabled: true });
+    try {
+      expect(c.frames).toEqual(['host.update:daemon-1']);
+    } finally {
+      await c.close();
+    }
+  });
+
+  it('a pause still in force holds the update', async () => {
+    publish(VERSION);
+    const c = await connectHost('0.0.1', undefined, {
+      enabled: false,
+      until: Date.now() + 3_600_000,
+    });
+    try {
+      expect(c.frames).toEqual([]);
+    } finally {
+      await c.close();
+    }
+  });
+
+  it('a lapsed pause falls back to the shared default', async () => {
+    publish(VERSION);
+    const c = await connectHost('0.0.1', undefined, { enabled: false, until: Date.now() - 1000 });
+    try {
+      expect(c.frames).toEqual(['host.update:daemon-1']);
     } finally {
       await c.close();
     }

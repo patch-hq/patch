@@ -19,7 +19,9 @@ import {
   CLOSE_SERVER_RESTARTING,
 } from '@patch/wire';
 import {
+  activeAutoUpdateOverride,
   decode,
+  effectiveAutoUpdate,
   encode,
   isHostAddressedSurfaceEvent,
   isReadOnlyMirrorThread,
@@ -29,6 +31,7 @@ import {
   type ClaudeSettingsListEvent,
   type HostAccountEvent,
   type HostConditionEvent,
+  type HostAutoUpdateOverride,
   type HostInfoEvent,
   type FoldersListEvent,
   type WireEvent,
@@ -387,10 +390,17 @@ export class WsHub {
    */
   private withServerOwnedHostFields(event: HostInfoEvent): HostInfoEvent {
     const name = this.deps.registry.hostName(event.hostId);
+    const { autoUpdateOverride: _reported, ...rest } = event;
+    void _reported;
+    const override = activeAutoUpdateOverride(
+      this.deps.registry.autoUpdateOverride(event.hostId),
+      Date.now(),
+    );
     return {
-      ...event,
+      ...rest,
       ...(name !== undefined ? { hostName: name } : {}),
       runsManager: this.managerHostId() === event.hostId,
+      ...(override ? { autoUpdateOverride: override } : {}),
     };
   }
 
@@ -1256,7 +1266,15 @@ export class WsHub {
       case 'incomparable':
         return;
       case 'update':
-        if (this.deps.autoUpdateHosts && !this.deps.autoUpdateHosts()) return;
+        if (
+          this.deps.autoUpdateHosts &&
+          !effectiveAutoUpdate(
+            this.deps.autoUpdateHosts(),
+            this.deps.registry.autoUpdateOverride(hostId),
+            Date.now(),
+          )
+        )
+          return;
         log.warn(ctx, 'host is behind the server; telling it to update');
         socket.send(encode({ type: 'host.update', hostId }));
         return;
@@ -1290,6 +1308,20 @@ export class WsHub {
         seq: OUT_OF_BAND_SEQ,
       }),
     );
+  }
+
+  /**
+   * Record a machine's auto-update override in the registry, tell the machine
+   * (so its own schedule agrees) and every surface. Throws, naming the problem,
+   * for an unregistered machine or an `until` already in the past.
+   */
+  setHostAutoUpdate(hostId: string, override: HostAutoUpdateOverride | null, from: string): void {
+    if (override?.until !== undefined && override.until <= Date.now()) {
+      throw new Error(`auto-update pause until ${override.until} is already in the past`);
+    }
+    this.deps.registry.setAutoUpdateOverride(hostId, override);
+    this.deps.hostLink.sendTo(hostId, from, { type: 'host.set_auto_update', hostId, override });
+    this.republishHost(hostId);
   }
 
   /**
@@ -1539,6 +1571,14 @@ export class WsHub {
         );
         this.deps.hostLink.sendTo(event.hostId, conn.surfaceId, event);
         this.republishHost(event.hostId);
+        return;
+      }
+      case 'host.set_auto_update': {
+        try {
+          this.setHostAutoUpdate(event.hostId, event.override, conn.surfaceId);
+        } catch (err) {
+          this.sendControlError(conn, 'invalid_frame', (err as Error).message);
+        }
         return;
       }
       // ---- host-scoped controls the MACHINE owns ----

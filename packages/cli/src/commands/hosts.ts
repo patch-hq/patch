@@ -81,6 +81,54 @@ async function hostRoute(
   return { t: getTransport({ ...opts, remote: true }), path: restPath(hostId) };
 }
 
+/**
+ * A pause end time: an ISO date-time, a clock time `HH:MM` (its next occurrence,
+ * local), or a duration like `90m` / `6h` / `2d`. Anything else is an error.
+ */
+export function parseUntil(text: string, now: Date = new Date()): number {
+  const dur = /^(\d+)\s*([mhd])$/.exec(text);
+  if (dur) {
+    const unit = { m: 60_000, h: 3_600_000, d: 86_400_000 }[dur[2] as 'm' | 'h' | 'd'];
+    return now.getTime() + Number(dur[1]) * unit;
+  }
+  const clock = /^(\d{1,2}):(\d{2})$/.exec(text);
+  if (clock) {
+    const at = new Date(now);
+    at.setHours(Number(clock[1]), Number(clock[2]), 0, 0);
+    if (Number(clock[1]) > 23 || Number(clock[2]) > 59) throw new Error(`"${text}" is not a time`);
+    if (at.getTime() <= now.getTime()) at.setDate(at.getDate() + 1);
+    return at.getTime();
+  }
+  const ms = Date.parse(text);
+  if (Number.isNaN(ms)) {
+    throw new Error(`"${text}" is not a time — use HH:MM, a duration like 6h, or an ISO date-time`);
+  }
+  if (ms <= now.getTime()) throw new Error(`"${text}" is already in the past`);
+  return ms;
+}
+
+/** The override body for `update-policy <mode> [time]`; null clears it. */
+export function policyOverride(
+  mode: string,
+  time: string | undefined,
+  now: Date = new Date(),
+): { enabled: boolean; until?: number } | null {
+  switch (mode) {
+    case 'on':
+    case 'off':
+      if (time !== undefined) throw new Error(`"${mode}" takes no time — use "until <time>"`);
+      return { enabled: mode === 'on' };
+    case 'until':
+      if (time === undefined) throw new Error('"until" needs a time, e.g. until 02:00');
+      return { enabled: false, until: parseUntil(time, now) };
+    case 'default':
+      if (time !== undefined) throw new Error('"default" takes no time');
+      return null;
+    default:
+      throw new Error(`unknown mode "${mode}" — use on, off, until <time> or default`);
+  }
+}
+
 export function registerHostsCommands(program: Command): void {
   const hosts = program.command('hosts').description('Machines this account runs on');
 
@@ -375,6 +423,22 @@ export function registerHostsCommands(program: Command): void {
             ...(hostId ? { hostId } : {}),
           }),
         );
+      });
+    });
+
+  hosts
+    .command('update-policy <mode> [time]')
+    .description(
+      "This machine's auto-update, overriding the shared default: on | off | until <time> (off until then, then back to the default) | default",
+    )
+    .requiredOption('--host <h>', 'machine name or hostId prefix')
+    .option('--json', 'JSON output')
+    .action(async (mode: string, time: string | undefined, opts: HostsOpts) => {
+      await run(opts, async () => {
+        const override = policyOverride(mode, time);
+        const t = getTransport({ ...opts, remote: true });
+        const hostId = await resolveHost(opts);
+        emitJson(await t.post<unknown>('/api/hosts/auto-update', { override, hostId }));
       });
     });
 

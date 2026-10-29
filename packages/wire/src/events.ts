@@ -2636,6 +2636,39 @@ export const SettingsAccountSignedInEvent = z
 export type SettingsAccountSignedInEvent = z.infer<typeof SettingsAccountSignedInEvent>;
 
 /**
+ * One machine's own say over auto-update, overriding the shared `autoUpdateHosts`
+ * default (spec/02 § Installation). `enabled` is the machine's own answer; when
+ * `until` (epoch ms) is set the override lapses at that instant and the shared
+ * default applies again, so "off until 02:00" needs no timer to switch it back.
+ */
+export const HostAutoUpdateOverride = z
+  .object({
+    enabled: z.boolean(),
+    until: z.number().int().positive().optional(),
+  })
+  .strict();
+export type HostAutoUpdateOverride = z.infer<typeof HostAutoUpdateOverride>;
+
+/** The override while it is in force: a lapsed `until` no longer counts. */
+export function activeAutoUpdateOverride(
+  override: HostAutoUpdateOverride | null | undefined,
+  now: number,
+): HostAutoUpdateOverride | undefined {
+  if (!override) return undefined;
+  if (override.until !== undefined && override.until <= now) return undefined;
+  return override;
+}
+
+/** Whether a machine auto-updates: its own override if in force, else the shared default. */
+export function effectiveAutoUpdate(
+  shared: boolean,
+  override: HostAutoUpdateOverride | null | undefined,
+  now: number,
+): boolean {
+  return activeAutoUpdateOverride(override, now)?.enabled ?? shared;
+}
+
+/**
  * A host's self-description (spec/03 § Session events → `host.host`,
  * spec/02 § Host identity). Emitted by the host on connect and whenever any
  * field changes; the server caches the last report per host and replays it in
@@ -2662,6 +2695,12 @@ export const HostInfoEvent = z
     builtAt: z.string().min(1).optional(),
     /** A newer host build is published for this host's os/arch. */
     updateAvailable: z.boolean(),
+    /**
+     * This machine's own auto-update override, while it is in force (a lapsed
+     * `until` is dropped). Absent: the shared `autoUpdateHosts` default applies.
+     * Server-owned, like the name.
+     */
+    autoUpdateOverride: HostAutoUpdateOverride.optional(),
     /** A newer build is published but this host's artifact is still being built; it applies on its own when it lands. */
     updatePending: z.boolean().optional(),
     /** An update is accepted but held: chats on this host are mid-turn and a restart would kill them. It applies once they finish. */
@@ -4868,6 +4907,21 @@ export const HostRenameEvent = z
   })
   .strict();
 export type HostRenameEvent = z.infer<typeof HostRenameEvent>;
+
+/**
+ * Surface → server, then server → host: set (or, with `override: null`, clear) a
+ * machine's auto-update override. The server owns the registry entry, records it,
+ * republishes `host.host`, and tells the machine so its own schedule agrees. It
+ * also tells the machine as it attaches.
+ */
+export const HostSetAutoUpdateEvent = z
+  .object({
+    type: z.literal('host.set_auto_update'),
+    ...hostIdField,
+    override: HostAutoUpdateOverride.nullable(),
+  })
+  .strict();
+export type HostSetAutoUpdateEvent = z.infer<typeof HostSetAutoUpdateEvent>;
 
 /**
  * Server → host: this machine does (or does not) run the Manager and Speakers.
@@ -9062,6 +9116,7 @@ export const HOST_ADDRESSED_SURFACE_EVENTS = [
   'chat.spawn_request',
   'patch.spawn',
   'host.rename',
+  'host.set_auto_update',
   'host.settings',
   'host.component_install',
   'host.component_remove',
@@ -9146,6 +9201,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   NewChatDraftAttachmentsListEvent,
   // Host controls (spec/03 § Host events)
   HostRenameEvent,
+  HostSetAutoUpdateEvent,
   HostSetManagerEvent,
   HostRemovedEvent,
   SigninRequestedEvent,
@@ -9452,6 +9508,7 @@ export const EVENT_SCHEMAS = {
   'new_chat_draft.attachments_changed': NewChatDraftAttachmentsChangedEvent,
   'new_chat_draft.attachments_list': NewChatDraftAttachmentsListEvent,
   'host.rename': HostRenameEvent,
+  'host.set_auto_update': HostSetAutoUpdateEvent,
   'host.set_manager': HostSetManagerEvent,
   'host.removed': HostRemovedEvent,
   'signin.requested': SigninRequestedEvent,

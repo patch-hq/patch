@@ -1022,6 +1022,13 @@ export const api = {
   // connected surface (this one included) is also sent `host.removed
   // {hostId}` and should drop the host from its list; the answer carries the
   // remaining roster. 404 `unknown_host` for an id the account does not hold.
+  // One machine's auto-update, overriding the shared setting (`override: null`
+  // clears it; `until` is epoch ms and makes an off lapse by itself).
+  setHostAutoUpdate: (hostId: string, override: { enabled: boolean; until?: number } | null) =>
+    request<{ ok: true }>('/api/hosts/auto-update', {
+      method: 'POST',
+      body: { hostId, override },
+    }),
   removeHost: (hostId: string) =>
     request<{ ok: true; hosts: AuthOkHost[] }>(`/api/hosts/${encodeURIComponent(hostId)}`, {
       method: 'DELETE',

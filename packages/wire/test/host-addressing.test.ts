@@ -640,6 +640,7 @@ describe('the host-addressed surface set is enumerable, so the gate can be compl
         'host.folder_add',
         'host.folder_remove',
         'host.rename',
+        'host.set_auto_update',
         'host.settings',
         'host.update',
         'patch.folders.browse.request',

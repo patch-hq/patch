@@ -44,6 +44,8 @@ export interface HostDescriptionInput {
   updatePending?: boolean | undefined;
   /** An update is held until this machine's running turns finish. */
   updateHeld?: boolean | undefined;
+  /** This machine's auto-update override while in force (server-owned; mirrored here). */
+  autoUpdateOverride?: { enabled: boolean; until?: number | undefined } | undefined;
   permissionModeDefault: SdkPermissionMode;
   permissionOverrides: number;
   /**
@@ -139,6 +141,16 @@ export function describeHost(input: HostDescriptionInput): HostInfoEvent {
     updateAvailable: input.updateAvailable,
     ...(input.updatePending ? { updatePending: true } : {}),
     ...(input.updateHeld ? { updateHeld: true } : {}),
+    ...(input.autoUpdateOverride
+      ? {
+          autoUpdateOverride: {
+            enabled: input.autoUpdateOverride.enabled,
+            ...(input.autoUpdateOverride.until !== undefined
+              ? { until: input.autoUpdateOverride.until }
+              : {}),
+          },
+        }
+      : {}),
     permissionModeDefault: input.permissionModeDefault,
     permissionOverrides: input.permissionOverrides,
     ...(input.defaultModel !== undefined ? { defaultModel: input.defaultModel } : {}),

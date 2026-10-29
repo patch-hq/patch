@@ -77,6 +77,9 @@ import {
   QUESTION_EXPIRY_SECONDS_DEFAULT,
   DEFAULT_QUESTION_EXPIRED_PROMPT,
   refusingRateLimitScope,
+  activeAutoUpdateOverride,
+  effectiveAutoUpdate,
+  type HostAutoUpdateOverride,
 } from '@patch/wire';
 import type { Logger } from 'pino';
 import { randomUUID } from 'node:crypto';
@@ -794,6 +797,8 @@ async function startHost(
   // Whether the scheduled check installs a published build itself. A manual
   // `host.update` and an unreadable server greeting always apply.
   let autoUpdateHosts = persistedHostState.autoUpdateHosts ?? true;
+  let autoUpdateOverride: HostAutoUpdateOverride | undefined =
+    persistedHostState.autoUpdateOverride;
 
   /**
    * Whether an unanswered question on this host expires, and the window it is
@@ -1103,6 +1108,9 @@ async function startHost(
       updateAvailable,
       updatePending,
       updateHeld,
+      ...(activeAutoUpdateOverride(autoUpdateOverride, Date.now())
+        ? { autoUpdateOverride: activeAutoUpdateOverride(autoUpdateOverride, Date.now()) }
+        : {}),
       permissionModeDefault: daemon.permissionModeDefault(),
       permissionOverrides: daemon.permissionOverrideCount(),
       ...(defaultModel !== undefined ? { defaultModel } : {}),
@@ -2666,6 +2674,15 @@ async function startHost(
         hostStateStore.update({ hostName: event.hostName });
         logger.info({ hostName }, 'host renamed');
         sender(describeHost());
+        return;
+      }
+      if (event.type === 'host.set_auto_update') {
+        // SERVER-owned, like the name: the registry holds the override, this keeps
+        // the machine's own schedule in step and persists it across restarts.
+        if (!isForThisHost(event.hostId, event.type)) return;
+        autoUpdateOverride = event.override ?? undefined;
+        hostStateStore.update({ autoUpdateOverride });
+        logger.info({ autoUpdateOverride }, 'auto-update override changed');
         return;
       }
       if (event.type === 'host.manager_adopt') {
@@ -4590,7 +4607,10 @@ async function startHost(
     // already knows how to do this safely: nothing happens with no update
     // published, and a busy machine defers until idle rather than killing a
     // running turn.
-    if (autoUpdateHosts && (check.available || check.awaitingArtifact)) {
+    if (
+      effectiveAutoUpdate(autoUpdateHosts, autoUpdateOverride, Date.now()) &&
+      (check.available || check.awaitingArtifact)
+    ) {
       const result = await applyUpdateOnce();
       if (!result.applied && !result.deferred) {
         logger.warn({ reason: result.message }, 'self-update: scheduled apply refused');
