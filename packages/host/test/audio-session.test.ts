@@ -202,6 +202,58 @@ describe('VoiceSession', () => {
     expect(session.getState()).toBe('listening');
   });
 
+  test('a streaming backend gives live partials, no prefix re-reads, and its seconds are costed', async () => {
+    const audio: AudioEvent[] = [];
+    let emit: (t: string) => void = () => {};
+    let closed = 0;
+    let pushedSamples = 0;
+    const transcribe = vi.fn(async () => 'hello world');
+    const whisper = {
+      supportsLivePartials: false,
+      costModel: 'scribe_v2',
+      transcribe,
+      transcribeClip: async () => '',
+      close: async () => {},
+      openLiveStream: (onText: (t: string) => void) => {
+        emit = onText;
+        return {
+          push: (pcm: Int16Array) => {
+            pushedSamples += pcm.length;
+          },
+          close: () => {
+            closed += 1;
+          },
+          get audioSeconds() {
+            return pushedSamples / 16000;
+          },
+        };
+      },
+    } as unknown as WhisperBackend;
+    const session = new VoiceSession(
+      initBase,
+      depsForTest({
+        whisper,
+        kokoro: mockKokoro({ chunks: 1 }),
+        vad: new ScriptedVad(['utterance_start', null, 'utterance_end']),
+        capturedAudio: audio,
+        binaryFrames: [],
+        reply: 'ok',
+      }),
+    );
+    session.onSessionStart();
+    await session.onMicFrame(new Int16Array(16000));
+    emit('hello wor');
+    await session.onMicFrame(new Int16Array(16000));
+    await session.onMicFrame(new Int16Array(16000));
+    await session.waitForSpeakDone();
+    expect(audio.find((e) => e.type === 'audio.transcript_partial')).toMatchObject({
+      text: 'hello wor',
+    });
+    expect(transcribe).toHaveBeenCalledTimes(1);
+    expect(closed).toBe(1);
+    expect(session.engineCosting().stt?.audioSeconds).toBeGreaterThan(0);
+  });
+
   test('app surface (web) stamps a voice-app source with its surfaceKind', async () => {
     let captured: VoiceTurnSource | undefined;
     const vad = new ScriptedVad(['utterance_start', 'utterance_end']);

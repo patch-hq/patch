@@ -63,6 +63,13 @@ export const PROVIDER_KEYS: readonly ProviderKeyInfo[] = [
     envVar: 'DEEPGRAM_API_KEY',
     usedFor: 'Live dictation on the deepgram engine',
   },
+  {
+    id: 'elevenlabs',
+    label: 'ElevenLabs',
+    envVar: 'ELEVEN_LABS_API_KEY',
+    usedFor:
+      'Scribe transcription: dictation on the elevenlabs engine, or WHISPER_BACKEND=elevenlabs',
+  },
 ];
 
 export function providerKeyInfo(id: ProviderKeyId): ProviderKeyInfo {
