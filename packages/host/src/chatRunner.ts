@@ -473,6 +473,8 @@ export interface HostOptions {
    * hands the window off rather than emitting `host.account` itself.
    */
   onRateLimit?: (chatId: string, scope: 'session' | 'week', window: RateLimitWindow) => void;
+  /** A turn ended (however it ended) on this account, if it had one. */
+  onTurnEnd?: (chatId: string, accountId: string | undefined) => void;
   logger: Logger;
   /** MCP child the SDK should launch per-query (real backend only). */
   mcpServer?: { command: string; args: string[]; env: Record<string, string> };
@@ -14747,6 +14749,7 @@ export class Daemon {
     }
     this.chatLog.endTurn(chatId);
     this.turnBranches.delete(chatId);
+    this.opts.onTurnEnd?.(chatId, this.runningOnAccount.get(chatId));
     try {
       this.mirrorSeqToMeta(chatId);
     } catch (err) {
