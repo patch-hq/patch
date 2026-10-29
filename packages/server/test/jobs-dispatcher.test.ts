@@ -1568,19 +1568,26 @@ describe('JobDispatcher', () => {
     });
 
     it('an unanswered fire is sent again, and settles ok when the host answers the resend', async () => {
-      const { link, logs, disp } = setup();
-      const sentEvents = (): Array<{ chatId?: string }> => link.sent.map((x) => x.event);
-      const result = disp.dispatch(makeJob({ id: JOB_ID }), {}, 'webhook');
-      const chatId = result.event.chatId as string;
-      await new Promise((r) => setTimeout(r, 110));
-      // Nothing is recorded as failed while a resend is still to come.
-      expect(logs.readRuns(JOB_ID)).toHaveLength(0);
-      expect(sentEvents().length).toBeGreaterThanOrEqual(2);
-      link.emit({ type: 'chat.spawned', chatId, hostId: 'd1', folder: '/work' });
-      const runs = logs.readRuns(JOB_ID);
-      expect(runs).toHaveLength(1);
-      expect(runs[0]?.status).toBe('ok');
-      disp.close();
+      // Plenty of resends and a polled wait, so a loaded CI box that fires timers late
+      // cannot exhaust the retries before the host answers.
+      const { link, logs, disp } = setup({ ackRetries: 50 });
+      try {
+        const result = disp.dispatch(makeJob({ id: JOB_ID }), {}, 'webhook');
+        const chatId = result.event.chatId as string;
+        const deadline = Date.now() + 5000;
+        while (link.sent.length < 2 && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 10));
+        }
+        // Nothing is recorded as failed while a resend is still to come.
+        expect(logs.readRuns(JOB_ID)).toHaveLength(0);
+        expect(link.sent.length).toBeGreaterThanOrEqual(2);
+        link.emit({ type: 'chat.spawned', chatId, hostId: 'd1', folder: '/work' });
+        const runs = logs.readRuns(JOB_ID);
+        expect(runs).toHaveLength(1);
+        expect(runs[0]?.status).toBe('ok');
+      } finally {
+        disp.close();
+      }
     });
 
     it('goes on retrying until the resends are spent: 1 send + N resends, then one dispatch-error', async () => {
