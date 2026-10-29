@@ -539,9 +539,13 @@ describe('what the install puts on the machine', () => {
       async status() {
         return '';
       },
+      async runState() {
+        return { running: true, pid: 1, detail: 'active' };
+      },
     };
     const runtime = join(home, '.patch', 'runtime');
     mkdirSync(runtime, { recursive: true });
+    writeFileSync(join(home, '.patch', 'daemon.key'), 'an-existing-daemon-key');
     writeFileSync(join(runtime, 'patch-host'), 'old bare binary');
     const argv = ['--non-interactive', '--server', 'http://s', '--internal-token', 't'];
     await runInstaller(
@@ -562,6 +566,39 @@ describe('what the install puts on the machine', () => {
     expect(plist).toContain('<string>me.tomchambers.patch-host</string>');
     expect(plist).toContain('<string>patch-host</string>');
     expect(existsSync(join(runtime, 'patch-host'))).toBe(false);
+  });
+
+  it('leaves the old runtime binary alone when the update fails', async () => {
+    const home = mkTmp('patch-home-');
+    const ops: ServiceOps = {
+      async register() {
+        return { unitPath: '/u', notes: [] };
+      },
+      async start() {},
+      async status() {
+        return '';
+      },
+      async runState() {
+        return { running: false, detail: 'exited' };
+      },
+    };
+    const runtime = join(home, '.patch', 'runtime');
+    mkdirSync(runtime, { recursive: true });
+    writeFileSync(join(home, '.patch', 'daemon.key'), 'an-existing-daemon-key');
+    writeFileSync(join(runtime, 'patch-host'), 'running host binary');
+    const res = await runInstaller(
+      makeCtx({
+        home,
+        serviceOps: ops,
+        argv: ['--non-interactive', '--server', 'http://s', '--internal-token', 't'],
+        artifactDir: makeArtifact('darwin-arm64'),
+        platform: 'darwin',
+        arch: 'arm64',
+        loginShellPath: () => '/usr/bin',
+      }),
+    );
+    expect(res.code).not.toBe(0);
+    expect(readFileSync(join(runtime, 'patch-host'), 'utf8')).toBe('running host binary');
   });
 
   it('prunes old version folders, keeping the new install and the previous one', async () => {

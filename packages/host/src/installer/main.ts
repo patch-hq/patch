@@ -27,7 +27,7 @@
 // (spec/11, unhappy paths). Nothing here is a fallback: each failure stops the
 // install where it is and says which step failed and why.
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   copyFileSync,
@@ -419,12 +419,12 @@ export function sameRuntimeBinary(installed: string, bundled: string): boolean {
 }
 
 function cdHash(file: string): string {
-  const out = execFileSync('codesign', ['-d', '-vvv', file], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  // codesign writes its description to stderr, so read both streams.
+  const r = spawnSync('codesign', ['-d', '-vvv', file], { encoding: 'utf8' });
+  if (r.error) throw r.error;
+  const out = `${r.stdout}\n${r.stderr}`;
   const m = /^CDHash=(\S+)$/m.exec(out);
-  if (!m) throw new Error(`codesign reported no CDHash for ${file}`);
+  if (!m) throw new Error(`codesign reported no CDHash for ${file}: ${r.stderr.trim()}`);
   return m[1]!;
 }
 
@@ -530,10 +530,7 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
     writeFileSync(join(dirname(stableNode), '..', 'Info.plist'), hostAppInfoPlist(build.version), {
       encoding: 'utf8',
     });
-    // The pre-bundle bare binary; leaving it would keep a second, prompting runtime on disk.
-    rmSync(join(runtimeDir, 'patch-host'), { force: true });
   }
-  rmSync(join(patchHome, 'node'), { force: true });
   const bundledNode = join(installDir, 'node');
   if (existsSync(bundledNode)) {
     const same = existsSync(stableNode) && sameRuntimeBinary(stableNode, bundledNode);
@@ -833,6 +830,12 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
     io.out('');
     io.out(`  This machine is ${machine}. It appears under Settings → Hosts.`);
   }
+  // Legacy runtimes go only now that the update has fully succeeded. A running
+  // host may have been launched from one, and its turn runners spawn that path:
+  // removing it on an attempt that then failed left every new turn with ENOENT.
+  // The pre-bundle bare binary would otherwise keep a second, prompting runtime on disk.
+  if (ctx.platform === 'darwin') rmSync(join(runtimeDir, 'patch-host'), { force: true });
+  rmSync(join(patchHome, 'node'), { force: true });
   return { code: 0 };
 }
 
