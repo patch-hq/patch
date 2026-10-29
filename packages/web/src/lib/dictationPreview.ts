@@ -41,8 +41,12 @@ export interface DictationPreview {
   stop(): void;
 }
 
-/** How long a finish waits for the host's answer (its own waits sum to 9 s). */
-export const FINISH_TIMEOUT_MS = 15_000;
+/**
+ * How long a finish waits for the host's answer. The host waits for the last
+ * tidy-up (up to Whisper's 20 s request timeout) on top of 6 s of its own, and
+ * the user must get the tidied words, not a timeout.
+ */
+export const FINISH_TIMEOUT_MS = 45_000;
 
 export interface DictationPreviewCallbacks {
   /** An interim transcript of what has been said so far. */

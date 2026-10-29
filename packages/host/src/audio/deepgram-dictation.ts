@@ -36,8 +36,6 @@ const DEEPGRAM_LISTEN_WSS = 'wss://api.deepgram.com/v1/listen';
 const ENDPOINTING_MS = 300;
 /** How long a finish waits for Deepgram to flush its last words. */
 export const FINALIZE_TIMEOUT_MS = 3000;
-/** How long a finish waits for the tidy-up of the phrases still in flight. */
-export const TIDY_WAIT_MS = 6000;
 /** Audio kept either side of a phrase's own timestamps, so Whisper hears its edges. */
 const TIDY_PAD_S = 0.25;
 /** Audio held for tidy-up. Past this the oldest goes, and so does its tidy-up. */
@@ -224,12 +222,10 @@ export class DeepgramDictationSession implements VoiceSessionLike {
     }
     const last = this.phrases[this.phrases.length - 1];
     if (last && !last.closed) this.closePhrase(last);
-    if (this.tidying.size > 0) {
-      await Promise.race([
-        Promise.allSettled([...this.tidying]),
-        new Promise((r) => setTimeout(r, TIDY_WAIT_MS)),
-      ]);
-    }
+    // Stopping must never make the text worse than the tidied preview: wait
+    // for every tidy-up still in flight. Each is bounded by Whisper's own
+    // request timeout, and a failed one is reported (never a silent raw swap).
+    await Promise.allSettled([...this.tidying]);
     if (this.failed) return;
     this.deps.sendAudio({
       type: 'audio.transcript_final',
