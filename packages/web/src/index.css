@@ -17441,7 +17441,7 @@ select.permission-mode.is-pending {
 .prompt-editor-bar { display: flex; justify-content: space-between; align-items: center; }
 .prompt-editor-tabs { display: flex; gap: 4px; }
 .prompt-editor-bar button,
-.prompt-editor-find button { font-size: var(--text-min); padding: 2px 10px; }
+.prompt-editor-find button { font-size: 15px; padding: 2px 10px; }
 .prompt-editor-tabs button[aria-selected='true'] { font-weight: 600; text-decoration: underline; }
 .prompt-editor-find { display: flex; align-items: center; gap: 8px; }
 .prompt-editor-find input { flex: 1; min-width: 0; }
