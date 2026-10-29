@@ -275,6 +275,39 @@ async function pairingCode(args: Args, io: InstallerIo): Promise<string | undefi
   return code.length > 0 ? code : undefined;
 }
 
+/** Bundle id of the macOS host app. Also the signing identifier of its executable (build-host). */
+export const HOST_APP_BUNDLE_ID = SERVICE_LABEL;
+
+/** `<runtime>/Patch Host.app/Contents/MacOS/patch-host`: the macOS service executable. */
+export function hostAppExecutable(runtimeDir: string): string {
+  return join(runtimeDir, 'Patch Host.app', 'Contents', 'MacOS', 'patch-host');
+}
+
+/** The Info.plist that makes the runtime a bundle, so TCC remembers one decision for it. */
+export function hostAppInfoPlist(version: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>${HOST_APP_BUNDLE_ID}</string>
+  <key>CFBundleName</key>
+  <string>Patch Host</string>
+  <key>CFBundleExecutable</key>
+  <string>patch-host</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleVersion</key>
+  <string>${version}</string>
+  <key>CFBundleShortVersionString</key>
+  <string>${version}</string>
+  <key>LSUIElement</key>
+  <true/>
+</dict>
+</plist>
+`;
+}
+
 /** Which service manager this machine has. Anything else is not a target. */
 export function serviceManagerFor(platform: NodeJS.Platform): ServiceManager {
   if (platform === 'darwin') return 'launchd';
@@ -483,8 +516,23 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
   // Named "patch-host" rather than "node", so the one entry in the privacy
   // list is recognisably Patch's. A real file (never a symlink), overwritten
   // in place by each update that ships a different binary.
-  const stableNode = join(patchHome, 'runtime', 'patch-host');
+  //
+  // On macOS the runtime lives inside a minimal .app bundle with its own bundle
+  // id. A bare Mach-O has no Info.plist, so TCC keys it by signing identifier
+  // ("node") and does not keep an Allow across processes: every child the agent
+  // spawned raised "patch-host would like to access data from other apps"
+  // again. A bundle id gives the decision something to attach to.
+  const runtimeDir = join(patchHome, 'runtime');
+  const stableNode =
+    ctx.platform === 'darwin' ? hostAppExecutable(runtimeDir) : join(runtimeDir, 'patch-host');
   mkdirSync(dirname(stableNode), { recursive: true });
+  if (ctx.platform === 'darwin') {
+    writeFileSync(join(dirname(stableNode), '..', 'Info.plist'), hostAppInfoPlist(build.version), {
+      encoding: 'utf8',
+    });
+    // The pre-bundle bare binary; leaving it would keep a second, prompting runtime on disk.
+    rmSync(join(runtimeDir, 'patch-host'), { force: true });
+  }
   rmSync(join(patchHome, 'node'), { force: true });
   const bundledNode = join(installDir, 'node');
   if (existsSync(bundledNode)) {
