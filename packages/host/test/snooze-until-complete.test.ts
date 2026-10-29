@@ -131,4 +131,23 @@ describe('Snooze until complete', () => {
     first.release();
     a.daemon.shutdown();
   });
+
+  it('a turn that errors while the host is going down does not end it', async () => {
+    const failing: SdkBackend = {
+      run: async function* () {
+        await sleep(30);
+        throw new Error('claude process exited');
+      },
+    };
+    const { daemon, folder, metaStore } = setup(failing);
+    const id = await daemon.spawnChat({ folder });
+    void daemon.sendInput({ chatId: id, message: 'go', localId: 'L1', origin: 'user' });
+    await sleep(10);
+    await daemon.setSnoozed(id, SNOOZE_UNTIL_COMPLETE);
+    daemon.beginShutdown();
+    await sleep(120);
+    expect(daemon.chatState.get(id)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
+    expect(metaStore.read(id)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
+    daemon.shutdown();
+  });
 });

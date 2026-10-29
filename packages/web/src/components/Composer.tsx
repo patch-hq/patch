@@ -80,6 +80,7 @@ import {
   providerForModel,
   SPECIAL_THREAD_IDS,
 } from '@patch/wire';
+import { voiceKeyHostStatus } from '@patch/wire/audio';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { providerConnectedForModel, usePreferencesStore } from '../stores/preferencesStore.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -535,6 +536,18 @@ export const Composer = forwardRef(function Composer(
   // daemon-offline reason. `offline` (WS link down) still disables voice/attach
   // — there's nothing to upload/stream into.
   const voiceDisabled = offline || !hostOnline;
+  // Dictation that is certain to fail is not offered: web/desktop dictation on
+  // an engine whose key this chat's machine lacks is refused at the host, so
+  // the mic greys out and says why. Unknown (host not reported) is not blocked.
+  const computerDictationEngine = usePreferencesStore(
+    (s) => s.preferences.voiceConfig.dictation.computer,
+  );
+  const chatHostPresence = usePresenceStore((s) => (hostId ? s.hosts[hostId] : undefined));
+  const dictationBlockedReason = chatHostPresence?.host
+    ? voiceKeyHostStatus(computerDictationEngine, [
+        { hostName: chatHostPresence.host.hostName, voiceKeys: chatHostPresence.host.voiceKeys },
+      ])
+    : null;
   // A missing Claude credential is NOT like daemon-offline. Daemon-offline queues
   // the text and delivers it on reconnect, so sending stays enabled; with no
   // credential the turn can never run, so accepting the message would be a lie.
@@ -1488,7 +1501,14 @@ export const Composer = forwardRef(function Composer(
     setDictPending(0);
   }
   function startDictMode(): void {
-    if (voiceDisabled || noteMode || noteActive || micState !== 'idle') return;
+    if (
+      voiceDisabled ||
+      dictationBlockedReason !== null ||
+      noteMode ||
+      noteActive ||
+      micState !== 'idle'
+    )
+      return;
     if (dictModeRef.current) {
       stopDictationMode();
       return;
@@ -1535,7 +1555,7 @@ export const Composer = forwardRef(function Composer(
       return;
     }
     /* v8 ignore next -- defensive only: the mic button carries `disabled={voiceDisabled}`, and React suppresses onMouseDown dispatch entirely on a disabled form control (verified: fireEvent.mouseDown on a disabled button never invokes the handler), so `onMicDown` can never actually run while `voiceDisabled` is true. */
-    if (voiceDisabled) return;
+    if (voiceDisabled || dictationBlockedReason !== null) return;
     // A note already in flight (sidebar row, ⌘⇧D/⌃Space hotkey, or the new-chat
     // mic whose note survives the navigation into the chat it created) is ENDED
     // by this press — never shadowed by a second, overlapping recording
@@ -2498,11 +2518,13 @@ export const Composer = forwardRef(function Composer(
               title={
                 !offline && !hostOnline
                   ? 'Voice unavailable while the agent is offline (audio can’t be queued)'
-                  : noteMode
-                    ? shortcutTitle('Voice note', chordGlyphs(dictateChord))
-                    : micState === 'transcribing'
-                      ? 'Transcribing…'
-                      : shortcutTitle('Dictate', chordGlyphs(dictateChord))
+                  : dictationBlockedReason !== null
+                    ? dictationBlockedReason
+                    : noteMode
+                      ? shortcutTitle('Voice note', chordGlyphs(dictateChord))
+                      : micState === 'transcribing'
+                        ? 'Transcribing…'
+                        : shortcutTitle('Dictate', chordGlyphs(dictateChord))
               }
               // Only the primary button dictates: a right-click opens the mic
               // menu (onContextMenu), and its own mousedown must not also start
@@ -2514,7 +2536,14 @@ export const Composer = forwardRef(function Composer(
                 if (e.button === 0) onMicUp(e.timeStamp);
               }}
               onContextMenu={(e) => {
-                if (voiceDisabled || noteMode || noteActive || micState !== 'idle' || dictModeOn) {
+                if (
+                  voiceDisabled ||
+                  dictationBlockedReason !== null ||
+                  noteMode ||
+                  noteActive ||
+                  micState !== 'idle' ||
+                  dictModeOn
+                ) {
                   e.preventDefault();
                   return;
                 }
@@ -2524,7 +2553,9 @@ export const Composer = forwardRef(function Composer(
                 // Pointer left while holding: commit (release-sends / release-dictates).
                 if (pressAt.current !== null) onMicUp(e.timeStamp);
               }}
-              disabled={voiceDisabled || micState === 'transcribing'}
+              disabled={
+                voiceDisabled || dictationBlockedReason !== null || micState === 'transcribing'
+              }
             >
               <Mic size={ICON_SIZE} aria-hidden />
             </button>

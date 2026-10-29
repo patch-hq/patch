@@ -15,7 +15,7 @@ import type { AudioSurfaceKind, AudioSessionMode } from '@patch/wire/audio';
 import type { AudioEvent } from '@patch/wire/audio';
 import type { Vad } from './vad.js';
 import type { AecProcessor } from './aec.js';
-import type { WhisperBackend } from './whisper.js';
+import type { LiveTranscriptStream, WhisperBackend } from './whisper.js';
 import type { KokoroBackend, KokoroSynthesis } from './kokoro.js';
 import { modeRequiresAddress } from '@patch/wire/audio';
 import { stripMarkdownForSpeech, extractSentences } from './speechText.js';
@@ -330,6 +330,8 @@ export class VoiceSession implements VoiceSessionLike {
   private lastPartialText = '';
   /** Set when interim STT failed; stops retrying for the current utterance. */
   private partialsDisabledForUtterance = false;
+  /** Streaming live words for the utterance in progress (backends with `openLiveStream`). */
+  private liveStream?: LiveTranscriptStream;
   // A NOTE is dictation: its live transcript covers everything said since the
   // gesture began, not just the phrase since the last pause. The buffer still
   // resets per phrase (it is capped at 30 s), so the words of each finished
@@ -362,6 +364,28 @@ export class VoiceSession implements VoiceSessionLike {
       stt.billedSeconds += Math.max(GROQ_MIN_BILLED_SECONDS, seconds);
       return text;
     };
+    if (whisper.openLiveStream) {
+      // A live stream is billed by the audio it was sent; count it when it closes.
+      counted.openLiveStream = (onText, onError) => {
+        const inner = whisper.openLiveStream!(onText, onError);
+        let counted = false;
+        return {
+          push: (pcm) => inner.push(pcm),
+          get audioSeconds() {
+            return inner.audioSeconds;
+          },
+          close: () => {
+            if (!counted) {
+              counted = true;
+              stt.requests += 1;
+              stt.audioSeconds += inner.audioSeconds;
+              stt.billedSeconds += inner.audioSeconds;
+            }
+            inner.close();
+          },
+        };
+      };
+    }
     this.whisper = counted;
     this.deps = deps;
     this.currentChatId = init.chatId;
@@ -559,8 +583,10 @@ export class VoiceSession implements VoiceSessionLike {
       }
       this.utteranceLen = 0;
       this.resetPartials();
+      this.openLiveStream();
     }
     if (this.state === 'listening' || this.state === 'speaking') {
+      if (this.state === 'listening') this.liveStream?.push(cleaned.slice());
       // Append `cleaned` into the pre-allocated utterance buffer. If the
       // utterance overflows 30s, drop the head — STT can't usefully work
       // on a half-hour utterance anyway.
@@ -646,6 +672,43 @@ export class VoiceSession implements VoiceSessionLike {
       sessionId: this.init.sessionId,
       text,
     });
+  }
+
+  /**
+   * A backend that streams (`openLiveStream`) gets the utterance's audio as it
+   * arrives and its words are the live transcript. The committed transcript is
+   * still the one `runTurn` reads from the whole utterance.
+   */
+  private openLiveStream(): void {
+    this.closeLiveStream();
+    if (!this.whisper.openLiveStream || this.init.surfaceKind === 'device') return;
+    const seq = this.phraseSeq;
+    this.liveStream = this.whisper.openLiveStream(
+      (text) => {
+        if (this.state !== 'listening' || seq !== this.phraseSeq || text === this.lastPartialText) {
+          return;
+        }
+        this.lastPartialText = text;
+        this.sendPartial(text);
+      },
+      (message) => {
+        this.deps.logger.error(
+          { sessionId: this.init.sessionId, err: message },
+          'voice-session: live transcript stream failed',
+        );
+        this.deps.sendAudio({
+          type: 'audio.error',
+          code: 'whisper_unavailable',
+          message: `Live transcript failed: ${message}`,
+          sessionId: this.init.sessionId,
+        });
+      },
+    );
+  }
+
+  private closeLiveStream(): void {
+    this.liveStream?.close();
+    this.liveStream = undefined;
   }
 
   /** Clear interim-transcript bookkeeping at an utterance boundary. */
@@ -843,6 +906,7 @@ export class VoiceSession implements VoiceSessionLike {
     const merged = this.utterance.subarray(0, this.utteranceLen);
     this.utteranceLen = 0;
     this.resetPartials();
+    this.closeLiveStream();
     let transcript: string;
     const sttStarted = Date.now();
     this.deps.logger.info(
@@ -1418,6 +1482,7 @@ export class VoiceSession implements VoiceSessionLike {
   }
 
   async close(): Promise<void> {
+    this.closeLiveStream();
     if (this.kokoroStream) {
       await this.kokoroStream.cancel();
       this.kokoroStream = undefined;

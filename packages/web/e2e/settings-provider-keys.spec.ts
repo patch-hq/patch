@@ -73,6 +73,7 @@ test.describe('Settings — Providers', () => {
         { id: 'openai', source: 'none', envSet: false },
         { id: 'groq', source: 'env', last4: 'q9Zk', envSet: true },
         { id: 'deepgram', source: 'ui', last4: 'LAST', envSet: false },
+        { id: 'elevenlabs', source: 'none', envSet: false },
       ],
     });
     await page.getByTestId('settings-nav-voice').click();

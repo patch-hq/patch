@@ -57,6 +57,7 @@ import { verifyVoiceToken, VoiceTokenError, type VoiceTokenClaims } from './toke
 import { DEVICE_CONTROL_PATH } from '../devices/control-ws.js';
 import { readKey, type KeySource } from './keySource.js';
 import { DeepgramDictationSession } from './deepgram-dictation.js';
+import { ElevenLabsDictationSession } from './elevenlabs-dictation.js';
 
 /** Spoken once when a local call opens, so the user is never left in silence. */
 const CALL_GREETING = 'Connected.';
@@ -170,6 +171,11 @@ export interface AudioServerOptions {
   /** Test seam: the WebSocket constructor and URL a Deepgram dictation dials. */
   deepgramWsCtor?: typeof import('ws').default;
   deepgramWsUrl?: string;
+  /** ELEVEN_LABS_API_KEY, for dictation on `elevenlabs` (elevenlabs-dictation.ts). */
+  elevenlabsApiKey?: KeySource;
+  /** Test seam: the WebSocket constructor and URL an ElevenLabs dictation dials. */
+  elevenlabsWsCtor?: typeof import('ws').default;
+  elevenlabsWsUrl?: string;
   /** Per-layer overrides of openai-realtime.ts's `DEFAULT_OPENAI_REALTIME_MODELS`. */
   openaiRealtimeModelLight?: string;
   openaiRealtimeModelHeavy?: string;
@@ -841,6 +847,18 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             ...(opts.deepgramWsCtor ? { wsCtor: opts.deepgramWsCtor } : {}),
             ...(opts.deepgramWsUrl ? { wsUrl: opts.deepgramWsUrl } : {}),
           });
+        } else if (dictationEngine === 'elevenlabs') {
+          if (readKey(opts.elevenlabsApiKey) === undefined) {
+            rejectConn(ws, 'voice_key_missing', voiceKeyMissingMessage('dictation', 'elevenlabs'));
+            return;
+          }
+          session = new ElevenLabsDictationSession(sessionInit, {
+            logger: sessionLog,
+            apiKey: opts.elevenlabsApiKey,
+            sendAudio: sendAudioFn,
+            ...(opts.elevenlabsWsCtor ? { wsCtor: opts.elevenlabsWsCtor } : {}),
+            ...(opts.elevenlabsWsUrl ? { wsUrl: opts.elevenlabsWsUrl } : {}),
+          });
         } else {
           // The self-hosted pipeline — and a dictation on Whisper, or a phone
           // on its own recogniser whose dictation-mode preview still needs one.
@@ -998,7 +1016,12 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             );
             return;
           }
-          if (!(session instanceof DeepgramDictationSession)) {
+          if (
+            !(
+              session instanceof DeepgramDictationSession ||
+              session instanceof ElevenLabsDictationSession
+            )
+          ) {
             send(ws, {
               type: 'audio.error',
               code: 'invalid_frame',

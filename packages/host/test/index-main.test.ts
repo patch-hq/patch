@@ -4061,7 +4061,7 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
       await boot.fakeServer.waitForAuthed();
       await boot.fakeServer.waitForFrame((e) => e.type === 'host.host');
       expect(boot.fakeServer.received.find((e) => e.type === 'host.host')).toMatchObject({
-        voiceKeys: { gemini: false, openai: false, deepgram: false },
+        voiceKeys: { gemini: false, openai: false, deepgram: false, elevenlabs: false },
         providerKeys: [
           { id: 'gemini', source: 'none', envSet: false },
           { id: 'openai', source: 'none', envSet: false },
