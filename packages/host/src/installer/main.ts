@@ -371,6 +371,30 @@ export interface InstallResult {
   code: number;
 }
 
+/**
+ * Whether the installed runtime already is the bundled one. On macOS two builds
+ * of the same signed node differ in the signature blob alone, so comparing bytes
+ * rewrote the binary on every update and TCC (which keys its grant to the file)
+ * asked again. The code directory hash covers the code, entitlements and
+ * identifier but not the signature, so equal hashes mean nothing to replace.
+ */
+export function sameRuntimeBinary(installed: string, bundled: string): boolean {
+  if (process.platform === 'darwin') {
+    return cdHash(installed) === cdHash(bundled);
+  }
+  return readFileSync(installed).equals(readFileSync(bundled));
+}
+
+function cdHash(file: string): string {
+  const out = execFileSync('codesign', ['-d', '-vvv', file], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const m = /^CDHash=(\S+)$/m.exec(out);
+  if (!m) throw new Error(`codesign reported no CDHash for ${file}`);
+  return m[1]!;
+}
+
 export async function runInstaller(ctx: InstallerContext): Promise<InstallResult> {
   const { io } = ctx;
   let args: Args;
@@ -464,8 +488,7 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
   rmSync(join(patchHome, 'node'), { force: true });
   const bundledNode = join(installDir, 'node');
   if (existsSync(bundledNode)) {
-    const same =
-      existsSync(stableNode) && readFileSync(stableNode).equals(readFileSync(bundledNode));
+    const same = existsSync(stableNode) && sameRuntimeBinary(stableNode, bundledNode);
     if (!same) {
       const tmp = `${stableNode}.new-${process.pid}`;
       copyFileSync(bundledNode, tmp);

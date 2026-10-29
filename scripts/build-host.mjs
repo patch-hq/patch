@@ -42,7 +42,7 @@ import {
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as ed from '@noble/ed25519';
 import { sha512 } from '@noble/hashes/sha512';
@@ -350,6 +350,8 @@ function codesignMacArtifact(outDir, machos) {
     sh('codesign', [
       '--force',
       '--timestamp=none',
+      '--identifier',
+      basename(file) === 'node' ? 'patch-host' : basename(file),
       '--options',
       'runtime',
       '--entitlements',
