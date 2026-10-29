@@ -4068,7 +4068,6 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
           { id: 'elevenlabs', source: 'none', envSet: false },
           { id: 'groq', source: 'none', envSet: false },
           { id: 'deepgram', source: 'none', envSet: false },
-          { id: 'elevenlabs', source: 'none', envSet: false },
         ],
       });
       const spawnRes = await boot.ready.app.inject({
@@ -4124,7 +4123,6 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
           { id: 'elevenlabs', source: 'none', envSet: false },
           { id: 'groq', source: 'none', envSet: false },
           { id: 'deepgram', source: 'ui', last4: 'LAST', envSet: false },
-          { id: 'elevenlabs', source: 'none', envSet: false },
         ],
       });
       // Nothing the host sent anywhere carries the value.
