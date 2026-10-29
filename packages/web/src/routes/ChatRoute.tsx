@@ -3,6 +3,7 @@
 // Renders header + event stream + composer. Real diff viewer + file browser
 // land in group 19 (the Monaco editor right-rail).
 
+import { isDictatedSend, markDictatedSend } from '../lib/dictatedSends.js';
 import { useViewPositionStore } from '../stores/viewPositionStore.js';
 import type { JSX } from 'react';
 import {
@@ -1029,6 +1030,9 @@ export function ChatRoute({
     seenLocalIdsRef.current = seen === null ? pending : new Set([...seen, ...pending]);
     if (seen === null) return;
     if (newest === undefined || seen.has(newest)) return;
+    // Dictation mode sends by itself while the user may be reading: leave the
+    // scroll where it is (follow mode, if on, still carries the new turn).
+    if (isDictatedSend(newest)) return;
     repinnedForSendRef.current = true;
     followRef.current = true;
     // A send outranks a still-landing `?seq=` jump and a still-settling
@@ -1637,7 +1641,7 @@ export function ChatRoute({
     message: string,
     files?: OutgoingFile[],
     _chatId?: string,
-    sendOpts?: { afterTurn?: boolean; interrupt?: boolean },
+    sendOpts?: { afterTurn?: boolean; interrupt?: boolean; dictated?: boolean },
   ): Promise<boolean | void> {
     if (turnEdit) {
       const ok = await handleFork(turnEdit.seq, message.trim(), files ?? []);
@@ -1781,6 +1785,7 @@ export function ChatRoute({
     // not feel like it waits on one. A block withdraws the echo again.
     setHookChecking(true);
     const localId = echoTurn(message, files ?? [], afterTurn, interrupt, true);
+    if (sendOpts?.dictated === true) markDictatedSend(localId);
     let check: Awaited<ReturnType<typeof api.checkHooks>>;
     try {
       check = await api.checkHooks(chatId, message, files ?? []);

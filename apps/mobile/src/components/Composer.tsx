@@ -158,6 +158,7 @@ import {
 import { startDictation, warmDictation, type DictationHandle } from '../lib/dictation';
 import { dictationEngineFor } from '../lib/dictationEngine';
 import { startDictationMode, type DictationModeHandle } from '../lib/dictationMode';
+import { markDictatedSend } from '../lib/dictatedSends';
 import { voiceKeyRefusal } from '../lib/voiceKeys';
 import { usePresenceStore } from '../stores/presenceStore';
 import { hostControlsDisabled, hostControlDisabledReason } from '../lib/connection';
@@ -957,6 +958,7 @@ export function Composer({
   const [dictModeOn, setDictModeOn] = React.useState(false);
   const [dictPending, setDictPending] = React.useState(0);
   const dictModeRef = React.useRef<DictationModeHandle | null>(null);
+  const dictatedSendRef = React.useRef(false);
   function stopDictationMode(): void {
     const h = dictModeRef.current;
     dictModeRef.current = null;
@@ -999,7 +1001,13 @@ export function Composer({
         onText: (t: string): void => {
           const cur = draftRef.current;
           updateDraft(cur.trim().length > 0 ? `${cur.trimEnd()} ${t}` : t);
-          submitRef.current();
+          // Dictation sends by itself; the chat must not jump to the bottom for it.
+          dictatedSendRef.current = true;
+          try {
+            submitRef.current();
+          } finally {
+            dictatedSendRef.current = false;
+          }
         },
         onBusy: (n: number): void => setDictPending(n),
         onPartial: (t: string): void => setLivePartial(t),
@@ -1231,6 +1239,7 @@ export function Composer({
     check?: Promise<HookCheckResponse>,
   ): void => {
     const localId = sendMessage(target, text, files, check ? { hold: true } : {});
+    if (dictatedSendRef.current) markDictatedSend(localId);
     // First message is when a reply you might not be watching for becomes
     // possible: explain + ask for notifications now (once per session).
     void enablePushNotifications().catch((e: Error) =>

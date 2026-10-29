@@ -294,7 +294,7 @@ export interface ComposerProps {
     message: string,
     files?: OutgoingFile[],
     chatId?: string,
-    opts?: { afterTurn?: boolean; interrupt?: boolean },
+    opts?: { afterTurn?: boolean; interrupt?: boolean; dictated?: boolean },
   ): void | boolean | Promise<void | boolean>;
   /**
    * Resolve the REAL chatId to upload/send to when `chatId` is a placeholder
@@ -1528,7 +1528,7 @@ export const Composer = forwardRef(function Composer(
         onText: (t: string) => {
           const cur = valueRef.current;
           const text = cur.trim().length > 0 ? `${cur.trimEnd()} ${t}` : t;
-          if (!submitRef.current(text)) {
+          if (!submitRef.current(text, false, false, true)) {
             setValue(text);
             pushError('voice: message not sent');
           }
@@ -1877,7 +1877,12 @@ export const Composer = forwardRef(function Composer(
   }
 
   /** Returns false when there was nothing to send or sending is blocked. */
-  function submitText(text: string, afterTurn = false, interrupt = false): boolean {
+  function submitText(
+    text: string,
+    afterTurn = false,
+    interrupt = false,
+    dictated = false,
+  ): boolean {
     if (resolving) return false;
     if (edit) {
       const edited = text.trim();
@@ -1959,7 +1964,7 @@ export const Composer = forwardRef(function Composer(
           return toOutgoingFile(a);
         });
         setValue('');
-        finishSend(trimmed, files, pending, realChatId, afterTurn, interrupt);
+        finishSend(trimmed, files, pending, realChatId, afterTurn, interrupt, dictated);
       })();
       return true;
     }
@@ -1974,6 +1979,7 @@ export const Composer = forwardRef(function Composer(
       pending.length > 0 ? chatId : undefined,
       afterTurn,
       interrupt,
+      dictated,
     );
     return true;
   }
@@ -1998,18 +2004,21 @@ export const Composer = forwardRef(function Composer(
     resolvedChatId: string | undefined,
     afterTurn: boolean,
     interrupt = false,
+    dictated = false,
   ): void {
     // Call with the bare message for a text-only turn (keeps the call shape
     // stable for callers/tests that predate attachments); pass the files + the
     // chatId only when there are attachments to carry.
     const hasFiles = files.length > 0;
-    const args: Parameters<ComposerProps['onSend']> = interrupt
-      ? [trimmed, hasFiles ? files : undefined, resolvedChatId, { interrupt: true }]
-      : afterTurn
-        ? [trimmed, hasFiles ? files : undefined, resolvedChatId, { afterTurn: true }]
-        : hasFiles
-          ? [trimmed, files, resolvedChatId]
-          : [trimmed];
+    const args: Parameters<ComposerProps['onSend']> = dictated
+      ? [trimmed, hasFiles ? files : undefined, resolvedChatId, { dictated: true }]
+      : interrupt
+        ? [trimmed, hasFiles ? files : undefined, resolvedChatId, { interrupt: true }]
+        : afterTurn
+          ? [trimmed, hasFiles ? files : undefined, resolvedChatId, { afterTurn: true }]
+          : hasFiles
+            ? [trimmed, files, resolvedChatId]
+            : [trimmed];
     if (!running && onStop) setPendingSend(true);
     const onAccepted = (): void => {
       if (pending.length === 0) return;
