@@ -116,17 +116,18 @@ surface ──── WSS /audio/<sessionId> ────▶ patch host
 
 ### Env vars
 
-| Var                         | Purpose                                                                                                | Default   |
-| --------------------------- | ------------------------------------------------------------------------------------------------------ | --------- |
-| `PATCH_DAEMON_AUDIO_PORT`   | TCP port for the audio WSS                                                                             | `3003`    |
-| `PATCH_DAEMON_AUDIO_HOST`   | Bind host                                                                                              | `0.0.0.0` |
-| `WHISPER_BACKEND`           | `groq` \| `local` \| `mock`                                                                            | `groq`    |
-| `GROQ_API_KEY`              | Required when `WHISPER_BACKEND=groq` — **lazy-checked**: missing-key fails the first session, not boot | _unset_   |
-| `WHISPER_LOCAL_SIDECAR_URL` | faster-whisper Python sidecar WS URL (when backend=local)                                              | _unset_   |
-| `KOKORO_BACKEND`            | `real` \| `mock`                                                                                       | `real`    |
-| `KOKORO_SIDECAR_URL`        | Kokoro Python sidecar WS URL (real backend)                                                            | _unset_   |
-| `KOKORO_MODEL_PATH`         | Path to the kokoro-onnx model dir on disk                                                              | _unset_   |
-| `PATCH_VOICE_MAX_SESSIONS`  | Concurrency cap (4 on Groq, 3 on local Whisper per spec/07)                                            | `4` / `3` |
+| Var                         | Purpose                                                                                                                                          | Default   |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | --------- |
+| `PATCH_DAEMON_AUDIO_PORT`   | TCP port for the audio WSS                                                                                                                       | `3003`    |
+| `PATCH_DAEMON_AUDIO_HOST`   | Bind host                                                                                                                                        | `0.0.0.0` |
+| `WHISPER_BACKEND`           | `groq` \| `local` \| `parakeet` \| `mock`                                                                                                        | `groq`    |
+| `PARAKEET_MODEL_DIR`        | Required when `WHISPER_BACKEND=parakeet`: the extracted `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8` dir (~650 MB; needs `ffmpeg` for m4a clips) | _unset_   |
+| `GROQ_API_KEY`              | Required when `WHISPER_BACKEND=groq` — **lazy-checked**: missing-key fails the first session, not boot                                           | _unset_   |
+| `WHISPER_LOCAL_SIDECAR_URL` | faster-whisper Python sidecar WS URL (when backend=local)                                                                                        | _unset_   |
+| `KOKORO_BACKEND`            | `real` \| `mock`                                                                                                                                 | `real`    |
+| `KOKORO_SIDECAR_URL`        | Kokoro Python sidecar WS URL (real backend)                                                                                                      | _unset_   |
+| `KOKORO_MODEL_PATH`         | Path to the kokoro-onnx model dir on disk                                                                                                        | _unset_   |
+| `PATCH_VOICE_MAX_SESSIONS`  | Concurrency cap (4 on Groq, 3 on local Whisper per spec/07)                                                                                      | `4` / `3` |
 
 ### Sidecar lifecycle (Python)
 

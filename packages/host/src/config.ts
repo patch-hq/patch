@@ -127,7 +127,7 @@ export interface HostConfig {
     host: string;
     /** `host.host.audioRelayHost` — see `loadConfig`'s comment above. */
     relayHost: string | undefined;
-    whisperBackend: 'off' | 'groq' | 'elevenlabs' | 'local' | 'mock';
+    whisperBackend: 'off' | 'groq' | 'elevenlabs' | 'local' | 'parakeet' | 'mock';
     /**
      * GROQ_API_KEY from the environment (required for whisperBackend='groq'
      * unless one is set from Settings → Hosts → Keys, which wins).
@@ -140,6 +140,8 @@ export interface HostConfig {
     whisperLocalSidecarUrl: string | undefined;
     /** faster-whisper model dir (medium.en) — used to spawn the local sidecar. */
     whisperModelPath: string | undefined;
+    /** PARAKEET_MODEL_DIR — the extracted Parakeet TDT v3 model (whisperBackend='parakeet'). */
+    parakeetModelDir: string | undefined;
     kokoroBackend: 'off' | 'real' | 'mock';
     kokoroSidecarUrl: string | undefined;
     /**
@@ -305,10 +307,11 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
     whisperBackendRaw !== 'groq' &&
     whisperBackendRaw !== 'elevenlabs' &&
     whisperBackendRaw !== 'local' &&
+    whisperBackendRaw !== 'parakeet' &&
     whisperBackendRaw !== 'mock'
   ) {
     throw new Error(
-      `Invalid WHISPER_BACKEND: ${whisperBackendRaw} (expected 'off' | 'groq' | 'elevenlabs' | 'local' | 'mock')`,
+      `Invalid WHISPER_BACKEND: ${whisperBackendRaw} (expected 'off' | 'groq' | 'elevenlabs' | 'local' | 'parakeet' | 'mock')`,
     );
   }
   const kokoroBackendRaw = env['KOKORO_BACKEND'] ?? 'off';
@@ -324,7 +327,7 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
   if (vadBackendRaw !== 'silero' && vadBackendRaw !== 'mock') {
     throw new Error(`Invalid VAD_BACKEND: ${vadBackendRaw} (expected 'silero' | 'mock')`);
   }
-  const defaultCap = whisperBackendRaw === 'local' ? 3 : 4;
+  const defaultCap = whisperBackendRaw === 'local' || whisperBackendRaw === 'parakeet' ? 3 : 4;
   const maxConcurrentSessions = intRequired(
     'PATCH_VOICE_MAX_SESSIONS',
     env['PATCH_VOICE_MAX_SESSIONS'],
@@ -362,6 +365,7 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
       elevenlabsApiKey: env['ELEVEN_LABS_API_KEY'],
       whisperLocalSidecarUrl: env['WHISPER_LOCAL_SIDECAR_URL'],
       whisperModelPath: env['WHISPER_MODEL_PATH'],
+      parakeetModelDir: env['PARAKEET_MODEL_DIR'],
       kokoroBackend: kokoroBackendRaw,
       kokoroSidecarUrl: env['KOKORO_SIDECAR_URL'],
       kokoroModelPath:
