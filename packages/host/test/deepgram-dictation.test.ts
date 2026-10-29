@@ -275,6 +275,27 @@ describe('Deepgram dictation — tidy-up with Whisper as it goes', () => {
     expect(w.calls[0]!.length).toBe(Math.round((3.5 + 0.25) * ONE_SECOND));
   });
 
+  test('a finish waits as long as the last tidy-up takes, never falling back to raw words', async () => {
+    const w = whisper(async () => {
+      await tick(6500);
+      return 'And some bread.';
+    });
+    const { dg, audio, session } = await open({
+      tidyWith: w,
+      onControl: (sock, msg) => {
+        if (msg.type === 'Finalize') {
+          sock.send(
+            result('and sum bread', { start: 0, duration: 1, isFinal: true, fromFinalize: true }),
+          );
+        }
+      },
+    });
+    await dg.socket();
+    await session.onMicFrame(new Int16Array(ONE_SECOND));
+    await session.finishDictation();
+    expect(finals(audio)).toEqual(['And some bread.']);
+  }, 20000);
+
   test('a failed tidy-up is reported once and the live words stand', async () => {
     const w = whisper(async () => {
       throw new Error('groq whisper 500');
