@@ -3694,6 +3694,19 @@ button.nav-row {
   color: var(--ink-3);
   padding: 4px 0;
 }
+.call-agent-reply {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 4px 0;
+}
+.call-agent-reply-text {
+  color: var(--ink);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .msg-user.voice-live .content,
 .msg.voice .content {
   font-style: italic;

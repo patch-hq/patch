@@ -121,7 +121,8 @@ export function createChatVoice(deps: {
     },
 
     handoffAnswered({ chatId, reply }) {
-      note(chatId, `<- agent: ${oneLine(reply, 300)}`);
+      // The whole answer: it is what the user reads in the transcript, so no cut-off.
+      note(chatId, `<- agent: ${reply.trim()}`);
     },
 
     makeTimeline(init) {

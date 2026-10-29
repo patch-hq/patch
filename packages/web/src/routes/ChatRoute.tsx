@@ -2394,6 +2394,17 @@ const TimelineEntry = memo(function TimelineEntry({
     }
     // spec/07 § Call cost — the one quiet line a finished call leaves.
     if ((entry.content ?? '').startsWith('[call] ')) {
+      const line = (entry.content ?? '').slice('[call] '.length);
+      // The agent's answer to a hand-off is the point of the exchange: full
+      // size, whole text. Only the plumbing around it stays quiet.
+      if (line.startsWith('<- agent:')) {
+        return (
+          <div className="call-agent-reply" data-testid="call-agent-reply">
+            <div className="call-summary-line">agent replied</div>
+            <div className="call-agent-reply-text">{line.slice('<- agent:'.length).trim()}</div>
+          </div>
+        );
+      }
       return (
         <div className="call-summary-line" data-testid="call-summary">
           {(entry.content ?? '').slice('[call] '.length)}
