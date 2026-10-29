@@ -243,6 +243,7 @@ import {
   LocalWhisperBackend,
   type WhisperBackend,
 } from './audio/whisper.js';
+import { ParakeetWhisperBackend } from './audio/parakeet.js';
 import { createKokoro, validateKokoroModel } from './audio/kokoro.js';
 import { createElevenLabs, createRoutedTts, type ElevenLabsVoice } from './audio/elevenlabs.js';
 import {
@@ -4889,11 +4890,14 @@ async function startHost(
       logger: whisperLog,
       apiKey: () => providerKeys.get('elevenlabs'),
     });
-  } else
+  } else {
     whisper = createWhisper({
       backend: config.audio.whisperBackend,
       logger: logger.child({ component: 'whisper' }),
       groqApiKey: () => providerKeys.get('groq'),
+      ...(config.audio.parakeetModelDir !== undefined
+        ? { parakeetModelDir: config.audio.parakeetModelDir }
+        : {}),
       ...(config.audio.whisperLocalSidecarUrl !== undefined
         ? { localSidecarUrl: config.audio.whisperLocalSidecarUrl }
         : {}),
@@ -4911,6 +4915,10 @@ async function startHost(
           }
         : {}),
     });
+  }
+  // The on-machine model loads now: a broken install aborts the boot rather
+  // than failing the first word someone says.
+  if (config.audio.whisperBackend === 'parakeet') await (whisper as ParakeetWhisperBackend).warm();
   // Shared settings may have landed before the backend existed.
   if (meetingTranscriptionModel !== '') whisper.useModel?.(meetingTranscriptionModel);
   dictationTranscribers = createDictationTranscribers({

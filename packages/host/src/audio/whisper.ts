@@ -4,6 +4,8 @@
 //   - 'groq'  (default): direct REST POST to Groq's transcribe endpoint.
 //   - 'local': spawn faster-whisper as a long-running Python sidecar
 //              (`uv run` → WS in/transcript out).
+//   - 'parakeet': NVIDIA Parakeet TDT v3 on this machine's CPU via sherpa-onnx
+//              (parakeet.ts) — no network, no quota, no per-minute cost.
 //   - 'mock' : test-stack stub that echoes a synthetic transcript per
 //              utterance — keeps docker-compose.test.yml viable without
 //              shipping API keys.
@@ -22,6 +24,7 @@ import { existsSync as existsSyncFs } from 'node:fs';
 import { PersistentWsClient } from './persistent-ws.js';
 import { pcmFromWav } from './smartTurn.js';
 import { readKey, type KeySource } from './keySource.js';
+import { ParakeetWhisperBackend } from './parakeet.js';
 
 /** Subset of the host's audio config the credential check needs. */
 export interface WhisperCredentialConfig {
@@ -153,6 +156,12 @@ export interface WhisperBackend {
    */
   readonly supportsLivePartials: boolean;
   /**
+   * New audio (16 kHz samples) between two live passes, when the backend can
+   * afford to look more often than the session's default second. Unmetered
+   * on-machine backends set it; a rationed one leaves it out.
+   */
+  readonly livePartialStepSamples?: number;
+  /**
    * The paid model this backend bills for (spec/07 § Call cost). Absent on a
    * backend that costs nothing per request (local, mock).
    */
@@ -199,7 +208,7 @@ export class UnsupportedClipFormatError extends Error {
   }
 }
 
-export type WhisperBackendKind = 'off' | 'groq' | 'elevenlabs' | 'local' | 'mock';
+export type WhisperBackendKind = 'off' | 'groq' | 'elevenlabs' | 'local' | 'parakeet' | 'mock';
 
 export interface CreateWhisperOptions {
   /** `elevenlabs` is built by index.ts (elevenlabs-stt.ts imports this file). */
@@ -220,6 +229,8 @@ export interface CreateWhisperOptions {
   localModelPath?: string;
   /** Working directory for the spawned `uv run` (the whisper-sidecar pkg). */
   localSidecarCwd?: string;
+  /** PARAKEET_MODEL_DIR (backend === 'parakeet'). */
+  parakeetModelDir?: string;
   /** Test hook: substitute fetch (used by groq-backend tests). */
   fetchImpl?: typeof fetch;
   /** Test hook: injectable clock for the request-quota window. */
@@ -241,6 +252,8 @@ export function createWhisper(opts: CreateWhisperOptions): WhisperBackend {
       return new GroqWhisperBackend(opts);
     case 'local':
       return new LocalWhisperBackend(opts);
+    case 'parakeet':
+      return new ParakeetWhisperBackend({ logger: opts.logger, modelDir: opts.parakeetModelDir });
     case 'mock':
       return new MockWhisperBackend();
   }
