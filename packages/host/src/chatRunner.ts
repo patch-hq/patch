@@ -3068,6 +3068,8 @@ export class Daemon {
   private readonly sdkRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Chats whose turn is held until the machine is fully awake, and since when. */
   private readonly waitingForWakeSince = new Map<string, number>();
+  /** Set once the host starts going down; see `beginShutdown`. */
+  private stopping = false;
   /** Keeps each sleep re-send's localId unique, however fast they come. */
   private sleepRetrySeq = 0;
   /**
@@ -3080,7 +3082,17 @@ export class Daemon {
   private readonly parkedTurns = new Map<string, PendingTurn>();
 
   /** Stop background timers. Call before letting the host go out of scope in tests. */
+  /**
+   * The host is going down. From here on a turn that errors or ends is the
+   * restart's doing, not the work finishing, so it must not end an
+   * until-complete snooze (spec/04 § Snooze): the next host resumes the turn.
+   */
+  beginShutdown(): void {
+    this.stopping = true;
+  }
+
   shutdown(): void {
+    this.beginShutdown();
     for (const t of this.snoozeTimers.values()) clearTimeout(t);
     this.snoozeTimers.clear();
     if (this.snoozeSweep !== null) clearInterval(this.snoozeSweep);
@@ -15542,8 +15554,10 @@ export class Daemon {
   }
 
   private emitState(chatId: string): void {
-    this.trackSnoozeOutcome(chatId);
-    this.wakeIfSnoozeComplete(chatId);
+    if (!this.stopping) {
+      this.trackSnoozeOutcome(chatId);
+      this.wakeIfSnoozeComplete(chatId);
+    }
     this.unhideIfComplete(chatId);
     if (this.aggregateActivity(chatId) === 'running') {
       if (!this.runningSince.has(chatId)) this.runningSince.set(chatId, this.opts.now());

@@ -5214,6 +5214,7 @@ async function startHost(
   const shutdown = async (): Promise<void> => {
     // Turns outlive the host (spec/02): let go of each one's runner first, so
     // nothing below ends a turn that is meant to carry on under the next host.
+    daemon.beginShutdown();
     const detached = detachDurableTurns();
     if (detached > 0) logger.info({ turns: detached }, 'patch-daemon: left turns running');
     homeLock.release();
