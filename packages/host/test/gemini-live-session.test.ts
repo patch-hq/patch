@@ -353,6 +353,19 @@ describe('GeminiLiveSession — audio out + turn lifecycle', () => {
     expect(timeline.log).toEqual([]);
   });
 
+  test('a lone "." transcript is no input: no partial, no chat message', async () => {
+    const { deps, lastWs, audioEvents, timeline } = makeDeps();
+    const session = new GeminiLiveSession(makeInit(), deps);
+    const ws = await openSession(session, lastWs);
+    ws.serverSend({ serverContent: { inputTranscription: { text: '.' } } });
+    ws.serverSend({ serverContent: { turnComplete: true } });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(session.stats().turns).toBe(0);
+    expect(audioEvents.some((e) => e.type === 'audio.transcript_partial')).toBe(false);
+    expect(audioEvents.some((e) => e.type === 'audio.transcript_final')).toBe(false);
+    expect(timeline.log).toEqual([]);
+  });
+
   test('a turn with input but no TTS audio reports gemini_unavailable (NO SILENT FAILURES)', async () => {
     const { deps, lastWs, audioEvents } = makeDeps();
     const session = new GeminiLiveSession(makeInit(), deps);

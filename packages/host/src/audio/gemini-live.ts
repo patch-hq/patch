@@ -837,9 +837,15 @@ export class GeminiLiveSession implements VoiceSessionLike {
     if (signals.length > 0) {
       this.log('server content', { signals, relaying: this.relaying });
     }
-    // Gemini transcribes audio with no speech as "<noise>": that is no input at all.
-    const heard = sc.inputTranscription?.text?.replace(/<noise>/gi, '');
-    if (sc.inputTranscription?.text && heard?.trim() === '' && !this.turnHadInput) {
+    // Gemini transcribes audio with no speech as "<noise>", and sometimes as a bare "." —
+    // neither opens a turn: a first transcript with no letter or digit in it is not input.
+    // (Punctuation arriving after words is kept — it belongs to them.)
+    const heardRaw = sc.inputTranscription?.text?.replace(/<noise>/gi, '');
+    const heard =
+      heardRaw !== undefined && (this.turnHadInput || /[\p{L}\p{N}]/u.test(heardRaw))
+        ? heardRaw
+        : '';
+    if (sc.inputTranscription?.text && heard.trim() === '' && !this.turnHadInput) {
       this.turnNoiseOnly = true;
     } else if (heard) {
       this.turnNoiseOnly = false;
