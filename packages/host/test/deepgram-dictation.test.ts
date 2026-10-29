@@ -259,6 +259,22 @@ describe('Deepgram dictation — tidy-up with Whisper as it goes', () => {
     expect(finals(audio)).toEqual(['And some bread.']);
   });
 
+  test('words Deepgram never finalised are inside the audio Whisper hears at the finish', async () => {
+    const w = whisper(async () => 'Buy oat milk and bread.');
+    // Finalize answers with nothing: the tail is only ever an interim.
+    const { dg, session } = await open({ tidyWith: w });
+    const sock = await dg.socket();
+    await session.onMicFrame(new Int16Array(4 * ONE_SECOND));
+    await until(() => dg.received.binary === 1, 'audio at Deepgram');
+    sock.send(result('buy oat milk', { start: 0.5, duration: 1, isFinal: true }));
+    sock.send(result('and bread', { start: 1.6, duration: 1.4 }));
+    await tick();
+    await session.finishDictation();
+    // The phrase runs to the end of the audio, so the tail words are in what Whisper reads.
+    expect(w.calls).toHaveLength(1);
+    expect(w.calls[0]!.length).toBe(Math.round((3.5 + 0.25) * ONE_SECOND));
+  });
+
   test('a failed tidy-up is reported once and the live words stand', async () => {
     const w = whisper(async () => {
       throw new Error('groq whisper 500');

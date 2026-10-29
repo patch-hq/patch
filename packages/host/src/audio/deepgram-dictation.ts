@@ -212,7 +212,14 @@ export class DeepgramDictationSession implements VoiceSessionLike {
     if (this.failed) return;
     // Anything Deepgram had not finalised by now is still what was heard.
     if (this.interim) {
-      this.currentPhrase(this.phraseEnd()).pieces.push(this.interim);
+      // The words run to the end of the audio. The phrase's stretch has to
+      // cover them, or Whisper reads a cut that stops short of them and its
+      // version of the phrase loses them.
+      const end = this.phraseEnd();
+      const prev = this.phrases[this.phrases.length - 1];
+      const phrase = this.currentPhrase(prev ? prev.end : 0);
+      phrase.pieces.push(this.interim);
+      phrase.end = end;
       this.interim = '';
     }
     const last = this.phrases[this.phrases.length - 1];
