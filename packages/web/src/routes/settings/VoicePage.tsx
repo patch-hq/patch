@@ -412,12 +412,21 @@ const KOKORO_VOICES: { id: string; label: string }[] = [
   { id: 'bm_lewis', label: 'Lewis (British M)' },
 ];
 
-/** How Patch speaks on every host: the Kokoro voice, and how often it says the chat's name. */
+/** How Patch speaks on every host: the engine and its voice, and how often it says the chat's name. */
 function SpeakingGroup(): JSX.Element {
   const pushError = useUiStore((s) => s.pushError);
   const kokoroVoice = usePreferencesStore((s) => s.preferences.kokoroVoice);
+  const ttsBackend = usePreferencesStore((s) => s.preferences.ttsBackend) ?? 'kokoro';
+  const elevenLabsVoice = usePreferencesStore((s) => s.preferences.elevenLabsVoice);
   const chatNameInterval = usePreferencesStore((s) => s.preferences.chatNameInterval);
   const loaded = usePreferencesStore((s) => s.loaded);
+  const hosts = usePresenceStore((s) => s.hosts);
+  // The account's voices come from whichever online host holds the key.
+  const elevenHosts = Object.values(hosts).flatMap((h) => (h.host ? [h.host] : []));
+  const elevenVoices = elevenHosts.find((h) => h.elevenLabsVoices !== undefined)?.elevenLabsVoices;
+  const elevenError = elevenHosts.find(
+    (h) => h.elevenLabsVoicesError !== undefined,
+  )?.elevenLabsVoicesError;
 
   function setNameInterval(raw: string): void {
     const n = parseInt(raw, 10);
@@ -431,25 +440,63 @@ function SpeakingGroup(): JSX.Element {
 
   return (
     <Group label="Speaking" testid="voice-speaking">
-      <Row
-        title="Voice"
-        sub={kokoroVoice === undefined ? 'Each machine’s Kokoro default' : undefined}
-      >
-        <select
-          aria-label="Voice"
-          data-testid="kokoro-voice"
-          value={kokoroVoice ?? ''}
-          disabled={!loaded}
-          onChange={(e) => void patchShared('voice', { kokoroVoice: e.target.value })}
-        >
-          {kokoroVoice === undefined ? <option value="">—</option> : null}
-          {KOKORO_VOICES.map((v) => (
-            <option key={v.id} value={v.id}>
-              {v.label}
-            </option>
-          ))}
-        </select>
+      <Row title="Speech engine">
+        <Pills
+          label="Speech engine"
+          value={ttsBackend}
+          options={['kokoro', 'elevenlabs'] as const}
+          labels={{ kokoro: 'Kokoro', elevenlabs: 'ElevenLabs' }}
+          testid="tts-backend"
+          onChange={(v) => void patchShared('speech engine', { ttsBackend: v })}
+        />
       </Row>
+      {ttsBackend === 'elevenlabs' ? (
+        <Row
+          title="Voice"
+          sub={
+            elevenError !== undefined
+              ? `Could not list ElevenLabs voices: ${elevenError}`
+              : elevenVoices === undefined
+                ? 'Add an ElevenLabs key under Hosts → Keys to list voices'
+                : undefined
+          }
+        >
+          <select
+            aria-label="Voice"
+            data-testid="elevenlabs-voice"
+            value={elevenLabsVoice ?? ''}
+            disabled={!loaded || elevenVoices === undefined}
+            onChange={(e) => void patchShared('voice', { elevenLabsVoice: e.target.value })}
+          >
+            {elevenLabsVoice === undefined ? <option value="">—</option> : null}
+            {(elevenVoices ?? []).map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.category && v.category !== 'premade' ? `${v.name} (${v.category})` : v.name}
+              </option>
+            ))}
+          </select>
+        </Row>
+      ) : (
+        <Row
+          title="Voice"
+          sub={kokoroVoice === undefined ? 'Each machine’s Kokoro default' : undefined}
+        >
+          <select
+            aria-label="Voice"
+            data-testid="kokoro-voice"
+            value={kokoroVoice ?? ''}
+            disabled={!loaded}
+            onChange={(e) => void patchShared('voice', { kokoroVoice: e.target.value })}
+          >
+            {kokoroVoice === undefined ? <option value="">—</option> : null}
+            {KOKORO_VOICES.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.label}
+              </option>
+            ))}
+          </select>
+        </Row>
+      )}
       <Row title="Say the chat name every">
         <input
           type="number"

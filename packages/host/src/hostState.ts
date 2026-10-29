@@ -59,6 +59,9 @@ const HostStateFile = z
      * Absent means use the sidecar's own default ('af_heart').
      */
     kokoroVoice: z.string().min(1).optional(),
+    /** Speech engine and ElevenLabs voice (`host.settings`). Absent = Kokoro. */
+    ttsBackend: z.enum(['kokoro', 'elevenlabs']).optional(),
+    elevenLabsVoice: z.string().min(1).optional(),
     /**
      * Account's per-surface voice config (`host.settings` → `voiceConfig`),
      * mirrored down the same way `defaultModel` is. Persisted so a host

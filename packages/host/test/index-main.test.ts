@@ -4043,6 +4043,7 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
         OPENAI_REALTIME_API_KEY: undefined,
         GROQ_API_KEY: undefined,
         DEEPGRAM_API_KEY: undefined,
+        ELEVEN_LABS_API_KEY: undefined,
       },
       {
         hostJson: {
