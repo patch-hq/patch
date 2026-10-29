@@ -70,3 +70,20 @@ test('the + menu opens above the field and does not cover its placeholder', asyn
   const menu = (await page.getByTestId('add-menu').boundingBox())!;
   expect(menu.y + menu.height).toBeLessThanOrEqual(field.y + 1);
 });
+
+test('phone: call, +, mic, approval mode and effort are 44px touch targets', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 800 });
+  await page.goto(CHAT);
+  for (const id of [
+    'call-btn',
+    'composer-add-btn',
+    'voice-note-btn',
+    'permission-mode',
+    'chat-effort',
+  ]) {
+    const box = (await page.getByTestId(id).boundingBox())!;
+    expect(box.width, `${id} width`).toBeGreaterThanOrEqual(44);
+    expect(box.height, `${id} height`).toBeGreaterThanOrEqual(44);
+  }
+  await oneLine(page);
+});

@@ -17153,3 +17153,71 @@ select.permission-mode.is-pending {
     padding: 6px 8px;
   }
 }
+
+/* Phone: every composer control is a --tap-min hit target on both axes
+   (spec/14 § Legibility). Desktop keeps the denser 40px / 32px sizes. The
+   in-field dictate and + stay inset in the field, so the field's minimum
+   height rises with them. */
+@media (max-width: 640px) {
+  .composer .composer-input {
+    min-height: var(--tap-min);
+  }
+  .composer .composer-input-wrap .voice-note-btn {
+    right: 0;
+    bottom: 0;
+  }
+  .composer .composer-input-wrap .composer-add-btn {
+    left: 0;
+    bottom: 0;
+  }
+  .composer .composer-input-wrap.has-add .composer-input,
+  .composer .composer-input-wrap.has-add .composer-live-preview,
+  .composer .composer-input-wrap.has-add .composer-chip-mirror {
+    padding-left: 46px;
+  }
+  .composer .composer-input-wrap .composer-input,
+  .composer .composer-input-wrap .composer-live-preview,
+  .composer .composer-input-wrap .composer-chip-mirror {
+    padding-right: 46px;
+  }
+  .composer .composer-tools .call-btn,
+  .composer .composer-actions.is-compact .composer-tools .call-btn,
+  .composer .composer-input-wrap .voice-note-btn,
+  .composer .composer-input-wrap .composer-add-btn,
+  .composer .composer-actions .stop-btn,
+  .composer .composer-actions .send-btn {
+    width: var(--tap-min);
+    height: var(--tap-min);
+  }
+  .composer .composer-actions .model-picker.as-crumb {
+    display: flex;
+    height: var(--tap-min);
+  }
+  .composer .composer-actions .model-picker.as-crumb .model-pill {
+    align-self: center;
+  }
+  /* One line at 360px is a budget: the wider boxes are paid for by a slimmer
+     composer gutter and tighter gaps, not by dropping a control. */
+  .composer {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .composer .composer-actions,
+  .composer .composer-actions .composer-tools,
+  .composer .composer-actions .composer-settings,
+  .composer .composer-actions .composer-actions-end {
+    gap: 0;
+  }
+  .composer .composer-actions .context-ring {
+    width: 30px;
+  }
+  .composer .composer-actions .model-pill.as-crumb {
+    padding: 0 4px;
+  }
+  .composer .composer-actions .permission-mode,
+  .composer .composer-actions .permission-mode-wrap,
+  .composer .composer-actions .model-pill.as-crumb {
+    min-width: var(--tap-min);
+    height: var(--tap-min);
+  }
+}
