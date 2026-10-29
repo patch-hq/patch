@@ -142,6 +142,11 @@ export interface HostConfig {
     whisperModelPath: string | undefined;
     /** PARAKEET_MODEL_DIR — the extracted Parakeet TDT v3 model (whisperBackend='parakeet'). */
     parakeetModelDir: string | undefined;
+    /**
+     * PARAKEET_STREAMING_MODEL_DIR — the extracted streaming FastConformer
+     * transducer that makes dictation's live words on the `host` engine.
+     */
+    parakeetStreamingModelDir: string | undefined;
     kokoroBackend: 'off' | 'real' | 'mock';
     kokoroSidecarUrl: string | undefined;
     /**
@@ -366,6 +371,7 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
       whisperLocalSidecarUrl: env['WHISPER_LOCAL_SIDECAR_URL'],
       whisperModelPath: env['WHISPER_MODEL_PATH'],
       parakeetModelDir: env['PARAKEET_MODEL_DIR'],
+      parakeetStreamingModelDir: env['PARAKEET_STREAMING_MODEL_DIR'],
       kokoroBackend: kokoroBackendRaw,
       kokoroSidecarUrl: env['KOKORO_SIDECAR_URL'],
       kokoroModelPath:
