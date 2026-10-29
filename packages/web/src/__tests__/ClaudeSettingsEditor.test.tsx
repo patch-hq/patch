@@ -1,4 +1,4 @@
-// Settings → Providers → Claude Code settings.json: that host's own file, shown
+// Settings → Machines → Claude Code settings.json: that host's own file, shown
 // as the machine holds it and replaced by a Save that goes to that host
 // (spec/02 § Claude Code settings). No shared text, no OS override, no drift,
 // no keep / discard.
@@ -15,8 +15,8 @@ const ID = 'host-d1-claude-settings';
 async function openPage(settingsJson: string | null): Promise<void> {
   reportHost('d1', { hostName: 'mac' });
   if (settingsJson !== null) reportClaudeSettings('d1', [], settingsJson);
-  renderSettings('/settings/providers');
-  await waitFor(() => expect(screen.getByTestId('settings-providers')).toBeInTheDocument());
+  renderSettings('/settings/hosts');
+  await waitFor(() => expect(screen.getByTestId('settings-hosts')).toBeInTheDocument());
 }
 
 beforeEach(() => {
@@ -30,8 +30,8 @@ afterEach(() => {
   setActiveWs(null);
 });
 
-describe('Settings → Providers — settings.json', () => {
-  it('sits on the Providers page, not Hosts or Agent, and offers no keep or discard', async () => {
+describe('Settings → Machines — settings.json', () => {
+  it('sits on the machine’s page, not Providers or Agent, and offers no keep or discard', async () => {
     await openPage('{"model":"opus"}');
     expect(screen.getByTestId(ID)).toHaveTextContent('mac');
     expect(screen.getByTestId(ID)).toHaveTextContent('Set');

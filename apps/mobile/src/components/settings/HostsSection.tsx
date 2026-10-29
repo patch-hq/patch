@@ -27,7 +27,7 @@ import { usePresenceStore, type HostPresence } from '../../stores/presenceStore'
 import { useUiStore } from '../../stores/uiStore';
 import { SettingsSection } from '../SettingsSection';
 import { agoLabel, sendToHost } from './hostSend';
-import { NoticeRow, hostName, sortedHosts, unreportedText, useSettingsHost } from './HostSwitcher';
+import { NoticeRow, hostName, sortedHosts } from './HostSwitcher';
 import { ClaudeSettingsRow } from './ClaudeSettingsSection';
 import { SecretsSection } from './SecretsSection';
 import { SettingsPage } from './SettingsPage';
@@ -161,6 +161,7 @@ export function HostDetail({ hostId }: { hostId: string }): React.ReactElement {
           <HostBackends host={host} />
           <HostComponents host={host} />
           <HostTools host={host} />
+          <ClaudeSettingsRow host={host} />
         </>
       )}
       <RemoveHost host={host} />
@@ -661,19 +662,10 @@ function AddHost({ onClose }: { onClose: () => void }): React.ReactElement {
 // ── Providers ────────────────────────────────────────────────────────────────
 
 export function ProvidersPage(): React.ReactElement {
-  const host = useSettingsHost();
-  const gap = unreportedText(host);
   return (
-    <SettingsPage title="Providers" testID="settings-page-providers" hostSwitcher>
+    <SettingsPage title="Providers" testID="settings-page-providers">
       <ProviderKeys />
       <SecretsSection />
-      {host === null || gap !== null ? (
-        <SettingsSection title="Claude Code settings.json">
-          <NoticeRow text={gap ?? ''} />
-        </SettingsSection>
-      ) : (
-        <ClaudeSettingsRow host={host} />
-      )}
     </SettingsPage>
   );
 }
