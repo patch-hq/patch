@@ -15,6 +15,7 @@ import { usePresenceStore } from '../src/stores/presenceStore';
 import { useChatStore } from '../src/stores/chatStore';
 import { useUiStore } from '../src/stores/uiStore';
 import { deliveryTracker } from '../src/lib/deliveryTracker';
+import { _resetSendQueue } from '../src/lib/sendQueue';
 import { useComposerDraftStore } from '../src/lib/composerDraft';
 import { useComposerAttachmentStore } from '../src/stores/composerAttachmentStore';
 import { __clearAllMmkv } from './stubs/mmkv';
@@ -60,6 +61,7 @@ beforeEach(() => {
   useUiStore.setState({ errors: [] });
   submitSpy = vi.spyOn(deliveryTracker, 'submit').mockImplementation(() => {});
   check.mockReset();
+  _resetSendQueue();
 });
 afterEach(() => submitSpy.mockRestore());
 
@@ -79,14 +81,17 @@ const pressId = async (r: ReturnType<typeof renderRN>, id: string) => {
 };
 
 describe('Composer — message hooks', () => {
-  it('Send reads Checking… and is disabled while the check is in flight', async () => {
+  it('echoes the message and clears the box at once; delivery waits for the check', async () => {
     let release!: (r: HookCheckResponse) => void;
     check.mockReturnValue(new Promise((res) => (release = res)));
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     type(r, 'hello');
     await press(r, 'Send message');
-    const busy = findHost(r.root, byLabel('Checking…'));
-    expect(busy.props['disabled']).toBe(true);
+    const echoed = (useChatStore.getState().timelines['c1'] ?? []).filter(
+      (e) => e.kind === 'message',
+    );
+    expect(echoed).toHaveLength(1);
+    expect(findHost(r.root, byType('TextInput')).props['value']).toBe('');
     expect(submitSpy).not.toHaveBeenCalled();
     release({ decision: 'pass', results: [] });
     await flushMicrotasks();
@@ -100,7 +105,7 @@ describe('Composer — message hooks', () => {
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     type(r, 'hello');
     await press(r, 'Send message');
-    type(r, 'hello world');
+    type(r, 'world');
     release({ decision: 'pass', results: [] });
     await flushMicrotasks();
     update(r, <Composer chatId="c1" folder="work" />);
@@ -144,6 +149,10 @@ describe('Composer — message hooks', () => {
     expect(findHost(r.root, byTestId('hook-block-analysis')).props['children']).toBe('Too curt');
     expect(findHost(r.root, byType('TextInput')).props['value']).toBe('give me it');
     expect(submitSpy).not.toHaveBeenCalled();
+    // The echoed message is taken back out of the stream.
+    expect(
+      (useChatStore.getState().timelines['c1'] ?? []).filter((e) => e.kind === 'message'),
+    ).toEqual([]);
   });
 
   it('Use suggestion replaces the draft without sending', async () => {

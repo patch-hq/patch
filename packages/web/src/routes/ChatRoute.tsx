@@ -89,7 +89,14 @@ import { useToolsStore } from '../stores/toolsStore.js';
 import { deliveryTracker } from '../lib/deliveryTracker.js';
 import { permissionDeliveryTracker } from '../lib/permissionDeliveryTracker.js';
 import { addToTodoList } from '../lib/addToTodo.js';
-import { discardUpload, retryUpload, sendMessage, type OutgoingFile } from '../lib/sendQueue.js';
+import {
+  cancelHeld,
+  discardUpload,
+  releaseHeld,
+  retryUpload,
+  sendMessage,
+  type OutgoingFile,
+} from '../lib/sendQueue.js';
 import type { PatchWs } from '../api/ws.js';
 import { getActiveWs } from '../api/ws.js';
 import { MeetingEditChips, MeetingLayout } from '../components/MeetingPanel.js';
@@ -1769,22 +1776,73 @@ export function ChatRoute({
     // before it is handed to delivery. "Send anyway" (the block card) bypasses
     // this and calls `doSend` directly with the hooks it already has results
     // for, rather than asking the server to check the same message twice.
+    // The turn is echoed into the stream NOW and held back from delivery
+    // until the check lands — a check is a server round trip, and Send must
+    // not feel like it waits on one. A block withdraws the echo again.
     setHookChecking(true);
-    const check = await api.checkHooks(chatId, message, files ?? []);
-    setHookChecking(false);
+    const localId = echoTurn(message, files ?? [], afterTurn, interrupt, true);
+    let check: Awaited<ReturnType<typeof api.checkHooks>>;
+    try {
+      check = await api.checkHooks(chatId, message, files ?? []);
+    } finally {
+      setHookChecking(false);
+    }
     if (check.decision === 'block') {
+      cancelHeld(chatId, localId);
       setHookBlock({ message, files: files ?? [], results: check.results, afterTurn, interrupt });
       return false;
     }
-    doSend(message, files ?? [], check.results, afterTurn, interrupt);
+    attachAdvise(localId, check.results);
+    releaseHeld(chatId, localId);
   }
 
   /**
-   * The actual send, past every hook check — called once a message has
-   * either passed, only advised, or the user chose Send anyway. `results`
-   * carries whatever `advise` outcomes matched, attached to the sent
-   * message's bubble (spec/20-hooks.md § On the user's message).
+   * Echo a turn into the stream and queue it for delivery (see lib/sendQueue.ts,
+   * spec/15 § Composer → Attachments). `hold` keeps it from delivery until
+   * `releaseHeld` / `cancelHeld`. Returns the turn's localId.
    */
+  function echoTurn(
+    message: string,
+    files: OutgoingFile[],
+    afterTurn: boolean,
+    interrupt: boolean,
+    hold: boolean,
+  ): string {
+    if (!ws) throw new Error('not connected');
+    // Optimistically render the user's own message immediately — the host
+    // streams back only the assistant reply, never a live echo of the input.
+    // A message with attachments shows its local files, uploading, and goes
+    // out once they have all landed; turns reach delivery in send order. From
+    // there the tracker holds it pending, redelivers on a flap/restart, and
+    // marks it "not delivered — tap to retry" if it stays unacked (spec/12).
+    // The per-chat Tools panel OFF set is captured at send time.
+    return sendMessage(chatId, message, files, {
+      send: (e) => ws.send(e),
+      ...(afterTurn ? { afterTurn: true } : {}),
+      ...(interrupt ? { onDelivered: handlePromote } : {}),
+      ...(hold ? { hold: true } : {}),
+    });
+  }
+
+  function attachAdvise(localId: string, results: HookRunResult[]): void {
+    const advise = (Array.isArray(results) ? results : []).filter(
+      (r) => r.status !== 'ok' || r.decision === 'advise',
+    );
+    if (advise.length === 0) return;
+    useChatStore.getState().patchLocalMessage(chatId, localId, {
+      hookAdvise: advise.map((r) => ({
+        hookId: r.hookId,
+        hookName: r.hookName,
+        ...(r.status !== 'ok'
+          ? { analysis: `Hook failed: ${r.error ?? r.status}` }
+          : r.analysis !== undefined
+            ? { analysis: r.analysis }
+            : {}),
+      })),
+    });
+  }
+
+  /** The send proper, past every hook check ("Send anyway"). */
   function doSend(
     message: string,
     files: OutgoingFile[],
@@ -1796,35 +1854,7 @@ export function ChatRoute({
       pushError('not connected');
       return;
     }
-    // Optimistically render the user's own message immediately — the host
-    // streams back only the assistant reply, never a live echo of the input.
-    // A message with attachments shows its local files, uploading, and goes
-    // out once they have all landed; turns reach delivery in send order
-    // (lib/sendQueue.ts, spec/15 § Composer → Attachments). From there the
-    // tracker holds it pending, redelivers on a flap/restart, and marks it
-    // "not delivered — tap to retry" if it stays unacked (spec/12). The
-    // per-chat Tools panel OFF set is captured at send time.
-    const localId = sendMessage(chatId, message, files, {
-      send: (e) => ws.send(e),
-      ...(afterTurn ? { afterTurn: true } : {}),
-      ...(interrupt ? { onDelivered: handlePromote } : {}),
-    });
-    const advise = (Array.isArray(results) ? results : []).filter(
-      (r) => r.status !== 'ok' || r.decision === 'advise',
-    );
-    if (advise.length > 0) {
-      useChatStore.getState().patchLocalMessage(chatId, localId, {
-        hookAdvise: advise.map((r) => ({
-          hookId: r.hookId,
-          hookName: r.hookName,
-          ...(r.status !== 'ok'
-            ? { analysis: `Hook failed: ${r.error ?? r.status}` }
-            : r.analysis !== undefined
-              ? { analysis: r.analysis }
-              : {}),
-        })),
-      });
-    }
+    attachAdvise(echoTurn(message, files, afterTurn, interrupt, false), results);
   }
 
   function handleHookSendAnyway(): void {
