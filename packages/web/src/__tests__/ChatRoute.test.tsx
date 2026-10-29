@@ -3479,6 +3479,25 @@ describe('ChatRoute regression', () => {
       );
     });
 
+    it('shows a call hand-off answer in full as readable text, not a truncated quiet line', () => {
+      const reply = `${'A long answer. '.repeat(40)}\nSecond paragraph.`;
+      seedChat('c-call-reply', [
+        {
+          seq: 0,
+          kind: 'message',
+          role: 'system',
+          content: '[call] -> sent to agent: add milk',
+          at: 0,
+        },
+        { seq: 1, kind: 'message', role: 'system', content: `[call] <- agent: ${reply}`, at: 1 },
+      ]);
+      renderChat('c-call-reply');
+      const el = screen.getByTestId('call-agent-reply');
+      expect(el.textContent).toContain('Second paragraph.');
+      expect(el.textContent).not.toContain('<- agent');
+      expect(el.textContent).not.toContain('…');
+    });
+
     it('renders an impossible outcome labelled distinctly from met', () => {
       seedChat('c-goal-impossible', [
         {

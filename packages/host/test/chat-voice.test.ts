@@ -234,6 +234,14 @@ describe('chat voice glue', () => {
     ]);
   });
 
+  it('records a long hand-off answer whole', async () => {
+    const { daemon, events, folder, glue } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    const reply = `${'word '.repeat(200)}end\nsecond line`;
+    glue.handoffAnswered({ chatId, reply });
+    expect(messages(events).map((m) => m.content)).toEqual([`[call] <- agent: ${reply}`]);
+  });
+
   it('puts the line in the chat the moment the call ends, whatever the agent is doing', async () => {
     const { daemon, events, folder, glue, holdTurns, releaseTurns } = setup();
     const chatId = await daemon.spawnChat({ folder });
