@@ -82,7 +82,7 @@ export function queueChipTitle(
   pause?: CreditPause | null,
   host = 'the host',
 ): string {
-  if (!hostOnline) return `Waiting for ${host} to come back online`;
+  if (!hostOnline) return `Waiting for ${host}`;
   if (pause) return 'Every account is out of credit; this runs once the limit resets';
   if (release === 'tool') return 'Goes in when the agent finishes its current tool call';
   if (pos === 1) return 'Runs when the current turn finishes';

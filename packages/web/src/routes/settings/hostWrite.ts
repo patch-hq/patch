@@ -52,9 +52,7 @@ export function sendToHost(host: HostPresence, event: WireEvent): boolean {
   }
   if (!host.online) {
     // Offline is a state, not a failure: a calm notice, not an error.
-    useUiStore
-      .getState()
-      .pushNotice(`${hostTitle(host, host.hostId)} is offline. It can be changed once it is back.`);
+    useUiStore.getState().pushNotice(`${hostTitle(host, host.hostId)} offline`);
     return false;
   }
   try {
@@ -178,11 +176,7 @@ export function useHostUpdate(host: HostPresence): { updating: boolean; apply: (
   }, [host.online]);
   function apply(): void {
     if (!host.online) {
-      useUiStore
-        .getState()
-        .pushNotice(
-          `${hostTitle(host, host.hostId)} is offline. It can be updated once it is back.`,
-        );
+      useUiStore.getState().pushNotice(`${hostTitle(host, host.hostId)} offline`);
       return;
     }
     setUpdating(true);

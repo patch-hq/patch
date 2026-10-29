@@ -43,15 +43,13 @@ describe('queueChipTitle', () => {
 describe('host offline', () => {
   it('names the host it is waiting for', () => {
     expect(queueChipLabel(1, false, undefined, null, 'Mac host')).toBe('Mac host offline');
-    expect(queueChipTitle(1, false, undefined, null, 'Mac host')).toBe(
-      'Waiting for Mac host to come back online',
-    );
+    expect(queueChipTitle(1, false, undefined, null, 'Mac host')).toBe('Waiting for Mac host');
   });
 
   it('says the host is offline rather than that a turn is running', () => {
     expect(queueChipLabel(1, false)).toBe('Host offline');
     expect(queueChipLabel(3, false)).toBe('Host offline');
-    expect(queueChipTitle(1, false)).toBe('Waiting for the host to come back online');
+    expect(queueChipTitle(1, false)).toBe('Waiting for the host');
   });
 });
 

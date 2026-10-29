@@ -2492,7 +2492,7 @@ export const Composer = forwardRef(function Composer(
               aria-pressed={noteActive || micState !== 'idle' || dictModeOn}
               title={
                 !offline && !hostOnline
-                  ? `Voice unavailable while ${hostView.title} is offline (audio can’t be queued)`
+                  ? `Voice unavailable: ${hostView.title} offline`
                   : noteMode
                     ? shortcutTitle('Voice note', chordGlyphs(dictateChord))
                     : micState === 'transcribing'
@@ -2578,7 +2578,7 @@ export const Composer = forwardRef(function Composer(
                   onCall
                     ? 'End call'
                     : voiceDisabled
-                      ? `Voice unavailable while ${hostView.title} is offline`
+                      ? `Voice unavailable: ${hostView.title} offline`
                       : 'Call'
                 }
                 onClick={() => void handleCall()}
@@ -2741,7 +2741,7 @@ export const Composer = forwardRef(function Composer(
                  (Tom, `patch/todo.md` — "nothing tells you enter sends"). */
                 title={
                   newChatHostDown
-                    ? `${hostDownLine(hostView)} A new chat can start there once it is back.`
+                    ? hostDownLine(hostView)
                     : editingTurn
                       ? shortcutTitle('Save edit', '↵')
                       : running

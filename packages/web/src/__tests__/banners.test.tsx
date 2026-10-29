@@ -50,7 +50,7 @@ describe('HostOfflineBanner', () => {
     });
     render(<HostOfflineBanner />);
     expect(screen.getByTestId('daemon-offline-banner')).toBeTruthy();
-    expect(screen.getByText(/Mac host is offline/)).toBeTruthy();
+    expect(screen.getByText(/Mac host offline/)).toBeTruthy();
   });
 });
 

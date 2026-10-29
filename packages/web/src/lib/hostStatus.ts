@@ -23,10 +23,10 @@ export function hostState(h: HostPresence | undefined): HostState {
   return h.offlineReason === 'updating' ? 'updating' : 'offline';
 }
 
-/** "Mac host is offline." / "Mac host is installing an update." */
+/** "Mac host offline" / "Mac host updating" */
 export function hostStateSentence(h: HostPresence | undefined, hostId: string): string {
   const title = hostTitle(h, hostId);
-  return hostState(h) === 'updating' ? `${title} is installing an update.` : `${title} is offline.`;
+  return hostState(h) === 'updating' ? `${title} updating` : `${title} offline`;
 }
 
 /** "2h ago" since it was last seen, or null when never seen or updating. */
@@ -58,9 +58,9 @@ export function hostStatusView(h: HostPresence | undefined, hostId: string): Hos
   };
 }
 
-/** "Mac host is offline. Last seen 2h ago." */
+/** "Mac host offline · last seen 2h ago" */
 export function hostStatusLine(v: HostStatusView): string {
-  return v.lastSeen === null ? v.sentence : `${v.sentence} Last seen ${v.lastSeen}.`;
+  return v.lastSeen === null ? v.sentence : `${v.sentence} · last seen ${v.lastSeen}`;
 }
 
 /**
@@ -68,7 +68,7 @@ export function hostStatusLine(v: HostStatusView): string {
  * host_offline) even if presence has not caught up: never an empty line.
  */
 export function hostDownLine(v: HostStatusView): string {
-  return v.state === 'online' ? `${v.title} is offline.` : hostStatusLine(v);
+  return v.state === 'online' ? `${v.title} offline` : hostStatusLine(v);
 }
 
 /** One host's status, live. `hostId` null/undefined reads as online. */

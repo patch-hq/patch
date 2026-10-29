@@ -171,7 +171,7 @@ describe('host offline (spec/12 § Host-offline UX)', () => {
     );
     render(withQuery(<HostFilesPage ws={null} />));
     expect(await screen.findByTestId('host-browse-offline')).toHaveTextContent(
-      'hetzner host is offline.',
+      'hetzner host offline',
     );
     expect(screen.queryByTestId('host-browse-error')).toBeNull();
     expect(useUiStore.getState().errors).toEqual([]);

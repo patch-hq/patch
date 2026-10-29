@@ -11,7 +11,7 @@
 // The + New chat button leads the fixed top band, directly under the brand row
 // (spec/14 § Sidebar §8) — starting a chat is the most-reached-for action.
 
-import { useHostStatus } from '../lib/hostStatus.js';
+import { hostStatusLine, useHostStatus } from '../lib/hostStatus.js';
 import type { JSX, MouseEvent as ReactMouseEvent } from 'react';
 import {
   createContext,
@@ -2458,7 +2458,7 @@ const ChatRowView = memo(function ChatRowView({
           <span
             className="preview row-host-down"
             data-testid={`row-host-down-${row.chatId}`}
-            title={`${rowHost.sentence} Messages to this chat are queued and sent when it is back.`}
+            title={`${hostStatusLine(rowHost)} · messages queued`}
           >
             <CloudOff size={11} aria-hidden />
             {hostDownLine}

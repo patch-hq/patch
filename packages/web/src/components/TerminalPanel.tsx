@@ -21,7 +21,7 @@
 // error land in the scrollback as an explicit line. The prompt is never left
 // looking alive over a dead session.
 
-import { hostStatusLine, useHostStatus } from '../lib/hostStatus.js';
+import { useHostStatus } from '../lib/hostStatus.js';
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from 'react';
 import type { WireEvent } from '@patch/wire';
 import type { PatchWs } from '../api/ws.js';
@@ -262,7 +262,7 @@ export function TerminalPanel({
       </header>
       {!session && hostDown ? (
         <p className="terminal-host-down" data-testid="terminal-host-down" role="status">
-          {hostStatusLine(chatHost)} The terminal opens when it is back.
+          Waiting for {chatHost.title}
         </p>
       ) : null}
       <div className="terminal-scroll mono" data-testid="terminal-scroll" ref={scrollRef}>

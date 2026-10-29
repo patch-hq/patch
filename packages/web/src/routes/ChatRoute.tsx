@@ -3233,9 +3233,7 @@ function MessageEntry({
               <CloudOff size={12} strokeWidth={2.5} aria-hidden />
             )}
           </span>
-          {hostOnline
-            ? 'Sending…'
-            : `${hostView.state === 'updating' ? `${hostView.title} is installing an update` : `${hostView.title} is offline`} — sends when it is back`}
+          {hostOnline ? 'Sending…' : `Waiting for ${hostView.title}`}
         </div>
       ) : null}
       {/* spec/14 § Messages — the per-message meta strip: facts ABOUT the turn

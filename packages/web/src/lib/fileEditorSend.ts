@@ -50,9 +50,7 @@ export function sendFileEditorEvent(ws: PatchWs | null, chatId: string, ev: File
       const host = usePresenceStore.getState().hosts[hostId];
       const online = host?.online ?? true;
       pushNotice(
-        online
-          ? `Saved ${ev.path}`
-          : `${hostTitle(host, hostId)} is offline. ${ev.path} saves when it is back.`,
+        online ? `Saved ${ev.path}` : `${ev.path} queued · ${hostTitle(host, hostId)} offline`,
       );
     }
   } catch (e) {

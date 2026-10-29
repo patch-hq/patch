@@ -394,7 +394,7 @@ export function FilesPage({ chatId }: { chatId: string }): JSX.Element {
             {treePending ? <BrowseSkeleton rows={6} testId="browse-tree-loading" /> : null}
             {listingFailed && isHostOffline(recursiveError) ? (
               <div className="browse-tree-empty" data-testid="browse-tree-offline">
-                {chatHostLine} Its files show again when it is back.
+                {chatHostLine}
               </div>
             ) : listingFailed ? (
               <div className="browse-tree-error" data-testid="browse-tree-error" role="alert">

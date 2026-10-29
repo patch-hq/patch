@@ -52,7 +52,7 @@ describe('HostOfflineBanner', () => {
     });
     render(<HostOfflineBanner />);
     expect(screen.getByTestId('daemon-offline-banner')).toHaveTextContent(
-      'Mac host is offline. Last seen 2h ago. Messages are queued and sent when it is back.',
+      'Mac host offline · last seen 2h ago · messages queued',
     );
   });
 
@@ -66,7 +66,7 @@ describe('HostOfflineBanner', () => {
     });
     render(<HostOfflineBanner />);
     expect(screen.getByTestId('daemon-offline-banner')).toHaveTextContent(
-      'All hosts are offline: Mac, Netcup.',
+      'All hosts offline: Mac, Netcup',
     );
   });
 
@@ -109,7 +109,7 @@ describe('HostOfflineBanner', () => {
     it('names the offline host and says messages are queued', () => {
       render(<HostOfflineBanner hostId="b" />);
       const banner = screen.getByTestId('daemon-offline-banner');
-      expect(banner).toHaveTextContent('hetzner host is offline');
+      expect(banner).toHaveTextContent('hetzner host offline');
       expect(banner).toHaveTextContent('queued');
     });
 
@@ -128,9 +128,7 @@ describe('HostOfflineBanner', () => {
         },
       });
       render(<HostOfflineBanner hostId="b" />);
-      expect(screen.getByTestId('daemon-offline-banner')).toHaveTextContent(
-        'hetzner host is offline',
-      );
+      expect(screen.getByTestId('daemon-offline-banner')).toHaveTextContent('hetzner host offline');
     });
 
     it('renders nothing when that host is online, even if another is down', () => {
@@ -148,9 +146,7 @@ describe('HostOfflineBanner', () => {
     usePresenceStore.setState({ connection: 'connected', hostOnline: false, hosts: {} });
     usePresenceStore.getState().setHostOnline('d1', false, 'updating');
     render(<HostOfflineBanner />);
-    expect(screen.getByTestId('daemon-offline-banner')).toHaveTextContent(
-      'd1 host is installing an update.',
-    );
+    expect(screen.getByTestId('daemon-offline-banner')).toHaveTextContent('d1 host updating');
     expect(screen.getByTestId('daemon-offline-banner')).toHaveAttribute('data-state', 'updating');
     expect(screen.queryByTestId('daemon-offline-diagnose')).toBeNull();
   });
@@ -186,7 +182,7 @@ describe('HostOfflineBanner', () => {
     });
     render(<HostOfflineBanner hostId="m" />);
     expect(screen.getByTestId('daemon-offline-banner')).toHaveTextContent(
-      'Mac host is installing an update. Messages to this chat are queued and sent when it is back.',
+      'Mac host updating · messages queued',
     );
     expect(screen.queryByTestId('daemon-offline-diagnose')).toBeNull();
   });

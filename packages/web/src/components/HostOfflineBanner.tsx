@@ -34,9 +34,7 @@ function ChatHostBanner({ hostId }: { hostId: string }): JSX.Element | null {
       role="status"
     >
       <span className="dot" aria-hidden />
-      <span>
-        {hostStatusLine(status)} Messages to this chat are queued and sent when it is back.
-      </span>
+      <span>{hostStatusLine(status)} · messages queued</span>
     </div>
   );
 }
@@ -56,8 +54,8 @@ function AllHostsOfflineBanner(): JSX.Element | null {
     one !== null
       ? hostStatusLine(one)
       : views.length === 0
-        ? 'No host is set up yet.'
-        : `All hosts are offline: ${views.map((v) => v.title.replace(/ host$/, '')).join(', ')}.`;
+        ? 'No hosts set up'
+        : `All hosts offline: ${views.map((v) => v.title.replace(/ host$/, '')).join(', ')}`;
   return (
     <div
       className="daemon-offline-banner"
@@ -68,9 +66,7 @@ function AllHostsOfflineBanner(): JSX.Element | null {
       <span className="dot" aria-hidden />
       <span>
         {text}
-        {views.length === 0
-          ? ''
-          : ` Messages are queued and sent when ${one === null ? 'one is' : 'it is'} back.`}
+        {views.length === 0 ? '' : ' · messages queued'}
       </span>
       {/* An update is a known gap with nothing to diagnose. Otherwise every
           host unreachable at once can be a real fault, so offer the check. */}

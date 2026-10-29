@@ -785,7 +785,7 @@ describe('integration: daemon-offline send renders queued then delivers', () => 
     // The turn renders with the daemon-offline queued affordance (NOT a bare
     // spinner, NOT lost).
     const pending = await screen.findByTestId('delivery-pending');
-    expect(pending).toHaveTextContent(/host is offline — sends when it is back/);
+    expect(pending).toHaveTextContent(/^Waiting for \w+ host$/);
     expect(pending).toHaveAttribute('data-daemon-offline', 'true');
     const localId = sentInputs(fake).find((e) => e.message === 'send me later')!.localId;
 

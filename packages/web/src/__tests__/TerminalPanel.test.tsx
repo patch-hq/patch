@@ -478,9 +478,7 @@ describe('TerminalPanel — command completion', () => {
     }));
     const ws = makeWs();
     renderPanel(ws);
-    expect(screen.getByTestId('terminal-host-down')).toHaveTextContent(
-      'Mac host is offline. The terminal opens when it is back.',
-    );
+    expect(screen.getByTestId('terminal-host-down')).toHaveTextContent('Waiting for Mac host');
     expect(ws.sent).toHaveLength(0);
     act(() => usePresenceStore.getState().setHostOnline('mac', true));
     await waitFor(() => expect(ws.sent).toHaveLength(1));

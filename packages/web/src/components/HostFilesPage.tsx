@@ -634,7 +634,7 @@ function HostBrowsePanel({
             <BrowseSkeleton rows={6} testId="host-browse-loading" />
           ) : isHostOffline(listQuery.error) ? (
             <div className="browse-tree-empty" data-testid="host-browse-offline">
-              {offlineLine} Its files show again when it is back.
+              {offlineLine}
             </div>
           ) : listQuery.isError ? (
             <div className="browse-tree-error" data-testid="host-browse-error" role="alert">
@@ -702,7 +702,7 @@ function HostBrowsePanel({
               </div>
             ) : isHostOffline(contentQuery.error) ? (
               <div className="browse-tree-empty" data-testid="host-browse-content-offline">
-                {offlineLine} This file opens again when it is back.
+                {offlineLine}
               </div>
             ) : contentQuery.isError ? (
               <div

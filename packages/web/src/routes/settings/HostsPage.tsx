@@ -114,7 +114,7 @@ function HostListRow({
   const seen = host.online
     ? 'online'
     : host.offlineReason === 'updating'
-      ? 'installing an update'
+      ? 'updating'
       : `offline · last seen ${agoLabel(host.lastSeenAt)}`;
   const { updating, apply: applyUpdate } = useHostUpdate(host);
   return (
@@ -201,9 +201,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
    */
   async function connectBackend(backendId: string, backendLabel: string): Promise<void> {
     if (!host.online) {
-      useUiStore
-        .getState()
-        .pushNotice(`${hostTitle(host, host.hostId)} is offline. Sign in once it is back.`);
+      useUiStore.getState().pushNotice(`${hostTitle(host, host.hostId)} offline`);
       return;
     }
     if (backendId === 'codex') {

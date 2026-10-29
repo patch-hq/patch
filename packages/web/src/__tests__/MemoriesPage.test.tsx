@@ -289,7 +289,7 @@ describe('Settings → Memories — the entries', () => {
     fireEvent.change(body, { target: { value: 'x' } });
     fireEvent.blur(body);
     expect(sent).toEqual([]);
-    await waitFor(() => expect(errors().some((e) => /mac host is offline/.test(e))).toBe(true));
+    await waitFor(() => expect(errors().some((e) => /mac host offline/.test(e))).toBe(true));
   });
 
   it('shows the host chosen in the switcher, and only its memories', async () => {

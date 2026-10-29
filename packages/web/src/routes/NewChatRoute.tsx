@@ -10,7 +10,7 @@
 // that folder and delivers the message into it; from then on the folder "moves
 // up" into the live chat's header crumb and the model is fixed.
 
-import { useHostStatus } from '../lib/hostStatus.js';
+import { hostStatusLine, useHostStatus } from '../lib/hostStatus.js';
 import type { JSX, KeyboardEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadLastNewChat, saveLastNewChat } from '../lib/lastNewChat';
@@ -995,10 +995,8 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
             host that is offline — its folder is checked there at spawn. */}
         {pickerHostView.state === 'online' ? null : (
           <p className="new-chat-host-down" data-testid="new-chat-host-down" role="status">
-            {pickerHostView.sentence}{' '}
-            {machines.some((m) => m.online)
-              ? 'Choose another machine, or start this chat once it is back.'
-              : 'This chat can start once it is back.'}
+            {hostStatusLine(pickerHostView)}
+            {machines.some((m) => m.online) ? ' · choose another machine' : ''}
           </p>
         )}
         {/* The project: chips for the head of the picker's list, then the pill
