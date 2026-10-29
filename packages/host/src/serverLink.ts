@@ -156,7 +156,8 @@ export interface ServerLink {
   /** Whether the link is currently authed/online. */
   isOnline(): boolean;
   /** Stop reconnecting and close any open socket. */
-  close(): Promise<void>;
+  /** `code` tells the server why, e.g. CLOSE_HOST_UPDATING. */
+  close(code?: number, reason?: string): Promise<void>;
   /**
    * Live diagnostics readout (always available, never gated). Backs the
    * host control-UDS `/internal/diag/link` route consumed by `patch doctor`
@@ -497,7 +498,7 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
       }
       return buffer.size();
     },
-    async close(): Promise<void> {
+    async close(code?: number, reason?: string): Promise<void> {
       stopped = true;
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
@@ -510,7 +511,7 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
       if (socket && socket.readyState !== WebSocket.CLOSED) {
         await new Promise<void>((resolve) => {
           socket.once('close', () => resolve());
-          socket.close();
+          socket.close(code, reason);
         });
       }
     },

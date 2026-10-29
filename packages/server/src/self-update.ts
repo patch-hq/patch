@@ -22,6 +22,7 @@ import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readMirrorState } from './release-mirror.js';
+import { noteInstallingUpdate } from './shutdown-reason.js';
 
 /** Between attempts at the same release, so a failing install is not a loop. */
 export const RETRY_AFTER_MS = 30 * 60 * 1000;
@@ -147,12 +148,15 @@ export function createSelfUpdater(opts: SelfUpdaterOptions): () => void {
       const installer = join(updates, dirs[0]!, 'install');
       if (!existsSync(installer)) throw new Error(`${installer} is missing`);
       const unit = `patch-server-update-${plan.to.replace(/\./g, '-')}-${now()}`;
+      // Before launching: the installer restarts this process within seconds.
+      noteInstallingUpdate(true);
       launch(installer, opts.home, unit);
       opts.log(
         `self-update: installing release ${plan.to} over ${opts.running}; ` +
           `progress in: journalctl --user -u ${unit}`,
       );
     } catch (err: unknown) {
+      noteInstallingUpdate(false);
       opts.log(
         `self-update FAILED to start installing ${plan.to}: ` +
           `${err instanceof Error ? err.message : String(err)} (tries again in ${RETRY_AFTER_MS / 60_000} min)`,

@@ -169,6 +169,13 @@ export interface PatchDesktopBridge {
    */
   installUpdate?(): void;
   /**
+   * Move this window's traffic lights so their centre sits `centre` px from
+   * the top — the middle of a banner that has taken the top row — or back to
+   * the brand row with `null`. Undefined on shells that predate it, which keep
+   * the lights where they are (see `lib/windowChrome.ts`).
+   */
+  seatTrafficLights?(centre: number | null): void;
+  /**
    * spec/14 § Links and the web panel — ask the shell to SHOW a page in the
    * right-docked web panel. This is Patch showing you something (an artifact, a
    * preview). A link the user clicks can land in the same panel, but it gets

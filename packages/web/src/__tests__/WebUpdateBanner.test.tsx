@@ -139,7 +139,7 @@ describe('WebUpdateBanner', () => {
     useWebUpdateStore.getState().setAvailable('assets/index-BBBB.js');
     render(<WebUpdateBanner />);
     expect(screen.getByTestId('web-update-banner')).toHaveTextContent('Patch has updated');
-    expect(screen.getByTestId('web-update-reload')).toHaveTextContent('Update Patch');
+    expect(screen.getByTestId('web-update-reload')).toHaveTextContent('Restart Patch');
   });
 
   it('acknowledges the press, and says so if the page is still here afterwards', async () => {
@@ -148,7 +148,7 @@ describe('WebUpdateBanner', () => {
     useWebUpdateStore.getState().setAvailable('assets/index-BBBB.js');
     render(<WebUpdateBanner />);
     fireEvent.click(screen.getByTestId('web-update-reload'));
-    expect(screen.getByTestId('web-update-reload')).toHaveTextContent('Updating');
+    expect(screen.getByTestId('web-update-reload')).toHaveTextContent('Restarting');
     expect(screen.getByTestId('web-update-reload')).toBeDisabled();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
