@@ -38,6 +38,8 @@ test.describe('Settings — Voice engines', () => {
       'Gemini Thinking',
       'OpenAI mini',
       'OpenAI',
+      'ElevenLabs Haiku',
+      'ElevenLabs Sonnet',
     ]);
     // Dictation: the phone has its own recogniser; a computer does not.
     await expect(page.getByTestId('dictation-phone-engine').locator('button')).toHaveText([
