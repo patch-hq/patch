@@ -1857,7 +1857,7 @@ describe('Composer', () => {
       const mic = screen.getByTestId('voice-note-btn') as HTMLButtonElement;
       expect(mic.disabled).toBe(true);
       expect(mic.getAttribute('title')).toBe(
-        'Not configured on hetzner: DEEPGRAM_API_KEY is missing. Sessions there are refused.',
+        'Not configured on hetzner: no Deepgram key is set. Sessions there are refused.',
       );
       fireEvent.mouseDown(mic);
       fireEvent.mouseUp(mic);
