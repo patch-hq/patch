@@ -7,8 +7,9 @@ Open a PR; when its tests pass it merges itself, and the merge is the release.
    (`scripts/verify.mjs`) on one runner for every PR, and the full gate (four
    shards, browser layer on) in the merge queue, which builds at most three
    entries at once so it can't fill the runner pool. Nothing re-runs on `main`.
-   A PR ejected from the queue by a failing test is put back once
-   (`pr-requeue.yml`); a second failure labels it `queue-failed`.
+   GitHub removes a PR that fails, conflicts or makes an invalid merge commit,
+   and nothing puts it back: a Patch job on the `dequeued` event runs
+   `scripts/merge-queue-dequeue.mjs`, which files an App Updates task (or comments on the open one) for an agent to fix and re-enable auto-merge.
    `pr-automerge.yml` turns on auto-merge for each PR as Tom, using the `AUTOMERGE_TOKEN` PAT secret because the Actions bot never gets a PR queued (the merge queue sets the method; the PAT expires and must be renewed);
    `pr-conflicts.yml` labels a PR `needs-rebase` and comments when main moves
    under it, for the chat that owns it to rebase and force-push.
@@ -51,8 +52,8 @@ Versions are `<major>.<minor>.<commit count>` (`scripts/version.mjs`); bump
 
 | Question                      | Look at                                                                     |
 | ----------------------------- | --------------------------------------------------------------------------- |
-| Did it build?                 | `gh run list -R patch-hq/patch`                                         |
-| Is it published?              | `gh release list -R patch-hq/patch`                                     |
+| Did it build?                 | `gh run list -R patch-hq/patch`                                             |
+| Is it published?              | `gh release list -R patch-hq/patch`                                         |
 | Did my server pick it up?     | `release mirror` / `self-update` lines in `~/.patch-server/logs/server.log` |
 | Did the install work?         | `journalctl --user -u patch-server-update-*`                                |
 | What is each surface running? | Settings → Updates                                                          |
