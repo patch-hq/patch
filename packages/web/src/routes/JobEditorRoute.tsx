@@ -803,6 +803,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
     const draft = isNew ? useJobDraftStore.getState().drafts.new : undefined;
     return draft ? { ...DEFAULT_FORM, ...(draft as Partial<FormState>) } : DEFAULT_FORM;
   });
+  // True once the server copy (with any draft over it) is in `form`. State, not
+  // `data !== undefined`: the render that first sees `data` still holds the blank
+  // form, and the draft sync below would read it as clean and wipe the draft.
+  const [hydrated, setHydrated] = useState(false);
   const [autonomyOpen, setAutonomyOpen] = useState(false);
   const accountAutonomyPrompt = usePreferencesStore((s) => s.preferences.jobAutonomyPrompt);
   const jobDefaultModel = usePreferencesStore((s) => s.preferences.jobDefaultModel);
@@ -965,6 +969,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
       // baseline stays the server's, so the form still reads as edited.
       const draft = useJobDraftStore.getState().drafts[draftKey];
       setForm(draft ? { ...loaded, ...(draft as Partial<FormState>) } : loaded);
+      setHydrated(true);
       // A job that carries an override shows it, rather than hiding it under
       // a collapsed "Advanced".
       if (loaded.autonomyPromptCustom) setAutonomyOpen(true);
@@ -1015,7 +1020,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
   // it is about to be laid over. `draftDropped` stops a deleted job's still-open
   // tab from writing its draft back.
   const draftDropped = useRef(false);
-  const draftReady = isNew || data !== undefined;
+  const draftReady = isNew || hydrated;
   useEffect(() => {
     if (!draftReady || draftDropped.current) return;
     const drafts = useJobDraftStore.getState();
