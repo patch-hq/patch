@@ -45,27 +45,70 @@ export function selectCodexAccount<T extends EligibleAccount>(
       (a.blockedUntil === undefined || a.blockedUntil <= now),
   );
 }
-export function codexUsage(result: RpcObject, at: number): HostAccountEvent['usage'] {
+type CodexWindowKey = 'session' | 'week';
+export interface CodexRawWindow {
+  usedPercent: number;
+  /** ms-epoch, exactly as OpenAI stated it. */
+  resetsAt?: number;
+}
+
+/** Below this, OpenAI's reset instant is treated as unanchored if it moves between readings. */
+const CODEX_UNANCHORED_PERCENT = 5;
+
+/**
+ * The windows exactly as OpenAI reported them. Which window is which comes
+ * from its own length, not its position: a plan with only a weekly limit
+ * reports that week as `primary`.
+ */
+function isoOrUndefined(at: number | undefined): string | undefined {
+  return at === undefined ? undefined : new Date(at).toISOString();
+}
+
+export function codexRawWindows(
+  result: RpcObject,
+): Partial<Record<CodexWindowKey, CodexRawWindow>> {
   const limits = result.rateLimitsByLimitId?.codex ?? result.rateLimits;
-  if (!limits?.primary && !limits?.secondary) return undefined;
-  const usage: NonNullable<HostAccountEvent['usage']> = { at };
-  // Which window is which comes from its own length, not its position: a plan
-  // with only a weekly limit reports that week as `primary`.
-  for (const value of [limits.primary, limits.secondary]) {
+  const out: Partial<Record<CodexWindowKey, CodexRawWindow>> = {};
+  for (const value of [limits?.primary, limits?.secondary]) {
     if (!value || typeof value.usedPercent !== 'number') continue;
     if (typeof value.windowDurationMins !== 'number') continue;
     const key = value.windowDurationMins <= 24 * 60 ? 'session' : 'week';
+    out[key] = {
+      usedPercent: value.usedPercent,
+      ...(typeof value.resetsAt === 'number' ? { resetsAt: value.resetsAt * 1000 } : {}),
+    };
+  }
+  return out;
+}
+
+export function codexUsage(
+  result: RpcObject,
+  at: number,
+  previous?: Partial<Record<CodexWindowKey, CodexRawWindow>>,
+): HostAccountEvent['usage'] {
+  const raw = codexRawWindows(result);
+  if (!raw.session && !raw.week) return undefined;
+  const usage: NonNullable<HostAccountEvent['usage']> = { at };
+  for (const key of ['session', 'week'] as const) {
+    const value = raw[key];
+    if (!value) continue;
+    // Near zero, nothing has anchored the window and OpenAI's resetsAt slides:
+    // at 0% it is exactly "now + the full window", and at a percent or two it
+    // has been seen to move between readings. Kept, it reads as a date that
+    // keeps changing. Dropped when the window is empty, or when it is nearly
+    // empty and the instant moved since the last reading; once usage anchors
+    // it (or it holds still) the date is shown.
+    const before = previous?.[key];
+    const sliding =
+      value.usedPercent < CODEX_UNANCHORED_PERCENT &&
+      before !== undefined &&
+      before.usedPercent < CODEX_UNANCHORED_PERCENT &&
+      before.resetsAt !== value.resetsAt;
     usage[key] = {
       status: value.usedPercent >= 100 ? 'rejected' : 'allowed',
       utilization: Math.min(1, Math.max(0, value.usedPercent / 100)),
-      // At 0% used, nothing has anchored this window yet, and OpenAI reports
-      // resetsAt as exactly "now + windowDurationMins" — which slides forward
-      // by however long it has been since the last poll rather than naming a
-      // fixed instant. Kept, it reads as "resets in 7 days" for ever, which is
-      // indistinguishable from "resets whenever this was last checked" because
-      // that is what it is. Dropped once real usage anchors the window.
-      ...(typeof value.resetsAt === 'number' && value.usedPercent > 0
-        ? { resetsAt: value.resetsAt * 1000 }
+      ...(value.resetsAt !== undefined && value.usedPercent > 0 && !sliding
+        ? { resetsAt: value.resetsAt }
         : {}),
     };
   }
@@ -73,6 +116,8 @@ export function codexUsage(result: RpcObject, at: number): HostAccountEvent['usa
 }
 interface Account extends EligibleAccount {
   label: string;
+  /** The previous reading as OpenAI stated it, to tell a sliding reset from a fixed one. */
+  lastRaw?: Partial<Record<CodexWindowKey, CodexRawWindow>>;
   home: string;
   adopted: boolean;
   /**
@@ -259,7 +304,23 @@ export class CodexAccounts {
         delete account.expired;
         if (result.account?.email) account.email = result.account.email;
         if (account.connected && account.kind === 'chatgpt') {
-          const usage = codexUsage(await client.request('account/rateLimits/read'), Date.now());
+          const result = await client.request('account/rateLimits/read');
+          const now = Date.now();
+          const raw = codexRawWindows(result);
+          // Every reading, with the reset instant as ISO text, so a date that
+          // moves can be traced to OpenAI or to patch from the log alone.
+          this.opts.logger?.info(
+            {
+              accountId: account.id,
+              session: raw.session?.usedPercent,
+              sessionResetsAt: isoOrUndefined(raw.session?.resetsAt),
+              week: raw.week?.usedPercent,
+              weekResetsAt: isoOrUndefined(raw.week?.resetsAt),
+            },
+            'codex usage reading',
+          );
+          const usage = codexUsage(result, now, account.lastRaw);
+          account.lastRaw = raw;
           account.usage = usage;
           const blocked = [usage?.session, usage?.week].filter((w) => w?.status === 'rejected');
           if (blocked.length)
