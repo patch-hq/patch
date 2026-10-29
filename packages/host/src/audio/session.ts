@@ -93,6 +93,12 @@ export interface SessionDeps {
      * than as the user's own words, which are already in the timeline.
      */
     handoff?: boolean;
+    /**
+     * Called once the chat has the message and its turn has started. A hand-off
+     * must not be reported as passed on before this fires; if the promise rejects
+     * first, the message never arrived.
+     */
+    onAccepted?: () => void;
   }) => Promise<string>;
   /**
    * Returns the currently configured Kokoro voice name for this host, or
