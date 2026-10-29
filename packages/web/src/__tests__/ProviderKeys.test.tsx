@@ -81,12 +81,12 @@ describe('Settings → Providers → Provider keys', () => {
     expect(screen.getByTestId('provider-key-openai-edit')).toHaveTextContent('Add');
   });
 
-  it('marks each key with a status dot and names its environment variable', () => {
+  it('marks each key with a status dot and never names an environment variable', () => {
     loadShared({ secrets: KEYS });
     renderSection();
     const gemini = screen.getByTestId('provider-key-gemini');
     expect(gemini.querySelector('.set-dot:not(.off)')).not.toBeNull();
-    expect(gemini).toHaveTextContent('GEMINI_API_KEY');
+    expect(gemini).not.toHaveTextContent('GEMINI_API_KEY');
     const openai = screen.getByTestId('provider-key-openai');
     expect(openai.querySelector('.set-dot.off')).not.toBeNull();
     expect(screen.getByTestId('provider-key-openai-edit').className).toContain('primary');

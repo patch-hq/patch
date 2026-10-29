@@ -49,9 +49,7 @@ test.describe('Settings — Providers', () => {
       },
     });
     await page.goto(settingsUrl('voice'));
-    await expect(page.getByTestId('dictation-phone-keys')).toContainText(
-      'DEEPGRAM_API_KEY is missing',
-    );
+    await expect(page.getByTestId('dictation-phone-keys')).toContainText('no Deepgram key is set');
     await page.getByTestId('settings-nav-providers').click();
 
     await page.getByTestId('provider-key-deepgram-edit').click();

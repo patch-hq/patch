@@ -409,8 +409,8 @@ describe('audio server — hosted backends on every app surface', () => {
           type: 'audio.error',
           code: 'voice_key_missing',
           message:
-            `${label} is set to openai, but OPENAI_REALTIME_API_KEY is not set on this host. ` +
-            `Switch ${label} to another backend in Settings → Voice.`,
+            `${label} is set to openai, but no OpenAI key is set on this host. ` +
+            `Add it in Settings → Providers, or switch ${label} to another backend in Settings → Voice.`,
         },
       ]);
       expect(openai).toHaveLength(0);
@@ -426,8 +426,8 @@ describe('audio server — hosted backends on every app surface', () => {
           type: 'audio.error',
           code: 'voice_key_missing',
           message:
-            `${label} is set to elevenlabs, but ELEVEN_LABS_API_KEY is not set on this host. ` +
-            `Switch ${label} to another backend in Settings → Voice.`,
+            `${label} is set to elevenlabs, but no ElevenLabs key is set on this host. ` +
+            `Add it in Settings → Providers, or switch ${label} to another backend in Settings → Voice.`,
         },
       ]);
       expect(eleven).toHaveLength(0);
