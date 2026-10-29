@@ -593,6 +593,10 @@ export class PatchWs {
       usePresenceStore.getState().setHostOnline(event.hostId, false);
       return;
     }
+    if (event.type === 'host.condition') {
+      usePresenceStore.getState().setHostCondition(event);
+      return;
+    }
     if (event.type === 'host.host') {
       usePresenceStore.getState().setHostReport(event);
       return;

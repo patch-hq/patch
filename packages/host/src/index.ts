@@ -93,6 +93,7 @@ import { ArtifactAutoRepublisher, ArtifactPublisher } from './artifacts.js';
 import { PadClient } from './pads.js';
 import { RemoteJobsStore } from './jobs-interface.js';
 import { QueuePullClient } from './queuePull.js';
+import { assessHostHealth, HOST_HEALTH_INTERVAL_MS } from '@patch/wire';
 import type { ChatInputEvent } from '@patch/wire';
 import { createMetaStore } from './meta.js';
 import { readAccountExhaustion, writeAccountExhaustion } from './accountAvailabilityStore.js';
@@ -184,6 +185,7 @@ import {
 } from './host.js';
 import { createPowerWatcher } from './power.js';
 import { createServerLink } from './serverLink.js';
+import { createHealthSampler } from './healthReport.js';
 import { handleJobExec } from './jobExec.js';
 import { handleHostWake } from './hostWake.js';
 import { rotateLog } from './logRotate.js';
@@ -2069,6 +2071,35 @@ async function startHost(
   };
   const credentialReportTimer = setInterval(reportRefreshedCredentials, 60_000);
   credentialReportTimer.unref();
+
+  // Heartbeat health (spec/03 § Host health): tell the server how this machine
+  // is coping, and hold new turns while its memory is critically short — work
+  // started now would only be cut off when the kernel kills something.
+  const healthSampler = createHealthSampler();
+  let memoryCritical = false;
+  const reportHealth = async (): Promise<void> => {
+    let sample: Awaited<ReturnType<typeof healthSampler.sample>>;
+    try {
+      sample = await healthSampler.sample();
+    } catch (err) {
+      logger.error({ err }, 'host health: could not sample this machine');
+      return;
+    }
+    const critical = assessHostHealth(sample).critical;
+    if (critical !== memoryCritical) {
+      memoryCritical = critical;
+      logger.warn(
+        { critical },
+        critical
+          ? 'host health: memory critical, holding new turns'
+          : 'host health: memory recovered, releasing held turns',
+      );
+      if (!critical) daemon.releaseHeldTurns();
+    }
+    if (linkOnline) link.send({ type: 'host.health', hostId: selfHostId, ...sample });
+  };
+  const healthTimer = setInterval(() => void reportHealth(), HOST_HEALTH_INTERVAL_MS);
+  healthTimer.unref();
 
   const link = createServerLink({
     url: config.serverWsUrl,
@@ -4199,6 +4230,7 @@ async function startHost(
       return block + (req.voicePrefix ? `${req.voicePrefix}${req.message}` : req.message);
     },
     sleepGuard: createSleepGuard({ logger }),
+    holdTurns: () => memoryCritical,
     sleepWatch: createSleepWatch({
       logger,
       // Whatever the server link held across the gap is stale: re-handshake now
@@ -5221,6 +5253,8 @@ async function startHost(
   const shutdown = async (): Promise<void> => {
     // Turns outlive the host (spec/02): let go of each one's runner first, so
     // nothing below ends a turn that is meant to carry on under the next host.
+    clearInterval(healthTimer);
+    healthSampler.stop();
     daemon.beginShutdown();
     const detached = detachDurableTurns();
     if (detached > 0) logger.info({ turns: detached }, 'patch-daemon: left turns running');

@@ -780,6 +780,10 @@ export class PatchWs {
       usePresenceStore.getState().setHostOnline(event.hostId, false);
       return;
     }
+    if (event.type === 'host.condition') {
+      usePresenceStore.getState().setHostCondition(event);
+      return;
+    }
     if (event.type === 'host.unauthenticated') {
       // A backend on a NAMED host has no usable credential — on boot and on a
       // refused query. Dropping it is what once produced a silent app: you

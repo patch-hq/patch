@@ -501,6 +501,13 @@ export interface HostOptions {
   onTurnCommitted?: (chatId: string) => void;
   /** Held from the start of a chat's pump until it settles, so the host machine cannot sleep mid-turn. */
   sleepGuard?: SleepGuard;
+  /**
+   * True while the machine is too short of memory to start more work. A turn
+   * that would start is queued instead and runs when this goes false
+   * (`releaseHeldTurns`), rather than being cut off when the kernel kills
+   * something.
+   */
+  holdTurns?: () => boolean;
   /** Tells a turn that died because the machine slept from one that failed on its own. */
   sleepWatch?: SleepWatch;
   /**
@@ -6549,6 +6556,27 @@ export class Daemon {
       // (`chat.resume_now_request`) is how someone who knows better lifts it.
       return;
     }
+    // The machine is too short of memory to start more work: queue the turn (the
+    // surface shows it as waiting) and let `releaseHeldTurns` run it. A chat
+    // already holding turns keeps queueing so they run in the order they came.
+    if (this.memoryHeld.has(req.chatId) || this.opts.holdTurns?.() === true) {
+      this.memoryHeld.add(req.chatId);
+      this.enqueueQueued(
+        req.chatId,
+        message,
+        req.localId,
+        req.fork,
+        req.origin,
+        req.retryOfSeq,
+        req.jobTrigger,
+        req.hookTrigger,
+        req.goalTrigger,
+        { text: req.message, ...(compose ? { compose } : {}) },
+        req.nudge,
+        req.afterTurn,
+      );
+      return;
+    }
     // Idle: run THIS turn now, then drain anything that queues up while it (and
     // each subsequent queued turn) runs. Awaiting the full drain preserves the
     // "await sendInput ⇒ my turn ran" contract callers/tests rely on.
@@ -6739,7 +6767,7 @@ export class Daemon {
       // surface shows it as QUEUED forever.
       // A turn parked for credit is not a throw: its queue is owed too, and
       // stays for the resume to drain.
-      if (!this.creditParked(chatId)) {
+      if (!this.creditParked(chatId) && !this.memoryHeld.has(chatId)) {
         for (const abandoned of this.turnQueues.get(chatId) ?? []) {
           this.emit({
             type: 'chat.dequeued',
@@ -6783,6 +6811,36 @@ export class Daemon {
     }
   }
 
+  /** Chats whose queued turns are waiting for memory to free up (see `holdTurns`). */
+  private readonly memoryHeld = new Set<string>();
+
+  /** Memory has recovered: start the turns that were held, each chat in its own order. */
+  releaseHeldTurns(): void {
+    for (const chatId of [...this.memoryHeld]) {
+      if (this.pumping.has(chatId)) continue; // its running pump drains the queue itself
+      this.memoryHeld.delete(chatId);
+      const item = this.turnQueues.get(chatId)?.shift();
+      if (!item) continue;
+      this.emit({ type: 'chat.dequeued', chatId, localId: item.localId, reason: 'running' });
+      this.runTurnsFrom(
+        chatId,
+        item.message,
+        item.fork,
+        item.localId,
+        item.origin,
+        item.retryOfSeq,
+        item.jobTrigger,
+        item.hookTrigger,
+        item.goalTrigger,
+      ).catch((err: unknown) => {
+        this.opts.logger.error(
+          { chatId, err: err instanceof Error ? err.message : String(err) },
+          'releaseHeldTurns: the held turn failed',
+        );
+      });
+    }
+  }
+
   /**
    * True while the chat's head turn is parked waiting for credit. Whatever is
    * queued behind it must neither run (each would hit the same limit, and each
@@ -6802,6 +6860,10 @@ export class Daemon {
       // the wrong message (see `announceStopped`).
       this.announceStopped(chatId);
       if (this.creditParked(chatId)) return;
+      if (this.turnQueues.get(chatId)?.length && this.opts.holdTurns?.() === true) {
+        this.memoryHeld.add(chatId);
+        return;
+      }
       const item = this.turnQueues.get(chatId)?.shift();
       if (!item) return;
       // It was announced via chat.queued → tell surfaces it's now running, so
