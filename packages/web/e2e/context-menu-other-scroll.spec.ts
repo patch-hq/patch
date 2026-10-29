@@ -35,7 +35,7 @@ test('a row menu survives the transcript scrolling, and closes when the sidebar 
   });
   expect(scrollOutsideSidebar).toBe(true);
   await expect(menu).toBeVisible();
-  await expect(page.getByText('Open to the side')).toBeVisible();
+  await expect(page.getByText('Open in new group')).toBeVisible();
 
   await page.evaluate(() => {
     document.querySelector('[data-testid="chat-row-chat_md"]')!.dispatchEvent(new Event('scroll'));

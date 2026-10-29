@@ -91,13 +91,13 @@ test.describe('sidebar row context menu', () => {
     await expect(menu).toBeVisible();
 
     // Opening moves focus into the menu, at the first item.
-    await expect(page.getByTestId(`chat-context-menu-${id}-open-new-tab`)).toBeFocused();
+    await expect(page.getByTestId(`chat-context-menu-${id}-open-new-group`)).toBeFocused();
     await page.keyboard.press('ArrowDown');
-    await expect(page.getByTestId(`chat-context-menu-${id}-open-to-the-side`)).toBeFocused();
+    await expect(page.getByTestId(`chat-context-menu-${id}-open-new-window`)).toBeFocused();
     await page.keyboard.press('End');
     await expect(page.getByTestId(`chat-context-menu-${id}-delete`)).toBeFocused();
     await page.keyboard.press('Home');
-    await expect(page.getByTestId(`chat-context-menu-${id}-open-new-tab`)).toBeFocused();
+    await expect(page.getByTestId(`chat-context-menu-${id}-open-new-group`)).toBeFocused();
 
     await page.keyboard.press('Escape');
     await expect(menu).toHaveCount(0);
@@ -107,9 +107,8 @@ test.describe('sidebar row context menu', () => {
   test('⏎ on a focused item runs it, so the menu never needs a mouse', async ({ page }) => {
     const id = await firstRowId(page);
     await page.getByTestId(`chat-row-${id}`).click({ button: 'right' });
-    // Open to the side, Open in new window and Rename sit between the first
-    // item and Pin.
-    for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowDown');
+    // Open in new window and Rename sit between the first item and Pin.
+    for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowDown');
     await expect(page.getByTestId(`chat-context-menu-${id}-pin`)).toBeFocused();
     await page.keyboard.press('Enter');
 
