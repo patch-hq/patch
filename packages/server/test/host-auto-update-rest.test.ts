@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { generateUserKeypair, mintSurfaceCredential, mintDaemonKey } from '@patch/auth';
+import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
 import { InProcessHostLink } from '../src/host-link.js';
