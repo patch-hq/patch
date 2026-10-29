@@ -1,9 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
-import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
 import { render, screen, fireEvent, act, waitFor, cleanup } from '@testing-library/react';
 import { Composer } from '../components/Composer.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
-import { usePreferencesStore } from '../stores/preferencesStore.js';
+import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
 import {
   clearHosts,
   clearSharedAccounts,
