@@ -429,6 +429,7 @@ async function startHost(
     env: {
       gemini: config.audio.geminiApiKey,
       openai: config.audio.openaiApiKey,
+      elevenlabs: config.audio.elevenLabsApiKey,
       groq: config.audio.groqApiKey,
       deepgram: config.audio.deepgramApiKey,
     },
@@ -713,6 +714,7 @@ async function startHost(
   const voiceKeys = (): VoiceKeys => ({
     gemini: providerKeys.has('gemini'),
     openai: providerKeys.has('openai'),
+    elevenlabs: providerKeys.has('elevenlabs'),
     deepgram: providerKeys.has('deepgram'),
   });
   logVoiceKeysMissing(logger, voiceConfig, voiceKeys());
@@ -5088,6 +5090,13 @@ async function startHost(
       ? { geminiLiveModelHeavy: config.audio.geminiLiveModelHeavy }
       : {}),
     openaiApiKey: () => providerKeys.get('openai'),
+    elevenLabsApiKey: () => providerKeys.get('elevenlabs'),
+    ...(config.audio.elevenLabsAgentLlmLight
+      ? { elevenLabsAgentLlmLight: config.audio.elevenLabsAgentLlmLight }
+      : {}),
+    ...(config.audio.elevenLabsAgentLlmHeavy
+      ? { elevenLabsAgentLlmHeavy: config.audio.elevenLabsAgentLlmHeavy }
+      : {}),
     ...(config.audio.openaiRealtimeModelLight
       ? { openaiRealtimeModelLight: config.audio.openaiRealtimeModelLight }
       : {}),

@@ -28,13 +28,22 @@ import { failed } from '../../lib/errorCopy.js';
  * spec/07 § Voice is a config matrix — each cell is presented as ONE choice of
  * engine; the backend and layer it stands for are not shown.
  */
-type ConversationEngine = 'local' | 'gemini-flash' | 'gemini-thinking' | 'openai-mini' | 'openai';
+type ConversationEngine =
+  | 'local'
+  | 'gemini-flash'
+  | 'gemini-thinking'
+  | 'openai-mini'
+  | 'openai'
+  | 'elevenlabs-haiku'
+  | 'elevenlabs-sonnet';
 const CONVERSATION_ENGINES: readonly ConversationEngine[] = [
   'local',
   'gemini-flash',
   'gemini-thinking',
   'openai-mini',
   'openai',
+  'elevenlabs-haiku',
+  'elevenlabs-sonnet',
 ];
 const ENGINE_LABELS: Record<ConversationEngine, string> = {
   local: 'Local',
@@ -42,6 +51,8 @@ const ENGINE_LABELS: Record<ConversationEngine, string> = {
   'gemini-thinking': 'Gemini Thinking',
   'openai-mini': 'OpenAI mini',
   openai: 'OpenAI',
+  'elevenlabs-haiku': 'ElevenLabs Haiku',
+  'elevenlabs-sonnet': 'ElevenLabs Sonnet',
 };
 const ENGINE_CELL: Record<ConversationEngine, { backend: VoiceBackend; layer: VoiceLayer }> = {
   local: { backend: 'local', layer: 'direct' },
@@ -49,11 +60,14 @@ const ENGINE_CELL: Record<ConversationEngine, { backend: VoiceBackend; layer: Vo
   'gemini-thinking': { backend: 'gemini', layer: 'heavy' },
   'openai-mini': { backend: 'openai', layer: 'light' },
   openai: { backend: 'openai', layer: 'heavy' },
+  'elevenlabs-haiku': { backend: 'elevenlabs', layer: 'light' },
+  'elevenlabs-sonnet': { backend: 'elevenlabs', layer: 'heavy' },
 };
 /** The engine a stored cell runs. A hosted `direct` runs as `light`. */
 function engineOf(backend: VoiceBackend, layer: VoiceLayer): ConversationEngine {
   if (backend === 'local') return 'local';
   if (backend === 'gemini') return layer === 'heavy' ? 'gemini-thinking' : 'gemini-flash';
+  if (backend === 'elevenlabs') return layer === 'heavy' ? 'elevenlabs-sonnet' : 'elevenlabs-haiku';
   return layer === 'heavy' ? 'openai' : 'openai-mini';
 }
 const HANDOFFS: readonly VoiceHandoff[] = ['auto', 'always', 'never'];

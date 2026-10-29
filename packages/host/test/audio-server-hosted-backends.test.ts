@@ -165,6 +165,8 @@ describe('audio server — hosted backends on every app surface', () => {
   let server: (AudioServerHandle & { port: number }) | undefined;
   let gemini: FakeGeminiWs[] = [];
   let openai: FakeOpenAIWs[] = [];
+  let eleven: Array<{ url: string }> = [];
+  const elevenRest: string[] = [];
   const submitted: Array<{ chatId: string; message: string }> = [];
   const transcribers = {
     local: fakeTranscriber('local words'),
@@ -173,6 +175,8 @@ describe('audio server — hosted backends on every app surface', () => {
   afterEach(async () => {
     gemini = [];
     openai = [];
+    eleven = [];
+    elevenRest.length = 0;
     submitted.length = 0;
     for (const t of Object.values(transcribers)) t.calls = 0;
     if (server) await server.close();
@@ -181,7 +185,10 @@ describe('audio server — hosted backends on every app surface', () => {
 
   async function start(
     voiceConfig: Partial<VoiceConfig>,
-    keys: { gemini?: boolean; openai?: boolean } = { gemini: true, openai: true },
+    keys: { gemini?: boolean; openai?: boolean; elevenlabs?: boolean } = {
+      gemini: true,
+      openai: true,
+    },
     extra: Partial<AudioServerOptions> = {},
   ): Promise<AudioServerHandle & { port: number }> {
     const cfg: VoiceConfig = { ...DEFAULT_VOICE_CONFIG, ...voiceConfig };
@@ -202,6 +209,25 @@ describe('audio server — hosted backends on every app surface', () => {
       getVoiceConfig: () => cfg,
       ...(keys.gemini ? { geminiApiKey: 'g-key' } : {}),
       ...(keys.openai ? { openaiApiKey: 'o-key' } : {}),
+      ...(keys.elevenlabs ? { elevenLabsApiKey: 'e-key' } : {}),
+      elevenLabsFetch: (async (url: string, init: RequestInit) => {
+        const path = new URL(url).pathname;
+        elevenRest.push(`${init.method} ${path}`);
+        if (path === '/v1/convai/tools') return Response.json({ id: 't1' });
+        if (path === '/v1/convai/agents/create') return Response.json({ agent_id: 'a1' });
+        if (path.includes('get-signed-url')) return Response.json({ signed_url: 'wss://signed/c' });
+        return Response.json({});
+      }) as unknown as AudioServerOptions['elevenLabsFetch'],
+      elevenLabsWsCtor: function (this: unknown, url: string) {
+        const inst = Object.assign(new EventEmitter(), {
+          url,
+          send() {},
+          close() {},
+        });
+        queueMicrotask(() => inst.emit('open'));
+        eleven.push(inst);
+        return inst;
+      } as unknown as AudioServerOptions['elevenLabsWsCtor'],
       geminiWsCtor: function (this: unknown, url: string) {
         const inst = new FakeGeminiWs(url);
         queueMicrotask(() => inst.emit('open'));
@@ -388,6 +414,42 @@ describe('audio server — hosted backends on every app surface', () => {
         },
       ]);
       expect(openai).toHaveLength(0);
+    });
+
+    test(`${mode} on elevenlabs with no key is refused as voice_key_missing — never local`, async () => {
+      const s = await start({ [key]: { backend: 'elevenlabs', layer: 'light' } });
+      const surface = await openSurface(s.port, `e-nokey-${mode}`, 'voice-call', mode);
+      await surface.closed;
+      const label = mode === 'call' ? 'Call' : 'Hands-free';
+      expect(surface.events).toEqual([
+        {
+          type: 'audio.error',
+          code: 'voice_key_missing',
+          message:
+            `${label} is set to elevenlabs, but ELEVEN_LABS_API_KEY is not set on this host. ` +
+            `Switch ${label} to another backend in Settings → Voice.`,
+        },
+      ]);
+      expect(eleven).toHaveLength(0);
+      expect(elevenRest).toHaveLength(0);
+    });
+
+    test(`${mode} on elevenlabs provisions an agent and dials its signed URL`, async () => {
+      const s = await start(
+        { [key]: { backend: 'elevenlabs', layer: 'light' } },
+        { elevenlabs: true },
+      );
+      const surface = await openSurface(s.port, `e-${mode}`, 'voice-call', mode);
+      await until(() => expect(eleven).toHaveLength(1));
+      expect(eleven[0]!.url).toBe('wss://signed/c');
+      expect(elevenRest).toEqual([
+        'POST /v1/convai/tools',
+        'POST /v1/convai/agents/create',
+        'GET /v1/convai/conversation/get-signed-url',
+      ]);
+      expect(gemini).toHaveLength(0);
+      expect(openai).toHaveLength(0);
+      surface.ws.close();
     });
 
     test(`${mode} on local/light is refused — no local front model`, async () => {

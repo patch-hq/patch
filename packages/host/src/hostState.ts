@@ -71,21 +71,21 @@ const HostStateFile = z
         dictation: DictationSetting,
         device: z
           .object({
-            backend: z.enum(['local', 'gemini', 'openai']),
+            backend: z.enum(['local', 'gemini', 'openai', 'elevenlabs']),
             layer: z.enum(['direct', 'light', 'heavy']),
             handoff: z.enum(['auto', 'always', 'never']).default('auto'),
           })
           .strict(),
         handsFree: z
           .object({
-            backend: z.enum(['local', 'gemini', 'openai']),
+            backend: z.enum(['local', 'gemini', 'openai', 'elevenlabs']),
             layer: z.enum(['direct', 'light', 'heavy']),
             handoff: z.enum(['auto', 'always', 'never']).default('auto'),
           })
           .strict(),
         call: z
           .object({
-            backend: z.enum(['local', 'gemini', 'openai']),
+            backend: z.enum(['local', 'gemini', 'openai', 'elevenlabs']),
             layer: z.enum(['direct', 'light', 'heavy']),
             handoff: z.enum(['auto', 'always', 'never']).default('auto'),
           })

@@ -200,6 +200,15 @@ export interface HostConfig {
     openaiRealtimeModelLight: string | undefined;
     /** Overrides `DEFAULT_OPENAI_REALTIME_MODELS.heavy`. OPENAI_REALTIME_MODEL_HEAVY env. */
     openaiRealtimeModelHeavy: string | undefined;
+    /**
+     * ELEVEN_LABS_API_KEY — ElevenLabs Agents voice (`backend: 'elevenlabs'`).
+     * The environment's value; a UI-set key wins (providerKeys.ts).
+     */
+    elevenLabsApiKey: string | undefined;
+    /** Overrides `DEFAULT_ELEVENLABS_AGENT_LLMS.light`. ELEVENLABS_AGENT_LLM_LIGHT env. */
+    elevenLabsAgentLlmLight: string | undefined;
+    /** Overrides `DEFAULT_ELEVENLABS_AGENT_LLMS.heavy`. ELEVENLABS_AGENT_LLM_HEAVY env. */
+    elevenLabsAgentLlmHeavy: string | undefined;
   };
 }
 
@@ -373,6 +382,9 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
       openaiApiKey: env['OPENAI_REALTIME_API_KEY'],
       openaiRealtimeModelLight: env['OPENAI_REALTIME_MODEL_LIGHT'],
       openaiRealtimeModelHeavy: env['OPENAI_REALTIME_MODEL_HEAVY'],
+      elevenLabsApiKey: env['ELEVEN_LABS_API_KEY'],
+      elevenLabsAgentLlmLight: env['ELEVENLABS_AGENT_LLM_LIGHT'],
+      elevenLabsAgentLlmHeavy: env['ELEVENLABS_AGENT_LLM_HEAVY'],
     },
   };
 }
