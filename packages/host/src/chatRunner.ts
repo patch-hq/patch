@@ -3249,8 +3249,10 @@ export class Daemon {
     for (const m of metas) {
       const state = this.chatState.get(m.chatId);
       if (!state || state.snoozedUntil === null) continue;
-      // A restart ends the run, so an until-complete snooze has nothing left to wait for.
-      if (state.snoozedUntil === SNOOZE_UNTIL_COMPLETE || state.snoozedUntil <= this.opts.now()) {
+      // An until-complete snooze is settled once interrupted turns are resumed
+      // (`settleUntilCompleteSnoozes`): the turn it waited on may be coming back.
+      if (state.snoozedUntil === SNOOZE_UNTIL_COMPLETE) continue;
+      if (state.snoozedUntil <= this.opts.now()) {
         this.wakeFromSnooze(m.chatId);
       } else this.armSnoozeTimer(m.chatId, state.snoozedUntil);
     }
@@ -3287,6 +3289,25 @@ export class Daemon {
     this.wake.loadAll();
     this.watch.loadAll();
     this.resumeInterruptedTurns(owned, lastTurnOutcomeByChatId, lastTurnLocalIdByChatId);
+    this.settleUntilCompleteSnoozes(owned);
+  }
+
+  /**
+   * A restart does not end the work an until-complete snooze waits on when the
+   * interrupted turn is resumed (or parked waiting on credit): the snooze then
+   * carries on and ends the normal way when that turn returns. With no turn
+   * owed again there is nothing
+   * left to wait for, so it ends now (a goal alone does not count: with no turn
+   * to judge it, nothing would ever end the snooze).
+   */
+  private settleUntilCompleteSnoozes(metas: ChatMeta[]): void {
+    for (const m of metas) {
+      const state = this.chatState.get(m.chatId);
+      if (!state || state.snoozedUntil !== SNOOZE_UNTIL_COMPLETE) continue;
+      const resumed = this.owedResend.has(m.chatId) || this.parkedTurns.has(m.chatId);
+      if (resumed || this.aggregateActivity(m.chatId) === 'running') continue;
+      this.wakeFromSnooze(m.chatId);
+    }
   }
 
   /**
