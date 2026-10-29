@@ -55,6 +55,7 @@ import type {
   PatchSearchChatsResponseEvent,
 } from '@patch/wire';
 import {
+  CLOSE_HOST_UPDATING,
   DEFAULT_SHARED_SETTINGS,
   isHostAddressedSurfaceEvent,
   isReservedSpecialThread,
@@ -934,20 +935,31 @@ async function startHost(
       emit(describeHost());
     },
   });
-  const applyNow = (stagedVersion?: string): ReturnType<typeof applyUpdate> =>
-    applyUpdateGated({
-      serverUrl: config.serverUrl,
-      ...(stagedVersion ? { stagedVersion } : {}),
-      internalToken: config.internalToken,
-      currentVersion: VERSION,
-      target: BUILD_TARGET,
-      patchHome: config.patchHome,
-      // Recorded only once the installer is about to run, so a deferred
-      // or artifact-pending apply leaves the version free to retry.
-      onInstallStart: (version) => hostStateStore.update({ lastAutoUpdateAttempt: version }),
-      logger,
-    });
-
+  // Set once an install is committed, so the shutdown the installer causes
+  // tells the server this machine is updating rather than just vanishing.
+  let installing = false;
+  const applyNow = async (stagedVersion?: string): ReturnType<typeof applyUpdate> => {
+    try {
+      return await applyUpdateGated({
+        serverUrl: config.serverUrl,
+        ...(stagedVersion ? { stagedVersion } : {}),
+        internalToken: config.internalToken,
+        currentVersion: VERSION,
+        target: BUILD_TARGET,
+        patchHome: config.patchHome,
+        // Recorded only once the installer is about to run, so a deferred
+        // or artifact-pending apply leaves the version free to retry.
+        onInstallStart: (version) => {
+          installing = true;
+          hostStateStore.update({ lastAutoUpdateAttempt: version });
+        },
+        logger,
+      });
+    } finally {
+      // Reached only if the installer did not take this process down.
+      installing = false;
+    }
+  };
   // A build staged ahead of the server's restart (spec/11 § Updates in
   // lockstep). Anything left from an older run that is no longer ahead goes.
   pruneStaged(config.patchHome, VERSION);
@@ -5506,7 +5518,9 @@ async function startHost(
     await kokoro.close().catch(() => undefined);
     await whisper.close().catch(() => undefined);
     await liveRecognizer?.close().catch(() => undefined);
-    await link.close().catch(() => undefined);
+    await link
+      .close(installing ? CLOSE_HOST_UPDATING : undefined, installing ? 'updating' : undefined)
+      .catch(() => undefined);
     await app.close().catch(() => undefined);
     tcp.close();
   };

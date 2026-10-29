@@ -112,4 +112,21 @@ describe('HostOfflineBanner', () => {
       expect(container).toBeEmptyDOMElement();
     });
   });
+
+  it('says the machine is installing an update, without Diagnose, when it went down to install an update', () => {
+    usePresenceStore.setState({ connection: 'connected', hostOnline: false, hosts: {} });
+    usePresenceStore.getState().setHostOnline('d1', false, 'updating');
+    render(<HostOfflineBanner />);
+    expect(screen.getByTestId('daemon-offline-banner')).toHaveTextContent(
+      'd1 is installing an update.',
+    );
+    expect(screen.queryByTestId('daemon-offline-diagnose')).toBeNull();
+  });
+
+  it('drops the restarting reason once the host is back', () => {
+    usePresenceStore.setState({ hosts: {} });
+    usePresenceStore.getState().setHostOnline('d1', false, 'updating');
+    usePresenceStore.getState().setHostOnline('d1', true);
+    expect(usePresenceStore.getState().hosts.d1?.offlineReason).toBeUndefined();
+  });
 });
