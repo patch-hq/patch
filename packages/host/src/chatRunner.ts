@@ -10115,7 +10115,7 @@ export class Daemon {
           // ladder against a limit that was already known to last hours.
           (isOverloadedError(errMsg) ||
             statedLimitOf(limit, errMsg) !== undefined ||
-            limit?.resetsAt !== undefined)
+            (limit?.resetsAt !== undefined && statedLimitOf(limit, errMsg) !== undefined))
         ) {
           const now = this.opts.now();
           const isOverload = isOverloadedError(errMsg);
