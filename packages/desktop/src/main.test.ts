@@ -381,6 +381,21 @@ test('context-menu handler skips the native menu inside a Monaco editor', () => 
   );
 });
 
+test('context-menu handler stands down while the web app shows its own context menu', () => {
+  // Regression: "patch right click copy from context menu does not work". The
+  // web ContextMenu (message actions: Copy, Quote, ...) opens on the DOM
+  // contextmenu event, but Electron's native 'context-menu' event fires anyway
+  // and its Cut/Copy/Paste menu covered the app's one.
+  const src = readFileSync(join(here, 'main.ts'), 'utf8');
+  const body = src.slice(
+    src.indexOf('function attachWindowLinkPolicy'),
+    src.indexOf('// Windows opened via `openChildWindow`'),
+  );
+  assert.match(body, /querySelector\(['"]\.context-menu['"]\)/);
+  const menuIndex = body.indexOf("webContents.on('context-menu'");
+  assert.ok(body.indexOf('.context-menu', menuIndex) < body.indexOf('.popup(', menuIndex));
+});
+
 test('bootstrap wires the permission gate onto session.defaultSession', () => {
   // Regression: the renderer's voice-note/voice-call getUserMedia({audio}) calls
   // were denied because Electron refuses the `media` permission unless the main
