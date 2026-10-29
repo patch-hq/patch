@@ -434,7 +434,6 @@ async function startHost(
       elevenlabs: config.audio.elevenLabsApiKey,
       groq: config.audio.groqApiKey,
       deepgram: config.audio.deepgramApiKey,
-      elevenlabs: config.audio.elevenlabsApiKey,
     },
     ...(config.audio.whisperBackend === 'groq'
       ? { requiredToStart: { groq: 'This host transcribes with Groq (WHISPER_BACKEND=groq)' } }
@@ -737,7 +736,6 @@ async function startHost(
     openai: providerKeys.has('openai'),
     elevenlabs: providerKeys.has('elevenlabs'),
     deepgram: providerKeys.has('deepgram'),
-    elevenlabs: providerKeys.has('elevenlabs'),
   });
   logVoiceKeysMissing(logger, voiceConfig, voiceKeys());
   // spec/07 § Call cost — every costed call, and this host's totals.
