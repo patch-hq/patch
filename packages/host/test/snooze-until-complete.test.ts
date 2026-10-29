@@ -95,7 +95,7 @@ describe('Snooze until complete', () => {
     daemon.shutdown();
   });
 
-  it('a host restart wakes it: the run it waited on is gone', async () => {
+  it('a host restart wakes it when nothing is left to resume', async () => {
     const { backend } = gated();
     const first = setup(backend);
     const id = await first.daemon.spawnChat({ folder: first.folder });
@@ -106,5 +106,29 @@ describe('Snooze until complete', () => {
     second.daemon.hydrate();
     expect(second.daemon.chatState.get(id)?.snoozedUntil ?? null).toBe(null);
     second.daemon.shutdown();
+  });
+
+  it('a host restart keeps it while the interrupted turn is resumed, then wakes when that returns', async () => {
+    const first = gated();
+    const a = setup(first.backend);
+    const id = await a.daemon.spawnChat({ folder: a.folder });
+    void a.daemon.sendInput({ chatId: id, message: 'go', localId: 'L1', origin: 'user' });
+    await sleep(20);
+    await a.daemon.setSnoozed(id, SNOOZE_UNTIL_COMPLETE);
+    // No shutdown(): a killed host is what leaves the turn owed in meta.json.
+
+    const second = gated();
+    const b = setup(second.backend, a.home);
+    b.daemon.hydrate();
+    await sleep(40);
+    expect(b.daemon.chatState.get(id)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
+    expect(b.metaStore.read(id)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
+
+    second.release();
+    await sleep(60);
+    expect(b.daemon.chatState.get(id)?.snoozedUntil ?? null).toBe(null);
+    b.daemon.shutdown();
+    first.release();
+    a.daemon.shutdown();
   });
 });
