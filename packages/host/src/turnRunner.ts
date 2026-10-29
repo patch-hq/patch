@@ -42,6 +42,7 @@ import {
 } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
+import { killTagged, newTurnTag, TURN_TAG_ENV } from './turnTag.js';
 
 export interface RunnerSpawnSpec {
   command: string;
@@ -116,9 +117,10 @@ export async function runTurnRunner(dir: string): Promise<void> {
     if (!sock.destroyed) sock.write(`${JSON.stringify(frame)}\n`);
   };
 
+  const turnTag = newTurnTag();
   const child = spawn(spec.command, spec.args, {
     cwd: spec.cwd,
-    env: spec.env,
+    env: { ...spec.env, [TURN_TAG_ENV]: turnTag },
     stdio: ['pipe', 'pipe', 'ignore'],
     // claude leads its own process group, as it did as the host's child
     // (claudeSpawn.ts): one kill(-pgid) takes everything it started.
@@ -219,6 +221,7 @@ export async function runTurnRunner(dir: string): Promise<void> {
           endStdin();
         } else if (frame.t === 'kill') {
           killGroup(frame.signal ?? 'SIGTERM');
+          if (frame.signal === 'SIGKILL') killTagged(turnTag);
         }
       }
     });
@@ -244,6 +247,10 @@ export async function runTurnRunner(dir: string): Promise<void> {
     log(`claude exited code=${code} signal=${signal}`);
     // Whatever claude left behind is in its group: sweep it, as the host did.
     killGroup('SIGKILL');
+    // ...and whatever left the group.
+    const stragglers = killTagged(turnTag);
+    if (stragglers.length > 0)
+      log(`killed ${stragglers.length} stray process(es): ${stragglers.join(' ')}`);
     closeSync(inFd);
     for (const c of live) send(c, { t: 'exit', ...exited });
     server.close();
