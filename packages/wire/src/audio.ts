@@ -217,7 +217,6 @@ export const VOICE_BACKEND_KEY_ENV: Record<HostedVoiceBackend, string> = {
   openai: 'OPENAI_REALTIME_API_KEY',
   elevenlabs: 'ELEVEN_LABS_API_KEY',
   deepgram: 'DEEPGRAM_API_KEY',
-  elevenlabs: 'ELEVEN_LABS_API_KEY',
 };
 
 /** How each surface is named on every screen, Settings → Voice included. */
@@ -237,12 +236,10 @@ export const VOICE_SURFACE_LABEL: Record<VoiceSurface, string> = {
 export interface VoiceKeys {
   gemini: boolean;
   openai: boolean;
-  /** Absent on a host older than ElevenLabs Agents, which cannot run it. */
+  /** Absent on a host older than ElevenLabs (Agents, Scribe), which cannot run it. */
   elevenlabs?: boolean;
   /** Absent on a host older than Deepgram dictation, which cannot run it. */
   deepgram?: boolean;
-  /** Absent on a host older than ElevenLabs Scribe dictation. */
-  elevenlabs?: boolean;
 }
 
 /**
