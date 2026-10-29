@@ -112,35 +112,34 @@ test.describe('job editor — unsaved changes', () => {
     await expect(page.getByTestId('job-editor-unsaved')).toHaveCount(0);
   });
 
-  test('leaving with unsaved edits asks first, and Keep editing stays put', async ({ page }) => {
+  test('leaving with unsaved edits does not ask, and the edit is still there on return', async ({
+    page,
+  }) => {
     await stub(page);
     await page.goto(EDIT_JOB);
     await expect(page.getByTestId('job-name')).toHaveValue('Nightly sweep');
     await page.getByTestId('job-name').fill('Nightly sweep (edited)');
     await page.getByTestId('nav-jobs').click();
+    await expect(page.getByTestId('jobs-route')).toBeVisible();
+    await expect(page.getByTestId('confirm-modal')).toHaveCount(0);
 
-    const modal = page.getByTestId('confirm-modal');
-    await expect(modal).toBeVisible();
-    await expect(modal).toContainText('Unsaved changes');
-    await expect(page.getByTestId('confirm-ok')).toHaveText('Discard changes');
-    await expect(page.getByTestId('confirm-cancel')).toHaveText('Keep editing');
-    await page.screenshot({ path: '/tmp/queue-shots/F-confirm-modal.png' });
-
-    await page.getByTestId('confirm-cancel').click();
-    await expect(modal).toHaveCount(0);
-    // Still on the editor, with the edit intact — nothing was lost.
-    await expect(page.getByTestId('job-editor')).toBeVisible();
+    // The draft lives in local storage, so a fresh load of the job gets it back.
+    await page.goto(EDIT_JOB);
     await expect(page.getByTestId('job-name')).toHaveValue('Nightly sweep (edited)');
+    await expect(page.getByTestId('job-editor-unsaved')).toBeVisible();
   });
 
-  test('Discard changes lets the navigation through', async ({ page }) => {
+  test('undoing the edit drops the draft', async ({ page }) => {
     await stub(page);
     await page.goto(EDIT_JOB);
     await expect(page.getByTestId('job-name')).toHaveValue('Nightly sweep');
     await page.getByTestId('job-name').fill('Nightly sweep (edited)');
+    await page.getByTestId('job-name').fill('Nightly sweep');
     await page.getByTestId('nav-jobs').click();
-    await page.getByTestId('confirm-ok').click();
     await expect(page.getByTestId('jobs-route')).toBeVisible();
+    await page.goto(EDIT_JOB);
+    await expect(page.getByTestId('job-name')).toHaveValue('Nightly sweep');
+    await expect(page.getByTestId('job-editor-unsaved')).toHaveCount(0);
   });
 
   test('an untouched job leaves with no prompt at all', async ({ page }) => {
