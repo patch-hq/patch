@@ -130,6 +130,14 @@ const HostStateFile = z
     /** Whether this host installs a published build on its own (shared `autoUpdateHosts`). */
     autoUpdateHosts: z.boolean().optional(),
     /**
+     * The published version a scheduled self-update last tried to install. Set
+     * BEFORE the attempt, because a failing installer still restarts the host
+     * and in-memory state dies with it — so the same broken build was retried
+     * on every restart. A scheduled check skips this version; a click on Update
+     * still tries it.
+     */
+    lastAutoUpdateAttempt: z.string().min(1).optional(),
+    /**
      * Whether an unanswered `AskUserQuestion` on this host expires
      * (`host.settings` → `questionExpiry`), and the window in seconds it is
      * given. Absent means the host's own default: on, at
