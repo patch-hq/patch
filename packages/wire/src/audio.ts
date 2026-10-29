@@ -57,7 +57,7 @@ export function modeRequiresAddress(mode: AudioSessionMode): boolean {
 // plain TS types and the one place that decides WHICH of the four surfaces
 // an incoming session is, so that logic exists exactly once.
 
-export const VoiceBackend = z.enum(['local', 'gemini', 'openai']);
+export const VoiceBackend = z.enum(['local', 'gemini', 'openai', 'elevenlabs']);
 export type VoiceBackend = z.infer<typeof VoiceBackend>;
 
 /**
@@ -214,6 +214,7 @@ export type HostedVoiceBackend = Exclude<VoiceBackend, 'local'> | 'deepgram';
 export const VOICE_BACKEND_KEY_ENV: Record<HostedVoiceBackend, string> = {
   gemini: 'GEMINI_API_KEY',
   openai: 'OPENAI_REALTIME_API_KEY',
+  elevenlabs: 'ELEVEN_LABS_API_KEY',
   deepgram: 'DEEPGRAM_API_KEY',
 };
 
@@ -234,6 +235,8 @@ export const VOICE_SURFACE_LABEL: Record<VoiceSurface, string> = {
 export interface VoiceKeys {
   gemini: boolean;
   openai: boolean;
+  /** Absent on a host older than ElevenLabs Agents, which cannot run it. */
+  elevenlabs?: boolean;
   /** Absent on a host older than Deepgram dictation, which cannot run it. */
   deepgram?: boolean;
 }
@@ -594,6 +597,8 @@ export const AudioErrorCode = z.enum([
    * request for dictation fails. Never answered by quietly running `local`.
    */
   'openai_unavailable',
+  /** ElevenLabs Agents counterpart of `openai_unavailable`. Never answered by running another backend. */
+  'elevenlabs_unavailable',
   'sdk_error',
   'invalid_frame',
   'session_not_found',

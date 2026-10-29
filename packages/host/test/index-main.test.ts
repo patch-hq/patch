@@ -4064,6 +4064,7 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
         providerKeys: [
           { id: 'gemini', source: 'none', envSet: false },
           { id: 'openai', source: 'none', envSet: false },
+          { id: 'elevenlabs', source: 'none', envSet: false },
           { id: 'groq', source: 'none', envSet: false },
           { id: 'deepgram', source: 'none', envSet: false },
         ],
@@ -4118,6 +4119,7 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
         providerKeys: [
           { id: 'gemini', source: 'none', envSet: false },
           { id: 'openai', source: 'none', envSet: false },
+          { id: 'elevenlabs', source: 'none', envSet: false },
           { id: 'groq', source: 'none', envSet: false },
           { id: 'deepgram', source: 'ui', last4: 'LAST', envSet: false },
         ],

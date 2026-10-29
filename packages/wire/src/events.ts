@@ -2035,7 +2035,7 @@ export const McpServerList = z
 // Shared settings (spec/01 § Settings)
 // ---------------------------------------------------------------------------
 
-const VoiceBackendSetting = z.enum(['local', 'gemini', 'openai']);
+const VoiceBackendSetting = z.enum(['local', 'gemini', 'openai', 'elevenlabs']);
 const VoiceSurfaceSetting = z
   .object({
     backend: VoiceBackendSetting,
@@ -2345,6 +2345,7 @@ export const SharedSecrets = z
       .object({
         gemini: z.string().min(1).optional(),
         openai: z.string().min(1).optional(),
+        elevenlabs: z.string().min(1).optional(),
         groq: z.string().min(1).optional(),
         deepgram: z.string().min(1).optional(),
       })
@@ -2659,7 +2660,12 @@ export const HostInfoEvent = z
      * later must not make an older client reject the whole host event.
      */
     voiceKeys: z
-      .object({ gemini: z.boolean(), openai: z.boolean(), deepgram: z.boolean().optional() })
+      .object({
+        gemini: z.boolean(),
+        openai: z.boolean(),
+        elevenlabs: z.boolean().optional(),
+        deepgram: z.boolean().optional(),
+      })
       .optional(),
     /**
      * spec/07 § Call cost — what this host's voice calls have cost, this

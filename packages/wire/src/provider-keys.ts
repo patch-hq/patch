@@ -18,7 +18,7 @@
 import { z } from 'zod';
 
 /** The keys a host can use, by id. */
-export const ProviderKeyId = z.enum(['gemini', 'openai', 'groq', 'deepgram']);
+export const ProviderKeyId = z.enum(['gemini', 'openai', 'elevenlabs', 'groq', 'deepgram']);
 export type ProviderKeyId = z.infer<typeof ProviderKeyId>;
 
 export interface ProviderKeyInfo {
@@ -44,6 +44,12 @@ export const PROVIDER_KEYS: readonly ProviderKeyInfo[] = [
     label: 'OpenAI Realtime',
     envVar: 'OPENAI_REALTIME_API_KEY',
     usedFor: 'Voice on the openai backend',
+  },
+  {
+    id: 'elevenlabs',
+    label: 'ElevenLabs',
+    envVar: 'ELEVEN_LABS_API_KEY',
+    usedFor: 'Voice on the elevenlabs backend',
   },
   {
     id: 'groq',
