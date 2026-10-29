@@ -1929,7 +1929,11 @@ function DraftsSection({ activeDraftId }: { activeDraftId: string | null }): JSX
           >
             <FileText size={14} aria-hidden className="draft-glyph" />
             <span className="name">{title}</span>
-            {d.folder ? (
+            {d.failure ? (
+              <span className="preview draft-failed" data-testid={`draft-failed-${d.id}`}>
+                Failed · {d.failure.sentence}
+              </span>
+            ) : d.folder ? (
               <span className="preview">{d.folder.split('/').filter(Boolean).slice(-1)[0]}</span>
             ) : null}
             <span className="row-when">

@@ -47,6 +47,11 @@ export interface NewChatDraft {
   hostId?: string;
   model?: string;
   text: string;
+  /**
+   * Why the chat this draft tried to start was refused (spec/04 § Spawn): the
+   * draft lists as a failed chat, with a resend. Device-local, never synced.
+   */
+  failure?: { sentence: string; at: number };
   updatedAt: number;
 }
 
@@ -70,6 +75,11 @@ function parseCached(raw: string): CachedShape {
           text: dd.text,
           ...(typeof dd.model === 'string' ? { model: dd.model } : {}),
           ...(typeof dd.hostId === 'string' ? { hostId: dd.hostId } : {}),
+          ...(dd.failure &&
+          typeof dd.failure.sentence === 'string' &&
+          typeof dd.failure.at === 'number'
+            ? { failure: dd.failure }
+            : {}),
           updatedAt: typeof dd.updatedAt === 'number' ? dd.updatedAt : 0,
         };
       }
@@ -129,6 +139,11 @@ function migrateOldSingleDraft(): { cached: CachedShape; pending: string[] } | n
   return { cached, pending: [id] };
 }
 
+/** A server snapshot knows nothing of this device's failure marker: keep it. */
+function withFailure(d: NewChatDraft, prior: NewChatDraft | undefined): NewChatDraft {
+  return prior?.failure ? { ...d, failure: prior.failure } : d;
+}
+
 interface PendingRemote {
   entry: NewChatDraft | null;
   updatedAt: number;
@@ -144,6 +159,9 @@ interface NewChatDraftState {
     id: string,
     patch: Partial<Pick<NewChatDraft, 'folder' | 'text' | 'model' | 'hostId'>>,
   ): void;
+  /** A first send was refused: keep `text` and record why (a failed chat). */
+  markFailed(id: string, text: string, sentence: string): void;
+  clearFailure(id: string): void;
   remove(id: string): void;
   pruneBlank(keepId?: string): void;
   get(id: string): NewChatDraft | undefined;
@@ -252,6 +270,34 @@ export const useNewChatDraftStore = create<NewChatDraftState>((set, get) => ({
     armSendTimer(id);
   },
 
+  markFailed(id, text, sentence) {
+    const cur = get().drafts[id];
+    if (!cur) return;
+    const next: NewChatDraft = {
+      ...cur,
+      text,
+      failure: { sentence, at: Date.now() },
+      updatedAt: Date.now(),
+    };
+    const drafts = { ...get().drafts, [id]: next };
+    const order = [id, ...get().order.filter((x) => x !== id)];
+    persist(drafts, order);
+    set({ drafts, order });
+    localEditAt.set(id, Date.now());
+    pendingOp.add(id);
+    armSendTimer(id);
+  },
+
+  clearFailure(id) {
+    const cur = get().drafts[id];
+    if (!cur?.failure) return;
+    const { failure: _f, ...rest } = cur;
+    void _f;
+    const drafts = { ...get().drafts, [id]: rest };
+    persist(drafts, get().order);
+    set({ drafts });
+  },
+
   remove(id) {
     cancelSendTimer(id);
     localEditAt.set(id, Date.now());
@@ -331,7 +377,7 @@ export const useNewChatDraftStore = create<NewChatDraftState>((set, get) => ({
         continue;
       }
       if (pendingOp.has(e.id)) continue;
-      drafts[e.id] = entry;
+      drafts[e.id] = withFailure(entry, drafts[e.id]);
       if (!order.includes(e.id)) order = [e.id, ...order];
     }
     for (const id of Object.keys(drafts)) {
@@ -364,7 +410,10 @@ export const useNewChatDraftStore = create<NewChatDraftState>((set, get) => ({
       });
       return;
     }
-    const drafts = { ...get().drafts, [entry.id]: draft };
+    const drafts = {
+      ...get().drafts,
+      [entry.id]: withFailure(draft, get().drafts[entry.id]),
+    };
     const order = get().order.includes(entry.id) ? get().order : [entry.id, ...get().order];
     persist(drafts, order);
     set({ drafts, order });

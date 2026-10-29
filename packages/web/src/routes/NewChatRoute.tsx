@@ -614,6 +614,10 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // The first message, shown while the chat it opens is being created.
   const [pendingFirst, setPendingFirst] = useState<string | null>(null);
   const createdChatId = useRef<string | null>(null);
+  // Why the last create request was refused, for the failed draft handleSend
+  // leaves behind (spec/04 § Spawn — a refused spawn).
+  const lastCreateFailure = useRef<{ sentence: string; detail?: string } | null>(null);
+  const draftFailure = useDraftStore((s) => s.drafts[draftId]?.failure);
 
   // The roster may hydrate after first render (WS replay), so the MRU folder
   // can resolve a tick late. Seed it once, until the user types their own.
@@ -643,6 +647,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // voice-note-starts-a-chat paths. Returns the new chatId, or null on a
   // validation/daemon error (with the error already surfaced to the user).
   async function createChatInFolder(): Promise<string | null> {
+    lastCreateFailure.current = null;
     const trimmed = folder.trim();
     if (!trimmed) {
       pushError('Folder is required before starting a chat.');
@@ -698,6 +703,10 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
       // to one sentence with the code kept in the toast's Details.
       const human = humaniseError({ code, message: msg }, 'spawn');
       pushError(human.sentence, undefined, human.detail);
+      lastCreateFailure.current = {
+        sentence: human.sentence,
+        ...(human.detail ? { detail: human.detail } : {}),
+      };
       setSubmitting(false);
       return null;
     }
@@ -712,6 +721,27 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     const id = await createChatInFolder();
     if (id) createdChatId.current = id;
     return id;
+  }
+
+  // A refused first send stays as a failed draft — the message, why it failed,
+  // and a resend — rather than vanishing (spec/04 § Spawn). The toast
+  // announces the failure once; the failed chat is where it stays.
+  function keepAsFailed(
+    message: string,
+    human: { sentence: string; detail?: string } | null = lastCreateFailure.current,
+  ): void {
+    if (!human) return;
+    useDraftStore.getState().markFailed(draftId, message, {
+      sentence: human.sentence,
+      ...(human.detail ? { detail: human.detail } : {}),
+    });
+  }
+
+  async function resendFailed(): Promise<void> {
+    const text = useDraftStore.getState().drafts[draftId]?.text ?? '';
+    if (!text.trim()) return;
+    useDraftStore.getState().clearFailure(draftId);
+    await handleSend(text);
   }
 
   async function handleSend(
@@ -731,6 +761,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     const chatId = presetChatId ?? createdChatId.current ?? (await createChatInFolder());
     if (!chatId) {
       setPendingFirst(null);
+      keepAsFailed(message);
       return false; // composer restores the typed first message
     }
     createdChatId.current = chatId;
@@ -746,6 +777,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
       createdChatId.current = null;
       setPendingFirst(null);
       const human = humaniseError(immediateRejection, 'spawn');
+      keepAsFailed(message, human);
       pushError(human.sentence, undefined, human.detail);
       setSubmitting(false);
       return false; // composer restores the typed first message
@@ -782,6 +814,15 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
       useChatStore.getState().removeChat(chatId);
       if (createdChatId.current === chatId) createdChatId.current = null;
       const human = humaniseError(spawnErr, 'spawn');
+      // The draft went with the send: bring the message back as a failed one
+      // and move the user onto it, off the chat that no longer exists.
+      const failedId = useDraftStore.getState().create(folder.trim());
+      useDraftStore.getState().update(failedId, {
+        ...(pickerHostId ? { hostId: pickerHostId } : {}),
+        ...(model !== null ? { model } : {}),
+      });
+      useDraftStore.getState().markFailed(failedId, message, human);
+      navigate(`/chats/new?draft=${encodeURIComponent(failedId)}`, { replace: true });
       pushError(human.sentence, undefined, human.detail);
     });
 
@@ -1415,6 +1456,25 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                     Not signed in to {effectiveModel?.startsWith('openai/') ? 'Codex' : 'Claude'}
                   </p>
                   <Link to="/settings/usage">Sign in</Link>
+                </div>
+              ) : null}
+              {draftFailure ? (
+                <div className="new-chat-failed" data-testid="new-chat-failed" role="alert">
+                  <p className="new-chat-failed-title">Chat didn’t start</p>
+                  <p data-testid="new-chat-failed-error">{draftFailure.sentence}</p>
+                  {draftFailure.detail ? (
+                    <p className="muted" data-testid="new-chat-failed-detail">
+                      {draftFailure.detail}
+                    </p>
+                  ) : null}
+                  <button
+                    type="button"
+                    data-testid="new-chat-resend"
+                    disabled={submitting}
+                    onClick={() => void resendFailed()}
+                  >
+                    Resend
+                  </button>
                 </div>
               ) : null}
               {setupRow}

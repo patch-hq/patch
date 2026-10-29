@@ -57,6 +57,15 @@ describe('Drafts screen', () => {
     expect(useNewChatDraftStore.getState().drafts[a]?.text).toBe('keep me');
   });
 
+  it('a failed chat lists with its message and why it failed', () => {
+    const a = useNewChatDraftStore.getState().create('/f');
+    useNewChatDraftStore.getState().markFailed(a, 'a long message', 'Failed to create chat: boom');
+    const r = renderRN(<Drafts />);
+    const row = findHost(r.root, byTestId(`draft-row-${a}`));
+    expect(hasText(row, 'a long message')).toBe(true);
+    expect(hasText(findHost(r.root, byTestId(`draft-failed-${a}`)), 'boom')).toBe(true);
+  });
+
   it('renders an empty list with no drafts', () => {
     const r = renderRN(<Drafts />);
     expect(
