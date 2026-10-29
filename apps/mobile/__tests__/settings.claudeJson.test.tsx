@@ -12,7 +12,7 @@ import {
   ClaudeSettingsEditor,
   ClaudeSettingsRow,
 } from '../src/components/settings/ClaudeSettingsSection';
-import { ProvidersPage } from '../src/components/settings/HostsSection';
+import { HostDetail, ProvidersPage } from '../src/components/settings/HostsSection';
 import { CLAUDE_ACK_TIMEOUT_MS } from '../src/components/settings/accountRows';
 import { renderRN, findHost, queryHost, byTestId, textOf, actAsync } from './testUtils/render';
 import { routerMock, __resetRouterMock } from './stubs/expo-router';
@@ -52,10 +52,10 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('Providers page — settings.json row', () => {
+describe('Machine page — settings.json row', () => {
   it('names the host and whether it has a file, and Edit opens the editor for that host', async () => {
     report('{"model":"opus"}');
-    const r = render(<ProvidersPage />);
+    const r = render(<HostDetail hostId="d1" />);
     expect(textOf(findHost(r.root, byTestId('claude-json-summary')))).toBe('Set');
     await actAsync(() => findHost(r.root, byTestId('claude-json-edit')).props.onPress());
     expect(routerMock.push).toHaveBeenCalledWith({
@@ -77,7 +77,7 @@ describe('Providers page — settings.json row', () => {
 
   it('offers no keep or discard, and no shared or per-OS layers', () => {
     report('{}');
-    const r = render(<ProvidersPage />);
+    const r = render(<HostDetail hostId="d1" />);
     expect(queryHost(r.root, byTestId('claude-json-keep'))).toBeNull();
     expect(queryHost(r.root, byTestId('host-d1-claude-drift'))).toBeNull();
   });
@@ -154,5 +154,13 @@ describe('settings.json editor', () => {
     usePresenceStore.getState().removeHost('d1');
     const r = render(<ClaudeSettingsEditor hostId="d1" />);
     expect(queryHost(r.root, byTestId('claude-json-unreported'))).not.toBeNull();
+  });
+});
+
+describe('Providers page', () => {
+  it('is shared: no host switcher and no per-host settings.json', () => {
+    const r = render(<ProvidersPage />);
+    expect(queryHost(r.root, byTestId('host-switcher'))).toBeNull();
+    expect(queryHost(r.root, byTestId('claude-json-edit'))).toBeNull();
   });
 });

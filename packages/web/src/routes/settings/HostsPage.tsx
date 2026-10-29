@@ -23,6 +23,7 @@ import { agoLabel, sendToHost, useHostUpdate } from './hostWrite.js';
 import { writeShared } from './sharedWrite.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { Group, Note, OnlineDot, Row, SettingsPage } from './ui.js';
+import { ClaudeSettingsEditor } from './ProvidersPage.js';
 
 /**
  * The server's refusal, said in words. It answers a machine-readable `error`
@@ -383,6 +384,8 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
           ))}
         </div>
       ) : null}
+
+      {report ? <ClaudeSettingsEditor host={host} /> : null}
 
       <div className="set-card set-card-gap">
         <Row title="Remove this machine">
