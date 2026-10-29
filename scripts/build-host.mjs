@@ -61,6 +61,14 @@ export const TARGETS = [
   { target: 'linux-arm64', platform: 'linux', arch: 'arm64', node: 'linux-arm64' },
 ];
 
+/** Signing identifier of the macOS runtime = bundle id of the installed host app (installer/main.ts). */
+const HOST_APP_BUNDLE_ID = (() => {
+  const src = readFileSync(join(DAEMON, 'src', 'installer', 'service.ts'), 'utf8');
+  const m = /export const SERVICE_LABEL = '([^']+)'/.exec(src);
+  if (!m) die('SERVICE_LABEL not found in packages/host/src/installer/service.ts');
+  return m[1];
+})();
+
 const NODE_VERSION = readFileSync(join(REPO_ROOT, '.nvmrc'), 'utf8').trim();
 
 function die(msg) {
@@ -347,8 +355,13 @@ function codesignMacArtifact(outDir, machos) {
     );
   }
   for (const file of machos) {
+    // The runtime's signing identifier is the host app's bundle id, not "node":
+    // the installer wraps it in a .app with that id, and TCC keys its
+    // Allow/Don't Allow on the pair. Keep in step with HOST_APP_BUNDLE_ID.
+    const identifier = file === join(outDir, 'node') ? ['--identifier', HOST_APP_BUNDLE_ID] : [];
     sh('codesign', [
       '--force',
+      ...identifier,
       '--timestamp=none',
       '--options',
       'runtime',
