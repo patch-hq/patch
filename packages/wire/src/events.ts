@@ -2352,7 +2352,6 @@ export const SharedSecrets = z
         elevenlabs: z.string().min(1).optional(),
         groq: z.string().min(1).optional(),
         deepgram: z.string().min(1).optional(),
-        elevenlabs: z.string().min(1).optional(),
       })
       .strict(),
   })
