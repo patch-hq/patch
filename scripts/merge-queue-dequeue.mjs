@@ -47,6 +47,11 @@ export function handleDequeue({ repo, pr, project, gh, td }) {
   const view = JSON.parse(gh(['pr', 'view', String(pr), '--repo', repo, '--json', 'number,title,url,state']));
   if (view.state !== 'OPEN') return { action: 'skipped', why: `PR is ${view.state.toLowerCase()}` };
 
+  // GitHub re-queues a dequeued PR about 10s later while auto-merge is on (its
+  // branch is still green), so this comes before anything else. Whoever fixes
+  // the PR turns it back on with gh pr merge --auto after pushing.
+  gh(['pr', 'merge', String(pr), '--disable-auto', '--repo', repo]);
+
   const [owner, name] = repo.split('/');
   const timeline = JSON.parse(
     gh([
