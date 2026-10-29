@@ -244,6 +244,7 @@ import {
   type WhisperBackend,
 } from './audio/whisper.js';
 import { ParakeetWhisperBackend } from './audio/parakeet.js';
+import { ParakeetLiveRecognizer } from './audio/parakeet-live.js';
 import { createKokoro, validateKokoroModel } from './audio/kokoro.js';
 import { createElevenLabs, createRoutedTts, type ElevenLabsVoice } from './audio/elevenlabs.js';
 import {
@@ -1591,6 +1592,7 @@ async function startHost(
   // transport — the mobile voice-note upload path). Assigned once the whisper
   // backend is created at step 8.
   let whisper: WhisperBackend | undefined;
+  let liveRecognizer: ParakeetLiveRecognizer | undefined;
   // The dictation surface's transcribers, one per backend this host has a key
   // for (hosted-stt.ts). Assigned alongside `whisper` at step 8; the
   // transcribe RPC below picks from them by `voiceConfig.dictation.backend`.
@@ -4919,6 +4921,14 @@ async function startHost(
   // The on-machine model loads now: a broken install aborts the boot rather
   // than failing the first word someone says.
   if (config.audio.whisperBackend === 'parakeet') await (whisper as ParakeetWhisperBackend).warm();
+  // The streaming model for dictation on the `host` engine loads now too.
+  if (config.audio.parakeetStreamingModelDir !== undefined) {
+    liveRecognizer = new ParakeetLiveRecognizer({
+      logger: logger.child({ component: 'parakeet-live' }),
+      modelDir: config.audio.parakeetStreamingModelDir,
+    });
+    await liveRecognizer.warm();
+  }
   // Shared settings may have landed before the backend existed.
   if (meetingTranscriptionModel !== '') whisper.useModel?.(meetingTranscriptionModel);
   dictationTranscribers = createDictationTranscribers({
@@ -5179,6 +5189,7 @@ async function startHost(
     geminiApiKey: () => providerKeys.get('gemini'),
     deepgramApiKey: () => providerKeys.get('deepgram'),
     elevenlabsApiKey: () => providerKeys.get('elevenlabs'),
+    ...(liveRecognizer ? { liveRecognizer } : {}),
     ...(config.audio.geminiLiveModel ? { geminiLiveModel: config.audio.geminiLiveModel } : {}),
     ...(config.audio.geminiLiveModelHeavy
       ? { geminiLiveModelHeavy: config.audio.geminiLiveModelHeavy }
@@ -5271,6 +5282,7 @@ async function startHost(
     await audioServer.close().catch(() => undefined);
     await kokoro.close().catch(() => undefined);
     await whisper.close().catch(() => undefined);
+    await liveRecognizer?.close().catch(() => undefined);
     await link.close().catch(() => undefined);
     await app.close().catch(() => undefined);
     tcp.close();

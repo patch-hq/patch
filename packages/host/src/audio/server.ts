@@ -58,6 +58,8 @@ import { DEVICE_CONTROL_PATH } from '../devices/control-ws.js';
 import { readKey, type KeySource } from './keySource.js';
 import { DeepgramDictationSession } from './deepgram-dictation.js';
 import { ElevenLabsDictationSession } from './elevenlabs-dictation.js';
+import { HostDictationSession } from './host-dictation.js';
+import type { LiveRecognizer } from './parakeet-live.js';
 
 /** Spoken once when a local call opens, so the user is never left in silence. */
 const CALL_GREETING = 'Connected.';
@@ -168,6 +170,11 @@ export interface AudioServerOptions {
    * Absent: such a session is refused with `voice_key_missing`.
    */
   deepgramApiKey?: KeySource;
+  /**
+   * The host's streaming recogniser, for dictation on `host` (host-dictation.ts).
+   * Absent: such a session is refused with `whisper_unavailable`.
+   */
+  liveRecognizer?: LiveRecognizer;
   /** Test seam: the WebSocket constructor and URL a Deepgram dictation dials. */
   deepgramWsCtor?: typeof import('ws').default;
   deepgramWsUrl?: string;
@@ -832,6 +839,24 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             ...(opts.elevenLabsFetch ? { fetchImpl: opts.elevenLabsFetch } : {}),
             ...(opts.elevenLabsApiBase ? { apiBase: opts.elevenLabsApiBase } : {}),
           });
+        } else if (dictationEngine === 'host') {
+          // Streaming dictation on this host (spec/07 § Dictation engines): a
+          // streaming model for the live words, the accurate transcriber once
+          // per finished phrase; finished by `audio.dictation_finish`.
+          if (!opts.liveRecognizer) {
+            rejectConn(
+              ws,
+              'whisper_unavailable',
+              'Dictation is set to On this host, but this host has no streaming speech model (PARAKEET_STREAMING_MODEL_DIR is not set). Switch Dictation to another engine in Settings → Voice.',
+            );
+            return;
+          }
+          session = new HostDictationSession(sessionInit, {
+            logger: sessionLog,
+            sendAudio: sendAudioFn,
+            live: opts.liveRecognizer,
+            accurate: opts.whisper,
+          });
         } else if (dictationEngine === 'deepgram') {
           // Streaming dictation (spec/07 § Dictation engines): the live words
           // are the transcript, finished by `audio.dictation_finish`.
@@ -1019,7 +1044,8 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           if (
             !(
               session instanceof DeepgramDictationSession ||
-              session instanceof ElevenLabsDictationSession
+              session instanceof ElevenLabsDictationSession ||
+              session instanceof HostDictationSession
             )
           ) {
             send(ws, {

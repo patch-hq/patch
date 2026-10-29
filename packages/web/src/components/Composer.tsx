@@ -1437,8 +1437,9 @@ export const Composer = forwardRef(function Composer(
     // last interim words stay drawn until it lands (cleared in `finally`).
     // On a streaming engine the live session IS the transcript, so it stays
     // open until the host has answered the finish below.
-    const streaming =
-      usePreferencesStore.getState().preferences.voiceConfig.dictation.computer === 'deepgram';
+    const computerEngine =
+      usePreferencesStore.getState().preferences.voiceConfig.dictation.computer;
+    const streaming = computerEngine === 'deepgram' || computerEngine === 'host';
     const livePreview = streaming ? previewRef.current : null;
     if (livePreview) previewRef.current = null;
     else stopPreview();
