@@ -14,6 +14,7 @@
 // the async-race guards) without touching the real native mic or the audio
 // WSS — those are covered directly in `dictation.test.ts`.
 
+import { isDictatedSend } from '../src/lib/dictatedSends';
 import React from 'react';
 import { Pressable as RNPressable } from 'react-native';
 import type { ReactTestInstance } from 'react-test-renderer';
@@ -526,6 +527,18 @@ describe('Composer — dictation mode (long-press the mic)', () => {
     expect(JSON.stringify(submitSpy.mock.calls)).toContain('second thing');
     expect(calls[0]!.stop).not.toHaveBeenCalled();
     expect(r.root.findAllByProps({ testID: 'dictation-mode-status' }).length).toBeGreaterThan(0);
+  });
+
+  it('marks each dictation-mode send as dictated, and an ordinary send is not', async () => {
+    const { factory, calls } = makeModeFactory();
+    const r = renderRN(<Composer chatId="c1" folder="work" dictationModeFactory={factory} />);
+    await keepDictating(r);
+    await actAsync(() => {
+      calls[0]!.onText('spoken');
+    });
+    await flush();
+    const dictatedId = submitSpy.mock.calls[0]![2] as string;
+    expect(isDictatedSend(dictatedId)).toBe(true);
   });
 
   it('shows Sending… while a transcript is pending', async () => {

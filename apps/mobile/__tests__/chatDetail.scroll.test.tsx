@@ -45,6 +45,7 @@ import {
   flush,
 } from './testUtils/render';
 import { useChatStore } from '../src/stores/chatStore';
+import { markDictatedSend } from '../src/lib/dictatedSends';
 import { usePresenceStore } from '../src/stores/presenceStore';
 import { useViewPositionStore } from '../src/stores/viewPositionStore';
 import { __emitKeyboardEvent, __flatListCalls, __resetFlatListCalls } from './stubs/react-native';
@@ -461,6 +462,24 @@ describe('onScroll — follow-mode tracking', () => {
     });
     await flush();
     expect(wasScrolledToNewest()).toBe(true);
+  });
+
+  // spec/07 § Dictation mode: a turn dictation mode sends by itself is not the
+  // user asking to go to the bottom — they may be reading a reply.
+  it('does not re-pin when the sent echo is a dictation-mode send', async () => {
+    seedChatWithMessages('scroll-send-dictated-1');
+    __setLocalSearchParams({ chatId: 'scroll-send-dictated-1' });
+    const r = render(<ChatDetailScreen />);
+    await flush();
+    const list = flatListNode(r.root);
+    userScrollTo(list, 300);
+    __flatListCalls.length = 0;
+    markDictatedSend('L-dict');
+    actSync(() => {
+      useChatStore.getState().appendLocalUserMessage('scroll-send-dictated-1', 'hello', 'L-dict');
+    });
+    await flush();
+    expect(wasScrolledToNewest()).toBe(false);
   });
 
   // A fling is one gesture reported in two parts, and the part that matters is
