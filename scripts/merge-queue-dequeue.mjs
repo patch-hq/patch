@@ -47,11 +47,6 @@ export function handleDequeue({ repo, pr, project, gh, td }) {
   const view = JSON.parse(gh(['pr', 'view', String(pr), '--repo', repo, '--json', 'number,title,url,state']));
   if (view.state !== 'OPEN') return { action: 'skipped', why: `PR is ${view.state.toLowerCase()}` };
 
-  // GitHub re-queues a dequeued PR about 10s later while auto-merge is on (its
-  // branch is still green), so this comes before anything else. Whoever fixes
-  // the PR turns it back on with gh pr merge --auto after pushing.
-  gh(['pr', 'merge', String(pr), '--disable-auto', '--repo', repo]);
-
   const [owner, name] = repo.split('/');
   const timeline = JSON.parse(
     gh([
@@ -68,6 +63,15 @@ export function handleDequeue({ repo, pr, project, gh, td }) {
   const reason = normaliseReason(nodes[nodes.length - 1].reason);
   if (reason === REASONS.MANUAL) return { action: 'skipped', why: 'manual removal', reason };
   if (reason === 'already_merged') return { action: 'skipped', why: 'already merged', reason };
+  // pr-conflicts.yml labels a conflicting PR needs-rebase, and that label has
+  // its own Patch job. A conflicting PR cannot re-enter the queue, and once
+  // rebased its still-on auto-merge queues it again.
+  if (reason === REASONS.MERGE_CONFLICT) return { action: 'skipped', why: 'needs-rebase owns conflicts', reason };
+
+  // GitHub re-queues a dequeued PR about 10s later while auto-merge is on (its
+  // branch is still green), so this comes before the task. Whoever fixes the
+  // PR turns it back on with gh pr merge --auto after pushing.
+  gh(['pr', 'merge', String(pr), '--disable-auto', '--repo', repo]);
 
   let runUrl = '';
   if (reason === REASONS.FAILED_CHECKS || reason === REASONS.INVALID_MERGE_COMMIT) {

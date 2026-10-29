@@ -9,7 +9,7 @@ Open a PR; when its tests pass it merges itself, and the merge is the release.
    entries at once so it can't fill the runner pool. Nothing re-runs on `main`.
    GitHub removes a PR that fails, conflicts or makes an invalid merge commit,
    and nothing puts it back: a Patch job on the `dequeued` event runs
-   `scripts/merge-queue-dequeue.mjs`, which files an App Updates task (or comments on the open one) for an agent to fix and re-enable auto-merge.
+   `scripts/merge-queue-dequeue.mjs`, which files an App Updates task (or comments on the open one) for an agent to fix and re-enable auto-merge. Conflicts are left to `pr-conflicts.yml` and its `needs-rebase` label.
    `pr-automerge.yml` turns on auto-merge for each PR as Tom, using the `AUTOMERGE_TOKEN` PAT secret because the Actions bot never gets a PR queued (the merge queue sets the method; the PAT expires and must be renewed);
    `pr-conflicts.yml` labels a PR `needs-rebase` and comments when main moves
    under it, for the chat that owns it to rebase and force-push.
