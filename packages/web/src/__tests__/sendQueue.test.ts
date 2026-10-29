@@ -11,7 +11,9 @@ import * as imageResizeModule from '../lib/imageResize.js';
 import { deliveryTracker } from '../lib/deliveryTracker.js';
 import {
   _resetSendQueue,
+  cancelHeld,
   discardUpload,
+  releaseHeld,
   retryUpload,
   sendMessage,
   type OutgoingFile,
@@ -60,6 +62,37 @@ describe('sendQueue', () => {
     expect(entry).toMatchObject({ localId, content: 'hello', deliveryPending: true });
     expect(entry.upload).toBeUndefined();
     expect(sent).toEqual([{ type: 'chat.input', chatId: 'c1', message: 'hello', localId }]);
+  });
+
+  it('a held send is echoed now and delivered only on release', () => {
+    const localId = sendMessage('c1', 'hello', [], { send, hold: true });
+    expect(useChatStore.getState().timelines['c1']![0]).toMatchObject({
+      localId,
+      content: 'hello',
+    });
+    expect(sent).toEqual([]);
+    releaseHeld('c1', localId);
+    expect(sent).toEqual([{ type: 'chat.input', chatId: 'c1', message: 'hello', localId }]);
+  });
+
+  it('a cancelled held send leaves the stream and is never delivered; later turns still go', () => {
+    const first = sendMessage('c1', 'first', [], { send, hold: true });
+    const second = sendMessage('c1', 'second', [], { send });
+    expect(sent).toEqual([]); // second waits behind the held first
+    cancelHeld('c1', first);
+    expect(useChatStore.getState().timelines['c1']!.map((e) => e.content)).toEqual(['second']);
+    expect(sent).toEqual([
+      { type: 'chat.input', chatId: 'c1', message: 'second', localId: second },
+    ]);
+  });
+
+  it('cancelling a held send whose upload is still running does not disturb the chain', async () => {
+    const f = image('a.png');
+    const held = sendMessage('c1', 'held', [f], { send, hold: true });
+    const other = sendMessage('c1', 'other', [], { send });
+    cancelHeld('c1', held);
+    await flush();
+    expect(sent).toEqual([{ type: 'chat.input', chatId: 'c1', message: 'other', localId: other }]);
   });
 
   it('uploads the ORIGINAL plus the downscaled copy when an image was downscaled', async () => {

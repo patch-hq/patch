@@ -18,7 +18,9 @@ import { useToolsStore } from '../src/stores/toolsStore';
 import { deliveryTracker } from '../src/lib/deliveryTracker';
 import {
   _resetSendQueue,
+  cancelHeld,
   discardUpload,
+  releaseHeld,
   retrySource,
   retryTurn,
   retryUpload,
@@ -82,6 +84,36 @@ describe('sendMessage', () => {
     sendMessage('c1', 'slow', [file('a.pdf')]);
     sendMessage('c2', 'fast', []);
     expect(submitSpy.mock.calls.map((c) => c[1])).toEqual(['fast']);
+  });
+});
+
+describe('held sends (pre-send check)', () => {
+  it('is echoed now and handed to delivery only on release', () => {
+    const localId = sendMessage('c1', 'hello', [], { hold: true });
+    expect(useChatStore.getState().timelines['c1']![0]).toMatchObject({ content: 'hello' });
+    expect(submitSpy).not.toHaveBeenCalled();
+    releaseHeld('c1', localId);
+    expect(submitSpy.mock.calls.map((c) => c[2])).toEqual([localId]);
+  });
+
+  it('a cancelled one leaves the stream, is never delivered, and the turn behind it still goes', () => {
+    const first = sendMessage('c1', 'first', [], { hold: true });
+    sendMessage('c1', 'second', []);
+    expect(submitSpy).not.toHaveBeenCalled();
+    cancelHeld('c1', first);
+    expect(useChatStore.getState().timelines['c1']!.map((e) => e.content)).toEqual(['second']);
+    expect(submitSpy.mock.calls.map((c) => c[1])).toEqual(['second']);
+  });
+
+  it('cancelling one whose upload is still running leaves the chain intact', async () => {
+    uploadAttachmentSpy.mockResolvedValue({
+      ref: { id: 'r', name: 'a.pdf', mimeType: 'application/pdf', kind: 'file' },
+    });
+    const held = sendMessage('c1', 'held', [file('a.pdf')], { hold: true });
+    sendMessage('c1', 'other', []);
+    cancelHeld('c1', held);
+    await flush();
+    expect(submitSpy.mock.calls.map((c) => c[1])).toEqual(['other']);
   });
 });
 
