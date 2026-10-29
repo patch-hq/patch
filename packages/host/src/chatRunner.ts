@@ -3549,6 +3549,7 @@ export class Daemon {
         if (disk && disk.state !== 'lost' && disk.localId === head?.localId) {
           unclaimed.delete(m.chatId);
           this.durableAttach.set(m.chatId, disk.consumed);
+          if (disk.accountId !== undefined) this.durableAccount.set(m.chatId, disk.accountId);
           reattach = true;
           this.opts.logger.info(
             { chatId: m.chatId, state: disk.state },
@@ -6603,6 +6604,9 @@ export class Daemon {
    */
   private readonly durableAttach = new Map<string, Consumed | null>();
 
+  /** The account a surviving turn was started on, by chat — it outlives the host's own memory. */
+  private readonly durableAccount = new Map<string, string>();
+
   private durableTurnFor(
     chatId: string,
     harness: HarnessId,
@@ -6617,6 +6621,9 @@ export class Daemon {
         config,
         chatId,
         localId,
+        ...(this.runningOnAccount.has(chatId)
+          ? { accountId: this.runningOnAccount.get(chatId) }
+          : {}),
         ...(attach !== undefined ? { attach: { consumed: attach } } : {}),
         log: this.opts.logger,
       },
@@ -9093,9 +9100,21 @@ export class Daemon {
       const previous = this.runningOnAccount.get(chatId);
       movedAccount =
         previous !== undefined && oauth.accountId !== undefined && previous !== oauth.accountId;
-      if (oauth.accountId === undefined) this.runningOnAccount.delete(chatId);
+      // A reattached turn is still running on the account it was started on,
+      // whatever the host resolves to now: a refusal has to be blamed there.
+      const carriedOn = this.durableAttach.has(chatId)
+        ? this.durableAccount.get(chatId)
+        : undefined;
+      this.durableAccount.delete(chatId);
+      if (carriedOn !== undefined) this.runningOnAccount.set(chatId, carriedOn);
+      else if (oauth.accountId === undefined) this.runningOnAccount.delete(chatId);
       else this.runningOnAccount.set(chatId, oauth.accountId);
-      if (previous !== undefined && oauth.accountId !== undefined && previous !== oauth.accountId) {
+      if (
+        carriedOn === undefined &&
+        previous !== undefined &&
+        oauth.accountId !== undefined &&
+        previous !== oauth.accountId
+      ) {
         this.sayAccountSwitch(chatId, state.model, previous, oauth.accountId);
       }
     }
