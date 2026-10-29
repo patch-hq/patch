@@ -352,6 +352,8 @@ function codesignMacArtifact(outDir, machos) {
     sh('codesign', [
       '--force',
       '--timestamp=none',
+      '--identifier',
+      basename(file) === 'node' ? 'patch-host' : basename(file),
       '--options',
       'runtime',
       // A stable identifier of our own: the copied Node binary otherwise signs
