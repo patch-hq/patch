@@ -200,6 +200,12 @@ interface Props {
    */
   sendTarget?(): Promise<string | null>;
   /**
+   * New-chat screen only: bump to send what the composer holds, as if send had
+   * been pressed — the resend on a failed new chat. Starts at 0, which sends
+   * nothing.
+   */
+  sendRequest?: number;
+  /**
    * Chat id the live dictation preview binds to when `chatId` is only a draft
    * key (new-chat screen): `draftDictationChatId(hostId)`. `null`: no host yet.
    */
@@ -302,6 +308,7 @@ export function Composer({
   dictationFactory,
   dictationModeFactory,
   sendTarget,
+  sendRequest = 0,
   onSent,
   autoFocus,
   edit,
@@ -1305,6 +1312,18 @@ export function Composer({
     }
     sendDraft();
   };
+
+  const sendDraftRef = React.useRef<() => void>(() => {});
+  // Latest closure every render, so a resend sees the current draft and picks.
+  React.useEffect(() => {
+    sendDraftRef.current = sendDraft;
+  });
+  const lastSendRequest = React.useRef(sendRequest);
+  React.useEffect(() => {
+    if (sendRequest === lastSendRequest.current) return;
+    lastSendRequest.current = sendRequest;
+    sendDraftRef.current();
+  }, [sendRequest]);
 
   const sendDraft = (): void => {
     if (resolving) return;

@@ -62,17 +62,29 @@ Host:
 5. Pipes the SDK's message stream into our wire protocol (`03-wire-protocol.md`).
 6. Emits `chat.spawned`.
 
-A refused spawn creates no chat, and leaves no trace of one on any surface. The
-refusal is reported against the `chatId` the spawn was allocated, and a chat-scoped
-error reaches every connected surface — but a surface builds a chat row out of any
+A refused spawn creates no chat, but it does not lose the message. The refusal is
+reported against the `chatId` the spawn was allocated, and a chat-scoped error
+reaches every connected surface — but a surface builds a chat row out of any
 `chatId` it has not seen before, so the refusal alone would draw a nameless,
 folderless row for a chat that does not exist and never will (it is absent from the
 chat list, so nothing later corrects it). The refusal therefore also names that
 `chatId` back to the caller as one to retract, and the caller drops the row.
 Retracting is idempotent and final: a duplicate or late-arriving error for a
 retracted chat does not redraw it, since the error frame and the refusal travel
-separately and can arrive in either order. The user still sees the failure once
-(`12-error-and-offline.md` § Principles) — the row goes, the error does not.
+separately and can arrive in either order.
+
+What stays is the surface's own new-chat draft (`14-design-web.md` § New chat
+drafts), not a chat: the message the user sent, with the folder, machine and model
+chosen, is kept as a failed draft that lists in the sidebar with the reason it
+failed, and opens on the new-chat screen with the error and a Resend. Resending
+spawns afresh from the draft as if it had just been sent; success consumes the
+draft, another refusal leaves it failed with the new reason. The user discards it
+like any draft. A spawn refused after the chat was already shown (the host's
+refusal arrives late) turns back into a failed draft the same way, and the user is
+moved onto it. The failure marker belongs to the surface it happened on and is not
+synced; the message is, as any draft is. A long message is therefore never lost to
+a refused spawn. The user still hears of the failure once, by the toast
+(`12-error-and-offline.md` § Principles), and the failed draft is where it stays.
 
 ## Model
 
