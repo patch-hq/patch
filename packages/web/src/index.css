@@ -10181,10 +10181,10 @@ button.set-row-open:focus-visible {
   margin: 0;
 }
 .new-chat-failed-title {
-  color: var(--danger, #c0392b);
+  color: var(--danger);
 }
 .draft-row .draft-failed {
-  color: var(--danger, #c0392b);
+  color: var(--danger);
 }
 .new-chat-blocked-title {
   margin: 0;
