@@ -1987,6 +1987,59 @@ export const HostOfflineEvent = z
   .strict();
 export type HostOfflineEvent = z.infer<typeof HostOfflineEvent>;
 
+/** One group of look-alike processes using memory on a host: "5 vitest, 11 GB". */
+export const HostProcessGroup = z
+  .object({
+    name: z.string().min(1).max(64),
+    count: z.number().int().gte(1),
+    rssBytes: z.number().int().gte(0),
+  })
+  .strict();
+export type HostProcessGroup = z.infer<typeof HostProcessGroup>;
+
+/**
+ * Host → server, every few seconds with the host's heartbeat: how the machine
+ * itself is coping. Fields a platform cannot measure are absent, never zero.
+ * `topProcesses` is only filled while memory is short — it is what the user is
+ * shown as the likely cause. Consumed by the server (spec/03 § Host health),
+ * never relayed to surfaces.
+ */
+export const HostHealthEvent = z
+  .object({
+    type: z.literal('host.health'),
+    ...hostIdField,
+    memTotalBytes: z.number().int().gte(0).optional(),
+    memAvailableBytes: z.number().int().gte(0).optional(),
+    swapTotalBytes: z.number().int().gte(0).optional(),
+    swapUsedBytes: z.number().int().gte(0).optional(),
+    load1: z.number().gte(0),
+    cpuCount: z.number().int().gte(1),
+    /** Worst delay of the host process's own event loop since the last report. */
+    eventLoopLagMs: z.number().gte(0),
+    /** Milliseconds between reports, so the server knows when one is late. */
+    intervalMs: z.number().int().gte(1),
+    topProcesses: z.array(HostProcessGroup).max(5),
+  })
+  .strict();
+export type HostHealthEvent = z.infer<typeof HostHealthEvent>;
+
+/**
+ * Server → surfaces: a host is online but coping badly, or is no longer. (A host
+ * that cannot be reached at all is `host.offline`.) `critical` means the host is
+ * holding new turns rather than start work it would not finish.
+ */
+export const HostConditionEvent = z
+  .object({
+    type: z.literal('host.condition'),
+    ...hostIdField,
+    state: z.enum(['online', 'struggling']),
+    critical: z.boolean(),
+    reasons: z.array(z.enum(['memory', 'load', 'lag', 'slow-link'])),
+    topProcesses: z.array(HostProcessGroup).max(5),
+  })
+  .strict();
+export type HostConditionEvent = z.infer<typeof HostConditionEvent>;
+
 /**
  * Host → server: one backend's credential on one host is missing or expired
  * (spec/10 § Backend credentials). Names BOTH the machine and the backend —
@@ -9040,6 +9093,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   ChatErrorEvent,
   HostOnlineEvent,
   HostOfflineEvent,
+  HostHealthEvent,
+  HostConditionEvent,
   HostUnauthenticatedEvent,
   HostInfoEvent,
   HostAccountEvent,
@@ -9346,6 +9401,8 @@ export const EVENT_SCHEMAS = {
   'chat.error': ChatErrorEvent,
   'host.online': HostOnlineEvent,
   'host.offline': HostOfflineEvent,
+  'host.health': HostHealthEvent,
+  'host.condition': HostConditionEvent,
   'host.unauthenticated': HostUnauthenticatedEvent,
   'host.host': HostInfoEvent,
   'host.account': HostAccountEvent,

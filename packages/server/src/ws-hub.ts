@@ -28,6 +28,7 @@ import {
   type AuthOkHost,
   type ClaudeSettingsListEvent,
   type HostAccountEvent,
+  type HostConditionEvent,
   type HostInfoEvent,
   type FoldersListEvent,
   type WireEvent,
@@ -170,6 +171,8 @@ export interface WsHubDeps {
    * running → errored → running, and the host is not announced offline. Default 5000.
    */
   hostOfflineGraceMs?: number;
+  /** A host's current struggling condition, if any, to greet a new surface with. */
+  hostCondition?: (hostId: string) => HostConditionEvent | null;
   /** Told of each chat forced to `errored` by a host-link loss (chat completion notifier). */
   onChatLinkLost?: (chatId: string) => void;
   /**
@@ -1068,6 +1071,8 @@ export class WsHub {
             : { type: 'host.offline', hostId },
         ),
       );
+      const condition = this.deps.hostCondition?.(hostId);
+      if (condition) socket.send(encode(condition));
       // Each machine's folder registry, from the greeting alone (spec/03 §
       // Host events — `folders.list` is "sent on connect"). A host only emits
       // it when its own link authenticates, so a surface that connects later
@@ -1808,7 +1813,10 @@ export class WsHub {
       event.type === 'settings.adopt.response' ||
       event.type === 'settings.account_signed_in' ||
       event.type === 'web_bot_auth.sign_request' ||
-      event.type === 'web_bot_auth.sign_response'
+      event.type === 'web_bot_auth.sign_response' ||
+      // Health reports are consumed by the host-health tracker, which tells
+      // surfaces the resulting condition (spec/03 § Host health).
+      event.type === 'host.health'
     ) {
       return;
     }

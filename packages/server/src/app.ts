@@ -107,6 +107,7 @@ import { HookStore } from './hooks/store.js';
 import { HookRunner } from './hooks/runner.js';
 import { registerHookRoutes } from './hooks/routes.js';
 import type { HooksInterface } from './hooks/types.js';
+import { HostHealthTracker } from './host-health.js';
 import { NotificationRouter, type PushBackend } from './notifications/router.js';
 import { CallOrchestrator } from './notifications/call-orchestrator.js';
 import { ChatCompletionNotifier } from './notifications/chat-complete.js';
@@ -820,7 +821,30 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // Where the published host artifacts, their manifest and the APKs live —
   // served below, and read by the hub to bring connecting hosts in step.
   const downloadsDir = process.env.PATCH_DOWNLOADS_DIR ?? '/app/downloads';
+  // How each host is coping (spec/03 § Host health). Reports arrive with the
+  // host's heartbeat; surfaces and the user are told when a host starts to struggle.
+  const hostHealth = new HostHealthTracker({
+    logger: log.child({ component: 'host-health' }),
+    hostName: (hostId) => registry.hostName(hostId) ?? hostId,
+    broadcast: (event) => wsHub.sendToAll(event),
+    notify: (message) => {
+      void notificationRouter
+        .route({ type: 'notify', chatId: 'host-health', message, priority: 'normal' })
+        .catch((err: unknown) => {
+          log.warn({ err: (err as Error).message }, 'host health notify failed');
+        });
+    },
+    ...(opts.nowMs ? { now: opts.nowMs } : {}),
+  });
+  hostLink.onEvent((event) => hostHealth.observe(event));
+  hostLink.onHostStatus((hostId, status) => {
+    if (status === 'offline') hostHealth.observe({ type: 'host.offline', hostId });
+  });
+  hostHealth.start();
+  app.addHook('onClose', async () => hostHealth.stop());
+
   const wsHub = new WsHub({
+    hostCondition: (hostId) => hostHealth.conditionFor(hostId),
     logger: log.child({ component: 'ws-hub' }),
     onChatLinkLost: (chatId) => chatCompletionNotifier.hostLinkLost(chatId),
     ...(accountSettings ? { sharedSettings: () => accountSettings.changedEvent() } : {}),
