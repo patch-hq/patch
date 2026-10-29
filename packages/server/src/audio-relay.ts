@@ -22,7 +22,7 @@
 //
 // NO FALLBACK: a session this server never minted a route for, or a host that
 // is offline, is refused with a specific `audio.error` before any audio is
-// accepted — never silently pointed at the wrong machine's pipeline (E1-d3's
+// accepted — never silently pointed at the wrong host's pipeline (E1-d3's
 // own `session_not_found` discipline, extended one hop). A tunnelled bridge
 // that fails to connect on the host's own end is refused the same way,
 // carried back as `patch.audio_relay.error`.

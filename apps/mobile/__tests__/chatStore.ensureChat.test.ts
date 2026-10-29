@@ -125,11 +125,11 @@ describe('chatStore.ensureChat', () => {
       type: 'chat.error',
       chatId: 'c_new',
       seq: 0,
-      error: { code: 'no_model_catalogue', message: 'that machine has no last-used model' },
+      error: { code: 'no_model_catalogue', message: 'that host has no last-used model' },
     });
     const tl = useChatStore.getState().timelines['c_new'] ?? [];
     const err = tl.find((e) => e.kind === 'error');
     expect(err?.errorCode).toBe('no_model_catalogue');
-    expect(err?.content).toBe('that machine has no last-used model');
+    expect(err?.content).toBe('that host has no last-used model');
   });
 });

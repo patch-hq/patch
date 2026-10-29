@@ -86,7 +86,7 @@ export interface PatchDesktopBridge {
    */
   /**
    * spec/02 § Browser — In the Patch app. The agent's tabs, when the host on
-   * this machine keeps its browser in this app: a large view shows the tab
+   * this host keeps its browser in this app: a large view shows the tab
    * itself laid over its place in the window. `onInput` says the user pressed
    * or typed in a tab being shown. Absent on a shell that predates it.
    */
@@ -119,11 +119,11 @@ export interface PatchDesktopBridge {
   getUpdaterState?(): Promise<DesktopUpdaterState>;
   /**
    * spec/09 § Presence heuristic — milliseconds since the last input anywhere
-   * on the machine. Absent on shells that predate it, and in a browser.
+   * on the host. Absent on shells that predate it, and in a browser.
    */
   getSystemIdleMs?(): Promise<number>;
   /**
-   * spec/09 § Presence heuristic — idle time plus `away` while the machine is
+   * spec/09 § Presence heuristic — idle time plus `away` while the host is
    * locked or asleep. Absent on shells that predate it, which have only
    * `getSystemIdleMs`.
    */
@@ -148,7 +148,7 @@ export interface PatchDesktopBridge {
   copyImagePng?(png: Uint8Array): Promise<void>;
   /**
    * Open a file with its default app, or reveal it in the file manager, on the
-   * machine the shell runs on. Only meaningful for a file the shell's own host
+   * host the shell runs on. Only meaningful for a file the shell's own host
    * wrote. Absent in a browser and on shells that predate it.
    */
   openPath?(path: string, mode: 'file' | 'folder'): Promise<void>;

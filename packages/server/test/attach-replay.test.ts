@@ -30,7 +30,7 @@ import { PatchWsClient } from '../../cli/src/transport/ws.js';
 const silent = pino({ level: 'silent' });
 
 class WiredHostLink implements HostLink {
-  // Presence names the machine it describes; a stand-in link is still a
+  // Presence names the host it describes; a stand-in link is still a
   // host, so it answers with one.
   hostId(): string | null {
     return 'd1';
@@ -81,8 +81,8 @@ class WiredHostLink implements HostLink {
   onStatus(): () => void {
     return () => undefined;
   }
-  // The multi-machine surface of HostLink (spec/03 § Host events): the hub
-  // greets and routes per machine, so a stand-in link answers per machine too.
+  // The multi-host surface of HostLink (spec/03 § Host events): the hub
+  // greets and routes per host, so a stand-in link answers per host too.
   onlineHostIds(): string[] {
     return ['d1'];
   }
@@ -134,7 +134,7 @@ describe('G1-15: attach path renders the existing wire stream (real PatchWsClien
     const user = generateUserKeypair(() => new Uint8Array(32).fill(70));
     const registry = Registry.load(dataDir);
     registry.bootstrapAccount({ keypair: user });
-    // The machine this fixture spawns on has to be registered — a host-addressed
+    // The host this fixture spawns on has to be registered — a host-addressed
     // ingress refuses an unknown id (spec/04 § Spawn).
     registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     registry.upsertSurface({

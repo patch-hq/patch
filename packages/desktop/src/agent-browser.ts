@@ -1,5 +1,5 @@
 // The agent's browser, inside the Patch app (spec/02 § Browser — In the Patch
-// app). When a host runs on the same machine as this app, the agent's tabs are
+// app). When a host runs on the same host as this app, the agent's tabs are
 // real browser tabs here — WebContentsViews — so the large view is the page
 // itself, not a picture of it: typing, selection, the context menu, scrolling
 // and copy and paste are the browser's own. The host still drives them with the
@@ -681,7 +681,7 @@ function safeOrigin(url: string): string {
   }
 }
 
-/** `<home>/.patch/agent-browser.json`, where the host on this machine looks. */
+/** `<home>/.patch/agent-browser.json`, where the host on this host looks. */
 export function agentBrowserEndpointFile(): string {
   return join(app.getPath('home'), '.patch', 'agent-browser.json');
 }

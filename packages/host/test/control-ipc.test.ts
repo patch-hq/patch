@@ -3820,7 +3820,7 @@ describe('GET /internal/jobs — plain success path', () => {
 });
 
 // spec/02 § Control IPC lists seventeen endpoints; only four existed, so every
-// host-scoped control was unreachable from the machine it belongs to — the one
+// host-scoped control was unreachable from the host it belongs to — the one
 // place the CLI's default host makes them most necessary.
 describe('host-scoped control endpoints (spec/02 § Control IPC)', () => {
   const hostReport = {
@@ -3970,7 +3970,7 @@ describe('host-scoped control endpoints (spec/02 § Control IPC)', () => {
     }
   });
 
-  // spec/02 § Claude Code settings: settings.json is the machine's own file,
+  // spec/02 § Claude Code settings: settings.json is the host's own file,
   // read and replaced over the host's socket; invalid text is refused, named.
   it('reads and replaces this host’s settings.json, refusing text the host rejects', async () => {
     const { daemon } = setup();

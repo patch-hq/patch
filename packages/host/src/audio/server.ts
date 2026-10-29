@@ -1136,7 +1136,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
     interruptOpenCall(text: string): boolean {
       // The surface the user is actually at wins (spec/07 § Which surface it
       // reaches): with a desk session and a phone in a pocket both live, the one
-      // that last heard something is the machine they are in front of.
+      // that last heard something is the host they are in front of.
       let target: string | undefined;
       let best = -1;
       for (const [, active] of sessions) {

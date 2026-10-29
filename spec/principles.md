@@ -2,7 +2,7 @@
 
 ## Patch is a public app
 
-Patch is deployed and used by many users on various environments. Everything that gets built must be able to run for them as part of a deployed unit, not just on this machine. All designs/spec must be able to work for a user doing a fresh install of their self hosted server, host and surfaces on their own devices.
+Patch is deployed and used by many users on various environments. Everything that gets built must be able to run for them as part of a deployed unit, not just on this host. All designs/spec must be able to work for a user doing a fresh install of their self hosted server, host and surfaces on their own devices.
 
 ## Never use environment variables
 
@@ -43,7 +43,7 @@ Behaviour is declared in code. An optional environment variable with a default i
 
 Values that genuinely come from outside — a bot token, an OAuth client, a service account — are configured in patch and stored with the rest of its state, not read from the environment. A host missing one says which value is missing and where to set it, rather than starting up degraded or failing at the moment the credential is first used. Configuring an integration is something the user does in patch, on any surface, like everything else.
 
-The environment supplies only what the process cannot know about itself: the account and host it is running as, and the paths and ports the machine hands it. Those are listed in one place, each with the reason it qualifies, and reading one that is not on the list fails the build — so adding the next one is a decision rather than an accident.
+The environment supplies only what the process cannot know about itself: the account and host it is running as, and the paths and ports the host hands it. Those are listed in one place, each with the reason it qualifies, and reading one that is not on the list fails the build — so adding the next one is a decision rather than an accident.
 
 ## History ownership
 
@@ -70,7 +70,7 @@ If the agent adopts a feature, the corresponding patch feature is removed.
 ## How we add it
 
 - Server is a dumb relay + registry + ingress endpoint. It makes no LLM calls.
-- Host owns agent-session lifecycle on its host. One host per host machine.
+- Host owns agent-session lifecycle on its host. One host per host host.
 - Surfaces are dumb clients. They render the wire event stream verbatim.
 - Copy from Happy where it works (wire protocol, voice architecture, QR linking, host model). Don't reinvent.
 - Fail loudly. No silent fallbacks (portfolio convention).

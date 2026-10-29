@@ -1582,7 +1582,7 @@ export function ChatRoute({
       });
       const timer = setTimeout(() => {
         unsubscribe();
-        pushError(failed('edit'), undefined, 'the machine did not confirm the new track');
+        pushError(failed('edit'), undefined, 'the host did not confirm the new track');
       }, 15000);
       return true;
     },
@@ -2185,9 +2185,9 @@ export function ChatRoute({
       <ArchivedBanner row={row} />
       <HiddenBanner row={row} />
       <SnoozedBanner row={row} />
-      {/* Provider accounts are shared by every host (spec/10): no machine is named. */}
+      {/* Provider accounts are shared by every host (spec/10): no host is named. */}
       <ClaudeDisconnectedBanner model={row.model ?? undefined} />
-      {/* And so is credit. Every chat on a spent machine says so, because the
+      {/* And so is credit. Every chat on a spent host says so, because the
           per-chat bubble only reaches whichever chat you happen to have open —
           it cannot tell you that the other twenty are stuck too. */}
       <OutOfUsageBanner hostId={row.hostId} model={row.model ?? undefined} chatId={chatId} />
@@ -2502,7 +2502,7 @@ const TimelineEntry = memo(function TimelineEntry({
     );
   }
   // A background `patch_agent` finishing: the host delivers its reply as a
-  // machine turn, but nobody typed it, so it is a quiet system row (queued or
+  // host turn, but nobody typed it, so it is a quiet system row (queued or
   // not) — never a user bubble.
   if (entry.kind === 'message' && entry.role === 'user') {
     const agentReturn = parseAgentReturn(entry.content ?? '');
@@ -3280,7 +3280,7 @@ function MessageEntry({
               <CloudOff size={12} strokeWidth={2.5} aria-hidden />
             )}
           </span>
-          {hostOnline ? 'Sending…' : 'Machine offline — will send when it reconnects'}
+          {hostOnline ? 'Sending…' : 'Host offline — will send when it reconnects'}
         </div>
       ) : null}
       {/* spec/14 § Messages — the per-message meta strip: facts ABOUT the turn
@@ -3991,7 +3991,7 @@ function ToolCall({
  * is reachable through a chat on the same (host, folder), makes the row a
  * link to it — same containment rule and same `resolveSkillLink` the Jobs
  * view's Skill field already uses, so a skill living outside this chat's
- * folder (a machine-wide one) states why instead of offering a link that
+ * folder (a host-wide one) states why instead of offering a link that
  * would 404. The tooltip is the skill's own frontmatter `description:`,
  * fetched alongside its path via `GET /api/skills`.
  */
@@ -5732,8 +5732,8 @@ function PermissionCard({
  * back up.
  */
 /**
- * The turn is held because its machine is in a dark wake (lid shut, waking
- * briefly for maintenance). Not an error: it runs as soon as the machine is
+ * The turn is held because its host is in a dark wake (lid shut, waking
+ * briefly for maintenance). Not an error: it runs as soon as the host is
  * fully awake, and the notice goes when it does.
  */
 function WakeHoldBubble({

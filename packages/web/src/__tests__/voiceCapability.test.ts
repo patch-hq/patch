@@ -1,7 +1,7 @@
 // Voice as a per-MACHINE capability (plan H1, spec/07).
 //
-// A call button looked identical on every machine and failed at the moment of
-// speaking, on the machine the user could not see.
+// A call button looked identical on every host and failed at the moment of
+// speaking, on the host the user could not see.
 
 import { describe, it, expect } from 'vitest';
 import { voiceCapability, voiceInstallPrompt } from '../lib/voiceCapability.js';
@@ -30,14 +30,14 @@ function host(components: unknown[], hostName = 'laptop'): HostPresence {
 }
 
 describe('voiceCapability', () => {
-  it('is available when the speech component is installed on that machine', () => {
+  it('is available when the speech component is installed on that host', () => {
     const cap = voiceCapability(
       host([{ id: 'kokoro', label: 'Kokoro', bytes: 340e6, state: 'installed' }]),
     );
     expect(cap.available).toBe(true);
   });
 
-  it('is unavailable when the component is missing, naming the machine AND what it needs', () => {
+  it('is unavailable when the component is missing, naming the host AND what it needs', () => {
     const cap = voiceCapability(
       host([{ id: 'kokoro', label: 'Kokoro', bytes: 340e6, state: 'absent' }], 'beta-box'),
     );
@@ -48,11 +48,11 @@ describe('voiceCapability', () => {
     expect(cap.reason).toContain('Kokoro');
   });
 
-  it('a machine whose speech backend is remote offers no component and still works', () => {
+  it('a host whose speech backend is remote offers no component and still works', () => {
     expect(voiceCapability(host([])).available).toBe(true);
   });
 
-  it('a machine that has not reported is NOT assumed capable', () => {
+  it('a host that has not reported is NOT assumed capable', () => {
     const cap = voiceCapability({
       hostId: 'quiet',
       online: false,
@@ -65,7 +65,7 @@ describe('voiceCapability', () => {
     expect(cap.reason).toContain('has not reported');
   });
 
-  it('the prompt names the download size and the machine, in one prompt', () => {
+  it('the prompt names the download size and the host, in one prompt', () => {
     const cap = voiceCapability(
       host([{ id: 'kokoro', label: 'Kokoro', bytes: 340e6, state: 'absent' }], 'beta-box'),
     );

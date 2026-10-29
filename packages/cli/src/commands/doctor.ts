@@ -171,9 +171,9 @@ export function registerDoctorCommand(program: Command): void {
         }
         checks['hostOnline'] = hostOnline;
 
-        // --- per-host status (every machine on the account) ---
+        // --- per-host status (every host on the account) ---
         // spec/17: doctor reports per-host status. The probe above only covers
-        // the machine the CLI talks to; the registry lists every host.
+        // the host the CLI talks to; the registry lists every host.
         try {
           const t = buildTransport(config, { forceRest: true });
           const res = await t.get<{

@@ -588,7 +588,7 @@ test('preload.ts exposes onMenubarVisibility for the menu-bar heartbeat gate', (
 
 test("the shell offers NO native folder picker (spec/04 - browsing is the host's FS)", () => {
   // The host usually runs on another host, so a folder chosen from THIS
-  // machine's disk is a path the host does not have and every chat spawned
+  // host's disk is a path the host does not have and every chat spawned
   // into it dies with folder_not_found. The desktop app browses the host's
   // tree like every other surface — so neither half of the old native-picker
   // bridge may exist.
@@ -713,7 +713,7 @@ test('every BrowserWindow disables backgroundThrottling (hidden windows must sti
 // A deploy used to run `install-to-applications.cjs` as a `postdist` hook: it
 // quit Patch, replaced /Applications/Patch.app and never relaunched it, so
 // every deploy left the desktop dead until the user started it by hand. The shell
-// now follows a deploy the same way any other machine would — over the update
+// now follows a deploy the same way any other host would — over the update
 // feed, which relaunches on install.
 
 test('the deploy no longer replaces /Applications under the running app (no postdist on `dist`)', () => {

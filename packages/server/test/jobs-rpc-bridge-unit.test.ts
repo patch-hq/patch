@@ -502,11 +502,11 @@ describe('attachJobsRpcBridge — every op branch', () => {
 
   // TA3-14a. `patch.jobs.response` carries neither `hostId` nor `chatId`, so
   // the routing `send()` fell through to `routeOf()`'s last resort — the
-  // account's HOME machine. Every request originating anywhere else was
+  // account's HOME host. Every request originating anywhere else was
   // answered to the wrong host and hung until the caller's 10s timeout. The
   // reply must be addressed to the requester.
-  it('replies to the REQUESTING machine, not the account default host', () => {
-    // The link's own (home) machine is `d1`; the request comes from `d2`.
+  it('replies to the REQUESTING host, not the account default host', () => {
+    // The link's own (home) host is `d1`; the request comes from `d2`.
     expect(link.hostId()).toBe('d1');
     link.emit({ type: 'patch.jobs.request', requestId: 'r-from-d2', op: 'list' }, 'd2');
     const reply = link.sent.find(
@@ -515,7 +515,7 @@ describe('attachJobsRpcBridge — every op branch', () => {
     expect(reply?.hostId).toBe('d2');
   });
 
-  it('replies to each requester independently when two machines ask at once', () => {
+  it('replies to each requester independently when two hosts ask at once', () => {
     link.emit({ type: 'patch.jobs.request', requestId: 'r-a', op: 'list' }, 'host-a');
     link.emit({ type: 'patch.jobs.request', requestId: 'r-b', op: 'list' }, 'host-b');
     const byId = (id: string) =>
@@ -524,7 +524,7 @@ describe('attachJobsRpcBridge — every op branch', () => {
     expect(byId('r-b')?.hostId).toBe('host-b');
   });
 
-  it('drops a request with no originating machine — a reply could not be routed', () => {
+  it('drops a request with no originating host — a reply could not be routed', () => {
     link.setHostId(null);
     link.emit({ type: 'patch.jobs.request', requestId: 'r-orphan', op: 'list' }, undefined);
     expect(

@@ -740,10 +740,10 @@ describe('message dispatch', () => {
     expect(usePresenceStore.getState().daemon).toBe('offline');
   });
 
-  // spec/10 § Backend credentials — the report names BOTH the machine and the
+  // spec/10 § Backend credentials — the report names BOTH the host and the
   // backend, and it is a CREDENTIAL fact, not a presence one: the host emitted
   // it over its own live link, so its presence is untouched. Flipping presence
-  // here would tell the user the machine is down when it is up and simply
+  // here would tell the user the host is down when it is up and simply
   // logged out of one backend.
   it('host.unauthenticated marks that backend on that host not-connected and surfaces the reason', () => {
     const sock = open();
@@ -790,9 +790,9 @@ describe('message dispatch', () => {
     });
   });
 
-  // `host.account` replaced the account-wide report: a machine can be
+  // `host.account` replaced the account-wide report: a host can be
   // connected on one backend and logged out on another, so the frame names
-  // machine AND backend (spec/10 § Backend credentials).
+  // host AND backend (spec/10 § Backend credentials).
   it('host.account records one backend s credential on one host', () => {
     const sock = open();
     sock.emitMessage(
@@ -827,7 +827,7 @@ describe('message dispatch', () => {
     });
   });
 
-  // Each registry names the machine whose filesystem it describes, and the
+  // Each registry names the host whose filesystem it describes, and the
   // store is keyed by it — two hosts sharing a path string stay two entries
   // (spec/04 § Folders).
   it('folders.list replaces THAT host s registry only', () => {
@@ -881,8 +881,8 @@ describe('message dispatch', () => {
     expect(useFolderStore.getState().foldersFor('d1')).toEqual(['~/c']);
   });
 
-  // spec/02 § Claude Code settings — Settings → Hosts reads each machine's
-  // settings.json + memory from these, settling on what the machine holds.
+  // spec/02 § Claude Code settings — Settings → Hosts reads each host's
+  // settings.json + memory from these, settling on what the host holds.
   it('claude_settings.list / .updated replace THAT host s snapshot, and survive the greeting', () => {
     const sock = open();
     const memory = { project: 'p', file: 'm.md', name: 'n', description: '', memoryType: 'user' };
@@ -941,7 +941,7 @@ describe('message dispatch', () => {
     expect(useSettingsStore.getState().data?.preferences.chatNameInterval).toBe(5);
   });
 
-  // Settings → Hosts → Remove this machine: every surface is sent `host.removed`
+  // Settings → Hosts → Remove this host: every surface is sent `host.removed`
   // and drops the host with every report it had cached for it.
   it('host.removed drops THAT host and its cached reports, and nothing else', () => {
     const sock = open();

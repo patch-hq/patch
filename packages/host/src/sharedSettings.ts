@@ -1,6 +1,6 @@
 // A host's half of the shared settings (spec/01 § Settings).
 //
-// The server owns every setting that is not tied to one machine and sends each
+// The server owns every setting that is not tied to one host and sends each
 // host a `settings.snapshot`. This module holds the pieces of applying one that
 // are not wiring: how a login this host already held is read back out so it can
 // be sent to the server once.

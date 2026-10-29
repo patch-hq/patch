@@ -1,5 +1,5 @@
-// A question card answered on a chat that lives on a machine OTHER than the
-// server's first (manager) machine. The surface greys the card the instant it
+// A question card answered on a chat that lives on a host OTHER than the
+// server's first (manager) host. The surface greys the card the instant it
 // is tapped, so the only proof the agent heard is the blocked tool call
 // actually resuming with the user's answers. This drives the real chain end to
 // end: surface -> server hub -> InboundHostLink -> the chat's own host socket ->
@@ -33,7 +33,7 @@ async function waitFor(pred: () => boolean, timeoutMs = 4000): Promise<void> {
   throw new Error('waitFor: timed out');
 }
 
-interface Machine {
+interface Host {
   daemon: Daemon;
   link: ServerLink;
   received: WireEvent[];
@@ -62,7 +62,7 @@ async function twoMachines() {
   cleanups.push(() => built.app.close());
   const wsUrl = `ws://127.0.0.1:${(built.app.server.address() as AddressInfo).port}/ws`;
 
-  async function startMachine(hostId: string): Promise<Machine> {
+  async function startMachine(hostId: string): Promise<Host> {
     const home = mkdtempSync(join(tmpdir(), `perm-remote-${hostId}-`));
     cleanups.push(() => rmSync(home, { recursive: true, force: true }));
     const received: WireEvent[] = [];
@@ -103,7 +103,7 @@ async function twoMachines() {
     return { daemon, link, received };
   }
 
-  // Home registers first, so it is the manager machine: the wrong place to
+  // Home registers first, so it is the manager host: the wrong place to
   // send an answer for a chat that is not its own.
   const home = await startMachine('home');
   const remote = await startMachine('remote');
@@ -130,7 +130,7 @@ async function twoMachines() {
   await waitFor(() => remote.daemon.list().some((c) => c.chatId === chatId));
 
   type Outcome = { approve: boolean; updatedInput?: Record<string, unknown> };
-  /** The agent on the remote machine asks a question and blocks on it. */
+  /** The agent on the remote host asks a question and blocks on it. */
   async function ask(): Promise<{ requestId: string; outcome: Promise<Outcome> }> {
     const asked = surface.waitFor('chat.permission_request', (e) => e.chatId === chatId);
     const outcome = (
@@ -164,8 +164,8 @@ async function twoMachines() {
 const within = <T>(p: Promise<T>, ms: number, msg: string): Promise<T> =>
   Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error(msg)), ms))]);
 
-describe('answering a question card on a chat that lives on a remote machine', () => {
-  it('reaches that machine, unblocks the agent with the answers, and echoes back', async () => {
+describe('answering a question card on a chat that lives on a remote host', () => {
+  it('reaches that host, unblocks the agent with the answers, and echoes back', async () => {
     const t = await twoMachines();
     const { requestId, outcome } = await t.ask();
     const echoed = t.surface.waitFor('chat.permission_response', (e) => e.requestId === requestId);
@@ -186,7 +186,7 @@ describe('answering a question card on a chat that lives on a remote machine', (
     expect(t.home.received.some((e) => e.type === 'chat.permission_response')).toBe(false);
   });
 
-  it("is delivered once the chat's machine is back when it was unreachable at the moment of the answer", async () => {
+  it("is delivered once the chat's host is back when it was unreachable at the moment of the answer", async () => {
     const t = await twoMachines();
     const { requestId, outcome } = await t.ask();
     t.remote.link.severForTest();

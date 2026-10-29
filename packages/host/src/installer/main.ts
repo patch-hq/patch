@@ -1,4 +1,4 @@
-// The host installer: first run on a machine that has only an OS on it.
+// The host installer: first run on a host that has only an OS on it.
 //
 // spec/02 § Installation, spec/10 § Host registration, spec/11 § Host
 // installation. It is shipped inside the artifact and run either by a person
@@ -7,21 +7,21 @@
 //
 // What it does, in this order and no other:
 //
-//   1. refuses an artifact built for a different machine, before it touches
+//   1. refuses an artifact built for a different host, before it touches
 //      anything at all;
-//   2. states, once, what the host will be able to do on this machine
+//   2. states, once, what the host will be able to do on this host
 //      (spec/10 § The authority of a turn);
 //   3. installs the artifact under the user's own ~/.patch and writes the
 //      patch-cli skill into the user's own agent skills directory;
-//   4. provisions the agent sandbox this machine runs every turn inside,
+//   4. provisions the agent sandbox this host runs every turn inside,
 //      because `auto` without one degrades into asking about every command;
 //   5. registers the service with launchd / systemd, with restart-on-failure
 //      and start-at-boot;
 //   6. redeems the pairing code the user took from an already-linked surface,
-//      submitting it with this machine's public key;
+//      submitting it with this host's public key;
 //   7. starts the service.
 //
-// The service is registered BEFORE pairing on purpose: a machine that cannot
+// The service is registered BEFORE pairing on purpose: a host that cannot
 // reach the server must still end up with a real, registered service and a
 // clear "the code could not be submitted", so a fresh code can be entered later
 // (spec/11, unhappy paths). Nothing here is a fallback: each failure stops the
@@ -109,7 +109,7 @@ export interface InstallerContext {
   /**
    * Sandbox-provisioning override — test hook, alongside `serviceOps`, so a
    * unit test installs no packages and touches no AppArmor profile on the
-   * machine running the suite.
+   * host running the suite.
    */
   provisionSandbox?: (platform: NodeJS.Platform, io: { out(line: string): void }) => Promise<void>;
   /** Login-shell PATH override — test hook, so a unit test runs no shell. */
@@ -158,23 +158,23 @@ export interface BuildInfo {
 
 /**
  * spec/10 § The authority of a turn: "The installer states what the host will
- * be able to do on the machine, once, before it registers." Plain language, no
- * jargon, and it names the actual user and the actual machine.
+ * be able to do on the host, once, before it registers." Plain language, no
+ * jargon, and it names the actual user and the actual host.
  */
 export function authorityNotice(user: string, machine: string, home: string): string {
   return [
     '',
     '  Patch host — what this installs, and what it will be able to do',
     '',
-    `  The host runs on this machine (${machine}) as ${user}, with ${user}'s whole`,
-    '  authority. A chat opened against this machine from any of your linked',
+    `  The host runs on this host (${machine}) as ${user}, with ${user}'s whole`,
+    '  authority. A chat opened against this host from any of your linked',
     '  surfaces — phone, web, desktop — can do anything you can do from your own',
     '  shell here:',
     '',
-    '    * read, change and delete any file you can, anywhere on this machine',
+    '    * read, change and delete any file you can, anywhere on this host',
     `    * run any installed command, including sudo and docker where ${user} has them`,
-    '    * reach services on this machine that are not exposed to the network',
-    '    * use the credentials, SSH keys and logins already on this machine',
+    '    * reach services on this host that are not exposed to the network',
+    '    * use the credentials, SSH keys and logins already on this host',
     '',
     `  It runs under ${home}, so it reads your own agent configuration and behaves`,
     '  the way your agent behaves in your terminal. It keeps its own state in',
@@ -226,10 +226,10 @@ const USAGE = `patch host installer
 
   ./install --server <url> [--code <pairing code>] [--internal-token <token>]
 
-  --server <url>            the patch server this machine reports to
+  --server <url>            the patch server this host reports to
   --internal-token <token>  the server's voice-session secret (default: sent at pairing)
   --code <code>             the pairing code from a linked surface's Add host
-  --host-name <name>        what to call this machine (default: its hostname)
+  --host-name <name>        what to call this host (default: its hostname)
   --non-interactive         never prompt; used when a surface runs the install
   -h, --help                this
 `;
@@ -308,7 +308,7 @@ export function hostAppInfoPlist(version: string): string {
 `;
 }
 
-/** Which service manager this machine has. Anything else is not a target. */
+/** Which service manager this host has. Anything else is not a target. */
 export function serviceManagerFor(platform: NodeJS.Platform): ServiceManager {
   if (platform === 'darwin') return 'launchd';
   if (platform === 'linux') return 'systemd';
@@ -330,7 +330,7 @@ export function readBuildInfo(artifactDir: string): BuildInfo {
 }
 
 /**
- * Machine-level settings the host reads from its own environment (spec/11
+ * Host-level settings the host reads from its own environment (spec/11
  * § Env). They are passed to the installer and written into the service unit,
  * so the host has them on every start without anyone editing the unit.
  */
@@ -357,11 +357,11 @@ export function passThroughEnv(env: NodeJS.ProcessEnv): Record<string, string> {
 }
 
 /**
- * What this machine was installed with, kept under the user's own ~/.patch.
+ * What this host was installed with, kept under the user's own ~/.patch.
  *
  * spec/10 § Host registration: "Re-running the installer on a host that is
  * already registered re-uses what is already stored." That has to cover the
- * machine's settings too, not just its credential — a re-run invoked without,
+ * host's settings too, not just its credential — a re-run invoked without,
  * say, GROQ_API_KEY in its environment must not quietly rewrite the service
  * unit without it and leave the host refusing to boot. Anything named on the
  * re-run wins; anything not named is what it already was.
@@ -443,14 +443,14 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
     return { code: 0 };
   }
 
-  // ---- 1. Right artifact for this machine? ------------------------------
+  // ---- 1. Right artifact for this host? ------------------------------
   // Checked FIRST, and before anything is written, copied or registered: an
   // artifact for the wrong platform refuses rather than half-installing.
   const build = readBuildInfo(ctx.artifactDir);
   const here = `${ctx.platform}-${ctx.arch}`;
   if (build.target !== here) {
     io.err(
-      `patch install: this artifact is for ${build.target}, but this machine is ${here}.\n` +
+      `patch install: this artifact is for ${build.target}, but this host is ${here}.\n` +
         'Nothing has been installed. Download the artifact for this platform and run that one.',
     );
     return { code: 65 };
@@ -464,7 +464,7 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
   const user = userInfo().username;
   const machine = args.hostName ?? readMachineSettings(join(home, '.patch')).hostName ?? hostname();
 
-  // What this machine already knows about itself; anything named on this run
+  // What this host already knows about itself; anything named on this run
   // overrides it, anything not named survives untouched.
   const stored = readMachineSettings(join(home, '.patch'));
   const serverUrl = args.serverUrl ?? stored.serverUrl;
@@ -487,10 +487,10 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
     return { code: 64 };
   }
 
-  // ---- 2. Say what this machine is agreeing to, once, up front ----------
+  // ---- 2. Say what this host is agreeing to, once, up front ----------
   io.out(authorityNotice(user, machine, home));
   if (!args.nonInteractive && io.ask) {
-    const answer = (await io.ask('  Install the patch host on this machine? [y/N] ')).trim();
+    const answer = (await io.ask('  Install the patch host on this host? [y/N] ')).trim();
     if (!/^y(es)?$/i.test(answer)) {
       io.out('  Nothing installed.');
       return { code: 1 };
@@ -554,7 +554,7 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
 
   // ---- 4. The patch-cli skill, in the user's own skills directory -------
   // spec/17 § Skill: written on install and rewritten on every self-update, so
-  // every chat on this machine can drive the CLI and the skill matches the
+  // every chat on this host can drive the CLI and the skill matches the
   // host it describes.
   const skillSrc = join(installDir, 'skill', 'patch-cli');
   if (!existsSync(join(skillSrc, 'SKILL.md'))) {
@@ -567,11 +567,11 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
   cpSync(skillSrc, skillDest, { recursive: true });
   io.out(`  patch-cli skill written to ${skillDest}`);
 
-  // The `patch` program the skill just told every chat on this machine to run.
+  // The `patch` program the skill just told every chat on this host to run.
   // Shipping the skill without the binary meant its very first instruction
-  // (`patch chats list --json`) failed on a freshly installed machine. The
+  // (`patch chats list --json`) failed on a freshly installed host. The
   // launcher runs the artifact's own pinned Node against the bundled CLI, so it
-  // needs nothing on the machine.
+  // needs nothing on the host.
   const cliBundle = join(installDir, 'bin', 'patch.js');
   if (existsSync(cliBundle)) {
     const binDir = join(home, '.local', 'bin');
@@ -595,14 +595,14 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
     // An artifact without the CLI must not claim the skill's instructions work.
     io.err(
       `patch install: WARNING the artifact carries no patch CLI at ${cliBundle}; ` +
-        'the patch-cli skill describes commands this machine cannot run',
+        'the patch-cli skill describes commands this host cannot run',
     );
   }
 
-  // ---- 5. The agent sandbox this machine will run every turn inside -----
+  // ---- 5. The agent sandbox this host will run every turn inside -----
   // Before the service exists, because a host whose sandbox does not work is
   // a host that parks every unattended job on its first command (see
-  // sandbox.ts). Provisioned on the machine, like the backend itself.
+  // sandbox.ts). Provisioned on the host, like the backend itself.
   try {
     await (ctx.provisionSandbox ?? provisionSandbox)(ctx.platform, io);
   } catch (err) {
@@ -618,7 +618,7 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
   if (internalToken === undefined || internalToken.length === 0) {
     const code = await pairingCode(args, io);
     if (code === undefined) {
-      io.err('patch install: no pairing code, so this machine cannot join the account.');
+      io.err('patch install: no pairing code, so this host cannot join the account.');
       return { code: 70 };
     }
     const result = await redeemPairingCode({
@@ -635,7 +635,7 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
     }
     if (result.internalToken === undefined) {
       io.err(
-        'patch install: the server paired this machine but did not hand over its voice-session ' +
+        'patch install: the server paired this host but did not hand over its voice-session ' +
           'secret, so the host cannot start. The server predates this installer: update it, ' +
           'or run this again with --internal-token <token>.',
       );
@@ -647,7 +647,7 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
     io.out(`  registered with ${serverUrl} as ${result.hostId}`);
   }
 
-  // ---- 6. Register with the machine's own service manager ---------------
+  // ---- 6. Register with the host's own service manager ---------------
   const machineEnv = { ...stored.env, ...passThroughEnv(ctx.env) };
   writeMachineSettings(patchHome, {
     serverUrl,
@@ -686,10 +686,10 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
       PATCH_SERVER_WS_URL: wsUrlFor(serverUrl),
       PATCH_HOST_NAME: machine,
       // The one agent backend patch drives. The backend's own install is
-      // provisioned on the machine, not carried in the artifact (spec/11).
+      // provisioned on the host, not carried in the artifact (spec/11).
       SDK_BACKEND: 'real',
       // Every artifact carries silero_vad.onnx, so end-of-utterance detection
-      // and barge-in work on this machine with nothing downloaded (spec/02).
+      // and barge-in work on this host with nothing downloaded (spec/02).
       VAD_BACKEND: 'silero',
       VAD_MODEL_PATH: join(installDir, 'silero_vad.onnx'),
       // spec/11 § Env: WHISPER_BACKEND, GROQ_API_KEY and CLAUDE_CODE_OAUTH_TOKEN
@@ -734,7 +734,7 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
     const code = await pairingCode(args, io);
     if (code === undefined) {
       io.err(
-        'patch install: no pairing code. The service is registered but this machine is not ' +
+        'patch install: no pairing code. The service is registered but this host is not ' +
           'linked to an account yet.\n' +
           `Get a code from a linked surface and run: ${join(installDir, 'install')} --code <code> ` +
           `--server ${serverUrl} --internal-token <token>`,
@@ -753,8 +753,8 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
       paired = true;
       io.out(`  registered with ${serverUrl} as ${result.hostId}`);
     } else if (result.kind === 'already_registered' && existingKey !== undefined) {
-      // spec/10: "Registration is per machine and idempotent." Re-running WITH
-      // a code on a machine that already holds a credential used to abort 75
+      // spec/10: "Registration is per host and idempotent." Re-running WITH
+      // a code on a host that already holds a credential used to abort 75
       // and advise "enter a fresh code" — advice that can never succeed, since
       // every fresh code hits the same 409. The stored credential is the right
       // answer; the code simply went unused.
@@ -811,15 +811,15 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
       return { code: 70 };
     }
     io.out(`  service started (pid ${state.pid ?? 'unknown'})`);
-    // A stored credential can be VALID or merely PRESENT. A machine whose key
+    // A stored credential can be VALID or merely PRESENT. A host whose key
     // has been revoked still has the file, so "re-using the stored credential"
-    // and "it appears under Settings → Hosts" were both asserted for a machine
+    // and "it appears under Settings → Hosts" were both asserted for a host
     // the server refuses on every reconnect. The host says so in its own log
     // within a second of starting — so look, rather than claim.
     const revoked = /daemon revoked|4401/.test(hostLogTail(def.home, 40));
     if (revoked) {
       io.err('');
-      io.err('patch install: this machine is registered but its credential has been REVOKED.');
+      io.err('patch install: this host is registered but its credential has been REVOKED.');
       io.err('  The server refuses the connection, so it will NOT appear under Settings → Hosts.');
       io.err(
         `  Pair it again with a fresh code: ${join(installDir, 'install')} --code <code> ` +
@@ -828,7 +828,7 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
       return { code: 77 };
     }
     io.out('');
-    io.out(`  This machine is ${machine}. It appears under Settings → Hosts.`);
+    io.out(`  This host is ${machine}. It appears under Settings → Hosts.`);
   }
   // Legacy runtimes go only now that the update has fully succeeded. A running
   // host may have been launched from one, and its turn runners spawn that path:

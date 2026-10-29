@@ -60,5 +60,5 @@ test('an ambiguous prefix is refused, naming every match', async () => {
 });
 
 test('a prefix nothing matches says so rather than 404ing on the prefix', async () => {
-  await assert.rejects(resolveChatId(fake('uds', [C]), '01M3N32N'), /no chat on this machine/);
+  await assert.rejects(resolveChatId(fake('uds', [C]), '01M3N32N'), /no chat on this host/);
 });

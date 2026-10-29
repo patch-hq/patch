@@ -7,7 +7,7 @@
 // got unhidden by a stray `patch_send_to` with no caller context had no
 // durable, queryable record of what happened or who was asking. This module
 // gives that hook a second, durable destination: one bounded, append-only
-// JSONL file per machine, read the same way job runs and webhook logs are
+// JSONL file per host, read the same way job runs and webhook logs are
 // (`packages/server/src/jobs/logs.ts`).
 //
 //   <patchHome>/logs/tool-calls.jsonl

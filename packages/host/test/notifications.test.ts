@@ -125,8 +125,8 @@ describe('broadcast sidecar', () => {
     });
     appendBroadcast(cwd, 'thread_speakers', {
       ts: 1_700_000_001_000,
-      sourceChatName: 'washing-machine',
-      message: 'washing machine done',
+      sourceChatName: 'washing-host',
+      message: 'washing host done',
     });
     const entries = readPendingBroadcasts(cwd, 'thread_speakers');
     expect(entries).toHaveLength(2);
@@ -446,7 +446,7 @@ describe('UDS /internal/notify â€” speakers device-resolution cascade (spec/09 Â
         headers: AUTH,
         payload: {
           channel: 'speakers',
-          message: extra.message ?? 'washing machine done',
+          message: extra.message ?? 'washing host done',
           callerChatId: chatId,
           ...(extra.deviceId !== undefined ? { deviceId: extra.deviceId } : {}),
         },

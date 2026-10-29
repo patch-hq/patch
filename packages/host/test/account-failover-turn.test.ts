@@ -181,7 +181,7 @@ describe('a spent account moves the chat on and the turn runs again', () => {
   });
 
   it("hands the host the limit's OWN reset instant, not just the sentence", async () => {
-    // The reset the host records is what arms the retry for the whole machine.
+    // The reset the host records is what arms the retry for the whole host.
     // Claude Code states it twice — as an exact epoch in `quotaLimits.resetsAt`
     // and, sometimes, as prose ("resets 8pm (UTC)") — and the host was reading
     // only the prose. A refusal that carries the structured field and no

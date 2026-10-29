@@ -128,7 +128,7 @@ export function maybeAcceptDevCredential(): string | null {
  * The desktop shell hands the page its credential in the URL fragment
  * (`/app/#credential=<jwt>`, spec/05 § Desktop first run): it has just made or
  * been given one and the page has nowhere else to receive it. A fragment never
- * leaves the machine, and it is taken ONLY inside the shell (`window.patch`),
+ * leaves the host, and it is taken ONLY inside the shell (`window.patch`),
  * never in a browser, where a link carrying one would sign a visitor in as
  * someone else. The fragment is removed once taken.
  */

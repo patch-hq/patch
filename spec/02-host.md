@@ -1,12 +1,12 @@
 # Host
 
-One native background process per host machine, running as the user who owns
-that machine. It runs agent sessions and owns the filesystem they work in.
+One native background process per host host, running as the user who owns
+that host. It runs agent sessions and owns the filesystem they work in.
 
 ## Runtime and installation
 
 The host runs with the access of the user it runs as: the whole filesystem,
-every installed tool, services on loopback, the machine's package manager,
+every installed tool, services on loopback, the host's package manager,
 `docker`, `systemctl`, `launchctl` and `cron`. A chat on a host can do what that
 user can do from their own shell.
 
@@ -16,14 +16,14 @@ and a chat behaves the way that agent behaves in their terminal.
 
 The OS service manager owns its lifecycle: launchd on macOS, a systemd user unit
 on Linux, with restart-on-failure and start-at-boot. It runs through logout,
-surface disconnects, and any app on the same machine closing.
+surface disconnects, and any app on the same host closing.
 
 It is a native process rather than a container. A container would have to mount
 the host back into itself to reach the files it works on, keeping a private
 network namespace that hides services on loopback, a private PID namespace that
 hides host processes, a foreign uid that misowns written files, and a duplicate
 toolchain. On macOS and Windows the container runs inside a Linux VM that cannot
-see the user's machine at all, so there the arrangement cannot work.
+see the user's host at all, so there the arrangement cannot work.
 
 The host dials out to the server over WSS and holds that connection, so a host
 works from behind NAT with no public address, open port or DNS entry.
@@ -31,7 +31,7 @@ works from behind NAT with no public address, open port or DNS entry.
 ### Installation
 
 The host ships as an installable binary artifact per OS/arch, which installs on
-a machine that has only an OS on it.
+a host that has only an OS on it.
 
 ```
 patch-host-<version>-<os>-<arch>/
@@ -49,9 +49,9 @@ nothing downloaded (`07-voice-app.md`). The large weights stay out
 
 Two install routes:
 
-1. `curl … | sh` on any machine with a shell.
+1. `curl … | sh` on any host with a shell.
 2. From a surface: Settings → Hosts offers the install command for another
-   machine, and the desktop app installs the host onto the Mac it runs on
+   host, and the desktop app installs the host onto the Mac it runs on
    (§ Desktop app and the local host).
 
 First run is self-contained: the installer registers the service, provisions an
@@ -98,7 +98,7 @@ runner started from.
 ### Desktop app and the local host
 
 The desktop app is a surface. It installs and manages the host on its own
-machine — offering "run a host on this Mac", installing the service, showing
+host — offering "run a host on this Mac", installing the service, showing
 its status, restarting it — and the host it installs is an ordinary OS service
 with its own lifetime, like any other host's.
 
@@ -162,7 +162,7 @@ unattended free to carry on or fail visibly rather than stall until somebody
 happens to look.
 
 The SDK's classifier sometimes gives up on a `Bash` call and hands it to the
-host as an approval request anyway. Under `auto`, on a turn the host started itself (job, trigger, self-wake — `origin: machine`), the host treats that as the
+host as an approval request anyway. Under `auto`, on a turn the host started itself (job, trigger, self-wake — `origin: host`), the host treats that as the
 classifier's denial: it refuses the call at once, tells the agent so, and raises
 no approval card — the denial shown in the transcript carries the classifier's own stated reason when the SDK gives one — a card in an unattended job chat only stalls it. On a turn the user started, someone can answer, so the call is put to them as an ordinary approval card — this is how an advance approval is honoured rather than refused. Other
 escalations under `auto` (a sensitive-file write, a question) still ask.
@@ -505,7 +505,7 @@ below.
 
 ### In the Patch app
 
-When the Patch app is installed on the host's own machine, the agent's browser
+When the Patch app is installed on the host's own host, the agent's browser
 lives in the app instead of in a Chromium of the host's own. The app is a real
 browser; its tabs are the agent's tabs, and a large view of one in that app's
 window (`14-design-web.md` § Main chat panel — Browser) shows the tab itself
@@ -677,17 +677,17 @@ installation), and two parts of it are visible and editable from Settings:
 
 - `settings.json` in the `~/.claude` the agent backend reads — permissions,
   hooks, model, statusLine, output style, env and the rest. It is that
-  machine's own file, not a shared setting: it is edited on one chosen host
+  host's own file, not a shared setting: it is edited on one chosen host
   and nothing copies it to another, so hook paths and the like can differ
-  between machines without any override. Settings shows the text as the host
+  between hosts without any override. Settings shows the text as the host
   holds it and Save sends the whole text to that host (`host.claude_settings_set`),
   which replaces the file. Text that is not a JSON object is refused, naming
-  why, and the file is left as it was. A change made on the machine itself
+  why, and the file is left as it was. A change made on the host itself
   (Claude Code, an editor) is simply the file; there is no drift to resolve.
 - Memory entries: Claude Code's own persistent-memory files, one per topic,
   under each project's `~/.claude/projects/<project>/memory/` alongside its
   `MEMORY.md` index. These stay on the host that wrote them, since they are
-  stored under that machine's project paths. Each entry is listed with its
+  stored under that host's project paths. Each entry is listed with its
   name, description and type (parsed from its frontmatter) and can be deleted.
   Deleting one also drops its line from that project's `MEMORY.md` index where
   present.
@@ -752,7 +752,7 @@ A host takes `<state dir>/daemon.lock` (its pid) before it reads or writes anyth
 ## Host identity
 
 Each host has a stable `hostId` issued at registration and a host name,
-editable from any surface. It defaults to the name a person knows the machine
+editable from any surface. It defaults to the name a person knows the host
 by: on macOS the Computer Name ("Tom's MacBook Pro"), not the numbered network
 hostname; elsewhere the hostname without its domain. Surfaces
 label the host by that name ("hetzner", "Tom's MacBook"). The host also reports
@@ -764,7 +764,7 @@ last-used model.
 
 - Node (pinned runtime, shipped with the host artifact), TypeScript, single process.
 - Drives its agent backend in-process (§ Agent backends), which manages whatever subprocesses the agent needs internally and gives us the agent stream as an async iterator.
-- Local storage, all of it resolved from the host user's `HOME` so it is the same on every start — with two deliberate test-only overrides, `PATCH_HOME` and `PATCH_DAEMON_SOCKET`, which exist so several hosts can run on one box for the multi-machine test rig (`18-tech-stack.md` § Testing). An ordinary install sets neither, and nothing in the product writes them: `~/.patch/` (config, credentials, socket) + `~/.patch/chats/<chat-id>/` (per-chat state: `meta.json`, `wake.json`, and its own append-only history log, `events.jsonl` — `04-chats-and-folders.md` § History) + `~/.patch/blobs/` (content-addressed store for large tool results and inline images referenced from that log) + `~/.patch/threads/{manager,speakers}/` on the Manager host (each special thread's working folder — `06-threads-manager-speakers.md` § Where special threads run). The agent's native history under `~/.claude/projects/...` is a resumption cache the harness reads from, not the record.
+- Local storage, all of it resolved from the host user's `HOME` so it is the same on every start — with two deliberate test-only overrides, `PATCH_HOME` and `PATCH_DAEMON_SOCKET`, which exist so several hosts can run on one box for the multi-host test rig (`18-tech-stack.md` § Testing). An ordinary install sets neither, and nothing in the product writes them: `~/.patch/` (config, credentials, socket) + `~/.patch/chats/<chat-id>/` (per-chat state: `meta.json`, `wake.json`, and its own append-only history log, `events.jsonl` — `04-chats-and-folders.md` § History) + `~/.patch/blobs/` (content-addressed store for large tool results and inline images referenced from that log) + `~/.patch/threads/{manager,speakers}/` on the Manager host (each special thread's working folder — `06-threads-manager-speakers.md` § Where special threads run). The agent's native history under `~/.claude/projects/...` is a resumption cache the harness reads from, not the record.
 - Connects to server via WebSocket. Reconnects with exponential backoff; buffers outbound events during disconnect. See `12-error-and-offline.md`.
 
 ## CLI
@@ -817,7 +817,7 @@ Subagents are Patch-owned. The native SDK `Agent` (formerly `Task`) and `Workflo
 
 That one field does three things:
 
-- **Lifecycle.** The subagent's turn runs exactly like any other chat's. The moment it settles — idle with nothing queued (success), or `errored` with no retry armed (an SDK error, or a usage limit it cannot get past) — the host stamps `outcome` (`done`/`failed`) once, and delivers a `[from <label>]`-prefixed message into the PARENT as a new turn, queuing behind a running parent turn like any other machine message (`04-chats-and-folders.md` ## Message queueing). A failure delivers the same way, naming what went wrong — never silent. Stopping or archiving the parent stops every one of its subagents that has not already settled (`outcome` stamped `stopped`, nothing delivered — the caller already knows). Several subagents can run under the same parent at once; each is an independent chat.
+- **Lifecycle.** The subagent's turn runs exactly like any other chat's. The moment it settles — idle with nothing queued (success), or `errored` with no retry armed (an SDK error, or a usage limit it cannot get past) — the host stamps `outcome` (`done`/`failed`) once, and delivers a `[from <label>]`-prefixed message into the PARENT as a new turn, queuing behind a running parent turn like any other host message (`04-chats-and-folders.md` ## Message queueing). A failure delivers the same way, naming what went wrong — never silent. Stopping or archiving the parent stops every one of its subagents that has not already settled (`outcome` stamped `stopped`, nothing delivered — the caller already knows). Several subagents can run under the same parent at once; each is an independent chat.
 - **Task/Agent semantics.** By default the call blocks until the child settles and returns `{ id, label, status, reply }` as its tool result. With `background: true` it returns `{ id, label }` immediately; Patch owns the continuing child and delivers its final reply into the parent when it settles. `disallowedTools` is the child's capability limit, persisted on `meta.subagent.disallowedTools` and added to the always-disabled set for every turn it runs.
 - **The parent stays alive for it.** While any of its subagents has not settled, the parent counts as still working, like one with a running `patch_watch`: a hidden parent does not archive itself, an active goal is not evaluated (it re-checks once they have delivered), and the chat cannot be moved to another host.
 - **Durability.** Because a subagent is an ordinary chat, a host restart resumes its in-flight turn exactly as it would any other chat's, and the delivery above fires whenever that resumed turn settles — there is no separate subagent-restart path to get wrong.
@@ -837,9 +837,9 @@ The sentence names the task and how it ended — completed, failed, stopped or k
 
 The lifting is a live-path translation only. Replay reconstructs a transcript from what the agent layer persisted, where the notification is still a user turn carrying the whole raw block, so a replayed chat — and any chat on a host whose host predates the lifting — hands that block to the surface as a user message. Surfaces therefore recognise the raw block themselves and render it as a completion rather than as a turn (`14-design-web.md` § Background task completions, `15-design-mobile.md` ## Chat detail). Replay does not rewrite the persisted turn: the block is what was persisted, and a surface that reads it is enough.
 
-While a background task is still running, the agent layer streams its output to a file on the host, under a per-session `tasks` directory named by the background id the launch reported (`/tmp/claude-<uid>/<project>/<session>/tasks/<id>.output`). A backgrounded command appends to it as it runs; a backgrounded sub-agent's is its transcript, so one lookup covers both kinds. A terminal session (§ Terminal sessions) is started by the same host on the same machine, so following that file is how a surface shows what a running background task is doing (`14-design-web.md` § Main chat panel — Background task bar). The host neither creates nor parses these files.
+While a background task is still running, the agent layer streams its output to a file on the host, under a per-session `tasks` directory named by the background id the launch reported (`/tmp/claude-<uid>/<project>/<session>/tasks/<id>.output`). A backgrounded command appends to it as it runs; a backgrounded sub-agent's is its transcript, so one lookup covers both kinds. A terminal session (§ Terminal sessions) is started by the same host on the same host, so following that file is how a surface shows what a running background task is doing (`14-design-web.md` § Main chat panel — Background task bar). The host neither creates nor parses these files.
 
-The host answers a surface's request for what a set of running background tasks are costing the machine, named by those same background ids. Every process in a backgrounded command's tree holds that task's output file open as both its standard output and its standard error, so the processes holding that file open are the task's processes; the task's cost is theirs summed. CPU is each process's share of one core averaged over its own lifetime, as the host's process table reports it — an average rather than an instant, because a number resampled every few seconds jitters without saying anything a reader can use. Memory is resident set size, which is current by nature.
+The host answers a surface's request for what a set of running background tasks are costing the host, named by those same background ids. Every process in a backgrounded command's tree holds that task's output file open as both its standard output and its standard error, so the processes holding that file open are the task's processes; the task's cost is theirs summed. CPU is each process's share of one core averaged over its own lifetime, as the host's process table reports it — an average rather than an instant, because a number resampled every few seconds jitters without saying anything a reader can use. Memory is resident set size, which is current by nature.
 
 A task with no such process is reported as unmeasured, not as zero: a backgrounded sub-agent runs inside the agent process and only links its transcript into the tasks directory, and a command whose processes have already exited leaves the file behind. Zero is a measurement, and a task that is genuinely working must never be indistinguishable from one that could not be measured (`principles.md`).
 
@@ -935,7 +935,7 @@ By default a fresh host adds nothing beyond `patch` itself — Settings → MCP 
 Two more sources feed the same `mcpServers` option, both merged in by the host rather than left to the SDK (which does not merge them itself):
 
 - **The host's own list** (Settings → MCP, `harnessMcpServers` in `host.json`) — servers the USER told Patch to add, editable through Patch's own settings tools, never by hand-editing a file. Only the `enabled` entries reach a chat.
-- **Claude Code's own config** (`claudeConfigMcp.ts`, `discoverClaudeMcpServers`) — servers the user already told the `claude` CLI to add, outside Patch entirely: `~/.claude/settings.json` → `mcpServers`, `~/.claude.json`'s global and per-project `mcpServers`, and a project's `.mcp.json`, the last gated on that project already appearing in `~/.claude.json`'s `enabledMcpjsonServers` (i.e. a human has trust-approved it on this machine at some point — an unapproved `.mcp.json` entry is not one Claude's own process would run unattended either, so Patch doesn't run it unattended). Read-only, same as the "no mutation" rule above.
+- **Claude Code's own config** (`claudeConfigMcp.ts`, `discoverClaudeMcpServers`) — servers the user already told the `claude` CLI to add, outside Patch entirely: `~/.claude/settings.json` → `mcpServers`, `~/.claude.json`'s global and per-project `mcpServers`, and a project's `.mcp.json`, the last gated on that project already appearing in `~/.claude.json`'s `enabledMcpjsonServers` (i.e. a human has trust-approved it on this host at some point — an unapproved `.mcp.json` entry is not one Claude's own process would run unattended either, so Patch doesn't run it unattended). Read-only, same as the "no mutation" rule above.
 
 Merge order into a chat's `mcpServers`: `patch`, then Claude Code's own discovered servers, then the host's enabled list — a name in both wins from the host's list, since that is the one the user can see and edit inside Patch.
 
@@ -965,7 +965,7 @@ Merge order into a chat's `mcpServers`: `patch`, then Claude Code's own discover
 
 Below the chat endpoints, the socket carries every host-scoped control of
 `03-wire-protocol.md` § Host events that this host owns, one endpoint per
-frame, because the CLI's default host is the machine it runs on (`17-cli.md`
+frame, because the CLI's default host is the host it runs on (`17-cli.md`
 § Hosts and the CLI) and those commands must work there without a round trip
 through the server. A host-scoped control added to the wire gains its endpoint
 here in the same change. Shared settings are not host-scoped and have no
@@ -979,7 +979,7 @@ adopts the device itself and the command is local-only (`17-cli.md` § Commands)
 
 Requests carry a `Bearer` local key — a defence-in-depth measure over the OS-level same-host/same-user trust the `0600` socket already provides (cheap to add, closes the case where another local process can reach the socket). When the CLI runs on a different host, it goes via the WebSocket server, not this IPC.
 
-The host is the only party that mints that key: it generates one on first start and keeps it at `~/.patch/local.key` (mode `0600`, beside the socket), rotating it on each start. It passes the current value as `PATCH_DAEMON_LOCAL_KEY` in the environment of the children it starts, and every other caller on that machine — the CLI a person runs there — reads the file, which the fixed path under `~/.patch` makes findable without discovery.
+The host is the only party that mints that key: it generates one on first start and keeps it at `~/.patch/local.key` (mode `0600`, beside the socket), rotating it on each start. It passes the current value as `PATCH_DAEMON_LOCAL_KEY` in the environment of the children it starts, and every other caller on that host — the CLI a person runs there — reads the file, which the fixed path under `~/.patch` makes findable without discovery.
 
 ## Terminal sessions
 

@@ -122,7 +122,7 @@ describe('runManagerSweep', () => {
     expect(out.actions).toMatchObject([]);
   });
 
-  it('nudge: delivers the message into a LOCAL candidate chat as a machine turn', async () => {
+  it('nudge: delivers the message into a LOCAL candidate chat as a host turn', async () => {
     let chatId = '';
     const decide = vi.fn(async () =>
       result([{ chatId, action: 'nudge', folder, message: 'carry on please' }]),

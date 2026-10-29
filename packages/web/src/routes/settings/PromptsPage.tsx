@@ -188,7 +188,7 @@ export function MeetingModelRows(): JSX.Element {
           aria-label="Meeting transcription model"
           key={p.meetingTranscriptionModel}
           defaultValue={p.meetingTranscriptionModel}
-          placeholder="Machine default"
+          placeholder="Host default"
           disabled={!loaded}
           data-testid="meeting-transcription-model"
           onBlur={(e) => {

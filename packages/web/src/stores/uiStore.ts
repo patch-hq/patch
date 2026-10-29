@@ -676,7 +676,7 @@ export interface ErrorToast {
    */
   snooze?: { subline: string | null };
   /**
-   * The original machine-readable code + message behind `message`, shown in a
+   * The original host-readable code + message behind `message`, shown in a
    * collapsed disclosure (`lib/errorCopy.ts`). Null when the sentence is all
    * there is.
    */
@@ -821,9 +821,9 @@ interface UiState {
   toolsPanelWidth: number;
   /** Double-click on the Tools divider: back to the default width. */
   resetToolsPanelWidth(): void;
-  /** The dictate shortcut on this machine (lib/dictateChord.ts). */
+  /** The dictate shortcut on this host (lib/dictateChord.ts). */
   dictateChord: DictateChord;
-  /** Per-machine shortcut overrides (lib/keymap.ts); absent = the default. */
+  /** Per-host shortcut overrides (lib/keymap.ts); absent = the default. */
   shortcutOverrides: Overrides;
   /** Rebind one action; `null` puts it back to its default. */
   setShortcutChord: (id: ActionId, chord: Chord | null) => void;
@@ -946,7 +946,7 @@ interface UiState {
   setSidebarWidth(w: number): void;
   setThreadsPanelWidth(w: number): void;
   setToolsPanelWidth(w: number): void;
-  /** Rebind the dictate shortcut (persisted per machine). */
+  /** Rebind the dictate shortcut (persisted per host). */
   setDictateChord(chord: DictateChord): void;
   /** F1: set the browse-tree width (clamped + persisted). */
   setBrowseTreeWidth(w: number): void;
@@ -1019,7 +1019,7 @@ interface UiState {
   resolvePrompt(value: string | null): void;
   /**
    * `message` is what the user reads — one plain sentence. `detail` is the
-   * machine-readable original (code + message) kept behind the toast's
+   * host-readable original (code + message) kept behind the toast's
    * collapsed Details disclosure.
    */
   pushError(message: string, retry?: (() => void) | undefined, detail?: string): void;

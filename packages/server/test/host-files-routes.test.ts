@@ -1,8 +1,8 @@
 // Host files REST (spec/03 § Host files).
 //
 // The server's half is a gate and a relay: authenticate the surface, refuse a
-// machine that is not registered or not online, round-trip exactly one
-// `patch.host_files.request` to THAT machine, and turn its answer (or its
+// host that is not registered or not online, round-trip exactly one
+// `patch.host_files.request` to THAT host, and turn its answer (or its
 // silence) into an HTTP status. The host half is tested against real files in
 // packages/host/test/hostFiles.test.ts.
 
@@ -20,7 +20,7 @@ import { HOST_FILES_TIMEOUT_MS } from '../src/host-files-routes.js';
 type Req = Extract<WireEvent, { type: 'patch.host_files.request' }>;
 type Res = Extract<WireEvent, { type: 'patch.host_files.response' }>;
 
-/** A host link whose machine answers host-files requests with `respond`. */
+/** A host link whose host answers host-files requests with `respond`. */
 class FakeHostHost extends InProcessHostLink {
   readonly asked: Array<{ hostId?: string; event: Req }> = [];
   constructor(
@@ -75,7 +75,7 @@ describe('host files routes', () => {
     return { built, auth, registry };
   }
 
-  it('lists the home directory when no path is given, addressed to the named machine', async () => {
+  it('lists the home directory when no path is given, addressed to the named host', async () => {
     const link = new FakeHostHost(() => ({
       ok: true,
       path: '/home/tom',
@@ -270,7 +270,7 @@ describe('host files routes', () => {
     }
   });
 
-  it('refuses an unregistered machine by name, never falling through to the attached one', async () => {
+  it('refuses an unregistered host by name, never falling through to the attached one', async () => {
     const link = new FakeHostHost(() => ({ ok: true, entries: [] }));
     const { built, auth } = await boot(link);
     try {
@@ -287,7 +287,7 @@ describe('host files routes', () => {
     }
   });
 
-  it('refuses an offline machine up front rather than waiting out a timeout', async () => {
+  it('refuses an offline host up front rather than waiting out a timeout', async () => {
     const link = new FakeHostHost(() => ({ ok: true, entries: [] }));
     link.setStatus('offline');
     const { built, auth } = await boot(link);
@@ -305,7 +305,7 @@ describe('host files routes', () => {
     }
   });
 
-  it('rejects a malformed body or a missing path as 400 without asking the machine', async () => {
+  it('rejects a malformed body or a missing path as 400 without asking the host', async () => {
     const link = new FakeHostHost(() => ({ ok: true }));
     const { built, auth } = await boot(link);
     try {
@@ -336,7 +336,7 @@ describe('host files routes', () => {
     }
   });
 
-  it('a machine that never answers is a 504', async () => {
+  it('a host that never answers is a 504', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const link = new FakeHostHost(() => null);
     const { built, auth } = await boot(link);
@@ -356,7 +356,7 @@ describe('host files routes', () => {
     }
   });
 
-  it('ignores an answer from a machine that was not asked', async () => {
+  it('ignores an answer from a host that was not asked', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const link = new FakeHostHost(() => ({ ok: true, entries: [] }), 'd2');
     const { built, auth } = await boot(link);

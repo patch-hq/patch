@@ -159,7 +159,7 @@ export class PatchWsClient {
     this.setState(this.state === 'offline' ? 'connecting' : 'reconnecting');
     const client = new WireTestClient({
       url: this.opts.url,
-      // This CLI build is installed on a machine and updated on its own
+      // This CLI build is installed on a host and updated on its own
       // schedule, so it routinely lags the server (spec/03 § Forward
       // compatibility). Strict decoding turned one added wire field into an
       // uncaught error that ended the session.

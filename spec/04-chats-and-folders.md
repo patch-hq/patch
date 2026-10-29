@@ -2,7 +2,7 @@
 
 ## Chat model
 
-A chat is one agent session pinned to a host and a folder on that host. Analogous to running an agent CLI inside that folder on that machine, except the session is persistent, routable, and observable from other surfaces.
+A chat is one agent session pinned to a host and a folder on that host. Analogous to running an agent CLI inside that folder on that host, except the session is persistent, routable, and observable from other surfaces.
 
 - Identity: `chatId` (ULID, prefix-matchable like Happy's session IDs).
 - Host: `hostId`, chosen at spawn alongside the folder, and changed only by moving the chat (§ Moving a chat to another host). A chat on an offline host stays visible and readable, and a message sent to it queues and delivers when the host reconnects, and the server keeps it on disk meanwhile so a server restart does not lose it (`12-error-and-offline.md` § Host-offline UX). Spawning a new chat on an offline host is refused up front instead, since its folder cannot be validated (§ Spawn).
@@ -10,7 +10,7 @@ A chat is one agent session pinned to a host and a folder on that host. Analogou
   **Ambiguous titles.** When a title is shared by chats on more than one host, a list row names its host (the host's name, as on the chat header) beneath the title, on web and phone; a title unique to one host, or repeated only within one host, carries no host.
 - Current status: what a chat IS to the user, carried on `chat.state` as `statusKind` + a one-line `statusSummary` and rendered under the sidebar title. Three kinds put a chat in the list and one keeps it out — `question` (blocked on the user: an answer, a decision, or a thing only a person can do in the world), `report` (not blocked, but the agent has elected to say this is worth seeing) and `complete` (finished, nothing outstanding — a hidden job that ends `complete` does not come into the list; it stays in Hidden, § Hidden). A permission prompt is the fourth way into the list but is not a kind: it is a live request derived from `pendingPermissions`.
 
-  **Generated vs declared.** Most statuses are GENERATED: a cheap model summarises what the agent did in the settled turn — read from the agent's final reply only, generated once that reply is complete, never from the user's request — in at most 80 characters so the row shows it whole. A summary the model returns over that length is dropped (logged), never cut with an ellipsis. The pair is in-memory only, cleared the instant another user message is accepted (including one queuing behind a running turn) so no surface shows a status predating the message on screen. A `question` or `report` set by the agent's own tool call — `patch_ask_human`, `patch_report` — is DECLARED, and is a different kind of fact. It is persisted to `meta.json`, so it survives the host restart every deploy performs; it outranks the generator, which may not overwrite or demote it; and it is cleared by a USER turn and nothing else, because a machine turn is the chat carrying on, not evidence anybody read it. Declaring also takes the chat out of Hidden (and out of Archived), one-way.
+  **Generated vs declared.** Most statuses are GENERATED: a cheap model summarises what the agent did in the settled turn — read from the agent's final reply only, generated once that reply is complete, never from the user's request — in at most 80 characters so the row shows it whole. A summary the model returns over that length is dropped (logged), never cut with an ellipsis. The pair is in-memory only, cleared the instant another user message is accepted (including one queuing behind a running turn) so no surface shows a status predating the message on screen. A `question` or `report` set by the agent's own tool call — `patch_ask_human`, `patch_report` — is DECLARED, and is a different kind of fact. It is persisted to `meta.json`, so it survives the host restart every deploy performs; it outranks the generator, which may not overwrite or demote it; and it is cleared by a USER turn and nothing else, because a host turn is the chat carrying on, not evidence anybody read it. Declaring also takes the chat out of Hidden (and out of Archived), one-way.
 
   **A notification brings its chat into the list.** `patch_notify` takes its source chat out of Archived and out of Hidden, one-way, exactly as a permission prompt does: a chat that reached for the user must be findable when they come looking. It does not set a status — the row carries no `statusKind` — so it is a way into the list, not a claim that the chat is blocked or worth reading. A chat that wants to stay hidden does not notify.
 
@@ -21,7 +21,7 @@ A chat is one agent session pinned to a host and a folder on that host. Analogou
   Archive is sticky against being merely opened or resumed: an archived chat stays archived when it is opened, resumes after a restart, or sits idle. But a MESSAGE landing in it starts it again: the user's own composer or a job tick into a `continue` chat un-archives the chat before the turn runs. Another agent's `patch_send_to` is the exception: it is delivered and the turn runs, but the chat stays archived, so a sibling agent cannot bring back a chat the user put away. It comes back to where it was before it was archived: a chat that was hidden (§ Hidden) returns to Hidden, unless the message is the user's own or another agent's `patch_send_to`, which bring a hidden chat into the active list. Un-archiving is one-way: nothing re-archives the chat afterwards except archiving it by hand again (the chat header's or sidebar row's archive icon, or the chat-panel banner's Unarchive control for un-archiving without sending anything). Archiving the chat you are currently reading moves you on with it: the chat leaves the active list and the surface opens the next chat in the sidebar's drawn order — the row that was below it, the nearest row above it if it was the last one, or the top of the list if it had no row of its own (a snoozed chat, say), and the new-chat screen when nothing active is left. This holds however that chat was archived (its header icon, its sidebar row, the keyboard shortcut, or a bulk/project archive that included it), and when the archive was made on ANOTHER surface: a surface showing the chat when its `chat.state` arrives as archived moves on the same way (the web opens the next chat; the phone goes back to the chat list), once, and a surface that archived the chat itself does not move twice; unarchiving never navigates. Deleting a chat is a recoverable soft-delete — it moves to a Deleted section and can be restored (nothing is hard-deleted from the surface).
 
 - Snooze: a chat can be snoozed until a moment in time (Gmail's snooze). Snooze is a separate axis from `status` — a snoozed chat is still `active`; it carries a `snoozedUntil` ms-epoch timestamp. While `snoozedUntil > now` the chat is hidden from the active list and appears in the sidebar's Snoozed section with its wake time. When `snoozedUntil` passes, `snoozedUntil` clears itself and the chat returns to the active list unchanged (same unread/read state, same `lastUpdated`, so a snooze leaves the chat's activity as it was). See § Snooze below.
-- Hidden: a chat can be hidden — running, but out of the active list. Like snooze it is a separate axis from `status`: a hidden chat is `active`, carries `hidden: true` on `chat.state` (persisted in `meta.json`), and is drawn only in the sidebar's Hidden section. It is how a job whose runs are background noise keeps them out of the way (the action's `startHidden`, `08-triggers-and-jobs.md` § Action), and it is the opposite of archived: a hidden chat is expected to be doing something, an archived one never is. A chat leaves Hidden, one-way, when the user needs to see it or has chosen to: another agent's `patch_send_to` writing into it, the agent declaring a `question` or `report` (§ Current status), or it blocking on a permission decision or an `AskUserQuestion` (`02-host.md` § Permission mode), so a request nobody can see cannot sit unanswered. If that prompt then EXPIRES unanswered (`02-host.md` § Permission mode) nobody saw it, so the chat goes back to Hidden and the agent is not told of the round trip; an answer or a manual hide/show makes the exit stick. Everything else — a USER message sent into it, a self-wake, a watch completing, a job tick, the todo list advancing, a turn re-sent after a usage limit — leaves it hidden. The Hidden section's row (and the hidden chat's banner) carries Unhide, which un-hides without sending anything (`chat.hide_request { hidden: false }`). Archiving a hidden chat stops it like any other but leaves `hidden` set: it has no effect while the chat is archived, and it is where a machine message starting the chat again returns it to (§ Lifecycle). A hidden chat that FINISHES stays in Hidden: nothing archives a chat automatically, so a job's chat is never in Archived unless a person put it there, and a `patch_ask_human` or `patch_report` from it reaches the user by moving it from Hidden into the list (the one-way exit above) rather than out of Archived. Its next message starts it again, hidden. Hide until complete: for a chat with running work, the user can instead hide it until that work completes (`chat.hide_request { hidden: true, untilComplete: true }`; the chat header's ⋯ menu offers it only while the chat is running, and the host refuses it for a chat with nothing running). The chat leaves Hidden on its own, one-way, the moment it is no longer running — it finished, or stopped on an error — and every other exit above still applies; a plain Show or hide clears the wait. The marker persists in `meta.json`, so a host restart (which ends the run) brings the chat back rather than leaving it hidden. Special threads cannot be hidden. The user hides a running chat from the chat header's ⋯ menu (web) or the row's long-press sheet (phone) — `chat.hide_request { hidden: true }` — and the AGENT is told: the next turn is prefixed with a one-shot `<system-reminder>` saying the chat is now in hidden mode (or, when it leaves Hidden, no longer in it), the way a surface's edit to the task list is. Hiding then showing before that turn says nothing.
+- Hidden: a chat can be hidden — running, but out of the active list. Like snooze it is a separate axis from `status`: a hidden chat is `active`, carries `hidden: true` on `chat.state` (persisted in `meta.json`), and is drawn only in the sidebar's Hidden section. It is how a job whose runs are background noise keeps them out of the way (the action's `startHidden`, `08-triggers-and-jobs.md` § Action), and it is the opposite of archived: a hidden chat is expected to be doing something, an archived one never is. A chat leaves Hidden, one-way, when the user needs to see it or has chosen to: another agent's `patch_send_to` writing into it, the agent declaring a `question` or `report` (§ Current status), or it blocking on a permission decision or an `AskUserQuestion` (`02-host.md` § Permission mode), so a request nobody can see cannot sit unanswered. If that prompt then EXPIRES unanswered (`02-host.md` § Permission mode) nobody saw it, so the chat goes back to Hidden and the agent is not told of the round trip; an answer or a manual hide/show makes the exit stick. Everything else — a USER message sent into it, a self-wake, a watch completing, a job tick, the todo list advancing, a turn re-sent after a usage limit — leaves it hidden. The Hidden section's row (and the hidden chat's banner) carries Unhide, which un-hides without sending anything (`chat.hide_request { hidden: false }`). Archiving a hidden chat stops it like any other but leaves `hidden` set: it has no effect while the chat is archived, and it is where a host message starting the chat again returns it to (§ Lifecycle). A hidden chat that FINISHES stays in Hidden: nothing archives a chat automatically, so a job's chat is never in Archived unless a person put it there, and a `patch_ask_human` or `patch_report` from it reaches the user by moving it from Hidden into the list (the one-way exit above) rather than out of Archived. Its next message starts it again, hidden. Hide until complete: for a chat with running work, the user can instead hide it until that work completes (`chat.hide_request { hidden: true, untilComplete: true }`; the chat header's ⋯ menu offers it only while the chat is running, and the host refuses it for a chat with nothing running). The chat leaves Hidden on its own, one-way, the moment it is no longer running — it finished, or stopped on an error — and every other exit above still applies; a plain Show or hide clears the wait. The marker persists in `meta.json`, so a host restart (which ends the run) brings the chat back rather than leaving it hidden. Special threads cannot be hidden. The user hides a running chat from the chat header's ⋯ menu (web) or the row's long-press sheet (phone) — `chat.hide_request { hidden: true }` — and the AGENT is told: the next turn is prefixed with a one-shot `<system-reminder>` saying the chat is now in hidden mode (or, when it leaves Hidden, no longer in it), the way a surface's edit to the task list is. Hiding then showing before that turn says nothing.
 
   Chats archived before hidden existed (2026-09-28) that still own live work — a pending self-wake, a running watch or an owed turn — are moved to Hidden when the host loads them, since under the old rules archived meant out of the way, not stopped.
 
@@ -42,7 +42,7 @@ Caller provides:
   catalogue). The chat starts on the model named here, or on the host's last-used
   model when it is omitted, and can be changed later (§ Model). It selects the
   backend the chat runs on. A host records the model of each chat spawned on it,
-  so the last-used value follows the machine rather than the surface that asked,
+  so the last-used value follows the host rather than the surface that asked,
   and a host carries one from its first successful catalogue read (`02-host.md`
   § Agent backends) — so a spawn on a newly added host needs no model. Until a
   host has read a catalogue it has none, and a spawn there that names no model is
@@ -221,17 +221,17 @@ An invalid (unresumable) session id is cleared the same way, rather than hanging
 
 ## Moving a chat to another host
 
-A chat can be moved to another machine, into a folder on that machine — usually
+A chat can be moved to another host, into a folder on that host — usually
 the same project checked out at a different path. Web (chat header ⋯ → Move to…),
 mobile (chat ⋯ → Move to…, a pushed page) and the CLI (`17-cli.md`) all call
 `POST /api/chats/:id/move {hostId, folder}`, which answers once the move has
 finished or failed.
 
-- The picker lists the other machines (offline ones disabled as targets), then the chosen
-  machine's own folders; the one with the same name as the chat's current folder
-  is pre-selected, else the first folder that machine offers, so choosing a
-  machine never leaves the folder for the user to pick; the field is empty only
-  when the machine offers no folder. Any absolute path can be typed.
+- The picker lists the other hosts (offline ones disabled as targets), then the chosen
+  host's own folders; the one with the same name as the chat's current folder
+  is pre-selected, else the first folder that host offers, so choosing a
+  host never leaves the folder for the user to pick; the field is empty only
+  when the host offers no folder. Any absolute path can be typed.
 - The server drives three steps, each one `patch.chat_move.request` to one host
   (`03-wire-protocol.md`): `export` on the chat's host, `import` on the target,
   `retire` on the old host, then points its chat mirror — and so all routing —
@@ -249,7 +249,7 @@ finished or failed.
   are not re-run.
 - Refused, naming why and leaving the chat where it was: a chat mid-turn or
   awaiting a permission, one with a self-wake armed or a watch running (both
-  belong to the old machine), a special thread, a chat on a Codex session, a
+  belong to the old host), a special thread, a chat on a Codex session, a
   target folder that isn't a directory there, a target that already has the
   chat, and a chat over 48 MB on disk.
 - From `export` until `retire` the old host refuses new turns for the chat. An
@@ -264,7 +264,7 @@ A chat can also be moved from the server's copy. The picker never offers it as
 a choice: the user picks only the folder. The client asks for it by itself when
 the chat's host refuses an ordinary move (`busy`, `unsupported`), and it is the
 only way when that host is offline, which is how work
-carries on while a machine is off. Only the target must be online. The server
+carries on while a host is off. Only the target must be online. The server
 builds the chat from its own copy instead of asking the old host to export it:
 the mirrored lifecycle/UI state and branch graph, pending self-wake, transcript,
 referenced blobs, and every attachment the server holds. Transcript and state
@@ -273,9 +273,9 @@ arming its wake, so nobody can use a half-restored chat. It goes through for a
 chat an ordinary move refuses, such as one mid-turn, with a timer armed or on a
 Codex session. The agent session is rebuilt from the transcript, so the first
 turn on the target starts a fresh session given the history, not a resumed one.
-Everything else stays on the old machine's disk: uncommitted changes in its
+Everything else stays on the old host's disk: uncommitted changes in its
 folder, the harness's own session files, attachments the server never received,
-and watches of processes on that machine. A self-wake or loop is server-held
+and watches of processes on that host. A self-wake or loop is server-held
 state and moves: it is armed on the target and cancelled when the old copy
 retires. The surface says what stays behind before the user
 confirms. The folder is always chosen by the user. A folder named like the
@@ -318,7 +318,7 @@ chat whose session has been lost. For the same reason `truncated` is true
 whenever the chat has emitted more than the slice contains, a cold ring
 included.
 
-Activity is driven entirely by events relayed from the host. If the host↔server link drops while a chat is in flight (`running` / `awaiting-permission`) — host restart, network blip, deploy churn — the turn-completion event does not arrive, and the chat would otherwise spin forever. On `host.offline` the server waits a short grace (5s) before resolving: a link that drops and returns inside it — a network blip — never touches the chats, so rows do not flip `running` → `errored` → `running`. A new host process taking over the same machine's link is a restart, not a blip, and resolves at once. Past the grace, the server resolves that host's in-flight chats — and only that host's — to `errored` for subscribed surfaces: it emits a `chat.error` (code `daemon_unavailable`, message "Connection to the host was lost. Message will resend.") plus a `chat.state` flipping `activity` to `errored`, mirroring the host's own error path, so the failure is visible as an error rather than a stuck spinner. Chats on other hosts are untouched. On reconnect the host is source of truth again: a turn the host was still running carries on and reports its own completion, and a turn a host restart killed is re-sent by the new host (`02-host.md` § Host restart behaviour). Either way the chat recovers without the user resending anything, so the message says so rather than asking for a resend. And because it does recover, the notice goes away with it: `daemon_unavailable` is the one chat error that describes a passing condition of the link rather than the outcome of a turn, so a surface DROPS its error entry — and the `errored` activity with it — the moment the host speaks for that chat again with any activity other than `errored`. That is the only thing that clears it. Not a timer, and not `host.online` on its own: a host coming back says nothing about whether this chat's turn did. If the host never returns, no such event arrives and the error stands. Every other code — `sdk_error`, `claude_oauth_missing`, `claude_session_missing` and the rest — records a turn that really failed and is never cleared by anything but the user acting on it. See `12-error-and-offline.md`.
+Activity is driven entirely by events relayed from the host. If the host↔server link drops while a chat is in flight (`running` / `awaiting-permission`) — host restart, network blip, deploy churn — the turn-completion event does not arrive, and the chat would otherwise spin forever. On `host.offline` the server waits a short grace (5s) before resolving: a link that drops and returns inside it — a network blip — never touches the chats, so rows do not flip `running` → `errored` → `running`. A new host process taking over the same host's link is a restart, not a blip, and resolves at once. Past the grace, the server resolves that host's in-flight chats — and only that host's — to `errored` for subscribed surfaces: it emits a `chat.error` (code `daemon_unavailable`, message "Connection to the host was lost. Message will resend.") plus a `chat.state` flipping `activity` to `errored`, mirroring the host's own error path, so the failure is visible as an error rather than a stuck spinner. Chats on other hosts are untouched. On reconnect the host is source of truth again: a turn the host was still running carries on and reports its own completion, and a turn a host restart killed is re-sent by the new host (`02-host.md` § Host restart behaviour). Either way the chat recovers without the user resending anything, so the message says so rather than asking for a resend. And because it does recover, the notice goes away with it: `daemon_unavailable` is the one chat error that describes a passing condition of the link rather than the outcome of a turn, so a surface DROPS its error entry — and the `errored` activity with it — the moment the host speaks for that chat again with any activity other than `errored`. That is the only thing that clears it. Not a timer, and not `host.online` on its own: a host coming back says nothing about whether this chat's turn did. If the host never returns, no such event arrives and the error stands. Every other code — `sdk_error`, `claude_oauth_missing`, `claude_session_missing` and the rest — records a turn that really failed and is never cleared by anything but the user acting on it. See `12-error-and-offline.md`.
 
 ## Stopping
 
@@ -508,7 +508,7 @@ One search covers every chat on every host except deleted ones — active, pinne
 
 Each chat is one hit. Hits are ordered by date: the most recently active chat first, whether its name or only its messages matched. A hit carries where the chat lives (its host, and the section it is listed under), how many of its messages matched, and a snippet: a window of the most recent matching message with every term occurrence marked, plus that message's `seq`. Opening a hit opens the chat scrolled to that message. A message that has never been numbered (written by the backend but not yet replayed) has no `seq`; its hit opens the chat at its latest message.
 
-Every host is part of the answer. A host that is offline, does not answer in time, or fails is named in the response with what happened to it, so results missing a machine's chats always say so. Results are paged, deepest page 200 hits. The fan-out and wire shapes are in `03-wire-protocol.md` § Chat search; the host's index in `02-host.md` § Chat search.
+Every host is part of the answer. A host that is offline, does not answer in time, or fails is named in the response with what happened to it, so results missing a host's chats always say so. Results are paged, deepest page 200 hits. The fan-out and wire shapes are in `03-wire-protocol.md` § Chat search; the host's index in `02-host.md` § Chat search.
 
 ## Folders (host-owned registry)
 
@@ -516,11 +516,11 @@ Projects are just folders with ≥1 chat, so to start the first chat in a
 project the user picks a host and a folder on it, in the common case without
 typing or guessing an absolute path.
 
-Where a chat runs is chosen first, then the folder on that machine. With more
+Where a chat runs is chosen first, then the folder on that host. With more
 than one host registered the new-chat screen offers the hosts by name, and the
 folder picker lists only the chosen host's registered roots and recent folders,
 so picking `~/projects/patch` on hetzner and `~/code/patch` on Tom's MacBook is
-the same gesture made after choosing the machine.
+the same gesture made after choosing the host.
 
 - Each host publishes its own folder registry and recent list, and a host's
   folders are only ever offered while that host is chosen, so two hosts sharing
@@ -616,7 +616,7 @@ directory (defaulting to the registered roots when none is given) returns that
 directory's child directories only (name + absolute path; files are not
 listed — a chat targets a folder, not a file). Browsing is NOT confined to the
 designated roots: the host runs with its user's whole authority and a chat can
-reach any path on that machine the moment it starts, so confining the picker
+reach any path on that host the moment it starts, so confining the picker
 protected nothing and only stopped a person opening a chat in a folder they had
 not registered first. The roots are what the picker OFFERS at the top level —
 the shortcuts to where you work — not a boundary on where you may go. Going up
@@ -631,10 +631,10 @@ browser (`15-design-mobile.md` § New chat flow); the flat published
 The browsed filesystem is ALWAYS the selected host's — on every surface,
 including the desktop shell. A surface offers only that host's filesystem, not
 its own, as the folder source: no OS-native directory dialog, no local file
-picker, no drag-a-folder-in. The selected host is frequently a different machine
+picker, no drag-a-folder-in. The selected host is frequently a different host
 from the surface (the Hetzner box vs. the user's laptop), so a locally-picked
 path is a path that host does not have and every chat spawned into it dies with
-`folder_not_found`. This holds even where the desktop app runs on a machine that
+`folder_not_found`. This holds even where the desktop app runs on a host that
 is itself a host: it is a surface like any other and uses the same host-backed
 browser the browser SPA uses, against whichever host the user picked. The only
 ways to name a folder are (a) the published/recent list, (b) drilling the chosen

@@ -115,7 +115,7 @@ function findSpawnRejection(chatId: string): SpawnRejection | null {
  * The code and the message are kept APART rather than collapsed into one
  * string: the host's message is written for whoever wrote the host
  * ("…so it has no last-used model; name a model on the spawn or connect the
- * backend credential on that machine"), so the surface humanises off the code
+ * backend credential on that host"), so the surface humanises off the code
  * and keeps that wording as the detail (`lib/errorCopy.ts`).
  *
  * This used to run BEFORE the optimistic render and navigation, blocking both
@@ -323,8 +323,8 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     }
     return byFolder;
   }, [projectChats, folderRoster]);
-  // The same recents, per machine. A path means one directory on one host, so
-  // the picker only ever offers the chosen machine's own folders.
+  // The same recents, per host. A path means one directory on one host, so
+  // the picker only ever offers the chosen host's own folders.
   const recentFoldersByHost = useMemo(() => {
     const byHost = new Map<string, Set<string>>();
     const add = (hostId: string, f: string): void => {
@@ -340,7 +340,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     return byHost;
   }, [projectChats, folderRoster]);
 
-  // The machines a chat can start on, the default one first (spec/14 §8).
+  // The hosts a chat can start on, the default one first (spec/14 §8).
   const presenceHosts = usePresenceStore((s) => s.hosts);
   const accountDefaultHostId = defaultHostId(presenceHosts);
   const machines = useMemo(
@@ -354,12 +354,12 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   );
 
   // The host whose filesystem the picker browses and whose folder the chat is
-  // spawned into. It is never this surface's own machine (spec/04 § Browsing).
+  // spawned into. It is never this surface's own host (spec/04 § Browsing).
   //
-  // Choosing a machine is its own decision, taken before the folder: a folder
-  // picked afterwards is one of THAT machine's, and the pair is what the spawn
+  // Choosing a host is its own decision, taken before the folder: a folder
+  // picked afterwards is one of THAT host's, and the pair is what the spawn
   // sends as `hostId` + `folder` (spec/14 §8). A restored draft comes back on
-  // the machine it was typed against; otherwise the most recent chat's machine.
+  // the host it was typed against; otherwise the most recent chat's host.
   const [chosenHostId, setChosenHostId] = useState<string | null>(
     draftHostId ??
       (folderParam ? recentFolderHosts.get(folderParam) : undefined) ??
@@ -373,11 +373,11 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
 
   // Configured project folders (Settings → Project folders) — offered first in
   // the picker (spec/04 § Folders). Cached with the same settings query key.
-  // They predate per-machine folders and name the default machine's paths.
+  // They predate per-host folders and name the default host's paths.
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: () => api.settings() });
   const configuredFolders = settings?.projectFolders ?? [];
-  // Picker option list for the chosen machine: configured first, then that
-  // machine's own registered roots, then its recents (de-duped).
+  // Picker option list for the chosen host: configured first, then that
+  // host's own registered roots, then its recents (de-duped).
   const optionsForHost = useCallback(
     (hostId: string): string[] => {
       const recent = Array.from(recentFoldersByHost.get(hostId) ?? []).sort();
@@ -407,7 +407,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
 
   // The projects offered as chips in the Project row (spec/14 §8): the head of
   // the picker's own list, in the picker's own order — configured project
-  // roots first, then the machine's recent folders. The order is FIXED. It
+  // roots first, then the host's recent folders. The order is FIXED. It
   // used to follow chat recency, which reshuffled the row whenever an agent or
   // a job touched a chat in the background (Tom: "things jump around depending
   // on what's happening in the background"). They are drawn from the SAME
@@ -443,7 +443,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   //
   // The surface holds NO default model id and NO browser-local last-used: that
   // pair is what made a fresh browser send `claude-opus-5` on every spawn and
-  // overwrite the machine's real last-used model.
+  // overwrite the host's real last-used model.
   //
   // The draft's own choice, else NONE: an omitted model resolves on the host to
   // the account's default (Settings → Agent → Model for new chats). The last
@@ -487,7 +487,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // while the picker is open. NO FALLBACK — a browse error (e.g. a dir that
   // escaped the project roots) is surfaced, never swallowed into an empty tree.
   const [browseDir, setBrowseDir] = useState<string | null>(null);
-  // Can this machine actually run a chat? Everything on this screen depends on
+  // Can this host actually run a chat? Everything on this screen depends on
   // it, so it is answered ONCE here rather than discovered control by control.
   // `null` = not reported yet; only a definite `connected: false` blocks, so a
   // slow first report does not flash a wall of red on every load.
@@ -506,8 +506,8 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
       backendIdForModel(model ?? hostDefaultModel(s.hosts, pickerHostId)),
     ),
   );
-  // The catalogue is per MACHINE, so it loads once the machine is known and
-  // RELOADS when it changes — showing one machine's models while a chat is
+  // The catalogue is per MACHINE, so it loads once the host is known and
+  // RELOADS when it changes — showing one host's models while a chat is
   // about to be pinned to another is how the wrong model gets sent.
   useEffect(() => {
     void loadModels(pickerHostId);
@@ -575,7 +575,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     queryKey: ['folders-browse', pickerHostId, browseDir],
     queryFn: () => api.browseFolders(pickerHostId as string, browseDir ?? undefined),
     // Browsing is addressed to ONE host; with none resolved there is nothing to
-    // ask, so the query stays idle rather than browsing a guessed machine.
+    // ask, so the query stays idle rather than browsing a guessed host.
     enabled: pickerOpen && pickerHostId !== null,
   });
   // A failed chat creation is reported by `pushError` alone — one surface per
@@ -652,14 +652,14 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     setSubmitting(true);
     try {
       if (pickerHostId === null) {
-        pushError('Choose which machine to start the chat on.');
+        pushError('Choose which host to start the chat on.');
         setSubmitting(false);
         return null;
       }
       // `model` rides ONLY when the user named one. Omitted, the host resolves
       // it from its own last-used value and records this chat's model as the
       // new one (spec/04 § Spawn). Sending the surface's idea of a default
-      // instead is what overwrote a machine's last-used model on every spawn.
+      // instead is what overwrote a host's last-used model on every spawn.
       const res = (await api.createChat({
         hostId: pickerHostId,
         folder: trimmed,
@@ -862,15 +862,15 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     setPickerOpen(false);
   }
 
-  // Choosing the machine. Its folders are not the last machine's, so the folder
-  // becomes the first one in this machine's list, and the browser goes back to
-  // this machine's roots.
+  // Choosing the host. Its folders are not the last host's, so the folder
+  // becomes the first one in this host's list, and the browser goes back to
+  // this host's roots.
   function chooseMachine(hostId: string): void {
     if (hostId === pickerHostId) return;
     userEditedFolder.current = true;
     setChosenHostId(hostId);
     setBrowseDir(null);
-    // Land on the first folder in this machine's list, never on an empty pick.
+    // Land on the first folder in this host's list, never on an empty pick.
     setFolder(optionsForHost(hostId)[0] ?? '');
   }
 
@@ -950,13 +950,13 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     <div className="new-chat-setup" data-testid="new-chat-setup">
       {/* One labelled row per decision, in the order they are taken: machine,
           project, model, account (spec/14 §8). A row with nothing to decide —
-          one machine, one account — is absent rather than drawn with one chip. */}
+          one host, one account — is absent rather than drawn with one chip. */}
       <div className="new-chat-setup-grid" data-testid="new-chat-setup-grid">
-        {/* Where the chat runs. An offline machine is listed so its absence is
+        {/* Where the chat runs. An offline host is listed so its absence is
             visible, and cannot be chosen. */}
         {machines.length > 1 ? (
           <>
-            <span className="new-chat-setup-label">Machine</span>
+            <span className="new-chat-setup-label">Host</span>
             <div className="new-chat-setup-row new-chat-machines" data-testid="new-chat-machines">
               <HostPicker
                 hosts={machines.map((m) => ({
@@ -1010,7 +1010,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
               data-testid="new-chat-folder-pill"
               aria-haspopup="listbox"
               aria-expanded={pickerOpen}
-              // Nothing here can be acted on until the machine can run a turn.
+              // Nothing here can be acted on until the host can run a turn.
               disabled={signedOut}
               onClick={() => setPickerOpen((v) => !v)}
             >
@@ -1157,14 +1157,14 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                   ) : (browse?.entries?.length ?? 0) === 0 ? (
                     // Two different emptinesses, and conflating them stalls people:
                     // AT THE ROOTS VIEW (no `dir`), nothing to browse means this
-                    // machine has no project folders registered at all — "No
+                    // host has no project folders registered at all — "No
                     // subfolders here" blames the wrong thing and offers no way
                     // out. Drilled INTO a folder, it really is an empty folder.
                     browse?.dir ? (
                       <p className="folder-popup-empty muted">No subfolders here.</p>
                     ) : (
                       <p className="folder-popup-empty muted" data-testid="folder-browser-no-roots">
-                        Nothing here. Type a path below to open any folder on this machine.
+                        Nothing here. Type a path below to open any folder on this host.
                       </p>
                     )
                   ) : (

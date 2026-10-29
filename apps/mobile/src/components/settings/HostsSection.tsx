@@ -2,7 +2,7 @@
 // Host identity, § Provider keys).
 //
 // Hosts — Add a host (the server's install command and a single-use pairing
-// code), then one row per machine: a presence dot, its name, platform and when
+// code), then one row per host: a presence dot, its name, platform and when
 // it was last seen, Update when it is behind. Tapping a row opens that host
 // (app/hosts/[hostId]/index.tsx → HostDetail): its name, the
 // state of its agent backends with Sign in, its optional components, its Files
@@ -10,9 +10,9 @@
 //
 // Keys — the picked host's provider keys, then the account's Secrets.
 //
-// A machine that has not reported yet is shown as awaiting its first report,
+// A host that has not reported yet is shown as awaiting its first report,
 // never given a fabricated name or platform. Every edit is addressed to that
-// machine and refused up front, naming it, when it cannot hear it.
+// host and refused up front, naming it, when it cannot hear it.
 
 import React from 'react';
 import { Alert, Text, View } from 'react-native';
@@ -57,11 +57,11 @@ export function HostsPage(): React.ReactElement {
   const [adding, setAdding] = React.useState(false);
   return (
     <SettingsPage
-      title="Machines"
+      title="Hosts"
       testID="settings-page-hosts"
       right={
         adding ? null : (
-          <SettingsButton testID="add-host" label="Add a machine" onPress={() => setAdding(true)} />
+          <SettingsButton testID="add-host" label="Add a host" onPress={() => setAdding(true)} />
         )
       }
     >
@@ -79,7 +79,7 @@ export function HostsSection(): React.ReactElement {
   return (
     <SettingsSection testID="settings-hosts">
       {rows.length === 0 ? (
-        <NoticeRow testID="hosts-empty" text="No machines yet" />
+        <NoticeRow testID="hosts-empty" text="No hosts yet" />
       ) : (
         rows.map((h) => (
           <Row
@@ -138,7 +138,7 @@ export function HostDetail({ hostId }: { hostId: string }): React.ReactElement {
     return (
       <SettingsPage title={hostId} testID="settings-host-detail">
         <SettingsSection>
-          <NoticeRow testID="host-detail-gone" text="This machine is no longer on the account" />
+          <NoticeRow testID="host-detail-gone" text="This host is no longer on the account" />
         </SettingsSection>
       </SettingsPage>
     );
@@ -205,8 +205,8 @@ function HostIdentity({ host }: { host: HostPresence }): React.ReactElement | nu
   const commitRename = (): void => {
     const next = draft.trim();
     if (next.length === 0) {
-      // A machine must always have a name.
-      Alert.alert('Rename failed', 'A machine name cannot be empty.');
+      // A host must always have a name.
+      Alert.alert('Rename failed', 'A host name cannot be empty.');
       setDraft(report.hostName);
       return;
     }
@@ -224,7 +224,7 @@ function HostIdentity({ host }: { host: HostPresence }): React.ReactElement | nu
           <>
             <Field
               testID={`host-${hostId}-name-input`}
-              accessibilityLabel="Machine name"
+              accessibilityLabel="Host name"
               value={draft}
               onChangeText={setDraft}
               onSubmitEditing={commitRename}
@@ -321,7 +321,7 @@ function HostBackends({ host }: { host: HostPresence }): React.ReactElement | nu
                 accessibilityLabel="Token"
                 value={token}
                 onChangeText={setToken}
-                placeholder="sk-ant-oat01-… (empty uses this machine's own login)"
+                placeholder="sk-ant-oat01-… (empty uses this host's own login)"
                 secureTextEntry
               />
               <SettingsButton
@@ -330,7 +330,7 @@ function HostBackends({ host }: { host: HostPresence }): React.ReactElement | nu
                 onPress={() => {
                   // A Claude account is shared by every host (spec/01 § Settings):
                   // a pasted token is added for all of them; an empty one adopts
-                  // the login already on this machine.
+                  // the login already on this host.
                   const t = token.trim();
                   void writeShared('Sign in', () =>
                     t
@@ -419,8 +419,8 @@ function HostComponents({ host }: { host: HostPresence }): React.ReactElement | 
 }
 
 /**
- * Files and Terminal for this machine (spec/15 § Host files and terminal).
- * Unpressable while the machine or the link is down: a screen that opened only
+ * Files and Terminal for this host (spec/15 § Host files and terminal).
+ * Unpressable while the host or the link is down: a screen that opened only
  * to fail would be a worse answer than a dimmed row.
  */
 function HostTools({ host }: { host: HostPresence }): React.ReactElement {
@@ -472,7 +472,7 @@ function RemoveHost({ host }: { host: HostPresence }): React.ReactElement {
   return (
     <SettingsSection>
       <Row
-        title="Remove this machine"
+        title="Remove this host"
         right={
           <SettingsButton
             testID={`host-${host.hostId}-remove`}
@@ -501,10 +501,10 @@ function RemoveHost({ host }: { host: HostPresence }): React.ReactElement {
 /** The server's refusal, said in words rather than as a code. */
 function installCommandProblem(message: string): string {
   if (message.startsWith('nothing_published')) {
-    return 'No machine build has been published yet.';
+    return 'No host build has been published yet.';
   }
   if (message.startsWith('no_build_for_os')) {
-    return 'No machine build has been published for that operating system yet.';
+    return 'No host build has been published for that operating system yet.';
   }
   if (message.startsWith('no_public_url')) {
     return 'This server has no public address configured.';
@@ -582,15 +582,15 @@ function AddHost({ onClose }: { onClose: () => void }): React.ReactElement {
     platforms.state === 'error' || (platforms.state === 'ok' && platforms.value.length === 0);
 
   return (
-    <SettingsSection title="Add a machine" testID="add-host-panel">
+    <SettingsSection title="Add a host" testID="add-host-panel">
       {platforms.state === 'loading' ? <NoticeRow text="…" /> : null}
       {nothingPublished ? (
-        <NoticeRow testID="add-host-error" text="No machine build has been published yet" />
+        <NoticeRow testID="add-host-error" text="No host build has been published yet" />
       ) : null}
       {platforms.state === 'ok' && platforms.value.length > 0 ? (
         <>
           <Row
-            title="Run on the new machine"
+            title="Run on the new host"
             subtitle={`Builds: ${platforms.value.map((o) => o.label).join(', ')}`}
             subtitleTestID="add-host-platforms"
             stack
@@ -766,7 +766,7 @@ export function ProviderKeys(): React.ReactElement {
                       onPress={() =>
                         Alert.alert(
                           `Revoke ${label} key?`,
-                          'It is deleted from every machine; a machine with one in its own environment goes back to that.',
+                          'It is deleted from every host; a host with one in its own environment goes back to that.',
                           [
                             { text: 'Cancel', style: 'cancel' },
                             {

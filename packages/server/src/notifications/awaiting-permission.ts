@@ -6,7 +6,7 @@
 // `AskUserQuestion`, and the chat is parked in `awaiting-permission` until a
 // human answers. That state never reaches `idle`, so chat-completion never
 // fires for it: before this existed, an agent could sit waiting on the user
-// indefinitely while he was away from the machine and nothing told him.
+// indefinitely while he was away from the host and nothing told him.
 //
 // Both cases — a tool approval and a question — arrive as the same thing. The
 // host's `requestPermission` routes `AskUserQuestion` through the very same
@@ -177,9 +177,9 @@ export class AwaitingPermissionNotifier {
     // `turnOrigin` is deliberately NOT consulted here, and that is not an
     // oversight to be tidied into consistency with chat-complete.ts.
     //
-    // Chat-completion stays silent for a `machine` turn because nobody is
+    // Chat-completion stays silent for a `host` turn because nobody is
     // waiting on a self-wake tick finishing. That reasoning inverts for a
-    // block: a machine-started run that stops to ask is precisely the run
+    // block: a host-started run that stops to ask is precisely the run
     // nobody is watching, and it stays stopped until a human answers. Same
     // judgement dd6f113 makes when it drags a hidden job's chat out of
     // Archived the moment it needs the user.

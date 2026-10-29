@@ -1,5 +1,5 @@
 // Settings → Voice: which engine each voice surface uses (account-wide), how
-// one host speaks, the voice devices paired to the account, and this machine's
+// one host speaks, the voice devices paired to the account, and this host's
 // dictate shortcut.
 
 import type { JSX } from 'react';
@@ -181,7 +181,7 @@ function DictationGroup(): JSX.Element {
 }
 
 /**
- * The dictate chord, per machine (lib/dictateChord.ts). "Change" listens for
+ * The dictate chord, per host (lib/dictateChord.ts). "Change" listens for
  * the next chord with ⌘/Ctrl in it; Esc leaves the old one. The listener runs
  * in the capture phase and stops the event there, so the chord being recorded
  * doesn't also fire whatever it is bound to.
@@ -489,7 +489,7 @@ function SpeakingGroup(): JSX.Element {
       ) : (
         <Row
           title="Voice"
-          sub={kokoroVoice === undefined ? 'Each machine’s Kokoro default' : undefined}
+          sub={kokoroVoice === undefined ? 'Each host’s Kokoro default' : undefined}
         >
           <select
             aria-label="Voice"

@@ -265,7 +265,7 @@ describe('ManagerSweeper', () => {
     expect(sweeper.tick()).toBe(false);
   });
 
-  test('a turn started by a machine message settling is not a settled edge', () => {
+  test('a turn started by a host message settling is not a settled edge', () => {
     emit(spawned('c1'));
     emit(state('c1', { activity: 'running', turnOrigin: 'machine' }));
     emit(state('c1', { activity: 'idle', turnOrigin: 'machine' }));

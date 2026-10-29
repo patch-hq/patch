@@ -20,9 +20,9 @@
 // so the target cannot be built (spec/11 § Host installation).
 //
 // What is deliberately NOT in here: the agent backend (provisioned on the
-// machine), the Python environment the voice sidecars need, and the large model
+// host), the Python environment the voice sidecars need, and the large model
 // weights (Kokoro ~340 MB, local Whisper ~1.5 GB) — those are optional
-// components the host downloads per machine.
+// components the host downloads per host.
 //
 // NO FALLBACK anywhere: a missing vendored input, a missing signing key or a
 // failed signature aborts the build. An unsigned or half-built artifact would
@@ -175,7 +175,7 @@ export async function bundle(esb, entry, outfile) {
     //   onnxruntime-node                a native addon         → native/
     //   @anthropic-ai/claude-agent-sdk  spawns its own program → node_modules/
     // External means "not inlined", NOT "not shipped". Treating the SDK as
-    // something the machine would supply is what left every installed host
+    // something the host would supply is what left every installed host
     // unable to run a single turn.
     //
     // chromium-bidi is a THIRD exception, but of a different kind: it is
@@ -260,18 +260,18 @@ function copyNativeAddons(vendor, t, outDir) {
 /**
  * Copy the agent SDK into the artifact's own `node_modules`, so the host's
  * bare `import('@anthropic-ai/claude-agent-sdk')` resolves from beside
- * `host.mjs` on any machine.
+ * `host.mjs` on any host.
  *
  * It is external to the BUNDLE because it spawns its own program files and
- * cannot be flattened into one .mjs — not because it belongs to the machine. It
+ * cannot be flattened into one .mjs — not because it belongs to the host. It
  * is an ordinary library dependency of the host, and treating it as the
- * machine's problem is what left every installed host unable to run a turn:
+ * host's problem is what left every installed host unable to run a turn:
  * an artifact has no node_modules on any parent of its program, so a bare
  * specifier could never have resolved to anything.
  *
  * The per-platform `claude-agent-sdk-<os>-<arch>` packages are deliberately NOT
  * copied: each is a ~200 MB Claude Code binary, and the host runs the
- * machine's own `claude` instead, passed as `pathToClaudeCodeExecutable`
+ * host's own `claude` instead, passed as `pathToClaudeCodeExecutable`
  * (spec/02 § Agent backends — "so a host runs the same `claude` the user runs").
  * ~4 MB of library travels; the CLI does not.
  */
@@ -414,7 +414,7 @@ async function buildTarget(t, ctx) {
   const binDir = copyNativeAddons(vendor, t, outDir);
 
   // 3b. the agent SDK, beside the bundle, so the host's bare import resolves
-  // on a machine that has nothing installed but this artifact.
+  // on a host that has nothing installed but this artifact.
   copyAgentSdk(outDir);
   copyPlaywrightCore(outDir);
 
@@ -428,9 +428,9 @@ async function buildTarget(t, ctx) {
   copyFileSync(turnModel, join(outDir, 'smart_turn.onnx'));
 
   // 5. the patch CLI itself. The artifact shipped the patch-cli SKILL — which
-  // tells every chat on the machine to run `patch chats list` and friends — but
+  // tells every chat on the host to run `patch chats list` and friends — but
   // no `patch` binary, so the skill's first instruction failed on a freshly
-  // installed machine. Ship the program the skill documents.
+  // installed host. Ship the program the skill documents.
   await bundle(
     esb,
     join(REPO_ROOT, 'packages', 'cli', 'src', 'index.ts'),
@@ -441,7 +441,7 @@ async function buildTarget(t, ctx) {
   cpSync(join(DAEMON, 'skill'), join(outDir, 'skill'), { recursive: true });
 
   // 6b. the voice sidecars' SOURCE — a few KB of Python each, and none of the
-  // ~2 GB of wheels they need. Those are built per machine when the user
+  // ~2 GB of wheels they need. Those are built per host when the user
   // installs the component (spec/02 § Optional components); the source has to
   // be here for there to be anything to build. Without it an artifact-installed
   // host could download 340 MB of Kokoro weights and still never say a word,

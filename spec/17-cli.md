@@ -16,10 +16,10 @@ properties:
 Resource-grouped. `<id>` accepts the full ULID or a unique prefix.
 
 Every `hosts` subcommand that acts on one host takes `--host H`, which defaults
-to the machine the command is invoked on (§ Hosts and the CLI). Two are
+to the host the command is invoked on (§ Hosts and the CLI). Two are
 exceptions. `hosts remove` requires `--host`, so an irreversible revocation is
 never aimed at a host by default. `hosts pair-device` takes no `--host` and runs
-on the machine it is invoked on, because the host adopts the device itself and
+on the host it is invoked on, because the host adopts the device itself and
 nothing about that exchange crosses the server (`16-voice-device.md`
 § Connection model).
 
@@ -29,7 +29,7 @@ patch --folder <path> [--host H] [--model M] [--no-status]   # start a chat ther
 
 patch hosts list                          # every registered host: name, status, version, components
 patch hosts get [--host H]                # one host (platform, backends and their versions, components, permission mode)
-patch hosts add                           # server-minted registration nonce as a QR + short code, for the new machine's installer to redeem, plus the server's install command for the target OS
+patch hosts add                           # server-minted registration nonce as a QR + short code, for the new host's installer to redeem, plus the server's install command for the target OS
 patch hosts rename <name> [--host H]
 patch hosts folders [--host H]            # that host's project-folder registry
 patch hosts folders add <path> [--host H]
@@ -42,7 +42,7 @@ patch hosts update [--host H]             # apply an available host update
 patch hosts claude-settings [--host H]                    # that host's Claude Code settings.json text and memory entries
 patch hosts claude-settings set <file> [--host H]         # replace that host's settings.json from a file
 patch hosts memory remove <project> <file> [--host H]     # delete one Claude Code memory entry
-patch hosts pair-device                   # on this machine only: open a five-minute window for a voice device to announce itself (16-voice-device.md)
+patch hosts pair-device                   # on this host only: open a five-minute window for a voice device to announce itself (16-voice-device.md)
 patch hosts remove --host H               # revoke a host (confirmed; names its chat count)
 
 patch settings                            # every shared setting, and each host's applied version (01-server.md § Settings)
@@ -53,7 +53,7 @@ patch accounts connect <backend> <accountId> --token T
 patch accounts disconnect <backend> <accountId>        # confirmed; takes it out of every host's sequence
 patch accounts order <backend> <accountId>...
 patch accounts strategy <backend> <strategy>          # priority, round-robin, soonest-reset or least-used
-patch accounts adopt <backend> [--host H]              # store that machine's own login as a shared account
+patch accounts adopt <backend> [--host H]              # store that host's own login as a shared account
 patch keys                                # provider keys: source and last four
 patch keys set <keyId> [--host H to adopt from its environment]
 patch keys revoke <keyId>                 # confirmed
@@ -71,7 +71,7 @@ patch chats resume-now <id>              # run a usage-limit-parked chat's turn 
 patch chats archive <id>                  # archive a chat (UI hides; its history and metadata stay on its host)
 patch chats set-model <id> <model>       # change an existing chat's model, from its next turn (spec/04 § Model)
 patch chats rename <id> [<name>]          # rename a chat; no name clears it back to the derived label
-patch chats move <id> --host H --folder F   # move a chat to another machine, to run in folder F there (spec/04 § Moving a chat to another host)
+patch chats move <id> --host H --folder F   # move a chat to another host, to run in folder F there (spec/04 § Moving a chat to another host)
 
 patch activity [--since S] [--until U] [--messages-cursor C] [--sessions] [--sessions-cursor C] [--limit N]
                                            # the user's own messages, read through every host's chat logs by the server (06-threads-manager-telegram-speakers.md § Cross-chat toolset); always REST — there is no per-host local view. --since/--until take ISO-8601 or ms-epoch; default is the last 24h. `--sessions` also returns the chat dwell sessions (chats open on a focused, visible surface); the default output is messages only.
@@ -107,7 +107,7 @@ patch surfaces revoke <id>                # revoke a linked surface (confirmed)
 patch auth bootstrap                      # get this CLI's credential from the server, for an account with no linked surface yet
 patch auth pair                           # server-minted pairing nonce as a QR + short code, for another surface to redeem
 
-patch host start | stop | status | list | clean   # the local host service, on this machine
+patch host start | stop | status | list | clean   # the local host service, on this host
 
 patch logs [--host H]                     # tail a host's log
 
@@ -115,7 +115,7 @@ patch doctor                              # server reachability, per-host status
                                           # webhook/cron backlog, errored-chat count
 ```
 
-All commands accept `--json` to emit machine-readable output (default is human-readable). Agents always pass `--json`.
+All commands accept `--json` to emit host-readable output (default is human-readable). Agents always pass `--json`.
 
 ## Scope
 
@@ -137,7 +137,7 @@ backend connect and disconnect (`10-auth.md` § Backend credentials), model
 catalogue — together with registration (`10-auth.md` § Host registration) and
 removal (`10-auth.md` § Revocation), which are server routes rather than wire
 frames. A host-scoped control added to the wire arrives with its command here in
-the same change, so no machine setting is reachable from one surface and not
+the same change, so no host setting is reachable from one surface and not
 another. The pairing holds both ways: each command here has a frame or a server
 route behind it, and each frame has a command. `hosts pair-device` is the one
 host command with no wire frame, and it is local-only for that reason
@@ -167,14 +167,14 @@ threads run). It's how an agent learns patch's surface area.
 
 ## Hosts and the CLI
 
-The CLI's default host is the machine it is invoked on, so `patch chats spawn
+The CLI's default host is the host it is invoked on, so `patch chats spawn
 ./x` runs there. Addressing another host is explicit via `--host`, and routes
 through the server rather than the local socket.
 
-A command aimed at this machine reaches its host over that machine's local
+A command aimed at this host reaches its host over that host's local
 socket, which carries one endpoint per host-scoped control for that reason
 (`02-host.md` § Control IPC). Three commands go to the server even when they
-name this machine, because the server owns what they change rather than the
+name this host, because the server owns what they change rather than the
 host: `hosts add`, `hosts rename` and `hosts remove`.
 
 `--host` accepts a host name or a `hostId` prefix. An ambiguous or unknown

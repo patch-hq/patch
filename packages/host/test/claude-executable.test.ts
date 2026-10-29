@@ -6,7 +6,7 @@
 // This is the half of the backend that genuinely belongs to the MACHINE. The
 // SDK — the npm package the host imports — is the host's own dependency and
 // travels in the artifact; the ~200 MB Claude Code binary is not something a
-// host build should be carrying, and the machine already has the one its user
+// host build should be carrying, and the host already has the one its user
 // runs. Without a path the SDK looks for a platform package that the artifact
 // deliberately does not ship, and dies with "Native CLI binary for
 // linux-x64 not found".
@@ -24,11 +24,11 @@ import {
 let root: string;
 
 /**
- * Resolve against a machine described ENTIRELY by the fixture. Left to the
+ * Resolve against a host described ENTIRELY by the fixture. Left to the
  * default, `wellKnown` reaches out to the real `/usr/local/bin/claude`, so the
- * two "machine has no Claude Code" cases passed on a laptop without one and
+ * two "host has no Claude Code" cases passed on a laptop without one and
  * failed on every box that had one — green where it did not matter and red
- * where it did. Cases that mean to describe a machine WITH a well-known
+ * where it did. Cases that mean to describe a host WITH a well-known
  * install pass their own paths.
  */
 function resolve(opts: Omit<ResolveClaudeOptions, 'wellKnown'> & { wellKnown?: string[] }) {
@@ -50,7 +50,7 @@ function installClaude(dir: string, name = 'claude'): string {
   return path;
 }
 
-describe('resolving the machine’s Claude Code', () => {
+describe('resolving the host’s Claude Code', () => {
   it('finds the native install under the user’s home', () => {
     const expected = installClaude(join(root, '.local', 'bin'));
     expect(resolve({ home: root, pathEnv: '' })).toBe(expected);
@@ -63,7 +63,7 @@ describe('resolving the machine’s Claude Code', () => {
   });
 
   it('prefers an explicit override over anything it would search for', () => {
-    // A machine with two installs, or a test rig pointing at its own.
+    // A host with two installs, or a test rig pointing at its own.
     installClaude(join(root, '.local', 'bin'));
     const chosen = installClaude(join(root, 'chosen'), 'claude');
     expect(resolve({ home: root, pathEnv: '', override: chosen })).toBe(chosen);
@@ -90,7 +90,7 @@ describe('resolving the machine’s Claude Code', () => {
     ).toBe(WELL_KNOWN_CLAUDE_PATHS.find((p) => existsSync(p)));
   });
 
-  it('reports nothing when the machine has no Claude Code', () => {
+  it('reports nothing when the host has no Claude Code', () => {
     // Not an error here: the caller decides what to say. `host.host` reports
     // the backend `absent`, and a turn fails naming it.
     expect(resolve({ home: root, pathEnv: join(root, 'nope') })).toBeUndefined();

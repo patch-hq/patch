@@ -1,7 +1,7 @@
 // GET /api/hosts — the host registry (spec/01 § Endpoints).
 //
 // The endpoint was listed in the spec and did not exist at all: the server
-// answered `route not found`, so nothing could enumerate the account's machines
+// answered `route not found`, so nothing could enumerate the account's hosts
 // over REST, and a host had no way to answer `patch_list_hosts` for its chats.
 //
 // It is authed by a daemonKey AS WELL AS a surface credential precisely because
@@ -62,7 +62,7 @@ describe('GET /api/hosts', () => {
     return { app: built.app, surfaceJwt, hostJwt };
   }
 
-  it('lists every registered machine for a surface credential', async () => {
+  it('lists every registered host for a surface credential', async () => {
     const { app, surfaceJwt } = await boot();
     try {
       const res = await app.inject({
@@ -109,7 +109,7 @@ describe('GET /api/hosts', () => {
     }
   });
 
-  it('says what it knows about a machine that has never connected, and invents nothing', async () => {
+  it('says what it knows about a host that has never connected, and invents nothing', async () => {
     const { app, surfaceJwt } = await boot();
     try {
       const res = await app.inject({
@@ -119,7 +119,7 @@ describe('GET /api/hosts', () => {
       });
       const hostA = res.json().hosts.find((h: { hostId: string }) => h.hostId === 'host-a');
       // Never spoken: no self-description, so no name and not online — rather
-      // than a fabricated label or the other machine's description.
+      // than a fabricated label or the other host's description.
       expect(hostA.hostName).toBeNull();
       expect(hostA.online).toBe(false);
       expect(hostA.runsManager).toBe(false);
@@ -212,7 +212,7 @@ describe('GET /api/daemon/install-command', () => {
 });
 
 // spec/17 § Hosts and the CLI: rename is SERVER-owned even when the
-// command naming it runs on that very machine, because the registry holds the
+// command naming it runs on that very host, because the registry holds the
 // name. The route did not exist, so the CLI's own command would have 404'd.
 describe('server-owned host controls', () => {
   let dir: string;
@@ -244,7 +244,7 @@ describe('server-owned host controls', () => {
     return { app: built.app, jwt, registry };
   }
 
-  it('renames a machine and the registry keeps it', async () => {
+  it('renames a host and the registry keeps it', async () => {
     const { app, jwt, registry } = await boot();
     try {
       const res = await app.inject({
@@ -260,7 +260,7 @@ describe('server-owned host controls', () => {
     }
   });
 
-  it('refuses an empty rename rather than leaving a nameless machine', async () => {
+  it('refuses an empty rename rather than leaving a nameless host', async () => {
     const { app, jwt } = await boot();
     try {
       const res = await app.inject({
@@ -276,7 +276,7 @@ describe('server-owned host controls', () => {
     }
   });
 
-  it('refuses a machine that is not registered, naming it', async () => {
+  it('refuses a host that is not registered, naming it', async () => {
     const { app, jwt } = await boot();
     try {
       const res = await app.inject({
@@ -304,7 +304,7 @@ describe('server-owned host controls', () => {
 });
 
 // spec/17 § Hosts and the CLI: rename is SERVER-owned even when the
-// command naming it runs on that very machine, because the registry holds the
+// command naming it runs on that very host, because the registry holds the
 // name. The route did not exist, so the CLI's own command would have 404'd.
 describe('server-owned host controls', () => {
   let dir: string;
@@ -336,7 +336,7 @@ describe('server-owned host controls', () => {
     return { app: built.app, jwt, registry };
   }
 
-  it('renames a machine and the registry keeps it', async () => {
+  it('renames a host and the registry keeps it', async () => {
     const { app, jwt, registry } = await boot();
     try {
       const res = await app.inject({
@@ -352,7 +352,7 @@ describe('server-owned host controls', () => {
     }
   });
 
-  it('refuses an empty rename rather than leaving a nameless machine', async () => {
+  it('refuses an empty rename rather than leaving a nameless host', async () => {
     const { app, jwt } = await boot();
     try {
       const res = await app.inject({
@@ -368,7 +368,7 @@ describe('server-owned host controls', () => {
     }
   });
 
-  it('refuses a machine that is not registered, naming it', async () => {
+  it('refuses a host that is not registered, naming it', async () => {
     const { app, jwt } = await boot();
     try {
       const res = await app.inject({

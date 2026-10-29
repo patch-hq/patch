@@ -78,7 +78,7 @@ contextBridge.exposeInMainWorld('patch', {
   // is what keeps the two copies in agreement.
   overlayTitleBar: process.platform === 'darwin',
   // spec/02 § Browser — In the Patch app. The agent's tabs, when the host on
-  // this machine keeps them in this app: a large view shows the tab itself at
+  // this host keeps them in this app: a large view shows the tab itself at
   // its own place in the window instead of a picture of it.
   agentBrowser: {
     owns(targetId: string): Promise<boolean> {
@@ -244,8 +244,8 @@ contextBridge.exposeInMainWorld('patch', {
   // panel. The renderer can't reach electron-updater (main-process only), so it
   // reads state, triggers a check, and subscribes to changes over IPC.
   // spec/09 § Presence heuristic — milliseconds since the last keyboard or
-  // mouse input anywhere on this machine, not just in Patch, and `away` while
-  // the screen is locked or the machine is asleep.
+  // mouse input anywhere on this host, not just in Patch, and `away` while
+  // the screen is locked or the host is asleep.
   async getSystemPresence(): Promise<{ idleMs: number; away?: 'locked' | 'asleep' }> {
     return (await ipcRenderer.invoke('patch:system-presence')) as {
       idleMs: number;

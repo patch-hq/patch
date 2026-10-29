@@ -175,7 +175,7 @@ export class ManagerFailover {
       type: 'host.manager_adopt',
       hostId: candidate,
       epoch: this.state.epoch,
-      handoff: this.handoffText(-1, 'the machine that was running you is offline'),
+      handoff: this.handoffText(-1, 'the host that was running you is offline'),
       nextSeq,
     };
     this.state.orders[candidate] = { kind: 'adopt', event: adopt };

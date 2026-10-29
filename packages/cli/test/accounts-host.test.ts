@@ -1,4 +1,4 @@
-// `patch accounts list|order|strategy` on a machine that runs a host: they go
+// `patch accounts list|order|strategy` on a host that runs a host: they go
 // over the host's own socket and need NO credential.jwt — the host relays them
 // to the server on the link it already holds. Anywhere else they keep using
 // REST (covered by the REST error path in `_common.test.ts`).
@@ -97,7 +97,7 @@ test('accounts list, order and strategy go over the host socket with no credenti
   });
 });
 
-test('a server call from a host machine is relayed over the host socket, no credential', async () => {
+test('a server call from a host host is relayed over the host socket, no credential', async () => {
   await withHostSocket(async ({ seen }) => {
     const { buildTransport } = await import('../src/transport/index.js');
     const { loadConfig } = await import('../src/config.js');

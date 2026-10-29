@@ -1,7 +1,7 @@
 // The top bar shared by the host Files, editor and terminal screens (spec/15
 // § Host files and terminal): back, a title, the host it is acting on, and an
 // optional action on the right. The host name is always shown — these screens
-// act on ONE machine's filesystem, and which one must never be a guess.
+// act on ONE host's filesystem, and which one must never be a guess.
 
 import React from 'react';
 import { Pressable, Text, View } from 'react-native';

@@ -89,14 +89,14 @@ async function frontmatter(): Promise<Record<string, Record<string, string>>> {
 }
 
 describe('the skills a folder offers', () => {
-  it('offers the machine’s own skills too — they apply in every folder', async () => {
+  it('offers the host’s own skills too — they apply in every folder', async () => {
     skill(join(home, '.claude', 'skills'), 'patch-cli');
     skill(join(folder, '.claude', 'skills'), 'local-thing');
 
     expect(await list()).toEqual(['local-thing', 'patch-cli']);
   });
 
-  it('names each skill once when the project and the machine both have it', async () => {
+  it('names each skill once when the project and the host both have it', async () => {
     skill(join(home, '.claude', 'skills'), 'plan');
     skill(join(folder, '.claude', 'skills'), 'plan');
 
@@ -146,7 +146,7 @@ describe('the file each skill is defined in', () => {
     expect(await paths()).toEqual({ plan: join(folder, '.claude', 'skills', 'plan.md') });
   });
 
-  it('names the machine-wide skill’s file under the home directory', async () => {
+  it('names the host-wide skill’s file under the home directory', async () => {
     skill(join(home, '.claude', 'skills'), 'patch-cli');
 
     expect(await paths()).toEqual({
@@ -154,7 +154,7 @@ describe('the file each skill is defined in', () => {
     });
   });
 
-  it('names the project’s copy, not the machine’s, when both define the skill', async () => {
+  it('names the project’s copy, not the host’s, when both define the skill', async () => {
     skill(join(home, '.claude', 'skills'), 'plan');
     skill(join(folder, '.claude', 'skills'), 'plan');
 
@@ -212,7 +212,7 @@ describe('the description each skill declares', () => {
     expect(await descriptions()).toEqual({});
   });
 
-  it('names the machine-wide skill’s description too', async () => {
+  it('names the host-wide skill’s description too', async () => {
     skillWithFrontmatter(join(home, '.claude', 'skills'), 'patch-cli', 'Drive the patch CLI.');
 
     expect(await descriptions()).toEqual({ 'patch-cli': 'Drive the patch CLI.' });

@@ -10,7 +10,7 @@ describe('parsePmsetBatt', () => {
     const out = `Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t83%; charging; 1:10 remaining present: true\n`;
     expect(parsePmsetBatt(out)).toEqual({ onBattery: false, percent: 83 });
   });
-  it('is undefined for a machine with no battery', () => {
+  it('is undefined for a host with no battery', () => {
     expect(parsePmsetBatt(`Now drawing from 'AC Power'\n`)).toBeUndefined();
   });
   it('throws on output it does not understand', () => {

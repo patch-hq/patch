@@ -2,8 +2,8 @@
 
 Patch is a thin coordination layer over LLMs. It adds multi-surface access (terminal, web, phone, standalone voice device), external triggers (cron, webhooks, Todoist), voice (host-hosted Whisper + Kokoro across all surfaces), and cross-chat management — without altering the agent's native UX.
 
-One server, and one host per host machine. A host is any machine whose files
-and commands the agent works with: an always-on box, a laptop, a work machine.
+One server, and one host per host host. A host is any host whose files
+and commands the agent works with: an always-on box, a laptop, a work host.
 The server is deployed once and is publicly reachable; a host is installed on
 each host and runs as an OS-managed service, starting at boot and running
 independently of any surface. See `02-host.md`.
@@ -12,7 +12,7 @@ The two are separate because a host is usually unreachable. Hosts dial out to
 the server and hold that connection, which is what lets a laptop behind NAT be a
 host at all, and gives webhooks and push a fixed address to arrive at
 while every host is asleep. Folding the server into a host would tie the whole
-system to one always-on machine with a public address — the arrangement this
+system to one always-on host with a public address — the arrangement this
 exists to avoid.
 
 ## Principles
@@ -41,7 +41,7 @@ exists to avoid.
              WebSocket│       │WebSocket
                       ▼       ▼
         ┌───────────────┐   ┌───────────────┐
-        │ Host        │   │ Host        │   one per host machine
+        │ Host        │   │ Host        │   one per host host
         │ "hetzner"     │   │ "Tom's Mac"   │
         │  agent        │   │  agent        │
         │  host access  │   │  host access  │
@@ -49,7 +49,7 @@ exists to avoid.
 ```
 
 - Server — one Node/Fastify process, deployed. Relay, registry, presence, push fanout, webhook ingress, voice token mint. See `01-server.md`.
-- Host — one native process per host machine. Runs agent sessions with that host's access, tracks chat_state, runs jobs. See `02-host.md`.
+- Host — one native process per host host. Runs agent sessions with that host's access, tracks chat_state, runs jobs. See `02-host.md`.
 - Surfaces — terminal CLI, web, phone, desktop notifier. See `05-surfaces.md`.
 - Special threads — Manager, Speakers. Long-running chats with cross-chat tools. See `06-threads-manager-speakers.md`.
 
@@ -57,7 +57,7 @@ exists to avoid.
 
 | Term       | Meaning                                                                                                      |
 | ---------- | ------------------------------------------------------------------------------------------------------------ |
-| Host       | A machine running a host. Identified by `hostId`, labelled by a user-editable host name.                     |
+| Host       | A host running a host. Identified by `hostId`, labelled by a user-editable host name.                        |
 | Chat       | One agent session, pinned to a host and a folder on it. Lives forever.                                       |
 | Project    | Emergent. Any folder with ≥1 chat. No registration step. Scoped to its host.                                 |
 | Surface    | A client UI (CLI, web, phone, desktop).                                                                      |

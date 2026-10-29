@@ -1,7 +1,7 @@
-// Guards that keep a test out of the machine's own Patch state.
+// Guards that keep a test out of the host's own Patch state.
 //
 // A test that boots a real host supplies its own directory and its own
-// socket. If any of that resolves into the machine's live `~/.patch`, the run
+// socket. If any of that resolves into the host's live `~/.patch`, the run
 // is creating real chats in the user's account, which is indistinguishable
 // from the user's own until someone reads the folder path. These assertions
 // fail loudly instead, naming the path.
@@ -10,7 +10,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 
-/** The machine's own Patch state directory. Mirrors config.ts. */
+/** The host's own Patch state directory. Mirrors config.ts. */
 export function livePatchHome(env: NodeJS.ProcessEnv = process.env): string {
   return env['PATCH_HOME'] ?? join(homedir(), '.patch');
 }
@@ -20,7 +20,7 @@ function isInside(target: string, root: string): boolean {
 }
 
 /**
- * Throws unless `p` sits outside the machine's own Patch state. `label` names
+ * Throws unless `p` sits outside the host's own Patch state. `label` names
  * what the path is for, so the failure says which knob was wrong.
  */
 export function assertIsolatedPath(
@@ -32,7 +32,7 @@ export function assertIsolatedPath(
   const target = resolve(p);
   if (isInside(target, live)) {
     throw new Error(
-      `${label} resolves to ${target}, inside this machine's live Patch state (${live}). ` +
+      `${label} resolves to ${target}, inside this host's live Patch state (${live}). ` +
         'A test supplies its own directory and socket — refusing to run against live state.',
     );
   }
@@ -53,12 +53,12 @@ export function assertToolsServerBuilt(binPath: string): void {
   if (existsSync(binPath)) return;
   throw new Error(
     `the patch tools MCP server is not built at ${binPath}. Without it the session has no ` +
-      "patch_* tools and the agent reaches the machine's own host instead. Build it first: " +
+      "patch_* tools and the agent reaches the host's own host instead. Build it first: " +
       'corepack pnpm --filter @patch/host build',
   );
 }
 
-/** The chat ids currently in the machine's own chat store. */
+/** The chat ids currently in the host's own chat store. */
 export function liveChatIds(env: NodeJS.ProcessEnv = process.env): Set<string> {
   const root = join(livePatchHome(env), 'chats');
   if (!existsSync(root)) return new Set();
@@ -81,10 +81,10 @@ function liveChatFolder(chatId: string, env: NodeJS.ProcessEnv): string | null {
 }
 
 /**
- * Throws if the machine's chat store gained a chat pointing into one of
+ * Throws if the host's chat store gained a chat pointing into one of
  * `ownedFolders` — the folders this test created.
  *
- * Scoped to owned folders on purpose: the machine's real host keeps serving
+ * Scoped to owned folders on purpose: the host's real host keeps serving
  * the user while the suite runs, so an unrelated chat appearing mid-run is not
  * this test's doing. A chat whose meta cannot be read is reported rather than
  * assumed innocent, since its folder is unknown.
@@ -107,7 +107,7 @@ export function assertNoLiveChatsCreated(
   }
   if (leaked.length === 0) return;
   throw new Error(
-    `this test created ${leaked.length} chat(s) in the machine's live Patch state ` +
+    `this test created ${leaked.length} chat(s) in the host's live Patch state ` +
       `(${join(livePatchHome(env), 'chats')}): ${leaked.join(', ')}. ` +
       'They belong to the user and are NOT deleted automatically — the host under test ' +
       'reached the live socket instead of its own.',

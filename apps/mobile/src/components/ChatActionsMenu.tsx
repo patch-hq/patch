@@ -76,7 +76,7 @@ export function ChatActionsMenu({
     // No fallback to the picker: a chat whose host is not known yet (not yet
     // spawned) has no "here" to start another in, and saying so is honest.
     if (!row || row.hostId === '' || row.folder === '') {
-      useUiStore.getState().pushError("new chat failed: this chat's machine isn't known yet");
+      useUiStore.getState().pushError("new chat failed: this chat's host isn't known yet");
       return;
     }
     router.push({

@@ -4,7 +4,7 @@
 //
 // Every case here is one the host or a surface would otherwise have to guess
 // at. The whole reason `hostId` is on the wire is that guessing runs a chat
-// on the wrong filesystem, or applies a machine setting to the wrong machine —
+// on the wrong filesystem, or applies a host setting to the wrong host —
 // failures that look like nothing happened. So the protocol rejects them with
 // the offending value named, and never silently defaults, drops, or routes to
 // whichever host happens to be attached.
@@ -58,7 +58,7 @@ function issuePaths(res: {
   return res.success ? [] : (res.error?.issues ?? []).map((i) => i.path.join('.'));
 }
 
-describe('a frame that names no machine is rejected, not defaulted', () => {
+describe('a frame that names no host is rejected, not defaulted', () => {
   it('rejects a spawn request with no hostId', () => {
     // spec/04 § Spawn: "the host to run on. Required." The same folder string
     // on two hosts is two different directories, so a spawn without a host has
@@ -73,7 +73,7 @@ describe('a frame that names no machine is rejected, not defaulted', () => {
   });
 
   it('rejects a cross-chat spawn with no hostId', () => {
-    // An agent spawning a chat is choosing a machine whether it realises it or
+    // An agent spawning a chat is choosing a host whether it realises it or
     // not. The contract makes it say which.
     const res = PatchSpawnEvent.safeParse({
       type: 'patch.spawn',
@@ -95,7 +95,7 @@ describe('a frame that names no machine is rejected, not defaulted', () => {
     expect(issuePaths(res)).toContain('hostId');
   });
 
-  it('rejects every host control that names no machine', () => {
+  it('rejects every host control that names no host', () => {
     const cases: Array<[string, { safeParse: (v: unknown) => { success: boolean } }, object]> = [
       ['host.rename', HostRenameEvent, { type: 'host.rename', hostName: 'hetzner' }],
       ['host.settings', HostSettingsEvent, { type: 'host.settings' }],
@@ -189,7 +189,7 @@ describe('empty and out-of-set values are named, not coerced', () => {
 });
 
 describe('model is optional at every spawn site', () => {
-  // Resolving what a chat actually runs on belongs to the machine, not to the
+  // Resolving what a chat actually runs on belongs to the host, not to the
   // protocol (spec/04 § Spawn). The contract must not oblige any caller to
   // supply one — a surface that has never read a catalogue still has to be
   // able to start a chat.
@@ -303,7 +303,7 @@ describe('chat.settings: omitting the field CLEARS the override', () => {
   });
 });
 
-describe('the greeting carries every registered machine', () => {
+describe('the greeting carries every registered host', () => {
   // spec/03 § Control — `auth.ok` is `{surfaceId, hosts[], webBundleHash}`:
   // per-host presence plus the server's cached `host.host` / `host.account`
   // reports, ALONGSIDE the web-bundle hash the frame already carried.
@@ -337,7 +337,7 @@ describe('the greeting carries every registered machine', () => {
           host,
           accounts: [{ hostId: 'host-a', backendId: 'claude-code', connected: true }],
         },
-        // A machine that has never spoken since the server started is still
+        // A host that has never spoken since the server started is still
         // named — a surface renders it offline-and-unknown rather than
         // omitting it and waiting for a `host.online` that may never come.
         { hostId: 'host-b', online: false, lastSeenAt: null, host: null, accounts: [] },
@@ -350,7 +350,7 @@ describe('the greeting carries every registered machine', () => {
     expect(ev.webBundleHash).toBe('assets/index-DEADBEEF.js');
   });
 
-  it('rejects a host entry that names no machine', () => {
+  it('rejects a host entry that names no host', () => {
     const res = AuthOkEvent.safeParse({
       type: 'auth.ok',
       accountId: 'acct-1',
@@ -362,10 +362,10 @@ describe('the greeting carries every registered machine', () => {
   });
 });
 
-describe('the unauthenticated report names the machine AND the backend', () => {
-  it('rejects a report that names only the machine', () => {
+describe('the unauthenticated report names the host AND the backend', () => {
+  it('rejects a report that names only the host', () => {
     // A host with two backends can be authenticated on one and not the other;
-    // "this machine is logged out" cannot say which credential to fix.
+    // "this host is logged out" cannot say which credential to fix.
     const res = HostUnauthenticatedEvent.safeParse({
       type: 'host.unauthenticated',
       hostId: 'host-a',
@@ -385,7 +385,7 @@ describe('the unauthenticated report names the machine AND the backend', () => {
     expect(ev.backendId).toBe('claude-code');
   });
 
-  it('replaces the account-wide report with a per-machine, per-backend one', () => {
+  it('replaces the account-wide report with a per-host, per-backend one', () => {
     const ev = HostAccountEvent.parse({
       type: 'host.account',
       hostId: 'host-a',
@@ -446,7 +446,7 @@ describe('the unauthenticated report names the machine AND the backend', () => {
   });
 });
 
-describe('the cross-chat listing names each chat’s machine', () => {
+describe('the cross-chat listing names each chat’s host', () => {
   it('rejects a listed chat with no hostId', () => {
     const ok = PatchListChatsResponseEvent.safeParse({
       type: 'patch.list_chats.response',
@@ -466,7 +466,7 @@ describe('the cross-chat listing names each chat’s machine', () => {
   });
 });
 
-describe('directory browse is addressed to one machine at a time', () => {
+describe('directory browse is addressed to one host at a time', () => {
   it('requires a hostId on both the request and the response', () => {
     expect(
       PatchFoldersBrowseRequestEvent.safeParse({
@@ -678,9 +678,9 @@ describe('the host-addressed surface set is enumerable, so the gate can be compl
     expect(isHostAddressedSurfaceEvent('chat.input')).toBe(false);
   });
 
-  it('carries a distinct error code for a machine that is not registered', () => {
+  it('carries a distinct error code for a host that is not registered', () => {
     // spec/04 § Spawn — the refusal has to be distinguishable from a folder or
-    // session failure, because the fix is different (add the machine, not the
+    // session failure, because the fix is different (add the host, not the
     // folder).
     expect(ChatErrorCode.safeParse('host_not_registered').success).toBe(true);
   });

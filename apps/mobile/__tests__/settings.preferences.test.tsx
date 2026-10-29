@@ -363,7 +363,7 @@ describe('Manager page', () => {
     expect(textOf(manager)).toContain('Address word');
     const threads = findHost(r.root, byTestId('settings-special-threads'));
     expect(textOf(threads)).toContain('Start a fresh session daily');
-    // No host switcher: nothing here belongs to one machine.
+    // No host switcher: nothing here belongs to one host.
     reportHost('other', { hostName: 'mac' });
     expect(queryHost(renderRN(<ManagerPage />).root, byTestId('host-switcher'))).toBeNull();
   });
@@ -443,7 +443,7 @@ describe('Manager page', () => {
     expect(api.setPreferences).toHaveBeenCalledWith({ addressWord: 'otto' });
   });
 
-  it('offers the special threads’ model from the default machine’s catalogue', async () => {
+  it('offers the special threads’ model from the default host’s catalogue', async () => {
     seedSettings();
     const r = renderRN(<ManagerPage />);
     await flush();
@@ -454,7 +454,7 @@ describe('Manager page', () => {
     expect(textOf(findHost(r.root, byTestId('special-thread-model')))).toBe('Opus 5');
   });
 
-  it('special threads’ model: no single machine, and a catalogue failure, are each said', async () => {
+  it('special threads’ model: no single host, and a catalogue failure, are each said', async () => {
     resetHosts();
     reportHost('a');
     reportHost('b');
@@ -545,7 +545,7 @@ describe('Voice page: Speaking (shared, spec/01 § Settings)', () => {
     seedSettings();
     const r = renderRN(<VoicePage />);
     expect(textOf(findHost(r.root, byTestId('voice-settings')))).toContain(
-      'Each machine’s Kokoro default',
+      'Each host’s Kokoro default',
     );
   });
 
@@ -663,7 +663,7 @@ describe('Voice page: frame', () => {
     seedSettings();
     const r = renderRN(<VoicePage />);
     expect(textOf(findHost(r.root, byTestId('voice-devices-no-machines')))).toBe(
-      'Add a machine first',
+      'Add a host first',
     );
   });
 

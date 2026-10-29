@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { setClaudeSettings, settingsUrl, stubSettingsApi, wsSent } from './settingsHarness.js';
 
 // Real-browser e2e for a host's Claude Code settings.json (Settings →
-// Providers) — that machine's own file, edited in place — and its memory
+// Providers) — that host's own file, edited in place — and its memory
 // entries (Settings → Memories): spec/02 § Claude Code settings.
 const PROVIDERS = settingsUrl('providers');
 const EDITOR = 'host-d1-claude-settings';
@@ -71,7 +71,7 @@ test.describe('Settings → Agent / Memories / Hosts → Claude Code settings', 
         hostId: 'd1',
         text: '{"model":"sonnet"}',
       });
-    // Still open: nothing is shown as saved until the machine says so.
+    // Still open: nothing is shown as saved until the host says so.
     await expect(page.getByTestId(`${EDITOR}-json`)).toBeVisible();
     await setClaudeSettings(page, [], { settingsJson: '{"model":"sonnet"}' });
     await expect(page.getByTestId(`${EDITOR}-json`)).toHaveCount(0);

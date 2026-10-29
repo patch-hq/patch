@@ -1,7 +1,7 @@
-// The banner every chat on a spent machine shows. The failure it guards against
+// The banner every chat on a spent host shows. The failure it guards against
 // is the 2026-09-11 one: every account out, every chat silently parked. It must
 // say so when that is true, and — as important — never cry wolf, never invent a
-// reset time, and never speak for a different machine.
+// reset time, and never speak for a different host.
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { render, screen, cleanup, act } from '@testing-library/react';
@@ -126,7 +126,7 @@ describe('OutOfUsageBanner — when credit has run out', () => {
 });
 
 describe('OutOfUsageBanner — when it must stay quiet', () => {
-  it('is silent while any account on the machine still has credit', () => {
+  it('is silent while any account on the host still has credit', () => {
     reportAccounts('host-a', [spent('a', 'work', NOW + 60 * MIN), fine('b', 'Default')]);
     renderBanner();
     expect(screen.queryByTestId('out-of-usage-banner')).toBeNull();
@@ -149,7 +149,7 @@ describe('OutOfUsageBanner — when it must stay quiet', () => {
     expect(screen.queryByTestId('out-of-usage-banner')).toBeNull();
   });
 
-  it('leaves a signed-out machine to the disconnected banner', () => {
+  it('leaves a signed-out host to the disconnected banner', () => {
     reportAccount('host-a', false);
     renderBanner();
     expect(screen.queryByTestId('out-of-usage-banner')).toBeNull();
@@ -180,7 +180,7 @@ describe('OutOfUsageBanner — when it must stay quiet', () => {
     expect(screen.queryByTestId('out-of-usage-banner')).toBeNull();
   });
 
-  it('does not speak for ANOTHER machine being spent', () => {
+  it('does not speak for ANOTHER host being spent', () => {
     reportAccounts('host-a', [fine('a', 'Default')]);
     reportAccounts('host-b', [spent('b', 'work', NOW + 60 * MIN)]);
     renderBanner('host-a');

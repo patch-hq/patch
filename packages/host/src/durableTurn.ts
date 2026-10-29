@@ -22,7 +22,7 @@
 //     a permission prompt, a hook — is delivered again, so the new host asks
 //     it again; one it did answer (`in.jsonl` holds the answer) is not.
 //
-// Nothing here waits for an idle machine: the point is that a restart can
+// Nothing here waits for an idle host: the point is that a restart can
 // happen at any moment.
 
 import { spawn } from 'node:child_process';

@@ -21,7 +21,7 @@
 //     [--mode call]                             session mode (call | …)
 //     [--mic-wav scripts/fixtures/probe-utterance-16k.wav]
 //     [--credential ~/.patch/credential.jwt]
-//     [--json]                                  machine-readable result line
+//     [--json]                                  host-readable result line
 //
 // The fixture WAV is Kokoro speaking "Patch, say the word banana back to me
 // and nothing else." (16 kHz mono PCM16). Regenerate it against a host

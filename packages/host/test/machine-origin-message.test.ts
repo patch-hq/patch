@@ -58,7 +58,7 @@ function userMessages(events: WireEvent[], chatId: string): ChatMessageEvent[] {
   );
 }
 
-describe('machine-origin turn (spec/09 § Whose turn it was)', () => {
+describe('host-origin turn (spec/09 § Whose turn it was)', () => {
   it('an ordinary composer turn carries no origin', async () => {
     const { backend } = recordingBackend();
     const { daemon, folder, events } = setup(backend);
@@ -100,7 +100,7 @@ describe('machine-origin turn (spec/09 § Whose turn it was)', () => {
     expect(msgs[1]?.origin).toBe('machine');
   });
 
-  it('a machine-origin turn that queues behind a running turn still carries it once it runs', async () => {
+  it('a host-origin turn that queues behind a running turn still carries it once it runs', async () => {
     const gates: Array<() => void> = [];
     const backend: SdkBackend = {
       async *run(opts): AsyncIterable<Env> {
@@ -134,7 +134,7 @@ describe('machine-origin turn (spec/09 § Whose turn it was)', () => {
     expect(msgs[1]?.origin).toBe('machine');
   });
 
-  it("a job's fire (jobTrigger) is NOT also a machine-origin turn — it counts as the user's own turn (spec/09)", async () => {
+  it("a job's fire (jobTrigger) is NOT also a host-origin turn — it counts as the user's own turn (spec/09)", async () => {
     const { backend } = recordingBackend();
     const { daemon, folder, events } = setup(backend);
     const chatId = await daemon.spawnChat({ folder });

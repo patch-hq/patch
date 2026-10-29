@@ -1,5 +1,5 @@
 // HostFilesPage — the `{kind:'page', page:'host-files'}` tab's content: a
-// machine's filesystem by absolute path, with no chat in between (spec/14 §
+// host's filesystem by absolute path, with no chat in between (spec/14 §
 // File browser — open anywhere, climb to `/`, Places, host-wide ⌘P, ⌘⇧F).
 // Reached from a chat's tree by climbing above its folder, from the sidebar's
 // Files button when no chat is focused, and by ⌘⇧' / ⌘⇧F. The open file, the

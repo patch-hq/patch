@@ -1,11 +1,11 @@
 // Account-wide usage history and per-chat token totals (Settings → Usage).
-// Same shape as tool-log.ts: no central store, each machine keeps its own
-// probe history and chat logs, and this asks every online machine and merges.
-// NO FALLBACK: a machine that does not answer fails the call, because a
+// Same shape as tool-log.ts: no central store, each host keeps its own
+// probe history and chat logs, and this asks every online host and merges.
+// NO FALLBACK: a host that does not answer fails the call, because a
 // chat list missing one host's chats would look complete.
 //
 // The named periods (day / week / month) are CACHED here. Reading them means
-// every machine scanning its chat logs, which took long enough that the page
+// every host scanning its chat logs, which took long enough that the page
 // opened on "Loading…" every time. So a period's last answer is kept, stamped
 // with when it was read, and handed back at once; a request that finds it
 // older than the TTL gets the cached answer AND starts a fresh read behind
@@ -90,9 +90,7 @@ export function createUsageReader(deps: {
       const timer = setTimeout(() => {
         waiting.delete(requestId);
         reject(
-          new Error(
-            `usage: machine ${hostId} did not answer within ${USAGE_READ_TIMEOUT_MS / 1000}s`,
-          ),
+          new Error(`usage: host ${hostId} did not answer within ${USAGE_READ_TIMEOUT_MS / 1000}s`),
         );
       }, USAGE_READ_TIMEOUT_MS);
       timer.unref();

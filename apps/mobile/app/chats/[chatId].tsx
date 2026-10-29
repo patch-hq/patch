@@ -303,7 +303,7 @@ function ChatDetailBody(): React.ReactElement {
     });
     return () => sub.remove();
   }, []);
-  // Which machine the chat runs on, for the header crumb (spec/15 § Chat detail).
+  // Which host the chat runs on, for the header crumb (spec/15 § Chat detail).
   const hostLabel = usePresenceStore((s) =>
     row?.hostId ? (s.hosts[row.hostId]?.host?.hostName ?? row.hostId).trim() : '',
   );
@@ -2542,7 +2542,7 @@ const TimelineItem = React.memo(function TimelineItem({
   // itself, not the agent: one muted line that says whose words they are.
   // spec/07 § The fast voice and the chat's agent — what a call's fast voice
   // asked the agent; § Call cost — the line a finished call leaves.
-  // A background `patch_agent` finishing: delivered as a machine turn, but
+  // A background `patch_agent` finishing: delivered as a host turn, but
   // nobody typed it — a muted system row (queued or not), not a user bubble.
   if (entry.kind === 'message' && (entry.role ?? 'assistant') === 'user') {
     const agentReturn = parseAgentReturn(entry.content ?? '');
@@ -2835,7 +2835,7 @@ const TimelineItem = React.memo(function TimelineItem({
               )}
             </View>
             <Text testID="delivery-pending" style={{ color: colors.ink3, fontSize: textMin }}>
-              {hostOnline ? 'Sending…' : 'Machine offline — will send when it reconnects'}
+              {hostOnline ? 'Sending…' : 'Host offline — will send when it reconnects'}
             </Text>
           </View>
         ) : null}

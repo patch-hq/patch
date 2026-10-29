@@ -105,7 +105,7 @@ export interface E2EHarness {
   /** ws://127.0.0.1:<port> */
   wsUrl: string;
   /**
-   * The machine this harness registered and boots its host as. Every
+   * The host this harness registered and boots its host as. Every
    * host-addressed request a test makes must name THIS id — the server refuses
    * one it has not registered (spec/04 § Spawn).
    */

@@ -27,12 +27,12 @@ describe('defaultMoveFolder (spec/04 § Moving a chat to another host)', () => {
       '/home/tom/Unite',
     );
   });
-  it('otherwise takes the first folder the machine offers', () => {
+  it('otherwise takes the first folder the host offers', () => {
     expect(defaultMoveFolder('/Users/tom/Unite', ['/home/tom/portfolio', '/home/tom/b'])).toBe(
       '/home/tom/portfolio',
     );
   });
-  it('is null only when the machine offers no folder at all', () => {
+  it('is null only when the host offers no folder at all', () => {
     expect(defaultMoveFolder('/Users/tom/Unite', [])).toBeNull();
   });
 });

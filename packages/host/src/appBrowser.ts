@@ -1,4 +1,4 @@
-// The Patch app's browser, when the app is installed on this machine (spec/02 §
+// The Patch app's browser, when the app is installed on this host (spec/02 §
 // Browser — In the Patch app). The app writes `~/.patch/agent-browser.json`
 // (mode 600): where its DevTools endpoint is while it runs, and how to start it
 // when it does not. The host's agent browser then lives in the app — real tabs
@@ -34,7 +34,7 @@ function alive(pid: number): boolean {
 
 /**
  * The link to the app's browser. `present()` is false while the app has never
- * run on this machine, and the host keeps its own Chromium.
+ * run on this host, and the host keeps its own Chromium.
  */
 export function appBrowserLink(opts: {
   home: string;

@@ -313,7 +313,7 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     label: 'patch_watch',
     category: 'patch',
     description:
-      'Runs a shell command as a durable background task the machine itself owns, holds a real pid for, and can kill.',
+      'Runs a shell command as a durable background task the host itself owns, holds a real pid for, and can kill.',
     params:
       'command: string, description: string, cwd?: string, checkInMinutes?: number, timeoutSec?: number',
   },
@@ -349,7 +349,7 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     name: patchToolId('patch_list_chats'),
     label: 'patch_list_chats',
     category: 'patch',
-    description: 'Lists every chat the user has, across every machine on the account.',
+    description: 'Lists every chat the user has, across every host on the account.',
     params: "archived?: 'only' | 'include'",
   },
   {
@@ -357,7 +357,7 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     label: 'patch_search_chats',
     category: 'patch',
     description:
-      'Searches every chat on the account, on any machine, by name, folder, summary and message text.',
+      'Searches every chat on the account, on any host, by name, folder, summary and message text.',
     params: 'query: string, limit?: number',
   },
   {
@@ -365,7 +365,7 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     label: 'patch_activity',
     category: 'patch',
     description:
-      'Reads the messages the user themselves sent in a time window, across every machine, and optionally the chats they had open.',
+      'Reads the messages the user themselves sent in a time window, across every host, and optionally the chats they had open.',
     params:
       'since: number, until: number, messagesCursor?: number, includeSessions?: boolean, sessionsCursor?: number, limit?: number',
   },
@@ -419,7 +419,7 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     label: 'patch_browser_open',
     category: 'patch',
     description:
-      'Opens a URL in a real browser on the machine and returns a tabId for the other browser tools.',
+      'Opens a URL in a real browser on the host and returns a tabId for the other browser tools.',
     params: "url: string, profile?: 'logged-in' | 'logged-out'",
   },
   {
@@ -501,7 +501,7 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     name: patchToolId('patch_browser_tabs'),
     label: 'patch_browser_tabs',
     category: 'patch',
-    description: 'Lists every open browser tab on this machine.',
+    description: 'Lists every open browser tab on this host.',
     params: '(no params)',
   },
   {
@@ -547,7 +547,7 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     name: patchToolId('patch_browser_downloads'),
     label: 'patch_browser_downloads',
     category: 'patch',
-    description: 'Lists files the browser downloaded, saved on the machine.',
+    description: 'Lists files the browser downloaded, saved on the host.',
     params: 'tabId?: string, waitSeconds?: number',
   },
   {

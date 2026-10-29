@@ -5,7 +5,7 @@
 //   1. env (PATCH_VERSION / PATCH_GIT_SHA / PATCH_BUILT_AT) — the container
 //      build injects these because the image has no .git.
 //   2. `build-info.json` beside the bundled program — how an INSTALLED artifact
-//      knows what it is on a machine with no git and no repo (spec/11 § Host
+//      knows what it is on a host with no git and no repo (spec/11 § Host
 //      installation: "it reports its version").
 //   3. dev only: scripts/version.mjs + `git rev-parse` from the checkout.
 // In production with none of those, we throw rather than invent a number.

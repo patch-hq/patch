@@ -42,7 +42,7 @@ function sessionId(): string {
 describe('TerminalPanel', () => {
   // A registered host, because every host-scoped action names one. With an
   // empty roster there is no right answer and the UI refuses rather than
-  // guessing a machine — which is the behaviour, not a fixture detail.
+  // guessing a host — which is the behaviour, not a fixture detail.
   beforeEach(() => {
     usePresenceStore
       .getState()

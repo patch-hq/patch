@@ -470,7 +470,7 @@ describe('WireTestClient', () => {
 
 // A `patch` CLI build is a reader that routinely LAGS the server it talks to —
 // the server is deployed on its own schedule and the CLI is whatever is
-// installed on that machine. spec/03 § Forward compatibility says such a reader
+// installed on that host. spec/03 § Forward compatibility says such a reader
 // decodes with `decodeCompat`; this client decoded strictly, inside a `ws`
 // 'message' handler with no try/catch, so one added field on `chat.state`
 // turned every `patch logs` / TUI session into an uncaught exception.

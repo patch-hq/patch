@@ -1,4 +1,4 @@
-// Provider accounts belong to the user, not to a machine (spec/10): the banner
+// Provider accounts belong to the user, not to a host (spec/10): the banner
 // reads the server's shared accounts, so which host a chat is on, and which
 // hosts are alive or have reported, never changes the answer.
 

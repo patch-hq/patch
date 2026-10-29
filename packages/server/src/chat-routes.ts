@@ -165,7 +165,7 @@ export interface ChatRoutesDeps {
    * The account's `defaultModel` — the model a spawn that names none runs on.
    *
    * Filled in HERE rather than left off: an omitted `model` used to resolve on
-   * the machine, through its own last-used model, which drifted to whatever
+   * the host, through its own last-used model, which drifted to whatever
    * anyone last ran there. The default is an account decision, so the account's
    * server is where it is applied.
    *
@@ -241,9 +241,9 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid body', issues: parsed.error.issues });
     }
-    // The named machine must be one this account has registered (spec/04
+    // The named host must be one this account has registered (spec/04
     // § Spawn). Refused BEFORE anything is allocated or forwarded, so an
-    // unknown machine leaves no chat behind anywhere.
+    // unknown host leaves no chat behind anywhere.
     const unknownHost = checkRegisteredHost(deps.registry, parsed.data.hostId);
     if (unknownHost) {
       deps.logger.warn(
@@ -303,7 +303,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       );
       let enriched = result.message;
       if (result.code === 'folder_not_found') {
-        enriched = `folder does not exist on the host: ${parsed.data.folder}. Note: paths are checked on the host container/host, not the caller's machine.`;
+        enriched = `folder does not exist on the host: ${parsed.data.folder}. Note: paths are checked on the host container/host, not the caller's host.`;
       }
       // No `chatId` in the failure body: the spawn never created a chat, so
       // surfacing the server-allocated id would be misleading (it is absent
@@ -1761,8 +1761,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
   // host-link (the host owns the project filesystem) and waits up to 5s.
   // `hostId` is REQUIRED (like `/api/models`) and validated against the
   // registered-host list: skills are per-host, so with more than one
-  // registered machine, falling back to "whichever host
-  // last attached" can ask the wrong machine and come back missing a skill
+  // registered host, falling back to "whichever host
+  // last attached" can ask the wrong host and come back missing a skill
   // that is real on the caller's actual host. NO FALLBACK: timeout → 504;
   // host errors map to a typed status.
   const SKILLS_REQUEST_TIMEOUT_MS = 5_000;
@@ -1871,7 +1871,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
         .send({ error: (e as Error).message });
     }
     // The catalogue is PER HOST (spec/02 § Model catalogue), so the caller
-    // must say which. Guessing would offer the wrong machine's models for a
+    // must say which. Guessing would offer the wrong host's models for a
     // chat that is about to be pinned to a different one.
     const q = ModelsQuery.safeParse(req.query);
     if (!q.success) {

@@ -96,7 +96,7 @@ describe('ModelPicker — the catalogue', () => {
     expect(modelsSpy).not.toHaveBeenCalled();
   });
 
-  it('re-reads the catalogue when the host changes — a catalogue is per machine', async () => {
+  it('re-reads the catalogue when the host changes — a catalogue is per host', async () => {
     modelsSpy.mockResolvedValue({ models: [] });
     const r = await renderPicker();
     await actAsync(async () => {

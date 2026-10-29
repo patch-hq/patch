@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 
-// spec/10 § Surface in Settings — Usage: when a machine has no credit left on
+// spec/10 § Surface in Settings — Usage: when a host has no credit left on
 // ANY account, every chat on it says so.
 //
 // The per-chat bubble reaches only the chat you happen to have open. It cannot
@@ -66,7 +66,7 @@ test.describe('out-of-usage banner', () => {
     // the list, and not an average of the two.
     await expect(page.getByTestId('out-of-usage-reset')).toContainText('work resets at');
     await expect(page.getByTestId('out-of-usage-reset')).toContainText(/\(\d+ minutes\)/);
-    // One line, two facts. No machine name, and no sentence explaining what a
+    // One line, two facts. No host name, and no sentence explaining what a
     // limit is — the banner's job is what is out and when it is back.
     await expect(banner).not.toContainText(/nothing can run/i);
   });
@@ -91,7 +91,7 @@ test.describe('out-of-usage banner', () => {
     await expect(page.getByTestId('out-of-usage-banner')).toHaveCount(0);
   });
 
-  test('says nothing when the machine is not signed in — that is the other banner', async ({
+  test('says nothing when the host is not signed in — that is the other banner', async ({
     page,
   }) => {
     await page.goto(HARNESS);
@@ -99,7 +99,7 @@ test.describe('out-of-usage banner', () => {
     await expect(page.getByTestId('out-of-usage-banner')).toHaveCount(0);
   });
 
-  test('appears in a DIFFERENT chat on the same machine, because credit is the machine’s', async ({
+  test('appears in a DIFFERENT chat on the same host, because credit is the host’s', async ({
     page,
   }) => {
     await page.goto(HARNESS);

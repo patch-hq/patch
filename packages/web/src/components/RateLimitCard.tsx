@@ -91,7 +91,7 @@ function RateLimitCardBody({ row }: { row: ChatRow }): JSX.Element {
   const moveToProvider = (target: string): void => {
     const model = getModelCatalog().models.find((m) => harnessForModel(m.id) === target);
     if (!model) {
-      pushError(`No ${target} model is available on this machine to switch to`);
+      pushError(`No ${target} model is available on this host to switch to`);
       return;
     }
     getActiveWs()?.send({ type: 'chat.model_request', chatId: row.chatId, model: model.id });

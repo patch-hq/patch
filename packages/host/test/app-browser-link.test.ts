@@ -20,7 +20,7 @@ function home(): string {
   return h;
 }
 
-it('is not present until the app has run on this machine', () => {
+it('is not present until the app has run on this host', () => {
   const h = home();
   const link = appBrowserLink({ home: h, logger: silent });
   expect(link.present()).toBe(false);

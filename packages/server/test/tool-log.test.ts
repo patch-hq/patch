@@ -1,5 +1,5 @@
 // Settings → Activity ("things agents did"): GET /api/tool-log fans out
-// `patch.tool_log.read.request` to every online machine and merges the
+// `patch.tool_log.read.request` to every online host and merges the
 // answers, same shape as `activity.test.ts`'s `/api/activity`.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -84,7 +84,7 @@ async function setup() {
 }
 
 describe('GET /api/tool-log', () => {
-  it('merges every online machine’s tool-call log, oldest first, each entry carrying its host', async () => {
+  it('merges every online host’s tool-call log, oldest first, each entry carrying its host', async () => {
     const { built, get, answerAll, readRequests } = await setup();
     try {
       const pending = get('since=1000&until=9000');

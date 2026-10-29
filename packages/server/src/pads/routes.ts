@@ -766,7 +766,7 @@ export function registerPadRoutes(app: FastifyInstance, deps: PadRoutesDeps): ()
       if (fromHostId === null) {
         log.error(
           { requestId: event.requestId },
-          'pads bridge: request with no originating machine; cannot reply',
+          'pads bridge: request with no originating host; cannot reply',
         );
         return;
       }

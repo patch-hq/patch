@@ -15,7 +15,7 @@
 //     of last resort when the mirror is missing or started late.
 //
 // The folder is the one thing that changes: the same work usually lives at a
-// different path on another machine (`/Users/tom/wpp/Unite` → `/home/tom/Unite`),
+// different path on another host (`/Users/tom/wpp/Unite` → `/home/tom/Unite`),
 // so every place the old folder is recorded as the session's working directory
 // is rewritten to the new one.
 

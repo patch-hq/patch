@@ -1,17 +1,17 @@
-// The machine's own identity: a stable `hostId` and an Ed25519 keypair.
+// The host's own identity: a stable `hostId` and an Ed25519 keypair.
 //
 // spec/10-auth.md § Host registration — "the host on the new host submits
-// the nonce and its public key". The keypair is minted once, on the machine, and
+// the nonce and its public key". The keypair is minted once, on the host, and
 // kept beside the host's other secrets under the host user's own `~/.patch`.
 //
 // It is what makes re-running the installer idempotent (spec/10 § Host
 // registration: "re-running the installer on a host that is already registered
 // re-uses its stored daemonKey rather than creating a duplicate host"): the
 // hostId is read back from this file rather than minted afresh, so a second
-// install on the same machine is the same machine.
+// install on the same host is the same host.
 //
 // NO FALLBACK: a malformed identity file is an error, not a reason to mint a new
-// identity — silently re-minting would register the machine twice.
+// identity — silently re-minting would register the host twice.
 
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -35,7 +35,7 @@ export function hostIdentityPath(patchHome: string): string {
   return join(patchHome, 'daemon-identity.json');
 }
 
-/** Read the identity if this machine already has one. */
+/** Read the identity if this host already has one. */
 export function readHostIdentity(patchHome: string): HostIdentity | undefined {
   const path = hostIdentityPath(patchHome);
   let raw: string;
@@ -53,7 +53,7 @@ export function readHostIdentity(patchHome: string): HostIdentity | undefined {
       `host identity at ${path} is malformed: ${parsed.error.issues.map((i) => i.message).join(', ')}`,
     );
   }
-  // The public key must actually belong to the private key, or the machine
+  // The public key must actually belong to the private key, or the host
   // would register a key it cannot prove it holds.
   const derived = loadUserIdentity(parsed.data.privateKey);
   if (derived.publicKey !== parsed.data.publicKey) {
@@ -73,7 +73,7 @@ export function readHostIdentity(patchHome: string): HostIdentity | undefined {
 }
 
 /**
- * The machine's identity, minted on first call and stable thereafter.
+ * The host's identity, minted on first call and stable thereafter.
  * Written 0600 beside `daemon.key` / `local.key`.
  */
 export function loadOrCreateHostIdentity(

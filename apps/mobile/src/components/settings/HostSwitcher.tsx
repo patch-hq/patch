@@ -1,5 +1,5 @@
-// Which machine a Settings page is showing (design/settings-redesign: a compact
-// segmented switcher under the title). Most settings are per machine — Claude
+// Which host a Settings page is showing (design/settings-redesign: a compact
+// segmented switcher under the title). Most settings are per host — Claude
 // accounts, the agent's layers, MCP servers, memories, the speaking voice,
 // provider keys — so those pages show ONE host at a time.
 //
@@ -125,7 +125,7 @@ export function HostSwitcher(): React.ReactElement | null {
  * at all, or one that has not reported — else null. Never invented values.
  */
 export function unreportedText(host: HostPresence | null): string | null {
-  if (host === null) return 'No machines yet';
+  if (host === null) return 'No hosts yet';
   if (host.host === null) return `${host.hostId} hasn’t reported yet`;
   return null;
 }

@@ -2,8 +2,8 @@
 # The artifact's installer entry point.
 #
 # It exists in shell, ahead of the bundled installer program, for one reason:
-# an artifact built for another machine must refuse rather than half-install,
-# and on the wrong machine the artifact's own `node` cannot even be executed
+# an artifact built for another host must refuse rather than half-install,
+# and on the wrong host the artifact's own `node` cannot even be executed
 # ("cannot execute binary file"). So the platform check happens here, in the
 # only language every target already has, before anything is run or written.
 #
@@ -32,12 +32,12 @@ esac
 case "$(uname -m)" in
   arm64 | aarch64) ARCH=arm64 ;;
   x86_64 | amd64) ARCH=x64 ;;
-  *) echo "patch install: unsupported machine architecture $(uname -m)" >&2; exit 65 ;;
+  *) echo "patch install: unsupported host architecture $(uname -m)" >&2; exit 65 ;;
 esac
 HOST_TARGET="$OS-$ARCH"
 
 if [ "$ARTIFACT_TARGET" != "$HOST_TARGET" ]; then
-  echo "patch install: this artifact is for $ARTIFACT_TARGET, but this machine is $HOST_TARGET." >&2
+  echo "patch install: this artifact is for $ARTIFACT_TARGET, but this host is $HOST_TARGET." >&2
   echo "Nothing has been installed. Download the artifact for this platform and run that one." >&2
   exit 65
 fi

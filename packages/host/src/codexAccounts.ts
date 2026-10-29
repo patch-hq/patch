@@ -297,7 +297,7 @@ export class CodexAccounts {
     }
     if (this.pending || this.login?.status === 'pending')
       throw new Error('A ChatGPT sign-in is already in progress on this host');
-    // A ChatGPT sign-in is the one account change that has to run on a machine:
+    // A ChatGPT sign-in is the one account change that has to run on a host:
     // Codex does the device flow. Its login is the account's, so it is stored
     // to a file and sent to the server (spec/01 § Settings); an API key and an
     // existing login are added through the server instead.
@@ -614,11 +614,11 @@ export class CodexAccounts {
     });
   }
 
-  /** This machine's own Codex login (`~/.codex`), for adopting as a shared account. */
+  /** This host's own Codex login (`~/.codex`), for adopting as a shared account. */
   async exportMachineLogin(): Promise<SharedCodexAccount> {
     const home = process.env['CODEX_HOME'] ?? join(homedir(), '.codex');
     const authJson = readCodexAuth(home);
-    if (!authJson) throw new Error(`No Codex login on this machine (${home})`);
+    if (!authJson) throw new Error(`No Codex login on this host (${home})`);
     const identity = await codexIdentity(home, true);
     const parsed = JSON.parse(authJson) as { auth_mode?: string };
     return {

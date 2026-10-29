@@ -139,7 +139,7 @@ test.describe('new chat header', () => {
     await page.getByTestId('new-chat-model').click();
     const box = page.getByTestId('model-popup-error');
     await expect(box.locator('span').first()).toHaveText(
-      'Couldn’t load the model list for that machine. Try again in a moment.',
+      'Couldn’t load the model list for that host. Try again in a moment.',
     );
     // The code is nowhere on screen until asked for: collapsed by default.
     const detail = page.getByTestId('model-popup-error-detail');
@@ -388,7 +388,7 @@ test.describe('new chat header', () => {
     await composer.fill('my first message');
     await composer.press('Enter');
 
-    const SENTENCE = 'That folder isn’t on that machine. Pick another project.';
+    const SENTENCE = 'That folder isn’t on that host. Pick another project.';
     const toast = page.locator('.error-toast');
     await expect(toast).toHaveCount(1);
     await expect(toast.locator('.msg')).toHaveText(SENTENCE);
@@ -424,8 +424,8 @@ test.describe('new chat header', () => {
     page,
   }) => {
     const PARAGRAPH =
-      'machine dev-daemon-1 has never read a model catalogue, so it has no last-used model; ' +
-      'name a model on the spawn or connect the backend credential on that machine';
+      'host dev-daemon-1 has never read a model catalogue, so it has no last-used model; ' +
+      'name a model on the spawn or connect the backend credential on that host';
     await page.route('**/api/chats', (r) =>
       r.fulfill({
         status: 400,
@@ -503,7 +503,7 @@ test.describe('new chat header', () => {
     // The composer clears at once (optimistic) and the message shows in the
     // transcript — and never is there a painted frame with the words in
     // neither place. Checked frame by frame rather than against a stopwatch:
-    // "within 1 s" was a statement about the machine, and a loaded runner
+    // "within 1 s" was a statement about the host, and a loaded runner
     // broke it while the app did nothing wrong.
     await expect(composer).toHaveValue('');
     await expect(page.locator('.msg-user')).toContainText(TEXT);

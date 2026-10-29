@@ -211,7 +211,7 @@ describe('POST /api/link-summary', () => {
         settled = true;
       });
       // The host-wait timer is only armed once the request has done real async work, which
-      // can take longer than any fixed number of clock steps on a loaded machine. Keep
+      // can take longer than any fixed number of clock steps on a loaded host. Keep
       // stepping the fake clock, yielding real time between steps, until the request answers.
       const deadline = Date.now() + 20_000;
       while (!settled && Date.now() < deadline) {

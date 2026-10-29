@@ -112,7 +112,7 @@ describe('BatchNotifier', () => {
     expect(store.current()?.members).toEqual(['c1']);
   });
 
-  test('a machine-originated turn does not auto-join', () => {
+  test('a host-originated turn does not auto-join', () => {
     store.start({ type: 'time', minutes: 20 });
     notifier.start();
     feed(spawned('c1'));

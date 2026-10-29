@@ -1363,7 +1363,7 @@ export function ArchivedSection({
         statusSummary: c.statusSummary,
         statusKind: c.statusKind,
         // spec/04 § Hidden — an archived chat may keep the flag; it is where a
-        // machine message starting the chat again returns it to.
+        // host message starting the chat again returns it to.
         hidden: c.hidden,
       }));
       mergeChats(rows);

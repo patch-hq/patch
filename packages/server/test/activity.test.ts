@@ -1,4 +1,4 @@
-// `patch_activity` reads through the chats' own logs on every online machine
+// `patch_activity` reads through the chats' own logs on every online host
 // (spec/06 § Cross-chat toolset): GET /api/activity and the daemon-facing
 // `patch.activity.request` both fan out `patch.activity.read.request` frames,
 // merge the answers and join them against the chat mirror.
@@ -13,7 +13,7 @@ import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
 import { InProcessHostLink } from '../src/host-link.js';
 
-// `d1` is the stand-in link's own machine; the two added hosts join it.
+// `d1` is the stand-in link's own host; the two added hosts join it.
 const ONLINE_HOSTS = ['d1', 'host-a', 'host-b'];
 
 let dir: string;
@@ -111,7 +111,7 @@ async function setup() {
 }
 
 describe('GET /api/activity', () => {
-  it('merges every online machine’s user messages, oldest first, enriched from the mirror, with no chatSessions', async () => {
+  it('merges every online host’s user messages, oldest first, enriched from the mirror, with no chatSessions', async () => {
     const { built, get, answerAll, readRequests } = await setup();
     try {
       const pending = get('since=1000&until=9000');
@@ -258,7 +258,7 @@ describe('GET /api/activity', () => {
     }
   });
 
-  it('clamps the window to 30 days and asks each machine for limit+1 rows', async () => {
+  it('clamps the window to 30 days and asks each host for limit+1 rows', async () => {
     const { built, get, answerAll, readRequests } = await setup();
     try {
       const until = Date.now();
@@ -286,7 +286,7 @@ describe('GET /api/activity', () => {
 });
 
 describe('patch.activity.request (a host’s patch_activity)', () => {
-  it('answers the asking machine with a patch.activity.response', async () => {
+  it('answers the asking host with a patch.activity.response', async () => {
     const { built, hostLink, answerAll } = await setup();
     try {
       hostLink.injectHostEvent({
@@ -446,7 +446,7 @@ describe('chat dwell sessions (opt-in)', () => {
 });
 
 describe('read retry', () => {
-  it('retries a machine that was silent for one attempt, and still fails if it stays silent', async () => {
+  it('retries a host that was silent for one attempt, and still fails if it stays silent', async () => {
     const { createActivityReader } = await import('../src/activity.js');
     const { ChatRegistry } = await import('../src/chat-registry.js');
     const hostLink = new InProcessHostLink();

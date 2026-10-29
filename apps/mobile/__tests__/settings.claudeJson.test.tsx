@@ -1,5 +1,5 @@
 // Settings → Providers → Claude Code settings.json (spec/02 § Claude Code
-// settings): the picked host's own file. The row says whether the machine has
+// settings): the picked host's own file. The row says whether the host has
 // one; Edit opens it full screen; Save sends `host.claude_settings_set` to that
 // host and the screen closes when the host's fresh snapshot shows the file
 // changed — or shows the host's refusal, in its own words.

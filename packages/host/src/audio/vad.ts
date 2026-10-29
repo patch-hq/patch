@@ -163,7 +163,7 @@ export class MockVad implements Vad {
  * tensor input layout (Silero v5: `input` [1, N], `state` [2, 1, 128],
  * `sr` scalar int64) and the `state`/`stateN` recurrent rollover are
  * not exhaustively validated against the upstream model release on this
- * machine. The implementation below follows the documented Silero v5
+ * host. The implementation below follows the documented Silero v5
  * shapes; if the loaded model expects v4 (h/c separately), it will throw
  * at the first `run()` call rather than silently misbehaving. Group 23
  * tightens this alongside the voice-device firmware integration.

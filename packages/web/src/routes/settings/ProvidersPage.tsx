@@ -34,7 +34,7 @@ export function ProvidersPage(): JSX.Element {
 }
 
 /**
- * That host's Claude Code `settings.json`, as the machine holds it. Save sends
+ * That host's Claude Code `settings.json`, as the host holds it. Save sends
  * the text to the host, which writes the file or refuses text that is not a
  * JSON object; the editor closes when the host's report shows the file changed,
  * and stays open with the text while it has not.
@@ -177,7 +177,7 @@ function ProviderKeys(): JSX.Element {
     const { label } = providerKeyInfo(id);
     const ok = await useUiStore.getState().confirm({
       title: `Revoke ${label} key`,
-      message: `Delete the ${label} key from every machine? A machine with one in its own environment goes back to that.`,
+      message: `Delete the ${label} key from every host? A host with one in its own environment goes back to that.`,
       confirmLabel: 'Revoke',
       danger: true,
     });

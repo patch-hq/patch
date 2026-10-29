@@ -134,10 +134,10 @@ const HostRegisterCompleteBody = z
     hostId: z.string().min(1),
     label: z.string().min(1),
     /**
-     * The machine's own Ed25519 public key, base64url (spec/10 § Host
+     * The host's own Ed25519 public key, base64url (spec/10 § Host
      * registration — "the host submits the nonce and its public key"). Minted
-     * once on the machine and kept in `~/.patch/daemon-identity.json`, so the
-     * registry records WHICH machine took this registration slot.
+     * once on the host and kept in `~/.patch/daemon-identity.json`, so the
+     * registry records WHICH host took this registration slot.
      */
     publicKey: z.string().min(1),
   })
@@ -260,7 +260,7 @@ export interface AuthRoutesDeps {
   terminateHost?: (hostId: string) => boolean;
   /**
    * The voice-session HMAC secret every host signs with (spec/13). Handed to
-   * a new machine along with its `daemonKey` when it collects the credential,
+   * a new host along with its `daemonKey` when it collects the credential,
    * so adding a host takes a pairing code and nothing else — the installer
    * used to demand this secret on its command line, where nobody could see it.
    */
@@ -983,15 +983,15 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
       if (!parsed.success) {
         return reply.code(400).send({ error: 'invalid body', issues: parsed.error.issues });
       }
-      // Any number of machines may register against one account (spec/01), so a
-      // second machine is ADDED, not refused. Re-registering an id that is
-      // already live IS refused: silently supplanting a running machine would
+      // Any number of hosts may register against one account (spec/01), so a
+      // second host is ADDED, not refused. Re-registering an id that is
+      // already live IS refused: silently supplanting a running host would
       // decommission it without anyone asking for that. Revoke it first.
       const existing = deps.registry.getDaemonKey(parsed.data.hostId);
       if (existing && existing.revoked !== true) {
         return reply
           .code(409)
-          .send({ error: `a machine is already registered as ${parsed.data.hostId}` });
+          .send({ error: `a host is already registered as ${parsed.data.hostId}` });
       }
       if (!isValidEd25519PublicKey(parsed.data.publicKey)) {
         return reply.code(400).send({ error: 'invalid publicKey' });
@@ -1006,7 +1006,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRoutesDeps): 
       }
       // A slot that already relayed a daemonKey has been REDEEMED. It is kept
       // (the host long-polls it for the credential), so it must be refused
-      // here explicitly — otherwise a second machine could redeem one code.
+      // here explicitly — otherwise a second host could redeem one code.
       // Checked before expiry: "already used" is the truer answer for a code
       // that was used and has since also aged out.
       if (peek.daemonKey !== undefined) {

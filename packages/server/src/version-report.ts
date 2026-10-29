@@ -68,15 +68,15 @@ export function compareVersions(
 }
 
 /**
- * Whether this server can speak to a machine on `version` (spec/11
- * § Deployment). An UNKNOWN version is NOT treated as supported — a machine
+ * Whether this server can speak to a host on `version` (spec/11
+ * § Deployment). An UNKNOWN version is NOT treated as supported — a host
  * that cannot say what it runs is exactly the one most likely to be too old.
  */
 export function hostSupport(version: string | null | undefined): HostSupport {
   if (!version) {
     return {
       supported: false,
-      reason: 'this machine does not report a host version',
+      reason: 'this host does not report a host version',
       remedy: `reinstall the host (this server supports ${MIN_SUPPORTED_HOST_VERSION} and newer)`,
     };
   }
@@ -92,7 +92,7 @@ export function hostSupport(version: string | null | undefined): HostSupport {
     return {
       supported: false,
       reason: `host ${version} is older than this server supports (${MIN_SUPPORTED_HOST_VERSION})`,
-      remedy: 'update this machine (Settings → Hosts → Update)',
+      remedy: 'update this host (Settings → Hosts → Update)',
     };
   }
   return { supported: true };
@@ -188,7 +188,7 @@ export interface DriftInput {
   server: LayerBuild & { serverSha?: string | null };
   web: WebLayer | null;
   daemon: (LayerBuild & { online: boolean }) | null;
-  /** Every registered machine and the build it is on (spec/11 § Version reporting). */
+  /** Every registered host and the build it is on (spec/11 § Version reporting). */
   hosts: VersionReport['hosts'];
   desktop: PublishedLayer | null;
   android: PublishedLayer | null;
@@ -207,11 +207,11 @@ export function computeDrift(input: DriftInput): VersionDrift[] {
   for (const h of online.filter((x) => x.version === null)) {
     drift.push({
       kind: 'host-unstamped',
-      detail: `machine ${h.hostName ?? h.hostId} is connected but reports no build version`,
-      remedy: 'reinstall the host on that machine from a published artifact',
+      detail: `host ${h.hostName ?? h.hostId} is connected but reports no build version`,
+      remedy: 'reinstall the host on that host from a published artifact',
     });
   }
-  // The wire protocol is the compatibility contract (spec/11): a machine
+  // The wire protocol is the compatibility contract (spec/11): a host
   // outside the range this server supports is SHOWN as needing an update rather
   // than left to misbehave quietly against frame shapes it cannot speak.
   for (const h of stamped) {
@@ -219,7 +219,7 @@ export function computeDrift(input: DriftInput): VersionDrift[] {
     if (support.supported) continue;
     drift.push({
       kind: 'host-unsupported',
-      detail: `machine ${h.hostName ?? h.hostId}: ${support.reason}`,
+      detail: `host ${h.hostName ?? h.hostId}: ${support.reason}`,
       remedy: support.remedy,
     });
   }

@@ -97,7 +97,7 @@ describe('RelayService', () => {
 
 describe('a device with only a pairing code', () => {
   it('pairs through the relay and then uses its credential, over the tunnel', async () => {
-    // The owner makes the account and opens a pairing window, as they would on the machine.
+    // The owner makes the account and opens a pairing window, as they would on the host.
     const owner = generateUserKeypair();
     const made = await fetch(`${base}/api/auth/account`, {
       method: 'POST',

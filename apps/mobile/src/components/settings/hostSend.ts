@@ -1,7 +1,7 @@
 // Sending a host-scoped edit from Settings (spec/03 § Host events).
 //
-// Every edit here is addressed to ONE machine, and the server BUFFERS
-// surface→host frames while that machine is down, flushing them when it
+// Every edit here is addressed to ONE host, and the server BUFFERS
+// surface→host frames while that host is down, flushing them when it
 // next connects — so a send to an offline host would look like nothing
 // happened and then apply whenever it reappears. Refuse up front instead,
 // naming which link is down, and report a send that throws. Nothing is ever

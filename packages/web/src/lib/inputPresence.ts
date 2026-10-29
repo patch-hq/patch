@@ -3,10 +3,10 @@
 // by: at the computer, a notification goes to the desktop and the phone stays
 // in the pocket; away from it, the phone.
 //
-// In the desktop app the answer is the whole machine's input idle time, so
-// typing in any app counts, and it says when the machine is locked or asleep.
+// In the desktop app the answer is the whole host's input idle time, so
+// typing in any app counts, and it says when the host is locked or asleep.
 // A browser tab cannot see past its own page unless the user has granted idle
-// detection (Settings → Notifications); then it reports the whole machine too.
+// detection (Settings → Notifications); then it reports the whole host too.
 // Otherwise the answer is input on this page — a narrower question, and the
 // report says which one it answered.
 
@@ -62,7 +62,7 @@ export function idleDetectionSupported(): boolean {
 export type IdleDetectionState = 'unsupported' | 'prompt' | 'granted' | 'denied';
 
 let detector: IdleDetectorLike | null = null;
-/** When the detector last said the machine went idle, backdated by its threshold. */
+/** When the detector last said the host went idle, backdated by its threshold. */
 let idleSince: number | null = null;
 let detectionChanged: (() => void) | null = null;
 
@@ -106,7 +106,7 @@ export async function startIdleDetection(now: () => number = Date.now): Promise<
 /**
  * The report to send now. Rejects when the desktop shell cannot say — a
  * shell that has the method but fails is an error to see, not a reason to
- * quietly report the page's narrower answer as if it were the machine's.
+ * quietly report the page's narrower answer as if it were the host's.
  */
 export async function readInputReport(now: number = Date.now()): Promise<InputReport> {
   const bridge = getDesktopBridge();
@@ -128,7 +128,7 @@ export async function readInputReport(now: number = Date.now()): Promise<InputRe
     if (detector.screenState === 'locked') {
       return { type: 'surface.input', idleMs: pageIdle, scope: 'system', away: 'locked' };
     }
-    // Active means the machine saw input inside the threshold, whatever this page saw.
+    // Active means the host saw input inside the threshold, whatever this page saw.
     const idleMs =
       idleSince !== null
         ? Math.max(0, now - idleSince)

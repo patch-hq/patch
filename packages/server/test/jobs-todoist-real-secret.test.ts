@@ -12,7 +12,7 @@
 //
 // It used to read one deployment's real TODOIST_WEBHOOK_SECRET from deploy/.env.
 // The HMAC check is the same code whatever the key, so that proved nothing more
-// and meant the test could only run on that one machine. What it cannot do is
+// and meant the test could only run on that one host. What it cannot do is
 // have Todoist's servers originate the push (they deliver only to a public
 // HTTPS URL); the payload, the scheme and the check are all real.
 

@@ -54,7 +54,7 @@ describe('loadConfig', () => {
 
   it('defaults audio.relayHost to undefined when NOT co-located (no PATCH_DAEMON_AUDIO_RELAY_HOST needed — voice relays over the host link instead)', () => {
     // `base`'s PATCH_SERVER_WS_URL names a real host ("server"), not loopback —
-    // this host and the server are not provably the same machine, so no
+    // this host and the server are not provably the same host, so no
     // direct address is assumed. Audio still works: the server tunnels the
     // session over this host's own outbound link (spec/03 § Audio relay
     // over the host link).
@@ -127,12 +127,12 @@ describe('loadConfig', () => {
     );
   });
 
-  // spec/11: the host "installs and runs on a machine carrying only an OS".
+  // spec/11: the host "installs and runs on a host carrying only an OS".
   // Voice is an optional component and the artifact ships no STT credential and
   // no TTS weights, so defaulting these to a real backend made every fresh
   // install abort at boot on a missing GROQ_API_KEY. Unset means the component
   // is not installed — not a quiet downgrade to a stub.
-  it('leaves voice off when no backend is named, so a bare machine can boot', () => {
+  it('leaves voice off when no backend is named, so a bare host can boot', () => {
     const cfg = loadConfig({ env: { ...base } });
     expect(cfg.audio.whisperBackend).toBe('off');
     expect(cfg.audio.kokoroBackend).toBe('off');

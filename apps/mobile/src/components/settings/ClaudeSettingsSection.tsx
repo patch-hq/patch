@@ -1,6 +1,6 @@
 // Claude Code's settings.json on one host (Settings → Providers), a plain file
 // edited where it lives (spec/02 § Claude Code settings). The row says whether
-// the machine has one; Edit opens it full screen (app/settings/claude-json.tsx).
+// the host has one; Edit opens it full screen (app/settings/claude-json.tsx).
 // Save sends the text to that host, which writes the file or refuses text that
 // is not a JSON object, in its own words (hostRefusalStore); the editor closes
 // when the host's fresh snapshot shows the file changed.

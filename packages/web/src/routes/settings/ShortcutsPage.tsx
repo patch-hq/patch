@@ -1,5 +1,5 @@
 // Settings → Shortcuts: every keyboard shortcut in one place, each rebindable
-// on this machine (spec/14 § Keyboard shortcuts → Customising). The rows are
+// on this host (spec/14 § Keyboard shortcuts → Customising). The rows are
 // the actions in lib/keymap.ts plus the dictate chord; the keys that only mean
 // something inside one widget (the composer's ↵, a permission card's 1/2/3, Esc
 // on a modal) are listed beneath, fixed.

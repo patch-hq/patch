@@ -616,7 +616,7 @@ export interface ChatEventEntry {
    */
   permissionModeChangeAutomatic?: boolean;
   /**
-   * `chat.error.error.code` on an `error` entry — the machine-readable half of
+   * `chat.error.error.code` on an `error` entry — the host-readable half of
    * a failed turn (`sdk_error`, `claude_oauth_missing`, `daemon_unavailable`…).
    * The human half is `content`.
    */

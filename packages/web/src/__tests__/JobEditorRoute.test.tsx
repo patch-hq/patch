@@ -131,7 +131,7 @@ function defaultRoute(url: string): Response {
 
 /**
  * Pick a folder in the host-grouped picker. The options arrive with the host
- * registry (`GET /api/folders`), so a test has to wait for the machine's group
+ * registry (`GET /api/folders`), so a test has to wait for the host's group
  * before it can choose anything under it.
  */
 async function choosePickerFolder(hostId: string, folder: string): Promise<void> {
@@ -142,7 +142,7 @@ async function choosePickerFolder(hostId: string, folder: string): Promise<void>
   fireEvent.change(sel, { target: { value: pick(hostId, folder) } });
 }
 
-/** Choose "Custom path on <host>…" and type an ad-hoc path on that machine. */
+/** Choose "Custom path on <host>…" and type an ad-hoc path on that host. */
 async function chooseCustomFolder(hostId: string, path: string): Promise<void> {
   await choosePickerFolder(hostId, '__custom__');
   fireEvent.change(await screen.findByTestId('job-spawn-folder-custom'), {
@@ -190,7 +190,7 @@ function makeChatRow(chatId: string, folder: string, name: string | null = null)
 describe('JobEditorRoute (single-page form)', () => {
   // A registered host, because every host-scoped action names one. With an
   // empty roster there is no right answer and the UI refuses rather than
-  // guessing a machine — which is the behaviour, not a fixture detail.
+  // guessing a host — which is the behaviour, not a fixture detail.
   beforeEach(() => {
     usePresenceStore
       .getState()
@@ -1201,7 +1201,7 @@ describe('JobEditorRoute (single-page form)', () => {
       fireEvent.change(screen.getByTestId('job-spawn-prompt'), { target: { value: 'go' } });
       const sel = screen.getByTestId('job-spawn-model') as HTMLSelectElement;
       // The catalogue is fetched for the host the FOLDER picked — models are
-      // per machine, so showing one host's list while pinning another's job is
+      // per host, so showing one host's list while pinning another's job is
       // how the wrong model gets stored.
       await waitFor(() => {
         expect([...sel.options].some((o) => o.value === 'claude-opus-5')).toBe(true);
@@ -2426,7 +2426,7 @@ describe('JobEditorRoute (single-page form)', () => {
     });
 
     it('an edit that has not rendered yet is still what Save sends, even after another field changes', async () => {
-      // A slow machine saved "t" and "…|| exit " for a fully typed command: the
+      // A slow host saved "t" and "…|| exit " for a fully typed command: the
       // editor's change was queued, then another field's handler and Save ran
       // against the render before it.
       const calls: Array<{ body: unknown }> = [];
@@ -4156,8 +4156,8 @@ describe('JobEditorRoute (single-page form)', () => {
   });
 
   it('with no host registry and no chats the picker offers nothing to pick — no host-less folder', async () => {
-    // Every option in this picker belongs to a machine (spec/08 § Action). With
-    // no machine there is nothing to offer, and the placeholder says so rather
+    // Every option in this picker belongs to a host (spec/08 § Action). With
+    // no host there is nothing to offer, and the placeholder says so rather
     // than presenting a path with no host behind it.
     useChatStore.setState({ chats: {} });
     vi.stubGlobal(
@@ -4205,7 +4205,7 @@ describe('JobEditorRoute (single-page form)', () => {
     await waitFor(() => {
       expect(sel.querySelectorAll('optgroup')).toHaveLength(2);
     });
-    // The SAME path under two machines is two distinct choices.
+    // The SAME path under two hosts is two distinct choices.
     expect([...sel.options].filter((o) => o.textContent === '/shared/path')).toHaveLength(2);
     fireEvent.change(screen.getByTestId('job-name'), { target: { value: 'host-carrying' } });
     await choosePickerFolder('d2', '/shared/path');
@@ -4420,7 +4420,7 @@ describe('JobEditorRoute (single-page form)', () => {
     });
 
     it('says why instead of linking when the skill lives outside the job’s folder', async () => {
-      // A machine-wide `~/.claude/skills` skill is reachable by the agent but
+      // A host-wide `~/.claude/skills` skill is reachable by the agent but
       // not by the file browser, which is rooted at the chat's folder.
       vi.stubGlobal(
         'fetch',
@@ -4435,7 +4435,7 @@ describe('JobEditorRoute (single-page form)', () => {
     });
 
     it('says why instead of linking when no chat sits on the action’s (host, folder)', async () => {
-      // The only chat is on another machine, so its folder root is a different
+      // The only chat is on another host, so its folder root is a different
       // filesystem — opening the path through it would read the wrong file.
       useChatStore.setState({
         chats: { c_other: { ...makeChatRow('c_other', SEED), hostId: 'd2' } },
@@ -4671,7 +4671,7 @@ describe('resolveSkillLink', () => {
   });
 
   it('picks the chat on the SAME host when two chats share a folder path', () => {
-    // The same path exists on two machines; only the action's own host can
+    // The same path exists on two hosts; only the action's own host can
     // open the file the job actually runs.
     expect(
       resolveSkillLink({
@@ -4689,13 +4689,13 @@ describe('resolveSkillLink', () => {
 
   // Todoist 6hfrrmrhG6GM3V36 — `paths` undefined (an old host with no
   // `paths` field at all) and `paths` present but missing one skill's key (a
-  // machine-level skill, e.g. chrome-cdp, genuinely absent from THIS host's
-  // fetch) were conflated into the same "machine does not report skill files"
+  // host-level skill, e.g. chrome-cdp, genuinely absent from THIS host's
+  // fetch) were conflated into the same "host does not report skill files"
   // message, which read as the host being incapable even when it answered
   // fine for every other skill.
   it('distinguishes an old host (no paths at all) from a skill missing on this host', () => {
     expect(resolveSkillLink({ ...base, skill: 'chrome-cdp', paths: undefined })).toEqual({
-      reason: 'machine does not report skill files',
+      reason: 'host does not report skill files',
     });
     // `plant` resolves fine from the SAME `paths` map that has no `chrome-cdp`
     // key — proving the fetch succeeded and this one skill simply isn't on
@@ -4769,7 +4769,7 @@ describe('buildFolderGroups — excludes patch’s own thread folders', () => {
 
   it('keeps a host group with no offerable folder at all', () => {
     // The group still has to exist — its Custom path… option is the only way
-    // to aim a job at a machine patch has never been used on.
+    // to aim a job at a host patch has never been used on.
     const groups = buildFolderGroups({
       registry: [{ hostId: 'd1', roots: [], recent: [] }],
       chats: [

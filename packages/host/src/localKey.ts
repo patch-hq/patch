@@ -2,7 +2,7 @@
 // authority of a turn).
 //
 // A turn runs with the host user's full authority, so the control socket is an
-// entry point to that authority. Same-user/same-machine is the real boundary —
+// entry point to that authority. Same-user/same-host is the real boundary —
 // the socket is `0600` — and this key closes the remaining case: another
 // process running as the same user reaching the socket without having been
 // started by the host.
@@ -13,7 +13,7 @@
 // true of a value generated on each start. So there is no env var for it. The
 // host generates one on every start, writes it beside the socket at
 // `~/.patch/local.key` mode 0600, passes the current value to the children it
-// launches, and every other caller on that machine reads the file. The fixed
+// launches, and every other caller on that host reads the file. The fixed
 // path under `~/.patch` is what makes it findable without a discovery step.
 //
 // Rotating on each start is deliberate: a stale key from a previous run stops

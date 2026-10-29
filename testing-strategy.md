@@ -4,13 +4,13 @@ Read by `/e2e-test-run patch` (and any other test-loop tooling). Defines how eac
 
 **`spec/19-testing.md` decides WHICH layer a test belongs in, and is the authority.** This file is the map from those layers onto the actual paths and commands in this repo. If the two disagree, the spec wins and this file is stale.
 
-| Layer       | Lives in                                                                         | Run by                                            |
-| ----------- | -------------------------------------------------------------------------------- | ------------------------------------------------- |
-| Unit        | `*.test.ts(x)` beside the code, or the package's `test/`                         | `pnpm --filter <pkg> test`                        |
-| Contract    | `packages/wire/src/*.test.ts`                                                    | `pnpm --filter @patch/wire test`                  |
-| Integration | `packages/server/test/e2e/`, `packages/web/src/__tests__/*.integration.test.tsx` | `pnpm test:e2e`, `pnpm test:integration`          |
-| Browser     | `packages/web/e2e/*.spec.ts`                                                     | `pnpm --filter @patch/web test:ui`                |
-| Surface     | this file's per-surface sections, plus `testing/`                                | by hand, on a machine with the emulator or device |
+| Layer       | Lives in                                                                         | Run by                                         |
+| ----------- | -------------------------------------------------------------------------------- | ---------------------------------------------- |
+| Unit        | `*.test.ts(x)` beside the code, or the package's `test/`                         | `pnpm --filter <pkg> test`                     |
+| Contract    | `packages/wire/src/*.test.ts`                                                    | `pnpm --filter @patch/wire test`               |
+| Integration | `packages/server/test/e2e/`, `packages/web/src/__tests__/*.integration.test.tsx` | `pnpm test:e2e`, `pnpm test:integration`       |
+| Browser     | `packages/web/e2e/*.spec.ts`                                                     | `pnpm --filter @patch/web test:ui`             |
+| Surface     | this file's per-surface sections, plus `testing/`                                | by hand, on a host with the emulator or device |
 
 `pnpm verify` runs every layer above except Surface, and the release workflow runs `pnpm verify` first. Nothing else is a gate.
 

@@ -60,7 +60,7 @@ export function canonicalizeHostNames(value: unknown): unknown {
       if (k === 'daemonId' && !('hostId' in (v as object))) out.hostId = walk(child);
       else if (k === 'daemonVersion' && !('hostVersion' in (v as object)))
         out.hostVersion = walk(child);
-      // The Manager's machine, once called the home machine. Persisted
+      // The Manager's host, once called the home host. Persisted
       // registries still carry `homeHostId` / `homeDaemonId`; the `.strict()`
       // RegistryFile would reject either and the server would crash-loop on boot.
       else if ((k === 'homeDaemonId' || k === 'homeHostId') && !('managerHostId' in (v as object)))

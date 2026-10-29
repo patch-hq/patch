@@ -63,7 +63,7 @@ test.describe('chat transcript — Skill tool call link', () => {
   });
 
   test('says why rather than offering a link the file browser cannot honour', async ({ page }) => {
-    // A machine-wide `~/.claude/skills` skill is outside the chat folder the
+    // A host-wide `~/.claude/skills` skill is outside the chat folder the
     // browser is rooted at, so there is no link to give. NO FALLBACK — the
     // reason is stated instead of a link that would fail on click.
     await stubSkillsApi(page, {

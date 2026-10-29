@@ -1,8 +1,8 @@
-// DELETE /api/hosts/:hostId — remove a machine from the account
+// DELETE /api/hosts/:hostId — remove a host from the account
 // (Settings → Hosts → "Remove this host").
 //
 // Real sockets both ways: a host dialled in through the real host gate
-// (InboundHostLink), and a surface. Removing the machine has to do four
+// (InboundHostLink), and a surface. Removing the host has to do four
 // things, each of which is checked here rather than trusted: revoke its
 // credential (its next hello is answered `auth.revoked`), close its live link,
 // drop it from every roster, and tell the surfaces `host.removed` so their host
@@ -70,7 +70,7 @@ async function setup(opts: { hostLink?: InProcessHostLink } = {}) {
 }
 
 describe('DELETE /api/hosts/:hostId', () => {
-  it('revokes the machine, closes its link, drops it from the roster and tells surfaces host.removed', async () => {
+  it('revokes the host, closes its link, drops it from the roster and tells surfaces host.removed', async () => {
     const s = await setup();
     const daemon = new WireTestClient({
       url: s.url,
@@ -81,7 +81,7 @@ describe('DELETE /api/hosts/:hostId', () => {
     try {
       await daemon.connect();
       await daemon.waitFor('auth.ok');
-      // The machine reports itself, so the server has a cached description to
+      // The host reports itself, so the server has a cached description to
       // forget.
       daemon.send({
         type: 'host.host',
@@ -110,7 +110,7 @@ describe('DELETE /api/hosts/:hostId', () => {
       expect(res.statusCode).toBe(200);
       expect(res.json().hosts.map((h: { hostId: string }) => h.hostId)).toEqual(['host-a']);
 
-      // The surface is told, naming the machine.
+      // The surface is told, naming the host.
       expect(await removed).toEqual({ type: 'host.removed', hostId: 'host-b' });
       await offline;
       // Its live link is closed…
@@ -130,7 +130,7 @@ describe('DELETE /api/hosts/:hostId', () => {
         await late.close().catch(() => undefined);
       }
 
-      // The machine cannot come back with the key it had: its hello is refused
+      // The host cannot come back with the key it had: its hello is refused
       // as REVOKED, the signal that tells it to wipe that key.
       const again = new WireTestClient({
         url: s.url,
@@ -150,7 +150,7 @@ describe('DELETE /api/hosts/:hostId', () => {
     }
   });
 
-  it('refuses an unknown or already-removed machine with 404, naming it', async () => {
+  it('refuses an unknown or already-removed host with 404, naming it', async () => {
     const s = await setup();
     try {
       const unknown = await s.remove('host-z');
@@ -171,7 +171,7 @@ describe('DELETE /api/hosts/:hostId', () => {
     try {
       expect((await s.remove('host-b', null)).statusCode).toBe(401);
       expect((await s.remove('host-b', 'not-a-jwt')).statusCode).toBe(401);
-      // A host's key is not a surface credential: a machine cannot remove
+      // A host's key is not a surface credential: a host cannot remove
       // another one.
       expect((await s.remove('host-b', await s.daemonKey('host-a'))).statusCode).toBe(401);
       expect(s.registry.registeredHostIds()).toEqual(['host-a', 'host-b']);
@@ -180,7 +180,7 @@ describe('DELETE /api/hosts/:hostId', () => {
     }
   });
 
-  it('greets surfaces with the registry name of a machine that has not reported', async () => {
+  it('greets surfaces with the registry name of a host that has not reported', async () => {
     const s = await setup();
     s.registry.setHostName('host-b', 'hetzner');
     const surface = new WireTestClient({ url: s.url, auth: s.surfaceJwt });
@@ -196,7 +196,7 @@ describe('DELETE /api/hosts/:hostId', () => {
     }
   });
 
-  it('passes the Manager to the next machine when its machine is removed, and tells that machine', async () => {
+  it('passes the Manager to the next host when its host is removed, and tells that host', async () => {
     const hostLink = new InProcessHostLink();
     hostLink.setHostId('host-a');
     hostLink.addOnlineHost('host-b');
@@ -212,7 +212,7 @@ describe('DELETE /api/hosts/:hostId', () => {
 
       expect(hostLink.forgotten).toEqual(['host-b']);
       expect(s.registry.managerHostId()).toBe('host-a');
-      // The machine now running the Manager is told, so its own flag agrees.
+      // The host now running the Manager is told, so its own flag agrees.
       expect(
         hostLink.sent
           .slice(before)
@@ -226,11 +226,11 @@ describe('DELETE /api/hosts/:hostId', () => {
   });
 });
 
-// The older route that can also revoke a machine. It closed EVERY machine's
+// The older route that can also revoke a host. It closed EVERY host's
 // socket, not the one it revoked: `terminateHostSocket()` was wired with no
 // id, which means "all of them".
-describe('POST /api/auth/revoke of one machine', () => {
-  it("closes only that machine's link", async () => {
+describe('POST /api/auth/revoke of one host', () => {
+  it("closes only that host's link", async () => {
     const s = await setup();
     const a = new WireTestClient({
       url: s.url,

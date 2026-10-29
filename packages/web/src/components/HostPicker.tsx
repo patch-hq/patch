@@ -1,9 +1,9 @@
-// The machine control: a switcher, one chip per machine, because there are
-// only ever a handful and a drop-down would hide them. The selected machine
+// The host control: a switcher, one chip per host, because there are
+// only ever a handful and a drop-down would hide them. The selected host
 // carries the accent fill; an offline one is visible but not selectable. No
-// tooltips — the chip reads the machine's name and nothing hides behind it.
+// tooltips — the chip reads the host's name and nothing hides behind it.
 //
-// "Machine" is the word the UI uses for what the protocol calls a host
+// "Host" is the word the UI uses for what the protocol calls a host
 // (spec/14 § Copy).
 
 export interface HostPickerOption {
@@ -24,7 +24,7 @@ export function HostPicker({ hosts, selected, onSelect, testId }: HostPickerProp
     <div
       className="new-chat-quick"
       role="radiogroup"
-      aria-label="Machine"
+      aria-label="Host"
       data-testid={testId}
       data-selected={selected ?? undefined}
     >

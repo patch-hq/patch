@@ -1124,7 +1124,7 @@ describe('PatchWs dispatch — host refusals addressed to no chat (pending-spawn
     fake.receive({
       type: 'chat.error',
       chatId: 'pending-spawn',
-      error: { code: 'invalid_frame', message: 'host.update: machine d1 did not update — reason' },
+      error: { code: 'invalid_frame', message: 'host.update: host d1 did not update — reason' },
       seq: -1,
     });
     expect(useUiStore.getState().errors.some((e) => e.message.includes('did not update'))).toBe(
@@ -1156,7 +1156,7 @@ describe('PatchWs dispatch — host presence', () => {
       connected: true,
       accountEmail: 'a@b.com',
     });
-    // Recorded against the (host, backend) pair it names — another machine's
+    // Recorded against the (host, backend) pair it names — another host's
     // credential is untouched (spec/10 § Backend credentials).
     expect(usePresenceStore.getState().hosts['d1']?.accounts['claude-code']).toEqual({
       hostId: 'd1',
@@ -1191,7 +1191,7 @@ describe('PatchWs dispatch — host presence', () => {
       roots: ['/srv/patch'],
       recent: ['/tmp/x'],
     });
-    // A push for one machine leaves every other machine's list exactly as it is
+    // A push for one host leaves every other host's list exactly as it is
     // — the same path string on two hosts is two different directories.
     fake.receive({ type: 'folders.updated', hostId: 'd1', roots: [], recent: [] });
     expect(usePresenceStore.getState().hosts['d1']?.folders).toEqual({ roots: [], recent: [] });

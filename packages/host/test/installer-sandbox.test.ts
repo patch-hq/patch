@@ -1,6 +1,6 @@
 // The install step that provisions the agent sandbox (installer/sandbox.ts).
 //
-// What matters here is that there is ONE path: a machine finishes this step
+// What matters here is that there is ONE path: a host finishes this step
 // with a sandbox that actually creates a user namespace, or the install stops
 // and names the commands that fix it. There is no "sandbox unavailable" mode
 // to assert, because there is not supposed to be one.
@@ -9,7 +9,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 import { provisionSandbox, SandboxProvisionError } from '../src/installer/sandbox.js';
 
 // The module shells out through node:child_process.execFile; the suite drives
-// it by scripting what each command returns, rather than touching the machine
+// it by scripting what each command returns, rather than touching the host
 // running the tests.
 const calls: string[][] = [];
 let script: (file: string, args: string[]) => { stdout: string } | Error;
@@ -40,13 +40,8 @@ afterEach(() => {
   io.lines = [];
 });
 
-/** A machine where `have` are on PATH, sudo works, and bwrap runs iff `userns`. */
-function machine(opts: {
-  have: string[];
-  sudo?: boolean;
-  userns: boolean;
-  apparmorFixes?: boolean;
-}) {
+/** A host where `have` are on PATH, sudo works, and bwrap runs iff `userns`. */
+function host(opts: { have: string[]; sudo?: boolean; userns: boolean; apparmorFixes?: boolean }) {
   let nsWorks = opts.userns;
   return (file: string, args: string[]): { stdout: string } | Error => {
     if (file === 'sh' && args[0] === '-c') {
@@ -76,16 +71,16 @@ describe('provisionSandbox', () => {
     expect(io.lines.join('\n')).toContain('sandbox-exec');
   });
 
-  it('passes through a linux machine that already has a working sandbox', async () => {
-    script = machine({ have: ['bwrap', 'socat'], userns: true });
+  it('passes through a linux host that already has a working sandbox', async () => {
+    script = host({ have: ['bwrap', 'socat'], userns: true });
     await provisionSandbox('linux', io);
     // Nothing installed, no profile written: only the checks were run.
     expect(calls.some((c) => c[0] === 'sudo' && c.includes('apt-get'))).toBe(false);
     expect(calls.some((c) => c[0] === 'bwrap')).toBe(true);
   });
 
-  it('installs the missing packages when the machine has a package manager', async () => {
-    script = machine({ have: ['apt-get'], userns: true });
+  it('installs the missing packages when the host has a package manager', async () => {
+    script = host({ have: ['apt-get'], userns: true });
     await provisionSandbox('linux', io);
     const install = calls.find((c) => c[0] === 'sudo' && c.includes('apt-get'));
     expect(install).toBeDefined();
@@ -94,14 +89,14 @@ describe('provisionSandbox', () => {
   });
 
   it('grants userns via an AppArmor profile when bwrap cannot make one', async () => {
-    script = machine({ have: ['bwrap', 'socat'], userns: false, apparmorFixes: true });
+    script = host({ have: ['bwrap', 'socat'], userns: false, apparmorFixes: true });
     await provisionSandbox('linux', io);
     expect(calls.some((c) => c.includes('apparmor_parser'))).toBe(true);
     expect(io.lines.join('\n')).toContain('/etc/apparmor.d/bwrap');
   });
 
   it('stops the install, with the commands, when there is no passwordless sudo', async () => {
-    script = machine({ have: ['bwrap', 'socat'], sudo: false, userns: false });
+    script = host({ have: ['bwrap', 'socat'], sudo: false, userns: false });
     await expect(provisionSandbox('linux', io)).rejects.toThrow(SandboxProvisionError);
     await expect(provisionSandbox('linux', io)).rejects.toMatchObject({
       remedy: expect.arrayContaining([expect.stringContaining('apparmor_parser')]),
@@ -109,14 +104,14 @@ describe('provisionSandbox', () => {
   });
 
   it('stops the install when no supported package manager exists', async () => {
-    script = machine({ have: [], userns: false });
+    script = host({ have: [], userns: false });
     await expect(provisionSandbox('linux', io)).rejects.toThrow(/package manager/);
   });
 
   // The failure this whole step exists to prevent: everything "succeeded" and
   // the sandbox still does not work. That must stop the install, not pass.
   it('stops the install when the profile loads and userns still fails', async () => {
-    script = machine({ have: ['bwrap', 'socat'], userns: false, apparmorFixes: false });
+    script = host({ have: ['bwrap', 'socat'], userns: false, apparmorFixes: false });
     await expect(provisionSandbox('linux', io)).rejects.toThrow(/still cannot create/);
   });
 });

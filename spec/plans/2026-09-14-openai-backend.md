@@ -4,13 +4,13 @@ Status: proposed implementation plan. No runtime changes made.
 
 ## User experience
 
-Settings → host → Add account opens an account-type picker: Claude, ChatGPT, OpenAI API key. Accounts remain attached to the machine running the work and appear in the existing credit-source controls.
+Settings → host → Add account opens an account-type picker: Claude, ChatGPT, OpenAI API key. Accounts remain attached to the host running the work and appear in the existing credit-source controls.
 
 For ChatGPT, offer three explicit connection methods:
 
-1. Sign in: browser login when the browser and daemon share a machine; device-code login for remote hosts and mobile. Show the link, copyable code, pending state, cancellation and expiry/retry. Device-code login may require enabling it in ChatGPT security settings; show the actionable provider failure when unavailable.
+1. Sign in: browser login when the browser and daemon share a host; device-code login for remote hosts and mobile. Show the link, copyable code, pending state, cancellation and expiry/retry. Device-code login may require enabling it in ChatGPT security settings; show the actionable provider failure when unavailable.
 2. Find existing login: ask the selected host to detect its existing Codex credential, then show the account identity before adopting it. Never search arbitrary files or browser cookies. No secret is returned to the UI. This searches the selected host, not the phone viewing Settings.
-3. Connect on another machine: where device login is unavailable, use a local Patch daemon's browser sign-in and an explicit authenticated credential transfer to the selected host. Implement only after verifying secure storage and refresh ownership; do not offer a button that depends on manual token extraction.
+3. Connect on another host: where device login is unavailable, use a local Patch daemon's browser sign-in and an explicit authenticated credential transfer to the selected host. Implement only after verifying secure storage and refresh ownership; do not offer a button that depends on manual token extraction.
 
 OpenAI API key is a separate, clearly billed account type. Accept a secret reference/secure submission and validate without generating a paid response. Adding it must not implicitly enable paid overflow from a subscription; expose API models separately as “OpenAI API (paid)” and only use a paid key when that model is explicitly selected. Development verification must not generate paid API responses without an agreed budget.
 

@@ -58,7 +58,7 @@ export interface HostPresence {
    * That host's Claude Code settings.json + memory entries
    * (`claude_settings.list` / `.updated`, spec/02 § Claude Code settings).
    * Absent/null until the host has reported it — Settings then draws no editor
-   * rather than an empty one that would read as "this machine has none".
+   * rather than an empty one that would read as "this host has none".
    */
   claudeSettings?: { settingsJson: string; memories: ClaudeMemoryEntry[] } | null;
 }
@@ -66,7 +66,7 @@ export interface HostPresence {
 /**
  * One backend's credential state on one host, or `null` when that host has not
  * reported it yet. The ONLY way to ask "is Claude connected?" — the question is
- * meaningless without naming a machine, so the answer always takes one.
+ * meaningless without naming a host, so the answer always takes one.
  */
 export function hostAccount(
   hosts: Record<string, HostPresence>,
@@ -112,7 +112,7 @@ interface PresenceState {
   setServerLost(v: boolean): void;
   /**
    * Every registered host, keyed by hostId, seeded from the `auth.ok`
-   * greeting so the list is complete even for machines that are asleep.
+   * greeting so the list is complete even for hosts that are asleep.
    */
   hosts: Record<string, HostPresence>;
   /**
@@ -179,14 +179,14 @@ const anyOnline = (hosts: Record<string, HostPresence>): boolean =>
  * The host a host-scoped action targets when the user has not picked one: the
  * only registered host, else the only online one. With several candidates there
  * is no right answer, so this returns null and the caller refuses
- * — sending a host-scoped edit to a guessed machine is precisely what
+ * — sending a host-scoped edit to a guessed host is precisely what
  * `hostId` exists to prevent.
  */
 export function defaultHostId(hosts: Record<string, HostPresence>): string | null {
   const all = Object.values(hosts);
   if (all.length === 1) return (all[0] as HostPresence).hostId;
-  // Hosts come and go: with several registered, the one live machine is the
-  // unambiguous target; two live machines are a choice, not a guess.
+  // Hosts come and go: with several registered, the one live host is the
+  // unambiguous target; two live hosts are a choice, not a guess.
   const online = all.filter((h) => h.online);
   return online.length === 1 ? (online[0] as HostPresence).hostId : null;
 }

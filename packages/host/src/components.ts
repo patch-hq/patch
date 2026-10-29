@@ -57,7 +57,7 @@ export interface ComponentSpec {
   sentinel: string;
   /**
    * The Python sidecar this component's weights are useless without. Present ⇒
-   * installing the component also builds that sidecar's runtime on this machine
+   * installing the component also builds that sidecar's runtime on this host
    * (spec/02 § Optional components). The artifact carries the sidecar's source
    * and none of its wheels, so this is where the wheels arrive.
    */
@@ -178,7 +178,7 @@ interface InstallRecord {
 const INSTALL_RECORD = 'install-state.json';
 
 /**
- * Where a component's sidecar runtime (its Python venv) lives on this machine:
+ * Where a component's sidecar runtime (its Python venv) lives on this host:
  * `<componentsRoot>/<id>/venv`. One definition, read by the install (which
  * builds it), by the settled state (which checks it) and by the boot gate
  * (which spawns from it), so the three can never disagree about which venv
@@ -191,9 +191,7 @@ export function componentRuntimeDir(componentsRoot: string, componentId: string)
 export class ComponentNotOfferedError extends Error {
   readonly code = 'component_not_offered' as const;
   constructor(componentId: string, offered: readonly string[]) {
-    super(
-      `this machine offers no component with id: ${componentId} (offered: ${offered.join(', ')})`,
-    );
+    super(`this host offers no component with id: ${componentId} (offered: ${offered.join(', ')})`);
     this.name = 'ComponentNotOfferedError';
   }
 }
@@ -403,7 +401,7 @@ export class ComponentManager {
   /**
    * Start (or resume) a component download. Returns immediately; progress
    * streams as `host.component_progress` and the settled state lands on
-   * `host.host`. Throws `ComponentNotOfferedError` for an id this machine
+   * `host.host`. Throws `ComponentNotOfferedError` for an id this host
    * does not offer.
    */
   install(componentId: string): void {

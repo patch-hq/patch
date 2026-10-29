@@ -52,7 +52,7 @@
     {
       "id": "speakers-routing",
       "was": "D3 routed speaker announcements to the home host",
-      "resolution": "they go to the machine the devices are paired with",
+      "resolution": "they go to the host the devices are paired with",
       "commit": "a10f537"
     },
     {

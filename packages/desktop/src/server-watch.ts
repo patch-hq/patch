@@ -1,7 +1,7 @@
-// A host on this machine that has lost its server (spec/12 § Server lost).
+// A host on this host that has lost its server (spec/12 § Server lost).
 //
 // The host dials out, so it is the first to know the server is gone, and the
-// desktop app sits on the same machine. A minute without the server is shown
+// desktop app sits on the same host. A minute without the server is shown
 // rather than left to look like chats silently not working. The check reads
 // the host's own control socket from the main process, so a hidden or
 // throttled window cannot miss it.

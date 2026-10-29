@@ -159,7 +159,7 @@ describe('the question-expiry setting drives the timer', () => {
       // Ten windows is well past any deadline it could have had. Every
       // periodic host timer fires at each step of the fake clock, so a
       // hundred windows took over 5 s on the loaded deploy box and failed the
-      // deploy gate while passing on a fast machine.
+      // deploy gate while passing on a fast host.
       await vi.advanceTimersByTimeAsync(QUESTION_EXPIRY_SECONDS_DEFAULT * 1000 * 10);
       expect(response(events)).toBeUndefined();
       expect(daemon.chatState.get('chat-1')?.activity).toBe('awaiting-permission');

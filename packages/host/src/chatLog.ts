@@ -12,7 +12,7 @@
 // was made — a user message, the end of a turn, a new session, a permission
 // decision, an import. Everything else is fsynced by a 1 s batch timer and on
 // shutdown; a process crash loses nothing either way (the write() already
-// reached the kernel), only a machine crash can lose the last second.
+// reached the kernel), only a host crash can lose the last second.
 //
 // Reads: every replay comes from here (chatRunner's `replayFromLog`).
 
@@ -692,7 +692,7 @@ export class ChatLog {
    *
    * 1. EVERY inline base64 image becomes a blob reference, whatever it weighs.
    *    Images are the single biggest thing in a chat log — 1,507 of them
-   *    across this machine's chats carry 317 MB of base64 — and a transcript
+   *    across this host's chats carry 317 MB of base64 — and a transcript
    *    has no use for the bytes: it renders an `<img>` pointing at the blob.
    *    Their pixel size is read from the header here, once, so the surface can
    *    reserve the right box instead of reflowing when the picture lands.
@@ -812,7 +812,7 @@ export class ChatLog {
   /**
    * The event as replay should SEND it: bulk left in the blob store, never
    * rehydrated. Records written before per-image blobs existed still hold
-   * inline base64 (317 MB of it on this machine), so this runs the same
+   * inline base64 (317 MB of it on this host), so this runs the same
    * externalisation over what it read — the sha is the content, so storing it
    * now is idempotent and the chat is permanently cheaper to open afterwards.
    */

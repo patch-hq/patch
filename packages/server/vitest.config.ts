@@ -5,7 +5,7 @@ export default defineConfig({
     include: ['test/**/*.test.ts'],
     testTimeout: 10_000,
     // I/O-integration suite: some tests wait on real OS filesystem-watch
-    // (chokidar) events, whose latency spikes under machine load and can miss an
+    // (chokidar) events, whose latency spikes under host load and can miss an
     // 8s poll deadline. Retry absorbs those transient misses; a real regression
     // still fails all attempts.
     retry: 2,

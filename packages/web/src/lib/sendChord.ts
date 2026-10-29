@@ -13,8 +13,8 @@
 // which every control in the app goes through.
 //
 // The platform read is deliberately the BROWSER'S. A host's reported
-// `platform` is the machine the agent runs on, and it is routinely a different
-// machine from the one being typed on — reading it prints `⌘` to a Windows user
+// `platform` is the host the agent runs on, and it is routinely a different
+// host from the one being typed on — reading it prints `⌘` to a Windows user
 // whose agent happens to live on a Mac, naming a key that keyboard does not
 // have.
 

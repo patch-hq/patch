@@ -64,7 +64,7 @@ import { appendBroadcast, readPendingBroadcasts } from '../src/specialThreads.js
 // server CHILD PROCESS started through tsx. That is seconds of real work, and
 // the file runs alongside the rest of a 1500-test suite on shared cores, so
 // vitest's 5s default was never a bound on anything real here — it was a bound
-// on how busy the machine was. Tests failed with "MCP server child failed to
+// on how busy the host was. Tests failed with "MCP server child failed to
 // start … signal=SIGTERM" (the timeout killing boot mid-flight) and a different
 // one lost the race on each run. The heavier cases already declared 15-30s
 // individually; this makes the whole file honest about what it does. A genuine
@@ -166,7 +166,7 @@ function makeFolder(): string {
  * published set never changes when a chat opens one. Any test that waits on
  * `folders.updated` for a scratch folder therefore waits forever — which is
  * exactly what happened when the junk filter landed: the fan-out assertion
- * below went from proving the wiring to timing out on every machine.
+ * below went from proving the wiring to timing out on every host.
  *
  * Under the home directory instead: a real path, no dot segment, not scratch.
  */
@@ -420,7 +420,7 @@ async function bootMain(
   } = {},
 ): Promise<Boot> {
   const home = mkdtempSync(join(tmpdir(), 'patch-main-home-'));
-  // The server says which machine runs the Manager; a test boots as that machine
+  // The server says which host runs the Manager; a test boots as that host
   // (remembered from an earlier `host.set_manager`) unless it asks not to.
   const runsManager = envOverrides['__NOT_MANAGER__'] === undefined;
   if (opts.hostJson || runsManager) {
@@ -516,7 +516,7 @@ async function bootMain(
 
   // The host MINTS its own control key on start and writes it beside the
   // socket (spec/02 § Control IPC). Reading it from that file is exactly what
-  // a person running the CLI on this machine does — and it is the only way to
+  // a person running the CLI on this host does — and it is the only way to
   // get it, since nothing outside the host may set it.
   const localKey = readFileSync(join(home, 'local.key'), 'utf8').trim();
 
@@ -655,7 +655,7 @@ describe('src/index.ts main() — full host boot', () => {
       await boot.fakeServer.waitForHello();
 
       const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-main-chat-')));
-      // spec/04 § Spawn — this machine has never read a model catalogue (its
+      // spec/04 § Spawn — this host has never read a model catalogue (its
       // backend is logged out in this boot), so a spawn naming no model is
       // REFUSED saying exactly that rather than guessing a model id.
       const noModelRes = await boot.ready.app.inject({
@@ -681,7 +681,7 @@ describe('src/index.ts main() — full host boot', () => {
       // secrets.list, AND (the loop this test cares about) chat.spawned +
       // chat.state for every chat the host already knows about.
       //
-      // Every one of these names the machine it is about — a host that could
+      // Every one of these names the host it is about — a host that could
       // not state its own id would leave the server unable to say which host a
       // chat lives on, so `daemon_id` is read out of the daemon.key at boot.
       await boot.fakeServer.waitForFrame((e) => e.type === 'host.host' && e.hostId === 'd1');
@@ -1215,7 +1215,7 @@ describe('src/index.ts main() — full host boot', () => {
         url: '/spawn-chat',
         headers: { authorization: `Bearer ${boot.localKey}` },
         // Named: this boot has read no model catalogue, and a model-less spawn
-        // on such a machine is refused rather than guessed (spec/04 § Spawn).
+        // on such a host is refused rather than guessed (spec/04 § Spawn).
         payload: { folder, model: 'claude-opus-5' },
       });
       const { chatId } = spawnRes.json() as { chatId: string };
@@ -1588,7 +1588,7 @@ describe('src/index.ts main() — full host boot', () => {
         url: '/spawn-chat',
         headers: { authorization: `Bearer ${boot.localKey}` },
         // Named: this boot has read no model catalogue, and a model-less spawn
-        // on such a machine is refused rather than guessed (spec/04 § Spawn).
+        // on such a host is refused rather than guessed (spec/04 § Spawn).
         payload: { folder, model: 'claude-opus-5' },
       });
       const { chatId } = spawnRes.json() as { chatId: string };
@@ -2088,7 +2088,7 @@ describe('src/index.ts main() — full host boot', () => {
     rmSync(kokoroModelHome, { recursive: true, force: true });
   });
 
-  it('a machine the server has not given the Manager creates no Manager or Speakers, and does once told it runs it', async () => {
+  it('a host the server has not given the Manager creates no Manager or Speakers, and does once told it runs it', async () => {
     const boot = await bootMain({ __NOT_MANAGER__: '1' });
     try {
       await boot.fakeServer.waitForAuthed();
@@ -2175,7 +2175,7 @@ describe('src/index.ts main() — full host boot', () => {
     }
   }, 30_000);
 
-  it('a machine told to stand in for the Manager creates it, remembers the takeover once, and lets go on release', async () => {
+  it('a host told to stand in for the Manager creates it, remembers the takeover once, and lets go on release', async () => {
     const boot = await bootMain({ __NOT_MANAGER__: '1' });
     try {
       await boot.fakeServer.waitForAuthed();
@@ -2215,7 +2215,7 @@ describe('src/index.ts main() — full host boot', () => {
     }
   }, 30_000);
 
-  it('ignores a takeover addressed to another machine', async () => {
+  it('ignores a takeover addressed to another host', async () => {
     const boot = await bootMain({ __NOT_MANAGER__: '1' });
     try {
       await boot.fakeServer.waitForAuthed();
@@ -2417,23 +2417,23 @@ describe('src/index.ts main() — full host boot', () => {
     }
   });
 
-  // spec/03 § Host events — a host-addressed frame names ONE machine. Reaching
-  // a host that is not that machine means the server mis-routed, and acting
+  // spec/03 § Host events — a host-addressed frame names ONE host. Reaching
+  // a host that is not that host means the server mis-routed, and acting
   // on it would spawn the chat / edit the registry on the wrong filesystem.
-  it('drops a host-addressed frame that names a different machine, and answers a mis-routed spawn', async () => {
+  it('drops a host-addressed frame that names a different host, and answers a mis-routed spawn', async () => {
     const boot = await bootMain();
     try {
       await boot.fakeServer.waitForHello();
       boot.fakeServer.authNow();
       const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-misroute-')));
-      // A folder edit for another machine must leave THIS machine's registry
+      // A folder edit for another host must leave THIS host's registry
       // alone.
       boot.fakeServer.send({
         type: 'host.folder_add',
         hostId: 'some-other-host',
         path: folder,
       });
-      // A spawn for another machine is refused as a frame, because a surface is
+      // A spawn for another host is refused as a frame, because a surface is
       // synchronously waiting on it.
       boot.fakeServer.send({
         type: 'chat.spawn_request',
@@ -2450,14 +2450,14 @@ describe('src/index.ts main() — full host boot', () => {
       expect((err as { error: { message: string } }).error.message).toContain('some-other-host');
       // …and no chat was created for it.
       expect(boot.ready.daemon.list().map((c) => c.chatId)).not.toContain('chat-misrouted-1');
-      // The same spawn naming THIS machine goes through, proving the guard
+      // The same spawn naming THIS host goes through, proving the guard
       // discriminates rather than blanket-refusing.
       boot.fakeServer.send({
         type: 'chat.spawn_request',
         hostId: 'd1',
         chatId: 'chat-routed-1',
         folder,
-        // Named explicitly: this machine has read no catalogue in this boot,
+        // Named explicitly: this host has read no catalogue in this boot,
         // and a model-less spawn there is its own (separately tested) refusal.
         model: 'claude-opus-5',
       });
@@ -2470,7 +2470,7 @@ describe('src/index.ts main() — full host boot', () => {
   });
 
   // spec/02 § Claude Code settings: the host publishes its settings.json text
-  // and memory entries on connect; settings.json is the machine's own file,
+  // and memory entries on connect; settings.json is the host's own file,
   // written only by a `host.claude_settings_set` (a refused edit leaves it
   // alone) and left alone by shared-settings snapshots; memory edits land on
   // disk and republish.
@@ -2509,7 +2509,7 @@ describe('src/index.ts main() — full host boot', () => {
         ],
       });
 
-      // A shared-settings snapshot does not touch the machine's file.
+      // A shared-settings snapshot does not touch the host's file.
       boot.fakeServer.send({
         type: 'settings.snapshot',
         hostId: 'd1',
@@ -2545,7 +2545,7 @@ describe('src/index.ts main() — full host boot', () => {
       expect((refused as { error: { message: string } }).error.message).toContain('JSON object');
       expect(readFileSync(settingsPath, 'utf8')).toBe('{"model":"haiku"}');
 
-      // A set frame naming a different machine is not applied here.
+      // A set frame naming a different host is not applied here.
       boot.fakeServer.send({
         type: 'host.claude_settings_set',
         hostId: 'some-other-host',
@@ -3007,7 +3007,7 @@ describe('src/index.ts main() — full host boot', () => {
     }
   });
 
-  it('refuses a usage refresh naming a backend this machine does not have, naming it', async () => {
+  it('refuses a usage refresh naming a backend this host does not have, naming it', async () => {
     const boot = await bootMain();
     try {
       await boot.fakeServer.waitForHello();
@@ -3088,12 +3088,12 @@ describe('src/index.ts main() — full host boot', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Cross-host `patch.spawn` — this machine as the TARGET (spec/03 § Cross-chat
-// tools). The calling machine's agent is BLOCKED inside its tool call, so this
-// machine has to answer whether it created the chat or refused it. The live
+// Cross-host `patch.spawn` — this host as the TARGET (spec/03 § Cross-chat
+// tools). The calling host's agent is BLOCKED inside its tool call, so this
+// host has to answer whether it created the chat or refused it. The live
 // defect: it answered neither, and the caller was told it had succeeded.
 
-describe('src/index.ts main() — cross-host patch.spawn answers the calling machine', () => {
+describe('src/index.ts main() — cross-host patch.spawn answers the calling host', () => {
   it('answers ok with the new chatId, and really creates the chat', async () => {
     const boot = await bootMain();
     try {
@@ -3156,7 +3156,7 @@ describe('src/index.ts main() — cross-host patch.spawn answers the calling mac
     }
   });
 
-  it('reproduces the live defect: a model-less spawn on a catalogue-less machine answers no_model_catalogue', async () => {
+  it('reproduces the live defect: a model-less spawn on a catalogue-less host answers no_model_catalogue', async () => {
     // Exactly the observed failure — host-logged-out refused
     // `{folder, prompt}` with no model and the caller heard nothing.
     const boot = await bootMain();
@@ -3184,12 +3184,12 @@ describe('src/index.ts main() — cross-host patch.spawn answers the calling mac
     }
   });
 
-  it('as the CALLER: /internal/spawn blocks on the other machine and returns its chatId', async () => {
+  it('as the CALLER: /internal/spawn blocks on the other host and returns its chatId', async () => {
     const boot = await bootMain();
     try {
       await boot.fakeServer.waitForHello();
       boot.fakeServer.authNow();
-      // The roster the server pushes — without it a cross-machine spawn is
+      // The roster the server pushes — without it a cross-host spawn is
       // refused before it reaches the wire.
       boot.fakeServer.send({ type: 'host.online', hostId: 'host-b' });
       // The roster update is an inbound WS frame: let it land before asking.
@@ -3227,7 +3227,7 @@ describe('src/index.ts main() — cross-host patch.spawn answers the calling mac
     }
   });
 
-  it("as the CALLER: the other machine's REFUSAL fails the tool call, naming it", async () => {
+  it("as the CALLER: the other host's REFUSAL fails the tool call, naming it", async () => {
     const boot = await bootMain();
     try {
       await boot.fakeServer.waitForHello();
@@ -3254,7 +3254,7 @@ describe('src/index.ts main() — cross-host patch.spawn answers the calling mac
         ok: false,
         error: {
           code: 'no_model_catalogue',
-          message: 'machine host-b has never read a model catalogue',
+          message: 'host host-b has never read a model catalogue',
         },
       });
       const res = await pending;
@@ -3305,7 +3305,7 @@ describe('src/index.ts main() — cross-host patch.spawn answers the calling mac
     }
   });
 
-  it('ignores a spawn addressed to another machine — no answer, no chat', async () => {
+  it('ignores a spawn addressed to another host — no answer, no chat', async () => {
     const boot = await bootMain();
     try {
       await boot.fakeServer.waitForHello();
@@ -3314,7 +3314,7 @@ describe('src/index.ts main() — cross-host patch.spawn answers the calling mac
       boot.fakeServer.send({
         type: 'patch.spawn',
         sourceChatId: 'mgr-on-host-a',
-        hostId: 'not-this-machine',
+        hostId: 'not-this-host',
         folder: makeFolder(),
         prompt: 'hi',
         requestId: 'req-elsewhere',
@@ -3389,7 +3389,7 @@ describe('src/index.ts main() — cross-host patch_send_to', () => {
     }
   });
 
-  it('as the CALLER: /internal/send-to blocks on the other machine and reports queued', async () => {
+  it('as the CALLER: /internal/send-to blocks on the other host and reports queued', async () => {
     const boot = await bootMain();
     try {
       await boot.fakeServer.waitForHello();
@@ -3425,7 +3425,7 @@ describe('src/index.ts main() — cross-host patch_send_to', () => {
     }
   });
 
-  it("as the CALLER: the owning machine's REFUSAL fails the call, naming it", async () => {
+  it("as the CALLER: the owning host's REFUSAL fails the call, naming it", async () => {
     const boot = await bootMain();
     try {
       await boot.fakeServer.waitForHello();

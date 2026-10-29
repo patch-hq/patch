@@ -1,10 +1,10 @@
-// `patch.spawn.response` — the named machine's own outcome for a cross-host
+// `patch.spawn.response` — the named host's own outcome for a cross-host
 // spawn (spec/03 § Cross-chat tools).
 //
 // Without this frame a cross-host `patch.spawn` was fire-and-forget: a target
 // that REFUSED the spawn reported nothing, and the calling agent's tool call
 // returned success for a chat that did not exist. These assertions are the
-// contract that makes that impossible — the answer names the machine, carries
+// contract that makes that impossible — the answer names the host, carries
 // the request it belongs to, and says out loud whether it worked.
 
 import { describe, it, expect } from 'vitest';
@@ -25,7 +25,7 @@ describe('patch.spawn.response', () => {
     expect(PatchSpawnResponseEvent.safeParse(ok).success).toBe(true);
   });
 
-  it('accepts a refusal carrying the reason the target machine gave', () => {
+  it('accepts a refusal carrying the reason the target host gave', () => {
     const res = PatchSpawnResponseEvent.safeParse({
       type: 'patch.spawn.response',
       requestId: 'req-1',
@@ -38,7 +38,7 @@ describe('patch.spawn.response', () => {
     expect(res.success).toBe(true);
   });
 
-  it('requires the machine that answered — an error that names no host is unactionable', () => {
+  it('requires the host that answered — an error that names no host is unactionable', () => {
     const { hostId: _drop, ...noHost } = ok;
     void _drop;
     const res = PatchSpawnResponseEvent.safeParse(noHost);

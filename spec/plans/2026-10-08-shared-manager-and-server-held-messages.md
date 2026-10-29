@@ -20,8 +20,8 @@ Built:
 - The server is the log of record for each chat's transcript: a finished event is committed to its file before it is broadcast, a resend is not broadcast twice, a contradiction is refused, and the host is told how far the log reaches (`chat.committed`) so its numbering stays above it. It answers replays and history reads from the log while the chat's host is offline.
 - The server keeps each chat's waiting messages and re-sends them to a surface that asks for the chat's replay.
 - Sweep rules: `stalled` once per quiet stretch, one unread sweep message per chat, early wakes debounced against the last sweep.
-- The Manager and Speakers exist only on the home machine, and the server ignores a non-home machine's copy.
-- Moving a chat to another machine and folder, and holding a message for an offline machine until it reconnects, were already in place.
+- The Manager and Speakers exist only on the home host, and the server ignores a non-home host's copy.
+- Moving a chat to another host and folder, and holding a message for an offline host until it reconnects, were already in place.
 
 Not built:
 
@@ -100,7 +100,7 @@ The sweep gate and its decision run once per account, not once per host.
 
 - The server checks the gate (`06-threads-manager-speakers.md` § The sweep) against every chat on every host and, when a sweep is due, asks one online host to run the decision call.
 - A disabled Manager is checked first. A disabled Manager sweeps nothing and makes no model call.
-- The decision call returns its actions to the server. The server delivers nudges and wakes directly to each target chat's host, as machine messages that follow the delivery rules above.
+- The decision call returns its actions to the server. The server delivers nudges and wakes directly to each target chat's host, as host messages that follow the delivery rules above.
 
 Rules that keep it from stacking messages:
 

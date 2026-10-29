@@ -1,6 +1,6 @@
 // Host files (spec/03 § Host files, spec/15 § Host files and terminal).
 //
-// List, read and write files on THIS machine by absolute path, with no chat in
+// List, read and write files on THIS host by absolute path, with no chat in
 // between. The chat-scoped file browser (`patch.files.*`) resolves everything
 // against a chat's pinned folder, so a file outside every chat — a skill in
 // `~/.claude/skills`, a dotfile — could not be reached without opening a chat

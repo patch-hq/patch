@@ -1,7 +1,7 @@
 // Host search (spec/02 § Host search, spec/03 § Host search, spec/14 § File
 // browser — ⌘⇧F search in files).
 //
-// Content search under one absolute directory, on THIS machine, with no chat
+// Content search under one absolute directory, on THIS host, with no chat
 // in between — the search-in-files half of the host-wide file browser
 // (`hostFiles.ts` is the browse/read/write half). A SESSION like a terminal's,
 // not a request/response like `patch.host_files.*`: a search can take a while
@@ -14,7 +14,7 @@
 //
 // Prefers `rg` (ripgrep): it is already gitignore-aware, already skips binary
 // files, and is fast enough that "streamed" rarely means more than one batch
-// for a project-sized tree. A machine with no `rg` on PATH falls back to the
+// for a project-sized tree. A host with no `rg` on PATH falls back to the
 // host's own walk (`files-recursive.ts`'s git-aware listing, read and
 // scanned line by line) — slower, but never a hard requirement.
 //

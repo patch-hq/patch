@@ -147,7 +147,7 @@ export function loadConfig(): ResolvedConfig {
   }
 
   // The host mints the key and writes it beside the socket; a person running
-  // the CLI on that machine READS IT FROM THAT FILE. The env var is honoured
+  // the CLI on that host READS IT FROM THAT FILE. The env var is honoured
   // first only because the host puts it in the environment of the children it
   // starts, which is the same value — it is not a way to configure the key,
   // and nothing but the host may set it (spec/02 § Control IPC).

@@ -1,8 +1,8 @@
 // Server-side host-link bridge for `patch.api.request`: the CLI on a host
-// machine manages patch (settings, keys, accounts, hosts) through the host's
+// host manages patch (settings, keys, accounts, hosts) through the host's
 // link rather than a separately paired credential. The request is run against
 // this server's own REST API as the account, for an allowlist of management
-// paths only; the answer goes back to the machine that asked.
+// paths only; the answer goes back to the host that asked.
 //
 // NO FALLBACK: a path outside the allowlist is refused with 403, never run.
 
@@ -47,10 +47,7 @@ export function attachApiRpcBridge(opts: AttachApiBridgeOptions): () => void {
   return link.onEvent((event: WireEvent, fromHostId: string | null) => {
     if (event.type !== 'patch.api.request') return;
     if (fromHostId === null) {
-      logger.error(
-        { requestId: event.requestId },
-        'api-rpc-bridge: no originating machine; dropping',
-      );
+      logger.error({ requestId: event.requestId }, 'api-rpc-bridge: no originating host; dropping');
       return;
     }
     const reply = (status: number, body?: unknown): void => {

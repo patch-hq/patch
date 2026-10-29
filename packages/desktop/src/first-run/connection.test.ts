@@ -39,7 +39,7 @@ test('a file that is not a connection is an error naming the file, never a silen
   assert.throws(() => readSaved(file), /connection\.json/);
 });
 
-test('the origin the window loads: this machine for local and relayed, the server for remote', () => {
+test('the origin the window loads: this host for local and relayed, the server for remote', () => {
   assert.equal(originOf({ mode: 'local', port: 41234 }), 'http://127.0.0.1:41234');
   assert.equal(originOf({ mode: 'relay', relay: RELAY, port: 41235 }), 'http://127.0.0.1:41235');
   assert.equal(

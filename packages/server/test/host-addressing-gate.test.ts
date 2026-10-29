@@ -1,9 +1,9 @@
 // A1 — the ingress gate for host-addressed frames and routes.
 //
 // spec/03 § Host events, spec/04 § Spawn ("A spawn naming an unregistered host
-// is an error"). A frame or request naming a machine this account has NOT
+// is an error"). A frame or request naming a host this account has NOT
 // registered must be refused with the offending id named — never relayed to
-// whichever host happens to be attached. With one machine online those two
+// whichever host happens to be attached. With one host online those two
 // behaviours are indistinguishable from the outside, which is exactly why the
 // check has to be asserted here rather than inferred from a working spawn.
 
@@ -51,21 +51,21 @@ describe('host-addressing gate', () => {
   }
 
   describe('Registry', () => {
-    it('knows which machines are registered, and drops a revoked one', async () => {
+    it('knows which hosts are registered, and drops a revoked one', async () => {
       const { registry } = await bootstrap();
       expect(registry.registeredHostIds()).toEqual([REGISTERED]);
       expect(registry.isRegisteredHost(REGISTERED)).toBe(true);
       expect(registry.isRegisteredHost(UNREGISTERED)).toBe(false);
       registry.revoke(REGISTERED);
-      // A revoked machine is no longer addressable — a frame naming it must be
-      // refused exactly like one naming a machine that never existed.
+      // A revoked host is no longer addressable — a frame naming it must be
+      // refused exactly like one naming a host that never existed.
       expect(registry.registeredHostIds()).toEqual([]);
       expect(registry.isRegisteredHost(REGISTERED)).toBe(false);
     });
   });
 
   describe('REST', () => {
-    it('POST /api/chats refuses an unregistered machine, naming it, and forwards nothing', async () => {
+    it('POST /api/chats refuses an unregistered host, naming it, and forwards nothing', async () => {
       const { registry, jwt } = await bootstrap();
       const hostLink = new InProcessHostLink();
       const built = await buildAll({ logger: false, registry, hostLink, spawnErrorWaitMs: 50 });
@@ -79,7 +79,7 @@ describe('host-addressing gate', () => {
         expect(res.statusCode).toBe(404);
         expect(res.json()).toEqual({
           error: 'unknown_host',
-          message: `no machine registered with hostId: ${UNREGISTERED}`,
+          message: `no host registered with hostId: ${UNREGISTERED}`,
           hostId: UNREGISTERED,
           knownHosts: [REGISTERED],
         });
@@ -91,7 +91,7 @@ describe('host-addressing gate', () => {
       }
     });
 
-    it('GET /api/models refuses an unregistered machine rather than reading the attached one', async () => {
+    it('GET /api/models refuses an unregistered host rather than reading the attached one', async () => {
       const { registry, jwt } = await bootstrap();
       const hostLink = new InProcessHostLink();
       const built = await buildAll({ logger: false, registry, hostLink });
@@ -109,7 +109,7 @@ describe('host-addressing gate', () => {
       }
     });
 
-    it('GET /api/skills refuses an unregistered machine rather than reading the attached one', async () => {
+    it('GET /api/skills refuses an unregistered host rather than reading the attached one', async () => {
       const { registry, jwt } = await bootstrap();
       const hostLink = new InProcessHostLink();
       const built = await buildAll({ logger: false, registry, hostLink });
@@ -127,7 +127,7 @@ describe('host-addressing gate', () => {
       }
     });
 
-    it('GET /api/folders/browse refuses an unregistered machine', async () => {
+    it('GET /api/folders/browse refuses an unregistered host', async () => {
       const { registry, jwt } = await bootstrap();
       const hostLink = new InProcessHostLink();
       const built = await buildAll({ logger: false, registry, hostLink });
@@ -180,7 +180,7 @@ describe('host-addressing gate', () => {
         'patch.terminal.open',
         { type: 'patch.terminal.open', sessionId: 's1', hostId: UNREGISTERED },
       ],
-    ])('%s naming an unregistered machine is refused, not relayed', async (_label, frame) => {
+    ])('%s naming an unregistered host is refused, not relayed', async (_label, frame) => {
       const { registry, jwt } = await bootstrap();
       const hostLink = new InProcessHostLink();
       const h = await startServer(registry, hostLink);
@@ -194,7 +194,7 @@ describe('host-addressing gate', () => {
           type: 'chat.error',
           error: {
             code: 'host_not_registered',
-            message: `no machine registered with hostId: ${UNREGISTERED}`,
+            message: `no host registered with hostId: ${UNREGISTERED}`,
           },
         });
         expect(hostLink.sent.length).toBe(before);
@@ -204,7 +204,7 @@ describe('host-addressing gate', () => {
       }
     });
 
-    it('relays the same frame when it names the REGISTERED machine', async () => {
+    it('relays the same frame when it names the REGISTERED host', async () => {
       const { registry, jwt } = await bootstrap();
       const hostLink = new InProcessHostLink();
       const h = await startServer(registry, hostLink);

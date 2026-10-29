@@ -275,7 +275,7 @@ export function formatReadAt(at: number | undefined, now: number = Date.now()): 
  * Every account is spent, or nothing is wrong enough to say so.
  *
  * The per-chat bubble speaks for ONE parked turn. This is the other question,
- * and it has a different answer: is there any credit left on this machine AT
+ * and it has a different answer: is there any credit left on this host AT
  * ALL? When there is not, every chat on it is stuck — including the ones nobody
  * is looking at, and the jobs that will fire into it — and that is worth
  * interrupting for in a way a single parked turn is not.
@@ -284,7 +284,7 @@ export function formatReadAt(at: number | undefined, now: number = Date.now()): 
  * The three ways to be uncertain are all treated as "say nothing":
  *
  *   NO CONNECTED ACCOUNT      — that is the disconnected banner's business, and
- *                               two warnings about the same machine is noise.
+ *                               two warnings about the same host is noise.
  *   AN ACCOUNT WITH NO READING — unknown is not spent. At boot, before the
  *                               first probe lands, every account looks like
  *                               this; crying wolf on every cold start is how a
@@ -319,7 +319,7 @@ export function hostOutage(
   for (const a of connected) {
     const scope = blockingScope(a.usage, now);
     // No reading, or a reading that says this account is fine: either way we
-    // cannot claim the machine is out.
+    // cannot claim the host is out.
     if (scope === undefined) return null;
     const window = a.usage?.[scope];
     spent.push({

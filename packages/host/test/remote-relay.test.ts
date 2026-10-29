@@ -1,4 +1,4 @@
-// The calling machine's half of a cross-host patch_peek/patch_history/
+// The calling host's half of a cross-host patch_peek/patch_history/
 // patch_send_to relay — shared by all three, so exercised generically here.
 // See remote-spawn.test.ts for the spawn-specific sibling.
 
@@ -82,7 +82,7 @@ describe('remote relay coordinator', () => {
             targetChatId: 'chat-remote',
             requestId,
           }) as WireEvent,
-        () => 'machine host-b did not answer within 50ms',
+        () => 'host host-b did not answer within 50ms',
       );
       const assertion = expect(p).rejects.toThrow(/did not answer/);
       await vi.advanceTimersByTimeAsync(51);

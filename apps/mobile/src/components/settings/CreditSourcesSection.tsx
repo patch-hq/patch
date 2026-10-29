@@ -7,7 +7,7 @@
 // The accounts are shared settings (spec/01 § Settings): every change is a
 // server write that settles on the committed state, and none needs any
 // particular host online. A ChatGPT sign-in is the one thing that runs on a
-// machine, since Codex does the device flow; its login then goes to the server.
+// host, since Codex does the device flow; its login then goes to the server.
 
 import React from 'react';
 import { Alert, View } from 'react-native';

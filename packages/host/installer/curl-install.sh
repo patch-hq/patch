@@ -1,10 +1,10 @@
 #!/bin/sh
 # Install route 1 (spec/02 § Installation): a single shell command, on any
-# machine that has a shell.
+# host that has a shell.
 #
 #   curl -fsSL https://<server>/api/daemon/install.sh | sh -s -- --code <code>
 #
-# It works out what machine it is on, fetches that machine's artifact from the
+# It works out what host it is on, fetches that host's artifact from the
 # server that served this script, verifies the artifact against the digest in
 # the server's manifest, unpacks it and hands over to the artifact's own
 # installer. It needs nothing but a shell, curl (or wget) and tar.
@@ -34,7 +34,7 @@ esac
 case "$(uname -m)" in
   arm64 | aarch64) ARCH=arm64 ;;
   x86_64 | amd64) ARCH=x64 ;;
-  *) echo "patch install: unsupported machine architecture $(uname -m)" >&2; exit 65 ;;
+  *) echo "patch install: unsupported host architecture $(uname -m)" >&2; exit 65 ;;
 esac
 TARGET="$OS-$ARCH"
 
@@ -52,7 +52,7 @@ fetch() {
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-echo "patch install: this machine is $TARGET; asking $SERVER_URL what to install"
+echo "patch install: this host is $TARGET; asking $SERVER_URL what to install"
 fetch "$SERVER_URL/api/host/host-latest.json" "$TMP/manifest.json"
 
 FILE=$(awk -v t="$TARGET" '

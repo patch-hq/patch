@@ -1,7 +1,7 @@
 // ClaudeDisconnectedBar — shown when no account is connected for the chat's
 // backend. Mobile port of web's ClaudeDisconnectedBanner
 // (packages/web/src/components/ClaudeDisconnectedBanner.tsx), same rule:
-// provider accounts belong to the user, not to a machine (spec/10), so it reads
+// provider accounts belong to the user, not to a host (spec/10), so it reads
 // the server's shared accounts and never names a host, and only on a definite
 // "none connected" — never a guess before the settings have loaded. The state
 // is otherwise invisible (a send just fails), so this is the case where text IS

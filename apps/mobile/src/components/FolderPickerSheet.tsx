@@ -123,7 +123,7 @@ export function FolderPickerSheet({
 
   const startBrowse = (): void => {
     if (actingHost === null) {
-      setError('Choose which machine to browse.');
+      setError('Choose which host to browse.');
       return;
     }
     setBrowsing(true);

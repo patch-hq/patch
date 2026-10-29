@@ -39,7 +39,7 @@ export type TabDescriptor =
   | { kind: 'page'; page: 'job'; jobId: string }
   | { kind: 'page'; page: 'settings' }
   | { kind: 'page'; page: 'files'; chatId: string }
-  /** A machine's filesystem by absolute path, no chat (spec/14 § File browser). Singleton. */
+  /** A host's filesystem by absolute path, no chat (spec/14 § File browser). Singleton. */
   | { kind: 'page'; page: 'host-files' }
   | { kind: 'page'; page: 'pads' }
   | { kind: 'page'; page: 'pad'; padId: string }

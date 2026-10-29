@@ -4,15 +4,15 @@
 // on a named HOST, by absolute path, with no chat in between. The chat-scoped
 // routes (`/api/chats/:id/files`) resolve every path through a chat's pinned
 // folder, which left anything outside a chat (a skill in `~/.claude/skills`, a
-// dotfile, a machine with no chat on it) out of reach.
+// dotfile, a host with no chat on it) out of reach.
 //
 //   GET /api/hosts/:hostId/files?path=<abs>          list (no path = home)
 //   GET /api/hosts/:hostId/files/content?path=<abs>  read
 //   PUT /api/hosts/:hostId/files/content             write {path, content, baseVersion}
 //
 // Auth is exactly the folder browser's: a live surface credential, and a
-// hostId that names a machine this account registered. Each call round-trips
-// one `patch.host_files.request` to that machine. NO FALLBACK: an offline host
+// hostId that names a host this account registered. Each call round-trips
+// one `patch.host_files.request` to that host. NO FALLBACK: an offline host
 // is refused up front (503) rather than left to time out, a timeout is a 504,
 // and every host refusal keeps its own status — a save can never read as
 // having landed when it did not.
@@ -66,12 +66,12 @@ export function registerHostFilesRoutes(app: FastifyInstance, deps: HostFilesRou
     if (event.type !== 'patch.host_files.response') return;
     const w = pending.get(event.requestId);
     if (!w) return;
-    // Only the machine that was asked may answer — a reply naming another host
+    // Only the host that was asked may answer — a reply naming another host
     // is a routing bug, not an answer.
     if (event.hostId !== w.hostId || (from !== null && from !== w.hostId)) {
       deps.logger.warn(
         { requestId: event.requestId, asked: w.hostId, answered: event.hostId, from },
-        'host files: response from a machine that was not asked; ignoring',
+        'host files: response from a host that was not asked; ignoring',
       );
       return;
     }

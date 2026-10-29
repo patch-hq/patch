@@ -2,9 +2,9 @@
 //
 // POST /api/link-summary {url} — fetches the linked page server-side (same
 // SSRF-checked fetch as the link preview), then round-trips one
-// `patch.link_summary.request` to the machine running the Manager, which holds the
+// `patch.link_summary.request` to the host running the Manager, which holds the
 // Claude credential and runs the account's `linkSummaryPrompt` over the page
-// text. NO FALLBACK: an unfetchable page is a 4xx/502, an offline Manager machine
+// text. NO FALLBACK: an unfetchable page is a 4xx/502, an offline Manager host
 // is a 503, a timeout is a 504, and a failed model call is a 502 carrying its
 // reason — never an empty summary.
 
@@ -99,7 +99,7 @@ export function registerLinkSummaryRoutes(app: FastifyInstance, deps: LinkSummar
     if (event.hostId !== w.hostId || (from !== null && from !== w.hostId)) {
       deps.logger.warn(
         { requestId: event.requestId, asked: w.hostId, answered: event.hostId, from },
-        'link summary: response from a machine that was not asked; ignoring',
+        'link summary: response from a host that was not asked; ignoring',
       );
       return;
     }
@@ -141,7 +141,7 @@ export function registerLinkSummaryRoutes(app: FastifyInstance, deps: LinkSummar
     if (hostId === null || !deps.hostLink.isOnline(hostId)) {
       return reply.code(503).send({
         error: 'host_offline',
-        message: hostId === null ? 'no machine is registered' : `${hostId} is offline`,
+        message: hostId === null ? 'no host is registered' : `${hostId} is offline`,
       });
     }
 

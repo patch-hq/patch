@@ -112,7 +112,7 @@ export class AccountUsageTracker {
        * before identity existed ever get one — including the two on this host
        * that were the same account under different labels. Without the
        * backfill, the duplicate guard and the shared-pool failover stay blind
-       * on exactly the machine that needed them.
+       * on exactly the host that needed them.
        */
       rememberOrganization?: (accountId: string, organizationId: string) => void;
       /** Probe override (tests). */

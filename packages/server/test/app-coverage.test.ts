@@ -230,7 +230,7 @@ describe('app.ts — unified error envelope (setErrorHandler safety net)', () =>
 describe('app.ts — /api/daemon/:name (the host install + artifact channel)', () => {
   // spec/11 § Deploy guide: the host artifacts are published to the server,
   // which serves them with a version manifest — the one channel that feeds a
-  // new machine's install command. Unauthenticated by design: a machine with
+  // new host's install command. Unauthenticated by design: a host with
   // nothing on it has no credential yet, and the pairing code is what gates
   // joining the account.
   let dir: string;

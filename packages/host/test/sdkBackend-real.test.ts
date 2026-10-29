@@ -23,10 +23,10 @@ import { dirname, join } from 'node:path';
 
 type QueryFactory = (args: { prompt: unknown; options: Record<string, unknown> }) => unknown;
 
-// `loadSdk` prefers the backend PROVISIONED on the machine (spec/02 § Agent
+// `loadSdk` prefers the backend PROVISIONED on the host (spec/02 § Agent
 // backends) over the ambient package. Point every test at an empty patch home
 // so what it exercises is the mocked bare specifier, and never whatever this
-// developer's own machine happens to have provisioned.
+// developer's own host happens to have provisioned.
 let emptyPatchHome: string;
 let priorPatchHome: string | undefined;
 
@@ -735,7 +735,7 @@ describe('createRealSdkBackend — where the agent backend comes from', () => {
   it('says the ARTIFACT is incomplete when the SDK will not load', () => {
     // The SDK is the host's own library dependency and ships inside the
     // artifact (scripts/build-host.mjs copies it beside host.mjs). It is not
-    // something a machine is expected to have, so "install it on this host" is
+    // something a host is expected to have, so "install it on this host" is
     // the wrong advice — a build that cannot load it is a broken build.
     // Asserted on the source rather than by breaking the import, because the
     // monorepo always resolves it.

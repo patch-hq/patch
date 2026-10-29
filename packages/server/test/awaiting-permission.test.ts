@@ -251,9 +251,9 @@ describe('AwaitingPermissionNotifier', () => {
   // --- Whose turn it was --------------------------------------------------
 
   // spec/09 § Waiting on you. The INVERSE of the chat-completion rule, and
-  // deliberately so: a machine-started run that stops to ask is exactly the run
+  // deliberately so: a host-started run that stops to ask is exactly the run
   // nobody is watching, and it stays stopped until a human answers.
-  test('a machine-started turn blocking on the user DOES notify', () => {
+  test('a host-started turn blocking on the user DOES notify', () => {
     seedRunning('c1', { turnOrigin: 'machine' });
     blockOn('c1', { tool: 'Bash', description: 'Run: echo hi' }, { turnOrigin: 'machine' });
     expect(channels()).toEqual(['desktop', 'push']);

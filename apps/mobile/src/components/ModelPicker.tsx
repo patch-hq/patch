@@ -39,7 +39,7 @@ export function ModelPicker({
   note,
   highlighted = false,
 }: {
-  /** The host this chat will run on — the catalogue is that machine's. */
+  /** The host this chat will run on — the catalogue is that host's. */
   hostId: string | null;
   /** The model in force as an id, or null when there is none to name yet. */
   selected: string | null;

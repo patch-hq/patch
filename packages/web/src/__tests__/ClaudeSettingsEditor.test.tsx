@@ -1,5 +1,5 @@
 // Settings → Providers → Claude Code settings.json: that host's own file, shown
-// as the machine holds it and replaced by a Save that goes to that host
+// as the host holds it and replaced by a Save that goes to that host
 // (spec/02 § Claude Code settings). No shared text, no OS override, no drift,
 // no keep / discard.
 

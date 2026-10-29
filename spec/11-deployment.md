@@ -1,7 +1,7 @@
 # Deployment and installation
 
 The server is deployed once by the operator. A host is installed on each host
-machine, from a signed binary artifact, onto a machine that has only an OS on it.
+host, from a signed binary artifact, onto a host that has only an OS on it.
 § Reference deployment covers the server; § Host installation covers the
 host.
 
@@ -32,8 +32,8 @@ components installed needs headroom for Node and the agent's own work.
 
 ## Topology
 
-One server; one host per host machine. The server and a host commonly share a
-machine, and deploy and update independently.
+One server; one host per host host. The server and a host commonly share a
+host, and deploy and update independently.
 
 ```
    ┌─────────────────────────────────────┐
@@ -44,7 +44,7 @@ machine, and deploy and update independently.
   ┌────────┴─────────┐   ┌────────┴──────────────┐
   │ HOST: rented box │   │ HOST: laptop (behind  │
   │ (often the same  │   │ NAT — no inbound      │
-  │  machine as the  │   │ address needed)       │
+  │  host as the  │   │ address needed)       │
   │  server)         │   │                       │
   │  patch-daemon    │   │  patch-daemon         │
   │   agent backend  │   │   agent backend       │
@@ -180,7 +180,7 @@ x64/arm64. macOS x64 is not a target: `onnxruntime-node` ships no darwin-x64
 binary, and every artifact carries VAD rather than making it an optional
 download, so the target cannot be built. Requirements on the result:
 
-- It installs and runs on a machine carrying only an OS.
+- It installs and runs on a host carrying only an OS.
 - It is signed with the project's signing identity, which is what the self-update path verifies against.
 - It reports its version, which drives the stale-host indicator in Settings →
   Hosts and the host's self-update against the server's manifest.
@@ -236,7 +236,7 @@ GROQ_API_KEY=...             # groq backend; or set it in Settings → Providers
 # (02-host.md § Optional components).
 
 # Agent backend credential (host)
-# Optional. This machine's own login, like `claude login`: adopted as the first
+# Optional. This host's own login, like `claude login`: adopted as the first
 # shared account when the server holds none, and offered for adoption from
 # Settings otherwise. The shared accounts on the server are what turns use.
 # See 10-auth.md.
@@ -276,7 +276,7 @@ version manifest: that one channel feeds both a new host's install command and
 every existing host's self-update (`02-host.md`).
 
 Nothing host-specific is committed. Getting a build to a particular place — a
-remote box, a phone — is machine-specific and lives in a git-ignored
+remote box, a phone — is host-specific and lives in a git-ignored
 `scripts/local/`.
 
 The rules that must hold, wherever it runs:

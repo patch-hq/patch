@@ -417,7 +417,7 @@ describe('ChatCompletionNotifier', () => {
   // spec/09 § Whose turn it was — only a turn the user started rings the
   // doorbell. These are the loops the user flagged: a watcher that wakes itself
   // every few minutes must not push on every tick.
-  test('a machine-started turn settling is silent', () => {
+  test('a host-started turn settling is silent', () => {
     seedRunning('c1');
     feed(state('c1', { activity: 'idle', turnOrigin: 'machine' }));
     expect(routed).toEqual([]);
@@ -523,10 +523,10 @@ describe('ChatCompletionNotifier', () => {
       expect(routed).toEqual([]);
     });
 
-    // The machine-origin rule is checked FIRST and is unconditional, so the
+    // The host-origin rule is checked FIRST and is unconditional, so the
     // option never has to re-state it: a job whose chat self-wakes was already
     // silent on that edge with the option left on.
-    test('the machine-origin rule still stands on a job chat with the option ON', () => {
+    test('the host-origin rule still stands on a job chat with the option ON', () => {
       linkTo('c1', job());
       seedRunning('c1');
       feed(state('c1', { activity: 'idle', turnOrigin: 'machine' }));
@@ -652,7 +652,7 @@ describe('ChatCompletionNotifier', () => {
       expect(routed).toHaveLength(0);
     });
 
-    test('a machine turn failing is silent', () => {
+    test('a host turn failing is silent', () => {
       seedRunning('c1');
       feed(state('c1', { activity: 'errored', turnOrigin: 'machine', lastError: err('boom') }));
       expect(routed).toHaveLength(0);
@@ -750,10 +750,10 @@ describe('ChatCompletionNotifier', () => {
 
   // User: "patch notifications are firing early before a chat has finished". A
   // turn can settle idle while the chat still owes work — a backgrounded task
-  // or sub-agent in flight, or an unmet goal. The follow-up turns are machine
+  // or sub-agent in flight, or an unmet goal. The follow-up turns are host
   // turns, so the ring is deferred to the real finish rather than dropped.
   describe('a chat that settles with work still owed', () => {
-    test('rings once the background tasks are done, on the machine turn that reports them', () => {
+    test('rings once the background tasks are done, on the host turn that reports them', () => {
       seedRunning('c1');
       feed(state('c1', { activity: 'idle', turnOrigin: 'user', backgroundTasks: 2 }));
       expect(routed).toEqual([]);
@@ -797,7 +797,7 @@ describe('ChatCompletionNotifier', () => {
       expect(routed).toEqual([]);
     });
 
-    test('a machine-only chat never starts owing', () => {
+    test('a host-only chat never starts owing', () => {
       seedRunning('c1');
       feed(state('c1', { activity: 'idle', turnOrigin: 'machine', backgroundTasks: 0 }));
       feed(state('c1', { activity: 'idle', turnOrigin: 'machine', backgroundTasks: 0 }));

@@ -16,7 +16,7 @@ type Section = keyof typeof COUNTS;
 const SECTIONS = Object.keys(COUNTS) as Section[];
 // Archived alone carries a keyboard chord in its tooltip (spec/14 § Sidebar
 // item 6 / § Discoverability) — jsdom's platform probe in the unit suite
-// pins the non-Mac wording; this is the same machine here.
+// pins the non-Mac wording; this is the same host here.
 const CHORD: Partial<Record<Section, string>> = { archived: ' (Ctrl+Shift+A)' };
 
 function expectedTitle(id: Section, count: number | null): string {

@@ -27,7 +27,7 @@ const silent = pino({ level: 'silent' });
  * via `onEvent`.
  */
 class WiredHostLink implements HostLink {
-  // Presence names the machine it describes; a stand-in link is still a
+  // Presence names the host it describes; a stand-in link is still a
   // host, so it answers with one.
   hostId(): string | null {
     return 'd1';
@@ -123,8 +123,8 @@ class WiredHostLink implements HostLink {
     return () => this.handlers.delete(h);
   }
 
-  // The multi-machine surface of HostLink (spec/03 § Host events): a stand-in
-  // link still answers per machine, because the hub greets and routes by
+  // The multi-host surface of HostLink (spec/03 § Host events): a stand-in
+  // link still answers per host, because the hub greets and routes by
   // `hostId` rather than by "the host".
   onlineHostIds(): string[] {
     return ['d1'];
@@ -189,7 +189,7 @@ describe('integration: spawn → message → pin → archive → resume → repl
     const user = generateUserKeypair(() => new Uint8Array(32).fill(50));
     const registry = Registry.load(dataDir);
     registry.bootstrapAccount({ keypair: user });
-    // `d1` is the machine every spawn in this file names — it must be REGISTERED,
+    // `d1` is the host every spawn in this file names — it must be REGISTERED,
     // because a host-addressed ingress refuses an unknown id (spec/04 § Spawn).
     registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     registry.upsertSurface({
@@ -322,7 +322,7 @@ describe('integration: spawn → message → pin → archive → resume → repl
     const user = generateUserKeypair(() => new Uint8Array(32).fill(51));
     const registry = Registry.load(dataDir);
     registry.bootstrapAccount({ keypair: user });
-    // `d1` is the machine every spawn in this file names — it must be REGISTERED,
+    // `d1` is the host every spawn in this file names — it must be REGISTERED,
     // because a host-addressed ingress refuses an unknown id (spec/04 § Spawn).
     registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     registry.upsertSurface({
@@ -392,7 +392,7 @@ describe('integration: spawn → message → pin → archive → resume → repl
     const user = generateUserKeypair(() => new Uint8Array(32).fill(52));
     const registry = Registry.load(dataDir);
     registry.bootstrapAccount({ keypair: user });
-    // `d1` is the machine every spawn in this file names — it must be REGISTERED,
+    // `d1` is the host every spawn in this file names — it must be REGISTERED,
     // because a host-addressed ingress refuses an unknown id (spec/04 § Spawn).
     registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     registry.upsertSurface({

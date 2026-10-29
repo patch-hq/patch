@@ -47,7 +47,7 @@ function setup(
     now: () => 1_700_000_000_000,
     generateChatId: () => `chat-${++id}`,
     // Otherwise defaults to reading the REAL ~/.claude.json / ~/.claude/settings.json
-    // of whatever machine runs this suite — a test asserting exact SDK options
+    // of whatever host runs this suite — a test asserting exact SDK options
     // must not depend on that.
     discoverClaudeMcpServers: () => [],
     ...(opts.onRateLimit ? { onRateLimit: opts.onRateLimit } : {}),
@@ -4993,9 +4993,9 @@ describe('Host ChatRunner', () => {
       expect(metaStore.read(chatId)?.lastUserActivity).toBe(clock);
     });
 
-    it('a machine turn (self-wake, job tick, patch_send_to — origin: machine, no fromUser) never bumps lastUserActivity', async () => {
-      const home = mkdtempSync(join(tmpdir(), 'patch-lua-machine-'));
-      const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-lua-machine-folder-')));
+    it('a host turn (self-wake, job tick, patch_send_to — origin: host, no fromUser) never bumps lastUserActivity', async () => {
+      const home = mkdtempSync(join(tmpdir(), 'patch-lua-host-'));
+      const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-lua-host-folder-')));
       mkdirSync(folder, { recursive: true });
       const metaStore = createMetaStore(home);
       let clock = 1_700_000_000_000;

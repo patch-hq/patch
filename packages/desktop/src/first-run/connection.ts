@@ -68,12 +68,12 @@ export function writeSaved(file: string, saved: SavedConnection): void {
   chmodSync(file, 0o600);
 }
 
-/** What the window talks to: this machine for a local or bridged server, else the server itself. */
+/** What the window talks to: this host for a local or bridged server, else the server itself. */
 export function originOf(c: Connection): string {
   return c.mode === 'remote' ? c.server.replace(/\/+$/, '') : `http://127.0.0.1:${c.port}`;
 }
 
-/** The page to load. The credential rides in the fragment: it never leaves the machine. */
+/** The page to load. The credential rides in the fragment: it never leaves the host. */
 export function appUrl(origin: string, credential: string): string {
   return `${origin}/app/#credential=${credential}`;
 }

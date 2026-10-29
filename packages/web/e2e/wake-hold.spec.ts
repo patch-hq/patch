@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 
-// A turn held because its machine is in a dark wake (a Mac with its lid shut)
-// says so in the transcript, names the machine, and goes when the hold ends.
+// A turn held because its host is in a dark wake (a Mac with its lid shut)
+// says so in the transcript, names the host, and goes when the hold ends.
 
 const HARNESS = '/app/dev-harness.html?chat=chat_md';
 
@@ -37,7 +37,7 @@ async function hold(page: Page, since: number | null): Promise<void> {
   }, since);
 }
 
-test('a turn held for a sleeping machine says so, and the notice goes when it wakes', async ({
+test('a turn held for a sleeping host says so, and the notice goes when it wakes', async ({
   page,
 }) => {
   await page.goto(HARNESS);

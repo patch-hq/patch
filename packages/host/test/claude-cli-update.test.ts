@@ -1,4 +1,4 @@
-// The machine's Claude Code stays current (spec/02 § Agent backends).
+// The host's Claude Code stays current (spec/02 § Agent backends).
 //
 // The CLI self-updates only from an interactive session, so a host that exists
 // to run unattended jobs silently stops moving — and a build old enough to be

@@ -240,7 +240,7 @@ describe('TerminalPanel against a real host shell', () => {
   it('with no host registered the panel says so instead of opening anything', async () => {
     usePresenceStore.getState().setHosts([]);
     mount();
-    await waitFor(() => expect(scroll()).toContain('no machine to open a shell on'));
+    await waitFor(() => expect(scroll()).toContain('no host to open a shell on'));
     expect(screen.getByTestId('terminal-restart')).toBeInTheDocument();
     expect(sent).toHaveLength(0);
   });

@@ -335,7 +335,7 @@ describe('api.* — every method call shape', () => {
     await api.folders();
     expect(lastCall()[0]).toBe(`${SERVER_URL}/api/folders`);
   });
-  // Browsing is addressed to ONE machine (spec/04 § Browsing) — the hostId is
+  // Browsing is addressed to ONE host (spec/04 § Browsing) — the hostId is
   // required and always on the query, because it is never the phone's own
   // filesystem being listed.
   it('browseFolders() with no dir', async () => {
@@ -440,7 +440,7 @@ describe('api.uploadAttachment — multipart upload (spec/15 § Composer)', () =
   });
 });
 
-describe('moveChat — continues from the server copy when the old machine refuses', () => {
+describe('moveChat — continues from the server copy when the old host refuses', () => {
   const ok = { ok: true, chatId: 'c1', hostId: 'box', folder: '/f' };
   const bodies = (): unknown[] =>
     fetchMock.mock.calls.map((c) => JSON.parse((c as [string, RequestInit])[1].body as string));

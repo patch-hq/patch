@@ -665,9 +665,9 @@ describe('serverSha comparison (the fix for the fix)', () => {
 });
 
 // spec/11: "the host layer can differ from host to host". Reporting a single
-// `daemon` made drift BETWEEN machines invisible — nine machines on two builds
+// `daemon` made drift BETWEEN hosts invisible — nine hosts on two builds
 // looked like agreement.
-describe('drift between machines', () => {
+describe('drift between hosts', () => {
   const host = (over: Record<string, unknown> = {}) => ({
     hostId: 'host-a',
     hostName: 'host-a',
@@ -678,7 +678,7 @@ describe('drift between machines', () => {
     ...over,
   });
 
-  it('is silent when every connected machine agrees', () => {
+  it('is silent when every connected host agrees', () => {
     const drift = computeDrift(
       baseInput({ hosts: [host(), host({ hostId: 'host-b', hostName: 'beta' })] }),
     );
@@ -694,7 +694,7 @@ describe('drift between machines', () => {
     expect(drift.find((x) => x.kind === 'hosts-disagree')).toBeUndefined();
   });
 
-  it('ignores an OFFLINE machine on an older build — it is not drift until it is back', () => {
+  it('ignores an OFFLINE host on an older build — it is not drift until it is back', () => {
     const drift = computeDrift(
       baseInput({
         hosts: [host(), host({ hostId: 'host-b', version: '0.1.100', online: false })],
@@ -703,13 +703,13 @@ describe('drift between machines', () => {
     expect(drift.find((x) => x.kind === 'hosts-disagree')).toBeUndefined();
   });
 
-  it('reports an unstamped machine as unknown rather than folding it in as agreeing', () => {
+  it('reports an unstamped host as unknown rather than folding it in as agreeing', () => {
     const drift = computeDrift(baseInput({ hosts: [host({ version: null })] }));
     expect(drift.find((x) => x.kind === 'host-unstamped')).toBeDefined();
     expect(drift.find((x) => x.kind === 'hosts-disagree')).toBeUndefined();
   });
 
-  it('shows a machine below the supported range as needing an update', () => {
+  it('shows a host below the supported range as needing an update', () => {
     const drift = computeDrift(baseInput({ hosts: [host({ version: '0.0.9' })] }));
     const d = drift.find((x) => x.kind === 'host-unsupported');
     expect(d).toBeDefined();

@@ -22,7 +22,7 @@ import {
 // NOTE: these exercise the LEGACY seed chain (env → credentials file → Keychain),
 // so they call loadLegacyClaudeOAuth directly. loadClaudeOAuth now consults patch's
 // own store first, and reading the real ~/.patch/claude-oauth.json from a unit test
-// would make results depend on whether the dev machine happens to have a host
+// would make results depend on whether the dev host happens to have a host
 // store — see claude-oauth-store.test.ts for the store's own coverage.
 import { existsSync } from 'node:fs';
 
@@ -46,7 +46,7 @@ describe('Claude OAuth loader', () => {
       getClaudeOAuthToken({
         path: join(fixturesDir, 'claude-good.json'),
         // Point the store at a path that cannot exist so this asserts the legacy
-        // chain, not whatever store the dev machine's host has written.
+        // chain, not whatever store the dev host's host has written.
         storePath: join(fixturesDir, 'no-such-store.json'),
         env: {},
         platform: 'linux' as NodeJS.Platform,

@@ -79,7 +79,7 @@ export function hostControlDisabledReason(
   if (conn === 'offline') return 'Offline — no connection to the server.';
   if (conn === 'unauthenticated') return 'Signed out — link this device again.';
   // WS connected — the only remaining blocker is the host.
-  if (daemon === 'offline') return 'Machine offline — paused until your Hetzner box reconnects.';
-  if (daemon === 'unknown') return 'Connecting to machine…';
+  if (daemon === 'offline') return 'Host offline — paused until your Hetzner box reconnects.';
+  if (daemon === 'unknown') return 'Connecting to host…';
   return null;
 }

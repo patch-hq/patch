@@ -169,7 +169,7 @@ let trayPopover: BrowserWindow | null = null;
 let popoverHiddenAt = 0;
 let voiceOverlay: BrowserWindow | null = null;
 let tray: Tray | null = null;
-/** The agent's browser, when a host on this machine uses it (agent-browser.ts). */
+/** The agent's browser, when a host on this host uses it (agent-browser.ts). */
 let agentBrowser: AgentBrowser | null = null;
 
 /** What a host starts to bring this app up: the .app bundle on a Mac, the binary elsewhere; none for a dev run. */
@@ -1262,7 +1262,7 @@ function registerIpc(): void {
     clipboard.writeImage(img);
   });
   // A view_file card's "open file" / "open folder": the host reported where the
-  // file sits on disk, and this runs on the machine the host runs on. The
+  // file sits on disk, and this runs on the host the host runs on. The
   // renderer only offers these when this Mac's own host owns the chat. A path
   // that is not absolute, or that no longer exists, throws back to the card.
   ipcMain.handle('patch:open-path', async (_e, payload: { path?: unknown; mode?: unknown }) => {
@@ -1462,7 +1462,7 @@ function setupAutoUpdater(): void {
   // The panel reads state and drives checks/installs regardless of whether the
   // updater is functional — that's how the disabledReason reaches the user.
   ipcMain.handle('patch:updater:get-state', () => updaterState);
-  // spec/09 § Presence heuristic — how long since ANY input on this machine, in
+  // spec/09 § Presence heuristic — how long since ANY input on this host, in
   // any app, and whether it is locked or asleep. The server reads it to decide
   // whether the user is at the computer; a change in `away` is pushed to every
   // window so it reports at once instead of at its next 15s tick.

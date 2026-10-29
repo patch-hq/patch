@@ -84,7 +84,7 @@ export function addressWordOrNull(): string | null {
 /**
  * Whether a chat on `model` has a connected provider account to run on. The
  * accounts are the server's, shared by every host (spec/10), so this never
- * names a machine. `null` until the shared state has loaded: not known yet is
+ * names a host. `null` until the shared state has loaded: not known yet is
  * not "signed out".
  */
 export function providerConnectedForModel(

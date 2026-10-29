@@ -6,7 +6,7 @@
 // become (empty transcript above, controls + composer below) rather than a
 // form:
 //
-//   Project — one pill, `<folder> · <machine>`, opening the folder picker sheet
+//   Project — one pill, `<folder> · <host>`, opening the folder picker sheet
 //            (one search box; picking a folder picks its host too).
 //   Model  — the three most recently used models on that host, plus the pill
 //            that opens the host's full live catalogue.
@@ -270,7 +270,7 @@ export default function NewChat(): React.ReactElement {
       return;
     }
     if (id !== hostId) {
-      // A model and a mode belong to the machine they were picked on; neither
+      // A model and a mode belong to the host they were picked on; neither
       // carries over to another.
       setModel(null);
       setMode(null);
@@ -286,7 +286,7 @@ export default function NewChat(): React.ReactElement {
   const sendTarget = async (): Promise<string | null> => {
     const pushError = useUiStore.getState().pushError;
     if (hostId === null) {
-      pushError('Choose which machine to start the chat on.');
+      pushError('Choose which host to start the chat on.');
       return null;
     }
     if (folder === null) {
@@ -427,9 +427,7 @@ export default function NewChat(): React.ReactElement {
           <PickRow label="Permissions">
             <Chip
               testID="new-chat-permission-mode"
-              label={
-                effectiveMode === null ? 'Machine default' : permissionModeLabel(effectiveMode)
-              }
+              label={effectiveMode === null ? 'Host default' : permissionModeLabel(effectiveMode)}
               selected={false}
               onPress={() => setModeMenuOpen(true)}
               icon={

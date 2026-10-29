@@ -20,7 +20,7 @@ const msg = (
   content: string,
   createdAt: number,
   // spec/06 § patch_activity — the same flags `chatRunner.ts` persists for a
-  // job fire / hook resubmit / goal resubmit / machine-started turn.
+  // job fire / hook resubmit / goal resubmit / host-started turn.
   extra?: Record<string, unknown>,
 ) =>
   JSON.stringify({
@@ -110,7 +110,7 @@ describe('readUserMessages', () => {
     ]);
   });
 
-  it("reports a restart-resume 'Carry on' as machine even though it keeps the turn's own origin", () => {
+  it("reports a restart-resume 'Carry on' as host even though it keeps the turn's own origin", () => {
     writeLog('c1', [
       msg('c1', 'user', 'Carry on', 1000, {
         retryOfSeq: 0,
@@ -126,7 +126,7 @@ describe('readUserMessages', () => {
     ]);
   });
 
-  it('a goal/hook resubmit that also carries origin: machine is reported by the more specific kind', () => {
+  it('a goal/hook resubmit that also carries origin: host is reported by the more specific kind', () => {
     writeLog('c1', [
       msg('c1', 'user', 'goal resubmit', 1000, {
         goalTrigger: { reason: 'not yet' },

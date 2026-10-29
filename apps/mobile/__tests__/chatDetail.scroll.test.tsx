@@ -254,7 +254,7 @@ describe('reveal — hidden until the transcript has gone quiet', () => {
     // Fake timers for THIS test only. It is the one case in the file that
     // asserts the reveal has NOT happened yet, so it depends on the clock
     // staying INSIDE an 80ms window — a 20ms margin against a real sleep,
-    // which a loaded machine overshoots. It failed a deploy exactly that way
+    // which a loaded host overshoots. It failed a deploy exactly that way
     // (deploy-2026-10-06T10-21-59: "expected opacity 1 to match 0") while
     // passing every time in isolation. The rest of the file waits for the
     // reveal to have happened, which only ever gets safer under load.

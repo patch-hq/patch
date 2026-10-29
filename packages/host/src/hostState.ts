@@ -1,8 +1,8 @@
-// Persisted per-machine state (spec/02 § Host identity, § Permission mode,
+// Persisted per-host state (spec/02 § Host identity, § Permission mode,
 // § Agent backends; spec/04 § Folders).
 //
-// Everything a surface can CHANGE about a machine has to outlive that
-// machine's process, or the change silently reverts the next time the host
+// Everything a surface can CHANGE about a host has to outlive that
+// host's process, or the change silently reverts the next time the host
 // restarts — indistinguishable from an edit that never saved. One small JSON
 // file at `<patchHome>/host.json`, written atomically (temp + fsync + rename).
 //
@@ -29,19 +29,19 @@ const HostStateFile = z
   .object({
     /** User-editable label (`host.rename`). Absent until renamed. */
     hostName: z.string().min(1).optional(),
-    /** This machine's DEFAULT permission mode (`host.settings`). */
+    /** This host's DEFAULT permission mode (`host.settings`). */
     permissionModeDefault: PermissionMode.optional(),
-    /** Does the server have this machine running the Manager (`host.set_manager`)? */
+    /** Does the server have this host running the Manager (`host.set_manager`)? */
     runsManager: z.boolean().optional(),
     /**
-     * The last Manager takeover this machine acted on (`host.manager_adopt` /
+     * The last Manager takeover this host acted on (`host.manager_adopt` /
      * `host.manager_release`), so the same one told twice is acted on once.
      */
     managerEpoch: z.number().int().nonnegative().optional(),
     /** What the Manager is to be told with its next message, until it has been. */
     managerHandoff: z.string().optional(),
     /**
-     * The model this machine's next model-less spawn runs on — the ACCOUNT's
+     * The model this host's next model-less spawn runs on — the ACCOUNT's
      * `defaultModel`, mirrored down by the server (`host.settings`).
      *
      * Persisted so a host that restarts before the server's first push still
@@ -52,7 +52,7 @@ const HostStateFile = z
     defaultModel: z.string().min(1).optional(),
     /** User-designated project roots (`host.folder_add` / `host.folder_remove`). */
     folderRoots: z.array(z.string().min(1)).optional(),
-    /** Optional components installed on this machine, by id. */
+    /** Optional components installed on this host, by id. */
     installedComponents: z.array(z.string().min(1)).optional(),
     /**
      * Currently selected Kokoro TTS voice (`host.settings` → `kokoroVoice`).
@@ -197,7 +197,7 @@ const HostStateFile = z
   // DIFFERENT VERSION of this host — a rollback, or a field that has since
   // been retired — and it is stripped with a warning rather than refused.
   //
-  // It used to be strict, and that took the whole machine down: retiring
+  // It used to be strict, and that took the whole host down: retiring
   // `lastUsedModel` meant every host on a host whose `host.json` still
   // carried it threw `Unrecognized key(s)` inside the HostStateStore
   // constructor, before anything was listening, and crash-looped. A field a

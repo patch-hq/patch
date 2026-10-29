@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 // Recent-folder selection rule (spec/04 § Folders) on the job editor's real
 // folder select. The harness seeds both special threads on their thread
 // working dirs alongside real projects, so an unfiltered picker offers patch's
-// own bookkeeping directories as machines-and-folders to aim a job at.
+// own bookkeeping directories as hosts-and-folders to aim a job at.
 //
 // A real browser rather than jsdom because a `<select>`'s `<optgroup>` options
 // are what the user actually opens, and the list is assembled from two sources
@@ -85,7 +85,7 @@ test.describe('job editor folder select excludes patch’s own thread folders', 
     ).toHaveCount(0);
 
     // The host's group survives regardless — Custom path… is how a job reaches
-    // a machine patch has no project history on.
+    // a host patch has no project history on.
     await expect(select.locator(`option[value='${value('d1', '__custom__')}']`)).toHaveCount(1);
   });
 

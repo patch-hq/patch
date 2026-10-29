@@ -324,7 +324,7 @@ export type ComputerUseHost = {
   tabs?: number;
   lastStoppedAt?: number;
   closed?: number;
-  /** Present when the machine did not answer. */
+  /** Present when the host did not answer. */
   error?: string;
 };
 
@@ -368,7 +368,7 @@ export const api = {
     request<PadView>(`/api/pads/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
   deletePad: (id: string) =>
     request<null>(`/api/pads/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  /** Settings → Computer use: is an agent driving each machine's browser. */
+  /** Settings → Computer use: is an agent driving each host's browser. */
   computerUse: () => request<{ hosts: ComputerUseHost[] }>('/api/browser-use'),
   stopComputerUse: (hostId: string) =>
     request<ComputerUseHost>(`/api/browser-use/${encodeURIComponent(hostId)}/stop`, {
@@ -478,7 +478,7 @@ export const api = {
     try {
       return await move(false);
     } catch (e) {
-      // The old machine would not let go of the chat (mid-turn, a timer armed,
+      // The old host would not let go of the chat (mid-turn, a timer armed,
       // a Codex session): continue from the server's copy, which has no such limit.
       const code = e instanceof ApiError ? (e.body as { error?: unknown } | null)?.error : null;
       if (code === 'busy' || code === 'unsupported') return move(true);
@@ -836,7 +836,7 @@ export const api = {
   // live socket. The new-chat + job-editor pickers read it via folderStore.
   /**
    * Every host's published registry, grouped by host (spec/04 § Folders). A
-   * flat union would make two machines' identical paths indistinguishable.
+   * flat union would make two hosts' identical paths indistinguishable.
    */
   folders: () =>
     request<{ hosts: Array<{ hostId: string; roots: string[]; recent: string[] }> }>(
@@ -857,7 +857,7 @@ export const api = {
       }`,
     ),
   // Host files (spec/03 § Host files, spec/15 § Host files and terminal): a
-  // machine's filesystem by ABSOLUTE path, with no chat in between. No `path`
+  // host's filesystem by ABSOLUTE path, with no chat in between. No `path`
   // lists the host user's home, and the answer says where that is.
   hostFilesList: (hostId: string, path?: string) =>
     request<{ path: string; parent: string | null; entries: HostFileEntry[] }>(

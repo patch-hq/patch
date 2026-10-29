@@ -1,4 +1,4 @@
-// Cross-chat tools across machines (spec/03 § Cross-chat tools).
+// Cross-chat tools across hosts (spec/03 § Cross-chat tools).
 //
 // "A cross-chat call whose target is on the calling chat's own host is
 // short-circuited in-process. One naming another host goes over these frames,
@@ -6,31 +6,31 @@
 //
 // Jobs living here:
 //
-//   1. `patch.spawn` naming a machine OTHER than the one that raised it is
-//      relayed to that machine's host, which creates the chat there, and that
-//      machine's `patch.spawn.response` is relayed BACK to the caller — the
+//   1. `patch.spawn` naming a host OTHER than the one that raised it is
+//      relayed to that host's host, which creates the chat there, and that
+//      host's `patch.spawn.response` is relayed BACK to the caller — the
 //      calling agent is blocked on it inside its turn, so a refusal there has
 //      to arrive here rather than only in the target's log. A frame naming the
-//      raising machine is its own audit record and is NOT relayed (that would
+//      raising host is its own audit record and is NOT relayed (that would
 //      spawn the chat twice).
 //   2. `patch.list_chats.request` is answered from the server's chat mirror,
-//      because only the server sees every machine's chats. Each entry names the
-//      machine it lives on, so the calling agent can address it afterwards.
+//      because only the server sees every host's chats. Each entry names the
+//      host it lives on, so the calling agent can address it afterwards.
 //   2b. `patch.search_chats.request` is answered by `chat-search.ts` from the
 //      chat mirror and the transcripts the server holds.
 //   3. `patch.peek.request` / `patch.history.request` / `patch.send_to` carrying
-//      a `requestId` are relayed to whichever machine the chat mirror says OWNS
+//      a `requestId` are relayed to whichever host the chat mirror says OWNS
 //      `targetChatId` — resolved here rather than by the caller naming a host,
 //      because `patch_peek`/`patch_history`/`patch_send_to` take only a chatId
 //      (an agent learns which chat lives where from `patch_list_chats`, not the
-//      other way round). The owning machine's `.response` is relayed back the
+//      other way round). The owning host's `.response` is relayed back the
 //      same way a spawn's is. A request with no `requestId` is a same-host call
 //      already resolved in-process, kept on the wire only as an audit record,
 //      and is never relayed (mirrors `patch.spawn`'s own-host case).
 //
-// NO FALLBACK: a call naming an unregistered or offline machine, or a chatId no
-// machine has ever reported, is refused with an error naming the problem,
-// returned to the CALLING machine so the tool call resolves inside the turn
+// NO FALLBACK: a call naming an unregistered or offline host, or a chatId no
+// host has ever reported, is refused with an error naming the problem,
+// returned to the CALLING host so the tool call resolves inside the turn
 // rather than hanging.
 
 import type { Logger } from 'pino';
@@ -55,7 +55,7 @@ export interface CrossHostBridgeDeps {
 }
 
 /**
- * How long the server remembers which machine asked for a relayed call.
+ * How long the server remembers which host asked for a relayed call.
  * Comfortably longer than the host's own wait on any of these, so the entry
  * outlives the call it belongs to and is only ever dropped as garbage.
  */
@@ -65,14 +65,14 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
   const { logger, hostLink, chatRegistry, registry, activity, chatLogStore } = deps;
 
   /**
-   * requestId → the machine that raised a relayed `patch.spawn`, so its
+   * requestId → the host that raised a relayed `patch.spawn`, so its
    * answer goes back to the CALLER rather than being looked up from the chat
    * mirror (which can lag a freshly-spawned chat).
    */
   const spawnRoutes = new Map<string, { fromHostId: string; timer: NodeJS.Timeout }>();
 
   /**
-   * requestId → the machine that raised a relayed `patch.peek.request` /
+   * requestId → the host that raised a relayed `patch.peek.request` /
    * `patch.history.request` / `patch.send_to`. One map for all three: their
    * requestIds come from independent generators on the host side, so
    * collision would need two coordinators to mint the same random string.
@@ -109,7 +109,7 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
       return {
         ok: false,
         code: 'host_not_registered',
-        message: `machine ${owner.hostId}, which owns chat ${targetChatId}, is offline`,
+        message: `host ${owner.hostId}, which owns chat ${targetChatId}, is offline`,
       };
     }
     return { ok: true, hostId: owner.hostId };
@@ -161,32 +161,32 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
       if (!registry.isRegisteredHost(event.hostId)) {
         logger.warn(
           { from: fromHostId, target: event.hostId },
-          'patch.spawn named an unregistered machine',
+          'patch.spawn named an unregistered host',
         );
         refuseSpawn(
           fromHostId,
           event,
           'host_not_registered',
-          `patch_spawn: no machine registered with hostId: ${event.hostId}`,
+          `patch_spawn: no host registered with hostId: ${event.hostId}`,
         );
         return;
       }
       if (!hostLink.isOnline(event.hostId)) {
         logger.warn(
           { from: fromHostId, target: event.hostId },
-          'patch.spawn named an offline machine',
+          'patch.spawn named an offline host',
         );
         refuseSpawn(
           fromHostId,
           event,
           'host_not_registered',
-          `patch_spawn: machine ${event.hostId} is offline`,
+          `patch_spawn: host ${event.hostId} is offline`,
         );
         return;
       }
       logger.info(
         { from: fromHostId, target: event.hostId, folder: event.folder },
-        'relaying patch.spawn to another machine',
+        'relaying patch.spawn to another host',
       );
       if (event.requestId !== undefined) {
         // Remember who asked, so the target's answer can be routed home.
@@ -200,7 +200,7 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
     }
 
     if (event.type === 'patch.spawn.response') {
-      // The named machine's own outcome, on its way back to the machine whose
+      // The named host's own outcome, on its way back to the host whose
       // agent is still inside the tool call. NO FALLBACK: a response the server
       // cannot route is logged loudly, never dropped in silence — the caller
       // would otherwise sit until its timeout.
@@ -216,7 +216,7 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
       spawnRoutes.delete(event.requestId);
       logger.info(
         { to: route.fromHostId, target: event.hostId, ok: event.ok },
-        'relaying patch.spawn.response back to the calling machine',
+        'relaying patch.spawn.response back to the calling host',
       );
       hostLink.sendTo(route.fromHostId, BRIDGE_SURFACE_ID, event);
       return;
@@ -319,7 +319,7 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
       }
       logger.info(
         { from: fromHostId, target: resolved.hostId, targetChatId: event.targetChatId },
-        `relaying ${event.type} to the machine that owns the chat`,
+        `relaying ${event.type} to the host that owns the chat`,
       );
       trackRelay(requestId, fromHostId);
       hostLink.sendTo(resolved.hostId, BRIDGE_SURFACE_ID, event);
@@ -365,7 +365,7 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
       }
       logger.info(
         { from: fromHostId, target: resolved.hostId, targetChatId: event.targetChatId },
-        'relaying patch.send_to to the machine that owns the chat',
+        'relaying patch.send_to to the host that owns the chat',
       );
       trackRelay(requestId, fromHostId);
       hostLink.sendTo(resolved.hostId, BRIDGE_SURFACE_ID, event);

@@ -1,9 +1,9 @@
-// Registering the host with the machine's own service manager.
+// Registering the host with the host's own service manager.
 //
 // spec/02 § Runtime and installation: "The OS service manager owns its
 // lifecycle: launchd on macOS, a systemd user unit on Linux, with
 // restart-on-failure and start-at-boot. It runs through logout, surface
-// disconnects, and any app on the same machine closing."
+// disconnects, and any app on the same host closing."
 //
 // Two hard rules come out of spec/02 § Stack and § Runtime and installation:
 //
@@ -26,12 +26,12 @@ const execFileAsync = promisify(execFile);
 
 export type ServiceManager = 'launchd' | 'systemd';
 
-/** The one service label / unit name a machine's patch host is known by. */
+/** The one service label / unit name a host's patch host is known by. */
 export const SERVICE_LABEL = 'me.tomchambers.patch-host';
 export const SYSTEMD_UNIT = 'patch-host.service';
 
 /**
- * The names a machine installed before the host rename carries. Registering
+ * The names a host installed before the host rename carries. Registering
  * the new service removes these; they go with the rename's final phase.
  */
 export const LEGACY_SERVICE_LABEL = SERVICE_LABEL.replace(/patch-host$/, 'patch-daemon');
@@ -241,14 +241,14 @@ export function hostLogTail(home: string, lines = 20): string {
 
 /**
  * launchd has two ways to own a per-user background process, and which one this
- * machine can have is not a preference — it is what the machine allows.
+ * host can have is not a preference — it is what the host allows.
  *
  *   * A system host in `/Library/LaunchDaemons`, running as this user via
  *     `UserName`. It starts at boot before anyone logs in and keeps running
  *     through logout, which is what spec/02's "runs through logout, ... and any
- *     app on the same machine closing" asks for. Installing it needs root, so
+ *     app on the same host closing" asks for. Installing it needs root, so
  *     it is available exactly when this user already has passwordless sudo on
- *     their own machine.
+ *     their own host.
  *   * A LaunchAgent in `~/Library/LaunchAgents`, bootstrapped into `gui/<uid>`.
  *     No privileges needed, starts at login, restarts on failure — and ends
  *     with the login session. (`user/<uid>` is not an alternative: modern macOS
@@ -301,7 +301,7 @@ export const launchdOps: ServiceOps = {
     const mode = await launchdMode(def);
     const agentPath = launchdPlistPath(def.home);
     const otherDomainNotes: string[] = [];
-    // A machine installed before the rename carries the old label. Two jobs
+    // A host installed before the rename carries the old label. Two jobs
     // would fight over the host's port, so the old one goes first. This kills
     // the running host; the installer outlives it in its own process group.
     const legacyPlist = legacyLaunchdPlistPath(def.home);
@@ -325,19 +325,19 @@ export const launchdOps: ServiceOps = {
     if (mode.domain === 'system') {
       // ONE label, ONE job. macOS auto-bootstraps anything in
       // ~/Library/LaunchAgents at login, so a plist left there beside a system
-      // job gives the machine two hosts under one label after a reboot — the
+      // job gives the host two hosts under one label after a reboot — the
       // second crash-looping forever on the first's port. The other domain is
-      // booted out and its plist removed, every time, so this machine can only
+      // booted out and its plist removed, every time, so this host can only
       // ever carry the job we just registered.
       await run('launchctl', ['bootout', `gui/${def.uid}/${SERVICE_LABEL}`]).catch(() => undefined);
       if (existsSync(agentPath)) {
         rmSync(agentPath, { force: true });
         otherDomainNotes.push(
-          `removed the LaunchAgent copy at ${agentPath} — this machine runs the system job, ` +
+          `removed the LaunchAgent copy at ${agentPath} — this host runs the system job, ` +
             'and two jobs under one label would fight over the host’s port at every login',
         );
       }
-      // The plist carries this machine's credentials, so it is written 0600 and
+      // The plist carries this host's credentials, so it is written 0600 and
       // installed as root-owned 0600 — never a world-readable copy under HOME.
       const staged = join(def.home, '.patch', `${SERVICE_LABEL}.plist`);
       writeFileSync(staged, launchdPlist(def, true), { encoding: 'utf8', mode: 0o600 });
@@ -446,7 +446,7 @@ export const systemdOps: ServiceOps = {
     const unitPath = systemdUnitPath(def.home);
     mkdirSync(dirname(unitPath), { recursive: true });
     mkdirSync(join(def.home, '.patch', 'logs'), { recursive: true });
-    // The unit carries this machine's credentials (PATCH_INTERNAL_TOKEN, and
+    // The unit carries this host's credentials (PATCH_INTERNAL_TOKEN, and
     // any voice/agent token passed at install), so it is owner-only. systemd
     // --user reads it as this same user.
     writeFileSync(unitPath, systemdUnit(def), { encoding: 'utf8', mode: 0o600 });
@@ -516,7 +516,7 @@ export const systemdOps: ServiceOps = {
     }
   },
   async runState() {
-    // One call, machine-readable: ActiveState/SubState say whether it is up,
+    // One call, host-readable: ActiveState/SubState say whether it is up,
     // MainPID identifies the instance (a changed pid between two probes is a
     // restart), NRestarts and Result are how a crash loop announces itself.
     const props = ['ActiveState', 'SubState', 'MainPID', 'NRestarts', 'Result', 'ExecMainStatus'];
@@ -549,7 +549,7 @@ export const systemdOps: ServiceOps = {
 /**
  * Lingering is what makes a systemd user unit survive logout and come up at
  * boot without anyone logging in (spec/02: "It runs through logout"). Without
- * it the unit dies with the last session, so a machine that cannot enable it
+ * it the unit dies with the last session, so a host that cannot enable it
  * is told exactly which root command to run rather than being left with a
  * host that quietly disappears.
  */
