@@ -1223,6 +1223,19 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     return { ok: true };
   });
 
+  // POST /chats/:id/resume-now — stop waiting out a usage-limit pause and run
+  // the parked turn now (same effect as the card's button, spec/10 § Usage).
+  // `resumed: false` means nothing was parked, so the caller can say so.
+  app.post<{ Params: { id: string } }>('/chats/:id/resume-now', async (req, reply) => {
+    const auth = checkAuth(req);
+    if (!auth.ok) return reply.code(401).send({ error: auth.reason });
+    if (!opts.daemon) return reply.code(503).send({ error: 'host not initialised' });
+    const state = opts.daemon.chatState.resolve(req.params.id);
+    if (!state) return reply.code(404).send({ error: 'not found' });
+    const resumed = opts.daemon.resumeRateLimitedNow(state.chatId);
+    return { ok: true, resumed };
+  });
+
   // POST /chats/:id/archive — archive/unarchive a chat over the local UDS.
   // spec/17-cli.md: `patch chats archive <id>` is a primitive that MUST work on
   // the default local transport (the host is the one backend). `setArchived`
