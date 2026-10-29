@@ -25,7 +25,7 @@ const SAMPLE_RATE = 16000;
 /** New audio between two live passes: 0.5 s. Unmetered, so tighter than Groq's 1 s. */
 export const PARAKEET_PARTIAL_STEP_SAMPLES = 8000;
 /**
- * Threads for one decode. Measured on the 16-core netcup host: 2 threads decode
+ * Threads for one decode. Measured on the 16-core host: 2 threads decode
  * at about 0.18x real time and 4 are no faster while burning twice the CPU.
  */
 const DEFAULT_THREADS = 2;
