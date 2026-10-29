@@ -59,11 +59,19 @@ import {
 export const CLOSE_MALFORMED_FRAME = 4400;
 export const CLOSE_AUTH_FAILED = 4401;
 /**
- * The server is shutting down to restart (a deploy or self-update). Unlike
- * CLOSE_AUTH_FAILED this IS retryable: surfaces keep dialling, but tell the
- * person the server is updating rather than showing a bare "Reconnecting…".
+ * The server is shutting down cleanly and will be back. The close reason says
+ * why: 'updating' (it launched the installer for a new release) or
+ * 'restarting' (any other clean stop). Unlike CLOSE_AUTH_FAILED this IS
+ * retryable: surfaces keep dialling, but say which of the two it is rather
+ * than a bare "Reconnecting…".
  */
 export const CLOSE_SERVER_RESTARTING = 4503;
+/**
+ * A host closing its link because it is installing an update and will be back.
+ * The server passes it on as `host.offline { reason: 'updating' }` so surfaces
+ * can say so instead of a bare "offline".
+ */
+export const CLOSE_HOST_UPDATING = 4504;
 
 // ---------------------------------------------------------------------------
 // Shared atoms

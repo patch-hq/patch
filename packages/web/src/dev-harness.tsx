@@ -8,7 +8,7 @@
 // This file is never imported by the production entry (main.tsx); Vite only
 // bundles it for dev-harness.html.
 
-import { StrictMode, useEffect } from 'react';
+import { StrictMode, useEffect, useState } from 'react';
 import type { JSX } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
@@ -71,7 +71,7 @@ import { useResponsiveShell } from './lib/responsiveShell.js';
 import { useSectionCounts } from './lib/sectionCounts.js';
 import { useDocumentTitleSync } from './lib/documentTitle.js';
 import { installDevErrorQueue } from './lib/devErrorQueue.js';
-import { initWindowChrome } from './lib/windowChrome.js';
+import { initWindowChrome, useSeatTrafficLights } from './lib/windowChrome.js';
 import './index.css';
 
 // Install the dev error queue collectors at harness boot — before any
@@ -3829,6 +3829,10 @@ function DiscardUnsentNewChats(): null {
 }
 
 function Harness(): JSX.Element {
+  // Mirrors AppShell: under `?voice` the harness has a real app-shell, so the
+  // traffic-light seating runs against it.
+  const [shellEl, setShellEl] = useState<HTMLDivElement | null>(null);
+  useSeatTrafficLights(shellEl);
   // Mirrors AppShell's global wiring so e2e can exercise the real thing.
   useShiftClickGuard();
   // Mirrors AppShell's batch watcher, so the batch notification (and the click
@@ -3973,7 +3977,7 @@ function Harness(): JSX.Element {
   // column so the bar is laid out against them for real.
   if (voiceParam === null) return withChrome;
   return (
-    <div className="app-shell" data-testid="app-shell" style={{ height: '100vh' }}>
+    <div className="app-shell" data-testid="app-shell" style={{ height: '100vh' }} ref={setShellEl}>
       <VoiceBar />
       {withChrome}
     </div>

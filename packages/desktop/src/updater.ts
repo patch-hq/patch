@@ -407,6 +407,14 @@ export function quitAndInstallNow(deps: {
    * and it is what the user is told — not that the installer stalled.
    */
   pendingError?: () => string | null;
+  /**
+   * True once the app has actually begun shutting down (`will-quit` fired).
+   * The quit then waits on the local server stopping, which can outlast the
+   * watchdog; that is the install going ahead, not a stall. Killing ShipIt
+   * then removed the very helper waiting to relaunch the app, so it closed and
+   * stayed closed.
+   */
+  shuttingDown?: () => boolean;
   /** Test seam for the stall watchdog below; real callers get the real timer. */
   setTimer?: (fn: () => void, ms: number) => { unref?: () => void };
 }): void {
@@ -424,6 +432,7 @@ export function quitAndInstallNow(deps: {
     // happening. If it genuinely is, this process exits before the timer below
     // ever fires, so firing at all IS the evidence of a stall, not a guess.
     const watchdog = schedule(() => {
+      if (deps.shuttingDown?.()) return;
       deps.app.isQuitting = false;
       const reason = deps.pendingError?.();
       if (reason) {
@@ -613,11 +622,11 @@ export function createInstaller(
   };
 }
 
-/** How long "Update Patch" waits for a newer build to finish downloading. */
+/** How long "Restart Patch" waits for a newer build to finish downloading. */
 export const LATEST_DOWNLOAD_WAIT_MS = 4 * 60_000;
 
 /**
- * "Update Patch" always lands on the newest published build. Patch ships ~20
+ * "Restart Patch" always lands on the newest published build. Patch ships ~20
  * times a day, so the build staged on disk when the button is pressed is often
  * already one or more deploys old; installing it relaunches into a build that
  * the next check immediately flags as behind, and the banner comes straight

@@ -10,6 +10,7 @@
 // NO FALLBACKS: malformed frame → close(4400). Auth failure → close(4401).
 // Hello timeout → close(4408).
 
+import { shutdownReason } from './shutdown-reason.js';
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
 import type WebSocket from 'ws';
@@ -460,8 +461,9 @@ export class WsHub {
     }
   }
 
+  /** `host.offline`, carrying the reason the machine gave, else the health tracker's. */
   private hostOfflineEvent(hostId: string): WireEvent {
-    const reason = this.deps.hostOfflineReason?.(hostId);
+    const reason = this.deps.hostLink.offlineReason?.(hostId) ?? this.deps.hostOfflineReason?.(hostId);
     return { type: 'host.offline', hostId, ...(reason !== undefined ? { reason } : {}) };
   }
 
@@ -659,7 +661,7 @@ export class WsHub {
     this.newChatAttachmentsUnsub?.();
     for (const conn of this.allConns()) {
       try {
-        conn.socket.close(CLOSE_SERVER_RESTARTING, 'server restarting');
+        conn.socket.close(CLOSE_SERVER_RESTARTING, shutdownReason());
       } catch {
         // ignore — socket already gone
         // (intentional swallow during teardown only)
