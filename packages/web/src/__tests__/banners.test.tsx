@@ -34,10 +34,23 @@ describe('HostOfflineBanner', () => {
   });
 
   it('renders banner when connected but host offline', () => {
-    usePresenceStore.setState({ connection: 'connected', hostOnline: false, hostsSeeded: true });
+    usePresenceStore.setState({
+      connection: 'connected',
+      hostOnline: false,
+      hostsSeeded: true,
+      hosts: {
+        m: {
+          hostId: 'm',
+          online: false,
+          lastSeenAt: null,
+          host: { hostName: 'Mac' },
+          accounts: {},
+        } as never,
+      },
+    });
     render(<HostOfflineBanner />);
     expect(screen.getByTestId('daemon-offline-banner')).toBeTruthy();
-    expect(screen.getByText(/Agent offline/)).toBeTruthy();
+    expect(screen.getByText(/Mac host is offline/)).toBeTruthy();
   });
 });
 

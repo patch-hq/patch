@@ -11,6 +11,7 @@
 // The + New chat button leads the fixed top band, directly under the brand row
 // (spec/14 § Sidebar §8) — starting a chat is the most-reached-for action.
 
+import { useHostStatus } from '../lib/hostStatus.js';
 import type { JSX, MouseEvent as ReactMouseEvent } from 'react';
 import {
   createContext,
@@ -56,6 +57,7 @@ import {
   Folder,
   Target,
   Layers,
+  CloudOff,
 } from 'lucide-react';
 import { CloseIcon, DeleteIcon } from './icons.js';
 import {
@@ -2013,6 +2015,16 @@ const ChatRowView = memo(function ChatRowView({
   const badge = useSettledBadge(row);
   const goalMet = row.goal === null && row.lastGoal?.outcome === 'met';
   const hostLabel = useAmbiguousHostLabel(row);
+  // This chat's host is down while another is up: say so on the row, quietly.
+  // (Every host down is the app-level banner's job, not every row's.)
+  const rowHost = useHostStatus(row.hostId);
+  const anyHostOnline = usePresenceStore((s) => s.hostOnline);
+  const hostDownLine =
+    rowHost.state !== 'online' && anyHostOnline
+      ? rowHost.state === 'updating'
+        ? `${rowHost.title} updating`
+        : `${rowHost.title} offline`
+      : null;
   const navigate = useNavigate();
   const menu = useContextMenu();
   // Multi-select (spec/14 § Sidebar → Selecting multiple rows). Only ordinary
@@ -2442,7 +2454,16 @@ const ChatRowView = memo(function ChatRowView({
             {back.line.text}
           </span>
         ) : null}
-        {hostLabel && !special ? (
+        {hostDownLine !== null && !special ? (
+          <span
+            className="preview row-host-down"
+            data-testid={`row-host-down-${row.chatId}`}
+            title={`${rowHost.sentence} Messages to this chat are queued and sent when it is back.`}
+          >
+            <CloudOff size={11} aria-hidden />
+            {hostDownLine}
+          </span>
+        ) : hostLabel && !special ? (
           <span className="preview" data-testid={`row-host-${row.chatId}`}>
             {hostLabel}
           </span>

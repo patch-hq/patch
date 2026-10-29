@@ -8,6 +8,7 @@
 // combined this tree with a single inline editor pane. The tree half moves
 // here almost unchanged; the editor half is `FileEditorTab.tsx`.
 
+import { hostDownLine, useHostStatus } from '../lib/hostStatus.js';
 import { type JSX, useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -62,6 +63,7 @@ export function FilesPage({ chatId }: { chatId: string }): JSX.Element {
   const treeCollapsed = useUiStore((s) => s.browseTreeCollapsed);
   const setBrowseTreeWidth = useUiStore((s) => s.setBrowseTreeWidth);
   const setBrowseTreeCollapsed = useUiStore((s) => s.setBrowseTreeCollapsed);
+  const chatHost = useHostStatus(useChatStore((s) => s.chats[chatId]?.hostId));
 
   const queryClient = useQueryClient();
   const {
@@ -74,7 +76,10 @@ export function FilesPage({ chatId }: { chatId: string }): JSX.Element {
   });
 
   useEffect(() => {
-    if (recursiveError) pushError(`files: ${(recursiveError as Error).message}`);
+    // An offline host is shown in place, calmly — not reported as a failure.
+    if (recursiveError && !isHostOffline(recursiveError)) {
+      pushError(`files: ${(recursiveError as Error).message}`);
+    }
   }, [recursiveError, pushError]);
 
   // spec/14 § File browser — live updates: a `patch.file_changed` push for
@@ -295,6 +300,7 @@ export function FilesPage({ chatId }: { chatId: string }): JSX.Element {
   }
 
   const listingFailed = recursiveError !== null && recursiveData === undefined;
+  const chatHostLine = hostDownLine(chatHost);
   const tree = buildFileTree(recursiveData?.entries ?? []);
   const filterQ = filter.trim();
   const visibleTree = filterQ === '' ? tree : filterFileTree(tree, filterQ);
@@ -386,7 +392,11 @@ export function FilesPage({ chatId }: { chatId: string }): JSX.Element {
           </div>
           <div className="browse-tree-list" data-testid="browse-tree-list">
             {treePending ? <BrowseSkeleton rows={6} testId="browse-tree-loading" /> : null}
-            {listingFailed ? (
+            {listingFailed && isHostOffline(recursiveError) ? (
+              <div className="browse-tree-empty" data-testid="browse-tree-offline">
+                {chatHostLine} Its files show again when it is back.
+              </div>
+            ) : listingFailed ? (
               <div className="browse-tree-error" data-testid="browse-tree-error" role="alert">
                 {(recursiveError as Error).message}
               </div>

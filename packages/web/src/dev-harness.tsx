@@ -3135,8 +3135,19 @@ if (editorParam === 'browse' || fileStubParam === 'skill') {
       ? '# plant\n\nSow what is in season.\n'
       : `// ${path}\nexport const x = 1;\n`;
   const realFetch = window.fetch.bind(window);
+  // `&filesOffline=1` answers every file request as the server does for a
+  // host that is down, so the calm offline state can be seen in a browser.
+  const filesOffline = params.get('filesOffline') !== null;
   window.fetch = ((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (filesOffline && /\/api\/(chats|hosts)\/[^/]+\/files/.test(url)) {
+      return Promise.resolve(
+        new Response(JSON.stringify({ error: 'host_offline', hostId: 'd1' }), {
+          status: 503,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    }
     if (url.includes('/api/hosts/')) {
       const u = new URL(url, window.location.origin);
       const path = u.searchParams.get('path');
@@ -3392,6 +3403,14 @@ if (editorParam === 'browse' || fileStubParam === 'skill') {
       useLayoutStore.getState().openTab({ kind: 'page', page: 'files', chatId });
     });
   }
+}
+
+// `?terminal=1` opens the chat's terminal tab, so its states (including a
+// host that is down) can be seen in a browser.
+if (params.get('terminal') !== null) {
+  registerEditorFixtureTab(() => {
+    useLayoutStore.getState().openTab({ kind: 'terminal', chatId });
+  });
 }
 
 // `?editor=diff` opens the Monaco DIFF editor as a file tab over a seeded

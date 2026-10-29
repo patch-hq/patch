@@ -57,7 +57,7 @@ describe('sendFileEditorEvent', () => {
       const send = vi.fn();
       sendFileEditorEvent({ send } as unknown as PatchWs, 'c-off', save);
       expect(send).toHaveBeenCalledWith(save);
-      expect(noticeText()).toEqual(['Host offline — a.md will save when it reconnects']);
+      expect(noticeText()).toEqual(['h1 host is offline. a.md saves when it is back.']);
     });
   });
 });

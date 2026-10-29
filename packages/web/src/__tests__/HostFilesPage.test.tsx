@@ -170,7 +170,9 @@ describe('host offline (spec/12 § Host-offline UX)', () => {
       new ApiError(503, 'host_offline', { error: 'host_offline', hostId: 'd1' }),
     );
     render(withQuery(<HostFilesPage ws={null} />));
-    expect(await screen.findByTestId('host-browse-offline')).toHaveTextContent('Host offline');
+    expect(await screen.findByTestId('host-browse-offline')).toHaveTextContent(
+      'hetzner host is offline.',
+    );
     expect(screen.queryByTestId('host-browse-error')).toBeNull();
     expect(useUiStore.getState().errors).toEqual([]);
   });

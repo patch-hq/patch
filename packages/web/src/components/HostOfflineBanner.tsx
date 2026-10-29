@@ -1,60 +1,79 @@
-// HostOfflineBanner — app-level banner (rendered once, in AppShell) shown
-// when the server WS is up but every host is offline. Per spec/14 ##
-// Offline / error states: "Host offline — messages queued." It is
-// app-level rather than per-chat so it shows on Jobs/Settings/New chat too,
-// not only inside an open chat (spec/12 § Host-offline UX).
+// HostOfflineBanner — says a host is down, by name, where it matters.
+//
+// A host going offline is expected (a laptop sleeps, travels, restarts to
+// update), so this is a calm grey strip, not an alarm, and it is scoped:
+//   - with `hostId` (inside a chat): that chat's host is down while another
+//     host is up — only this chat waits, so only this chat says so;
+//   - without (AppShell, once): EVERY host is down, so nothing can run
+//     anywhere — the one case that belongs to the whole app. It keeps
+//     Diagnose, since "everything is unreachable" can be a real fault.
+// Messages still queue in both cases and are sent when the host is back
+// (spec/12 § Host-offline UX).
 
 import type { JSX } from 'react';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
+import { hostStatusLine, hostStatusView, useHostStatus } from '../lib/hostStatus.js';
+import { sortHosts } from '../routes/settings/hostScope.js';
 
-// With `hostId` the banner is scoped to that one host (a chat on it): it
-// shows whenever THAT host is down, even while another is up, and names it.
-// Without, it is the app-level banner for every host being offline.
 export function HostOfflineBanner({ hostId }: { hostId?: string } = {}): JSX.Element | null {
-  const connection = usePresenceStore((s) => s.connection);
-  const hostOnline = usePresenceStore((s) =>
-    hostId === undefined ? s.hostOnline : (s.hosts[hostId]?.online ?? true),
-  );
+  return hostId === undefined ? <AllHostsOfflineBanner /> : <ChatHostBanner hostId={hostId} />;
+}
+
+function ChatHostBanner({ hostId }: { hostId: string }): JSX.Element | null {
+  const status = useHostStatus(hostId);
   const anyOnline = usePresenceStore((s) => s.hostOnline);
-  const hostName = usePresenceStore((s) =>
-    hostId === undefined
-      ? ''
-      : (s.hosts[hostId]?.host?.hostName ?? s.hosts[hostId]?.registeredName ?? hostId).trim(),
-  );
-  // The host said it is restarting to install an update: a known gap, not a mystery.
-  const updating = usePresenceStore((s) =>
-    hostId === undefined
-      ? Object.values(s.hosts).some((h) => !h.online && h.offlineReason === 'updating')
-      : s.hosts[hostId]?.offlineReason === 'updating',
-  );
-  // Which host is restarting, by name, for the app-level banner.
-  const restartingName = usePresenceStore((s) => {
-    const h = Object.entries(s.hosts).find(([, v]) => !v.online && v.offlineReason === 'updating');
-    return h === undefined ? '' : (h[1].host?.hostName ?? h[1].registeredName ?? h[0]).trim();
-  });
-  const setDiagnosticsOpen = useUiStore((s) => s.setDiagnosticsOpen);
-  const hostsSeeded = usePresenceStore((s) => s.hostsSeeded);
-  // Until the auth.ok greeting seeds the roster, hostOnline is unknown, not false.
-  if (connection !== 'connected' || !hostsSeeded) return null;
-  if (hostOnline) return null;
+  if (status.state === 'online') return null;
   // Every host down is the app-level banner's job; a second one here would double it.
-  if (hostId !== undefined && !anyOnline) return null;
+  if (!anyOnline) return null;
   return (
-    <div className="daemon-offline-banner" data-testid="daemon-offline-banner" role="status">
+    <div
+      className="daemon-offline-banner"
+      data-testid="daemon-offline-banner"
+      data-state={status.state}
+      role="status"
+    >
       <span className="dot" aria-hidden />
       <span>
-        {updating
-          ? hostId === undefined
-            ? `${restartingName || 'A machine'} is installing an update. Messages are queued and sent when it is back.`
-            : `${hostName} is installing an update. Messages to this chat are queued and sent when it is back.`
-          : hostId === undefined
-            ? 'Agent offline. Messages are queued and sent when it reconnects.'
-            : `${hostName} is offline. Messages to this chat are queued and sent when it reconnects.`}
+        {hostStatusLine(status)} Messages to this chat are queued and sent when it is back.
       </span>
-      {/* Diagnose, not a dead end: opens the diagnostics screen as a dismissible
-          overlay (spec/12 § Connection diagnostics screen). The app stays
-          navigable — a daemon-offline surface is never blocked. */}
+    </div>
+  );
+}
+
+function AllHostsOfflineBanner(): JSX.Element | null {
+  const connection = usePresenceStore((s) => s.connection);
+  const hostsSeeded = usePresenceStore((s) => s.hostsSeeded);
+  const anyOnline = usePresenceStore((s) => s.hostOnline);
+  const hosts = usePresenceStore((s) => s.hosts);
+  const setDiagnosticsOpen = useUiStore((s) => s.setDiagnosticsOpen);
+  // Until the auth.ok greeting seeds the roster, hostOnline is unknown, not false.
+  if (connection !== 'connected' || !hostsSeeded || anyOnline) return null;
+  const views = sortHosts(Object.values(hosts)).map((h) => hostStatusView(h, h.hostId));
+  const updating = views.length > 0 && views.every((v) => v.state === 'updating');
+  const one = views.length === 1 ? views[0]! : null;
+  const text =
+    one !== null
+      ? hostStatusLine(one)
+      : views.length === 0
+        ? 'No host is set up yet.'
+        : `All hosts are offline: ${views.map((v) => v.title.replace(/ host$/, '')).join(', ')}.`;
+  return (
+    <div
+      className="daemon-offline-banner"
+      data-testid="daemon-offline-banner"
+      data-state={updating ? 'updating' : 'offline'}
+      role="status"
+    >
+      <span className="dot" aria-hidden />
+      <span>
+        {text}
+        {views.length === 0
+          ? ''
+          : ` Messages are queued and sent when ${one === null ? 'one is' : 'it is'} back.`}
+      </span>
+      {/* An update is a known gap with nothing to diagnose. Otherwise every
+          host unreachable at once can be a real fault, so offer the check. */}
       {updating ? null : (
         <button
           type="button"

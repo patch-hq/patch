@@ -424,9 +424,12 @@ export class WsHub {
         void _accountEnvelope;
         return rest;
       });
+      const online = this.deps.hostLink.isOnline(hostId);
+      const offlineReason = online ? undefined : this.deps.hostLink.offlineReason?.(hostId);
       return {
         hostId,
-        online: this.deps.hostLink.isOnline(hostId),
+        online,
+        ...(offlineReason === undefined ? {} : { offlineReason }),
         lastSeenAt: this.hostLastSeenAt.get(hostId) ?? null,
         host: cached ? (host as Omit<HostInfoEvent, 'type'>) : null,
         registeredName: this.deps.registry.hostName(hostId) ?? null,

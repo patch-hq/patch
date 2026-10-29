@@ -13,6 +13,7 @@ import type { WireEvent } from '@patch/wire';
 import { TerminalPanel } from '../components/TerminalPanel.js';
 import { useTerminalStore } from '../stores/terminalStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
+import { useChatStore } from '../stores/chatStore.js';
 
 function makeWs(): { send: ReturnType<typeof vi.fn>; sent: WireEvent[] } {
   const sent: WireEvent[] = [];
@@ -457,5 +458,38 @@ describe('TerminalPanel — command completion', () => {
     // Twice: the open could not be sent either, and then neither could `ls`.
     expect(await screen.findAllByText(/not connected/)).toHaveLength(2);
     expect(screen.queryByTestId('terminal-running')).toBeNull();
+  });
+
+  it('waits for a host that is down instead of opening a shell, then opens when it is back', async () => {
+    usePresenceStore.getState().setHosts([
+      { hostId: 'd1', online: true, lastSeenAt: null, host: null, accounts: [] },
+      {
+        hostId: 'mac',
+        online: false,
+        lastSeenAt: null,
+        host: null,
+        registeredName: 'Mac',
+        accounts: [],
+      },
+    ]);
+    usePresenceStore.setState({ hostsSeeded: true, connection: 'connected' });
+    useChatStore.setState((s) => ({
+      chats: { ...s.chats, c1: { ...(s.chats['c1'] ?? {}), chatId: 'c1', hostId: 'mac' } as never },
+    }));
+    const ws = makeWs();
+    renderPanel(ws);
+    expect(screen.getByTestId('terminal-host-down')).toHaveTextContent(
+      'Mac host is offline. The terminal opens when it is back.',
+    );
+    expect(ws.sent).toHaveLength(0);
+    act(() => usePresenceStore.getState().setHostOnline('mac', true));
+    await waitFor(() => expect(ws.sent).toHaveLength(1));
+    expect(ws.sent[0]).toMatchObject({ type: 'patch.terminal.open', hostId: 'mac' });
+    expect(screen.queryByTestId('terminal-host-down')).toBeNull();
+    useChatStore.setState((s) => {
+      const chats = { ...s.chats };
+      delete chats['c1'];
+      return { chats };
+    });
   });
 });

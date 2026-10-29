@@ -61,8 +61,10 @@ export function queueChipLabel(
   hostOnline = true,
   release?: QueueRelease,
   pause?: CreditPause | null,
+  /** "Mac host" — which host it is waiting for. */
+  host = 'Host',
 ): string {
-  if (!hostOnline) return 'Machine offline';
+  if (!hostOnline) return `${host} offline`;
   if (pause) {
     const base = 'Paused · out of credit';
     return pause.resetsAt === null ? base : `${base} · resumes ${formatReset(pause.resetsAt)}`;
@@ -78,8 +80,9 @@ export function queueChipTitle(
   hostOnline = true,
   release?: QueueRelease,
   pause?: CreditPause | null,
+  host = 'the host',
 ): string {
-  if (!hostOnline) return 'Waiting for the machine to come back online';
+  if (!hostOnline) return `Waiting for ${host} to come back online`;
   if (pause) return 'Every account is out of credit; this runs once the limit resets';
   if (release === 'tool') return 'Goes in when the agent finishes its current tool call';
   if (pos === 1) return 'Runs when the current turn finishes';

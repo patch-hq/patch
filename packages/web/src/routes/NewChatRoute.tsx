@@ -10,6 +10,7 @@
 // that folder and delivers the message into it; from then on the folder "moves
 // up" into the live chat's header crumb and the model is fixed.
 
+import { useHostStatus } from '../lib/hostStatus.js';
 import type { JSX, KeyboardEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadLastNewChat, saveLastNewChat } from '../lib/lastNewChat';
@@ -367,6 +368,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
       null,
   );
   const pickerHostId = chosenHostId ?? accountDefaultHostId;
+  const pickerHostView = useHostStatus(pickerHostId);
   useEffect(() => {
     updateDraft(draftId, { hostId: pickerHostId ?? undefined });
   }, [pickerHostId, draftId, updateDraft]);
@@ -623,6 +625,23 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
       setChosenHostId(mruPair.hostId);
     }
   }, [mruPair, folder]);
+
+  // The remembered machine is a default, not a choice: when it is offline and
+  // another is up, start on the one that is up, with one of ITS folders. A
+  // machine or folder the user picked (or a draft typed against one) stays.
+  const fallbackHostId = usePresenceStore((s) => {
+    if (!s.hostsSeeded || pickerHostId === null || s.hosts[pickerHostId]?.online !== false) {
+      return null;
+    }
+    const up = Object.values(s.hosts).filter((h) => h.online);
+    return up.find((h) => h.hostId === accountDefaultHostId)?.hostId ?? up[0]?.hostId ?? null;
+  });
+  useEffect(() => {
+    if (fallbackHostId === null || userEditedFolder.current || draftHostId) return;
+    setChosenHostId(fallbackHostId);
+    setBrowseDir(null);
+    setFolder(optionsForHost(fallbackHostId)[0] ?? '');
+  }, [fallbackHostId, draftHostId, optionsForHost]);
 
   // A call's toast asked for a meeting: start it in the chat this screen
   // creates. Waits for a folder (the MRU can resolve a tick late).
@@ -961,7 +980,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
               <HostPicker
                 hosts={machines.map((m) => ({
                   hostId: m.hostId,
-                  label: m.host?.hostName ?? m.hostId,
+                  label: m.host?.hostName ?? m.registeredName ?? m.hostId,
                   online: m.online,
                 }))}
                 selected={pickerHostId}
@@ -971,6 +990,17 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
             </div>
           </>
         ) : null}
+        {/* The chosen machine is down: say so here, where the choice is made,
+            rather than letting Send fail. A new chat cannot be queued for a
+            host that is offline — its folder is checked there at spawn. */}
+        {pickerHostView.state === 'online' ? null : (
+          <p className="new-chat-host-down" data-testid="new-chat-host-down" role="status">
+            {pickerHostView.sentence}{' '}
+            {machines.some((m) => m.online)
+              ? 'Choose another machine, or start this chat once it is back.'
+              : 'This chat can start once it is back.'}
+          </p>
+        )}
         {/* The project: chips for the head of the picker's list, then the pill
             that opens the picker for the rest, to browse, or to type a path.
             Same toggle and same host pairing as the pop-up's rows. No tooltip:

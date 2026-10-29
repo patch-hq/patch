@@ -223,6 +223,7 @@ export const usePresenceStore = create<PresenceState>((set) => ({
       hosts[h.hostId] = {
         hostId: h.hostId,
         online: h.online,
+        ...(h.online || h.offlineReason === undefined ? {} : { offlineReason: h.offlineReason }),
         lastSeenAt: h.lastSeenAt,
         host: h.host,
         registeredName: h.registeredName ?? null,
@@ -250,7 +251,8 @@ export const usePresenceStore = create<PresenceState>((set) => ({
           ...prev,
           online,
           offlineReason: online ? undefined : reason,
-          ...(online ? { lastSeenAt: Date.now() } : {}),
+          // "Last seen" is when it went away, so stamp the offline edge too.
+          ...(online || prev.online ? { lastSeenAt: Date.now() } : {}),
         },
       };
       return { hosts, hostOnline: anyOnline(hosts) };

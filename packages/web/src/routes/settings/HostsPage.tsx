@@ -7,6 +7,7 @@
 // is shown as awaiting its first report rather than being given a fabricated
 // name or an assumed platform: unknown must never render as known.
 
+import { hostTitle } from '../../lib/hostStatus.js';
 import type { JSX } from 'react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -110,7 +111,11 @@ function HostListRow({
   onSelect: () => void;
 }): JSX.Element {
   const report = host.host;
-  const seen = host.online ? 'online' : `seen ${agoLabel(host.lastSeenAt)}`;
+  const seen = host.online
+    ? 'online'
+    : host.offlineReason === 'updating'
+      ? 'installing an update'
+      : `offline · last seen ${agoLabel(host.lastSeenAt)}`;
   const { updating, apply: applyUpdate } = useHostUpdate(host);
   return (
     <Row
@@ -120,8 +125,10 @@ function HostListRow({
       title={
         <>
           <OnlineDot online={host.online} />{' '}
-          {report ? (
-            <span data-testid={`host-${host.hostId}-label`}>{report.hostName}</span>
+          {report || host.registeredName ? (
+            <span data-testid={`host-${host.hostId}-label`}>
+              {report?.hostName ?? host.registeredName}
+            </span>
           ) : (
             <span className="mono" data-testid={`host-${host.hostId}-id`}>
               {host.hostId}
@@ -133,7 +140,9 @@ function HostListRow({
         <span data-testid={`host-${host.hostId}-status`}>
           {report
             ? `${PLATFORM_LABEL[report.platform] ?? report.platform} · ${seen}`
-            : 'awaiting first report'}
+            : host.online || host.lastSeenAt === null
+              ? 'awaiting first report'
+              : seen}
           {report?.power ? (
             <>
               {' · '}
@@ -192,7 +201,9 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
    */
   async function connectBackend(backendId: string, backendLabel: string): Promise<void> {
     if (!host.online) {
-      pushError(`${name} is offline. Sign in once it reconnects.`);
+      useUiStore
+        .getState()
+        .pushNotice(`${hostTitle(host, host.hostId)} is offline. Sign in once it is back.`);
       return;
     }
     if (backendId === 'codex') {

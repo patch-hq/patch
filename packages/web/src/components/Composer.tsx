@@ -28,6 +28,7 @@
 // start opens a skill autocomplete sourced from the chat's folder (spec/14 §
 // Composer — skill autocomplete).
 
+import { hostDownLine, useHostStatus } from '../lib/hostStatus.js';
 import { DateTimeField } from './DateTimeField.js';
 import { LONG_PASTE_CHARS, pastedTextName } from '../lib/pastedText';
 import type { JSX, ReactNode, Ref } from 'react';
@@ -516,7 +517,12 @@ export const Composer = forwardRef(function Composer(
   ref: Ref<ComposerHandle>,
 ): JSX.Element {
   const connection = usePresenceStore((s) => s.connection);
-  const hostOnline = usePresenceStore((s) => s.hostOnline);
+  const anyHostOnline = usePresenceStore((s) => s.hostOnline);
+  // THIS chat's host, by name: another host being up does not help a call here.
+  const hostView = useHostStatus(hostId);
+  const hostOnline = usePresenceStore((s) =>
+    hostId ? (s.hosts[hostId]?.online ?? anyHostOnline) : anyHostOnline,
+  );
   const offline = connection !== 'connected';
   // Provider accounts are the user's, shared by every host (spec/10), so what
   // gates sending is whether any account is connected for this model, never
@@ -546,7 +552,10 @@ export const Composer = forwardRef(function Composer(
   // exception: spawning it has to validate the folder on a live link, so it
   // is refused up front instead of queued (spec/12 § Host-offline UX).
   const isNewChat = chatId === 'new';
-  const sendBlocked = (offline && isNewChat) || claudeDisconnected;
+  // A new chat is spawned on its host, which validates the folder there, so it
+  // cannot be queued for a host that is down — unlike a message to a chat.
+  const newChatHostDown = isNewChat && !!hostId && !hostOnline;
+  const sendBlocked = (offline && isNewChat) || claudeDisconnected || newChatHostDown;
   // The EFFECTIVE approval mode the next turn will use, as the host resolved
   // it and put it on `chat.state` — never re-derived here, since a surface does
   // not hold the host default this was resolved against. `undefined` means the
@@ -2483,7 +2492,7 @@ export const Composer = forwardRef(function Composer(
               aria-pressed={noteActive || micState !== 'idle' || dictModeOn}
               title={
                 !offline && !hostOnline
-                  ? 'Voice unavailable while the agent is offline (audio can’t be queued)'
+                  ? `Voice unavailable while ${hostView.title} is offline (audio can’t be queued)`
                   : noteMode
                     ? shortcutTitle('Voice note', chordGlyphs(dictateChord))
                     : micState === 'transcribing'
@@ -2569,7 +2578,7 @@ export const Composer = forwardRef(function Composer(
                   onCall
                     ? 'End call'
                     : voiceDisabled
-                      ? 'Voice unavailable while the agent is offline'
+                      ? `Voice unavailable while ${hostView.title} is offline`
                       : 'Call'
                 }
                 onClick={() => void handleCall()}
@@ -2731,11 +2740,13 @@ export const Composer = forwardRef(function Composer(
                 /* `↵` is the primary key and `⌘↵` also works — name the primary one
                  (Tom, `patch/todo.md` — "nothing tells you enter sends"). */
                 title={
-                  editingTurn
-                    ? shortcutTitle('Save edit', '↵')
-                    : running
-                      ? shortcutTitle('Queue', '↵')
-                      : shortcutTitle('Send', '↵')
+                  newChatHostDown
+                    ? `${hostDownLine(hostView)} A new chat can start there once it is back.`
+                    : editingTurn
+                      ? shortcutTitle('Save edit', '↵')
+                      : running
+                        ? shortcutTitle('Queue', '↵')
+                        : shortcutTitle('Send', '↵')
                 }
                 disabled={sendBlocked || resolving || !hasContent}
                 onContextMenu={sendMenu.openAt}

@@ -8923,6 +8923,8 @@ export const AuthOkHost = z
     online: z.boolean(),
     /** ms-epoch of the last time this host's link was seen; null if never. */
     lastSeenAt: z.number().int().nullable(),
+    /** Why an offline host went, when it said ('updating'); absent otherwise. */
+    offlineReason: z.string().optional(),
     /** The cached `host.host` payload, minus its envelope. */
     host: HostInfoEvent.omit({ type: true }).nullable(),
     /** The name the registry holds for this machine, for hosts that have not reported one since the server started. */

@@ -1929,11 +1929,11 @@ describe('ChatRoute regression', () => {
     ]);
     renderChat('c-queue-vs-offline');
     const chip = screen.getByTestId('queued-badge');
-    expect(chip).toHaveTextContent('Machine offline');
+    expect(chip).toHaveTextContent(/host offline$/);
     // The offline line owns the "reconnect" wording; the chip must not echo it —
     // that's what actually tells the two states apart, not the shared "Queued" word.
-    expect(screen.getByTestId('delivery-pending')).toHaveTextContent(/reconnect/i);
-    expect(chip.textContent).not.toMatch(/reconnect/i);
+    expect(screen.getByTestId('delivery-pending')).toHaveTextContent(/sends when it is back/);
+    expect(chip.textContent).not.toMatch(/sends when/);
   });
 
   // spec/04 ## Message queueing — nothing interrupts on a timer. The 30s
@@ -2263,13 +2263,15 @@ describe('ChatRoute regression', () => {
     expect(screen.getByTestId('delivery-pending-icon')).toHaveAttribute('data-icon', 'clock');
   });
 
-  it('shows "machine offline — will send when it reconnects" while the host is offline', () => {
+  it('shows "<name> host is offline — sends when it is back" while the host is offline', () => {
     usePresenceStore.getState().setHostOnline('d1', false);
     seedChat('c-pending-offline', [
       { seq: 1, kind: 'message', role: 'user', content: 'x', deliveryPending: true, at: 0 },
     ]);
     renderChat('c-pending-offline');
-    expect(screen.getByTestId('delivery-pending')).toHaveTextContent(/machine offline.*reconnect/i);
+    expect(screen.getByTestId('delivery-pending')).toHaveTextContent(
+      /host is offline — sends when it is back/,
+    );
     expect(screen.getByTestId('delivery-pending-icon')).toHaveAttribute('data-icon', 'cloud-off');
   });
 
@@ -2281,19 +2283,21 @@ describe('ChatRoute regression', () => {
       { seq: 1, kind: 'message', role: 'user', content: 'x', deliveryPending: true, at: 0 },
     ]);
     renderChat('c-pending-other-host-up');
-    expect(screen.getByTestId('delivery-pending')).toHaveTextContent(/machine offline.*reconnect/i);
+    expect(screen.getByTestId('delivery-pending')).toHaveTextContent(
+      /host is offline — sends when it is back/,
+    );
     expect(screen.getByTestId('daemon-offline-banner')).toHaveTextContent(/offline.*queued/i);
     usePresenceStore.getState().setHostOnline('d2', false);
     usePresenceStore.setState({ connection: 'offline', hostsSeeded: false });
   });
 
-  it('a queued message reads "Machine offline" on its chip while the host is offline', () => {
+  it('a queued message reads "<name> host offline" on its chip while the host is offline', () => {
     usePresenceStore.getState().setHostOnline('d1', false);
     seedChat('c-queued-offline', [
       { seq: 1, kind: 'message', role: 'user', content: 'x', queued: true, localId: 'l1', at: 0 },
     ]);
     renderChat('c-queued-offline');
-    expect(screen.getByTestId('queued-badge')).toHaveTextContent('Machine offline');
+    expect(screen.getByTestId('queued-badge')).toHaveTextContent(/host offline$/);
   });
 
   it('a deliveryPending AND queued message shows only the Queued chip, not the pending line', () => {
