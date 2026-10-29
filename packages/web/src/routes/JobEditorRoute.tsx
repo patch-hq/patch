@@ -35,13 +35,8 @@ import { parseNaturalSchedule, describeCron } from '../lib/naturalCron.js';
 import { MONACO_THEME } from '../lib/monacoTheme.js';
 import { shortcutLabel } from '../lib/shortcuts.js';
 import { isSubmitChord } from '../lib/submitChord.js';
-import {
-  UNSAVED_BADGE_LABEL,
-  UNSAVED_CONFIRM,
-  isDirty,
-  shouldPromptOnLeave,
-} from '../lib/unsavedChanges.js';
-import { useNavigationGuard } from '../lib/useNavigationGuard.js';
+import { UNSAVED_BADGE_LABEL, isDirty } from '../lib/unsavedChanges.js';
+import { useJobDraftStore, type JobDraftForm } from '../stores/jobDraftStore.js';
 import { useGoBack } from '../lib/useGoBack.js';
 import { NavHistoryControls } from '../components/NavHistoryControls.js';
 import { failed } from '../lib/errorCopy.js';
@@ -800,7 +795,14 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
   const pushError = useUiStore((s) => s.pushError);
   const openFileInBrowser = useUiStore((s) => s.openFileInBrowser);
   const qc = useQueryClient();
-  const [form, setForm] = useState<FormState>(DEFAULT_FORM);
+  // Unsaved edits are kept as a draft per job (`new` for the new-job form), so
+  // leaving the tab — or reloading — never loses them. A new job's draft seeds
+  // the first render; a saved job's is laid over the server copy when it loads.
+  const draftKey = isNew ? 'new' : (id ?? 'new');
+  const [form, setForm] = useState<FormState>(() => {
+    const draft = isNew ? useJobDraftStore.getState().drafts.new : undefined;
+    return draft ? { ...DEFAULT_FORM, ...(draft as Partial<FormState>) } : DEFAULT_FORM;
+  });
   const [autonomyOpen, setAutonomyOpen] = useState(false);
   const accountAutonomyPrompt = usePreferencesStore((s) => s.preferences.jobAutonomyPrompt);
   const jobDefaultModel = usePreferencesStore((s) => s.preferences.jobDefaultModel);
@@ -959,7 +961,10 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
   useEffect(() => {
     if (data && !isNew) {
       const loaded = jobToForm(data as Job);
-      setForm(loaded);
+      // Edits left unsaved on this job come back over the server's copy; the
+      // baseline stays the server's, so the form still reads as edited.
+      const draft = useJobDraftStore.getState().drafts[draftKey];
+      setForm(draft ? { ...loaded, ...(draft as Partial<FormState>) } : loaded);
       // A job that carries an override shows it, rather than hiding it under
       // a collapsed "Advanced".
       if (loaded.autonomyPromptCustom) setAutonomyOpen(true);
@@ -978,7 +983,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
         setShowRawRecurrence(true);
       }
     }
-  }, [data, isNew]);
+  }, [data, isNew, draftKey]);
 
   // Seed a new job to the most-recently-used (host, folder) PAIR — the same
   // seed the new-chat picker uses (spec/14 § Jobs view / §8). The pair is
@@ -1001,14 +1006,22 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
     setBaseline(seed);
   }, [isNew, mruPair?.folder, mruPair?.hostId, form.spawnFolder, form.spawnHostId, folderCustom]);
 
-  // Unsaved-edit tracking (spec/14 § Jobs view — Unsaved changes). The guard
-  // below runs from a history call rather than from a render, so it reads a
-  // REF: a `setBaseline` has not landed yet when a mutation's `onSuccess`
-  // navigates in the same tick, and the user would then be asked to confirm
-  // discarding the edits they had just saved.
+  // Unsaved-edit tracking (spec/14 § Jobs view — Unsaved changes): the form
+  // against what the server last gave us or a save last wrote.
   const dirty = isDirty(form, baseline);
-  const dirtyRef = useRef(dirty);
-  dirtyRef.current = dirty;
+
+  // Keep the draft in step with the form. A saved job waits for its server copy
+  // first: before that the form is blank and would look clean, wiping the draft
+  // it is about to be laid over. `draftDropped` stops a deleted job's still-open
+  // tab from writing its draft back.
+  const draftDropped = useRef(false);
+  const draftReady = isNew || data !== undefined;
+  useEffect(() => {
+    if (!draftReady || draftDropped.current) return;
+    const drafts = useJobDraftStore.getState();
+    if (dirty) drafts.set(draftKey, form as unknown as JobDraftForm);
+    else drafts.clear(draftKey);
+  }, [form, dirty, draftKey, draftReady]);
 
   const createMut = useMutation({
     mutationFn: (body: JobCreateBody) => api.createJob(body),
@@ -1016,7 +1029,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
       // Saved: this form IS what the server holds now, so nothing is unsaved.
       // Cleared through the ref as well as the state because the navigate on
       // the next line runs before React has re-rendered with the new baseline.
-      dirtyRef.current = false;
+      useJobDraftStore.getState().clear(draftKey);
       setBaseline(form);
       qc.invalidateQueries({ queryKey: ['jobs'] });
       goBack();
@@ -1029,7 +1042,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
     mutationFn: (body: unknown) => api.patchJob(id ?? '', body),
     onSuccess: () => {
       // Saved — see createMut above.
-      dirtyRef.current = false;
+      useJobDraftStore.getState().clear(draftKey);
       setBaseline(form);
       qc.invalidateQueries({ queryKey: ['jobs'] });
       qc.invalidateQueries({ queryKey: ['job', id] });
@@ -1044,7 +1057,8 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
     onSuccess: () => {
       // The job is gone, so there is nothing left to save and nothing to warn
       // about — the user already confirmed the destructive thing.
-      dirtyRef.current = false;
+      draftDropped.current = true;
+      useJobDraftStore.getState().clear(draftKey);
       qc.invalidateQueries({ queryKey: ['jobs'] });
       goBack();
     },
@@ -1068,17 +1082,6 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
 
   /** A create/patch is in flight — the Save button is dead for its duration. */
   const saving = createMut.isPending || patchMut.isPending;
-  const savingRef = useRef(saving);
-  savingRef.current = saving;
-
-  // Every in-app way off this page goes through the router's navigator, so one
-  // guard there covers the Back button, the sidebar, the app's Back/Forward
-  // controls and the desktop shell's navigate IPC alike.
-  useNavigationGuard({
-    shouldBlock: () => shouldPromptOnLeave({ dirty: dirtyRef.current, saving: savingRef.current }),
-    confirm: () => useUiStore.getState().confirm({ ...UNSAVED_CONFIRM, danger: true }),
-    dismiss: () => useUiStore.getState().resolveConfirm(false),
-  });
 
   /**
    * The natural-language recurrence path (spec/08 § Recurrence — additive to

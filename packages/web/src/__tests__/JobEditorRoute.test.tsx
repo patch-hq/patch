@@ -15,6 +15,7 @@ import {
   buildGroupOptions,
   mostRecentPair,
 } from '../routes/JobEditorRoute.js';
+import { useJobDraftStore } from '../stores/jobDraftStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
@@ -211,6 +212,24 @@ describe('JobEditorRoute (single-page form)', () => {
   });
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('keeps unsaved edits as a draft when the tab is closed and comes back', async () => {
+    const first = renderNew();
+    fireEvent.change(await screen.findByTestId('job-name'), { target: { value: 'Half done' } });
+    await waitFor(() => {
+      expect(useJobDraftStore.getState().drafts.new?.name).toBe('Half done');
+    });
+    first.unmount();
+    renderNew();
+    expect(((await screen.findByTestId('job-name')) as HTMLInputElement).value).toBe('Half done');
+  });
+
+  it('does not keep a draft for a form nobody edited', async () => {
+    const first = renderNew();
+    await screen.findByTestId('job-name');
+    first.unmount();
+    expect(useJobDraftStore.getState().drafts.new).toBeUndefined();
   });
 
   it('shows trigger + action on one page with a Create button (no wizard)', () => {
