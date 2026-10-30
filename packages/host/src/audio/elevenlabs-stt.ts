@@ -272,6 +272,71 @@ export interface ScribeBackendOptions {
   wsUrl?: string;
 }
 
+interface ScribeWord {
+  text?: unknown;
+  type?: unknown;
+  speaker_id?: unknown;
+}
+
+/** One stretch of a diarised clip, by Scribe's per-request speaker id. */
+export interface ScribeSpeakerRun {
+  speakerId: string;
+  text: string;
+}
+
+/**
+ * Groups Scribe's word list into consecutive runs by speaker. Audio events
+ * ("(laughter)") stay in the text, in the speaker's run, so notes keep them.
+ */
+export function scribeSpeakerRuns(words: ScribeWord[]): ScribeSpeakerRun[] {
+  const runs: ScribeSpeakerRun[] = [];
+  for (const w of words) {
+    if (typeof w.text !== 'string')
+      throw new ScribeError('ElevenLabs returned a word with no text');
+    if (w.type === 'spacing') {
+      const last = runs[runs.length - 1];
+      if (last) last.text += w.text;
+      continue;
+    }
+    if (typeof w.speaker_id !== 'string') {
+      throw new ScribeError('ElevenLabs returned a word with no speaker_id');
+    }
+    const last = runs[runs.length - 1];
+    if (last && last.speakerId === w.speaker_id) last.text += w.text;
+    else runs.push({ speakerId: w.speaker_id, text: w.text });
+  }
+  return runs.map((r) => ({ ...r, text: r.text.trim() })).filter((r) => r.text !== '');
+}
+
+/**
+ * Scribe numbers speakers per request: `speaker_0` in one clip is not
+ * necessarily `speaker_0` in the next. This keeps voice numbers (1, 2, ...) for
+ * one meeting. Scribe offers no way to match a speaker across requests, so the
+ * only continuity assumed is that a clip opens with whoever closed the last one;
+ * every other speaker in a clip is a new voice. A person may therefore appear as
+ * more than one voice — visible and nameable — rather than two people silently
+ * merging.
+ */
+export class ScribeVoiceMap {
+  private next = 1;
+  private lastVoice: number | null = null;
+
+  assign(runs: ScribeSpeakerRun[]): { text: string; voice: number }[] {
+    const ids = new Map<string, number>();
+    const out = runs.map((r) => {
+      let voice = ids.get(r.speakerId);
+      if (voice === undefined) {
+        voice = ids.size === 0 && this.lastVoice !== null ? this.lastVoice : this.next++;
+        ids.set(r.speakerId, voice);
+      }
+      return { text: r.text, voice };
+    });
+    const last = out[out.length - 1];
+    if (last) this.lastVoice = last.voice;
+    return out;
+  }
+}
+
 export class ElevenLabsScribeBackend implements WhisperBackend {
   /** Live words come from `openLiveStream`, not from re-reading a prefix. */
   readonly supportsLivePartials = false;
@@ -319,6 +384,49 @@ export class ElevenLabsScribeBackend implements WhisperBackend {
       throw new ScribeError('ElevenLabs transcription returned no transcript');
     }
     return json.text.trim();
+  }
+
+  /**
+   * Transcribes a clip with speaker diarisation and audio-event tagging.
+   * Speaker ids are Scribe's own, per request (see `ScribeVoiceMap`).
+   */
+  async transcribeDiarised(wav: Buffer): Promise<ScribeSpeakerRun[]> {
+    const apiKey = readKey(this.opts.apiKey);
+    if (apiKey === undefined) {
+      throw new ScribeError('ELEVEN_LABS_API_KEY is no longer set on this host');
+    }
+    const form = new FormData();
+    form.append('model_id', SCRIBE_MODEL);
+    form.append('language_code', 'en');
+    form.append('diarize', 'true');
+    form.append('tag_audio_events', 'true');
+    form.append(
+      'file',
+      new Blob([new Uint8Array(wav.buffer, wav.byteOffset, wav.byteLength)], { type: 'audio/wav' }),
+      'clip.wav',
+    );
+    const doFetch = this.opts.fetchImpl ?? fetch;
+    let res: Response;
+    try {
+      res = await doFetch(SCRIBE_URL, {
+        method: 'POST',
+        headers: { 'xi-api-key': apiKey },
+        body: form,
+      });
+    } catch (err) {
+      throw new ScribeError(`ElevenLabs transcription request failed: ${(err as Error).message}`);
+    }
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new ScribeError(
+        `ElevenLabs transcription failed: HTTP ${res.status}${body ? `: ${body.slice(0, 300)}` : ''}`,
+      );
+    }
+    const json = (await res.json()) as { words?: unknown };
+    if (!Array.isArray(json.words)) {
+      throw new ScribeError('ElevenLabs transcription returned no words');
+    }
+    return scribeSpeakerRuns(json.words as ScribeWord[]);
   }
 
   openLiveStream(
