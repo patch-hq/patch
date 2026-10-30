@@ -117,7 +117,11 @@ describe('ChatRoute — /goal command + goal banner', () => {
     renderChat();
     const banner = screen.getByTestId('goal-banner');
     expect(banner).toHaveAttribute('data-paused', 'true');
-    expect(screen.getByTestId('goal-banner-reason')).toHaveTextContent(/Paused.*stopped/);
+    // The note needs the user, so it shows while the row is folded.
+    expect(screen.getByTestId('goal-banner-paused-note')).toHaveTextContent(
+      'You stopped the chat. Send a message to resume.',
+    );
+    expect(screen.getByTestId('goal-pill')).toHaveTextContent('Paused');
   });
 
   it('does not show the goal as paused while it is running', () => {
@@ -131,7 +135,8 @@ describe('ChatRoute — /goal command + goal banner', () => {
     });
     renderChat();
     expect(screen.getByTestId('goal-banner')).toHaveAttribute('data-paused', 'false');
-    expect(screen.queryByTestId('goal-banner-reason')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('goal-banner-paused-note')).not.toBeInTheDocument();
+    expect(screen.getByTestId('goal-pill')).toHaveTextContent('Working');
   });
 
   it('does NOT show the goal banner when the chat has no goal', () => {
@@ -204,26 +209,27 @@ describe('ChatRoute — /goal command + goal banner', () => {
       lastReason: 'Tests are still red',
     });
     renderChat();
-    expect(screen.getByTestId('goal-banner-cell-time')).toHaveTextContent('9m');
-    expect(screen.getByTestId('goal-banner-cell-turns')).toHaveTextContent('3 checks');
-    expect(screen.getByTestId('goal-banner-cell-tokens')).toHaveTextContent('8.2k tokens');
-    const metrics = screen.getByTestId('goal-banner-meta');
-    expect(metrics).toHaveTextContent('9m');
-    expect(metrics).toHaveTextContent('3 checks');
-    expect(metrics).toHaveTextContent('8.2k tokens');
+    const banner = screen.getByTestId('goal-banner');
+    expect(banner).toHaveTextContent('9m · 3 checks');
+    // Tokens and the evaluator's reason are behind the pill.
+    expect(screen.queryByTestId('goal-banner-reason')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('goal-pill'));
     expect(screen.getByTestId('goal-banner-reason')).toHaveTextContent(
-      'Not met: Tests are still red',
+      '8.2k tokens · Not met: Tests are still red',
     );
   });
 
-  it('labels the banner with its state and expands the full goal text', () => {
+  it('opens from the pill and offers Edit goal; no bordered state badge', () => {
     seed('Ship the release by Friday');
-    renderChat();
-    expect(screen.getByTestId('goal-banner-label')).toHaveTextContent('Goal active');
-    const banner = screen.getByTestId('goal-banner');
-    expect(banner).not.toHaveClass('goal-banner-expanded');
-    fireEvent.click(screen.getByTestId('goal-expand-btn'));
-    expect(banner).toHaveClass('goal-banner-expanded');
+    renderChat({ send: vi.fn(), requestReplay: vi.fn() });
+    expect(screen.queryByText('Goal active')).not.toBeInTheDocument();
+    const pill = screen.getByTestId('goal-pill');
+    expect(pill).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('goal-edit-link')).not.toBeInTheDocument();
+    fireEvent.click(pill);
+    expect(pill).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(screen.getByTestId('goal-edit-link'));
+    expect(screen.getByTestId('goal-edit-modal')).toBeInTheDocument();
   });
 
   it('shows no metrics/reason before the first evaluation has landed', () => {
@@ -235,6 +241,7 @@ describe('ChatRoute — /goal command + goal banner', () => {
       lastReason: null,
     });
     renderChat();
+    fireEvent.click(screen.getByTestId('goal-pill'));
     expect(screen.queryByTestId('goal-banner-reason')).not.toBeInTheDocument();
   });
 
