@@ -5760,9 +5760,30 @@ export const PatchStopEvent = z
     type: z.literal('patch.stop'),
     sourceChatId: z.string().min(1),
     targetChatId: z.string().min(1),
+    /**
+     * Present iff this is a cross-host relay the caller is waiting on (same
+     * convention as `patch.send_to`); absent is a same-host audit record.
+     */
+    requestId: z.string().min(1).optional(),
   })
   .strict();
 export type PatchStopEvent = z.infer<typeof PatchStopEvent>;
+
+/** The owning host's answer to a cross-host `patch_stop`. */
+export const PatchStopResponseEvent = z
+  .object({
+    type: z.literal('patch.stop.response'),
+    requestId: z.string().min(1),
+    sourceChatId: z.string().min(1),
+    targetChatId: z.string().min(1),
+    ok: z.boolean(),
+    error: z
+      .object({ code: ChatErrorCode, message: z.string().min(1) })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type PatchStopResponseEvent = z.infer<typeof PatchStopResponseEvent>;
 
 export const PatchJobCreateEvent = z
   .object({
@@ -9269,6 +9290,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchUsageReadRequestEvent,
   PatchUsageReadResponseEvent,
   PatchStopEvent,
+  PatchStopResponseEvent,
   PatchJobCreateEvent,
   PatchJobUpdateEvent,
   PatchJobDeleteEvent,
@@ -9573,6 +9595,7 @@ export const EVENT_SCHEMAS = {
   'patch.usage.read.request': PatchUsageReadRequestEvent,
   'patch.usage.read.response': PatchUsageReadResponseEvent,
   'patch.stop': PatchStopEvent,
+  'patch.stop.response': PatchStopResponseEvent,
   'patch.job_create': PatchJobCreateEvent,
   'patch.job_update': PatchJobUpdateEvent,
   'patch.job_delete': PatchJobDeleteEvent,

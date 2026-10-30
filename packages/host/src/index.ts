@@ -1501,6 +1501,12 @@ async function startHost(
     onUnknownResponse: (requestId) =>
       logger.warn({ requestId }, 'patch.send_to.response for an unknown request; dropping'),
   });
+  const remoteStops = createRemoteRelayCoordinator<undefined>({
+    emit: (event) => emit(event),
+    idPrefix: 'rstop',
+    onUnknownResponse: (requestId) =>
+      logger.warn({ requestId }, 'patch.stop.response for an unknown request; dropping'),
+  });
   const webBotAuthSignatures = createRemoteRelayCoordinator<{
     headers: Record<string, string>;
   }>({
@@ -1590,6 +1596,19 @@ async function startHost(
           ...(req.voicePrefix !== undefined ? { voicePrefix: req.voicePrefix } : {}),
         }),
         () => `patch_send_to: chat ${req.targetChatId}'s host did not answer in time`,
+      )
+      .then(() => undefined);
+
+  const stopRemoteChat = (req: { sourceChatId: string; targetChatId: string }): Promise<void> =>
+    remoteStops
+      .call(
+        (requestId) => ({
+          type: 'patch.stop',
+          sourceChatId: req.sourceChatId,
+          targetChatId: req.targetChatId,
+          requestId,
+        }),
+        () => `patch_stop: chat ${req.targetChatId}'s host did not answer in time`,
       )
       .then(() => undefined);
 
@@ -3197,6 +3216,38 @@ async function startHost(
       }
       if (event.type === 'patch.send_to.response') {
         remoteSendTos.resolve(event);
+        return;
+      }
+      if (event.type === 'patch.stop') {
+        // Cross-host `patch_stop`: no requestId is a same-host audit record.
+        const requestId = event.requestId;
+        if (requestId === undefined) return;
+        const answer = (error?: { code: 'chat_not_found' | 'sdk_error'; message: string }): void =>
+          sender({
+            type: 'patch.stop.response',
+            requestId,
+            sourceChatId: event.sourceChatId,
+            targetChatId: event.targetChatId,
+            ok: error === undefined,
+            ...(error ? { error } : {}),
+          });
+        if (!daemon.chatState.has(event.targetChatId)) {
+          answer({ code: 'chat_not_found', message: `no such chat: ${event.targetChatId}` });
+          return;
+        }
+        daemon
+          .stopChat(event.targetChatId)
+          .then(() => answer())
+          .catch((err: unknown) =>
+            answer({
+              code: 'sdk_error',
+              message: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        return;
+      }
+      if (event.type === 'patch.stop.response') {
+        remoteStops.resolve(event);
         return;
       }
       if (event.type === 'web_bot_auth.sign_response') {
@@ -4859,6 +4910,7 @@ async function startHost(
     peekRemoteChat,
     historyRemoteChat,
     sendToRemoteChat,
+    stopRemoteChat,
     listDevices: () => presence.enumerate(deviceRegistry.list()),
     // Speakers-channel device-resolution cascade (spec/09 § `### speakers`).
     // Composes the live presence registry; step-4 exhaustion re-routes the
