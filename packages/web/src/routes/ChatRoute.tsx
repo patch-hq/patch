@@ -4305,7 +4305,7 @@ function ToolBlobBody({ blob }: { blob: ToolBlobRef }): JSX.Element {
 
 /** What `view_file` hands back: where the rendered page lives, and what it is. */
 interface ViewFileView {
-  kind: 'image' | 'pdf' | 'html' | 'file';
+  kind: 'image' | 'pdf' | 'video' | 'html' | 'file';
   /** Server-relative URL of the wrapped page (`/api/chats/:id/artifact/:aid`). */
   url: string;
   name: string;
@@ -4363,7 +4363,8 @@ function asViewFile(value: unknown): ViewFileView | null {
   const kind = v['kind'];
   const url = v['url'];
   const name = v['name'];
-  if (kind !== 'image' && kind !== 'pdf' && kind !== 'html' && kind !== 'file') return null;
+  if (kind !== 'image' && kind !== 'pdf' && kind !== 'video' && kind !== 'html' && kind !== 'file')
+    return null;
   if (typeof url !== 'string' || !url.startsWith('/api/')) return null;
   if (typeof name !== 'string' || name.length === 0) return null;
   const width = typeof v['width'] === 'number' ? v['width'] : undefined;
@@ -4918,6 +4919,15 @@ function ViewFileCard({ view, chatId }: { view: ViewFileView; chatId: string }):
             {...(view.height !== undefined ? { height: view.height } : {})}
           />
         </button>
+      ) : view.kind === 'video' ? (
+        <video
+          className="view-file-video"
+          data-testid="view-file-video"
+          src={view.url}
+          controls
+          playsInline
+          preload="metadata"
+        />
       ) : (
         <iframe
           className="view-file-frame"

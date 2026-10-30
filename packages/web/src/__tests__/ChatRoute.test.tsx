@@ -2710,6 +2710,44 @@ describe('ChatRoute regression', () => {
     expect(screen.getByTestId('view-file').getAttribute('data-expanded')).toBe('true');
   });
 
+  it('renders a view_file video result as an inline player', () => {
+    seedChat('c-view-video', [
+      {
+        seq: 1,
+        kind: 'tool_call',
+        tool: 'view_file',
+        callId: 'v1',
+        toolArgs: { file_path: 'clip.mp4' },
+        at: 0,
+      },
+      {
+        seq: 2,
+        kind: 'tool_result',
+        tool: 'view_file',
+        callId: 'v1',
+        toolResult: {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                ok: true,
+                kind: 'video',
+                url: '/api/chats/c-view-video/artifact/abc123',
+                name: 'clip.mp4',
+              }),
+            },
+          ],
+        },
+        at: 1,
+      },
+    ]);
+    renderChat('c-view-video');
+    expect(screen.getByTestId('view-file').getAttribute('data-kind')).toBe('video');
+    const video = screen.getByTestId('view-file-video');
+    expect(video.getAttribute('src')).toBe('/api/chats/c-view-video/artifact/abc123');
+    expect(video.hasAttribute('controls')).toBe(true);
+  });
+
   function seedFileCard(id: string, ack: Record<string, unknown>): void {
     seedChat(id, [
       {

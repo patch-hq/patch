@@ -54,6 +54,7 @@ import {
   MAX_ARTIFACT_BYTES,
   MAX_VIEW_IMAGE_BYTES,
   MAX_VIEW_PDF_BYTES,
+  MAX_VIEW_VIDEO_BYTES,
   artifactIdFor,
   resolveArtifactPath,
   resolveViewFilePath,
@@ -3573,6 +3574,19 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
           contentType: resolved.mime,
           base64: readFileSync(resolved.absPath).toString('base64'),
         };
+      } else if (kind === 'video') {
+        if (stat.size > MAX_VIEW_VIDEO_BYTES) {
+          throw new ArtifactInputError(
+            `video is ${stat.size} bytes — the limit is ${MAX_VIEW_VIDEO_BYTES}`,
+          );
+        }
+        // Served byte-for-byte with its own content-type: the chat puts this
+        // URL straight into a `<video src>`.
+        raw = {
+          contentType: resolved.mime,
+          base64: readFileSync(resolved.absPath).toString('base64'),
+        };
+        fileBytes = stat.size;
       } else if (kind === 'file') {
         if (stat.size > MAX_VIEW_PDF_BYTES) {
           throw new ArtifactInputError(
