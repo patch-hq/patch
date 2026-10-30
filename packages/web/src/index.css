@@ -17317,6 +17317,8 @@ select.permission-mode.is-pending {
   padding: 10px 14px;
   color: var(--term-ink-dim);
   font-size: var(--text-min);
+}
+
 /* ---------- Status list (spec/14 § Main chat panel — Status list) ---------- */
 /* One container under the header for Goal, Agents, Tasks and Artifacts. Every
    row shares one grid: 16px icon | label word | content | meta | action. */
