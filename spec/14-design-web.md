@@ -814,7 +814,7 @@ cost a context window.
   usually just been handling absolute paths and demanding a relative one is
   friction. It must still resolve INSIDE the chat folder; containment is the
   boundary, not the spelling of the argument.
-- Size caps are on the SOURCE file: 7 MB for an image, a PDF or a downloadable file, 2 MB for an
+- Size caps are on the SOURCE file: 7 MB for an image or a PDF, 50 MB for a video or a downloadable file, 2 MB for an
   HTML page. A PDF is inlined as a base64 data URI, which costs 4/3 — capping
   the source is what stops the wrapped page exceeding the artifact ceiling and
   bouncing at the server. An image is served at its own URL instead, so its
