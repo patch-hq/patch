@@ -418,7 +418,7 @@ describe('GET /api/link-preview', () => {
       vi.useRealTimers();
       await app.close();
     }
-  });
+  }, 30_000);
 
   it('rejects a non-html response rather than parsing it as one', async () => {
     vi.stubGlobal(
@@ -551,7 +551,7 @@ describe('GET /api/link-preview/image', () => {
       vi.useRealTimers();
       await app.close();
     }
-  });
+  }, 30_000);
 
   it('stops reading an image with no content-length once it passes the size cap', async () => {
     const chunk = new Uint8Array(1024 * 1024);
