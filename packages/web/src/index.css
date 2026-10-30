@@ -17498,7 +17498,6 @@ select.permission-mode.is-pending {
     display: none;
   }
 }
-<<<<<<< HEAD
 .status-row-wrap .status-row-content {
   white-space: normal;
   overflow-wrap: anywhere;
@@ -17624,7 +17623,7 @@ select.permission-mode.is-pending {
   .status-row-sub {
     grid-column: 2 / 4;
   }
-=======
+}
 
 /* An artifact open as a tab */
 .artifact-pane {
@@ -17687,5 +17686,4 @@ select.permission-mode.is-pending {
   border: 0;
   min-height: 0;
   background: var(--bg-soft);
->>>>>>> bdbd3e55 (Tabs 4/5: artifacts open as tabs)
 }
