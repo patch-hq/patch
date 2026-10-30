@@ -829,7 +829,13 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     broadcast: (event) => wsHub.sendToAll(event),
     notify: (message) => {
       void notificationRouter
-        .route({ type: 'notify', chatId: 'host-health', message, priority: 'normal' })
+        .route({
+          type: 'notify',
+          chatId: 'host-health',
+          kind: 'host-health',
+          message,
+          priority: 'normal',
+        })
         .catch((err: unknown) => {
           log.warn({ err: (err as Error).message }, 'host health notify failed');
         });

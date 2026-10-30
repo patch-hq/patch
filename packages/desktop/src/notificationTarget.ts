@@ -7,6 +7,7 @@ export function notificationClickPath(
   chatId: string | undefined,
 ): string | null {
   if (kind === 'batch') return '/batch';
+  if (kind === 'host-health') return '/settings/hosts';
   if (kind === 'sign-in') return '/settings/usage';
   if (chatId) return `/chats/${chatId}`;
   return null;

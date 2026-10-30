@@ -43,6 +43,12 @@ describe('resolveNotificationAction — chat routing', () => {
     });
   });
 
+  it('resolves a host-health notification to settings, never the placeholder chat', () => {
+    expect(
+      resolveNotificationAction({ kind: 'host-health', chatId: 'host-health' }, NO_TEXT),
+    ).toEqual({ action: { type: 'settings' } });
+  });
+
   it('resolves a sign-in notification to settings, never the placeholder chat', () => {
     expect(
       resolveNotificationAction({ kind: 'sign-in', chatId: 'account-sign-in' }, NO_TEXT),
