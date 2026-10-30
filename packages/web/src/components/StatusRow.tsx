@@ -3,7 +3,7 @@
 // action. Goal, Agents, Tasks and Artifacts all draw through it so they read as
 // one list rather than four separately styled bars.
 
-import { type JSX, type ReactNode } from 'react';
+import { type JSX, type KeyboardEvent, type ReactNode } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 
 export interface StatusRowProps {
@@ -26,6 +26,9 @@ export interface StatusRowProps {
   /** Muted detail line under the content column (an opened row, or a note that needs the user). */
   sub?: ReactNode;
   role?: string;
+  /** Makes the whole row a button (opening a transcript or terminal). */
+  onActivate?: () => void;
+  activateLabel?: string;
   [dataAttr: `data-${string}`]: string | undefined;
 }
 
@@ -41,6 +44,8 @@ export function StatusRow({
   nested,
   wrap,
   sub,
+  onActivate,
+  activateLabel,
   ...rest
 }: StatusRowProps): JSX.Element {
   const cls = [
@@ -52,7 +57,26 @@ export function StatusRow({
     .filter((c) => c !== '')
     .join(' ');
   return (
-    <div className={cls} data-testid={testId} {...rest}>
+    <div
+      className={cls}
+      data-testid={testId}
+      {...(onActivate
+        ? {
+            role: 'button',
+            tabIndex: 0,
+            'aria-label': activateLabel,
+            title: activateLabel,
+            onClick: onActivate,
+            onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => {
+              if (e.target !== e.currentTarget) return;
+              if (e.key !== 'Enter' && e.key !== ' ') return;
+              e.preventDefault();
+              onActivate();
+            },
+          }
+        : {})}
+      {...rest}
+    >
       <span className="status-row-icon">{icon}</span>
       <span className="status-row-label">{label}</span>
       <span className="status-row-content">{children}</span>
