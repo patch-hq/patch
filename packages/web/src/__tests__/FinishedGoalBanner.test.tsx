@@ -31,9 +31,12 @@ describe('FinishedGoalBanner', () => {
 
   it('shows the full goal text and metrics, untruncated', () => {
     render(<FinishedGoalBanner row={row()} />);
-    expect(screen.getByTestId('finished-goal-summary')).toHaveTextContent(`Goal met: ${long}`);
+    expect(screen.getByTestId('finished-goal-summary')).toHaveTextContent(long);
+    expect(screen.getByTestId('finished-goal-pill')).toHaveTextContent('Met');
+    expect(screen.queryByTestId('finished-goal-detail')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('finished-goal-pill'));
     expect(screen.getByTestId('finished-goal-detail')).toHaveTextContent(
-      '9m · 3 checks · 8.2k tokens · All checks pass',
+      '9m · 3 checks · 8.2k tokens. All checks pass',
     );
   });
 
@@ -59,6 +62,6 @@ describe('FinishedGoalBanner', () => {
 
   it('labels impossible distinctly', () => {
     render(<FinishedGoalBanner row={row({ lastGoal: { ...lastGoal, outcome: 'impossible' } })} />);
-    expect(screen.getByTestId('finished-goal-summary')).toHaveTextContent('Goal impossible');
+    expect(screen.getByTestId('finished-goal-pill')).toHaveTextContent('Impossible');
   });
 });

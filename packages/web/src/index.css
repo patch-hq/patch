@@ -10706,65 +10706,13 @@ main.empty-state p {
   color: var(--ink-1, var(--ink-2));
 }
 
-/* ---------- Goal banner (patch/todo.md — /goal) ---------- */
+/* ---------- Goal row (status list; patch/todo.md — /goal) ---------- */
 
-.goal-banner {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  background: var(--paper, var(--bg-elevated));
-  color: var(--ink-2);
-  padding: 4px 16px;
-  font-size: 15px;
-  border-bottom: 1px solid var(--line-soft);
+.goal-icon-working {
+  color: var(--accent);
 }
-/* Two plain lines: icon, goal text and clear; then one muted line of metrics
-   (and the evaluator's reason), wrapped so nothing is cut mid-word. */
-.goal-banner-main {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.goal-banner-meta {
-  min-width: 0;
-  font-size: var(--text-min);
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-  padding-left: 24px;
-}
-.goal-banner-label {
-  flex: none;
-  font-size: var(--text-min);
-  color: var(--ink-3);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-sm);
-  padding: 0 6px;
-}
-.goal-banner-expanded .goal-banner-text {
-  display: block;
-}
-.goal-banner-cell + .goal-banner-cell::before {
-  content: ' · ';
-}
-.goal-banner-main .goal-clear-btn {
-  flex: none;
-}
-.goal-banner-text {
-  flex: 1 1 auto;
-  min-width: 0;
-  border: none;
-  background: transparent;
-  color: var(--ink-1, var(--ink-2));
-  font: inherit;
-  text-align: left;
-  padding: 0;
-  cursor: pointer;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-  overflow-wrap: anywhere;
+.goal-icon-met {
+  color: var(--goal-met);
 }
 .goal-edit-input {
   width: 100%;
@@ -10777,36 +10725,6 @@ main.empty-state p {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   resize: vertical;
-}
-.goal-clear-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  border: none;
-  background: transparent;
-  color: var(--ink-3);
-  padding: 2px;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-}
-.goal-clear-btn:hover {
-  color: var(--ink-1, var(--ink-2));
-  background: var(--bg-elevated);
-}
-
-/* Finished-goal bar: full wrapped text, never truncated. */
-.finished-goal-title {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  color: var(--ink-1, var(--ink-2));
-}
-.finished-goal-meta {
-  font-size: var(--text-min);
-  line-height: 1.4;
-  padding-left: 24px;
-  overflow-wrap: anywhere;
 }
 
 /* ---------- Inline click-to-edit text (goal bar, task rows) ---------- */
