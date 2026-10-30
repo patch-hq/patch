@@ -91,7 +91,7 @@ test.describe('background task bar', () => {
     await expect(rows.nth(0)).toContainText('Diagnose 25045 test failures');
     await expect(rows.nth(1)).toContainText('Build web package to compile CSS');
     await expect(bar).not.toContainText('Run the server suite');
-    await expect(page.getByTestId('background-task-bar-count')).toHaveText('2 background tasks');
+    await expect(page.getByTestId('background-task-bar-count')).toHaveText('2 running');
 
     const head = await page.getByTestId('chat-main').boundingBox();
     const box = await bar.boundingBox();
@@ -104,18 +104,18 @@ test.describe('background task bar', () => {
     const first = await rows.nth(0).boundingBox();
     const second = await rows.nth(1).boundingBox();
     if (!first || !second) throw new Error('missing row boxes');
-    expect(first.height).toBeLessThan(28);
-    expect(second.height).toBeLessThan(28);
+    expect(first.height).toBeLessThan(40);
+    expect(second.height).toBeLessThan(40);
     expect(second.y).toBeGreaterThan(first.y + first.height - 1);
     expect(second.x).toBeCloseTo(first.x, 1);
   });
 
-  test('every running row spins', async ({ page }) => {
+  test('the group row spins', async ({ page }) => {
     await stubWatchList(page);
     await page.goto(BG);
-    const spinners = page.locator('.background-task-bar-spinner');
-    await expect(spinners).toHaveCount(2);
-    for (const i of [0, 1]) {
+    const spinners = page.locator('.status-spinner');
+    await expect(spinners).toHaveCount(1);
+    for (const i of [0]) {
       const anim = await spinners.nth(i).evaluate((el) => {
         const s = getComputedStyle(el);
         return {
@@ -141,7 +141,7 @@ test.describe('background task bar', () => {
     await stubWatchList(page);
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto(BG);
-    const spinner = page.locator('.background-task-bar-spinner').first();
+    const spinner = page.locator('.status-spinner').first();
     await expect(spinner).toBeVisible();
     expect(await spinner.evaluate((el) => getComputedStyle(el).animationName)).toBe('none');
   });
@@ -157,7 +157,7 @@ test.describe('background task bar', () => {
     await toggle.click();
     await expect(bar).toHaveAttribute('data-collapsed', 'true');
     await expect(page.getByTestId('background-task-bar-task')).toHaveCount(0);
-    await expect(page.getByTestId('background-task-bar-count')).toHaveText('2 background tasks');
+    await expect(page.getByTestId('background-task-bar-count')).toHaveText('2 running');
     await expect(page.getByTestId('background-task-bar-toggle')).toHaveAttribute(
       'aria-expanded',
       'false',
@@ -166,7 +166,7 @@ test.describe('background task bar', () => {
 
     await page.getByTestId('background-task-bar-toggle').click();
     await expect(page.getByTestId('background-task-bar-task')).toHaveCount(2);
-    await expect(page.getByTestId('background-task-bar-count')).toHaveText('2 background tasks');
+    await expect(page.getByTestId('background-task-bar-count')).toHaveText('2 running');
   });
 
   test('the fold survives a reload', async ({ page }) => {
@@ -177,22 +177,22 @@ test.describe('background task bar', () => {
 
     await page.reload();
     await expect(page.getByTestId('background-task-bar')).toHaveAttribute('data-collapsed', 'true');
-    await expect(page.getByTestId('background-task-bar-count')).toHaveText('2 background tasks');
+    await expect(page.getByTestId('background-task-bar-count')).toHaveText('2 running');
     await expect(page.getByTestId('background-task-bar-task')).toHaveCount(0);
   });
 
-  test('the title stays above the bars when the stack is expanded', async ({ page }) => {
+  test('the pill row stays above the task rows when the group is opened', async ({ page }) => {
     await stubWatchList(page);
     await page.goto(BG);
     const title = page.getByTestId('background-task-bar-count');
-    await expect(title).toHaveText('2 background tasks');
+    await expect(title).toHaveText('2 running');
     const titleBox = await title.boundingBox();
     const firstRow = await page.getByTestId('background-task-bar-task').nth(0).boundingBox();
     if (!titleBox || !firstRow) throw new Error('missing boxes');
     expect(titleBox.y + titleBox.height).toBeLessThanOrEqual(firstRow.y + 1);
-    await expect(page.locator('.background-task-bar-spinner')).toHaveCount(2);
+    await expect(page.locator('.status-spinner')).toHaveCount(1);
     await page.getByTestId('background-task-bar-toggle').click();
-    await expect(page.locator('.background-task-bar-spinner')).toHaveCount(1);
+    await expect(page.locator('.status-spinner')).toHaveCount(1);
   });
 
   test('the rows are set at body size on a readable line', async ({ page }) => {
@@ -204,11 +204,11 @@ test.describe('background task bar', () => {
       return { font: parseFloat(s.fontSize), line: parseFloat(s.lineHeight) };
     });
     expect(size.font).toBeGreaterThanOrEqual(14);
-    expect(size.line).toBeGreaterThanOrEqual(22);
+    expect(size.line).toBeGreaterThanOrEqual(20);
     const box = await row.boundingBox();
     if (!box) throw new Error('missing row box');
-    expect(box.height).toBeGreaterThanOrEqual(20);
-    expect(box.height).toBeLessThan(32);
+    expect(box.height).toBeGreaterThanOrEqual(32);
+    expect(box.height).toBeLessThan(40);
   });
 
   // Elapsed time (background-task reliability overhaul, part 3).
@@ -229,34 +229,19 @@ test.describe('background task bar', () => {
     test('an ended row shows no elapsed clock', async ({ page }) => {
       await stubWatchList(page);
       await page.goto(BG);
-      await page.getByTestId('background-task-bar-show-all').check();
+      await page.getByTestId('background-task-bar-show-all').click();
       const rows = page.getByTestId('background-task-bar-task');
       const ended = rows.filter({ hasText: 'Typecheck the monorepo' });
       await expect(ended.getByTestId('background-task-bar-elapsed')).toHaveCount(0);
     });
   });
 
-  // Command preview + click-to-expand (background-task reliability overhaul, part 3).
-  test.describe('command preview', () => {
-    test('a long command is truncated, and clicking it reveals the whole thing without opening the terminal', async ({
-      page,
-    }) => {
-      await stubWatchList(page, [
-        {
-          ...RUNNING[0],
-          command:
-            'pnpm --filter @patch/web test -- --grep "a much longer flag than the preview length allows"',
-        },
-      ]);
-      await page.goto(BG);
-      const preview = page.getByTestId('background-task-bar-command');
-      const full =
-        'pnpm --filter @patch/web test -- --grep "a much longer flag than the preview length allows"';
-      await expect(preview).not.toHaveText(full);
-      await preview.click();
-      await expect(preview).toHaveText(full);
-      await expect(page.getByTestId('terminal-pane')).toHaveCount(0);
-    });
+  // The row shows the description only: no command, no log path.
+  test('the row does not show the command', async ({ page }) => {
+    await stubWatchList(page);
+    await page.goto(BG);
+    await expect(page.getByTestId('background-task-bar')).not.toContainText('pnpm');
+    await expect(page.getByTestId('background-task-bar')).not.toContainText('.output');
   });
 
   // Kill button (background-task reliability overhaul, part 3 — reverses
@@ -285,7 +270,7 @@ test.describe('background task bar', () => {
     test('an ended row carries no kill control', async ({ page }) => {
       await stubWatchList(page);
       await page.goto(BG);
-      await page.getByTestId('background-task-bar-show-all').check();
+      await page.getByTestId('background-task-bar-show-all').click();
       const ended = page
         .getByTestId('background-task-bar-task')
         .filter({ hasText: 'Typecheck the monorepo' });
@@ -316,18 +301,18 @@ test.describe('background task bar', () => {
       await page.goto(BG);
       const bar = page.getByTestId('background-task-bar');
       await expect(page.getByTestId('background-task-bar-task')).toHaveCount(2);
-      await expect(page.getByTestId('background-task-bar-count')).toHaveText('2 background tasks');
+      await expect(page.getByTestId('background-task-bar-count')).toHaveText('2 running');
       await expect(bar).not.toContainText('Ship the web bundle');
       await expect(bar).not.toContainText('Typecheck the monorepo');
-      await expect(page.getByTestId('background-task-bar-show-all')).not.toBeChecked();
+      await expect(page.getByTestId('background-task-bar-show-all')).toHaveText('show ended');
     });
 
-    test('checking it lists the ended tasks under the running ones, struck through', async ({
+    test('clicking show ended lists the ended tasks under the running ones, struck through', async ({
       page,
     }) => {
       await stubWatchList(page);
       await page.goto(BG);
-      await page.getByTestId('background-task-bar-show-all').check();
+      await page.getByTestId('background-task-bar-show-all').click();
       const rows = page.getByTestId('background-task-bar-task');
       await expect(rows).toHaveCount(5);
       await expect(rows.nth(0)).toContainText('Diagnose 25045 test failures');
@@ -349,21 +334,21 @@ test.describe('background task bar', () => {
       expect(await line(0)).not.toContain('line-through');
       expect(await line(1)).not.toContain('line-through');
 
-      await expect(page.getByTestId('background-task-bar-count')).toHaveText('2 background tasks');
+      await expect(page.getByTestId('background-task-bar-count')).toHaveText('2 running');
       const box = await rows.nth(2).boundingBox();
       if (!box) throw new Error('missing row box');
-      expect(box.height).toBeLessThan(32);
+      expect(box.height).toBeLessThan(40);
     });
 
     test('an ended row does not turn', async ({ page }) => {
       await stubWatchList(page);
       await page.goto(BG);
-      await page.getByTestId('background-task-bar-show-all').check();
+      await page.getByTestId('background-task-bar-show-all').click();
       const rows = page.getByTestId('background-task-bar-task');
       await expect(rows).toHaveCount(5);
-      await expect(page.locator('.background-task-bar-spinner')).toHaveCount(2);
+      await expect(page.locator('.status-spinner')).toHaveCount(1);
       for (const i of [2, 3, 4]) {
-        await expect(rows.nth(i).locator('.background-task-bar-spinner')).toHaveCount(0);
+        await expect(rows.nth(i).locator('.status-spinner')).toHaveCount(0);
       }
       const x = async (i: number): Promise<number> => {
         const b = await rows.nth(i).getByTestId('background-task-bar-description').boundingBox();
@@ -373,20 +358,22 @@ test.describe('background task bar', () => {
       expect(await x(2)).toBeCloseTo(await x(0), 1);
     });
 
-    test('the checkbox survives a reload, and folds away with the stack', async ({ page }) => {
+    test('the show-ended link state survives a reload, and folds away with the stack', async ({
+      page,
+    }) => {
       await stubWatchList(page);
       await page.goto(BG);
-      await page.getByTestId('background-task-bar-show-all').check();
+      await page.getByTestId('background-task-bar-show-all').click();
       await expect(page.getByTestId('background-task-bar-task')).toHaveCount(5);
 
       await page.reload();
-      await expect(page.getByTestId('background-task-bar-show-all')).toBeChecked();
+      await expect(page.getByTestId('background-task-bar-show-all')).toHaveText('hide ended');
       await expect(page.getByTestId('background-task-bar-task')).toHaveCount(5);
 
       await page.getByTestId('background-task-bar-toggle').click();
       await expect(page.getByTestId('background-task-bar-task')).toHaveCount(0);
       await expect(page.getByTestId('background-task-bar-show-all')).toHaveCount(0);
-      await expect(page.getByTestId('background-task-bar-count')).toHaveText('2 background tasks');
+      await expect(page.getByTestId('background-task-bar-count')).toHaveText('2 running');
     });
 
     test('an ended task still opens the terminal on the output it left behind', async ({
@@ -394,7 +381,7 @@ test.describe('background task bar', () => {
     }) => {
       await stubWatchList(page);
       await page.goto(BG);
-      await page.getByTestId('background-task-bar-show-all').check();
+      await page.getByTestId('background-task-bar-show-all').click();
       await page
         .getByTestId('background-task-bar-task')
         .filter({ hasText: 'Ship the web bundle' })
@@ -402,13 +389,13 @@ test.describe('background task bar', () => {
       await expect(page.getByTestId('terminal-pane')).toBeVisible();
     });
 
-    test('unchecking it takes the ended tasks away again', async ({ page }) => {
+    test('clicking hide ended takes the ended tasks away again', async ({ page }) => {
       await stubWatchList(page);
       await page.goto(BG);
       const box = page.getByTestId('background-task-bar-show-all');
-      await box.check();
+      await box.click();
       await expect(page.getByTestId('background-task-bar-task')).toHaveCount(5);
-      await box.uncheck();
+      await box.click();
       await expect(page.getByTestId('background-task-bar-task')).toHaveCount(2);
       await expect(page.getByTestId('background-task-bar')).not.toContainText(
         'Typecheck the monorepo',

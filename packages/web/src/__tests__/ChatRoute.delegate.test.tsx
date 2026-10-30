@@ -350,35 +350,67 @@ describe('ChatRoute — patch_delegate tool row', () => {
       });
     }
 
-    it('lists each running subagent with its label and running time, and drops it when done', () => {
+    beforeEach(() => {
+      useUiStore.getState().setDelegatesOpen(false);
+      useUiStore.getState().setDelegatesShowDone(false);
+    });
+
+    it('one running subagent is a single Agent row with its label and running time', () => {
       seed();
       renderChat();
       expect(screen.queryByTestId('delegate-strip')).toBeNull();
       update('sub-1', 'draft the email', 'running', 1);
-      update('sub-2', 'build the design', 'running', 2);
-      const items = screen.getAllByTestId('delegate-strip-item');
-      expect(items).toHaveLength(2);
-      expect(items[0]!.textContent).toContain('draft the email');
-      expect(screen.getAllByTestId('delegate-strip-time')[0]!.textContent).toMatch(/^\d+s$/);
-      update('sub-1', 'draft the email', 'done', 3);
-      expect(screen.getAllByTestId('delegate-strip-item')).toHaveLength(1);
-      update('sub-2', 'build the design', 'done', 4);
+      const strip = screen.getByTestId('delegate-strip');
+      expect(strip.dataset['grouped']).toBe('false');
+      expect(strip.textContent).toContain('Agent');
+      expect(strip.textContent).toContain('draft the email');
+      expect(screen.getByTestId('delegate-strip-time').textContent).toMatch(/^\d+s$/);
+      expect(screen.queryByTestId('delegate-strip-toggle')).toBeNull();
+      update('sub-1', 'draft the email', 'done', 2);
       expect(screen.queryByTestId('delegate-strip')).toBeNull();
     });
 
-    it('sits with the other top bars, not above the composer, and is drawn like the task bar', () => {
+    it('several fold into one Agents row, open to one row each, and count the done ones', () => {
+      seed();
+      renderChat();
+      update('sub-1', 'draft the email', 'running', 1);
+      update('sub-2', 'build the design', 'running', 2);
+      update('sub-3', 'old one', 'done', 3);
+      const strip = screen.getByTestId('delegate-strip');
+      expect(strip.textContent).toContain('Agents');
+      expect(screen.getByTestId('delegate-strip-toggle').textContent).toContain('2 running');
+      expect(strip.textContent).toContain('1 done');
+      expect(strip.textContent).toContain('draft the email, build the design');
+      expect(screen.queryAllByTestId('delegate-strip-open')).toHaveLength(0);
+      fireEvent.click(screen.getByTestId('delegate-strip-toggle'));
+      expect(screen.getAllByTestId('delegate-strip-open')).toHaveLength(2);
+      fireEvent.click(screen.getByTestId('delegate-strip-show-done'));
+      expect(screen.getAllByTestId('delegate-strip-open')).toHaveLength(3);
+    });
+
+    it('holds up with 30+ agents: still one folded row', () => {
+      seed();
+      renderChat();
+      for (let i = 0; i < 35; i++) update(`s${i}`, `agent ${i}`, i < 5 ? 'running' : 'done', i + 1);
+      const strip = screen.getByTestId('delegate-strip');
+      expect(strip.querySelectorAll('.status-row')).toHaveLength(1);
+      expect(strip.textContent).toContain('5 running');
+      expect(strip.textContent).toContain('30 done');
+    });
+
+    it('sits with the other top bars, not above the composer', () => {
       seed();
       const { container } = renderChat();
       update('sub-1', 'draft the email', 'running', 1);
       const strip = screen.getByTestId('delegate-strip');
-      expect(strip.classList.contains('background-task-bar')).toBe(true);
+      expect(strip.closest('.status-list')).not.toBeNull();
       expect(strip.closest('.composer')).toBeNull();
       const composer = container.querySelector('textarea, [contenteditable="true"]');
       expect(composer).not.toBeNull();
       expect(
         strip.compareDocumentPosition(composer!) & Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy();
-      expect(strip.querySelector('.background-task-bar-spinner')).not.toBeNull();
+      expect(strip.querySelector('.status-spinner')).not.toBeNull();
     });
 
     it('opens the subagent read-only transcript from the strip', async () => {
