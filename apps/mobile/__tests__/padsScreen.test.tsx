@@ -173,6 +173,17 @@ describe('Pad screen', () => {
     expect(queryHost(r.root, byTestId('pad-webview'))).toBeNull();
   });
 
+  it('does not round the WebView (blank on Android) and says so when the editor fails to load', async () => {
+    const r = await mount(<PadScreen />);
+    const wv = get(r, 'pad-webview');
+    expect(wv.props['style']).toEqual({ flex: 1 });
+    await act(async () => {
+      wv.props['onHttpError']({ nativeEvent: { statusCode: 404, url: 'u' } });
+    });
+    expect(hasText(get(r, 'pad-frame-error'), 'HTTP 404 from u')).toBe(true);
+    expect(queryHost(r.root, byTestId('pad-webview'))).toBeNull();
+  });
+
   it('says so when the Pad cannot be loaded', async () => {
     vi.mocked(api.getPad).mockRejectedValue(new Error('gone'));
     const r = await mount(<PadScreen />);
