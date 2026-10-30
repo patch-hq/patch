@@ -42,8 +42,6 @@ export interface WsCloseInfo {
 export interface HostPresence {
   hostId: string;
   online: boolean;
-  /** Why it is offline, when it said: 'updating' means it will be back shortly. */
-  offlineReason?: string;
   lastSeenAt: number | null;
   /** The host's last self-description; null until it has reported one. */
   host: Omit<HostInfoEvent, 'type'> | null;
@@ -70,7 +68,7 @@ export interface HostPresence {
    * condition to report.
    */
   condition?: HostConditionEvent | null;
-  /** Why the host dropped off, when the server could tell (`host.offline` reason). */
+  /** Why the host dropped off, when the server could tell (`host.offline` reason); 'updating' means it is installing an update and will be back shortly. */
   offlineReason?: string | null;
 }
 
