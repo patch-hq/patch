@@ -61,6 +61,13 @@ describe('statedLimitOf — the structured fields decide, not the sentence', () 
     expect(statedLimitOf({ status: 'allowed' }, PROVIDER_SENTENCE)).toBeUndefined();
   });
 
+  it('does not read an allowed block as a limit just because it names a window and reset', () => {
+    for (const status of ['allowed', 'allowed_warning']) {
+      const facts = { status, rateLimitType: 'seven_day', resetsAt: 1788804000_000 };
+      expect(statedLimitOf(facts, 'Claude Code process exited with code 1')).toBeUndefined();
+    }
+  });
+
   it('does not read an unrelated typed failure as a limit', () => {
     expect(statedLimitOf({ kind: 'api_error' }, 'API Error: 500 internal')).toBeUndefined();
   });

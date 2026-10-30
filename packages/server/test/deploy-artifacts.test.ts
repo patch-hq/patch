@@ -25,7 +25,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -133,12 +133,10 @@ describe('H1 deploy artifacts — deploy command + backup scripts', () => {
       /--delete-branch|--rebase|\s-d\s/,
     );
     expect(read('.github/workflows/pr-conflicts.yml')).toMatch(/needs-rebase/);
-    // A PR ejected from the queue by a failing test goes back once, then is
-    // labelled for its chat; a re-run of a queue run is pointless (its branch is gone).
-    const requeue = read('.github/workflows/pr-requeue.yml');
-    expect(requeue).toMatch(/types: \[dequeued\]/);
-    expect(requeue).toMatch(/enqueuePullRequest/);
-    expect(requeue).toMatch(/queue-failed/);
+    // GitHub owns a PR from green to merged: nothing re-queues an ejected PR.
+    // The dequeued event goes to a Patch job (scripts/merge-queue-dequeue.mjs).
+    expect(existsSync(join(repoRoot, '.github/workflows/pr-requeue.yml'))).toBe(false);
+    expect(read('scripts/merge-queue-dequeue.mjs')).not.toMatch(/enqueuePullRequest/);
     expect(read('.github/workflows/test-retry.yml')).toMatch(
       /github\.event\.workflow_run\.event == 'pull_request'/,
     );

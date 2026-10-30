@@ -107,6 +107,65 @@ describe('ChatRoute — message hooks', () => {
     expect(ws.send).toHaveBeenCalled();
   });
 
+  it('echoes the message at once, before the check answers, and delivers only after it passes', async () => {
+    let resolve!: (v: { decision: 'pass'; results: [] }) => void;
+    vi.mocked(api.checkHooks).mockReturnValue(
+      new Promise((r) => {
+        resolve = r;
+      }),
+    );
+    seed();
+    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    renderChat(ws);
+    typeAndSend('instant please');
+    await waitFor(() =>
+      expect(
+        useChatStore.getState().timelines['c1']?.some((e) => e.content === 'instant please'),
+      ).toBe(true),
+    );
+    expect(ws.send).not.toHaveBeenCalled();
+    resolve({ decision: 'pass', results: [] });
+    await waitFor(() => expect(ws.send).toHaveBeenCalledTimes(1));
+    expect(
+      useChatStore.getState().timelines['c1']!.filter((e) => e.content === 'instant please'),
+    ).toHaveLength(1);
+  });
+
+  it('a block takes the echoed message back out of the stream and sends nothing', async () => {
+    let resolve!: (v: Awaited<ReturnType<typeof api.checkHooks>>) => void;
+    vi.mocked(api.checkHooks).mockReturnValue(
+      new Promise((r) => {
+        resolve = r;
+      }),
+    );
+    seed();
+    const ws = { send: vi.fn(), requestReplay: vi.fn() };
+    renderChat(ws);
+    typeAndSend('my hunter2 password');
+    await waitFor(() =>
+      expect(
+        useChatStore.getState().timelines['c1']?.some((e) => e.content === 'my hunter2 password'),
+      ).toBe(true),
+    );
+    resolve({
+      decision: 'block',
+      results: [
+        {
+          hookId: 'hook_b',
+          hookName: 'no secrets',
+          status: 'ok',
+          decision: 'block',
+          durationMs: 5,
+        },
+      ],
+    });
+    await screen.findByTestId('hook-block-card');
+    expect(
+      useChatStore.getState().timelines['c1']?.some((e) => e.content === 'my hunter2 password'),
+    ).toBe(false);
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
   it('an advise result sends the message and attaches an expandable note', async () => {
     vi.mocked(api.checkHooks).mockResolvedValue({
       decision: 'advise',

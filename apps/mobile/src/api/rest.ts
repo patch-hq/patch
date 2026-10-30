@@ -249,7 +249,7 @@ export interface SettingsResponse {
   shared?: Omit<SharedState, 'settings'>;
 }
 
-export type VoiceBackend = 'local' | 'gemini' | 'openai';
+export type VoiceBackend = 'local' | 'gemini' | 'openai' | 'elevenlabs';
 export type VoiceLayer = 'direct' | 'light' | 'heavy';
 export type VoiceHandoff = 'auto' | 'always' | 'never';
 export interface VoiceSurfaceConfig {

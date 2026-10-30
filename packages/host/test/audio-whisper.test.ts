@@ -31,11 +31,39 @@ describe('createWhisper', () => {
     await expect(w.close()).resolves.toBeUndefined();
   });
 
+  test('groq clip retries share one deadline: 429 then a stall fails inside the budget', async () => {
+    let calls = 0;
+    const fakeFetch = (async (_url: string | URL, init?: RequestInit) => {
+      calls++;
+      if (calls === 1) {
+        return new Response('rate limited', { status: 429, headers: { 'retry-after': '0' } });
+      }
+      // Stall until the attempt's signal aborts.
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+      });
+    }) as typeof fetch;
+    const w = new GroqWhisperBackend({
+      backend: 'groq',
+      logger,
+      groqApiKey: 'gsk_test',
+      fetchImpl: fakeFetch,
+      clipDeadlineMs: 300,
+      requestTimeoutMs: 60_000,
+    });
+    const started = Date.now();
+    await expect(w.transcribeClip(Buffer.from('x'), 'm4a')).rejects.toThrow(
+      /exceeded its 300ms budget/,
+    );
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(calls).toBe(2);
+  });
+
   test('groq backend lazy-fails when GROQ_API_KEY is missing (undefined or empty string)', async () => {
     const w = createWhisper({ backend: 'groq', logger });
-    await expect(w.transcribe(new Int16Array(160))).rejects.toThrow(/GROQ_API_KEY missing/);
+    await expect(w.transcribe(new Int16Array(160))).rejects.toThrow(/No Groq key is set/);
     const wEmpty = createWhisper({ backend: 'groq', logger, groqApiKey: '' });
-    await expect(wEmpty.transcribe(new Int16Array(160))).rejects.toThrow(/GROQ_API_KEY missing/);
+    await expect(wEmpty.transcribe(new Int16Array(160))).rejects.toThrow(/No Groq key is set/);
   });
 
   test('groq clip waits out a 429 and retries instead of dropping the clip (meeting audio)', async () => {
@@ -231,10 +259,10 @@ describe('WhisperBackend.transcribeClip (voice-note upload)', () => {
 
   test('groq backend lazy-fails when GROQ_API_KEY is missing (undefined or empty string)', async () => {
     const w = createWhisper({ backend: 'groq', logger });
-    await expect(w.transcribeClip(Buffer.from('x'), 'm4a')).rejects.toThrow(/GROQ_API_KEY missing/);
+    await expect(w.transcribeClip(Buffer.from('x'), 'm4a')).rejects.toThrow(/No Groq key is set/);
     const wEmpty = createWhisper({ backend: 'groq', logger, groqApiKey: '' });
     await expect(wEmpty.transcribeClip(Buffer.from('x'), 'm4a')).rejects.toThrow(
-      /GROQ_API_KEY missing/,
+      /No Groq key is set/,
     );
   });
 
@@ -601,13 +629,13 @@ describe('LocalWhisperBackend (spawned sidecar — host-owned process)', () => {
 });
 
 describe('validateWhisperCredentials (group H1: eager startup abort)', () => {
-  test('groq backend without GROQ_API_KEY aborts at startup, naming the env keys', () => {
+  test('groq backend without GROQ_API_KEY aborts at startup, pointing at Settings → Providers', () => {
     expect(() => validateWhisperCredentials({ whisperBackend: 'groq' })).toThrowError(
-      /WHISPER_BACKEND=groq.*GROQ_API_KEY/s,
+      /no Groq key.*Settings → Providers/s,
     );
     expect(() =>
       validateWhisperCredentials({ whisperBackend: 'groq', groqApiKey: '' }),
-    ).toThrowError(/GROQ_API_KEY/);
+    ).toThrowError(/Settings → Providers/);
   });
 
   test('groq backend with a GROQ_API_KEY passes', () => {

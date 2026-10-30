@@ -25,6 +25,20 @@ function stalledBodyFetch(contentType: string) {
   });
 }
 
+// The route registers its abort timer only after auth and routing have run, so a single
+// advance can fire before the timer exists. Advance in steps until the request settles.
+async function settleByAdvancing<T>(pending: Promise<T>): Promise<T> {
+  let settled = false;
+  void pending.finally(() => {
+    settled = true;
+  });
+  for (let i = 0; i < 20 && !settled; i++) {
+    await vi.advanceTimersByTimeAsync(1_000);
+    await new Promise<void>((r) => setImmediate(r));
+  }
+  return pending;
+}
+
 describe('GET /api/link-preview', () => {
   let dir: string;
   beforeEach(() => {
@@ -397,8 +411,7 @@ describe('GET /api/link-preview', () => {
         url: '/api/link-preview?url=' + encodeURIComponent('https://example.com/slow'),
         headers: { authorization: `Bearer ${jwt}` },
       });
-      await vi.advanceTimersByTimeAsync(5_000);
-      const res = await pending;
+      const res = await settleByAdvancing(pending);
       expect(res.statusCode).toBe(502);
       expect(res.json().error).toBe('fetch_failed');
     } finally {
@@ -531,8 +544,7 @@ describe('GET /api/link-preview/image', () => {
         url: '/api/link-preview/image?url=' + encodeURIComponent('https://example.com/slow.png'),
         headers: { authorization: `Bearer ${jwt}` },
       });
-      await vi.advanceTimersByTimeAsync(5_000);
-      const res = await pending;
+      const res = await settleByAdvancing(pending);
       expect(res.statusCode).toBe(502);
       expect(res.json().error).toBe('fetch_failed');
     } finally {

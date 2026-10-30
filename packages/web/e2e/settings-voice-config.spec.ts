@@ -38,15 +38,19 @@ test.describe('Settings — Voice engines', () => {
       'Gemini Thinking',
       'OpenAI mini',
       'OpenAI',
+      'ElevenLabs Haiku',
+      'ElevenLabs Sonnet',
     ]);
     // Dictation: the phone has its own recogniser; a computer does not.
     await expect(page.getByTestId('dictation-phone-engine').locator('button')).toHaveText([
       'Built-in',
       'Deepgram',
+      'ElevenLabs',
       'Whisper',
     ]);
     await expect(page.getByTestId('dictation-computer-engine').locator('button')).toHaveText([
       'Deepgram',
+      'ElevenLabs',
       'Whisper',
     ]);
     await expect(page.getByText(/\b(direct|light|heavy)\b/)).toHaveCount(0);
@@ -134,7 +138,7 @@ test.describe('Settings — Voice engines', () => {
     await page.getByTestId('dictation-computer-engine-deepgram').click();
     const line = page.getByTestId('dictation-computer-keys');
     await expect(line).toHaveText(
-      'Not configured on dev-host: DEEPGRAM_API_KEY is missing. Sessions there are refused.',
+      'Not configured on dev-host: no Deepgram key is set. Sessions there are refused.',
     );
     await expect(line).toBeVisible();
     // It reads as an error, not as a muted hint.

@@ -55,7 +55,7 @@ describe('DeepgramTranscribeBackend (the clip path)', () => {
     });
     await expect(empty.transcribeClip(Buffer.from('x'), 'wav')).rejects.toThrow('no transcript');
     const noKey = new DeepgramTranscribeBackend({ logger, apiKey: undefined });
-    await expect(noKey.transcribeClip(Buffer.from('x'), 'wav')).rejects.toThrow('DEEPGRAM_API_KEY');
+    await expect(noKey.transcribeClip(Buffer.from('x'), 'wav')).rejects.toThrow('Deepgram key');
   });
 });
 
@@ -75,8 +75,8 @@ describe('picking the dictation transcriber', () => {
       ok: false,
       backend: 'deepgram',
       message:
-        'Dictation is set to deepgram, but DEEPGRAM_API_KEY is not set on this host. ' +
-        'Switch Dictation to another backend in Settings → Voice.',
+        'Dictation is set to deepgram, but no Deepgram key is set on this host. ' +
+        'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Voice.',
     });
     const withKey = createDictationTranscribers({ logger, local, deepgramApiKey: 'd' });
     const picked = pickDictationTranscriber('deepgram', withKey);

@@ -716,7 +716,7 @@ export function ProviderKeys(): React.ReactElement {
   return (
     <SettingsSection title="Provider keys" testID="providers-keys">
       {shared.secrets.providerKeys.map((k) => {
-        const { label, envVar } = providerKeyInfo(k.id);
+        const { label } = providerKeyInfo(k.id);
         const row = `provider-key-${k.id}`;
         const env = envHosts(k.id);
         const status = k.set
@@ -789,7 +789,7 @@ export function ProviderKeys(): React.ReactElement {
                 <Field
                   testID={`${row}-input`}
                   accessibilityLabel={`${label} key`}
-                  placeholder={envVar}
+                  placeholder="Paste key"
                   value={draft}
                   onChangeText={setDraft}
                   secureTextEntry

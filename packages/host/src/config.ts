@@ -127,12 +127,14 @@ export interface HostConfig {
     host: string;
     /** `host.host.audioRelayHost` — see `loadConfig`'s comment above. */
     relayHost: string | undefined;
-    whisperBackend: 'off' | 'groq' | 'local' | 'mock';
+    whisperBackend: 'off' | 'groq' | 'elevenlabs' | 'local' | 'mock';
     /**
      * GROQ_API_KEY from the environment (required for whisperBackend='groq'
      * unless one is set from Settings → Hosts → Keys, which wins).
      */
     groqApiKey: string | undefined;
+    /** ELEVEN_LABS_API_KEY — ElevenLabs Scribe: the elevenlabs dictation engine, or WHISPER_BACKEND=elevenlabs. */
+    elevenlabsApiKey: string | undefined;
     /** DEEPGRAM_API_KEY — needed only while dictation is on the deepgram engine. */
     deepgramApiKey: string | undefined;
     whisperLocalSidecarUrl: string | undefined;
@@ -200,6 +202,15 @@ export interface HostConfig {
     openaiRealtimeModelLight: string | undefined;
     /** Overrides `DEFAULT_OPENAI_REALTIME_MODELS.heavy`. OPENAI_REALTIME_MODEL_HEAVY env. */
     openaiRealtimeModelHeavy: string | undefined;
+    /**
+     * ELEVEN_LABS_API_KEY — ElevenLabs Agents voice (`backend: 'elevenlabs'`).
+     * The environment's value; a UI-set key wins (providerKeys.ts).
+     */
+    elevenLabsApiKey: string | undefined;
+    /** Overrides `DEFAULT_ELEVENLABS_AGENT_LLMS.light`. ELEVENLABS_AGENT_LLM_LIGHT env. */
+    elevenLabsAgentLlmLight: string | undefined;
+    /** Overrides `DEFAULT_ELEVENLABS_AGENT_LLMS.heavy`. ELEVENLABS_AGENT_LLM_HEAVY env. */
+    elevenLabsAgentLlmHeavy: string | undefined;
   };
 }
 
@@ -292,11 +303,12 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
   if (
     whisperBackendRaw !== 'off' &&
     whisperBackendRaw !== 'groq' &&
+    whisperBackendRaw !== 'elevenlabs' &&
     whisperBackendRaw !== 'local' &&
     whisperBackendRaw !== 'mock'
   ) {
     throw new Error(
-      `Invalid WHISPER_BACKEND: ${whisperBackendRaw} (expected 'off' | 'groq' | 'local' | 'mock')`,
+      `Invalid WHISPER_BACKEND: ${whisperBackendRaw} (expected 'off' | 'groq' | 'elevenlabs' | 'local' | 'mock')`,
     );
   }
   const kokoroBackendRaw = env['KOKORO_BACKEND'] ?? 'off';
@@ -347,6 +359,7 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
       whisperBackend: whisperBackendRaw,
       groqApiKey: env['GROQ_API_KEY'],
       deepgramApiKey: env['DEEPGRAM_API_KEY'],
+      elevenlabsApiKey: env['ELEVEN_LABS_API_KEY'],
       whisperLocalSidecarUrl: env['WHISPER_LOCAL_SIDECAR_URL'],
       whisperModelPath: env['WHISPER_MODEL_PATH'],
       kokoroBackend: kokoroBackendRaw,
@@ -373,6 +386,9 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
       openaiApiKey: env['OPENAI_REALTIME_API_KEY'],
       openaiRealtimeModelLight: env['OPENAI_REALTIME_MODEL_LIGHT'],
       openaiRealtimeModelHeavy: env['OPENAI_REALTIME_MODEL_HEAVY'],
+      elevenLabsApiKey: env['ELEVEN_LABS_API_KEY'],
+      elevenLabsAgentLlmLight: env['ELEVENLABS_AGENT_LLM_LIGHT'],
+      elevenLabsAgentLlmHeavy: env['ELEVENLABS_AGENT_LLM_HEAVY'],
     },
   };
 }

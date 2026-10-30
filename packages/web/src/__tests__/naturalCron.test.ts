@@ -53,6 +53,14 @@ describe('parseNaturalSchedule', () => {
     expect(parseNaturalSchedule('at 25:00')).toBeNull();
   });
 
+  it('returns null for one-off phrases rather than reading them as a daily cron', () => {
+    expect(parseNaturalSchedule('once at 9am tomorrow')).toBeNull();
+    expect(parseNaturalSchedule('at 9am tomorrow')).toBeNull();
+    expect(parseNaturalSchedule('next friday at 9am')).toBeNull();
+    expect(parseNaturalSchedule('on the 5th at 9am')).toBeNull();
+    expect(parseNaturalSchedule('today at noon')).toBeNull();
+  });
+
   it('returns null when a day phrase comes with an ambiguous bare-number time, not midnight', () => {
     expect(parseNaturalSchedule('9 every day')).toBeNull();
     expect(parseNaturalSchedule('17 every day')).toBeNull();

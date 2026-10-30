@@ -43,6 +43,8 @@ const css = readFileSync(CSS_PATH, 'utf8');
  */
 const MAY_FALL_BACK: Record<string, string> = {
   '--measure-slack': 'defined on .chat-stream, and .content.md also renders outside that scope',
+  '--panel-inset':
+    'set on <html> by AppShell only while the desktop web panel is open; 0px otherwise',
   '--wave-level': 'written per element by Waveform.tsx; the bars need a resting value',
   '--wave-envelope': 'written per element by Waveform.tsx; the bars need a resting value',
 };

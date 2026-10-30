@@ -3,7 +3,7 @@
 # press re-run. A second failure is left alone: that one is real.
 #
 # Not merge-queue runs: a failed queue run has already ejected its PR and its
-# branch is gone, so a re-run tests nothing. pr-requeue.yml puts the PR back.
+# branch is gone, so a re-run tests nothing. the dequeue job files a task for it.
 
 name: test-retry
 

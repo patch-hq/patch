@@ -42,7 +42,7 @@ import {
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as ed from '@noble/ed25519';
 import { sha512 } from '@noble/hashes/sha512';
@@ -60,6 +60,14 @@ export const TARGETS = [
   { target: 'linux-x64', platform: 'linux', arch: 'x64', node: 'linux-x64' },
   { target: 'linux-arm64', platform: 'linux', arch: 'arm64', node: 'linux-arm64' },
 ];
+
+/** Signing identifier of the macOS runtime = bundle id of the installed host app (installer/main.ts). */
+const HOST_APP_BUNDLE_ID = (() => {
+  const src = readFileSync(join(DAEMON, 'src', 'installer', 'service.ts'), 'utf8');
+  const m = /export const SERVICE_LABEL = '([^']+)'/.exec(src);
+  if (!m) die('SERVICE_LABEL not found in packages/host/src/installer/service.ts');
+  return m[1];
+})();
 
 const NODE_VERSION = readFileSync(join(REPO_ROOT, '.nvmrc'), 'utf8').trim();
 
@@ -327,6 +335,8 @@ export function copyPlaywrightCore(outDir) {
  * `allow-jit` the signed Node dies at startup with "Failed to reserve virtual
  * memory for CodeRange" while still passing `codesign --verify`.
  */
+const HOST_CODESIGN_IDENTIFIER = 'dev.patch.host';
+
 function codesignMacArtifact(outDir, machos) {
   const identity = process.env.PATCH_CODESIGN_IDENTITY ?? process.env.CSC_NAME;
   if (!identity) {
@@ -347,11 +357,22 @@ function codesignMacArtifact(outDir, machos) {
     );
   }
   for (const file of machos) {
+    // The runtime's signing identifier is the host app's bundle id, not "node":
+    // the installer wraps it in a .app with that id, and TCC keys its
+    // Allow/Don't Allow on the pair. Keep in step with HOST_APP_BUNDLE_ID.
+    const identifier = file === join(outDir, 'node') ? ['--identifier', HOST_APP_BUNDLE_ID] : [];
     sh('codesign', [
       '--force',
+      ...identifier,
       '--timestamp=none',
+      '--identifier',
+      basename(file) === 'node' ? 'patch-host' : basename(file),
       '--options',
       'runtime',
+      // A stable identifier of our own: the copied Node binary otherwise signs
+      // as `node`, and macOS keys a privacy decision on it, so one Don't Allow
+      // would not stick across updates (and would collide with any other node).
+      ...(basename(file) === 'node' ? ['--identifier', HOST_CODESIGN_IDENTIFIER] : []),
       '--entitlements',
       entitlements,
       '--sign',

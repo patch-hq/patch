@@ -11,6 +11,8 @@
 import * as FileSystem from 'expo-file-system';
 import {
   createUtteranceSegmenter,
+  isPhantomTranscript,
+  speechMs,
   type UtteranceSegmenterOptions,
 } from '@patch/wire/utterance-segmenter';
 import { api } from '../api/rest';
@@ -126,7 +128,9 @@ export function startDictationMode(
     chain = chain.then(async () => {
       try {
         const text = await transcribe(pcm);
-        if (!stopped && text) cb.onText(text);
+        if (!stopped && text && !isPhantomTranscript(text, speechMs(pcm, SAMPLE_RATE))) {
+          cb.onText(text);
+        }
       } catch (e) {
         if (!stopped) cb.onError(`voice transcription failed: ${(e as Error).message}`);
       } finally {

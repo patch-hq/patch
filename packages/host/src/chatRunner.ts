@@ -1300,6 +1300,7 @@ import { hasConversation } from './syntheticTurns.js';
 import { cutAt } from './textClean.js';
 import { untilAborted } from './untilAborted.js';
 import { withLimitStall } from './limitStall.js';
+import { RepeatFailureGuard, type RepeatTrip } from './repeatFailureGuard.js';
 
 /**
  * Hard cap on events returned by a single `patch_history` page. A caller
@@ -2553,6 +2554,8 @@ export class Daemon {
   private queuedStallSweep: ReturnType<typeof setInterval> | null = null;
   /** chatId → callId → start time of tool calls that have not returned yet. */
   private readonly toolsInFlight = new Map<string, Map<string, number>>();
+  /** Spots an agent re-running the same failing tool call (repeatFailureGuard.ts). */
+  private readonly repeatFailures = new RepeatFailureGuard();
 
   /**
    * Per-chat auto-resume timers: when a turn fails with a rate limit error and
@@ -2781,6 +2784,12 @@ export class Daemon {
   private readonly owedResend = new Set<string>();
   /** Chats whose pump is re-sending a turn a host restart cut off (as "carry on"). */
   private readonly interruptedResend = new Set<string>();
+  /**
+   * Chats whose provider session was found dead (e.g. it belongs to another
+   * account after a switch). Their next turn rebuilds a fresh session from
+   * Patch's log instead of starting contextless.
+   */
+  private readonly rebuildFromLog = new Set<string>();
 
   /** Put a chat's owed turn at the back of the resume line, once. */
   private enqueueResume(chatId: string, start: () => Promise<void> | undefined): void {
@@ -3062,6 +3071,8 @@ export class Daemon {
   private readonly sdkRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Chats whose turn is held until the machine is fully awake, and since when. */
   private readonly waitingForWakeSince = new Map<string, number>();
+  /** Set once the host starts going down; see `beginShutdown`. */
+  private stopping = false;
   /** Keeps each sleep re-send's localId unique, however fast they come. */
   private sleepRetrySeq = 0;
   /**
@@ -3074,7 +3085,17 @@ export class Daemon {
   private readonly parkedTurns = new Map<string, PendingTurn>();
 
   /** Stop background timers. Call before letting the host go out of scope in tests. */
+  /**
+   * The host is going down. From here on a turn that errors or ends is the
+   * restart's doing, not the work finishing, so it must not end an
+   * until-complete snooze (spec/04 § Snooze): the next host resumes the turn.
+   */
+  beginShutdown(): void {
+    this.stopping = true;
+  }
+
   shutdown(): void {
+    this.beginShutdown();
     for (const t of this.snoozeTimers.values()) clearTimeout(t);
     this.snoozeTimers.clear();
     if (this.snoozeSweep !== null) clearInterval(this.snoozeSweep);
@@ -3243,8 +3264,10 @@ export class Daemon {
     for (const m of metas) {
       const state = this.chatState.get(m.chatId);
       if (!state || state.snoozedUntil === null) continue;
-      // A restart ends the run, so an until-complete snooze has nothing left to wait for.
-      if (state.snoozedUntil === SNOOZE_UNTIL_COMPLETE || state.snoozedUntil <= this.opts.now()) {
+      // An until-complete snooze is settled once interrupted turns are resumed
+      // (`settleUntilCompleteSnoozes`): the turn it waited on may be coming back.
+      if (state.snoozedUntil === SNOOZE_UNTIL_COMPLETE) continue;
+      if (state.snoozedUntil <= this.opts.now()) {
         this.wakeFromSnooze(m.chatId);
       } else this.armSnoozeTimer(m.chatId, state.snoozedUntil);
     }
@@ -3281,6 +3304,25 @@ export class Daemon {
     this.wake.loadAll();
     this.watch.loadAll();
     this.resumeInterruptedTurns(owned, lastTurnOutcomeByChatId, lastTurnLocalIdByChatId);
+    this.settleUntilCompleteSnoozes(owned);
+  }
+
+  /**
+   * A restart does not end the work an until-complete snooze waits on when the
+   * interrupted turn is resumed (or parked waiting on credit): the snooze then
+   * carries on and ends the normal way when that turn returns. With no turn
+   * owed again there is nothing
+   * left to wait for, so it ends now (a goal alone does not count: with no turn
+   * to judge it, nothing would ever end the snooze).
+   */
+  private settleUntilCompleteSnoozes(metas: ChatMeta[]): void {
+    for (const m of metas) {
+      const state = this.chatState.get(m.chatId);
+      if (!state || state.snoozedUntil !== SNOOZE_UNTIL_COMPLETE) continue;
+      const resumed = this.owedResend.has(m.chatId) || this.parkedTurns.has(m.chatId);
+      if (resumed || this.aggregateActivity(m.chatId) === 'running') continue;
+      this.wakeFromSnooze(m.chatId);
+    }
   }
 
   /**
@@ -3522,6 +3564,7 @@ export class Daemon {
         if (disk && disk.state !== 'lost' && disk.localId === head?.localId) {
           unclaimed.delete(m.chatId);
           this.durableAttach.set(m.chatId, disk.consumed);
+          if (disk.accountId !== undefined) this.durableAccount.set(m.chatId, disk.accountId);
           reattach = true;
           this.opts.logger.info(
             { chatId: m.chatId, state: disk.state },
@@ -6576,6 +6619,9 @@ export class Daemon {
    */
   private readonly durableAttach = new Map<string, Consumed | null>();
 
+  /** The account a surviving turn was started on, by chat — it outlives the host's own memory. */
+  private readonly durableAccount = new Map<string, string>();
+
   private durableTurnFor(
     chatId: string,
     harness: HarnessId,
@@ -6590,6 +6636,9 @@ export class Daemon {
         config,
         chatId,
         localId,
+        ...(this.runningOnAccount.has(chatId)
+          ? { accountId: this.runningOnAccount.get(chatId) }
+          : {}),
         ...(attach !== undefined ? { attach: { consumed: attach } } : {}),
         log: this.opts.logger,
       },
@@ -7220,6 +7269,27 @@ export class Daemon {
     await this.stopChat(chatId);
   }
 
+  /**
+   * An agent re-ran the same failing tool call until the guard tripped: end the
+   * turn and tell the user, rather than let it hammer on (a blocked CLI can
+   * raise an OS permission dialog on every attempt).
+   */
+  private stopRepeatingChat(chatId: string, loop: RepeatTrip): void {
+    this.opts.logger.error(
+      { chatId, ...loop },
+      'agent repeated the same failing tool call; stopping',
+    );
+    this.emit({
+      type: 'notify',
+      chatId,
+      message: `Stopped: the agent ran the same failing ${loop.tool} call ${loop.count} times (${loop.summary})`,
+      priority: 'urgent',
+    });
+    void this.stopChat(chatId).catch((err: unknown) => {
+      this.opts.logger.error({ err, chatId }, 'stopping a repeating chat failed');
+    });
+  }
+
   async stopChat(chatId: string): Promise<void> {
     // spec/06 § Cross-chat tools — "archiving or stopping the parent stops
     // its subagents". Unconditional, before the early return below: a parent
@@ -7252,6 +7322,7 @@ export class Daemon {
       denyMessage: PERMISSION_STOPPED_MESSAGE,
       reason: 'cancelling outstanding permission request: the user stopped the turn',
     });
+    this.repeatFailures.clear(chatId);
     this.stopAnnouncePending.add(chatId);
     // spec/09 § A turn the user stopped. Stamped on the state BEFORE the abort,
     // so whichever settling frame the aborted run produces already carries it —
@@ -9066,9 +9137,21 @@ export class Daemon {
       const previous = this.runningOnAccount.get(chatId);
       movedAccount =
         previous !== undefined && oauth.accountId !== undefined && previous !== oauth.accountId;
-      if (oauth.accountId === undefined) this.runningOnAccount.delete(chatId);
+      // A reattached turn is still running on the account it was started on,
+      // whatever the host resolves to now: a refusal has to be blamed there.
+      const carriedOn = this.durableAttach.has(chatId)
+        ? this.durableAccount.get(chatId)
+        : undefined;
+      this.durableAccount.delete(chatId);
+      if (carriedOn !== undefined) this.runningOnAccount.set(chatId, carriedOn);
+      else if (oauth.accountId === undefined) this.runningOnAccount.delete(chatId);
       else this.runningOnAccount.set(chatId, oauth.accountId);
-      if (previous !== undefined && oauth.accountId !== undefined && previous !== oauth.accountId) {
+      if (
+        carriedOn === undefined &&
+        previous !== undefined &&
+        oauth.accountId !== undefined &&
+        previous !== oauth.accountId
+      ) {
         this.sayAccountSwitch(chatId, state.model, previous, oauth.accountId);
       }
     }
@@ -9435,7 +9518,7 @@ export class Daemon {
     // instead of starting a contextless session that only sees this prompt.
     const isNativeRebuild =
       !isProviderSwitch &&
-      (isResume || switchedClaudeAccount) &&
+      (isResume || switchedClaudeAccount || this.rebuildFromLog.has(chatId)) &&
       !fork &&
       !state.claudeSessionId &&
       this.hasPriorTrack(chatId, userMessageSeq) &&
@@ -9443,6 +9526,7 @@ export class Daemon {
       // carries its prompt itself and starts fresh. Only a restart's "carry on"
       // re-send leans on the log for the prompt it never repeats.
       (this.hasAnsweredTrack(chatId, userMessageSeq) || this.interruptedResend.has(chatId));
+    this.rebuildFromLog.delete(chatId);
     // spec/04 § History — preserve the cached prefix: a return to a harness
     // this track used before resumes ITS OWN prior session and hands over
     // only the delta (everything that happened elsewhere since), so the
@@ -10075,7 +10159,7 @@ export class Daemon {
           // ladder against a limit that was already known to last hours.
           (isOverloadedError(errMsg) ||
             statedLimitOf(limit, errMsg) !== undefined ||
-            limit?.resetsAt !== undefined)
+            (limit?.resetsAt !== undefined && statedLimitOf(limit, errMsg) !== undefined))
         ) {
           const now = this.opts.now();
           const isOverload = isOverloadedError(errMsg);
@@ -10366,6 +10450,7 @@ export class Daemon {
             return { ...rest, updatedAt: this.opts.now() };
           });
           this.hydratedFromDisk.delete(chatId);
+          this.rebuildFromLog.add(chatId);
           this.opts.logger.warn(
             { chatId, deadSessionId: deadSessionId ?? null, error: errMsg },
             'resumed onto a session with no transcript — re-sending the owed turn as a fresh session',
@@ -10405,6 +10490,7 @@ export class Daemon {
           // from the hydrated set so the recovery turn is treated as a
           // legitimate first turn (spec/04 line 46: "starts fresh").
           this.hydratedFromDisk.delete(chatId);
+          this.rebuildFromLog.add(chatId);
         }
         // A LIMIT THE PROVIDER STATED, THAT NOBODY PARKED — auto-resume off, or
         // its retry budget spent. Patch renders its own structured account of
@@ -11691,6 +11777,7 @@ export class Daemon {
         this.emit(ev);
         const inFlight = this.toolsInFlight.get(chatId) ?? new Map<string, number>();
         inFlight.set(env.tool.callId, this.opts.now());
+        this.repeatFailures.onToolUse(chatId, env.tool.callId, env.tool.name, env.tool.args);
         this.toolsInFlight.set(chatId, inFlight);
         // patch/todo.md § "todo list": mirror the agent's native TodoWrite list
         // onto chat state so surfaces can show it and the turn-settle
@@ -11775,6 +11862,12 @@ export class Daemon {
           seq,
         };
         this.emit(ev);
+        const loop = this.repeatFailures.onToolResult(
+          chatId,
+          env.toolResult.callId,
+          env.toolResult.isError === true,
+        );
+        if (loop !== undefined) this.stopRepeatingChat(chatId, loop);
         // Perf: a completed Edit/Write/NotebookEdit is the moment the
         // agent's own tool execution (not host code — the SDK writes the
         // file itself) landed a change on disk. The file-listing caches
@@ -15512,8 +15605,10 @@ export class Daemon {
   }
 
   private emitState(chatId: string): void {
-    this.trackSnoozeOutcome(chatId);
-    this.wakeIfSnoozeComplete(chatId);
+    if (!this.stopping) {
+      this.trackSnoozeOutcome(chatId);
+      this.wakeIfSnoozeComplete(chatId);
+    }
     this.unhideIfComplete(chatId);
     if (this.aggregateActivity(chatId) === 'running') {
       if (!this.runningSince.has(chatId)) this.runningSince.set(chatId, this.opts.now());

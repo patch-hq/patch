@@ -111,64 +111,19 @@ describe('ChatHeader', () => {
     cleanup();
   });
 
-  it('shows one segmented workers pill, a segment per agent, for running patch_delegate subagents only, and drops it when they finish', () => {
-    const send = (id: string, status: 'running' | 'done', seq: number): void => {
-      act(() => {
-        useChatStore.getState().applyEvent({
-          type: 'chat.delegate_update',
-          chatId: 'c1',
-          delegateId: id,
-          label: `job ${id}`,
-          status,
-          seq,
-        } as never);
-      });
-    };
+  it('has no workers pill beside the title', () => {
+    act(() => {
+      useChatStore.getState().applyEvent({
+        type: 'chat.delegate_update',
+        chatId: 'c1',
+        delegateId: 'a',
+        label: 'job a',
+        status: 'running',
+        seq: 1,
+      } as never);
+    });
     render(<ChatHeader row={row()} />);
     expect(screen.queryByTestId('header-workers')).toBeNull();
-    send('a', 'running', 1);
-    expect(screen.getAllByTestId('header-worker').map((e) => e.textContent)).toEqual([
-      'job a · running',
-    ]);
-    send('b', 'running', 2);
-    expect(screen.getAllByTestId('header-workers')).toHaveLength(1);
-    expect(screen.getAllByTestId('header-worker').map((e) => e.textContent)).toEqual([
-      'job a · running',
-      'job b · running',
-    ]);
-    send('a', 'done', 3);
-    expect(screen.getAllByTestId('header-worker').map((e) => e.textContent)).toEqual([
-      'job a · done',
-      'job b · running',
-    ]);
-    send('b', 'done', 4);
-    expect(screen.queryByTestId('header-workers')).toBeNull();
-  });
-
-  it('a worker parked on a usage limit reads "out of credit until <time>" and goes back to running when it resumes', () => {
-    const resetsAt = new Date(2030, 0, 15, 14, 5).getTime();
-    const send = (outOfCredit: { resetsAt?: number } | undefined, seq: number): void => {
-      act(() => {
-        useChatStore.getState().applyEvent({
-          type: 'chat.delegate_update',
-          chatId: 'c1',
-          delegateId: 'a',
-          label: 'job a',
-          status: 'running',
-          ...(outOfCredit ? { outOfCredit } : {}),
-          seq,
-        } as never);
-      });
-    };
-    render(<ChatHeader row={row()} />);
-    send({ resetsAt }, 1);
-    const seg = screen.getByTestId('header-worker');
-    expect(seg.getAttribute('data-state')).toBe('out-of-credit');
-    expect(seg.textContent).toMatch(/^job a · out of credit until .*(14:05|02:05)/);
-    send({}, 2);
-    expect(screen.getByTestId('header-worker').textContent).toBe('job a · out of credit');
-    send(undefined, 3);
-    expect(screen.getByTestId('header-worker').textContent).toBe('job a · running');
   });
 
   it('the ⋯ menu offers Move to…, which opens the Move dialog (spec/04 § Moving a chat)', () => {

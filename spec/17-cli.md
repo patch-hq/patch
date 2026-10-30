@@ -67,6 +67,7 @@ patch chats history <id> [--limit N]      # print the chat's transcript
 patch chats attach <id>                   # reattach to a live chat's TUI
 patch chats resume [<id>]                 # reopen the most recent chat's TUI, or the one named
 patch chats stop <id>                     # stop a chat
+patch chats resume-now <id>              # run a usage-limit-parked chat's turn now instead of waiting out the limit
 patch chats archive <id>                  # archive a chat (UI hides; its history and metadata stay on its host)
 patch chats set-model <id> <model>       # change an existing chat's model, from its next turn (spec/04 § Model)
 patch chats rename <id> [<name>]          # rename a chat; no name clears it back to the derived label

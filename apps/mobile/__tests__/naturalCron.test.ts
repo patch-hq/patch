@@ -13,6 +13,12 @@ describe('parseNaturalSchedule', () => {
     expect(parseNaturalSchedule('   ')).toBeNull();
   });
 
+  it('refuses one-off phrases instead of reading them as a daily cron', () => {
+    expect(parseNaturalSchedule('once at 9am tomorrow')).toBeNull();
+    expect(parseNaturalSchedule('next friday at 9am')).toBeNull();
+    expect(parseNaturalSchedule('on the 5th at 9am')).toBeNull();
+  });
+
   it('reads a leading time ("8am every day", "17:30 weekdays")', () => {
     expect(parseNaturalSchedule('8am every day')).toBe('0 8 * * *');
     expect(parseNaturalSchedule('17:30 weekdays')).toBe('30 17 * * 1-5');

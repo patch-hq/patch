@@ -3863,6 +3863,32 @@ describe('chat REST routes', () => {
     }
   });
 
+  it('POST /api/chats/:id/resume-now forwards chat.resume_now_request; 404 on unknown chat', async () => {
+    const { registry, jwt } = await bootstrap();
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
+    try {
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c-rn', folder: '/x' });
+      const res = await built.app.inject({
+        method: 'POST',
+        url: '/api/chats/c-rn/resume-now',
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ ok: true });
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.resume_now_request');
+      expect(sent?.event).toMatchObject({ chatId: 'c-rn' });
+      const missing = await built.app.inject({
+        method: 'POST',
+        url: '/api/chats/nope/resume-now',
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      expect(missing.statusCode).toBe(404);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('DELETE /api/chats/:id returns 404 for an unknown chat', async () => {
     const { registry, jwt } = await bootstrap();
     const built = await makeApp({ registry, hostLink: new InProcessHostLink() });

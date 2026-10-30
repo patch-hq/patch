@@ -119,7 +119,13 @@ describe('a durable turn', () => {
 
   it('survives the host going away and is picked up, without repeats, by the next one', async () => {
     const { cfg, cwd } = fresh();
-    const first = new DurableTurn({ config: cfg, chatId: 'c2', localId: 'L2', log });
+    const first = new DurableTurn({
+      config: cfg,
+      chatId: 'c2',
+      localId: 'L2',
+      accountId: 'work',
+      log,
+    });
     const d1 = drive(first.spawn({ ...spawnOpts, cwd }));
     d1.send(initialize('r1'));
     d1.send(prompt);
@@ -134,6 +140,7 @@ describe('a durable turn', () => {
     expect(inspectTurn(cfg, 'c2')).toMatchObject({
       state: 'live',
       localId: 'L2',
+      accountId: 'work',
       consumed: { offset, envelopes: -1 },
     });
 

@@ -18,7 +18,7 @@
 import { z } from 'zod';
 
 /** The keys a host can use, by id. */
-export const ProviderKeyId = z.enum(['gemini', 'openai', 'groq', 'deepgram']);
+export const ProviderKeyId = z.enum(['gemini', 'openai', 'elevenlabs', 'groq', 'deepgram']);
 export type ProviderKeyId = z.infer<typeof ProviderKeyId>;
 
 export interface ProviderKeyInfo {
@@ -44,6 +44,13 @@ export const PROVIDER_KEYS: readonly ProviderKeyInfo[] = [
     label: 'OpenAI Realtime',
     envVar: 'OPENAI_REALTIME_API_KEY',
     usedFor: 'Voice on the openai backend',
+  },
+  {
+    id: 'elevenlabs',
+    label: 'ElevenLabs',
+    envVar: 'ELEVEN_LABS_API_KEY',
+    usedFor:
+      'Voice on the elevenlabs backend, speech out when ElevenLabs is the chosen voice, and Scribe transcription (elevenlabs dictation engine, WHISPER_BACKEND=elevenlabs)',
   },
   {
     id: 'groq',
@@ -108,5 +115,5 @@ export function providerKeyStatusText(key: HostProviderKey): string {
  */
 export function providerKeyEnvOnlyNote(key: HostProviderKey): string | null {
   if (key.source !== 'env') return null;
-  return `From ${providerKeyInfo(key.id).envVar} in this host's environment; can't be revoked here.`;
+  return `From this host's environment; can't be revoked here.`;
 }

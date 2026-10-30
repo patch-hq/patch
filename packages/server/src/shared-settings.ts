@@ -57,6 +57,8 @@ import { validateClaudeOAuthToken, type ClaudeTokenValidation } from '@patch/aut
 const HOST_HELD_KEYS = [
   'voiceConfig',
   'kokoroVoice',
+  'ttsBackend',
+  'elevenLabsVoice',
   'permissionModeDefault',
   'chatNameInterval',
   'titleGenerationEnabled',

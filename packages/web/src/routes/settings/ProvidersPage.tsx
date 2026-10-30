@@ -188,7 +188,7 @@ function ProviderKeys(): JSX.Element {
   return (
     <div className="set-card" data-testid="providers-keys">
       {shared.secrets.providerKeys.map((k) => {
-        const { label, envVar } = providerKeyInfo(k.id);
+        const { label } = providerKeyInfo(k.id);
         const row = `provider-key-${k.id}`;
         const env = envHosts(k.id);
         const status = k.set
@@ -212,7 +212,6 @@ function ProviderKeys(): JSX.Element {
                 <span className="set-sub" data-testid={`${row}-status`}>
                   {status}
                 </span>
-                <span className="set-sub mono">{envVar}</span>
               </div>
               {editing === k.id ? null : (
                 <div className="set-row-ctrl">
@@ -269,7 +268,7 @@ function ProviderKeys(): JSX.Element {
                   autoComplete="off"
                   spellCheck={false}
                   aria-label={`${label} key`}
-                  placeholder={envVar}
+                  placeholder="Paste key"
                   data-testid={`${row}-input`}
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}

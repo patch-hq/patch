@@ -43,6 +43,8 @@ interface Waiter {
   resolve: (text: string) => void;
   reject: (err: Error) => void;
   onReplyText?: (chunk: string) => void;
+  /** Called once, when the waiter is armed: the chat has the turn. */
+  onAccepted?: () => void;
   /**
    * The `localId` the turn was sent with. When set, the waiter is armed only by that
    * turn's own persisted user message (emitted as the turn starts), never by whichever
@@ -71,6 +73,7 @@ export interface VoiceReplyBridge {
     chatId: string,
     onReplyText?: (chunk: string) => void,
     localId?: string,
+    onAccepted?: () => void,
   ): Promise<string>;
   /**
    * Drop the pending waiter for `chatId`, rejecting it with `err`. Used when
@@ -109,6 +112,7 @@ export function createVoiceReplyBridge(): VoiceReplyBridge {
             if (w.localId !== undefined && event.localId === w.localId) {
               w.armed = true;
               w.buf = [];
+              w.onAccepted?.();
             }
             return;
           }
@@ -131,6 +135,7 @@ export function createVoiceReplyBridge(): VoiceReplyBridge {
             if (!w.armed) {
               w.armed = true;
               w.buf = [];
+              w.onAccepted?.();
             }
             return;
           }
@@ -156,6 +161,7 @@ export function createVoiceReplyBridge(): VoiceReplyBridge {
       chatId: string,
       onReplyText?: (chunk: string) => void,
       localId?: string,
+      onAccepted?: () => void,
     ): Promise<string> {
       // One voice session per chat is the v1 contract. A second registration
       // means the first will never be settled by its own turn — fail it loudly
@@ -166,6 +172,7 @@ export function createVoiceReplyBridge(): VoiceReplyBridge {
           resolve,
           reject,
           ...(onReplyText ? { onReplyText } : {}),
+          ...(onAccepted ? { onAccepted } : {}),
           ...(localId !== undefined ? { localId } : {}),
           armed: false,
           buf: [],

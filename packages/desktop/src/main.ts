@@ -379,12 +379,16 @@ function attachWindowLinkPolicy(win: BrowserWindow): void {
       // below popped on top of Monaco's own menu on every right-click inside
       // the file editor. Ask the page what's under the click and stand down
       // there, leaving Monaco's own menu as the only one.
-      const insideMonacoEditor = await win.webContents
+      // The same goes for the app's own right-click menu (message actions,
+      // row menus: web ContextMenu, `.context-menu`). It is already open by
+      // the time this event is handled, and the native menu popped on top of
+      // it, so its Copy / Quote / Send items could not be reached.
+      const pageOwnsMenu = await win.webContents
         .executeJavaScript(
-          `!!document.elementFromPoint(${params.x}, ${params.y})?.closest('.monaco-editor')`,
+          `!!document.querySelector('.context-menu') || !!document.elementFromPoint(${params.x}, ${params.y})?.closest('.monaco-editor')`,
         )
         .catch(() => false);
-      if (insideMonacoEditor) return;
+      if (pageOwnsMenu) return;
 
       const template = buildContextMenuTemplate(params, {
         openExternal: (url) => void shell.openExternal(url),

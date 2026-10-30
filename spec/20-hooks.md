@@ -246,8 +246,12 @@ both are host ↔ server only.
 
 ## On the user's message
 
-- While the request is in flight the composer shows **Checking…** in place of
-  the send button's idle state, disabled, so a wait is never a silent one.
+- Send reacts at once: the message is echoed into the transcript and the
+  composer clears the moment Send is pressed, before the check has answered.
+  Delivery to the agent is held until the verdict — turns behind it in the
+  same chat wait their turn — so nothing reaches the agent unchecked. While
+  the request is in flight the composer shows **Checking…** in place of the
+  send button's idle state, disabled, so a wait is never a silent one.
   Hooks run in parallel server-side, so this is bounded by the slowest
   matching hook's own timeout, not their sum. The client also gives up after
   20 seconds if the server never answers. Whenever the check itself can't
@@ -261,7 +265,8 @@ both are host ↔ server only.
 - **Advise**: the message sends. A small note is attached to it in the
   transcript, naming the hook(s) that advised, expandable to each one's
   `analysis`.
-- **Block**: the message is **not** sent. It stays in the composer, and a
+- **Block**: the message is **not** sent. Its echo leaves the transcript and
+  the text returns to the composer, and a
   card above it shows the blocking hook's name, `analysis` and `suggestion`
   (when one is given), with three actions:
   - **Use suggestion** — replaces the composer's text with `suggestion` and

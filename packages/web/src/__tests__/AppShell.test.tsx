@@ -538,9 +538,11 @@ describe('AppShell', () => {
     const { unmount } = await renderShell('/');
     insetCb!({ width: 504 });
     await waitFor(() => expect(document.body.style.paddingRight).toBe('504px'));
+    expect(document.documentElement.style.getPropertyValue('--panel-inset')).toBe('504px');
     // Closing the panel (inset 0) restores the full-width app.
     insetCb!({ width: 0 });
     await waitFor(() => expect(document.body.style.paddingRight).toBe(''));
+    expect(document.documentElement.style.getPropertyValue('--panel-inset')).toBe('');
     unmount();
     expect(unsub).toHaveBeenCalled();
   });

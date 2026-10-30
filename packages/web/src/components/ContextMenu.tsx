@@ -262,6 +262,14 @@ export function ContextMenu({
             className={`context-menu-item${it.danger === true ? ' danger' : ''}${sub ? ' sub' : ''}`}
             data-testid={`${testId}-${it.id}`}
             aria-expanded={!sub && item.submenu !== undefined ? open : undefined}
+            // Hover moves focus, so focus is the one highlight: opening the menu
+            // focuses the first row, and without this a hovered row lit up as
+            // well, leaving two rows highlighted at once.
+            onMouseMove={(e) => {
+              if (document.activeElement !== e.currentTarget) {
+                e.currentTarget.focus({ preventScroll: true });
+              }
+            }}
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();

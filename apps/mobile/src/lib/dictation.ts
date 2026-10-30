@@ -207,7 +207,7 @@ export async function warmDictation(): Promise<void> {
  * Which way a dictation makes its words (spec/07 § Dictation engines):
  *   whisper — the recording so far is re-read by the dictation engine for a
  *             preview, and the whole clip is uploaded on finish (below).
- *   stream  — `deepgram`: the host streams it, the live words ARE the
+ *   stream  — `deepgram` or `elevenlabs`: the host streams it, the live words ARE the
  *             transcript, and finishing asks the host for them.
  *   phone   — the phone's own recogniser hears the mic tap; its words are the
  *             transcript, nothing leaves the phone except tidy-up.

@@ -8,7 +8,7 @@ import { useUiStore } from '../stores/uiStore.js';
 
 // Full-screen, zoomable image viewer rendered INSIDE the app (spec/14 §
 // Composer — "in-app zoomable viewer, never navigate away"). Click/scroll to
-// zoom, drag to pan when zoomed, Esc or a backdrop click to close.
+// zoom (once zoomed, scroll pans and pinch zooms), drag to pan when zoomed, Esc or a backdrop click to close.
 //
 // Portalled to <body>: `.chat-main` carries `contain: layout`, which makes it
 // the containing block for `position: fixed` descendants, so an in-tree overlay
@@ -37,6 +37,32 @@ export function ImageLightbox({
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const drag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+
+  const scaleRef = useRef(1);
+  scaleRef.current = scale;
+  const backdrop = useRef<HTMLDivElement>(null);
+
+  // Native, non-passive listener so preventDefault works (React's onWheel is passive).
+  // Scrolling a fitted image zooms it; once zoomed, a scroll pans (trackpad
+  // two-finger scroll) and only pinch / ctrl+scroll changes the zoom.
+  useEffect(() => {
+    const el = backdrop.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent): void => {
+      e.preventDefault();
+      if (scaleRef.current > 1 && !e.ctrlKey) {
+        setOffset((o) => ({ x: o.x - e.deltaX, y: o.y - e.deltaY }));
+        return;
+      }
+      setScale((s) => {
+        const next = clampScale(s - e.deltaY * 0.002 * s);
+        if (next === 1) setOffset({ x: 0, y: 0 });
+        return next;
+      });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
 
   const menu = useContextMenu();
   // Esc and a backdrop click close the menu first, the viewer only when no menu is up.
@@ -86,6 +112,7 @@ export function ImageLightbox({
 
   return createPortal(
     <div
+      ref={backdrop}
       className="lightbox-backdrop"
       data-testid="image-lightbox"
       role="dialog"
@@ -95,14 +122,6 @@ export function ImageLightbox({
         if (!menuOpen.current) onClose();
       }}
       onContextMenu={menu.openAt}
-      onWheel={(e) => {
-        e.preventDefault();
-        setScale((s) => {
-          const next = clampScale(s - e.deltaY * 0.002 * s);
-          if (next === 1) setOffset({ x: 0, y: 0 });
-          return next;
-        });
-      }}
     >
       <button
         type="button"

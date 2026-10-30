@@ -80,6 +80,8 @@ export interface DurableTurnRequest {
   chatId: string;
   /** The turn's surface id, so a restart can match the turn to its runner. */
   localId?: string | undefined;
+  /** The account the turn runs on, kept so a reattaching host blames the right one. */
+  accountId?: string | undefined;
   /** Set when this run carries on a turn a previous host started. */
   attach?: { consumed: Consumed | null } | undefined;
   log: DurableTurnLog;
@@ -119,6 +121,7 @@ export interface TurnOnDisk {
   dir: string;
   chatId: string;
   localId?: string;
+  accountId?: string;
   /**
    * `live`: the runner is up (claude may or may not still be running);
    * `exited`: claude finished while no host was attached and everything it
@@ -135,7 +138,9 @@ export function inspectTurn(config: DurableTurnConfig, chatId: string): TurnOnDi
 }
 
 export function inspectTurnDir(dir: string): TurnOnDisk | undefined {
-  const meta = readJson<{ chatId: string; localId?: string }>(join(dir, TURN_META));
+  const meta = readJson<{ chatId: string; localId?: string; accountId?: string }>(
+    join(dir, TURN_META),
+  );
   if (!meta) return undefined;
   const info = readJson<{ pid: number }>(join(dir, RUNNER_INFO));
   const exited = existsSync(join(dir, RUNNER_EXIT));
@@ -145,6 +150,7 @@ export function inspectTurnDir(dir: string): TurnOnDisk | undefined {
     dir,
     chatId: meta.chatId,
     ...(meta.localId !== undefined ? { localId: meta.localId } : {}),
+    ...(meta.accountId !== undefined ? { accountId: meta.accountId } : {}),
     state: exited ? 'exited' : live ? 'live' : 'lost',
     consumed: readJson<Consumed>(join(dir, CONSUMED)) ?? null,
   };
@@ -303,6 +309,7 @@ export class DurableTurn {
     writeJsonAtomic(join(this.dir, TURN_META), {
       chatId: this.chatId,
       ...(this.req.localId !== undefined ? { localId: this.req.localId } : {}),
+      ...(this.req.accountId !== undefined ? { accountId: this.req.accountId } : {}),
       startedAt: Date.now(),
     });
     const logFd = openSync(join(this.dir, RUNNER_LOG), 'a');

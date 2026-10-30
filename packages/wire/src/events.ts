@@ -2035,7 +2035,7 @@ export const McpServerList = z
 // Shared settings (spec/01 § Settings)
 // ---------------------------------------------------------------------------
 
-const VoiceBackendSetting = z.enum(['local', 'gemini', 'openai']);
+const VoiceBackendSetting = z.enum(['local', 'gemini', 'openai', 'elevenlabs']);
 const VoiceSurfaceSetting = z
   .object({
     backend: VoiceBackendSetting,
@@ -2164,6 +2164,10 @@ export const SharedSettings = z
     dictationTurnDetection: z.boolean(),
     /** Absent until one is chosen: each host then uses its Kokoro default. */
     kokoroVoice: z.string().min(1).optional(),
+    /** Which engine speaks: absent is Kokoro. */
+    ttsBackend: z.enum(['kokoro', 'elevenlabs']).optional(),
+    /** The ElevenLabs voice id to speak with, from the account's own list. */
+    elevenLabsVoice: z.string().min(1).optional(),
     permissionModeDefault: PermissionMode,
     /**
      * Per-provider override of `permissionModeDefault`, keyed by provider id
@@ -2345,6 +2349,7 @@ export const SharedSecrets = z
       .object({
         gemini: z.string().min(1).optional(),
         openai: z.string().min(1).optional(),
+        elevenlabs: z.string().min(1).optional(),
         groq: z.string().min(1).optional(),
         deepgram: z.string().min(1).optional(),
       })
@@ -2649,6 +2654,18 @@ export const HostInfoEvent = z
      * not installed or the voice has never been set.
      */
     kokoroVoice: z.string().min(1).optional(),
+    /** The speech engine and ElevenLabs voice this host is using (`host.settings`). */
+    ttsBackend: z.enum(['kokoro', 'elevenlabs']).optional(),
+    elevenLabsVoice: z.string().min(1).optional(),
+    /**
+     * The voices on this host's ElevenLabs account, cloned and designed ones
+     * included. Present only while the host holds a key; `elevenLabsVoicesError`
+     * says why the list could not be fetched instead.
+     */
+    elevenLabsVoices: z
+      .array(z.object({ id: z.string().min(1), name: z.string(), category: z.string().optional() }))
+      .optional(),
+    elevenLabsVoicesError: z.string().optional(),
     /**
      * Which hosted-voice provider keys this host holds (spec/07 § Voice — a
      * config matrix): GEMINI_API_KEY and OPENAI_REALTIME_API_KEY. Settings →
@@ -2659,7 +2676,12 @@ export const HostInfoEvent = z
      * later must not make an older client reject the whole host event.
      */
     voiceKeys: z
-      .object({ gemini: z.boolean(), openai: z.boolean(), deepgram: z.boolean().optional() })
+      .object({
+        gemini: z.boolean(),
+        openai: z.boolean(),
+        elevenlabs: z.boolean().optional(),
+        deepgram: z.boolean().optional(),
+      })
       .optional(),
     /**
      * spec/07 § Call cost — what this host's voice calls have cost, this

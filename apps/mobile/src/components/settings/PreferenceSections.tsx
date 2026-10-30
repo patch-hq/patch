@@ -187,11 +187,21 @@ function ManagerControls({ preferences }: { preferences: AccountPreferences }): 
 
 const VOICE_BACKENDS: readonly VoiceBackend[] = ['local', 'gemini', 'openai'];
 /** spec/07 § Dictation engines — a computer has no recogniser of its own. */
-const PHONE_DICTATION: readonly PhoneDictationEngine[] = ['device', 'deepgram', 'whisper'];
-const COMPUTER_DICTATION: readonly ComputerDictationEngine[] = ['deepgram', 'whisper'];
+const PHONE_DICTATION: readonly PhoneDictationEngine[] = [
+  'device',
+  'deepgram',
+  'elevenlabs',
+  'whisper',
+];
+const COMPUTER_DICTATION: readonly ComputerDictationEngine[] = [
+  'deepgram',
+  'elevenlabs',
+  'whisper',
+];
 const DICTATION_LABELS: Record<PhoneDictationEngine, string> = {
   device: 'Built-in',
   deepgram: 'Deepgram',
+  elevenlabs: 'ElevenLabs',
   whisper: 'Whisper',
 };
 const VOICE_LAYERS: readonly VoiceLayer[] = ['direct', 'light', 'heavy'];

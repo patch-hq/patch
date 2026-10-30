@@ -32,13 +32,22 @@ export interface KokoroSynthesis {
   cancel(): Promise<void>;
 }
 
+/**
+ * What a synthesis is for. `live` is a turn in a conversation, where the first
+ * audio matters most; `announce` is something said once to a room or a briefing,
+ * where quality matters more. A backend with one model ignores it.
+ */
+export interface SynthOptions {
+  purpose?: 'live' | 'announce';
+}
+
 export interface KokoroBackend {
   /**
    * Synthesise `text` as PCM audio. `voice` is an optional per-call override
    * (one of the standard Kokoro v1 voice names, e.g. 'af_heart'). When absent
    * the sidecar uses its configured default.
    */
-  synthesize(text: string, voice?: string): Promise<KokoroSynthesis>;
+  synthesize(text: string, voice?: string, opts?: SynthOptions): Promise<KokoroSynthesis>;
   /** True iff the sidecar is alive + accepting requests. */
   isReady(): boolean;
   close(): Promise<void>;

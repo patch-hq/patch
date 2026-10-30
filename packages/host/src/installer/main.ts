@@ -27,7 +27,7 @@
 // (spec/11, unhappy paths). Nothing here is a fallback: each failure stops the
 // install where it is and says which step failed and why.
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   copyFileSync,
@@ -275,6 +275,39 @@ async function pairingCode(args: Args, io: InstallerIo): Promise<string | undefi
   return code.length > 0 ? code : undefined;
 }
 
+/** Bundle id of the macOS host app. Also the signing identifier of its executable (build-host). */
+export const HOST_APP_BUNDLE_ID = SERVICE_LABEL;
+
+/** `<runtime>/Patch Host.app/Contents/MacOS/patch-host`: the macOS service executable. */
+export function hostAppExecutable(runtimeDir: string): string {
+  return join(runtimeDir, 'Patch Host.app', 'Contents', 'MacOS', 'patch-host');
+}
+
+/** The Info.plist that makes the runtime a bundle, so TCC remembers one decision for it. */
+export function hostAppInfoPlist(version: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>${HOST_APP_BUNDLE_ID}</string>
+  <key>CFBundleName</key>
+  <string>Patch Host</string>
+  <key>CFBundleExecutable</key>
+  <string>patch-host</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleVersion</key>
+  <string>${version}</string>
+  <key>CFBundleShortVersionString</key>
+  <string>${version}</string>
+  <key>LSUIElement</key>
+  <true/>
+</dict>
+</plist>
+`;
+}
+
 /** Which service manager this machine has. Anything else is not a target. */
 export function serviceManagerFor(platform: NodeJS.Platform): ServiceManager {
   if (platform === 'darwin') return 'launchd';
@@ -371,6 +404,30 @@ export interface InstallResult {
   code: number;
 }
 
+/**
+ * Whether the installed runtime already is the bundled one. On macOS two builds
+ * of the same signed node differ in the signature blob alone, so comparing bytes
+ * rewrote the binary on every update and TCC (which keys its grant to the file)
+ * asked again. The code directory hash covers the code, entitlements and
+ * identifier but not the signature, so equal hashes mean nothing to replace.
+ */
+export function sameRuntimeBinary(installed: string, bundled: string): boolean {
+  if (process.platform === 'darwin') {
+    return cdHash(installed) === cdHash(bundled);
+  }
+  return readFileSync(installed).equals(readFileSync(bundled));
+}
+
+function cdHash(file: string): string {
+  // codesign writes its description to stderr, so read both streams.
+  const r = spawnSync('codesign', ['-d', '-vvv', file], { encoding: 'utf8' });
+  if (r.error) throw r.error;
+  const out = `${r.stdout}\n${r.stderr}`;
+  const m = /^CDHash=(\S+)$/m.exec(out);
+  if (!m) throw new Error(`codesign reported no CDHash for ${file}: ${r.stderr.trim()}`);
+  return m[1]!;
+}
+
 export async function runInstaller(ctx: InstallerContext): Promise<InstallResult> {
   const { io } = ctx;
   let args: Args;
@@ -459,13 +516,24 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
   // Named "patch-host" rather than "node", so the one entry in the privacy
   // list is recognisably Patch's. A real file (never a symlink), overwritten
   // in place by each update that ships a different binary.
-  const stableNode = join(patchHome, 'runtime', 'patch-host');
+  //
+  // On macOS the runtime lives inside a minimal .app bundle with its own bundle
+  // id. A bare Mach-O has no Info.plist, so TCC keys it by signing identifier
+  // ("node") and does not keep an Allow across processes: every child the agent
+  // spawned raised "patch-host would like to access data from other apps"
+  // again. A bundle id gives the decision something to attach to.
+  const runtimeDir = join(patchHome, 'runtime');
+  const stableNode =
+    ctx.platform === 'darwin' ? hostAppExecutable(runtimeDir) : join(runtimeDir, 'patch-host');
   mkdirSync(dirname(stableNode), { recursive: true });
-  rmSync(join(patchHome, 'node'), { force: true });
+  if (ctx.platform === 'darwin') {
+    writeFileSync(join(dirname(stableNode), '..', 'Info.plist'), hostAppInfoPlist(build.version), {
+      encoding: 'utf8',
+    });
+  }
   const bundledNode = join(installDir, 'node');
   if (existsSync(bundledNode)) {
-    const same =
-      existsSync(stableNode) && readFileSync(stableNode).equals(readFileSync(bundledNode));
+    const same = existsSync(stableNode) && sameRuntimeBinary(stableNode, bundledNode);
     if (!same) {
       const tmp = `${stableNode}.new-${process.pid}`;
       copyFileSync(bundledNode, tmp);
@@ -762,6 +830,12 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
     io.out('');
     io.out(`  This machine is ${machine}. It appears under Settings → Hosts.`);
   }
+  // Legacy runtimes go only now that the update has fully succeeded. A running
+  // host may have been launched from one, and its turn runners spawn that path:
+  // removing it on an attempt that then failed left every new turn with ENOENT.
+  // The pre-bundle bare binary would otherwise keep a second, prompting runtime on disk.
+  if (ctx.platform === 'darwin') rmSync(join(runtimeDir, 'patch-host'), { force: true });
+  rmSync(join(patchHome, 'node'), { force: true });
   return { code: 0 };
 }
 

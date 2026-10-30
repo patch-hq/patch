@@ -54,6 +54,19 @@ test.describe('image lightbox', () => {
     await page.keyboard.press('Escape');
     await expect(lightbox).toHaveCount(0);
   });
+  test('scrolling a zoomed image pans it and keeps the zoom', async ({ page }) => {
+    await page.route('**/api/chats/*/attachment/*', (route) =>
+      route.fulfill({ status: 200, contentType: 'image/png', body: PNG }),
+    );
+    await page.goto(IMAGE_CHAT);
+    await page.getByTestId('msg-attachment-img').click();
+    const img = page.locator('.lightbox-img');
+    await img.click(); // fit -> 2.5x
+    await expect(img).toHaveCSS('transform', /matrix\(2\.5, 0, 0, 2\.5, 0, 0\)/);
+    await page.mouse.move(300, 300);
+    await page.mouse.wheel(0, 100);
+    await expect(img).toHaveCSS('transform', 'matrix(2.5, 0, 0, 2.5, 0, -100)');
+  });
   test('right-click opens the image menu above the viewer', async ({ page }) => {
     await page.route('**/api/chats/*/attachment/*', (route) =>
       route.fulfill({ status: 200, contentType: 'image/png', body: PNG }),

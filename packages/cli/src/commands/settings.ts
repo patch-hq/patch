@@ -46,6 +46,8 @@ const SETTING_KEYS: Record<string, string> = {
   'status-generation': 'statusGenerationEnabled',
   'sync-position': 'syncPosition',
   'kokoro-voice': 'kokoroVoice',
+  'tts-backend': 'ttsBackend',
+  'elevenlabs-voice': 'elevenLabsVoice',
   'dictation-pause': 'dictationPauseSeconds',
   'turn-detection': 'dictationTurnDetection',
   memory: 'harnessMemoryEnabled',

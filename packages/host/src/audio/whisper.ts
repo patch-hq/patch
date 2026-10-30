@@ -27,6 +27,7 @@ import { readKey, type KeySource } from './keySource.js';
 export interface WhisperCredentialConfig {
   whisperBackend: WhisperBackendKind;
   groqApiKey?: string | undefined;
+  elevenlabsApiKey?: string | undefined;
   whisperLocalSidecarUrl?: string | undefined;
   whisperModelPath?: string | undefined;
 }
@@ -52,8 +53,17 @@ export function validateWhisperCredentials(config: WhisperCredentialConfig): voi
     case 'groq':
       if (!config.groqApiKey || config.groqApiKey.length === 0) {
         throw new Error(
-          'WHISPER_BACKEND=groq (the default) but GROQ_API_KEY is missing. ' +
-            'Set GROQ_API_KEY in .env, or switch WHISPER_BACKEND=local (+ WHISPER_LOCAL_SIDECAR_URL). ' +
+          'Speech-to-text is set to groq (the default) but no Groq key is set. ' +
+            'Add it in Settings → Providers, or switch to local speech-to-text. ' +
+            'Refusing to start in a degraded mode (NO SILENT FALLBACK).',
+        );
+      }
+      return;
+    case 'elevenlabs':
+      if (!config.elevenlabsApiKey || config.elevenlabsApiKey.length === 0) {
+        throw new Error(
+          'WHISPER_BACKEND=elevenlabs but ELEVEN_LABS_API_KEY is missing. ' +
+            'Set ELEVEN_LABS_API_KEY, or switch WHISPER_BACKEND. ' +
             'Refusing to start in a degraded mode (NO SILENT FALLBACK).',
         );
       }
@@ -110,7 +120,24 @@ export class PartialBudgetExhaustedError extends Error {
   override readonly name = 'PartialBudgetExhaustedError';
 }
 
+/** A live transcription of one utterance, fed PCM as it is spoken. */
+export interface LiveTranscriptStream {
+  push(pcm: Int16Array): void;
+  close(): void;
+  /** Audio seconds sent, which is what the provider bills. */
+  readonly audioSeconds: number;
+}
+
 export interface WhisperBackend {
+  /**
+   * Streaming live words for an utterance (ElevenLabs Scribe). When present the
+   * voice session uses it instead of re-reading the growing prefix, which on a
+   * paid provider would bill that prefix again every second.
+   */
+  openLiveStream?(
+    onText: (text: string) => void,
+    onError: (message: string) => void,
+  ): LiveTranscriptStream;
   /**
    * Whether interim transcripts of an utterance still in progress are worth
    * attempting on this backend. NOT a claim that the backend streams — none of
@@ -172,10 +199,11 @@ export class UnsupportedClipFormatError extends Error {
   }
 }
 
-export type WhisperBackendKind = 'off' | 'groq' | 'local' | 'mock';
+export type WhisperBackendKind = 'off' | 'groq' | 'elevenlabs' | 'local' | 'mock';
 
 export interface CreateWhisperOptions {
-  backend: WhisperBackendKind;
+  /** `elevenlabs` is built by index.ts (elevenlabs-stt.ts imports this file). */
+  backend: Exclude<WhisperBackendKind, 'elevenlabs'>;
   logger: Logger;
   /**
    * GROQ_API_KEY (only required when backend === 'groq'). Read per request, so
@@ -198,6 +226,8 @@ export interface CreateWhisperOptions {
   nowMs?: () => number;
   /** Override the per-request timeout (tests). */
   requestTimeoutMs?: number;
+  /** Override the total clip budget across all attempts (tests). */
+  clipDeadlineMs?: number;
 }
 
 /** Default loopback port the spawned faster-whisper sidecar listens on. */
@@ -228,8 +258,7 @@ class UnconfiguredWhisperBackend implements WhisperBackend {
   private refuse(): never {
     throw new Error(
       'Speech-to-text is not configured on this machine. Voice is an optional component: ' +
-        'install it from Settings → Hosts, or set WHISPER_BACKEND (groq + GROQ_API_KEY, or local ' +
-        '+ WHISPER_MODEL_PATH). Refusing to return a fabricated transcript.',
+        'install it from Settings → Hosts and choose a speech-to-text engine. Refusing to return a fabricated transcript.',
     );
   }
   async transcribe(): Promise<string> {
@@ -293,6 +322,13 @@ const GROQ_REQUEST_TIMEOUT_MS = 20_000;
  * and transcribing it takes far longer than a streamed utterance.
  */
 const GROQ_CLIP_REQUEST_TIMEOUT_MS = 120_000;
+/**
+ * Total budget across every attempt at one clip, retries and waits included.
+ * The server gives up on the host's transcript at 150s
+ * (packages/server/src/voice/note.ts), so the host must fail first: work that
+ * outlives the server's wait is discarded and its Groq quota wasted.
+ */
+const GROQ_CLIP_DEADLINE_MS = 140_000;
 
 /** Seconds Groq asks us to wait, from its "Please try again in 3s" message. */
 export function parseRetryAfterMs(body: string, header: string | null): number | null {
@@ -347,9 +383,7 @@ export class GroqWhisperBackend implements WhisperBackend {
   async transcribe(pcm: Int16Array, opts?: TranscribeOptions): Promise<string> {
     const apiKey = readKey(this.opts.groqApiKey);
     if (apiKey === undefined) {
-      throw new Error(
-        'GROQ_API_KEY missing — set it in Settings → Hosts → Keys or switch WHISPER_BACKEND (NO FALLBACKS).',
-      );
+      throw new Error('No Groq key is set — add it in Settings → Providers (NO FALLBACKS).');
     }
     const priority = opts?.priority ?? 'final';
     const fetchFn = this.opts.fetchImpl ?? fetch;
@@ -418,9 +452,7 @@ export class GroqWhisperBackend implements WhisperBackend {
   async transcribeClip(audio: Buffer, format: 'm4a' | 'wav', opts?: ClipOptions): Promise<string> {
     const apiKey = readKey(this.opts.groqApiKey);
     if (apiKey === undefined) {
-      throw new Error(
-        'GROQ_API_KEY missing — set it in Settings → Hosts → Keys or switch WHISPER_BACKEND (NO FALLBACKS).',
-      );
+      throw new Error('No Groq key is set — add it in Settings → Providers (NO FALLBACKS).');
     }
     const fetchFn = this.opts.fetchImpl ?? fetch;
     const mime = format === 'm4a' ? 'audio/mp4' : 'audio/wav';
@@ -434,16 +466,30 @@ export class GroqWhisperBackend implements WhisperBackend {
     // A clip is audio that cannot be re-recorded (a meeting's minutes): a 429
     // carries a stated wait, so wait it out like a final does rather than
     // dropping the clip. Persistent 429s still throw.
+    const budgetMs = this.opts.clipDeadlineMs ?? GROQ_CLIP_DEADLINE_MS;
+    const deadline = Date.now() + budgetMs;
+    const deadlineError = () =>
+      new Error(`groq whisper: clip transcription exceeded its ${budgetMs}ms budget`);
     let lastError = '';
     let res: Response | undefined;
     for (let attempt = 0; attempt < FINAL_RETRIES; attempt++) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw deadlineError();
       this.admit('final');
-      const r = await fetchFn('https://api.groq.com/openai/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: { authorization: `Bearer ${apiKey}` },
-        body: form,
-        signal: AbortSignal.timeout(this.opts.requestTimeoutMs ?? GROQ_CLIP_REQUEST_TIMEOUT_MS),
-      });
+      let r: Response;
+      try {
+        r = await fetchFn('https://api.groq.com/openai/v1/audio/transcriptions', {
+          method: 'POST',
+          headers: { authorization: `Bearer ${apiKey}` },
+          body: form,
+          signal: AbortSignal.timeout(
+            Math.min(remaining, this.opts.requestTimeoutMs ?? GROQ_CLIP_REQUEST_TIMEOUT_MS),
+          ),
+        });
+      } catch (err) {
+        if (Date.now() >= deadline) throw deadlineError();
+        throw err;
+      }
       if (r.ok) {
         res = r;
         break;
@@ -451,8 +497,13 @@ export class GroqWhisperBackend implements WhisperBackend {
       const text = await r.text();
       lastError = `groq whisper ${r.status}: ${text}`;
       if (r.status !== 429 || attempt === FINAL_RETRIES - 1) throw new Error(lastError);
-      const waitMs = parseRetryAfterMs(text, r.headers.get('retry-after')) ?? 2_000;
-      await new Promise((resolve) => setTimeout(resolve, Math.min(waitMs, 10_000)));
+      const waitMs = Math.min(
+        parseRetryAfterMs(text, r.headers.get('retry-after')) ?? 2_000,
+        10_000,
+      );
+      // A wait that cannot leave time for another attempt is not worth taking.
+      if (waitMs >= deadline - Date.now()) throw new Error(lastError);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
     }
     if (!res) throw new Error(lastError);
     const body = (await res.json()) as { text?: string };

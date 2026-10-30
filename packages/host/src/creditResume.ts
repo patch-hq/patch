@@ -263,8 +263,21 @@ export class CreditResume {
    * reading to show it spendable — events (2) and (3) — rather than for a clock
    * that would be guessing.
    */
-  arm(): void {
-    const at = this.opts.rotation.earliestReset();
+  arm(unattributedAt?: number): void {
+    // A reset read off a failed chat after a restart names no account, so it is
+    // armed for without sidelining anyone: guessing the account would blame
+    // the wrong one (the retry that fires just re-runs the work).
+    if (unattributedAt !== undefined) this.unattributedAt = unattributedAt;
+    if (this.unattributedAt !== undefined && this.unattributedAt <= this.now) {
+      this.unattributedAt = undefined;
+    }
+    const stated = this.opts.rotation.earliestReset();
+    const at =
+      stated === undefined
+        ? this.unattributedAt
+        : this.unattributedAt === undefined
+          ? stated
+          : Math.min(stated, this.unattributedAt);
     if (at === undefined) return;
     if (this.timer) clearTimeout(this.timer);
     // +5s past the stated reset: firing exactly on the boundary races the
@@ -292,6 +305,8 @@ export class CreditResume {
     }
     this.limitReset();
   }
+
+  private unattributedAt: number | undefined;
 
   /** Is a reset currently being waited for? For tests and diagnostics. */
   armed(): boolean {

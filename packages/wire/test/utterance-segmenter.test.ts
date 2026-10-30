@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { createUtteranceSegmenter, frameRms } from '../src/utterance-segmenter.js';
+import {
+  createUtteranceSegmenter,
+  frameRms,
+  isPhantomTranscript,
+  speechMs,
+} from '../src/utterance-segmenter.js';
 
 const FRAME = 640; // 40 ms at 16 kHz
 const speech = (): Int16Array => new Int16Array(FRAME).fill(6000);
@@ -145,5 +150,36 @@ describe('utterance segmenter', () => {
       feed(seg, speech, 1000);
       expect(feed(seg, quiet, 10_000)).toHaveLength(1);
     });
+  });
+});
+
+describe('phantom transcripts', () => {
+  it('drops the stock phrases a speech model invents from silence or noise', () => {
+    for (const t of ['Thank you.', 'you', 'Thanks for watching!', ' Bye. ', 'Okay.']) {
+      expect(isPhantomTranscript(t, 600)).toBe(true);
+    }
+  });
+
+  it('drops bracketed sound tags whatever the length', () => {
+    for (const t of ['[BLANK_AUDIO]', '(music)', '[Music]', '*silence*']) {
+      expect(isPhantomTranscript(t, 30_000)).toBe(true);
+    }
+  });
+
+  it('keeps a stock phrase that was spoken for long enough to be meant', () => {
+    expect(isPhantomTranscript('Thank you.', 3000)).toBe(false);
+  });
+
+  it('keeps anything else', () => {
+    expect(isPhantomTranscript('Thank you for the summary, now fix the build', 600)).toBe(false);
+    expect(isPhantomTranscript('run the tests', 600)).toBe(false);
+  });
+});
+
+describe('speechMs', () => {
+  it('counts only the loud part of a clip', () => {
+    const clip = new Int16Array(16000 * 4);
+    clip.fill(6000, 0, 16000 * 0.8);
+    expect(speechMs(clip)).toBeCloseTo(800, -1);
   });
 });

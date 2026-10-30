@@ -87,6 +87,29 @@ describe('dictation mode', () => {
     mode.stop();
   });
 
+  it('drops a stock phrase the speech model invented from a short noise burst', async () => {
+    const r = fakeRecorder();
+    const texts: string[] = [];
+    const transcribe = vi.fn(async () => ({ transcript: ' Thank you. ' }));
+    const mode = startDictationMode(
+      { recorderFactory: r.factory, transcribe },
+      {
+        onText: (t) => texts.push(t),
+        onBusy: () => {},
+        onError: (m) => {
+          throw new Error(m);
+        },
+      },
+    );
+    await mode.ready;
+    r.feed(speech, 800);
+    r.feed(quiet, 3200);
+    await flush();
+    expect(transcribe).toHaveBeenCalledOnce();
+    expect(texts).toEqual([]);
+    mode.stop();
+  });
+
   it('sends each utterance as its own text and keeps listening', async () => {
     const r = fakeRecorder();
     const texts: string[] = [];
@@ -154,7 +177,7 @@ describe('dictation mode', () => {
         recorderFactory: r.factory,
         transcribe: async () => {
           if (n++ === 0) throw new Error('boom');
-          return { transcript: 'ok' };
+          return { transcript: 'all good' };
         },
       },
       { onText, onBusy: () => {}, onError },
@@ -166,7 +189,7 @@ describe('dictation mode', () => {
       await flush();
     }
     expect(onError).toHaveBeenCalledWith('voice transcription failed: boom');
-    expect(onText).toHaveBeenCalledWith('ok');
+    expect(onText).toHaveBeenCalledWith('all good');
   });
 
   it('rejects ready when the mic cannot open', async () => {

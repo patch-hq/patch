@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vite
 import { render, screen, fireEvent, act, waitFor, cleanup } from '@testing-library/react';
 import { Composer } from '../components/Composer.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
+import { usePreferencesStore } from '../stores/preferencesStore.js';
 import {
   clearHosts,
   clearSharedAccounts,
@@ -1823,6 +1824,46 @@ describe('Composer', () => {
       render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       expect(screen.getByTestId('voice-note-btn').getAttribute('title')).toContain('unavailable');
       usePresenceStore.getState().setHostOnline('d1', true);
+    });
+
+    it('greys out the mic with the reason when dictation needs a key this chat\u2019s machine lacks', () => {
+      const prefs = usePreferencesStore.getState().preferences;
+      const prevHosts = usePresenceStore.getState().hosts;
+      usePreferencesStore.setState({
+        preferences: {
+          ...prefs,
+          voiceConfig: {
+            ...prefs.voiceConfig,
+            dictation: { phone: 'whisper', computer: 'deepgram', tidy: false },
+          },
+        },
+      });
+      usePresenceStore.setState({
+        hosts: {
+          ...prevHosts,
+          d1: {
+            ...(prevHosts.d1 ?? { hostId: 'd1', accounts: {} }),
+            host: {
+              hostName: 'hetzner',
+              voiceKeys: { gemini: true, openai: true, deepgram: false },
+            },
+          },
+        } as never,
+      });
+      const onStartVoiceNote = vi.fn();
+      render(
+        <Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={onStartVoiceNote} />,
+      );
+      const mic = screen.getByTestId('voice-note-btn') as HTMLButtonElement;
+      expect(mic.disabled).toBe(true);
+      expect(mic.getAttribute('title')).toBe(
+        'Not configured on hetzner: no Deepgram key is set. Sessions there are refused.',
+      );
+      fireEvent.mouseDown(mic);
+      fireEvent.mouseUp(mic);
+      expect(onStartVoiceNote).not.toHaveBeenCalled();
+      usePresenceStore.setState({ hosts: prevHosts });
+      usePreferencesStore.setState({ preferences: prefs });
     });
 
     it('mic mousedown/up is a no-op while voice is disabled', () => {

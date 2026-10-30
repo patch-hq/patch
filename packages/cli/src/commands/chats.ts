@@ -6,6 +6,7 @@
 //   spawn     → POST /internal/spawn (uds) | POST /api/chats (rest)
 //   send-to   → POST /internal/send-to (uds) | POST /api/chats/:id/send-to (rest)
 //   stop      → POST /chats/:id/stop (uds) | POST /api/chats/:id/stop (rest)
+//   resume-now → POST /chats/:id/resume-now (uds) | POST /api/chats/:id/resume-now (rest)
 //   set-model → POST /chats/:id/model (uds) | POST /api/chats/:id/model (rest)
 //   archive   → POST /chats/:id/archive (uds) | POST /api/chats/:id/archive (rest)
 //   pin       → POST /api/chats/:id/pin (rest)
@@ -205,6 +206,21 @@ export function registerChatsCommands(program: Command): void {
           if (opts.json) emitJson(res);
           else emitText('stopped');
         }
+      });
+    });
+
+  chats
+    .command('resume-now <id>')
+    .description('Stop waiting out a usage-limit pause and run the parked turn now')
+    .option('--json', 'JSON output')
+    .action(async (rawId: string, opts: CommonOpts) => {
+      await run(opts, async () => {
+        const t = getTransport(opts);
+        const id = await resolveChatId(t, rawId);
+        const path = pickPath(t, `/chats/${id}/resume-now`, `/api/chats/${id}/resume-now`);
+        const res = await t.post<{ ok: true; resumed?: boolean }>(path);
+        if (opts.json) emitJson(res);
+        else emitText(res.resumed === false ? 'nothing parked' : 'resumed');
       });
     });
 

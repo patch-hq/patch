@@ -195,6 +195,22 @@ test('chats stop --json: REST happy path', async () => {
   );
 });
 
+test('chats resume-now --json: REST happy path', async () => {
+  await withSetup(
+    (req) => {
+      if (req.url === '/api/chats/01M3N32N9T7V75JCV7XHY9NRHM/resume-now' && req.method === 'POST')
+        return { status: 200, body: { ok: true } };
+      return { status: 404, body: { error: 'not found' } };
+    },
+    async (env) => {
+      const r = await runCli(['chats', 'resume-now', '01M3N32N9T7V75JCV7XHY9NRHM', '--json'], env);
+      assert.equal(r.code, 0, `stderr=${r.stderr}`);
+      const parsed = JSON.parse(r.stdout) as { ok: boolean };
+      assert.equal(parsed.ok, true);
+    },
+  );
+});
+
 test('chats archive --json: REST happy path', async () => {
   await withSetup(
     (req) => {

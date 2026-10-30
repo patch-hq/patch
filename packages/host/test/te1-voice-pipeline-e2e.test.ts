@@ -582,7 +582,7 @@ describe('TE1 voice host pipeline e2e', () => {
     // Whisper groq with no key.
     expect(() =>
       validateWhisperCredentials({ whisperBackend: 'groq', groqApiKey: undefined }),
-    ).toThrow(/GROQ_API_KEY/);
+    ).toThrow(/Settings → Providers/);
     // Whisper local with neither URL nor model path.
     expect(() => validateWhisperCredentials({ whisperBackend: 'local' })).toThrow(
       /WHISPER_MODEL_PATH/,

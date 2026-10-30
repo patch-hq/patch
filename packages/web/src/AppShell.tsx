@@ -366,11 +366,15 @@ export function AppShell(): JSX.Element {
     if (!bridge?.onPanelInset) return;
     const off = bridge.onPanelInset(({ width }) => {
       document.body.style.paddingRight = width > 0 ? `${width}px` : '';
+      // Native panel draws above the page, so modals must stop at its edge.
+      if (width > 0) document.documentElement.style.setProperty('--panel-inset', `${width}px`);
+      else document.documentElement.style.removeProperty('--panel-inset');
       setPanelWidth(width);
     });
     return () => {
       off();
       document.body.style.paddingRight = '';
+      document.documentElement.style.removeProperty('--panel-inset');
       setPanelWidth(0);
     };
   }, []);

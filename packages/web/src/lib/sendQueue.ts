@@ -60,6 +60,11 @@ export interface SendMessageOptions {
   send?: (event: WireEvent) => void;
   /** "Send, wait until agent finished": the host holds it until the running turn ends. */
   afterTurn?: boolean;
+  /**
+   * Echo now but do not deliver until `releaseHeld` (a pre-send check is
+   * running) — or `cancelHeld`, which withdraws the turn.
+   */
+  hold?: boolean;
   /** Called once the turn has been handed to delivery (after any upload), e.g. to promote it. */
   onDelivered?: (localId: string) => void;
 }
@@ -74,6 +79,10 @@ interface Outgoing {
   opts: SendMessageOptions;
   /** The uploaded refs; `null` while the files are still uploading. */
   refs: AttachmentRef[] | null;
+  /** Echoed but not yet cleared to deliver — a pre-send check is still running. */
+  held: boolean;
+  /** Withdrawn by `cancelHeld`: an upload still running for it must not touch the chain. */
+  cancelled: boolean;
 }
 
 /** Per chat, the turns not yet handed to delivery, in send order. */
@@ -108,6 +117,8 @@ export function sendMessage(
     disabledTools: useToolsStore.getState().disabledFor(chatId),
     opts,
     refs: files.length === 0 ? [] : allResolved ? files.map((f) => f.ref!) : null,
+    held: opts.hold === true,
+    cancelled: false,
   };
   useChatStore.getState().addLocalMessage(
     chatId,
@@ -127,6 +138,31 @@ export function sendMessage(
   );
   enqueue(item);
   return localId;
+}
+
+/**
+ * Clear a turn sent with `hold` to deliver (its pre-send check passed). It
+ * goes out as soon as everything ahead of it in the chat has.
+ */
+export function releaseHeld(chatId: string, localId: string): void {
+  const item = chains.get(chatId)?.find((i) => i.localId === localId);
+  if (!item) return;
+  item.held = false;
+  drain(chatId);
+}
+
+/**
+ * Withdraw a turn sent with `hold` (its pre-send check refused it): out of the
+ * stream and out of the chain, never delivered. Turns behind it carry on.
+ */
+export function cancelHeld(chatId: string, localId: string): void {
+  const chain = chains.get(chatId);
+  const item = chain?.find((i) => i.localId === localId);
+  if (!chain || !item) return;
+  item.cancelled = true;
+  chain.splice(chain.indexOf(item), 1);
+  useChatStore.getState().removeLocalMessage(chatId, localId);
+  drain(chatId);
 }
 
 /** Retry: upload the same files again, then send. */
@@ -169,7 +205,7 @@ function enqueue(item: Outgoing): void {
 function drain(chatId: string): void {
   // Only ever called for a chat with a chain: a turn stays in it until drained.
   const chain = chains.get(chatId)!;
-  while (chain.length > 0 && chain[0]!.refs !== null) {
+  while (chain.length > 0 && chain[0]!.refs !== null && !chain[0]!.held) {
     const item = chain.shift()!;
     deliveryTracker.submit(
       item.chatId,
@@ -244,6 +280,7 @@ async function upload(item: Outgoing): Promise<void> {
         upload: { done: refs.length, total, failed: false },
       });
     }
+    if (item.cancelled) return;
     item.refs = refs;
     // Every file is up: from here it is an ordinary send.
     useChatStore.getState().patchLocalMessage(chatId, localId, {
@@ -252,6 +289,7 @@ async function upload(item: Outgoing): Promise<void> {
       deliveryPending: true,
     });
   } catch (e) {
+    if (item.cancelled) return;
     const chain = chains.get(chatId)!;
     chain.splice(chain.indexOf(item), 1);
     failed.set(key(chatId, localId), item);

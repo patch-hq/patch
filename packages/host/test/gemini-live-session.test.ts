@@ -96,7 +96,10 @@ function makeDeps(overrides: Partial<GeminiLiveDeps> = {}): {
   const audioEvents: AudioEvent[] = [];
   const binaryFrames: Int16Array[] = [];
   const lastWs: { current?: FakeGeminiWs } = {};
-  const submitUserTurn = vi.fn(async () => 'the heavy agent reply');
+  const submitUserTurn = vi.fn(async (args: { onAccepted?: () => void }) => {
+    args.onAccepted?.();
+    return 'the heavy agent reply';
+  });
   const timeline = new FakeTimeline();
   const wsCtor = function (this: FakeGeminiWs, url: string): FakeGeminiWs {
     const inst = new FakeGeminiWs(url);
@@ -350,6 +353,19 @@ describe('GeminiLiveSession — audio out + turn lifecycle', () => {
     expect(timeline.log).toEqual([]);
   });
 
+  test('a lone "." transcript is no input: no partial, no chat message', async () => {
+    const { deps, lastWs, audioEvents, timeline } = makeDeps();
+    const session = new GeminiLiveSession(makeInit(), deps);
+    const ws = await openSession(session, lastWs);
+    ws.serverSend({ serverContent: { inputTranscription: { text: '.' } } });
+    ws.serverSend({ serverContent: { turnComplete: true } });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(session.stats().turns).toBe(0);
+    expect(audioEvents.some((e) => e.type === 'audio.transcript_partial')).toBe(false);
+    expect(audioEvents.some((e) => e.type === 'audio.transcript_final')).toBe(false);
+    expect(timeline.log).toEqual([]);
+  });
+
   test('a turn with input but no TTS audio reports gemini_unavailable (NO SILENT FAILURES)', async () => {
     const { deps, lastWs, audioEvents } = makeDeps();
     const session = new GeminiLiveSession(makeInit(), deps);
@@ -478,11 +494,11 @@ describe('GeminiLiveSession — dispatch to the heavy agent', () => {
     await vi.waitFor(() => expect(session.stats().turns).toBe(1));
   });
 
-  test('a failed dispatch still reaches the voice (to be spoken as an apology) rather than leaving it waiting forever', async () => {
+  test('a dispatch the chat never received is reported as an error, and the voice is told it did not go through', async () => {
     const submitUserTurn = vi.fn(async () => {
       throw new Error('host offline');
     });
-    const { deps, lastWs } = makeDeps({
+    const { deps, lastWs, audioEvents } = makeDeps({
       submitUserTurn: submitUserTurn as unknown as GeminiLiveDeps['submitUserTurn'],
     });
     const session = new GeminiLiveSession(makeInit(), deps);
@@ -492,8 +508,35 @@ describe('GeminiLiveSession — dispatch to the heavy agent', () => {
         functionCalls: [{ id: 'c2', name: DISPATCH_TOOL_NAME, args: { request: 'do a thing' } }],
       },
     });
-    await vi.waitFor(() => expect(ws.sent.some((s) => s.includes('clientContent'))).toBe(true));
-    expect(clientTurns(ws)[0]).toMatch(/host offline/);
+    await vi.waitFor(() => expect(ws.sent.some((s) => s.includes('"failed"'))).toBe(true));
+    expect(ws.sent.some((s) => s.includes('"started"'))).toBe(false);
+    expect(
+      audioEvents.some((e) => e.type === 'audio.error' && /host offline/.test(e.message)),
+    ).toBe(true);
+  });
+
+  test('the voice is not told it has passed a request on until the chat has accepted it', async () => {
+    let accept!: () => void;
+    const submitUserTurn = vi.fn(
+      (args: { onAccepted?: () => void }) =>
+        new Promise<string>(() => {
+          accept = () => args.onAccepted?.();
+        }),
+    );
+    const { deps, lastWs } = makeDeps({
+      submitUserTurn: submitUserTurn as unknown as GeminiLiveDeps['submitUserTurn'],
+    });
+    const session = new GeminiLiveSession(makeInit(), deps);
+    const ws = await openSession(session, lastWs);
+    ws.serverSend({
+      toolCall: {
+        functionCalls: [{ id: 'c3', name: DISPATCH_TOOL_NAME, args: { request: 'bread' } }],
+      },
+    });
+    await vi.waitFor(() => expect(submitUserTurn).toHaveBeenCalled());
+    expect(ws.sent.some((s) => s.includes('"started"'))).toBe(false);
+    accept();
+    expect(ws.sent.some((s) => s.includes('"started"'))).toBe(true);
   });
 
   test('ignores a function call for a tool name other than dispatch_to_patch', async () => {
@@ -833,7 +876,13 @@ function pendingHandoff(): {
 } {
   let resolve!: (reply: string) => void;
   const done = new Promise<string>((r) => (resolve = r));
-  return { submit: (async () => done) as unknown as GeminiLiveDeps['submitUserTurn'], resolve };
+  return {
+    submit: (async (args: { onAccepted?: () => void }) => {
+      args.onAccepted?.();
+      return done;
+    }) as unknown as GeminiLiveDeps['submitUserTurn'],
+    resolve,
+  };
 }
 
 function speech(): unknown {

@@ -16,6 +16,7 @@ import type { Logger } from 'pino';
 import { voiceKeyMissingMessage, type DictationEngine } from '@patch/wire/audio';
 import { pcm16ToWav, type WhisperBackend } from './whisper.js';
 import { readKey, type KeySource } from './keySource.js';
+import { ElevenLabsScribeBackend } from './elevenlabs-stt.js';
 
 export const DEEPGRAM_MODEL = 'nova-3';
 const DEEPGRAM_LISTEN_URL = 'https://api.deepgram.com/v1/listen';
@@ -65,7 +66,10 @@ export class DeepgramTranscribeBackend implements WhisperBackend {
   async transcribeClip(audio: Buffer, format: 'm4a' | 'wav'): Promise<string> {
     const apiKey = readKey(this.opts.apiKey);
     if (apiKey === undefined) {
-      throw new HostedSttError('deepgram', 'DEEPGRAM_API_KEY is no longer set on this host');
+      throw new HostedSttError(
+        'deepgram',
+        'The Deepgram key is no longer set on this host; add it in Settings → Providers',
+      );
     }
     const url = `${DEEPGRAM_LISTEN_URL}?${new URLSearchParams({
       model: this.opts.model ?? DEEPGRAM_MODEL,
@@ -110,6 +114,8 @@ export interface DictationTranscribers {
   local: WhisperBackend;
   /** Present only while this host holds a Deepgram key. */
   deepgram?: WhisperBackend | undefined;
+  /** Present only while this host holds an ElevenLabs key. */
+  elevenlabs?: WhisperBackend | undefined;
 }
 
 /**
@@ -121,7 +127,21 @@ export interface DictationTranscribers {
 export function pickDictationTranscriber(
   engine: DictationEngine,
   transcribers: DictationTranscribers,
-): { ok: true; whisper: WhisperBackend } | { ok: false; backend: 'deepgram'; message: string } {
+):
+  | {
+      ok: true;
+      whisper: WhisperBackend;
+    }
+  | { ok: false; backend: 'deepgram' | 'elevenlabs'; message: string } {
+  if (engine === 'elevenlabs') {
+    const e = transcribers.elevenlabs;
+    if (e) return { ok: true, whisper: e };
+    return {
+      ok: false,
+      backend: 'elevenlabs',
+      message: voiceKeyMissingMessage('dictation', 'elevenlabs'),
+    };
+  }
   if (engine !== 'deepgram') return { ok: true, whisper: transcribers.local };
   const t = transcribers.deepgram;
   if (t) return { ok: true, whisper: t };
@@ -141,13 +161,21 @@ export function createDictationTranscribers(opts: {
   logger: Logger;
   local: WhisperBackend;
   deepgramApiKey?: KeySource;
+  elevenlabsApiKey?: KeySource;
 }): DictationTranscribers {
   const deepgram = new DeepgramTranscribeBackend({
     logger: opts.logger,
     apiKey: opts.deepgramApiKey,
   });
+  const elevenlabs = new ElevenLabsScribeBackend({
+    logger: opts.logger,
+    apiKey: opts.elevenlabsApiKey,
+  });
   return {
     local: opts.local,
+    get elevenlabs(): WhisperBackend | undefined {
+      return readKey(opts.elevenlabsApiKey) !== undefined ? elevenlabs : undefined;
+    },
     get deepgram(): WhisperBackend | undefined {
       return readKey(opts.deepgramApiKey) !== undefined ? deepgram : undefined;
     },

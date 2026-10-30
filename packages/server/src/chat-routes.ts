@@ -1936,6 +1936,28 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     return reply.code(200).send({ ok: true });
   });
 
+  // ---- POST /api/chats/:id/resume-now ----
+  // Run a usage-limit-parked chat's turn now. Fire-and-forget like /stop: the
+  // host logs whether anything was parked (chat.resume_now_request).
+  app.post<{ Params: { id: string } }>('/api/chats/:id/resume-now', async (req, reply) => {
+    let auth;
+    try {
+      auth = await requireAuth(req, deps.registry);
+    } catch (e) {
+      return reply
+        .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+        .send({ error: (e as Error).message });
+    }
+    if (!deps.chatRegistry.get(req.params.id)) {
+      return sendUnknownChat(reply, req.params.id);
+    }
+    deps.hostLink.send(auth.surfaceId, {
+      type: 'chat.resume_now_request',
+      chatId: req.params.id,
+    });
+    return reply.code(200).send({ ok: true });
+  });
+
   // ---- POST /api/chats/:id/rotate ----
   // Manual trigger for the same session rotation ThreadRotator runs on a
   // schedule (spec/06 § Session rotation): retire the underlying Claude

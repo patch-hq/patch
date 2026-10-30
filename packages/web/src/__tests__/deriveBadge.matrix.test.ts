@@ -84,8 +84,8 @@ describe('deriveBadge — edges that must not trigger', () => {
 describe('deriveBadge — pairwise precedence', () => {
   const signals: Array<[DisplayBadge, Partial<ChatRow>]> = [
     ['permission', { pendingPermissions: [PERM] }],
-    ['errored', { status: 'errored' }],
-    ['working', { activity: 'running' }],
+    ['errored', { activity: 'errored' }],
+    ['working', { openToolCalls: 1 }],
     ['done', { lastSeq: 5, lastReadSeq: 1 }],
     ['background', { backgroundTasks: 1 }],
     ['monitoring', { pendingWake: WAKE }],
@@ -104,6 +104,11 @@ describe('deriveBadge — pairwise precedence', () => {
     expect(deriveBadge(row({ activity: 'idle', pendingPermissions: [PERM], lastSeq: 9 }))).toBe(
       'permission',
     );
+  });
+  it('an errored status left over from an earlier failure yields to a turn running now', () => {
+    expect(deriveBadge(row({ status: 'errored', activity: 'running' }))).toBe('working');
+    expect(deriveBadge(row({ status: 'errored', openToolCalls: 1 }))).toBe('working');
+    expect(deriveBadge(row({ status: 'errored', activity: 'idle' }))).toBe('errored');
   });
   it('a declared question beats errored and working', () => {
     const q = { statusKind: 'question', statusDeclared: true } as const;
