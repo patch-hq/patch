@@ -250,7 +250,8 @@ import {
   pickDictationTranscriber,
   type DictationTranscribers,
 } from './audio/hosted-stt.js';
-import { ElevenLabsScribeBackend } from './audio/elevenlabs-stt.js';
+import { ElevenLabsScribeBackend, ScribeVoiceMap } from './audio/elevenlabs-stt.js';
+import { costCall } from './audio/voiceCost.js';
 import { createSileroVadFactory, validateVadModel, MockVad, type Vad } from './audio/vad.js';
 import { DeviceRegistry } from './devices/registry.js';
 import { PresenceRegistry } from './devices/presence.js';
@@ -4242,8 +4243,10 @@ async function startHost(
     // between spawns is reflected immediately.
   });
   daemon.setWatchCheckIn({ intervalMs: watchCheckInMinutes * 60_000, prompt: watchCheckInPrompt });
-  // Meeting mode (meeting.ts). Local Whisper only: a meeting is hours of audio,
-  // so a paid STT backend is never an option here, configured or not.
+  // Meeting mode (meeting.ts). Local Whisper unless the host opts in with
+  // MEETING_STT=elevenlabs: a meeting is hours of audio, so a paid STT backend is
+  // never picked just because a key exists.
+  const scribeVoiceMaps = new Map<string, ScribeVoiceMap>();
   meetings = new MeetingManager({
     dir: join(config.patchHome, 'meetings'),
     transcribe: async (wav) => {
@@ -4253,15 +4256,52 @@ async function startHost(
     },
     // Voice separation needs the local sidecar and its speaker model; without
     // DIARISE_MODEL_PATH the sidecar refuses rather than merging voices.
-    ...(process.env['DIARISE_MODEL_PATH']
+    // MEETING_STT=elevenlabs opts a host into paid Scribe for meetings, with its
+    // own diarisation. Chosen explicitly, never as a fallback: a missing key or a
+    // failed request fails the clip. Usage goes on the voice ledger.
+    ...(process.env['MEETING_STT'] === 'elevenlabs'
       ? {
           transcribeVoices: async (session: string, wav: Buffer) => {
-            if (!(whisper instanceof LocalWhisperBackend))
-              throw new Error('DIARISE_MODEL_PATH is set but WHISPER_BACKEND is not local');
-            return whisper.transcribeVoices(session, wav);
+            const scribe = dictationTranscribers?.elevenlabs;
+            if (!(scribe instanceof ElevenLabsScribeBackend)) {
+              throw new Error(
+                'MEETING_STT=elevenlabs but this host has no ElevenLabs key (ELEVEN_LABS_API_KEY)',
+              );
+            }
+            const startedAt = Date.now();
+            const runs = await scribe.transcribeDiarised(wav);
+            const audioSeconds = Math.max(0, wav.length - 44) / 32000;
+            const sep = session.lastIndexOf(':');
+            voiceLedger.record(
+              costCall({
+                sessionId: `meeting-stt-${startedAt}`,
+                chatId: session.slice(0, sep),
+                surfaceKind: 'meeting',
+                startedAt,
+                endedAt: Date.now(),
+                engine: {
+                  backend: 'local',
+                  model: scribe.costModel,
+                  tokens: null,
+                  stt: { requests: 1, audioSeconds, billedSeconds: audioSeconds },
+                },
+                handoffs: 0,
+              }),
+            );
+            let map = scribeVoiceMaps.get(session);
+            if (!map) scribeVoiceMaps.set(session, (map = new ScribeVoiceMap()));
+            return map.assign(runs);
           },
         }
-      : {}),
+      : process.env['DIARISE_MODEL_PATH']
+        ? {
+            transcribeVoices: async (session: string, wav: Buffer) => {
+              if (!(whisper instanceof LocalWhisperBackend))
+                throw new Error('DIARISE_MODEL_PATH is set but WHISPER_BACKEND is not local');
+              return whisper.transcribeVoices(session, wav);
+            },
+          }
+        : {}),
     ...(process.env['VOICEPRINT_PATH']
       ? { hasVoiceprint: () => existsSync(process.env['VOICEPRINT_PATH'] as string) }
       : {}),
