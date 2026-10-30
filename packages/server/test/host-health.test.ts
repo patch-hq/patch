@@ -22,29 +22,26 @@ const report = (over: Partial<HostHealthEvent> = {}): HostHealthEvent => ({
 function setup() {
   let now = 1_000_000;
   const broadcasts: HostConditionEvent[] = [];
-  const notes: string[] = [];
   const tracker = new HostHealthTracker({
     logger: pino({ level: 'silent' }),
     hostName: () => 'Netcup',
     broadcast: (e) => broadcasts.push(e),
-    notify: (m) => notes.push(m),
     now: () => now,
   });
-  return { tracker, broadcasts, notes, advance: (ms: number) => (now += ms) };
+  return { tracker, broadcasts, advance: (ms: number) => (now += ms) };
 }
 
 describe('HostHealthTracker', () => {
   it('stays quiet while a host is healthy, apart from the first all-clear', () => {
-    const { tracker, broadcasts, notes } = setup();
+    const { tracker, broadcasts } = setup();
     tracker.observe(report());
     tracker.observe(report());
     expect(broadcasts.map((b) => b.state)).toEqual(['online']);
-    expect(notes).toEqual([]);
     expect(tracker.conditionFor('h1')).toBeNull();
   });
 
-  it('marks a host struggling once, names the culprits and notifies once', () => {
-    const { tracker, broadcasts, notes } = setup();
+  it('marks a host struggling once, names the culprits', () => {
+    const { tracker, broadcasts } = setup();
     tracker.observe(report());
     const low = report({
       memAvailableBytes: 1 * GB,
@@ -54,34 +51,20 @@ describe('HostHealthTracker', () => {
     tracker.observe(low);
     const last = broadcasts.at(-1)!;
     expect(last).toMatchObject({ state: 'struggling', critical: false, reasons: ['memory'] });
-    expect(notes).toEqual(['Netcup is low on memory — chats may be slow (5 vitest, 11 GB)']);
     expect(tracker.conditionFor('h1')).toEqual(last);
   });
 
   it('escalates to critical, then recovers', () => {
-    const { tracker, broadcasts, notes } = setup();
+    const { tracker, broadcasts } = setup();
     tracker.observe(report({ memAvailableBytes: 1 * GB }));
     tracker.observe(report({ memAvailableBytes: 0.2 * GB }));
     expect(broadcasts.at(-1)).toMatchObject({ state: 'struggling', critical: true });
     tracker.observe(report());
     expect(broadcasts.at(-1)).toMatchObject({ state: 'online', reasons: [] });
-    expect(notes).toHaveLength(1);
-  });
-
-  it('does not notify again when it flaps inside the cooldown, but does after', () => {
-    const { tracker, notes, advance } = setup();
-    tracker.observe(report({ memAvailableBytes: 1 * GB }));
-    tracker.observe(report());
-    tracker.observe(report({ memAvailableBytes: 1 * GB }));
-    expect(notes).toHaveLength(1);
-    tracker.observe(report());
-    advance(11 * 60_000);
-    tracker.observe(report({ memAvailableBytes: 1 * GB }));
-    expect(notes).toHaveLength(2);
   });
 
   it('calls a host whose reports run late slow to respond, until one arrives', () => {
-    const { tracker, broadcasts, notes, advance } = setup();
+    const { tracker, broadcasts, advance } = setup();
     tracker.observe(report());
     advance(30_000);
     tracker.sweep();
@@ -89,7 +72,6 @@ describe('HostHealthTracker', () => {
     advance(16_000);
     tracker.sweep();
     expect(broadcasts.at(-1)).toMatchObject({ state: 'struggling', reasons: ['slow-link'] });
-    expect(notes).toEqual(['Netcup is slow to respond — chats may be slow']);
     tracker.observe(report());
     expect(broadcasts.at(-1)?.state).toBe('online');
   });
@@ -102,14 +84,13 @@ describe('HostHealthTracker', () => {
   });
 
   it('warns about a low battery that is not charging, with the charge', () => {
-    const { tracker, broadcasts, notes } = setup();
+    const { tracker, broadcasts } = setup();
     tracker.observe(report({ power: { onBattery: true, percent: 10 } }));
     expect(broadcasts.at(-1)).toMatchObject({
       state: 'struggling',
       reasons: ['battery'],
       batteryPercent: 10,
     });
-    expect(notes).toEqual(['Netcup battery at 10%, not charging']);
   });
 
   describe('why a host dropped off', () => {
