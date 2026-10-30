@@ -11,7 +11,7 @@ vi.mock('../lib/meetingCapture.js', () => ({
   },
 }));
 
-import { startMeeting, endMeeting } from '../lib/meetingControl.js';
+import { startMeeting, endMeeting, NO_PARTICIPANTS_AFTER_MS } from '../lib/meetingControl.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useMeetingStore } from '../stores/meetingStore.js';
 
@@ -80,5 +80,22 @@ describe('meeting speaker names (desktop shell)', () => {
     );
     endMeeting('c1');
     expect(bridge.stopMeetingSpeakers).toHaveBeenCalled();
+  });
+
+  it('says so when the call app shows no participants, and stays quiet when it does', async () => {
+    vi.useFakeTimers();
+    const pushError = vi.spyOn(useUiStore.getState(), 'pushError');
+    pushError.mockClear();
+    await startMeeting('c1');
+    vi.advanceTimersByTime(NO_PARTICIPANTS_AFTER_MS);
+    expect(pushError).toHaveBeenCalledWith(expect.stringMatching(/no call participants found/));
+    endMeeting('c1');
+
+    pushError.mockClear();
+    await startMeeting('c1');
+    speakers({ participants: ['Priya'], speaking: [] });
+    vi.advanceTimersByTime(NO_PARTICIPANTS_AFTER_MS);
+    expect(pushError).not.toHaveBeenCalled();
+    endMeeting('c1');
   });
 });
