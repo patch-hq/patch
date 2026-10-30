@@ -38,11 +38,14 @@ import { useUiStore } from '../src/stores/uiStore';
 import { useComposerAttachmentStore } from '../src/stores/composerAttachmentStore';
 import { deliveryTracker } from '../src/lib/deliveryTracker';
 import { _resetSendQueue } from '../src/lib/sendQueue';
+import { startVoiceCall } from '../src/lib/voiceCall';
 import { loadLastNewChat, saveLastNewChat } from '../src/lib/lastNewChat';
 import { useNewChatDraftStore } from '../src/stores/newChatDraftStore';
 import { routerMock, __resetRouterMock, __setLocalSearchParams } from './stubs/expo-router';
 import { __clearAllMmkv } from './stubs/mmkv';
 import type { ChatRow } from '../src/stores/types';
+
+vi.mock('../src/lib/voiceCall', () => ({ startVoiceCall: vi.fn() }));
 
 const { api, ApiErrorClass } = vi.hoisted(() => {
   class ApiErrorClass extends Error {
@@ -114,6 +117,7 @@ function chat(partial: Partial<ChatRow> & { chatId: string }): ChatRow {
 let submitSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
+  vi.mocked(startVoiceCall).mockClear();
   __clearAllMmkv();
   __resetRouterMock();
   __setLocalSearchParams({});
@@ -1036,5 +1040,45 @@ describe('NewChat — account usage', () => {
     expect(textOf(findHost(r.root, byTestId('new-chat-usage-claude-code-c1')))).toContain(
       'not read',
     );
+  });
+});
+
+describe('NewChat — header call buttons', () => {
+  it('Call creates the chat, opens the call on it and goes into it, keeping typed text as a draft', async () => {
+    __setLocalSearchParams({ hostId: HOST, folder: '/p/one' });
+    const r = await renderReady();
+    typeText(r, 'half a thought');
+    await press(r, 'new-chat-call');
+    expect(api.createChat).toHaveBeenCalledWith({ hostId: HOST, folder: '/p/one' });
+    expect(startVoiceCall).toHaveBeenCalledWith('chat_new', 'call');
+    expect(routerMock.replace).toHaveBeenCalledWith('/chats/chat_new?justCreated=1');
+    expect(Object.values(useNewChatDraftStore.getState().drafts).map((d) => d.text)).toContain(
+      'half a thought',
+    );
+  });
+
+  it('Hands-free opens the same call in hands-free mode', async () => {
+    __setLocalSearchParams({ hostId: HOST, folder: '/p/one' });
+    const r = await renderReady();
+    await press(r, 'new-chat-hands-free');
+    expect(startVoiceCall).toHaveBeenCalledWith('chat_new', 'hands-free');
+  });
+
+  it('with no folder chosen it says so and starts nothing', async () => {
+    const r = await renderReady();
+    await press(r, 'new-chat-call');
+    expect(api.createChat).not.toHaveBeenCalled();
+    expect(startVoiceCall).not.toHaveBeenCalled();
+    expect(useUiStore.getState().errors.length).toBeGreaterThan(0);
+  });
+
+  it('a refused create is reported and starts no call', async () => {
+    api.createChat.mockRejectedValue(new Error('boom'));
+    __setLocalSearchParams({ hostId: HOST, folder: '/p/one' });
+    const r = await renderReady();
+    await press(r, 'new-chat-call');
+    expect(startVoiceCall).not.toHaveBeenCalled();
+    expect(routerMock.replace).not.toHaveBeenCalled();
+    expect(useUiStore.getState().errors.length).toBeGreaterThan(0);
   });
 });
