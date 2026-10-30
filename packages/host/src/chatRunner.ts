@@ -8311,6 +8311,7 @@ export class Daemon {
       permissionMode: this.chatPermissionMode(chatId),
       disabledTools: state.disabledTools,
       onReapRefused: (message: string) => this.announceReapRefused(chatId, message),
+      onBashHung: (message: string) => this.announceBashHung(chatId, message),
       onPermissionRequest: (req: {
         tool: string;
         args: Record<string, unknown>;
@@ -9844,6 +9845,7 @@ export class Daemon {
       // forever, so patch no longer omits this for any mode — it trusts the
       // SDK's own gating instead.
       onReapRefused: (message: string) => this.announceReapRefused(chatId, message),
+      onBashHung: (message: string) => this.announceBashHung(chatId, message),
       ...this.durableTurnFor(chatId, targetHarness, localId),
       onPermissionRequest: (req: {
         tool: string;
@@ -14017,6 +14019,20 @@ export class Daemon {
    * what the turn started may still be running. Arrives after the turn has
    * ended, from a timer — a chat deleted in the meantime only gets the log.
    */
+  private announceBashHung(chatId: string, message: string): void {
+    this.opts.logger.error({ chatId }, message);
+    if (!this.chatState.has(chatId)) return;
+    const ev: ChatMessageEvent = {
+      type: 'chat.message',
+      chatId,
+      role: 'system',
+      content: message,
+      seq: this.bumpSeq(chatId),
+      createdAt: this.opts.now(),
+    };
+    this.emit(ev);
+  }
+
   private announceReapRefused(chatId: string, message: string): void {
     this.opts.logger.error({ chatId }, message);
     if (!this.chatState.has(chatId)) return;

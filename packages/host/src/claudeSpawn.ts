@@ -57,6 +57,7 @@ export function linkUserConfigIntoResumeDir(
 export function spawnClaudeInGroup(
   opts: SpawnOptions,
   onRefused?: (message: string) => void,
+  onPid?: (pid: number | undefined) => void,
 ): SpawnedProcess {
   linkUserConfigIntoResumeDir(opts.env);
   const turnTag = newTurnTag();
@@ -68,6 +69,7 @@ export function spawnClaudeInGroup(
     windowsHide: true,
   });
   const pgid = child.pid;
+  onPid?.(pgid);
   const killGroup = (signal: NodeJS.Signals): boolean => {
     if (pgid === undefined) return child.kill(signal);
     try {
