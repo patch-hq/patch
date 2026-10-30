@@ -304,7 +304,7 @@ Voice runs on its own WSS to the chat's host, opened with the one-shot token fro
 
 A cross-chat call whose target is on the calling chat's own host is short-circuited in-process. One naming another host goes over these frames, relayed by the server to that host. Surfaces see them either way, so cross-chat activity renders as an audit trail.
 
-`patch_spawn` names its host directly (`hostId` on the frame), since the caller is choosing a machine to create a chat on. `patch_peek`, `patch_history` and `patch_send_to` take only a `targetChatId` — the caller learns which chats exist from `patch_list_chats`, not which host each is on — so the server resolves the owning host from its chat mirror and relays there.
+`patch_spawn` names its host directly (`hostId` on the frame), since the caller is choosing a machine to create a chat on. `patch_peek`, `patch_history`, `patch_send_to` and `patch_stop` take only a `targetChatId` — the caller learns which chats exist from `patch_list_chats`, not which host each is on — so the server resolves the owning host from its chat mirror and relays there.
 
 A call naming an offline host, or a `targetChatId` no host has ever reported, returns an error to the calling agent, naming the problem, within the turn. A tool result is part of a turn in progress, so it resolves rather than buffering the way `chat.input` does, and the agent decides what to do about the host being down.
 

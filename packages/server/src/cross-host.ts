@@ -18,7 +18,7 @@
 //      machine it lives on, so the calling agent can address it afterwards.
 //   2b. `patch.search_chats.request` is answered by `chat-search.ts` from the
 //      chat mirror and the transcripts the server holds.
-//   3. `patch.peek.request` / `patch.history.request` / `patch.send_to` carrying
+//   3. `patch.peek.request` / `patch.history.request` / `patch.send_to` / `patch.stop` carrying
 //      a `requestId` are relayed to whichever machine the chat mirror says OWNS
 //      `targetChatId` — resolved here rather than by the caller naming a host,
 //      because `patch_peek`/`patch_history`/`patch_send_to` take only a chatId
@@ -369,6 +369,48 @@ export function registerCrossHostBridge(deps: CrossHostBridgeDeps): () => void {
       );
       trackRelay(requestId, fromHostId);
       hostLink.sendTo(resolved.hostId, BRIDGE_SURFACE_ID, event);
+      return;
+    }
+
+    if (event.type === 'patch.stop') {
+      // No requestId: a same-host stop, audit record only (see § 3).
+      if (fromHostId === null || event.requestId === undefined) return;
+      const requestId = event.requestId;
+      const resolved = resolveTargetHost(event.targetChatId);
+      if (!resolved.ok) {
+        logger.warn(
+          { from: fromHostId, target: event.targetChatId, code: resolved.code },
+          'patch.stop named a chat this server cannot reach',
+        );
+        hostLink.sendTo(fromHostId, BRIDGE_SURFACE_ID, {
+          type: 'patch.stop.response',
+          requestId,
+          sourceChatId: event.sourceChatId,
+          targetChatId: event.targetChatId,
+          ok: false,
+          error: { code: resolved.code, message: resolved.message },
+        });
+        return;
+      }
+      logger.info(
+        { from: fromHostId, target: resolved.hostId, targetChatId: event.targetChatId },
+        'relaying patch.stop to the machine that owns the chat',
+      );
+      trackRelay(requestId, fromHostId);
+      hostLink.sendTo(resolved.hostId, BRIDGE_SURFACE_ID, event);
+      return;
+    }
+
+    if (event.type === 'patch.stop.response') {
+      const route = takeRelay(event.requestId);
+      if (!route) {
+        logger.warn(
+          { requestId: event.requestId, from: fromHostId },
+          'patch.stop.response for a request this server did not relay; dropping',
+        );
+        return;
+      }
+      hostLink.sendTo(route.fromHostId, BRIDGE_SURFACE_ID, event);
       return;
     }
 
