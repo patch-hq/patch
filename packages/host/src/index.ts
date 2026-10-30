@@ -4599,6 +4599,14 @@ async function startHost(
     // published, and a busy machine defers until idle rather than killing a
     // running turn.
     if (autoUpdateHosts && (check.available || check.awaitingArtifact)) {
+      if (check.version && check.version === hostStateStore.get().lastAutoUpdateAttempt) {
+        logger.warn(
+          { version: check.version },
+          'self-update: scheduled apply skipped, this version was already attempted and this host is still not on it; use Update to retry',
+        );
+        return;
+      }
+      if (check.version) hostStateStore.update({ lastAutoUpdateAttempt: check.version });
       const result = await applyUpdateOnce();
       if (!result.applied && !result.deferred) {
         logger.warn({ reason: result.message }, 'self-update: scheduled apply refused');

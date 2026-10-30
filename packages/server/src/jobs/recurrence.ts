@@ -179,7 +179,7 @@ export class RecurrenceScheduler {
     await this.fire(job);
   }
 
-  private applyJob(job: Job): void {
+  private applyJob(job: Job, afterFire = false): void {
     this.deregister(job.id);
     // Disabled or archived — one definition of "does this job fire"
     // (spec/08 § Archived jobs).
@@ -197,6 +197,17 @@ export class RecurrenceScheduler {
       this.logger.error(
         { jobId: job.id, rrule, err: (err as Error).message },
         'jobs/recurrence: invalid RRULE, refusing to register',
+      );
+      return;
+    }
+
+    if (next === null && afterFire) {
+      // The schedule completed: its last occurrence just fired. That is an
+      // outcome, not a failure — log it, but write no run entry, so the
+      // history ends on the real last run rather than a false dispatch-error.
+      this.logger.info(
+        { jobId: job.id, rrule, timezone },
+        'jobs/recurrence: schedule finished — no further occurrences',
       );
       return;
     }
@@ -298,7 +309,7 @@ export class RecurrenceScheduler {
       // Re-arm regardless of outcome: the fire already happened, and the
       // schedule must keep advancing to its NEXT occurrence rather than
       // dying on the first filtered/failed one.
-      this.applyJob(live);
+      this.applyJob(live, true);
       return;
     }
     if (!passed) {
@@ -309,7 +320,7 @@ export class RecurrenceScheduler {
         trigger: 'recurrence',
         payloadDigest: digestPayload(payload),
       });
-      this.applyJob(live);
+      this.applyJob(live, true);
       return;
     }
     try {
@@ -329,6 +340,6 @@ export class RecurrenceScheduler {
         error: message,
       });
     }
-    this.applyJob(live);
+    this.applyJob(live, true);
   }
 }
