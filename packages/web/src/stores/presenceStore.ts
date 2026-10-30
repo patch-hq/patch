@@ -6,7 +6,13 @@
 // per-chat banner per spec/14 ## Offline / error states.
 
 import { create } from 'zustand';
-import type { AuthOkHost, ClaudeMemoryEntry, HostAccountEvent, HostInfoEvent } from '@patch/wire';
+import type {
+  AuthOkHost,
+  ClaudeMemoryEntry,
+  HostAccountEvent,
+  HostConditionEvent,
+  HostInfoEvent,
+} from '@patch/wire';
 
 export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'offline';
 
@@ -55,6 +61,14 @@ export interface HostPresence {
    * an empty one, and Settings says which it is.
    */
   folders: { roots: string[]; recent: string[] } | null;
+  /**
+   * Why this online host is struggling (`host.condition`), or null while it is
+   * coping. Dropped when the host goes offline: an unreachable host has no
+   * condition to report.
+   */
+  condition?: HostConditionEvent | null;
+  /** Why the host dropped off, when the server could tell (`host.offline` reason). */
+  offlineReason?: string | null;
 }
 
 /**
@@ -133,7 +147,9 @@ interface PresenceState {
    */
   removeHost(hostId: string): void;
   /** One host's presence changed (`host.online` / `host.offline`). */
-  setHostOnline(hostId: string, online: boolean): void;
+  setHostOnline(hostId: string, online: boolean, offlineReason?: string): void;
+  /** One host's condition (`host.condition`). */
+  setHostCondition(condition: HostConditionEvent): void;
   /** One host's self-description (`host.host`). */
   setHostReport(report: HostInfoEvent): void;
   /** One backend's credential state on one host (`host.account`). */
@@ -180,6 +196,7 @@ function blankHost(hostId: string): HostPresence {
     accounts: {},
     claudeSettings: null,
     folders: null,
+    condition: null,
   };
 }
 
@@ -226,14 +243,30 @@ export const usePresenceStore = create<PresenceState>((set) => ({
       return { hosts, hostOnline: anyOnline(hosts) };
     });
   },
-  setHostOnline(hostId, online) {
+  setHostOnline(hostId, online, offlineReason) {
     set((s) => {
       const prev = s.hosts[hostId] ?? blankHost(hostId);
       const hosts = {
         ...s.hosts,
-        [hostId]: { ...prev, online, ...(online ? { lastSeenAt: Date.now() } : {}) },
+        [hostId]: {
+          ...prev,
+          online,
+          ...(online
+            ? { lastSeenAt: Date.now(), offlineReason: null }
+            : { condition: null, offlineReason: offlineReason ?? null }),
+        },
       };
       return { hosts, hostOnline: anyOnline(hosts) };
+    });
+  },
+  setHostCondition(condition) {
+    set((s) => {
+      const prev = s.hosts[condition.hostId] ?? blankHost(condition.hostId);
+      const hosts = {
+        ...s.hosts,
+        [condition.hostId]: { ...prev, condition: condition.state === 'online' ? null : condition },
+      };
+      return { hosts };
     });
   },
   setHostReport(report) {

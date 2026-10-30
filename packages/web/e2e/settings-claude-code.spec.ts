@@ -2,9 +2,9 @@ import { test, expect } from '@playwright/test';
 import { setClaudeSettings, settingsUrl, stubSettingsApi, wsSent } from './settingsHarness.js';
 
 // Real-browser e2e for a host's Claude Code settings.json (Settings →
-// Providers) — that machine's own file, edited in place — and its memory
+// Hosts) — that machine's own file, edited in place — and its memory
 // entries (Settings → Memories): spec/02 § Claude Code settings.
-const PROVIDERS = settingsUrl('providers');
+const HOSTS = settingsUrl('hosts');
 const EDITOR = 'host-d1-claude-settings';
 const MEMORIES = settingsUrl('memories');
 
@@ -17,10 +17,10 @@ const FEEDBACK = {
   body: 'Write real tests.',
 };
 
-/** Open the settings.json editor on the Providers page, holding `json`. */
+/** Open the settings.json editor on the machine page, holding `json`. */
 async function openEditor(page: import('@playwright/test').Page, json: string): Promise<void> {
   await stubSettingsApi(page);
-  await page.goto(PROVIDERS);
+  await page.goto(HOSTS);
   await setClaudeSettings(page, [], { settingsJson: json });
   await page.getByTestId(`${EDITOR}-edit`).click();
   await expect(page.getByTestId(`${EDITOR}-json`)).toBeVisible();
@@ -31,18 +31,16 @@ test.describe('Settings → Agent / Memories / Hosts → Claude Code settings', 
     await stubSettingsApi(page);
   });
 
-  test('settings.json is on Providers for the chosen host, and Hosts and Agent no longer carry it', async ({
+  test('settings.json is on the machine page, and Providers and Agent do not carry it', async ({
     page,
   }) => {
-    await page.goto(PROVIDERS);
+    await page.goto(HOSTS);
     await setClaudeSettings(page, [], { settingsJson: '{"model":"opus"}' });
     await expect(page.getByTestId(EDITOR)).toContainText('Set');
     await page.goto(settingsUrl('agent'));
     await expect(page.getByTestId('claude-settings-shared')).toHaveCount(0);
-    await page.goto(settingsUrl('hosts'));
-    await setClaudeSettings(page, [], { settingsJson: '{"model":"sonnet"}' });
-    await expect(page.getByText('Keep for every host')).toHaveCount(0);
-    await expect(page.getByText('Discard')).toHaveCount(0);
+    await page.goto(settingsUrl('providers'));
+    await expect(page.getByTestId(EDITOR)).toHaveCount(0);
   });
 
   test('shows the host’s file and its memory entries', async ({ page }) => {
@@ -59,7 +57,7 @@ test.describe('Settings → Agent / Memories / Hosts → Claude Code settings', 
     page,
   }) => {
     const server = await stubSettingsApi(page);
-    await page.goto(PROVIDERS);
+    await page.goto(HOSTS);
     await setClaudeSettings(page, [], { settingsJson: '{"model":"opus"}' });
     await page.getByTestId(`${EDITOR}-edit`).click();
     await page.getByTestId(`${EDITOR}-json`).fill('{"model":"sonnet"}');

@@ -777,7 +777,11 @@ export class PatchWs {
       return;
     }
     if (event.type === 'host.offline') {
-      usePresenceStore.getState().setHostOnline(event.hostId, false);
+      usePresenceStore.getState().setHostOnline(event.hostId, false, event.reason);
+      return;
+    }
+    if (event.type === 'host.condition') {
+      usePresenceStore.getState().setHostCondition(event);
       return;
     }
     if (event.type === 'host.unauthenticated') {

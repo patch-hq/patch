@@ -381,6 +381,13 @@ export interface RouteOptions {
    * Undefined for a key with no reading, which sorts after every key that has one.
    */
   utilization?: (accountId: string) => number | undefined;
+  /**
+   * The key is projected to run out within minutes, at the burn rate its recent
+   * usage readings show. New turns go to a key that is not, while one exists;
+   * a nearly-out key is still usable, so it is ordered LAST rather than skipped.
+   * A chat locked to its key stays on it unless auto-resume lets it move.
+   */
+  nearlyOut?: (accountId: string) => boolean;
 }
 
 /**
@@ -618,12 +625,18 @@ export class AccountRotation {
         break;
       }
     }
+    const nearly = (a: FailoverAccount) => route.nearlyOut?.(a.id) === true;
+    // Stable: healthy keys keep their order ahead of the ones about to run out.
+    ordered = [...ordered.filter((a) => !nearly(a)), ...ordered.filter(nearly)];
     const locked = ordered.find((a) => a.id === route.preferred);
     if (!locked) return ordered;
     if (route.resumeOnAnyAccount === true && this.isExhausted(locked.id)) {
       // Locked key first, so a host with nothing spendable still fails with the
       // locked key's own message; the usable lookups skip it while it is spent.
       return [locked, ...ordered.filter((a) => a.id !== locked.id)];
+    }
+    if (route.resumeOnAnyAccount === true && nearly(locked)) {
+      return [...ordered.filter((a) => a.id !== locked.id), locked];
     }
     return [locked];
   }

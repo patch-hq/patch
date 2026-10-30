@@ -93,6 +93,7 @@ import { ArtifactAutoRepublisher, ArtifactPublisher } from './artifacts.js';
 import { PadClient } from './pads.js';
 import { RemoteJobsStore } from './jobs-interface.js';
 import { QueuePullClient } from './queuePull.js';
+import { assessHostHealth, HOST_HEALTH_INTERVAL_MS } from '@patch/wire';
 import type { ChatInputEvent } from '@patch/wire';
 import { createMetaStore } from './meta.js';
 import { readAccountExhaustion, writeAccountExhaustion } from './accountAvailabilityStore.js';
@@ -184,6 +185,7 @@ import {
 } from './host.js';
 import { createPowerWatcher } from './power.js';
 import { createServerLink } from './serverLink.js';
+import { createHealthSampler } from './healthReport.js';
 import { handleJobExec } from './jobExec.js';
 import { handleHostWake } from './hostWake.js';
 import { rotateLog } from './logRotate.js';
@@ -250,7 +252,8 @@ import {
   pickDictationTranscriber,
   type DictationTranscribers,
 } from './audio/hosted-stt.js';
-import { ElevenLabsScribeBackend } from './audio/elevenlabs-stt.js';
+import { ElevenLabsScribeBackend, ScribeVoiceMap } from './audio/elevenlabs-stt.js';
+import { costCall } from './audio/voiceCost.js';
 import { createSileroVadFactory, validateVadModel, MockVad, type Vad } from './audio/vad.js';
 import { DeviceRegistry } from './devices/registry.js';
 import { PresenceRegistry } from './devices/presence.js';
@@ -1021,9 +1024,12 @@ async function startHost(
     if (!entry) return undefined;
     const { session, week, overage } = entry.reading.windows;
     if (session === undefined && week === undefined && overage === undefined) return undefined;
+    const runsOut = accountUsage?.runOutAt(accountId) ?? {};
     return {
-      ...(session ? { session } : {}),
-      ...(week ? { week } : {}),
+      ...(session
+        ? { session: { ...session, ...(runsOut.session ? { runsOutAt: runsOut.session } : {}) } }
+        : {}),
+      ...(week ? { week: { ...week, ...(runsOut.week ? { runsOutAt: runsOut.week } : {}) } } : {}),
       ...(overage ? { overage } : {}),
       at: entry.reading.at,
     };
@@ -2066,6 +2072,43 @@ async function startHost(
   };
   const credentialReportTimer = setInterval(reportRefreshedCredentials, 60_000);
   credentialReportTimer.unref();
+
+  // Heartbeat health (spec/03 § Host health): tell the server how this machine
+  // is coping, and hold new turns while its memory is critically short — work
+  // started now would only be cut off when the kernel kills something.
+  const healthSampler = createHealthSampler();
+  let memoryCritical = false;
+  const reportHealth = async (): Promise<void> => {
+    let sample: Awaited<ReturnType<typeof healthSampler.sample>>;
+    try {
+      sample = await healthSampler.sample();
+    } catch (err) {
+      logger.error({ err }, 'host health: could not sample this machine');
+      return;
+    }
+    const critical = assessHostHealth(sample).critical;
+    if (critical !== memoryCritical) {
+      memoryCritical = critical;
+      logger.warn(
+        { critical },
+        critical
+          ? 'host health: memory critical, holding new turns'
+          : 'host health: memory recovered, releasing held turns',
+      );
+      if (!critical) daemon.releaseHeldTurns();
+    }
+    const power = powerWatcher.current();
+    if (linkOnline) {
+      link.send({
+        type: 'host.health',
+        hostId: selfHostId,
+        ...sample,
+        ...(power ? { power } : {}),
+      });
+    }
+  };
+  const healthTimer = setInterval(() => void reportHealth(), HOST_HEALTH_INTERVAL_MS);
+  healthTimer.unref();
 
   const link = createServerLink({
     url: config.serverWsUrl,
@@ -3622,6 +3665,7 @@ async function startHost(
       ...(preferredAccountId !== undefined ? { preferred: preferredAccountId } : {}),
       resumeOnAnyAccount: autoResumeRateLimit,
       weekResetsAt: (id) => accountUsage?.get(id)?.reading.windows.week?.resetsAt,
+      nearlyOut: (id) => accountUsage?.nearlyOut(id) === true,
       utilization: (id) => {
         const w = accountUsage?.get(id)?.reading.windows;
         const values = [w?.session?.utilization, w?.week?.utilization].filter(
@@ -4195,6 +4239,7 @@ async function startHost(
       return block + (req.voicePrefix ? `${req.voicePrefix}${req.message}` : req.message);
     },
     sleepGuard: createSleepGuard({ logger }),
+    holdTurns: () => memoryCritical,
     sleepWatch: createSleepWatch({
       logger,
       // Whatever the server link held across the gap is stale: re-handshake now
@@ -4242,8 +4287,10 @@ async function startHost(
     // between spawns is reflected immediately.
   });
   daemon.setWatchCheckIn({ intervalMs: watchCheckInMinutes * 60_000, prompt: watchCheckInPrompt });
-  // Meeting mode (meeting.ts). Local Whisper only: a meeting is hours of audio,
-  // so a paid STT backend is never an option here, configured or not.
+  // Meeting mode (meeting.ts). Local Whisper unless the host opts in with
+  // MEETING_STT=elevenlabs: a meeting is hours of audio, so a paid STT backend is
+  // never picked just because a key exists.
+  const scribeVoiceMaps = new Map<string, ScribeVoiceMap>();
   meetings = new MeetingManager({
     dir: join(config.patchHome, 'meetings'),
     transcribe: async (wav) => {
@@ -4253,15 +4300,52 @@ async function startHost(
     },
     // Voice separation needs the local sidecar and its speaker model; without
     // DIARISE_MODEL_PATH the sidecar refuses rather than merging voices.
-    ...(process.env['DIARISE_MODEL_PATH']
+    // MEETING_STT=elevenlabs opts a host into paid Scribe for meetings, with its
+    // own diarisation. Chosen explicitly, never as a fallback: a missing key or a
+    // failed request fails the clip. Usage goes on the voice ledger.
+    ...(process.env['MEETING_STT'] === 'elevenlabs'
       ? {
           transcribeVoices: async (session: string, wav: Buffer) => {
-            if (!(whisper instanceof LocalWhisperBackend))
-              throw new Error('DIARISE_MODEL_PATH is set but WHISPER_BACKEND is not local');
-            return whisper.transcribeVoices(session, wav);
+            const scribe = dictationTranscribers?.elevenlabs;
+            if (!(scribe instanceof ElevenLabsScribeBackend)) {
+              throw new Error(
+                'MEETING_STT=elevenlabs but this host has no ElevenLabs key (ELEVEN_LABS_API_KEY)',
+              );
+            }
+            const startedAt = Date.now();
+            const runs = await scribe.transcribeDiarised(wav);
+            const audioSeconds = Math.max(0, wav.length - 44) / 32000;
+            const sep = session.lastIndexOf(':');
+            voiceLedger.record(
+              costCall({
+                sessionId: `meeting-stt-${startedAt}`,
+                chatId: session.slice(0, sep),
+                surfaceKind: 'meeting',
+                startedAt,
+                endedAt: Date.now(),
+                engine: {
+                  backend: 'local',
+                  model: scribe.costModel,
+                  tokens: null,
+                  stt: { requests: 1, audioSeconds, billedSeconds: audioSeconds },
+                },
+                handoffs: 0,
+              }),
+            );
+            let map = scribeVoiceMaps.get(session);
+            if (!map) scribeVoiceMaps.set(session, (map = new ScribeVoiceMap()));
+            return map.assign(runs);
           },
         }
-      : {}),
+      : process.env['DIARISE_MODEL_PATH']
+        ? {
+            transcribeVoices: async (session: string, wav: Buffer) => {
+              if (!(whisper instanceof LocalWhisperBackend))
+                throw new Error('DIARISE_MODEL_PATH is set but WHISPER_BACKEND is not local');
+              return whisper.transcribeVoices(session, wav);
+            },
+          }
+        : {}),
     ...(process.env['VOICEPRINT_PATH']
       ? { hasVoiceprint: () => existsSync(process.env['VOICEPRINT_PATH'] as string) }
       : {}),
@@ -5217,6 +5301,8 @@ async function startHost(
   const shutdown = async (): Promise<void> => {
     // Turns outlive the host (spec/02): let go of each one's runner first, so
     // nothing below ends a turn that is meant to carry on under the next host.
+    clearInterval(healthTimer);
+    healthSampler.stop();
     daemon.beginShutdown();
     const detached = detachDurableTurns();
     if (detached > 0) logger.info({ turns: detached }, 'patch-daemon: left turns running');

@@ -529,22 +529,17 @@ test('send --json (flat): REST posts to /api/chats/:id/send-to', async () => {
   );
 });
 
-test('history --json (flat): REST reads /api/chats/:id/history with limit', async () => {
+test('history --json (flat): --limit keeps the most recent events across pages', async () => {
   await withSetup(
     (req) => {
+      const ev = (seq: number) => ({ type: 'chat.message', role: 'user', content: 'm', seq });
+      if (req.url === '/api/chats/01M3N32N9T7V75JCV7XHY9NRHM/history' && req.method === 'GET')
+        return { status: 200, body: { events: [ev(0), ev(1)], nextFromSeq: 2 } };
       if (
-        req.url === '/api/chats/01M3N32N9T7V75JCV7XHY9NRHM/history?limit=2' &&
+        req.url === '/api/chats/01M3N32N9T7V75JCV7XHY9NRHM/history?since=2' &&
         req.method === 'GET'
       )
-        return {
-          status: 200,
-          body: {
-            events: [
-              { type: 'chat.message', role: 'user', content: 'a', seq: 0 },
-              { type: 'chat.message', role: 'assistant', content: 'b', seq: 1 },
-            ],
-          },
-        };
+        return { status: 200, body: { events: [ev(2), ev(3), ev(4)] } };
       return { status: 404, body: { error: `unexpected ${req.url}` } };
     },
     async (env) => {
@@ -553,8 +548,11 @@ test('history --json (flat): REST reads /api/chats/:id/history with limit', asyn
         env,
       );
       assert.equal(r.code, 0, `stderr=${r.stderr} stdout=${r.stdout}`);
-      const parsed = JSON.parse(r.stdout) as { events: unknown[] };
-      assert.equal(parsed.events.length, 2);
+      const parsed = JSON.parse(r.stdout) as { events: { seq: number }[] };
+      assert.deepEqual(
+        parsed.events.map((e) => e.seq),
+        [3, 4],
+      );
     },
   );
 });
@@ -1139,4 +1137,22 @@ test('activity --json: over the host socket it asks /internal/activity as the ca
     await new Promise<void>((ok) => server.close(() => ok()));
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('doctor --json: folderAccess is unknown over REST (only the host can answer)', async () => {
+  await withSetup(
+    (req) => {
+      if (req.url === '/api/healthz') return { status: 200, body: { ok: true, version: 'v' } };
+      if (req.url === '/api/daemon/healthz') return { status: 200, body: { ok: true } };
+      if (req.url === '/api/chats') return { status: 200, body: { chats: [] } };
+      if (req.url === '/api/auth/me') return { status: 200, body: { ok: true } };
+      return { status: 404, body: { error: 'not found' } };
+    },
+    async (env) => {
+      const r = await runCli(['doctor', '--json'], env);
+      assert.equal(r.code, 0, `stderr=${r.stderr}`);
+      const parsed = JSON.parse(r.stdout) as { folderAccess: string };
+      assert.match(parsed.folderAccess, /only reported over the local host socket/);
+    },
+  );
 });

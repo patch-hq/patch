@@ -171,6 +171,8 @@ export default function NewChat(): React.ReactElement {
     if (hereDraftId && st.get(hereDraftId)) return hereDraftId;
     return st.create(hereFolder ?? undefined);
   });
+  const failure = useNewChatDraftStore((s) => s.drafts[draftId]?.failure);
+  const [sendRequest, setSendRequest] = React.useState(0);
   const [openedDraft] = React.useState(() => useNewChatDraftStore.getState().get(draftId));
   const reopened = hereDraftId !== null && openedDraft !== undefined && openedDraft.text !== '';
   React.useEffect(() => {
@@ -314,6 +316,13 @@ export default function NewChat(): React.ReactElement {
       const body = e instanceof ApiError ? (e.body as { retractChatId?: string } | null) : null;
       if (body?.retractChatId) useChatStore.getState().removeChat(body.retractChatId);
       pushError(`Failed to create chat: ${(e as Error).message}`);
+      // The message stays as a failed chat (spec/04 § Spawn), with a resend.
+      const drafts = useNewChatDraftStore.getState();
+      drafts.markFailed(
+        draftId,
+        drafts.get(draftId)?.text ?? '',
+        `Failed to create chat: ${(e as Error).message}`,
+      );
       return null;
     }
   };
@@ -346,6 +355,24 @@ export default function NewChat(): React.ReactElement {
         {/* A new chat has no messages yet, so the title and the picks are
             centred between two equal spacers in the space above the composer. */}
         <View testID="new-chat-top-spacer" style={{ flex: 1 }} />
+
+        {failure ? (
+          <View testID="new-chat-failed" style={{ alignItems: 'center', paddingBottom: space.sm }}>
+            <Text style={{ color: colors.red, ...typography.meta }}>Chat didn’t start</Text>
+            <Text testID="new-chat-failed-error" style={{ color: colors.ink2, ...typography.meta }}>
+              {failure.sentence}
+            </Text>
+            <Chip
+              testID="new-chat-resend"
+              label="Resend"
+              selected={false}
+              onPress={() => {
+                useNewChatDraftStore.getState().clearFailure(draftId);
+                setSendRequest((n) => n + 1);
+              }}
+            />
+          </View>
+        ) : null}
 
         <Text
           testID="new-chat-title"
@@ -453,6 +480,7 @@ export default function NewChat(): React.ReactElement {
           dictationChatId={hostId ? draftDictationChatId(hostId) : undefined}
           folder={folder ?? undefined}
           sendTarget={sendTarget}
+          sendRequest={sendRequest}
           onSent={onSent}
         />
       </KeyboardAvoidingView>

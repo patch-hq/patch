@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, lstatSync, symlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
+import { newTurnTag, TURN_TAG_ENV, killTagged } from './turnTag.js';
 import type { SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
 
 /** What a resumed chat needs from the user's own Claude config dir. */
@@ -58,9 +59,10 @@ export function spawnClaudeInGroup(
   onRefused?: (message: string) => void,
 ): SpawnedProcess {
   linkUserConfigIntoResumeDir(opts.env);
+  const turnTag = newTurnTag();
   const child = spawn(opts.command, opts.args, {
     cwd: opts.cwd,
-    env: opts.env,
+    env: { ...opts.env, [TURN_TAG_ENV]: turnTag },
     stdio: ['pipe', 'pipe', 'ignore'],
     detached: true,
     windowsHide: true,
@@ -90,6 +92,7 @@ export function spawnClaudeInGroup(
     opts.signal.removeEventListener('abort', onAbort);
     // Whatever claude left behind is in its group: sweep it.
     killGroup('SIGKILL');
+    killTagged(turnTag);
   });
   return {
     stdin: child.stdin,

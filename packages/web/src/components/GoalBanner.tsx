@@ -1,24 +1,22 @@
-// GoalBanner — the Goal bar above the chat (spec/04 § Goals, spec/14 § Main
-// chat panel — Goal bar). The goal is set from the composer via `/goal <text>`
-// (which also starts a turn with the condition as the directive) and cleared
-// with a bare `/goal`; this bar is the always-visible readout of what Patch's
-// own evaluator is judging — condition, running time, checks evaluated, tokens
-// spent, and its latest reason — so the user can see progress without opening
-// the transcript. The condition's text is shown in full (wrapped, never
-// truncated) and edited in a modal opened by clicking it (re-arms the
-// evaluator on the new text as a fresh goal, same as typing a new `/goal`).
-// Editing and the clear (×) control are both optimistic, reverting + surfacing
-// a toast on failure (NO FALLBACK), mirroring the ArchivedBanner's per-chat
-// pattern.
+// GoalBanner — the Goal row of the status list under the chat header (spec/04
+// § Goals, spec/14 § Main chat panel — Status list). The goal is set from the
+// composer via `/goal <text>` (which also starts a turn with the condition as
+// the directive) and cleared with a bare `/goal`. The row is one folded line —
+// state pill, goal text, running time and checks — and its pill opens the
+// evaluator's detail (tokens, latest reason, Edit goal). Clicking the goal text
+// edits it in a modal (re-arms the evaluator on the new text as a fresh goal,
+// same as typing a new `/goal`). Editing and the clear (×) control are both
+// optimistic, reverting + surfacing a toast on failure (NO FALLBACK).
 
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { ChevronDown, ChevronUp, Pause, Target, X } from 'lucide-react';
+import { CircleCheck, CircleX, Pause, Target, X } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { api } from '../api/rest.js';
 import type { ChatRow } from '../stores/types.js';
 import { formatDateTime } from '../lib/formatDateTime.js';
 import { ModalOverlay } from './ModalOverlay.js';
+import { StatusPill, StatusRow } from './StatusRow.js';
 
 /**
  * Humanise time elapsed since a goal started: `9m`, `1h 4m`, `3h`. Coarsest
@@ -149,39 +147,81 @@ export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
   }
 
   const paused = progress?.pausedByStop === true;
-  const metrics: { key: string; label: string }[] = [];
-  if (progress) {
-    metrics.push({ key: 'time', label: formatElapsed(now - progress.startedAt) });
-    metrics.push({
-      key: 'turns',
-      label: `${progress.turnsEvaluated} check${progress.turnsEvaluated === 1 ? '' : 's'}`,
-    });
-    if (progress.tokensSpent > 0)
-      metrics.push({ key: 'tokens', label: `${formatTokenCount(progress.tokensSpent)} tokens` });
-  }
-  const reason = paused
-    ? 'Paused: you stopped the chat. Send a message to resume.'
-    : progress?.lastVerdict === 'not_met' && progress.lastReason !== null
-      ? `Not met: ${progress.lastReason}`
-      : null;
+  const meta = progress
+    ? `${formatElapsed(now - progress.startedAt)} · ${progress.turnsEvaluated} check${progress.turnsEvaluated === 1 ? '' : 's'}`
+    : null;
+  const detail: string[] = [];
+  if (progress && progress.tokensSpent > 0)
+    detail.push(`${formatTokenCount(progress.tokensSpent)} tokens`);
+  if (progress?.lastVerdict === 'not_met' && progress.lastReason !== null)
+    detail.push(`Not met: ${progress.lastReason}`);
 
-  const cells = reason !== null ? [...metrics, { key: 'reason', label: reason }] : metrics;
+  const sub =
+    paused || expanded ? (
+      <>
+        {paused && (
+          <div data-testid="goal-banner-paused-note">
+            You stopped the chat. Send a message to resume.
+          </div>
+        )}
+        {expanded && (
+          <div data-testid="goal-banner-detail">
+            {detail.length > 0 && (
+              <span data-testid="goal-banner-reason">{detail.join(' · ')} · </span>
+            )}
+            <button
+              type="button"
+              className="status-link status-link-underline"
+              data-testid="goal-edit-link"
+              onClick={() => setEditing(true)}
+            >
+              Edit goal
+            </button>
+          </div>
+        )}
+      </>
+    ) : undefined;
 
   return (
-    <div
-      className={`goal-banner${paused ? ' goal-banner-paused' : ''}${expanded ? ' goal-banner-expanded' : ''}`}
-      data-testid="goal-banner"
-      data-paused={paused ? 'true' : 'false'}
-      role="status"
-    >
-      <div className="goal-banner-main">
-        {paused ? <Pause size={16} aria-hidden /> : <Target size={16} aria-hidden />}
-        <span className="goal-banner-label" data-testid="goal-banner-label">
-          {paused ? 'Goal paused' : 'Goal active'}
-        </span>
+    <>
+      <StatusRow
+        testId="goal-banner"
+        data-paused={paused ? 'true' : 'false'}
+        role="status"
+        icon={
+          paused ? (
+            <Pause size={16} aria-hidden />
+          ) : (
+            <Target size={16} className="goal-icon-working" aria-hidden />
+          )
+        }
+        label="Goal"
+        wrap={expanded}
+        meta={meta}
+        sub={sub}
+        action={
+          <button
+            type="button"
+            data-testid="goal-clear-btn"
+            aria-label="Clear goal"
+            title="Clear goal"
+            onClick={() => void writeGoal(null)}
+          >
+            <X size={16} aria-hidden />
+          </button>
+        }
+      >
+        <StatusPill
+          testId="goal-pill"
+          open={expanded}
+          onToggle={() => setExpanded((v) => !v)}
+          label={expanded ? 'Hide goal details' : 'Show goal details'}
+        >
+          {paused ? 'Paused' : 'Working'}
+        </StatusPill>
         <button
           type="button"
-          className="goal-banner-text"
+          className="status-link status-grow"
           data-testid="goal-banner-text"
           aria-label="Edit goal"
           title={goal}
@@ -189,45 +229,7 @@ export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
         >
           {goal}
         </button>
-        <button
-          type="button"
-          className="goal-clear-btn goal-expand-btn"
-          data-testid="goal-expand-btn"
-          aria-label={expanded ? 'Show less' : 'Show full goal'}
-          aria-expanded={expanded}
-          title={expanded ? 'Show less' : 'Show full goal'}
-          onClick={() => setExpanded((v) => !v)}
-        >
-          {expanded ? <ChevronUp size={16} aria-hidden /> : <ChevronDown size={16} aria-hidden />}
-        </button>
-        <button
-          type="button"
-          className="goal-clear-btn"
-          data-testid="goal-clear-btn"
-          aria-label="Clear goal"
-          title="Clear goal"
-          onClick={() => void writeGoal(null)}
-        >
-          <X size={16} aria-hidden />
-        </button>
-      </div>
-      {cells.length > 0 && (
-        <div
-          className="goal-banner-meta"
-          data-testid="goal-banner-meta"
-          title={cells.map((c) => c.label).join(' · ')}
-        >
-          {cells.map((c) => (
-            <span
-              key={c.key}
-              className="goal-banner-cell"
-              data-testid={c.key === 'reason' ? 'goal-banner-reason' : `goal-banner-cell-${c.key}`}
-            >
-              {c.label}
-            </span>
-          ))}
-        </div>
-      )}
+      </StatusRow>
       {editing && (
         <GoalEditModal
           value={goal}
@@ -235,7 +237,7 @@ export function GoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
           onClose={() => setEditing(false)}
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -247,39 +249,48 @@ function readDismissed(): Record<string, number> {
 }
 
 /**
- * spec/04 § Goals — a finished goal stays viewable, in the top bar with the
- * active goal's bar (not a popover over the transcript). Full text, wrapped;
- * dismissible per finished goal (remembered by its end time, so the next goal
- * to finish shows again).
+ * spec/04 § Goals — a finished goal stays viewable as a Goal row in the status
+ * list. Folded: outcome pill, goal text, finish time. Opened: duration, checks,
+ * tokens and the evaluator's reason, wrapped. Dismissible per finished goal
+ * (remembered by its end time, so the next goal to finish shows again).
  */
 export function FinishedGoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
   const last = row.lastGoal;
   const [dismissed, setDismissed] = useState<Record<string, number>>(readDismissed);
+  const [expanded, setExpanded] = useState(false);
   if (row.goal !== null || last === null || dismissed[row.chatId] === last.endedAt) return null;
-  const label = last.outcome === 'met' ? 'Goal met' : 'Goal impossible';
+  const met = last.outcome === 'met';
   function dismiss(): void {
     const next = { ...dismissed, [row.chatId]: last!.endedAt };
     localStorage.setItem(DISMISSED_KEY, JSON.stringify(next));
     setDismissed(next);
   }
   return (
-    <div
-      className="goal-banner finished-goal-banner"
-      data-testid="finished-goal-banner"
+    <StatusRow
+      testId="finished-goal-banner"
       role="status"
-    >
-      <div className="goal-banner-main">
-        <Target size={16} aria-hidden />
-        <span className="goal-banner-label">Goal finished</span>
-        <span className="finished-goal-time" data-testid="finished-goal-time">
-          {formatDateTime(last.endedAt)}
-        </span>
-        <span className="finished-goal-title" data-testid="finished-goal-summary">
-          {label}: {last.condition}
-        </span>
+      icon={
+        met ? (
+          <CircleCheck size={16} className="goal-icon-met" aria-hidden />
+        ) : (
+          <CircleX size={16} aria-hidden />
+        )
+      }
+      label="Goal"
+      wrap={expanded}
+      meta={<span data-testid="finished-goal-time">{formatDateTime(last.endedAt)}</span>}
+      sub={
+        expanded ? (
+          <div data-testid="finished-goal-detail">
+            {formatElapsed(last.endedAt - last.startedAt)} · {last.turns} check
+            {last.turns === 1 ? '' : 's'}
+            {last.tokens > 0 ? ` · ${formatTokenCount(last.tokens)} tokens` : ''}. {last.reason}
+          </div>
+        ) : undefined
+      }
+      action={
         <button
           type="button"
-          className="goal-clear-btn"
           data-testid="finished-goal-dismiss"
           aria-label="Dismiss"
           title="Dismiss"
@@ -287,14 +298,19 @@ export function FinishedGoalBanner({ row }: { row: ChatRow }): JSX.Element | nul
         >
           <X size={16} aria-hidden />
         </button>
-      </div>
-      <div className="finished-goal-meta" data-testid="finished-goal-detail">
-        {formatElapsed(last.endedAt - last.startedAt)} · {last.turns} check
-        {last.turns === 1 ? '' : 's'}
-        {last.tokens > 0 ? ` · ${formatTokenCount(last.tokens)} tokens` : ''}
-        {' · '}
-        {last.reason}
-      </div>
-    </div>
+      }
+    >
+      <StatusPill
+        testId="finished-goal-pill"
+        open={expanded}
+        onToggle={() => setExpanded((v) => !v)}
+        label={expanded ? 'Hide goal details' : 'Show goal details'}
+      >
+        {met ? 'Met' : 'Impossible'}
+      </StatusPill>
+      <span className="status-grow" data-testid="finished-goal-summary" title={last.condition}>
+        {last.condition}
+      </span>
+    </StatusRow>
   );
 }

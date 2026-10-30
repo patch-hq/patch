@@ -687,6 +687,35 @@ describe('WS hub relay', () => {
     }
   });
 
+  it("tells surfaces why a host dropped off, from the host's last health report", async () => {
+    const user = generateUserKeypair(() => new Uint8Array(32).fill(13));
+    const registry = Registry.load(dir);
+    registry.bootstrapAccount({ keypair: user });
+    const h = await startServer({ registry });
+    try {
+      const client = await makeAuthedClient(h, user, 'srf-1');
+      h.hostLink.injectHostEvent({
+        type: 'host.health',
+        hostId: 'd1',
+        load1: 0.1,
+        cpuCount: 4,
+        eventLoopLagMs: 1,
+        intervalMs: 15000,
+        power: { onBattery: true, percent: 3 },
+        topProcesses: [],
+      });
+      const offlinePromise = client.waitFor('host.offline');
+      h.hostLink.setStatus('offline');
+      expect(await offlinePromise).toMatchObject({
+        hostId: 'd1',
+        reason: 'battery',
+      });
+      await client.close();
+    } finally {
+      await h.close();
+    }
+  });
+
   it('emits daemon.offline to all surfaces when upstream link drops', async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(13));
     const registry = Registry.load(dir);

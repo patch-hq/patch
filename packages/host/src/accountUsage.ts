@@ -18,6 +18,13 @@
 // failover know that two accounts are one account.
 
 import type { Logger } from 'pino';
+import {
+  NEARLY_OUT_MS,
+  probeIntervalMs,
+  projectRunOut,
+  type PoolForecast,
+  type UsageSample,
+} from './usageForecast.js';
 import { rateLimitWindowsBlocked } from '@patch/wire';
 import {
   fetchClaudeUsage,
@@ -26,8 +33,17 @@ import {
   type ClaudeStoredAccount,
 } from '@patch/auth';
 
-/** How often the timer refreshes every account, unprompted. */
+/**
+ * How often the timer refreshes an account that is nowhere near a limit. Closer
+ * to one it asks more often (`probeIntervalMs`); the timer itself ticks at
+ * `USAGE_TICK_MS` and probes whichever accounts are due.
+ */
 export const USAGE_POLL_INTERVAL_MS = 10 * 60_000;
+export const USAGE_TICK_MS = 30_000;
+
+/** How much probe history each pool's burn rate is drawn from. */
+const LOOKBACK_MS = { session: 45 * 60_000, week: 6 * 3_600_000 } as const;
+const KEEP_SAMPLES_MS = 6 * 3_600_000;
 
 /**
  * The floor between two probes of the SAME account.
@@ -82,6 +98,7 @@ export class AccountUsageTracker {
   private readonly entries = new Map<string, AccountUsageEntry>();
   private readonly lastProbeAt = new Map<string, number>();
   private readonly inFlight = new Map<string, Promise<void>>();
+  private readonly samples = new Map<string, Record<'session' | 'week', UsageSample[]>>();
   private timer: ReturnType<typeof setInterval> | undefined;
 
   constructor(
@@ -139,6 +156,58 @@ export class AccountUsageTracker {
     const wasWindowBlock = rateLimitWindowsBlocked(windows, 0);
     if (!wasWindowBlock || rateLimitWindowsBlocked(windows, this.now)) return entry;
     return { ...entry, reading: { ...entry.reading, blocked: false } };
+  }
+
+  /**
+   * When each pool is expected to run out at the burn rate the last probes
+   * show. Probes only: a turn's reading is not on a schedule, so it says
+   * nothing about rate.
+   */
+  runOutAt(accountId: string): Partial<Record<'session' | 'week', number>> {
+    const held = this.samples.get(accountId);
+    const out: Partial<Record<'session' | 'week', number>> = {};
+    if (!held) return out;
+    for (const scope of ['session', 'week'] as const) {
+      const at = projectRunOut(held[scope], LOOKBACK_MS[scope], this.now);
+      if (at !== undefined) out[scope] = at;
+    }
+    return out;
+  }
+
+  /** Will this account be empty within `NEARLY_OUT_MS`? New turns should go elsewhere. */
+  nearlyOut(accountId: string): boolean {
+    return Object.values(this.runOutAt(accountId)).some((at) => at - this.now < NEARLY_OUT_MS);
+  }
+
+  /** How long to leave this account between probes, given how close it is. */
+  probeInterval(accountId: string): number {
+    const runOut = this.runOutAt(accountId);
+    const windows = this.entries.get(accountId)?.reading.windows;
+    const pools: PoolForecast[] = (['session', 'week'] as const).map((scope) => ({
+      scope,
+      ...(windows?.[scope]?.utilization !== undefined
+        ? { utilization: windows[scope]!.utilization }
+        : {}),
+      ...(runOut[scope] !== undefined ? { runOutAt: runOut[scope] } : {}),
+    }));
+    return probeIntervalMs(pools, this.now);
+  }
+
+  private record(accountId: string, reading: ClaudeUsageReading): void {
+    const held = this.samples.get(accountId) ?? { session: [], week: [] };
+    for (const scope of ['session', 'week'] as const) {
+      const w = reading.windows[scope];
+      const list = held[scope].filter((s) => reading.at - s.at <= KEEP_SAMPLES_MS);
+      if (w?.utilization !== undefined) {
+        list.push({
+          at: reading.at,
+          utilization: w.utilization,
+          ...(w.resetsAt !== undefined ? { resetsAt: w.resetsAt } : {}),
+        });
+      }
+      held[scope] = list;
+    }
+    this.samples.set(accountId, held);
   }
 
   /**
@@ -226,6 +295,7 @@ export class AccountUsageTracker {
       return;
     }
     this.entries.set(accountId, { reading: result.reading, source: 'probe' });
+    this.record(accountId, result.reading);
     if (result.reading.organizationId !== undefined) {
       this.opts.rememberOrganization?.(accountId, result.reading.organizationId);
     }
@@ -256,7 +326,7 @@ export class AccountUsageTracker {
   /** Begin the unprompted refresh loop. Unref'd — it must not hold the process open. */
   start(): void {
     if (this.timer) return;
-    this.timer = setInterval(() => void this.poll(), USAGE_POLL_INTERVAL_MS);
+    this.timer = setInterval(() => void this.poll(), USAGE_TICK_MS);
     this.timer.unref?.();
     void this.poll();
   }
@@ -267,7 +337,11 @@ export class AccountUsageTracker {
    * it; each failure is logged against its account and the rest still finish.
    */
   private async poll(): Promise<void> {
-    const targets = this.opts.accounts().filter((a) => a.credential !== null);
+    const targets = this.opts.accounts().filter((a) => {
+      if (a.credential === null) return false;
+      const last = this.lastProbeAt.get(a.id);
+      return last === undefined || this.now - last >= this.probeInterval(a.id);
+    });
     const results = await Promise.allSettled(targets.map((a) => this.refresh(a.id)));
     results.forEach((r, i) => {
       if (r.status === 'rejected') {

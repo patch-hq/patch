@@ -62,3 +62,32 @@ describe('a rejected window whose reset has passed', () => {
     ).not.toBe('blocked');
   });
 });
+
+describe('a pool at 98% or more is empty', () => {
+  const NOW = 1_800_000_000_000;
+  const ahead = NOW + 3_600_000;
+
+  it('blocks at 98% while the reset is still ahead, though the status says allowed', () => {
+    const win = { status: 'allowed' as const, utilization: 0.98, resetsAt: ahead };
+    expect(rateLimitWindowsBlocked({ session: win }, NOW)).toBe(true);
+    expect(rateLimitWindowState('session', win, NOW)).toBe('blocked');
+  });
+
+  it('does not block at 97%', () => {
+    const win = { status: 'allowed' as const, utilization: 0.97, resetsAt: ahead };
+    expect(rateLimitWindowsBlocked({ session: win }, NOW)).toBe(false);
+  });
+
+  it('does not block with no stated reset or after it has passed', () => {
+    expect(rateLimitWindowsBlocked({ week: { status: 'allowed', utilization: 0.99 } }, NOW)).toBe(
+      false,
+    );
+    const past = { status: 'allowed' as const, utilization: 0.99, resetsAt: NOW - 1 };
+    expect(rateLimitWindowsBlocked({ week: past }, NOW)).toBe(false);
+  });
+
+  it('never blocks on overage', () => {
+    const win = { status: 'allowed' as const, utilization: 1, resetsAt: ahead };
+    expect(rateLimitWindowsBlocked({ overage: win }, NOW)).toBe(false);
+  });
+});

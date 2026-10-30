@@ -1982,10 +1982,76 @@ export const HostOfflineEvent = z
   .object({
     type: z.literal('host.offline'),
     ...hostIdField,
+    /**
+     * Why, when the server can tell from the host's last heartbeat: `battery`
+     * (it was nearly flat and discharging), `asleep` (the machine reported going
+     * to sleep) or `unresponsive`. Absent when it was not worked out, e.g. the
+     * host was removed. See `describeHostOffline`.
+     */
     reason: z.string().optional(),
   })
   .strict();
 export type HostOfflineEvent = z.infer<typeof HostOfflineEvent>;
+
+/** One group of look-alike processes using memory on a host: "5 vitest, 11 GB". */
+export const HostProcessGroup = z
+  .object({
+    name: z.string().min(1).max(64),
+    count: z.number().int().gte(1),
+    rssBytes: z.number().int().gte(0),
+  })
+  .strict();
+export type HostProcessGroup = z.infer<typeof HostProcessGroup>;
+
+/**
+ * Host → server, every few seconds with the host's heartbeat: how the machine
+ * itself is coping. Fields a platform cannot measure are absent, never zero.
+ * `topProcesses` is only filled while memory is short — it is what the user is
+ * shown as the likely cause. Consumed by the server (spec/03 § Host health),
+ * never relayed to surfaces.
+ */
+export const HostHealthEvent = z
+  .object({
+    type: z.literal('host.health'),
+    ...hostIdField,
+    memTotalBytes: z.number().int().gte(0).optional(),
+    memAvailableBytes: z.number().int().gte(0).optional(),
+    swapTotalBytes: z.number().int().gte(0).optional(),
+    swapUsedBytes: z.number().int().gte(0).optional(),
+    load1: z.number().gte(0),
+    cpuCount: z.number().int().gte(1),
+    /** Worst delay of the host process's own event loop since the last report. */
+    eventLoopLagMs: z.number().gte(0),
+    /** Milliseconds between reports, so the server knows when one is late. */
+    intervalMs: z.number().int().gte(1),
+    /** Battery state; absent on a machine with no battery. */
+    power: z
+      .object({ onBattery: z.boolean(), percent: z.number().gte(0).lte(100) })
+      .strict()
+      .optional(),
+    topProcesses: z.array(HostProcessGroup).max(5),
+  })
+  .strict();
+export type HostHealthEvent = z.infer<typeof HostHealthEvent>;
+
+/**
+ * Server → surfaces: a host is online but coping badly, or is no longer. (A host
+ * that cannot be reached at all is `host.offline`.) `critical` means the host is
+ * holding new turns rather than start work it would not finish.
+ */
+export const HostConditionEvent = z
+  .object({
+    type: z.literal('host.condition'),
+    ...hostIdField,
+    state: z.enum(['online', 'struggling']),
+    critical: z.boolean(),
+    reasons: z.array(z.enum(['memory', 'battery', 'load', 'lag', 'slow-link'])),
+    /** The charge, when `battery` is a reason. */
+    batteryPercent: z.number().gte(0).lte(100).optional(),
+    topProcesses: z.array(HostProcessGroup).max(5),
+  })
+  .strict();
+export type HostConditionEvent = z.infer<typeof HostConditionEvent>;
 
 /**
  * Host → server: one backend's credential on one host is missing or expired
@@ -2084,17 +2150,15 @@ export const SharedSettings = z
         contact: z.string().trim().max(200),
       })
       .strict(),
-    /** Whether the Manager sweep runs at all (spec/06 § Sweep). */
+    /** Whether the Manager sweep runs at all (spec/06 § The sweep). Off by default; the one switch that stops everything. */
     sweepEnabled: z.boolean(),
-    /** How often the interval trigger fires, subject to the gate. */
-    sweepIntervalMinutes: z.number().int().positive(),
-    /** How long a RUNNING chat may go without output before the gate calls it stalled. */
-    stalledThresholdMinutes: z.number().int().positive(),
-    /** How many of each changed chat's most recent messages go into the digest. */
+    /** How soon a question the Manager can't answer reaches Tom: 0 = at once (a notification as the chat goes idle), otherwise batched into one digest every N minutes. */
+    sweepIntervalMinutes: z.number().int().nonnegative(),
+    /** How many of each idle chat's most recent messages the sweep reads. */
     sweepMessagesPerChat: z.number().int().positive(),
     /** The Manager's own bounded context window (spec/06 § Manager conversation). */
     managerContextWindow: z.number().int().positive(),
-    /** The sweep's decision-call prompt; "Reset to default" writes `DEFAULT_SWEEP_PROMPT` back. */
+    /** The Manager's standing instructions — written guidance Tom edits, which the sweep reads to decide what it may answer on his behalf; "Reset to default" writes `DEFAULT_SWEEP_PROMPT` back. */
     sweepPrompt: z.string().min(1),
     /** The model the sweep's one decision call runs on. */
     sweepModel: z.string().min(1),
@@ -2230,10 +2294,9 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
     operator: '',
     contact: '',
   },
-  sweepEnabled: true,
+  sweepEnabled: false,
   sweepIntervalMinutes: 30,
-  stalledThresholdMinutes: 15,
-  sweepMessagesPerChat: 3,
+  sweepMessagesPerChat: 1,
   managerContextWindow: 40,
   sweepPrompt: DEFAULT_SWEEP_PROMPT,
   // Mid-size by default (spec/06 § Settings).
@@ -2811,6 +2874,12 @@ export const RateLimitWindow = z
     status: z.enum(['allowed', 'allowed_warning', 'rejected']),
     utilization: z.number().min(0).max(1).optional(),
     resetsAt: z.number().optional(),
+    /**
+     * When the host estimates this window will run out at its current burn rate
+     * (ms-epoch). Absent when there is no burn to extrapolate or the window
+     * resets first.
+     */
+    runsOutAt: z.number().optional(),
     /**
      * Why this window is refusing, in Anthropic's own words, when it says.
      * `org_level_disabled_until` on the overage window means extra usage is
@@ -4041,7 +4110,9 @@ export const ManagerSweepCandidate = z
     chatId: z.string().min(1),
     hostId: z.string().min(1),
     folder: z.string().min(1),
-    edge: z.enum(['settled', 'stalled', 'permission', 'question', 'job-failed', 'task-ended']),
+    // The sweep has one reason to look at a chat: it went idle. Kept as a field
+    // so an older host still parses the candidate.
+    edge: z.literal('settled'),
     idleMinutes: z.number().nonnegative(),
   })
   .strict();
@@ -4079,10 +4150,10 @@ export type ManagerSweepCancelEvent = z.infer<typeof ManagerSweepCancelEvent>;
 export const ManagerSweepAction = z
   .object({
     chatId: z.string().min(1),
-    action: z.enum(['nudge', 'wake', 'flag', 'leave']),
+    action: z.enum(['answer', 'digest', 'leave']),
     /** Why the chat was a candidate. */
     edge: ManagerSweepCandidate.shape.edge.optional(),
-    /** What the sweep sent or wrote (nudge/wake/flag), or why it left the chat alone. */
+    /** What the sweep sent (answer), the open question it listed (digest), or why it left the chat alone. */
     detail: z.string().optional(),
   })
   .strict();
@@ -5137,6 +5208,12 @@ export const SurfaceInputEvent = z
      * not know the field reads `idleMs` alone.
      */
     away: z.enum(['locked', 'asleep']).optional(),
+    /**
+     * The host running on the same machine as this surface (the desktop app's
+     * local host). Lets the server tie `away: 'asleep'` to a host, so it can say
+     * "went to sleep" when that host drops. Absent when the machine has none.
+     */
+    machineHostId: z.string().min(1).optional(),
   })
   .strict();
 export type SurfaceInputEvent = z.infer<typeof SurfaceInputEvent>;
@@ -9040,6 +9117,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   ChatErrorEvent,
   HostOnlineEvent,
   HostOfflineEvent,
+  HostHealthEvent,
+  HostConditionEvent,
   HostUnauthenticatedEvent,
   HostInfoEvent,
   HostAccountEvent,
@@ -9346,6 +9425,8 @@ export const EVENT_SCHEMAS = {
   'chat.error': ChatErrorEvent,
   'host.online': HostOnlineEvent,
   'host.offline': HostOfflineEvent,
+  'host.health': HostHealthEvent,
+  'host.condition': HostConditionEvent,
   'host.unauthenticated': HostUnauthenticatedEvent,
   'host.host': HostInfoEvent,
   'host.account': HostAccountEvent,

@@ -1455,7 +1455,7 @@ export interface SweepRun {
   candidateCount: number;
   actions: {
     chatId: string;
-    action: 'nudge' | 'wake' | 'flag' | 'leave';
+    action: 'answer' | 'digest' | 'leave';
     edge?: string;
     detail?: string;
   }[];
