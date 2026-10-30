@@ -167,6 +167,22 @@ function HostListRow({
   );
 }
 
+type AutoUpdateOverride = { enabled: boolean; until?: number } | undefined;
+
+function autoUpdateChoice(o: AutoUpdateOverride): string {
+  if (!o) return 'default';
+  if (o.until !== undefined) return 'until';
+  return o.enabled ? 'on' : 'off';
+}
+
+function autoUpdateSummary(o: AutoUpdateOverride): string {
+  if (!o) return 'follows the shared setting';
+  if (o.until !== undefined) {
+    return `off until ${new Date(o.until).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`;
+  }
+  return o.enabled ? 'on for this machine' : 'off for this machine';
+}
+
 function HostDetail({ host }: { host: HostPresence }): JSX.Element {
   const pushError = useUiStore((s) => s.pushError);
   const navigate = useNavigate();
@@ -218,6 +234,23 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
         ? api.addAccount('claude-code', { token })
         : api.adoptAccount('claude-code', host.hostId),
     );
+  }
+
+  async function setAutoUpdate(choice: string): Promise<void> {
+    if (choice === 'until') return;
+    const override =
+      choice === 'on'
+        ? { enabled: true }
+        : choice === 'off'
+          ? { enabled: false }
+          : choice === '6h' || choice === '24h'
+            ? { enabled: false, until: Date.now() + (choice === '6h' ? 6 : 24) * 3_600_000 }
+            : null;
+    try {
+      await api.setHostAutoUpdate(host.hostId, override);
+    } catch (e) {
+      pushError(`auto-update change failed: ${(e as Error).message}`);
+    }
   }
 
   async function removeHost(): Promise<void> {
@@ -286,6 +319,30 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
               }
             />
             <SettingsVersionRow host={host} />
+            <Row
+              title="Auto-update"
+              sub={
+                <span data-testid={`host-${host.hostId}-auto-update-state`}>
+                  {autoUpdateSummary(report.autoUpdateOverride)}
+                </span>
+              }
+            >
+              <select
+                aria-label="Auto-update"
+                data-testid={`host-${host.hostId}-auto-update`}
+                value={autoUpdateChoice(report.autoUpdateOverride)}
+                onChange={(e) => void setAutoUpdate(e.target.value)}
+              >
+                <option value="default">Shared setting</option>
+                <option value="on">On</option>
+                <option value="off">Off</option>
+                <option value="6h">Off for 6 hours</option>
+                <option value="24h">Off for 24 hours</option>
+                {report.autoUpdateOverride?.until !== undefined ? (
+                  <option value="until">Off until set time</option>
+                ) : null}
+              </select>
+            </Row>
             {report.permissionOverrides > 0 ? (
               <Row
                 title="Permission mode"

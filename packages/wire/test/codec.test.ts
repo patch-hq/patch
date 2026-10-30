@@ -243,6 +243,11 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   },
   'host.rename': { type: 'host.rename', hostId: 'host-a', hostName: 'hetzner' },
   'host.set_manager': { type: 'host.set_manager', hostId: 'host-a' },
+  'host.set_auto_update': {
+    type: 'host.set_auto_update',
+    hostId: 'host-a',
+    override: { enabled: false, until: 1_700_000_000_000 },
+  },
   'host.removed': { type: 'host.removed', hostId: 'host-a' },
   'signin.requested': { type: 'signin.requested', id: 'r1', label: 'Chrome on Mac', expiresAt: 1 },
   'signin.resolved': { type: 'signin.resolved', id: 'r1' },

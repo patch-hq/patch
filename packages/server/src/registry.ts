@@ -49,6 +49,14 @@ const DaemonKeyRecord = z
      * which case the machine's own reported `hostName` stands.
      */
     hostName: z.string().min(1).optional(),
+    /**
+     * This machine's own auto-update override of the shared `autoUpdateHosts`
+     * (spec/02 § Installation). `until` (epoch ms) makes it lapse on its own.
+     */
+    autoUpdateOverride: z
+      .object({ enabled: z.boolean(), until: z.number().int().positive().optional() })
+      .strict()
+      .optional(),
   })
   .strict();
 export type DaemonKeyRecord = z.infer<typeof DaemonKeyRecord>;
@@ -360,6 +368,25 @@ export class Registry implements RevocationStoreInterface {
     const rec = this.state.daemonKeys[idx] as DaemonKeyRecord;
     this.state.daemonKeys[idx] = { ...rec, hostName: hostName.trim() };
     this.flush();
+  }
+
+  /** Set (or with null clear) a machine's auto-update override. Throws if unregistered. */
+  setAutoUpdateOverride(
+    hostId: string,
+    override: { enabled: boolean; until?: number } | null,
+  ): void {
+    const idx = this.state.daemonKeys.findIndex((d) => d.hostId === hostId);
+    if (idx < 0)
+      throw new Error(`Registry.setAutoUpdateOverride: no machine registered as ${hostId}`);
+    const { autoUpdateOverride: _old, ...rest } = this.state.daemonKeys[idx] as DaemonKeyRecord;
+    void _old;
+    this.state.daemonKeys[idx] = override ? { ...rest, autoUpdateOverride: override } : rest;
+    this.flush();
+  }
+
+  /** The machine's stored auto-update override (possibly lapsed), or undefined. */
+  autoUpdateOverride(hostId: string): { enabled: boolean; until?: number } | undefined {
+    return this.getDaemonKey(hostId)?.autoUpdateOverride;
   }
 
   /** The machine's user-editable label, or undefined when never renamed. */

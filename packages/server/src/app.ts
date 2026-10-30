@@ -14,7 +14,9 @@ import helmetPlugin from '@fastify/helmet';
 import { ulid } from 'ulid';
 import type { Logger } from 'pino';
 import {
+  activeAutoUpdateOverride,
   canonicalizeHostNames,
+  HostAutoUpdateOverride,
   DEFAULT_SHARED_SETTINGS,
   signInQuestion,
   type ChatInputEvent,
@@ -485,6 +487,12 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       if (manager !== null) {
         hostLink.sendTo(hostId, '_server', { type: 'host.set_manager', hostId: manager });
       }
+      // The machine's own auto-update override is server-owned; it is told as it attaches.
+      hostLink.sendTo(hostId, '_server', {
+        type: 'host.set_auto_update',
+        hostId,
+        override: activeAutoUpdateOverride(registry.autoUpdateOverride(hostId), Date.now()) ?? null,
+      });
     }
   });
   // A host asks at a tool boundary what is waiting.
@@ -1675,6 +1683,56 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       return { ok: true, hosts: wsHub.hosts() };
     });
   }
+
+  // A machine's auto-update override (spec/02 § Installation): `override` is
+  // `{enabled, until?}` or null to clear. Server-owned like the name.
+  app.post<{ Body: { hostId?: string; override?: unknown } }>(
+    '/api/hosts/auto-update',
+    async (req, reply) => {
+      const account = registry.getAccount();
+      const authHeader = req.headers.authorization;
+      if (!account || !authHeader || !authHeader.startsWith('Bearer ')) {
+        return reply.code(401).send({ error: 'unauthenticated' });
+      }
+      try {
+        const claims = await verifySurfaceCredential(authHeader.slice('Bearer '.length).trim(), {
+          userPublicKey: account.userPublicKey,
+        });
+        if (registry.isRevoked(claims.surface_id)) {
+          return reply.code(401).send({ error: 'unauthenticated' });
+        }
+      } catch {
+        return reply.code(401).send({ error: 'unauthenticated' });
+      }
+      const hostId = req.body?.hostId;
+      if (typeof hostId !== 'string' || hostId.length === 0) {
+        return reply
+          .code(400)
+          .send({ error: 'hostId_required', message: 'name the machine this applies to' });
+      }
+      if (!registry.registeredHostIds().includes(hostId)) {
+        return reply.code(404).send({
+          error: 'unknown_host',
+          message: `no machine registered with hostId: ${hostId}`,
+          hostId,
+          knownHosts: registry.registeredHostIds(),
+        });
+      }
+      const parsed = HostAutoUpdateOverride.nullable().safeParse(req.body?.override);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'invalid_override',
+          message: 'override must be null or {enabled: boolean, until?: epoch ms}',
+        });
+      }
+      try {
+        wsHub.setHostAutoUpdate(hostId, parsed.data, 'server');
+      } catch (err) {
+        return reply.code(400).send({ error: 'invalid_override', message: (err as Error).message });
+      }
+      return { ok: true, hosts: wsHub.hosts() };
+    },
+  );
 
   // Authed: what every layer of Patch is running, and where they disagree
   // (spec/11 § Version reporting). Backs the desktop/web "Version & updates"

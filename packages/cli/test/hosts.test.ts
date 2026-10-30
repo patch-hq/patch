@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Command } from 'commander';
-import { registerHostsCommands } from '../src/commands/hosts.js';
+import { parseUntil, policyOverride, registerHostsCommands } from '../src/commands/hosts.js';
 
 function build(): Command {
   const program = new Command();
@@ -30,6 +30,7 @@ test('every hosts subcommand the spec names is registered', () => {
     'get',
     'add',
     'rename',
+    'update-policy',
     'folders',
     'backends',
     'models',
@@ -123,4 +124,21 @@ test('pickHost: an empty --host names no machine, even with one host registered'
   assert.throws(() => pickHost(hosts, ''), /--host must not be empty/);
   assert.equal(pickHost(hosts, 'mac'), 'd-abc');
   assert.equal(pickHost(hosts, 'd-a'), 'd-abc');
+});
+
+test('update-policy parses on, off, until and default', () => {
+  const now = new Date('2026-10-29T23:30:00');
+  assert.deepEqual(policyOverride('on', undefined, now), { enabled: true });
+  assert.deepEqual(policyOverride('off', undefined, now), { enabled: false });
+  assert.equal(policyOverride('default', undefined, now), null);
+  assert.deepEqual(policyOverride('until', '02:00', now), {
+    enabled: false,
+    until: new Date('2026-10-30T02:00:00').getTime(),
+  });
+  assert.equal(parseUntil('6h', now), now.getTime() + 6 * 3_600_000);
+  assert.throws(() => policyOverride('until', undefined, now), /needs a time/);
+  assert.throws(() => policyOverride('off', '02:00', now), /takes no time/);
+  assert.throws(() => policyOverride('maybe', undefined, now), /unknown mode/);
+  assert.throws(() => parseUntil('soon', now), /not a time/);
+  assert.throws(() => parseUntil('2020-01-01T00:00:00Z', now), /past/);
 });
