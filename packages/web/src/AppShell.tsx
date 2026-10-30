@@ -564,7 +564,7 @@ export function AppShell(): JSX.Element {
           useLayoutStore.getState().openTab({ kind: 'page', page: 'host-files' });
           return;
         }
-        useLayoutStore.getState().openTab({ kind: 'page', page: 'files', chatId: activeChatId });
+        useLayoutStore.getState().toggleTab({ kind: 'page', page: 'files', chatId: activeChatId });
       },
       onSearchInFiles: () => {
         // ⌘⇧F — search in files (spec/14 § File browser). The chat's own tree

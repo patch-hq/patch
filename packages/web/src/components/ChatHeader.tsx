@@ -142,7 +142,7 @@ function GroupTools({ chatId, groupId }: { chatId: string; groupId: string }): J
             aria-label={it.label}
             aria-pressed={open}
             title={it.label}
-            onClick={() => toggleTab(it.descriptor, { placement: 'tab' })}
+            onClick={() => toggleTab(it.descriptor)}
           >
             {it.icon}
             <span className="group-tool-label">{it.label}</span>

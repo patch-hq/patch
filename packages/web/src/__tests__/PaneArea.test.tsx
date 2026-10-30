@@ -399,9 +399,8 @@ describe('PaneArea — groups (spec/14 § Groups)', () => {
     }
     fireEvent.click(screen.getByTestId('group-tool-terminal'));
     expect(screen.getByTestId('group-tool-terminal')).toHaveAttribute('aria-pressed', 'true');
-    expect(
-      screen.getByRole('tablist', { name: 'Tabs' }).querySelectorAll('[role="tab"]'),
-    ).toHaveLength(2);
+    // The terminal opens in its own pane along the bottom, an ordinary tab row.
+    expect(screen.getAllByRole('tablist', { name: 'Tabs' })).toHaveLength(2);
     fireEvent.click(screen.getByTestId('group-tool-terminal'));
     expect(screen.getByTestId('group-tool-terminal')).toHaveAttribute('aria-pressed', 'false');
   });
