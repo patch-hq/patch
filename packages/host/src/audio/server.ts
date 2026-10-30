@@ -45,12 +45,19 @@ import {
   openaiRealtimeModelFor,
   type OpenAIWsCtor,
 } from './openai-realtime.js';
+import {
+  ElevenLabsAgentSession,
+  elevenLabsAgentLlmFor,
+  type ElevenLabsWsCtor,
+  type ElevenLabsFetch,
+} from './elevenlabs-agent.js';
 import type { VoiceSessionLike, VoiceTimeline } from './voice-session-like.js';
 import type { EngineCosting } from './voiceCost.js';
 import { verifyVoiceToken, VoiceTokenError, type VoiceTokenClaims } from './token-verifier.js';
 import { DEVICE_CONTROL_PATH } from '../devices/control-ws.js';
 import { readKey, type KeySource } from './keySource.js';
 import { DeepgramDictationSession } from './deepgram-dictation.js';
+import { ElevenLabsDictationSession } from './elevenlabs-dictation.js';
 
 /** Spoken once when a local call opens, so the user is never left in silence. */
 const CALL_GREETING = 'Connected.';
@@ -164,9 +171,27 @@ export interface AudioServerOptions {
   /** Test seam: the WebSocket constructor and URL a Deepgram dictation dials. */
   deepgramWsCtor?: typeof import('ws').default;
   deepgramWsUrl?: string;
+  /** ELEVEN_LABS_API_KEY, for dictation on `elevenlabs` (elevenlabs-dictation.ts). */
+  elevenlabsApiKey?: KeySource;
+  /** Test seam: the WebSocket constructor and URL an ElevenLabs dictation dials. */
+  elevenlabsWsCtor?: typeof import('ws').default;
+  elevenlabsWsUrl?: string;
   /** Per-layer overrides of openai-realtime.ts's `DEFAULT_OPENAI_REALTIME_MODELS`. */
   openaiRealtimeModelLight?: string;
   openaiRealtimeModelHeavy?: string;
+  /**
+   * ELEVEN_LABS_API_KEY. Required to construct an `ElevenLabsAgentSession` —
+   * absent on a surface configured for `backend: 'elevenlabs'` rejects the
+   * connection with `audio.error {code: 'voice_key_missing'}` (NO SILENT FALLBACK).
+   */
+  elevenLabsApiKey?: KeySource;
+  /** Per-layer overrides of elevenlabs-agent.ts's `DEFAULT_ELEVENLABS_AGENT_LLMS`. */
+  elevenLabsAgentLlmLight?: string;
+  elevenLabsAgentLlmHeavy?: string;
+  /** Test seams: the WebSocket constructor, REST fetch and API base an ElevenLabs session uses. */
+  elevenLabsWsCtor?: ElevenLabsWsCtor;
+  elevenLabsFetch?: ElevenLabsFetch;
+  elevenLabsApiBase?: string;
   /**
    * spec/07 § Keeping voice and text as one conversation — the one-time
    * context snapshot a native session sends Gemini Live before the mic opens.
@@ -781,6 +806,32 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             ...(opts.openaiWsCtor ? { wsCtor: opts.openaiWsCtor } : {}),
             ...(opts.openaiWsUrl ? { wsUrl: opts.openaiWsUrl } : {}),
           });
+        } else if (voiceSurface !== 'dictation' && cell.backend === 'elevenlabs') {
+          const elevenKey = readKey(opts.elevenLabsApiKey);
+          if (elevenKey === undefined) {
+            rejectConn(ws, 'voice_key_missing', voiceKeyMissingMessage(voiceSurface, 'elevenlabs'));
+            return;
+          }
+          if (!opts.makeTimeline) throw new Error('audio server: hosted voice needs makeTimeline');
+          session = new ElevenLabsAgentSession(sessionInit, {
+            timeline: opts.makeTimeline(sessionInit),
+            logger: sessionLog,
+            sendAudio: sendAudioFn,
+            sendBinary: sendBinaryFn,
+            submitUserTurn: opts.submitUserTurn,
+            apiKey: elevenKey,
+            ...(cell.handoff !== undefined ? { handoff: cell.handoff } : {}),
+            llm: elevenLabsAgentLlmFor(cell.layer ?? 'light', {
+              light: opts.elevenLabsAgentLlmLight,
+              heavy: opts.elevenLabsAgentLlmHeavy,
+            }),
+            onFatal,
+            ...(opts.getChatContext ? { getChatContext: opts.getChatContext } : {}),
+            ...(opts.lookBack ? { lookBack: opts.lookBack } : {}),
+            ...(opts.elevenLabsWsCtor ? { wsCtor: opts.elevenLabsWsCtor } : {}),
+            ...(opts.elevenLabsFetch ? { fetchImpl: opts.elevenLabsFetch } : {}),
+            ...(opts.elevenLabsApiBase ? { apiBase: opts.elevenLabsApiBase } : {}),
+          });
         } else if (dictationEngine === 'deepgram') {
           // Streaming dictation (spec/07 § Dictation engines): the live words
           // are the transcript, finished by `audio.dictation_finish`.
@@ -795,6 +846,18 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             ...(voiceConfig.dictation.tidy ? { tidyWith: opts.whisper } : {}),
             ...(opts.deepgramWsCtor ? { wsCtor: opts.deepgramWsCtor } : {}),
             ...(opts.deepgramWsUrl ? { wsUrl: opts.deepgramWsUrl } : {}),
+          });
+        } else if (dictationEngine === 'elevenlabs') {
+          if (readKey(opts.elevenlabsApiKey) === undefined) {
+            rejectConn(ws, 'voice_key_missing', voiceKeyMissingMessage('dictation', 'elevenlabs'));
+            return;
+          }
+          session = new ElevenLabsDictationSession(sessionInit, {
+            logger: sessionLog,
+            apiKey: opts.elevenlabsApiKey,
+            sendAudio: sendAudioFn,
+            ...(opts.elevenlabsWsCtor ? { wsCtor: opts.elevenlabsWsCtor } : {}),
+            ...(opts.elevenlabsWsUrl ? { wsUrl: opts.elevenlabsWsUrl } : {}),
           });
         } else {
           // The self-hosted pipeline — and a dictation on Whisper, or a phone
@@ -953,7 +1016,12 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             );
             return;
           }
-          if (!(session instanceof DeepgramDictationSession)) {
+          if (
+            !(
+              session instanceof DeepgramDictationSession ||
+              session instanceof ElevenLabsDictationSession
+            )
+          ) {
             send(ws, {
               type: 'audio.error',
               code: 'invalid_frame',

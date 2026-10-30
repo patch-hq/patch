@@ -8,6 +8,7 @@ import {
   callSummaryLine,
   costCall,
   engineCostUsd,
+  elevenLabsCostUsd,
   formatUsd,
   ZERO_TOKENS,
   type EngineCosting,
@@ -127,5 +128,33 @@ describe('formatUsd — amounts too small for plain digits', () => {
     expect(formatUsd(0.05)).toBe('$0.05');
     expect(formatUsd(1.234)).toBe('$1.23');
     expect(formatUsd(0)).toBe('$0');
+  });
+});
+
+describe('ElevenLabs Agents', () => {
+  it('prices a call by the minute: platform rate plus the LLM rate', () => {
+    expect(elevenLabsCostUsd('claude-haiku-4-5', 600)).toBeCloseTo(10 * (0.08 + 0.0082), 6);
+  });
+
+  it('an LLM with no published rate is price unknown, never guessed', () => {
+    expect(elevenLabsCostUsd('claude-sonnet-4-5', 600)).toBeNull();
+  });
+
+  it('is costed from the call length, named, and kept in the ledger', () => {
+    const engine: EngineCosting = {
+      backend: 'elevenlabs',
+      model: 'claude-haiku-4-5',
+      tokens: ZERO_TOKENS,
+      stt: null,
+      agentSeconds: 52,
+    };
+    const c = costCall({ ...base, engine, handoffs: 1 });
+    expect(c.engineUsd).toBeCloseTo((52 / 60) * 0.0882, 6);
+    expect(c.agentSeconds).toBe(52);
+    expect(callSummaryLine(c)).toContain('ElevenLabs Haiku');
+    const dir = mkdtempSync(join(tmpdir(), 'ledger-'));
+    const ledger = createVoiceLedger(join(dir, 'u.jsonl'));
+    ledger.record(c);
+    expect(createVoiceLedger(join(dir, 'u.jsonl')).totals(base.endedAt).allCalls).toBe(1);
   });
 });

@@ -525,3 +525,15 @@ describe('a key sidelined on a guess at boot is not held until the stated reset'
     expect(resumeParked).toHaveBeenCalled();
   });
 });
+
+describe('a reset read off a failed chat after a restart names no account', () => {
+  it('arms for the instant without sidelining anyone, then resumes at it', () => {
+    const { clock, rotation, credit, resumeParked } = harness();
+    credit.arm(clock.t + 4 * HOUR);
+    expect(credit.armed()).toBe(true);
+    expect(rotation.snapshot()).toEqual([]);
+    clock.t += 4 * HOUR + 10_000;
+    credit.limitReset();
+    expect(resumeParked).toHaveBeenCalled();
+  });
+});

@@ -12,6 +12,8 @@
 
 import {
   createUtteranceSegmenter,
+  isPhantomTranscript,
+  speechMs,
   type UtteranceSegmenterOptions,
 } from '@patch/wire/utterance-segmenter';
 import { startRecording, type VoiceRecording } from './voiceRecorder.js';
@@ -131,7 +133,9 @@ export function startDictationMode(
       try {
         const { transcript } = await deps.transcribe(pcm16ToWavBlob(pcm));
         const text = transcript.trim();
-        if (!stopped && text) cb.onText(text);
+        if (!stopped && text && !isPhantomTranscript(text, speechMs(pcm, SAMPLE_RATE))) {
+          cb.onText(text);
+        }
       } catch (e) {
         if (!stopped) cb.onError(`voice transcription failed: ${(e as Error).message}`);
       } finally {

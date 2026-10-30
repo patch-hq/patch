@@ -68,6 +68,26 @@ const TOKEN_PRICES: Record<string, TokenPrices> = {
   },
 };
 
+/**
+ * ElevenLabs Agents bill by call minute, not by token: $0.08 a minute on every
+ * plan (elevenlabs.io/pricing/agents, checked 2026-10-29; $0.16 in burst), plus
+ * the front LLM's own per-minute charge, which is taken from credits. An LLM
+ * that is not in this table makes the call `null` — price unknown.
+ * Claude Haiku 4.5's figure is the one third-party-quoted rate; Sonnet's is not
+ * published as a per-minute number, so it stays unknown until it is.
+ */
+export const ELEVENLABS_AGENT_USD_PER_MINUTE = 0.08;
+const ELEVENLABS_LLM_USD_PER_MINUTE: Record<string, number> = {
+  'claude-haiku-4-5': 0.0082,
+};
+
+/** Dollar cost of `seconds` of an ElevenLabs agent call on `llm`, or `null` when the LLM's rate is unknown. */
+export function elevenLabsCostUsd(llm: string, seconds: number): number | null {
+  const llmRate = ELEVENLABS_LLM_USD_PER_MINUTE[llm];
+  if (llmRate === undefined) return null;
+  return (seconds / 60) * (ELEVENLABS_AGENT_USD_PER_MINUTE + llmRate);
+}
+
 /** Groq `whisper-large-v3-turbo`: $0.04 per hour, each request billed for at least 10s. */
 export const GROQ_WHISPER_USD_PER_SECOND = 0.04 / 3600;
 export const GROQ_MIN_BILLED_SECONDS = 10;
@@ -95,16 +115,24 @@ export interface SttUsage {
   billedSeconds: number;
 }
 
-export function sttCostUsd(stt: SttUsage): number {
+/**
+ * Dollar cost of `stt` on `model`. Only Groq's price is in the table: ElevenLabs
+ * Scribe is billed in plan credits whose dollar rate is not published per hour,
+ * so its usage is recorded and its cost is `null` (price unknown), never guessed.
+ */
+export function sttCostUsd(stt: SttUsage, model: string): number | null {
+  if (model === 'scribe_v2') return null;
   return stt.billedSeconds * GROQ_WHISPER_USD_PER_SECOND;
 }
 
 /** What the session's engine reports on close. */
 export interface EngineCosting {
-  backend: 'local' | 'gemini' | 'openai';
+  backend: 'local' | 'gemini' | 'openai' | 'elevenlabs';
   model: string;
   tokens: EngineTokens | null;
   stt: SttUsage | null;
+  /** ElevenLabs only: seconds the agent conversation was open (what it bills by). */
+  agentSeconds?: number;
 }
 
 /** One costed session, as stored on disk and summarised into the chat. */
@@ -114,10 +142,11 @@ export interface CallCosting {
   surfaceKind: string;
   startedAt: number;
   endedAt: number;
-  backend: 'local' | 'gemini' | 'openai';
+  backend: 'local' | 'gemini' | 'openai' | 'elevenlabs';
   model: string;
   tokens: EngineTokens | null;
   stt: SttUsage | null;
+  agentSeconds?: number;
   /** `null` = the engine's price is unknown. */
   engineUsd: number | null;
   /** Requests the fast voice handed to the chat's agent; absent on records from before this was counted. */
@@ -136,7 +165,9 @@ export function costCall(args: {
   const { engine } = args;
   let engineUsd: number | null;
   if (engine.backend === 'local') {
-    engineUsd = engine.stt ? sttCostUsd(engine.stt) : 0;
+    engineUsd = engine.stt ? sttCostUsd(engine.stt, engine.model) : 0;
+  } else if (engine.backend === 'elevenlabs') {
+    engineUsd = elevenLabsCostUsd(engine.model, engine.agentSeconds ?? 0);
   } else {
     engineUsd = engine.tokens ? engineCostUsd(engine.model, engine.tokens) : 0;
   }
@@ -150,20 +181,24 @@ export function costCall(args: {
     model: engine.model,
     tokens: engine.tokens,
     stt: engine.stt,
+    ...(engine.agentSeconds !== undefined ? { agentSeconds: engine.agentSeconds } : {}),
     engineUsd,
     handoffs: args.handoffs,
   };
 }
 
 const ENGINE_NAMES: Record<string, string> = {
+  scribe_v2: 'ElevenLabs Scribe',
   'gemini-2.5-flash-native-audio-preview-12-2025': 'Gemini Flash',
   'gemini-3.8-live-extended-thinking': 'Gemini Thinking',
   'gpt-realtime-2.1': 'OpenAI',
   'gpt-realtime-2.1-mini': 'OpenAI mini',
+  'claude-haiku-4-5': 'ElevenLabs Haiku',
+  'claude-sonnet-4-5': 'ElevenLabs Sonnet',
 };
 
 function engineName(c: CallCosting): string {
-  if (c.backend === 'local') return 'Local';
+  if (c.backend === 'local') return c.model === 'scribe_v2' ? 'ElevenLabs Scribe' : 'Local';
   return ENGINE_NAMES[modelKey(c.model)] ?? modelKey(c.model);
 }
 
@@ -206,4 +241,37 @@ export function callSummaryLine(c: CallCosting): string {
 /** Total spend of one costed session; an unknown engine price counts as nothing. */
 export function callTotalUsd(c: CallCosting): number {
   return c.engineUsd ?? 0;
+}
+
+/**
+ * Text-to-speech on ElevenLabs. The account is on the Starter plan, $5 for
+ * 30,000 credits a month. Flash and Turbo models bill half a credit a
+ * character, the others one. A model not in the table is `null` — price
+ * unknown — never guessed (NO FALLBACK).
+ */
+export const ELEVENLABS_USD_PER_CREDIT = 5 / 30_000;
+const ELEVENLABS_CREDITS_PER_CHAR: Record<string, number> = {
+  eleven_flash_v2_5: 0.5,
+  eleven_flash_v2: 0.5,
+  eleven_turbo_v2_5: 0.5,
+  eleven_turbo_v2: 0.5,
+  eleven_multilingual_v2: 1,
+  eleven_v3: 1,
+};
+
+/** One synthesis request to a paid speech provider, as the ledger keeps it. */
+export interface SpeechUsage {
+  kind: 'tts';
+  provider: 'elevenlabs';
+  model: string;
+  characters: number;
+  at: number;
+  /** `null` = the model's price is unknown. */
+  usd: number | null;
+}
+
+export function speechCostUsd(model: string, characters: number): number | null {
+  const perChar = ELEVENLABS_CREDITS_PER_CHAR[model];
+  if (perChar === undefined) return null;
+  return characters * perChar * ELEVENLABS_USD_PER_CREDIT;
 }

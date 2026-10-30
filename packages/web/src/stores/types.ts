@@ -374,9 +374,14 @@ export function deriveBadge(row: ChatRow): DisplayBadge {
   // failure is usually waiting on something else; above `working` because a
   // chat cannot be both, and if it somehow claims to be, the failure is the more
   // important fact.
-  if (row.activity === 'errored' || row.status === 'errored') return 'errored';
-  if (row.activity === 'running' || (row.openToolCalls ?? 0) > 0 || row.optimisticSend)
-    return 'working';
+  //
+  // `status: 'errored'` is the lifetime flag, and the host only drops it when a
+  // turn COMPLETES. A turn that is running now has not failed yet, so it must
+  // not read as failed while the transcript shows it in flight; if that turn
+  // dies the activity goes `errored` and the failure comes back.
+  const running = row.activity === 'running' || (row.openToolCalls ?? 0) > 0 || row.optimisticSend;
+  if (row.activity === 'errored' || (row.status === 'errored' && !running)) return 'errored';
+  if (running) return 'working';
   // Unread beats a still-running background job or self-wake loop (User: "unread
   // beats background always"). The chat HAS something new to look at — that is
   // the strongest true claim available, and it does not stop being true just

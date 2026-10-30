@@ -727,6 +727,7 @@ Settings → Providers and used by every host.
   with none in its environment (`required`, naming the host): that host
   refuses to start without it, and would not come back up to be given
   another. Replace it instead.
+- Patch never asks a person to set an environment variable, and an agent relaying a refusal never does either. Every message that reaches a surface names the key ("no Deepgram key is set") and Settings → Providers as where to add it, never the variable's name; Settings shows no variable names. The environment remains a source a host can read (above), but only for an operator who chose it. Deepgram, for dictation on the `deepgram` engine, is set there like every other key. `test/no-env-var-prompts.test.ts` fails on any credential variable name in a message.
 - A missing key never stops a host, except for that Groq one. Voice refuses
   the surface's sessions (`voice_key_missing`), and a transcription on a
   missing Groq key fails naming where to set it.

@@ -279,11 +279,11 @@ describe('Voice (per-surface config matrix)', () => {
     });
     const r = renderRN(<VoicePage />);
     expect(textOf(findHost(r.root, byTestId('dictation-phone-keys')))).toBe(
-      'Not configured on hetzner: DEEPGRAM_API_KEY is missing. Sessions there are refused.',
+      'Not configured on hetzner: no Deepgram key is set. Sessions there are refused.',
     );
     expect(queryHost(r.root, byTestId('dictation-computer-keys'))).toBeNull();
     expect(textOf(findHost(r.root, byTestId('voice-device-keys')))).toBe(
-      'Not configured on laptop, hetzner: OPENAI_REALTIME_API_KEY is missing. Sessions there are refused.',
+      'Not configured on laptop, hetzner: no OpenAI key is set. Sessions there are refused.',
     );
     expect(queryHost(r.root, byTestId('voice-call-keys'))).toBeNull();
     expect(queryHost(r.root, byTestId('voice-handsFree-keys'))).toBeNull();

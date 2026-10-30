@@ -63,10 +63,12 @@ export function statedLimitOf(
   _message: string,
 ): StatedLimit | undefined {
   if (limit !== undefined) {
+    // An allowed block always names its window and when it renews; that is the
+    // account being fine, not a limit.
+    const allowed = limit.status === 'allowed' || limit.status === 'allowed_warning';
     const stated =
       limit.status === 'rejected' ||
-      limit.rateLimitType !== undefined ||
-      limit.resetsAt !== undefined ||
+      (!allowed && (limit.rateLimitType !== undefined || limit.resetsAt !== undefined)) ||
       (limit.kind !== undefined && LIMIT_KINDS.has(limit.kind));
     return stated ? { facts: limit, from: 'structured' } : undefined;
   }

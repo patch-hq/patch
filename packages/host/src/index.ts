@@ -244,11 +244,13 @@ import {
   type WhisperBackend,
 } from './audio/whisper.js';
 import { createKokoro, validateKokoroModel } from './audio/kokoro.js';
+import { createElevenLabs, createRoutedTts, type ElevenLabsVoice } from './audio/elevenlabs.js';
 import {
   createDictationTranscribers,
   pickDictationTranscriber,
   type DictationTranscribers,
 } from './audio/hosted-stt.js';
+import { ElevenLabsScribeBackend } from './audio/elevenlabs-stt.js';
 import { createSileroVadFactory, validateVadModel, MockVad, type Vad } from './audio/vad.js';
 import { DeviceRegistry } from './devices/registry.js';
 import { PresenceRegistry } from './devices/presence.js';
@@ -429,14 +431,26 @@ async function startHost(
     env: {
       gemini: config.audio.geminiApiKey,
       openai: config.audio.openaiApiKey,
+      elevenlabs: config.audio.elevenLabsApiKey,
       groq: config.audio.groqApiKey,
       deepgram: config.audio.deepgramApiKey,
     },
     ...(config.audio.whisperBackend === 'groq'
       ? { requiredToStart: { groq: 'This host transcribes with Groq (WHISPER_BACKEND=groq)' } }
       : {}),
+    ...(config.audio.whisperBackend === 'elevenlabs'
+      ? {
+          requiredToStart: {
+            elevenlabs: 'This host transcribes with ElevenLabs (WHISPER_BACKEND=elevenlabs)',
+          },
+        }
+      : {}),
   });
-  validateWhisperCredentials({ ...config.audio, groqApiKey: providerKeys.get('groq') });
+  validateWhisperCredentials({
+    ...config.audio,
+    groqApiKey: providerKeys.get('groq'),
+    elevenlabsApiKey: providerKeys.get('elevenlabs'),
+  });
   // spec/07 § Python sidecar lifecycle: KOKORO_MODEL_PATH must be validated at
   // startup — a missing model file aborts boot with a clear error rather than
   // silently 500ing the first TTS turn. Same fail-loud contract as Whisper.
@@ -695,6 +709,13 @@ async function startHost(
   let runsManager = persistedHostState.runsManager ?? false;
   /** Currently selected Kokoro TTS voice (`host.settings` → `kokoroVoice`). */
   let kokoroVoice: string | undefined = persistedHostState.kokoroVoice;
+  /** Which engine speaks (`host.settings` → `ttsBackend`); absent is Kokoro. */
+  let ttsBackend: 'kokoro' | 'elevenlabs' = persistedHostState.ttsBackend ?? 'kokoro';
+  /** The ElevenLabs voice id in use (`host.settings` → `elevenLabsVoice`). */
+  let elevenLabsVoice: string | undefined = persistedHostState.elevenLabsVoice;
+  /** The account's ElevenLabs voices, or why they could not be listed. */
+  let elevenLabsVoices: ElevenLabsVoice[] | undefined;
+  let elevenLabsVoicesError: string | undefined;
   /**
    * Account's per-surface voice config (`host.settings` → `voiceConfig`,
    * spec/07 § Voice — a config matrix). Independently selects the STT/TTS/
@@ -713,6 +734,7 @@ async function startHost(
   const voiceKeys = (): VoiceKeys => ({
     gemini: providerKeys.has('gemini'),
     openai: providerKeys.has('openai'),
+    elevenlabs: providerKeys.has('elevenlabs'),
     deepgram: providerKeys.has('deepgram'),
   });
   logVoiceKeysMissing(logger, voiceConfig, voiceKeys());
@@ -1102,6 +1124,10 @@ async function startHost(
       ],
       components: components.describe(),
       ...(kokoroVoice !== undefined ? { kokoroVoice } : {}),
+      ttsBackend,
+      ...(elevenLabsVoice !== undefined ? { elevenLabsVoice } : {}),
+      ...(elevenLabsVoices !== undefined ? { elevenLabsVoices } : {}),
+      ...(elevenLabsVoicesError !== undefined ? { elevenLabsVoicesError } : {}),
       voiceKeys: voiceKeys(),
       voiceUsage: voiceLedger.totals(Date.now()),
       providerKeys: providerKeys.describe(),
@@ -1195,10 +1221,46 @@ async function startHost(
   // A provider key set or revoked from Settings: every surface's Keys block and
   // Settings → Voice's "not configured" line follow from the fresh report, and
   // the log says which configured surfaces are now without a key.
+  // ElevenLabs speech out. One backend serves every place Patch speaks (see
+  // `tts` below); the host also lists the account's voices for Settings, and says
+  // so loudly when it cannot.
+  const elevenlabs = createElevenLabs({
+    apiKey: () => providerKeys.get('elevenlabs'),
+    logger: logger.child({ component: 'elevenlabs' }),
+    onUsage: (usage) => {
+      voiceLedger.recordSpeech(usage);
+      publishHost();
+    },
+  });
+  const refreshElevenLabsVoices = (): void => {
+    if (!providerKeys.has('elevenlabs')) {
+      elevenLabsVoices = undefined;
+      elevenLabsVoicesError = undefined;
+      publishHost();
+      return;
+    }
+    void elevenlabs
+      .listVoices()
+      .then((voices) => {
+        elevenLabsVoices = voices;
+        elevenLabsVoicesError = undefined;
+      })
+      .catch((err: Error) => {
+        elevenLabsVoices = undefined;
+        elevenLabsVoicesError = err.message;
+        logger.error(
+          { component: 'elevenlabs', err: err.message },
+          'elevenlabs: voice list failed',
+        );
+      })
+      .finally(publishHost);
+  };
   providerKeys.onChange(() => {
     logVoiceKeysMissing(logger, voiceConfig, voiceKeys());
     publishHost();
+    refreshElevenLabsVoices();
   });
+  if (providerKeys.has('elevenlabs')) refreshElevenLabsVoices();
 
   /**
    * Optional components (spec/02 § Optional components) — real downloads onto
@@ -1665,6 +1727,17 @@ async function startHost(
       hostStateStore.update({ kokoroVoice });
       logger.info({ kokoroVoice }, 'kokoro voice changed');
     }
+    if (shared.ttsBackend !== undefined && shared.ttsBackend !== ttsBackend) {
+      ttsBackend = shared.ttsBackend;
+      hostStateStore.update({ ttsBackend });
+      logger.info({ ttsBackend }, 'speech engine changed');
+      if (ttsBackend === 'elevenlabs') refreshElevenLabsVoices();
+    }
+    if (shared.elevenLabsVoice !== undefined && shared.elevenLabsVoice !== elevenLabsVoice) {
+      elevenLabsVoice = shared.elevenLabsVoice;
+      hostStateStore.update({ elevenLabsVoice });
+      logger.info({ elevenLabsVoice }, 'elevenlabs voice changed');
+    }
     if (shared.managerContextWindow !== managerContextWindow) {
       managerContextWindow = shared.managerContextWindow;
       daemon.setManagerContextWindow(managerContextWindow);
@@ -1855,6 +1928,8 @@ async function startHost(
               : {}),
             ...(state.voiceConfig ? { voiceConfig: state.voiceConfig } : {}),
             ...(state.kokoroVoice ? { kokoroVoice: state.kokoroVoice } : {}),
+            ...(state.ttsBackend ? { ttsBackend: state.ttsBackend } : {}),
+            ...(state.elevenLabsVoice ? { elevenLabsVoice: state.elevenLabsVoice } : {}),
             chatNameInterval,
             titleGenerationEnabled,
             statusGenerationEnabled,
@@ -4513,7 +4588,6 @@ async function startHost(
   const armCreditRetryFromDisk = (): void => {
     const now = Date.now();
     let soonest: number | undefined;
-    let failedAt = now;
     for (const state of daemon.chatState.list()) {
       // Off META, and with no filter on the lifecycle status. This read used to
       // be `state.status === 'errored'` and then `state.lastError`, and neither
@@ -4529,7 +4603,6 @@ async function startHost(
       if (at === undefined || at <= now) continue;
       if (soonest === undefined || at < soonest) {
         soonest = at;
-        failedAt = last.at;
       }
     }
     if (soonest === undefined) {
@@ -4539,29 +4612,12 @@ async function startHost(
       if (daemon.hasOrphanedCreditParks()) void accountUsage?.refreshAll(true);
       return;
     }
-    // WHICH key that chat spent is not on disk and is not worth inventing: a
-    // chat has no account, and the turn that failed is long gone. What matters
-    // is the instant to retry at, so the first stored key carries the record —
-    // it is the one every turn resolves to first, so it is the one that has to
-    // be seen as spent for the others to be tried at all.
-    const first = readPatchStore(oauthOpts)?.accounts[0]?.id;
-    if (first === undefined) return;
-    //
-    // It is a GUESS, so it is stamped with the failure's own time, not the
-    // boot's: a usage probe a refresh cycle after that failure is then believed
-    // and clears it. Stamped "now" it would hold the priority-first key out for
-    // the whole reset while the key that really ran out was another one — every
-    // key sidelined, the turn stopped, nothing to switch to.
-    accountRotation.markExhausted(
-      first,
-      'restored from a failed chat after restart',
-      soonest,
-      failedAt,
-    );
-    // And ask now, so the guess is checked at boot rather than 10 minutes on.
+    // WHICH key that chat spent is not on disk, so none is sidelined: a guess
+    // blamed the wrong account for the whole host. The reset is armed without
+    // an account, and the probe below says what each account really has.
     void accountUsage?.refreshAll(true);
     logger.info({ at: soonest }, 'credit retry: re-armed after restart from a failed chat on disk');
-    creditResume.arm();
+    creditResume.arm(soonest);
   };
 
   // Boot: an event-driven retry needs its event armed, and a restart forgot it.
@@ -4808,32 +4864,41 @@ async function startHost(
   // 8. Voice infrastructure (group 13): audio WSS at :3003/audio/<sessionId>.
   //    (The server-link dial happens earlier — right after the host graph is
   //    wired — so surfaces connect promptly rather than waiting on this stack.)
-  whisper = createWhisper({
-    backend: config.audio.whisperBackend,
-    logger: logger.child({ component: 'whisper' }),
-    groqApiKey: () => providerKeys.get('groq'),
-    ...(config.audio.whisperLocalSidecarUrl !== undefined
-      ? { localSidecarUrl: config.audio.whisperLocalSidecarUrl }
-      : {}),
-    ...(config.audio.whisperModelPath !== undefined
-      ? { localModelPath: config.audio.whisperModelPath }
-      : {}),
-    // Spawn the faster-whisper sidecar from its package dir when local mode is
-    // self-hosted (no external URL). WHISPER_SIDECAR_CWD overrides for docker.
-    ...(config.audio.whisperBackend === 'local' && config.audio.whisperLocalSidecarUrl === undefined
-      ? {
-          localSidecarCwd:
-            process.env['WHISPER_SIDECAR_CWD'] ??
-            resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'whisper-sidecar'),
-        }
-      : {}),
-  });
+  const whisperLog = logger.child({ component: 'whisper' });
+  if (config.audio.whisperBackend === 'elevenlabs') {
+    whisper = new ElevenLabsScribeBackend({
+      logger: whisperLog,
+      apiKey: () => providerKeys.get('elevenlabs'),
+    });
+  } else
+    whisper = createWhisper({
+      backend: config.audio.whisperBackend,
+      logger: logger.child({ component: 'whisper' }),
+      groqApiKey: () => providerKeys.get('groq'),
+      ...(config.audio.whisperLocalSidecarUrl !== undefined
+        ? { localSidecarUrl: config.audio.whisperLocalSidecarUrl }
+        : {}),
+      ...(config.audio.whisperModelPath !== undefined
+        ? { localModelPath: config.audio.whisperModelPath }
+        : {}),
+      // Spawn the faster-whisper sidecar from its package dir when local mode is
+      // self-hosted (no external URL). WHISPER_SIDECAR_CWD overrides for docker.
+      ...(config.audio.whisperBackend === 'local' &&
+      config.audio.whisperLocalSidecarUrl === undefined
+        ? {
+            localSidecarCwd:
+              process.env['WHISPER_SIDECAR_CWD'] ??
+              resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'whisper-sidecar'),
+          }
+        : {}),
+    });
   // Shared settings may have landed before the backend existed.
   if (meetingTranscriptionModel !== '') whisper.useModel?.(meetingTranscriptionModel);
   dictationTranscribers = createDictationTranscribers({
     logger: logger.child({ component: 'hosted-stt' }),
     local: whisper,
     deepgramApiKey: () => providerKeys.get('deepgram'),
+    elevenlabsApiKey: () => providerKeys.get('elevenlabs'),
   });
   // spec/02 § Optional components: voice is a component the user installs on a
   // machine, and installing it is what turns it ON. A machine that has installed
@@ -4979,7 +5044,9 @@ async function startHost(
     logger: logger.child({ component: 'audio' }),
     internalToken: config.internalToken,
     whisper,
-    kokoro,
+    // Every place that speaks goes through this: the voice session (calls, house
+    // speakers, announcements) takes whichever engine Settings chose.
+    kokoro: createRoutedTts({ kokoro, elevenlabs, choice: () => ttsBackend }),
     makeVad,
     maxConcurrentSessions: config.audio.maxConcurrentSessions,
     // E1-d3: a voice session must bind to a chat that exists. Check live
@@ -5078,16 +5145,25 @@ async function startHost(
       daemon.submitPermissionResponse({ requestId, decision: approve ? 'approve' : 'deny' }),
     // Voice-in-settings: read the live value so a settings change takes effect
     // on the next utterance without restarting an open session.
-    getKokoroVoice: () => kokoroVoice,
+    // The voice for whichever engine is chosen: read per utterance.
+    getKokoroVoice: () => (ttsBackend === 'elevenlabs' ? elevenLabsVoice : kokoroVoice),
     // spec/07 § Voice — live read, same pattern as getKokoroVoice above.
     getVoiceConfig: () => voiceConfig,
     geminiApiKey: () => providerKeys.get('gemini'),
     deepgramApiKey: () => providerKeys.get('deepgram'),
+    elevenlabsApiKey: () => providerKeys.get('elevenlabs'),
     ...(config.audio.geminiLiveModel ? { geminiLiveModel: config.audio.geminiLiveModel } : {}),
     ...(config.audio.geminiLiveModelHeavy
       ? { geminiLiveModelHeavy: config.audio.geminiLiveModelHeavy }
       : {}),
     openaiApiKey: () => providerKeys.get('openai'),
+    elevenLabsApiKey: () => providerKeys.get('elevenlabs'),
+    ...(config.audio.elevenLabsAgentLlmLight
+      ? { elevenLabsAgentLlmLight: config.audio.elevenLabsAgentLlmLight }
+      : {}),
+    ...(config.audio.elevenLabsAgentLlmHeavy
+      ? { elevenLabsAgentLlmHeavy: config.audio.elevenLabsAgentLlmHeavy }
+      : {}),
     ...(config.audio.openaiRealtimeModelLight
       ? { openaiRealtimeModelLight: config.audio.openaiRealtimeModelLight }
       : {}),
@@ -5141,6 +5217,7 @@ async function startHost(
   const shutdown = async (): Promise<void> => {
     // Turns outlive the host (spec/02): let go of each one's runner first, so
     // nothing below ends a turn that is meant to carry on under the next host.
+    daemon.beginShutdown();
     const detached = detachDurableTurns();
     if (detached > 0) logger.info({ turns: detached }, 'patch-daemon: left turns running');
     homeLock.release();

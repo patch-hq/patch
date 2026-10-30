@@ -110,7 +110,7 @@ export class DeepgramDictationSession implements VoiceSessionLike {
   onSessionStart(): void {
     const key = readKey(this.deps.apiKey);
     if (key === undefined) {
-      this.fail('DEEPGRAM_API_KEY is no longer set on this host');
+      this.fail('The Deepgram key is no longer set on this host; add it in Settings → Providers');
       return;
     }
     // Accepted: the mic is live from here, and audio is held until the stream

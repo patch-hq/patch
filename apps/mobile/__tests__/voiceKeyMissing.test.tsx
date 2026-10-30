@@ -41,8 +41,8 @@ const TOMS_CONFIG: VoiceConfig = {
   call: { backend: 'local', layer: 'direct', handoff: 'auto' },
 };
 const REFUSAL =
-  'Dictation is set to deepgram, but DEEPGRAM_API_KEY is not set on this host. ' +
-  'Switch Dictation to another backend in Settings → Voice.';
+  'Dictation is set to deepgram, but no Deepgram key is set on this host. ' +
+  'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Voice.';
 
 function seedConfig(voiceConfig: VoiceConfig): void {
   useSettingsStore.setState({

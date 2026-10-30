@@ -55,6 +55,13 @@ describe('composer dictation mode', () => {
     expect((screen.getByTestId('composer-input') as HTMLTextAreaElement).value).toBe('');
   });
 
+  it('sends each utterance marked as dictated, so the chat does not jump to the bottom', () => {
+    const onSend = mount();
+    keepDictating();
+    act(() => cb.onText('hello there'));
+    expect(onSend).toHaveBeenCalledWith('hello there', undefined, undefined, { dictated: true });
+  });
+
   it('offers the mode a live-preview opener', () => {
     mount();
     keepDictating();

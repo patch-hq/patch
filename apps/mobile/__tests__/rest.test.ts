@@ -107,8 +107,8 @@ describe('request() — shared helper branches', () => {
 
   it('a voice surface with no provider key: the host sentence alone, no code prefix', async () => {
     const message =
-      'Dictation is set to gemini, but GEMINI_API_KEY is not set on this host. ' +
-      'Switch Dictation to another backend in Settings → Voice.';
+      'Dictation is set to gemini, but no Gemini key is set on this host. ' +
+      'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Voice.';
     fetchMock.mockResolvedValue(jsonResponse({ error: 'voice_key_missing', message }, 502));
     await expect(api.getJob('x')).rejects.toMatchObject({ status: 502, message });
   });

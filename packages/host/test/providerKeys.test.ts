@@ -94,6 +94,7 @@ describe('ProviderKeyStore — precedence', () => {
     expect(described).toEqual([
       { id: 'gemini', source: 'ui', last4: 'WXYZ', envSet: true },
       { id: 'openai', source: 'none', envSet: false },
+      { id: 'elevenlabs', source: 'none', envSet: false },
       { id: 'groq', source: 'env', last4: 'G1G2', envSet: true },
       { id: 'deepgram', source: 'none', envSet: false },
     ]);
