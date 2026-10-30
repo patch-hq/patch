@@ -17624,3 +17624,66 @@ select.permission-mode.is-pending {
     grid-column: 2 / 4;
   }
 }
+
+/* An artifact open as a tab */
+.artifact-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+}
+.artifact-pane-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.artifact-pane-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.artifact-pane-btn:hover:not(:disabled) {
+  background: var(--bg-soft);
+}
+.artifact-pane-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.artifact-pane-address {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0 8px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.artifact-pane-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.artifact-pane-file {
+  color: var(--ink-3);
+  font-size: var(--text-min);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.artifact-pane-frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  min-height: 0;
+  background: var(--bg-soft);
+}

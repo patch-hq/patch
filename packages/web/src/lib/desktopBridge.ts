@@ -170,17 +170,14 @@ export interface PatchDesktopBridge {
   installUpdate?(): void;
   /**
    * spec/14 § Links and the web panel — ask the shell to SHOW a page in the
-   * right-docked web panel. This is Patch showing you something (an artifact, a
-   * preview). A link the user clicks can land in the same panel, but it gets
+   * right-docked web panel. This is Patch showing you something (a
+   * preview; artifacts are tabs, not this panel). A link the user clicks can land in the same panel, but it gets
    * there in the main process (the shell's own link policy decides from the
    * click's gesture), never through this bridge.
    */
   openPanel?(url: string): void;
   /**
-   * spec/14 § Artifacts — ask the shell to CLOSE the right-docked web panel.
-   * The panel shows the artifact belonging to the chat you are in, so opening a
-   * chat that has none (or leaving the chat route) has to be able to put it
-   * away again, not just replace its page.
+   * Ask the shell to CLOSE the right-docked web panel.
    */
   closePanel?(): void;
   /**

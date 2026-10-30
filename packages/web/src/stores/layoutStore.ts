@@ -15,10 +15,7 @@
 import { create } from 'zustand';
 
 /** A page tab's own kind — spec/14 § Panes and tabs: "pages (Jobs, a job's
- *  editor, Settings)". The built-in web panel and artifacts stay a native,
- *  OS-level second window (`lib/artifactPanel.ts`) — they are not DOM content
- *  this app renders, so there is nothing for a pane to host; they keep their
- *  existing opening mechanism unchanged. */
+ *  editor, Settings)", and an artifact the chat published (spec/14 § Artifacts). */
 export type PageKind =
   | 'jobs'
   | 'job'
@@ -27,7 +24,8 @@ export type PageKind =
   | 'host-files'
   | 'pads'
   | 'pad'
-  | 'new-pad';
+  | 'new-pad'
+  | 'artifact';
 
 export type TabDescriptor =
   | { kind: 'chat'; chatId: string }
@@ -43,7 +41,9 @@ export type TabDescriptor =
   | { kind: 'page'; page: 'host-files' }
   | { kind: 'page'; page: 'pads' }
   | { kind: 'page'; page: 'pad'; padId: string }
-  | { kind: 'page'; page: 'new-pad'; chatId?: string };
+  | { kind: 'page'; page: 'new-pad'; chatId?: string }
+  /** A page the chat published with `patch_artifact` (spec/14 § Artifacts). `url` is the signed, server-served URL. */
+  | { kind: 'page'; page: 'artifact'; chatId: string; artifactId: string; url: string };
 
 export interface Tab {
   /** Stable identity — `tabKey(descriptor)`. Also the React key. */
@@ -162,7 +162,9 @@ export function tabKey(descriptor: TabDescriptor): string {
           ? `page:files:${descriptor.chatId}`
           : descriptor.page === 'pad'
             ? `page:pad:${descriptor.padId}`
-            : `page:${descriptor.page}`;
+            : descriptor.page === 'artifact'
+              ? `page:artifact:${descriptor.chatId}:${descriptor.artifactId}`
+              : `page:${descriptor.page}`;
   }
 }
 
@@ -406,6 +408,12 @@ export function isTabDescriptor(v: unknown): v is TabDescriptor {
           return d['chatId'] === undefined || typeof d['chatId'] === 'string';
         case 'files':
           return typeof d['chatId'] === 'string';
+        case 'artifact':
+          return (
+            typeof d['chatId'] === 'string' &&
+            typeof d['artifactId'] === 'string' &&
+            typeof d['url'] === 'string'
+          );
         default:
           return false;
       }

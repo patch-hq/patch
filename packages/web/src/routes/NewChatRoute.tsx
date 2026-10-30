@@ -1360,13 +1360,12 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
             title="Editor"
             onClick={() =>
               void createThenRun((chatId) => {
-                // `navigate` above lands on `ChatPaneRoute`, whose own effect
-                // opens the plain chat tab and focuses it — deferred past
-                // that commit so THIS open (the files page) is the one left
-                // focused, not raced and immediately replaced by it.
-                queueMicrotask(() =>
-                  useLayoutStore.getState().openTab({ kind: 'page', page: 'files', chatId }),
-                );
+                // Show the chat in the focused group first, so the files page
+                // opens beside its chat tab rather than racing the route's own
+                // showChat (which is then a no-op: a group already shows it).
+                const layout = useLayoutStore.getState();
+                layout.showChat(chatId);
+                layout.openTab({ kind: 'page', page: 'files', chatId });
               })
             }
           >

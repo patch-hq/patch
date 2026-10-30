@@ -8,6 +8,7 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ChatRoute } from '../routes/ChatRoute.js';
 import { useChatStore } from '../stores/chatStore.js';
+import { useLayoutStore } from '../stores/layoutStore.js';
 import type { WireEvent } from '@patch/wire';
 
 function renderChat(chatId: string) {
@@ -70,8 +71,6 @@ describe('ChatRoute — artifact bar', () => {
 
   it('clicking an earlier chip opens that artifact', () => {
     const chatId = 'c-bar-click';
-    const openPanel = vi.fn();
-    (window as unknown as { patch?: unknown }).patch = { openPanel };
     const store = useChatStore.getState();
     store.applyEvent(artifact(chatId, 'a1', 'Bristol bus times', 1));
     store.applyEvent(artifact(chatId, 'a2', 'Garden plan', 2));
@@ -81,8 +80,14 @@ describe('ChatRoute — artifact bar', () => {
     const chips = screen.getAllByTestId('artifact-bar-chip');
     fireEvent.click(chips[1]!); // the older one, "Bristol bus times"
 
-    expect(openPanel).toHaveBeenCalledTimes(1);
-    expect(openPanel.mock.calls[0]![0]).toContain(`/api/chats/${chatId}/artifact/a1`);
+    const tab = useLayoutStore.getState().findTab({
+      kind: 'page',
+      page: 'artifact',
+      chatId,
+      artifactId: 'a1',
+      url: '',
+    });
+    expect(tab).toBeDefined();
   });
 
   it('republishing the same artifact updates its chip instead of adding one', () => {
