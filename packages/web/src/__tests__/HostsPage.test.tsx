@@ -318,12 +318,11 @@ describe('Settings → Hosts', () => {
     expect(screen.queryByTestId('host-host-c-power')).toBeNull();
   });
 
-  it('shows nothing about settings.json: it is edited under Providers', () => {
+  it('shows the settings.json editor on the machine page', () => {
     reportHost('host-a', { hostName: 'laptop' });
     reportClaudeSettings('host-a', [], '{"model":"sonnet"}');
     renderPage('hosts');
-    expect(screen.queryByText(/settings\.json/)).toBeNull();
-    expect(screen.queryByText(/Keep for/)).toBeNull();
+    expect(screen.getByText(/settings\.json/)).toBeTruthy();
   });
 
   it('Sign in on a codex backend hands the host to the ChatGPT sign-in on Usage', () => {
