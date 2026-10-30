@@ -5035,6 +5035,12 @@ button.view-file-download {
   height: 80vh;
 }
 /* Same thumbnail-then-lightbox treatment as .tool-field-img*. */
+.view-file-audio-player {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+}
+
 .view-file-img-btn {
   display: block;
   width: 100%;
