@@ -1140,3 +1140,21 @@ test('activity --json: over the host socket it asks /internal/activity as the ca
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('doctor --json: folderAccess is unknown over REST (only the host can answer)', async () => {
+  await withSetup(
+    (req) => {
+      if (req.url === '/api/healthz') return { status: 200, body: { ok: true, version: 'v' } };
+      if (req.url === '/api/daemon/healthz') return { status: 200, body: { ok: true } };
+      if (req.url === '/api/chats') return { status: 200, body: { chats: [] } };
+      if (req.url === '/api/auth/me') return { status: 200, body: { ok: true } };
+      return { status: 404, body: { error: 'not found' } };
+    },
+    async (env) => {
+      const r = await runCli(['doctor', '--json'], env);
+      assert.equal(r.code, 0, `stderr=${r.stderr}`);
+      const parsed = JSON.parse(r.stdout) as { folderAccess: string };
+      assert.match(parsed.folderAccess, /only reported over the local host socket/);
+    },
+  );
+});

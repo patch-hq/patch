@@ -86,6 +86,7 @@ import { resolveSpeakers, type SpeakerCascadeDeps } from './devices/speakers-cas
 import { GIT_SHA, VERSION } from './version.js';
 import { RemoteRelayError } from './remote-relay.js';
 import { buildPeekResult } from './peek.js';
+import { probeFolderAccess } from './folderAccess.js';
 
 /**
  * A cross-machine `patch_spawn` the NAMED machine refused (or never answered).
@@ -1473,6 +1474,8 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
   };
 
   // GET /host — this machine's self-description.
+  app.get('/folder-access', async () => probeFolderAccess());
+
   app.get('/host', async (req, reply) => {
     const host = hostGate(req, reply);
     if (!host) return;

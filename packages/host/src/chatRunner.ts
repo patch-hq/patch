@@ -694,6 +694,8 @@ export interface HostOptions {
    * `LIMIT_STALL_GRACE_MS`.
    */
   limitStallGraceMs?: number;
+  /** How often in-flight tool calls are checked against their deadline. Defaults to 5s. */
+  toolWatchdogPollMs?: number;
   /**
    * Enable `agent_response` hooks (spec/20-hooks.md § On the agent's
    * response). When set, the host sends a `hook.agent_response_check_request`
@@ -1307,6 +1309,7 @@ import { hasConversation } from './syntheticTurns.js';
 import { cutAt } from './textClean.js';
 import { untilAborted } from './untilAborted.js';
 import { withLimitStall } from './limitStall.js';
+import { withToolWatchdog } from './toolWatchdog.js';
 import { RepeatFailureGuard, type RepeatTrip } from './repeatFailureGuard.js';
 
 /**
@@ -9926,7 +9929,16 @@ export class Daemon {
         for (;;) {
           try {
             for await (const env of untilAborted(
-              withLimitStall(this.opts.sdkBackend.run(sdkOpts), this.opts.limitStallGraceMs),
+              withToolWatchdog(
+                withLimitStall(this.opts.sdkBackend.run(sdkOpts), this.opts.limitStallGraceMs),
+                {
+                  paused: () => this.hasPendingPermission(chatId),
+                  now: this.opts.now,
+                  ...(this.opts.toolWatchdogPollMs !== undefined
+                    ? { pollMs: this.opts.toolWatchdogPollMs }
+                    : {}),
+                },
+              ),
               abortController.signal,
               (env) => env.type === 'tool_result',
             )) {
