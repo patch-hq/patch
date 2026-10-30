@@ -361,7 +361,26 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
           `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(meta.filename)}`,
         );
       }
-      return reply.send(readFileSync(binFile));
+      const body = readFileSync(binFile);
+      // A <video> seeks with byte-range requests; without a 206 it can only
+      // play from the start.
+      if (meta.contentType.startsWith('video/')) {
+        reply.header('accept-ranges', 'bytes');
+        const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
+        if (m) {
+          const start = m[1] === '' ? Math.max(0, body.length - Number(m[2])) : Number(m[1]);
+          const end =
+            m[1] === '' || m[2] === '' ? body.length - 1 : Math.min(Number(m[2]), body.length - 1);
+          if (start > end || start >= body.length) {
+            return reply.code(416).header('content-range', `bytes */${body.length}`).send();
+          }
+          return reply
+            .code(206)
+            .header('content-range', `bytes ${start}-${end}/${body.length}`)
+            .send(body.subarray(start, end + 1));
+        }
+      }
+      return reply.send(body);
     }
     const file = join(dir, `${artifactId}.html`);
     if (!existsSync(file)) {
