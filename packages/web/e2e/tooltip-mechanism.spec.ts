@@ -51,11 +51,19 @@ test.describe('the app tooltip', () => {
     const menu = page.getByTestId('action-more');
     await expect(menu).toBeVisible();
 
-    await menu.hover();
     const tooltip = page.getByTestId('app-tooltip');
-    await expect(tooltip).toBeVisible();
+    // A background re-render can take the bubble down between "visible" and
+    // the measurement; re-hover and measure again as one retried unit rather
+    // than reading a box off a tooltip that has just gone.
+    let box: { x: number; y: number; width: number; height: number } | null = null;
+    await expect(async () => {
+      await page.mouse.move(0, 0);
+      await menu.hover();
+      await expect(tooltip).toBeVisible({ timeout: 2000 });
+      box = await tooltip.boundingBox();
+      expect(box).not.toBeNull();
+    }).toPass({ timeout: 15000 });
 
-    const box = await tooltip.boundingBox();
     const viewport = page.viewportSize();
     expect(box).not.toBeNull();
     expect(viewport).not.toBeNull();

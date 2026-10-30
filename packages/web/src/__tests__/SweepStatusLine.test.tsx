@@ -30,7 +30,7 @@ describe('SweepStatusLine', () => {
     );
   });
 
-  it('summarizes the last run — nudged/woke/flagged counts', async () => {
+  it('summarizes the last run — answered/digest counts', async () => {
     vi.spyOn(rest.api, 'getSweepRuns').mockResolvedValue({
       runs: [
         {
@@ -38,9 +38,9 @@ describe('SweepStatusLine', () => {
           runId: 'r1',
           candidateCount: 3,
           actions: [
-            { chatId: 'c1', action: 'nudge' },
-            { chatId: 'c2', action: 'nudge' },
-            { chatId: 'c3', action: 'flag' },
+            { chatId: 'c1', action: 'answer' },
+            { chatId: 'c2', action: 'answer' },
+            { chatId: 'c3', action: 'digest' },
           ],
           tokensUsed: 900,
         },
@@ -49,7 +49,7 @@ describe('SweepStatusLine', () => {
     renderLine();
     await waitFor(() =>
       expect(screen.getByTestId('sweep-status-summary')).toHaveTextContent(
-        'Last sweep 14:30 · nudged 2 · flagged 1',
+        'Last sweep 14:30 · answered 2 · digest 1',
       ),
     );
   });
@@ -61,7 +61,7 @@ describe('SweepStatusLine', () => {
           at: 0,
           runId: 'r1',
           candidateCount: 1,
-          actions: [{ chatId: 'chat-abc', action: 'wake' }],
+          actions: [{ chatId: 'chat-abc', action: 'digest' }],
           tokensUsed: 10,
         },
       ],
@@ -70,7 +70,7 @@ describe('SweepStatusLine', () => {
     const summary = await screen.findByTestId('sweep-status-summary');
     expect(screen.queryByTestId('sweep-status-detail')).toBeNull();
     fireEvent.click(summary);
-    expect(screen.getByTestId('sweep-status-row-chat-abc')).toHaveTextContent('wake · chat-abc');
+    expect(screen.getByTestId('sweep-status-row-chat-abc')).toHaveTextContent('digest · chat-abc');
   });
 
   it('"Check now" calls the API and refreshes the summary', async () => {
@@ -107,18 +107,14 @@ describe('SweepStatusLine', () => {
           at: 0,
           runId: 'r2',
           candidateCount: 1,
-          actions: [
-            { chatId: 'chat-abc', action: 'nudge', edge: 'settled', detail: 'carry on please' },
-          ],
+          actions: [{ chatId: 'chat-abc', action: 'answer', detail: 'carry on please' }],
           tokensUsed: 10,
         },
         {
           at: 0,
           runId: 'r1',
           candidateCount: 1,
-          actions: [
-            { chatId: 'chat-old', action: 'leave', edge: 'stalled', detail: 'nothing needed' },
-          ],
+          actions: [{ chatId: 'chat-old', action: 'leave', detail: 'nothing needed' }],
           tokensUsed: 10,
         },
       ],
@@ -126,7 +122,6 @@ describe('SweepStatusLine', () => {
     renderLine();
     fireEvent.click(await screen.findByTestId('sweep-status-summary'));
     expect(screen.getByTestId('sweep-status-row-chat-abc')).toHaveTextContent('carry on please');
-    expect(screen.getByTestId('sweep-status-row-chat-abc')).toHaveTextContent('settled');
     expect(screen.getByTestId('sweep-status-row-r1-chat-old')).toHaveTextContent('nothing needed');
   });
 });

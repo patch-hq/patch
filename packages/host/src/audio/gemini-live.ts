@@ -837,9 +837,15 @@ export class GeminiLiveSession implements VoiceSessionLike {
     if (signals.length > 0) {
       this.log('server content', { signals, relaying: this.relaying });
     }
-    // Gemini transcribes audio with no speech as "<noise>": that is no input at all.
-    const heard = sc.inputTranscription?.text?.replace(/<noise>/gi, '');
-    if (sc.inputTranscription?.text && heard?.trim() === '' && !this.turnHadInput) {
+    // Gemini transcribes audio with no speech as "<noise>", and sometimes as a bare "." —
+    // neither opens a turn: a first transcript with no letter or digit in it is not input.
+    // (Punctuation arriving after words is kept — it belongs to them.)
+    const heardRaw = sc.inputTranscription?.text?.replace(/<noise>/gi, '');
+    const heard =
+      heardRaw !== undefined && (this.turnHadInput || /[\p{L}\p{N}]/u.test(heardRaw))
+        ? heardRaw
+        : '';
+    if (sc.inputTranscription?.text && heard.trim() === '' && !this.turnHadInput) {
       this.turnNoiseOnly = true;
     } else if (heard) {
       this.turnNoiseOnly = false;
@@ -1167,31 +1173,37 @@ export class GeminiLiveSession implements VoiceSessionLike {
     this.dispatchTurnOpen = true;
     this.unpromptedBudget += 1;
     this.setState('thinking');
-    // Answer the call at once: it stays open for nothing, so there is nothing for
-    // Gemini to cancel and the conversation carries on while the agent works. The
-    // result comes later, as a message (flushResults).
-    this.sendFrame(
-      {
-        toolResponse: {
-          functionResponses: [
-            {
-              id: callId,
-              name: DISPATCH_TOOL_NAME,
-              response: {
-                result: 'started',
-                note:
-                  'The agent is working on it in the background. Tell the user once, in a few ' +
-                  'words, that you have passed it on, then carry on the conversation. Its result ' +
-                  'will arrive as a message; do not wait for it or keep mentioning it.',
-                scheduling: 'WHEN_IDLE',
+    // The call is answered only once the chat has the message (onAccepted below): the voice
+    // must not tell the user it has passed something on before that is true. Answering then
+    // leaves nothing open for Gemini to cancel, so the conversation carries on while the
+    // agent works. The result comes later, as a message (flushResults).
+    let accepted = false;
+    const answerStarted = (): void => {
+      if (accepted) return;
+      accepted = true;
+      this.sendFrame(
+        {
+          toolResponse: {
+            functionResponses: [
+              {
+                id: callId,
+                name: DISPATCH_TOOL_NAME,
+                response: {
+                  result: 'started',
+                  note:
+                    'The agent has the request and is working on it in the background. Tell the user once, in a few ' +
+                    'words, that you have passed it on, then carry on the conversation. Its result ' +
+                    'will arrive as a message; do not wait for it or keep mentioning it.',
+                  scheduling: 'WHEN_IDLE',
+                },
               },
-            },
-          ],
+            ],
+          },
         },
-      },
-      'tool response (started)',
-      { callId, scheduling: 'WHEN_IDLE' },
-    );
+        'tool response (started)',
+        { callId, scheduling: 'WHEN_IDLE' },
+      );
+    };
     const source: VoiceTurnSource = {
       kind: 'voice-app',
       surfaceKind: this.init.surfaceKind as 'web' | 'desktop' | 'mobile',
@@ -1205,13 +1217,52 @@ export class GeminiLiveSession implements VoiceSessionLike {
         message: request,
         source,
         handoff: true,
+        onAccepted: answerStarted,
       });
     } catch (err) {
-      replyText = `That failed: ${(err as Error).message}`;
+      const reason = (err as Error).message;
       this.deps.logger.error(
-        { sessionId: this.init.sessionId, err: (err as Error).message },
+        { sessionId: this.init.sessionId, err: reason },
         'gemini-live: dispatch failed',
       );
+      if (!accepted) {
+        // The chat never got the request: say so to the user and the voice, loudly.
+        this.handoffsInFlight -= 1;
+        if (this.handoffsInFlight === 0) {
+          this.unpromptedBudget = 0;
+          this.dispatchTurnOpen = false;
+        }
+        this.deps.sendAudio({
+          type: 'audio.error',
+          code: 'gemini_unavailable',
+          message: `The request was not passed to the agent: ${reason}`,
+          sessionId: this.init.sessionId,
+        });
+        if (this.closed || !this.ws) return;
+        this.sendFrame(
+          {
+            toolResponse: {
+              functionResponses: [
+                {
+                  id: callId,
+                  name: DISPATCH_TOOL_NAME,
+                  response: {
+                    result: 'failed',
+                    note:
+                      `The request did NOT reach the agent (${reason}). Tell the user in a few ` +
+                      'words that it was not passed on. Do not say it was.',
+                    scheduling: 'WHEN_IDLE',
+                  },
+                },
+              ],
+            },
+          },
+          'tool response (failed)',
+          { callId, scheduling: 'WHEN_IDLE' },
+        );
+        return;
+      }
+      replyText = `That failed: ${reason}`;
     }
     this.log('chat agent answered', {
       callId,

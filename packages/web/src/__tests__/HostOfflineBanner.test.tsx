@@ -113,6 +113,12 @@ describe('HostOfflineBanner', () => {
       expect(banner).toHaveTextContent('queued');
     });
 
+    it('says why the host dropped off when the server could tell', () => {
+      usePresenceStore.getState().setHostOnline('b', false, 'asleep');
+      render(<HostOfflineBanner hostId="b" />);
+      expect(screen.getByTestId('daemon-offline-banner')).toHaveTextContent('hetzner host asleep');
+    });
+
     it('uses the registry name when the offline host has not reported one', () => {
       usePresenceStore.setState({
         hosts: {
@@ -155,7 +161,7 @@ describe('HostOfflineBanner', () => {
     usePresenceStore.setState({ hosts: {} });
     usePresenceStore.getState().setHostOnline('d1', false, 'updating');
     usePresenceStore.getState().setHostOnline('d1', true);
-    expect(usePresenceStore.getState().hosts.d1?.offlineReason).toBeUndefined();
+    expect(usePresenceStore.getState().hosts.d1?.offlineReason).toBeNull();
   });
 
   it('a chat on a host that is installing an update says so, by name, without Diagnose', () => {

@@ -318,11 +318,11 @@ describe('Settings → Hosts', () => {
     expect(screen.queryByTestId('host-host-c-power')).toBeNull();
   });
 
-  it('shows nothing about settings.json: it is edited under Providers', () => {
+  it("shows the host's settings.json editor on the machine page", () => {
     reportHost('host-a', { hostName: 'laptop' });
     reportClaudeSettings('host-a', [], '{"model":"sonnet"}');
     renderPage('hosts');
-    expect(screen.queryByText(/settings\.json/)).toBeNull();
+    expect(screen.getByText('Claude Code settings.json')).toBeInTheDocument();
     expect(screen.queryByText(/Keep for/)).toBeNull();
   });
 

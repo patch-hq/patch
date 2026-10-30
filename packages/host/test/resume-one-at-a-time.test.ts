@@ -139,18 +139,22 @@ describe('a turn resumed onto a session with no transcript', () => {
   const setup = () => {
     const home = mkdtempSync(join(tmpdir(), 'patch-dead-session-'));
     const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-dead-session-f-')));
-    const seen: Array<{ prompt: string; resume: string | undefined }> = [];
+    const seen: Array<{ prompt: string; resume: string | undefined; reseed: boolean }> = [];
     const mode = { limited: false };
     const daemon = new Daemon({
       hostId: 'd1',
       metaStore: createMetaStore(home),
       sdkBackend: {
         run: (opts): AsyncGenerator<SdkEnvelope> => {
-          seen.push({ prompt: opts.prompt, resume: opts.resumeSessionId });
+          seen.push({
+            prompt: opts.prompt,
+            resume: opts.resumeSessionId,
+            reseed: opts.claudeSessionStore?.reseed !== undefined,
+          });
           async function* gen(): AsyncGenerator<SdkEnvelope> {
             if (mode.limited) throw limitError(NO_RESET_SPEND_LIMIT);
             // The session id the first attempt was handed never reached disk.
-            if (opts.resumeSessionId !== undefined) {
+            if (opts.resumeSessionId === 'sess-dead') {
               throw new Error(
                 `Claude Code returned an error result: No conversation found with session ID: ${opts.resumeSessionId}`,
               );
@@ -188,10 +192,13 @@ describe('a turn resumed onto a session with no transcript', () => {
     await settle();
 
     // The resume tried `sess-dead`, was told there is no such conversation, and
-    // ran again with no session — the same prompt.
+    // ran again on a rebuilt session — the same prompt.
     expect(seen.map((s) => s.prompt)).toEqual(['owed turn', 'owed turn']);
     expect(seen[0]?.resume).toBe('sess-dead');
-    expect(seen[1]?.resume).toBeUndefined();
+    // The dead id is dropped and the session rebuilt from Patch's history
+    // (a new id, seeded), not started empty and not resumed onto the dead one.
+    expect(seen[1]?.resume).not.toBe('sess-dead');
+    expect(seen[1]?.reseed).toBe(true);
     expect(daemon.chatState.get(chatId)?.activity).not.toBe('errored');
     daemon.shutdown();
   });

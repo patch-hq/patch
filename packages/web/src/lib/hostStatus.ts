@@ -23,10 +23,18 @@ export function hostState(h: HostPresence | undefined): HostState {
   return h.offlineReason === 'updating' ? 'updating' : 'offline';
 }
 
-/** "Mac host offline" / "Mac host updating" */
+/** Short label for a reason the server could tell; anything else is plain "offline". */
+const OFFLINE_REASON_LABEL: Record<string, string> = {
+  battery: 'out of battery',
+  asleep: 'asleep',
+  unresponsive: 'not responding',
+};
+
+/** "Mac host offline" / "Mac host updating" / "Mac host asleep" */
 export function hostStateSentence(h: HostPresence | undefined, hostId: string): string {
   const title = hostTitle(h, hostId);
-  return hostState(h) === 'updating' ? `${title} updating` : `${title} offline`;
+  if (hostState(h) === 'updating') return `${title} updating`;
+  return `${title} ${OFFLINE_REASON_LABEL[h?.offlineReason ?? ''] ?? 'offline'}`;
 }
 
 /** "2h ago" since it was last seen, or null when never seen or updating. */

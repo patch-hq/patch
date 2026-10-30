@@ -1,5 +1,5 @@
-// The Manager view's slim sweep-status line (spec/06 § Sweep — "Visible"):
-// "Last sweep 14:30 · nudged 2 · flagged 1", expandable to what it did to
+// The Manager view's slim sweep-status line (spec/06 § The sweep — "Visible"):
+// "Last sweep 14:30 · answered 2 · digest 1", expandable to what it did to
 // which chat, plus a "Check now" button. Local component state — one
 // account, one sweep loop, nothing else on the page needs this.
 
@@ -14,9 +14,8 @@ function summarize(run: SweepRun): string {
   const counts: Record<string, number> = {};
   for (const a of run.actions) counts[a.action] = (counts[a.action] ?? 0) + 1;
   const parts: string[] = [];
-  if (counts['nudge']) parts.push(`nudged ${counts['nudge']}`);
-  if (counts['wake']) parts.push(`woke ${counts['wake']}`);
-  if (counts['flag']) parts.push(`flagged ${counts['flag']}`);
+  if (counts['answer']) parts.push(`answered ${counts['answer']}`);
+  if (counts['digest']) parts.push(`digest ${counts['digest']}`);
   if (parts.length === 0) return 'nothing to do';
   return parts.join(' · ');
 }
@@ -45,7 +44,6 @@ function ActionRows({ run, first }: { run: SweepRun; first: boolean }): JSX.Elem
           onClick={() => navigate(`/chats/${a.chatId}`)}
         >
           {a.action} · {a.chatId}
-          {a.edge ? ` · ${a.edge}` : ''}
           {a.detail ? <span className="sweep-status-detail-text"> — {a.detail}</span> : null}
         </button>
       ))}

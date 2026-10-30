@@ -29,6 +29,7 @@ import {
   type AuthOkHost,
   type ClaudeSettingsListEvent,
   type HostAccountEvent,
+  type HostConditionEvent,
   type HostInfoEvent,
   type FoldersListEvent,
   type WireEvent,
@@ -171,6 +172,12 @@ export interface WsHubDeps {
    * running → errored → running, and the host is not announced offline. Default 5000.
    */
   hostOfflineGraceMs?: number;
+  /** A host's current struggling condition, if any, to greet a new surface with. */
+  hostCondition?: (hostId: string) => HostConditionEvent | null;
+  /** Why a host that is down went down (`describeHostOffline`), if known. */
+  hostOfflineReason?: (hostId: string) => string | undefined;
+  /** A surface on a host's own machine said the machine is going to sleep, or is awake. */
+  onMachineSleep?: (hostId: string, asleep: boolean) => void;
   /** Told of each chat forced to `errored` by a host-link loss (chat completion notifier). */
   onChatLinkLost?: (chatId: string) => void;
   /**
@@ -457,12 +464,11 @@ export class WsHub {
     }
   }
 
-  /** `host.offline`, carrying the reason the machine gave when it had one. */
+  /** `host.offline`, carrying the reason the machine gave, else the health tracker's. */
   private hostOfflineEvent(hostId: string): WireEvent {
-    const reason = this.deps.hostLink.offlineReason?.(hostId);
-    return reason === undefined
-      ? { type: 'host.offline', hostId }
-      : { type: 'host.offline', hostId, reason };
+    const reason =
+      this.deps.hostLink.offlineReason?.(hostId) ?? this.deps.hostOfflineReason?.(hostId);
+    return { type: 'host.offline', hostId, ...(reason !== undefined ? { reason } : {}) };
   }
 
   /** Tell every surface and machine a host's status changed; on offline, resolve what died with it. */
@@ -1080,6 +1086,8 @@ export class WsHub {
             : this.hostOfflineEvent(hostId),
         ),
       );
+      const condition = this.deps.hostCondition?.(hostId);
+      if (condition) socket.send(encode(condition));
       // Each machine's folder registry, from the greeting alone (spec/03 §
       // Host events — `folders.list` is "sent on connect"). A host only emits
       // it when its own link authenticates, so a surface that connects later
@@ -1386,6 +1394,9 @@ export class WsHub {
         return;
       }
       case 'surface.input': {
+        if (event.machineHostId !== undefined) {
+          this.deps.onMachineSleep?.(event.machineHostId, event.away === 'asleep');
+        }
         this.deps.presence.input(conn.accountId, conn.surfaceId, event.idleMs, Date.now(), {
           scope: event.scope,
           ...(event.away ? { away: event.away } : {}),
@@ -1820,7 +1831,10 @@ export class WsHub {
       event.type === 'settings.adopt.response' ||
       event.type === 'settings.account_signed_in' ||
       event.type === 'web_bot_auth.sign_request' ||
-      event.type === 'web_bot_auth.sign_response'
+      event.type === 'web_bot_auth.sign_response' ||
+      // Health reports are consumed by the host-health tracker, which tells
+      // surfaces the resulting condition (spec/03 § Host health).
+      event.type === 'host.health'
     ) {
       return;
     }

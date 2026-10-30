@@ -3919,15 +3919,15 @@ describe('src/index.ts main() — a voice surface on a provider with no key', ()
           50,
           'dictation',
           'DEEPGRAM_API_KEY',
-          'voice: Dictation is set to deepgram, but DEEPGRAM_API_KEY is not set on this host. ' +
-            'Switch Dictation to another backend in Settings → Voice. Its sessions will be refused.',
+          'voice: Dictation is set to deepgram, but no Deepgram key is set on this host. ' +
+            'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Voice. Its sessions will be refused.',
         ],
         [
           50,
           'device',
           'OPENAI_REALTIME_API_KEY',
-          'voice: Voice device is set to openai, but OPENAI_REALTIME_API_KEY is not set on this host. ' +
-            'Switch Voice device to another backend in Settings → Voice. Its sessions will be refused.',
+          'voice: Voice device is set to openai, but no OpenAI key is set on this host. ' +
+            'Add it in Settings → Providers, or switch Voice device to another backend in Settings → Voice. Its sessions will be refused.',
         ],
       ]);
 
@@ -3980,8 +3980,8 @@ describe('src/index.ts main() — a voice surface on a provider with no key', ()
           type: 'audio.error',
           code: 'voice_key_missing',
           message:
-            'Dictation is set to deepgram, but DEEPGRAM_API_KEY is not set on this host. ' +
-            'Switch Dictation to another backend in Settings → Voice.',
+            'Dictation is set to deepgram, but no Deepgram key is set on this host. ' +
+            'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Voice.',
         },
       ]);
     } finally {
@@ -4043,6 +4043,7 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
         OPENAI_REALTIME_API_KEY: undefined,
         GROQ_API_KEY: undefined,
         DEEPGRAM_API_KEY: undefined,
+        ELEVEN_LABS_API_KEY: undefined,
       },
       {
         hostJson: {
@@ -4060,10 +4061,11 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
       await boot.fakeServer.waitForAuthed();
       await boot.fakeServer.waitForFrame((e) => e.type === 'host.host');
       expect(boot.fakeServer.received.find((e) => e.type === 'host.host')).toMatchObject({
-        voiceKeys: { gemini: false, openai: false, deepgram: false },
+        voiceKeys: { gemini: false, openai: false, deepgram: false, elevenlabs: false },
         providerKeys: [
           { id: 'gemini', source: 'none', envSet: false },
           { id: 'openai', source: 'none', envSet: false },
+          { id: 'elevenlabs', source: 'none', envSet: false },
           { id: 'groq', source: 'none', envSet: false },
           { id: 'deepgram', source: 'none', envSet: false },
         ],
@@ -4118,6 +4120,7 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
         providerKeys: [
           { id: 'gemini', source: 'none', envSet: false },
           { id: 'openai', source: 'none', envSet: false },
+          { id: 'elevenlabs', source: 'none', envSet: false },
           { id: 'groq', source: 'none', envSet: false },
           { id: 'deepgram', source: 'ui', last4: 'LAST', envSet: false },
         ],
@@ -4318,8 +4321,8 @@ describe('handleVoiceNoteTranscribe', () => {
       error: {
         code: 'voice_key_missing',
         message:
-          'Dictation is set to deepgram, but DEEPGRAM_API_KEY is not set on this host. ' +
-          'Switch Dictation to another backend in Settings → Voice.',
+          'Dictation is set to deepgram, but no Deepgram key is set on this host. ' +
+          'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Voice.',
       },
     });
     expect(local).not.toHaveBeenCalled();

@@ -62,17 +62,29 @@ Host:
 5. Pipes the SDK's message stream into our wire protocol (`03-wire-protocol.md`).
 6. Emits `chat.spawned`.
 
-A refused spawn creates no chat, and leaves no trace of one on any surface. The
-refusal is reported against the `chatId` the spawn was allocated, and a chat-scoped
-error reaches every connected surface — but a surface builds a chat row out of any
+A refused spawn creates no chat, but it does not lose the message. The refusal is
+reported against the `chatId` the spawn was allocated, and a chat-scoped error
+reaches every connected surface — but a surface builds a chat row out of any
 `chatId` it has not seen before, so the refusal alone would draw a nameless,
 folderless row for a chat that does not exist and never will (it is absent from the
 chat list, so nothing later corrects it). The refusal therefore also names that
 `chatId` back to the caller as one to retract, and the caller drops the row.
 Retracting is idempotent and final: a duplicate or late-arriving error for a
 retracted chat does not redraw it, since the error frame and the refusal travel
-separately and can arrive in either order. The user still sees the failure once
-(`12-error-and-offline.md` § Principles) — the row goes, the error does not.
+separately and can arrive in either order.
+
+What stays is the surface's own new-chat draft (`14-design-web.md` § New chat
+drafts), not a chat: the message the user sent, with the folder, machine and model
+chosen, is kept as a failed draft that lists in the sidebar with the reason it
+failed, and opens on the new-chat screen with the error and a Resend. Resending
+spawns afresh from the draft as if it had just been sent; success consumes the
+draft, another refusal leaves it failed with the new reason. The user discards it
+like any draft. A spawn refused after the chat was already shown (the host's
+refusal arrives late) turns back into a failed draft the same way, and the user is
+moved onto it. The failure marker belongs to the surface it happened on and is not
+synced; the message is, as any draft is. A long message is therefore never lost to
+a refused spawn. The user still hears of the failure once, by the toast
+(`12-error-and-offline.md` § Principles), and the failed draft is where it stays.
 
 ## Model
 
@@ -468,7 +480,7 @@ Snooze means "I'm leaving this to carry on; don't make me think about it until i
 - The sheet: choosing Snooze — the chat header ⋯ and hamburger menus' Snooze row, or the folder header's clock for a whole project — opens one modal sheet (a bottom sheet on the phone). It names what is being snoozed (the chat's name; for a project, "Snooze <project>" and "<N> chats"), offers the presets in a two-column grid with each preset's resolved wake time beside it, shows a "Run in background" box, states the rule "Snoozed chats keep running and reappear when scheduled", and ends in Cancel and one primary button. Choosing a preset only selects it; the button reads "Snooze" and is disabled until one is chosen, then "Snooze until <wake>" ("Snooze <N> until <wake>" for a project). Enter confirms; Esc and the scrim cancel. Unsnoozing an already-snoozed chat is a direct action with no sheet.
 - Presets: 2 minutes, 5 minutes, 30 minutes, 1 hour, an evening time (default 5pm; today, or tomorrow once it has passed), Tomorrow at the morning time (default 9am), 1 day, Next Monday (the coming Monday at the morning time; a Monday today means a week out), plus Custom… — a free-form date/time (web: a date/time field shown inline; phone: typed `YYYY-MM-DD HH:mm`). A past or invalid custom time raises a visible error and snoozes nothing (NO FALLBACK). A wake time is shown `HH:MM` if it is today, `Fri 08:00` within the next 6 days, and `Thu 22 Oct` beyond. The morning (default 9) and evening (default 17) hours are shared account settings (Settings → Chats → Snooze defaults, `snoozeMorningHour` / `snoozeEveningHour`, whole local hours 0–23), and the sheet carries a cog at its top right that opens that page. Every preset is resolved on the surface, at confirm time, into an absolute `snoozedUntil`; the host only ever stores the absolute timestamp (a delta would drift while an event is in flight).
 - Run in background: the box appears only if some chat in the set is `running`. It lists each running chat — its working badge, its name ("This chat" in a single-chat sheet), its current status line if it has one, and how long its current run has gone (`25m`, `2h 10m`, from `chat.state.runningSince`) — and, for a project, a last line "+ <N> not running". Without a running chat the box is absent.
-- Until complete: a further preset, offered only when every chat the sheet is for has work to wait for (a turn running, or a goal still open). It is sent as `snoozedUntil = 8640000000000000` (`SNOOZE_UNTIL_COMPLETE`, the largest Date) so "snoozed ⇔ `snoozedUntil > now`" holds unchanged, and shows as "when done" where a wake time would be ("Snooze until complete" on the button). The host ends it, as a normal wake with a record and Back state, the moment the chat has no turn running and no goal left; or sooner if it stops for a person (a permission, a question, an error). Background tasks and self-wakes are not waited on. The host refuses it (400-equivalent error, no snooze) for a chat with nothing running and no goal, and a host restart ends it, since the run it waited on is gone.
+- Until complete: a further preset, offered only when every chat the sheet is for has work to wait for (a turn running, or a goal still open). It is sent as `snoozedUntil = 8640000000000000` (`SNOOZE_UNTIL_COMPLETE`, the largest Date) so "snoozed ⇔ `snoozedUntil > now`" holds unchanged, and shows as "when done" where a wake time would be ("Snooze until complete" on the button). The host ends it, as a normal wake with a record and Back state, the moment the chat has no turn running and no goal left; or sooner if it stops for a person (a permission, a question, an error). Background tasks and self-wakes are not waited on. The host refuses it (400-equivalent error, no snooze) for a chat with nothing running and no goal, and a host restart does not end it by itself: if the restart resumes the interrupted turn (or leaves it parked on credit) the snooze carries on and ends when that turn returns, otherwise there is nothing left to wait for and it ends at startup.
 - Unsnooze: setting `snoozedUntil = null` at any time (the Snoozed section's row control, the snoozed banner, or the chat header's snooze control while snoozed) returns the chat to the active list immediately.
 - Snoozing the chat you are currently reading moves you on, exactly as archiving does (§ Lifecycle): the surface opens the next chat in the sidebar's drawn order, or the new-chat screen when nothing active is left. This holds from the chat header, the sidebar row, and a project-wide snooze that includes it. Unsnoozing never navigates.
 - After confirming, a toast (the usual toast duration) reads "<chat or project name> snoozed until <wake>", with a second line "<N> chats running in background" for a project ("1 chat…" for one), or "Running in background" for a single running chat, and nothing when nothing is running. It carries Undo, which restores each chat's previous `snoozedUntil`.

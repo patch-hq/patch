@@ -249,7 +249,7 @@ describe('audio server — voice config matrix selection', () => {
     expect(msg).toMatchObject({
       type: 'audio.error',
       code: 'voice_key_missing',
-      message: expect.stringContaining('DEEPGRAM_API_KEY'),
+      message: expect.stringContaining('Deepgram key'),
     });
     ws.close();
   });
@@ -346,8 +346,8 @@ describe('audio server — voice config matrix selection', () => {
     expect(msg).toMatchObject({
       code: 'voice_key_missing',
       message:
-        'Call is set to gemini, but GEMINI_API_KEY is not set on this host. ' +
-        'Switch Call to another backend in Settings → Voice.',
+        'Call is set to gemini, but no Gemini key is set on this host. ' +
+        'Add it in Settings → Providers, or switch Call to another backend in Settings → Voice.',
     });
     expect(instances.length).toBe(0);
     ws.close();
@@ -379,8 +379,8 @@ describe('audio server — voice config matrix selection', () => {
     expect(msg).toMatchObject({
       code: 'voice_key_missing',
       message:
-        'Call is set to openai, but OPENAI_REALTIME_API_KEY is not set on this host. ' +
-        'Switch Call to another backend in Settings → Voice.',
+        'Call is set to openai, but no OpenAI key is set on this host. ' +
+        'Add it in Settings → Providers, or switch Call to another backend in Settings → Voice.',
     });
     expect(instances.length).toBe(0);
     ws.close();

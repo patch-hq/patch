@@ -363,15 +363,41 @@ describe('layoutStore — persistence', () => {
     store().openTab({ kind: 'chat', chatId: 'c1' });
     store().openTab({ kind: 'chat', chatId: 'c2' }, { placement: 'split', edge: 'right' });
     const loaded = loadLayout();
-    expect(loaded.root).toEqual(store().root);
-    expect(loaded.activePaneId).toBe(store().activePaneId);
+    expect(loaded.groups).toHaveLength(1);
+    expect(loaded.groups[0]!.root).toEqual(store().root);
+    expect(loaded.groups[0]!.activePaneId).toBe(store().activePaneId);
+    expect(loaded.focusedGroupId).toBe(store().focusedGroupId);
   });
 
-  it('a garbled layout falls back to a fresh single pane, not a crash', () => {
-    localStorage.setItem('patch.layout.v1', '{not json');
+  it('a garbled layout falls back to one fresh empty group, not a crash', () => {
+    localStorage.setItem('patch.layout.v2', '{not json');
     const loaded = loadLayout();
-    expect(loaded.root.type).toBe('leaf');
-    expect((loaded.root as LeafPane).tabs).toEqual([]);
+    expect(loaded.groups).toHaveLength(1);
+    expect(loaded.groups[0]!.root.type).toBe('leaf');
+    expect((loaded.groups[0]!.root as LeafPane).tabs).toEqual([]);
+  });
+
+  it('migrates a layout saved as a single pane tree into one group', () => {
+    const leaf = {
+      type: 'leaf',
+      id: 'pane-old',
+      tabs: [
+        { id: 'chat:c9', descriptor: { kind: 'chat', chatId: 'c9' } },
+        { id: 'terminal:c9', descriptor: { kind: 'terminal', chatId: 'c9' } },
+      ],
+      activeTabId: 'terminal:c9',
+    };
+    localStorage.setItem(
+      'patch.layout.v1',
+      JSON.stringify({ root: leaf, activePaneId: 'pane-old' }),
+    );
+    const loaded = loadLayout();
+    expect(loaded.groups).toHaveLength(1);
+    const g = loaded.groups[0]!;
+    expect(g.root).toEqual(leaf);
+    expect(g.activePaneId).toBe('pane-old');
+    expect(g.chatId).toBe('c9');
+    expect(g.size).toBe(1);
   });
 });
 
@@ -427,5 +453,129 @@ describe('layoutStore — focusedChatId', () => {
     expect(focusedChatId(store().root, store().activePaneId)).toBe('a');
     store().openTab({ kind: 'page', page: 'host-files' });
     expect(focusedChatId(store().root, store().activePaneId)).toBeNull();
+  });
+});
+
+describe('layoutStore — groups (spec/14 § Groups)', () => {
+  const groups = (): ReturnType<typeof store>['groups'] => store().groups;
+  const focused = (): ReturnType<typeof store>['groups'][number] =>
+    groups().find((g) => g.id === store().focusedGroupId)!;
+  const tabIds = (g: { root: unknown }): string[] =>
+    ((g.root as LeafPane).tabs ?? []).map((t) => t.id);
+
+  it('starts with one empty group', () => {
+    expect(groups()).toHaveLength(1);
+    expect(focused().chatId).toBeNull();
+  });
+
+  it('showChat the first time shows just the chat tab', () => {
+    store().showChat('a');
+    expect(focused().chatId).toBe('a');
+    expect(tabIds(focused())).toEqual(['chat:a']);
+  });
+
+  it('switching the focused group to another chat replaces, never adds, a chat tab', () => {
+    store().showChat('a');
+    store().showChat('b');
+    expect(groups()).toHaveLength(1);
+    expect(focused().chatId).toBe('b');
+    expect(tabIds(focused())).toEqual(['chat:b']);
+  });
+
+  it("switching away and back restores that chat's panes and tabs as they were left", () => {
+    store().showChat('a');
+    store().openTab({ kind: 'terminal', chatId: 'a' }, { placement: 'split', edge: 'right' });
+    store().openTab({ kind: 'page', page: 'jobs' }, { placement: 'tab' });
+    const before = JSON.stringify(focused().root);
+    const activeBefore = focused().activePaneId;
+    store().showChat('b');
+    expect(tabIds(focused())).toEqual(['chat:b']);
+    store().showChat('a');
+    expect(JSON.stringify(focused().root)).toBe(before);
+    expect(focused().activePaneId).toBe(activeBefore);
+    expect(store().root).toBe(focused().root);
+  });
+
+  it('a chat already showing in a group focuses that group instead of switching', () => {
+    store().showChat('a');
+    store().showChat('b', { newGroup: true });
+    expect(groups().map((g) => g.chatId)).toEqual(['a', 'b']);
+    expect(focused().chatId).toBe('b');
+    store().showChat('a');
+    expect(groups()).toHaveLength(2);
+    expect(focused().chatId).toBe('a');
+    expect(groups().map((g) => g.chatId)).toEqual(['a', 'b']);
+  });
+
+  it('pages open as tabs in the focused group only', () => {
+    store().showChat('a');
+    store().showChat('b', { newGroup: true });
+    store().openTab({ kind: 'page', page: 'settings' }, { placement: 'tab' });
+    expect(tabIds(groups()[1]!)).toEqual(['chat:b', 'page:settings']);
+    expect(tabIds(groups()[0]!)).toEqual(['chat:a']);
+  });
+
+  it('groups share the width and a new group splits it', () => {
+    store().showChat('a');
+    store().showChat('b', { newGroup: true });
+    store().showChat('c', { newGroup: true });
+    expect(groups().map((g) => g.chatId)).toEqual(['a', 'b', 'c']);
+    const sum = groups().reduce((n, g) => n + g.size, 0);
+    expect(sum).toBeCloseTo(1);
+    for (const g of groups()) expect(g.size).toBeCloseTo(1 / 3);
+  });
+
+  it('resizeGroups moves the divider but never below the minimum fraction', () => {
+    store().showChat('a');
+    store().showChat('b', { newGroup: true });
+    store().resizeGroups(0, 0.1, 0.3);
+    expect(groups()[0]!.size).toBeCloseTo(0.6);
+    store().resizeGroups(0, 5, 0.3);
+    expect(groups()[1]!.size).toBeCloseTo(0.3);
+    store().resizeGroups(0, -5, 0.3);
+    expect(groups()[0]!.size).toBeCloseTo(0.3);
+  });
+
+  it('closing a group gives its width to the others and moves focus', () => {
+    store().showChat('a');
+    store().showChat('b', { newGroup: true });
+    store().closeGroup(focused().id);
+    expect(groups().map((g) => g.chatId)).toEqual(['a']);
+    expect(groups()[0]!.size).toBeCloseTo(1);
+    expect(focused().chatId).toBe('a');
+  });
+
+  it('closing the last group leaves one empty group', () => {
+    store().showChat('a');
+    store().closeGroup(focused().id);
+    expect(groups()).toHaveLength(1);
+    expect(focused().chatId).toBeNull();
+    expect(tabIds(focused())).toEqual([]);
+  });
+
+  it('acting on a pane in another group focuses that group', () => {
+    store().showChat('a');
+    store().showChat('b', { newGroup: true });
+    const first = groups()[0]!;
+    store().setActivePane((first.root as LeafPane).id);
+    expect(store().focusedGroupId).toBe(first.id);
+    expect(store().root).toBe(focused().root);
+  });
+
+  it('a seq on an already-showing chat lands on its chat tab', () => {
+    store().showChat('a');
+    store().showChat('b', { newGroup: true });
+    store().showChat('a', { seq: 7 });
+    expect((groups()[0]!.root as LeafPane).tabs[0]!.pendingSeq).toBe(7);
+  });
+
+  it('persists every group and the focus across a reload', () => {
+    store().showChat('a');
+    store().showChat('b', { newGroup: true });
+    store().showChat('c');
+    const loaded = loadLayout();
+    expect(loaded.groups.map((g) => g.chatId)).toEqual(['a', 'c']);
+    expect(loaded.focusedGroupId).toBe(store().focusedGroupId);
+    expect(loaded.groups[1]!.layouts['b']).toBeDefined();
   });
 });

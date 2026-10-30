@@ -1,6 +1,6 @@
-// Settings → Providers: the account's provider keys (shared by every host), its
-// secrets, and Claude Code's own settings.json on one host — a plain file edited
-// where it lives (spec/02 § Claude Code settings).
+// Settings → Providers: the account's provider keys and secrets. Both are shared
+// by every host, so the page has no host switch. Claude Code's own settings.json
+// is a per-host file and is edited on that host's page (HostsPage).
 
 import type { JSX } from 'react';
 import { useState } from 'react';
@@ -15,12 +15,11 @@ import { usePresenceStore, type HostPresence } from '../../stores/presenceStore.
 import { useUiStore } from '../../stores/uiStore.js';
 import { hostLabel } from './hostScope.js';
 import { problemText, writeShared } from './sharedWrite.js';
-import { Group, Note, Row, SettingsPage, useHostGate } from './ui.js';
+import { Group, Note, Row, SettingsPage } from './ui.js';
 
 export function ProvidersPage(): JSX.Element {
-  const { host, gate } = useHostGate();
   return (
-    <SettingsPage title="Providers" testid="settings-providers" hostSwitch>
+    <SettingsPage title="Providers" testid="settings-providers">
       <section className="set-group">
         <div className="set-group-head">
           <h2 className="set-label">Provider keys</h2>
@@ -28,7 +27,6 @@ export function ProvidersPage(): JSX.Element {
         <ProviderKeys />
       </section>
       <Secrets />
-      {gate ?? (host ? <ClaudeSettingsEditor host={host} /> : null)}
     </SettingsPage>
   );
 }
@@ -39,7 +37,7 @@ export function ProvidersPage(): JSX.Element {
  * JSON object; the editor closes when the host's report shows the file changed,
  * and stays open with the text while it has not.
  */
-function ClaudeSettingsEditor({ host }: { host: HostPresence }): JSX.Element {
+export function ClaudeSettingsEditor({ host }: { host: HostPresence }): JSX.Element {
   const report = host.claudeSettings;
   const [draft, setDraft] = useState<string | null>(null);
   const [sentOver, setSentOver] = useState<string | null>(null);
@@ -177,7 +175,7 @@ function ProviderKeys(): JSX.Element {
     const { label } = providerKeyInfo(id);
     const ok = await useUiStore.getState().confirm({
       title: `Revoke ${label} key`,
-      message: `Delete the ${label} key from every machine? A machine with one in its own environment goes back to that.`,
+      message: `Delete the ${label} key? A machine with one in its own environment goes back to that.`,
       confirmLabel: 'Revoke',
       danger: true,
     });
@@ -188,7 +186,7 @@ function ProviderKeys(): JSX.Element {
   return (
     <div className="set-card" data-testid="providers-keys">
       {shared.secrets.providerKeys.map((k) => {
-        const { label, envVar } = providerKeyInfo(k.id);
+        const { label } = providerKeyInfo(k.id);
         const row = `provider-key-${k.id}`;
         const env = envHosts(k.id);
         const status = k.set
@@ -212,7 +210,6 @@ function ProviderKeys(): JSX.Element {
                 <span className="set-sub" data-testid={`${row}-status`}>
                   {status}
                 </span>
-                <span className="set-sub mono">{envVar}</span>
               </div>
               {editing === k.id ? null : (
                 <div className="set-row-ctrl">
@@ -226,7 +223,7 @@ function ProviderKeys(): JSX.Element {
                         void run(`${label} key`, () => api.adoptProviderKey(k.id, env[0]!.hostId))
                       }
                     >
-                      Use for every host
+                      Use for all
                     </button>
                   ) : null}
                   <button
@@ -269,7 +266,7 @@ function ProviderKeys(): JSX.Element {
                   autoComplete="off"
                   spellCheck={false}
                   aria-label={`${label} key`}
-                  placeholder={envVar}
+                  placeholder="Paste key"
                   data-testid={`${row}-input`}
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}

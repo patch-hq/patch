@@ -141,3 +141,47 @@ export function createUtteranceSegmenter(opts: UtteranceSegmenterOptions = {}): 
     },
   };
 }
+
+// Speech models invent text from silence and steady noise — "Thank you.",
+// "Thanks for watching", "[BLANK_AUDIO]". Dictation mode sends every
+// transcript on its own, so these must not become messages.
+const PHANTOM_PHRASES = new Set([
+  'you',
+  'thank you',
+  'thanks',
+  'thanks for watching',
+  'thank you for watching',
+  'bye',
+  'bye bye',
+  'okay',
+  'ok',
+  'so',
+  'uh',
+  'um',
+  'hmm',
+  'mm',
+  'mhm',
+]);
+/** A stock phrase over audio this long is taken to have been said on purpose. */
+export const PHANTOM_MAX_MS = 2000;
+
+export function isPhantomTranscript(text: string, audioMs: number): boolean {
+  const t = text.trim();
+  if (/^[[(*].*[\])*]$/.test(t)) return true;
+  const plain = t
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return audioMs < PHANTOM_MAX_MS && PHANTOM_PHRASES.has(plain);
+}
+
+/** How much of a clip is loud enough to be speech, in ms — the trailing quiet that ended it does not count. */
+export function speechMs(pcm: Int16Array, sampleRate = 16000, threshold = 0.015): number {
+  const frame = Math.round(sampleRate / 50); // 20 ms
+  let loud = 0;
+  for (let i = 0; i < pcm.length; i += frame) {
+    if (frameRms(pcm.subarray(i, i + frame)) >= threshold) loud += frame;
+  }
+  return (loud / sampleRate) * 1000;
+}

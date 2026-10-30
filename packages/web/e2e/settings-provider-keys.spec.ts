@@ -49,9 +49,7 @@ test.describe('Settings — Providers', () => {
       },
     });
     await page.goto(settingsUrl('voice'));
-    await expect(page.getByTestId('dictation-phone-keys')).toContainText(
-      'DEEPGRAM_API_KEY is missing',
-    );
+    await expect(page.getByTestId('dictation-phone-keys')).toContainText('no Deepgram key is set');
     await page.getByTestId('settings-nav-providers').click();
 
     await page.getByTestId('provider-key-deepgram-edit').click();
@@ -73,6 +71,7 @@ test.describe('Settings — Providers', () => {
         { id: 'openai', source: 'none', envSet: false },
         { id: 'groq', source: 'env', last4: 'q9Zk', envSet: true },
         { id: 'deepgram', source: 'ui', last4: 'LAST', envSet: false },
+        { id: 'elevenlabs', source: 'none', envSet: false },
       ],
     });
     await page.getByTestId('settings-nav-voice').click();
@@ -81,7 +80,7 @@ test.describe('Settings — Providers', () => {
     expect(await page.content()).not.toContain(FAKE_KEY);
   });
 
-  test('revoking asks first, then deletes it from every machine', async ({ page }) => {
+  test('revoking asks first, then deletes it', async ({ page }) => {
     const server = await stubSettingsApi(page, {
       secrets: {
         providerKeys: NO_SECRETS.providerKeys.map((k) =>
@@ -93,7 +92,7 @@ test.describe('Settings — Providers', () => {
     await expect(page.getByTestId('provider-key-gemini-status')).toHaveText('Set · ends LAST');
     await page.getByTestId('provider-key-gemini-revoke').click();
     const dialog = page.getByRole('dialog');
-    await expect(dialog).toContainText('from every machine');
+    await expect(dialog).toContainText('Delete the Gemini key');
     await dialog.getByRole('button', { name: 'Revoke' }).click();
     await expect
       .poll(() => server.writes.map((w) => `${w.method} ${w.path}`))

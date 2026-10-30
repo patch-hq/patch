@@ -1,13 +1,10 @@
-// The Manager sweep's one decision call (spec/06 § Sweep).
+// The Manager sweep's one decision call (spec/06 § The sweep).
 //
-// A cheap, tool-free, one-shot query: given the sweep's compact digest, the
-// model returns exactly one action per candidate chat — nudge, wake, flag or
-// leave — as JSON. No tool loop, so there is no way for it to approve a
-// permission or answer a real question even by accident; those candidates
-// are never offered to it as nudgeable in the first place (the digest marks
-// them `permission`/`question`, and the executor refuses to nudge/wake a
-// chat carrying either edge regardless of what this returns — belt and
-// braces, `managerSweepRunner.ts`).
+// A cheap, tool-free, one-shot query: given the standing instructions and the
+// facts (chats that went idle, with their last messages), the model returns
+// exactly one action per chat — answer, digest or leave — as JSON. No tool
+// loop, so it cannot approve a permission; whether a question is covered by
+// Tom's standing instructions is the prompt's call, not code's.
 //
 // NO FALLBACK: any failure — OAuth miss, SDK error, timeout, unparseable
 // reply — resolves to null, and the sweep records the run as a failure
@@ -24,9 +21,13 @@ const SWEEP_TIMEOUT_MS = 30_000;
 
 export interface SweepDecision {
   chatId: string;
-  action: 'nudge' | 'wake' | 'flag' | 'leave';
+  action: 'answer' | 'digest' | 'leave';
+  /** What to send the chat (answer). */
   message?: string;
-  flagText?: string;
+  /** The open question, in one plain line (digest). */
+  question?: string;
+  /** Why the Manager couldn't answer it itself (digest). */
+  reason?: string;
   /** The target chat's folder, echoed back; delivery checks it matches. */
   folder?: string;
 }
@@ -40,7 +41,7 @@ export interface SweepDecisionResult {
 export interface GenerateSweepDecisionsInput {
   /** The rendered digest text — candidates, their edge, idle time, and recent messages. */
   digest: string;
-  /** The (possibly user-edited) sweep prompt — spec/06 § Settings. */
+  /** The (possibly user-edited) standing instructions — spec/06 § Settings. */
   prompt: string;
   model: string;
 }
@@ -73,20 +74,22 @@ export function parseSweepDecisions(raw: string): SweepDecision[] | null {
   const raw_decisions = (parsed as { decisions: unknown }).decisions;
   if (!Array.isArray(raw_decisions)) return null;
   const out: SweepDecision[] = [];
-  const VALID_ACTIONS = new Set(['nudge', 'wake', 'flag', 'leave']);
+  const VALID_ACTIONS = new Set(['answer', 'digest', 'leave']);
   for (const d of raw_decisions) {
     if (typeof d !== 'object' || d === null) return null;
-    const { chatId, action, message, flagText, folder } = d as Record<string, unknown>;
+    const { chatId, action, message, question, reason, folder } = d as Record<string, unknown>;
     if (typeof chatId !== 'string' || chatId === '') return null;
     if (typeof action !== 'string' || !VALID_ACTIONS.has(action)) return null;
     if (message !== undefined && typeof message !== 'string') return null;
-    if (flagText !== undefined && typeof flagText !== 'string') return null;
+    if (question !== undefined && typeof question !== 'string') return null;
+    if (reason !== undefined && typeof reason !== 'string') return null;
     if (folder !== undefined && typeof folder !== 'string') return null;
     out.push({
       chatId,
       action: action as SweepDecision['action'],
       ...(typeof message === 'string' ? { message } : {}),
-      ...(typeof flagText === 'string' ? { flagText } : {}),
+      ...(typeof question === 'string' ? { question } : {}),
+      ...(typeof reason === 'string' ? { reason } : {}),
       ...(typeof folder === 'string' ? { folder } : {}),
     });
   }

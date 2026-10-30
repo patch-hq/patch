@@ -57,6 +57,18 @@ async function start(options?: import('../src/lib/dictationMode').DictationModeO
 }
 
 describe('mobile dictation mode', () => {
+  it('drops a stock phrase the speech model invented from a short noise burst', async () => {
+    voiceTranscribeMock.mockResolvedValue({ ok: true, transcript: ' Thank you. ' });
+    const { h, texts, errors } = await start();
+    feed(speech, 800);
+    feed(quiet, 3200);
+    await flush();
+    expect(voiceTranscribeMock).toHaveBeenCalledOnce();
+    expect(texts).toEqual([]);
+    expect(errors).toEqual([]);
+    h.stop();
+  });
+
   it('opens a live preview per utterance, feeds it, and closes it when the utterance ends', async () => {
     const partials: string[] = [];
     let onPartial!: (t: string) => void;

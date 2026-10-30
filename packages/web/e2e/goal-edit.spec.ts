@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-// Real-browser e2e for the goal bar (spec/14 § Main chat panel — Goal bar).
+// Real-browser e2e for the goal row (spec/14 § Main chat panel — Goal bar).
 // Real ChatRoute + real CSS via the dev harness, no backend. The goal text is
 // edited in a modal, expandable in place, with metrics that wrap without clipping.
 const HARNESS = '/app/dev-harness.html?chat=chat_tasks';
@@ -11,7 +11,7 @@ for (const [name, viewport] of [
   ['desktop', { width: 1280, height: 800 }],
   ['mobile', { width: 390, height: 780 }],
 ] as const) {
-  test.describe(`goal bar — ${name}`, () => {
+  test.describe(`goal row — ${name}`, () => {
     test.use({ viewport });
 
     test('clicking the goal opens a modal; saving posts the new goal', async ({ page }) => {
@@ -31,7 +31,9 @@ for (const [name, viewport] of [
       await expect.poll(() => posted).toEqual({ goal: LONG });
     });
 
-    test('a long goal is clamped to two readable lines and expands in place', async ({ page }) => {
+    test('a long goal is one ellipsised line folded, wrapped when opened from the pill', async ({
+      page,
+    }) => {
       await page.route('**/api/chats/*/goal', (r) =>
         r.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' }),
       );
@@ -41,50 +43,37 @@ for (const [name, viewport] of [
       await page.getByTestId('goal-edit-save').click();
       const text = page.getByTestId('goal-banner-text');
       await expect(text).toHaveAttribute('title', LONG);
-      const m = await text.evaluate((el) => {
-        const cs = getComputedStyle(el);
-        return {
-          h: el.getBoundingClientRect().height,
-          lh: parseFloat(cs.lineHeight),
-          font: parseFloat(cs.fontSize),
-        };
-      });
-      expect(m.font).toBeGreaterThanOrEqual(15);
-      expect(m.h).toBeLessThanOrEqual(m.lh * 2 + 2);
-      const expand = page.getByTestId('goal-expand-btn');
-      await expand.click();
-      await expect(expand).toHaveAttribute('aria-expanded', 'true');
-      expect(await text.evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
-      await expand.click();
-      await expect(expand).toHaveAttribute('aria-expanded', 'false');
-      expect((await text.boundingBox())!.height).toBeLessThanOrEqual(m.lh * 2 + 2);
+      const folded = (await text.boundingBox())!.height;
+      expect(folded).toBeLessThan(24);
+      const pill = page.getByTestId('goal-pill');
+      await pill.click();
+      await expect(pill).toHaveAttribute('aria-expanded', 'true');
+      expect((await text.boundingBox())!.height).toBeGreaterThan(folded * 1.5);
+      expect(await text.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+      await pill.click();
+      expect((await text.boundingBox())!.height).toBeLessThan(24);
     });
 
-    test('goal state and controls stay readable while metrics wrap inside the bar', async ({
-      page,
-    }) => {
+    test('the Goal row follows the shared anatomy; Edit goal opens the modal', async ({ page }) => {
       await page.goto(HARNESS);
       const bar = await page.getByTestId('goal-banner').boundingBox();
       expect(bar!.x).toBeGreaterThanOrEqual(0);
       expect(bar!.x + bar!.width).toBeLessThanOrEqual(viewport.width);
-      await expect(page.getByTestId('goal-banner-label')).toHaveText('Goal active');
+      await expect(page.getByTestId('goal-pill')).toContainText('Working');
+      await expect(page.getByText('Goal active')).toHaveCount(0);
+      await expect(page.getByTestId('goal-banner')).toContainText('1 check');
+      const font = await page
+        .getByTestId('goal-banner-text')
+        .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+      expect(font).toBeLessThanOrEqual(14);
       const clear = await page.getByTestId('goal-clear-btn').boundingBox();
       const text = await page.getByTestId('goal-banner-text').boundingBox();
       expect(Math.abs(text!.y + text!.height / 2 - (clear!.y + clear!.height / 2))).toBeLessThan(
         text!.height / 2 + 4,
       );
-      await expect(page.locator('[data-testid^="goal-banner-cell-"]')).toHaveCount(3);
-      const meta = await page.getByTestId('goal-banner-meta').boundingBox();
-      expect(meta!.y).toBeGreaterThanOrEqual(text!.y + text!.height - 1);
-      expect(meta!.y + meta!.height).toBeLessThanOrEqual(bar!.y + bar!.height);
-      await expect(page.getByTestId('goal-banner-cell-turns')).toHaveText('1 check');
-      const cells = page.getByTestId('goal-banner-meta').locator('span');
-      for (const cell of await cells.all()) {
-        const box = (await cell.boundingBox())!;
-        expect(box.x).toBeGreaterThanOrEqual(meta!.x);
-        expect(box.x + box.width).toBeLessThanOrEqual(meta!.x + meta!.width + 1);
-        expect(await cell.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
-      }
+      await page.getByTestId('goal-pill').click();
+      await page.getByTestId('goal-edit-link').click();
+      await expect(page.getByTestId('goal-edit-modal')).toBeVisible();
     });
   });
 }

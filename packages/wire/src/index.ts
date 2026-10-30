@@ -164,6 +164,7 @@ export * from './modelLabel.js';
 // all render from it.
 export * from './usageWindows.js';
 export * from './codec.js';
+export * from './host-health.js';
 export * from './codepoints.js';
 export * from './cron-tz.js';
 // The one natural-language renderer for a cron expression, shared by every

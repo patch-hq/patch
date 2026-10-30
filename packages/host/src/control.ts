@@ -86,6 +86,7 @@ import { resolveSpeakers, type SpeakerCascadeDeps } from './devices/speakers-cas
 import { GIT_SHA, VERSION } from './version.js';
 import { RemoteRelayError } from './remote-relay.js';
 import { buildPeekResult } from './peek.js';
+import { probeFolderAccess } from './folderAccess.js';
 
 /**
  * A cross-machine `patch_spawn` the NAMED machine refused (or never answered).
@@ -1209,7 +1210,27 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!auth.ok) return reply.code(401).send({ error: auth.reason });
     if (!opts.daemon) return reply.code(503).send({ error: 'host not initialised' });
     const state = opts.daemon.chatState.resolve(req.params.id);
-    if (!state) return reply.code(404).send({ error: 'not found' });
+    if (!state) {
+      // Not on THIS host — `patch chats get` on a chat another machine owns.
+      // Same relay as patch_peek (one event, only the chat_state is kept).
+      if (opts.peekRemoteChat) {
+        try {
+          const remote = await opts.peekRemoteChat({
+            sourceChatId: 'cli',
+            targetChatId: req.params.id,
+            limit: 1,
+          });
+          return remote.chat_state;
+        } catch (err) {
+          const code = err instanceof RemoteRelayError ? err.code : 'sdk_error';
+          return reply.code(code === 'chat_not_found' ? 404 : 502).send({
+            error: code,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      return reply.code(404).send({ error: 'not found' });
+    }
     return state;
   });
 
@@ -1221,6 +1242,19 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!state) return reply.code(404).send({ error: 'not found' });
     await opts.daemon.stopChat(state.chatId);
     return { ok: true };
+  });
+
+  // POST /chats/:id/resume-now — stop waiting out a usage-limit pause and run
+  // the parked turn now (same effect as the card's button, spec/10 § Usage).
+  // `resumed: false` means nothing was parked, so the caller can say so.
+  app.post<{ Params: { id: string } }>('/chats/:id/resume-now', async (req, reply) => {
+    const auth = checkAuth(req);
+    if (!auth.ok) return reply.code(401).send({ error: auth.reason });
+    if (!opts.daemon) return reply.code(503).send({ error: 'host not initialised' });
+    const state = opts.daemon.chatState.resolve(req.params.id);
+    if (!state) return reply.code(404).send({ error: 'not found' });
+    const resumed = opts.daemon.resumeRateLimitedNow(state.chatId);
+    return { ok: true, resumed };
   });
 
   // POST /chats/:id/archive — archive/unarchive a chat over the local UDS.
@@ -1460,6 +1494,8 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
   };
 
   // GET /host — this machine's self-description.
+  app.get('/folder-access', async () => probeFolderAccess());
+
   app.get('/host', async (req, reply) => {
     const host = hostGate(req, reply);
     if (!host) return;

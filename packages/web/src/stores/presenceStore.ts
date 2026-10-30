@@ -7,7 +7,13 @@
 
 import { create } from 'zustand';
 import { CLOSE_SERVER_RESTARTING } from '@patch/wire';
-import type { AuthOkHost, ClaudeMemoryEntry, HostAccountEvent, HostInfoEvent } from '@patch/wire';
+import type {
+  AuthOkHost,
+  ClaudeMemoryEntry,
+  HostAccountEvent,
+  HostConditionEvent,
+  HostInfoEvent,
+} from '@patch/wire';
 
 export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'offline';
 
@@ -36,8 +42,6 @@ export interface WsCloseInfo {
 export interface HostPresence {
   hostId: string;
   online: boolean;
-  /** Why it is offline, when it said: 'updating' means it will be back shortly. */
-  offlineReason?: string;
   lastSeenAt: number | null;
   /** The host's last self-description; null until it has reported one. */
   host: Omit<HostInfoEvent, 'type'> | null;
@@ -58,6 +62,14 @@ export interface HostPresence {
    * an empty one, and Settings says which it is.
    */
   folders: { roots: string[]; recent: string[] } | null;
+  /**
+   * Why this online host is struggling (`host.condition`), or null while it is
+   * coping. Dropped when the host goes offline: an unreachable host has no
+   * condition to report.
+   */
+  condition?: HostConditionEvent | null;
+  /** Why the host dropped off, when the server could tell (`host.offline` reason); 'updating' means it is installing an update and will be back shortly. */
+  offlineReason?: string | null;
 }
 
 /**
@@ -146,7 +158,9 @@ interface PresenceState {
    */
   removeHost(hostId: string): void;
   /** One host's presence changed (`host.online` / `host.offline`). */
-  setHostOnline(hostId: string, online: boolean, reason?: string): void;
+  setHostOnline(hostId: string, online: boolean, offlineReason?: string): void;
+  /** One host's condition (`host.condition`). */
+  setHostCondition(condition: HostConditionEvent): void;
   /** One host's self-description (`host.host`). */
   setHostReport(report: HostInfoEvent): void;
   /** One backend's credential state on one host (`host.account`). */
@@ -193,6 +207,7 @@ function blankHost(hostId: string): HostPresence {
     accounts: {},
     claudeSettings: null,
     folders: null,
+    condition: null,
   };
 }
 
@@ -242,7 +257,7 @@ export const usePresenceStore = create<PresenceState>((set) => ({
       return { hosts, hostOnline: anyOnline(hosts) };
     });
   },
-  setHostOnline(hostId, online, reason) {
+  setHostOnline(hostId, online, offlineReason) {
     set((s) => {
       const prev = s.hosts[hostId] ?? blankHost(hostId);
       const hosts = {
@@ -250,12 +265,24 @@ export const usePresenceStore = create<PresenceState>((set) => ({
         [hostId]: {
           ...prev,
           online,
-          offlineReason: online ? undefined : reason,
           // "Last seen" is when it went away, so stamp the offline edge too.
           ...(online || prev.online ? { lastSeenAt: Date.now() } : {}),
+          ...(online
+            ? { offlineReason: null }
+            : { condition: null, offlineReason: offlineReason ?? null }),
         },
       };
       return { hosts, hostOnline: anyOnline(hosts) };
+    });
+  },
+  setHostCondition(condition) {
+    set((s) => {
+      const prev = s.hosts[condition.hostId] ?? blankHost(condition.hostId);
+      const hosts = {
+        ...s.hosts,
+        [condition.hostId]: { ...prev, condition: condition.state === 'online' ? null : condition },
+      };
+      return { hosts };
     });
   },
   setHostReport(report) {

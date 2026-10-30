@@ -317,7 +317,11 @@ export function UsageBars({
               {win.disabledReason !== undefined ? (
                 <DisabledReason reason={win.disabledReason} extraUsageUrl={extraUsageUrl} />
               ) : win.resetsAt !== undefined ? (
-                `${blocked ? 'blocked · ' : ''}resets ${formatReset(win.resetsAt)}`
+                `${blocked ? 'blocked · ' : ''}${
+                  !blocked && win.runsOutAt !== undefined
+                    ? `runs out ~${formatReset(win.runsOutAt)} · `
+                    : ''
+                }resets ${formatReset(win.resetsAt)}`
               ) : blocked ? (
                 'blocked'
               ) : (

@@ -43,6 +43,8 @@ const css = readFileSync(CSS_PATH, 'utf8');
  */
 const MAY_FALL_BACK: Record<string, string> = {
   '--measure-slack': 'defined on .chat-stream, and .content.md also renders outside that scope',
+  '--panel-inset':
+    'set on <html> by AppShell only while the desktop web panel is open; 0px otherwise',
   '--wave-level': 'written per element by Waveform.tsx; the bars need a resting value',
   '--wave-envelope': 'written per element by Waveform.tsx; the bars need a resting value',
 };
@@ -109,12 +111,12 @@ function references(): { name: string; hasFallback: boolean; line: number; text:
  * taken off this list, so the numbers only ever go down. Never raise an entry.
  */
 const UNDEFINED_BASELINE: Record<string, number> = {
-  '--ink-1': 18,
+  '--ink-1': 15,
   '--text-base': 1,
   '--hover': 1,
   '--font-mono': 3,
   '--border': 1,
-  '--paper': 7,
+  '--paper': 6,
   '--bg-1': 2,
   '--bg-hover': 1,
   '--bg-subtle': 1,
@@ -126,7 +128,7 @@ const SHADOWED_BASELINE: Record<string, number> = {
   '--accent-tint': 3,
   '--accent-soft': 18,
   '--danger': 18,
-  '--ink-1': 18,
+  '--ink-1': 15,
   '--line': 1,
   '--text-base': 1,
   '--hover': 1,
@@ -142,7 +144,7 @@ const SHADOWED_BASELINE: Record<string, number> = {
   '--running': 2,
   '--leaf': 5,
   '--waiting': 3,
-  '--paper': 7,
+  '--paper': 6,
   '--bg-1': 2,
   '--bg-hover': 1,
   '--bg-soft': 1,

@@ -11,6 +11,7 @@
 // (spec/12 § Host-offline UX).
 
 import type { JSX } from 'react';
+import { describeHostOffline } from '@patch/wire';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { hostStatusLine, hostStatusView, useHostStatus } from '../lib/hostStatus.js';

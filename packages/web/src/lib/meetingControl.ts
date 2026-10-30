@@ -75,6 +75,9 @@ function ws(): NonNullable<ReturnType<typeof getActiveWs>> {
 const speakerLog = new SpeakerLog();
 let stopSpeakerWatch: (() => void) | null = null;
 
+/** How long the call app may go without showing a single participant before the meeting says so. */
+export const NO_PARTICIPANTS_AFTER_MS = 90_000;
+
 /** Seconds of 16 kHz mono PCM16 in a WAV clip (44-byte header). */
 function wavSeconds(wavBytes: number): number {
   return Math.max(0, wavBytes - 44) / 2 / 16000;
@@ -84,13 +87,24 @@ function wavSeconds(wavBytes: number): number {
 function watchSpeakers(bridge: PatchDesktopBridge): void {
   if (!bridge.startMeetingSpeakers || !bridge.onMeetingSpeakers) return;
   speakerLog.clear();
-  const offSpeakers = bridge.onMeetingSpeakers(({ speaking }) =>
-    speakerLog.record(speaking, Date.now()),
-  );
+  let sawParticipants = false;
+  const noParticipants = setTimeout(() => {
+    if (sawParticipants) return;
+    useUiStore
+      .getState()
+      .pushError(
+        'Speaker names unavailable: no call participants found in Teams, Zoom or a browser. Open the call window and check Patch is allowed in Privacy & Security > Accessibility. Lines stay "Them".',
+      );
+  }, NO_PARTICIPANTS_AFTER_MS);
+  const offSpeakers = bridge.onMeetingSpeakers(({ participants, speaking }) => {
+    if (participants.length > 0) sawParticipants = true;
+    speakerLog.record(speaking, Date.now());
+  });
   const offFailed = bridge.onMeetingSpeakersFailed?.(({ message }) =>
     useUiStore.getState().pushError(`Speaker names unavailable: ${message}`),
   );
   stopSpeakerWatch = () => {
+    clearTimeout(noParticipants);
     offSpeakers();
     offFailed?.();
     bridge.stopMeetingSpeakers?.();

@@ -7,9 +7,23 @@
 // terminals and pages join as later stages extend `TabDescriptor`
 // (`stores/layoutStore.ts`) and the `TabContent` switch below.
 
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  Fragment,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { createPortal } from 'react-dom';
-import type { DragEvent as ReactDragEvent, JSX, MouseEvent as ReactMouseEvent } from 'react';
+import type {
+  DragEvent as ReactDragEvent,
+  JSX,
+  MouseEvent as ReactMouseEvent,
+  ReactNode,
+} from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/rest.js';
 import {
@@ -23,10 +37,13 @@ import {
   Layers,
 } from 'lucide-react';
 import {
+  GROUP_COLOURS,
+  MIN_GROUP_WIDTH_PX,
   countPanes,
   firstLeaf,
   isTabDirty,
   useLayoutStore,
+  type Group,
   type LeafPane,
   type PaneNode,
   type SplitEdge,
@@ -207,14 +224,17 @@ function activeLeafTabs(node: PaneNode, out: { pane: LeafPane; tab: Tab }[] = []
 
 function HostedTab({
   tab,
+  hostKey,
   focused,
   ws,
 }: {
   tab: Tab;
+  /** `groupId:tabId` — the same tab can be open in two groups at once. */
+  hostKey: string;
   focused: boolean;
   ws: PatchWs | null;
 }): JSX.Element {
-  const el = tabHostEl(tab.id);
+  const el = tabHostEl(hostKey);
   useLayoutEffect(() => {
     tabHostUsers.set(el, (tabHostUsers.get(el) ?? 0) + 1);
     return () => {
@@ -227,24 +247,156 @@ function HostedTab({
         if ((tabHostUsers.get(el) ?? 0) > 0) return;
         tabHostUsers.delete(el);
         el.remove();
-        if (tabHostEls.get(tab.id) === el) tabHostEls.delete(tab.id);
+        if (tabHostEls.get(hostKey) === el) tabHostEls.delete(hostKey);
       });
     };
-  }, [el, tab.id]);
+  }, [el, hostKey]);
   return createPortal(<TabContent tab={tab} focused={focused} ws={ws} />, el);
 }
 
+/** Which group a pane is being drawn in. */
+interface GroupView {
+  group: Group;
+  /** The group has the user's focus. */
+  focused: boolean;
+}
+const GroupCtx = createContext<GroupView | null>(null);
+
+function useGroupView(): GroupView {
+  const v = useContext(GroupCtx);
+  if (!v) throw new Error('pane rendered outside a group');
+  return v;
+}
+
+/** Colour slot (1..GROUP_COLOURS) of the group at `index` — the sidebar's
+ *  number chip and the group card share it. */
+export function groupColourClass(index: number): string {
+  return `g${(index % GROUP_COLOURS) + 1}`;
+}
+
 export function PaneArea({ ws }: { ws: PatchWs | null }): JSX.Element {
-  const root = useLayoutStore((s) => s.root);
-  const activePaneId = useLayoutStore((s) => s.activePaneId);
-  const totalPanes = countPanes(root);
+  const groups = useLayoutStore((s) => s.groups);
+  const focusedGroupId = useLayoutStore((s) => s.focusedGroupId);
+  const resizeGroups = useLayoutStore((s) => s.resizeGroups);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const [rowWidth, setRowWidth] = useState(0);
+  useLayoutEffect(() => {
+    const el = rowRef.current;
+    if (!el) return;
+    const measure = (): void => setRowWidth(el.getBoundingClientRect().width);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // When the row cannot give every group its minimum width, only the focused
+  // group is shown; the rest stay reachable from their sidebar numbers
+  // (spec/14 § Groups). Before the first measure everything is shown.
+  const fits = rowWidth === 0 || groups.length * MIN_GROUP_WIDTH_PX <= rowWidth;
+  const visible = fits ? groups : groups.filter((g) => g.id === focusedGroupId);
+  const cards = groups.length > 1;
+  const minFraction = rowWidth > 0 ? MIN_GROUP_WIDTH_PX / rowWidth : 0;
+
   return (
-    <>
-      <PaneNodeView node={root} ws={ws} totalPanes={totalPanes} />
-      {activeLeafTabs(root).map(({ pane, tab }) => (
-        <HostedTab key={tab.id} tab={tab} focused={pane.id === activePaneId} ws={ws} />
-      ))}
-    </>
+    <div
+      ref={rowRef}
+      className={`group-row${cards ? ' group-row-cards' : ''}`}
+      data-testid="group-row"
+    >
+      {visible.map((group, i) => {
+        const index = groups.indexOf(group);
+        const focused = group.id === focusedGroupId;
+        const active = activeLeafTabs(group.root);
+        return (
+          <Fragment key={group.id}>
+            {i > 0 ? (
+              <PaneDividerHandle
+                direction="row"
+                onResize={(delta) => resizeGroups(index - 1, delta, minFraction)}
+              />
+            ) : null}
+            <GroupCtx.Provider value={{ group, focused }}>
+              <GroupCard
+                group={group}
+                index={index}
+                cards={cards}
+                focused={focused}
+                size={fits ? group.size : 1}
+              >
+                <PaneNodeView node={group.root} ws={ws} totalPanes={countPanes(group.root)} />
+              </GroupCard>
+              {active.map(({ pane, tab }) => (
+                <HostedTab
+                  key={`${group.id}:${tab.id}`}
+                  hostKey={`${group.id}:${tab.id}`}
+                  tab={tab}
+                  focused={focused && pane.id === group.activePaneId}
+                  ws={ws}
+                />
+              ))}
+            </GroupCtx.Provider>
+          </Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
+function GroupCard({
+  group,
+  index,
+  cards,
+  focused,
+  size,
+  children,
+}: {
+  group: Group;
+  index: number;
+  cards: boolean;
+  focused: boolean;
+  size: number;
+  children: ReactNode;
+}): JSX.Element {
+  const focusGroup = useLayoutStore((s) => s.focusGroup);
+  const closeGroup = useLayoutStore((s) => s.closeGroup);
+  const chat = useChatStore((s) => (group.chatId ? s.chats[group.chatId] : undefined));
+  const name = group.chatId === null ? 'Empty group' : chatTitle(group.chatId, chat?.name);
+  const colour = groupColourClass(index);
+  return (
+    <section
+      className={`group-card ${colour}${cards ? ' group-card-framed' : ''}${focused ? ' group-card-focused' : ''}`}
+      style={{ flexGrow: size, flexBasis: 0 }}
+      data-testid={`group-${group.id}`}
+      data-group-index={index + 1}
+      data-focused={focused}
+      onPointerDownCapture={() => {
+        if (!focused) focusGroup(group.id);
+      }}
+    >
+      {cards ? (
+        <header className="group-head" data-testid="group-head">
+          <span className="group-name">
+            <span className="group-num" data-testid="group-num">
+              {index + 1}
+            </span>
+            <span className="group-title">{name}</span>
+          </span>
+          <button
+            type="button"
+            className="group-close"
+            aria-label="Close group"
+            title="Close group"
+            data-testid="group-close"
+            onClick={() => closeGroup(group.id)}
+          >
+            <CloseIcon size={14} />
+          </button>
+        </header>
+      ) : null}
+      <div className="group-body">{children}</div>
+    </section>
   );
 }
 
@@ -289,11 +441,11 @@ function PaneNodeView({
 import { PaneDivider as PaneDividerHandle } from './PaneDivider.js';
 
 function Pane({ pane, totalPanes }: { pane: LeafPane; totalPanes: number }): JSX.Element {
-  const activePaneId = useLayoutStore((s) => s.activePaneId);
+  const { group, focused: groupFocused } = useGroupView();
   const setActivePane = useLayoutStore((s) => s.setActivePane);
   const moveTab = useLayoutStore((s) => s.moveTab);
   const splitWithTab = useLayoutStore((s) => s.splitWithTab);
-  const focused = activePaneId === pane.id;
+  const focused = groupFocused && group.activePaneId === pane.id;
   const [dropEdge, setDropEdge] = useState<SplitEdge | 'center' | null>(null);
   // `onDrop` reads this REF, not the `dropEdge` state above: a native drag
   // fires `dragover` and `drop` back-to-back, synchronously, often before
@@ -369,7 +521,9 @@ function Pane({ pane, totalPanes }: { pane: LeafPane; totalPanes: number }): JSX
   const showTabBar = pane.tabs.length > 1 || totalPanes > 1;
   // The pane in the window's top-left corner: its tab bar is the row the
   // desktop shell's window controls float over (spec/05 § Window chrome).
-  const isOrigin = useLayoutStore((s) => firstLeaf(s.root).id === pane.id);
+  const isOrigin = useLayoutStore(
+    (s) => s.groups[0]?.id === group.id && firstLeaf(group.root).id === pane.id,
+  );
 
   return (
     <div
@@ -385,7 +539,7 @@ function Pane({ pane, totalPanes }: { pane: LeafPane; totalPanes: number }): JSX
           <div className={`pane-dropzone pane-dropzone-${dropEdge}`} data-testid="pane-dropzone" />
         ) : null}
         {activeTab ? (
-          <TabSlot tabId={activeTab.id} />
+          <TabSlot tabId={`${group.id}:${activeTab.id}`} />
         ) : (
           <div className="pane-empty" data-testid="pane-empty">
             No tabs open
@@ -480,7 +634,7 @@ function TabBar({ pane, focused }: { pane: LeafPane; focused: boolean }): JSX.El
   const setActivePane = useLayoutStore((s) => s.setActivePane);
   const closeTab = useLayoutStore((s) => s.closeTab);
   const closePane = useLayoutStore((s) => s.closePane);
-  const multiplePanes = useLayoutStore((s) => s.root.type === 'split');
+  const multiplePanes = useGroupView().group.root.type === 'split';
   const reorderTab = useLayoutStore((s) => s.reorderTab);
   const moveTab = useLayoutStore((s) => s.moveTab);
   const [dragOverId, setDragOverId] = useState<string | null>(null);

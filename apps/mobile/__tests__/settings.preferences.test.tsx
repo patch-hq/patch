@@ -132,7 +132,7 @@ describe('sections before the settings have loaded', () => {
       await flush();
     });
     expect(api.settings).toHaveBeenCalled();
-    expect(findHost(r.root, byTestId('manager-watching')).props.value).toBe(true);
+    expect(findHost(r.root, byTestId('manager-watching')).props.value).toBe(false);
   });
 });
 
@@ -279,11 +279,11 @@ describe('Voice (per-surface config matrix)', () => {
     });
     const r = renderRN(<VoicePage />);
     expect(textOf(findHost(r.root, byTestId('dictation-phone-keys')))).toBe(
-      'Not configured on hetzner: DEEPGRAM_API_KEY is missing. Sessions there are refused.',
+      'Not configured on hetzner: no Deepgram key is set. Sessions there are refused.',
     );
     expect(queryHost(r.root, byTestId('dictation-computer-keys'))).toBeNull();
     expect(textOf(findHost(r.root, byTestId('voice-device-keys')))).toBe(
-      'Not configured on laptop, hetzner: OPENAI_REALTIME_API_KEY is missing. Sessions there are refused.',
+      'Not configured on laptop, hetzner: no OpenAI key is set. Sessions there are refused.',
     );
     expect(queryHost(r.root, byTestId('voice-call-keys'))).toBeNull();
     expect(queryHost(r.root, byTestId('voice-handsFree-keys'))).toBeNull();
@@ -371,13 +371,13 @@ describe('Manager page', () => {
   it('Enabled writes sweepEnabled', async () => {
     seedSettings();
     const r = renderRN(<ManagerPage />);
-    expect(findHost(r.root, byTestId('manager-watching')).props.value).toBe(true);
+    expect(findHost(r.root, byTestId('manager-watching')).props.value).toBe(false); // off by default
     await actAsync(async () => {
-      findHost(r.root, byTestId('manager-watching')).props.onValueChange(false);
+      findHost(r.root, byTestId('manager-watching')).props.onValueChange(true);
       await flush();
     });
-    expect(api.setPreferences).toHaveBeenCalledWith({ sweepEnabled: false });
-    expect(findHost(r.root, byTestId('manager-watching')).props.value).toBe(false);
+    expect(api.setPreferences).toHaveBeenCalledWith({ sweepEnabled: true });
+    expect(findHost(r.root, byTestId('manager-watching')).props.value).toBe(true);
   });
 
   it('a failed write is reported and the switch keeps what the server holds', async () => {
@@ -385,7 +385,7 @@ describe('Manager page', () => {
     seedSettings();
     const r = renderRN(<ManagerPage />);
     await actAsync(async () => {
-      findHost(r.root, byTestId('manager-watching')).props.onValueChange(false);
+      findHost(r.root, byTestId('manager-watching')).props.onValueChange(true);
       await flush();
     });
     expect(__getLastAlert()).toEqual({
@@ -393,7 +393,7 @@ describe('Manager page', () => {
       message: 'HTTP 503',
       buttons: undefined,
     });
-    expect(findHost(r.root, byTestId('manager-watching')).props.value).toBe(true);
+    expect(findHost(r.root, byTestId('manager-watching')).props.value).toBe(false);
   });
 
   it('quiet hours commit a valid HH:MM on blur, and refuse anything else', async () => {

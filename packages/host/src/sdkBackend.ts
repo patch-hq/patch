@@ -1078,6 +1078,11 @@ export function buildSdkEnv(opts: SdkRunOptions): {
   const env: Record<string, string | undefined> = { ...process.env };
   delete env['ANTHROPIC_API_KEY'];
   env['CLAUDE_CODE_OAUTH_TOKEN'] = opts.oauthAccessToken;
+  // An unattended agent must not reach the 1Password desktop app: with the
+  // integration on, every `op` call raises a macOS "would like to access data
+  // from other apps" prompt, blamed on the host. Off, `op` fails fast (service
+  // account tokens, which need no desktop app, are unaffected).
+  env['OP_BIOMETRIC_UNLOCK_ENABLED'] = 'false';
   // The chat's own shell commands learn which chat they are in (e.g. `pad
   // publish` sends the user's edits back here). Only this run's id: never one
   // inherited from whatever launched the host.

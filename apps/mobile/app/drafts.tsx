@@ -39,7 +39,15 @@ function DraftRow({ draft }: { draft: NewChatDraft }): React.ReactElement {
         <Text numberOfLines={1} style={{ color: colors.ink, fontFamily: fonts.body, fontSize: 15 }}>
           {title}
         </Text>
-        {draft.folder ? (
+        {draft.failure ? (
+          <Text
+            testID={`draft-failed-${draft.id}`}
+            numberOfLines={1}
+            style={{ color: colors.red, ...typography.meta, marginTop: 2 }}
+          >
+            Failed · {draft.failure.sentence}
+          </Text>
+        ) : draft.folder ? (
           <Text numberOfLines={1} style={{ color: colors.ink3, ...typography.meta, marginTop: 2 }}>
             {folderName(draft.folder)}
           </Text>

@@ -26,9 +26,9 @@ const runWith =
 describe('parseSweepDecisions', () => {
   it('parses a plain JSON object', () => {
     const out = parseSweepDecisions(
-      '{"decisions": [{"chatId": "c1", "action": "nudge", "message": "carry on"}]}',
+      '{"decisions": [{"chatId": "c1", "action": "answer", "message": "carry on"}]}',
     );
-    expect(out).toEqual([{ chatId: 'c1', action: 'nudge', message: 'carry on' }]);
+    expect(out).toEqual([{ chatId: 'c1', action: 'answer', message: 'carry on' }]);
   });
 
   it('tolerates a fenced code block', () => {
@@ -38,11 +38,13 @@ describe('parseSweepDecisions', () => {
     expect(out).toEqual([{ chatId: 'c1', action: 'leave' }]);
   });
 
-  it('parses a flag decision with flagText', () => {
+  it('parses a digest decision with its question', () => {
     const out = parseSweepDecisions(
-      '{"decisions": [{"chatId": "c1", "action": "flag", "flagText": "needs a human call"}]}',
+      '{"decisions": [{"chatId": "c1", "action": "digest", "question": "which database?", "reason": "needs a person"}]}',
     );
-    expect(out).toEqual([{ chatId: 'c1', action: 'flag', flagText: 'needs a human call' }]);
+    expect(out).toEqual([
+      { chatId: 'c1', action: 'digest', question: 'which database?', reason: 'needs a person' },
+    ]);
   });
 
   it('returns null for invalid JSON', () => {
@@ -59,6 +61,14 @@ describe('parseSweepDecisions', () => {
     ).toBeNull();
   });
 
+  it('returns null for the retired actions (nudge, wake, flag)', () => {
+    for (const action of ['nudge', 'wake', 'flag']) {
+      expect(
+        parseSweepDecisions(`{"decisions": [{"chatId": "c1", "action": "${action}"}]}`),
+      ).toBeNull();
+    }
+  });
+
   it('returns null when a decision is missing chatId', () => {
     expect(parseSweepDecisions('{"decisions": [{"action": "leave"}]}')).toBeNull();
   });
@@ -72,7 +82,7 @@ describe('parseSweepDecisions', () => {
 describe('makeSweepDecider', () => {
   const okOAuth = (): OAuthCheckResult => ({ ok: true, accessToken: 'tok-123' });
   const baseInput = {
-    digest: '1 chat changed:\n\n- c1 — stalled',
+    digest: '1 chat went idle:\n\n- c1 — idle',
     prompt: 'decide',
     model: 'claude-sonnet-5',
   };
@@ -82,7 +92,8 @@ describe('makeSweepDecider', () => {
     sdk.enqueue([
       {
         type: 'assistant',
-        content: '{"decisions": [{"chatId": "c1", "action": "wake", "message": "still there?"}]}',
+        content:
+          '{"decisions": [{"chatId": "c1", "action": "answer", "message": "Yes, carry on."}]}',
       },
       { type: 'result', sessionId: 'sess-1' },
     ]);
@@ -92,7 +103,7 @@ describe('makeSweepDecider', () => {
       logger: silent,
     });
     const out = await decide(baseInput);
-    expect(out?.decisions).toEqual([{ chatId: 'c1', action: 'wake', message: 'still there?' }]);
+    expect(out?.decisions).toEqual([{ chatId: 'c1', action: 'answer', message: 'Yes, carry on.' }]);
     expect(out?.tokensUsed).toBeGreaterThan(0);
     const opts = sdk.lastOptions();
     expect(opts?.inferenceProfile).toBe('classifier');

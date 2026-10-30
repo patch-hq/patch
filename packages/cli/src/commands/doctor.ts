@@ -219,6 +219,21 @@ export function registerDoctorCommand(program: Command): void {
           checks['erroredChats'] = `error: ${(err as Error).message}`;
         }
 
+        // --- macOS folder permissions (the host process's own access) ---
+        // Reads of ~/Documents etc. hang when the host lacks Full Disk Access,
+        // which stalls every tool call that touches them. Only the host itself
+        // can answer, so this is reported over the local socket only.
+        if (config.hostSocket !== null && config.daemonLocalKey !== null) {
+          try {
+            const t = buildTransport(config, { forceUds: true });
+            checks['folderAccess'] = await t.get<unknown>('/folder-access');
+          } catch (err) {
+            checks['folderAccess'] = `error: ${(err as Error).message}`;
+          }
+        } else {
+          checks['folderAccess'] = 'unknown: only reported over the local host socket';
+        }
+
         // --- pending cron/webhook backlog (on-box only) ---
         checks['pendingBacklog'] = pendingBacklog();
 

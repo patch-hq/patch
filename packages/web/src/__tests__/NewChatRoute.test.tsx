@@ -1994,6 +1994,55 @@ describe('/chats/new', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it('a refused first send stays as a failed draft with its message and error, and resends', async () => {
+    for (const id of [...useDraftStore.getState().order]) useDraftStore.getState().remove(id);
+    let creates = 0;
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      if (init?.method !== 'POST') {
+        return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      creates += 1;
+      return creates === 1
+        ? new Response(
+            JSON.stringify({ error: 'no_model_catalogue', message: 'no model catalogue on d1' }),
+            { status: 400, headers: { 'content-type': 'application/json' } },
+          )
+        : new Response(JSON.stringify({ chatId: '01JRESENT00000000000000000' }), {
+            status: 202,
+            headers: { 'content-type': 'application/json' },
+          });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const ws = { send: vi.fn() } as unknown as PatchWs;
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={['/chats/new']}>
+          <Routes>
+            <Route path="/chats/new" element={<NewChatRoute ws={ws} />} />
+            <Route path="/chats/:chatId" element={<div data-testid="navigated" />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByTestId('new-chat-folder-pill'));
+    fireEvent.change(screen.getByTestId('new-chat-folder'), { target: { value: '~/proj' } });
+    const composer = screen.getByTestId('composer-input') as HTMLTextAreaElement;
+    fireEvent.change(composer, { target: { value: 'a long first message' } });
+    fireEvent.keyDown(composer, { key: 'Enter', metaKey: true });
+
+    await waitFor(() => expect(screen.getByTestId('new-chat-failed')).toBeInTheDocument());
+    const kept = Object.values(useDraftStore.getState().drafts).filter((d) => d.failure);
+    expect(kept).toHaveLength(1);
+    expect(kept[0]!.text).toBe('a long first message');
+    expect(kept[0]!.failure!.detail).toMatch(/no_model_catalogue/);
+
+    fireEvent.click(screen.getByTestId('new-chat-resend'));
+    await waitFor(() => expect(screen.getByTestId('navigated')).toBeInTheDocument());
+    expect(creates).toBe(2);
+    expect(Object.values(useDraftStore.getState().drafts).filter((d) => d.failure)).toHaveLength(0);
+  });
+
   it('surfaces a plain Error message (not an ApiError) from a failed chat creation', async () => {
     // A network-level failure (fetch itself rejects) rather than a non-2xx
     // JSON response — exercises the non-ApiError branch of the catch handler.
@@ -2109,14 +2158,18 @@ describe('/chats/new', () => {
       (el) =>
         Array.from(el.childNodes).some((n) => n.nodeType === 3) && el.textContent === SENTENCE,
     );
-    expect(carriers).toHaveLength(1);
-    expect(carriers[0]).toHaveClass('msg');
+    // The toast announces it; the failed chat kept for the message holds it
+    // (spec/04 § Spawn). The old unstyled panel paragraph stays gone.
+    expect(carriers).toHaveLength(2);
+    expect(carriers.map((c) => c.getAttribute('data-testid'))).toContain('new-chat-failed-error');
+    const toast = carriers.find((c) => c.closest('.error-toast'))!;
+    expect(toast).toHaveClass('msg');
     // And that one place is the STYLED toast, not a bare paragraph.
-    expect(carriers[0]?.closest('.error-toast')).not.toBeNull();
+    expect(toast.closest('.error-toast')).not.toBeNull();
     expect(screen.queryByTestId('new-chat-error')).not.toBeInTheDocument();
     // The host's own wording is kept, but only inside the Details disclosure —
     // it is not a second copy of the failure sitting in the open.
-    expect(carriers[0]?.textContent).not.toContain(MESSAGE);
+    expect(toast.textContent).not.toContain(MESSAGE);
     expect(screen.getByTestId('error-toast-detail-text')).toHaveTextContent(MESSAGE);
   });
 

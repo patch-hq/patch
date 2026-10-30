@@ -185,6 +185,33 @@ describe('C1 Control IPC: POST /chats/:id/stop (no body)', () => {
   });
 });
 
+describe('C1 Control IPC: POST /chats/:id/resume-now', () => {
+  it('requires auth, 404s an unknown chat, and reports resumed:false when nothing is parked', async () => {
+    const { daemon, jobs, folder } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    const app = await buildControl({ daemon, jobs, localKey: LOCAL_KEY });
+    try {
+      const unauth = await app.inject({ method: 'POST', url: `/chats/${chatId}/resume-now` });
+      expect(unauth.statusCode).toBe(401);
+      const missing = await app.inject({
+        method: 'POST',
+        url: '/chats/nope/resume-now',
+        headers: AUTH,
+      });
+      expect(missing.statusCode).toBe(404);
+      const res = await app.inject({
+        method: 'POST',
+        url: `/chats/${chatId}/resume-now`,
+        headers: AUTH,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ ok: true, resumed: false });
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 describe('C1 Control IPC: POST /chats/:id/archive (over UDS)', () => {
   it('archives and unarchives a chat over the local UDS transport', async () => {
     const { daemon, jobs, folder } = setup();
