@@ -15,7 +15,7 @@ export function openPadBesideChat(padId: string, chatId: string): void {
   const chatTab: TabDescriptor = { kind: 'chat', chatId };
   let chat = store.findTab(chatTab);
   if (!chat) {
-    store.openTab(chatTab);
+    store.showChat(chatId);
     chat = useLayoutStore.getState().findTab(chatTab);
   }
   if (chat) {

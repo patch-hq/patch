@@ -301,12 +301,12 @@ describe('a voice surface whose backend has no key on the host', () => {
   };
   test('the refusal names the surface, the key and the Settings → Voice fix', () => {
     expect(voiceKeyMissingMessage('dictation', 'gemini')).toBe(
-      'Dictation is set to gemini, but GEMINI_API_KEY is not set on this host. ' +
-        'Switch Dictation to another backend in Settings → Voice.',
+      'Dictation is set to gemini, but no Gemini key is set on this host. ' +
+        'Add it in Settings → Providers, or switch Dictation to another backend in Settings → Voice.',
     );
     expect(voiceKeyMissingMessage('hands-free', 'openai')).toBe(
-      'Hands-free is set to openai, but OPENAI_REALTIME_API_KEY is not set on this host. ' +
-        'Switch Hands-free to another backend in Settings → Voice.',
+      'Hands-free is set to openai, but no OpenAI key is set on this host. ' +
+        'Add it in Settings → Providers, or switch Hands-free to another backend in Settings → Voice.',
     );
   });
   test('lists every surface on a provider the host has no key for, and only those', () => {
@@ -328,17 +328,17 @@ describe('a voice surface whose backend has no key on the host', () => {
       { hostName: 'old-daemon' },
     ];
     expect(voiceKeyHostStatus('gemini', hosts)).toBe(
-      'Not configured on hetzner: GEMINI_API_KEY is missing. Sessions there are refused.',
+      'Not configured on hetzner: no Gemini key is set. Sessions there are refused.',
     );
     expect(voiceKeyHostStatus('openai', hosts)).toBe(
-      'Not configured on hetzner, mac: OPENAI_REALTIME_API_KEY is missing. Sessions there are refused.',
+      'Not configured on hetzner, mac: no OpenAI key is set. Sessions there are refused.',
     );
     expect(voiceKeyHostStatus('local', hosts)).toBeNull();
     // Neither the phone's recogniser nor the host's Whisper needs a key.
     expect(voiceKeyHostStatus('device', hosts)).toBeNull();
     expect(voiceKeyHostStatus('whisper', hosts)).toBeNull();
     expect(voiceKeyHostStatus('deepgram', hosts)).toBe(
-      'Not configured on hetzner, mac: DEEPGRAM_API_KEY is missing. Sessions there are refused.',
+      'Not configured on hetzner, mac: no Deepgram key is set. Sessions there are refused.',
     );
     expect(
       voiceKeyHostStatus('gemini', [

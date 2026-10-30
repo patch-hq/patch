@@ -27,19 +27,34 @@ export function useOpenable(
   menu: JSX.Element;
 } {
   const ctx = useContextMenu();
+  // A chat is shown by a group, not opened as a tab (spec/14 § Groups): its
+  // other ways of opening put it in a group of its own.
+  const chatId = target.kind === 'chat' ? target.chatId : null;
   const items: ContextMenuItem[] = [
-    {
-      id: 'open-new-tab',
-      label: 'Open in new tab',
-      icon: <SquarePlus size={14} aria-hidden />,
-      run: () => useLayoutStore.getState().openTab(target, { placement: 'tab' }),
-    },
-    {
-      id: 'open-to-the-side',
-      label: 'Open to the side',
-      icon: <PanelRightOpen size={14} aria-hidden />,
-      run: () => useLayoutStore.getState().openTab(target, { placement: 'split', edge: 'right' }),
-    },
+    ...(chatId !== null
+      ? [
+          {
+            id: 'open-new-group',
+            label: 'Open in new group',
+            icon: <PanelRightOpen size={14} aria-hidden />,
+            run: () => useLayoutStore.getState().showChat(chatId, { newGroup: true }),
+          },
+        ]
+      : [
+          {
+            id: 'open-new-tab',
+            label: 'Open in new tab',
+            icon: <SquarePlus size={14} aria-hidden />,
+            run: () => useLayoutStore.getState().openTab(target, { placement: 'tab' }),
+          },
+          {
+            id: 'open-to-the-side',
+            label: 'Open to the side',
+            icon: <PanelRightOpen size={14} aria-hidden />,
+            run: () =>
+              useLayoutStore.getState().openTab(target, { placement: 'split', edge: 'right' }),
+          },
+        ]),
     {
       id: 'open-new-window',
       label: 'Open in new window',
@@ -57,7 +72,8 @@ export function useOpenable(
     onAuxClick: (e) => {
       if (e.button !== 1) return;
       e.preventDefault();
-      useLayoutStore.getState().openTab(target, { placement: 'tab' });
+      if (chatId !== null) useLayoutStore.getState().showChat(chatId, { newGroup: true });
+      else useLayoutStore.getState().openTab(target, { placement: 'tab' });
     },
     onContextMenu: ctx.openAt,
     menu: (
@@ -88,6 +104,9 @@ export function OpenableLink({
         {...rest}
         onClick={(e) => {
           if (o.handleModifiedClick(e)) return;
+          // Unconditional, not left to the route: the path may already name
+          // this chat while another group has the focus.
+          if (opens.kind === 'chat') useLayoutStore.getState().showChat(opens.chatId);
           onClick?.(e);
         }}
         onAuxClick={o.onAuxClick}

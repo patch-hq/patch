@@ -16,6 +16,7 @@ import { LayerEditor } from './AgentPage.js';
 import { patchShared } from './sharedWrite.js';
 import { failed } from '../../lib/errorCopy.js';
 import { PositiveNumberInput } from './PositiveNumberInput.js';
+import { DeliverySlider } from './DeliverySlider.js';
 
 export function ManagerPage(): JSX.Element {
   const preferences = usePreferencesStore((s) => s.preferences);
@@ -47,29 +48,17 @@ export function ManagerPage(): JSX.Element {
             testid="sweep-enabled"
           />
         </Row>
-        <Row title="Interval">
-          <PositiveNumberInput
-            ariaLabel="Sweep interval (minutes)"
+        <Row title="Questions for me">
+          <DeliverySlider
             value={preferences.sweepIntervalMinutes}
             disabled={!loaded}
-            testid="sweep-interval-minutes"
+            testid="sweep-delivery"
             onCommit={(next) => write({ sweepIntervalMinutes: next })}
           />
-          <span className="set-unit">min</span>
-        </Row>
-        <Row title="Stalled after">
-          <PositiveNumberInput
-            ariaLabel="Stalled threshold (minutes)"
-            value={preferences.stalledThresholdMinutes}
-            disabled={!loaded}
-            testid="sweep-stalled-threshold"
-            onCommit={(next) => write({ stalledThresholdMinutes: next })}
-          />
-          <span className="set-unit">min with no new output</span>
         </Row>
         <Row title="Messages per chat">
           <PositiveNumberInput
-            ariaLabel="Messages per chat in the digest"
+            ariaLabel="Messages read per chat"
             value={preferences.sweepMessagesPerChat}
             disabled={!loaded}
             testid="sweep-messages-per-chat"
@@ -92,7 +81,7 @@ export function ManagerPage(): JSX.Element {
           </select>
         </Row>
         <LayerEditor
-          title="Sweep prompt"
+          title="Standing instructions"
           sub={preferences.sweepPrompt.split('\n')[0] ?? ''}
           initial={preferences.sweepPrompt}
           testid="sweep-prompt"

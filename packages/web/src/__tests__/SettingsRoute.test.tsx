@@ -717,12 +717,12 @@ describe('Settings → Voice', () => {
       renderSettings('/settings/voice');
       await waitFor(() => expect(screen.getByTestId('dictation-phone-keys')).toBeInTheDocument());
       expect(screen.getByTestId('dictation-phone-keys')).toHaveTextContent(
-        'Not configured on hetzner: DEEPGRAM_API_KEY is missing. Sessions there are refused.',
+        'Not configured on hetzner: no Deepgram key is set. Sessions there are refused.',
       );
       // Whisper on the computer needs no key.
       expect(screen.queryByTestId('dictation-computer-keys')).toBeNull();
       expect(screen.getByTestId('voice-device-keys')).toHaveTextContent(
-        'Not configured on hetzner, mac: OPENAI_REALTIME_API_KEY is missing. Sessions there are refused.',
+        'Not configured on hetzner, mac: no OpenAI key is set. Sessions there are refused.',
       );
       expect(screen.queryByTestId('voice-handsFree-keys')).toBeNull();
       expect(screen.queryByTestId('voice-call-keys')).toBeNull();
@@ -955,6 +955,25 @@ describe('Settings → Voice', () => {
       expect(select.value).toBe('af_heart');
       fireEvent.change(select, { target: { value: 'bm_george' } });
       await waitFor(() => expect(server.writes).toContainEqual({ kokoroVoice: 'bm_george' }));
+    });
+
+    it('chooses ElevenLabs as the speech engine and writes it to the account', async () => {
+      const server = preferencesServer(() => usePreferencesStore.getState().preferences as never);
+      vi.stubGlobal('fetch', makeFetch({}, server.handler));
+      loadShared();
+      renderSettings('/settings/voice');
+      await screen.findByTestId('kokoro-voice');
+      fireEvent.click(within(screen.getByTestId('tts-backend')).getByText('ElevenLabs'));
+      await waitFor(() => expect(server.writes).toContainEqual({ ttsBackend: 'elevenlabs' }));
+    });
+
+    it('with ElevenLabs chosen and no key on any host, says why there are no voices', async () => {
+      vi.stubGlobal('fetch', makeFetch());
+      loadShared({ settings: { ttsBackend: 'elevenlabs' } });
+      renderSettings('/settings/voice');
+      const select = (await screen.findByTestId('elevenlabs-voice')) as HTMLSelectElement;
+      expect(select.disabled).toBe(true);
+      expect(screen.getByTestId('voice-speaking')).toHaveTextContent('Add an ElevenLabs key');
     });
 
     it('says each host uses its own default until a voice is chosen', async () => {
@@ -1420,7 +1439,7 @@ describe('Settings → Manager (account-wide)', () => {
     fireEvent.change(screen.getByTestId('rotation-time'), { target: { value: '03:00' } });
     await waitFor(() => expect(server.writes).toHaveLength(5));
     expect(server.writes).toEqual([
-      { sweepEnabled: false },
+      { sweepEnabled: true },
       { quietHoursStart: '22:30' },
       { quietHoursEnd: '06:15' },
       { rotationEnabled: false },

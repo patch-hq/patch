@@ -141,6 +141,17 @@ export function parseNaturalSchedule(input: string): string | null {
     return null;
   }
 
+  // A one-off ("once at 9am tomorrow", "next friday", "on the 5th") is not a
+  // repeating schedule. Reading only its clock time turned it into a daily
+  // cron, so refuse the whole phrase.
+  if (
+    /\b(?:once|one[- ]?off|one time|tomorrow|today|tonight|yesterday|next|this|\d{1,2}(?:st|nd|rd|th)|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/.test(
+      text,
+    )
+  ) {
+    return null;
+  }
+
   // A word that changes the meaning of everything around it and that cron
   // cannot express ("except friday", "9am or 10pm"): refuse the whole phrase.
   // Reading past it produced the OPPOSITE schedule — "every hour between 9am

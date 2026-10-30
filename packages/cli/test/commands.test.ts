@@ -195,6 +195,22 @@ test('chats stop --json: REST happy path', async () => {
   );
 });
 
+test('chats resume-now --json: REST happy path', async () => {
+  await withSetup(
+    (req) => {
+      if (req.url === '/api/chats/01M3N32N9T7V75JCV7XHY9NRHM/resume-now' && req.method === 'POST')
+        return { status: 200, body: { ok: true } };
+      return { status: 404, body: { error: 'not found' } };
+    },
+    async (env) => {
+      const r = await runCli(['chats', 'resume-now', '01M3N32N9T7V75JCV7XHY9NRHM', '--json'], env);
+      assert.equal(r.code, 0, `stderr=${r.stderr}`);
+      const parsed = JSON.parse(r.stdout) as { ok: boolean };
+      assert.equal(parsed.ok, true);
+    },
+  );
+});
+
 test('chats archive --json: REST happy path', async () => {
   await withSetup(
     (req) => {
@@ -1123,4 +1139,22 @@ test('activity --json: over the host socket it asks /internal/activity as the ca
     await new Promise<void>((ok) => server.close(() => ok()));
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('doctor --json: folderAccess is unknown over REST (only the host can answer)', async () => {
+  await withSetup(
+    (req) => {
+      if (req.url === '/api/healthz') return { status: 200, body: { ok: true, version: 'v' } };
+      if (req.url === '/api/daemon/healthz') return { status: 200, body: { ok: true } };
+      if (req.url === '/api/chats') return { status: 200, body: { chats: [] } };
+      if (req.url === '/api/auth/me') return { status: 200, body: { ok: true } };
+      return { status: 404, body: { error: 'not found' } };
+    },
+    async (env) => {
+      const r = await runCli(['doctor', '--json'], env);
+      assert.equal(r.code, 0, `stderr=${r.stderr}`);
+      const parsed = JSON.parse(r.stdout) as { folderAccess: string };
+      assert.match(parsed.folderAccess, /only reported over the local host socket/);
+    },
+  );
 });

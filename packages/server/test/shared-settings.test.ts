@@ -121,6 +121,32 @@ describe('SharedSettingsService', () => {
     });
   });
 
+  it('accepts 0 for the sweep interval (Instant) and refuses a negative one', () => {
+    expect(service.update({ sweepIntervalMinutes: 0 }).sweepIntervalMinutes).toBe(0);
+    expect(() => service.update({ sweepIntervalMinutes: -5 })).toThrow();
+  });
+
+  it('has the sweep off by default', () => {
+    expect(service.current().sweepEnabled).toBe(false);
+  });
+
+  it('a settings file from before the Manager redesign loads, with the sweep off and the old prompt replaced', () => {
+    writeFileSync(
+      join(dir, 'settings.json'),
+      JSON.stringify({
+        sweepEnabled: true,
+        stalledThresholdMinutes: 15,
+        sweepPrompt: 'old prompt that returns nudge/wake/flag',
+        sweepIntervalMinutes: 10,
+      }),
+    );
+    const loaded = make().current();
+    expect(loaded.sweepEnabled).toBe(false);
+    expect(loaded.sweepPrompt).toBe(DEFAULT_SHARED_SETTINGS.sweepPrompt);
+    expect(loaded.sweepIntervalMinutes).toBe(10);
+    expect('stalledThresholdMinutes' in loaded).toBe(false);
+  });
+
   it('gives every deployment a stable public name from its generated identity key', () => {
     const first = service.current().agentIdentity.name;
     expect(make().current().agentIdentity.name).toBe(first);

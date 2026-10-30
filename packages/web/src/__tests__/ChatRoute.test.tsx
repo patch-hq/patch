@@ -3,6 +3,7 @@
 // selector returning a fresh `[]` on every call, breaking Object.is and
 // causing infinite re-render. Hoisted EMPTY_TIMELINE fixes it.
 
+import { markDictatedSend } from '../lib/dictatedSends.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
@@ -360,6 +361,40 @@ describe('ChatRoute regression', () => {
     await new Promise((r) => requestAnimationFrame(() => r(null)));
     await new Promise((r) => requestAnimationFrame(() => r(null)));
     expect(stream.scrollTop).toBe(12000);
+  });
+
+  // spec/07 § Dictation mode: a message dictation mode sends by itself is not
+  // the user asking to go to the bottom — they may be reading a reply.
+  it('does not re-pin when the sent echo is a dictation-mode send', async () => {
+    const base: ChatEventEntry[] = Array.from({ length: 40 }, (_v, i) => ({
+      seq: i,
+      kind: 'message' as const,
+      role: 'user' as const,
+      content: `m${i}`,
+      at: 0,
+    }));
+    seedChat('c-send-dictated', base);
+    renderChat('c-send-dictated');
+    const stream = screen.getByTestId('chat-stream');
+    Object.defineProperty(stream, 'scrollHeight', { configurable: true, value: 12000 });
+    Object.defineProperty(stream, 'clientHeight', { configurable: true, value: 780 });
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+    stream.scrollTop = 2000;
+    stream.dispatchEvent(new Event('scroll'));
+    markDictatedSend('L-dict');
+    useChatStore.setState((s) => ({
+      timelines: {
+        ...s.timelines,
+        ['c-send-dictated']: [
+          ...base,
+          { seq: 40, kind: 'message', role: 'user', content: 'hello', localId: 'L-dict', at: 0 },
+        ],
+      },
+    }));
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+    expect(stream.scrollTop).toBe(2000);
   });
 
   // Searching backwards for the newest still-pending echo must not re-yank the
@@ -3477,6 +3512,25 @@ describe('ChatRoute regression', () => {
       expect(screen.getByTestId('goal-outcome-detail').textContent).toContain(
         'All tests pass and the release is tagged',
       );
+    });
+
+    it('shows a call hand-off answer in full as readable text, not a truncated quiet line', () => {
+      const reply = `${'A long answer. '.repeat(40)}\nSecond paragraph.`;
+      seedChat('c-call-reply', [
+        {
+          seq: 0,
+          kind: 'message',
+          role: 'system',
+          content: '[call] -> sent to agent: add milk',
+          at: 0,
+        },
+        { seq: 1, kind: 'message', role: 'system', content: `[call] <- agent: ${reply}`, at: 1 },
+      ]);
+      renderChat('c-call-reply');
+      const el = screen.getByTestId('call-agent-reply');
+      expect(el.textContent).toContain('Second paragraph.');
+      expect(el.textContent).not.toContain('<- agent');
+      expect(el.textContent).not.toContain('…');
     });
 
     it('renders an impossible outcome labelled distinctly from met', () => {

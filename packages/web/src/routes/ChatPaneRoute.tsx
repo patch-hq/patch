@@ -3,9 +3,8 @@
 // mount it replaces.
 //
 // A navigation to `/chats/:chatId` (a sidebar Link, browser back/forward, a
-// deep link, a reload) opens that chat in the active pane, replacing its
-// current tab (spec/14 § Opening things) — or simply focuses it if it's
-// already open somewhere. `?seq=` rides along as a one-shot jump, then is
+// deep link, a reload) shows that chat in a group (spec/14 § Groups): the group
+// already showing it, else the focused group switches to it. `?seq=` rides along as a one-shot jump, then is
 // stripped from the URL (mirrors the jump-to param's own clear-immediately
 // rule, moved up from `ChatRoute`).
 //
@@ -28,35 +27,27 @@ import { useEffect } from 'react';
 import type { JSX } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { PaneArea } from '../components/PaneArea.js';
-import { useLayoutStore, resolvePane } from '../stores/layoutStore.js';
+import { useLayoutStore } from '../stores/layoutStore.js';
 import type { PatchWs } from '../api/ws.js';
 
 export function ChatPaneRoute({ ws }: { ws: PatchWs | null }): JSX.Element {
   const { chatId = '' } = useParams<{ chatId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const seqParam = searchParams.get('seq');
-  const openTab = useLayoutStore((s) => s.openTab);
+  const showChat = useLayoutStore((s) => s.showChat);
 
   useEffect(() => {
-    // The active tab may ALREADY be this exact chat, just not as a bare
-    // chat tab — a file, a terminal, or that chat's Files page. That is
-    // most often the layout a reload just restored (spec/14 § Panes and
-    // tabs — "the whole layout persists"): opening the plain chat tab here
-    // unconditionally would immediately clobber it. A genuine navigation
-    // to a DIFFERENT chat never hits this — the active tab, if any, is
-    // scoped to the chat being navigated AWAY from, not this one — so the
-    // check only ever fires for "this is already showing", never for "skip
-    // a real switch".
+    // A group may ALREADY be showing this chat — most often the layout a reload
+    // just restored (spec/14 § Groups — "the whole layout persists"): showing
+    // it again would move focus off the group the user left focused. A genuine
+    // navigation to a chat no group shows never hits this.
     const state = useLayoutStore.getState();
-    const activePane = resolvePane(state.root, state.activePaneId);
-    const activeTab = activePane.tabs.find((t) => t.id === activePane.activeTabId);
-    const alreadyShowingThisChat =
-      activeTab && 'chatId' in activeTab.descriptor && activeTab.descriptor.chatId === chatId;
-    if (alreadyShowingThisChat && seqParam === null) return;
+    const alreadyShowing = state.groups.some((g) => g.chatId === chatId);
+    if (alreadyShowing && seqParam === null) return;
 
     const seq =
       seqParam !== null && Number.isInteger(Number(seqParam)) ? Number(seqParam) : undefined;
-    openTab({ kind: 'chat', chatId }, seq !== undefined ? { seq } : {});
+    showChat(chatId, seq !== undefined ? { seq } : {});
     if (seqParam !== null) {
       setSearchParams(
         (prev) => {
@@ -67,7 +58,7 @@ export function ChatPaneRoute({ ws }: { ws: PatchWs | null }): JSX.Element {
         { replace: true },
       );
     }
-  }, [chatId, seqParam, openTab, setSearchParams]);
+  }, [chatId, seqParam, showChat, setSearchParams]);
 
   return <PaneArea ws={ws} />;
 }

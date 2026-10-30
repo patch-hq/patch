@@ -692,6 +692,149 @@ body {
 
 /* ---------- Panes and tabs (spec/14 § Panes and tabs) ---------- */
 
+/* ---------- Groups (spec/14 § Groups) ---------- */
+
+/* `PaneArea`'s root: a row of groups filling the slot `.chat-main` once held.
+   With one group there is no card chrome and it looks as it always did. */
+.group-row {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.group-row-cards {
+  gap: 0;
+  padding: 8px;
+  background: var(--bg-app);
+}
+.group-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.group-card-framed {
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  position: relative;
+}
+.group-card-framed.group-card-focused {
+  border-color: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent-tint);
+}
+.group-row-cards > .pane-divider {
+  flex-basis: 8px;
+  width: 8px;
+}
+.group-body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 44px;
+  box-sizing: border-box;
+  padding: 0 8px 0 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.group-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  font-family: 'Fraunces Variable', Fraunces, serif;
+  font-size: 17px;
+  font-weight: 500;
+}
+.group-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.group-close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+.group-close:hover {
+  background: var(--bg-soft);
+  color: var(--ink);
+}
+/* The fixed set of group colours. `.onscreen` is the number in a sidebar row
+   or a group's header. */
+.g1 {
+  --g: #46802f;
+  --gt: #e7f0dd;
+  --gs: #2f5521;
+}
+.g2 {
+  --g: #4a6fa5;
+  --gt: #e1e9f4;
+  --gs: #2d4c78;
+}
+.g3 {
+  --g: #9a5b8a;
+  --gt: #f1e3ee;
+  --gs: #6c3a61;
+}
+.g4 {
+  --g: #b07a12;
+  --gt: #f6ead0;
+  --gs: #7a5208;
+}
+.g5 {
+  --g: #3f8a86;
+  --gt: #dcefed;
+  --gs: #245f5c;
+}
+.onscreen,
+.group-num {
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 5px;
+  display: grid;
+  place-items: center;
+  font:
+    600 11px/1 Inter,
+    system-ui,
+    sans-serif;
+  background: var(--gt);
+  color: var(--gs);
+  cursor: pointer;
+}
+.group-num {
+  cursor: default;
+}
+.name.has-onscreen {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.name.has-onscreen .name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.name.has-onscreen .onscreen {
+  margin-right: 0;
+}
+
 /* `PaneArea`'s own root fills the same flex slot `.chat-main` used to occupy
    directly in `.three-col`. */
 .pane-split {
@@ -3141,32 +3284,6 @@ button.nav-row {
   font-size: var(--text-min);
   font-weight: 500;
 }
-.workers-pill {
-  align-self: flex-start;
-  margin-top: 6px;
-  background: var(--line-soft);
-  color: var(--ink-2);
-  display: inline-flex;
-  max-width: 100%;
-  overflow: hidden;
-  border-radius: var(--radius-pill);
-  font-size: var(--text-min);
-  font-weight: 500;
-  white-space: nowrap;
-}
-.workers-pill-segment {
-  padding: 3px 10px;
-  min-width: 0;
-  max-width: 260px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.workers-pill-segment[data-state='done'] {
-  color: var(--ink-3);
-}
-.workers-pill-segment + .workers-pill-segment {
-  border-left: 1px solid var(--line);
-}
 .chat-head-actions {
   /* Same 1fr basis as the crumb (so the title stays centred). This used to
      carry `min-width: fit-content` — never shrink below the icons — which
@@ -3693,6 +3810,19 @@ button.nav-row {
   font-size: var(--text-min);
   color: var(--ink-3);
   padding: 4px 0;
+}
+.call-agent-reply {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 4px 0;
+}
+.call-agent-reply-text {
+  color: var(--ink);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .msg-user.voice-live .content,
 .msg.voice .content {
@@ -7851,6 +7981,9 @@ button.view-file-download {
 .modal-overlay {
   position: fixed;
   inset: 0;
+  /* The web panel is a native view above the page: stop at its edge so the
+     modal is centred in what is visible, not half hidden under the panel. */
+  right: var(--panel-inset, 0px);
   z-index: 3000;
   display: flex;
   align-items: center;
@@ -9289,6 +9422,14 @@ button.set-row-open:focus-visible {
 .set-unit {
   color: var(--ink-3);
   font-size: 14px;
+}
+.set-slider {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.set-slider input[type='range'] {
+  width: 160px;
 }
 .set-chev {
   color: var(--ink-faint);
@@ -17161,4 +17302,187 @@ select.permission-mode.is-pending {
 .sweep-status-detail-text,
 .sweep-status-earlier {
   opacity: 0.7;
+}
+
+/* ---------- Status list (spec/14 § Main chat panel — Status list) ---------- */
+/* One container under the header for Goal, Agents, Tasks and Artifacts. Every
+   row shares one grid: 16px icon | label word | content | meta | action. */
+.status-list {
+  padding: 6px 0;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--ink);
+}
+.status-list:empty {
+  display: none;
+}
+.status-row {
+  display: grid;
+  grid-template-columns: 16px 72px minmax(0, 1fr) auto 20px;
+  column-gap: 12px;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 28px;
+}
+.status-row:hover {
+  background: var(--bg-soft);
+}
+.status-row-icon {
+  display: flex;
+  color: var(--ink-3);
+}
+.status-row-icon.run {
+  color: var(--accent);
+}
+.status-row-label,
+.status-row-meta {
+  color: var(--ink-3);
+}
+.status-row-meta {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: right;
+}
+.status-row-content {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.status-row-content > .status-grow {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.status-row-wrap .status-row-content {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.status-row-wrap .status-row-content > .status-grow {
+  white-space: normal;
+}
+.status-row-action {
+  display: flex;
+  justify-content: flex-end;
+  color: var(--ink-3);
+}
+.status-row-action button,
+.status-row-action [role='button'] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  padding: 0;
+  cursor: pointer;
+}
+.status-row-action button:hover,
+.status-row-action [role='button']:hover {
+  color: var(--danger);
+}
+.status-row-action [aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: default;
+}
+.status-pill {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  padding: 0 8px 0 10px;
+  font: inherit;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.status-link {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.status-link-underline {
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 3px;
+}
+.status-muted {
+  color: var(--ink-3);
+}
+.status-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-3);
+  cursor: pointer;
+  flex: none;
+}
+.status-toggle input {
+  margin: 0;
+}
+.status-row-ended .status-grow {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+.status-row-sub {
+  grid-column: 3 / 5;
+  color: var(--ink-3);
+  padding: 0 0 8px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.status-spinner {
+  animation: background-task-spin 1.8s linear infinite;
+}
+@keyframes background-task-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .status-spinner {
+    animation: none;
+  }
+}
+.status-row-nested .status-row-content {
+  display: block;
+}
+.status-row-nested .status-row-content > .status-grow {
+  display: block;
+}
+.task-row-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+@media (max-width: 600px) {
+  .status-row {
+    grid-template-columns: 16px minmax(0, 1fr) auto 20px;
+    padding: 0 16px;
+  }
+  .status-row-label,
+  .status-row-meta-quiet {
+    display: none;
+  }
+  .status-row-sub {
+    grid-column: 2 / 4;
+  }
 }

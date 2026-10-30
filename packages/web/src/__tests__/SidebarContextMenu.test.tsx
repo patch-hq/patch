@@ -107,8 +107,7 @@ describe('sidebar row context menu', () => {
     const menu = screen.getByTestId(MENU);
     expect(menu.getAttribute('role')).toBe('menu');
     expect([...menu.querySelectorAll('[role="menuitem"]')].map((n) => n.textContent)).toEqual([
-      'Open in new tab',
-      'Open to the side',
+      'Open in new group',
       'Open in new window',
       'Rename',
       'Pin',
@@ -224,32 +223,18 @@ describe('sidebar row context menu', () => {
     await waitFor(() => expect(useChatStore.getState().chats['c1']?.hidden).toBe(false));
   });
 
-  it('"Open in new tab" opens the chat as a new tab in the active pane (spec/14 § Panes and tabs)', async () => {
+  it('"Open in new group" shows the chat in a group of its own (spec/14 § Groups)', async () => {
     useChatStore.getState().hydrate([rowFixture()]);
     renderSidebar();
 
     rightClick(screen.getByTestId('chat-row-c1'));
     await act(async () => {
-      fireEvent.click(screen.getByTestId(`${MENU}-open-new-tab`));
+      fireEvent.click(screen.getByTestId(`${MENU}-open-new-group`));
     });
 
-    const root = useLayoutStore.getState().root;
-    expect(root.type).toBe('leaf');
-    expect(
-      (root as { tabs: { descriptor: { chatId: string } }[] }).tabs.map((t) => t.descriptor.chatId),
-    ).toEqual(['c1']);
-  });
-
-  it('"Open to the side" splits the pane with the chat in the new one', async () => {
-    useChatStore.getState().hydrate([rowFixture()]);
-    renderSidebar();
-
-    rightClick(screen.getByTestId('chat-row-c1'));
-    await act(async () => {
-      fireEvent.click(screen.getByTestId(`${MENU}-open-to-the-side`));
-    });
-
-    expect(useLayoutStore.getState().root.type).toBe('split');
+    const { groups, focusedGroupId } = useLayoutStore.getState();
+    expect(groups).toHaveLength(2);
+    expect(groups.find((g) => g.id === focusedGroupId)?.chatId).toBe('c1');
   });
 
   it('"Open in new window" opens the chat in its own window', async () => {
@@ -265,7 +250,7 @@ describe('sidebar row context menu', () => {
     expect(spy).toHaveBeenCalledWith('c1');
   });
 
-  it('middle-click opens the chat as a new tab instead of a browser tab', () => {
+  it('middle-click opens the chat in a new group instead of a browser tab', () => {
     useChatStore.getState().hydrate([rowFixture(), rowFixture({ chatId: 'c2' })]);
     renderSidebar();
 
@@ -273,11 +258,52 @@ describe('sidebar row context menu', () => {
     fireEvent(screen.getByTestId('chat-row-c2'), ev);
 
     expect(ev.defaultPrevented).toBe(true);
-    const root = useLayoutStore.getState().root;
-    expect(root.type).toBe('leaf');
-    expect(
-      (root as { tabs: { descriptor: { chatId: string } }[] }).tabs.map((t) => t.descriptor.chatId),
-    ).toEqual(['c2']);
+    const { groups, focusedGroupId } = useLayoutStore.getState();
+    expect(groups).toHaveLength(2);
+    expect(groups.find((g) => g.id === focusedGroupId)?.chatId).toBe('c2');
+  });
+
+  it('a click switches the focused group to the chat, never adding a tab for it', () => {
+    useChatStore.getState().hydrate([rowFixture(), rowFixture({ chatId: 'c2' })]);
+    renderSidebar();
+
+    fireEvent.click(screen.getByTestId('chat-row-c1'));
+    fireEvent.click(screen.getByTestId('chat-row-c2'));
+
+    const { groups } = useLayoutStore.getState();
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.chatId).toBe('c2');
+    expect(JSON.stringify(groups[0]!.root)).not.toContain('"chatId":"c1"');
+  });
+
+  it('a click on a chat already showing in another group focuses that group', () => {
+    useChatStore.getState().hydrate([rowFixture(), rowFixture({ chatId: 'c2' })]);
+    useLayoutStore.getState().showChat('c1');
+    useLayoutStore.getState().showChat('c2', { newGroup: true });
+    renderSidebar();
+
+    fireEvent.click(screen.getByTestId('chat-row-c1'));
+
+    const { groups, focusedGroupId } = useLayoutStore.getState();
+    expect(groups).toHaveLength(2);
+    expect(groups.find((g) => g.id === focusedGroupId)?.chatId).toBe('c1');
+  });
+
+  it('rows of showing chats carry their group number only while several groups are on screen', () => {
+    useChatStore.getState().hydrate([rowFixture(), rowFixture({ chatId: 'c2' })]);
+    useLayoutStore.getState().showChat('c1');
+    renderSidebar();
+    expect(screen.queryByTestId('group-number-c1')).toBeNull();
+
+    act(() => useLayoutStore.getState().showChat('c2', { newGroup: true }));
+    expect(screen.getByTestId('group-number-c1').textContent).toBe('1');
+    expect(screen.getByTestId('group-number-c2').textContent).toBe('2');
+    expect(screen.getByTestId('group-number-c1').className).toContain('g1');
+    expect(screen.getByTestId('group-number-c2').className).toContain('g2');
+
+    fireEvent.click(screen.getByTestId('group-number-c1'));
+    const { groups, focusedGroupId } = useLayoutStore.getState();
+    expect(groups.find((g) => g.id === focusedGroupId)?.chatId).toBe('c1');
   });
 
   it('Delete asks for confirmation first, exactly as the header does', async () => {

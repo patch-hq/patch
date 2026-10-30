@@ -159,6 +159,20 @@ describe('away reports from the desktop shell', () => {
     }
   });
 
+  it("names the host on the machine, so the server can tie 'asleep' to it", async () => {
+    (window as unknown as { patch: unknown }).patch = {
+      getSystemPresence: async () => ({ idleMs: 10, away: 'asleep' }),
+      localHost: { status: async () => ({ installed: true, hostId: 'mac-1' }) },
+    };
+    expect(await readInputReport()).toEqual({
+      type: 'surface.input',
+      idleMs: 10,
+      scope: 'system',
+      away: 'asleep',
+      machineHostId: 'mac-1',
+    });
+  });
+
   it('leaves away out when the machine is in use', async () => {
     (window as unknown as { patch: unknown }).patch = {
       getSystemPresence: async () => ({ idleMs: 50 }),

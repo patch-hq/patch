@@ -370,3 +370,38 @@ describe('PaneArea — remount between routes', () => {
     expect(document.body).toContainElement(screen.getByTestId('settings-stub'));
   });
 });
+
+describe('PaneArea — groups (spec/14 § Groups)', () => {
+  it('one group draws no card; several draw a card each with the chat name and number', () => {
+    seedChats(['a', 'b']);
+    useLayoutStore.getState().showChat('a');
+    renderPanes();
+    expect(screen.queryByTestId('group-head')).toBeNull();
+
+    act(() => useLayoutStore.getState().showChat('b', { newGroup: true }));
+    const heads = screen.getAllByTestId('group-head');
+    expect(heads.map((h) => h.textContent)).toEqual(['1a', '2b']);
+  });
+
+  it('closing a group from its card removes it', () => {
+    seedChats(['a', 'b']);
+    useLayoutStore.getState().showChat('a');
+    useLayoutStore.getState().showChat('b', { newGroup: true });
+    renderPanes();
+    fireEvent.click(screen.getAllByTestId('group-close')[1]!);
+    expect(useLayoutStore.getState().groups.map((g) => g.chatId)).toEqual(['a']);
+  });
+
+  it('shows only the focused group when the row cannot fit them all', () => {
+    seedChats(['a', 'b']);
+    useLayoutStore.getState().showChat('a');
+    useLayoutStore.getState().showChat('b', { newGroup: true });
+    const spy = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue({ width: 700, height: 600 } as DOMRect);
+    renderPanes();
+    expect(screen.getAllByTestId('group-head')).toHaveLength(1);
+    expect(screen.getByTestId('group-head').textContent).toBe('2b');
+    spy.mockRestore();
+  });
+});

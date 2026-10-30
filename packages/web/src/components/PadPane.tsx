@@ -131,7 +131,7 @@ export function PadPane({ padId }: { padId: string }): JSX.Element {
             data-testid="pad-open-chat"
             aria-label="Open chat"
             title="Open chat"
-            onClick={() => useLayoutStore.getState().openTab({ kind: 'chat', chatId: pad.chatId })}
+            onClick={() => useLayoutStore.getState().showChat(pad.chatId)}
           >
             <MessageSquare size={16} aria-hidden />
           </button>

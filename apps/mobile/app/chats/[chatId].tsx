@@ -1,5 +1,6 @@
 // Chat detail screen: full-screen stream + composer.
 
+import { isDictatedSend } from '../../src/lib/dictatedSends';
 import { useViewPositionStore } from '../../src/stores/viewPositionStore';
 import { presentFailure } from '../../src/lib/usage';
 import React from 'react';
@@ -730,6 +731,9 @@ function ChatDetailBody(): React.ReactElement {
     seenLocalIdsRef.current = seen === null ? pending : new Set([...seen, ...pending]);
     if (seen === null) return;
     if (newest === undefined || seen.has(newest)) return;
+    // Dictation mode sends by itself while the user may be reading: leave the
+    // scroll where it is (follow mode, if on, still carries the new turn).
+    if (isDictatedSend(newest)) return;
     repinnedForSendRef.current = true;
     followRef.current = true;
     setShowScrollToBottom(false);

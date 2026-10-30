@@ -95,7 +95,7 @@ describe('manager sweep REST routes', () => {
     try {
       built.managerSweeper.onResult({
         runId: 'run-1',
-        actions: [{ chatId: 'c1', action: 'nudge' }],
+        actions: [{ chatId: 'c1', action: 'answer' }],
         tokensUsed: 500,
       });
       const res = await built.app.inject({

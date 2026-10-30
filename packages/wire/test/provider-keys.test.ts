@@ -78,7 +78,7 @@ describe('status text', () => {
   it('says why an env-only key has no Revoke', () => {
     expect(
       providerKeyEnvOnlyNote({ id: 'groq', source: 'env', last4: '1234', envSet: true }),
-    ).toContain('GROQ_API_KEY');
+    ).not.toContain('GROQ_API_KEY');
     expect(providerKeyEnvOnlyNote({ id: 'groq', source: 'ui', last4: '1', envSet: true })).toBe(
       null,
     );

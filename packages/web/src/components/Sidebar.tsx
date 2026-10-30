@@ -51,7 +51,6 @@ import {
   Maximize2,
   Ear,
   Phone,
-  SquarePlus,
   PanelRightOpen,
   Folder,
   Target,
@@ -108,6 +107,7 @@ import {
   openSidebarInNewWindow,
 } from '../lib/newWindow.js';
 import { useLayoutStore, resolvePane, focusedChatId } from '../stores/layoutStore.js';
+import { GroupNumber, useGroupIndex } from './GroupNumber.js';
 import {
   startVoiceNote,
   sendVoiceNote,
@@ -2041,6 +2041,7 @@ const ChatRowView = memo(function ChatRowView({
   // spec/04 § Snooze → Back: a chat back from a snooze carries an inset and, if
   // it did anything, a line saying what.
   const back = snoozed || archived || deleted || hidden ? null : rowBack(row);
+  const groupNum = useGroupIndex(row.chatId) !== null;
   const cls = [
     'sb-row',
     back ? 'snooze-back-row' : '',
@@ -2251,22 +2252,10 @@ const ChatRowView = memo(function ChatRowView({
     }
     items.push(
       {
-        id: 'open-new-tab',
-        label: 'Open in new tab',
-        icon: <SquarePlus size={14} aria-hidden />,
-        run: () =>
-          useLayoutStore
-            .getState()
-            .openTab({ kind: 'chat', chatId: row.chatId }, { placement: 'tab' }),
-      },
-      {
-        id: 'open-to-the-side',
-        label: 'Open to the side',
+        id: 'open-new-group',
+        label: 'Open in new group',
         icon: <PanelRightOpen size={14} aria-hidden />,
-        run: () =>
-          useLayoutStore
-            .getState()
-            .openTab({ kind: 'chat', chatId: row.chatId }, { placement: 'split', edge: 'right' }),
+        run: () => useLayoutStore.getState().showChat(row.chatId, { newGroup: true }),
       },
       {
         id: 'open-new-window',
@@ -2343,27 +2332,22 @@ const ChatRowView = memo(function ChatRowView({
     }
     if (selectable) useSelectionStore.getState().anchorAt(row.chatId);
     else useSelectionStore.getState().clear();
-    // Opens in the active pane, replacing its current tab (spec/14 § Opening
-    // things) — called directly rather than left to the `<Link>` the row
-    // already is, because react-router only re-runs `ChatPaneRoute`'s own
-    // open-on-navigate effect when the PATH actually changes. Something else
-    // (a tab click, a middle-click open elsewhere) can leave a DIFFERENT chat
-    // focused while the URL still names this one; clicking it again would
-    // then be a navigation to the path already showing — a no-op React
-    // Router does not fire a transition for — and the chat would never
-    // re-focus. Calling it here makes the open unconditional on what the URL
-    // happens to say.
-    useLayoutStore.getState().openTab({ kind: 'chat', chatId: row.chatId });
+    // Shows the chat in a group (spec/14 § Groups): focuses the group already
+    // showing it, else switches the focused group to it. Called directly
+    // rather than left to the `<Link>` the row already is, because react-router
+    // only re-runs `ChatPaneRoute`'s own effect when the PATH actually changes,
+    // and clicking a chat whose group is not focused must still focus it.
+    useLayoutStore.getState().showChat(row.chatId);
     onOpened?.();
   }
 
-  // Middle-click opens the chat as a new tab in the active pane (spec/14 §
-  // Panes and tabs), instead of the browser's own default of a new window/tab
-  // on the anchor's href.
+  // Middle-click opens the chat in a new group beside the focused one (spec/14
+  // § Groups), instead of the browser's own default of a new window/tab on the
+  // anchor's href.
   function handleRowAuxClick(e: ReactMouseEvent): void {
     if (e.button !== 1) return;
     e.preventDefault();
-    useLayoutStore.getState().openTab({ kind: 'chat', chatId: row.chatId }, { placement: 'tab' });
+    useLayoutStore.getState().showChat(row.chatId, { newGroup: true });
   }
 
   // spec/14 § Copy: the row name ellipsises at rest and clips harder still while
@@ -2419,9 +2403,13 @@ const ChatRowView = memo(function ChatRowView({
             >
               <Target size={12} aria-label={goalMet ? 'goal met' : 'working toward a goal'} />
             </span>
+            <GroupNumber chatId={row.chatId} />
           </span>
         ) : (
-          <span className="name">{title}</span>
+          <span className={groupNum ? 'name has-onscreen' : 'name'}>
+            {groupNum ? <span className="name-text">{title}</span> : title}
+            <GroupNumber chatId={row.chatId} />
+          </span>
         )}
         {project ? (
           <span className="preview" data-testid={`row-project-${row.chatId}`}>

@@ -22,6 +22,7 @@ import {
 const ENGINE_NAME: Record<Exclude<VoiceBackend, 'local'>, string> = {
   gemini: 'Gemini Live',
   openai: 'OpenAI Realtime',
+  elevenlabs: 'ElevenLabs Agents',
 };
 
 /**

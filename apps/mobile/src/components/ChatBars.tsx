@@ -10,6 +10,7 @@ import React, { type ReactElement } from 'react';
 import type { ChatRow } from '../stores/types';
 import { OfflineBanner } from './OfflineBanner';
 import { HostOfflineBanner } from './HostOfflineBanner';
+import { HostStrugglingBar } from './chatBars/HostStrugglingBar';
 import { WakeBar } from './WakeBar';
 import { BackgroundTaskBar } from './BackgroundTaskBar';
 import { SnoozedBanner } from './SnoozedBanner';
@@ -38,6 +39,7 @@ export function ChatBars({
           own self-gating banner (spec/12 § Daemon-offline UX). */}
       <OfflineBanner />
       <HostOfflineBanner />
+      {row ? <HostStrugglingBar hostId={row.hostId} /> : null}
       {row ? <JobBar row={row} /> : null}
       {row ? <ParentChatBar row={row} /> : null}
       {row ? <GoalBar row={row} /> : null}

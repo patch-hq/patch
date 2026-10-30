@@ -266,7 +266,7 @@ export interface WebBotAuthStatus {
   keyId: string;
 }
 
-export type VoiceBackend = 'local' | 'gemini' | 'openai';
+export type VoiceBackend = 'local' | 'gemini' | 'openai' | 'elevenlabs';
 export type VoiceLayer = 'direct' | 'light' | 'heavy';
 export type VoiceHandoff = 'auto' | 'always' | 'never';
 export interface VoiceSurfaceConfig {
@@ -1455,7 +1455,7 @@ export interface SweepRun {
   candidateCount: number;
   actions: {
     chatId: string;
-    action: 'nudge' | 'wake' | 'flag' | 'leave';
+    action: 'answer' | 'digest' | 'leave';
     edge?: string;
     detail?: string;
   }[];

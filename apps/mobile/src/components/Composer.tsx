@@ -116,6 +116,7 @@ import {
   type EffortLevel,
   type PermissionMode,
 } from '@patch/wire';
+import { useRouter, type Href } from 'expo-router';
 import { AnchoredMenu } from './AnchoredMenu';
 import { ImageAnnotatorModal, type AnnotatedImage } from './ImageAnnotatorModal';
 import { ModelPicker } from './ModelPicker';
@@ -157,17 +158,18 @@ import {
 import { startDictation, warmDictation, type DictationHandle } from '../lib/dictation';
 import { dictationEngineFor } from '../lib/dictationEngine';
 import { startDictationMode, type DictationModeHandle } from '../lib/dictationMode';
+import { markDictatedSend } from '../lib/dictatedSends';
 import { voiceKeyRefusal } from '../lib/voiceKeys';
 import { usePresenceStore } from '../stores/presenceStore';
 import { hostControlsDisabled, hostControlDisabledReason } from '../lib/connection';
-import { sendMessage, type OutgoingFile } from '../lib/sendQueue';
+import { cancelHeld, releaseHeld, sendMessage, type OutgoingFile } from '../lib/sendQueue';
 import { adviseNotes, checkHooks } from '../lib/hookCheck';
 import { HookBlockSheet } from './HookBlockSheet';
 import { ContextRing } from './ContextRing';
 import { runSlashCommand, SLASH_COMMANDS } from '../lib/slashCommands';
 
 const BUILTIN_COMMAND_NAMES: string[] = SLASH_COMMANDS.map((c) => c.name);
-import type { HookRunResult } from '@patch/wire/hooks';
+import type { HookCheckResponse, HookRunResult } from '@patch/wire/hooks';
 import { StatusDot } from './CallParts';
 import { ensurePermission } from '../lib/permissionGate';
 import { enablePushNotifications } from '../lib/push';
@@ -956,6 +958,7 @@ export function Composer({
   const [dictModeOn, setDictModeOn] = React.useState(false);
   const [dictPending, setDictPending] = React.useState(0);
   const dictModeRef = React.useRef<DictationModeHandle | null>(null);
+  const dictatedSendRef = React.useRef(false);
   function stopDictationMode(): void {
     const h = dictModeRef.current;
     dictModeRef.current = null;
@@ -966,6 +969,7 @@ export function Composer({
   }
   // Long-press the mic: the ways to dictate beyond a plain tap.
   const [micMenuOpen, setMicMenuOpen] = React.useState(false);
+  const router = useRouter();
   function startDictMode(): void {
     // The pause is a shared setting; the store is normally loaded at launch.
     if (useSettingsStore.getState().data === null) {
@@ -997,7 +1001,13 @@ export function Composer({
         onText: (t: string): void => {
           const cur = draftRef.current;
           updateDraft(cur.trim().length > 0 ? `${cur.trimEnd()} ${t}` : t);
-          submitRef.current();
+          // Dictation sends by itself; the chat must not jump to the bottom for it.
+          dictatedSendRef.current = true;
+          try {
+            submitRef.current();
+          } finally {
+            dictatedSendRef.current = false;
+          }
         },
         onBusy: (n: number): void => setDictPending(n),
         onPartial: (t: string): void => setLivePartial(t),
@@ -1223,42 +1233,66 @@ export function Composer({
     pending: PendingAttachment[],
     hookResults: HookRunResult[] = [],
     draftAtSend?: string,
+    // Set while the hook check is still running: the turn is echoed and the
+    // box cleared at once, delivery waits for the verdict, and a block takes
+    // the echo back out and puts the draft back.
+    check?: Promise<HookCheckResponse>,
   ): void => {
-    const localId = sendMessage(target, text, files);
+    const localId = sendMessage(target, text, files, check ? { hold: true } : {});
+    if (dictatedSendRef.current) markDictatedSend(localId);
     // First message is when a reply you might not be watching for becomes
     // possible: explain + ask for notifications now (once per session).
     void enablePushNotifications().catch((e: Error) =>
       useUiStore.getState().pushError(`push registration failed: ${e.message}`),
     );
-    const notes = adviseNotes(hookResults);
-    if (notes.length > 0) {
-      useChatStore.getState().patchLocalMessage(target, localId, { hookAdvise: notes });
-    }
-    if (pending.length > 0) {
-      // Bookkeeping-only: the ids just sent now belong to the message, not
-      // the draft. NEVER deletes a byte. A file attached since stays.
-      // A file still uploading is released by the store once its upload lands.
-      const removed = useComposerAttachmentStore.getState().detach(
-        chatId,
-        pending.map((a) => a.key),
-      );
-      // A new-chat draft is discarded wholesale by the caller once it spawns
-      // — only an existing chat's composer draft needs the server told.
-      // Read after the detach: a file that landed since Send is uploaded by now.
-      const ready = removed.filter((a) => a.status === 'uploaded').map((a) => a.key);
-      if (sendTarget === undefined && ready.length > 0) {
-        api.detachAttachments(target, ready).catch((err: Error) => {
-          useUiStore
-            .getState()
-            .pushError(`couldn’t release the draft’s attachments: ${err.message}`);
-        });
-      }
-    }
     const now = draftRef.current;
     if (draftAtSend === undefined || now === draftAtSend) updateDraft('');
     // Typed on after what was sent: the sent part goes, the rest stays. Edited
     // somewhere inside it, there is no telling what is left, so it all stays.
     else if (now.startsWith(draftAtSend)) updateDraft(now.slice(draftAtSend.length).trimStart());
+    const settle = (results: HookRunResult[]): void => {
+      const notes = adviseNotes(results);
+      if (notes.length > 0) {
+        useChatStore.getState().patchLocalMessage(target, localId, { hookAdvise: notes });
+      }
+      if (pending.length > 0) {
+        // Bookkeeping-only: the ids just sent now belong to the message, not
+        // the draft. NEVER deletes a byte. A file attached since stays.
+        // A file still uploading is released by the store once its upload lands.
+        const removed = useComposerAttachmentStore.getState().detach(
+          chatId,
+          pending.map((a) => a.key),
+        );
+        // A new-chat draft is discarded wholesale by the caller once it spawns
+        // — only an existing chat's composer draft needs the server told.
+        // Read after the detach: a file that landed since Send is uploaded by now.
+        const ready = removed.filter((a) => a.status === 'uploaded').map((a) => a.key);
+        if (sendTarget === undefined && ready.length > 0) {
+          api.detachAttachments(target, ready).catch((err: Error) => {
+            useUiStore
+              .getState()
+              .pushError(`couldn’t release the draft’s attachments: ${err.message}`);
+          });
+        }
+      }
+    };
+    if (!check) {
+      settle(hookResults);
+      return;
+    }
+    void check.then((res) => {
+      setHookChecking(false);
+      if (res.decision === 'block') {
+        cancelHeld(target, localId);
+        // The draft goes back as it was, with whatever was typed since after it.
+        const typed = draftRef.current;
+        updateDraft(typed.length === 0 ? text : `${text}\n${typed}`);
+        setHookBlock({ text, pending, results: res.results, draftAtSend: draftAtSend ?? text });
+        return;
+      }
+      settle(res.results);
+      releaseHeld(target, localId);
+    });
   };
 
   const submit = (): void => {
@@ -1370,22 +1404,14 @@ export function Composer({
     sendCheckedText(text, pending, draftAtSend);
   };
 
-  // Hook check, then delivery (spec/20-hooks.md).
+  // Echo at once, hook check alongside, delivery on its verdict (spec/20-hooks.md).
   const sendCheckedText = (
     text: string,
     pending: PendingAttachment[],
     draftAtSend: string,
   ): void => {
     setHookChecking(true);
-    void (async () => {
-      const check = await checkHooks(chatId, text, pending);
-      setHookChecking(false);
-      if (check.decision === 'block') {
-        setHookBlock({ text, pending, results: check.results, draftAtSend });
-        return;
-      }
-      deliver(text, pending, check.results, draftAtSend);
-    })();
+    deliver(text, pending, [], draftAtSend, checkHooks(chatId, text, pending));
   };
 
   // The send proper, past the hook check.
@@ -1394,6 +1420,7 @@ export function Composer({
     pending: PendingAttachment[],
     hookResults: HookRunResult[],
     draftAtSend: string,
+    check?: Promise<HookCheckResponse>,
   ) => {
     if (!running && pending.length === 0) {
       clearPendingSendTimeout();
@@ -1406,7 +1433,7 @@ export function Composer({
     const files = pending.map((a) =>
       toOutgoingFile(a, a.status === 'uploading' ? waitForOwnUpload(a) : undefined),
     );
-    sendNow(chatId, text, files, pending, hookResults, draftAtSend);
+    sendNow(chatId, text, files, pending, hookResults, draftAtSend, check);
   };
 
   // Send stays enabled whether it's the host or the LINK itself that's
@@ -2234,10 +2261,12 @@ export function Composer({
         visible={micMenuOpen}
         items={[
           { id: 'keep-dictating', label: 'Keep dictating', testID: 'mic-menu-keep-dictating' },
+          { id: 'voice-settings', label: 'Voice settings', testID: 'mic-menu-voice-settings' },
         ]}
         onSelect={(id) => {
           setMicMenuOpen(false);
           if (id === 'keep-dictating') startDictMode();
+          else if (id === 'voice-settings') router.push('/settings/voice' as Href);
         }}
         onDismiss={() => setMicMenuOpen(false)}
         placement="bottom"

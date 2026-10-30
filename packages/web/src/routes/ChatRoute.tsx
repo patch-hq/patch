@@ -3,6 +3,7 @@
 // Renders header + event stream + composer. Real diff viewer + file browser
 // land in group 19 (the Monaco editor right-rail).
 
+import { isDictatedSend, markDictatedSend } from '../lib/dictatedSends.js';
 import { useViewPositionStore } from '../stores/viewPositionStore.js';
 import type { JSX } from 'react';
 import {
@@ -81,6 +82,7 @@ import { ClaudeDisconnectedBanner } from '../components/ClaudeDisconnectedBanner
 import { OutOfUsageBanner } from '../components/OutOfUsageBanner.js';
 import { JobBar } from '../components/JobBar.js';
 import { HostOfflineBanner } from '../components/HostOfflineBanner.js';
+import { HostStrugglingBanner } from '../components/HostStrugglingBanner.js';
 import { EmptyChat } from '../components/EmptyChat.js';
 import { ChatNotFound } from '../components/ChatNotFound.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -89,7 +91,14 @@ import { useToolsStore } from '../stores/toolsStore.js';
 import { deliveryTracker } from '../lib/deliveryTracker.js';
 import { permissionDeliveryTracker } from '../lib/permissionDeliveryTracker.js';
 import { addToTodoList } from '../lib/addToTodo.js';
-import { discardUpload, retryUpload, sendMessage, type OutgoingFile } from '../lib/sendQueue.js';
+import {
+  cancelHeld,
+  discardUpload,
+  releaseHeld,
+  retryUpload,
+  sendMessage,
+  type OutgoingFile,
+} from '../lib/sendQueue.js';
 import type { PatchWs } from '../api/ws.js';
 import { getActiveWs } from '../api/ws.js';
 import { MeetingEditChips, MeetingLayout } from '../components/MeetingPanel.js';
@@ -423,6 +432,7 @@ export function ChatRoute({
   onSeqConsumed?: () => void;
 }): JSX.Element {
   const { chatId: paramChatId = '' } = useParams<{ chatId: string }>();
+  const navigate = useNavigate();
   const chatId = chatIdProp ?? paramChatId;
   // `?seq=N` — a sidebar search result asking for this chat opened AT that
   // message rather than at its latest (see the jump-to effects below). In
@@ -1021,6 +1031,9 @@ export function ChatRoute({
     seenLocalIdsRef.current = seen === null ? pending : new Set([...seen, ...pending]);
     if (seen === null) return;
     if (newest === undefined || seen.has(newest)) return;
+    // Dictation mode sends by itself while the user may be reading: leave the
+    // scroll where it is (follow mode, if on, still carries the new turn).
+    if (isDictatedSend(newest)) return;
     repinnedForSendRef.current = true;
     followRef.current = true;
     // A send outranks a still-landing `?seq=` jump and a still-settling
@@ -1629,7 +1642,7 @@ export function ChatRoute({
     message: string,
     files?: OutgoingFile[],
     _chatId?: string,
-    sendOpts?: { afterTurn?: boolean; interrupt?: boolean },
+    sendOpts?: { afterTurn?: boolean; interrupt?: boolean; dictated?: boolean },
   ): Promise<boolean | void> {
     if (turnEdit) {
       const ok = await handleFork(turnEdit.seq, message.trim(), files ?? []);
@@ -1768,22 +1781,74 @@ export function ChatRoute({
     // before it is handed to delivery. "Send anyway" (the block card) bypasses
     // this and calls `doSend` directly with the hooks it already has results
     // for, rather than asking the server to check the same message twice.
+    // The turn is echoed into the stream NOW and held back from delivery
+    // until the check lands — a check is a server round trip, and Send must
+    // not feel like it waits on one. A block withdraws the echo again.
     setHookChecking(true);
-    const check = await api.checkHooks(chatId, message, files ?? []);
-    setHookChecking(false);
+    const localId = echoTurn(message, files ?? [], afterTurn, interrupt, true);
+    if (sendOpts?.dictated === true) markDictatedSend(localId);
+    let check: Awaited<ReturnType<typeof api.checkHooks>>;
+    try {
+      check = await api.checkHooks(chatId, message, files ?? []);
+    } finally {
+      setHookChecking(false);
+    }
     if (check.decision === 'block') {
+      cancelHeld(chatId, localId);
       setHookBlock({ message, files: files ?? [], results: check.results, afterTurn, interrupt });
       return false;
     }
-    doSend(message, files ?? [], check.results, afterTurn, interrupt);
+    attachAdvise(localId, check.results);
+    releaseHeld(chatId, localId);
   }
 
   /**
-   * The actual send, past every hook check — called once a message has
-   * either passed, only advised, or the user chose Send anyway. `results`
-   * carries whatever `advise` outcomes matched, attached to the sent
-   * message's bubble (spec/20-hooks.md § On the user's message).
+   * Echo a turn into the stream and queue it for delivery (see lib/sendQueue.ts,
+   * spec/15 § Composer → Attachments). `hold` keeps it from delivery until
+   * `releaseHeld` / `cancelHeld`. Returns the turn's localId.
    */
+  function echoTurn(
+    message: string,
+    files: OutgoingFile[],
+    afterTurn: boolean,
+    interrupt: boolean,
+    hold: boolean,
+  ): string {
+    if (!ws) throw new Error('not connected');
+    // Optimistically render the user's own message immediately — the host
+    // streams back only the assistant reply, never a live echo of the input.
+    // A message with attachments shows its local files, uploading, and goes
+    // out once they have all landed; turns reach delivery in send order. From
+    // there the tracker holds it pending, redelivers on a flap/restart, and
+    // marks it "not delivered — tap to retry" if it stays unacked (spec/12).
+    // The per-chat Tools panel OFF set is captured at send time.
+    return sendMessage(chatId, message, files, {
+      send: (e) => ws.send(e),
+      ...(afterTurn ? { afterTurn: true } : {}),
+      ...(interrupt ? { onDelivered: handlePromote } : {}),
+      ...(hold ? { hold: true } : {}),
+    });
+  }
+
+  function attachAdvise(localId: string, results: HookRunResult[]): void {
+    const advise = (Array.isArray(results) ? results : []).filter(
+      (r) => r.status !== 'ok' || r.decision === 'advise',
+    );
+    if (advise.length === 0) return;
+    useChatStore.getState().patchLocalMessage(chatId, localId, {
+      hookAdvise: advise.map((r) => ({
+        hookId: r.hookId,
+        hookName: r.hookName,
+        ...(r.status !== 'ok'
+          ? { analysis: `Hook failed: ${r.error ?? r.status}` }
+          : r.analysis !== undefined
+            ? { analysis: r.analysis }
+            : {}),
+      })),
+    });
+  }
+
+  /** The send proper, past every hook check ("Send anyway"). */
   function doSend(
     message: string,
     files: OutgoingFile[],
@@ -1795,35 +1860,7 @@ export function ChatRoute({
       pushError('not connected');
       return;
     }
-    // Optimistically render the user's own message immediately — the host
-    // streams back only the assistant reply, never a live echo of the input.
-    // A message with attachments shows its local files, uploading, and goes
-    // out once they have all landed; turns reach delivery in send order
-    // (lib/sendQueue.ts, spec/15 § Composer → Attachments). From there the
-    // tracker holds it pending, redelivers on a flap/restart, and marks it
-    // "not delivered — tap to retry" if it stays unacked (spec/12). The
-    // per-chat Tools panel OFF set is captured at send time.
-    const localId = sendMessage(chatId, message, files, {
-      send: (e) => ws.send(e),
-      ...(afterTurn ? { afterTurn: true } : {}),
-      ...(interrupt ? { onDelivered: handlePromote } : {}),
-    });
-    const advise = (Array.isArray(results) ? results : []).filter(
-      (r) => r.status !== 'ok' || r.decision === 'advise',
-    );
-    if (advise.length > 0) {
-      useChatStore.getState().patchLocalMessage(chatId, localId, {
-        hookAdvise: advise.map((r) => ({
-          hookId: r.hookId,
-          hookName: r.hookName,
-          ...(r.status !== 'ok'
-            ? { analysis: `Hook failed: ${r.error ?? r.status}` }
-            : r.analysis !== undefined
-              ? { analysis: r.analysis }
-              : {}),
-        })),
-      });
-    }
+    attachAdvise(echoTurn(message, files, afterTurn, interrupt, false), results);
   }
 
   function handleHookSendAnyway(): void {
@@ -2134,16 +2171,18 @@ export function ChatRoute({
       {row.parentChatId ? (
         <ParentChatBar chatId={row.chatId} parentChatId={row.parentChatId} />
       ) : null}
-      <GoalBanner row={row} />
-      <FinishedGoalBanner row={row} />
-      <TaskBar key={`tasks-${row.chatId}`} row={row} />
+      <div className="status-list" data-testid="status-list">
+        <GoalBanner row={row} />
+        <FinishedGoalBanner row={row} />
+        <TaskBar key={`tasks-${row.chatId}`} row={row} />
+        <BackgroundTaskBar chatId={chatId} />
+        <DelegateStrip chatId={chatId} />
+        <ArtifactBar chatId={chatId} />
+      </div>
       <ReminderBanner row={row} />
       <ProviderContextPanel row={row} />
       <WakeBar row={row} />
-      <BackgroundTaskBar chatId={chatId} />
-      <DelegateStrip chatId={chatId} />
       <BrowserHandoffPanel chatId={chatId} />
-      <ArtifactBar chatId={chatId} />
       <ArchivedBanner row={row} />
       <HiddenBanner row={row} />
       <SnoozedBanner row={row} />
@@ -2155,6 +2194,7 @@ export function ChatRoute({
       <OutOfUsageBanner hostId={row.hostId} model={row.model ?? undefined} chatId={chatId} />
       <MeetingLayout chatId={chatId}>
         <HostOfflineBanner hostId={row.hostId} />
+        <HostStrugglingBanner hostId={row.hostId} />
         <BlobChatIdContext.Provider value={chatId}>
           <PendingApprovalCountContext.Provider value={pendingApprovalCount}>
             <section
@@ -2251,6 +2291,7 @@ export function ChatRoute({
               chatId={chatId}
               hostId={row.hostId}
               folder={row.folder}
+              onOpenVoiceSettings={() => navigate('/settings/voice')}
               // spec/14 § Composer — unsent text belongs to the chat it was
               // typed in. Read non-reactively: `initialValue` is seeded once
               // per mount and the `key={chatId}` remount above is what re-seeds
@@ -2394,6 +2435,17 @@ const TimelineEntry = memo(function TimelineEntry({
     }
     // spec/07 § Call cost — the one quiet line a finished call leaves.
     if ((entry.content ?? '').startsWith('[call] ')) {
+      const line = (entry.content ?? '').slice('[call] '.length);
+      // The agent's answer to a hand-off is the point of the exchange: full
+      // size, whole text. Only the plumbing around it stays quiet.
+      if (line.startsWith('<- agent:')) {
+        return (
+          <div className="call-agent-reply" data-testid="call-agent-reply">
+            <div className="call-summary-line">agent replied</div>
+            <div className="call-agent-reply-text">{line.slice('<- agent:'.length).trim()}</div>
+          </div>
+        );
+      }
       return (
         <div className="call-summary-line" data-testid="call-summary">
           {(entry.content ?? '').slice('[call] '.length)}
