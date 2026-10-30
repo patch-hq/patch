@@ -1,8 +1,9 @@
 // Tracks how each host is coping (spec/03 § Host health). A host sends a
 // `host.health` report with every heartbeat; this turns the stream into a
 // condition — online, or struggling and why — and tells surfaces when it
-// changes. A report that arrives late is itself a sign: the host or its link is
-// too slow to keep up, whatever the machine says about its own memory.
+// changes — a banner, never a notification. A report that arrives late is
+// itself a sign: the host or its link is too slow to keep up, whatever the
+// machine says about its own memory.
 //
 // A host that cannot be reached at all is not tracked here: that is
 // `host.offline`, and the host's condition is forgotten when it happens.
@@ -10,7 +11,6 @@
 import type { Logger } from 'pino';
 import {
   assessHostHealth,
-  describeHostCondition,
   HOST_HEALTH_INTERVAL_MS,
   HOST_HEALTH_LATE_INTERVALS,
   BATTERY_FLAT_PERCENT,
@@ -23,17 +23,12 @@ import {
 /** A sleep report this close to (or after) the last heartbeat explains the host dropping off. */
 const SLEEP_SLACK_MS = 30_000;
 
-/** Don't tell the user about the same host struggling again within this long. */
-const NOTIFY_COOLDOWN_MS = 10 * 60_000;
-
 export interface HostHealthTrackerDeps {
   logger: Logger;
   /** What the user calls this machine. */
   hostName: (hostId: string) => string;
   /** Tell every surface a host's condition changed. */
   broadcast: (event: HostConditionEvent) => void;
-  /** One notification, when a host starts struggling. */
-  notify: (message: string) => void;
   now?: () => number;
 }
 
@@ -44,7 +39,6 @@ interface HostRecord {
   /** The condition surfaces were last told, as a comparable key. */
   publishedKey: string;
   struggling: boolean;
-  lastNotifiedAt: number | null;
 }
 
 export class HostHealthTracker {
@@ -90,7 +84,6 @@ export class HostHealthTracker {
       report,
       publishedKey: prev?.publishedKey ?? '',
       struggling: prev?.struggling ?? false,
-      lastNotifiedAt: prev?.lastNotifiedAt ?? null,
     });
     this.publish(report.hostId);
   }
@@ -164,7 +157,6 @@ export class HostHealthTracker {
       c.topProcesses.map((p) => [p.name, p.count]),
     ]);
     if (key === rec.publishedKey) return;
-    const wasStruggling = rec.struggling;
     rec.publishedKey = key;
     rec.struggling = c.state === 'struggling';
     this.deps.logger.warn(
@@ -172,13 +164,5 @@ export class HostHealthTracker {
       'host condition changed',
     );
     this.deps.broadcast(c);
-    const startedStruggling = c.state === 'struggling' && !wasStruggling;
-    if (
-      startedStruggling &&
-      (rec.lastNotifiedAt === null || this.now() - rec.lastNotifiedAt > NOTIFY_COOLDOWN_MS)
-    ) {
-      rec.lastNotifiedAt = this.now();
-      this.deps.notify(describeHostCondition(this.deps.hostName(hostId), c));
-    }
   }
 }

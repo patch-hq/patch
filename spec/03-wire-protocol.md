@@ -55,7 +55,7 @@ A host reports how its machine is coping with every heartbeat: `host.health` `{h
 
 The server turns reports into a condition and tells surfaces with `host.condition` `{hostId, state: 'online' | 'struggling', critical, reasons, topProcesses}`, only when it changes, and replays the current one in the greeting. A host is struggling when memory is low (under 10% available), load is over four per CPU, its event loop lags over a second, its battery is at 15% or less and not charging (`battery`), or its reports arrive more than three intervals late (`slow-link`). `critical` is memory under 4% available, or low with swap at least 90% used. A host that cannot be reached at all is `host.offline`, and its condition is dropped. The offline frame carries a `reason` worked out from the host's last heartbeat: `battery` (discharging at 10% or less), `asleep` (the host's own machine reported going to sleep, via `machineHostId` on the desktop app's `surface.input`, after that heartbeat) or `unresponsive`. The thresholds and the wording live in `@patch/wire` (`host-health.ts`).
 
-Surfaces show the wording on that host's chats; the server sends one notification when a host starts to struggle (not again within ten minutes). While `critical`, the host itself holds new turns: they are queued (`chat.queued`) and run in order when memory recovers.
+Surfaces show the wording on that host's chats as a banner; the server sends no notification for it. While `critical`, the host itself holds new turns: they are queued (`chat.queued`) and run in order when memory recovers.
 
 ### Host events
 
