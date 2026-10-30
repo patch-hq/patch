@@ -23,6 +23,9 @@ export interface StatusRowProps {
   nested?: boolean;
   /** Content wraps instead of ellipsising (an opened goal). */
   wrap?: boolean;
+  /** Muted detail line under the content column (an opened row, or a note that needs the user). */
+  sub?: ReactNode;
+  role?: string;
   [dataAttr: `data-${string}`]: string | undefined;
 }
 
@@ -37,6 +40,7 @@ export function StatusRow({
   className,
   nested,
   wrap,
+  sub,
   ...rest
 }: StatusRowProps): JSX.Element {
   const cls = [
@@ -54,6 +58,7 @@ export function StatusRow({
       <span className="status-row-content">{children}</span>
       <span className={`status-row-meta${quietMeta ? ' status-row-meta-quiet' : ''}`}>{meta}</span>
       <span className="status-row-action">{action}</span>
+      {sub ? <div className="status-row-sub">{sub}</div> : null}
     </div>
   );
 }

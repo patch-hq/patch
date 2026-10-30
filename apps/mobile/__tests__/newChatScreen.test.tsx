@@ -747,6 +747,34 @@ describe('NewChat — the first send creates the chat', () => {
     expect(useNewChatDraftStore.getState().drafts[draftId]?.text).toBe('hello');
   });
 
+  it('a refused create stays as a failed chat with its message and error, and resends', async () => {
+    api.createChat.mockRejectedValueOnce(new ApiErrorClass(400, 'folder_not_found', null));
+    const draftId = seedDraft();
+    const r = await renderReady();
+    typeText(r, 'a long first message');
+    await send(r);
+    const failed = useNewChatDraftStore.getState().drafts[draftId];
+    expect(failed?.text).toBe('a long first message');
+    expect(failed?.failure?.sentence).toBe('Failed to create chat: folder_not_found');
+    expect(hasText(findHost(r.root, byTestId('new-chat-failed-error')), 'folder_not_found')).toBe(
+      true,
+    );
+
+    api.createChat.mockResolvedValueOnce({
+      chatId: 'chat_new',
+      folder: '/p/one',
+      status: 'pending',
+    });
+    await press(r, 'new-chat-resend');
+    await actAsync(async () => {
+      await flush();
+      await flush();
+    });
+    expect(api.createChat).toHaveBeenCalledTimes(2);
+    expect(useNewChatDraftStore.getState().drafts[draftId]).toBeUndefined();
+    expect(routerMock.replace).toHaveBeenCalled();
+  });
+
   it('a create that fails with a plain error still reports it', async () => {
     api.createChat.mockRejectedValue(new Error('network down'));
     const r = await renderReady();

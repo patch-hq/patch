@@ -54,7 +54,21 @@ export interface Draft {
   text: string;
   /** SDK `--model` override for the chat this draft will spawn (spec/13). */
   model?: string;
+  /**
+   * Why the chat this draft tried to start was refused (spec/04 § Spawn). Set
+   * when a first send fails, so the message stays in the sidebar as a failed
+   * chat with its error and a resend. Device-local: never sent to the server.
+   */
+  failure?: DraftFailure;
   updatedAt: number;
+}
+
+export interface DraftFailure {
+  /** The one-sentence reason, as shown to the user. */
+  sentence: string;
+  /** The keepable detail (code + message), when there is one. */
+  detail?: string;
+  at: number;
 }
 
 const STORAGE_KEY = 'patch.drafts.v1';
@@ -77,6 +91,7 @@ function load(): { drafts: Record<string, Draft>; order: string[] } {
             text: dd.text,
             ...(typeof dd.model === 'string' ? { model: dd.model } : {}),
             ...(typeof dd.hostId === 'string' ? { hostId: dd.hostId } : {}),
+            ...(isFailure(dd.failure) ? { failure: dd.failure } : {}),
             updatedAt: typeof dd.updatedAt === 'number' ? dd.updatedAt : 0,
           };
         }
@@ -91,6 +106,11 @@ function load(): { drafts: Record<string, Draft>; order: string[] } {
   } catch {
     return { drafts: {}, order: [] };
   }
+}
+
+function isFailure(f: unknown): f is DraftFailure {
+  const x = f as Partial<DraftFailure> | null;
+  return !!x && typeof x.sentence === 'string' && typeof x.at === 'number';
 }
 
 function persist(drafts: Record<string, Draft>, order: string[]): void {
@@ -180,6 +200,12 @@ interface DraftStore {
   create(folder?: string): string;
   /** Patch a draft's folder/text/model; no-op if the draft is gone. */
   update(id: string, patch: Partial<Pick<Draft, 'folder' | 'text' | 'model' | 'hostId'>>): void;
+  /**
+   * A first send was refused: keep `text` as the draft and record why, so it
+   * lists as a failed chat. Resending clears it (`clearFailure`).
+   */
+  markFailed(id: string, text: string, failure: Omit<DraftFailure, 'at'>): void;
+  clearFailure(id: string): void;
   /** Drop a draft (discarded, or consumed on send). */
   remove(id: string): void;
   /**
@@ -231,6 +257,32 @@ export const useDraftStore = create<DraftStore>((set, get) => ({
     if (hasDraftText(next.text) || hasDraftText(cur.text) || pendingOp.has(id)) owe(id, false);
   },
 
+  markFailed(id, text, failure) {
+    const cur = get().drafts[id];
+    if (!cur) return;
+    const next: Draft = {
+      ...cur,
+      text,
+      failure: { ...failure, at: Date.now() },
+      updatedAt: Date.now(),
+    };
+    const drafts = { ...get().drafts, [id]: next };
+    const order = [id, ...get().order.filter((x) => x !== id)];
+    persist(drafts, order);
+    set({ drafts, order });
+    if (hasDraftText(text)) owe(id, false);
+  },
+
+  clearFailure(id) {
+    const cur = get().drafts[id];
+    if (!cur?.failure) return;
+    const { failure: _f, ...rest } = cur;
+    void _f;
+    const drafts = { ...get().drafts, [id]: rest };
+    persist(drafts, get().order);
+    set({ drafts });
+  },
+
   remove(id) {
     if (!get().drafts[id]) return;
     const drafts = { ...get().drafts };
@@ -267,7 +319,7 @@ export const useDraftStore = create<DraftStore>((set, get) => ({
     const drafts = { ...get().drafts };
     for (const e of entries) {
       if (pendingOp.has(e.id)) continue;
-      drafts[e.id] = fromBody(e, e.updatedAt);
+      drafts[e.id] = withFailure(fromBody(e, e.updatedAt), drafts[e.id]);
     }
     // A text draft the server no longer has was deleted elsewhere while we were
     // away — drop it, but never a write we still owe, nor blank local scratch.
@@ -284,7 +336,10 @@ export const useDraftStore = create<DraftStore>((set, get) => ({
     if (n > 0) awaitingEcho.set(draft.id, n - 1);
     // Our own newer edit (unsent, or sent with its echo still to come) wins.
     if (pendingOp.has(draft.id) || n > 1) return;
-    const drafts = { ...get().drafts, [draft.id]: fromBody(draft, updatedAt) };
+    const drafts = {
+      ...get().drafts,
+      [draft.id]: withFailure(fromBody(draft, updatedAt), get().drafts[draft.id]),
+    };
     commit(drafts, get().order, [draft.id], set);
   },
 
@@ -312,6 +367,11 @@ function fromBody(b: NewChatDraftBody, updatedAt: number): Draft {
     ...(b.hostId ? { hostId: b.hostId } : {}),
     updatedAt,
   };
+}
+
+/** A server snapshot knows nothing of this device's failure marker: keep it. */
+function withFailure(d: Draft, prior: Draft | undefined): Draft {
+  return prior?.failure ? { ...d, failure: prior.failure } : d;
 }
 
 function e2ids(entries: { id: string }[]): string[] {

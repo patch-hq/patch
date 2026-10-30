@@ -392,8 +392,10 @@ test.describe('new chat header', () => {
     const toast = page.locator('.error-toast');
     await expect(toast).toHaveCount(1);
     await expect(toast.locator('.msg')).toHaveText(SENTENCE);
-    // No second copy anywhere on the page.
-    expect(await page.getByText(SENTENCE, { exact: true }).count()).toBe(1);
+    // The toast announces it; the failed chat kept for the message holds the
+    // only other copy (spec/14 § New chat drafts).
+    await expect(page.getByText(SENTENCE, { exact: true })).toHaveCount(2);
+    await expect(page.getByTestId('new-chat-failed-error')).toHaveText(SENTENCE);
     await expect(page.getByTestId('new-chat-error')).toHaveCount(0);
 
     // The one surviving surface is STYLED, not a bare paragraph: it has the
@@ -440,8 +442,9 @@ test.describe('new chat header', () => {
 
     const toast = page.locator('.error-toast');
     await expect(toast.locator('.msg')).toHaveText('Pick a model before starting the chat.');
-    // Neither the paragraph nor the code is anywhere visible on the page.
-    await expect(page.getByText(PARAGRAPH)).toBeHidden();
+    // The toast itself shows neither the paragraph nor the code; the failed
+    // chat kept for the message holds the reason (spec/14 § New chat drafts).
+    await expect(toast.getByText(PARAGRAPH)).toBeHidden();
     await expect(page.getByTestId('error-toast-detail-text')).toBeHidden();
 
     // Kept: opening Details shows the code AND the host's own words, and the
