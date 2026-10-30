@@ -161,6 +161,43 @@ describe('POST /internal/view_file (view_file)', () => {
     }
   });
 
+  it('publishes audio raw with its own content-type so the chat can play it', async () => {
+    const { app, chatId, folder, events, published } = await setup();
+    try {
+      const mp3 = Buffer.from([0xff, 0xfb, 0x90, 0x00, 1, 2, 3, 4]);
+      writeFileSync(join(folder, 'clip.mp3'), mp3);
+      writeFileSync(join(folder, 'tone.wav'), mp3);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/view_file',
+        headers: AUTH,
+        payload: { callerChatId: chatId, file_path: 'clip.mp3' },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { kind: string; name: string };
+      expect(body.kind).toBe('audio');
+      expect(body.name).toBe('clip.mp3');
+      expect(res.body).not.toContain(mp3.toString('base64'));
+      expect(published[0]!.html).toBeUndefined();
+      expect(published[0]!.raw).toEqual({
+        contentType: 'audio/mpeg',
+        base64: mp3.toString('base64'),
+      });
+
+      const wav = await app.inject({
+        method: 'POST',
+        url: '/internal/view_file',
+        headers: AUTH,
+        payload: { callerChatId: chatId, file_path: 'tone.wav' },
+      });
+      expect(wav.statusCode).toBe(200);
+      expect(published[1]!.raw!.contentType).toBe('audio/wav');
+      expect(events.find((e) => e.type === 'chat.artifact')).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+
   it('rejects an oversize PDF rather than publishing a page that will bounce', async () => {
     const { app, chatId, folder, published } = await setup();
     try {

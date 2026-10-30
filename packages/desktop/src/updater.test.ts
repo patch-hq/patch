@@ -995,3 +995,26 @@ test('createLatestInstaller: a failed check is reported and nothing installs', a
   })();
   assert.deepEqual(errors, ['feed down']);
 });
+
+// Regression: "the update restarts twice". A slow-but-healthy install (~75s bundle
+// swap) outlived a 20s watchdog, which killed ShipIt and asked again.
+test('the stall watchdog outlasts a slow healthy install, so it cannot cause a second restart', () => {
+  const SLOWEST_HEALTHY_INSTALL_MS = 75_000;
+  assert.ok(INSTALL_WATCHDOG_MS > SLOWEST_HEALTHY_INSTALL_MS);
+  const delays: number[] = [];
+  let resets = 0;
+  quitAndInstallNow({
+    app: { isQuitting: false },
+    autoUpdater: { quitAndInstall: () => {} },
+    onError: () => {},
+    recoverStall: () => {
+      resets++;
+    },
+    setTimer: (_fn, ms) => {
+      delays.push(ms);
+      return {};
+    },
+  });
+  assert.deepEqual(delays, [INSTALL_WATCHDOG_MS]);
+  assert.equal(resets, 0, 'nothing is reset until the watchdog actually fires');
+});

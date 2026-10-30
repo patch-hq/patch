@@ -29,7 +29,7 @@
 import React from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ChevronDown, ChevronLeft, Folder } from 'lucide-react-native';
+import { ChevronDown, ChevronLeft, Ear, Folder, Phone } from 'lucide-react-native';
 import { folderName, type PermissionMode } from '@patch/wire';
 import { api, ApiError } from '../src/api/rest';
 import { FolderPickerSheet } from '../src/components/FolderPickerSheet';
@@ -44,6 +44,7 @@ import { useFolderStore } from '../src/stores/folderStore';
 import { useUiStore } from '../src/stores/uiStore';
 import { defaultHostId, hostDefaultModel, usePresenceStore } from '../src/stores/presenceStore';
 import { newChatRoute } from '../src/lib/newChat';
+import { startVoiceCall } from '../src/lib/voiceCall';
 import { useNewChatDraftStore } from '../src/stores/newChatDraftStore';
 import { buildRecentFolders } from '../src/lib/folderPicker';
 import { useModelCatalog } from '../src/lib/models';
@@ -285,7 +286,7 @@ export default function NewChat(): React.ReactElement {
   // ── Create on first send ──────────────────────────────────────────────────
   // Once created, the send goes into the chat at once (its uploads follow it
   // there), so there is never a created chat left to retry into or discard.
-  const sendTarget = async (): Promise<string | null> => {
+  const createChat = async (): Promise<string | null> => {
     const pushError = useUiStore.getState().pushError;
     if (hostId === null) {
       pushError('Choose which machine to start the chat on.');
@@ -316,6 +317,14 @@ export default function NewChat(): React.ReactElement {
       const body = e instanceof ApiError ? (e.body as { retractChatId?: string } | null) : null;
       if (body?.retractChatId) useChatStore.getState().removeChat(body.retractChatId);
       pushError(`Failed to create chat: ${(e as Error).message}`);
+      throw e;
+    }
+  };
+
+  const sendTarget = async (): Promise<string | null> => {
+    try {
+      return await createChat();
+    } catch (e) {
       // The message stays as a failed chat (spec/04 § Spawn), with a resend.
       const drafts = useNewChatDraftStore.getState();
       drafts.markFailed(
@@ -324,6 +333,24 @@ export default function NewChat(): React.ReactElement {
         `Failed to create chat: ${(e as Error).message}`,
       );
       return null;
+    }
+  };
+
+  // The header's call buttons (spec/15 § Chat detail — the same Call and
+  // Hands-free): a call needs a chat, so this creates it, opens the call on it
+  // and goes into it. Unlike a send, the draft is NOT consumed — whatever was
+  // typed stays in Drafts, and a blank one is collected on the way out.
+  const callStarting = React.useRef(false);
+  const startCall = async (callMode: 'call' | 'hands-free'): Promise<void> => {
+    if (callStarting.current) return;
+    callStarting.current = true;
+    try {
+      const chatId = await createChat().catch(() => null);
+      if (chatId === null) return;
+      startVoiceCall(chatId, callMode);
+      router.replace(newChatRoute(chatId) as `/chats/${string}`);
+    } finally {
+      callStarting.current = false;
     }
   };
 
@@ -345,6 +372,25 @@ export default function NewChat(): React.ReactElement {
       <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: space.md }}>
         <Pressable onPress={goBack} style={{ padding: space.sm }} accessibilityLabel="Cancel">
           <ChevronLeft size={22} color={colors.ink} />
+        </Pressable>
+        <View style={{ flex: 1 }} />
+        <Pressable
+          testID="new-chat-call"
+          onPress={() => void startCall('call')}
+          style={{ padding: space.sm }}
+          accessibilityRole="button"
+          accessibilityLabel="Start voice call"
+        >
+          <Phone size={20} color={colors.ink} />
+        </Pressable>
+        <Pressable
+          testID="new-chat-hands-free"
+          onPress={() => void startCall('hands-free')}
+          style={{ padding: space.sm }}
+          accessibilityRole="button"
+          accessibilityLabel="Start hands-free"
+        >
+          <Ear size={20} color={colors.ink} />
         </Pressable>
       </View>
 
