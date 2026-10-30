@@ -127,6 +127,6 @@ describe('HostOfflineBanner', () => {
     usePresenceStore.setState({ hosts: {} });
     usePresenceStore.getState().setHostOnline('d1', false, 'updating');
     usePresenceStore.getState().setHostOnline('d1', true);
-    expect(usePresenceStore.getState().hosts.d1?.offlineReason).toBeUndefined();
+    expect(usePresenceStore.getState().hosts.d1?.offlineReason).toBeNull();
   });
 });

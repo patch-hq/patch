@@ -41,6 +41,7 @@ export function HostOfflineBanner({ hostId }: { hostId?: string } = {}): JSX.Ele
   if (hostOnline) return null;
   // Every host down is the app-level banner's job; a second one here would double it.
   if (hostId !== undefined && !anyOnline) return null;
+  const updating = hostId === undefined ? anyUpdating : offlineReason === 'updating';
   return (
     <div className="daemon-offline-banner" data-testid="daemon-offline-banner" role="status">
       <span className="dot" aria-hidden />
