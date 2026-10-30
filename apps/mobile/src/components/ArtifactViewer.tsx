@@ -11,7 +11,7 @@
 // both triggers share one modal instance).
 
 import React from 'react';
-import { Linking, Modal, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { ExternalLink, X } from 'lucide-react-native';
 import { create } from 'zustand';
@@ -118,21 +118,57 @@ export function ArtifactViewerHost(): React.ReactElement | null {
             <X size={22} color={colors.ink} />
           </Pressable>
         </View>
-        {error ? (
-          <Text testID="artifact-viewer-error" style={{ color: colors.red, padding: space.md }}>
-            Could not load this file: {error}
-          </Text>
-        ) : shown ? (
-          <WebView
-            key={rev}
-            testID="artifact-viewer-webview"
-            source={{ uri: shown }}
-            originWhitelist={['*']}
-            allowFileAccess
-            style={{ flex: 1 }}
-          />
-        ) : null}
+        <ArtifactBody key={`${artifact.url}#${rev}`} shown={shown} error={error} rev={rev} />
       </View>
     </Modal>
+  );
+}
+
+function Loading(): React.ReactElement {
+  const colors = useTheme();
+  return (
+    <View
+      testID="artifact-viewer-loading"
+      style={{ ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' }}
+    >
+      <ActivityIndicator size="large" color={colors.ink2} />
+    </View>
+  );
+}
+
+/** The page area: spinner while fetching or loading, a message if either fails. */
+function ArtifactBody({
+  shown,
+  error,
+  rev,
+}: {
+  shown: string | null;
+  error: string | null;
+  rev: number;
+}): React.ReactElement {
+  const colors = useTheme();
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const message = error ?? loadError;
+  if (message !== null) {
+    return (
+      <Text testID="artifact-viewer-error" style={{ color: colors.red, padding: space.md }}>
+        Could not load this file: {message}
+      </Text>
+    );
+  }
+  if (!shown) return <Loading />;
+  return (
+    <WebView
+      key={rev}
+      testID="artifact-viewer-webview"
+      source={{ uri: shown }}
+      originWhitelist={['*']}
+      allowFileAccess
+      startInLoadingState
+      renderLoading={() => <Loading />}
+      onError={(e) => setLoadError(e.nativeEvent.description)}
+      onHttpError={(e) => setLoadError(`HTTP ${e.nativeEvent.statusCode}`)}
+      style={{ flex: 1 }}
+    />
   );
 }
