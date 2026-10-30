@@ -148,7 +148,7 @@ describe('artifacts', () => {
           requestId: 'req-huge',
           artifactId: 'a1ab03',
           html: undefined,
-          raw: { contentType: 'image/png', base64: Buffer.alloc(8_000_000, 7).toString('base64') },
+          raw: { contentType: 'image/png', base64: Buffer.alloc(60_000_000, 7).toString('base64') },
         }),
       );
       expect(huge.ok).toBe(false);
