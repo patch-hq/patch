@@ -189,6 +189,51 @@ describe('artifacts', () => {
     }
   });
 
+  it('serves a raw video with byte ranges so it can seek', async () => {
+    const { built, hostLink } = await makeApp();
+    try {
+      const video = Buffer.from('0123456789abcdef');
+      const res = await publish(
+        hostLink,
+        publishRequest({
+          artifactId: 'a1ab02',
+          html: undefined,
+          raw: { contentType: 'video/mp4', base64: video.toString('base64') },
+        }),
+      );
+      const full = await built.app.inject({ method: 'GET', url: res.url! });
+      expect(full.statusCode).toBe(200);
+      expect(full.headers['accept-ranges']).toBe('bytes');
+      expect(full.rawPayload.equals(video)).toBe(true);
+
+      const part = await built.app.inject({
+        method: 'GET',
+        url: res.url!,
+        headers: { range: 'bytes=4-7' },
+      });
+      expect(part.statusCode).toBe(206);
+      expect(part.headers['content-range']).toBe('bytes 4-7/16');
+      expect(part.rawPayload.toString()).toBe('4567');
+
+      const tail = await built.app.inject({
+        method: 'GET',
+        url: res.url!,
+        headers: { range: 'bytes=12-' },
+      });
+      expect(tail.statusCode).toBe(206);
+      expect(tail.rawPayload.toString()).toBe('cdef');
+
+      const bad = await built.app.inject({
+        method: 'GET',
+        url: res.url!,
+        headers: { range: 'bytes=99-120' },
+      });
+      expect(bad.statusCode).toBe(416);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   // A raw publish carries an agent-chosen content-type. Served bare, a
   // `text/html` one would run script in the SPA's own origin and could read the
   // stored credential, so every response is sandboxed regardless of type.

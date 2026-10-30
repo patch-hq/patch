@@ -5060,6 +5060,12 @@ button.view-file-download {
   display: block;
   margin: 0 auto;
 }
+.view-file-video {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  background: #000;
+}
 /* spec/14 § Context compression, § Automations — transcript furniture, not a
    tool call OR a user bubble: no panel fill, tighter, and muted, so a long
    chat's compressions and job triggers recede rather than reading as another
