@@ -2710,6 +2710,46 @@ describe('ChatRoute regression', () => {
     expect(screen.getByTestId('view-file').getAttribute('data-expanded')).toBe('true');
   });
 
+  it('renders a view_file audio result as an inline audio player', () => {
+    seedChat('c-view-audio', [
+      {
+        seq: 1,
+        kind: 'tool_call',
+        tool: 'view_file',
+        callId: 'a1',
+        toolArgs: { file_path: 'clip.mp3' },
+        at: 0,
+      },
+      {
+        seq: 2,
+        kind: 'tool_result',
+        tool: 'view_file',
+        callId: 'a1',
+        toolResult: {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                ok: true,
+                kind: 'audio',
+                url: '/api/chats/c-view-audio/artifact/aud123',
+                name: 'clip.mp3',
+              }),
+            },
+          ],
+        },
+        at: 1,
+      },
+    ]);
+    renderChat('c-view-audio');
+    expect(screen.getByTestId('view-file').getAttribute('data-kind')).toBe('audio');
+    const player = screen.getByTestId('view-file-audio');
+    expect(player.tagName).toBe('AUDIO');
+    expect(player.getAttribute('src')).toBe('/api/chats/c-view-audio/artifact/aud123');
+    expect(player.hasAttribute('controls')).toBe(true);
+    expect(screen.getByTestId('view-file-download').getAttribute('download')).toBe('clip.mp3');
+  });
+
   function seedFileCard(id: string, ack: Record<string, unknown>): void {
     seedChat(id, [
       {

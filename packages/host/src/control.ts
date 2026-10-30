@@ -3560,15 +3560,16 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         // each image lands, which is half of what "it scrolls through the
         // messages one by one" looks like.
         size = imageSize(imageBytes);
-      } else if (kind === 'pdf') {
+      } else if (kind === 'pdf' || kind === 'audio') {
         if (stat.size > MAX_VIEW_PDF_BYTES) {
           throw new ArtifactInputError(
-            `pdf is ${stat.size} bytes — the limit is ${MAX_VIEW_PDF_BYTES}`,
+            `${kind} is ${stat.size} bytes — the limit is ${MAX_VIEW_PDF_BYTES}`,
           );
         }
-        // Served byte-for-byte as application/pdf, NOT wrapped in an HTML
-        // page: the browser's PDF viewer will not start inside a sandboxed
-        // frame (which a wrapper page always is), so it stays grey.
+        // Served byte-for-byte with its own content-type, NOT wrapped in an
+        // HTML page: the browser's PDF viewer will not start inside a
+        // sandboxed frame (which a wrapper page always is), and an audio
+        // player needs real audio bytes at its `src`.
         raw = {
           contentType: resolved.mime,
           base64: readFileSync(resolved.absPath).toString('base64'),
