@@ -135,6 +135,11 @@ function defaultRoute(url: string): Response {
  * before it can choose anything under it.
  */
 async function choosePickerFolder(hostId: string, folder: string): Promise<void> {
+  const hostSel = (await screen.findByTestId('job-spawn-host-select')) as HTMLSelectElement;
+  await waitFor(() => {
+    expect([...hostSel.options].some((o) => o.value === hostId)).toBe(true);
+  });
+  fireEvent.change(hostSel, { target: { value: hostId } });
   const sel = (await screen.findByTestId('job-spawn-folder')) as HTMLSelectElement;
   await waitFor(() => {
     expect([...sel.options].some((o) => o.value === pick(hostId, folder))).toBe(true);
@@ -4201,12 +4206,13 @@ describe('JobEditorRoute (single-page form)', () => {
       }),
     );
     renderNew();
-    const sel = (await screen.findByTestId('job-spawn-folder')) as HTMLSelectElement;
-    await waitFor(() => {
-      expect(sel.querySelectorAll('optgroup')).toHaveLength(2);
-    });
-    // The SAME path under two machines is two distinct choices.
-    expect([...sel.options].filter((o) => o.textContent === '/shared/path')).toHaveLength(2);
+    // Machine first: the folder list then shows only that machine's folders.
+    const hostSel = (await screen.findByTestId('job-spawn-host-select')) as HTMLSelectElement;
+    await waitFor(() => expect(hostSel.options.length).toBe(3));
+    const sel = screen.getByTestId('job-spawn-folder') as HTMLSelectElement;
+    fireEvent.change(hostSel, { target: { value: 'd1' } });
+    expect(sel.querySelectorAll('optgroup')).toHaveLength(1);
+    expect([...sel.options].filter((o) => o.textContent === '/shared/path')).toHaveLength(1);
     fireEvent.change(screen.getByTestId('job-name'), { target: { value: 'host-carrying' } });
     await choosePickerFolder('d2', '/shared/path');
     expect(screen.getByTestId('job-spawn-host')).toHaveTextContent('d2');
@@ -4216,6 +4222,62 @@ describe('JobEditorRoute (single-page form)', () => {
     const body = calls[0]?.body as { action: { hostId: string; folder: string } };
     expect(body.action.hostId).toBe('d2');
     expect(body.action.folder).toBe('/shared/path');
+  });
+
+  it('Browse… opens a directory tree on the chosen machine and picks any folder in it', async () => {
+    const calls: Array<{ body: unknown }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const u = String(url);
+        if (u.includes('/api/folders/browse')) {
+          if (u.includes('dir=%2Fsrv%2Fa')) {
+            return jsonResponse({
+              hostId: 'd1',
+              dir: '/srv/a',
+              parent: null,
+              entries: [{ name: 'deep', path: '/srv/a/deep' }],
+            });
+          }
+          if (u.includes('dir=%2Fsrv%2Fa%2Fdeep')) {
+            return jsonResponse({
+              hostId: 'd1',
+              dir: '/srv/a/deep',
+              parent: '/srv/a',
+              entries: [],
+            });
+          }
+          return jsonResponse({
+            hostId: 'd1',
+            dir: null,
+            parent: null,
+            entries: [{ name: 'a', path: '/srv/a' }],
+          });
+        }
+        if (u.includes('/api/folders')) {
+          return jsonResponse({ hosts: [{ hostId: 'd1', roots: ['/listed'], recent: [] }] });
+        }
+        if (u.includes('/api/jobs') && (init?.method ?? 'GET').toUpperCase() === 'POST') {
+          calls.push({ body: JSON.parse(String(init?.body)) });
+          return jsonResponse({ id: 'j_new' }, 201);
+        }
+        return jsonResponse({});
+      }),
+    );
+    renderNew();
+    await choosePickerFolder('d1', '__browse__');
+    fireEvent.click(await screen.findByText('a'));
+    fireEvent.click(await screen.findByText('deep'));
+    await waitFor(() =>
+      expect(screen.getByTestId('job-folder-browser-chosen')).toHaveTextContent('/srv/a/deep'),
+    );
+    fireEvent.change(screen.getByTestId('job-name'), { target: { value: 'browsed' } });
+    fireEvent.change(screen.getByTestId('job-spawn-prompt'), { target: { value: 'go' } });
+    fireEvent.click(screen.getByTestId('job-save'));
+    await waitFor(() => expect(calls.length).toBe(1));
+    const body = calls[0]?.body as { action: { hostId: string; folder: string } };
+    expect(body.action.hostId).toBe('d1');
+    expect(body.action.folder).toBe('/srv/a/deep');
   });
 
   // Task 2: "Loading… - view scheduled job stuck on loading for too long"
