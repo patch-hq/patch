@@ -85,7 +85,7 @@ import { RateLimiter } from './rate-limit.js';
 import { resolveSpeakers, type SpeakerCascadeDeps } from './devices/speakers-cascade.js';
 import { GIT_SHA, VERSION } from './version.js';
 import { RemoteRelayError } from './remote-relay.js';
-import { buildPeekResult } from './peek.js';
+import { buildPeekResult, stripBinaryPayloads } from './peek.js';
 import { probeFolderAccess } from './folderAccess.js';
 
 /**
@@ -1915,7 +1915,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
               durationMs: Date.now() - start,
               ok: true,
             });
-            return remote;
+            return stripBinaryPayloads(remote);
           } catch (err) {
             const code = err instanceof RemoteRelayError ? err.code : 'sdk_error';
             toolLog({
@@ -1948,7 +1948,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         durationMs: Date.now() - start,
         ok: true,
       });
-      return local;
+      return stripBinaryPayloads(local);
     },
   );
 
@@ -3030,7 +3030,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       });
       const out: { events: WireEvent[]; nextFromSeq?: number } = { events: slice.events };
       if (slice.nextFromSeq !== undefined) out.nextFromSeq = slice.nextFromSeq;
-      return out;
+      return stripBinaryPayloads(out);
     } catch (err) {
       // Not on THIS host — spec/03 § Cross-chat tools, same relay `patch_peek`
       // uses above. NO FALLBACK to a local-only 404 when the caller can be
@@ -3053,7 +3053,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
             durationMs: Date.now() - start,
             ok: true,
           });
-          return remote;
+          return stripBinaryPayloads(remote);
         } catch (remoteErr) {
           const code = remoteErr instanceof RemoteRelayError ? remoteErr.code : 'sdk_error';
           toolLog({
