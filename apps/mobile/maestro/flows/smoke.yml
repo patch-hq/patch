@@ -48,7 +48,13 @@ appId: io.github.tomchambers2.patch
 # New chat: the folder picker must actually render. A blank screen here is the
 # regression this step exists for — it is not a crash, so nothing else notices.
 - tapOn: 'New chat'
-- assertVisible: 'Pick a folder'
+- assertVisible: 'Send message'
+- assertVisible: 'Add to message'
+- assertVisible:
+    text: 'Permission mode.*'
+- assertVisible: 'model'
+- assertVisible:
+    text: 'Account.*'
 - takeScreenshot: 03b-new-chat
 - tapOn: 'Cancel'
 

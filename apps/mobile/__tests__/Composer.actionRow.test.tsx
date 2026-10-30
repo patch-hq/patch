@@ -35,6 +35,7 @@ import * as dictationModule from '../src/lib/dictation';
 import { usePresenceStore } from '../src/stores/presenceStore';
 import { useChatStore } from '../src/stores/chatStore';
 import { useUiStore } from '../src/stores/uiStore';
+import { useSettingsStore } from '../src/stores/settingsStore';
 import { deliveryTracker } from '../src/lib/deliveryTracker';
 import { __clearAllMmkv } from './stubs/mmkv';
 import { compactModelLabel } from '../src/lib/modelLabel';
@@ -127,6 +128,8 @@ function rowOrder(root: ReactTestInstance): string[] {
     'composer-actions-spacer',
     'composer-model-pill',
     'permission-mode-padlock',
+    'composer-effort',
+    'chat-account',
     'composer-stop',
     'Send message',
   ]);
@@ -188,21 +191,38 @@ describe('Composer action row — order', () => {
     expect(rowOrder(r.root)).toEqual([
       'permission-mode-padlock',
       'composer-model-pill',
+      'composer-effort',
+      'chat-account',
       'composer-actions-spacer',
       'Send message',
     ]);
-    const settings = findHost(r.root, byTestId('composer-settings-row'));
-    expect(queryHost(settings, byTestId('composer-effort'))).not.toBeNull();
   });
 
-  it('labels the mode and effort icons in words so they are not icon-only', () => {
+  it('has no text on the action row but the model name — the mode, effort and account are icons', () => {
     seed();
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
-    const mode = findHost(r.root, byTestId('permission-mode-padlock'));
-    const effort = findHost(r.root, byTestId('composer-effort'));
-    expect(textOf(mode)).not.toBe('');
-    // No effort chosen yet: the gauge still says what it is.
-    expect(textOf(effort)).toBe('Effort');
+    for (const id of ['permission-mode-padlock', 'composer-effort', 'chat-account']) {
+      expect(textOf(findHost(r.root, byTestId(id)))).toBe('');
+    }
+  });
+
+  it('draws one icon system: shield, gauge circle and user circle, 20px at stroke 1.75 in the quiet ink', () => {
+    seed();
+    const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
+    const icon = (id: string): ReactTestInstance =>
+      findHost(r.root, byTestId(id)).findAll((i) => i.type === ('Icon' as unknown as string))[0]!;
+    for (const [id, name] of [
+      ['permission-mode-padlock', 'ShieldCheck'],
+      ['composer-effort', 'CircleGauge'],
+      ['chat-account', 'CircleUserRound'],
+    ] as const) {
+      expect(icon(id).props).toMatchObject({
+        name,
+        size: 20,
+        strokeWidth: 1.75,
+        color: lightColors.ink3,
+      });
+    }
   });
 
   it('the + offers camera, photo, file and sketch', () => {
@@ -259,32 +279,123 @@ describe('Composer action row — order', () => {
     expect(queryHost(r.root, byTestId('permission-mode-padlock'))).not.toBeNull();
   });
 
-  it('leaves them to the setup rows on the new-chat screen (a send target)', () => {
+  it('shows the same settings row on a new chat (a send target) — everything but the context ring', () => {
     const r = renderRN(
-      <Composer chatId="c1" folder="/home/tom/work" sendTarget={async () => null} />,
+      <Composer
+        chatId="c1"
+        folder="/home/tom/work"
+        sendTarget={async () => null}
+        setup={{
+          hostId: 'd1',
+          model: 'claude-opus-5-5',
+          onModel: vi.fn(),
+          mode: 'default',
+          onMode: vi.fn(),
+          effort: null,
+          onEffort: vi.fn(),
+          accountId: null,
+          onAccount: vi.fn(),
+        }}
+      />,
     );
-    expect(queryHost(r.root, byTestId('composer-model-pill'))).toBeNull();
-    expect(queryHost(r.root, byTestId('permission-mode-padlock'))).toBeNull();
+    expect(rowOrder(r.root)).toEqual([
+      'permission-mode-padlock',
+      'composer-model-pill',
+      'composer-effort',
+      'chat-account',
+      'composer-actions-spacer',
+      'Send message',
+    ]);
+    expect(queryHost(r.root, byTestId('context-ring'))).toBeNull();
   });
 });
 
 describe('Composer action row — fits a 360dp phone', () => {
-  it('only the model pill shrinks; send and the icon buttons keep their size', () => {
+  it('nothing shrinks — the model name is never truncated — and the row fits 360dp', () => {
     seed();
     const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
     const pillStyle = findHost(r.root, byTestId('composer-model-pill')).props['style'] as Record<
       string,
       number
     >;
-    expect(pillStyle['flexShrink']).toBe(1);
-    expect(pillStyle['maxWidth']).toBeLessThanOrEqual(120);
+    expect(pillStyle['flexShrink'] ?? 0).toBe(0);
+    expect(pillStyle['maxWidth']).toBeUndefined();
     const send = findHost(r.root, byLabel('Send message')).props['style'] as Record<string, number>;
     expect(send['flexShrink'] ?? 0).toBe(0);
-    // Budget: 12px padding each side, six fixed 36px buttons, 2px gaps and a
-    // minimum spacer — what is left is the pill's room, and it must be enough
-    // to read "Opus 5.5".
-    const fixed = 2 * 12 + 6 * send['width']! + 7 * 2 + 4;
-    expect(360 - fixed).toBeGreaterThanOrEqual(90);
+    // Budget: 10px padding each side, three 36px icon buttons, the ring at its
+    // widest (20px + gap + "100%"), the send circle, and a ~100px model pill.
+    const fixed = 2 * 10 + 3 * 36 + 60 + send['width']! + 7 * 2 + 4 + 100;
+    expect(360 - fixed).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('Composer account menu', () => {
+  function connect(): void {
+    useSettingsStore.setState({
+      data: {
+        preferences: {},
+        shared: {
+          version: 1,
+          secrets: {
+            claude: [
+              { id: 'c0', label: 'Work', connected: true },
+              { id: 'c1', label: 'Home', connected: true },
+            ],
+            codex: [],
+            providerKeys: [],
+          },
+          hosts: [],
+        },
+      } as never,
+    });
+  }
+
+  it('is always on the row, and in a chat ticks the account in force', async () => {
+    seed();
+    connect();
+    useChatStore.setState({
+      chats: {
+        c1: { ...useChatStore.getState().chats['c1']!, account: { id: 'c1', label: 'Home' } },
+      },
+    });
+    const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
+    expect(findHost(r.root, byTestId('chat-account')).props['accessibilityLabel']).toBe(
+      'Account: Home',
+    );
+    await actAsync(async () => {
+      findHost(r.root, byTestId('chat-account')).props['onPress']();
+      await flush();
+    });
+    const tick = (id: string): unknown =>
+      findHost(r.root, byTestId(id)).props['accessibilityState'].selected;
+    expect(tick('account-option-c1')).toBe(true);
+    expect(tick('account-option-c0')).toBe(false);
+  });
+
+  it('switching an account mid-chat sends chat.account_request; By strategy sends null', async () => {
+    seed();
+    connect();
+    const r = renderRN(<Composer chatId="c1" folder="/home/tom/work" />);
+    await actAsync(async () => {
+      findHost(r.root, byTestId('chat-account')).props['onPress']();
+      await flush();
+    });
+    actSync(() => findHost(r.root, byTestId('account-option-c0')).props['onPress']());
+    expect(wsMock.send).toHaveBeenCalledWith({
+      type: 'chat.account_request',
+      chatId: 'c1',
+      preferredAccountId: 'c0',
+    });
+    await actAsync(async () => {
+      findHost(r.root, byTestId('chat-account')).props['onPress']();
+      await flush();
+    });
+    actSync(() => findHost(r.root, byTestId('account-option-strategy')).props['onPress']());
+    expect(wsMock.send).toHaveBeenCalledWith({
+      type: 'chat.account_request',
+      chatId: 'c1',
+      preferredAccountId: null,
+    });
   });
 });
 
@@ -315,6 +426,7 @@ describe('Composer model pill', () => {
       findHost(r.root, byTestId('composer-model-pill')).props['onPress']();
       await flush();
     });
+    actSync(() => findHost(r.root, byTestId('model-menu-all')).props['onPress']());
     actSync(() =>
       findHost(r.root, byTestId('new-chat-model-option-claude-sonnet-5')).props['onPress'](),
     );
@@ -336,6 +448,7 @@ describe('Composer model pill', () => {
       findHost(r.root, byTestId('composer-model-pill')).props['onPress']();
       await flush();
     });
+    actSync(() => findHost(r.root, byTestId('model-menu-all')).props['onPress']());
     expect(textOf(findHost(r.root, byTestId('model-picker-note')))).toMatch(
       /next message — this turn keeps its model/,
     );
@@ -348,6 +461,7 @@ describe('Composer model pill', () => {
       findHost(r.root, byTestId('composer-model-pill')).props['onPress']();
       await flush();
     });
+    actSync(() => findHost(r.root, byTestId('model-menu-all')).props['onPress']());
     actSync(() =>
       findHost(r.root, byTestId('new-chat-model-option-claude-opus-5-5')).props['onPress'](),
     );
@@ -361,6 +475,7 @@ describe('Composer model pill', () => {
       findHost(r.root, byTestId('composer-model-pill')).props['onPress']();
       await flush();
     });
+    actSync(() => findHost(r.root, byTestId('model-menu-all')).props['onPress']());
     actSync(() =>
       findHost(r.root, byTestId('new-chat-model-option-claude-sonnet-5')).props['onPress'](),
     );
@@ -384,6 +499,7 @@ describe('Composer model pill', () => {
       findHost(r.root, byTestId('composer-model-pill')).props['onPress']();
       await vi.advanceTimersByTimeAsync(0);
     });
+    actSync(() => findHost(r.root, byTestId('model-menu-all')).props['onPress']());
     actSync(() =>
       findHost(r.root, byTestId('new-chat-model-option-claude-sonnet-5')).props['onPress'](),
     );
