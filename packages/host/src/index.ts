@@ -186,6 +186,7 @@ import {
 import { createPowerWatcher } from './power.js';
 import { createServerLink } from './serverLink.js';
 import { createHealthSampler } from './healthReport.js';
+import { checkLaunchPath } from './launchPath.js';
 import { handleJobExec } from './jobExec.js';
 import { handleHostWake } from './hostWake.js';
 import { rotateLog } from './logRotate.js';
@@ -489,6 +490,13 @@ async function startHost(
   const logger = testHooks?.logStream
     ? pino(loggerOptions, testHooks.logStream)
     : pino(loggerOptions);
+  const launchMove = checkLaunchPath(config.patchHome, process.execPath);
+  if (launchMove) {
+    logger.warn(
+      launchMove,
+      'patch-daemon: host launch path changed — anything that allow-lists the old path (process killers, firewalls, permissions) must be updated or it will act on this host',
+    );
+  }
   installCrashGuard(logger);
 
   // 0. TCP /healthz — bound FIRST, before anything touches shared state. This
