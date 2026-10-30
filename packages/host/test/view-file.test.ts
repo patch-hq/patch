@@ -23,7 +23,12 @@ import { Daemon } from '../src/chatRunner.js';
 import { buildControl } from '../src/control.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
-import { MAX_VIEW_IMAGE_BYTES, MAX_VIEW_PDF_BYTES, MAX_VIEW_VIDEO_BYTES } from '../src/artifacts.js';
+import {
+  MAX_VIEW_IMAGE_BYTES,
+  MAX_VIEW_PDF_BYTES,
+  MAX_VIEW_VIDEO_BYTES,
+  MAX_VIEW_FILE_BYTES,
+} from '../src/artifacts.js';
 
 const LOCAL_KEY = 'local-secret';
 const AUTH = { authorization: `Bearer ${LOCAL_KEY}` };
@@ -462,7 +467,7 @@ describe('POST /internal/view_file (view_file)', () => {
   it('rejects an oversize downloadable file', async () => {
     const { app, chatId, folder, published } = await setup();
     try {
-      writeFileSync(join(folder, 'big.docx'), Buffer.alloc(MAX_VIEW_PDF_BYTES + 1));
+      writeFileSync(join(folder, 'big.docx'), Buffer.alloc(MAX_VIEW_FILE_BYTES + 1));
       const res = await app.inject({
         method: 'POST',
         url: '/internal/view_file',

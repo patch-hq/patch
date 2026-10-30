@@ -55,6 +55,7 @@ import {
   MAX_VIEW_IMAGE_BYTES,
   MAX_VIEW_PDF_BYTES,
   MAX_VIEW_VIDEO_BYTES,
+  MAX_VIEW_FILE_BYTES,
   artifactIdFor,
   resolveArtifactPath,
   resolveViewFilePath,
@@ -3589,9 +3590,9 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         };
         fileBytes = stat.size;
       } else if (kind === 'file') {
-        if (stat.size > MAX_VIEW_PDF_BYTES) {
+        if (stat.size > MAX_VIEW_FILE_BYTES) {
           throw new ArtifactInputError(
-            `file is ${stat.size} bytes — the limit is ${MAX_VIEW_PDF_BYTES}`,
+            `file is ${stat.size} bytes — the limit is ${MAX_VIEW_FILE_BYTES}`,
           );
         }
         // Served byte-for-byte as an attachment under its own name: the chat

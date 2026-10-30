@@ -38,8 +38,9 @@ const BRIDGE_SURFACE_ID = 'artifact-bridge';
 const ID_RE = /^[0-9a-f]{2,64}$/;
 /** Mirrors the host-side ceiling (spec/14 § Artifacts), post-wrapping. */
 const MAX_ARTIFACT_BYTES = 3 * 1024 * 1024;
-/** Raw (image) bodies are base64 of up to 7 MB of source, so they get their own ceiling. */
-const MAX_RAW_ARTIFACT_BYTES = 10 * 1024 * 1024;
+/** Raw bodies (images, PDFs, videos, files) are base64 of up to 50 MB of source
+ * (the host's video/file cap), so they get their own ceiling: 50 MB * 4/3, rounded up. */
+const MAX_RAW_ARTIFACT_BYTES = 70 * 1024 * 1024;
 /** Opaque origin: agent-authored script cannot touch the SPA's origin.
  * Popups are allowed, and escape the sandbox, so a `target=_blank` link opens
  * a working page; the artifact itself stays opaque either way. */
