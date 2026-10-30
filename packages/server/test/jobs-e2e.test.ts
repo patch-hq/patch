@@ -841,7 +841,10 @@ describe('jobs E2E [running server]', () => {
     // Frames the server sends every host as it attaches are not job work.
     const work = () =>
       h.hostLink.sent.filter(
-        (s) => !s.event.type.startsWith('settings.') && s.event.type !== 'server.queue_mode',
+        (s) =>
+          !s.event.type.startsWith('settings.') &&
+          s.event.type !== 'server.queue_mode' &&
+          s.event.type !== 'host.set_auto_update',
       );
     const before = work().length;
     h.hostLink.setStatus('online');
