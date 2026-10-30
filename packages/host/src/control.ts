@@ -1210,7 +1210,27 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!auth.ok) return reply.code(401).send({ error: auth.reason });
     if (!opts.daemon) return reply.code(503).send({ error: 'host not initialised' });
     const state = opts.daemon.chatState.resolve(req.params.id);
-    if (!state) return reply.code(404).send({ error: 'not found' });
+    if (!state) {
+      // Not on THIS host — `patch chats get` on a chat another machine owns.
+      // Same relay as patch_peek (one event, only the chat_state is kept).
+      if (opts.peekRemoteChat) {
+        try {
+          const remote = await opts.peekRemoteChat({
+            sourceChatId: 'cli',
+            targetChatId: req.params.id,
+            limit: 1,
+          });
+          return remote.chat_state;
+        } catch (err) {
+          const code = err instanceof RemoteRelayError ? err.code : 'sdk_error';
+          return reply.code(code === 'chat_not_found' ? 404 : 502).send({
+            error: code,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      return reply.code(404).send({ error: 'not found' });
+    }
     return state;
   });
 
