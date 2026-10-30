@@ -293,3 +293,57 @@ describe('patch_send_to — falls back to the owning host when not local', () =>
     }
   });
 });
+
+describe('GET /chats/:id (patch chats get) — falls back to the owning host when not local', () => {
+  it('relays a peek of one event and returns the remote chat_state', async () => {
+    const { daemon, jobs } = setup();
+    const calls: unknown[] = [];
+    const app = await buildControl({
+      localKey: LOCAL_KEY,
+      daemon,
+      jobs,
+      peekRemoteChat: async (req) => {
+        calls.push(req);
+        return {
+          chat_state: { chatId: 'chat-on-host-b', activity: 'idle' },
+          events: [],
+          truncated: false,
+        };
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/chats/chat-on-host-b',
+        headers: { authorization: `Bearer ${LOCAL_KEY}` },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ chatId: 'chat-on-host-b', activity: 'idle' });
+      expect(calls).toEqual([{ sourceChatId: 'cli', targetChatId: 'chat-on-host-b', limit: 1 }]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('a chat_not_found from the relay is a 404', async () => {
+    const { daemon, jobs } = setup();
+    const app = await buildControl({
+      localKey: LOCAL_KEY,
+      daemon,
+      jobs,
+      peekRemoteChat: async () => {
+        throw new RemoteRelayError('chat_not_found', 'no such chat');
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/chats/chat-ghost',
+        headers: { authorization: `Bearer ${LOCAL_KEY}` },
+      });
+      expect(res.statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+});

@@ -109,13 +109,25 @@ export function registerManageCommands(program: Command): void {
           opts.limit !== undefined ? parseLimit(opts.limit) : undefined;
         const t = getTransport(opts);
         const id = await resolveChatId(t, rawId);
-        const qs = limit !== undefined ? `?limit=${limit}` : '';
-        const path = pickPath(
-          t,
-          `/internal/history/${encodeURIComponent(id)}${qs}`,
-          `/api/chats/${encodeURIComponent(id)}/history${qs}`,
-        );
-        const res = await t.get<{ events: unknown[]; nextFromSeq?: number }>(path);
+        // The host and server both page forward from a seq (and cap a page), so
+        // the most-recent N means walking every page and keeping the tail.
+        const fromParam = t.kind === 'uds' ? 'fromSeq' : 'since';
+        const events: unknown[] = [];
+        let from: number | undefined;
+        for (;;) {
+          const qs = from !== undefined ? `?${fromParam}=${from}` : '';
+          const path = pickPath(
+            t,
+            // callerChatId lets the host relay a chat owned by another machine.
+            `/internal/history/${encodeURIComponent(id)}${qs}${qs ? '&' : '?'}callerChatId=cli`,
+            `/api/chats/${encodeURIComponent(id)}/history${qs}`,
+          );
+          const page = await t.get<{ events: unknown[]; nextFromSeq?: number }>(path);
+          events.push(...page.events);
+          if (page.nextFromSeq === undefined) break;
+          from = page.nextFromSeq;
+        }
+        const res = { events: limit !== undefined ? events.slice(-limit) : events };
         if (opts.json) {
           emitJson(res);
           return;
