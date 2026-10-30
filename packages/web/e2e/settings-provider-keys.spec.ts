@@ -80,7 +80,7 @@ test.describe('Settings — Providers', () => {
     expect(await page.content()).not.toContain(FAKE_KEY);
   });
 
-  test('revoking asks first, then deletes it from every machine', async ({ page }) => {
+  test('revoking asks first, then deletes it', async ({ page }) => {
     const server = await stubSettingsApi(page, {
       secrets: {
         providerKeys: NO_SECRETS.providerKeys.map((k) =>
@@ -92,7 +92,7 @@ test.describe('Settings — Providers', () => {
     await expect(page.getByTestId('provider-key-gemini-status')).toHaveText('Set · ends LAST');
     await page.getByTestId('provider-key-gemini-revoke').click();
     const dialog = page.getByRole('dialog');
-    await expect(dialog).toContainText('from every machine');
+    await expect(dialog).toContainText('Delete the Gemini key');
     await dialog.getByRole('button', { name: 'Revoke' }).click();
     await expect
       .poll(() => server.writes.map((w) => `${w.method} ${w.path}`))
