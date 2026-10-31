@@ -1676,7 +1676,7 @@ function ToolResultBody({ chatId, value }: { chatId: string; value: unknown }): 
 }
 
 interface ViewFileView {
-  kind: 'image' | 'pdf' | 'html' | 'file';
+  kind: 'image' | 'pdf' | 'video' | 'html' | 'file';
   /** Server-relative URL of the wrapped page (`/api/chats/:id/artifact/:aid`). */
   url: string;
   name: string;
@@ -1690,7 +1690,8 @@ interface ViewFileView {
 function asViewFile(v: unknown): ViewFileView | null {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return null;
   const { kind, url, name } = v as Record<string, unknown>;
-  if (kind !== 'image' && kind !== 'pdf' && kind !== 'html' && kind !== 'file') return null;
+  if (kind !== 'image' && kind !== 'pdf' && kind !== 'video' && kind !== 'html' && kind !== 'file')
+    return null;
   if (typeof url !== 'string' || !url.startsWith('/api/')) return null;
   if (typeof name !== 'string' || name === '') return null;
   const { width, height, size } = v as Record<string, unknown>;

@@ -46,11 +46,13 @@ test.describe('Settings — Voice engines', () => {
       'Built-in',
       'Deepgram',
       'ElevenLabs',
+      'On this host',
       'Whisper',
     ]);
     await expect(page.getByTestId('dictation-computer-engine').locator('button')).toHaveText([
       'Deepgram',
       'ElevenLabs',
+      'On this host',
       'Whisper',
     ]);
     await expect(page.getByText(/\b(direct|light|heavy)\b/)).toHaveCount(0);

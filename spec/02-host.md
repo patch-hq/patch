@@ -92,7 +92,9 @@ off"), everything claude said is replayed, and what the previous host had alread
 handled is skipped. A permission the turn was waiting on is asked again. A turn
 whose runner is gone (a reboot) is cut off and re-sent with the reminder, as
 before. A directory belonging to no owed turn is ended and removed. A finished
-turn's directory is removed. An install never prunes a version folder a live
+turn's directory is removed. A runner with no host attached whose claude has been
+silent for 30 minutes ends claude itself, so an orphaned turn finishes as failed
+instead of holding its chat "running". An install never prunes a version folder a live
 runner started from.
 
 ### Desktop app and the local host

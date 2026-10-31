@@ -238,7 +238,7 @@ describe('voice note — the typed message is appended to, never erased', () => 
       let cbs: DictationPreviewCallbacks | null = null;
       const factory: typeof startDictationPreview = (_chatId, callbacks) => {
         cbs = callbacks;
-        return { push: () => {}, stop: () => {} };
+        return { push: () => {}, finish: async () => '', stop: () => {} };
       };
       return { factory, emit: (text) => act(() => cbs?.onPartial(text)) };
     }

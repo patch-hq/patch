@@ -5375,3 +5375,80 @@ describe('handleServerEvent', () => {
     }
   });
 });
+
+describe('src/index.ts main() — cross-host patch_stop', () => {
+  it('as the TARGET: stops the local chat and acks ok', async () => {
+    const boot = await bootMain();
+    try {
+      await boot.fakeServer.waitForHello();
+      boot.fakeServer.authNow();
+      const chatId = await boot.ready.daemon.spawnChat({
+        folder: makeFolder(),
+        model: 'claude-3-5-haiku-20241022',
+      });
+      boot.fakeServer.send({
+        type: 'patch.stop',
+        sourceChatId: 'agent-on-host-a',
+        targetChatId: chatId,
+        requestId: 'req-stop-ok-1',
+      });
+      const resp = (await boot.fakeServer.waitForFrame(
+        (e) => e.type === 'patch.stop.response' && e.requestId === 'req-stop-ok-1',
+      )) as { ok: boolean };
+      expect(resp.ok).toBe(true);
+    } finally {
+      await boot.cleanup();
+    }
+  });
+
+  it('as the TARGET: an unknown chat answers ok:false chat_not_found', async () => {
+    const boot = await bootMain();
+    try {
+      await boot.fakeServer.waitForHello();
+      boot.fakeServer.authNow();
+      boot.fakeServer.send({
+        type: 'patch.stop',
+        sourceChatId: 'agent-on-host-a',
+        targetChatId: 'no-such-chat',
+        requestId: 'req-stop-missing-1',
+      });
+      const resp = (await boot.fakeServer.waitForFrame(
+        (e) => e.type === 'patch.stop.response' && e.requestId === 'req-stop-missing-1',
+      )) as { ok: boolean; error?: { code: string } };
+      expect(resp.ok).toBe(false);
+      expect(resp.error?.code).toBe('chat_not_found');
+    } finally {
+      await boot.cleanup();
+    }
+  });
+
+  it('as the CALLER: /internal/stop blocks on the other machine and returns ok', async () => {
+    const boot = await bootMain();
+    try {
+      await boot.fakeServer.waitForHello();
+      boot.fakeServer.authNow();
+      const pending = boot.ready.app.inject({
+        method: 'POST',
+        url: '/internal/stop/chat-on-host-b',
+        headers: { authorization: `Bearer ${boot.localKey}` },
+        payload: { callerChatId: 'mgr' },
+      });
+      const req = (await boot.fakeServer.waitForFrame(
+        (e) => e.type === 'patch.stop' && e.targetChatId === 'chat-on-host-b',
+      )) as { requestId?: string };
+      expect(req.requestId).toBeDefined();
+      boot.fakeServer.send({
+        type: 'patch.stop.response',
+        requestId: req.requestId!,
+        sourceChatId: 'mgr',
+        targetChatId: 'chat-on-host-b',
+        ok: true,
+      });
+      const res = await pending;
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ ok: true });
+    } finally {
+      await boot.cleanup();
+    }
+  });
+});

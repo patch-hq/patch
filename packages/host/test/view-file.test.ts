@@ -23,7 +23,7 @@ import { Daemon } from '../src/chatRunner.js';
 import { buildControl } from '../src/control.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
-import { MAX_VIEW_IMAGE_BYTES, MAX_VIEW_PDF_BYTES } from '../src/artifacts.js';
+import { MAX_VIEW_IMAGE_BYTES, MAX_VIEW_PDF_BYTES, MAX_VIEW_VIDEO_BYTES } from '../src/artifacts.js';
 
 const LOCAL_KEY = 'local-secret';
 const AUTH = { authorization: `Bearer ${LOCAL_KEY}` };
@@ -156,6 +156,90 @@ describe('POST /internal/view_file (view_file)', () => {
         base64: PDF_MINIMAL.toString('base64'),
       });
       expect(events.find((e) => e.type === 'chat.artifact')).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('publishes audio raw with its own content-type so the chat can play it', async () => {
+    const { app, chatId, folder, events, published } = await setup();
+    try {
+      const mp3 = Buffer.from([0xff, 0xfb, 0x90, 0x00, 1, 2, 3, 4]);
+      writeFileSync(join(folder, 'clip.mp3'), mp3);
+      writeFileSync(join(folder, 'tone.wav'), mp3);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/view_file',
+        headers: AUTH,
+        payload: { callerChatId: chatId, file_path: 'clip.mp3' },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { kind: string; name: string };
+      expect(body.kind).toBe('audio');
+      expect(body.name).toBe('clip.mp3');
+      expect(res.body).not.toContain(mp3.toString('base64'));
+      expect(published[0]!.html).toBeUndefined();
+      expect(published[0]!.raw).toEqual({
+        contentType: 'audio/mpeg',
+        base64: mp3.toString('base64'),
+      });
+
+      const wav = await app.inject({
+        method: 'POST',
+        url: '/internal/view_file',
+        headers: AUTH,
+        payload: { callerChatId: chatId, file_path: 'tone.wav' },
+      });
+      expect(wav.statusCode).toBe(200);
+      expect(published[1]!.raw!.contentType).toBe('audio/wav');
+      expect(events.find((e) => e.type === 'chat.artifact')).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('publishes an mp4 raw as video/mp4 and acks kind video with its size', async () => {
+    const { app, chatId, folder, events, published } = await setup();
+    try {
+      const mp4 = Buffer.from('000000186674797069736f6d0000020069736f6d', 'hex');
+      writeFileSync(join(folder, 'clip.mp4'), mp4);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/view_file',
+        headers: AUTH,
+        payload: { callerChatId: chatId, file_path: 'clip.mp4' },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { kind: string; name: string; size: number };
+      expect(body.kind).toBe('video');
+      expect(body.name).toBe('clip.mp4');
+      expect(body.size).toBe(mp4.length);
+      expect(res.body).not.toContain(mp4.toString('base64'));
+      expect(published).toHaveLength(1);
+      expect(published[0]!.html).toBeUndefined();
+      expect(published[0]!.raw).toEqual({
+        contentType: 'video/mp4',
+        base64: mp4.toString('base64'),
+      });
+      expect(events.find((e) => e.type === 'chat.artifact')).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects an oversize video', async () => {
+    const { app, chatId, folder, published } = await setup();
+    try {
+      writeFileSync(join(folder, 'huge.mp4'), Buffer.alloc(MAX_VIEW_VIDEO_BYTES + 1, 1));
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/view_file',
+        headers: AUTH,
+        payload: { callerChatId: chatId, file_path: 'huge.mp4' },
+      });
+      expect(res.statusCode).toBe(400);
+      expect((res.json() as { message: string }).message).toContain('limit');
+      expect(published).toHaveLength(0);
     } finally {
       await app.close();
     }

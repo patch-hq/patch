@@ -21,6 +21,18 @@ export const ELEVENLABS_LIVE_MODEL = 'eleven_flash_v2_5';
 /** Higher-quality model: announcements and briefings, spoken once. */
 export const ELEVENLABS_ANNOUNCE_MODEL = 'eleven_multilingual_v2';
 
+/** Voice Design model: turns a description into candidate voices. */
+export const ELEVENLABS_DESIGN_MODEL = 'eleven_ttv_v3';
+
+/** One candidate voice from Voice Design, with a sample of it speaking. */
+export interface DesignedVoicePreview {
+  generatedVoiceId: string;
+  /** mp3 sample, base64. */
+  audioBase64: string;
+  durationSecs?: number;
+  text?: string;
+}
+
 /** A voice on the account, cloned and designed ones included. */
 export interface ElevenLabsVoice {
   id: string;
@@ -100,6 +112,74 @@ export class ElevenLabsBackend implements KokoroBackend {
       name: v.name,
       ...(v.category ? { category: v.category } : {}),
     }));
+  }
+
+  /**
+   * Voice Design: ElevenLabs invents candidate voices from a written
+   * description. Each preview is a short sample; nothing is kept on the
+   * account until `saveDesignedVoice`. Spends credits, so it is recorded.
+   */
+  async designVoicePreviews(description: string): Promise<DesignedVoicePreview[]> {
+    const key = readKey(this.opts.apiKey);
+    if (key === undefined) throw missingKey();
+    const res = await this.fetchImpl(`${this.baseUrl}/v1/text-to-voice/design`, {
+      method: 'POST',
+      headers: { 'xi-api-key': key, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        voice_description: description,
+        model_id: ELEVENLABS_DESIGN_MODEL,
+        auto_generate_text: true,
+      }),
+    });
+    if (!res.ok)
+      throw new ElevenLabsError(`ElevenLabs voice design failed: ${await failureText(res)}`);
+    const body = (await res.json()) as {
+      previews?: { generated_voice_id: string; audio_base_64: string; duration_secs?: number }[];
+      text?: string;
+    };
+    if (!Array.isArray(body.previews) || body.previews.length === 0) {
+      throw new ElevenLabsError('ElevenLabs voice design failed: response had no previews');
+    }
+    this.opts.onUsage?.({
+      kind: 'tts',
+      provider: 'elevenlabs',
+      model: ELEVENLABS_DESIGN_MODEL,
+      characters: (body.text ?? '').length,
+      at: this.now(),
+      usd: speechCostUsd(ELEVENLABS_DESIGN_MODEL, (body.text ?? '').length),
+    });
+    return body.previews.map((p) => ({
+      generatedVoiceId: p.generated_voice_id,
+      audioBase64: p.audio_base_64,
+      ...(p.duration_secs !== undefined ? { durationSecs: p.duration_secs } : {}),
+      ...(body.text !== undefined ? { text: body.text } : {}),
+    }));
+  }
+
+  /** Keep a previewed voice on the account; returns the id the voice picker lists. */
+  async saveDesignedVoice(args: {
+    name: string;
+    description: string;
+    generatedVoiceId: string;
+  }): Promise<ElevenLabsVoice> {
+    const key = readKey(this.opts.apiKey);
+    if (key === undefined) throw missingKey();
+    const res = await this.fetchImpl(`${this.baseUrl}/v1/text-to-voice`, {
+      method: 'POST',
+      headers: { 'xi-api-key': key, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        voice_name: args.name,
+        voice_description: args.description,
+        generated_voice_id: args.generatedVoiceId,
+      }),
+    });
+    if (!res.ok)
+      throw new ElevenLabsError(`ElevenLabs voice save failed: ${await failureText(res)}`);
+    const body = (await res.json()) as { voice_id?: string };
+    if (typeof body.voice_id !== 'string') {
+      throw new ElevenLabsError('ElevenLabs voice save failed: response had no voice_id');
+    }
+    return { id: body.voice_id, name: args.name, category: 'generated' };
   }
 
   async synthesize(text: string, voice?: string, opts?: SynthOptions): Promise<KokoroSynthesis> {

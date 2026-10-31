@@ -137,6 +137,7 @@ function fakeOpener(opts: OpenAudioSessionOpts): Promise<AudioSession> {
     setSessionMode: () => {},
     speak: () => {},
     sendPcm: () => {},
+    finishDictation: () => {},
     isMuted: () => false,
     end: () => {},
   });

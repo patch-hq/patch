@@ -4308,7 +4308,7 @@ function ToolBlobBody({ blob }: { blob: ToolBlobRef }): JSX.Element {
 
 /** What `view_file` hands back: where the rendered page lives, and what it is. */
 interface ViewFileView {
-  kind: 'image' | 'pdf' | 'html' | 'file';
+  kind: 'image' | 'pdf' | 'audio' | 'video' | 'html' | 'file';
   /** Server-relative URL of the wrapped page (`/api/chats/:id/artifact/:aid`). */
   url: string;
   name: string;
@@ -4366,7 +4366,15 @@ function asViewFile(value: unknown): ViewFileView | null {
   const kind = v['kind'];
   const url = v['url'];
   const name = v['name'];
-  if (kind !== 'image' && kind !== 'pdf' && kind !== 'html' && kind !== 'file') return null;
+  if (
+    kind !== 'image' &&
+    kind !== 'pdf' &&
+    kind !== 'audio' &&
+    kind !== 'video' &&
+    kind !== 'html' &&
+    kind !== 'file'
+  )
+    return null;
   if (typeof url !== 'string' || !url.startsWith('/api/')) return null;
   if (typeof name !== 'string' || name.length === 0) return null;
   const width = typeof v['width'] === 'number' ? v['width'] : undefined;
@@ -4871,6 +4879,32 @@ function ViewFileCard({ view, chatId }: { view: ViewFileView; chatId: string }):
       </div>
     );
   }
+  if (view.kind === 'audio') {
+    return (
+      <div className="view-file view-file-audio" data-testid="view-file" data-kind="audio">
+        <div className="view-file-bar">
+          <span className="view-file-name">{view.name}</span>
+          <a
+            className="view-file-download"
+            href={view.url}
+            download={view.name}
+            data-testid="view-file-download"
+            aria-label={`Download ${view.name}`}
+            title="Download"
+          >
+            <Download size={14} aria-hidden />
+          </a>
+        </div>
+        <audio
+          className="view-file-audio-player"
+          data-testid="view-file-audio"
+          src={view.url}
+          controls
+          preload="metadata"
+        />
+      </div>
+    );
+  }
   return (
     <div
       className={`view-file view-file-${view.kind}${expanded ? ' expanded' : ''}`}
@@ -4921,6 +4955,15 @@ function ViewFileCard({ view, chatId }: { view: ViewFileView; chatId: string }):
             {...(view.height !== undefined ? { height: view.height } : {})}
           />
         </button>
+      ) : view.kind === 'video' ? (
+        <video
+          className="view-file-video"
+          data-testid="view-file-video"
+          src={view.url}
+          controls
+          playsInline
+          preload="metadata"
+        />
       ) : (
         <iframe
           className="view-file-frame"

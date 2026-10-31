@@ -200,6 +200,9 @@ function describeApiError(e: unknown): string {
 /** Sentinel folder for the per-host "Custom path…" option. */
 const CUSTOM_FOLDER = '__custom__';
 
+/** Sentinel folder for the per-host "Browse…" option. */
+const BROWSE_FOLDER = '__browse__';
+
 /** Sentinel group value for the Group picker's "New group…" option. */
 const NEW_GROUP = '__new_group__';
 
@@ -872,12 +875,28 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
   // path: the picker drops into a free-text "Custom path…" mode (the latch also
   // lets the user choose Custom explicitly before typing anything).
   const [folderCustom, setFolderCustom] = useState(false);
+  const [folderBrowse, setFolderBrowse] = useState(false);
+  const [browseDir, setBrowseDir] = useState<string | null>(null);
   const folderIsAdHoc =
-    folderCustom || (form.spawnFolder !== '' && !foldersOnChosenHost.includes(form.spawnFolder));
+    folderCustom ||
+    (!folderBrowse && form.spawnFolder !== '' && !foldersOnChosenHost.includes(form.spawnFolder));
   // A path on a machine patch has no history on: complete it from that host's
   // own filesystem (the directory typed so far) so a never-used folder is
   // reachable without knowing its exact spelling. A browse error just offers
   // no suggestions; the typed path is still what is saved.
+  // Browse mode: the folder picker's "Browse…" option opens a directory tree on
+  // the chosen host (the same listing the new-chat browser uses), so any folder
+  // under that machine's browsable roots is reachable, not just the listed ones.
+  const {
+    data: browseListing,
+    isLoading: browseLoading,
+    error: browseError,
+  } = useQuery({
+    queryKey: ['folders-browse', form.spawnHostId, 'tree', browseDir],
+    queryFn: () => api.browseFolders(form.spawnHostId, browseDir ?? undefined),
+    enabled: folderBrowse && form.spawnHostId !== '',
+    retry: false,
+  });
   const customDir = form.spawnFolder.startsWith('/')
     ? form.spawnFolder.slice(0, form.spawnFolder.lastIndexOf('/') + 1)
     : '';
@@ -2190,26 +2209,59 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
             ) : form.actionType === 'spawn' || form.actionType === 'continue' ? (
               <>
                 <label>
+                  Machine
+                  <select
+                    value={form.spawnHostId}
+                    onChange={(e) => {
+                      // Choosing a machine clears the folder: a path means
+                      // nothing without the machine it is on (spec/08 § Action).
+                      setFolderCustom(false);
+                      setFolderBrowse(false);
+                      setBrowseDir(null);
+                      setForm((f) => ({ ...f, spawnHostId: e.target.value, spawnFolder: '' }));
+                    }}
+                    data-testid="job-spawn-host-select"
+                  >
+                    <option value="" disabled>
+                      {folderGroups.length === 0 ? 'No machines connected' : 'Select a machine…'}
+                    </option>
+                    {folderGroups.map((g) => (
+                      <option key={g.hostId} value={g.hostId}>
+                        {g.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
                   Folder
                   <select
+                    disabled={form.spawnHostId === ''}
                     value={
-                      form.spawnHostId === '' && form.spawnFolder === '' && !folderCustom
+                      form.spawnHostId === ''
                         ? ''
-                        : folderChoiceValue(
-                            form.spawnHostId,
-                            folderIsAdHoc ? CUSTOM_FOLDER : form.spawnFolder,
-                          )
+                        : folderBrowse
+                          ? folderChoiceValue(form.spawnHostId, BROWSE_FOLDER)
+                          : form.spawnFolder === '' && !folderCustom
+                            ? ''
+                            : folderChoiceValue(
+                                form.spawnHostId,
+                                folderIsAdHoc ? CUSTOM_FOLDER : form.spawnFolder,
+                              )
                     }
                     onChange={(e) => {
                       const picked = parseFolderChoice(e.target.value);
                       if (!picked) return;
-                      // The option carries its host: picking a folder picks the
-                      // machine, and BOTH are what the action stores
-                      // (spec/14 § Jobs view, spec/08 § Action).
-                      if (picked.folder === CUSTOM_FOLDER) {
+                      if (picked.folder === BROWSE_FOLDER) {
+                        setFolderCustom(false);
+                        setFolderBrowse(true);
+                        setBrowseDir(null);
+                        setForm((f) => ({ ...f, spawnHostId: picked.hostId }));
+                      } else if (picked.folder === CUSTOM_FOLDER) {
+                        setFolderBrowse(false);
                         setFolderCustom(true);
                         setForm((f) => ({ ...f, spawnHostId: picked.hostId, spawnFolder: '' }));
                       } else {
+                        setFolderBrowse(false);
                         setFolderCustom(false);
                         setForm((f) => ({
                           ...f,
@@ -2220,31 +2272,86 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                     }}
                     data-testid="job-spawn-folder"
                   >
-                    {form.spawnHostId === '' && form.spawnFolder === '' && !folderCustom ? (
+                    {form.spawnHostId === '' ||
+                    (form.spawnFolder === '' && !folderCustom && !folderBrowse) ? (
                       <option value="" disabled>
-                        {folderGroups.length === 0
-                          ? 'No machines connected'
-                          : 'Select a machine and folder…'}
+                        {form.spawnHostId === '' ? 'Select a machine first' : 'Select a folder…'}
                       </option>
                     ) : null}
-                    {folderGroups.map((g) => (
-                      <optgroup key={g.hostId} label={g.label}>
-                        {g.folders.map((f) => (
-                          <option key={f} value={folderChoiceValue(g.hostId, f)}>
-                            {f}
+                    {folderGroups
+                      .filter((g) => g.hostId === form.spawnHostId)
+                      .map((g) => (
+                        <optgroup key={g.hostId} label={g.label}>
+                          {g.folders.map((f) => (
+                            <option key={f} value={folderChoiceValue(g.hostId, f)}>
+                              {f}
+                            </option>
+                          ))}
+                          <option value={folderChoiceValue(g.hostId, BROWSE_FOLDER)}>
+                            Browse {g.label}…
                           </option>
-                        ))}
-                        <option value={folderChoiceValue(g.hostId, CUSTOM_FOLDER)}>
-                          Custom path on {g.label}…
-                        </option>
-                      </optgroup>
-                    ))}
+                          <option value={folderChoiceValue(g.hostId, CUSTOM_FOLDER)}>
+                            Custom path on {g.label}…
+                          </option>
+                        </optgroup>
+                      ))}
                   </select>
                   <p className="field-hint" data-testid="job-spawn-host">
                     {form.spawnHostId
                       ? `Runs on ${folderGroups.find((g) => g.hostId === form.spawnHostId)?.label ?? form.spawnHostId}`
-                      : 'No machine chosen. Pick a folder under the machine it lives on.'}
+                      : 'No machine chosen. Pick the machine the folder lives on.'}
                   </p>
+                  {folderBrowse ? (
+                    <div className="folder-browser" data-testid="job-folder-browser">
+                      {browseListing?.dir ? (
+                        <p className="field-hint mono" data-testid="job-folder-browser-dir">
+                          {browseListing.dir}
+                        </p>
+                      ) : null}
+                      {browseListing?.dir ? (
+                        <button
+                          type="button"
+                          data-testid="job-folder-browser-up"
+                          onClick={() => {
+                            const parent = browseListing.parent;
+                            setBrowseDir(parent);
+                            if (parent) setForm((f) => ({ ...f, spawnFolder: parent }));
+                          }}
+                        >
+                          Up
+                        </button>
+                      ) : null}
+                      {browseLoading ? (
+                        <p className="field-hint">Loading…</p>
+                      ) : browseError ? (
+                        <p className="error" data-testid="job-folder-browser-error">
+                          {(browseError as Error).message}
+                        </p>
+                      ) : (browseListing?.entries.length ?? 0) === 0 ? (
+                        <p className="field-hint">No subfolders.</p>
+                      ) : (
+                        <ul data-testid="job-folder-browser-list">
+                          {browseListing?.entries.map((entry) => (
+                            <li key={entry.path}>
+                              <button
+                                type="button"
+                                data-testid="job-folder-browser-entry"
+                                onClick={() => {
+                                  setBrowseDir(entry.path);
+                                  setForm((f) => ({ ...f, spawnFolder: entry.path }));
+                                }}
+                              >
+                                {entry.name}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      <p className="field-hint" data-testid="job-folder-browser-chosen">
+                        {form.spawnFolder ? `Selected: ${form.spawnFolder}` : 'Pick a folder.'}
+                      </p>
+                    </div>
+                  ) : null}
                   {folderIsAdHoc ? (
                     <input
                       value={form.spawnFolder}

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vite
 import { render, screen, fireEvent, act, waitFor, cleanup } from '@testing-library/react';
 import { Composer } from '../components/Composer.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
-import { usePreferencesStore } from '../stores/preferencesStore.js';
+import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
 import {
   clearHosts,
   clearSharedAccounts,
@@ -1993,6 +1993,7 @@ describe('Composer', () => {
           push: (pcm: Int16Array) => {
             pushed.push(pcm);
           },
+          finish: async () => '',
           stop: () => {
             stops += 1;
           },
@@ -2041,6 +2042,84 @@ describe('Composer', () => {
       expect(rec.stop).toHaveBeenCalledOnce();
       // The turn is NOT auto-sent — it's editable in the box.
       expect(onSend).not.toHaveBeenCalled();
+    });
+
+    describe('on a streaming engine (Deepgram)', () => {
+      const setEngine = (computer: 'deepgram' | 'whisper'): void =>
+        usePreferencesStore.setState({
+          preferences: {
+            ...DEFAULT_PREFERENCES,
+            voiceConfig: {
+              ...DEFAULT_PREFERENCES.voiceConfig,
+              dictation: { ...DEFAULT_PREFERENCES.voiceConfig.dictation, computer },
+            },
+          },
+        });
+      afterEach(() => usePreferencesStore.setState({ preferences: DEFAULT_PREFERENCES }));
+
+      it("stopping lands the host's tidied transcript and uploads nothing", async () => {
+        setEngine('deepgram');
+        const rec = makeRec();
+        const finish = vi.fn(async () => 'Buy oat milk.');
+        const stop = vi.fn();
+        const factory: typeof startDictationPreview = () => ({
+          push: () => {},
+          finish,
+          stop,
+        });
+        const transcribeClip = vi.fn(async () => ({ transcript: 'by oat milk' }));
+        render(
+          <Composer
+            chatId="c1"
+            hostId="d1"
+            onSend={() => {}}
+            previewFactory={factory}
+            recorderFactory={async () => rec as unknown as VoiceRecording}
+            transcribeClip={transcribeClip}
+          />,
+        );
+        const mic = screen.getByTestId('voice-note-btn');
+        fireEvent.mouseDown(mic);
+        fireEvent.mouseUp(mic);
+        await waitFor(() => expect(rec.stop).not.toHaveBeenCalled());
+        fireEvent.mouseDown(mic);
+        await waitFor(() => expect(input().value).toBe('Buy oat milk.'));
+        expect(finish).toHaveBeenCalledOnce();
+        expect(stop).toHaveBeenCalled();
+        expect(transcribeClip).not.toHaveBeenCalled();
+      });
+
+      it('a stream that fails while finishing fails the dictation; the clip is not re-read', async () => {
+        setEngine('deepgram');
+        const rec = makeRec();
+        const factory: typeof startDictationPreview = () => ({
+          push: () => {},
+          finish: async () => {
+            throw new Error('Deepgram closed');
+          },
+          stop: () => {},
+        });
+        const transcribeClip = vi.fn(async () => ({ transcript: 'by oat milk' }));
+        render(
+          <Composer
+            chatId="c1"
+            hostId="d1"
+            onSend={() => {}}
+            previewFactory={factory}
+            recorderFactory={async () => rec as unknown as VoiceRecording}
+            transcribeClip={transcribeClip}
+          />,
+        );
+        const mic = screen.getByTestId('voice-note-btn');
+        fireEvent.mouseDown(mic);
+        fireEvent.mouseUp(mic);
+        await waitFor(() => expect(rec.stop).not.toHaveBeenCalled());
+        fireEvent.mouseDown(mic);
+        await waitFor(() => expect(rec.stop).toHaveBeenCalled());
+        await waitFor(() => expect(mic.getAttribute('aria-pressed')).toBe('false'));
+        expect(input().value).toBe('');
+        expect(transcribeClip).not.toHaveBeenCalled();
+      });
     });
 
     it('a hands-free toggle dictation keeps listening through a long silence — only a second tap ends it', async () => {

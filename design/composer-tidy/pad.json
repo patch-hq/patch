@@ -1,0 +1,1 @@
+{"screens": [{"id": "new", "name": "New chat", "path": "index.html"}, {"id": "chat", "name": "In a chat", "path": "chat.html"}, {"id": "model", "name": "Model menu", "path": "model-menu.html"}, {"id": "account", "name": "Account menu", "path": "account-menu.html"}, {"id": "mode", "name": "Permissions menu", "path": "mode-menu.html"}]}

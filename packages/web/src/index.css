@@ -5048,6 +5048,12 @@ button.view-file-download {
   height: 80vh;
 }
 /* Same thumbnail-then-lightbox treatment as .tool-field-img*. */
+.view-file-audio-player {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+}
+
 .view-file-img-btn {
   display: block;
   width: 100%;
@@ -5066,6 +5072,12 @@ button.view-file-download {
   object-fit: contain;
   display: block;
   margin: 0 auto;
+}
+.view-file-video {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  background: #000;
 }
 /* spec/14 § Context compression, § Automations — transcript furniture, not a
    tool call OR a user bubble: no panel fill, tighter, and muted, so a long

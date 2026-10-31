@@ -42,3 +42,4 @@ declare module 'turndown-plugin-gfm' {
   const plugin: { gfm: (service: TurndownService) => void };
   export default plugin;
 }
+declare module 'sherpa-onnx-node';

@@ -1,4 +1,3 @@
-import { StyleSheet } from 'react-native';
 // app/new-chat.tsx — type-first new chat (spec/15 § New chat flow, parity
 // with web's new chat, spec/14 § Sidebar §8). Pins:
 //   - the screen opens on the most recently used (host, folder) pair, shown in
@@ -38,11 +37,14 @@ import { useUiStore } from '../src/stores/uiStore';
 import { useComposerAttachmentStore } from '../src/stores/composerAttachmentStore';
 import { deliveryTracker } from '../src/lib/deliveryTracker';
 import { _resetSendQueue } from '../src/lib/sendQueue';
+import { startVoiceCall } from '../src/lib/voiceCall';
 import { loadLastNewChat, saveLastNewChat } from '../src/lib/lastNewChat';
 import { useNewChatDraftStore } from '../src/stores/newChatDraftStore';
 import { routerMock, __resetRouterMock, __setLocalSearchParams } from './stubs/expo-router';
 import { __clearAllMmkv } from './stubs/mmkv';
 import type { ChatRow } from '../src/stores/types';
+
+vi.mock('../src/lib/voiceCall', () => ({ startVoiceCall: vi.fn() }));
 
 const { api, ApiErrorClass } = vi.hoisted(() => {
   class ApiErrorClass extends Error {
@@ -114,6 +116,7 @@ function chat(partial: Partial<ChatRow> & { chatId: string }): ChatRow {
 let submitSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
+  vi.mocked(startVoiceCall).mockClear();
   __clearAllMmkv();
   __resetRouterMock();
   __setLocalSearchParams({});
@@ -205,11 +208,24 @@ const sheetRows = (r: ReturnType<typeof renderRN>): string[] =>
     (i) => String(i.props.testID).replace('folder-sheet-row-', ''),
   );
 
+/** Model pill → "All models…" → the option, as the composer offers it. */
+async function pickModel(r: ReturnType<typeof renderRN>, id: string): Promise<void> {
+  await press(r, 'composer-model-pill');
+  await press(r, 'model-menu-all');
+  await press(r, `new-chat-model-option-${id}`);
+}
+
+const modePillLabel = (r: ReturnType<typeof renderRN>): string =>
+  String(findHost(r.root, byTestId('permission-mode-padlock')).props.accessibilityLabel);
+
+const modelPillText = (r: ReturnType<typeof renderRN>): string =>
+  textOf(findHost(r.root, byTestId('composer-model-pill')));
+
 const selected = (r: ReturnType<typeof renderRN>, testID: string): boolean =>
   findHost(r.root, byTestId(testID)).props.accessibilityState?.selected === true;
 
 describe('NewChat — setup quick picks', () => {
-  it('fills the chosen folder pill and model dropdown solid so the choice is unmistakable', async () => {
+  it('shows the chosen project as a pill under the title and the model by its name in the composer', async () => {
     saveLastNewChat({
       hostId: HOST,
       folder: '/p/mine',
@@ -217,11 +233,9 @@ describe('NewChat — setup quick picks', () => {
       permissionMode: 'plan',
     });
     const r = await renderReady();
-    const bg = (id: string): unknown =>
-      StyleSheet.flatten(findHost(r.root, byTestId(id)).props.style).backgroundColor;
-    expect(bg('new-chat-folder-pill')).toBe('#46802f');
-    expect(bg('new-chat-model-quick-claude-sonnet-5')).toBe('#46802f');
-    expect(bg('new-chat-model-pill')).toBe('#46802f');
+    expect(textOf(findHost(r.root, byTestId('new-chat-title')))).toBe('New chat');
+    expect(pillText(r)).toBe('mine · d1-box');
+    expect(modelPillText(r)).toContain('Sonnet 5');
   });
 
   // Todoist 6hhj229445J7cG36: the options for a new chat are whatever the last
@@ -241,8 +255,8 @@ describe('NewChat — setup quick picks', () => {
     });
     const r = await renderReady();
     expect(pillText(r)).toBe('mine · d1-box');
-    expect(selected(r, 'new-chat-model-quick-claude-sonnet-5')).toBe(true);
-    expect(textOf(findHost(r.root, byTestId('new-chat-permission-mode')))).toBe('Plan only');
+    expect(modelPillText(r)).toContain('Sonnet 5');
+    expect(modePillLabel(r)).toBe('Permission mode: Plan only');
   });
 
   it('does not carry Auto onto a model that cannot run it: the pill reads the host default and none is sent', async () => {
@@ -253,9 +267,7 @@ describe('NewChat — setup quick picks', () => {
       permissionMode: 'auto',
     });
     const r = await renderReady();
-    expect(textOf(findHost(r.root, byTestId('new-chat-permission-mode')))).toBe(
-      'Ask before acting',
-    );
+    expect(modePillLabel(r)).toBe('Permission mode: Ask before acting');
     typeText(r, 'go');
     await send(r);
     const payload = api.createChat.mock.calls[0]![0] as Record<string, unknown>;
@@ -277,11 +289,7 @@ describe('NewChat — setup quick picks', () => {
       chats: { a: chat({ chatId: 'a', folder: '/p/one', model: 'claude-opus-4', lastUpdated: 1 }) },
     });
     const r = await renderReady();
-    const picks = (): unknown[] =>
-      findAllHost(r.root, (i) =>
-        String(i.props['testID'] ?? '').startsWith('new-chat-model-quick-'),
-      ).map((i) => i.props.testID);
-    const before = picks();
+    const before = modelPillText(r);
     await actAsync(async () => {
       useChatStore.setState({
         chats: {
@@ -291,7 +299,7 @@ describe('NewChat — setup quick picks', () => {
       });
       await flush();
     });
-    expect(picks()).toEqual(before);
+    expect(modelPillText(r)).toBe(before);
     expect(pillText(r)).toBe('mine · d1-box');
   });
 
@@ -299,7 +307,7 @@ describe('NewChat — setup quick picks', () => {
     useFolderStore.getState().setHostFolders({ hostId: HOST, roots: ['/p/one'], recent: [] });
     __setLocalSearchParams({ hostId: HOST, folder: '/p/one' });
     const r = await renderReady();
-    await press(r, 'new-chat-model-quick-claude-sonnet-5');
+    await pickModel(r, 'claude-sonnet-5');
     typeText(r, 'hello');
     await send(r);
     expect(loadLastNewChat()).toEqual({
@@ -332,22 +340,44 @@ describe('NewChat — setup quick picks', () => {
     expect(pillText(r)).toBe('Choose a folder…');
   });
 
-  it('model picks: models this host has used first, topped up from the catalogue head', async () => {
+  it('the model menu lists the models this host has used first, topped up from the catalogue head, then All models…', async () => {
     useChatStore.setState({
       chats: { a: chat({ chatId: 'a', folder: '/p/one', model: 'claude-opus-4' }) },
     });
     const r = await renderReady();
+    await press(r, 'composer-model-pill');
     const ids = findAllHost(r.root, (i) =>
-      String(i.props['testID'] ?? '').startsWith('new-chat-model-quick-'),
+      String(i.props['testID'] ?? '').startsWith('model-menu-'),
     ).map((i) => i.props.testID);
     expect(ids).toEqual([
-      'new-chat-model-quick-claude-opus-4',
-      'new-chat-model-quick-claude-opus-5-5',
-      'new-chat-model-quick-claude-sonnet-5',
+      'model-menu-option-claude-opus-4',
+      'model-menu-option-claude-opus-5-5',
+      'model-menu-option-claude-sonnet-5',
+      'model-menu-all',
     ]);
-    expect(
-      hasText(findHost(r.root, byTestId('new-chat-model-quick-claude-opus-4')), 'Opus 4'),
-    ).toBe(true);
+  });
+
+  it('picking a recent model from the menu selects it without opening the catalogue', async () => {
+    const r = await renderReady();
+    await press(r, 'composer-model-pill');
+    await press(r, 'model-menu-option-claude-sonnet-5');
+    expect(modelPillText(r)).toContain('Sonnet 5');
+    expect(findAllHost(r.root, byTestId('model-picker-list'))).toHaveLength(0);
+  });
+
+  it('has no quick-pick model chips, no pick rows and no usage block any more', async () => {
+    const r = await renderReady();
+    const ids = findAllHost(r.root, () => true).map((i) => String(i.props['testID'] ?? ''));
+    expect(ids.filter((id) => id.startsWith('new-chat-model-quick-'))).toEqual([]);
+    for (const gone of [
+      'new-chat-permission-mode',
+      'new-chat-account-strategy',
+      'new-chat-usage',
+      'new-chat-top-spacer',
+      'new-chat-bottom-spacer',
+    ]) {
+      expect(ids).not.toContain(gone);
+    }
   });
 
   // Todoist: "the model select drop-down opens up in the wrong place when
@@ -355,15 +385,16 @@ describe('NewChat — setup quick picks', () => {
   // thing". The list dropped from under the header, where the chat kebab menu
   // opens, rather than over the composer the way the Permissions list right
   // below it does.
-  it('the model pill opens its list over the composer, not under the header', async () => {
+  it('All models… opens the full list over the composer, not under the header', async () => {
     const r = await renderReady();
-    await press(r, 'new-chat-model-pill');
+    await press(r, 'composer-model-pill');
+    await press(r, 'model-menu-all');
     const list = findHost(r.root, byTestId('model-picker-list'));
     expect(list.props.style.bottom).toEqual(expect.any(Number));
     expect(list.props.style.top).toBeUndefined();
   });
 
-  it('model picks lead with the last model the USER chose, not a newer job chat or thread', async () => {
+  it('model menu leads with the last model the USER chose, not a newer job chat or thread', async () => {
     useChatStore.setState({
       chats: {
         a: chat({ chatId: 'a', folder: '/p/one', model: 'claude-opus-4', lastUpdated: 1 }),
@@ -383,60 +414,62 @@ describe('NewChat — setup quick picks', () => {
       },
     });
     const r = await renderReady();
+    await press(r, 'composer-model-pill');
     const ids = findAllHost(r.root, (i) =>
-      String(i.props['testID'] ?? '').startsWith('new-chat-model-quick-'),
+      String(i.props['testID'] ?? '').startsWith('model-menu-option-'),
     ).map((i) => i.props.testID);
     expect(ids).toEqual([
-      'new-chat-model-quick-claude-opus-4',
-      'new-chat-model-quick-claude-opus-5-5',
-      'new-chat-model-quick-claude-sonnet-5',
+      'model-menu-option-claude-opus-4',
+      'model-menu-option-claude-opus-5-5',
+      'model-menu-option-claude-sonnet-5',
     ]);
   });
 
-  // Todoist 6hq3Wmwm3fRQqcwc: the setup is centred in the space above the
-  // composer with the `New chat` title directly above it (not in a header at
-  // the top), and Account sits below Model. Document order of this flex-column
-  // screen: top spacer, title, Project, Model, Account, Permissions, composer.
-  it('centres title + picks between two spacers, Account below Model', async () => {
+  // The new-chat screen is the chat layout: header (back, title, project pill,
+  // call), empty transcript, the one composer docked at the bottom.
+  it('lays out as a chat does: header with the project pill under the title, then the composer with every setting', async () => {
+    usePresenceStore.setState({
+      hosts: { [HOST]: host(HOST, true, { defaultModel: 'claude-opus-5-5' }) },
+    });
     useChatStore.setState({ chats: { a: chat({ chatId: 'a', folder: '/p/one' }) } });
-    useSettingsStore.setState({
-      data: {
-        preferences: {},
-        shared: {
-          version: 1,
-          secrets: {
-            claude: [
-              { id: 'a1', label: 'one', connected: true },
-              { id: 'a2', label: 'two', connected: true },
-            ],
-            codex: [],
-            providerKeys: [],
-          },
-        },
-      },
-    } as never);
     const r = await renderReady();
-    const everyHostNode = findAllHost(r.root, () => true);
-    const indexOf = (testID: string): number =>
-      everyHostNode.findIndex((i) => i.props['testID'] === testID);
-    const top = indexOf('new-chat-top-spacer');
-    const title = indexOf('new-chat-title');
-    const folder = indexOf('new-chat-folder-pill');
-    const model = everyHostNode.findIndex((i) =>
-      String(i.props['testID'] ?? '').startsWith('new-chat-model-quick-'),
-    );
-    const account = indexOf('new-chat-account-strategy');
-    const mode = indexOf('new-chat-permission-mode');
-    const bottom = indexOf('new-chat-bottom-spacer');
-    const composer = indexOf('composer-actions-row');
-    expect(top).toBeGreaterThanOrEqual(0);
-    expect(title).toBeGreaterThan(top);
-    expect(folder).toBeGreaterThan(title);
-    expect(model).toBeGreaterThan(folder);
-    expect(account).toBeGreaterThan(model);
-    expect(mode).toBeGreaterThan(account);
-    expect(bottom).toBeGreaterThan(mode);
-    expect(composer).toBeGreaterThan(bottom);
+    const nodes = findAllHost(r.root, () => true);
+    const at = (testID: string): number => nodes.findIndex((i) => i.props['testID'] === testID);
+    expect(at('new-chat-title')).toBeGreaterThanOrEqual(0);
+    expect(at('new-chat-folder-pill')).toBeGreaterThan(at('new-chat-title'));
+    expect(at('new-chat-call')).toBeGreaterThan(at('new-chat-folder-pill'));
+    expect(at('permission-mode-padlock')).toBeGreaterThan(at('new-chat-call'));
+    for (const id of ['composer-model-pill', 'composer-effort', 'chat-account']) {
+      expect(at(id)).toBeGreaterThan(at('permission-mode-padlock'));
+    }
+    expect(findAllHost(r.root, byTestId('context-ring'))).toHaveLength(0);
+  });
+
+  it('effort: a pick on a new chat rides to the chat as chat.effort_request once it is created', async () => {
+    usePresenceStore.setState({
+      hosts: { [HOST]: host(HOST, true, { defaultModel: 'claude-opus-5-5' }) },
+    });
+    __setLocalSearchParams({ hostId: HOST, folder: '/p/one' });
+    const r = await renderReady();
+    await press(r, 'composer-effort');
+    await press(r, 'effort-option-high');
+    expect(wsSend.mock.calls.filter((c) => c[0]?.type === 'chat.effort_request')).toHaveLength(0);
+    typeText(r, 'go');
+    await send(r);
+    expect(api.createChat).toHaveBeenCalledWith({ hostId: HOST, folder: '/p/one' });
+    expect(wsSend).toHaveBeenCalledWith({
+      type: 'chat.effort_request',
+      chatId: 'chat_new',
+      effort: 'high',
+    });
+  });
+
+  it('untouched effort sends no effort request', async () => {
+    __setLocalSearchParams({ hostId: HOST, folder: '/p/one' });
+    const r = await renderReady();
+    typeText(r, 'go');
+    await send(r);
+    expect(wsSend.mock.calls.filter((c) => c[0]?.type === 'chat.effort_request')).toHaveLength(0);
   });
 });
 
@@ -633,11 +666,10 @@ describe('NewChat — folder picker sheet, several hosts', () => {
 
   it('picking a folder picks its host, and drops the model and mode chosen on the old one', async () => {
     const r = await renderReady();
-    await press(r, 'new-chat-model-quick-claude-sonnet-5');
+    await pickModel(r, 'claude-sonnet-5');
     await openSheet(r);
     await press(r, 'folder-sheet-row-/p/other');
     expect(pillText(r)).toBe('other · d2-box');
-    expect(selected(r, 'new-chat-model-quick-claude-sonnet-5')).toBe(false);
     typeText(r, 'go');
     await send(r);
     expect(api.createChat).toHaveBeenCalledWith({ hostId: OTHER, folder: '/p/other' });
@@ -694,11 +726,11 @@ describe('NewChat — the first send creates the chat', () => {
 
   it('carries an explicitly chosen model and permission mode', async () => {
     const r = await renderReady();
-    await press(r, 'new-chat-model-quick-claude-sonnet-5');
-    expect(selected(r, 'new-chat-model-quick-claude-sonnet-5')).toBe(true);
-    await press(r, 'new-chat-permission-mode');
+    await pickModel(r, 'claude-sonnet-5');
+    expect(modelPillText(r)).toContain('Sonnet 5');
+    await press(r, 'permission-mode-padlock');
     await press(r, 'permission-mode-option-plan');
-    expect(hasText(findHost(r.root, byTestId('new-chat-permission-mode')), 'Plan only')).toBe(true);
+    expect(modePillLabel(r)).toBe('Permission mode: Plan only');
     typeText(r, 'go');
     await send(r);
     expect(api.createChat).toHaveBeenCalledWith({
@@ -714,9 +746,7 @@ describe('NewChat — the first send creates the chat', () => {
       hosts: { [HOST]: host(HOST, true, { permissionModeDefault: 'acceptEdits' }) },
     });
     const r = await renderReady();
-    expect(
-      hasText(findHost(r.root, byTestId('new-chat-permission-mode')), 'Auto-accept edits'),
-    ).toBe(true);
+    expect(modePillLabel(r)).toBe('Permission mode: Auto-accept edits');
   });
 
   it('sending with no folder chosen is refused, keeping the text', async () => {
@@ -946,11 +976,12 @@ it('refreshes models when ChatGPT connects on the current host', async () => {
     await flush();
   });
   expect(api.models.mock.calls.length).toBeGreaterThan(calls);
-  expect(findHost(r.root, byTestId('new-chat-model-quick-openai/test'))).toBeTruthy();
+  await press(r, 'composer-model-pill');
+  expect(findHost(r.root, byTestId('model-menu-option-openai/test'))).toBeTruthy();
 });
 
-describe('NewChat — account usage', () => {
-  it('shows a usage line for each connected account with its 5-hour and weekly figures', async () => {
+describe('NewChat — account menu', () => {
+  function connect(): void {
     useSettingsStore.setState({
       data: {
         preferences: {},
@@ -991,18 +1022,46 @@ describe('NewChat — account usage', () => {
         } as never,
       },
     });
+  }
+
+  it('lists each connected account with its 5-hour and weekly usage beside it, plus By strategy', async () => {
+    connect();
     const r = await renderReady();
-    const work = textOf(findHost(r.root, byTestId('new-chat-usage-claude-code-c0')));
+    await press(r, 'chat-account');
+    const work = textOf(findHost(r.root, byTestId('account-option-c0')));
     expect(work).toContain('Work');
     expect(work).toContain('42%');
     expect(work).toContain('10%');
-    expect(textOf(findHost(r.root, byTestId('new-chat-usage-claude-code-c1')))).toContain(
-      'not read',
-    );
-    expect(findAllHost(r.root, byTestId('new-chat-usage-claude-code-c2'))).toHaveLength(0);
+    expect(textOf(findHost(r.root, byTestId('account-option-c1')))).toContain('not read');
+    expect(findAllHost(r.root, byTestId('account-option-c2'))).toHaveLength(0);
+    expect(selected(r, 'account-option-strategy')).toBe(true);
   });
 
-  it('asks the online hosts to read usage when an account has no reading, once per backend', async () => {
+  it('picking an account sets preferredAccountId on the new chat; By strategy clears it', async () => {
+    connect();
+    __setLocalSearchParams({ hostId: HOST, folder: '/p/one' });
+    const r = await renderReady();
+    await press(r, 'chat-account');
+    await press(r, 'account-option-c1');
+    typeText(r, 'go');
+    await send(r);
+    expect(api.createChat).toHaveBeenCalledWith({
+      hostId: HOST,
+      folder: '/p/one',
+      preferredAccountId: 'c1',
+    });
+  });
+
+  it('an untouched account rides on nothing', async () => {
+    connect();
+    __setLocalSearchParams({ hostId: HOST, folder: '/p/one' });
+    const r = await renderReady();
+    typeText(r, 'go');
+    await send(r);
+    expect(api.createChat.mock.calls[0]![0]).not.toHaveProperty('preferredAccountId');
+  });
+
+  it('asks the online hosts to read usage when an account has no reading, once per backend, only when the menu opens', async () => {
     useSettingsStore.setState({
       data: {
         preferences: {},
@@ -1019,22 +1078,52 @@ describe('NewChat — account usage', () => {
     });
     wsSend.mockClear();
     const r = await renderReady();
-    const refreshes = wsSend.mock.calls
-      .map((c) => c[0])
-      .filter((e) => e?.type === 'host.backend_usage_refresh');
-    expect(refreshes).toEqual([
+    const refreshes = (): unknown[] =>
+      wsSend.mock.calls.map((c) => c[0]).filter((e) => e?.type === 'host.backend_usage_refresh');
+    expect(refreshes()).toEqual([]);
+    await press(r, 'chat-account');
+    expect(refreshes()).toEqual([
       { type: 'host.backend_usage_refresh', hostId: HOST, backendId: 'claude-code' },
     ]);
-    // A re-render with the account still unread does not ask again.
-    await actAsync(async () => {
-      usePresenceStore.setState({ hosts: { [HOST]: host(HOST) } });
-      await flush();
-    });
-    expect(
-      wsSend.mock.calls.filter((c) => c[0]?.type === 'host.backend_usage_refresh'),
-    ).toHaveLength(1);
-    expect(textOf(findHost(r.root, byTestId('new-chat-usage-claude-code-c1')))).toContain(
-      'not read',
+  });
+});
+
+describe('NewChat — header call buttons', () => {
+  it('Call creates the chat, opens the call on it and goes into it, keeping typed text as a draft', async () => {
+    __setLocalSearchParams({ hostId: HOST, folder: '/p/one' });
+    const r = await renderReady();
+    typeText(r, 'half a thought');
+    await press(r, 'new-chat-call');
+    expect(api.createChat).toHaveBeenCalledWith({ hostId: HOST, folder: '/p/one' });
+    expect(startVoiceCall).toHaveBeenCalledWith('chat_new', 'call');
+    expect(routerMock.replace).toHaveBeenCalledWith('/chats/chat_new?justCreated=1');
+    expect(Object.values(useNewChatDraftStore.getState().drafts).map((d) => d.text)).toContain(
+      'half a thought',
     );
+  });
+
+  it('Hands-free opens the same call in hands-free mode', async () => {
+    __setLocalSearchParams({ hostId: HOST, folder: '/p/one' });
+    const r = await renderReady();
+    await press(r, 'new-chat-hands-free');
+    expect(startVoiceCall).toHaveBeenCalledWith('chat_new', 'hands-free');
+  });
+
+  it('with no folder chosen it says so and starts nothing', async () => {
+    const r = await renderReady();
+    await press(r, 'new-chat-call');
+    expect(api.createChat).not.toHaveBeenCalled();
+    expect(startVoiceCall).not.toHaveBeenCalled();
+    expect(useUiStore.getState().errors.length).toBeGreaterThan(0);
+  });
+
+  it('a refused create is reported and starts no call', async () => {
+    api.createChat.mockRejectedValue(new Error('boom'));
+    __setLocalSearchParams({ hostId: HOST, folder: '/p/one' });
+    const r = await renderReady();
+    await press(r, 'new-chat-call');
+    expect(startVoiceCall).not.toHaveBeenCalled();
+    expect(routerMock.replace).not.toHaveBeenCalled();
+    expect(useUiStore.getState().errors.length).toBeGreaterThan(0);
   });
 });

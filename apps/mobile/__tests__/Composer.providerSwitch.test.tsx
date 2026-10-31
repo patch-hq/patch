@@ -130,6 +130,7 @@ async function openPickerAndChoose(
     findHost(root, byTestId('composer-model-pill')).props['onPress']();
     await flush();
   });
+  actSync(() => findHost(root, byTestId('model-menu-all')).props['onPress']());
   actSync(() => findHost(root, byTestId(`new-chat-model-option-${modelId}`)).props['onPress']());
 }
 

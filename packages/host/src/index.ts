@@ -187,6 +187,7 @@ import {
 import { createPowerWatcher } from './power.js';
 import { createServerLink } from './serverLink.js';
 import { createHealthSampler } from './healthReport.js';
+import { checkLaunchPath } from './launchPath.js';
 import { handleJobExec } from './jobExec.js';
 import { handleHostWake } from './hostWake.js';
 import { rotateLog } from './logRotate.js';
@@ -246,6 +247,8 @@ import {
   LocalWhisperBackend,
   type WhisperBackend,
 } from './audio/whisper.js';
+import { ParakeetWhisperBackend } from './audio/parakeet.js';
+import { ParakeetLiveRecognizer } from './audio/parakeet-live.js';
 import { createKokoro, validateKokoroModel } from './audio/kokoro.js';
 import { createElevenLabs, createRoutedTts, type ElevenLabsVoice } from './audio/elevenlabs.js';
 import {
@@ -490,6 +493,13 @@ async function startHost(
   const logger = testHooks?.logStream
     ? pino(loggerOptions, testHooks.logStream)
     : pino(loggerOptions);
+  const launchMove = checkLaunchPath(config.patchHome, process.execPath);
+  if (launchMove) {
+    logger.warn(
+      launchMove,
+      'patch-daemon: host launch path changed — anything that allow-lists the old path (process killers, firewalls, permissions) must be updated or it will act on this host',
+    );
+  }
   installCrashGuard(logger);
 
   // 0. TCP /healthz — bound FIRST, before anything touches shared state. This
@@ -1501,6 +1511,12 @@ async function startHost(
     onUnknownResponse: (requestId) =>
       logger.warn({ requestId }, 'patch.send_to.response for an unknown request; dropping'),
   });
+  const remoteStops = createRemoteRelayCoordinator<undefined>({
+    emit: (event) => emit(event),
+    idPrefix: 'rstop',
+    onUnknownResponse: (requestId) =>
+      logger.warn({ requestId }, 'patch.stop.response for an unknown request; dropping'),
+  });
   const webBotAuthSignatures = createRemoteRelayCoordinator<{
     headers: Record<string, string>;
   }>({
@@ -1593,6 +1609,19 @@ async function startHost(
       )
       .then(() => undefined);
 
+  const stopRemoteChat = (req: { sourceChatId: string; targetChatId: string }): Promise<void> =>
+    remoteStops
+      .call(
+        (requestId) => ({
+          type: 'patch.stop',
+          sourceChatId: req.sourceChatId,
+          targetChatId: req.targetChatId,
+          requestId,
+        }),
+        () => `patch_stop: chat ${req.targetChatId}'s host did not answer in time`,
+      )
+      .then(() => undefined);
+
   // Forward-declared so the onFrame closure (constructed below, before the
   // audio server boots) can route `chat.focus_change` into the surface's open
   // voice session for focus-follow (spec/07 ## Focus-follow). Assigned once the
@@ -1604,6 +1633,7 @@ async function startHost(
   // transport — the mobile voice-note upload path). Assigned once the whisper
   // backend is created at step 8.
   let whisper: WhisperBackend | undefined;
+  let liveRecognizer: ParakeetLiveRecognizer | undefined;
   // The dictation surface's transcribers, one per backend this host has a key
   // for (hosted-stt.ts). Assigned alongside `whisper` at step 8; the
   // transcribe RPC below picks from them by `voiceConfig.dictation.backend`.
@@ -3199,6 +3229,38 @@ async function startHost(
         remoteSendTos.resolve(event);
         return;
       }
+      if (event.type === 'patch.stop') {
+        // Cross-host `patch_stop`: no requestId is a same-host audit record.
+        const requestId = event.requestId;
+        if (requestId === undefined) return;
+        const answer = (error?: { code: 'chat_not_found' | 'sdk_error'; message: string }): void =>
+          sender({
+            type: 'patch.stop.response',
+            requestId,
+            sourceChatId: event.sourceChatId,
+            targetChatId: event.targetChatId,
+            ok: error === undefined,
+            ...(error ? { error } : {}),
+          });
+        if (!daemon.chatState.has(event.targetChatId)) {
+          answer({ code: 'chat_not_found', message: `no such chat: ${event.targetChatId}` });
+          return;
+        }
+        daemon
+          .stopChat(event.targetChatId)
+          .then(() => answer())
+          .catch((err: unknown) =>
+            answer({
+              code: 'sdk_error',
+              message: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        return;
+      }
+      if (event.type === 'patch.stop.response') {
+        remoteStops.resolve(event);
+        return;
+      }
       if (event.type === 'web_bot_auth.sign_response') {
         if (event.hostId !== selfHostId) return;
         webBotAuthSignatures.resolve(event);
@@ -4276,6 +4338,9 @@ async function startHost(
     // spec/06 § Manager conversation — persisted global preference.
     managerContextWindow,
     onRateLimit: reportUsage,
+    onTurnEnd: (_chatId, accountId) => {
+      if (accountId !== undefined) void accountUsage?.refreshAfterTurn(accountId);
+    },
     // Computer use is off until granted; Always allow persists to host.json.
     computerUse: {
       alwaysAllowed: () => hostStateStore.get().computerUseAlwaysAllowed === true,
@@ -4859,6 +4924,7 @@ async function startHost(
     peekRemoteChat,
     historyRemoteChat,
     sendToRemoteChat,
+    stopRemoteChat,
     listDevices: () => presence.enumerate(deviceRegistry.list()),
     // Speakers-channel device-resolution cascade (spec/09 § `### speakers`).
     // Composes the live presence registry; step-4 exhaustion re-routes the
@@ -4970,11 +5036,14 @@ async function startHost(
       logger: whisperLog,
       apiKey: () => providerKeys.get('elevenlabs'),
     });
-  } else
+  } else {
     whisper = createWhisper({
       backend: config.audio.whisperBackend,
       logger: logger.child({ component: 'whisper' }),
       groqApiKey: () => providerKeys.get('groq'),
+      ...(config.audio.parakeetModelDir !== undefined
+        ? { parakeetModelDir: config.audio.parakeetModelDir }
+        : {}),
       ...(config.audio.whisperLocalSidecarUrl !== undefined
         ? { localSidecarUrl: config.audio.whisperLocalSidecarUrl }
         : {}),
@@ -4992,6 +5061,18 @@ async function startHost(
           }
         : {}),
     });
+  }
+  // The on-machine model loads now: a broken install aborts the boot rather
+  // than failing the first word someone says.
+  if (config.audio.whisperBackend === 'parakeet') await (whisper as ParakeetWhisperBackend).warm();
+  // The streaming model for dictation on the `host` engine loads now too.
+  if (config.audio.parakeetStreamingModelDir !== undefined) {
+    liveRecognizer = new ParakeetLiveRecognizer({
+      logger: logger.child({ component: 'parakeet-live' }),
+      modelDir: config.audio.parakeetStreamingModelDir,
+    });
+    await liveRecognizer.warm();
+  }
   // Shared settings may have landed before the backend existed.
   if (meetingTranscriptionModel !== '') whisper.useModel?.(meetingTranscriptionModel);
   dictationTranscribers = createDictationTranscribers({
@@ -5252,6 +5333,7 @@ async function startHost(
     geminiApiKey: () => providerKeys.get('gemini'),
     deepgramApiKey: () => providerKeys.get('deepgram'),
     elevenlabsApiKey: () => providerKeys.get('elevenlabs'),
+    ...(liveRecognizer ? { liveRecognizer } : {}),
     ...(config.audio.geminiLiveModel ? { geminiLiveModel: config.audio.geminiLiveModel } : {}),
     ...(config.audio.geminiLiveModelHeavy
       ? { geminiLiveModelHeavy: config.audio.geminiLiveModelHeavy }
@@ -5346,6 +5428,7 @@ async function startHost(
     await audioServer.close().catch(() => undefined);
     await kokoro.close().catch(() => undefined);
     await whisper.close().catch(() => undefined);
+    await liveRecognizer?.close().catch(() => undefined);
     await link
       .close(installing ? CLOSE_HOST_UPDATING : undefined, installing ? 'updating' : undefined)
       .catch(() => undefined);

@@ -2,7 +2,7 @@
 // patch_* tool. Uses Fastify's `.inject()` for direct request injection —
 // no socket plumbing — and the mock SDK + MemoryJobsStore.
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,6 +14,7 @@ import { MemoryJobsStore } from '../src/jobs-interface.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import { RateLimiter } from '../src/rate-limit.js';
+import { RemoteRelayError } from '../src/remote-relay.js';
 
 // The control socket is gated as a whole (spec/02 § Control IPC): every
 // route but /healthz needs the host's local key.
@@ -447,6 +448,72 @@ describe('UDS internal endpoints — patch_stop', () => {
         payload: { callerChatId: 'caller' },
       });
       expect(miss.statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('UDS internal endpoints — patch_stop on a chat owned by another machine', () => {
+  it('relays to the owning machine instead of 404ing', async () => {
+    const { daemon, jobs } = setup();
+    const stopRemoteChat = vi.fn(async () => undefined);
+    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs, stopRemoteChat });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/stop/remote-chat',
+        headers: AUTH,
+        payload: { callerChatId: 'caller' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(stopRemoteChat).toHaveBeenCalledWith({
+        sourceChatId: 'caller',
+        targetChatId: 'remote-chat',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("surfaces the owner's refusal as 404 chat_not_found, and silence as an error", async () => {
+    const { daemon, jobs } = setup();
+    const stopRemoteChat = vi
+      .fn()
+      .mockRejectedValueOnce(new RemoteRelayError('chat_not_found', 'no such chat'))
+      .mockRejectedValueOnce(new RemoteRelayError('sdk_error', 'host did not answer'));
+    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs, stopRemoteChat });
+    try {
+      const call = () =>
+        app.inject({
+          method: 'POST',
+          url: '/internal/stop/remote-chat',
+          headers: AUTH,
+          payload: { callerChatId: 'caller' },
+        });
+      const miss = await call();
+      expect(miss.statusCode).toBe(404);
+      expect(miss.json().error).toBe('chat_not_found');
+      const hung = await call();
+      expect(hung.statusCode).toBe(500);
+      expect(hung.json().message).toContain('did not answer');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('the CLI route /chats/:id/stop relays too', async () => {
+    const { daemon, jobs } = setup();
+    const stopRemoteChat = vi.fn(async () => undefined);
+    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs, stopRemoteChat });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/chats/remote-chat/stop',
+        headers: AUTH,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(stopRemoteChat).toHaveBeenCalledOnce();
     } finally {
       await app.close();
     }
