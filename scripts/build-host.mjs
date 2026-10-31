@@ -197,7 +197,12 @@ export async function bundle(esb, entry, outfile) {
     // never starts; verified 2026-10-04 that the darwin-arm64 bundle builds
     // and loads with it external.
     //
-    // playwright-core is the fourth: it is shipped beside the bundle (see
+    // sherpa-onnx-node is the fifth: the optional Parakeet dictation engine
+    // (WHISPER_BACKEND=parakeet). It loads a platform `.node` addon esbuild
+    // has no loader for, so it stays a runtime import. Not shipped in the
+    // artifact: Parakeet fails loudly on a host without it installed.
+    //
+    // playwright-core is the sixth: it is shipped beside the bundle (see
     // copyPlaywrightCore) because it locates its own package.json as
     // `path.join(__dirname, '..')`, which only holds while it sits one folder
     // inside its package. Flattened into host.mjs that resolves to the parent
@@ -209,6 +214,7 @@ export async function bundle(esb, entry, outfile) {
       'fsevents',
       'playwright-core',
       'playwright-core/*',
+      'sherpa-onnx-node',
     ],
     banner: {
       // The bundle is ESM but some dependencies reach for CJS globals.
