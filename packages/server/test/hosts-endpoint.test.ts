@@ -122,7 +122,8 @@ describe('GET /api/hosts', () => {
       // than a fabricated label or the other machine's description.
       expect(hostA.hostName).toBeNull();
       expect(hostA.online).toBe(false);
-      expect(hostA.runsManager).toBe(false);
+      // Which machine runs the Manager is the server's business, not the roster's.
+      expect(hostA).not.toHaveProperty('runsManager');
     } finally {
       await app.close();
     }
