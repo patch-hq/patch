@@ -99,6 +99,7 @@ import type { Registry } from './registry.js';
 import type { ChatRegistry } from './chat-registry.js';
 import type { HostLink } from './host-link.js';
 import type { DraftAttachmentStore } from './draft-attachments.js';
+import { isResizable, parseThumbWidth, resizeImage } from './image-thumb.js';
 
 const STORE_REQUEST_TIMEOUT_MS = 30_000;
 /** Reject files larger than this before spending a host round-trip on them. */
@@ -236,17 +237,22 @@ function deleteStoredFile(dir: string, id: string): void {
 
 /** Stream a stored attachment back, with the hardened content-type handling
  *  (`servedContentType`) shared by the composer-draft and new-chat-draft GETs. */
-function sendStored(
+async function sendStored(
   reply: import('fastify').FastifyReply,
   dataPath: string,
   sidecar: AttachmentSidecar,
-): import('fastify').FastifyReply {
+  width?: number,
+): Promise<import('fastify').FastifyReply> {
   const served = servedContentType(sidecar.mimeType);
+  const thumb =
+    width !== undefined && isResizable(sidecar.mimeType)
+      ? await resizeImage(readFileSync(dataPath), sidecar.mimeType, width)
+      : undefined;
   return (
     reply
       .code(200)
       .header('content-type', served.type)
-      .header('content-length', String(statSync(dataPath).size))
+      .header('content-length', String(thumb ? thumb.byteLength : statSync(dataPath).size))
       // Never let the browser recover a richer (scriptable) type from the
       // bytes after we have decided what this is.
       .header('x-content-type-options', 'nosniff')
@@ -260,7 +266,7 @@ function sendStored(
         `${served.disposition}; filename="${sidecar.name.replace(/[^\x20-\x7e]|["\\]/g, '_')}"; ` +
           `filename*=UTF-8''${encodeRFC5987(sidecar.name)}`,
       )
-      .send(createReadStream(dataPath))
+      .send(thumb ?? createReadStream(dataPath))
   );
 }
 
@@ -521,7 +527,7 @@ export function registerAttachmentRoutes(app: FastifyInstance, deps: AttachmentR
   });
 
   // ---- serve back (inline rendering) ----
-  app.get<{ Params: { chatId: string; id: string } }>(
+  app.get<{ Params: { chatId: string; id: string }; Querystring: { w?: string } }>(
     '/api/chats/:chatId/attachment/:id',
     { logLevel: 'warn' },
     async (req, reply) => {
@@ -529,13 +535,15 @@ export function registerAttachmentRoutes(app: FastifyInstance, deps: AttachmentR
       if (!ID_RE.test(id) || chatId.includes('/') || chatId.includes('..')) {
         return reply.code(404).send({ error: 'not found' });
       }
+      const thumb = parseThumbWidth(req.query.w);
+      if (!thumb.ok) return reply.code(400).send({ error: 'bad_width', message: thumb.message });
       const dir = join(deps.attachmentsDir, chatId);
       const dataPath = join(dir, id);
       const sidecar = readSidecar(dir, id);
       if (!existsSync(dataPath) || !sidecar) {
         return reply.code(404).send({ error: 'attachment not found' });
       }
-      return sendStored(reply, dataPath, sidecar);
+      return sendStored(reply, dataPath, sidecar, thumb.width);
     },
   );
 

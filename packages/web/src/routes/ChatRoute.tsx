@@ -166,6 +166,7 @@ import {
 } from 'lucide-react';
 import { CloseIcon } from '../components/icons.js';
 import { ImageLightbox, imageDownloadName } from '../components/ImageLightbox.js';
+import { thumbUrl } from '../lib/thumbUrl.js';
 import { failed } from '../lib/errorCopy.js';
 import { isStoppable } from '../stores/types.js';
 
@@ -3703,7 +3704,7 @@ function MessageAttachments({
               aria-label={`View ${att.name}`}
               onClick={() => setLightbox({ url, alt: att.name })}
             >
-              <img className="msg-attachment-img" src={url} alt={att.name} />
+              <img className="msg-attachment-img" src={thumbUrl(url)} alt={att.name} />
             </button>
           );
         }
@@ -4216,7 +4217,7 @@ function ToolImage({ src, width, height, mediaType }: ToolImageSource): JSX.Elem
       >
         <img
           className="tool-field-img"
-          src={src}
+          src={thumbUrl(src)}
           alt=""
           loading="lazy"
           decoding="async"
@@ -5006,7 +5007,7 @@ function ViewFileCard({ view, chatId }: { view: ViewFileView; chatId: string }):
         >
           <img
             className="view-file-img"
-            src={view.url}
+            src={thumbUrl(view.url)}
             alt={view.name}
             loading="lazy"
             decoding="async"
