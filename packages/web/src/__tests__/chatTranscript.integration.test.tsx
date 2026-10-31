@@ -454,7 +454,10 @@ describe('integration: image attachment renders in-stream', () => {
     await waitFor(() => expect(bubbleTexts()).toContain('look at this'));
     // The image renders inline (spec/14 § Composer — attachments render inline).
     const img = await screen.findByTestId('msg-attachment-img');
-    expect(within(img).getByRole('img')).toHaveAttribute('src', '/api/chats/c1/attachment/img-1');
+    expect(within(img).getByRole('img')).toHaveAttribute(
+      'src',
+      expect.stringMatching(/^\/api\/chats\/c1\/attachment\/img-1\?w=\d+$/),
+    );
   });
 });
 
