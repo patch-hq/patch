@@ -13,6 +13,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import type { VersionReport } from '@patch/wire';
+import { beginSession, clearExitLog, readExitLog } from '../src/lib/exitLog';
 import {
   UpdatesPage,
   formatWhen,
@@ -111,6 +112,8 @@ const NEEDS_INSTALL = {
 };
 
 beforeEach(() => {
+  clearExitLog();
+  beginSession();
   vi.mocked(api.version).mockReset().mockResolvedValue(REPORT);
   wsMock.send.mockReset();
   __resetRouterMock();
@@ -249,6 +252,7 @@ describe('Settings — Updates — this app', () => {
     expect(status(r)).toBe('Update ready');
     findHost(r.root, byTestId('restart-to-update')).props.onPress();
     expect(Updates.reloadAsync).toHaveBeenCalled();
+    expect(readExitLog().map((e) => e.kind)).toEqual(['restart']);
   });
 
   it('Check now: "Checking…" (disabled) while in flight, then "Up to date", the new check time, and a re-read', async () => {

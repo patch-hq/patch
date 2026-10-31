@@ -10,6 +10,10 @@
 //      data dir and logged at error level), removing it from MMKV on success.
 // `flushPendingCrashes` re-sends whatever a previous run could not deliver.
 //
+// Reports are only sent when the user has turned on "Share crash reports"
+// (exitLog.ts, off by default). Otherwise a crash is written to the on-device
+// exit log alone and nothing is queued or sent.
+//
 // NO FALLBACK: a report that cannot be delivered stays queued and is surfaced
 // through the error toasts; it is never dropped quietly. The one exception is a
 // 4xx: the server rejected the report itself, so resending can never succeed —
@@ -21,6 +25,7 @@ import { api, ApiError, type CrashReport } from '../api/rest';
 import { store } from './credential';
 import { mobileBuildInfo } from './buildInfo';
 import { useUiStore } from '../stores/uiStore';
+import { beginSession, logExit, noteCrashed, telemetryEnabled, trackSession } from './exitLog';
 
 const PENDING_KEY = 'patch.crash.pending';
 /** Oldest reports are dropped past this, so a crash loop cannot fill storage. */
@@ -92,12 +97,20 @@ export function recordCrash(
     occurredAt: partial.occurredAt ?? Date.now(),
     build: `${info.version}${info.gitSha ? `+${info.gitSha}` : ''}`,
   };
+  noteCrashed();
+  logExit('crash', `${report.source}: ${report.message}`.slice(0, 300), report.occurredAt);
+  if (!telemetryEnabled()) return Promise.resolve();
   writePending([...readPending(), report]);
   return send(report);
 }
 
 /** Re-send every report an earlier run persisted but could not deliver. */
 export async function flushPendingCrashes(): Promise<void> {
+  if (!telemetryEnabled()) {
+    // Sharing is off: reports queued while it was on are not sent.
+    writePending([]);
+    return;
+  }
   for (const report of readPending()) await send(report);
 }
 
@@ -149,9 +162,29 @@ export async function collectNativeCrash(): Promise<void> {
 
 /** Everything the app does at startup for crash capture. */
 export function startCrashCapture(): void {
+  const launch = beginSession();
+  trackSession();
+  if (launch.unexplained && launch.entry) {
+    void recordExit(launch.entry.detail, launch.entry.at);
+  }
   installGlobalCrashHandler();
   void flushPendingCrashes();
   collectNativeCrash().catch((err) =>
     useUiStore.getState().pushError(`native crash check failed: ${String(err)}`),
   );
+}
+
+/** An exit we only found on relaunch: shared like a crash when sharing is on. */
+async function recordExit(detail: string, at: number): Promise<void> {
+  if (!telemetryEnabled()) return;
+  const info = mobileBuildInfo();
+  const report: CrashReport = {
+    source: 'native',
+    message: `unexpected exit: ${detail}`,
+    fatal: true,
+    occurredAt: at,
+    build: `${info.version}${info.gitSha ? `+${info.gitSha}` : ''}`,
+  };
+  writePending([...readPending(), report]);
+  await send(report);
 }
