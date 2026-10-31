@@ -3,12 +3,19 @@
 # queue then merges it, with the method the queue sets, the moment the required
 # `tests` check is green; until then it waits. Branches are tidied by the
 # repo's "delete branch on merge" setting.
+#
+# A PR the queue drops (failed check, conflict) loses auto-merge, so it is
+# switched on again on every push, and a half-hourly sweep re-enables it on any
+# open, non-draft, clean PR into main that has lost it.
 
 name: pr-automerge
 
 on:
   pull_request_target:
-    types: [opened, reopened, ready_for_review]
+    types: [opened, reopened, ready_for_review, synchronize]
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -16,7 +23,7 @@ permissions:
 
 jobs:
   automerge:
-    if: github.repository == 'patch-hq/patch' && github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft && github.event.pull_request.base.ref == 'main'
+    if: github.event_name == 'pull_request_target' && github.repository == 'patch-hq/patch' && github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft && github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
     steps:
       # No checkout: pull_request_target runs with write access, so it never
@@ -29,3 +36,19 @@ jobs:
       - env:
           GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
         run: gh pr merge --auto "${{ github.event.pull_request.number }}" --repo "$GITHUB_REPOSITORY"
+
+  sweep:
+    if: github.event_name != 'pull_request_target' && github.repository == 'patch-hq/patch'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main --limit 100 \
+            --json number,isDraft,mergeStateStatus,autoMergeRequest,headRepositoryOwner \
+            --jq '.[] | select(.isDraft == false and .mergeStateStatus == "CLEAN" and .autoMergeRequest == null) | .number' |
+          while read -r n; do
+            echo "re-enabling auto-merge on #$n"
+            gh pr merge --auto "$n" --repo "$GITHUB_REPOSITORY"
+          done
