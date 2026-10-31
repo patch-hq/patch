@@ -623,9 +623,12 @@ link in a new window — on the desktop shell that is the user's real browser (�
 Links and the web panel). The link itself still follows the normal link-click
 rules above — the icons are an addition, not a replacement.
 
-A link to another chat — `/chats/<id>` or `patch://chats/<id>` — is an in-app
-link: it carries no Summarise or open in browser icons, and a plain click opens
-that chat in the current pane without a page load. A modified or middle click
+A link to the app itself — `/chats/<id>`, `patch://<route>` for any app route
+(`chats`, `pads`, `jobs`, `settings`, `lifecycle`), or an absolute URL on the
+app's own origin — is an in-app link, and bare `patch://<route>` text in a
+message becomes one too (not inside code). It carries no Summarise or open in
+browser icons, and a plain click opens that page in the current pane without a
+page load. A modified or middle click
 keeps the browser's new-tab meaning. On mobile a tap on such a link opens that
 chat in the app, with no preview icons.
 
