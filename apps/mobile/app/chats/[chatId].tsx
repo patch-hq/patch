@@ -77,6 +77,8 @@ import {
   discardUpload,
   retrySource,
   retryTurn,
+  editTurn,
+  editSource,
   retryUpload,
   sendMessage,
 } from '../../src/lib/sendQueue';
@@ -2632,6 +2634,11 @@ const TimelineItem = React.memo(function TimelineItem({
             // message is text-only — attachments would be dropped.
             {...(entry.localId === undefined && !entry.queued && retrySource(chatId, entry) !== null
               ? { retry: () => retryTurn(chatId, entry) }
+              : {})}
+            // Edit: a settled text-only user message is replaced by a fork
+            // carrying the new text (spec/04 § Branching).
+            {...(entry.localId === undefined && !entry.queued && editSource(chatId, entry) !== null
+              ? { edit: (next: string) => editTurn(chatId, entry.seq, next) }
               : {})}
             // spec/04 ## Message queueing § Edit — a tap on a queued message
             // opens it for editing in place.
