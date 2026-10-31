@@ -197,7 +197,15 @@ export async function bundle(esb, entry, outfile) {
     // never starts; verified 2026-10-04 that the darwin-arm64 bundle builds
     // and loads with it external.
     //
-    // playwright-core is the fourth: it is shipped beside the bundle (see
+    // sherpa-onnx-node (and its per-platform sherpa-onnx-<os>-<arch> addon) is
+    // the fifth: the opt-in "On this host" dictation engine's native addon,
+    // loaded through a lazy import only when PARAKEET_* is configured. esbuild
+    // cannot inline its `.node` binary, so it stays external. It is NOT yet
+    // shipped beside the bundle (the vendored inputs hold no per-platform
+    // copy), so enabling that engine on an installed host fails loudly with
+    // module-not-found rather than silently falling back.
+    //
+    // playwright-core is the sixth: it is shipped beside the bundle (see
     // copyPlaywrightCore) because it locates its own package.json as
     // `path.join(__dirname, '..')`, which only holds while it sits one folder
     // inside its package. Flattened into host.mjs that resolves to the parent
@@ -207,6 +215,8 @@ export async function bundle(esb, entry, outfile) {
       '@anthropic-ai/claude-agent-sdk',
       'chromium-bidi/*',
       'fsevents',
+      'sherpa-onnx-node',
+      'sherpa-onnx-*',
       'playwright-core',
       'playwright-core/*',
     ],
