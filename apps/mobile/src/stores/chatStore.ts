@@ -897,8 +897,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // Hide / snooze are what a cold start paints from the cache, so keep the
           // cache in step or the next launch shows the old section until the roster lands.
           if (
-            chats[event.chatId].hidden !== row.hidden ||
-            chats[event.chatId].snoozedUntil !== row.snoozedUntil
+            chats[event.chatId]!.hidden !== row.hidden ||
+            chats[event.chatId]!.snoozedUntil !== row.snoozedUntil
           ) {
             saveCachedChatList(Object.values(chats).map(toListRow));
           }
