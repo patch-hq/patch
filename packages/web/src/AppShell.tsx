@@ -46,6 +46,7 @@ import { NewChatRoute } from './routes/NewChatRoute.js';
 import { JobsPaneRoute } from './routes/JobsPaneRoute.js';
 import { PadsPaneRoute } from './routes/PadsPaneRoute.js';
 import { ViewPositionSync } from './components/ViewPositionSync.js';
+import { useSeatTrafficLights } from './lib/windowChrome.js';
 import { LifecycleRoute } from './routes/LifecycleRoute.js';
 import { JobPaneRoute } from './routes/JobPaneRoute.js';
 import { SettingsPaneRoute } from './routes/SettingsPaneRoute.js';
@@ -95,6 +96,10 @@ export function AppShell(): JSX.Element {
   // spec/14 § Links and the web panel: a shift-click on an in-app link would
   // otherwise fall through to the browser and reload the single window.
   useShiftClickGuard();
+  // A banner at the top is the window's title bar while it is up; the shell
+  // moves the traffic lights into it rather than leaving them on the row below.
+  const [shellEl, setShellEl] = useState<HTMLDivElement | null>(null);
+  useSeatTrafficLights(shellEl);
   // spec/09 § `### desktop` — clicking a native toast opens the chat it came
   // from, and the tray's "Version & updates…" opens Settings. Main can only
   // raise the window; the routing has to happen here.
@@ -630,7 +635,7 @@ export function AppShell(): JSX.Element {
   }
 
   return (
-    <div className="app-shell" data-testid="app-shell">
+    <div className="app-shell" data-testid="app-shell" ref={setShellEl}>
       <OfflineBanner />
       <ViewPositionSync ws={wsRef.current} />
       {/* App-level, not per-chat: the WS can be connected while every daemon

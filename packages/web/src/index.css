@@ -477,6 +477,7 @@ body {
  * banner's content clears the lights the same way every other top-row
  * element already does. */
 .overlay-titlebar .offline-banner,
+.overlay-titlebar .app-shell > .daemon-offline-banner,
 .overlay-titlebar .desktop-update-banner {
   padding-left: var(--overlay-titlebar-inset);
   -webkit-app-region: drag;
@@ -495,8 +496,20 @@ body {
  * sit clear of them by position. Keeping the lights inset on them as well
  * pushed the wordmark 84px in under an empty coloured strip — the banner
  * "looks messy". */
-.overlay-titlebar :is(.offline-banner, .desktop-update-banner) ~ * .sb-brand {
+.overlay-titlebar
+  :is(.offline-banner, .daemon-offline-banner, .desktop-update-banner)
+  ~ *
+  .sb-brand {
   padding-left: 20px;
+}
+/* A shell that can move the lights seats them on the banner's own centre-line
+ * (lib/windowChrome.ts useSeatTrafficLights), so the banner keeps a title
+ * bar's height instead of stretching down to lights pinned for the brand row —
+ * which put them on its bottom edge, below the line of its text. */
+.overlay-titlebar.lights-seatable
+  :is(.offline-banner, .daemon-offline-banner, .desktop-update-banner),
+.overlay-titlebar.lights-seatable .voice-bar {
+  min-height: 36px;
 }
 .overlay-titlebar .desktop-update-restart,
 .overlay-titlebar .banner-diagnose {
@@ -7769,12 +7782,38 @@ button.view-file-download {
 
 /* ---------- Banners ---------- */
 
+/* Reconnecting — the same strip as the update banner below (dot, one line,
+ * one outlined action, centred), in the waiting amber. The dot pulses because
+ * something is happening right now; the action reads as the update banner's
+ * does rather than a pill pushed into the far corner. */
 .offline-banner {
-  background: var(--waiting-tint);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: color-mix(in srgb, var(--waiting) 16%, var(--bg-app));
   color: var(--waiting);
   padding: 6px 16px;
   font-size: var(--text-min);
-  text-align: center;
+}
+.offline-banner .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .offline-banner .dot {
+    animation: desktop-update-pulse 1.6s ease-in-out infinite;
+  }
+}
+.offline-banner .banner-diagnose {
+  margin-left: 0;
+  border-radius: var(--radius-sm);
+}
+.offline-banner .banner-diagnose:hover {
+  background: var(--bg-elevated);
 }
 
 /* DesktopUpdateBanner — a staged shell update waiting to be taken.

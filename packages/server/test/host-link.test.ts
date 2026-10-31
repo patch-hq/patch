@@ -9,7 +9,7 @@ import type { AddressInfo } from 'node:net';
 import { EventEmitter } from 'node:events';
 import { WebSocketServer, WebSocket as WsClient, type WebSocket } from 'ws';
 import pino from 'pino';
-import { encode, decode, type WireEvent } from '@patch/wire';
+import { CLOSE_HOST_UPDATING, encode, decode, type WireEvent } from '@patch/wire';
 import { InboundHostLink, InProcessHostLink, hostSilenceTimeoutMs } from '../src/host-link.js';
 
 const silentLogger = pino({ level: 'silent' });
@@ -131,6 +131,23 @@ describe('InboundHostLink', () => {
     client.close();
     await waitFor(() => link!.status() === 'offline', 1000);
     expect(statuses).toEqual(['online']); // offline transition not delivered — unsubscribed
+  });
+
+  it('remembers that a host went offline to update, and forgets it when it is back', async () => {
+    link = new InboundHostLink({ logger: silentLogger });
+    const first = await makePair(wss, url);
+    sockets.push(first.client);
+    link.attach(first.server, 'd1');
+    first.client.close(CLOSE_HOST_UPDATING, 'updating');
+    await waitFor(() => !link!.isOnline('d1'), 1000);
+    expect(link.offlineReason('d1')).toBe('updating');
+
+    const again = await makePair(wss, url);
+    sockets.push(again.client);
+    link.attach(again.server, 'd1');
+    again.client.close();
+    await waitFor(() => !link!.isOnline('d1'), 1000);
+    expect(link.offlineReason('d1')).toBeUndefined();
   });
 
   it('is offline until a socket is attached, then online', async () => {

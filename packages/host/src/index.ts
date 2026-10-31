@@ -55,6 +55,7 @@ import type {
   PatchSearchChatsResponseEvent,
 } from '@patch/wire';
 import {
+  CLOSE_HOST_UPDATING,
   DEFAULT_SHARED_SETTINGS,
   isHostAddressedSurfaceEvent,
   isReservedSpecialThread,
@@ -918,6 +919,9 @@ async function startHost(
       emit(describeHost());
     },
   });
+  // Set once an install is committed, so the shutdown the installer causes
+  // tells the server this machine is updating rather than just vanishing.
+  let installing = false;
   const applyUpdateOnce = (): ReturnType<typeof applyUpdate> =>
     requestUpdate({
       runningChats,
@@ -948,7 +952,10 @@ async function startHost(
                 await waitUntilNoRunningTurns({
                   runningChats,
                   logger,
-                  onIdle: () => daemon.commitToInstall(),
+                  onIdle: () => {
+                    installing = true;
+                    daemon.commitToInstall();
+                  },
                   force: () => forceInstall,
                 });
               } finally {
@@ -963,6 +970,7 @@ async function startHost(
           });
         } finally {
           // Reached only if the installer did not take this process down.
+          installing = false;
           daemon.releaseInstall();
         }
       },
@@ -5421,7 +5429,9 @@ async function startHost(
     await kokoro.close().catch(() => undefined);
     await whisper.close().catch(() => undefined);
     await liveRecognizer?.close().catch(() => undefined);
-    await link.close().catch(() => undefined);
+    await link
+      .close(installing ? CLOSE_HOST_UPDATING : undefined, installing ? 'updating' : undefined)
+      .catch(() => undefined);
     await app.close().catch(() => undefined);
     tcp.close();
   };
