@@ -285,3 +285,80 @@ describe('retryTurn', () => {
     expect(retrySource('c2', { role: 'assistant', seq: 2 })).toBeNull();
   });
 });
+
+describe('MessageLongPress with edit', () => {
+  it('a row without edit has no Edit item', () => {
+    const r = renderRN(
+      <>
+        <MessageLongPress text="hello" testID="row">
+          <Text>hello</Text>
+        </MessageLongPress>
+        <MessageActionsHost />
+      </>,
+    );
+    actSync(() => findHost(r.root, byTestId('row')).props.onLongPress());
+    expect(findAllHost(r.root, byTestId('message-action-edit'))).toHaveLength(0);
+  });
+
+  it('Edit opens an editor prefilled with the text; Save passes the new text', () => {
+    const edit = vi.fn();
+    const r = renderRN(
+      <>
+        <MessageLongPress text="hello" edit={edit} testID="row">
+          <Text>hello</Text>
+        </MessageLongPress>
+        <MessageActionsHost />
+      </>,
+    );
+    actSync(() => findHost(r.root, byTestId('row')).props.onLongPress());
+    actSync(() => findHost(r.root, byTestId('message-action-edit')).props.onPress());
+    const input = findHost(r.root, byTestId('message-edit-input'));
+    expect(input.props.value).toBe('hello');
+    actSync(() => input.props.onChangeText('hello there'));
+    actSync(() => findHost(r.root, byTestId('message-edit-save')).props.onPress());
+    expect(edit).toHaveBeenCalledWith('hello there');
+    expect(findAllHost(r.root, byTestId('message-edit-view'))).toHaveLength(0);
+  });
+
+  it('Cancel closes the editor without saving', () => {
+    const edit = vi.fn();
+    const r = renderRN(
+      <>
+        <MessageLongPress text="hello" edit={edit} testID="row">
+          <Text>hello</Text>
+        </MessageLongPress>
+        <MessageActionsHost />
+      </>,
+    );
+    actSync(() => findHost(r.root, byTestId('row')).props.onLongPress());
+    actSync(() => findHost(r.root, byTestId('message-action-edit')).props.onPress());
+    actSync(() => findHost(r.root, byTestId('message-edit-cancel')).props.onPress());
+    expect(edit).not.toHaveBeenCalled();
+  });
+});
+
+describe('editSource', () => {
+  it('only a settled text-only user message is editable', async () => {
+    const { useChatStore } = await import('../src/stores/chatStore');
+    const { editSource } = await import('../src/lib/sendQueue');
+    useChatStore.setState({
+      timelines: {
+        c1: [
+          { seq: 1, kind: 'message', role: 'user', content: 'ask', at: 0 },
+          { seq: 2, kind: 'message', role: 'assistant', content: 'answer', at: 0 },
+          {
+            seq: 3,
+            kind: 'message',
+            role: 'user',
+            content: 'pic',
+            attachments: [{ id: 'a' }],
+            at: 0,
+          },
+        ] as never,
+      },
+    });
+    expect(editSource('c1', { role: 'user', seq: 1 })).toEqual({ content: 'ask', seq: 1 });
+    expect(editSource('c1', { role: 'assistant', seq: 2 })).toBeNull();
+    expect(editSource('c1', { role: 'user', seq: 3 })).toBeNull();
+  });
+});
