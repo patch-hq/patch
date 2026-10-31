@@ -65,8 +65,8 @@ test.describe('a chat opened in a new window', () => {
     await openAsNewWindow(page, true);
     await expect(page.locator('.pane-tab-bar')).toBeVisible();
     expect(await underControls(page)).toEqual([]);
+    // The group header is the top row; the tab row sits below the controls.
     const tab = (await page.locator('.pane-tab').first().boundingBox())!;
-    const chevron = (await page.locator('.sidebar-expand-btn').boundingBox())!;
-    expect(tab.x).toBeGreaterThanOrEqual(chevron.x + chevron.width);
+    expect(tab.y).toBeGreaterThanOrEqual(LIGHTS_BOTTOM);
   });
 });

@@ -102,11 +102,13 @@ describe('PaneArea — close pane', () => {
 });
 
 describe('PaneArea — single pane, single tab', () => {
-  it('draws no tab bar at all (the plain, pre-existing chat view)', () => {
+  it('always draws the tab row, so a lone chat tab can still be dragged', () => {
     seedChats(['c1']);
     useLayoutStore.getState().openTab({ kind: 'chat', chatId: 'c1' });
     renderPanes();
-    expect(screen.queryByRole('tablist', { name: 'Tabs' })).toBeNull();
+    const bar = screen.getByRole('tablist', { name: 'Tabs' });
+    expect(bar.querySelectorAll('[role="tab"]')).toHaveLength(1);
+    expect(bar.querySelector('[role="tab"]')).toHaveAttribute('draggable', 'true');
     expect(screen.getByTestId('chat-main')).toBeInTheDocument();
   });
 });
@@ -372,15 +374,56 @@ describe('PaneArea — remount between routes', () => {
 });
 
 describe('PaneArea — groups (spec/14 § Groups)', () => {
-  it('one group draws no card; several draw a card each with the chat name and number', () => {
+  it('every group is a card whose header is the chat header; the number shows with several groups', () => {
     seedChats(['a', 'b']);
     useLayoutStore.getState().showChat('a');
     renderPanes();
-    expect(screen.queryByTestId('group-head')).toBeNull();
+    expect(screen.getAllByTestId('chat-head')).toHaveLength(1);
+    expect(screen.getByTestId('chat-head')).toHaveClass('chat-head-group');
+    expect(screen.getByTestId('chat-head').closest('.group-card-framed')).not.toBeNull();
+    expect(screen.queryByTestId('group-num')).toBeNull();
+    expect(screen.queryByTestId('group-close')).toBeNull();
 
     act(() => useLayoutStore.getState().showChat('b', { newGroup: true }));
-    const heads = screen.getAllByTestId('group-head');
-    expect(heads.map((h) => h.textContent)).toEqual(['1a', '2b']);
+    expect(screen.getAllByTestId('chat-head')).toHaveLength(2);
+    expect(screen.getAllByTestId('group-num').map((n) => n.textContent)).toEqual(['1', '2']);
+    expect(screen.getAllByTestId('chat-title').map((n) => n.textContent)).toEqual(['a', 'b']);
+  });
+
+  it('the group header carries Files, Browser, Editor and Terminal, each toggling its tab', () => {
+    seedChats(['a']);
+    useLayoutStore.getState().showChat('a');
+    renderPanes();
+    for (const id of ['files', 'browser', 'editor', 'terminal']) {
+      expect(screen.getByTestId(`group-tool-${id}`)).toHaveAttribute('aria-pressed', 'false');
+    }
+    fireEvent.click(screen.getByTestId('group-tool-terminal'));
+    expect(screen.getByTestId('group-tool-terminal')).toHaveAttribute('aria-pressed', 'true');
+    expect(
+      screen.getByRole('tablist', { name: 'Tabs' }).querySelectorAll('[role="tab"]'),
+    ).toHaveLength(2);
+    fireEvent.click(screen.getByTestId('group-tool-terminal'));
+    expect(screen.getByTestId('group-tool-terminal')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('the + at the end of the tab row opens a menu whose items open ordinary tabs', () => {
+    seedChats(['a']);
+    useLayoutStore.getState().showChat('a');
+    renderPanes();
+    const bar = screen.getByRole('tablist', { name: 'Tabs' });
+    fireEvent.click(bar.querySelector('.pane-tab-new')!);
+    fireEvent.click(screen.getByRole('menuitem', { name: /Browser/ }));
+    expect(screen.getByTestId('group-tool-browser')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('only the focused group is marked focused', () => {
+    seedChats(['a', 'b']);
+    useLayoutStore.getState().showChat('a');
+    useLayoutStore.getState().showChat('b', { newGroup: true });
+    renderPanes();
+    const cards = document.querySelectorAll('.group-card');
+    expect(Array.from(cards).map((c) => c.getAttribute('data-focused'))).toEqual(['false', 'true']);
+    expect(cards[1]).toHaveClass('group-card-focused');
   });
 
   it('closing a group from its card removes it', () => {
@@ -400,8 +443,8 @@ describe('PaneArea — groups (spec/14 § Groups)', () => {
       .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
       .mockReturnValue({ width: 700, height: 600 } as DOMRect);
     renderPanes();
-    expect(screen.getAllByTestId('group-head')).toHaveLength(1);
-    expect(screen.getByTestId('group-head').textContent).toBe('2b');
+    expect(screen.getAllByTestId('chat-head')).toHaveLength(1);
+    expect(screen.getByTestId('chat-title').textContent).toBe('b');
     spy.mockRestore();
   });
 });

@@ -41,6 +41,7 @@ test.describe('tab window title bar', () => {
     await mountTabWindow(page, false);
     const tab = (await page.locator('[data-testid=tab-window] .pane-tab').boundingBox())!;
     expect(tab.x).toBeLessThan(LIGHTS_RIGHT_EDGE);
-    expect(tab.y).toBeLessThan(2);
+    // The Chrome-shaped tab sits on the bar's bottom edge, 7px below its top.
+    expect(tab.y).toBeLessThan(8);
   });
 });

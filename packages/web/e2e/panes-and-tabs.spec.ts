@@ -15,6 +15,15 @@ function paneTabs(page: Page): Locator {
   return page.locator('.pane-tab');
 }
 
+/** A new tab in the first pane, from its + menu (a chat opens as a group, so
+ *  tabs beside it come from here, not the sidebar). */
+async function addTab(page: Page, item: 'settings' | 'jobs' | 'pads'): Promise<void> {
+  const before = await paneTabs(page).count();
+  await page.locator('.pane-tab-new').first().click();
+  await page.locator(`[data-testid$="-new-${item}"]`).click();
+  await expect(paneTabs(page)).toHaveCount(before + 1);
+}
+
 /**
  * Right-click a sidebar row and wait for its context menu. The row is scrolled
  * into view FIRST, and two frames allowed to pass: Playwright's own
@@ -49,14 +58,14 @@ test.describe('panes and tabs — opening', () => {
     page,
   }) => {
     await page.goto(HARNESS);
-    // The common case: one group, one pane, one tab — no tab bar, no card.
-    await expect(paneTabs(page)).toHaveCount(0);
+    // The common case: one group, one pane, one tab — the tab row is drawn all the same.
+    await expect(paneTabs(page)).toHaveCount(1);
     await expect(page.locator('.group-card')).toHaveCount(1);
 
     await page.getByTestId('chat-row-chat_md').click();
     // Still one group and one tab — the click SWITCHED the group's chat, it did
     // not add a tab — and it's the chat just clicked, not the harness's own.
-    await expect(paneTabs(page)).toHaveCount(0);
+    await expect(paneTabs(page)).toHaveCount(1);
     await expect(page.locator('.chat-head-title .chat-title')).toHaveText('July Seasonal Food');
     // The row click also navigates the router; wait for that to land (the row
     // goes active) so its route effect can't run after the middle-click below
@@ -65,7 +74,7 @@ test.describe('panes and tabs — opening', () => {
 
     await page.getByTestId('chat-row-chat_table').click({ button: 'middle' });
     await expect(page.locator('.group-card')).toHaveCount(2);
-    await expect(paneTabs(page)).toHaveCount(0);
+    await expect(paneTabs(page)).toHaveCount(2);
   });
 
   test('a page opens as a tab: middle-click adds one, and a plain click on it again focuses it rather than duplicating', async ({
@@ -175,10 +184,24 @@ test.describe('panes and tabs — drag and drop', () => {
     });
 
     await expect(page.locator('.pane')).toHaveCount(2);
-    // One tab per pane now — still 2 bars (now a second PANE, not just a
-    // second tab, has appeared; spec/14 § Panes and tabs shows a bar once
-    // there's more than one pane, even with one tab each).
+    // One tab per pane now, each pane drawing its own tab row.
     await expect(paneTabs(page)).toHaveCount(2);
+  });
+
+  test('dragging a tab onto another pane moves it there', async ({ page }) => {
+    await page.goto(HARNESS);
+    await addTab(page, 'settings');
+    await page.keyboard.press('Meta+Backslash');
+    await expect(page.locator('.pane')).toHaveCount(2);
+
+    const leftPane = page.locator('.pane').first();
+    const rightPane = page.locator('.pane').last();
+    const before = await paneTabs(page).count();
+    await leftPane.locator('.pane-tab').last().dragTo(rightPane.locator('.pane-content').first());
+
+    // A pane whose last tab is dragged away closes (spec/14 § Panes and tabs),
+    // so the count of tabs is unchanged and the layout is whole.
+    await expect(paneTabs(page)).toHaveCount(before);
   });
 
   test('a divider drag resizes the two panes', async ({ page }) => {
@@ -187,7 +210,7 @@ test.describe('panes and tabs — drag and drop', () => {
 
     const panes = page.locator('.pane');
     const beforeLeft = (await panes.first().boundingBox())!;
-    const divider = page.locator('.pane-divider');
+    const divider = page.locator('.group-card .pane-divider');
     const dBox = (await divider.boundingBox())!;
 
     await page.mouse.move(dBox.x + dBox.width / 2, dBox.y + dBox.height / 2);
@@ -206,12 +229,12 @@ test.describe('panes and tabs — persistence', () => {
     await splitViaTabMenu(page);
     await page.getByTestId('nav-pads').click({ button: 'middle' });
     await expect(page.locator('.pane')).toHaveCount(2);
-    await expect(paneTabs(page)).toHaveCount(3);
+    const tabCount = await paneTabs(page).count();
 
     await page.reload();
 
     await expect(page.locator('.pane')).toHaveCount(2);
-    await expect(paneTabs(page)).toHaveCount(3);
+    await expect(paneTabs(page)).toHaveCount(tabCount);
   });
 });
 
@@ -221,7 +244,7 @@ test.describe('panes and tabs — keyboard', () => {
     await page.getByTestId('nav-jobs').click({ button: 'middle' });
     await expect(paneTabs(page)).toHaveCount(2);
     await page.keyboard.press('Meta+w');
-    await expect(paneTabs(page)).toHaveCount(0); // back to one tab, no bar
+    await expect(paneTabs(page)).toHaveCount(1); // back to one tab, bar still drawn
   });
 
   test('⌘⌥→ switches to the next tab', async ({ page }) => {
