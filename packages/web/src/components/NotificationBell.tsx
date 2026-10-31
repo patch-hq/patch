@@ -91,7 +91,11 @@ export function NotificationBell(): JSX.Element {
                           void markRead({ ids: [n.id] });
                           setOpen(false);
                           if (n.jobId !== undefined) {
-                            navigate(`/jobs/${n.jobId}?run=${n.runTs ?? ''}`);
+                            navigate(
+                              n.runTs !== undefined
+                                ? `/jobs/${n.jobId}?run=${n.runTs}`
+                                : `/jobs/${n.jobId}`,
+                            );
                           } else {
                             navigate(`/chats/${n.chatId}`);
                           }
@@ -103,16 +107,18 @@ export function NotificationBell(): JSX.Element {
                       </button>
                       {n.jobId !== undefined ? (
                         <span className="notif-links">
-                          <Link
-                            to={`/jobs/${n.jobId}?run=${n.runTs ?? ''}`}
-                            data-testid={`notif-run-${n.id}`}
-                            onClick={() => {
-                              void markRead({ ids: [n.id] });
-                              setOpen(false);
-                            }}
-                          >
-                            Run
-                          </Link>
+                          {n.runTs !== undefined ? (
+                            <Link
+                              to={`/jobs/${n.jobId}?run=${n.runTs}`}
+                              data-testid={`notif-run-${n.id}`}
+                              onClick={() => {
+                                void markRead({ ids: [n.id] });
+                                setOpen(false);
+                              }}
+                            >
+                              Run
+                            </Link>
+                          ) : null}
                           <Link
                             to={`/jobs/${n.jobId}`}
                             data-testid={`notif-job-${n.id}`}
