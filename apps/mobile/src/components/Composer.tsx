@@ -185,7 +185,7 @@ import {
 
 interface Props {
   chatId: string;
-  /** Put the cursor in the input on mount (spec/15 § Composer — opening a chat). */
+  /** Put the cursor in the input on mount. Defaults on for the new-chat draft (sendTarget), off for an existing chat. */
   autoFocus?: boolean;
   /** The chat's folder — sources the skill autocomplete (`/` menu). */
   folder?: string;
@@ -1794,7 +1794,7 @@ export function Composer({
       <View testID="composer-input-row" style={{ position: 'relative' }}>
         <TextInput
           ref={inputRef}
-          autoFocus={autoFocus || edit !== undefined}
+          autoFocus={(autoFocus ?? isNewChatDraft) || edit !== undefined}
           {...(edit ? { testID: 'queued-edit-input' } : {})}
           value={body}
           onChangeText={(text) => {
