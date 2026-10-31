@@ -431,9 +431,12 @@ export class WsHub {
         void _accountEnvelope;
         return rest;
       });
+      const online = this.deps.hostLink.isOnline(hostId);
+      const offlineReason = online ? undefined : this.deps.hostLink.offlineReason?.(hostId);
       return {
         hostId,
-        online: this.deps.hostLink.isOnline(hostId),
+        online,
+        ...(offlineReason === undefined ? {} : { offlineReason }),
         lastSeenAt: this.hostLastSeenAt.get(hostId) ?? null,
         host: cached ? (host as Omit<HostInfoEvent, 'type'>) : null,
         registeredName: this.deps.registry.hostName(hostId) ?? null,
@@ -463,7 +466,8 @@ export class WsHub {
 
   /** `host.offline`, carrying the reason the machine gave, else the health tracker's. */
   private hostOfflineEvent(hostId: string): WireEvent {
-    const reason = this.deps.hostLink.offlineReason?.(hostId) ?? this.deps.hostOfflineReason?.(hostId);
+    const reason =
+      this.deps.hostLink.offlineReason?.(hostId) ?? this.deps.hostOfflineReason?.(hostId);
     return { type: 'host.offline', hostId, ...(reason !== undefined ? { reason } : {}) };
   }
 

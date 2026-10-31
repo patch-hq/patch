@@ -1364,6 +1364,27 @@ describe('/chats/new', () => {
     expect(mac).toHaveTextContent('mac · offline');
   });
 
+  it('starts on a machine that is up when the remembered one is offline, with its own folder', async () => {
+    // The most recent chat ran on the Mac (d2), which is asleep; d1 is up.
+    usePresenceStore.getState().setHostOnline('d2', false);
+    reportHost('d2', { hostName: 'mac' });
+    usePresenceStore.setState({ hostsSeeded: true });
+    useChatStore.setState({
+      chats: {
+        c1: makeRow('c1', '/home/tom/projects/alpha', 100, 'd1'),
+        c2: makeRow('c2', '/srv/bravo', 300, 'd2'),
+      },
+    });
+    stubPickerFetch({ folders: [] });
+    renderPicker();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('new-chat-host')).toHaveAttribute('data-selected', 'd1'),
+    );
+    expect(chosenFolderLabel()).toBe('alpha');
+    expect(screen.queryByTestId('new-chat-host-down')).toBeNull();
+  });
+
   it('the host control is a switcher showing every host, not a drop-down', async () => {
     usePresenceStore.getState().setHostOnline('d2', true);
     reportHost('d2', { hostName: 'mac' });

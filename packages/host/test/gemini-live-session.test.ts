@@ -510,9 +510,9 @@ describe('GeminiLiveSession — dispatch to the heavy agent', () => {
     });
     await vi.waitFor(() => expect(ws.sent.some((s) => s.includes('"failed"'))).toBe(true));
     expect(ws.sent.some((s) => s.includes('"started"'))).toBe(false);
-    expect(audioEvents.some((e) => e.type === 'audio.error' && /host offline/.test(e.message))).toBe(
-      true,
-    );
+    expect(
+      audioEvents.some((e) => e.type === 'audio.error' && /host offline/.test(e.message)),
+    ).toBe(true);
   });
 
   test('the voice is not told it has passed a request on until the chat has accepted it', async () => {

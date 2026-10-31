@@ -100,3 +100,71 @@ describe('Sidebar host label on ambiguous titles', () => {
     expect(screen.queryByTestId('row-host-c3')).toBeNull();
   });
 });
+
+describe('Sidebar rows on a host that is down', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useChatStore.getState()._reset();
+    useBatchStore.getState()._reset();
+    usePresenceStore.getState().setConnection('connected');
+    usePresenceStore.getState().setHosts([
+      {
+        hostId: 'd1',
+        online: true,
+        lastSeenAt: null,
+        host: null,
+        registeredName: 'Netcup',
+        accounts: [],
+      },
+      {
+        hostId: 'd2',
+        online: false,
+        lastSeenAt: null,
+        host: null,
+        registeredName: 'Mac',
+        accounts: [],
+      },
+    ]);
+    usePresenceStore.setState({ hostsSeeded: true });
+    vi.spyOn(api, 'listChatsArchived').mockResolvedValue({ chats: [], nextOffset: null });
+    vi.spyOn(api, 'listChatsDeleted').mockResolvedValue({ chats: [], nextOffset: null });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it('marks only the chats whose host is down, by name', () => {
+    seedChat('c1', 'On netcup', 'd1');
+    seedChat('c2', 'On mac', 'd2');
+    render(
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId('row-host-down-c1')).toBeNull();
+    expect(screen.getByTestId('row-host-down-c2')).toHaveTextContent('Mac host offline');
+  });
+
+  it('says updating, not offline, while that host installs an update', () => {
+    usePresenceStore.getState().setHostOnline('d2', false, 'updating');
+    seedChat('c2', 'On mac', 'd2');
+    render(
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId('row-host-down-c2')).toHaveTextContent('Mac host updating');
+  });
+
+  it('leaves rows alone when every host is down (the app banner says that once)', () => {
+    usePresenceStore.getState().setHostOnline('d1', false);
+    seedChat('c2', 'On mac', 'd2');
+    render(
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId('row-host-down-c2')).toBeNull();
+  });
+});

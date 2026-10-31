@@ -41,10 +41,15 @@ describe('queueChipTitle', () => {
 });
 
 describe('host offline', () => {
+  it('names the host it is waiting for', () => {
+    expect(queueChipLabel(1, false, undefined, null, 'Mac host')).toBe('Mac host offline');
+    expect(queueChipTitle(1, false, undefined, null, 'Mac host')).toBe('Waiting for Mac host');
+  });
+
   it('says the host is offline rather than that a turn is running', () => {
-    expect(queueChipLabel(1, false)).toBe('Machine offline');
-    expect(queueChipLabel(3, false)).toBe('Machine offline');
-    expect(queueChipTitle(1, false)).toBe('Waiting for the machine to come back online');
+    expect(queueChipLabel(1, false)).toBe('Host offline');
+    expect(queueChipLabel(3, false)).toBe('Host offline');
+    expect(queueChipTitle(1, false)).toBe('Waiting for the host');
   });
 });
 
@@ -63,7 +68,7 @@ describe('release event', () => {
   });
 
   it('host offline wins over the release event', () => {
-    expect(queueChipLabel(1, false, 'tool')).toBe('Machine offline');
+    expect(queueChipLabel(1, false, 'tool')).toBe('Host offline');
   });
 
   it('holds everything behind a turn that needs its own run', () => {
@@ -88,7 +93,7 @@ describe('out of credit', () => {
   });
 
   it('host offline still wins', () => {
-    expect(queueChipLabel(1, false, 'tool', { resetsAt: null })).toBe('Machine offline');
+    expect(queueChipLabel(1, false, 'tool', { resetsAt: null })).toBe('Host offline');
   });
 
   it('derives the pause from a row: limit block or armed resume, not an overload', () => {

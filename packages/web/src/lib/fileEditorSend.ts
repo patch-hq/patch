@@ -4,6 +4,7 @@
 // `FileEditorTab` is its own instance (one per open file), so the logic moves
 // here to stay in exactly one place rather than copy-pasted per tab.
 
+import { hostTitle } from './hostStatus.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -46,9 +47,10 @@ export function sendFileEditorEvent(ws: PatchWs | null, chatId: string, ev: File
       // The server buffers a save for an offline host and delivers it on
       // reconnect (spec/12 § Host-offline UX), so say that, not "Saved".
       const hostId = useChatStore.getState().chats[chatId]?.hostId ?? '';
-      const online = usePresenceStore.getState().hosts[hostId]?.online ?? true;
+      const host = usePresenceStore.getState().hosts[hostId];
+      const online = host?.online ?? true;
       pushNotice(
-        online ? `Saved ${ev.path}` : `Host offline — ${ev.path} will save when it reconnects`,
+        online ? `Saved ${ev.path}` : `${ev.path} queued · ${hostTitle(host, hostId)} offline`,
       );
     }
   } catch (e) {

@@ -82,6 +82,7 @@ import { ClaudeDisconnectedBanner } from '../components/ClaudeDisconnectedBanner
 import { OutOfUsageBanner } from '../components/OutOfUsageBanner.js';
 import { JobBar } from '../components/JobBar.js';
 import { HostOfflineBanner } from '../components/HostOfflineBanner.js';
+import { useHostStatus } from '../lib/hostStatus.js';
 import { HostStrugglingBanner } from '../components/HostStrugglingBanner.js';
 import { EmptyChat } from '../components/EmptyChat.js';
 import { ChatNotFound } from '../components/ChatNotFound.js';
@@ -2795,6 +2796,8 @@ function MessageEntry({
   attemptAt?: number;
   onAttemptAt?(seq: number, idx: number): void;
 }): JSX.Element {
+  // Which host, by name, for "Mac host offline" on queued and pending turns.
+  const hostView = useHostStatus(useChatStore((s) => s.chats[chatId]?.hostId));
   // spec/04 ## Message queueing — a queued entry on a chat paused for credit
   // says so. Selected as a primitive so the selector never returns a fresh object.
   const pauseAt = useChatStore((s) => {
@@ -3147,10 +3150,10 @@ function MessageEntry({
           <span
             className="queued-badge"
             data-testid="queued-badge"
-            title={queueChipTitle(queuePos!, hostOnline, release, pause)}
+            title={queueChipTitle(queuePos!, hostOnline, release, pause, hostView.title)}
             data-paused={pause ? 'true' : undefined}
           >
-            {queueChipLabel(queuePos!, hostOnline, release, pause)}
+            {queueChipLabel(queuePos!, hostOnline, release, pause, hostView.title)}
           </span>
           {entry.localId && onPromote ? (
             <button
@@ -3282,7 +3285,7 @@ function MessageEntry({
               <CloudOff size={12} strokeWidth={2.5} aria-hidden />
             )}
           </span>
-          {hostOnline ? 'Sending…' : 'Machine offline — will send when it reconnects'}
+          {hostOnline ? 'Sending…' : `Waiting for ${hostView.title}`}
         </div>
       ) : null}
       {/* spec/14 § Messages — the per-message meta strip: facts ABOUT the turn

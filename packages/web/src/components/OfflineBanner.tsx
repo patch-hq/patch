@@ -22,8 +22,8 @@ export function OfflineBanner(): JSX.Element | null {
         {!serverRestarting
           ? 'Reconnecting…'
           : stopReason === 'updating'
-            ? 'Patch server is installing an update. Back in a moment.'
-            : 'Patch server is restarting. Back in a moment.'}
+            ? 'Patch server updating'
+            : 'Patch server restarting'}
       </span>
       {/* An update is a known, expected gap: nothing to diagnose. */}
       {serverRestarting ? null : (

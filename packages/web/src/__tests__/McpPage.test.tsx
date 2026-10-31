@@ -327,7 +327,7 @@ describe('Settings → MCP', () => {
     // The refusal is the toast; the form does not repeat it as its own error.
     expect(screen.queryByTestId('mcp-editor-error')).toBeNull();
     await waitFor(() =>
-      expect(errors().filter((e) => /mac is offline/.test(e)).length).toBeGreaterThanOrEqual(1),
+      expect(errors().filter((e) => /mac host offline/.test(e)).length).toBeGreaterThanOrEqual(1),
     );
   });
 });

@@ -72,7 +72,7 @@ export function useBehind(): BehindItem[] {
 }
 
 function hostStatus(h: HostPresence): string {
-  if (!h.online) return 'Offline';
+  if (!h.online) return h.offlineReason === 'updating' ? 'Updating' : 'Offline';
   if (h.host?.updateHeld) return 'Update waiting for chats to finish';
   if (h.host?.updatePending) return 'Update on its way';
   return h.host?.updateAvailable ? 'Update available' : 'Up to date';

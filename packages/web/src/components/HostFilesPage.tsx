@@ -6,6 +6,7 @@
 // folder and the draft live in `uiStore.hostBrowse`, so the tab survives being
 // closed and reopened where it was left.
 
+import { hostDownLine, hostStatusView, hostTitle } from '../lib/hostStatus.js';
 import { type JSX, Fragment, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileText, Folder, Search } from 'lucide-react';
@@ -608,7 +609,7 @@ function HostBrowsePanel({
                 disabled={!online}
                 onClick={() => setHostBrowse({ hostId: id, path: null, openFile: null })}
               >
-                {h?.host?.hostName ?? id}
+                {hostTitle(h, id)}
                 {online ? '' : ' · offline'}
               </button>
             );
@@ -619,6 +620,7 @@ function HostBrowsePanel({
   }
 
   const entries: HostFileEntry[] = listQuery.data?.entries ?? [];
+  const offlineLine = hostDownLine(hostStatusView(hosts[hostId], hostId));
 
   return (
     <div className="browse-panel" data-testid="host-browse-panel" ref={panelRef}>
@@ -632,7 +634,7 @@ function HostBrowsePanel({
             <BrowseSkeleton rows={6} testId="host-browse-loading" />
           ) : isHostOffline(listQuery.error) ? (
             <div className="browse-tree-empty" data-testid="host-browse-offline">
-              Host offline
+              {offlineLine}
             </div>
           ) : listQuery.isError ? (
             <div className="browse-tree-error" data-testid="host-browse-error" role="alert">
@@ -700,7 +702,7 @@ function HostBrowsePanel({
               </div>
             ) : isHostOffline(contentQuery.error) ? (
               <div className="browse-tree-empty" data-testid="host-browse-content-offline">
-                Host offline
+                {offlineLine}
               </div>
             ) : contentQuery.isError ? (
               <div

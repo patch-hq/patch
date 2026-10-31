@@ -71,9 +71,7 @@ describe('OfflineBanner', () => {
       .getState()
       .noteWsClose({ code: CLOSE_SERVER_RESTARTING, reason: 'restarting', at: Date.now() });
     render(<OfflineBanner />);
-    expect(screen.getByTestId('offline-banner')).toHaveTextContent(
-      'Patch server is restarting. Back in a moment.',
-    );
+    expect(screen.getByTestId('offline-banner')).toHaveTextContent('Patch server restarting');
     // A known gap: nothing to diagnose.
     expect(screen.queryByTestId('offline-diagnose')).toBeNull();
   });
@@ -88,9 +86,7 @@ describe('OfflineBanner', () => {
       .noteWsClose({ code: CLOSE_SERVER_RESTARTING, reason: 'updating', at });
     usePresenceStore.getState().noteWsClose({ code: 1006, reason: '', at: at + 1 });
     render(<OfflineBanner />);
-    expect(screen.getByTestId('offline-banner')).toHaveTextContent(
-      'Patch server is installing an update. Back in a moment.',
-    );
+    expect(screen.getByTestId('offline-banner')).toHaveTextContent('Patch server updating');
   });
 
   it('falls back to "Reconnecting…" if the server has not come back after the grace period', () => {

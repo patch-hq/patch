@@ -21,6 +21,7 @@
 // error land in the scrollback as an explicit line. The prompt is never left
 // looking alive over a dead session.
 
+import { useHostStatus } from '../lib/hostStatus.js';
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from 'react';
 import type { WireEvent } from '@patch/wire';
 import type { PatchWs } from '../api/ws.js';
@@ -75,6 +76,10 @@ export function TerminalPanel({
   // the shell belongs on that machine and nowhere else. `/chats/new` has no
   // chat yet, hence the fall-through to the account's default host below.
   const chatHostId = useChatStore((s) => s.chats[chatId]?.hostId ?? null) || null;
+  // A shell needs its host live: a terminal cannot be queued. While the chat's
+  // host is down the pane says so, and the shell opens once it is back.
+  const chatHost = useHostStatus(chatHostId);
+  const hostDown = chatHostId !== null && chatHost.state !== 'online';
   const session = useTerminalStore((s) => s.sessions[chatId]);
   const startSession = useTerminalStore((s) => s.startSession);
   const recordCommand = useTerminalStore((s) => s.recordCommand);
@@ -106,6 +111,7 @@ export function TerminalPanel({
     // — the terminal exists to work on the files that chat works on — so this
     // refuses rather than opening a shell on some other box.
     const hostId = chatHostId ?? defaultHostId(usePresenceStore.getState().hosts);
+    if (hostId !== null && hostId === chatHostId && hostDown) return;
     if (hostId === null) {
       // A session is needed to show anything: with none, `appendLocal` is a
       // no-op and the user would get a blank, apparently-live prompt.
@@ -140,10 +146,10 @@ export function TerminalPanel({
     // explicit Restart rather than silently respawning.
     if (session) return;
     startShell();
-    // Deliberately keyed on mount for this chat: `startShell` closes over the
-    // current session/ws, so a dependency-complete list would re-run it on
-    // every render and spawn shells.
-  }, [chatId]);
+    // Deliberately keyed on mount for this chat and on the host coming back:
+    // `startShell` closes over the current session/ws, so a dependency-complete
+    // list would re-run it on every render and spawn shells.
+  }, [chatId, hostDown]);
 
   // Drain whatever asked for this terminal (spec/14 § Background task bar): a
   // click on a running background task queues a command or a note and opens
@@ -254,6 +260,11 @@ export function TerminalPanel({
           {tailPath(session?.folder || folder)}
         </span>
       </header>
+      {!session && hostDown ? (
+        <p className="terminal-host-down" data-testid="terminal-host-down" role="status">
+          Waiting for {chatHost.title}
+        </p>
+      ) : null}
       <div className="terminal-scroll mono" data-testid="terminal-scroll" ref={scrollRef}>
         {(session?.chunks ?? []).map((c, i) => (
           <span key={i} className={`term-${c.stream}`}>

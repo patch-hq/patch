@@ -8,6 +8,7 @@
 // it, rather than appearing to do nothing and applying hours later (NO
 // FALLBACK).
 
+import { hostTitle } from '../../lib/hostStatus.js';
 import { useEffect, useRef, useState } from 'react';
 import type { HostSettingsEvent, WireEvent } from '@patch/wire';
 import { getActiveWs } from '../../api/ws.js';
@@ -50,7 +51,8 @@ export function sendToHost(host: HostPresence, event: WireEvent): boolean {
     return false;
   }
   if (!host.online) {
-    pushError(`${name} is offline. It cannot be changed until it reconnects.`);
+    // Offline is a state, not a failure: a calm notice, not an error.
+    useUiStore.getState().pushNotice(`${hostTitle(host, host.hostId)} offline`);
     return false;
   }
   try {
@@ -162,7 +164,6 @@ export function readySocket(
  * go once it is seen again.
  */
 export function useHostUpdate(host: HostPresence): { updating: boolean; apply: () => void } {
-  const pushError = useUiStore((s) => s.pushError);
   const errors = useUiStore((s) => s.errors);
   const [updating, setUpdating] = useState(false);
   useEffect(() => {
@@ -175,7 +176,7 @@ export function useHostUpdate(host: HostPresence): { updating: boolean; apply: (
   }, [host.online]);
   function apply(): void {
     if (!host.online) {
-      pushError(`${hostLabel(host)} is offline. It cannot be updated until it reconnects.`);
+      useUiStore.getState().pushNotice(`${hostTitle(host, host.hostId)} offline`);
       return;
     }
     setUpdating(true);

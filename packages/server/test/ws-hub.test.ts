@@ -841,6 +841,45 @@ describe('WS hub relay', () => {
     }
   });
 
+  it('the greeting says a host is installing an update when it went down to do so', async () => {
+    // A surface that opens while a host is mid-update must not have to wait
+    // for the next presence change to learn why it is down.
+    const user = generateUserKeypair(() => new Uint8Array(32).fill(35));
+    const registry = Registry.load(dir);
+    registry.bootstrapAccount({ keypair: user });
+    registry.setDaemonKey({ hostId: 'd1', publicKey: 'pk-d1', issuedAt: 1 });
+    const hostLink = new InProcessHostLink();
+    hostLink.setStatus('offline');
+    (hostLink as unknown as { offlineReason: (id: string) => string | undefined }).offlineReason = (
+      id,
+    ) => (id === 'd1' ? 'updating' : undefined);
+    const h = await startServer({ registry, hostLink });
+    try {
+      h.registry.upsertSurface({
+        surfaceId: 'srf-upd',
+        surfaceKind: 'web',
+        label: 'b',
+        issuedAt: 1,
+      });
+      const jwt = await mintSurfaceCredential({
+        userPrivateKey: user.privateKey,
+        surfaceId: 'srf-upd',
+        surfaceKind: 'web',
+        label: 'b',
+      });
+      const client = new WireTestClient({ url: h.url, auth: jwt });
+      await client.connect();
+      const okPromise = client.waitFor('auth.ok');
+      const offlinePromise = client.waitFor('host.offline');
+      const ok = await okPromise;
+      expect(ok.hosts[0]).toMatchObject({ hostId: 'd1', online: false, offlineReason: 'updating' });
+      expect(await offlinePromise).toMatchObject({ hostId: 'd1', reason: 'updating' });
+      await client.close();
+    } finally {
+      await h.close();
+    }
+  });
+
   it('buffers post-hello frames sent before auth completes; drains them on success', async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(15));
     const registry = Registry.load(dir);

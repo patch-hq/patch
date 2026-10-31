@@ -10663,15 +10663,22 @@ main.empty-state p {
 
 /* ---------- Daemon-offline banner (per-chat) ---------- */
 
+/* A host being down is expected (a laptop sleeps, restarts to update), so this
+   is a calm grey strip, not the amber of a warning. Installing an update gets
+   the accent, as something under way that ends by itself. */
 .daemon-offline-banner {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: var(--waiting-tint);
-  color: var(--waiting);
+  background: var(--bg-soft);
+  color: var(--ink-2);
   padding: 8px 16px;
   font-size: var(--text-min);
   border-bottom: 1px solid var(--line-soft);
+}
+.daemon-offline-banner[data-state='updating'] {
+  background: var(--accent-tint);
+  color: var(--accent-strong);
 }
 
 /* Same shape as the daemon-offline banner but in the error colour, because it is a
@@ -10738,7 +10745,11 @@ main.empty-state p {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--waiting);
+  background: var(--ink-3);
+  flex: none;
+}
+.daemon-offline-banner[data-state='updating'] .dot {
+  background: currentColor;
 }
 
 /* Archived banner — shown in the chat panel when the open chat is archived
@@ -17290,6 +17301,34 @@ select.permission-mode.is-pending {
 .sweep-status-detail-text,
 .sweep-status-earlier {
   opacity: 0.7;
+}
+
+/* New chat: the chosen machine is offline. Spans the setup grid under the
+   Machine row, in the same quiet grey as the host banner. */
+.new-chat-host-down {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--text-min);
+}
+
+/* Sidebar row: this chat's host is down while another is up. One line, the
+   icon beside the words (the preview's line-clamp box would stack them). */
+.sb-row .preview.row-host-down {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.sb-row .preview.row-host-down svg {
+  flex: none;
+}
+
+/* Terminal: the chat's host is down, so no shell can open yet. */
+.terminal-host-down {
+  margin: 0;
+  padding: 10px 14px;
+  color: var(--term-ink-dim);
+  font-size: var(--text-min);
 }
 
 /* ---------- Status list (spec/14 § Main chat panel — Status list) ---------- */
