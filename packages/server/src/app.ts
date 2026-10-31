@@ -1411,7 +1411,6 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         // is known and do not invent a name for it.
         hostName: h.host?.hostName ?? null,
         online: h.online,
-        runsManager: h.host?.runsManager ?? false,
         ...(h.host?.defaultModel !== undefined ? { defaultModel: h.host.defaultModel } : {}),
       })),
     };
