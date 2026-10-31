@@ -5057,13 +5057,15 @@ export class Daemon {
     }
     state.hidden = hidden;
     state.hideUntilComplete = untilComplete;
+    this.bumpForSectionMove(state);
     // spec/04 § Hidden — the agent is told on its next turn. Undoing a change
     // the agent was never told about cancels it instead of announcing a no-op.
     const notice = hidden ? 'hidden' : 'shown';
     state.hiddenNotice =
       state.hiddenNotice !== null && state.hiddenNotice !== notice ? null : notice;
-    // Like snooze, moving between sections is not activity: `updatedAt` and
-    // `lastUpdated` stay as they were, so the chat keeps its place by recency.
+    // Like snooze, moving between sections is not activity: `updatedAt` stays
+    // as it was, so the chat keeps its place by recency. `lastUpdated` moves
+    // only so a surface can tell this state from an older roster snapshot.
     this.opts.metaStore.update(chatId, (m) => ({
       ...m,
       hidden,
@@ -5678,8 +5680,10 @@ export class Daemon {
       this.finishSnoozeRecord(chatId, now, opts.byAgent !== true);
     }
     state.snoozedUntil = snoozedUntil;
-    // A snooze is not activity — `lastUpdated` is deliberately untouched so the
-    // chat returns to the list exactly where it left (spec/04 § Snooze).
+    // A snooze is not activity: `updatedAt` is untouched so the chat returns to
+    // the list where it left (spec/04 § Snooze). `lastUpdated` still moves so a
+    // surface can tell this state from an older roster snapshot.
+    this.bumpForSectionMove(state);
     this.opts.metaStore.update(chatId, (m) => ({
       ...m,
       snoozedUntil,
@@ -5688,6 +5692,15 @@ export class Daemon {
     }));
     this.armSnoozeTimer(chatId, snoozedUntil);
     this.emitState(chatId);
+  }
+
+  /**
+   * Hide / snooze change what a surface shows, so `lastUpdated` must move: it is
+   * how a phone tells this state from a stale roster. Strictly increasing, so
+   * two changes in the same millisecond still order.
+   */
+  private bumpForSectionMove(state: { lastUpdated: number }): void {
+    state.lastUpdated = Math.max(this.opts.now(), state.lastUpdated + 1);
   }
 
   /** Running, or idle between turns with a goal still to be judged. */
