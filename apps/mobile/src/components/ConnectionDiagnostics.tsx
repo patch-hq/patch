@@ -88,7 +88,9 @@ export function ConnectionDiagnostics({
       ? 'Checking the connection…'
       : failed === undefined
         ? 'Everything looks reachable'
-        : HEADLINES[failed.id];
+        : failed.tls === true
+          ? "Can't trust the patch server's certificate"
+          : HEADLINES[failed.id];
 
   const button = {
     paddingHorizontal: space.lg,

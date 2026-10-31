@@ -55,6 +55,7 @@ import {
   MAX_VIEW_IMAGE_BYTES,
   MAX_VIEW_PDF_BYTES,
   MAX_VIEW_VIDEO_BYTES,
+  MAX_VIEW_FILE_BYTES,
   artifactIdFor,
   resolveArtifactPath,
   resolveViewFilePath,
@@ -86,7 +87,7 @@ import { RateLimiter } from './rate-limit.js';
 import { resolveSpeakers, type SpeakerCascadeDeps } from './devices/speakers-cascade.js';
 import { GIT_SHA, VERSION } from './version.js';
 import { RemoteRelayError } from './remote-relay.js';
-import { buildPeekResult } from './peek.js';
+import { buildPeekResult, stripBinaryPayloads } from './peek.js';
 import { probeFolderAccess } from './folderAccess.js';
 
 /**
@@ -276,6 +277,11 @@ export interface BuildOptions {
     /** A visible caller brings the recipient into view; hidden automation does not. */
     revealTarget: boolean;
   }) => Promise<void>;
+  /**
+   * `patch_stop`'s cross-host sibling: resolves once the OWNING machine has
+   * stopped the chat, rejects with its real error otherwise.
+   */
+  stopRemoteChat?: (req: { sourceChatId: string; targetChatId: string }) => Promise<void>;
   /**
    * Backs `patch_artifact` (spec/14 § Artifacts): hands the page to the server,
    * which owns the public origin, and resolves with the URL it is served from.
@@ -1240,7 +1246,23 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!auth.ok) return reply.code(401).send({ error: auth.reason });
     if (!opts.daemon) return reply.code(503).send({ error: 'host not initialised' });
     const state = opts.daemon.chatState.resolve(req.params.id);
-    if (!state) return reply.code(404).send({ error: 'not found' });
+    if (!state) {
+      // Not on this machine: the owning one may be elsewhere. A full id only —
+      // a prefix cannot be resolved without the owner's chat list.
+      if (opts.stopRemoteChat) {
+        try {
+          await opts.stopRemoteChat({ sourceChatId: 'cli', targetChatId: req.params.id });
+          return { ok: true };
+        } catch (err) {
+          const code = err instanceof RemoteRelayError ? err.code : 'sdk_error';
+          return reply.code(code === 'chat_not_found' ? 404 : 502).send({
+            error: code === 'chat_not_found' ? 'not found' : code,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      return reply.code(404).send({ error: 'not found' });
+    }
     await opts.daemon.stopChat(state.chatId);
     return { ok: true };
   });
@@ -1916,7 +1938,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
               durationMs: Date.now() - start,
               ok: true,
             });
-            return remote;
+            return stripBinaryPayloads(remote);
           } catch (err) {
             const code = err instanceof RemoteRelayError ? err.code : 'sdk_error';
             toolLog({
@@ -1949,7 +1971,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         durationMs: Date.now() - start,
         ok: true,
       });
-      return local;
+      return stripBinaryPayloads(local);
     },
   );
 
@@ -3031,7 +3053,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       });
       const out: { events: WireEvent[]; nextFromSeq?: number } = { events: slice.events };
       if (slice.nextFromSeq !== undefined) out.nextFromSeq = slice.nextFromSeq;
-      return out;
+      return stripBinaryPayloads(out);
     } catch (err) {
       // Not on THIS host — spec/03 § Cross-chat tools, same relay `patch_peek`
       // uses above. NO FALLBACK to a local-only 404 when the caller can be
@@ -3054,7 +3076,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
             durationMs: Date.now() - start,
             ok: true,
           });
-          return remote;
+          return stripBinaryPayloads(remote);
         } catch (remoteErr) {
           const code = remoteErr instanceof RemoteRelayError ? remoteErr.code : 'sdk_error';
           toolLog({
@@ -3251,7 +3273,21 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       // stopChat is already idempotent (no-op if already idle).
       // We still prefer to surface chat-not-found so callers learn typos.
       if (!opts.daemon!.chatState.has(params.data.id)) {
-        throw new ChatNotFoundError(params.data.id);
+        // Not on this machine: relay to whichever machine owns it. NO
+        // FALLBACK — the owner's refusal (or silence) comes back as the error.
+        if (!opts.stopRemoteChat || !callerChatId) throw new ChatNotFoundError(params.data.id);
+        await opts.stopRemoteChat({
+          sourceChatId: callerChatId,
+          targetChatId: params.data.id,
+        });
+        toolLog({
+          tool: 'patch_stop',
+          callerChatId,
+          targetChatId: params.data.id,
+          durationMs: Date.now() - start,
+          ok: true,
+        });
+        return { ok: true };
       }
       await opts.daemon!.stopChat(params.data.id);
       if (opts.emitWire && callerChatId) {
@@ -3270,7 +3306,11 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       });
       return { ok: true };
     } catch (err) {
-      const code = err instanceof ChatNotFoundError ? 'chat_not_found' : 'sdk_error';
+      const code =
+        err instanceof ChatNotFoundError ||
+        (err instanceof RemoteRelayError && err.code === 'chat_not_found')
+          ? 'chat_not_found'
+          : 'sdk_error';
       toolLog({
         tool: 'patch_stop',
         callerChatId,
@@ -3589,9 +3629,9 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         };
         fileBytes = stat.size;
       } else if (kind === 'file') {
-        if (stat.size > MAX_VIEW_PDF_BYTES) {
+        if (stat.size > MAX_VIEW_FILE_BYTES) {
           throw new ArtifactInputError(
-            `file is ${stat.size} bytes — the limit is ${MAX_VIEW_PDF_BYTES}`,
+            `file is ${stat.size} bytes — the limit is ${MAX_VIEW_FILE_BYTES}`,
           );
         }
         // Served byte-for-byte as an attachment under its own name: the chat

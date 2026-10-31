@@ -1522,6 +1522,11 @@ function ActionRow({
             onEnter={() => (document.activeElement as HTMLElement | null)?.blur()}
           />
         </span>
+        {action.absent ? (
+          <span className="mm-act-st" data-testid="meeting-action-absent">
+            Not in meeting
+          </span>
+        ) : null}
         {action.chatId ? <ActionChatStatus chatId={action.chatId} /> : null}
         {action.chatId ? (
           <Link

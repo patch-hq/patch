@@ -293,6 +293,7 @@ describe('MeetingManager', () => {
       chatId: 'c',
       previous: { now: null, topics: [], actions: [] },
       newLines: [{ clock: '00:05', speaker: 'Them', text: "Hi, I'm Priya" }],
+      earlierLines: [],
       final: false,
       elapsedMs: 5000,
       myNotes: '',
@@ -415,21 +416,21 @@ describe('MeetingManager', () => {
     m.start('c1');
     clock += 10_000;
     await m.ingestAudio('c1', 'mic', Buffer.from('a'));
-    clock += 10_000;
+    clock += 600_000;
     analyse.mockResolvedValueOnce(
       analysis({
         topics: [
-          { id: null, title: 'Late', points: [], decided: false, atSeconds: 99 },
+          { id: null, title: 'Late', points: [], decided: false, atSeconds: 99_999 },
           { id: null, title: 'Early', points: [], decided: false, atSeconds: 1 },
-          { id: null, title: 'Mid', points: [], decided: false, atSeconds: 15 },
+          { id: null, title: 'Mid', points: [], decided: false, atSeconds: 400 },
         ],
       }),
     );
     await m.tick('c1');
     expect(m.get('c1')!.topics.map((t) => [t.title, t.at])).toEqual([
       ['Early', 10_000],
-      ['Mid', 15_000],
-      ['Late', 20_000],
+      ['Mid', 400_000],
+      ['Late', 610_000],
     ]);
   });
 
@@ -598,6 +599,75 @@ describe('MeetingManager', () => {
     expect(buildMeetingPrompt(analyse.mock.calls[1]![0])).toContain('"fixed":true');
   });
 
+  it('folds a topic that starts within three minutes of the one before into it, keeping its detail', async () => {
+    const m = make();
+    m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    await m.tick('c1'); // id1 at 5s
+    await m.ingestAudio('c1', 'mic', Buffer.from('b'));
+    clock += 100_000;
+    analyse.mockResolvedValueOnce(
+      analysis({
+        topics: [
+          {
+            id: null,
+            title: 'Decision: January',
+            points: ['Own service', 'Sign-off'],
+            decided: true,
+            atSeconds: 90,
+          },
+        ],
+      }),
+    );
+    await m.tick('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('c'));
+    clock += 400_000;
+    analyse.mockResolvedValueOnce(
+      analysis({
+        topics: [
+          { id: null, title: 'Registry', points: ['Skills list'], decided: false, atSeconds: 400 },
+        ],
+      }),
+    );
+    await m.tick('c1');
+    const topics = m.get('c1')!.topics;
+    expect(topics.map((t) => t.title)).toEqual(['Points ledger', 'Registry']);
+    expect(topics[0]).toMatchObject({ decided: true });
+    expect(topics[0]!.points).toEqual(['Own service', 'Decision: January', 'Sign-off']);
+  });
+
+  it('merges existing fragments when a pass lands, never touching fixed topics', async () => {
+    const m = make();
+    m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    clock += 300_000;
+    analyse.mockResolvedValueOnce(
+      analysis({
+        topics: [
+          { id: null, title: 'A', points: ['a1'], decided: false, atSeconds: 0 },
+          { id: null, title: 'B', points: ['b1'], decided: false, atSeconds: 60 },
+          { id: null, title: 'C', points: ['c1'], decided: false, atSeconds: 120 },
+          { id: null, title: 'D', points: ['d1'], decided: false, atSeconds: 200 },
+        ],
+      }),
+    );
+    await m.tick('c1');
+    expect(m.get('c1')!.topics.map((t) => [t.at, t.title, t.points])).toEqual([
+      [0, 'A', ['a1', 'B', 'b1', 'C', 'c1']],
+      [200_000, 'D', ['d1']],
+    ]);
+  });
+
+  it('drops transcription noise lines', async () => {
+    const m = make();
+    m.start('c1');
+    for (const t of ['[Music]', '(silence)', 'Thank you.', '...', 'you', 'Real sentence here']) {
+      transcribe.mockResolvedValueOnce(t);
+      await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    }
+    expect(m.get('c1')!.transcript.map((l) => l.text)).toEqual(['Real sentence here']);
+  });
+
   it('an edit made while analysis is running still wins', async () => {
     const m = make();
     m.start('c1');
@@ -667,6 +737,7 @@ describe('MeetingManager', () => {
       chatId: 'c',
       previous: { now: null, topics: [], actions: [] },
       newLines: [],
+      earlierLines: [],
       final: false,
       elapsedMs: 5000,
       myNotes: '',
@@ -949,6 +1020,55 @@ describe('MeetingManager', () => {
       ]);
     });
 
+    it('marks an owner who never spoke as not in the meeting, and an owner who did as present', async () => {
+      diarise = true;
+      const m = make();
+      m.start('c1');
+      transcribeVoices.mockResolvedValueOnce([{ text: 'I will build it', voice: 1 }]);
+      await m.ingestAudio('c1', 'system', Buffer.from('a'));
+      m.nameVoice('c1', 1, 'Priya');
+      analyse.mockResolvedValueOnce(
+        analysis({
+          actions: [
+            { kind: 'other', owner: 'Priya', title: 'Priya builds it', why: 'w' },
+            { kind: 'other', owner: 'Marcus', title: 'Marcus reviews it', why: 'w' },
+            { kind: 'other', owner: 'Everyone', title: 'All read it', why: 'w' },
+          ],
+        }),
+      );
+      await m.tick('c1');
+      expect(m.get('c1')!.actions.map((a) => [a.owner, a.absent])).toEqual([
+        ['Priya', undefined],
+        ['Marcus', true],
+        ['Everyone', undefined],
+      ]);
+    });
+
+    it("turns an owner of Tom's own name into Tom's action", async () => {
+      const m = make();
+      m.start('c1');
+      await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+      analyse.mockResolvedValueOnce(
+        analysis({ actions: [{ kind: 'other', owner: 'Tom', title: 'Join the build', why: 'w' }] }),
+      );
+      await m.tick('c1');
+      const [a] = m.get('c1')!.actions;
+      expect([a!.kind, a!.owner, a!.absent]).toEqual(['mine', undefined, undefined]);
+    });
+
+    it('gives the analysis the lines it already analysed as context', async () => {
+      const m = make();
+      m.start('c1');
+      await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+      await m.tick('c1');
+      await m.ingestAudio('c1', 'mic', Buffer.from('b'));
+      await m.tick('c1');
+      const second = analyse.mock.calls[1]![0];
+      expect(second.earlierLines).toHaveLength(1);
+      expect(second.newLines).toHaveLength(1);
+      expect(buildMeetingPrompt(second)).toContain('Earlier transcript');
+    });
+
     it('rejects an analysis action for someone else with no owner, and one with no kind', () => {
       expect(() =>
         MeetingAnalysis.parse(analysis({ actions: [{ kind: 'other', title: 't', why: 'w' }] })),
@@ -1117,6 +1237,7 @@ describe('meetingGen', () => {
       chatId: 'c',
       previous: { now: null, topics: [], actions: [] },
       newLines: [],
+      earlierLines: [],
       final: true,
       elapsedMs: 5000,
       myNotes: '',
@@ -1130,6 +1251,7 @@ describe('meetingGen', () => {
       chatId: 'c',
       previous: { now: null, topics: [], actions: [] },
       newLines: [{ clock: '00:05', speaker: 'You', text: 'hi' }],
+      earlierLines: [],
       final: false,
       elapsedMs: 5000,
       myNotes: '',
@@ -1149,6 +1271,7 @@ describe('meetingGen', () => {
         actions: [],
       },
       newLines: [{ clock: '20:00', speaker: 'Them', text: 'x' }],
+      earlierLines: [],
       final: false,
       elapsedMs: 1_200_000,
       myNotes: '',
@@ -1166,6 +1289,7 @@ describe('editable meeting prompts', () => {
     chatId: 'c',
     previous: { now: null, topics: [], actions: [] },
     newLines: [{ clock: '00:05', speaker: 'You', text: 'hi' }],
+    earlierLines: [],
     final: false,
     elapsedMs: 5000,
     myNotes: '',
@@ -1216,6 +1340,7 @@ describe('meeting action restraint', () => {
       chatId: 'c',
       previous: { now: null, topics: [], actions: [] },
       newLines: [{ clock: '00:05', speaker: 'Them', text: 'x' }],
+      earlierLines: [],
       final: false,
       elapsedMs: 5000,
       myNotes: '',
@@ -1233,6 +1358,7 @@ describe('makeMeetingAnalyser', () => {
     chatId: 'c',
     previous: { now: null, topics: [], actions: [] },
     newLines: [{ clock: '00:05', speaker: 'Them', text: 'ship monday' }],
+    earlierLines: [],
     final: false,
     elapsedMs: 5000,
     myNotes: '',

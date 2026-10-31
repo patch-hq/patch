@@ -30,9 +30,23 @@ import { openAudioSession, type AudioSession } from './audioSession.js';
 export interface DictationPreview {
   /** Feed one frame of 16 kHz PCM16 from the recording already in progress. */
   push(pcm: Int16Array): void;
+  /**
+   * Streaming engines only (spec/07 § Dictation engines): the user has
+   * stopped, so ask the host for the whole dictation and resolve with it. The
+   * live words are the transcript, so nothing is uploaded. Rejects if the
+   * stream failed or the host does not answer; the session is closed after.
+   */
+  finish(): Promise<string>;
   /** Close the preview session. Never commits a turn. */
   stop(): void;
 }
+
+/**
+ * How long a finish waits for the host's answer. The host waits for the last
+ * tidy-up (up to Whisper's 20 s request timeout) on top of 6 s of its own, and
+ * the user must get the tidied words, not a timeout.
+ */
+export const FINISH_TIMEOUT_MS = 45_000;
 
 export interface DictationPreviewCallbacks {
   /** An interim transcript of what has been said so far. */
@@ -61,11 +75,19 @@ export function startDictationPreview(
   let session: AudioSession | null = null;
   let stopped = false;
   const pending: Int16Array[] = [];
+  let finishing: { resolve(text: string): void; reject(err: Error): void } | null = null;
+  let finishAsked = false;
+  let lastError: string | null = null;
 
   function report(message: string): void {
     // Logged as well as surfaced: the surfaced copy is what the user sees,
     // the log is what a later diagnosis reads.
     console.error(`[patch-voice] live dictation preview: ${message}`);
+    lastError = message;
+    if (finishing) {
+      finishing.reject(new Error(message));
+      return;
+    }
     callbacks.onPreviewError(message);
   }
 
@@ -80,11 +102,9 @@ export function startDictationPreview(
           onTranscriptPartial: (text: string) => {
             if (!stopped) callbacks.onPartial(text);
           },
-          // A dictation session is ended by the composer's gesture, so the
-          // host never produces a final for it — and if one ever arrived it
-          // would not be the authoritative transcript, which comes back over
-          // HTTP. Ignore it rather than racing the upload.
-          onTranscriptFinal: () => {},
+          // Only a streaming engine answers `finishDictation` with a final.
+          // On Whisper none arrives, and the transcript comes back over HTTP.
+          onTranscriptFinal: (text: string) => finishing?.resolve(text),
           onTtsStart: () => {},
           onTtsEnd: () => {},
           onBargeIn: () => {},
@@ -92,7 +112,10 @@ export function startDictationPreview(
           onError: (message: string) => {
             if (!stopped) report(message);
           },
-          onClose: () => {},
+          onClose: () => {
+            if (finishing)
+              finishing.reject(new Error('the live dictation closed before it finished'));
+          },
         },
       });
       if (stopped) {
@@ -101,6 +124,7 @@ export function startDictationPreview(
       }
       session = s;
       for (const pcm of pending.splice(0)) s.sendPcm(pcm);
+      if (finishAsked) s.finishDictation();
     } catch (e) {
       if (!stopped) report((e as Error).message);
     }
@@ -111,6 +135,28 @@ export function startDictationPreview(
       if (stopped) return;
       if (session) session.sendPcm(pcm);
       else pending.push(pcm);
+    },
+    finish(): Promise<string> {
+      if (stopped) return Promise.reject(new Error('the live dictation was already closed'));
+      if (lastError !== null) return Promise.reject(new Error(lastError));
+      return new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error('the live dictation did not finish in time')),
+          FINISH_TIMEOUT_MS,
+        );
+        finishing = {
+          resolve: (t) => {
+            clearTimeout(timer);
+            resolve(t);
+          },
+          reject: (e) => {
+            clearTimeout(timer);
+            reject(e);
+          },
+        };
+        finishAsked = true;
+        session?.finishDictation();
+      });
     },
     stop(): void {
       if (stopped) return;

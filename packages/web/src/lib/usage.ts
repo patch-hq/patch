@@ -43,14 +43,15 @@ export function formatUtilization(win: RateLimitWindow | undefined): string {
 }
 
 /**
- * A reset instant in the reader's own zone, with the weekday when it is not
- * today — `10:40`, or `Wed 17:58`.
+ * A reset instant in the reader's own zone, with the date when it is not
+ * today — `10:40`, or `Tue, 3 Nov 15:00`. A bare weekday read as the one just gone.
  */
 export function formatReset(at: number, now: number = Date.now()): string {
   const d = new Date(at);
   const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
   if (new Date(now).toDateString() === d.toDateString()) return time;
-  return `${d.toLocaleDateString(undefined, { weekday: 'short' })} ${time}`;
+  const day = d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+  return `${day} ${time}`;
 }
 
 /**

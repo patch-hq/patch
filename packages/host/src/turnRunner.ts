@@ -57,6 +57,15 @@ export const RUNNER_IN = 'in.jsonl';
 export const RUNNER_EXIT = 'exit.json';
 export const RUNNER_INFO = 'runner.json';
 
+/**
+ * How long a runner waits with no host attached and claude silent before it
+ * ends claude itself. A claude that is waiting on something only a host can
+ * answer (a permission prompt) would otherwise hold the runner, and the chat's
+ * "running" state, for ever once the host that owned the turn is not coming back.
+ */
+export const ORPHAN_IDLE_ENV = 'PATCH_TURN_ORPHAN_IDLE_MS';
+export const DEFAULT_ORPHAN_IDLE_MS = 30 * 60 * 1000;
+
 export interface RunnerExit {
   code: number | null;
   signal: string | null;
@@ -112,6 +121,10 @@ export async function runTurnRunner(dir: string): Promise<void> {
   const live = new Set<Socket>();
   let exited: RunnerExit | null = null;
   let stdinEnded = false;
+  // The last time a host was attached or claude said anything. A runner nobody
+  // is attached to and claude is not talking on is an orphan once this is old.
+  let lastActivity = Date.now();
+  const orphanIdleMs = Number(process.env[ORPHAN_IDLE_ENV] ?? DEFAULT_ORPHAN_IDLE_MS);
 
   const send = (sock: Socket, frame: unknown): void => {
     if (!sock.destroyed) sock.write(`${JSON.stringify(frame)}\n`);
@@ -165,6 +178,7 @@ export async function runTurnRunner(dir: string): Promise<void> {
   const emitLine = (line: string): void => {
     const bytes = `${line}\n`;
     writeSync(outFd, bytes);
+    lastActivity = Date.now();
     offset += Buffer.byteLength(bytes);
     for (const c of live) send(c, { t: 'out', line, end: offset });
     // A one-shot turn's input ends with its result: the SDK closes claude's
@@ -228,6 +242,7 @@ export async function runTurnRunner(dir: string): Promise<void> {
     const drop = (): void => {
       clients.delete(sock);
       live.delete(sock);
+      lastActivity = Date.now();
     };
     sock.on('close', drop);
     sock.on('error', drop);
@@ -236,12 +251,23 @@ export async function runTurnRunner(dir: string): Promise<void> {
   if (existsSync(sockPath)) unlinkSync(sockPath);
   server.listen(sockPath);
 
+  const orphanWatch = setInterval(
+    () => {
+      if (live.size > 0 || Date.now() - lastActivity < orphanIdleMs) return;
+      log(`no host attached and claude silent for ${orphanIdleMs}ms; ending the orphaned turn`);
+      clearInterval(orphanWatch);
+      killGroup('SIGKILL');
+    },
+    Math.max(50, Math.min(60_000, orphanIdleMs / 4)),
+  );
+
   child.on('error', (err) => log(`claude spawn error: ${err.message}`));
   // `close` follows both the exit and the end of claude's stdout, so every
   // line it wrote is in out.jsonl before exit.json says it is finished.
   child.on('close', (code, signal) => {
     if (partial.length > 0) emitLine(partial);
     partial = '';
+    clearInterval(orphanWatch);
     exited = { code, signal };
     writeJsonAtomic(join(dir, RUNNER_EXIT), exited);
     log(`claude exited code=${code} signal=${signal}`);

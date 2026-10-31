@@ -736,7 +736,8 @@ export class VoiceSession implements VoiceSessionLike {
     // later ones wait for a meaningful amount of NEW speech.
     if (
       this.partialAtSamples > 0 &&
-      this.utteranceLen - this.partialAtSamples < PARTIAL_MIN_STEP_SAMPLES
+      this.utteranceLen - this.partialAtSamples <
+        (this.whisper.livePartialStepSamples ?? PARTIAL_MIN_STEP_SAMPLES)
     ) {
       return;
     }

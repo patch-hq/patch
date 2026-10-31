@@ -473,6 +473,8 @@ export interface HostOptions {
    * hands the window off rather than emitting `host.account` itself.
    */
   onRateLimit?: (chatId: string, scope: 'session' | 'week', window: RateLimitWindow) => void;
+  /** A turn ended (however it ended) on this account, if it had one. */
+  onTurnEnd?: (chatId: string, accountId: string | undefined) => void;
   logger: Logger;
   /** MCP child the SDK should launch per-query (real backend only). */
   mcpServer?: { command: string; args: string[]; env: Record<string, string> };
@@ -14776,6 +14778,7 @@ export class Daemon {
     }
     this.chatLog.endTurn(chatId);
     this.turnBranches.delete(chatId);
+    this.opts.onTurnEnd?.(chatId, this.runningOnAccount.get(chatId));
     try {
       this.mirrorSeqToMeta(chatId);
     } catch (err) {
@@ -15479,6 +15482,10 @@ export class Daemon {
   ): void {
     const reason = this.opts.accountSpent?.(model, fromId);
     if (!reason?.spent) return;
+    // Both accounts spent (a shared pool, or a rotation walking a spent host):
+    // nothing has credit to move to, so "switched" would be a false claim that
+    // flips back and forth every turn. The turn fails with its own limit message.
+    if (this.opts.accountSpent?.(model, toId)?.spent) return;
     const from = this.opts.accountLabel?.(model, fromId) ?? fromId;
     const to = this.opts.accountLabel?.(model, toId) ?? toId;
     this.emit({

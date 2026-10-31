@@ -510,9 +510,9 @@ describe('GeminiLiveSession — dispatch to the heavy agent', () => {
     });
     await vi.waitFor(() => expect(ws.sent.some((s) => s.includes('"failed"'))).toBe(true));
     expect(ws.sent.some((s) => s.includes('"started"'))).toBe(false);
-    expect(audioEvents.some((e) => e.type === 'audio.error' && /host offline/.test(e.message))).toBe(
-      true,
-    );
+    expect(
+      audioEvents.some((e) => e.type === 'audio.error' && /host offline/.test(e.message)),
+    ).toBe(true);
   });
 
   test('the voice is not told it has passed a request on until the chat has accepted it', async () => {
@@ -1073,6 +1073,20 @@ describe('GeminiLiveSession — false hand-off claims', () => {
     });
     say(ws, null, "I've passed that on.");
     await new Promise((r) => setTimeout(r, 20));
+    expect(corrections(ws)).toHaveLength(0);
+  });
+
+  test('a dispatch call that lands just after the claiming turn completes is not called unsent', async () => {
+    const { deps, lastWs } = makeDeps();
+    const session = new GeminiLiveSession(makeInit(), deps);
+    const ws = await openSession(session, lastWs);
+    say(ws, 'check my train times today', "I've passed that on.");
+    ws.serverSend({
+      toolCall: {
+        functionCalls: [{ id: 'c1', name: DISPATCH_TOOL_NAME, args: { request: 'trains' } }],
+      },
+    });
+    await new Promise((r) => setTimeout(r, 700));
     expect(corrections(ws)).toHaveLength(0);
   });
 
