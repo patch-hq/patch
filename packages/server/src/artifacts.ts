@@ -32,6 +32,7 @@ import { verifySurfaceCredential } from '@patch/auth';
 import type { HostLink } from './host-link.js';
 import type { Registry } from './registry.js';
 import { SIGNIN_PAGE_CSP, signInPage, wantsHtml } from './signin-page.js';
+import { isResizable, parseThumbWidth, resizeImage } from './image-thumb.js';
 
 const BRIDGE_SURFACE_ID = 'artifact-bridge';
 /** Ids are daemon-minted hex digests; charset-validate before touching the fs. */
@@ -316,7 +317,7 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
 
   app.get<{
     Params: { chatId: string; artifactId: string };
-    Querystring: { sig?: string; exp?: string };
+    Querystring: { sig?: string; exp?: string; w?: string };
   }>('/api/chats/:chatId/artifact/:artifactId', { logLevel: 'warn' }, async (req, reply) => {
     const { chatId, artifactId } = req.params;
     if (!safeChatId(chatId) || !ID_RE.test(artifactId)) {
@@ -362,7 +363,13 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
           `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(meta.filename)}`,
         );
       }
-      const body = readFileSync(binFile);
+      let body = readFileSync(binFile);
+      // `?w=` — a display-size copy of a still image (see image-thumb.ts).
+      const thumb = parseThumbWidth(req.query.w);
+      if (!thumb.ok) return reply.code(400).send({ error: 'bad_width', message: thumb.message });
+      if (thumb.width !== undefined && isResizable(meta.contentType)) {
+        body = await resizeImage(body, meta.contentType, thumb.width);
+      }
       // A <video> seeks with byte-range requests; without a 206 it can only
       // play from the start.
       if (meta.contentType.startsWith('video/')) {
