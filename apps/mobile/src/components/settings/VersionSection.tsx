@@ -29,6 +29,15 @@ import { sortedHosts } from './HostSwitcher';
 import { SettingsPage } from './SettingsPage';
 import { ErrorLine, Row, RowValue, SettingsButton, ToggleRow, ValueRow, WithSettings } from './ui';
 import { patchShared } from './sharedWrite';
+import * as Clipboard from 'expo-clipboard';
+import {
+  clearExitLog,
+  exitLogText,
+  noteIntentionalRestart,
+  readExitLog,
+  setTelemetryEnabled,
+  telemetryEnabled,
+} from '../../lib/exitLog';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -142,7 +151,10 @@ export function UpdatesPage(): React.ReactElement {
       <SettingsButton
         testID="restart-to-update"
         label="Restart to update"
-        onPress={() => void Updates.reloadAsync()}
+        onPress={() => {
+          noteIntentionalRestart();
+          void Updates.reloadAsync();
+        }}
       />
     );
   } else if (apkAvailable && apk) {
@@ -250,6 +262,62 @@ export function UpdatesPage(): React.ReactElement {
           testID="update-last-checked"
         />
       </SettingsSection>
+      <ExitLogSection />
     </SettingsPage>
+  );
+}
+
+const pad2 = (n: number): string => String(n).padStart(2, '0');
+
+/** Settings -> Updates -> Exits: the on-device record of why the app stopped. */
+function ExitLogSection(): React.ReactElement {
+  const [entries, setEntries] = React.useState(() => readExitLog());
+  const [share, setShare] = React.useState(() => telemetryEnabled());
+  const shown = [...entries].reverse().slice(0, 10);
+  return (
+    <SettingsSection testID="exit-log" title="Exits">
+      <ToggleRow
+        label="Share crash reports"
+        subtitle="Off: exits and crashes stay on this phone"
+        testID="share-crash-reports"
+        value={share}
+        onChange={(next) => {
+          setTelemetryEnabled(next);
+          setShare(next);
+        }}
+      />
+      {shown.length === 0 ? (
+        <Row title="Nothing recorded" testID="exit-log-empty" />
+      ) : (
+        shown.map((e) => {
+          const d = new Date(e.at);
+          return (
+            <Row
+              key={`${e.at}-${e.kind}`}
+              title={e.detail}
+              subtitle={`${e.kind} · ${d.getDate()} ${MONTHS[d.getMonth()]}, ${pad2(d.getHours())}:${pad2(d.getMinutes())}`}
+              testID={`exit-log-${e.at}`}
+            />
+          );
+        })
+      )}
+      {entries.length > 0 ? (
+        <Row
+          title="Copy log"
+          testID="exit-log-copy"
+          right={
+            <SettingsButton
+              testID="exit-log-clear"
+              label="Clear"
+              onPress={() => {
+                clearExitLog();
+                setEntries([]);
+              }}
+            />
+          }
+          onPress={() => void Clipboard.setStringAsync(exitLogText(entries))}
+        />
+      ) : null}
+    </SettingsSection>
   );
 }

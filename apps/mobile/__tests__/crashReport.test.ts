@@ -28,12 +28,16 @@ import {
 } from '../src/lib/crashReport';
 import { NativeModules, Platform } from 'react-native';
 import { useUiStore } from '../src/stores/uiStore';
+import { clearExitLog, readExitLog, setTelemetryEnabled } from '../src/lib/exitLog';
 
 const pending = (): unknown[] => JSON.parse(store().getString('patch.crash.pending') ?? '[]');
 
 beforeEach(() => {
   reportCrash.mockReset();
   store().delete('patch.crash.pending');
+  store().delete('patch.exitSession.v1');
+  clearExitLog();
+  setTelemetryEnabled(true);
   setCrashContext({});
   Platform.OS = 'test';
   delete (NativeModules as Record<string, unknown>)['PatchCrash'];
@@ -140,5 +144,15 @@ describe('collectNativeCrash', () => {
     expect(reportCrash).not.toHaveBeenCalled();
     delete (NativeModules as Record<string, unknown>)['PatchCrash'];
     await expect(collectNativeCrash()).rejects.toThrow('PatchCrash native module missing');
+  });
+});
+
+describe('sharing off', () => {
+  it('logs the crash on the phone and sends nothing', async () => {
+    setTelemetryEnabled(false);
+    await recordCrash({ source: 'global', message: 'boom' });
+    expect(reportCrash).not.toHaveBeenCalled();
+    expect(pending()).toEqual([]);
+    expect(readExitLog().map((e) => e.kind)).toEqual(['crash']);
   });
 });
