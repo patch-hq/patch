@@ -36,7 +36,6 @@ import {
   ChevronLeft,
   Search,
   Phone,
-  Ear,
   MessageSquare,
   Mic,
   FileText,
@@ -1147,29 +1146,19 @@ function ChatDetailBody(): React.ReactElement {
         ) : null}
         {/* Call button — the ONLY place a sustained voice CALL is started on
             mobile (spec/15 § Chat detail). Read-only mirror threads have no
-            voice call, so it is hidden there. */}
+            voice call, so it is hidden there. A long press starts hands-free
+            instead — the same sustained session with the line left open
+            (spec/07 § Session modes). */}
         {!readOnlyMirror ? (
           <Pressable
             onPress={() => startVoiceCall(chatId)}
+            onLongPress={() => startVoiceCall(chatId, 'hands-free')}
             style={{ padding: space.sm }}
             accessibilityRole="button"
             accessibilityLabel="Start voice call"
+            accessibilityHint="Long press to start hands-free"
           >
             <Phone size={20} color={colors.ink} />
-          </Pressable>
-        ) : null}
-        {/* Hands-free — the same sustained session, with the line left open
-            (spec/07 § Session modes). It never ends itself on silence, so
-            there is nothing to reopen an hour into plastering a wall, and only
-            an utterance addressed to Patch counts as a turn. */}
-        {!readOnlyMirror ? (
-          <Pressable
-            onPress={() => startVoiceCall(chatId, 'hands-free')}
-            style={{ padding: space.sm }}
-            accessibilityRole="button"
-            accessibilityLabel="Start hands-free"
-          >
-            <Ear size={20} color={colors.ink} />
           </Pressable>
         ) : null}
         {/* Find in this chat (spec/15 § Find in chat). */}

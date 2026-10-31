@@ -285,14 +285,14 @@ describe('Unread option (spec/15 § Needs attention)', () => {
     expect(hasText(r.root, 'read-row')).toBe(false);
   });
 
-  it('hides Channels, Snoozed and Archived sections while filtering', () => {
+  it('hides Channels and Snoozed but keeps Archived while filtering', () => {
     useChatStore.getState().hydrate([row({ chatId: 'a', folder: 'work', lastUpdated: 100 })]);
     const r = renderRN(<ChatsScreen />);
     expect(hasText(r.root, 'Channels')).toBe(true);
     selectUnread(r);
     expect(hasText(r.root, 'Channels')).toBe(false);
     expect(hasText(r.root, 'Snoozed')).toBe(false);
-    expect(hasText(r.root, 'Archived')).toBe(false);
+    expect(hasText(r.root, 'Archived')).toBe(true);
   });
 
   it('shows the attention-empty state when nothing needs attention', () => {
