@@ -486,6 +486,21 @@ useChatStore.getState().hydrate([
     disabled: false,
     lastUpdated: 0,
   },
+  // Goal, several agents and several artifacts — drives the status list e2e.
+  {
+    chatId: 'chat_status',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'status-list-fixture',
+    folder: '/home/tom/projects/bus',
+    activity: 'idle',
+    status: 'active',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 0,
+    goal: 'build this as you have it now, but it should all actually work',
+  },
   // A run of tools whose AI summary failed — drives the failed-summary marker e2e.
   {
     chatId: 'chat_tools_failed',
@@ -1848,6 +1863,23 @@ useChatStore.setState((s) => ({
     chat_delegate: {
       'sub-1': { label: 'resume job', status: 'running' as const, since: Date.now() },
     },
+    chat_status: {
+      'a-1': {
+        label: 'OpenNext review and repair',
+        status: 'running' as const,
+        since: Date.now() - 19 * 60_000,
+      },
+      'a-2': {
+        label: 'Check PR 412 against the Unite rules',
+        status: 'running' as const,
+        since: Date.now() - 6 * 60_000,
+      },
+      'a-3': {
+        label: 'Draft the release notes',
+        status: 'running' as const,
+        since: Date.now() - 60_000,
+      },
+    },
   },
   timelines: {
     ...s.timelines,
@@ -1859,6 +1891,19 @@ useChatStore.setState((s) => ({
     chat_perm_mode_auto: permissionModeAutomaticEntries,
     chat_tools: toolRunEntries,
     chat_tools_failed: toolRunFailedEntries,
+    chat_status: [
+      'Cadence: two products, one platform',
+      'Flow test report',
+      'Marketplace audit',
+    ].map((title, i) => ({
+      seq: i + 1,
+      kind: 'artifact' as const,
+      artifactId: `art-${i}`,
+      artifactTitle: title,
+      artifactUrl: `/api/chats/chat_status/artifact/art-${i}`,
+      artifactPath: `out/art-${i}.html`,
+      at: Date.now() - (3 - i) * 20 * 60_000,
+    })),
     chat_delegate: [
       { seq: 0, kind: 'message', role: 'user', content: 'run the job', at: 0 },
       {
