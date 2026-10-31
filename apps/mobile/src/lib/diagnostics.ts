@@ -26,6 +26,8 @@ export interface DiagnosticCheck {
   status: CheckStatus;
   /** The real evidence — HTTP status, thrown error message, version strings. */
   detail: string;
+  /** The failure was a certificate/TLS error, not a plain network one. */
+  tls?: boolean;
 }
 
 export interface DiagnosticsReport {
@@ -42,6 +44,14 @@ export interface DiagnosticsReport {
 function errText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
+
+/** Certificate/TLS failures as the Android and iOS network stacks word them. */
+export function isTlsError(message: string): boolean {
+  return /trust anchor|certpath|pkix|certificate|ssl|tls|handshake/i.test(message);
+}
+
+const TLS_CAUSES =
+  "the phone doesn't trust the server's certificate. Likely causes: the phone's clock is wrong, a Wi-Fi sign-in page is intercepting HTTPS, or a VPN is intercepting HTTPS";
 
 function checkCredential(): DiagnosticCheck {
   const claims = decodeSurfaceClaims();
@@ -75,7 +85,16 @@ async function checkServer(): Promise<DiagnosticCheck> {
       detail: `HTTP 200 · version ${body.version ?? '?'} · sha ${body.gitSha ?? '?'}`,
     };
   } catch (err) {
-    return { ...base, status: 'fail', detail: `unreachable: ${errText(err)}` };
+    const message = errText(err);
+    if (isTlsError(message)) {
+      return {
+        ...base,
+        status: 'fail',
+        tls: true,
+        detail: `certificate error: ${message}. The server answered, but ${TLS_CAUSES}`,
+      };
+    }
+    return { ...base, status: 'fail', detail: `unreachable: ${message}` };
   }
 }
 
