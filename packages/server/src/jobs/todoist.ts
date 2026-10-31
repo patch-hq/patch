@@ -56,19 +56,18 @@ interface FanoutResult {
 
 const BODY_LIMIT = 64 * 1024;
 
+/** A SHA-256 digest in canonical base64: 43 chars plus one `=` pad. */
+const CANONICAL_SHA256_B64 = /^[A-Za-z0-9+/]{43}=$/;
+
 function safeEqualBase64(a: string, b: string): boolean {
-  let ab: Buffer;
-  let bb: Buffer;
-  try {
-    ab = Buffer.from(a, 'base64');
-    bb = Buffer.from(b, 'base64');
-    // Defensive: Node's Buffer.from(str, 'base64') never throws (it decodes
-    // leniently), so this catch is unreachable in practice.
-    /* v8 ignore next 3 */
-  } catch {
-    return false;
-  }
-  if (ab.length !== bb.length || ab.length === 0) return false;
+  // Buffer.from(str, 'base64') decodes leniently (skips junk characters,
+  // ignores non-canonical trailing bits), so a header that is not the real
+  // signature text could still decode to the genuine digest. Require both
+  // sides to be canonical base64 first, then compare the decoded bytes.
+  if (!CANONICAL_SHA256_B64.test(a) || !CANONICAL_SHA256_B64.test(b)) return false;
+  const ab = Buffer.from(a, 'base64');
+  const bb = Buffer.from(b, 'base64');
+  if (ab.toString('base64') !== a || bb.toString('base64') !== b) return false;
   return timingSafeEqual(ab, bb);
 }
 
