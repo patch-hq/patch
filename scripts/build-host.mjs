@@ -35,6 +35,8 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -42,6 +44,7 @@ import {
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as ed from '@noble/ed25519';
@@ -356,15 +359,25 @@ function copySherpaOnnx(outDir, t) {
     die(`sherpa-onnx-node is not installed (run pnpm install): ${err.message}`);
   }
   const platformPkg = `sherpa-onnx-${t.platform}-${t.arch}`;
-  let platformJson;
+  const version = JSON.parse(readFileSync(pkgJson, 'utf8')).version;
+  // pnpm installs only the addon for the machine it runs on, so a cross-arch
+  // target (linux-arm64 built on an x64 runner) is fetched from the registry at
+  // the exact version sherpa-onnx-node was installed at.
+  const fetchDir = mkdtempSync(join(tmpdir(), 'sherpa-'));
   try {
-    platformJson = createRequire(pkgJson).resolve(`${platformPkg}/package.json`);
+    execFileSync('npm', ['pack', `${platformPkg}@${version}`, '--pack-destination', fetchDir], {
+      stdio: ['ignore', 'ignore', 'inherit'],
+    });
+    const tgz = readdirSync(fetchDir).find((n) => n.endsWith('.tgz'));
+    if (!tgz) die(`npm pack ${platformPkg}@${version} produced no tarball`);
+    execFileSync('tar', ['-xzf', join(fetchDir, tgz), '-C', fetchDir]);
   } catch (err) {
-    die(`${platformPkg} is not installed beside sherpa-onnx-node: ${err.message}`);
+    die(`could not fetch ${platformPkg}@${version}: ${err.message}`);
   }
   const dest = join(outDir, 'node_modules');
   cpSync(dirname(pkgJson), join(dest, 'sherpa-onnx-node'), { recursive: true, dereference: true });
-  cpSync(dirname(platformJson), join(dest, platformPkg), { recursive: true, dereference: true });
+  cpSync(join(fetchDir, 'package'), join(dest, platformPkg), { recursive: true });
+  rmSync(fetchDir, { recursive: true, force: true });
   if (!existsSync(join(dest, platformPkg, 'sherpa-onnx.node'))) {
     die(`${platformPkg} has no sherpa-onnx.node`);
   }
