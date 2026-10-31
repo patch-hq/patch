@@ -197,6 +197,13 @@ export async function bundle(esb, entry, outfile) {
     // never starts; verified 2026-10-04 that the darwin-arm64 bundle builds
     // and loads with it external.
     //
+    // sherpa-onnx-node is the same kind as fsevents: a native `.node` addon
+    // (per-platform sibling package) that esbuild cannot bundle, taking every
+    // lane down with "No loader is configured for .node files". It backs only
+    // the opt-in Parakeet dictation engines, which are gated on PARAKEET_*_DIR
+    // model dirs and are not part of the artifact; a host that selects one
+    // without the addon installed fails loudly at its import.
+    //
     // playwright-core is the fourth: it is shipped beside the bundle (see
     // copyPlaywrightCore) because it locates its own package.json as
     // `path.join(__dirname, '..')`, which only holds while it sits one folder
@@ -207,6 +214,7 @@ export async function bundle(esb, entry, outfile) {
       '@anthropic-ai/claude-agent-sdk',
       'chromium-bidi/*',
       'fsevents',
+      'sherpa-onnx-node',
       'playwright-core',
       'playwright-core/*',
     ],
