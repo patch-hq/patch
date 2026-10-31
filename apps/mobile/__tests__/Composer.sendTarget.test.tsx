@@ -43,6 +43,14 @@ function typeAndRender(r: ReturnType<typeof renderRN>, el: React.ReactElement, t
 }
 
 describe('Composer — sendTarget', () => {
+  it('focuses the input on mount for a new-chat draft, not for an existing chat', () => {
+    const sendTarget = vi.fn();
+    const draft = renderRN(<Composer chatId="new" sendTarget={sendTarget} />);
+    expect(findHost(draft.root, byType('TextInput')).props['autoFocus']).toBe(true);
+    const existing = renderRN(<Composer chatId="c1" />);
+    expect(findHost(existing.root, byType('TextInput')).props['autoFocus']).toBeFalsy();
+  });
+
   it('holds Send busy while the chat is created, then sends into the resolved chat', async () => {
     let resolve!: (id: string | null) => void;
     const sendTarget = vi.fn(() => new Promise<string | null>((res) => (resolve = res)));
