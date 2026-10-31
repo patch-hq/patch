@@ -11001,245 +11001,35 @@ main.empty-state p {
   background: var(--bg-elevated);
 }
 
-/* spec/14 § Main chat panel — Background task bar. Each task's row is a button
-   that opens the terminal on that task's live output; a monitor's row and the
-   folded summary line open nothing, so they stay inert. */
-.background-task-bar {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  width: 100%;
-  background: var(--paper, var(--bg-elevated));
-  color: var(--ink-2);
-  padding: 10px 16px;
-  font-size: 14px;
-  border-bottom: 1px solid var(--line-soft);
-}
-/* One bar per running task, stacked newest-first (spec/14 § Background task
-   bar). `min-width: 0` on the stack is what lets each row's description
-   ellipsis fire inside the flex child, so six tasks stay six single lines. */
-.background-task-bar-rows {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-/* A task row is a <button>, so the UA's own button chrome (border, padding,
-   inherited-nothing font, centred text) has to be undone or the stack stops
-   being a row of flush single lines. `text-align: left` is load-bearing:
-   a button centres its content by default, so descriptions of different
-   lengths would not share a left edge. */
-.background-task-bar-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  width: 100%;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  /* AFTER `font: inherit`: the `font` shorthand resets line-height to the
-     inherited value, so a leading declared above it is silently thrown away. */
-  line-height: 22px;
-  min-height: 22px;
-}
-button.background-task-bar-row {
-  cursor: pointer;
-}
-button.background-task-bar-row:hover .background-task-bar-description {
-  color: var(--ink-1, var(--ink-2));
-}
-/* The stack's title, above the bars whether they are shown or folded away. */
-.background-task-bar-count {
-  color: var(--ink-1, var(--ink-2));
-  font-variant-numeric: tabular-nums;
-}
-/* Open, the title has no spinner of its own, so its text would hang a spinner's
-   width to the left of every row below it. */
-.background-task-bar[data-collapsed='false'] .background-task-bar-title {
-  padding-left: 24px;
-}
-/* Elapsed running time, right after the description and before the command
-   preview — tabular so the digits stop shuffling sideways on every tick. */
-.background-task-bar-elapsed {
-  flex: none;
-  padding-left: 8px;
-  color: var(--ink-3);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-/* Last output line of a running task; goes amber when the task has been silent for an hour. */
-.background-task-bar-progress {
-  flex: 1 1 0;
-  min-width: 0;
-  padding-left: 8px;
-  color: var(--ink-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.background-task-bar-progress[data-quiet='true'] {
-  color: var(--amber);
-}
-/* The command preview: pushed to the trailing edge (ahead of the kill button),
-   monospace so it reads as a literal command rather than prose, and its own
-   click target — expanding it must not also fire the row's open-terminal
-   click, hence the dedicated `role="button"` rather than relying on the row. */
-.background-task-bar-command {
-  flex: none;
-  margin-left: auto;
-  padding-left: 12px;
-  color: var(--ink-3);
-  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
-  font-size: var(--text-min);
-  white-space: nowrap;
-  cursor: pointer;
-}
-.background-task-bar-command:hover {
-  color: var(--ink-1, var(--ink-2));
-}
-/* The kill control. Trailing-most — after the command preview, before nothing
-   (it is the last thing on the row) — so a reach for "stop this" never lands
-   on "show me more of the command" by mistake. */
-.background-task-bar-kill {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  margin-left: 8px;
-  color: var(--ink-3);
-  cursor: pointer;
-}
-.background-task-bar-kill:hover {
-  color: var(--danger);
-}
-.background-task-bar-kill[aria-disabled='true'] {
-  opacity: 0.5;
-  cursor: default;
-}
-.background-task-bar-description {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ink-3);
-}
-/* Show all, on the title row. Muted and set after the count, so the line still
-   reads as a count first and a control second. */
-.background-task-bar-all {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: 12px;
-  color: var(--ink-3);
-  cursor: pointer;
-}
-.background-task-bar-all input {
-  margin: 0;
-  cursor: pointer;
-}
-/* An ended task, listed behind Show all. Struck through, because the row still
-   has to say at a glance which of the descriptions under this bar are things
-   that are happening and which are things that happened; and dimmer than a
-   running one, since the running ones are what the bar is for. */
-.background-task-bar-row[data-ended='true'] .background-task-bar-description {
-  text-decoration: line-through;
-  opacity: 0.7;
-}
-/* The blank where an ended row's spinner would be. Sized to the spinner it
-   replaces so every description in the stack keeps one left edge. */
-.background-task-bar-nospinner {
-  flex: none;
-  width: 16px;
-  height: 16px;
-}
-/* The fold/unfold control. Trailing edge, and its height is pinned to the first
-   row's line box so it lines up with the top task rather than floating in the
-   middle of a tall stack. */
-.background-task-bar-toggle {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 22px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--ink-3);
-  cursor: pointer;
-}
-.background-task-bar-toggle:hover {
-  color: var(--ink-1, var(--ink-2));
-}
-/* The spinner has to actually turn — a frozen glyph reads as work that has
-   stalled, which is the opposite of what this bar exists to say. It turns at a
-   pace a reader can follow rather than as fast as it can: a marker spinning
-   near the eye's flicker threshold strobes, and a strobe above the transcript
-   is a distraction rather than a status. `linear` is load-bearing — an eased
-   loop accelerates and decelerates once per turn, which puts a visible stutter
-   at the seam and is the flicker again by another route. Stopped outright under
-   a reduced-motion preference, the same rule the voice waveform's oscillation
-   follows. */
-.background-task-bar-spinner {
-  flex: none;
-  animation: background-task-spin 1.8s linear infinite;
-}
-@keyframes background-task-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .background-task-bar-spinner {
-    animation: none;
-  }
-}
 /* ---------- Artifact bar ---------- */
-/* spec/14 § Artifacts — Artifact bar. Every artifact this chat has published,
-   as a row of chips above the transcript, so an earlier one is one click away
-   instead of a scroll back to find its card. */
-.artifact-bar {
+/* spec/14 § Artifacts — Artifact bar. Drawn through the shared StatusRow: the
+   artifacts are plain text links, 16px apart, each ellipsised past ~260px. */
+.artifact-links {
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
-  overflow-x: auto;
-  background: var(--paper, var(--bg-elevated));
-  padding: 4px 16px;
-  border-bottom: 1px solid var(--line-soft);
+  gap: 16px;
+  min-width: 0;
+  overflow: hidden;
 }
-.artifact-bar-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.artifact-link {
   flex: none;
-  max-width: 220px;
-  padding: 2px 10px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--accent-soft, #cad9be);
-  border-radius: var(--radius-sm);
+  max-width: 260px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
   font: inherit;
-  font-size: var(--text-min);
-  color: var(--ink-2);
-  cursor: pointer;
-}
-.artifact-bar-chip:hover {
-  background: var(--accent-soft, #cad9be);
-}
-.artifact-bar-title {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 3px;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  cursor: pointer;
+}
+.artifact-link:hover {
+  text-decoration-color: var(--ink-3);
 }
 .tool-call-monitor-command {
   display: block;
@@ -15524,10 +15314,6 @@ select.permission-mode.is-pending {
   cursor: default;
 }
 
-.delegate-strip-item {
-  min-width: 0;
-}
-
 /* Find in chat (spec/14 § Find in chat) */
 .chat-find {
   position: absolute;
@@ -17410,12 +17196,6 @@ select.permission-mode.is-pending {
     animation: none;
   }
 }
-.status-row-nested .status-row-content {
-  display: block;
-}
-.status-row-nested .status-row-content > .status-grow {
-  display: block;
-}
 .task-row-inline {
   display: flex;
   align-items: center;
@@ -17451,4 +17231,44 @@ select.permission-mode.is-pending {
   border: 1px solid var(--line-soft);
   border-radius: 6px;
   overflow: auto;
+}
+
+.status-names {
+  color: var(--ink-3);
+}
+.status-checkin {
+  cursor: pointer;
+}
+.status-checkin-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-3);
+}
+.status-checkin-form input {
+  width: 64px;
+}
+@media (max-width: 600px) {
+  .status-checkin {
+    display: none;
+  }
+}
+.status-grow[data-quiet='true'] {
+  color: var(--amber);
+}
+
+/* Folded Artifacts row: the links after the pill, clipped at the row's edge. */
+.status-links {
+  display: flex;
+  gap: 16px;
+  min-width: 0;
+  overflow: hidden;
+}
+.status-links .status-link {
+  flex: 0 1 auto;
+  max-width: 260px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

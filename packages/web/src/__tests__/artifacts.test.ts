@@ -40,6 +40,7 @@ describe('deriveArtifacts', () => {
       path: 'out/buses.html',
       url: '/api/chats/c1/artifact/a1',
       seq: 1,
+      at: 0,
     });
   });
 

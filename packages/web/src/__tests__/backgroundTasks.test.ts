@@ -10,7 +10,6 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  backgroundBarTitle,
   formatElapsed,
   runningWatchTasks,
   sortWatchTasks,
@@ -90,12 +89,5 @@ describe('formatElapsed', () => {
 
   it('never goes negative — a clock skew reads as 0s, not a negative number', () => {
     expect(formatElapsed(10_000, 0)).toBe('0s');
-  });
-});
-
-describe('backgroundBarTitle', () => {
-  it('names the running count, singular and plural', () => {
-    expect(backgroundBarTitle(1)).toBe('1 background task');
-    expect(backgroundBarTitle(3)).toBe('3 background tasks');
   });
 });

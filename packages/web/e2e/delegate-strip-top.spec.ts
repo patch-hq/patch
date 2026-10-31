@@ -18,8 +18,11 @@ for (const [name, size] of [
     const composerBox = (await composer.boundingBox())!;
     expect(stripBox.y + stripBox.height).toBeLessThan(composerBox.y);
     expect(stripBox.y).toBeLessThan(size.height / 3);
-    await expect(strip.locator('.background-task-bar-spinner')).toBeVisible();
-    const bg = await strip.evaluate((el) => getComputedStyle(el).paddingLeft);
-    expect(bg).toBe('16px');
+    await expect(strip.locator('.status-spinner')).toBeVisible();
+    const pad = await strip
+      .locator('.status-row')
+      .first()
+      .evaluate((el) => getComputedStyle(el).paddingLeft);
+    expect(pad).toBe(size.width < 600 ? '16px' : '28px');
   });
 }
