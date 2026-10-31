@@ -11,6 +11,8 @@ export interface ArtifactRow {
   path: string;
   url: string;
   seq: number;
+  /** When this surface saw the publish (ms). */
+  at: number;
 }
 
 export function deriveArtifacts(entries: ChatEventEntry[]): ArtifactRow[] {
@@ -23,6 +25,7 @@ export function deriveArtifacts(entries: ChatEventEntry[]): ArtifactRow[] {
       path: entry.artifactPath ?? '',
       url: entry.artifactUrl ?? '',
       seq: entry.seq,
+      at: entry.at,
     });
   }
   return rows.sort((a, b) => b.seq - a.seq);
