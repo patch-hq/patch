@@ -196,3 +196,21 @@ describe('Host snooze (spec/04 § Snooze)', () => {
     }
   });
 });
+
+describe('hide / snooze move lastUpdated (a surface tells them from a stale roster)', () => {
+  it('snoozing, unsnoozing and hiding each advance lastUpdated', async () => {
+    const { daemon, folder } = setup({ now: () => T0 });
+    const chatId = await daemon.spawnChat({ folder });
+    const seen = [daemon.chatState.get(chatId)!.lastUpdated];
+    await daemon.setSnoozed(chatId, T0 + 60_000);
+    seen.push(daemon.chatState.get(chatId)!.lastUpdated);
+    await daemon.setSnoozed(chatId, null);
+    seen.push(daemon.chatState.get(chatId)!.lastUpdated);
+    await daemon.setHidden(chatId, true);
+    seen.push(daemon.chatState.get(chatId)!.lastUpdated);
+    await daemon.setHidden(chatId, false);
+    seen.push(daemon.chatState.get(chatId)!.lastUpdated);
+    for (let i = 1; i < seen.length; i++) expect(seen[i]).toBeGreaterThan(seen[i - 1]!);
+    daemon.shutdown();
+  });
+});

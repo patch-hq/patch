@@ -608,6 +608,11 @@ function rowsToRecord(
             permissionMode: prior.permissionMode,
             lastUpdated: prior.lastUpdated,
             lastUserActivity: prior.lastUserActivity,
+            // Hide / snooze bump `lastUpdated`, so a newer row holds the newer
+            // answer to these too.
+            hidden: prior.hidden,
+            snoozedUntil: prior.snoozedUntil,
+            snoozeRecords: prior.snoozeRecords,
           }
         : r,
     );
@@ -889,6 +894,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
             todos: event.todos !== undefined ? event.todos : row.todos,
             disabled: event.disabled !== undefined ? event.disabled : row.disabled,
           };
+          // Hide / snooze are what a cold start paints from the cache, so keep the
+          // cache in step or the next launch shows the old section until the roster lands.
+          if (
+            chats[event.chatId].hidden !== row.hidden ||
+            chats[event.chatId].snoozedUntil !== row.snoozedUntil
+          ) {
+            saveCachedChatList(Object.values(chats).map(toListRow));
+          }
           // The host is speaking for this chat again with a non-`errored`
           // activity, so the server's host-link-lost notice has resolved —
           // the turn carried on or was re-sent, as its message promised. Only
@@ -1636,9 +1649,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({
       chats: {
         ...get().chats,
-        [chatId]: { ...row, snoozedUntil },
+        // Moves past the roster the phone holds, so a stale one cannot undo it; the
+        // host's own bump is at least this high, so its confirming frame still lands.
+        [chatId]: { ...row, snoozedUntil, lastUpdated: row.lastUpdated + 1 },
       },
     });
+    saveCachedChatList(Object.values(get().chats).map(toListRow));
   },
 
   setName(chatId, name) {
@@ -1653,9 +1669,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({
       chats: {
         ...get().chats,
-        [chatId]: { ...row, hidden },
+        [chatId]: { ...row, hidden, lastUpdated: row.lastUpdated + 1 },
       },
     });
+    saveCachedChatList(Object.values(get().chats).map(toListRow));
   },
 
   setGoal(chatId, goal) {
