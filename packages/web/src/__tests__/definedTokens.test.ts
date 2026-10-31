@@ -116,7 +116,7 @@ const UNDEFINED_BASELINE: Record<string, number> = {
   '--hover': 1,
   '--font-mono': 3,
   '--border': 1,
-  '--paper': 5,
+  '--paper': 4,
   '--bg-1': 2,
   '--bg-hover': 1,
   '--bg-subtle': 1,
@@ -126,7 +126,7 @@ const UNDEFINED_BASELINE: Record<string, number> = {
 };
 const SHADOWED_BASELINE: Record<string, number> = {
   '--accent-tint': 3,
-  '--accent-soft': 18,
+  '--accent-soft': 16,
   '--danger': 18,
   '--ink-1': 11,
   '--line': 1,
@@ -144,7 +144,7 @@ const SHADOWED_BASELINE: Record<string, number> = {
   '--running': 2,
   '--leaf': 5,
   '--waiting': 3,
-  '--paper': 5,
+  '--paper': 4,
   '--bg-1': 2,
   '--bg-hover': 1,
   '--bg-soft': 1,

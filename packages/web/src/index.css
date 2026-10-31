@@ -11002,41 +11002,34 @@ main.empty-state p {
 }
 
 /* ---------- Artifact bar ---------- */
-/* spec/14 § Artifacts — Artifact bar. Every artifact this chat has published,
-   as a row of chips above the transcript, so an earlier one is one click away
-   instead of a scroll back to find its card. */
-.artifact-bar {
+/* spec/14 § Artifacts — Artifact bar. Drawn through the shared StatusRow: the
+   artifacts are plain text links, 16px apart, each ellipsised past ~260px. */
+.artifact-links {
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
-  overflow-x: auto;
-  background: var(--paper, var(--bg-elevated));
-  padding: 4px 16px;
-  border-bottom: 1px solid var(--line-soft);
+  gap: 16px;
+  min-width: 0;
+  overflow: hidden;
 }
-.artifact-bar-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.artifact-link {
   flex: none;
-  max-width: 220px;
-  padding: 2px 10px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--accent-soft, #cad9be);
-  border-radius: var(--radius-sm);
+  max-width: 260px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
   font: inherit;
-  font-size: var(--text-min);
-  color: var(--ink-2);
-  cursor: pointer;
-}
-.artifact-bar-chip:hover {
-  background: var(--accent-soft, #cad9be);
-}
-.artifact-bar-title {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 3px;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  cursor: pointer;
+}
+.artifact-link:hover {
+  text-decoration-color: var(--ink-3);
 }
 .tool-call-monitor-command {
   display: block;
@@ -17262,4 +17255,20 @@ select.permission-mode.is-pending {
 }
 .status-grow[data-quiet='true'] {
   color: var(--amber);
+}
+
+/* Folded Artifacts row: the links after the pill, clipped at the row's edge. */
+.status-links {
+  display: flex;
+  gap: 16px;
+  min-width: 0;
+  overflow: hidden;
+}
+.status-links .status-link {
+  flex: 0 1 auto;
+  max-width: 260px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
