@@ -312,19 +312,13 @@ describe('chat-detail header', () => {
     expect(startVoiceCallMock).toHaveBeenCalledWith('c1');
   });
 
-  it('the hands-free button starts a hands-free session for a regular (new) chat', () => {
+  it('long-pressing the call button starts a hands-free session for a regular (new) chat', () => {
     seedChat('c1');
     __setLocalSearchParams({ chatId: 'c1' });
     const r = renderRN(<ChatDetailScreen />);
-    findHost(r.root, byLabel('Start hands-free')).props.onPress();
-    expect(startVoiceCallMock).toHaveBeenCalledWith('c1', 'hands-free');
-  });
-
-  it('hands-free is hidden on a read-only mirror thread (Speakers)', () => {
-    seedChat(SPECIAL_THREAD_IDS.speakers);
-    __setLocalSearchParams({ chatId: SPECIAL_THREAD_IDS.speakers });
-    const r = renderRN(<ChatDetailScreen />);
     expect(() => findHost(r.root, byLabel('Start hands-free'))).toThrow();
+    findHost(r.root, byLabel('Start voice call')).props.onLongPress();
+    expect(startVoiceCallMock).toHaveBeenCalledWith('c1', 'hands-free');
   });
 
   it('the call button is hidden on a read-only mirror thread (Speakers)', () => {
