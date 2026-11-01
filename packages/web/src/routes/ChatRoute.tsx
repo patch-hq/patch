@@ -67,6 +67,7 @@ import { api } from '../api/rest.js';
 import { SkillRefChatContext, useSkillTarget } from '../components/SkillRef.js';
 import { linkSkillTokens } from '../lib/skillToken.js';
 import { parseGoalCommand } from '../lib/goalCommand.js';
+import { parseJobCommand, matchJob } from '../lib/jobCommand.js';
 import { parseReminderCommand } from '../lib/reminderCommand.js';
 import { parseLoopCommand } from '../lib/loopCommand.js';
 import { parseClearCommand } from '../lib/clearCommand.js';
@@ -1682,6 +1683,32 @@ export function ChatRoute({
       });
       if (parsedGoal.goal === null) return;
       message = parsedGoal.goal;
+    }
+    // `/job <name>` fires that job once, now (the Jobs page's "Run now"),
+    // instead of sending a chat turn. REST only; every failure is surfaced.
+    const parsedJob = parseJobCommand(message);
+    if (parsedJob.isJob) {
+      if (parsedJob.query === null) {
+        pushError('usage: /job <name>');
+        return;
+      }
+      const query = parsedJob.query;
+      void (async () => {
+        try {
+          const { jobs } = (await api.listJobs()) as { jobs: { id: string; name: string }[] };
+          const m = matchJob(jobs, query);
+          if (m.kind === 'none') {
+            pushError(`no job matches "${query}"`);
+          } else if (m.kind === 'many') {
+            pushError(`"${query}" matches several jobs: ${m.names.join(', ')}`);
+          } else {
+            await api.runJob(m.id);
+          }
+        } catch (err) {
+          pushError(failed('running job'), undefined, (err as Error).message);
+        }
+      })();
+      return;
     }
     // patch/todo.md — `/remind <text>` sets the chat's reminder INSTEAD of
     // sending a chat turn (a bare `/remind` clears it). REST mutation (no WS),
