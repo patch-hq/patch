@@ -894,9 +894,12 @@ function ChatDetailBody(): React.ReactElement {
       // Follow mode answers "does the user want to stay pinned to the newest
       // message?", which only the user can change — so only a drag changes it.
       // A programmatic re-pin must never turn it off.
+      // The button is different: it answers "is the view off the newest
+      // message?", true however the list got there (a drag, or the keyboard
+      // shrinking the list under a reader who is not following).
+      setShowScrollToBottom(!atNewest);
       if (draggingRef.current) {
         followRef.current = atNewest;
-        setShowScrollToBottom(!atNewest);
         // Only remember a position the user actually chose. Recording our own
         // mid-load offsets meant a chat could be "remembered" at a spot the
         // user never scrolled to. No anchor needed once pinned to the newest
