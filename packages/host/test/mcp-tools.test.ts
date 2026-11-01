@@ -314,6 +314,22 @@ describe('patch-tools MCP server — full client round-trip', () => {
     expect(JSON.parse(stop.content[0]!.text)).toEqual({ ok: true });
   });
 
+  it('patch_spawn and patch_send_to can arm a goal on the other chat', async () => {
+    const spawn = (await client.callTool({
+      name: 'patch_spawn',
+      arguments: { folder, goal: 'spawned goal' },
+    })) as { content: { text: string }[] };
+    const { chatId } = JSON.parse(spawn.content[0]!.text) as { chatId: string };
+    const read = (): string | null => daemon.chatState.get(chatId)?.goal ?? null;
+    expect(read()).toBe('spawned goal');
+
+    await client.callTool({
+      name: 'patch_send_to',
+      arguments: { chatId, message: 'hi', goal: 'sent goal' },
+    });
+    expect(read()).toBe('sent goal');
+  });
+
   it('patch_list_chats + patch_history return shape', async () => {
     const listed = (await client.callTool({
       name: 'patch_list_chats',

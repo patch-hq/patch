@@ -418,6 +418,8 @@ const SendToBody = z
     chatId: z.string().min(1),
     message: z.string().min(1),
     voicePrefix: z.string().optional(),
+    /** Goal to arm on the recipient chat (spec/04 § Goals). Local recipients only. */
+    goal: z.string().min(1).optional(),
     // Required, not optional: the MCP child always bakes this from its own
     // PATCH_CHAT_ID (packages/host/src/mcp.ts) — it is not an agent-supplied
     // tool argument, so an agent can't omit it, and nothing else in this
@@ -846,6 +848,8 @@ const SpawnBody = z
     host: z.string().min(1).optional(),
     name: z.string().min(1).optional(),
     prompt: z.string().min(1).optional(),
+    /** Goal to arm on the new chat (spec/04 § Goals). Same-machine spawns only. */
+    goal: z.string().min(1).optional(),
     callerChatId: z.string().min(1).optional(),
     /** The stored account the chat starts on: its id or its label. Refused if not held. */
     account: z.string().min(1).optional(),
@@ -1983,7 +1987,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
     }
-    const { chatId, message, voicePrefix, callerChatId } = parsed.data;
+    const { chatId, message, voicePrefix, callerChatId, goal } = parsed.data;
     // A hidden automation often delegates work and receives the result through
     // patch_send_to. Treating that machine-to-machine return as though a visible
     // agent had deliberately surfaced the recipient leaked every hidden job into
@@ -2004,6 +2008,10 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       return sendRateLimited(reply, `send_to:${callerChatId}`);
     }
     try {
+      // Armed before the message lands so the evaluator judges the very turn
+      // this message starts. A chat that is not on this host throws
+      // ChatNotFoundError here and is refused below (NO FALLBACK).
+      if (goal !== undefined) await opts.daemon!.setGoal(chatId, goal);
       // Accepted, not finished: the sender is inside its own turn and must not
       // wait out the target's.
       await opts.daemon!.submitInput({
@@ -2045,6 +2053,20 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       // lives on another registered host must get delivered there, or a real
       // error naming why it couldn't — never a silent 404 for a chat that
       // does exist, just not here.
+      if (code === 'chat_not_found' && goal !== undefined) {
+        toolLog({
+          tool: 'patch_send_to',
+          callerChatId,
+          targetChatId: chatId,
+          durationMs: Date.now() - start,
+          ok: false,
+          err: 'goal_remote_unsupported',
+        });
+        return reply.code(400).send({
+          error: 'goal_remote_unsupported',
+          message: `patch_send_to: chat ${chatId} is not on this machine, and a goal can only be set on a chat here. Nothing was sent.`,
+        });
+      }
       if (code === 'chat_not_found' && opts.sendToRemoteChat) {
         try {
           await opts.sendToRemoteChat({
@@ -2855,7 +2877,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
     }
-    const { folder, host, name, prompt, callerChatId, model, permissionMode, account } =
+    const { folder, host, name, prompt, callerChatId, model, permissionMode, account, goal } =
       parsed.data;
     const limiterKey = callerChatId ?? 'anonymous';
     if (!limiter.check(`spawn:${limiterKey}`)) {
@@ -2891,6 +2913,12 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     // own machine is short-circuited in-process; one naming another machine
     // goes over the wire, relayed by the server to that machine's host.
     if (host !== undefined && host !== selfHostId) {
+      if (goal !== undefined) {
+        return reply.code(400).send({
+          error: 'goal_remote_unsupported',
+          message: `patch_spawn: a goal can only be set on a chat created on this machine, not on ${host}. No chat was created.`,
+        });
+      }
       if (!callerChatId) {
         return reply
           .code(400)
@@ -2973,6 +3001,26 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         ...(callerChatId !== undefined ? { spawnedByChatId: callerChatId } : {}),
       };
       const chatId = await opts.daemon!.spawnChat(spawnReq);
+      if (goal !== undefined) {
+        try {
+          await opts.daemon!.setGoal(chatId, goal);
+        } catch (err) {
+          toolLog({
+            tool: 'patch_spawn',
+            callerChatId,
+            targetChatId: chatId,
+            durationMs: Date.now() - start,
+            ok: false,
+            err: 'goal_failed',
+          });
+          return reply.code(500).send({
+            error: 'goal_failed',
+            message: `patch_spawn created chat ${chatId} but setting its goal failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          });
+        }
+      }
       if (opts.emitWire && callerChatId) {
         opts.emitWire({
           type: 'patch.spawn',

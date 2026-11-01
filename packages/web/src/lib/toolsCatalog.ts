@@ -132,7 +132,7 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     category: 'patch',
     description: 'Creates a brand-new persistent chat in a folder and returns its id.',
     params:
-      'folder: string, host?: string, name?: string, prompt?: string, model?: string, account?: string',
+      'folder: string, host?: string, name?: string, prompt?: string, model?: string, account?: string, goal?: string',
   },
   {
     name: patchToolId('patch_send_to'),
@@ -140,7 +140,8 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     category: 'patch',
     description:
       'Delivers a message into another existing chat as if the human sent it (agent-to-agent).',
-    params: 'chatId: string, message: string, voicePrefix?: string, localId?: string',
+    params:
+      'chatId: string, message: string, voicePrefix?: string, localId?: string, goal?: string',
   },
   {
     name: patchToolId('patch_send_back'),
