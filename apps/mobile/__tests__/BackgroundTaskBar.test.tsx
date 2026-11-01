@@ -160,6 +160,40 @@ describe('BackgroundTaskBar', () => {
     expect(apiMocks.watchStop).toHaveBeenCalledWith('c1', 't1');
   });
 
+  it('stop all kills every running task, and is offered only when more than one runs', async () => {
+    apiMocks.watchList.mockResolvedValue({
+      tasks: [
+        task({ taskId: 't1' }),
+        task({ taskId: 't2' }),
+        task({ taskId: 't3', status: 'exited' }),
+      ],
+    });
+    const r = renderRN(<BackgroundTaskBar chatId="c1" />);
+    await act(async () => {
+      setLiveCount(2);
+      await Promise.resolve();
+    });
+    const stopAll = queryHost(r.root, byTestId('background-task-bar-stop-all'))!;
+    await act(async () => {
+      stopAll.props['onPress']();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(apiMocks.watchStop).toHaveBeenCalledTimes(2);
+    expect(apiMocks.watchStop).toHaveBeenCalledWith('c1', 't1');
+    expect(apiMocks.watchStop).toHaveBeenCalledWith('c1', 't2');
+  });
+
+  it('no stop all with a single running task', async () => {
+    apiMocks.watchList.mockResolvedValue({ tasks: [task({ taskId: 't1' })] });
+    const r = renderRN(<BackgroundTaskBar chatId="c1" />);
+    await act(async () => {
+      setLiveCount(1);
+      await Promise.resolve();
+    });
+    expect(queryHost(r.root, byTestId('background-task-bar-stop-all'))).toBeNull();
+  });
+
   it('a kill the host refuses is reported, not left as an unhandled rejection', async () => {
     apiMocks.watchList.mockResolvedValue({ tasks: [task({ taskId: 't1' })] });
     apiMocks.watchStop.mockRejectedValue(new Error('host offline'));

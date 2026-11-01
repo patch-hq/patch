@@ -177,4 +177,39 @@ describe('WakeBar', () => {
     expect(queryHost(r.root, byTestId('wake-modal'))).not.toBeNull();
     expect(useUiStore.getState().errors.length).toBe(1);
   });
+
+  it('cancel in the modal clears a one-shot wake and closes the sheet', async () => {
+    apiMocks.setLoop.mockClear();
+    const r = renderRN(<WakeBar row={row({ message: 'check', fireAt: NOW + 60_000 })} />);
+    press(r, 'wake-bar');
+    await actAsync(async () => {
+      (findHost(r.root, byTestId('wake-modal-cancel')).props.onPress as () => void)();
+    });
+    expect(apiMocks.setLoop).toHaveBeenCalledWith('c1', null);
+    expect(queryHost(r.root, byTestId('wake-modal'))).toBeNull();
+  });
+
+  it('cancel in the modal stops a loop wake too', async () => {
+    apiMocks.setLoop.mockClear();
+    const r = renderRN(
+      <WakeBar row={row({ message: 'poll', fireAt: NOW + 60_000, every: 600_000 })} />,
+    );
+    press(r, 'wake-bar');
+    await actAsync(async () => {
+      (findHost(r.root, byTestId('wake-modal-cancel')).props.onPress as () => void)();
+    });
+    expect(apiMocks.setLoop).toHaveBeenCalledWith('c1', null);
+  });
+
+  it('a refused cancel keeps the modal open and says so', async () => {
+    apiMocks.setLoop.mockRejectedValueOnce(new Error('nope'));
+    useUiStore.setState({ errors: [] });
+    const r = renderRN(<WakeBar row={row({ message: 'check', fireAt: NOW + 60_000 })} />);
+    press(r, 'wake-bar');
+    await actAsync(async () => {
+      (findHost(r.root, byTestId('wake-modal-cancel')).props.onPress as () => void)();
+    });
+    expect(queryHost(r.root, byTestId('wake-modal'))).not.toBeNull();
+    expect(useUiStore.getState().errors.length).toBe(1);
+  });
 });
