@@ -15,7 +15,7 @@ vi.mock('../src/api/rest', () => ({
   api: { markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })) },
 }));
 vi.mock('../src/api/ws', () => ({
-  getWs: () => ({ send, safeSend: vi.fn(), requestReplay: vi.fn() }),
+  getWs: () => ({ send: vi.fn(), safeSend: send, requestReplay: vi.fn() }),
 }));
 
 let ChatDetailScreen: React.ComponentType;
