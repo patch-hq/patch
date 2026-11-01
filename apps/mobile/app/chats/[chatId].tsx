@@ -430,7 +430,7 @@ function ChatDetailBody(): React.ReactElement {
     // user, so a notification for any OTHER chat still reaches them. Only
     // while the app is foregrounded: a backgrounded phone is looking at nothing.
     const reportFocus = (open: boolean) =>
-      getWs().send({ type: 'chat.focus_change', chatId: open ? chatId : null });
+      getWs().safeSend({ type: 'chat.focus_change', chatId: open ? chatId : null });
     if (AppState.currentState === 'active') reportFocus(true);
     const sub = AppState.addEventListener('change', (s) => {
       if (s === 'active') clear();
