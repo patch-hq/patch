@@ -155,10 +155,18 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
             'Tag prepended to the delivered turn to mark it as spoken input. Leave unset for ordinary text.',
           ),
         localId: z.string().min(1).max(128).optional(),
+        goal: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "Arm a goal on the RECIPIENT chat (replaces any it has), judged by Patch's evaluator after each of its turns. Recipient must be on this machine; otherwise the call is refused and nothing is sent.",
+          ),
       },
     },
-    async ({ chatId, message, voicePrefix, localId }) => {
+    async ({ chatId, message, voicePrefix, localId, goal }) => {
       const body: Record<string, unknown> = { chatId, message, callerChatId };
+      if (goal !== undefined) body['goal'] = goal;
       if (voicePrefix !== undefined) body['voicePrefix'] = voicePrefix;
       if (localId !== undefined) body['localId'] = localId;
       const res = await uds<unknown>({ method: 'POST', path: '/internal/send-to', body });
@@ -311,10 +319,18 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
         prompt: z.string().min(1).optional(),
         model: z.string().min(1).optional(),
         account: z.string().min(1).optional(),
+        goal: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "Arm a goal on the NEW chat, judged by Patch's evaluator after each of its turns. Not allowed together with `host` naming another machine.",
+          ),
       },
     },
-    async ({ folder, host, name, prompt, model, account }) => {
+    async ({ folder, host, name, prompt, model, account, goal }) => {
       const body: Record<string, unknown> = { folder, callerChatId };
+      if (goal !== undefined) body['goal'] = goal;
       if (host !== undefined) body['host'] = host;
       if (account !== undefined) body['account'] = account;
       if (model !== undefined) body['model'] = model;
