@@ -1005,6 +1005,7 @@ describe('Composer', () => {
         'composer-skill-option-deploy',
         'composer-skill-option-clear',
         'composer-skill-option-goal',
+        'composer-skill-option-job',
         'composer-skill-option-plant',
         'composer-skill-option-plan-travel',
       ]);
@@ -1049,6 +1050,7 @@ describe('Composer', () => {
       expect(options).toEqual([
         'composer-skill-option-clear',
         'composer-skill-option-goal',
+        'composer-skill-option-job',
         'composer-skill-option-plant',
         'composer-skill-option-plan-travel',
         'composer-skill-option-deploy',

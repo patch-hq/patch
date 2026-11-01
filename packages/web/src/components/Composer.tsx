@@ -126,6 +126,7 @@ import {
   spliceCompletion,
 } from '../lib/skillToken.js';
 import { GOAL_COMMAND_NAME, GOAL_COMMAND_DESCRIPTION } from '../lib/goalCommand.js';
+import { JOB_COMMAND_NAME, JOB_COMMAND_DESCRIPTION } from '../lib/jobCommand.js';
 import { CLEAR_COMMAND_NAME, CLEAR_COMMAND_DESCRIPTION } from '../lib/clearCommand.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import { isSubmitChord } from '../lib/submitChord.js';
@@ -877,6 +878,7 @@ export const Composer = forwardRef(function Composer(
   const BUILTIN_COMMANDS: { name: string; description: string }[] = [
     { name: CLEAR_COMMAND_NAME, description: CLEAR_COMMAND_DESCRIPTION },
     { name: GOAL_COMMAND_NAME, description: GOAL_COMMAND_DESCRIPTION },
+    { name: JOB_COMMAND_NAME, description: JOB_COMMAND_DESCRIPTION },
   ];
   // Every name a chip can legitimately be — a skill from the folder, or a
   // built-in — used both to recognise a completed chip anywhere in the text
