@@ -112,6 +112,29 @@ describe('ChatRoute — patch_notify deepLink', () => {
     expect(screen.getByTestId('notify-box')?.textContent).toContain('Patch notify');
   });
 
+  it('renders links in the message as clickable anchors', () => {
+    seed();
+    useChatStore.getState().applyEvent({
+      type: 'chat.tool_call',
+      chatId: 'c1',
+      seq: 1,
+      tool: 'patch_notify',
+      args: {
+        message: 'PR ready: [#42](https://github.com/o/r/pull/42) and https://example.com/x',
+      },
+      callId: 'call-1',
+    });
+    renderChat();
+    const links = Array.from(
+      screen.getByTestId('notify-message').querySelectorAll('a'),
+    ) as HTMLAnchorElement[];
+    // Link previews add a card anchor per URL, so compare the distinct targets.
+    expect([...new Set(links.map((a) => a.getAttribute('href')))]).toEqual([
+      'https://github.com/o/r/pull/42',
+      'https://example.com/x',
+    ]);
+  });
+
   it('shows every patch_notify as a green box carrying its message', () => {
     seed();
     useChatStore.getState().applyEvent({

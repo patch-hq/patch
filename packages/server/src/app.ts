@@ -978,7 +978,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
           ...(event.deepLink ? { deepLink: event.deepLink } : {}),
         });
       }
-      void notificationRouter.route(event).catch((err: unknown) => {
+      void notificationRouter.route(event, { suppressOn: 'chat-open' }).catch((err: unknown) => {
         log.warn({ err: (err as Error).message }, 'notify route failed');
       });
       return;

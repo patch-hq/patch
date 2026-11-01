@@ -3882,7 +3882,11 @@ function ToolCall({
           <Bell size={13} aria-hidden />
           <span className="tool-call-notify-label">Patch notify · {importance}</span>
         </div>
-        {message ? <div className="tool-call-notify-message">{message}</div> : null}
+        {message ? (
+          <div className="tool-call-notify-message" data-testid="notify-message">
+            <Markdown content={message} />
+          </div>
+        ) : null}
         {deepLink ? (
           <a
             className="tool-call-deeplink"

@@ -394,6 +394,72 @@ describe('NotificationRouter — push channel', () => {
     expect(push.sent).toHaveLength(0);
   });
 
+  // spec/09 § `### push` — an agent's patch_notify is held back only while the
+  // user is looking at that very chat; the phone being open elsewhere is not it.
+  describe('suppressOn=chat-open', () => {
+    function setup(focusedChat: string | null) {
+      const { dir, registry } = makeRegistryDir();
+      const presence = new PresenceTracker();
+      presence.online(ACCOUNT.publicKey, 'srf-phone', 'mobile', 1_700_000_000_000);
+      presence.heartbeat(ACCOUNT.publicKey, 'srf-phone', 1_700_000_000_000);
+      if (focusedChat) presence.setFocus(ACCOUNT.publicKey, 'srf-phone', focusedChat);
+      registry.registerPushToken({
+        surfaceId: 'srf-phone',
+        accountId: ACCOUNT.publicKey,
+        token: 'tok-1',
+        registeredAt: 1,
+      });
+      const push = fakePush();
+      const router = new NotificationRouter({
+        logger: silent,
+        registry,
+        presence,
+        wsHub: makeFakeWsHub() as never,
+        dataDir: dir,
+        pushBackend: push.backend,
+        nowMs: () => 1_700_000_010_000,
+      });
+      return { router, push };
+    }
+    const ev = { type: 'notify', chatId: 'c1', channel: 'push', message: 'hi' } as const;
+
+    it('delivers while the phone is open on a different chat', async () => {
+      const { router, push } = setup('c2');
+      await router.route(ev, { suppressOn: 'chat-open' });
+      expect(push.sent).toHaveLength(1);
+    });
+
+    it('delivers while the phone is open but on no chat', async () => {
+      const { router, push } = setup(null);
+      await router.route(ev, { suppressOn: 'chat-open' });
+      expect(push.sent).toHaveLength(1);
+    });
+
+    it('suppresses while the phone has that chat open', async () => {
+      const { router, push } = setup('c1');
+      await router.route(ev, { suppressOn: 'chat-open' });
+      expect(push.sent).toHaveLength(0);
+    });
+
+    it('desktop toast skips a surface focused on that chat', async () => {
+      const { dir, registry } = makeRegistryDir();
+      const wsHub = makeFakeWsHub();
+      const router = new NotificationRouter({
+        logger: silent,
+        registry,
+        presence: new PresenceTracker(),
+        wsHub: wsHub as never,
+        dataDir: dir,
+        nowMs: () => 1_700_000_010_000,
+      });
+      await router.route(
+        { type: 'notify', chatId: 'c1', channel: 'desktop', message: 'hi' },
+        { suppressOn: 'chat-open' },
+      );
+      expect(wsHub.delivered[0]?.unlessFocusedChatId).toBe('c1');
+    });
+  });
+
   // spec/09 § `### push` — deepLink rides along in the push data payload so the
   // Android app can open it on tap instead of the source chat.
   it('carries deepLink through to the push data payload', async () => {

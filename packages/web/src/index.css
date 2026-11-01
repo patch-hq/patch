@@ -11086,8 +11086,13 @@ main.empty-state p {
   line-height: 1.5;
   padding: 0 10px 8px 10px;
   color: var(--ink);
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+.tool-call-notify-message > :first-child {
+  margin-top: 0;
+}
+.tool-call-notify-message > :last-child {
+  margin-bottom: 0;
 }
 .tool-call-deeplink {
   display: flex;
