@@ -567,30 +567,28 @@ body {
 /* A single tab detached into its own window (`/tab-window`): the tab bar is the
    window's top row, so on the desktop shell the traffic lights float over the
    first tab's title. Same treatment as `.sb-brand` — clear the lights, seat the
-   tabs on the lights' centre-line (a 34px tab, so 20px above it puts its centre
-   at `--overlay-titlebar-lights-centre`), and make the bar the drag region with
-   the tabs punched back out. */
+   tabs on the lights' centre-line (a 31px tab sitting on the bar's bottom edge,
+   so a 53px bar puts its centre at `--overlay-titlebar-lights-centre`), and make
+   the bar the drag region with the tabs punched back out. */
 .overlay-titlebar [data-testid='tab-window'] .pane-tab-bar {
   padding-left: var(--overlay-titlebar-inset);
-  padding-top: 20px;
+  height: 53px;
   -webkit-app-region: drag;
 }
 .overlay-titlebar [data-testid='tab-window'] .pane-tab {
   -webkit-app-region: no-drag;
 }
-/* The same strip for the top-left pane's tab bar in a main-shell window whose
-   sidebar is hidden — a chat opened in its own window boots that way and reads
-   the opener's saved layout, so it can carry a tab bar (more than one tab or
-   pane) above the chat header. With the sidebar up the brand row is the
-   top-left instead. */
-.overlay-titlebar .three-col.sidebar-collapsed .pane-origin > .pane-tab-bar {
-  /* Past the expand chevron too, which sits just right of the lights. */
-  padding-left: calc(var(--overlay-titlebar-inset) + 36px);
-  padding-top: 20px;
-  -webkit-app-region: drag;
+/* The top-left group's header is the row the lights float over once the
+   sidebar is hidden: clear them (and the expand chevron). */
+.overlay-titlebar .three-col.sidebar-collapsed .chat-head.chat-head-group {
+  padding-left: 14px;
 }
-.overlay-titlebar .three-col.sidebar-collapsed .pane-origin > .pane-tab-bar .pane-tab {
-  -webkit-app-region: no-drag;
+.overlay-titlebar
+  .three-col.sidebar-collapsed
+  .group-row
+  > .group-card:first-child
+  .chat-head.chat-head-group {
+  padding-left: calc(var(--overlay-titlebar-inset) + 36px);
 }
 .editor-window .editor-rail {
   border-left: 0;
@@ -702,7 +700,7 @@ body {
   min-width: 0;
   min-height: 0;
 }
-.group-row-cards {
+.group-row {
   gap: 0;
   padding: 8px;
   background: var(--bg-app);
@@ -713,6 +711,11 @@ body {
   min-width: 0;
   min-height: 0;
 }
+.group-card {
+  /* The query container the header's tool buttons collapse against. */
+  container-type: inline-size;
+  container-name: group;
+}
 .group-card-framed {
   background: var(--bg-elevated);
   border: 1px solid var(--line);
@@ -720,11 +723,21 @@ body {
   overflow: hidden;
   position: relative;
 }
+/* A phone has no width to spare for gutters: the cards go full-bleed. */
+@media (max-width: 640px) {
+  .group-row {
+    padding: 0;
+  }
+  .group-card-framed {
+    border-radius: 0;
+    border-width: 1px 0;
+  }
+}
 .group-card-framed.group-card-focused {
   border-color: var(--accent-soft);
   box-shadow: 0 0 0 2px var(--accent-tint);
 }
-.group-row-cards > .pane-divider {
+.group-row > .pane-divider {
   flex-basis: 8px;
   width: 8px;
 }
@@ -894,54 +907,104 @@ body {
   background: var(--bg-elevated);
 }
 
+/* Chrome-style tab row (spec/14 § Panes and tabs): rounded tabs on a recessed
+   strip, the active one joined to the content below it with concave feet,
+   faint separators between inactive neighbours, the + at the end. */
 .pane-tab-bar {
   display: flex;
-  align-items: stretch;
+  align-items: flex-end;
   flex: 0 0 auto;
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--line);
+  height: 38px;
+  box-sizing: border-box;
+  padding: 0 8px 0 8px;
+  background: var(--bg-soft);
   overflow-x: auto;
+  overflow-y: hidden;
   scrollbar-width: none;
 }
 .pane-tab-bar::-webkit-scrollbar {
   display: none;
 }
 .pane-tab {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
-  flex: 0 1 auto;
-  min-width: 72px;
-  max-width: 200px;
+  flex: 0 1 190px;
+  min-width: 64px;
+  height: 31px;
   padding: 0 6px 0 12px;
-  height: 34px;
   box-sizing: border-box;
   font-size: 16px;
   color: var(--ink-3);
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
+  border-radius: 9px 9px 0 0;
   cursor: pointer;
   user-select: none;
 }
-.pane-tab:hover {
-  color: var(--ink);
+.pane-tab + .pane-tab::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  height: 14px;
+  width: 1px;
+  background: var(--line);
+}
+.pane-tab.active::before,
+.pane-tab.active + .pane-tab::before {
+  display: none;
+}
+.pane-tab:not(.active):hover {
+  color: var(--ink-2);
+  background: var(--bg-panel);
 }
 .pane-tab:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
-/* The active tab reads as the page it opens onto (white, like the content
-   below); the accent underline marks the pane keyboard chords will land in. */
 .pane-tab.active {
+  z-index: 1;
   color: var(--ink);
   background: var(--bg-elevated);
-  border-bottom-color: var(--ink-faint);
+}
+.pane-tab.active::after {
+  content: '';
+  position: absolute;
+  left: -9px;
+  right: -9px;
+  bottom: 0;
+  height: 9px;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 0 0, transparent 8.5px, var(--bg-elevated) 9px) left / 9px 9px
+      no-repeat,
+    radial-gradient(circle at 100% 0, transparent 8.5px, var(--bg-elevated) 9px) right / 9px 9px
+      no-repeat;
 }
 .pane-focused .pane-tab.active {
-  border-bottom-color: var(--accent);
+  box-shadow: inset 0 2px 0 var(--accent);
 }
 .pane-tab.drag-over {
   background: var(--accent-tint);
+}
+.pane-tab-new {
+  display: grid;
+  place-items: center;
+  flex: none;
+  align-self: center;
+  width: 28px;
+  height: 28px;
+  margin: 0 0 3px 6px;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 50%;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.pane-tab-new:hover {
+  background: var(--bg-panel);
+  color: var(--ink);
 }
 .pane-tab-title {
   flex: 1 1 auto;
@@ -967,7 +1030,7 @@ body {
   padding: 0;
   background: none;
   border: 0;
-  border-radius: 4px;
+  border-radius: 50%;
   color: var(--ink-3);
   cursor: pointer;
 }
@@ -17039,6 +17102,40 @@ select.permission-mode.is-pending {
   opacity: 0.7;
 }
 
+/* The chat header as a group header (spec/14 § Groups): one 44px row — nav,
+   badge · number · name, then the tool buttons and the per-chat controls. */
+.chat-head.chat-head-group {
+  flex: 0 0 44px;
+  box-sizing: border-box;
+  /* Back/Forward pull themselves 12px left, so 14px keeps them inside it. */
+  padding: 0 8px 0 14px;
+  gap: 6px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--bg-elevated);
+}
+.chat-head-group .chat-head-left {
+  flex: 0 0 auto;
+}
+.chat-head-group .chat-head-title {
+  flex: 1 1 0;
+  align-items: flex-start;
+  text-align: left;
+}
+.chat-head-group .chat-head-title-row {
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+}
+.chat-head-group .chat-head-title-row .group-num {
+  margin: 0;
+}
+.chat-head-group .chat-title {
+  font-size: 17px;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* ---------- Status list (spec/14 § Main chat panel — Status list) ---------- */
 /* One container under the header for Goal, Agents, Tasks and Artifacts. Every
    row shares one grid: 16px icon | label word | content | meta | action. */
@@ -17094,6 +17191,55 @@ select.permission-mode.is-pending {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.chat-head-group .chat-head-actions {
+  flex: 0 0 auto;
+  container-type: normal;
+  gap: 4px;
+}
+/* A group header is wider than its rail alone (it carries the tool buttons), so
+   it cannot be its own query container; the group card is. Narrow (the tool
+   buttons have already dropped to icons by 640px): the rail gives way to the
+   hamburger. */
+@container group (max-width: 480px) {
+  .chat-head-group .head-action-rail {
+    display: none;
+  }
+  .chat-head-group .head-hamburger {
+    display: inline-flex;
+  }
+}
+.group-tools {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+.group-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  color: var(--ink-3);
+  font-size: 16px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.group-tool:hover {
+  background: var(--bg-soft);
+  color: var(--ink);
+}
+.group-tool.on {
+  background: var(--accent-tint);
+  color: var(--accent-strong);
+}
+@container group (max-width: 640px) {
+  .group-tool-label {
+    display: none;
+  }
 }
 .status-row-wrap .status-row-content {
   white-space: normal;

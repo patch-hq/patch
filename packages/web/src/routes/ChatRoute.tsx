@@ -53,6 +53,7 @@ import { loadTranscript, dropTranscript, setBranch, trimCache } from '../lib/tra
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { ChatHeader } from '../components/ChatHeader.js';
+import { useGroupDrawsHeaderFor } from '../lib/groupHeaderContext.js';
 import { RateLimitCard } from '../components/RateLimitCard.js';
 import { ChatFind } from '../components/ChatFind.js';
 import { ArchivedBanner } from '../components/ArchivedBanner.js';
@@ -696,6 +697,7 @@ export function ChatRoute({
   const meetingFolded = useMeetingStore((s) => s.folded[chatId] === true);
   const meetingShown = isMeetingShown(meeting, meetingFolded);
   const chatDrop = useWholeChatDrop(composerRef);
+  const groupDrawsHeader = useGroupDrawsHeaderFor(chatId);
   // Follow mode: while true we keep the latest message pinned in view. A fresh
   // open starts in follow mode; the user scrolling UP to read history turns it
   // off; scrolling back to the bottom turns it on again. Programmatic scrolls
@@ -2160,7 +2162,7 @@ export function ChatRoute({
           {chatDrop.dropBlocked ? 'Can’t attach right now' : 'Drop to attach'}
         </div>
       ) : null}
-      <ChatHeader row={row} />
+      {groupDrawsHeader ? null : <ChatHeader row={row} />}
       <ChatFind
         key={chatId}
         streamRef={streamRef}
