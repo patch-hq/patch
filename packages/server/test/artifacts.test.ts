@@ -234,6 +234,53 @@ describe('artifacts', () => {
     }
   });
 
+  it('serves ranges of a multi-MB video as streamed slices', async () => {
+    const { built, hostLink } = await makeApp();
+    try {
+      const size = 5 * 1024 * 1024;
+      const video = Buffer.alloc(size);
+      for (let i = 0; i < size; i += 1) video[i] = i % 251;
+      const res = await publish(
+        hostLink,
+        publishRequest({
+          artifactId: 'a1ab03',
+          html: undefined,
+          raw: { contentType: 'video/mp4', base64: video.toString('base64') },
+        }),
+      );
+      const get = (range?: string) =>
+        built.app.inject({
+          method: 'GET',
+          url: res.url!,
+          headers: range === undefined ? {} : { range },
+        });
+
+      const mid = await get('bytes=3000000-3000099');
+      expect(mid.statusCode).toBe(206);
+      expect(mid.headers['content-range']).toBe(`bytes 3000000-3000099/${size}`);
+      expect(mid.headers['content-length']).toBe('100');
+      expect(mid.rawPayload.equals(video.subarray(3000000, 3000100))).toBe(true);
+
+      const suffix = await get('bytes=-50');
+      expect(suffix.statusCode).toBe(206);
+      expect(suffix.headers['content-range']).toBe(`bytes ${size - 50}-${size - 1}/${size}`);
+      expect(suffix.rawPayload.equals(video.subarray(size - 50))).toBe(true);
+
+      const open = await get(`bytes=${size - 10}-`);
+      expect(open.statusCode).toBe(206);
+      expect(open.rawPayload.equals(video.subarray(size - 10))).toBe(true);
+
+      const whole = await get();
+      expect(whole.statusCode).toBe(200);
+      expect(whole.headers['content-length']).toBe(String(size));
+      expect(whole.rawPayload.equals(video)).toBe(true);
+
+      expect((await get(`bytes=${size}-`)).statusCode).toBe(416);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   // A raw publish carries an agent-chosen content-type. Served bare, a
   // `text/html` one would run script in the SPA's own origin and could read the
   // stored credential, so every response is sandboxed regardless of type.
