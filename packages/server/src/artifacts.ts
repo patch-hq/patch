@@ -23,7 +23,15 @@
 //      `PUT .../storage` (same `?sig=` the page was opened with).
 
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
@@ -362,26 +370,28 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
           `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(meta.filename)}`,
         );
       }
-      const body = readFileSync(binFile);
+      // Stream from disk: a video can be 50 MB and a <video> issues many Range
+      // requests, so never load the whole file on the event loop.
+      const size = statSync(binFile).size;
       // A <video> seeks with byte-range requests; without a 206 it can only
       // play from the start.
       if (meta.contentType.startsWith('video/')) {
         reply.header('accept-ranges', 'bytes');
         const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
         if (m) {
-          const start = m[1] === '' ? Math.max(0, body.length - Number(m[2])) : Number(m[1]);
-          const end =
-            m[1] === '' || m[2] === '' ? body.length - 1 : Math.min(Number(m[2]), body.length - 1);
-          if (start > end || start >= body.length) {
-            return reply.code(416).header('content-range', `bytes */${body.length}`).send();
+          const start = m[1] === '' ? Math.max(0, size - Number(m[2])) : Number(m[1]);
+          const end = m[1] === '' || m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1);
+          if (start > end || start >= size) {
+            return reply.code(416).header('content-range', `bytes */${size}`).send();
           }
           return reply
             .code(206)
-            .header('content-range', `bytes ${start}-${end}/${body.length}`)
-            .send(body.subarray(start, end + 1));
+            .header('content-range', `bytes ${start}-${end}/${size}`)
+            .header('content-length', end - start + 1)
+            .send(createReadStream(binFile, { start, end }));
         }
       }
-      return reply.send(body);
+      return reply.header('content-length', size).send(createReadStream(binFile));
     }
     const file = join(dir, `${artifactId}.html`);
     if (!existsSync(file)) {
