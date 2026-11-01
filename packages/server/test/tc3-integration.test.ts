@@ -163,7 +163,7 @@ describe('TC3 [test-runner] push channel — suppression / urgent override (runn
     }
   });
 
-  it('B2 push SUPPRESSED while the user is at a computer (non-urgent)', async () => {
+  it('B2 push SUPPRESSED while the user has that chat open (non-urgent)', async () => {
     const h = await startServer({ dir });
     h.registry.registerPushToken({
       surfaceId: 'phone',
@@ -171,7 +171,8 @@ describe('TC3 [test-runner] push channel — suppression / urgent override (runn
       token: 'expo-token-aaa',
       registeredAt: Date.now(),
     });
-    h.presenceOnline('web-surface'); // input just now ⇒ isActive() true
+    h.presenceOnline('web-surface');
+    h.app.presence.setFocus(ACCOUNT_PUBKEY, 'web-surface', 'c');
     try {
       h.hostLink.emit({ type: 'notify', chatId: 'c', channel: 'push', message: 'quiet' });
       await sleep(150);
@@ -181,7 +182,7 @@ describe('TC3 [test-runner] push channel — suppression / urgent override (runn
     }
   });
 
-  it('B3 urgent is suppressed like normal — it differs only in its sound', async () => {
+  it('B3 urgent is suppressed like normal while that chat is open — it differs only in its sound', async () => {
     const h = await startServer({ dir });
     h.registry.registerPushToken({
       surfaceId: 'phone',
@@ -190,6 +191,7 @@ describe('TC3 [test-runner] push channel — suppression / urgent override (runn
       registeredAt: Date.now(),
     });
     h.presenceOnline('web-surface');
+    h.app.presence.setFocus(ACCOUNT_PUBKEY, 'web-surface', 'c');
     try {
       h.hostLink.emit({
         type: 'notify',
