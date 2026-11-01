@@ -2912,6 +2912,7 @@ usePresenceStore.getState().setHosts([
       updateAvailable: false,
       permissionModeDefault: 'auto',
       permissionOverrides: 0,
+      toolPromptDefaults: { patch_peek: 'Built-in peek description.' },
       defaultModel: 'claude-opus-5',
       runsManager: true,
       audioRelayHost: '127.0.0.1:3003',

@@ -19,11 +19,14 @@
 // or on another chat is editing a chat nobody is looking at. Switching the left
 // sidebar's view (Chats/Batch) is not a route change and leaves it alone.
 
-import { useEffect, type JSX } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import { useMatch } from 'react-router-dom';
 import { useUiStore } from '../stores/uiStore.js';
 import { useToolsStore } from '../stores/toolsStore.js';
 import { TOOL_CATALOG, type ToolCategory } from '../lib/toolsCatalog.js';
+import { usePreferencesStore } from '../stores/preferencesStore.js';
+import { usePresenceStore } from '../stores/presenceStore.js';
+import { patchShared } from '../routes/settings/sharedWrite.js';
 import { Toggle } from './Toggle.js';
 import { ColumnDivider } from './ColumnDivider.js';
 import { CloseIcon } from './icons.js';
@@ -32,6 +35,104 @@ const CATEGORY_LABEL: Record<ToolCategory, string> = {
   native: 'Built-in tools',
   patch: 'Patch tools',
 };
+
+/** A Patch tool's name as the MCP server registers it (`mcp__patch__patch_spawn` → `patch_spawn`). */
+function bareName(label: string): string {
+  return label;
+}
+
+/**
+ * The description the model reads for one Patch tool: Edit opens it for
+ * rewriting, Save stores the edit as a shared setting (the next turn's tools
+ * carry it), Reset drops the edit so the built-in text stands again.
+ */
+function ToolPromptEditor({ tool }: { tool: string }): JSX.Element | null {
+  const override = usePreferencesStore((s) => s.preferences.toolPromptOverrides[tool]);
+  const builtIn = usePresenceStore(
+    (s) =>
+      Object.values(s.hosts).find((h) => h.host?.toolPromptDefaults?.[tool] !== undefined)?.host
+        ?.toolPromptDefaults?.[tool],
+  );
+  const [draft, setDraft] = useState<string | null>(null);
+  const current = override ?? builtIn;
+  // No host has reported the built-in text yet: there is nothing to edit from.
+  if (current === undefined) return null;
+  const overridesNow = (): Record<string, string> =>
+    usePreferencesStore.getState().preferences.toolPromptOverrides;
+  const save = async (text: string): Promise<void> => {
+    const overrides = overridesNow();
+    if (await patchShared('tool prompt', { toolPromptOverrides: { ...overrides, [tool]: text } })) {
+      setDraft(null);
+    }
+  };
+  const reset = async (): Promise<void> => {
+    const { [tool]: _dropped, ...rest } = overridesNow();
+    if (await patchShared('tool prompt', { toolPromptOverrides: rest })) setDraft(null);
+  };
+
+  if (draft === null) {
+    return (
+      <div className="tool-prompt" data-testid={`tool-prompt-${tool}`}>
+        <div className="tool-prompt-actions">
+          <button
+            type="button"
+            className="tool-prompt-btn"
+            data-testid={`tool-prompt-edit-${tool}`}
+            onClick={() => setDraft(current)}
+          >
+            Edit
+          </button>
+          {override !== undefined && (
+            <span className="tool-prompt-state" data-testid={`tool-prompt-edited-${tool}`}>
+              Edited
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="tool-prompt" data-testid={`tool-prompt-${tool}`}>
+      <textarea
+        className="tool-prompt-input"
+        data-testid={`tool-prompt-input-${tool}`}
+        aria-label={`${bareName(tool)} description`}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        rows={6}
+      />
+      <div className="tool-prompt-actions">
+        <button
+          type="button"
+          className="tool-prompt-btn"
+          data-testid={`tool-prompt-save-${tool}`}
+          disabled={draft.trim() === '' || draft === current}
+          onClick={() => void save(draft)}
+        >
+          Save
+        </button>
+        <button
+          type="button"
+          className="tool-prompt-btn"
+          data-testid={`tool-prompt-cancel-${tool}`}
+          onClick={() => setDraft(null)}
+        >
+          Cancel
+        </button>
+        {override !== undefined && (
+          <button
+            type="button"
+            className="tool-prompt-btn"
+            data-testid={`tool-prompt-reset-${tool}`}
+            onClick={() => void reset()}
+          >
+            Reset
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function ToolsPanel(): JSX.Element | null {
   const chatId = useUiStore((s) => s.toolsPanelChatId);
@@ -121,6 +222,7 @@ export function ToolsPanel(): JSX.Element | null {
                           />
                         </div>
                         <p className="tool-row-desc">{t.description}</p>
+                        {cat === 'patch' && <ToolPromptEditor tool={t.label} />}
                         <code className="tool-row-def" data-testid={`tool-def-${t.label}`}>
                           {t.label}({t.params})
                         </code>

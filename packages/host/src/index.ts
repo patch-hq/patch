@@ -211,6 +211,7 @@ import {
   withBrowserToolsEnabled,
 } from './mcpServers.js';
 import { getPatchToolsPrompt, toolsPromptOverride } from './toolsPrompt.js';
+import { patchToolDescriptions } from './mcp.js';
 import { ComponentManager, ComponentNotOfferedError, componentRuntimeDir } from './components.js';
 import { provisionSidecarRuntime, resolveUv } from './audio/sidecarRuntime.js';
 import { bundledSidecarDir } from './installPaths.js';
@@ -825,6 +826,15 @@ async function startHost(
   const effectiveToolsPrompt = (): string =>
     harnessToolsPrompt === undefined ? getPatchToolsPrompt() : harnessToolsPrompt;
   let harnessSkills: string[] | 'all' | undefined = persistedHostState.harnessSkills;
+  // Edits of Patch tools' descriptions. The MCP child reads them from its
+  // launch environment, so each turn's child starts from the current set.
+  let toolPromptOverrides: Record<string, string> = persistedHostState.toolPromptOverrides ?? {};
+  const toolPromptDefaults = patchToolDescriptions();
+  const mcpEnv: Record<string, string> = {};
+  const publishToolPrompts = (): void => {
+    mcpEnv['PATCH_TOOL_PROMPTS'] = JSON.stringify(toolPromptOverrides);
+  };
+  publishToolPrompts();
   // The three "layer" toggles (spec/14 § Agent behavior). Unlike the fields
   // above, these always resolve to a concrete boolean — there is no "SDK
   // default" reading for them to fall back to, only a stated default per
@@ -1159,6 +1169,7 @@ async function startHost(
       ...(harnessSystemPrompt !== undefined ? { harnessSystemPrompt } : {}),
       ...(harnessToolsPrompt !== undefined ? { harnessToolsPrompt } : {}),
       harnessToolsPromptDefault: getPatchToolsPrompt(),
+      toolPromptDefaults,
       ...(harnessSkills !== undefined ? { harnessSkills } : {}),
       harnessMemoryEnabled,
       harnessBrowserToolsEnabled: browserToolsEnabledOf(harnessMcpServers),
@@ -1881,6 +1892,12 @@ async function startHost(
       });
       applyHarnessConfig();
       logger.info('agent behaviour layers changed');
+    }
+    if (JSON.stringify(shared.toolPromptOverrides) !== JSON.stringify(toolPromptOverrides)) {
+      toolPromptOverrides = shared.toolPromptOverrides;
+      publishToolPrompts();
+      hostStateStore.update({ toolPromptOverrides });
+      logger.info('tool prompt overrides changed');
     }
     accountStrategy = shared.accountStrategy;
   };
@@ -4267,7 +4284,7 @@ async function startHost(
     mcpServer: {
       command: mcpBin.command,
       args: mcpBin.args,
-      env: {
+      env: Object.assign(mcpEnv, {
         PATCH_HOST_SOCKET: config.socketPath,
         PATCH_DAEMON_SOCKET: config.socketPath,
         // The child presents this as a Bearer on every socket call (spec/02
@@ -4281,7 +4298,7 @@ async function startHost(
         // PATCH_CHAT_ID is injected per-query in chatRunner.runQuery —
         // the MCP child needs the *current* chatId, not a static one.
         // See group 10 BLOCKER A.2.
-      },
+      }),
     },
     // Group 11: prepend the broadcast `<system-reminder>` for special threads.
     preprocessInput: (req) => {

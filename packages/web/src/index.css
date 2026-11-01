@@ -8353,6 +8353,42 @@ button.view-file-download {
   line-height: 1.4;
   font-size: var(--text-min);
 }
+.tool-prompt {
+  margin: 4px 0 6px;
+}
+.tool-prompt-input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: var(--text-min);
+  color: var(--ink);
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  resize: vertical;
+}
+.tool-prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.tool-prompt-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--ink-2);
+  font-size: var(--text-min);
+  cursor: pointer;
+}
+.tool-prompt-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.tool-prompt-state {
+  color: var(--ink-3);
+  font-size: var(--text-min);
+}
 .tool-row-def {
   display: block;
   font-size: var(--text-min);

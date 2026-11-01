@@ -2278,6 +2278,13 @@ export const SharedSettings = z
     /** `null` = no explicit configuration. */
     harnessSkills: z.union([z.array(z.string().min(1)), z.literal('all')]).nullable(),
     harnessMemoryEnabled: z.boolean(),
+    /**
+     * The user's edits of Patch tools' descriptions (spec/06 § Tool prompts),
+     * keyed by tool name (`patch_spawn`). A tool absent here keeps the
+     * description it is built with; the host hands this to the MCP child at
+     * launch, so an edit reaches the next turn.
+     */
+    toolPromptOverrides: z.record(z.string().min(1), z.string().min(1)),
     accountStrategy: z.object({ claude: AccountStrategy, codex: AccountStrategy }).strict(),
   })
   .strict();
@@ -2357,6 +2364,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   questionExpiredPrompt: DEFAULT_QUESTION_EXPIRED_PROMPT,
   harnessSystemPrompt: '',
   harnessToolsPrompt: null,
+  toolPromptOverrides: {},
   harnessSkills: null,
   harnessMemoryEnabled: false,
   accountStrategy: { claude: 'priority', codex: 'priority' },
@@ -2807,6 +2815,8 @@ export const HostInfoEvent = z
     harnessToolsPrompt: z.string().optional(),
     /** The built-in guidance, so a surface can show it without shipping a copy. */
     harnessToolsPromptDefault: z.string().optional(),
+    /** Each Patch tool's built-in description, by tool name, so a surface can show what an edit replaces. */
+    toolPromptDefaults: z.record(z.string(), z.string()).optional(),
     /**
      * Per-host list of skill names to enable for every chat on this host
      * (`skills: string[] | 'all'` in the SDK query options). `'all'` enables
