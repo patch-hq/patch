@@ -366,3 +366,63 @@ test('the browser sign-in screen adds no desktop drag strip', async ({ page }) =
   await expect(page.getByTestId('pairing-screen')).toBeVisible();
   await expect(page.getByTestId('pairing-window-drag')).toBeHidden();
 });
+
+test('a shell that can move the lights seats them inside the top banner, centred on its text', async ({
+  page,
+}) => {
+  // Live screenshot: the update banner stretched to reach lights pinned for
+  // the sidebar row, so they hugged its bottom edge below the line of its text
+  // ("still overlapping and shit"). A shell with seatTrafficLights moves them
+  // onto the banner's own centre-line instead.
+  await page.addInitScript(() => {
+    const w = window as unknown as { patch: unknown; seated: (number | null)[] };
+    w.seated = [];
+    w.patch = {
+      overlayTitleBar: true,
+      seatTrafficLights: (centre: number | null) => w.seated.push(centre),
+      getUpdaterState: () =>
+        Promise.resolve({
+          currentVersion: '0.1.899',
+          lastResult: 'downloaded',
+          lastError: null,
+          lastErrorKind: null,
+          availableVersion: '0.1.900',
+          downloaded: true,
+          checking: false,
+          staleSince: new Date().toISOString(),
+        }),
+      checkForUpdates: () => Promise.resolve(undefined),
+      onUpdaterState: () => () => {},
+      installUpdate: () => {},
+    };
+  });
+  await page.goto(`${HARNESS}&voice=off`);
+
+  const banner = page.getByTestId('desktop-update-banner');
+  await expect(banner).toBeVisible();
+  const box = (await banner.boundingBox())!;
+  expect(box.y).toBe(0);
+  expect(box.height).toBeLessThan(LIGHTS_BOTTOM_EDGE);
+  const text = (await banner.locator('.desktop-update-text').boundingBox())!;
+  const textCentre = text.y + text.height / 2;
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { seated: number[] }).seated.at(-1)))
+    .toBe(Math.round(box.height / 2));
+  expect(Math.abs(textCentre - box.height / 2)).toBeLessThanOrEqual(1);
+
+  // Paint stand-ins where the shell would put the lights, for the eye check.
+  await page.evaluate(
+    (c) => {
+      for (const [i, colour] of ['#ff5f57', '#febc2e', '#28c840'].entries()) {
+        const d = document.createElement('div');
+        d.style.cssText = `position:fixed;left:${18 + i * 20}px;top:${c - 6}px;width:12px;height:12px;border-radius:50%;background:${colour};z-index:9999`;
+        document.body.append(d);
+      }
+    },
+    Math.round(box.height / 2),
+  );
+  await page.screenshot({
+    path: test.info().outputPath('seated-lights.png'),
+    clip: { x: 0, y: 0, width: 1280, height: 140 },
+  });
+});

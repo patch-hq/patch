@@ -13,6 +13,7 @@ import {
   TRAFFIC_LIGHT_DIAMETER,
   TRAFFIC_LIGHT_INSET,
   TRAFFIC_LIGHT_POSITION,
+  trafficLightPositionFor,
 } from './window-chrome';
 
 /** The renderer's stylesheet — the far side of every mirrored constant here. */
@@ -106,4 +107,12 @@ test('the renderer reserves exactly the strip this module claims', () => {
   const declared = /--overlay-titlebar-inset:\s*(\d+)px/.exec(css);
   assert.ok(declared, '--overlay-titlebar-inset not found in packages/web/src/index.css');
   assert.equal(Number(declared[1]), TRAFFIC_LIGHT_INSET);
+});
+
+test('a top banner seats the lights on its own centre-line, and nothing else moves them', () => {
+  assert.deepEqual(trafficLightPositionFor(18), { x: 18, y: 12 });
+  assert.deepEqual(trafficLightPositionFor(null), TRAFFIC_LIGHT_POSITION);
+  for (const junk of [undefined, 'x', Number.NaN, 2, 500]) {
+    assert.deepEqual(trafficLightPositionFor(junk), TRAFFIC_LIGHT_POSITION);
+  }
 });

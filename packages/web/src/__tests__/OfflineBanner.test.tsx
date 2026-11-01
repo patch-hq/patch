@@ -5,12 +5,18 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { CLOSE_SERVER_RESTARTING } from '@patch/wire';
 import { OfflineBanner } from '../components/OfflineBanner.js';
-import { usePresenceStore } from '../stores/presenceStore.js';
+import { SERVER_UPDATE_GRACE_MS, usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 
 describe('OfflineBanner', () => {
   beforeEach(() => {
-    usePresenceStore.setState({ connection: 'offline', everConnected: true, lastClose: null });
+    usePresenceStore.setState({
+      connection: 'offline',
+      everConnected: true,
+      lastClose: null,
+      serverUpdatingSince: null,
+      serverStopReason: null,
+    });
   });
 
   it('renders nothing when connected', () => {
@@ -63,17 +69,49 @@ describe('OfflineBanner', () => {
     usePresenceStore.getState().setConnection('reconnecting');
     usePresenceStore
       .getState()
-      .noteWsClose({ code: CLOSE_SERVER_RESTARTING, reason: 'server restarting', at: Date.now() });
+      .noteWsClose({ code: CLOSE_SERVER_RESTARTING, reason: 'restarting', at: Date.now() });
     render(<OfflineBanner />);
     expect(screen.getByTestId('offline-banner')).toHaveTextContent(
-      'Server is updating — back in a moment',
+      'Patch server is restarting. Back in a moment.',
+    );
+    // A known gap: nothing to diagnose.
+    expect(screen.queryByTestId('offline-diagnose')).toBeNull();
+  });
+
+  it('keeps saying it is updating through the failed retries while the server is down', () => {
+    // Each retry against a server mid-restart fails with a bare 1006. Reading
+    // only the latest close flipped this to "Reconnecting…" within a second.
+    const at = Date.now();
+    usePresenceStore.getState().setConnection('reconnecting');
+    usePresenceStore
+      .getState()
+      .noteWsClose({ code: CLOSE_SERVER_RESTARTING, reason: 'updating', at });
+    usePresenceStore.getState().noteWsClose({ code: 1006, reason: '', at: at + 1 });
+    render(<OfflineBanner />);
+    expect(screen.getByTestId('offline-banner')).toHaveTextContent(
+      'Patch server is installing an update. Back in a moment.',
     );
   });
 
-  it('goes back to "Reconnecting…" once a later close is not a restart', () => {
+  it('falls back to "Reconnecting…" if the server has not come back after the grace period', () => {
     usePresenceStore.getState().setConnection('reconnecting');
-    usePresenceStore.getState().noteWsClose({ code: CLOSE_SERVER_RESTARTING, reason: '', at: 1 });
-    usePresenceStore.getState().noteWsClose({ code: 1006, reason: '', at: 2 });
+    usePresenceStore.getState().noteWsClose({
+      code: CLOSE_SERVER_RESTARTING,
+      reason: '',
+      at: Date.now() - SERVER_UPDATE_GRACE_MS - 1,
+    });
+    render(<OfflineBanner />);
+    expect(screen.getByTestId('offline-banner')).toHaveTextContent('Reconnecting…');
+    expect(screen.getByTestId('offline-diagnose')).toBeInTheDocument();
+  });
+
+  it('forgets the update once the link is back', () => {
+    usePresenceStore
+      .getState()
+      .noteWsClose({ code: CLOSE_SERVER_RESTARTING, reason: '', at: Date.now() });
+    usePresenceStore.getState().noteWsOpen('ws://x');
+    usePresenceStore.getState().noteWsClose({ code: 1006, reason: '', at: Date.now() });
+    usePresenceStore.getState().setConnection('reconnecting');
     render(<OfflineBanner />);
     expect(screen.getByTestId('offline-banner')).toHaveTextContent('Reconnecting…');
   });

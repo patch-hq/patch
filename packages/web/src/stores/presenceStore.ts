@@ -6,6 +6,7 @@
 // per-chat banner per spec/14 ## Offline / error states.
 
 import { create } from 'zustand';
+import { CLOSE_SERVER_RESTARTING } from '@patch/wire';
 import type {
   AuthOkHost,
   ClaudeMemoryEntry,
@@ -67,7 +68,7 @@ export interface HostPresence {
    * condition to report.
    */
   condition?: HostConditionEvent | null;
-  /** Why the host dropped off, when the server could tell (`host.offline` reason). */
+  /** Why the host dropped off, when the server could tell (`host.offline` reason); 'updating' means it is installing an update and will be back shortly. */
   offlineReason?: string | null;
 }
 
@@ -133,6 +134,16 @@ interface PresenceState {
   hostsSeeded: boolean;
   failedAttempts: number;
   lastClose: WsCloseInfo | null;
+  /**
+   * The server said it was restarting (CLOSE_SERVER_RESTARTING). Held until the
+   * link is back: the retries that follow fail with a bare 1006 while it is
+   * down, and reading only the latest close flipped the banner back to
+   * "Reconnecting…" a second into an update. Epoch-ms it was said, so a server
+   * that never comes back stops claiming to be updating (`isServerUpdating`).
+   */
+  serverUpdatingSince: number | null;
+  /** What it said it was doing: installing a new release, or a plain restart. */
+  serverStopReason: 'updating' | 'restarting' | null;
   /** Account / surface info, populated after `auth.ok`. */
   accountId: string | null;
   surfaceId: string | null;
@@ -212,6 +223,8 @@ export const usePresenceStore = create<PresenceState>((set) => ({
   hostsSeeded: false,
   failedAttempts: 0,
   lastClose: null,
+  serverUpdatingSince: null,
+  serverStopReason: null,
   accountId: null,
   surfaceId: null,
   setConnection(s) {
@@ -317,12 +330,38 @@ export const usePresenceStore = create<PresenceState>((set) => ({
     });
   },
   noteWsOpen(url) {
-    set({ wsUrl: url, everConnected: true, failedAttempts: 0 });
+    set({
+      wsUrl: url,
+      everConnected: true,
+      failedAttempts: 0,
+      serverUpdatingSince: null,
+      serverStopReason: null,
+    });
   },
   noteWsClose(info) {
-    set((s) => ({ lastClose: info, failedAttempts: s.failedAttempts + 1 }));
+    set((s) => {
+      const said = info.code === CLOSE_SERVER_RESTARTING;
+      return {
+        lastClose: info,
+        failedAttempts: s.failedAttempts + 1,
+        serverUpdatingSince: s.serverUpdatingSince ?? (said ? info.at : null),
+        serverStopReason:
+          s.serverStopReason ??
+          (said ? (info.reason === 'updating' ? 'updating' : 'restarting') : null),
+      };
+    });
   },
   setIdentity(accountId, surfaceId) {
     set({ accountId, surfaceId });
   },
 }));
+
+/** A server restart that has not come back by now is a failure, not an update. */
+export const SERVER_UPDATE_GRACE_MS = 3 * 60_000;
+
+export function isServerUpdating(
+  s: Pick<PresenceState, 'serverUpdatingSince'>,
+  now: number = Date.now(),
+): boolean {
+  return s.serverUpdatingSince !== null && now - s.serverUpdatingSince < SERVER_UPDATE_GRACE_MS;
+}

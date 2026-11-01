@@ -8,6 +8,7 @@
 //   - patch.notificationSendResult(id, ok)    → the renderer's answer back
 //   - patch.checkForUpdateNow()               → a deploy landed: check the feed now
 //   - patch.installUpdate()                   → the user pressed Restart
+//   - patch.seatTrafficLights(centre)         → a banner took the top row
 //   - patch.onNavigate(cb)                    → main asks the renderer to navigate
 //   - patch.onStartVoiceNote(cb)              → ⌃Space global hotkey hit
 //   - patch.copyImagePng(png)                 → native clipboard image write
@@ -290,6 +291,11 @@ contextBridge.exposeInMainWorld('patch', {
   // relaunch. The only path that ends the process for an update.
   installUpdate(): void {
     ipcRenderer.send('patch:updater:install');
+  },
+  // A banner has taken the window's top row (or let it go): move the traffic
+  // lights onto its centre-line, or back to the brand row when `null`.
+  seatTrafficLights(centre: number | null): void {
+    ipcRenderer.send('patch:window:seat-lights', centre);
   },
   onUpdaterState(cb: (state: unknown) => void): () => void {
     const handler = (_: unknown, state: unknown): void => cb(state);
