@@ -36,6 +36,12 @@ export interface PatchToolsServerOptions {
    * case and refuses saying so.
    */
   branchId?: string;
+  /**
+   * The user's edits of tool descriptions, by tool name (spec/06 § Tool
+   * prompts). A tool named here is registered with this text instead of the
+   * one written beside it.
+   */
+  toolPromptOverrides?: Record<string, string>;
 }
 
 interface UdsRequestOptions {
@@ -65,6 +71,36 @@ function definedOnly(o: Record<string, unknown>): Record<string, unknown> {
 /** The one browser tool that is always listed; calling it enables the others. */
 const BROWSER_ENTRY_TOOL = 'patch_browser_open';
 const TAB_ID_PARAM = 'The tabId returned by patch_browser_open (or listed by patch_browser_tabs).';
+/** Each Patch tool's built-in description, by tool name — what an edit replaces. */
+export function patchToolDescriptions(): Record<string, string> {
+  const server = buildPatchToolsServer({
+    hostSocketPath: '/dev/null',
+    chatId: 'defaults',
+    localKey: 'defaults',
+  });
+  const registered = (
+    server as unknown as { _registeredTools: Record<string, { description?: string }> }
+  )._registeredTools;
+  return Object.fromEntries(
+    Object.entries(registered).map(([name, t]) => [name, t.description ?? '']),
+  );
+}
+
+/** PATCH_TOOL_PROMPTS is the host's JSON of overrides; anything else is a bug to surface. */
+export function parseToolPromptOverrides(raw: string | undefined): Record<string, string> {
+  if (raw === undefined || raw === '') return {};
+  const parsed: unknown = JSON.parse(raw);
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('patch-tools-server: PATCH_TOOL_PROMPTS is not an object (NO FALLBACK)');
+  }
+  for (const [k, v] of Object.entries(parsed)) {
+    if (typeof v !== 'string') {
+      throw new Error(`patch-tools-server: PATCH_TOOL_PROMPTS.${k} is not a string (NO FALLBACK)`);
+    }
+  }
+  return parsed as Record<string, string>;
+}
+
 /**
  * Build the MCP server with the full patch tool catalogue. Caller wires it
  * to a transport (stdio in production, in-memory pair in tests).
@@ -88,6 +124,11 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
   const gatedBrowserTools: Array<{ enable: () => void }> = [];
   const registerTool = server.registerTool.bind(server) as typeof server.registerTool;
   server.registerTool = ((name: string, ...rest: unknown[]) => {
+    const override = opts.toolPromptOverrides?.[name];
+    if (override !== undefined) {
+      const config = rest[0] as Record<string, unknown>;
+      rest[0] = { ...config, description: override };
+    }
     const tool = (
       registerTool as (n: string, ...r: unknown[]) => { enable: () => void; disable: () => void }
     )(name, ...rest);
@@ -1623,6 +1664,7 @@ export async function runPatchToolsServerStdio(): Promise<void> {
   const server = buildPatchToolsServer({
     hostSocketPath,
     chatId,
+    toolPromptOverrides: parseToolPromptOverrides(process.env['PATCH_TOOL_PROMPTS']),
     localKey:
       localKeyFile && localKeyFile.length > 0
         ? () => {

@@ -488,6 +488,14 @@ Patch's own — each showing its name, what it does, its parameter definition,
 and a toggle. The off set is per-chat, persisted, and sent with the chat's
 input so the host drops disabled tools from the model's context.
 
+Each of Patch's own tools also has an Edit control. It opens the description the
+model reads for that tool, starting from the user's earlier edit or else the
+built-in text the host reports. Save stores the edit as a shared setting;
+Reset, shown only for an edited tool, removes it. An edited tool carries an
+`Edited` label. A tool whose built-in text no host has reported has no Edit
+control, and the built-in tools have none (their descriptions belong to Claude
+Code). Mobile's Tools page has the same control.
+
 The tool inventory scrolls as its own region below the fixed head; the category
 groupings are headings within it, not separate scroll panes. The per-tool
 description stays: it is the panel's content, not

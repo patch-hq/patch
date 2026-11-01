@@ -159,6 +159,8 @@ const HostStateFile = z
      * user turned it off.
      */
     harnessToolsPrompt: z.string().optional(),
+    /** Edits of Patch tools' descriptions (`shared` → `toolPromptOverrides`). */
+    toolPromptOverrides: z.record(z.string(), z.string()).optional(),
     /**
      * Per-host skills to enable on every turn (`skills` SDK option). `'all'`
      * enables every discovered skill; an array enables only the named skills.

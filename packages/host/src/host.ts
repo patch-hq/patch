@@ -106,6 +106,8 @@ export interface HostDescriptionInput {
   harnessToolsPrompt?: string | undefined;
   /** The built-in patch-tools prompt, so a surface need not ship a copy. */
   harnessToolsPromptDefault?: string | undefined;
+  /** Each Patch tool's built-in description, by tool name. */
+  toolPromptDefaults?: Record<string, string> | undefined;
   /** Per-host skills to enable on every turn (Task 3). */
   harnessSkills?: string[] | 'all' | undefined;
   /** Whether Claude Code's own persistent memory is enabled on this host. */
@@ -181,6 +183,9 @@ export function describeHost(input: HostDescriptionInput): HostInfoEvent {
       : {}),
     ...(input.harnessToolsPromptDefault !== undefined
       ? { harnessToolsPromptDefault: input.harnessToolsPromptDefault }
+      : {}),
+    ...(input.toolPromptDefaults !== undefined
+      ? { toolPromptDefaults: input.toolPromptDefaults }
       : {}),
     ...(input.harnessSkills !== undefined ? { harnessSkills: input.harnessSkills } : {}),
     // Stated UNCONDITIONALLY, same discipline as `questionExpiry` above: a

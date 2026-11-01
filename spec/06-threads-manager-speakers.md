@@ -121,6 +121,12 @@ Exposed to the agent inside these two chats:
 
 All tools are prefixed `patch_` to mark them as patch-namespace, with distinct words so they stay semantically distinct from native tools (`patch_wake_me`, not `patch_cron`; the `_job_` family avoids cron/schedule). Patch owns its platform capabilities; The agent owns the in-session coding loop; inert native tools are disallowed entirely (`principles.md` § Tool ownership).
 
+### Tool prompts
+
+The description the model reads for each `patch_*` tool is editable from the Tools panel (`14-design-web.md` § Tools panel). An edit is the shared setting `toolPromptOverrides`, a map from tool name to replacement description (`01-server.md` § Settings). A tool absent from the map keeps the description it is built with. Edits apply to every chat on every host.
+
+Each host applies the setting by giving the MCP child an environment variable, `PATCH_TOOL_PROMPTS` (a JSON object of the same shape), when it launches the child for a turn. The child replaces the named tools' descriptions as it registers them, so an edit reaches the next turn that starts and not one already running. A value that is not a JSON object of strings stops the child with an error. The host also reports each tool's built-in description (`toolPromptDefaults` in `host.host`), so a surface can show what an edit replaces. Only the description changes: a tool's parameters and behaviour stay as built.
+
 ### Browser tools
 
 Available to every chat, not special-thread-only — a real browser on the host (`02-host.md` § Browser). Names distinct from both the native tool surface and the optional `playwright` / `chrome-devtools` MCP pair, so the model never faces two overlapping ways to drive a browser.

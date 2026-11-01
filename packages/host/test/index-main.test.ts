@@ -2136,6 +2136,39 @@ describe('src/index.ts main() — full host boot', () => {
     }
   }, 30_000);
 
+  it('hands tool prompt edits from the snapshot to the MCP child env, keeps them in host.json, and reports the built-in text', async () => {
+    const boot = await bootMain();
+    try {
+      await boot.fakeServer.waitForAuthed();
+      const hostReport = (await boot.fakeServer.waitForFrame((e) => e.type === 'host.host')) as {
+        host?: { toolPromptDefaults?: Record<string, string> };
+      } & Record<string, unknown>;
+      expect(Object.keys(hostReport['toolPromptDefaults'] as Record<string, string>)).toContain(
+        'patch_peek',
+      );
+      const mcpEnv = (): Record<string, string> =>
+        (
+          boot.ready.daemon as unknown as {
+            opts: { mcpServer: { env: Record<string, string> } };
+          }
+        ).opts.mcpServer.env;
+      expect(JSON.parse(mcpEnv()['PATCH_TOOL_PROMPTS'] ?? '')).toEqual({});
+
+      boot.fakeServer.send({
+        type: 'settings.snapshot',
+        hostId: 'd1',
+        version: 42,
+        settings: { ...DEFAULT_SHARED_SETTINGS, toolPromptOverrides: { patch_peek: 'Edited.' } },
+        secrets: { claude: [], codex: [], providerKeys: {} },
+      } as WireEvent);
+      await waitFor(() => mcpEnv()['PATCH_TOOL_PROMPTS'] === '{"patch_peek":"Edited."}');
+      const hostJson = JSON.parse(readFileSync(join(boot.home, 'host.json'), 'utf8'));
+      expect(hostJson.toolPromptOverrides).toEqual({ patch_peek: 'Edited.' });
+    } finally {
+      await boot.cleanup();
+    }
+  }, 30_000);
+
   it("rebuilds a chat's log from log_restore frames and hands its own log back on log_sync", async () => {
     const boot = await bootMain();
     try {
