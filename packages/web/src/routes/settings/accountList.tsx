@@ -324,6 +324,10 @@ export function UsageBars({
                 }resets ${formatReset(win.resetsAt)}`
               ) : blocked ? (
                 'blocked'
+              ) : scope === 'week' && win.utilization !== undefined && win.utilization < 0.05 ? (
+                // No reset instant on a nearly empty week: the provider's date
+                // slides until usage anchors it, so none is shown.
+                'resets 7 days after next use'
               ) : (
                 ''
               )}
