@@ -228,6 +228,26 @@ export class PresenceTracker {
   }
 
   /**
+   * spec/09 § `### push` — true when the user is looking at `chatId` right now:
+   * a live surface has it focused (`chat.focus_change`), and a computer surface
+   * only counts while someone is at that computer. A surface that has gone
+   * quiet (phone backgrounded, heartbeat stale) is not looking at anything.
+   */
+  isChatOpen(accountId: string, chatId: string, nowMs: number = Date.now()): boolean {
+    for (const r of this.records.values()) {
+      if (r.accountId !== accountId) continue;
+      if (r.lastFocusedChatId !== chatId) continue;
+      if (r.status === 'offline') continue;
+      if (isComputerSurface(r.surfaceKind)) {
+        if (this.presenceOf(r, nowMs).state === 'active') return true;
+        continue;
+      }
+      if (nowMs - r.lastHeartbeat <= PRESENCE_STALE_MS) return true;
+    }
+    return false;
+  }
+
+  /**
    * spec/09 ## Presence heuristic — true when some web or desktop surface
    * reported within 45s, did not say the machine is away, and has been idle for
    * less than the `Send to my phone after` threshold. A visible window on its

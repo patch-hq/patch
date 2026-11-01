@@ -425,11 +425,19 @@ function ChatDetailBody(): React.ReactElement {
         console.error('dismissChatNotifications failed', e),
       );
     clear();
+    // spec/09 § `### push` — tell the server which chat is in front of the
+    // user, so a notification for any OTHER chat still reaches them. Only
+    // while the app is foregrounded: a backgrounded phone is looking at nothing.
+    const reportFocus = (open: boolean) =>
+      getWs().send({ type: 'chat.focus_change', chatId: open ? chatId : null });
+    if (AppState.currentState === 'active') reportFocus(true);
     const sub = AppState.addEventListener('change', (s) => {
       if (s === 'active') clear();
+      reportFocus(s === 'active');
     });
     return () => {
       sub.remove();
+      reportFocus(false);
       useChatStore.getState().setActiveChat(null);
     };
   }, [chatId]);

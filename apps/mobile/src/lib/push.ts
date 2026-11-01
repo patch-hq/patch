@@ -14,6 +14,7 @@ import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { AppState } from 'react-native';
 import { api } from '../api/rest';
+import { useChatStore } from '../stores/chatStore';
 import { useUiStore } from '../stores/uiStore';
 import { ensurePermission } from './permissionGate';
 import { showIncomingCall } from './callkeep';
@@ -95,18 +96,25 @@ export async function enablePushNotifications(): Promise<boolean> {
 }
 
 async function register(): Promise<void> {
-  // Foreground policy: don't auto-show banners — we render the
-  // chat detail / overlays ourselves. Banner only when backgrounded.
+  // Foreground policy (spec/09 § `### push`): a notification shows unless it
+  // is about the chat on screen — that one the user is already reading.
   Notifications.setNotificationHandler({
-    handleNotification: async (): Promise<{
+    handleNotification: async (
+      n,
+    ): Promise<{
       shouldShowAlert: boolean;
       shouldPlaySound: boolean;
       shouldSetBadge: boolean;
-    }> => ({
-      shouldShowAlert: AppState.currentState !== 'active',
-      shouldPlaySound: false,
-      shouldSetBadge: false,
-    }),
+    }> => {
+      const aboutOpenChat =
+        AppState.currentState === 'active' &&
+        n.request.content.data?.['chatId'] === useChatStore.getState().activeChatId;
+      return {
+        shouldShowAlert: !aboutOpenChat,
+        shouldPlaySound: false,
+        shouldSetBadge: false,
+      };
+    },
   });
 
   // Channel for chat messages (default importance).
