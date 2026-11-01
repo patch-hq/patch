@@ -2794,6 +2794,17 @@ export class Daemon {
    * transcript: for a typed turn a lost session is reported (spec/04 line 46).
    */
   private readonly owedResend = new Set<string>();
+
+  /**
+   * The head turn a restart put back, from the moment it is re-sent until the
+   * run records itself in `runningTurn`. The resume clears `pendingTurns` before
+   * re-sending (so a turn that takes the host down is not retried forever), but
+   * between that clear and `runQuery` setting `runningTurn` there are awaited
+   * steps (session load, a dark-wake hold, credential resolution): a failure or
+   * another restart in that window used to lose the turn with nothing on disk to
+   * say it was ever owed. Persisted with the rest of `pendingTurns` meanwhile.
+   */
+  private readonly resumeOwed = new Map<string, PendingTurn>();
   /** Chats whose pump is re-sending a turn a host restart cut off (as "carry on"). */
   private readonly interruptedResend = new Set<string>();
   /**
@@ -3615,6 +3626,10 @@ export class Daemon {
         // behind the first in their original order — exactly where they were.
         this.owedResend.add(m.chatId);
         this.interruptedResend.add(m.chatId);
+        if (i === 0) {
+          this.resumeOwed.set(m.chatId, turn);
+          this.persistPendingTurns(m.chatId);
+        }
         void this.sendInput({
           chatId: m.chatId,
           message,
@@ -3637,9 +3652,18 @@ export class Daemon {
           // spec/14 § Job trigger turn — resumed as what it was, same as `origin`.
           ...(turn.jobTrigger ? { jobTrigger: turn.jobTrigger } : {}),
         }).catch((err: unknown) => {
+          // Said in the chat, not only in the log: the turn was owed and did not
+          // start, and a chat left idle with no word is indistinguishable from
+          // one that finished.
+          const reason = err instanceof Error ? err.message : String(err);
           this.opts.logger.error(
             { chatId: m.chatId, err },
             'resume: interrupted turn could not be re-sent',
+          );
+          this.failPreflight(
+            m.chatId,
+            'sdk_error',
+            `The turn cut off by the host restart could not be restarted: ${reason}`,
           );
         });
       }
@@ -6780,6 +6804,7 @@ export class Daemon {
       this.pumping.delete(chatId);
       this.owedResend.delete(chatId);
       this.interruptedResend.delete(chatId);
+      this.resumeOwed.delete(chatId);
       // Normally empty. When a turn threw, whatever queued behind it is dropped
       // here — each was announced with `chat.queued`, so say it is gone or the
       // surface shows it as QUEUED forever.
@@ -7046,12 +7071,16 @@ export class Daemon {
     const running = this.runningTurn.get(chatId);
     const parked = this.parkedTurns.get(chatId);
     const queued = this.turnQueues.get(chatId) ?? [];
+    const resumeOwed = this.resumeOwed.get(chatId);
     // A parked turn is not running (its attempt already failed) and not queued
     // (nothing is pumping it), but it is still owed. Persist it in the same
     // list so a restart mid-park resumes it instead of forgetting it.
     const pendingTurns: PendingTurn[] = [
       ...(running ? [running] : []),
       ...(parked ? [parked] : []),
+      ...(resumeOwed && !running && !parked && !queued.some((q) => q.localId === resumeOwed.localId)
+        ? [resumeOwed]
+        : []),
       // Only what a restart needs to re-send the turn. A queued turn's typed
       // text and prompt builder are live-editing state (spec/04 ## Message
       // queueing § Edit): an edit rewrites `message` itself, so the persisted
@@ -9387,6 +9416,7 @@ export class Daemon {
     // loudly; from here on the turn can be killed halfway through with no trace,
     // and this is the trace. Cleared in the `finally` below, so it only survives
     // a host that never got to run one — which is every deploy.
+    this.resumeOwed.delete(chatId);
     this.runningTurn.set(chatId, {
       message: prompt,
       ...(localId !== undefined ? { localId } : {}),
