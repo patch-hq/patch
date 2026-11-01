@@ -77,6 +77,8 @@ export interface ToolWatchdogOptions {
   /** How often in-flight calls are checked. */
   pollMs?: number;
   platform?: NodeJS.Platform;
+  /** Called once when a call is judged hung, before the stream fails: stop the work at its source. */
+  onHung?: () => void;
 }
 
 const HUNG = Symbol('tool-hung');
@@ -121,6 +123,7 @@ export async function* withToolWatchdog(
       pending.catch(() => undefined);
       const r = await Promise.race([pending, hung]);
       if (r === HUNG) {
+        opts.onHung?.();
         void Promise.resolve(it.return?.()).catch(() => undefined);
         throw trip!;
       }

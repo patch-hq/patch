@@ -9788,6 +9788,14 @@ export class Daemon {
         );
       }
     }
+    // The backend's own stop switch. It follows the user's stop, and the tool
+    // watchdog also pulls it when a call hangs: the backend must interrupt its
+    // turn (and kill the call's processes), or the provider keeps running it
+    // and rejects the next message as a second writer.
+    const backendAbort = new AbortController();
+    if (abortController.signal.aborted) backendAbort.abort();
+    else
+      abortController.signal.addEventListener('abort', () => backendAbort.abort(), { once: true });
     const sdkOpts: SdkRunOptions = {
       prompt,
       cwd: state.folder,
@@ -9832,7 +9840,7 @@ export class Daemon {
       // session, leaving the parent transcript intact.
       ...(fork ? { fork } : {}),
       ...(handoffDivider ? { handoffStrict: true } : {}),
-      abortController,
+      abortController: backendAbort,
       oauthAccessToken: oauth.accessToken,
       ...(oauth.accountId ? { accountId: oauth.accountId } : {}),
       ...(mcpServer ? { mcpServer } : {}),
@@ -9950,6 +9958,7 @@ export class Daemon {
                 withLimitStall(this.opts.sdkBackend.run(sdkOpts), this.opts.limitStallGraceMs),
                 {
                   paused: () => this.hasPendingPermission(chatId),
+                  onHung: () => backendAbort.abort(),
                   now: this.opts.now,
                   ...(this.opts.toolWatchdogPollMs !== undefined
                     ? { pollMs: this.opts.toolWatchdogPollMs }
