@@ -390,7 +390,15 @@ jobs:
         run: |
           set -euo pipefail
           tag="dev-$VERSION"
-          gh release create "$tag" assets/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "Patch $VERSION" --prerelease \
-            --notes "Development build $VERSION of ${GITHUB_SHA::8}."
+          # Asset upload can time out on the runner's network; retry from a clean slate.
+          for attempt in 1 2 3; do
+            if gh release create "$tag" assets/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "Patch $VERSION" --prerelease \
+              --notes "Development build $VERSION of ${GITHUB_SHA::8}."; then
+              break
+            fi
+            [ "$attempt" = 3 ] && exit 1
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+            sleep 15
+          done
           gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'
