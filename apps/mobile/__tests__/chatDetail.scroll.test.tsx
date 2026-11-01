@@ -1135,6 +1135,34 @@ describe('keyboard-show re-pin (spec/15 § Composer)', () => {
     expect(offsetsScrolledTo()).toEqual([300]);
   });
 
+  it('shows go-to-bottom when the keyboard shrinks the list off the newest message, and tapping returns', async () => {
+    seedChatWithMessages('scroll-kbd-btn-1');
+    __setLocalSearchParams({ chatId: 'scroll-kbd-btn-1' });
+    const r = render(<ChatDetailScreen />);
+    await flush();
+    await waitForSettle();
+    const list = flatListNode(r.root);
+    layout(list, 700);
+    userFling(list, 300, 300);
+    actSync(() => {
+      list.props.onScroll(scrollEvent(0));
+    });
+    layout(list, 400);
+    // The platform reports the compensating scroll with no finger on the list.
+    actSync(() => {
+      list.props.onScroll(scrollEvent(600));
+    });
+
+    expect(queryHost(r.root, byTestId('scroll-to-bottom'))).not.toBeNull();
+    actSync(() => {
+      findHost(r.root, byTestId('scroll-to-bottom')).props.onPress();
+    });
+    actSync(() => {
+      list.props.onScroll(scrollEvent(0));
+    });
+    expect(queryHost(r.root, byTestId('scroll-to-bottom'))).toBeNull();
+  });
+
   it('never compensates while following — the newest message stays pinned instead', async () => {
     seedChatWithMessages('scroll-kbd-hold-3');
     __setLocalSearchParams({ chatId: 'scroll-kbd-hold-3' });
