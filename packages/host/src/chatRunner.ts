@@ -10258,7 +10258,10 @@ export class Daemon {
         // of this error, so it is true for a turn that died of something else
         // entirely while every key was spent, and settled BEFORE the failover
         // walk below can mark another account and change the answer.
-        let hostOutOfCredit = this.opts.hostOutOfCredit?.(chatId) === true;
+        // This aggregate reads Claude's account rotation. Codex failures must
+        // use their own structured limit or account probe below.
+        let hostOutOfCredit =
+          !isCodexModel(state.model) && this.opts.hostOutOfCredit?.(chatId) === true;
         if (
           harnessTraitsForModel(state.model).turnRetrySafe(err) &&
           this.accountOutOfCredit(chatId, limit) &&
