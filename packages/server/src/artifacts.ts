@@ -357,11 +357,15 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
       reply
         .code(200)
         .header('content-type', meta.contentType)
-        // The type is agent-chosen: sandbox it like a page so a `text/html`
-        // raw publish cannot run in the SPA's origin.
-        .header('content-security-policy', ARTIFACT_CSP)
         .header('x-content-type-options', 'nosniff')
         .header('referrer-policy', 'no-referrer');
+      // The type is agent-chosen: sandbox it like a page so a `text/html` raw
+      // publish cannot run in the SPA's origin. Video and audio are exempt: they
+      // cannot run script, and the sandbox gives a directly opened media page an
+      // opaque origin, which makes Chrome block the video's own fetch.
+      if (!/^(video|audio)\//.test(meta.contentType)) {
+        reply.header('content-security-policy', ARTIFACT_CSP);
+      }
       if (meta.filename !== undefined) {
         // RFC 5987 form carries any unicode/quote safely; the plain `filename`
         // is the ASCII-only fallback older clients read.
