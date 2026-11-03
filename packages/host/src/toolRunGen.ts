@@ -13,11 +13,9 @@
 
 import type { SdkBackend } from './sdkBackend.js';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
+import { runSmallJob } from './smallJobModels.js';
 import type { Logger } from 'pino';
 import { cutAt } from './textClean.js';
-
-/** Cheap + fast model for the one-shot summariser (same as titleGen/statusGen). */
-export const TOOL_RUN_MODEL = 'claude-haiku-4-5-20251001';
 
 const TOOL_RUN_TIMEOUT_MS = 30_000;
 /** Each call spawns a harness process; a busy turn must not spawn dozens at once. */
@@ -49,6 +47,8 @@ export interface MakeToolRunSummarizerOptions {
   sdkBackend: SdkBackend;
   /** The host's AI-call gate (spec/10-auth.md § Backend credentials). */
   runOnAccountWithCredit: RunOnAccountWithCredit;
+  /** The set model and its failovers (smallJobModels.ts). */
+  smallJobModels: readonly string[];
   logger?: Logger;
 }
 
@@ -142,9 +142,10 @@ export function makeToolRunSummarizer(
   return async function summarizeToolRun(input: GenerateToolRunSummaryInput): Promise<string> {
     await acquire();
     try {
-      const summary = await opts.runOnAccountWithCredit(
+      const summary = await runSmallJob(
+        opts,
         `tool run summary ${input.chatId}`,
-        async (accessToken) => {
+        async (accessToken, model) => {
           const abortController = new AbortController();
           const timer = setTimeout(() => abortController.abort(), TOOL_RUN_TIMEOUT_MS);
           try {
@@ -157,7 +158,7 @@ export function makeToolRunSummarizer(
               resumeSessionId: undefined,
               abortController,
               oauthAccessToken: accessToken,
-              model: TOOL_RUN_MODEL,
+              model,
               permissionMode: 'bypassPermissions',
             })) {
               if (env.type === 'assistant' && env.content) finalText += env.content;

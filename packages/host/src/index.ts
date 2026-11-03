@@ -4065,10 +4065,15 @@ async function startHost(
   const translateRecurrenceRule = makeRecurrenceTranslator({
     sdkBackend,
     runOnAccountWithCredit,
+    smallJobModels: config.smallJobModels,
     logger,
   });
   // spec/14 § Message links — the Summarise button's one-shot.
-  const summariseLink = makeLinkSummariser({ sdkBackend, runOnAccountWithCredit });
+  const summariseLink = makeLinkSummariser({
+    sdkBackend,
+    runOnAccountWithCredit,
+    smallJobModels: config.smallJobModels,
+  });
   let pullQueuedFromServer: ((chatId: string) => Promise<ChatInputEvent[]>) | undefined;
   const daemon: Daemon = new Daemon({
     ...(durableTurns ? { durableTurns } : {}),
@@ -4238,6 +4243,7 @@ async function startHost(
     generateTitle: makeTitleGenerator({
       sdkBackend,
       runOnAccountWithCredit,
+      smallJobModels: config.smallJobModels,
       // A Codex chat is titled on its own model, like its goal check (below).
       codex: { sdkBackend: routedBackend, resolveOAuth: resolveModelOAuth },
       logger,
@@ -4246,7 +4252,12 @@ async function startHost(
     // settles, summarise the thread's current status + whether it's paused on a
     // user question or merely complete. Cheap one-shot Haiku, fired async +
     // non-blocking; a failure leaves the previous status unchanged.
-    generateStatus: makeStatusGenerator({ sdkBackend, runOnAccountWithCredit, logger }),
+    generateStatus: makeStatusGenerator({
+      sdkBackend,
+      runOnAccountWithCredit,
+      smallJobModels: config.smallJobModels,
+      logger,
+    }),
     // spec/04 § Goals: after each turn settles on a chat with an active goal,
     // judge the condition against the transcript so far. `routedBackend` +
     // `resolveModelOAuth` (same pair `hook.check_request`'s prompt check uses)
@@ -4260,12 +4271,18 @@ async function startHost(
     // spec/14 § Tool runs: label each closed run of tool calls with what it was
     // for ("Set up the project locally"). Cheap one-shot Haiku, async; a
     // failure is stamped on the run rather than hidden.
-    summarizeToolRun: makeToolRunSummarizer({ sdkBackend, runOnAccountWithCredit, logger }),
+    summarizeToolRun: makeToolRunSummarizer({
+      sdkBackend,
+      runOnAccountWithCredit,
+      smallJobModels: config.smallJobModels,
+      logger,
+    }),
     // spec/04 § Send back — the one-line summary a side branch's conclusion
     // carries into its parent track. Cheap one-shot Haiku, async.
     summarizeBranchSendBack: makeBranchSendBackSummarizer({
       sdkBackend,
       runOnAccountWithCredit,
+      smallJobModels: config.smallJobModels,
       logger,
     }),
     // spec/06 § Session rotation — the handoff digest a scheduled rotation
