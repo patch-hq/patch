@@ -168,7 +168,6 @@ export class CodexBackend implements SdkBackend {
   constructor(
     private accounts: CodexAccounts,
     readonly history: CodexHistory,
-    private readonly runtime: { silenceTimeoutMs?: number } = {},
   ) {}
   async *run(opts: SdkRunOptions): AsyncIterable<SdkEnvelope> {
     const policy = codexPermission(opts.permissionMode);
@@ -262,18 +261,10 @@ export class CodexBackend implements SdkBackend {
       yield { type: 'system', sessionId, ...(seedTrim > 0 ? { seedTrim } : {}) };
       const queue: CodexNotification[] = [];
       let wake: (() => void) | undefined;
-      // A live app-server process is not proof that its active turn can still
-      // make progress. In particular, an external process manager can kill a
-      // browser/MCP child and leave Codex waiting forever while Patch's host
-      // socket continues to advertise "online". Bound complete silence so the
-      // chat becomes a visible, retryable error rather than staying `running`
-      // indefinitely. Ten minutes leaves deliberately long tools room to work;
-      // every notification (including tool progress) resets the deadline.
-      const silenceTimeoutMs = this.runtime.silenceTimeoutMs ?? 10 * 60_000;
-      let lastProgressAt = Date.now();
+      // No elapsed-time limit: a long tool is not a failure and the host cannot tell slow from stuck.
+      // Only the user's stop, or the turn itself ending, finishes it.
       const unsubscribe = client.subscribe((message) => {
         if (message.params.threadId === threadId || message.method === 'patch/processFailed') {
-          lastProgressAt = Date.now();
           queue.push(message);
           wake?.();
         }
@@ -398,17 +389,10 @@ export class CodexBackend implements SdkBackend {
             let watchdog: ReturnType<typeof setTimeout> | undefined;
             await new Promise<void>((resolve) => {
               wake = resolve;
-              const remaining = Math.max(1, silenceTimeoutMs - (Date.now() - lastProgressAt));
-              watchdog = setTimeout(resolve, Math.min(60_000, remaining));
+              watchdog = setTimeout(resolve, 60_000);
             });
             clearTimeout(watchdog);
             if (!queue.length && !opts.abortController.signal.aborted) {
-              if (Date.now() - lastProgressAt >= silenceTimeoutMs) {
-                throw new CodexTurnError(
-                  'The agent stopped responding. Its host is still connected, but the active worker or one of its tools is no longer making progress. Retry this message.',
-                  false,
-                );
-              }
               const snapshot = await client.request('thread/read', {
                 threadId,
                 includeTurns: true,

@@ -6,7 +6,6 @@
 // be free of that. SDK_BACKEND=mock (default in test stack) skips the import
 // entirely. SDK_BACKEND=real loads it.
 
-import { BashWatchdog, killProcessGroup, listProcesses } from './bashWatchdog.js';
 import { spawnClaudeInGroup } from './claudeSpawn.js';
 import { DurableTurn, type DurableTurnRequest } from './durableTurn.js';
 import { randomUUID } from 'node:crypto';
@@ -171,11 +170,6 @@ export interface SdkRunOptions {
    * processes may still be running. See claudeSpawn.ts.
    */
   onReapRefused?: ((message: string) => void) | undefined;
-  /**
-   * Told when the host steps in on a Bash call that ran past its time limit
-   * (bashWatchdog.ts), and how that ended.
-   */
-  onBashHung?: ((message: string) => void) | undefined;
   /**
    * Run claude under a detached per-turn runner so the turn outlives a host
    * restart, or — with `attach` — carry on a turn a previous host started
@@ -1964,15 +1958,6 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   const { env, mcpServers } = buildSdkEnv(opts);
   const durable = opts.durableTurn ? new DurableTurn(opts.durableTurn) : undefined;
   const sup = mcpServers === undefined ? undefined : new McpSupervisor({});
-  let claudePid: number | undefined;
-  const watchdog = opts.onBashHung
-    ? new BashWatchdog({
-        rootPid: () => durable?.claudePid() ?? claudePid,
-        list: listProcesses,
-        killGroup: killProcessGroup,
-        announce: opts.onBashHung,
-      })
-    : undefined;
   // The chat's mode can change while this process is running (the composer's
   // mode control, or "Approve & resume bypass" on a plan-mode card). `live`
   // is what every later decision in this turn reads, and `setLiveRunPermissionMode`
@@ -2004,7 +1989,7 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
           }
         : {}),
       ...SHARED_OPTS,
-      ...machineOpts(opts, durable, (pid) => (claudePid = pid)),
+      ...machineOpts(opts, durable),
       ...withMcpSupervisor(boundaryHooks(boundaryOpts), sup),
       disallowedTools: disallowedToolsFor(opts),
       env,
@@ -2030,15 +2015,6 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
       const plan = durable?.plan(msg) ?? { offset: undefined, skip: 0 };
       limitEvents.note(msg);
       const envs = translateSdkMessage(msg, toolNames);
-      if (watchdog && plan.skip === 0) {
-        for (const e of envs) {
-          if (e.type === 'tool_use' && e.tool?.name === 'Bash') {
-            void watchdog.started(e.tool.callId, e.tool.args);
-          } else if (e.type === 'tool_result' && e.toolResult) {
-            watchdog.finished(e.toolResult.callId);
-          }
-        }
-      }
       if (plan.skip === -1) continue;
       // A process that listed its skills before one was added would answer
       // "unknown command" for it; reload now, before the prompt is handled.
@@ -2070,7 +2046,6 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
       );
     }
   } finally {
-    watchdog?.stop();
     durable?.release();
     sup?.stop();
     if (opts.chatId !== undefined && liveRuns.get(opts.chatId) === live) {

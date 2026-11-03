@@ -702,8 +702,6 @@ export interface HostOptions {
    * `LIMIT_STALL_GRACE_MS`.
    */
   limitStallGraceMs?: number;
-  /** How often in-flight tool calls are checked against their deadline. Defaults to 5s. */
-  toolWatchdogPollMs?: number;
   /**
    * Enable `agent_response` hooks (spec/20-hooks.md § On the agent's
    * response). When set, the host sends a `hook.agent_response_check_request`
@@ -1317,7 +1315,6 @@ import { hasConversation } from './syntheticTurns.js';
 import { cutAt } from './textClean.js';
 import { untilAborted } from './untilAborted.js';
 import { withLimitStall } from './limitStall.js';
-import { withToolWatchdog } from './toolWatchdog.js';
 import { RepeatFailureGuard, type RepeatTrip } from './repeatFailureGuard.js';
 
 /**
@@ -8363,7 +8360,6 @@ export class Daemon {
       permissionMode: this.chatPermissionMode(chatId),
       disabledTools: state.disabledTools,
       onReapRefused: (message: string) => this.announceReapRefused(chatId, message),
-      onBashHung: (message: string) => this.announceBashHung(chatId, message),
       onPermissionRequest: (req: {
         tool: string;
         args: Record<string, unknown>;
@@ -9826,14 +9822,6 @@ export class Daemon {
         );
       }
     }
-    // The backend's own stop switch. It follows the user's stop, and the tool
-    // watchdog also pulls it when a call hangs: the backend must interrupt its
-    // turn (and kill the call's processes), or the provider keeps running it
-    // and rejects the next message as a second writer.
-    const backendAbort = new AbortController();
-    if (abortController.signal.aborted) backendAbort.abort();
-    else
-      abortController.signal.addEventListener('abort', () => backendAbort.abort(), { once: true });
     const sdkOpts: SdkRunOptions = {
       prompt,
       cwd: state.folder,
@@ -9878,7 +9866,7 @@ export class Daemon {
       // session, leaving the parent transcript intact.
       ...(fork ? { fork } : {}),
       ...(handoffDivider ? { handoffStrict: true } : {}),
-      abortController: backendAbort,
+      abortController,
       oauthAccessToken: oauth.accessToken,
       ...(oauth.accountId ? { accountId: oauth.accountId } : {}),
       ...(mcpServer ? { mcpServer } : {}),
@@ -9906,7 +9894,6 @@ export class Daemon {
       // forever, so patch no longer omits this for any mode — it trusts the
       // SDK's own gating instead.
       onReapRefused: (message: string) => this.announceReapRefused(chatId, message),
-      onBashHung: (message: string) => this.announceBashHung(chatId, message),
       ...this.durableTurnFor(chatId, targetHarness, localId),
       onPermissionRequest: (req: {
         tool: string;
@@ -9992,17 +9979,7 @@ export class Daemon {
         for (;;) {
           try {
             for await (const env of untilAborted(
-              withToolWatchdog(
-                withLimitStall(this.opts.sdkBackend.run(sdkOpts), this.opts.limitStallGraceMs),
-                {
-                  paused: () => this.hasPendingPermission(chatId),
-                  onHung: () => backendAbort.abort(),
-                  now: this.opts.now,
-                  ...(this.opts.toolWatchdogPollMs !== undefined
-                    ? { pollMs: this.opts.toolWatchdogPollMs }
-                    : {}),
-                },
-              ),
+              withLimitStall(this.opts.sdkBackend.run(sdkOpts), this.opts.limitStallGraceMs),
               abortController.signal,
               (env) => env.type === 'tool_result',
             )) {
@@ -14084,20 +14061,6 @@ export class Daemon {
    * what the turn started may still be running. Arrives after the turn has
    * ended, from a timer — a chat deleted in the meantime only gets the log.
    */
-  private announceBashHung(chatId: string, message: string): void {
-    this.opts.logger.error({ chatId }, message);
-    if (!this.chatState.has(chatId)) return;
-    const ev: ChatMessageEvent = {
-      type: 'chat.message',
-      chatId,
-      role: 'system',
-      content: message,
-      seq: this.bumpSeq(chatId),
-      createdAt: this.opts.now(),
-    };
-    this.emit(ev);
-  }
-
   private announceReapRefused(chatId: string, message: string): void {
     this.opts.logger.error({ chatId }, message);
     if (!this.chatState.has(chatId)) return;

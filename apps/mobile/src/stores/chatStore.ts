@@ -64,6 +64,8 @@ export interface ChatEventEntry {
     | 'handoff_link';
   /** The chat a `handoff_link` row points at (spec/04 § Handoff budget). */
   linkedChatId?: string;
+  /** tool_call only: when the host says the call started (wire `startedAt`), not when this phone received it. */
+  startedAt?: number;
   role?: 'user' | 'assistant' | 'system';
   content?: string;
   /**
@@ -1308,6 +1310,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             toolArgs: event.args,
             callId: event.callId,
             at: Date.now(),
+            ...(event.startedAt !== undefined ? { startedAt: event.startedAt } : {}),
           });
           break;
         }
