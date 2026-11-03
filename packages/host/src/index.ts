@@ -327,6 +327,12 @@ export interface MainTestHooks {
   validateClaudeToken?: ClaudeTokenValidator;
   /** Where the host's log lines go instead of stdout — lets a test read what boot logged. */
   logStream?: import('pino').DestinationStream;
+  /**
+   * Overrides how long a published build must be the newest before the
+   * scheduled auto-update installs it. Present ONLY so a test can exercise the
+   * boot-time apply without waiting out the real window.
+   */
+  autoUpdateSettleMs?: number;
 }
 
 /**
@@ -4671,7 +4677,7 @@ async function startHost(
   );
   credentialTimer.unref?.();
 
-  const autoUpdateSettle = createAutoUpdateSettle();
+  const autoUpdateSettle = createAutoUpdateSettle({ settleMs: testHooks?.autoUpdateSettleMs });
   const refreshUpdateAvailable = async (): Promise<void> => {
     const check = await checkForUpdate({
       serverUrl: config.serverUrl,
