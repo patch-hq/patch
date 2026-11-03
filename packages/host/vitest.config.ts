@@ -9,9 +9,10 @@ export default defineConfig({
     retry: 2,
     // On a CI runner the suite's real sidecars and fork workers together
     // outgrow the VM's memory and the kernel SIGKILLs the run (exit 137, no
-    // assertion failed). Fewer parallel forks keep it inside the box.
+    // assertion failed). Two forks still got killed in merge-group runs, so CI
+    // runs one at a time.
     poolOptions: {
-      forks: process.env.CI ? { minForks: 1, maxForks: 2 } : {},
+      forks: process.env.CI ? { minForks: 1, maxForks: 1 } : {},
     },
     coverage: {
       provider: 'v8',
