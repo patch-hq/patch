@@ -12,7 +12,11 @@ export default defineConfig({
     // assertion failed). Two forks still got killed in merge-group runs, so CI
     // runs one at a time.
     poolOptions: {
-      forks: process.env.CI ? { minForks: 1, maxForks: 1 } : {},
+      forks: process.env.CI
+        ? // A fork that outgrows the heap fails with a V8 out-of-memory error
+          // naming the test file, instead of the kernel killing the whole run.
+          { minForks: 1, maxForks: 1, execArgv: ['--max-old-space-size=2048'] }
+        : {},
     },
     coverage: {
       provider: 'v8',
