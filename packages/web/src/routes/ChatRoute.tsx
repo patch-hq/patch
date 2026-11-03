@@ -1681,8 +1681,8 @@ export function ChatRoute({
         setGoal(chatId, prev);
         pushError(failed('setting goal'), undefined, (err as Error).message);
       });
-      if (parsedGoal.goal === null) return;
-      message = parsedGoal.goal;
+      if (parsedGoal.message === '') return;
+      message = parsedGoal.message;
     }
     // `/job <name>` fires that job once, now (the Jobs page's "Run now"),
     // instead of sending a chat turn. REST only; every failure is surfaced.
