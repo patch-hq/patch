@@ -1029,6 +1029,37 @@ describe('WS hub relay', () => {
     }
   });
 
+  it('auth.ok reports the bundle on disk now, not the one at boot (web shipped without a restart)', async () => {
+    const user = await generateUserKeypair();
+    const registry = Registry.load(mkdtempSync(join(tmpdir(), 'patch-wshub-ver2-')));
+    registry.bootstrapAccount({ keypair: user });
+    registry.upsertSurface({ surfaceId: 'srf-ver2', surfaceKind: 'web', label: 'b', issuedAt: 1 });
+    const jwt = await mintSurfaceCredential({
+      userPrivateKey: user.privateKey,
+      surfaceId: 'srf-ver2',
+      surfaceKind: 'web',
+      label: 'browser',
+    });
+    const webDir = mkdtempSync(join(tmpdir(), 'patch-wshub-web2-'));
+    const page = (hash: string): string =>
+      `<!doctype html><script type="module" src="/app/assets/index-${hash}.js"></script>`;
+    writeFileSync(join(webDir, 'index.html'), page('OLD'));
+    const h = await startServer({ registry, webDistDir: webDir });
+    try {
+      // A deploy rsyncs a new build under the running server; nobody has
+      // requested index.html through the wildcard route since.
+      writeFileSync(join(webDir, 'index.html'), page('NEW'));
+      const client = new WireTestClient({ url: h.url, auth: jwt });
+      await client.connect();
+      const ok = await client.waitFor('auth.ok');
+      expect(ok.webBundleHash).toBe('assets/index-NEW.js');
+      await client.close();
+    } finally {
+      await h.close();
+      rmSync(webDir, { recursive: true, force: true });
+    }
+  });
+
   it('closes connection (4400) on a malformed inbound frame', async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(14));
     const registry = Registry.load(dir);
