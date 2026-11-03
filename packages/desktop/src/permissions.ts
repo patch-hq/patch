@@ -24,6 +24,10 @@
 //     API's `clipboard-write` never reaches this code, so listing it would be
 //     decoration.
 //
+//   - `fullscreen` — the fullscreen button on an inline video player in chat
+//     (view_file). Denied, Electron refuses the HTML fullscreen request and the
+//     button does nothing.
+//
 // Reading the clipboard is a different privilege — it hands a page whatever the
 // user last copied — and nothing in Patch needs it, so `clipboard-read` and
 // `deprecated-sync-clipboard-read` stay denied. Only the write side is allowed.
@@ -41,6 +45,7 @@ export const ALLOWED_PERMISSIONS: readonly string[] = [
   'media',
   'audioCapture',
   'clipboard-sanitized-write',
+  'fullscreen',
 ];
 
 /**
