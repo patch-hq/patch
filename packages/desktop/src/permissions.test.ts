@@ -72,6 +72,11 @@ test('denies READING the clipboard from EVERY origin, including the app itself',
   assert.ok(!ALLOWED_PERMISSIONS.includes('clipboard-read-write'));
 });
 
+test('grants fullscreen for the app origin only (inline video player)', () => {
+  assert.equal(decidePermission('fullscreen', APP, APP), true);
+  assert.equal(decidePermission('fullscreen', 'https://evil.example.com', APP), false);
+});
+
 test('denies every other permission even from the app origin', () => {
   for (const permission of [
     'geolocation',
@@ -85,7 +90,6 @@ test('denies every other permission even from the app origin', () => {
     'idle-detection',
     'window-management',
     'storage-access',
-    'fullscreen',
     'pointerLock',
     'display-capture',
     'unknown',
