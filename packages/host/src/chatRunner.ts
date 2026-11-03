@@ -412,6 +412,12 @@ export interface HostOptions {
          * for these two, and naming it as the limit hit reads as nonsense.
          */
         scope?: 'session' | 'week';
+        /**
+         * `scope` comes from a forecast (a pool at 98%+), not a refusal. Good
+         * enough to route around the account, not evidence that a failure the
+         * provider never called a limit was about credit.
+         */
+        estimated?: boolean;
         utilization?: number;
         resetsAt?: number;
         /** Extra usage could not cover it — why this is a stop, not a spill. */
@@ -7113,7 +7119,9 @@ export class Daemon {
     const ranOn = this.runningOnAccount.get(chatId);
     const info = this.opts.accountLimitInfo?.(ranOn);
     const probeBlocked =
-      info?.scope !== undefined && (info.resetsAt === undefined || info.resetsAt > this.opts.now());
+      info?.scope !== undefined &&
+      info.estimated !== true &&
+      (info.resetsAt === undefined || info.resetsAt > this.opts.now());
     return isAccountExhausted(limit, { probeBlocked });
   }
 

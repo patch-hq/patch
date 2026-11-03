@@ -48,6 +48,27 @@ export function refusingRateLimitScope(
   );
 }
 
+/**
+ * The spendable pool the provider has actually REFUSED, if one has — a
+ * `rejected` status whose reset is still ahead.
+ *
+ * Narrower than `refusingRateLimitScope`, which also counts a pool at 98% as
+ * empty. That is a forecast, right for routing a turn away from an account, and
+ * wrong as evidence that some other failure was about credit: a crash on an
+ * account at 99% was read as the account running out, which sidelined it and
+ * told every chat the whole host was out of credit while it was still answering.
+ */
+export function rejectedRateLimitScope(
+  windows: RateLimitWindows | undefined,
+  now: number = Date.now(),
+): SpendableRateLimitScope | undefined {
+  if (!windows) return undefined;
+  return SPENDABLE_RATE_LIMIT_SCOPES.find((scope) => {
+    const w = windows[scope];
+    return w?.status === 'rejected' && (w.resetsAt === undefined || w.resetsAt > now);
+  });
+}
+
 /** True when a spendable pool is refusing work right now. */
 export function rateLimitWindowsBlocked(
   windows: RateLimitWindows | undefined,
