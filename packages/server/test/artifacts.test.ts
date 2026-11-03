@@ -276,6 +276,11 @@ describe('artifacts', () => {
       expect(whole.rawPayload.equals(video)).toBe(true);
 
       expect((await get(`bytes=${size}-`)).statusCode).toBe(416);
+
+      // No numbers at all is malformed, not an out-of-range request.
+      const bare = await get('bytes=-');
+      expect(bare.statusCode).toBe(200);
+      expect(bare.rawPayload.equals(video)).toBe(true);
     } finally {
       await built.app.close();
     }
