@@ -2495,10 +2495,7 @@ export class Daemon {
       // a loop tick due while the chat's pump is occupied is absorbed rather
       // than queued (see wake.ts `fire`/`onTurnEnd`).
       isBusy: (chatId) => this.pumping.has(chatId),
-      isLimited: (chatId) =>
-        this.limitBlocks.has(chatId) ||
-        this.rateLimitPendingTurns.has(chatId) ||
-        this.rateLimitTimers.has(chatId),
+      isLimited: (chatId) => this.isWaitingOnCredit(chatId),
       now: () => this.opts.now(),
       logger: this.opts.logger,
     });
@@ -3749,6 +3746,33 @@ export class Daemon {
     // state change (spec/02 § Self-wake, "Visible, never invisible").
     this.emitState(chatId);
     return { fireAt };
+  }
+
+  /**
+   * Is this chat stalled on credit, so a self-wake delivered now would only
+   * stack behind the turn that failed?
+   *
+   * Three shapes: blocked by a limit, parked with a turn owed, or ERRORED on a
+   * spent account (`lastError.outOfCredit`, no park or timer). The third was
+   * missing: a loop's wakes kept landing in such a chat, one per tick, and
+   * were all replayed at once when credit returned — the agent saw a pile of
+   * identical wake turns and ended its own loop.
+   */
+  private isWaitingOnCredit(chatId: string): boolean {
+    if (
+      this.limitBlocks.has(chatId) ||
+      this.rateLimitPendingTurns.has(chatId) ||
+      this.rateLimitTimers.has(chatId)
+    ) {
+      return true;
+    }
+    if (this.runs.has(chatId)) return false;
+    const last =
+      (this.opts.metaStore.read(chatId)?.lastError as ChatLastError | undefined) ??
+      this.chatState.get(chatId)?.lastError;
+    // Same cutoff as the resume sweep: a failure older than that is never
+    // resumed, so holding wakes for it would hold them for ever.
+    return last?.outOfCredit === true && this.opts.now() - last.at <= STALE_RETRY_CUTOFF_MS;
   }
 
   /** Cancel a chat's pending self-wake (stop the loop). Returns whether one existed. */
