@@ -9,7 +9,7 @@ import {
   seedMcpServers,
   withBrowserToolsEnabled,
 } from '../src/mcpServers.js';
-import { codexMcpServers } from '../src/codexBackend.js';
+import { codexDisabledMcpTools, codexMcpServers } from '../src/codexBackend.js';
 import { buildSdkEnv } from '../src/sdkBackend.js';
 
 describe('seedMcpServers', () => {
@@ -83,6 +83,26 @@ describe('codexMcpServers', () => {
     expect(
       codexMcpServers({ extraMcpServers: [{ name: 'mine', command: 'm', args: [], env: {} }] }),
     ).toBeUndefined();
+  });
+});
+
+describe('Codex tool exclusions', () => {
+  const patch = { command: 'node', args: ['tools.js'], env: {} };
+
+  it('switches excluded MCP tools off on their own server with disabled_tools', () => {
+    const servers = codexMcpServers({
+      mcpServer: patch,
+      disabledTools: ['mcp__patch__patch_notify', 'mcp__patch__patch_report'],
+    });
+    expect(servers).toEqual({
+      patch: { ...patch, enabled: true, disabled_tools: ['patch_notify', 'patch_report'] },
+    });
+  });
+
+  it('reports native tool names as unsupported instead of dropping them', () => {
+    expect(codexDisabledMcpTools(['Bash', 'mcp__patch__patch_notify']).unsupported).toEqual([
+      'Bash',
+    ]);
   });
 });
 

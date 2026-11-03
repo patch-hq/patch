@@ -152,7 +152,7 @@ export class CodexTurnError extends TurnFailedError {
  * same way: nothing at all when the caller configured no patch tools server.
  */
 export function codexMcpServers(
-  opts: Pick<SdkRunOptions, 'mcpServer' | 'extraMcpServers' | 'patchMcpOff'>,
+  opts: Pick<SdkRunOptions, 'mcpServer' | 'extraMcpServers' | 'patchMcpOff' | 'disabledTools'>,
 ): Record<string, RpcObject> | undefined {
   if (!opts.mcpServer) return undefined;
   const servers: Record<string, RpcObject> = opts.patchMcpOff
@@ -161,7 +161,33 @@ export function codexMcpServers(
   for (const s of opts.extraMcpServers ?? []) {
     servers[s.name] = { command: s.command, args: s.args, env: s.env, enabled: true };
   }
+  for (const [server, tools] of codexDisabledMcpTools(opts.disabledTools).byServer) {
+    if (servers[server]) servers[server] = { ...servers[server], disabled_tools: tools };
+  }
   return servers;
+}
+
+/**
+ * Splits a chat's exclusion list into what Codex can honour — MCP tools,
+ * named `mcp__<server>__<tool>` and switched off per server with Codex's
+ * `disabled_tools` — and `unsupported`, the native tool names Codex has no
+ * switch for. Those stay a loud error rather than being dropped.
+ */
+export function codexDisabledMcpTools(disabledTools: readonly string[] | undefined): {
+  byServer: Map<string, string[]>;
+  unsupported: string[];
+} {
+  const byServer = new Map<string, string[]>();
+  const unsupported: string[] = [];
+  for (const id of new Set(disabledTools ?? [])) {
+    const m = /^mcp__(.+?)__(.+)$/.exec(id);
+    if (!m) {
+      unsupported.push(id);
+      continue;
+    }
+    byServer.set(m[1]!, [...(byServer.get(m[1]!) ?? []), m[2]!]);
+  }
+  return { byServer, unsupported };
 }
 
 export class CodexBackend implements SdkBackend {
@@ -172,8 +198,11 @@ export class CodexBackend implements SdkBackend {
   ) {}
   async *run(opts: SdkRunOptions): AsyncIterable<SdkEnvelope> {
     const policy = codexPermission(opts.permissionMode);
-    if (opts.disabledTools?.length)
-      throw new Error('Codex tool exclusions must be configured before running this chat');
+    const { unsupported } = codexDisabledMcpTools(opts.disabledTools);
+    if (unsupported.length)
+      throw new Error(
+        `Codex cannot switch off these tools for this chat: ${unsupported.join(', ')}`,
+      );
     const { accountId } = await this.accounts
       .resolveChosen(opts.accountId, opts.model?.startsWith('openai/api/') ? 'apiKey' : 'chatgpt')
       .catch((error: Error) => {
