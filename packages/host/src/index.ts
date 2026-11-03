@@ -927,6 +927,9 @@ async function startHost(
             currentVersion: VERSION,
             target: BUILD_TARGET,
             patchHome: config.patchHome,
+            // Recorded only once the installer is about to run, so a deferred
+            // or artifact-pending apply leaves the version free to retry.
+            onInstallStart: (version) => hostStateStore.update({ lastAutoUpdateAttempt: version }),
             untilIdle: async () => {
               // Surfaces read this to say "waiting for chats" instead of "behind".
               const held = runningChats().length > 0;
@@ -4598,7 +4601,6 @@ async function startHost(
         );
         return;
       }
-      if (check.version) hostStateStore.update({ lastAutoUpdateAttempt: check.version });
       const result = await applyUpdateOnce();
       if (!result.applied && !result.deferred) {
         logger.warn({ reason: result.message }, 'self-update: scheduled apply refused');
