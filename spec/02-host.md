@@ -903,6 +903,8 @@ Self-wake vs job vs `CronCreate`: a job (`08-triggers-and-jobs.md`) is an extern
 
 The agent tracks its work with Claude Code's native TodoWrite tool. The host observes those tool calls and mirrors the list onto chat state as `todos` — `{text, status}` per item, status ∈ pending / in_progress / completed — carried on `chat.state` so every surface can show what the chat is working through (`14-design-web.md` § Main chat panel). The mirror follows the agent's list and is not persisted: a rehydrated chat starts empty until its next TodoWrite.
 
+History: the agent's TodoWrite replaces its whole list, so the mirror keeps the items finished earlier that a new list no longer names, ahead of the new items, so the list stays a record of what was done.
+
 Keeping the agent on the list. When a turn settles idle with items still incomplete, the host fires the head incomplete item back into the chat as a fresh `[todo]`-prefixed turn, so the agent works one focused item at a time instead of drifting. The fired turn carries a `<system-reminder>` telling the agent the line is one of its own TodoWrite items and to mark it in_progress now and completed once it is done; without that cue the agent does the work and leaves the item reading pending for ever.
 
 An item already fired that comes back still incomplete is not re-fired — the agent stopped for a reason (usually a question for the user), and re-firing would steamroll the user's turn. A whole turn was spent on it, so the host marks it in_progress rather than leaving it reading pending, which would claim it was never started. The host never marks an item completed: only the agent or the user closes one out.
