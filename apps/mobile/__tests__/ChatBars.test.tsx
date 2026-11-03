@@ -191,6 +191,13 @@ describe('Task bar', () => {
     expect(queryHost(r.root, byTestId('task-bar-list'))).toBeNull();
   });
 
+  it('expanded: the line is the Tasks title, not the first item', () => {
+    seed({ todos: TODOS });
+    const r = renderRN(<Harness />);
+    actSync(() => findHost(r.root, byTestId('task-bar-summary')).props.onPress());
+    expect(hasText(findHost(r.root, byTestId('task-bar-head')), 'Tasks')).toBe(true);
+  });
+
   it('reads "All tasks done" once everything is complete', () => {
     seed({ todos: [{ text: 'a', status: 'completed' }] });
     const r = renderRN(<Harness />);

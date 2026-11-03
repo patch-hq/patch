@@ -160,6 +160,7 @@ import {
   parseTodoWriteArgs,
   selectNextTodo,
   TODO_PREFIX,
+  keepCompletedHistory,
 } from './todos.js';
 import { execFileSync } from 'node:child_process';
 import { assistantContextTokens, resultContextWindow } from './contextUsage.js';
@@ -11046,7 +11047,7 @@ export class Daemon {
       this.opts.logger.warn({ chatId }, 'TodoWrite args unrecognised; leaving todo list unchanged');
       return;
     }
-    state.todos = carryTodoAttachments(todos, state.todos);
+    state.todos = keepCompletedHistory(carryTodoAttachments(todos, state.todos), state.todos);
     this.persistTodos(chatId, state.todos);
     state.lastUpdated = this.opts.now();
     this.emitState(chatId);
