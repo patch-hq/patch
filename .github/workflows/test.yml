@@ -62,10 +62,10 @@ jobs:
       # a slow moment instead of a killed shard.
       - name: Add swap
         run: |
-          sudo fallocate -l 6G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          sudo fallocate -l 6G /mnt/ci-extra.swap
+          sudo chmod 600 /mnt/ci-extra.swap
+          sudo mkswap /mnt/ci-extra.swap
+          sudo swapon /mnt/ci-extra.swap
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @patch/web exec playwright install --with-deps chromium
