@@ -15,11 +15,9 @@
 import type { StatusKind } from '@patch/wire';
 import type { SdkBackend } from './sdkBackend.js';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
+import { runSmallJob } from './smallJobModels.js';
 import type { Logger } from 'pino';
 import { stripWrappingQuotes } from './textClean.js';
-
-/** Cheap + fast model for the one-shot status summariser. */
-export const STATUS_MODEL = 'claude-haiku-4-5-20251001';
 
 /** Abort a hung status call so it never leaks a warm SDK query. */
 const STATUS_TIMEOUT_MS = 20_000;
@@ -54,6 +52,8 @@ export interface MakeStatusGeneratorOptions {
    * answer.
    */
   runOnAccountWithCredit: RunOnAccountWithCredit;
+  /** The set model and its failovers (smallJobModels.ts). */
+  smallJobModels: readonly string[];
   logger?: Logger;
 }
 
@@ -141,7 +141,7 @@ export function makeStatusGenerator(
   return async function generateStatus(
     input: GenerateStatusInput,
   ): Promise<ChatStatusSummary | null> {
-    return await opts.runOnAccountWithCredit(`status gen ${input.chatId}`, async (accessToken) => {
+    return await runSmallJob(opts, `status gen ${input.chatId}`, async (accessToken, model) => {
       const abortController = new AbortController();
       const timer = setTimeout(() => abortController.abort(), STATUS_TIMEOUT_MS);
       try {
@@ -157,7 +157,7 @@ export function makeStatusGenerator(
           resumeSessionId: undefined,
           abortController,
           oauthAccessToken: accessToken,
-          model: STATUS_MODEL,
+          model,
           permissionMode: 'bypassPermissions',
         })) {
           if (env.type === 'assistant' && env.content) finalText += env.content;

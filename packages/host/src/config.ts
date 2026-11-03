@@ -1,5 +1,6 @@
 // Host env config. NO FALLBACKS for required keys.
 
+import { parseSmallJobModels } from './smallJobModels.js';
 import { execFileSync } from 'node:child_process';
 import { homedir, hostname } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -72,6 +73,13 @@ export interface HostConfig {
    * through the server registry.
    */
   hostName: string;
+  /**
+   * The model the small one-shot jobs (titles, status lines, tool-run labels,
+   * send-back and link summaries, recurrence translation) run on, then the
+   * failovers tried in order. PATCH_SMALL_JOB_MODELS, comma-separated, set
+   * model first (spec/02-host.md § Small jobs).
+   */
+  smallJobModels: readonly string[];
   /** Home directory for ~/.patch state. PATCH_HOME override, otherwise ~/.patch. */
   patchHome: string;
   /** Unix domain socket path the local control HTTP listens on. */
@@ -340,6 +348,7 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
   );
 
   return {
+    smallJobModels: parseSmallJobModels(env['PATCH_SMALL_JOB_MODELS']),
     hostName:
       env['PATCH_HOST_NAME'] !== undefined && env['PATCH_HOST_NAME'] !== ''
         ? env['PATCH_HOST_NAME']
