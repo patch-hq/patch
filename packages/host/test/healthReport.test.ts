@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groupProcesses, parseMeminfo } from '../src/healthReport.js';
+import { groupProcesses, parseMeminfo, sustainedLag } from '../src/healthReport.js';
 
 describe('parseMeminfo', () => {
   it('reads memory and swap in bytes', () => {
@@ -32,5 +32,15 @@ describe('groupProcesses', () => {
       { name: 'claude', count: 1, rssBytes: 1048576 * 1024 },
       { name: 'sshd', count: 1, rssBytes: 102400 * 1024 },
     ]);
+  });
+});
+
+describe('sustainedLag', () => {
+  it('ignores a single stalled window', () => {
+    expect(sustainedLag(5, 2500)).toBe(5);
+    expect(sustainedLag(2500, 5)).toBe(5);
+  });
+  it('reports lag that lasted two windows', () => {
+    expect(sustainedLag(1800, 2500)).toBe(1800);
   });
 });

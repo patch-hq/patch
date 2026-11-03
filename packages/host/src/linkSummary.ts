@@ -8,8 +8,8 @@
 
 import type { SdkBackend } from './sdkBackend.js';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
+import { runSmallJob } from './smallJobModels.js';
 
-export const LINK_SUMMARY_MODEL = 'claude-haiku-4-5-20251001';
 const LINK_SUMMARY_TIMEOUT_MS = 45_000;
 
 export interface SummariseLinkInput {
@@ -28,11 +28,14 @@ export function buildLinkSummaryPrompt(input: Pick<SummariseLinkInput, 'prompt' 
 export function makeLinkSummariser(opts: {
   sdkBackend: SdkBackend;
   runOnAccountWithCredit: RunOnAccountWithCredit;
+  /** The set model and its failovers (smallJobModels.ts). */
+  smallJobModels: readonly string[];
 }): (input: SummariseLinkInput) => Promise<string | null> {
   return async function summariseLink(input) {
-    return await opts.runOnAccountWithCredit(
+    return await runSmallJob(
+      opts,
       `link summary ${input.requestId}`,
-      async (accessToken) => {
+      async (accessToken, model) => {
         const abortController = new AbortController();
         const timer = setTimeout(() => abortController.abort(), LINK_SUMMARY_TIMEOUT_MS);
         try {
@@ -45,7 +48,7 @@ export function makeLinkSummariser(opts: {
             resumeSessionId: undefined,
             abortController,
             oauthAccessToken: accessToken,
-            model: LINK_SUMMARY_MODEL,
+            model,
             permissionMode: 'bypassPermissions',
           })) {
             if (env.type === 'assistant' && env.content) finalText += env.content;

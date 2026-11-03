@@ -501,6 +501,12 @@ export async function applyUpdate(opts: {
    * the time of the request.
    */
   untilIdle?: () => Promise<void>;
+  /**
+   * Called with the build's version once the machine is idle and immediately
+   * before the installer runs — the point at which an install has genuinely
+   * been tried. Deferred and awaiting-artifact paths never reach it.
+   */
+  onInstallStart?: (version: string) => void;
   /** Installer-runner override — test hook, so a unit test starts no process. */
   runInstaller?: (cmd: string, args: string[], fd: number, timeoutMs?: number) => Promise<void>;
   logger: Logger;
@@ -586,6 +592,7 @@ export async function applyUpdate(opts: {
     if (existsSync(node)) chmodSync(node, 0o755);
 
     if (opts.untilIdle) await opts.untilIdle();
+    opts.onInstallStart?.(manifest.version);
     opts.logger.info(
       { from: opts.currentVersion, to: manifest.version, target: opts.target },
       'self-update: verified artifact, handing over to its installer',

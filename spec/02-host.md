@@ -153,6 +153,12 @@ A failed install is reported to surfaces and the host holds turns for that
 backend until it is resolved. Backends are independent: a host with one backend
 unprovisioned keeps running chats on the others.
 
+## Small jobs
+
+Chat titles, status lines, tool-run labels, branch send-back summaries, link summaries and recurrence translation are small one-shot model queries. They share one ordered model list: the first entry is the set model, and each later entry is a failover tried in order when the one before it fails. The default is `claude-haiku-4-5-20251001` then `claude-sonnet-4-5`; `PATCH_SMALL_JOB_MODELS` (comma-separated, set model first) replaces it for the host. An empty entry or a model named twice aborts startup.
+
+This is separate from account failover (`10-auth.md` § Backend credentials): the account gate picks the credential, then the models are walked on it. Each failed model is logged. When every model fails the job fails with an error naming the models tried and the last reason, so a retired or unavailable set model is visible and not covered over. Jobs with their own configured model (goal checks, meeting analysis, manager sweeps, rotation digests) and Codex chats, which run on their own model, are not part of this list.
+
 ## Permission mode
 
 Turns run under `auto` by default: a model classifier approves or denies each

@@ -13,11 +13,9 @@
 
 import type { SdkBackend } from './sdkBackend.js';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
+import { runSmallJob } from './smallJobModels.js';
 import type { Logger } from 'pino';
 import { cutAt } from './textClean.js';
-
-/** Cheap + fast model for the one-shot summariser (same as titleGen/toolRunGen). */
-export const BRANCH_SEND_BACK_MODEL = 'claude-haiku-4-5-20251001';
 
 const SEND_BACK_TIMEOUT_MS = 30_000;
 /** The row is one line. */
@@ -37,6 +35,8 @@ export interface GenerateBranchSendBackInput {
 export interface MakeBranchSendBackSummarizerOptions {
   sdkBackend: SdkBackend;
   runOnAccountWithCredit: RunOnAccountWithCredit;
+  /** The set model and its failovers (smallJobModels.ts). */
+  smallJobModels: readonly string[];
   logger?: Logger;
 }
 
@@ -81,9 +81,10 @@ export function makeBranchSendBackSummarizer(
   return async function summarizeBranchSendBack(
     input: GenerateBranchSendBackInput,
   ): Promise<string> {
-    const summary = await opts.runOnAccountWithCredit(
+    const summary = await runSmallJob(
+      opts,
       `branch send-back ${input.chatId}/${input.branchId}`,
-      async (accessToken) => {
+      async (accessToken, model) => {
         const abortController = new AbortController();
         const timer = setTimeout(() => abortController.abort(), SEND_BACK_TIMEOUT_MS);
         try {
@@ -96,7 +97,7 @@ export function makeBranchSendBackSummarizer(
             resumeSessionId: undefined,
             abortController,
             oauthAccessToken: accessToken,
-            model: BRANCH_SEND_BACK_MODEL,
+            model,
             permissionMode: 'bypassPermissions',
           })) {
             if (env.type === 'assistant' && env.content) finalText += env.content;
