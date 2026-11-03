@@ -6,7 +6,12 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { createHash, generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
-import { checkForUpdate, verifyArtifactSignature, compareVersions } from '../src/selfUpdate.js';
+import {
+  checkForUpdate,
+  verifyArtifactSignature,
+  compareVersions,
+  createAutoUpdateSettle,
+} from '../src/selfUpdate.js';
 
 /** Sign a hex digest exactly as scripts/build-host.mjs does. */
 function signDigest(digestHex: string): { sig: string; publicKeyB64Url: string } {
@@ -611,5 +616,23 @@ describe('describeUpdateRefusal', () => {
     expect(describeUpdateRefusal('could not reach the update channel: boom')).toBe(
       'Update failed: could not reach the update channel: boom',
     );
+  });
+});
+
+describe('auto-update settle', () => {
+  it('waits for a build to stay the newest before installing it, and restarts the clock on a newer one', () => {
+    let t = 0;
+    const s = createAutoUpdateSettle({ settleMs: 1000, now: () => t });
+    expect(s.settled('1.0.1')).toBe(false);
+    t = 999;
+    expect(s.settled('1.0.1')).toBe(false);
+    t = 1000;
+    expect(s.settled('1.0.1')).toBe(true);
+    t = 1500;
+    expect(s.settled('1.0.2')).toBe(false);
+    t = 2499;
+    expect(s.settled('1.0.2')).toBe(false);
+    t = 2500;
+    expect(s.settled('1.0.2')).toBe(true);
   });
 });
