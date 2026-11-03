@@ -160,6 +160,7 @@ import {
   applyUpdate,
   checkForUpdate,
   createArtifactWait,
+  createAutoUpdateSettle,
   describeUpdateRefusal,
   createUpdateGate,
   requestUpdate,
@@ -4670,6 +4671,7 @@ async function startHost(
   );
   credentialTimer.unref?.();
 
+  const autoUpdateSettle = createAutoUpdateSettle();
   const refreshUpdateAvailable = async (): Promise<void> => {
     const check = await checkForUpdate({
       serverUrl: config.serverUrl,
@@ -4696,6 +4698,16 @@ async function startHost(
     // published, and a busy machine defers until idle rather than killing a
     // running turn.
     if (autoUpdateHosts && (check.available || check.awaitingArtifact)) {
+      // Deploys come in bursts and each install restarts the host, so wait
+      // until the published build has stopped changing (`AUTO_UPDATE_SETTLE_MS`).
+      // The next scheduled check picks it up; the Update button skips this.
+      if (check.version && !autoUpdateSettle.settled(check.version)) {
+        logger.info(
+          { version: check.version },
+          'self-update: scheduled apply waiting for the published build to settle',
+        );
+        return;
+      }
       if (check.version && check.version === hostStateStore.get().lastAutoUpdateAttempt) {
         logger.warn(
           { version: check.version },
