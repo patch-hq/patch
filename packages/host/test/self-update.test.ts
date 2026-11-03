@@ -357,15 +357,19 @@ describe('requestUpdate: never restarts under a running turn', () => {
           await idle;
           order.push('idle');
         },
+        onInstallStart: (v) => {
+          order.push(`start:${v}`);
+        },
         runInstaller: async () => {
           order.push('install');
         },
       });
       await vi.waitFor(() => expect(order).toEqual(['waiting']));
-      expect(order).not.toContain('install');
+      // Held for idle: nothing has been attempted yet, so nothing is recorded.
+      expect(order).not.toContain('start:0.2.0');
       release();
       await done;
-      expect(order).toEqual(['waiting', 'idle', 'install']);
+      expect(order).toEqual(['waiting', 'idle', 'start:0.2.0', 'install']);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -375,6 +379,31 @@ describe('requestUpdate: never restarts under a running turn', () => {
 // 2026-10-04/05: a deploy publishes linux-x64 first and darwin-arm64 a minute
 // later, so a Mac polling in between saw a newer version with no artifact for
 // it and toasted "did not update" on a deploy that was fine.
+describe('a deferred apply', () => {
+  it('requestUpdate never reaches the install-start hook while turns are running', async () => {
+    const { requestUpdate } = await import('../src/selfUpdate.js');
+    const logger = { info() {}, warn() {}, error() {} } as never;
+    const onInstallStart = vi.fn();
+    let finish!: () => void;
+    const held = new Promise<void>((r) => (finish = r));
+    const res = await requestUpdate({
+      runningChats: () => ['chat'],
+      logger,
+      check: async () => ({ available: true, version: '0.2.0', reason: '' }),
+      // Stand-in for applyUpdate: holds on idle, and only then signals start.
+      apply: async () => {
+        await held;
+        onInstallStart('0.2.0');
+        return { applied: true, message: 'ok' };
+      },
+    });
+    expect(res.deferred).toBe(true);
+    expect(onInstallStart).not.toHaveBeenCalled();
+    finish();
+    await vi.waitFor(() => expect(onInstallStart).toHaveBeenCalledWith('0.2.0'));
+  });
+});
+
 describe('a newer build with no artifact for this target yet', () => {
   const logger = { info() {}, warn() {}, error() {} } as never;
   const manifest = (artifacts: string[], version = '0.2.0') =>
