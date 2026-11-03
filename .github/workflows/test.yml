@@ -57,6 +57,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
+      # Headroom against the OOM killer (exit 137): the host suite's sidecars,
+      # then headed Chromium, outgrow the runner's RAM. Swap turns a spike into
+      # a slow moment instead of a killed shard.
+      - name: Add swap
+        run: |
+          sudo fallocate -l 6G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @patch/web exec playwright install --with-deps chromium
