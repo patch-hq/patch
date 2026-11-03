@@ -281,6 +281,36 @@ describe('artifacts', () => {
     }
   });
 
+  // Opened directly, a video is the browser's own media page. A `sandbox` CSP on
+  // it gives the page an opaque origin and Chrome blocks the video fetch as
+  // cross-origin, leaving a player that cannot play. Video and audio cannot run
+  // script, so they go without it (still nosniff).
+  it('serves raw video and audio without the sandbox CSP so a direct link plays', async () => {
+    const { built, hostLink } = await makeApp();
+    try {
+      for (const [id, contentType] of [
+        ['a1ab03', 'video/mp4'],
+        ['a1ab04', 'audio/mpeg'],
+      ] as const) {
+        const res = await publish(
+          hostLink,
+          publishRequest({
+            artifactId: id,
+            html: undefined,
+            raw: { contentType, base64: Buffer.from('0123456789abcdef').toString('base64') },
+          }),
+        );
+        for (const headers of [{}, { range: 'bytes=4-7' }]) {
+          const get = await built.app.inject({ method: 'GET', url: res.url!, headers });
+          expect(get.headers['content-security-policy']).toBeUndefined();
+          expect(get.headers['x-content-type-options']).toBe('nosniff');
+        }
+      }
+    } finally {
+      await built.app.close();
+    }
+  });
+
   // A raw publish carries an agent-chosen content-type. Served bare, a
   // `text/html` one would run script in the SPA's own origin and could read the
   // stored credential, so every response is sandboxed regardless of type.

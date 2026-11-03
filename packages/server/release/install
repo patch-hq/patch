@@ -120,7 +120,10 @@ LOCK="${HOME_DIR}/install.lock"
 i=0
 until mkdir "${LOCK}" 2>/dev/null; do
   HOLDER=$(cat "${LOCK}/pid" 2>/dev/null || true)
-  if [ -n "${HOLDER}" ] && ! kill -0 "${HOLDER}" 2>/dev/null; then
+  if [ -n "${HOLDER}" ] && ! kill -0 "${HOLDER}" 2>/dev/null \
+    && [ "$(cat "${LOCK}/pid" 2>/dev/null || true)" = "${HOLDER}" ]; then
+    # Re-read just before stealing: the holder we saw may have finished and a
+    # live installer taken the lock since, and rm -rf would delete that one.
     rm -rf "${LOCK}"
     continue
   fi
@@ -151,9 +154,10 @@ fi
 "${NODE}" -e "
   const fs = require('fs');
   const [home, target] = process.argv.slice(1);
-  fs.rmSync(home + '/current.new', { force: true });
-  fs.symlinkSync(target, home + '/current.new');
-  fs.renameSync(home + '/current.new', home + '/current');
+  const tmp = home + '/current.new.' + process.pid;
+  fs.rmSync(tmp, { force: true });
+  fs.symlinkSync(target, tmp);
+  fs.renameSync(tmp, home + '/current');
 " "${HOME_DIR}" "${TARGET}"
 echo "installed release ${RELEASE} (${GIT_SHA}) → ${HOME_DIR}/current"
 
