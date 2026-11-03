@@ -121,7 +121,13 @@ i=0
 until mkdir "${LOCK}" 2>/dev/null; do
   HOLDER=$(cat "${LOCK}/pid" 2>/dev/null || true)
   if [ -n "${HOLDER}" ] && ! kill -0 "${HOLDER}" 2>/dev/null; then
-    rm -rf "${LOCK}"
+    # Stealing is itself serialised and re-checked: otherwise a thief that read a
+    # dead pid can delete the fresh lock another install took in the meantime.
+    if mkdir "${LOCK}.steal" 2>/dev/null; then
+      AGAIN=$(cat "${LOCK}/pid" 2>/dev/null || true)
+      if [ "${AGAIN}" = "${HOLDER}" ]; then rm -rf "${LOCK}"; fi
+      rmdir "${LOCK}.steal"
+    fi
     continue
   fi
   i=$((i + 1))
