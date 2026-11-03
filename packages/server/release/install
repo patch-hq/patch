@@ -151,9 +151,10 @@ fi
 "${NODE}" -e "
   const fs = require('fs');
   const [home, target] = process.argv.slice(1);
-  fs.rmSync(home + '/current.new', { force: true });
-  fs.symlinkSync(target, home + '/current.new');
-  fs.renameSync(home + '/current.new', home + '/current');
+  const tmp = home + '/current.new.' + process.pid;
+  fs.rmSync(tmp, { force: true });
+  fs.symlinkSync(target, tmp);
+  fs.renameSync(tmp, home + '/current');
 " "${HOME_DIR}" "${TARGET}"
 echo "installed release ${RELEASE} (${GIT_SHA}) → ${HOME_DIR}/current"
 
