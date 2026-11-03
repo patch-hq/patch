@@ -77,6 +77,7 @@ import {
   QUESTION_EXPIRY_SECONDS_DEFAULT,
   DEFAULT_QUESTION_EXPIRED_PROMPT,
   refusingRateLimitScope,
+  rejectedRateLimitScope,
 } from '@patch/wire';
 import type { Logger } from 'pino';
 import { randomUUID } from 'node:crypto';
@@ -3979,7 +3980,7 @@ async function startHost(
         const probeWindows = accountUsage?.get(accountId)?.reading.windows;
         if (
           !isAccountExhausted((err as { limit?: LimitFacts }).limit, {
-            probeBlocked: refusingRateLimitScope(probeWindows) !== undefined,
+            probeBlocked: rejectedRateLimitScope(probeWindows) !== undefined,
           })
         ) {
           // Not an account problem, so no other account would answer
@@ -4230,10 +4231,12 @@ async function startHost(
       // limit resets on its own, extra usage being off does not.
       const refusing = refusingRateLimitScope(windows);
       const window = refusing ? windows?.[refusing] : undefined;
+      const estimated = refusing !== undefined && rejectedRateLimitScope(windows) === undefined;
       const overage = windows?.overage;
       return {
         ...(account?.label !== undefined ? { label: account.label } : {}),
         ...(refusing !== undefined ? { scope: refusing } : {}),
+        ...(estimated ? { estimated: true as const } : {}),
         ...(window?.utilization !== undefined ? { utilization: window.utilization } : {}),
         ...(window?.resetsAt !== undefined ? { resetsAt: window.resetsAt } : {}),
         ...(overage?.status === 'rejected' ? { overageBlocked: true } : {}),

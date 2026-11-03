@@ -250,3 +250,20 @@ describe('a failure that says nothing, on a host with no credit, is still a cred
     daemon.shutdown();
   });
 });
+
+describe('credit stays with the provider that owns it', () => {
+  it('does not turn a Codex process failure into a Claude usage limit', async () => {
+    const { daemon, folder, metaStore, events } = setup({
+      failWith: PROCESS_KILLED,
+      hostOutOfCredit: true,
+    });
+    const chatId = await daemon.spawnChat({ folder, model: 'openai/gpt-5.6-sol' });
+    await daemon.sendInput({ chatId, message: 'go' });
+
+    expect(metaStore.read(chatId)?.lastError?.outOfCredit).not.toBe(true);
+    expect(metaStore.read(chatId)?.lastError?.message).toContain(PROCESS_KILLED);
+    expect(lastState(events)?.limitBlock).toBeNull();
+    expect(lastState(events)?.rateLimitResumingAt).toBeNull();
+    daemon.shutdown();
+  });
+});

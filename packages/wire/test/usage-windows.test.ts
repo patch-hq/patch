@@ -6,6 +6,7 @@ import {
   rateLimitWindowState,
   rateLimitWindowsBlocked,
   refusingRateLimitScope,
+  rejectedRateLimitScope,
 } from '../src/usageWindows.js';
 
 describe('rateLimitWindowState', () => {
@@ -89,5 +90,28 @@ describe('a pool at 98% or more is empty', () => {
   it('never blocks on overage', () => {
     const win = { status: 'allowed' as const, utilization: 1, resetsAt: ahead };
     expect(rateLimitWindowsBlocked({ overage: win }, NOW)).toBe(false);
+  });
+});
+
+describe('rejectedRateLimitScope — what the provider actually refused', () => {
+  const NOW = 1_800_000_000_000;
+
+  it('names a rejected spendable pool whose reset is still ahead', () => {
+    const windows = { week: { status: 'rejected' as const, resetsAt: NOW + 1 } };
+    expect(rejectedRateLimitScope(windows, NOW)).toBe('week');
+  });
+
+  it('does not name a pool that is merely nearly spent', () => {
+    // 99% used is a forecast, good for routing around the account. It is not a
+    // refusal, so it is no evidence that an unrelated failure was about credit.
+    const windows = { week: { status: 'allowed' as const, utilization: 0.99, resetsAt: NOW + 1 } };
+    expect(refusingRateLimitScope(windows, NOW)).toBe('week');
+    expect(rejectedRateLimitScope(windows, NOW)).toBeUndefined();
+  });
+
+  it('does not name a rejected overage on its own', () => {
+    expect(
+      rejectedRateLimitScope({ overage: { status: 'rejected' as const } }, NOW),
+    ).toBeUndefined();
   });
 });
