@@ -94,8 +94,15 @@ function RateLimitCardBody({ row }: { row: ChatRow }): JSX.Element {
       pushError(`No ${target} model is available on this machine to switch to`);
       return;
     }
-    getActiveWs()?.send({ type: 'chat.model_request', chatId: row.chatId, model: model.id });
-    send();
+    // The re-send rides on the model change (`retry`): the host applies the model
+    // first, then runs the owed turn on it. A separate resume-now raced the
+    // change and re-ran the turn on the old account, hitting the limit again.
+    getActiveWs()?.send({
+      type: 'chat.model_request',
+      chatId: row.chatId,
+      model: model.id,
+      retry: true,
+    });
   };
   // The catalogue is how "Change provider" finds a model to move to; it is
   // fetched when that menu opens, not for every card.
