@@ -390,7 +390,8 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
       if (meta.contentType.startsWith('video/')) {
         reply.header('accept-ranges', 'bytes');
         const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
-        if (m) {
+        // `bytes=-` (no numbers) is malformed: ignore it and serve the whole file.
+        if (m && (m[1] !== '' || m[2] !== '')) {
           const start = m[1] === '' ? Math.max(0, size - Number(m[2])) : Number(m[1]);
           const end = m[1] === '' || m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1);
           if (start > end || start >= size) {
