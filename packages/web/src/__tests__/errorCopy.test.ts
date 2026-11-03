@@ -76,6 +76,14 @@ describe('humaniseError', () => {
     expect(out.detail).toBe('GET /api/models failed: oauth_unavailable on d1');
   });
 
+  it('says the machine is not answering for a daemon_timeout, keeping the code as detail', () => {
+    const out = humaniseError({ code: 'daemon_timeout' }, 'models');
+    expect(out.sentence).toBe(
+      'That machine isn’t answering. It may be offline. Try again when it’s back.',
+    );
+    expect(out.detail).toBe('daemon_timeout');
+  });
+
   it('has an empty detail when there was nothing to keep', () => {
     const out = humaniseError({}, 'models');
     expect(out.sentence).toBe(
