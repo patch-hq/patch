@@ -131,6 +131,33 @@ test('chats list (no --json): human output', async () => {
   );
 });
 
+test('chats list: host id shown when the server returns one', async () => {
+  await withSetup(
+    () => ({
+      status: 200,
+      body: {
+        chats: [{ chatId: 'C1', status: 'active', hostId: 'abcdef1234567890', name: 'mac' }],
+      },
+    }),
+    async (env) => {
+      const r = await runCli(['chats', 'list'], env);
+      assert.equal(r.code, 0);
+      assert.match(r.stdout, /\[abcdef12\]/);
+    },
+  );
+});
+
+test('chats peek over REST: refuses with a clear error', async () => {
+  await withSetup(
+    () => ({ status: 200, body: {} }),
+    async (env) => {
+      const r = await runCli(['chats', 'peek', 'C1', '--json'], env);
+      assert.equal(r.code, 1);
+      assert.match(r.stdout, /needs the host socket/);
+    },
+  );
+});
+
 test('jobs list --json: REST happy path', async () => {
   await withSetup(
     (req) => {

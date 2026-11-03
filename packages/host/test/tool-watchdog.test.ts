@@ -69,6 +69,22 @@ describe('withToolWatchdog', () => {
     expect((err as ToolHungError).message).toMatch(/Full Disk Access/);
   });
 
+  it('calls onHung before failing, so the stuck turn can be stopped at its source', async () => {
+    let t = 0;
+    let stopped = 0;
+    async function* src(): AsyncGenerator<SdkEnvelope> {
+      yield bashUse({ command: 'ffmpeg', timeout: 1000 });
+      await new Promise(() => undefined);
+    }
+    const run = drain(
+      withToolWatchdog(src(), { now: () => t, pollMs: 5, onHung: () => void stopped++ }),
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    t = 1000 + 30_000 + 1;
+    await run.catch(() => undefined);
+    expect(stopped).toBe(1);
+  });
+
   it('passes a call that returns in time', async () => {
     let t = 0;
     async function* src(): AsyncGenerator<SdkEnvelope> {
@@ -110,9 +126,11 @@ describe('a hung tool inside a turn', () => {
     const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-wd-f-')));
     const events: WireEvent[] = [];
     let t = 1_700_000_000_000;
+    let backendSignal: AbortSignal | undefined;
     const backend: SdkBackend = {
-      run: () =>
+      run: (o) =>
         (async function* (): AsyncGenerator<SdkEnvelope> {
+          backendSignal = o.abortController.signal;
           yield bashUse({ command: 'ls', timeout: 1000 });
           t += 1_000_000;
           await new Promise(() => undefined);
@@ -133,6 +151,9 @@ describe('a hung tool inside a turn', () => {
     await daemon.sendInput({ chatId, message: 'go' });
     const errs = events.filter((e): e is ChatErrorEvent => e.type === 'chat.error');
     expect(errs[0]?.error.message).toMatch(/Bash call did not return/);
+    // The backend is told to stop the turn it was running, so the provider
+    // does not go on writing and reject the next message.
+    expect(backendSignal?.aborted).toBe(true);
     daemon.shutdown();
   });
 });

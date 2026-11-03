@@ -20,7 +20,7 @@ import { useChatStore } from '../../src/stores/chatStore';
 import { useUiStore } from '../../src/stores/uiStore';
 import { useGoBack } from '../../src/lib/goBack';
 import { padBadge } from '../../src/lib/pads';
-import { radii, space, textMin, typography, useTheme } from '../../src/lib/theme';
+import { space, textMin, typography, useTheme } from '../../src/lib/theme';
 
 export const PAD_POLL_MS = 5000;
 
@@ -32,6 +32,7 @@ export default function PadScreen(): React.ReactElement {
   const [pad, setPad] = React.useState<PadView | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [name, setName] = React.useState<string | null>(null);
+  const [frameError, setFrameError] = React.useState<string | null>(null);
   const chatName = useChatStore((s) => (pad ? (s.chats[pad.chatId]?.name ?? pad.chatId) : ''));
 
   React.useEffect(() => {
@@ -180,12 +181,24 @@ export default function PadScreen(): React.ReactElement {
           The Pad editor needs a direct connection to the server; this phone reaches it through a
           relay.
         </Text>
+      ) : frameError ? (
+        <Text testID="pad-frame-error" style={{ color: colors.red, padding: space.md }}>
+          The Pad editor failed to load: {frameError}
+        </Text>
       ) : (
+        // No borderRadius: on Android it makes the WebView paint white.
         <WebView
           testID="pad-webview"
           source={{ uri: apiUrl(pad.frameUrl) }}
           originWhitelist={['*']}
-          style={{ flex: 1, borderRadius: radii.md }}
+          javaScriptEnabled
+          domStorageEnabled
+          onError={(e) => setFrameError(e.nativeEvent.description)}
+          onHttpError={(e) =>
+            setFrameError(`HTTP ${e.nativeEvent.statusCode} from ${e.nativeEvent.url}`)
+          }
+          onRenderProcessGone={() => setFrameError('the WebView process was killed')}
+          style={{ flex: 1 }}
         />
       )}
     </View>

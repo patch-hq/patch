@@ -221,6 +221,24 @@ describe('a durable turn', () => {
     }
   }, 20000);
 
+  it('ends a turn nobody is attached to once claude has been silent too long', async () => {
+    const { cfg, cwd } = fresh();
+    process.env['PATCH_TURN_ORPHAN_IDLE_MS'] = '800';
+    try {
+      const turn = new DurableTurn({ config: cfg, chatId: 'c6', localId: 'L6', log });
+      const d = drive(turn.spawn({ ...spawnOpts, cwd }));
+      d.send(initialize('r1'));
+      d.send(prompt);
+      await d.until(() => texts(d.lines).includes('a1'), 'a1');
+      // The host goes and never comes back; claude is left waiting for `go`.
+      detachDurableTurns();
+      for (let i = 0; i < 200 && inspectTurn(cfg, 'c6')?.state !== 'exited'; i++) await sleep(50);
+      expect(inspectTurn(cfg, 'c6')?.state).toBe('exited');
+    } finally {
+      delete process.env['PATCH_TURN_ORPHAN_IDLE_MS'];
+    }
+  }, 30000);
+
   it('reports a turn whose runner was killed as lost', () => {
     const { cfg } = fresh();
     const dir = join(cfg.turnsDir, 'c5');

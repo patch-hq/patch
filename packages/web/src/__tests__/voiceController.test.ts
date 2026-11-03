@@ -55,6 +55,7 @@ function stubOpener(opts: OpenAudioSessionOpts): Promise<AudioSession> {
       muted = m;
       muteSpy(m);
     },
+    finishDictation: () => {},
     isMuted: () => muted,
     setSessionMode: () => {},
     speak: () => {},
@@ -106,7 +107,11 @@ describe('voiceController', () => {
     previewPushSpy = vi.fn();
     __setPreviewFactoryForTests((_chatId, callbacks) => {
       previewCbs = callbacks;
-      return { push: (pcm) => previewPushSpy(pcm), stop: () => previewStopSpy() };
+      return {
+        push: (pcm) => previewPushSpy(pcm),
+        finish: async () => '',
+        stop: () => previewStopSpy(),
+      };
     });
     useUiStore.getState().clearToasts();
     useVoiceStore.setState({ note: null, call: null, session: null, permission: null });
@@ -552,6 +557,7 @@ describe('voiceController', () => {
       setSessionMode: () => {},
       speak: () => {},
       sendPcm: () => {},
+      finishDictation: () => {},
       isMuted: () => false,
       end: (reason?: string) => endSpy(reason),
     });

@@ -805,7 +805,7 @@ describe('ChatRoute regression', () => {
     renderChat('c-tool-image-blob');
     fireEvent.click(screen.getByTestId('tool-result-summary'));
     const img = screen.getByTestId('tool-field-image').querySelector('img');
-    expect(img?.getAttribute('src')).toBe(`/api/chats/c-tool-image-blob/blob/${sha}`);
+    expect(img?.getAttribute('src')).toBe(`/api/chats/c-tool-image-blob/blob/${sha}?w=960`);
     // The real pixel size, so nothing below the picture moves when it lands.
     expect(img?.getAttribute('width')).toBe('390');
     expect(img?.getAttribute('height')).toBe('844');
@@ -2710,6 +2710,84 @@ describe('ChatRoute regression', () => {
     expect(screen.getByTestId('view-file').getAttribute('data-expanded')).toBe('true');
   });
 
+  it('renders a view_file audio result as an inline audio player', () => {
+    seedChat('c-view-audio', [
+      {
+        seq: 1,
+        kind: 'tool_call',
+        tool: 'view_file',
+        callId: 'a1',
+        toolArgs: { file_path: 'clip.mp3' },
+        at: 0,
+      },
+      {
+        seq: 2,
+        kind: 'tool_result',
+        tool: 'view_file',
+        callId: 'a1',
+        toolResult: {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                ok: true,
+                kind: 'audio',
+                url: '/api/chats/c-view-audio/artifact/aud123',
+                name: 'clip.mp3',
+              }),
+            },
+          ],
+        },
+        at: 1,
+      },
+    ]);
+    renderChat('c-view-audio');
+    expect(screen.getByTestId('view-file').getAttribute('data-kind')).toBe('audio');
+    const player = screen.getByTestId('view-file-audio');
+    expect(player.tagName).toBe('AUDIO');
+    expect(player.getAttribute('src')).toBe('/api/chats/c-view-audio/artifact/aud123');
+    expect(player.hasAttribute('controls')).toBe(true);
+    expect(screen.getByTestId('view-file-download').getAttribute('download')).toBe('clip.mp3');
+  });
+
+  it('renders a view_file video result as an inline player', () => {
+    seedChat('c-view-video', [
+      {
+        seq: 1,
+        kind: 'tool_call',
+        tool: 'view_file',
+        callId: 'v1',
+        toolArgs: { file_path: 'clip.mp4' },
+        at: 0,
+      },
+      {
+        seq: 2,
+        kind: 'tool_result',
+        tool: 'view_file',
+        callId: 'v1',
+        toolResult: {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                ok: true,
+                kind: 'video',
+                url: '/api/chats/c-view-video/artifact/abc123',
+                name: 'clip.mp4',
+              }),
+            },
+          ],
+        },
+        at: 1,
+      },
+    ]);
+    renderChat('c-view-video');
+    expect(screen.getByTestId('view-file').getAttribute('data-kind')).toBe('video');
+    const video = screen.getByTestId('view-file-video');
+    expect(video.getAttribute('src')).toBe('/api/chats/c-view-video/artifact/abc123');
+    expect(video.hasAttribute('controls')).toBe(true);
+  });
+
   function seedFileCard(id: string, ack: Record<string, unknown>): void {
     seedChat(id, [
       {
@@ -2887,7 +2965,7 @@ describe('ChatRoute regression', () => {
     expect(screen.queryByTestId('view-file-expand')).not.toBeInTheDocument();
     const picture = screen.getByTestId('view-file-image');
     expect(picture.querySelector('img')?.getAttribute('src')).toBe(
-      '/api/chats/c-view-file-img/artifact/abc123',
+      '/api/chats/c-view-file-img/artifact/abc123?w=960',
     );
     expect(screen.queryByTestId('image-lightbox')).not.toBeInTheDocument();
     fireEvent.click(picture);
@@ -2962,7 +3040,7 @@ describe('ChatRoute regression', () => {
     // Shown without anything being expanded first.
     const picture = screen.getByTestId('view-file-image');
     expect(picture.querySelector('img')?.getAttribute('src')).toBe(
-      '/api/chats/c-view-grouped/artifact/abc123',
+      '/api/chats/c-view-grouped/artifact/abc123?w=960',
     );
     // And it is not inside a run's collapsed detail.
     for (const group of screen.queryAllByTestId('tool-group')) {
@@ -3087,7 +3165,7 @@ describe('ChatRoute regression', () => {
     const card = screen.getByTestId('view-file');
     expect(card.getAttribute('data-kind')).toBe('image');
     expect(screen.getByTestId('view-file-image').querySelector('img')?.getAttribute('src')).toBe(
-      '/api/chats/c-view-bare/artifact/17f6de',
+      '/api/chats/c-view-bare/artifact/17f6de?w=960',
     );
     // It replaces the tool row rather than sitting beside it.
     expect(screen.queryByTestId('tool-call-summary')).not.toBeInTheDocument();

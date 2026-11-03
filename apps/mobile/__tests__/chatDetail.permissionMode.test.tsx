@@ -102,11 +102,11 @@ describe('chat-detail — permission mode padlock', () => {
   });
 
   it.each([
-    ['default', 'Lock'],
-    ['acceptEdits', 'FilePen'],
-    ['plan', 'ClipboardList'],
-    ['auto', 'Sparkles'],
-    ['bypassPermissions', 'LockOpen'],
+    ['default', 'ShieldCheck'],
+    ['acceptEdits', 'ShieldEllipsis'],
+    ['plan', 'ShieldQuestion'],
+    ['auto', 'ShieldAlert'],
+    ['bypassPermissions', 'ShieldOff'],
   ] as const)('mode %s draws the %s icon', (mode, icon) => {
     const r = render(mode);
     expect(padlockIcon(r.root).props['name']).toBe(icon);
@@ -116,7 +116,7 @@ describe('chat-detail — permission mode padlock', () => {
     const bypass = render('bypassPermissions');
     expect(padlockIcon(bypass.root).props['color']).toBe(palette.red);
     const def = render('default');
-    expect(padlockIcon(def.root).props['color']).toBe(palette.ink2);
+    expect(padlockIcon(def.root).props['color']).toBe(palette.ink3);
   });
 
   it('names the mode in force in its accessible label, by its friendly name', () => {

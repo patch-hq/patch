@@ -13,6 +13,7 @@ function fakeSession(over: Partial<AudioSession> = {}): AudioSession {
     sessionId: 'sess-1',
     chatId: 'chat1',
     setMuted: () => {},
+    finishDictation: () => {},
     isMuted: () => false,
     setSessionMode: () => {},
     speak: () => {},
@@ -166,5 +167,52 @@ describe('dictation preview', () => {
     await Promise.resolve();
     (d.opts().callbacks as AudioSessionCallbacks).onError('whisper_unavailable: no key');
     expect(errors).toEqual(['whisper_unavailable: no key']);
+  });
+
+  describe('finish (streaming engine)', () => {
+    it('asks the host to finish once the socket is up and resolves with its final', async () => {
+      const d = deferredOpener();
+      const finish = vi.fn();
+      const preview = startDictationPreview(
+        'chat1',
+        { onPartial: () => {}, onPreviewError: () => {} },
+        d.open,
+      );
+      const done = preview.finish();
+      await Promise.resolve();
+      expect(finish).not.toHaveBeenCalled();
+      d.resolve(fakeSession({ finishDictation: finish }));
+      await vi.waitFor(() => expect(finish).toHaveBeenCalledOnce());
+      d.opts().callbacks.onTranscriptFinal('Buy oat milk.', true);
+      await expect(done).resolves.toBe('Buy oat milk.');
+    });
+
+    it('rejects, and says so, when the stream breaks while finishing', async () => {
+      const d = deferredOpener();
+      const onPreviewError = vi.fn();
+      const preview = startDictationPreview(
+        'chat1',
+        { onPartial: () => {}, onPreviewError },
+        d.open,
+      );
+      d.resolve(fakeSession());
+      await Promise.resolve();
+      await Promise.resolve();
+      const done = preview.finish();
+      d.opts().callbacks.onError('Live dictation failed: Deepgram closed');
+      await expect(done).rejects.toThrow('Deepgram closed');
+    });
+
+    it('rejects at once when the preview had already failed', async () => {
+      const d = deferredOpener();
+      const preview = startDictationPreview(
+        'chat1',
+        { onPartial: () => {}, onPreviewError: () => {} },
+        d.open,
+      );
+      d.reject(new Error('no key'));
+      await new Promise((r) => setTimeout(r, 0));
+      await expect(preview.finish()).rejects.toThrow('no key');
+    });
   });
 });

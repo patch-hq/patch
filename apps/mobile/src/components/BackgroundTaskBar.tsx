@@ -107,6 +107,25 @@ export function BackgroundTaskBar({ chatId }: { chatId: string }): ReactElement 
     }
   }
 
+  async function killAll(): Promise<void> {
+    const running = tasks.filter((t) => t.status === 'running');
+    setKilling((prev) => new Set([...prev, ...running.map((t) => t.taskId)]));
+    const results = await Promise.allSettled(running.map((t) => api.watchStop(chatId, t.taskId)));
+    const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+    if (failed.length > 0) {
+      useUiStore
+        .getState()
+        .pushError(
+          `stopping ${failed.length} task(s) failed: ${(failed[0]!.reason as Error).message}`,
+        );
+    }
+    setKilling((prev) => {
+      const next = new Set(prev);
+      for (const t of running) next.delete(t.taskId);
+      return next;
+    });
+  }
+
   function toggleExpanded(taskId: string): void {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -120,6 +139,7 @@ export function BackgroundTaskBar({ chatId }: { chatId: string }): ReactElement 
 
   const shown = showAll ? sortWatchTasks(tasks) : runningWatchTasks(tasks);
   const summary = backgroundBarTitle(liveCount);
+  const runningCount = tasks.filter((t) => t.status === 'running').length;
   const detailTask = detailId === null ? undefined : tasks.find((t) => t.taskId === detailId);
 
   function commandPreview(key: string, command: string): ReactElement {
@@ -166,6 +186,17 @@ export function BackgroundTaskBar({ chatId }: { chatId: string }): ReactElement 
         >
           {summary}
         </Text>
+        {collapsed || runningCount < 2 ? null : (
+          <Pressable
+            testID="background-task-bar-stop-all"
+            onPress={() => void killAll()}
+            hitSlop={space.sm}
+            accessibilityRole="button"
+            accessibilityLabel="Stop all"
+          >
+            <Text style={{ color: colors.red, fontSize: textMin }}>Stop all</Text>
+          </Pressable>
+        )}
         {collapsed ? null : (
           <Pressable
             testID="background-task-bar-show-all"

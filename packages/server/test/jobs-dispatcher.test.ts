@@ -1594,7 +1594,11 @@ describe('JobDispatcher', () => {
       const { link, logs, disp } = setup({ ackRetries: 2 });
       const sent = link.sent;
       disp.dispatch(makeJob({ id: JOB_ID }), {}, 'webhook');
-      await new Promise((r) => setTimeout(r, 400));
+      // Polled, not a fixed sleep, so a loaded CI box that fires timers late still gets there.
+      const deadline = Date.now() + 5000;
+      while (logs.readRuns(JOB_ID).length === 0 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
       expect(sent).toHaveLength(3);
       const runs = logs.readRuns(JOB_ID);
       expect(runs).toHaveLength(1);

@@ -188,6 +188,14 @@ const BACKGROUND_TASKS_COLLAPSED_KEY = 'patch.chat.backgroundTasksCollapsed';
 // finished is the answer to a question the reader has to ask.
 const BACKGROUND_TASKS_SHOW_ALL_KEY = 'patch.chat.backgroundTasksShowAll';
 
+// The Agents group under the chat header (spec/14 § Main chat panel — Status
+// list): opened to one row per running agent, and whether finished agents are
+// listed too. Same kind of per-user preference as the task stack; folded and
+// hiding the done ones by default, because a chat can have dozens.
+const DELEGATES_OPEN_KEY = 'patch.chat.delegatesOpen';
+const DELEGATES_SHOW_DONE_KEY = 'patch.chat.delegatesShowDone';
+const ARTIFACTS_OPEN_KEY = 'patch.chat.artifactsOpen';
+
 function loadWidth(key: string, fallback: number): number {
   /* v8 ignore next -- jsdom (the test environment) always defines `localStorage`; this SSR/non-DOM guard cannot be exercised under vitest+jsdom. */
   if (typeof localStorage === 'undefined') return fallback;
@@ -835,6 +843,12 @@ interface UiState {
   backgroundTasksCollapsed: boolean;
   /** Background-task stack also listing this chat's ended tasks? */
   backgroundTasksShowAll: boolean;
+  /** Agents group opened to one row per agent? */
+  delegatesOpen: boolean;
+  /** Agents group also listing finished agents? */
+  delegatesShowDone: boolean;
+  /** Artifacts group opened to one row per artifact? */
+  artifactsOpen: boolean;
   /**
    * Group 19/20: pending diffs keyed by chatId. spec/14 § Panes and tabs: a
    * `FileEditorTab` reads its OWN chat's entry directly — there is no more
@@ -955,6 +969,9 @@ interface UiState {
   /** Fold the chat's background-task bars to one summary line, or unfold (persisted). */
   setBackgroundTasksCollapsed(v: boolean): void;
   setBackgroundTasksShowAll(v: boolean): void;
+  setDelegatesOpen(v: boolean): void;
+  setDelegatesShowDone(v: boolean): void;
+  setArtifactsOpen(v: boolean): void;
   /** Record a pending permission diff for `d.chatId`. */
   setPendingDiff(d: PendingDiff): void;
   /**
@@ -1086,6 +1103,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   browseTreeCollapsed: loadBool(BROWSE_TREE_COLLAPSED_KEY),
   backgroundTasksCollapsed: loadBool(BACKGROUND_TASKS_COLLAPSED_KEY),
   backgroundTasksShowAll: loadBool(BACKGROUND_TASKS_SHOW_ALL_KEY),
+  delegatesOpen: loadBool(DELEGATES_OPEN_KEY),
+  delegatesShowDone: loadBool(DELEGATES_SHOW_DONE_KEY),
+  artifactsOpen: loadBool(ARTIFACTS_OPEN_KEY),
   pendingDiffByChat: {},
   fileDiff: null,
   settingsPageRequest: null,
@@ -1248,6 +1268,18 @@ export const useUiStore = create<UiState>((set, get) => ({
   setBackgroundTasksShowAll(v) {
     persistBool(BACKGROUND_TASKS_SHOW_ALL_KEY, v);
     set({ backgroundTasksShowAll: v });
+  },
+  setDelegatesOpen(v) {
+    persistBool(DELEGATES_OPEN_KEY, v);
+    set({ delegatesOpen: v });
+  },
+  setDelegatesShowDone(v) {
+    persistBool(DELEGATES_SHOW_DONE_KEY, v);
+    set({ delegatesShowDone: v });
+  },
+  setArtifactsOpen(v) {
+    persistBool(ARTIFACTS_OPEN_KEY, v);
+    set({ artifactsOpen: v });
   },
   setPendingDiff(d) {
     const next = { ...get().pendingDiffByChat, [d.chatId]: d };

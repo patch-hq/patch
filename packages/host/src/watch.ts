@@ -28,6 +28,7 @@
 
 import { type ChildProcess, spawn } from 'node:child_process';
 import {
+  appendFileSync,
   closeSync,
   statSync,
   existsSync,
@@ -75,6 +76,10 @@ export const WatchRecord = z
     exitCode: z.number().int().nullable().optional(),
     signal: z.string().nullable().optional(),
     endedAt: z.number().int().optional(),
+    /** Sidecar the wrapper writes the real exit code to. Present = the host can tell "finished" from "killed by a host restart". */
+    exitFile: z.string().min(1).optional(),
+    /** How many times the host re-ran this command after a restart killed it. */
+    restarts: z.number().int().nonnegative().optional(),
   })
   .strict();
 export type WatchRecord = z.infer<typeof WatchRecord>;
@@ -109,6 +114,15 @@ const WATCH_DIR = 'watch';
 /** Metadata tag on the delivered turn — data not directive, like wake.ts's `[wake]`. */
 export const WATCH_PREFIX = '[watch]';
 const DEFAULT_POLL_MS = 3_000;
+/** A watch killed by host restarts this many times is given up on rather than looping forever. */
+export const MAX_WATCH_RESTARTS = 3;
+/**
+ * Runs the command, then records its real exit code in a sidecar file. If the
+ * whole group is killed (host restart, reboot) the wrapper dies with it and no
+ * sidecar appears — that absence is how an interrupted watch is told apart
+ * from one that finished while the host was down.
+ */
+const WRAPPER = 'sh -c "$1"; c=$?; echo $c > "$2.tmp" && mv "$2.tmp" "$2"; exit $c';
 export const DEFAULT_CHECK_IN_MS = 60 * 60 * 1000;
 export const DEFAULT_CHECK_IN_PROMPT = DEFAULT_WATCH_CHECK_IN_PROMPT;
 
@@ -219,11 +233,47 @@ export class WatchScheduler {
     const dir = this.dirFor(opts.chatId);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const outputFile = join(dir, `${taskId}.output`);
+    const exitFile = join(dir, `${taskId}.exit`);
+    let child: ChildProcess;
+    try {
+      child = this.spawnProcess(opts.chatId, taskId, opts.command, opts.cwd, outputFile, exitFile);
+    } catch (err) {
+      rmSync(outputFile, { force: true });
+      throw err;
+    }
+    const rec: WatchRecord = {
+      chatId: opts.chatId,
+      taskId,
+      description: opts.description,
+      command: opts.command,
+      cwd: opts.cwd,
+      outputFile,
+      exitFile,
+      pid: child.pid!,
+      startedAt: this.deps.now(),
+      timeoutSec: opts.timeoutSec,
+      ...(opts.checkInSec !== undefined ? { checkInSec: opts.checkInSec } : {}),
+      status: 'running',
+    };
+    this.writeRecord(rec);
+    this.liveHandles.set(taskId, child);
+    return rec;
+  }
+
+  private spawnProcess(
+    chatId: string,
+    taskId: string,
+    command: string,
+    cwd: string,
+    outputFile: string,
+    exitFile: string,
+  ): ChildProcess {
+    rmSync(exitFile, { force: true });
     const fd = openSync(outputFile, 'a');
     let child: ChildProcess;
     try {
-      child = this.spawnFn('/bin/sh', ['-c', opts.command], {
-        cwd: opts.cwd,
+      child = this.spawnFn('/bin/sh', ['-c', WRAPPER, 'sh', command, exitFile], {
+        cwd,
         // Own process group, exactly like terminal.ts's shell sessions: lets
         // us signal the whole job tree later without ever aiming a signal at
         // the host itself.
@@ -236,33 +286,14 @@ export class WatchScheduler {
     }
     // A spawn that cannot start (a missing cwd, no /bin/sh) reports it as an
     // 'error' event, and one with no listener would crash the host — so the
-    // listener goes on before anything below can throw. After a successful
-    // spawn the same event is just a process problem the poll picks up as an
-    // ordinary non-zero exit.
+    // listener goes on before anything below can throw.
     child.on('error', (err) => {
-      this.deps.logger.warn({ chatId: opts.chatId, taskId, err }, 'watch: process error');
+      this.deps.logger.warn({ chatId, taskId, err }, 'watch: process error');
     });
-    const pid = child.pid;
-    if (pid === undefined) {
-      rmSync(outputFile, { force: true });
-      throw new Error(`patch_watch: failed to spawn command: ${opts.command}`);
+    if (child.pid === undefined) {
+      throw new Error(`patch_watch: failed to spawn command: ${command}`);
     }
-    const rec: WatchRecord = {
-      chatId: opts.chatId,
-      taskId,
-      description: opts.description,
-      command: opts.command,
-      cwd: opts.cwd,
-      outputFile,
-      pid,
-      startedAt: this.deps.now(),
-      timeoutSec: opts.timeoutSec,
-      ...(opts.checkInSec !== undefined ? { checkInSec: opts.checkInSec } : {}),
-      status: 'running',
-    };
-    this.writeRecord(rec);
-    this.liveHandles.set(taskId, child);
-    return rec;
+    return child;
   }
 
   /** Every watch this chat has running or recently ended. */
@@ -378,10 +409,70 @@ export class WatchScheduler {
         }
         // Re-attached after a restart: no handle, just the bare pid.
         if (!this.isAliveFn(rec.pid)) {
-          await this.complete(rec, null, null);
+          await this.settleOrphan(rec);
         }
       }
     }
+  }
+
+  /**
+   * A re-attached record whose process is gone. With a sidecar exit code it
+   * finished on its own; without one the host restart killed it, so run it
+   * again (up to MAX_WATCH_RESTARTS). Records from before the sidecar existed
+   * can't be told apart and keep the old "exit status unknown" completion.
+   */
+  private async settleOrphan(rec: WatchRecord): Promise<void> {
+    if (rec.exitFile === undefined) return this.complete(rec, null, null);
+    if (existsSync(rec.exitFile)) {
+      const code = Number.parseInt(readFileSync(rec.exitFile, 'utf8').trim(), 10);
+      return this.complete(rec, Number.isNaN(code) ? null : code, null);
+    }
+    const restarts = rec.restarts ?? 0;
+    if (restarts >= MAX_WATCH_RESTARTS) {
+      return this.complete(
+        rec,
+        null,
+        null,
+        `was interrupted by host restarts ${restarts} times and not run again`,
+      );
+    }
+    let child: ChildProcess;
+    try {
+      appendFileSync(
+        rec.outputFile,
+        `\n--- host restarted; re-running (restart ${restarts + 1}) ---\n`,
+      );
+      child = this.spawnProcess(
+        rec.chatId,
+        rec.taskId,
+        rec.command,
+        rec.cwd,
+        rec.outputFile,
+        rec.exitFile,
+      );
+    } catch (err) {
+      this.deps.logger.error(
+        { chatId: rec.chatId, taskId: rec.taskId, err },
+        'watch: restart failed',
+      );
+      return this.complete(
+        rec,
+        null,
+        null,
+        'was interrupted by a host restart and could not be re-run',
+      );
+    }
+    this.liveHandles.set(rec.taskId, child);
+    this.writeRecord({
+      ...rec,
+      pid: child.pid!,
+      startedAt: this.deps.now(),
+      restarts: restarts + 1,
+    });
+    await this.send(
+      rec,
+      `${WATCH_PREFIX} "${rec.description}" was interrupted by a host restart and has been started again from the beginning (restart ${restarts + 1}). Command: ${rec.command}.`,
+    );
   }
 
   private async timeOut(rec: WatchRecord): Promise<void> {
@@ -462,10 +553,12 @@ export class WatchScheduler {
     rec: WatchRecord,
     exitCode: number | null,
     signal: string | null,
+    note?: string,
   ): Promise<void> {
     // A nonzero exit is a failure; a signal kill or an unknown (restart-lost)
     // status is still just "it stopped running" rather than a reported error.
-    const status = exitCode !== null && exitCode !== 0 ? 'failed' : 'exited';
+    const status =
+      note !== undefined || (exitCode !== null && exitCode !== 0) ? 'failed' : 'exited';
     const updated: WatchRecord = {
       ...rec,
       status,
@@ -475,13 +568,15 @@ export class WatchScheduler {
     };
     this.writeRecord(updated);
     const summary =
-      exitCode === 0
-        ? 'finished'
-        : exitCode !== null
-          ? `finished (exit ${exitCode})`
-          : signal
-            ? `finished (killed by ${signal})`
-            : 'finished (exit status unknown — the host restarted while it was running)';
+      note !== undefined
+        ? note
+        : exitCode === 0
+          ? 'finished'
+          : exitCode !== null
+            ? `finished (exit ${exitCode})`
+            : signal
+              ? `finished (killed by ${signal})`
+              : 'finished (exit status unknown — the host restarted while it was running)';
     try {
       await this.deps.deliver(
         rec.chatId,

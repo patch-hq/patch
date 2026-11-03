@@ -1015,7 +1015,7 @@ function showNativeNotification(opts: {
   body: string;
   chatId?: string;
   priority?: NotifyPriority;
-  kind?: 'message' | 'call' | 'batch' | 'ask' | 'sign-in';
+  kind?: 'message' | 'call' | 'batch' | 'ask' | 'sign-in' | 'host-health';
   actions?: NotifyActionsPayload;
   /** Set when this toast IS a "Not sent — tap to retry" state: a click retries the same thing instead of opening the chat. */
   retry?: { chatId: string; actions?: NotifyActionsPayload; index?: number; replyText?: string };
@@ -1219,7 +1219,7 @@ function registerIpc(): void {
         body: string;
         chatId?: string;
         priority?: NotifyPriority;
-        kind?: 'message' | 'call' | 'batch' | 'ask' | 'sign-in';
+        kind?: 'message' | 'call' | 'batch' | 'ask' | 'sign-in' | 'host-health';
         actions?: NotifyActionsPayload;
       },
     ) => {

@@ -37,7 +37,7 @@ test.describe('sidebar background-job badge', () => {
 
     // The open chat's own bar counts the same work, so the two readouts cannot
     // be telling the reader different things.
-    await expect(page.getByTestId('background-task-bar-count')).toHaveText('2 background tasks');
+    await expect(page.getByTestId('background-task-bar-count')).toHaveText('2 running');
 
     // A chat with nothing running is unaffected: still the tick's own slot,
     // still the badge it always drew.

@@ -3,3 +3,9 @@ packages:
   - 'apps/*'
   - '!packages/voice-firmware'
   - 'packages/voice-firmware/mock'
+
+# The release host job builds linux-arm64 on an x64 runner; install every
+# target's optional native addons (sherpa-onnx-<os>-<arch>), not just the runner's.
+supportedArchitectures:
+  os: [linux, darwin]
+  cpu: [x64, arm64]

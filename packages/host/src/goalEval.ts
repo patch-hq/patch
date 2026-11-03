@@ -27,8 +27,8 @@ export const GOAL_EVAL_MODEL = DEFAULT_GOAL_MODEL;
 /** Abort a hung evaluator call so it never leaks a warm SDK query. */
 const GOAL_EVAL_TIMEOUT_MS = 20_000;
 
-/** Hard cap on the returned reason. */
-const MAX_REASON_LEN = 220;
+/** Hard cap on the returned reason — a safety bound only; the chat shows the whole reason. */
+const MAX_REASON_LEN = 2000;
 
 export type GoalVerdict = 'met' | 'not_met' | 'refused' | 'impossible';
 

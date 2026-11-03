@@ -131,6 +131,24 @@ describe('runDiagnostics', () => {
     expect(byId.agent!.status).toBe('fail');
   });
 
+  it('reports a certificate failure as such, with the likely causes', async () => {
+    const tls = new TypeError(
+      'java.security.cert.CertPathValidatorException: Trust anchor for certification path not found.',
+    );
+    stubFetch({
+      '/api/healthz': { status: 0, throws: tls },
+      '/api/daemon/healthz': { status: 0, throws: tls },
+    });
+    const report = await runDiagnostics();
+    const server = report.checks.find((c) => c.id === 'server')!;
+    expect(server.tls).toBe(true);
+    expect(server.detail).toMatch(/certificate error/);
+    expect(server.detail).toMatch(/clock/);
+    expect(server.detail).toMatch(/sign-in page/);
+    expect(server.detail).toMatch(/VPN/);
+    expect(server.detail).not.toMatch(/unreachable/);
+  });
+
   it('reports a rejected credential distinctly when the agent probe 401s', async () => {
     stubFetch({
       '/api/healthz': HEALTHY['/api/healthz'],
@@ -271,6 +289,17 @@ describe('ConnectionDiagnostics screen', () => {
     const r = renderRN(<ConnectionDiagnostics />);
     await flush();
     expect(textOf(findHost(r.root, byTestId('diagnostics-headline')))).toMatch(/server/i);
+  });
+
+  it('headlines a certificate error rather than an unreachable server', async () => {
+    const tls = new TypeError('Trust anchor for certification path not found.');
+    stubFetch({
+      '/api/healthz': { status: 0, throws: tls },
+      '/api/daemon/healthz': { status: 0, throws: tls },
+    });
+    const r = renderRN(<ConnectionDiagnostics />);
+    await flush();
+    expect(textOf(findHost(r.root, byTestId('diagnostics-headline')))).toMatch(/certificate/i);
   });
 
   it('names the pairing problem when there is no credential', async () => {

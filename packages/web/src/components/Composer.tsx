@@ -126,6 +126,7 @@ import {
   spliceCompletion,
 } from '../lib/skillToken.js';
 import { GOAL_COMMAND_NAME, GOAL_COMMAND_DESCRIPTION } from '../lib/goalCommand.js';
+import { JOB_COMMAND_NAME, JOB_COMMAND_DESCRIPTION } from '../lib/jobCommand.js';
 import { CLEAR_COMMAND_NAME, CLEAR_COMMAND_DESCRIPTION } from '../lib/clearCommand.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import { isSubmitChord } from '../lib/submitChord.js';
@@ -877,6 +878,7 @@ export const Composer = forwardRef(function Composer(
   const BUILTIN_COMMANDS: { name: string; description: string }[] = [
     { name: CLEAR_COMMAND_NAME, description: CLEAR_COMMAND_DESCRIPTION },
     { name: GOAL_COMMAND_NAME, description: GOAL_COMMAND_DESCRIPTION },
+    { name: JOB_COMMAND_NAME, description: JOB_COMMAND_DESCRIPTION },
   ];
   // Every name a chip can legitimately be — a skill from the folder, or a
   // built-in — used both to recognise a completed chip anywhere in the text
@@ -1435,8 +1437,16 @@ export const Composer = forwardRef(function Composer(
     // The preview's job is over the moment the gesture ends: from here the
     // authoritative transcript is the only text that may reach the input. The
     // last interim words stay drawn until it lands (cleared in `finally`).
-    stopPreview();
+    // On a streaming engine the live session IS the transcript, so it stays
+    // open until the host has answered the finish below.
+    const computerEngine =
+      usePreferencesStore.getState().preferences.voiceConfig.dictation.computer;
+    const streaming = computerEngine === 'deepgram' || computerEngine === 'host';
+    const livePreview = streaming ? previewRef.current : null;
+    if (livePreview) previewRef.current = null;
+    else stopPreview();
     if (!rec) {
+      livePreview?.stop();
       setLivePartial('');
       setMicState('idle');
       pushError('voice: nothing recorded (released too quickly?). Hold a beat longer.');
@@ -1445,8 +1455,20 @@ export const Composer = forwardRef(function Composer(
     setMicState('transcribing');
     try {
       const clip = await rec.stop();
-      const doTranscribe = transcribeClip ?? ((c: Blob) => api.voiceTranscribe(c));
-      const { transcript } = await doTranscribe(clip);
+      let transcript: string;
+      if (streaming) {
+        // NO FALLBACK: a stream that is gone fails the dictation; the clip is
+        // not read by another engine.
+        if (!livePreview) throw new Error('the live dictation never opened');
+        try {
+          transcript = await livePreview.finish();
+        } finally {
+          livePreview.stop();
+        }
+      } else {
+        const doTranscribe = transcribeClip ?? ((c: Blob) => api.voiceTranscribe(c));
+        ({ transcript } = await doTranscribe(clip));
+      }
       const t = transcript.trim();
       const cur = valueRef.current;
       const next = t && cur.trim().length > 0 ? `${cur.trimEnd()} ${t}` : t || cur;

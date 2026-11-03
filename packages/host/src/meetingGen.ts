@@ -39,7 +39,9 @@ export function meetingTimeoutMs(topicCount: number): number {
 }
 
 export function buildMeetingPrompt(input: AnalyseInput): string {
-  const transcript = input.newLines.map((l) => `[${l.clock} ${l.speaker}] ${l.text}`).join('\n');
+  const line = (l: AnalyseInput['newLines'][number]): string =>
+    `[${l.clock} ${l.speaker}] ${l.text}`;
+  const transcript = input.newLines.map(line).join('\n');
   return [
     ...MEETING_NOTES_FRAME,
     '',
@@ -69,6 +71,13 @@ export function buildMeetingPrompt(input: AnalyseInput): string {
       })),
     }),
     '',
+    ...(input.earlierLines.length > 0
+      ? [
+          'Earlier transcript (context only, already in the notes: read the new lines in light of it):',
+          input.earlierLines.map(line).join('\n'),
+          '',
+        ]
+      : []),
     'NEW transcript:',
     transcript !== ''
       ? transcript

@@ -247,3 +247,25 @@ describe('AccountUsageTracker', () => {
     }
   });
 });
+
+describe('refreshAfterTurn', () => {
+  it('re-reads an account above 85% after a turn, and leaves a quiet one to the timer', async () => {
+    let util = 0.5;
+    const probe = vi.fn(async (): Promise<ClaudeUsageResult> => {
+      const r = ok();
+      if (r.kind === 'ok') r.reading.windows.session = { status: 'allowed', utilization: util };
+      return r;
+    });
+    let now = 1_000_000;
+    const { tracker } = make({ probe, now: () => now });
+    await tracker.refresh('a');
+    await tracker.refreshAfterTurn('a');
+    expect(probe).toHaveBeenCalledTimes(1);
+    util = 0.9;
+    now += 10 * 60_000;
+    await tracker.refresh('a');
+    now += 1_000;
+    await tracker.refreshAfterTurn('a');
+    expect(probe).toHaveBeenCalledTimes(3);
+  });
+});

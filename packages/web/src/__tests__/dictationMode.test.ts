@@ -59,7 +59,11 @@ describe('dictation mode', () => {
     let pushed = 0;
     const openPreview = vi.fn((c) => {
       pcb = c;
-      return { push: () => void pushed++, stop: () => void stops.push(1) };
+      return {
+        push: () => void pushed++,
+        finish: async () => '',
+        stop: () => void stops.push(1),
+      };
     });
     const mode = startDictationMode(
       { recorderFactory: r.factory, transcribe: async () => ({ transcript: 'hi' }), openPreview },

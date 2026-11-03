@@ -822,18 +822,11 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // served below, and read by the hub to bring connecting hosts in step.
   const downloadsDir = process.env.PATCH_DOWNLOADS_DIR ?? '/app/downloads';
   // How each host is coping (spec/03 § Host health). Reports arrive with the
-  // host's heartbeat; surfaces and the user are told when a host starts to struggle.
+  // host's heartbeat; surfaces are told when a host starts to struggle.
   const hostHealth = new HostHealthTracker({
     logger: log.child({ component: 'host-health' }),
     hostName: (hostId) => registry.hostName(hostId) ?? hostId,
     broadcast: (event) => wsHub.sendToAll(event),
-    notify: (message) => {
-      void notificationRouter
-        .route({ type: 'notify', chatId: 'host-health', message, priority: 'normal' })
-        .catch((err: unknown) => {
-          log.warn({ err: (err as Error).message }, 'host health notify failed');
-        });
-    },
     ...(opts.nowMs ? { now: opts.nowMs } : {}),
   });
   hostLink.onEvent((event) => hostHealth.observe(event));
@@ -985,7 +978,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
           ...(event.deepLink ? { deepLink: event.deepLink } : {}),
         });
       }
-      void notificationRouter.route(event).catch((err: unknown) => {
+      void notificationRouter.route(event, { suppressOn: 'chat-open' }).catch((err: unknown) => {
         log.warn({ err: (err as Error).message }, 'notify route failed');
       });
       return;
@@ -1411,7 +1404,6 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         // is known and do not invent a name for it.
         hostName: h.host?.hostName ?? null,
         online: h.online,
-        runsManager: h.host?.runsManager ?? false,
         ...(h.host?.defaultModel !== undefined ? { defaultModel: h.host.defaultModel } : {}),
       })),
     };
