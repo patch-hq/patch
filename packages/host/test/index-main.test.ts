@@ -510,6 +510,7 @@ async function bootMain(
       main({
         onReady: (handle) => resolve(handle),
         ...(opts.logStream ? { logStream: opts.logStream } : {}),
+        autoUpdateSettleMs: 0,
       }).catch(reject);
     },
   );
