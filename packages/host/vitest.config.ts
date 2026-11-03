@@ -10,7 +10,9 @@ export default defineConfig({
     // On a CI runner the suite's real sidecars and fork workers together
     // outgrow the VM's memory and the kernel SIGKILLs the run (exit 137, no
     // assertion failed). Fewer parallel forks keep it inside the box.
-    poolOptions: { forks: { maxForks: process.env.CI ? 2 : undefined } },
+    poolOptions: {
+      forks: process.env.CI ? { minForks: 1, maxForks: 2 } : {},
+    },
     coverage: {
       provider: 'v8',
       all: true,
