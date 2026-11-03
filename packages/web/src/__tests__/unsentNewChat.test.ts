@@ -30,12 +30,29 @@ beforeEach(() => {
   deleteChat.mockImplementation(async () => ({ ok: true as const }));
   _resetUnsentNewChats();
   useChatStore.getState()._reset();
+  useChatStore.setState({ hydrated: true });
   useComposerDraftStore.getState()._reset();
   useVoiceStore.getState().endCall();
   useUiStore.setState({ errors: [] });
 });
 
 describe('unsentNewChat', () => {
+  it('remembers an empty chat across a restart and removes it once the roster has loaded', async () => {
+    created();
+    vi.resetModules();
+    const fresh = await import('../lib/unsentNewChat.js');
+    const store = (await import('../stores/chatStore.js')).useChatStore;
+    store.setState({ hydrated: false });
+    store.getState().ensureChat(ID, '/home/tom/projects/portfolio');
+
+    fresh.discardUnsentNewChats(null);
+    expect(deleteChat).not.toHaveBeenCalled();
+
+    store.setState({ hydrated: true });
+    fresh.discardUnsentNewChats(null);
+    expect(deleteChat).toHaveBeenCalledWith(ID);
+  });
+
   it('deletes the chat once the user is somewhere else, and forgets it', () => {
     created();
     discardUnsentNewChats('chat_md');

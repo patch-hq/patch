@@ -160,6 +160,7 @@ import {
   parseTodoWriteArgs,
   selectNextTodo,
   TODO_PREFIX,
+  keepCompletedHistory,
 } from './todos.js';
 import { execFileSync } from 'node:child_process';
 import { assistantContextTokens, resultContextWindow } from './contextUsage.js';
@@ -412,6 +413,12 @@ export interface HostOptions {
          * for these two, and naming it as the limit hit reads as nonsense.
          */
         scope?: 'session' | 'week';
+        /**
+         * `scope` comes from a forecast (a pool at 98%+), not a refusal. Good
+         * enough to route around the account, not evidence that a failure the
+         * provider never called a limit was about credit.
+         */
+        estimated?: boolean;
         utilization?: number;
         resetsAt?: number;
         /** Extra usage could not cover it — why this is a stop, not a spill. */
@@ -7113,7 +7120,9 @@ export class Daemon {
     const ranOn = this.runningOnAccount.get(chatId);
     const info = this.opts.accountLimitInfo?.(ranOn);
     const probeBlocked =
-      info?.scope !== undefined && (info.resetsAt === undefined || info.resetsAt > this.opts.now());
+      info?.scope !== undefined &&
+      info.estimated !== true &&
+      (info.resetsAt === undefined || info.resetsAt > this.opts.now());
     return isAccountExhausted(limit, { probeBlocked });
   }
 
@@ -10250,7 +10259,10 @@ export class Daemon {
         // of this error, so it is true for a turn that died of something else
         // entirely while every key was spent, and settled BEFORE the failover
         // walk below can mark another account and change the answer.
-        let hostOutOfCredit = this.opts.hostOutOfCredit?.(chatId) === true;
+        // This aggregate reads Claude's account rotation. Codex failures must
+        // use their own structured limit or account probe below.
+        let hostOutOfCredit =
+          !isCodexModel(state.model) && this.opts.hostOutOfCredit?.(chatId) === true;
         if (
           harnessTraitsForModel(state.model).turnRetrySafe(err) &&
           this.accountOutOfCredit(chatId, limit) &&
@@ -11035,7 +11047,7 @@ export class Daemon {
       this.opts.logger.warn({ chatId }, 'TodoWrite args unrecognised; leaving todo list unchanged');
       return;
     }
-    state.todos = carryTodoAttachments(todos, state.todos);
+    state.todos = keepCompletedHistory(carryTodoAttachments(todos, state.todos), state.todos);
     this.persistTodos(chatId, state.todos);
     state.lastUpdated = this.opts.now();
     this.emitState(chatId);

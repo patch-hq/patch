@@ -11552,7 +11552,12 @@ main.empty-state p {
   color: var(--ink-2);
   cursor: pointer;
 }
-.model-option:hover {
+.model-option:disabled,
+.model-quick:disabled.is-spent {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.model-option:hover:not(:disabled) {
   /* Was var(--bg-hover, var(--bg-subtle)) — neither token exists, so the
      hovered row got no highlight at all. */
   background: var(--bg-soft);

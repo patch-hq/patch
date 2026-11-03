@@ -74,6 +74,7 @@ import { ImageLightbox } from './ImageLightbox.js';
 import { SkillPreviewPanel } from './SkillPreviewPanel.js';
 import type { AttachmentRef, PermissionMode } from '@patch/wire';
 import {
+  backendIdForModel,
   permissionModesFor,
   providerBuiltinCommands,
   providerDescriptor,
@@ -81,6 +82,7 @@ import {
   SPECIAL_THREAD_IDS,
 } from '@patch/wire';
 import { voiceKeyHostStatus } from '@patch/wire/audio';
+import { hostOutage } from '../lib/usage.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { providerConnectedForModel, usePreferencesStore } from '../stores/preferencesStore.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -564,7 +566,34 @@ export const Composer = forwardRef(function Composer(
   // exception: spawning it has to validate the folder on a live link, so it
   // is refused up front instead of queued (spec/12 § Host-offline UX).
   const isNewChat = chatId === 'new';
-  const sendBlocked = (offline && isNewChat) || claudeDisconnected;
+  // No credit left on any account that could run this chat: the turn would
+  // only park, so the send is refused up front and says why. Same certainty
+  // rule as the out-of-usage banner (an unread account is not "spent"), and
+  // the same per-host account set it counts.
+  const hostAccounts = usePresenceStore((s) =>
+    hostId ? (s.hosts[hostId]?.accounts[backendIdForModel(accountModel)] ?? null) : null,
+  );
+  const [usageNow, setUsageNow] = useState(() => Date.now());
+  const outage = hostOutage(
+    (hostAccounts?.accounts ?? []).filter(
+      (a) =>
+        !accountModel?.startsWith('openai/') ||
+        (a.kind ?? 'chatgpt') === (accountModel.startsWith('openai/api/') ? 'apiKey' : 'chatgpt'),
+    ),
+    usageNow,
+  );
+  const outOfUsage = !claudeDisconnected && outage !== null;
+  const outageResetsAt = outage?.soonest?.resetsAt;
+  useEffect(() => {
+    if (outageResetsAt === undefined) return;
+    // Re-evaluate the moment the pool refills, so Send comes back by itself.
+    const id = window.setTimeout(
+      () => setUsageNow(Date.now()),
+      Math.max(0, outageResetsAt - Date.now()) + 1000,
+    );
+    return () => window.clearTimeout(id);
+  }, [outageResetsAt]);
+  const sendBlocked = (offline && isNewChat) || claudeDisconnected || outOfUsage;
   // The EFFECTIVE approval mode the next turn will use, as the host resolved
   // it and put it on `chat.state` — never re-derived here, since a surface does
   // not hold the host default this was resolved against. `undefined` means the
@@ -2807,11 +2836,13 @@ export const Composer = forwardRef(function Composer(
                 /* `↵` is the primary key and `⌘↵` also works — name the primary one
                  (Tom, `patch/todo.md` — "nothing tells you enter sends"). */
                 title={
-                  editingTurn
-                    ? shortcutTitle('Save edit', '↵')
-                    : running
-                      ? shortcutTitle('Queue', '↵')
-                      : shortcutTitle('Send', '↵')
+                  outOfUsage
+                    ? 'Out of usage — can’t send until it resets'
+                    : editingTurn
+                      ? shortcutTitle('Save edit', '↵')
+                      : running
+                        ? shortcutTitle('Queue', '↵')
+                        : shortcutTitle('Send', '↵')
                 }
                 disabled={sendBlocked || resolving || !hasContent}
                 onContextMenu={sendMenu.openAt}

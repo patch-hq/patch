@@ -16,6 +16,7 @@ import {
   parseTodoWriteArgs,
   selectNextTodo,
   TODO_PREFIX,
+  keepCompletedHistory,
 } from '../src/todos.js';
 import type { TodoItem } from '@patch/wire';
 
@@ -237,5 +238,30 @@ describe('todo items with attachments', () => {
   it('tells the agent an item has files attached in the edit reminder', () => {
     const out = buildTodoEditSystemReminder([{ text: 'x', status: 'pending', attachments: [ref] }]);
     expect(out).toContain('1 attached');
+  });
+});
+
+describe('keepCompletedHistory', () => {
+  it('keeps finished items the new list dropped, ahead of it', () => {
+    const prev = [
+      { text: 'a', status: 'completed' as const },
+      { text: 'b', status: 'pending' as const },
+    ];
+    const next = [{ text: 'c', status: 'pending' as const }];
+    expect(keepCompletedHistory(next, prev)).toEqual([prev[0], next[0]]);
+  });
+  it('does not repeat an item the new list still names, nor keep unfinished ones', () => {
+    const prev = [
+      { text: 'a', status: 'completed' as const },
+      { text: 'b', status: 'in_progress' as const },
+    ];
+    const next = [{ text: 'a', status: 'completed' as const }];
+    expect(keepCompletedHistory(next, prev)).toEqual(next);
+  });
+});
+
+describe('keepCompletedHistory clearing', () => {
+  it('an empty list clears the history', () => {
+    expect(keepCompletedHistory([], [{ text: 'a', status: 'completed' }])).toEqual([]);
   });
 });
