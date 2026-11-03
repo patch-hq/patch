@@ -4,6 +4,7 @@ import { isDictatedSend } from '../../src/lib/dictatedSends';
 import { useViewPositionStore } from '../../src/stores/viewPositionStore';
 import { presentFailure } from '../../src/lib/usage';
 import React from 'react';
+import { formatElapsed as formatToolElapsed } from '../../src/lib/backgroundTasks';
 import {
   Animated,
   Dimensions,
@@ -1440,6 +1441,24 @@ function ChatDetailBody(): React.ReactElement {
 // the row expands its args + (for Edit/Write/MultiEdit) an inline unified
 // diff (spec/15 ## Chat detail). NO side-by-side — the unified renderer is
 // the only diff view on mobile.
+/** A running call's elapsed time, from the host's start stamp. Display only. */
+function ToolElapsed({ since }: { since: number }): React.ReactElement {
+  const colors = useTheme();
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <Text
+      testID="tool-running-elapsed"
+      style={{ ...typography.meta, color: colors.ink3, marginLeft: space.sm }}
+    >
+      {formatToolElapsed(since, now)}
+    </Text>
+  );
+}
+
 function ToolCallItem({
   chatId,
   entry,
@@ -1496,6 +1515,8 @@ function ToolCallItem({
   const phrase =
     labelForRun(ownLabel, [entry.callId])?.summary ?? toolCallSummary(entry.tool, entry.toolArgs);
   const summary = result ? `${phrase} →` : phrase;
+  const chatRunning = useChatStore((s) => s.chats[chatId]?.activity === 'running');
+  const runningSince = !result && chatRunning ? entry.startedAt : undefined;
   // patch_notify calls carrying a deepLink render a tappable link row on the
   // collapsed summary itself — same tap-target the push notification itself
   // opens (spec/09 § `### push`, spec/15 § Chat detail) — rather than
@@ -1537,6 +1558,7 @@ function ToolCallItem({
         >
           {summary}
         </Text>
+        {runningSince !== undefined ? <ToolElapsed since={runningSince} /> : null}
       </Pressable>
       {deepLink ? (
         <Pressable
