@@ -710,7 +710,17 @@ export const Composer = forwardRef(function Composer(
     if (seededOnMount.current) seededOnMount.current = false;
     else apply();
     let last = useComposerDraftStore.getState().drafts[chatId] ?? '';
+    let lastClears = useComposerDraftStore.getState().remoteClears[chatId] ?? 0;
     return useComposerDraftStore.subscribe((st) => {
+      // Sent/emptied on another surface while this composer has focus: the
+      // store applied the clear through the focus guard, so empty to match.
+      const clears = st.remoteClears[chatId] ?? 0;
+      if (clears !== lastClears) {
+        lastClears = clears;
+        last = st.drafts[chatId] ?? '';
+        setValue('');
+        return;
+      }
       const next = st.drafts[chatId] ?? '';
       if (next === last) return;
       last = next;
