@@ -537,8 +537,8 @@ Patch is a fully native Android app (bare-workflow Expo / React Native).
 - A small on-device cache (MMKV) mirrors the chat list rows — the roster
   metadata the Chats tab renders. On launch the UI paints from this cache
   synchronously, before any network call, so the chat list appears immediately,
-  exactly as it was last seen. Message timelines are not cached; a chat's
-  transcript is always loaded live.
+  exactly as it was last seen. Transcripts are kept on the device too, for every chat in the
+  roster, so any chat opens offline (`12-error-and-offline.md` § Offline reading).
 - The cache is a convenience read-mirror of server state. The roster fetch and
   the live WebSocket stream are authoritative and replace it wholesale, so a
   chat deleted or renamed elsewhere cannot survive from cache, and the cache

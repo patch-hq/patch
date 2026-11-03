@@ -36,8 +36,14 @@ const KEY_PREFIX = 'patch.transcript.v1.';
 const INDEX_KEY = 'patch.transcript.index.v1';
 /** Most recent events kept per chat — well past a tall screen's worth. */
 export const MAX_CACHED_EVENTS = 3000;
-/** How many chats' transcripts to keep, least-recently-opened dropped first. */
-export const MAX_CACHED_CHATS = 20;
+/**
+ * How many chats' transcripts to keep, least-recently-opened dropped first.
+ * Every chat in the roster is meant to read offline (spec/12 § Offline
+ * reading), so this is a safety ceiling on a phone's storage, not the working
+ * set.
+ */
+export const MAX_CACHED_CHATS = 500;
+const SYNCED_KEY = 'patch.transcript.synced.v1';
 /** Live events trickle in; coalesce before rewriting a chat's blob. */
 const FLUSH_MS = 750;
 
@@ -253,4 +259,60 @@ export function __resetPendingForTests(): void {
   pending.clear();
   if (flushTimer !== null) clearTimeout(flushTimer);
   flushTimer = null;
+}
+
+/** chatId -> the roster `lastUpdated` the held transcript was last brought level with. */
+function readSynced(): Record<string, number> {
+  const raw = store().getString(SYNCED_KEY);
+  if (raw === undefined) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error('synced marks are not an object');
+    }
+    return parsed as Record<string, number>;
+  } catch (e) {
+    store().delete(SYNCED_KEY);
+    useUiStore.getState().pushError(`transcript sync marks unreadable: ${(e as Error).message}`);
+    return {};
+  }
+}
+
+/** The highest seq held for a chat, or -1 when nothing is. Reads only; no recency bump. */
+export function heldCursor(chatId: string): number {
+  const held = readChat(chatId);
+  if (held === null) return -1;
+  return held.events.reduce<number>((max, e) => {
+    const seq = durableSeq(e);
+    return seq !== null && seq > max ? seq : max;
+  }, -1);
+}
+
+/** True when the chat's held transcript has not been brought level with `lastUpdated`. */
+export function needsOfflineSync(chatId: string, lastUpdated: number): boolean {
+  return readSynced()[chatId] !== lastUpdated || heldCursor(chatId) < 0;
+}
+
+/** Record that the transcript now covers everything up to `lastUpdated`. */
+export function markSynced(chatId: string, lastUpdated: number): void {
+  // Land anything still coalescing so the marker never runs ahead of the blob.
+  if (pending.has(chatId)) flush();
+  const synced = readSynced();
+  synced[chatId] = lastUpdated;
+  store().set(SYNCED_KEY, JSON.stringify(synced));
+}
+
+/** Forget transcripts of chats the roster no longer lists (deleted elsewhere). */
+export function pruneTranscripts(liveChatIds: Set<string>): void {
+  const index = readIndex();
+  const synced = readSynced();
+  for (const chatId of Object.keys(index)) {
+    if (liveChatIds.has(chatId)) continue;
+    pending.delete(chatId);
+    store().delete(key(chatId));
+    delete index[chatId];
+    delete synced[chatId];
+  }
+  store().set(INDEX_KEY, JSON.stringify(index));
+  store().set(SYNCED_KEY, JSON.stringify(synced));
 }
