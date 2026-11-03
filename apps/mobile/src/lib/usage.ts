@@ -5,7 +5,7 @@
 // Times are formatted by hand rather than with toLocale*, which is unreliable
 // under Hermes; they are always in the phone's own zone.
 
-import type { RateLimitWindow } from '@patch/wire';
+import { rateLimitWindowsBlocked, type RateLimitWindow } from '@patch/wire';
 
 export type UsageScope = 'session' | 'week' | 'overage';
 
@@ -95,4 +95,30 @@ export function presentFailure(content: string, now: number = Date.now()): strin
     const at = Date.parse(iso);
     return Number.isNaN(at) ? iso : formatReset(at, now);
   });
+}
+
+/**
+ * Every connected account is spent, as of `now` — and the ms-epoch the first
+ * of them comes back (undefined when none states a reset).
+ *
+ * Returns null unless it is certain, the same rule as web's `hostOutage`: no
+ * connected account, an account with no reading, or any account still usable
+ * all mean "not out". Unknown is not spent.
+ */
+export function accountsOutage(
+  accounts: readonly { connected: boolean; usage?: AccountUsage }[],
+  now: number = Date.now(),
+): { resetsAt?: number } | null {
+  const connected = accounts.filter((a) => a.connected);
+  if (connected.length === 0) return null;
+  let soonest: number | undefined;
+  for (const a of connected) {
+    if (!a.usage || !rateLimitWindowsBlocked(a.usage, now)) return null;
+    for (const w of [a.usage.session, a.usage.week]) {
+      if (w?.resetsAt !== undefined && w.resetsAt > now) {
+        soonest = soonest === undefined ? w.resetsAt : Math.min(soonest, w.resetsAt);
+      }
+    }
+  }
+  return soonest === undefined ? {} : { resetsAt: soonest };
 }
