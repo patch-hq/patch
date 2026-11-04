@@ -61,8 +61,8 @@ export const WakeRecord = z
      * about-to-start turn, or an unrelated one already running) and was
      * absorbed rather than delivered/enqueued. `fireAt` is stale while this
      * is true — the host arms a fresh one (`onTurnEnd`, or on boot) once it
-     * knows the turn has actually ended. Meaningless without `every`: a
-     * one-shot wake is never marked waiting.
+     * knows the turn has actually ended. On a one-shot it means the wake is
+     * held until the running turn ends, then delivered once.
      */
     waiting: z.boolean().optional(),
   })
@@ -191,6 +191,18 @@ export class WakeScheduler {
       this.deps.logger.info({ chatId }, 'wake: held — chat is waiting on a usage limit');
       return;
     }
+    if (rec.every === undefined && rec.waiting !== true && this.deps.isBusy(chatId)) {
+      // One-shot + the chat is mid-turn: hold it (spec/02 § Self-wake) rather
+      // than queue a `[wake]` turn behind the running one. `onTurnEnd`
+      // delivers it once the pump empties. One pending wake per chat, so a
+      // held wake is also de-duplicated: re-arming replaces it.
+      this.persist({ ...rec, waiting: true });
+      this.deps.logger.info(
+        { chatId },
+        'wake: one-shot held — turn already running, delivering when it ends',
+      );
+      return;
+    }
     if (rec.every !== undefined) {
       // Recurring + the chat is already busy with an unrelated turn: don't
       // deliver (and don't let `sendInput` enqueue it either — we just never
@@ -241,7 +253,12 @@ export class WakeScheduler {
    */
   onTurnEnd(chatId: string): boolean {
     const rec = this.read(chatId);
-    if (!rec || rec.every === undefined || rec.waiting !== true) return false;
+    if (!rec || rec.waiting !== true) return false;
+    if (rec.every === undefined) {
+      // A held one-shot: the turn it waited on is over, so deliver it now.
+      void this.fire(chatId);
+      return false;
+    }
     this.rearmFresh(rec, rec.every);
     return true;
   }
