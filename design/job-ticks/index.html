@@ -1,0 +1,30 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=420">
+<style>
+:root{--bg-app:#f2f0ea;--bg-panel:#faf8f3;--bg-elevated:#fff;--ink-1:#1c1b19;--ink-2:#3b3a36;--ink-3:#77746b;--line:#dcd8cc;--line-soft:#e8e4d9}
+*{box-sizing:border-box}body{margin:0;font:14px system-ui,sans-serif;background:var(--bg-app);color:var(--ink-2);display:flex;justify-content:center}
+.phone{width:420px;height:760px;background:var(--bg-panel);display:flex;flex-direction:column;border:1px solid var(--line)}
+.top{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line-soft);background:var(--bg-elevated)}
+.top b{flex:1;font-size:15px;color:var(--ink-1);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.chip{font-size:12px;padding:2px 8px;border:1px solid var(--line);border-radius:999px;color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap}
+.msgs{flex:1;padding:16px;display:flex;flex-direction:column;gap:12px;overflow:hidden}
+.m{background:var(--bg-elevated);border:1px solid var(--line-soft);border-radius:10px;padding:10px 12px;max-width:85%}
+.u{align-self:flex-end;background:var(--bg-soft,#f4f2eb)}
+.tick{display:flex;align-items:center;gap:12px;padding:8px 16px;font-size:13px;color:var(--ink-2);border-top:1px solid var(--line-soft);background:var(--bg-panel);font-variant-numeric:tabular-nums}
+.tick .t{color:var(--ink-1)}.tick .n{color:var(--ink-3);flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.tick .bar{height:3px;background:var(--line-soft);position:relative}
+.comp{padding:10px 16px 14px;border-top:1px solid var(--line-soft);background:var(--bg-elevated)}
+.comp div{border:1px solid var(--line);border-radius:10px;padding:10px 12px;color:var(--ink-3)}
+.prog{height:2px;background:var(--line-soft)}.prog i{display:block;height:100%;width:62%;background:var(--ink-3)}
+</style>
+<div class="phone">
+ <div class="top"><b>Resume Cadence Delivery Automation</b><span class="chip" data-testid="top-tick">Job · next 2m 14s</span><span class="chip">Loop 5m</span></div>
+ <div class="msgs">
+  <div class="m u">You are running autonomously…</div>
+  <div class="m">Checked the board: nothing new. Waiting for the next pass.</div>
+  <div class="m u">You are running autonomously…</div>
+  <div class="m">PR #482 still in review. No action.</div>
+ </div>
+ <div class="prog"><i></i></div>
+ <div class="tick" data-testid="tick-bar"><span class="t">Next job run in 2m 14s</span><span class="n">Resume Cadence Delivery · every 5m</span></div>
+ <div class="comp"><div>Message</div></div>
+</div>
