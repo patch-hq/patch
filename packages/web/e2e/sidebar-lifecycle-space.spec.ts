@@ -135,19 +135,22 @@ test.describe('Sidebar lifecycle group cannot starve the chat list', () => {
       expect(await bandHeight(page, `.sb-${id}`), `${id} section must be zero-height`).toBe(0);
     }
 
-    // Three sections open and the group has not grown by a pixel, so the chat
-    // list has not lost one. (Unfixed: 272px -> 13px with all four open.)
+    // Toggles are exclusive: opening each closed the previous one, so only the
+    // last is open, and the group has not grown by a pixel — the chat list has
+    // not lost one.
+    await expect(page.getByTestId('snoozed-section')).toHaveCount(0);
+    await expect(page.getByTestId('deleted-section')).toHaveCount(0);
     expect(await bandHeight(page, '.sb-lifecycle')).toBe(lifecycleBefore);
     expect(await bandHeight(page, '.sb-scroll')).toBe(scrollBefore);
     expect(await page.locator('.sb-scroll [data-testid^="chat-row-"]').count()).toBeGreaterThan(1);
 
-    // The count does not depend on the row being open. Collapse them again and
-    // the tooltips stay, unchanged — one server-served number, not a
+    // The count does not depend on the row being open. Collapse the open one
+    // and every tooltip stays, unchanged — one server-served number, not a
     // measurement of whichever list happens to be loaded.
+    await page.getByTestId('automations-toggle').click();
+    await page.mouse.move(900, 450);
+    await expect(page.getByTestId('automations-section')).toHaveCount(0);
     for (const id of ['snoozed', 'deleted', 'automations'] as const) {
-      await page.getByTestId(`${id}-toggle`).click();
-      await page.mouse.move(900, 450);
-      await expect(page.getByTestId(`${id}-section`)).toHaveCount(0);
       await expect(page.getByTestId(`${id}-toggle`)).toBeVisible();
       await expect(page.getByTestId(`${id}-toggle`)).toHaveAttribute('title', /· 0$/);
     }
@@ -159,7 +162,9 @@ test.describe('Sidebar lifecycle group cannot starve the chat list', () => {
     await expect(page.getByTestId('hidden-toggle')).toHaveAttribute('title', /· 1$/);
   });
 
-  test('expanding all five FULL sections leaves the chat list several rows', async ({ page }) => {
+  test('expanding each FULL section in turn leaves the chat list several rows', async ({
+    page,
+  }) => {
     const many = (prefix: string, status: string, extra?: Record<string, unknown>): unknown[] =>
       Array.from({ length: 12 }, (_, i) => chatFixture(`${prefix}_${i}`, status, extra));
     await stubLifecycle(page, {
@@ -174,29 +179,41 @@ test.describe('Sidebar lifecycle group cannot starve the chat list', () => {
     await page.goto(HARNESS);
     await expect(page.getByTestId('sidebar')).toBeVisible();
 
-    for (const id of TOGGLES) await page.getByTestId(id).click();
+    // Lifecycle toggles are exclusive, so each section is measured open on
+    // its own; the cap holds for every one.
+    await page.getByTestId('archived-toggle').click();
     await page.mouse.move(900, 450);
     await expect(page.getByTestId('archived-section').getByTestId('chat-row-arch_0')).toBeVisible();
     // A populated section reports its size in the icon's tooltip, from the
     // server total.
     await expect(page.getByTestId('archived-toggle')).toHaveAttribute('title', /· 12 /);
 
-    const lifecycle = await bandHeight(page, '.sb-lifecycle');
-    const scroll = await bandHeight(page, '.sb-scroll');
+    for (const id of ['archived', 'hidden', 'snoozed', 'deleted', 'automations'] as const) {
+      if (id !== 'archived') {
+        await page.getByTestId(`${id}-toggle`).click();
+        await page.mouse.move(900, 450);
+        await expect(page.getByTestId(`${id}-section`)).toBeAttached();
+      }
+      const lifecycle = await bandHeight(page, '.sb-lifecycle');
+      const scroll = await bandHeight(page, '.sb-scroll');
 
-    // Capped at min(30%, 300px) of a 900px sidebar — nowhere near the 430px
-    // the old 50% cap allowed, and it scrolls its own overflow internally.
-    expect(lifecycle).toBeLessThanOrEqual(300);
-    expect(
-      await page.evaluate(() => {
-        const el = document.querySelector('.sb-lifecycle') as HTMLElement;
-        return el.scrollHeight > el.clientHeight;
-      }),
-    ).toBe(true);
-    // The chat list survives with real rows in it (the four-row bottom nav
-    // and the grouping switch leave it 82px at this size).
-    expect(scroll).toBeGreaterThanOrEqual(75);
-    expect(await page.locator('.sb-scroll [data-testid^="chat-row-"]').count()).toBeGreaterThan(1);
+      // Capped at min(30%, 300px) of a 900px sidebar — nowhere near the 430px
+      // the old 50% cap allowed, and it scrolls its own overflow internally.
+      expect(lifecycle, id).toBeLessThanOrEqual(300);
+      if (id === 'archived') {
+        expect(
+          await page.evaluate(() => {
+            const el = document.querySelector('.sb-lifecycle') as HTMLElement;
+            return el.scrollHeight > el.clientHeight;
+          }),
+        ).toBe(true);
+      }
+      // The chat list survives with real rows in it.
+      expect(scroll, id).toBeGreaterThanOrEqual(75);
+      expect(await page.locator('.sb-scroll [data-testid^="chat-row-"]').count()).toBeGreaterThan(
+        1,
+      );
+    }
   });
 
   test('a long chat list still cannot clip the five lifecycle toggles', async ({ page }) => {
