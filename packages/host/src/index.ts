@@ -6971,6 +6971,7 @@ export async function handleServerEvent(
           event.source,
           Buffer.from(event.audioBase64, 'base64'),
           event.speakerName,
+          event.device,
         );
         return;
       }

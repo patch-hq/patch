@@ -622,6 +622,9 @@ test.describe('meeting mode — live', () => {
     await page.goto(URL_LIVE);
     await expect(page.getByTestId('meeting-not-listening')).toBeVisible();
     await expect(page.getByTestId('meeting-listen-here')).toBeVisible();
+    await expect(page.getByTestId('meeting-not-listening')).not.toContainText(
+      'This device is not listening',
+    );
   });
 
   test('a host error is one line under the header, and shows in full on click', async ({
@@ -956,7 +959,7 @@ test.describe('meeting mode — editing prompts mid-call', () => {
 });
 
 test.describe('meeting mode — research cards', () => {
-  test('one line each, the type by the chip colour, opening to bullets and source', async ({
+  test('one line each, the type by the chip colour, open by default, folding on click', async ({
     page,
   }) => {
     await page.goto(URL_LIVE);
@@ -964,6 +967,8 @@ test.describe('meeting mode — research cards', () => {
     await openTopic(page, 'points ledger');
     const cards = page.getByTestId('meeting-card');
     await expect(cards).toHaveCount(3);
+    // Bullets show without a click.
+    await expect(cards.first().locator('li').first()).toBeVisible();
     await expect(cards.getByTestId('meeting-card-kind')).toHaveText([
       'Answer',
       'Fact check',
@@ -978,7 +983,8 @@ test.describe('meeting mode — research cards', () => {
     );
     expect(new Set(colours).size).toBe(3);
     for (const c of await cards.all()) {
-      expect((await c.boundingBox())!.height).toBeLessThan(30);
+      expect((await c.locator('.mm-card-h').boundingBox())!.height).toBeLessThan(30);
+      await expect(c.locator('.mm-card-chev')).toBeVisible();
       expect(await c.evaluate((el) => getComputedStyle(el).borderLeftWidth)).toBe('0px');
     }
     const fact = page.locator('[data-testid=meeting-card][data-kind=fact]');
@@ -986,12 +992,13 @@ test.describe('meeting mode — research cards', () => {
       '"The ferry carries about fifty cars"',
     );
     await expect(fact.getByTestId('meeting-card-verdict')).toHaveText('Off');
-    await fact.locator('.mm-card-h').click();
     await expect(fact.locator('li')).toHaveText(['The operator lists a deck capacity of 40 cars']);
     const link = fact.getByTestId('meeting-card-source');
     await expect(link).toHaveText('Operator fleet page');
     await expect(link).toHaveAttribute('href', 'https://example.org/fleet');
     await expect(link).toHaveAttribute('target', '_blank');
+    await fact.locator('.mm-card-h').click();
+    await expect(fact.locator('li')).toHaveCount(0);
   });
 
   test('the research switch tells the host, and a failed pass shows under the header', async ({

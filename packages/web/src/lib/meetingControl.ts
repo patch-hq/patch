@@ -26,6 +26,8 @@ import {
   type PcmFeed,
 } from './meetingCapture.js';
 
+import { deviceLabel } from './deviceLabel.js';
+
 let capture: MeetingCapture | null = null;
 
 const SETTINGS_KEY = 'patch.meeting.liveness';
@@ -204,6 +206,7 @@ async function beginCapture(chatId: string, opts: { names?: boolean } = {}): Pro
             source,
             audioBase64,
             ...(speakerName ? { speakerName } : {}),
+            device: deviceLabel(),
           });
         } catch (err) {
           useUiStore.getState().pushError(`Meeting audio not sent: ${(err as Error).message}`);

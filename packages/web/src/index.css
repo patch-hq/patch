@@ -14556,6 +14556,9 @@ select.permission-mode.is-pending {
   color: var(--ink);
   background: var(--bg-soft);
 }
+.mm-icon[aria-pressed='true'] {
+  border-color: var(--ink);
+}
 .mm-icon:disabled {
   cursor: default;
 }
@@ -16940,6 +16943,10 @@ select.permission-mode.is-pending {
   all: unset;
   box-sizing: border-box;
   width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
   cursor: pointer;
 }
 .mm-card[data-kind='fact'] .mm-chip {
@@ -16949,6 +16956,14 @@ select.permission-mode.is-pending {
 .mm-card[data-kind='answer'] .mm-chip {
   background: var(--bg-soft);
   color: var(--permission);
+}
+.mm-card-chev {
+  flex: none;
+  color: var(--ink-3);
+  transition: transform 0.15s;
+}
+.mm-card[data-open='false'] .mm-card-chev {
+  transform: rotate(-90deg);
 }
 .mm-card-b {
   margin: 2px 0 4px 8px;

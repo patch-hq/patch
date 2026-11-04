@@ -3993,6 +3993,8 @@ export const MeetingAudioEvent = z
     audioBase64: z.string().min(1),
     /** Who was lit up as the active speaker during this system clip, when the shell could tell. */
     speakerName: z.string().min(1).optional(),
+    /** Which device is sending the audio, e.g. "Chrome on a Mac"; other surfaces name it as where the meeting is listening. */
+    device: z.string().min(1).optional(),
   })
   .strict();
 export type MeetingAudioEvent = z.infer<typeof MeetingAudioEvent>;
