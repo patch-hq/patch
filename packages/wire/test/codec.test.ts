@@ -203,14 +203,6 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     intervalMs: 15000,
     topProcesses: [{ name: 'vitest', count: 5, rssBytes: 11811160064 }],
   },
-  'host.condition': {
-    type: 'host.condition',
-    hostId: 'host-a',
-    state: 'struggling',
-    critical: false,
-    reasons: ['memory'],
-    topProcesses: [{ name: 'vitest', count: 5, rssBytes: 11811160064 }],
-  },
   'host.unauthenticated': {
     type: 'host.unauthenticated',
     hostId: 'host-a',
