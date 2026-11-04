@@ -20,12 +20,6 @@ import type { AudioEvent } from '@patch/wire/audio';
 const logger = pino({ level: 'silent' });
 
 describe('which backends offer a live transcript', () => {
-  test('Groq does — a fresh request per prefix, paid for out of a reserved slice of its quota', () => {
-    expect(createWhisper({ backend: 'groq', logger, groqApiKey: 'k' }).supportsLivePartials).toBe(
-      true,
-    );
-  });
-
   test('a model on this machine does — one pass in flight at a time, so the final waits behind at most one', () => {
     expect(
       createWhisper({ backend: 'local', logger, localSidecarUrl: 'ws://127.0.0.1:1' })

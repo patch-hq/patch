@@ -14,7 +14,6 @@ import {
   meetingCardProblem,
 } from '@patch/wire';
 import {
-  MeetingManager,
   MeetingResearchResult,
   type AnalyseInput,
   type MeetingAnalysis,

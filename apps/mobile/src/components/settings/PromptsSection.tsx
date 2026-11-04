@@ -108,14 +108,9 @@ export function PromptsPage(): React.ReactElement {
 /** The meeting models and how often the notes are refreshed, saved on blur like the other fields. */
 function MeetingControls({ preferences }: { preferences: AccountPreferences }): React.ReactElement {
   const [seconds, setSeconds] = React.useState(String(preferences.meetingAnalyseSeconds));
-  const [stt, setStt] = React.useState(preferences.meetingTranscriptionModel);
   React.useEffect(
     () => setSeconds(String(preferences.meetingAnalyseSeconds)),
     [preferences.meetingAnalyseSeconds],
-  );
-  React.useEffect(
-    () => setStt(preferences.meetingTranscriptionModel),
-    [preferences.meetingTranscriptionModel],
   );
   return (
     <>
@@ -130,25 +125,6 @@ function MeetingControls({ preferences }: { preferences: AccountPreferences }): 
         testID="meeting-cleanup-model"
         value={preferences.meetingCleanupModel}
         onSelect={(id) => writePreferences({ meetingCleanupModel: id })}
-      />
-      <Row
-        title="Transcription model"
-        subtitle="Model directory (local) or Groq model name; empty is the machine's"
-        right={
-          <Field
-            testID="meeting-transcription-model"
-            accessibilityLabel="Meeting transcription model"
-            value={stt}
-            placeholder="Machine default"
-            onChangeText={setStt}
-            style={{ width: 160 }}
-            onBlur={() => {
-              const next = stt.trim();
-              if (next !== preferences.meetingTranscriptionModel)
-                writePreferences({ meetingTranscriptionModel: next });
-            }}
-          />
-        }
       />
       <Row
         title="Analyse every"

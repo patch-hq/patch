@@ -124,6 +124,12 @@ export function isEchoOf(micText: string, callTexts: string[]): boolean {
   return words.filter((w) => pool.has(w)).length / words.length >= ECHO_CONTAINED;
 }
 
+/** sherpa-onnx's native addon, loaded on first use so the app starts without it. */
+function loadSherpa(): SherpaModule {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require('sherpa-onnx-node') as SherpaModule;
+}
+
 export function missingModelFiles(parakeetDir: string, vadModel: string): string[] {
   const missing: string[] = PARAKEET_FILES.filter((f) => !existsSync(join(parakeetDir, f))).map(
     (f) => join(parakeetDir, f),
@@ -153,10 +159,7 @@ export class MeetingTranscriber {
     if (missing.length > 0) {
       throw new Error(`Meeting transcription model is missing: ${missing.join(', ')}`);
     }
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    this.sherpa = opts.loadSherpa
-      ? opts.loadSherpa()
-      : (require('sherpa-onnx-node') as SherpaModule);
+    this.sherpa = opts.loadSherpa ? opts.loadSherpa() : loadSherpa();
     const dir = opts.parakeetDir;
     this.recognizer = new this.sherpa.OfflineRecognizer({
       featConfig: { sampleRate: SAMPLE_RATE, featureDim: 80 },

@@ -336,7 +336,6 @@ export function readBuildInfo(artifactDir: string): BuildInfo {
  */
 export const PASSTHROUGH_ENV = [
   'WHISPER_BACKEND',
-  'GROQ_API_KEY',
   'WHISPER_LOCAL_SIDECAR_URL',
   'PARAKEET_MODEL_DIR',
   'PARAKEET_STREAMING_MODEL_DIR',
@@ -347,7 +346,19 @@ export const PASSTHROUGH_ENV = [
 ] as const;
 
 /** Passed-through variables that are credentials, kept out of the unit file. */
-export const SECRET_ENV = ['GROQ_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'] as const;
+export const SECRET_ENV = ['CLAUDE_CODE_OAUTH_TOKEN'] as const;
+
+/**
+ * Settings a machine may have been installed with that Patch no longer has:
+ * dropped on a re-run so they never reach the unit (a retired key would
+ * otherwise be written there in the clear).
+ */
+export function withoutRetiredEnv(env: Record<string, string>): Record<string, string> {
+  const out = { ...env };
+  delete out['GROQ_API_KEY'];
+  if (out['WHISPER_BACKEND'] === 'groq') delete out['WHISPER_BACKEND'];
+  return out;
+}
 
 export function passThroughEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   const out: Record<string, string> = {};
@@ -364,7 +375,7 @@ export function passThroughEnv(env: NodeJS.ProcessEnv): Record<string, string> {
  * spec/10 § Host registration: "Re-running the installer on a host that is
  * already registered re-uses what is already stored." That has to cover the
  * machine's settings too, not just its credential — a re-run invoked without,
- * say, GROQ_API_KEY in its environment must not quietly rewrite the service
+ * say, WHISPER_BACKEND in its environment must not quietly rewrite the service
  * unit without it and leave the host refusing to boot. Anything named on the
  * re-run wins; anything not named is what it already was.
  */
@@ -650,7 +661,7 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
   }
 
   // ---- 6. Register with the machine's own service manager ---------------
-  const machineEnv = { ...stored.env, ...passThroughEnv(ctx.env) };
+  const machineEnv = withoutRetiredEnv({ ...stored.env, ...passThroughEnv(ctx.env) });
   writeMachineSettings(patchHome, {
     serverUrl,
     internalToken,
@@ -694,7 +705,7 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
       // and barge-in work on this machine with nothing downloaded (spec/02).
       VAD_BACKEND: 'silero',
       VAD_MODEL_PATH: join(installDir, 'silero_vad.onnx'),
-      // spec/11 § Env: WHISPER_BACKEND, GROQ_API_KEY and CLAUDE_CODE_OAUTH_TOKEN
+      // spec/11 § Env: WHISPER_BACKEND and CLAUDE_CODE_OAUTH_TOKEN
       // "are read by the host, so they are set in the environment of each
       // host's service rather than in the server's compose env". They travel
       // with the install command, and are carried into the unit here.

@@ -672,7 +672,7 @@ export function ProvidersPage(): React.ReactElement {
 
 /**
  * The account's provider keys (spec/02 § Provider keys) — Gemini, OpenAI
- * Realtime, Groq — shared settings held on the server and sent to every host,
+ * Realtime, Deepgram — shared settings held on the server and sent to every host,
  * each stating whether it is set and its last four characters, never the
  * value. A key only some hosts' environments supply names them and can be
  * used for every host. Separate from Secrets (which are injected into chats).

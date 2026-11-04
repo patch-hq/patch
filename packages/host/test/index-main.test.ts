@@ -2044,14 +2044,13 @@ describe('src/index.ts main() — full host boot', () => {
     rmSync(modelHome, { recursive: true, force: true });
   });
 
-  it('whisper/kokoro optional-field construction spreads (groqApiKey, sidecar URLs/model paths)', async () => {
+  it('whisper/kokoro optional-field construction spreads (sidecar URLs/model paths)', async () => {
     // All of these fields are accepted regardless of the SELECTED backend
     // (still 'mock' here) — main() spreads them into createWhisper/createKokoro
     // whenever they're SET, independent of which backend is active. Setting
     // them exercises index.ts's own `!== undefined` branches without needing
     // the mock backend to actually use them.
     const boot = await bootMain({
-      GROQ_API_KEY: 'groq-test-key',
       WHISPER_LOCAL_SIDECAR_URL: 'ws://127.0.0.1:1/whisper-unused',
       WHISPER_MODEL_PATH: '/no/such/whisper-model',
       KOKORO_SIDECAR_URL: 'ws://127.0.0.1:1/kokoro-unused',
@@ -2942,7 +2941,7 @@ describe('src/index.ts main() — full host boot', () => {
   // settings were shared goes up once, and a key in its environment on request.
   it('answers the server’s import with what it held, and adopts a key from its environment', async () => {
     const boot = await bootMain(
-      { GROQ_API_KEY: 'env-groq-fake-value-000000-ENV9' },
+      { DEEPGRAM_API_KEY: 'env-deepgram-fake-value-00000-ENV9' },
       {
         hostJson: { permissionModeDefault: 'plan', questionExpirySeconds: 90 },
         claudeStore: {
@@ -2993,7 +2992,7 @@ describe('src/index.ts main() — full host boot', () => {
         requestId: 'key-1',
         hostId: 'd1',
         kind: 'provider-key',
-        id: 'groq',
+        id: 'deepgram',
       });
       expect(
         await boot.fakeServer.waitForFrame(
@@ -3001,7 +3000,11 @@ describe('src/index.ts main() — full host boot', () => {
         ),
       ).toMatchObject({
         ok: true,
-        result: { kind: 'provider-key', id: 'groq', value: 'env-groq-fake-value-000000-ENV9' },
+        result: {
+          kind: 'provider-key',
+          id: 'deepgram',
+          value: 'env-deepgram-fake-value-00000-ENV9',
+        },
       });
 
       boot.fakeServer.send({
@@ -4075,7 +4078,6 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
       {
         GEMINI_API_KEY: undefined,
         OPENAI_REALTIME_API_KEY: undefined,
-        GROQ_API_KEY: undefined,
         DEEPGRAM_API_KEY: undefined,
         ELEVEN_LABS_API_KEY: undefined,
       },
@@ -4100,7 +4102,6 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
           { id: 'gemini', source: 'none', envSet: false },
           { id: 'openai', source: 'none', envSet: false },
           { id: 'elevenlabs', source: 'none', envSet: false },
-          { id: 'groq', source: 'none', envSet: false },
           { id: 'deepgram', source: 'none', envSet: false },
         ],
       });
@@ -4155,7 +4156,6 @@ describe('src/index.ts main() — provider keys set from Settings (spec/02 § Pr
           { id: 'gemini', source: 'none', envSet: false },
           { id: 'openai', source: 'none', envSet: false },
           { id: 'elevenlabs', source: 'none', envSet: false },
-          { id: 'groq', source: 'none', envSet: false },
           { id: 'deepgram', source: 'ui', last4: 'LAST', envSet: false },
         ],
       });

@@ -22,7 +22,7 @@ import { stripMarkdownForSpeech, extractSentences } from './speechText.js';
 import { isStockHallucination } from './partial-filter.js';
 import type { VoiceSessionLike } from './voice-session-like.js';
 import { MicLevelWatch, micSilentMessage } from './micLevel.js';
-import { GROQ_MIN_BILLED_SECONDS, type EngineCosting, type SttUsage } from './voiceCost.js';
+import type { EngineCosting, SttUsage } from './voiceCost.js';
 
 export type SessionState = 'connecting' | 'listening' | 'transcribing' | 'thinking' | 'speaking';
 
@@ -361,7 +361,7 @@ export class VoiceSession implements VoiceSessionLike {
       const seconds = pcm.length / 16000;
       stt.requests += 1;
       stt.audioSeconds += seconds;
-      stt.billedSeconds += Math.max(GROQ_MIN_BILLED_SECONDS, seconds);
+      stt.billedSeconds += seconds;
       return text;
     };
     if (whisper.openLiveStream) {

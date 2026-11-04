@@ -11,7 +11,7 @@ import { ProviderKeyError, ProviderKeyStore, providerKeysPath } from '../src/pro
 // Obviously fake values, long enough to pass the length floor.
 const UI_GEMINI = 'ui-gemini-fake-value-000000-WXYZ';
 const ENV_GEMINI = 'env-gemini-fake-value-00000-ENV1';
-const UI_GROQ = 'ui-groq-fake-value-0000000-GRQ9';
+const UI_DG = 'ui-deepgram-fake-value-00000-DG99';
 
 let home: string;
 beforeEach(() => {
@@ -40,8 +40,8 @@ describe('ProviderKeyStore — storage', () => {
   });
 
   it('survives a restart: a new store reads what the last one wrote', () => {
-    store().set('groq', UI_GROQ);
-    expect(store().get('groq')).toBe(UI_GROQ);
+    store().set('deepgram', UI_DG);
+    expect(store().get('deepgram')).toBe(UI_DG);
   });
 
   it('narrows a file someone widened back to 0600 on load', () => {
@@ -50,6 +50,20 @@ describe('ProviderKeyStore — storage', () => {
     chmodSync(path, 0o644);
     store();
     expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  it('loads a file from before Groq was removed, and drops its Groq key', () => {
+    writeFileSync(
+      join(home, 'keys.json'),
+      JSON.stringify({
+        version: 1,
+        keys: { groq: 'gsk-old-fake-value-000000000', gemini: UI_GEMINI },
+      }),
+      { mode: 0o600 },
+    );
+    const s = store();
+    expect(s.get('gemini')).toBe(UI_GEMINI);
+    expect(JSON.stringify(s.settingsKeys())).not.toContain('gsk-old');
   });
 
   it('refuses to boot on a malformed file rather than starting empty (NO FALLBACK)', () => {
@@ -88,15 +102,14 @@ describe('ProviderKeyStore — precedence', () => {
   });
 
   it('describe() states the source and last four, and nothing else', () => {
-    const s = store({ gemini: ENV_GEMINI, groq: 'env-groq-fake-value-000000-G1G2' });
+    const s = store({ gemini: ENV_GEMINI, deepgram: 'env-deepgram-fake-value-000000-G1G2' });
     s.set('gemini', UI_GEMINI);
     const described = s.describe();
     expect(described).toEqual([
       { id: 'gemini', source: 'ui', last4: 'WXYZ', envSet: true },
       { id: 'openai', source: 'none', envSet: false },
       { id: 'elevenlabs', source: 'none', envSet: false },
-      { id: 'groq', source: 'env', last4: 'G1G2', envSet: true },
-      { id: 'deepgram', source: 'none', envSet: false },
+      { id: 'deepgram', source: 'env', last4: 'G1G2', envSet: true },
     ]);
     const json = JSON.stringify(described);
     expect(json).not.toContain(UI_GEMINI);
@@ -111,24 +124,24 @@ describe('ProviderKeyStore — revoke', () => {
   });
 
   it('a key that is not set cannot be revoked', () => {
-    expect(() => store().revoke('groq')).toThrow(expect.objectContaining({ code: 'not_set' }));
+    expect(() => store().revoke('deepgram')).toThrow(expect.objectContaining({ code: 'not_set' }));
   });
 
   it('refuses to revoke the only key the host needs to start', () => {
-    const s = store({}, { requiredToStart: { groq: 'This host transcribes with Groq' } });
-    s.set('groq', UI_GROQ);
-    expect(() => s.revoke('groq')).toThrow(expect.objectContaining({ code: 'required' }));
-    expect(s.get('groq')).toBe(UI_GROQ);
+    const s = store({}, { requiredToStart: { deepgram: 'This host needs Deepgram' } });
+    s.set('deepgram', UI_DG);
+    expect(() => s.revoke('deepgram')).toThrow(expect.objectContaining({ code: 'required' }));
+    expect(s.get('deepgram')).toBe(UI_DG);
   });
 
   it('allows it when the environment still has one to fall back to', () => {
     const s = store(
-      { groq: 'env-groq-fake-value-000000-G1G2' },
-      { requiredToStart: { groq: 'This host transcribes with Groq' } },
+      { deepgram: 'env-deepgram-fake-value-000000-G1G2' },
+      { requiredToStart: { deepgram: 'This host needs Deepgram' } },
     );
-    s.set('groq', UI_GROQ);
-    s.revoke('groq');
-    expect(s.describe().find((k) => k.id === 'groq')?.source).toBe('env');
+    s.set('deepgram', UI_DG);
+    s.revoke('deepgram');
+    expect(s.describe().find((k) => k.id === 'deepgram')?.source).toBe('env');
   });
 });
 
@@ -160,36 +173,36 @@ describe('ProviderKeyStore — from the shared settings (spec/01 § Settings)', 
     s.set('gemini', UI_GEMINI);
     let told = 0;
     s.onChange(() => (told += 1));
-    s.replaceAll({ groq: UI_GROQ });
+    s.replaceAll({ deepgram: UI_DG });
     expect(s.get('gemini')).toBeUndefined();
-    expect(s.get('groq')).toBe(UI_GROQ);
-    expect(store().get('groq')).toBe(UI_GROQ);
+    expect(s.get('deepgram')).toBe(UI_DG);
+    expect(store().get('deepgram')).toBe(UI_DG);
     expect(told).toBe(1);
     // The same set again writes nothing and tells nobody.
-    s.replaceAll({ groq: UI_GROQ });
+    s.replaceAll({ deepgram: UI_DG });
     expect(told).toBe(1);
   });
 
   it('refuses a snapshot without the key this host needs to start, changing nothing', () => {
-    const s = store({}, { requiredToStart: { groq: 'This host runs WHISPER_BACKEND=groq' } });
-    s.set('groq', UI_GROQ);
+    const s = store({}, { requiredToStart: { deepgram: 'This host needs Deepgram' } });
+    s.set('deepgram', UI_DG);
     expect(() => s.replaceAll({})).toThrow(ProviderKeyError);
-    expect(s.get('groq')).toBe(UI_GROQ);
+    expect(s.get('deepgram')).toBe(UI_DG);
   });
 
   it('allows it when the environment still has one', () => {
     const s = store(
-      { groq: 'env-groq-fake-value-000000-ENV2' },
-      { requiredToStart: { groq: 'groq host' } },
+      { deepgram: 'env-deepgram-fake-value-000000-ENV2' },
+      { requiredToStart: { deepgram: 'deepgram host' } },
     );
     s.replaceAll({});
-    expect(s.get('groq')).toBe('env-groq-fake-value-000000-ENV2');
+    expect(s.get('deepgram')).toBe('env-deepgram-fake-value-000000-ENV2');
   });
 
   it('hands up the Settings-set keys for the import, and the environment’s for adopting', () => {
     const s = store({ gemini: ENV_GEMINI });
-    s.set('groq', UI_GROQ);
-    expect(s.settingsKeys()).toEqual({ groq: UI_GROQ });
+    s.set('deepgram', UI_DG);
+    expect(s.settingsKeys()).toEqual({ deepgram: UI_DG });
     expect(s.envValue('gemini')).toBe(ENV_GEMINI);
     expect(s.envValue('openai')).toBeUndefined();
   });
@@ -197,7 +210,7 @@ describe('ProviderKeyStore — from the shared settings (spec/01 § Settings)', 
 
 describe('ProviderKeyStore — blank environment values', () => {
   it('treats an empty or whitespace env var as not set', () => {
-    const s = store({ gemini: '', openai: '   ', groq: undefined });
+    const s = store({ gemini: '', openai: '   ', deepgram: undefined });
     expect(s.get('gemini')).toBeUndefined();
     expect(s.has('gemini')).toBe(false);
     expect(s.has('openai')).toBe(false);

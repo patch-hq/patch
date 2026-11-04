@@ -430,14 +430,14 @@ async function startHost(
   // 0. Deployment credential gate (group H1, spec/11-deployment.md § Env): the
   // whisper backend's credential is validated EAGERLY, before OAuth, before the
   // healthz listener, before the /ws dial — "Validation must happen before any
-  // attempt to serve requests. No silent fallback to a degraded mode." A `groq`
-  // host with no GROQ_API_KEY would otherwise present a green audio WSS that
+  // attempt to serve requests. No silent fallback to a degraded mode." An
+  // `elevenlabs` host with no key would otherwise present a green audio WSS that
   // 500s the first real utterance — exactly the degraded mode the deployment
-  // contract forbids. (This supersedes the earlier group-14 lazy-fail affordance.)
+  // contract forbids.
   //
   // The key itself may come from this host's provider-key store (spec/02
   // § Provider keys) — set from Settings → Hosts → Keys — which wins over the
-  // environment. The store refuses to revoke the one Groq key a `groq` host has,
+  // environment. The store refuses to revoke the one key such a host has,
   // since the host would then not start to be given another.
   const providerKeys = new ProviderKeyStore({
     path: providerKeysPath(config.patchHome),
@@ -445,12 +445,8 @@ async function startHost(
       gemini: config.audio.geminiApiKey,
       openai: config.audio.openaiApiKey,
       elevenlabs: config.audio.elevenLabsApiKey,
-      groq: config.audio.groqApiKey,
       deepgram: config.audio.deepgramApiKey,
     },
-    ...(config.audio.whisperBackend === 'groq'
-      ? { requiredToStart: { groq: 'This host transcribes with Groq (WHISPER_BACKEND=groq)' } }
-      : {}),
     ...(config.audio.whisperBackend === 'elevenlabs'
       ? {
           requiredToStart: {
@@ -461,7 +457,6 @@ async function startHost(
   });
   validateWhisperCredentials({
     ...config.audio,
-    groqApiKey: providerKeys.get('groq'),
     elevenlabsApiKey: providerKeys.get('elevenlabs'),
   });
   // spec/07 § Python sidecar lifecycle: KOKORO_MODEL_PATH must be validated at
@@ -5014,19 +5009,37 @@ async function startHost(
   //    (The server-link dial happens earlier — right after the host graph is
   //    wired — so surfaces connect promptly rather than waiting on this stack.)
   const whisperLog = logger.child({ component: 'whisper' });
-  if (config.audio.whisperBackend === 'elevenlabs') {
+  // spec/02 § Optional components: an installed Parakeet is the host's
+  // speech-to-text unless WHISPER_BACKEND names another, the same way an
+  // installed Kokoro turns speech on.
+  const parakeetInstalled =
+    components.describe().find((c) => c.id === 'parakeet')?.state === 'installed';
+  const sttBackend =
+    !config.audio.whisperBackendExplicit && parakeetInstalled
+      ? ('parakeet' as const)
+      : config.audio.whisperBackend;
+  const parakeetModelDir =
+    config.audio.parakeetModelDir ??
+    (parakeetInstalled ? join(config.patchHome, 'components', 'parakeet') : undefined);
+  const sttOffReason =
+    config.audio.whisperBackendRetired !== undefined
+      ? `Speech-to-text was set to ${config.audio.whisperBackendRetired}, which Patch no longer offers. ` +
+        'Install Parakeet from Settings → Hosts to transcribe on this machine.'
+      : undefined;
+  if (sttOffReason !== undefined && sttBackend === 'off') whisperLog.error(sttOffReason);
+  if (sttBackend !== config.audio.whisperBackend)
+    whisperLog.info('speech-to-text: the Parakeet component is installed on this machine');
+  if (sttBackend === 'elevenlabs') {
     whisper = new ElevenLabsScribeBackend({
       logger: whisperLog,
       apiKey: () => providerKeys.get('elevenlabs'),
     });
   } else {
     whisper = createWhisper({
-      backend: config.audio.whisperBackend,
+      backend: sttBackend,
       logger: logger.child({ component: 'whisper' }),
-      groqApiKey: () => providerKeys.get('groq'),
-      ...(config.audio.parakeetModelDir !== undefined
-        ? { parakeetModelDir: config.audio.parakeetModelDir }
-        : {}),
+      ...(sttOffReason !== undefined ? { offReason: sttOffReason } : {}),
+      ...(parakeetModelDir !== undefined ? { parakeetModelDir } : {}),
       ...(config.audio.whisperLocalSidecarUrl !== undefined
         ? { localSidecarUrl: config.audio.whisperLocalSidecarUrl }
         : {}),
@@ -5047,7 +5060,7 @@ async function startHost(
   }
   // The on-machine model loads now: a broken install aborts the boot rather
   // than failing the first word someone says.
-  if (config.audio.whisperBackend === 'parakeet') await (whisper as ParakeetWhisperBackend).warm();
+  if (sttBackend === 'parakeet') await (whisper as ParakeetWhisperBackend).warm();
   // The streaming model for dictation on the `host` engine loads now too.
   if (config.audio.parakeetStreamingModelDir !== undefined) {
     liveRecognizer = new ParakeetLiveRecognizer({
@@ -5793,9 +5806,9 @@ export async function handleFoldersBrowseRequest(
  * spec/07 § End-to-end voice transport — transcribe a mobile voice-note clip.
  *
  * The server round-trips the uploaded m4a (base64) over the host link; the
- * host runs it through its Whisper backend's "uploaded clip" path (Groq
- * accepts m4a directly; the local faster-whisper backend refuses it with a
- * typed `unsupported_format`) and replies with the transcript or a typed error.
+ * host runs it through its speech-to-text backend's "uploaded clip" path
+ * (Parakeet decodes the m4a with ffmpeg; the local faster-whisper backend
+ * refuses it with a typed `unsupported_format`) and replies with the transcript or a typed error.
  * The server, on `ok`, injects the transcript as the chat's next user turn.
  * NO FALLBACK — every failure is reported, never swallowed into a blank note.
  */

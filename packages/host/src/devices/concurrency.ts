@@ -12,7 +12,7 @@
 // Device sessions themselves run concurrently UP TO `cap` (spec/07 §Concurrency
 // on the host: "Multiple voice surfaces can have audio sessions open at the
 // same time … CCX22 has headroom for ~3 concurrent sessions"). `cap` is the
-// configured whisper concurrency cap (3 for local-whisper, 4 for Groq). A new
+// configured whisper concurrency cap (3 on this machine's CPU, 4 on a hosted engine). A new
 // device event is admitted immediately while the active count is below `cap`;
 // once the cap is reached further events QUEUE (not dropped) and replay as
 // running sessions end. A second event for an ALREADY-active device is rejected

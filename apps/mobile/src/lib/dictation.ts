@@ -4,7 +4,7 @@
 //
 // READ FIRST: `voiceNote.ts`'s "WHY UPLOAD" header comment documents the
 // prior streaming attempt that was reverted (`2c94aab`) for two reasons:
-//   (a) Groq Whisper isn't a streaming backend, so a WS-only "live transcript"
+//   (a) The speech-to-text backend may not stream, so a WS-only "live transcript"
 //       was always blank.
 //   (b) A quick tap/hold-release raced the async WSS-open, so
 //       `audio.session_start` / `audio.session_end` never reached the host
@@ -13,7 +13,7 @@
 // (a) no longer holds: the host's `VoiceSession.maybeTranscribePartial()`
 // (`packages/host/src/audio/session.ts`, added in `71be70e`, AFTER the
 // revert) periodically RE-transcribes the growing utterance and emits real
-// `audio.transcript_partial` frames even over the non-streaming Groq backend.
+// `audio.transcript_partial` frames even over a non-streaming backend.
 // That already ships today and needs no wire/daemon change here.
 //
 // (b) is fixed here by DECOUPLING note-correctness from the socket entirely:

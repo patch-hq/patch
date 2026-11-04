@@ -1,13 +1,13 @@
 // The provider keys this host uses (spec/02 § Provider keys).
 //
 // Each paid service the host itself calls — Gemini and OpenAI Realtime for
-// hosted voice, Groq for Whisper — needs an API key on this host. A key has
+// hosted voice, Deepgram and ElevenLabs for dictation — needs an API key on this host. A key has
 // two possible sources:
 //
 //   ui  — set from Settings → Hosts → Keys, stored HERE, in
 //         `<patchHome>/keys.json` (mode 0600). Never on the server.
 //   env — the host's environment (`GEMINI_API_KEY`, `OPENAI_REALTIME_API_KEY`,
-//         `GROQ_API_KEY`), read once at boot.
+//         …), read once at boot.
 //
 // A UI-set key wins over the environment. Everything that uses a key reads it
 // through `get()` at the moment it opens a session or sends a request, so a
@@ -48,6 +48,7 @@ const KeysFile = z
       .object({
         gemini: z.string().min(1).optional(),
         openai: z.string().min(1).optional(),
+        /** Retired: Groq transcription is gone. Read so an older file loads; dropped on load. */
         groq: z.string().min(1).optional(),
         deepgram: z.string().min(1).optional(),
         elevenlabs: z.string().min(1).optional(),
@@ -96,8 +97,8 @@ export class ProviderKeyStore {
 
   /**
    * `requiredToStart` names each key this host cannot boot without, with the
-   * reason (the host aborts at startup when it is missing — Groq under
-   * WHISPER_BACKEND=groq). Revoking the last value of such a key is refused:
+   * reason (the host aborts at startup when it is missing — ElevenLabs under
+   * WHISPER_BACKEND=elevenlabs). Revoking the last value of such a key is refused:
    * the host would not come back up to be given a new one.
    */
   constructor(opts: {
@@ -122,7 +123,8 @@ export class ProviderKeyStore {
     if ((statSync(this.path).mode & 0o077) !== 0) chmodSync(this.path, 0o600);
     const raw = readFileSync(this.path, 'utf8');
     try {
-      return KeysFile.parse(JSON.parse(raw)).keys;
+      const { groq: _retired, ...keys } = KeysFile.parse(JSON.parse(raw)).keys;
+      return keys;
     } catch (err) {
       throw new Error(
         `${this.path} is not a valid provider-key file (${(err as Error).message.split('\n')[0]}). ` +

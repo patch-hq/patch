@@ -38,7 +38,7 @@ import {
   DEFAULT_WATCH_CHECK_IN_MINUTES,
   DEFAULT_WATCH_CHECK_IN_PROMPT,
 } from './watch-check-in-prompt.js';
-import { HostProviderKey, ProviderKeyId } from './provider-keys.js';
+import { HostProviderKeys, ProviderKeyId } from './provider-keys.js';
 import { BACKEND_IDS, PROVIDERS, providerForModel, type ProviderId } from './providers.js';
 import {
   HookDecision,
@@ -2421,6 +2421,7 @@ export const SharedSecrets = z
         gemini: z.string().min(1).optional(),
         openai: z.string().min(1).optional(),
         elevenlabs: z.string().min(1).optional(),
+        /** Retired: Groq transcription is gone. Still read so a stored or older host's copy parses; never used. */
         groq: z.string().min(1).optional(),
         deepgram: z.string().min(1).optional(),
       })
@@ -2775,7 +2776,7 @@ export const HostInfoEvent = z
      * the value. Settings → Hosts → Keys renders it. Absent = a host
      * older than the key store, which gets no Keys block at all.
      */
-    providerKeys: z.array(HostProviderKey).optional(),
+    providerKeys: HostProviderKeys.optional(),
     /**
      * How many user messages between auto-regen of the chat name. `0` means
      * regen is disabled (name only from first message). Absent means the

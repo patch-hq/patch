@@ -27,7 +27,6 @@ export const NO_SECRETS: Secrets = {
   providerKeys: [
     { id: 'gemini', set: false },
     { id: 'openai', set: false },
-    { id: 'groq', set: false },
     { id: 'deepgram', set: false },
   ],
 };

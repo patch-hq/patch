@@ -1,7 +1,7 @@
 // Provider keys a host holds (spec/02 § Provider keys).
 //
 // The paid services the HOST itself calls — hosted voice (Gemini Live, OpenAI
-// Realtime) and Groq's Whisper — each need an API key on the host. They used to
+// Realtime), Deepgram and ElevenLabs — each need an API key on the host. They used to
 // come only from the host's environment, so adding one meant editing a file
 // and restarting the machine. Now each host also keeps its own store of them,
 // shared by every host: Settings → Keys is one page for the whole account, and
@@ -18,7 +18,7 @@
 import { z } from 'zod';
 
 /** The keys a host can use, by id. */
-export const ProviderKeyId = z.enum(['gemini', 'openai', 'elevenlabs', 'groq', 'deepgram']);
+export const ProviderKeyId = z.enum(['gemini', 'openai', 'elevenlabs', 'deepgram']);
 export type ProviderKeyId = z.infer<typeof ProviderKeyId>;
 
 export interface ProviderKeyInfo {
@@ -51,12 +51,6 @@ export const PROVIDER_KEYS: readonly ProviderKeyInfo[] = [
     envVar: 'ELEVEN_LABS_API_KEY',
     usedFor:
       'Voice on the elevenlabs backend, speech out when ElevenLabs is the chosen voice, and Scribe transcription (elevenlabs dictation engine, WHISPER_BACKEND=elevenlabs)',
-  },
-  {
-    id: 'groq',
-    label: 'Groq',
-    envVar: 'GROQ_API_KEY',
-    usedFor: 'Whisper transcription when WHISPER_BACKEND=groq',
   },
   {
     id: 'deepgram',
@@ -98,6 +92,25 @@ export const HostProviderKey = z
   })
   .strict();
 export type HostProviderKey = z.infer<typeof HostProviderKey>;
+
+/** Keys an older host may still report that Patch no longer has. */
+const RETIRED_PROVIDER_KEYS: readonly string[] = ['groq'];
+
+/** A host's keys, minus any retired one an older host still reports, so its whole state still parses. */
+export const HostProviderKeys = z.preprocess(
+  (v) =>
+    Array.isArray(v)
+      ? v.filter(
+          (k: unknown) =>
+            !(
+              typeof k === 'object' &&
+              k !== null &&
+              RETIRED_PROVIDER_KEYS.includes(String((k as { id?: unknown }).id))
+            ),
+        )
+      : v,
+  z.array(HostProviderKey),
+);
 
 /** The status line Settings shows for one key row. One copy for web and mobile. */
 export function providerKeyStatusText(key: HostProviderKey): string {

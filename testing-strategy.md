@@ -208,7 +208,7 @@ End-to-end voice on phone / web / device is exercised via:
 
 - **Host-side unit tests** for the Whisper, Kokoro, VAD, AEC pipeline using fixture audio.
 - **Surface-level smoke** — open the voice overlay, press-and-hold to record a fixture, assert the chat receives a `chat.message` with the expected transcript prefix `[voice • <surface>]`.
-- **Latency budgets** — `pnpm --filter @patch/host test:latency` measures STT + Kokoro + WSS round-trip against a fixture; should pass on the test compose stack with `WHISPER_BACKEND=groq`.
+- **Latency budgets** — `pnpm --filter @patch/host test:latency` measures STT + Kokoro + WSS round-trip against a fixture; should pass on the test compose stack with `WHISPER_BACKEND=mock`.
 
 See `testing/voice.md` for the test fixtures and assertion thresholds.
 

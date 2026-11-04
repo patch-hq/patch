@@ -1231,7 +1231,7 @@ reports the key, which Settings → Providers sets without a restart.
   Claude login of its own not already stored, naming the host.
 - OpenAI — the shared OpenAI/Codex accounts, on the same terms as Claude above.
 - Providers — the provider keys (`02-host.md` § Provider keys): Gemini, OpenAI
-  Realtime and Groq, one row each, stating where the value in use comes from —
+  Realtime, ElevenLabs and Deepgram, one row each, stating where the value in use comes from —
   _Set from UI_, _Set from environment_ (naming the hosts) or _Not set_ — with
   its last four characters. Add / Replace opens a write-only password field
   with Save and Cancel; Revoke, on a UI-set key only, asks first. A key only a

@@ -88,10 +88,6 @@ export function elevenLabsCostUsd(llm: string, seconds: number): number | null {
   return (seconds / 60) * (ELEVENLABS_AGENT_USD_PER_MINUTE + llmRate);
 }
 
-/** Groq `whisper-large-v3-turbo`: $0.04 per hour, each request billed for at least 10s. */
-export const GROQ_WHISPER_USD_PER_SECOND = 0.04 / 3600;
-export const GROQ_MIN_BILLED_SECONDS = 10;
-
 const modelKey = (model: string): string => model.replace(/^models\//, '');
 
 /** Dollar cost of `tokens` on `model`, or `null` when the model's price is unknown. */
@@ -116,13 +112,14 @@ export interface SttUsage {
 }
 
 /**
- * Dollar cost of `stt` on `model`. Only Groq's price is in the table: ElevenLabs
- * Scribe is billed in plan credits whose dollar rate is not published per hour,
- * so its usage is recorded and its cost is `null` (price unknown), never guessed.
+ * Dollar cost of `stt` on `model`. Speech-to-text on this machine costs nothing.
+ * ElevenLabs Scribe is billed in plan credits whose dollar rate is not published
+ * per hour, so its usage is recorded and its cost is `null` (price unknown),
+ * never guessed.
  */
-export function sttCostUsd(stt: SttUsage, model: string): number | null {
+export function sttCostUsd(_stt: SttUsage, model: string): number | null {
   if (model === 'scribe_v2') return null;
-  return stt.billedSeconds * GROQ_WHISPER_USD_PER_SECOND;
+  return 0;
 }
 
 /** What the session's engine reports on close. */

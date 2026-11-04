@@ -1,4 +1,4 @@
-// Whisper backend pluggability + Groq path test (group 13).
+// Speech-to-text backend pluggability (group 13).
 
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { existsSync } from 'node:fs';
@@ -12,7 +12,6 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import type { AddressInfo } from 'node:net';
 import {
   createWhisper,
-  GroqWhisperBackend,
   LocalWhisperBackend,
   pcm16ToWav,
   validateWhisperCredentials,
@@ -31,148 +30,6 @@ describe('createWhisper', () => {
     await expect(w.close()).resolves.toBeUndefined();
   });
 
-  test('groq clip retries share one deadline: 429 then a stall fails inside the budget', async () => {
-    let calls = 0;
-    const fakeFetch = (async (_url: string | URL, init?: RequestInit) => {
-      calls++;
-      if (calls === 1) {
-        return new Response('rate limited', { status: 429, headers: { 'retry-after': '0' } });
-      }
-      // Stall until the attempt's signal aborts.
-      return new Promise<Response>((_resolve, reject) => {
-        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
-      });
-    }) as typeof fetch;
-    const w = new GroqWhisperBackend({
-      backend: 'groq',
-      logger,
-      groqApiKey: 'gsk_test',
-      fetchImpl: fakeFetch,
-      clipDeadlineMs: 300,
-      requestTimeoutMs: 60_000,
-    });
-    const started = Date.now();
-    await expect(w.transcribeClip(Buffer.from('x'), 'm4a')).rejects.toThrow(
-      /exceeded its 300ms budget/,
-    );
-    expect(Date.now() - started).toBeLessThan(2_000);
-    expect(calls).toBe(2);
-  });
-
-  test('groq backend lazy-fails when GROQ_API_KEY is missing (undefined or empty string)', async () => {
-    const w = createWhisper({ backend: 'groq', logger });
-    await expect(w.transcribe(new Int16Array(160))).rejects.toThrow(/No Groq key is set/);
-    const wEmpty = createWhisper({ backend: 'groq', logger, groqApiKey: '' });
-    await expect(wEmpty.transcribe(new Int16Array(160))).rejects.toThrow(/No Groq key is set/);
-  });
-
-  test('groq clip waits out a 429 and retries instead of dropping the clip (meeting audio)', async () => {
-    let calls = 0;
-    const fakeFetch = (async () => {
-      calls++;
-      if (calls < 3) {
-        return new Response('Please try again in 0s', {
-          status: 429,
-          headers: { 'retry-after': '0' },
-        });
-      }
-      return new Response(JSON.stringify({ text: 'made it' }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    }) as unknown as typeof fetch;
-    const w = new GroqWhisperBackend({
-      backend: 'groq',
-      logger,
-      groqApiKey: 'gsk_test',
-      fetchImpl: fakeFetch,
-    });
-    expect(await w.transcribeClip(Buffer.from('clip'), 'wav')).toBe('made it');
-    expect(calls).toBe(3);
-  });
-
-  test('groq clip still fails loudly when 429 persists', async () => {
-    const fakeFetch = (async () =>
-      new Response('rate limited', {
-        status: 429,
-        headers: { 'retry-after': '0' },
-      })) as unknown as typeof fetch;
-    const w = new GroqWhisperBackend({
-      backend: 'groq',
-      logger,
-      groqApiKey: 'gsk_test',
-      fetchImpl: fakeFetch,
-    });
-    await expect(w.transcribeClip(Buffer.from('x'), 'wav')).rejects.toThrow(
-      /groq whisper 429: rate limited/,
-    );
-  });
-
-  test('groq backend falls back to the global fetch when no fetchImpl is given', async () => {
-    const fakeFetch = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ text: 'from global fetch' }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        }),
-    );
-    vi.stubGlobal('fetch', fakeFetch);
-    try {
-      const w = new GroqWhisperBackend({ backend: 'groq', logger, groqApiKey: 'gsk_test' });
-      const out = await w.transcribe(new Int16Array(160));
-      expect(out).toBe('from global fetch');
-      expect(fakeFetch).toHaveBeenCalledTimes(1);
-      await w.close();
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  test('groq backend POSTs to the Groq endpoint with bearer auth', async () => {
-    const calls: { url: string; init: RequestInit }[] = [];
-    const fakeFetch = (async (url: string | URL, init?: RequestInit) => {
-      calls.push({ url: String(url), init: init ?? {} });
-      return new Response(JSON.stringify({ text: '  hi from groq  ' }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    }) as typeof fetch;
-    const w = new GroqWhisperBackend({
-      backend: 'groq',
-      logger,
-      groqApiKey: 'gsk_test',
-      fetchImpl: fakeFetch,
-    });
-    const out = await w.transcribe(new Int16Array(160));
-    expect(out).toBe('hi from groq');
-    expect(calls).toHaveLength(1);
-    const call = calls[0];
-    if (!call) throw new Error('expected one fetch call');
-    expect(call.url).toContain('groq.com');
-    const headers = call.init.headers as Record<string, string>;
-    expect(headers['authorization']).toBe('Bearer gsk_test');
-    expect(call.init.body).toBeInstanceOf(FormData);
-  });
-
-  test('groq backend sends the model chosen in Settings, and the default when cleared', async () => {
-    const models: unknown[] = [];
-    const fakeFetch = (async (_url: string | URL, init?: RequestInit) => {
-      models.push((init?.body as FormData).get('model'));
-      return new Response(JSON.stringify({ text: 'x' }), { status: 200 });
-    }) as typeof fetch;
-    const w = new GroqWhisperBackend({
-      backend: 'groq',
-      logger,
-      groqApiKey: 'gsk_test',
-      fetchImpl: fakeFetch,
-    });
-    w.useModel('whisper-large-v3');
-    await w.transcribe(new Int16Array(160));
-    w.useModel('');
-    await w.transcribe(new Int16Array(160));
-    expect(models).toEqual(['whisper-large-v3', 'whisper-large-v3-turbo']);
-  });
-
   test('local backend refuses a Settings model it cannot load, loudly', async () => {
     const w = createWhisper({ backend: 'local', logger, localModelPath: '/tmp' });
     w.useModel?.('/no/such/whisper-model');
@@ -185,35 +42,6 @@ describe('createWhisper', () => {
     // path. Absent both, transcribe() must fail loudly (NO FALLBACKS).
     await expect(w.transcribe(new Int16Array(160))).rejects.toThrow(/WHISPER_MODEL_PATH/);
   });
-
-  test('groq backend surfaces a non-ok HTTP response as a typed error', async () => {
-    const fakeFetch = (async () =>
-      new Response('rate limited', { status: 429 })) as unknown as typeof fetch;
-    const w = new GroqWhisperBackend({
-      backend: 'groq',
-      logger,
-      groqApiKey: 'gsk_test',
-      fetchImpl: fakeFetch,
-    });
-    await expect(w.transcribe(new Int16Array(160))).rejects.toThrow(
-      /groq whisper 429: rate limited/,
-    );
-  });
-
-  test('groq backend throws when the response is missing .text', async () => {
-    const fakeFetch = (async () =>
-      new Response(JSON.stringify({ notText: 'oops' }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      })) as unknown as typeof fetch;
-    const w = new GroqWhisperBackend({
-      backend: 'groq',
-      logger,
-      groqApiKey: 'gsk_test',
-      fetchImpl: fakeFetch,
-    });
-    await expect(w.transcribe(new Int16Array(160))).rejects.toThrow(/response missing \.text/);
-  });
 });
 
 // spec/07 § End-to-end voice transport — the uploaded voice-note clip path.
@@ -224,104 +52,12 @@ describe('WhisperBackend.transcribeClip (voice-note upload)', () => {
     expect(out).toBe('[mock-clip m4a 5b]');
   });
 
-  test('groq backend POSTs the m4a clip AS-IS (no PCM→WAV re-encode)', async () => {
-    const calls: { url: string; init: RequestInit }[] = [];
-    const fakeFetch = (async (url: string | URL, init?: RequestInit) => {
-      calls.push({ url: String(url), init: init ?? {} });
-      return new Response(JSON.stringify({ text: '  buy oat milk  ' }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    }) as typeof fetch;
-    const w = new GroqWhisperBackend({
-      backend: 'groq',
-      logger,
-      groqApiKey: 'gsk_test',
-      fetchImpl: fakeFetch,
-    });
-    const clip = Buffer.from('fake-m4a-bytes');
-    const out = await w.transcribeClip(clip, 'm4a');
-    expect(out).toBe('buy oat milk');
-    expect(calls).toHaveLength(1);
-    const call = calls[0];
-    if (!call) throw new Error('expected one fetch call');
-    expect(call.url).toContain('groq.com');
-    const headers = call.init.headers as Record<string, string>;
-    expect(headers['authorization']).toBe('Bearer gsk_test');
-    const form = call.init.body as FormData;
-    expect(form).toBeInstanceOf(FormData);
-    // The uploaded file is the raw clip, not a WAV re-encode.
-    const file = form.get('file') as Blob;
-    expect(file.type).toBe('audio/mp4');
-    const bytes = Buffer.from(await file.arrayBuffer());
-    expect(bytes.equals(clip)).toBe(true);
-  });
-
-  test('groq backend lazy-fails when GROQ_API_KEY is missing (undefined or empty string)', async () => {
-    const w = createWhisper({ backend: 'groq', logger });
-    await expect(w.transcribeClip(Buffer.from('x'), 'm4a')).rejects.toThrow(/No Groq key is set/);
-    const wEmpty = createWhisper({ backend: 'groq', logger, groqApiKey: '' });
-    await expect(wEmpty.transcribeClip(Buffer.from('x'), 'm4a')).rejects.toThrow(
-      /No Groq key is set/,
-    );
-  });
-
-  test('groq backend falls back to the global fetch when no fetchImpl is given', async () => {
-    const fakeFetch = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ text: 'from global fetch' }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        }),
-    );
-    vi.stubGlobal('fetch', fakeFetch);
-    try {
-      const w = new GroqWhisperBackend({ backend: 'groq', logger, groqApiKey: 'gsk_test' });
-      const out = await w.transcribeClip(Buffer.from('clip'), 'wav');
-      expect(out).toBe('from global fetch');
-      expect(fakeFetch).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
   test('local backend refuses an m4a clip with UnsupportedClipFormatError (DOCUMENTED LIMITATION)', async () => {
     const w = createWhisper({ backend: 'local', logger, localSidecarUrl: 'ws://127.0.0.1:5018' });
     await expect(w.transcribeClip(Buffer.from('x'), 'm4a')).rejects.toBeInstanceOf(
       UnsupportedClipFormatError,
     );
     await expect(w.transcribeClip(Buffer.from('x'), 'm4a')).rejects.toThrow(/PCM16 samples only/);
-  });
-
-  test('groq backend surfaces a non-ok HTTP response as a typed error', async () => {
-    const fakeFetch = (async () =>
-      new Response('bad request', { status: 400 })) as unknown as typeof fetch;
-    const w = new GroqWhisperBackend({
-      backend: 'groq',
-      logger,
-      groqApiKey: 'gsk_test',
-      fetchImpl: fakeFetch,
-    });
-    await expect(w.transcribeClip(Buffer.from('x'), 'wav')).rejects.toThrow(
-      /groq whisper 400: bad request/,
-    );
-  });
-
-  test('groq backend throws when the response is missing .text', async () => {
-    const fakeFetch = (async () =>
-      new Response(JSON.stringify({}), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      })) as unknown as typeof fetch;
-    const w = new GroqWhisperBackend({
-      backend: 'groq',
-      logger,
-      groqApiKey: 'gsk_test',
-      fetchImpl: fakeFetch,
-    });
-    await expect(w.transcribeClip(Buffer.from('x'), 'wav')).rejects.toThrow(
-      /response missing \.text/,
-    );
   });
 });
 
@@ -629,21 +365,6 @@ describe('LocalWhisperBackend (spawned sidecar — host-owned process)', () => {
 });
 
 describe('validateWhisperCredentials (group H1: eager startup abort)', () => {
-  test('groq backend without GROQ_API_KEY aborts at startup, pointing at Settings → Providers', () => {
-    expect(() => validateWhisperCredentials({ whisperBackend: 'groq' })).toThrowError(
-      /no Groq key.*Settings → Providers/s,
-    );
-    expect(() =>
-      validateWhisperCredentials({ whisperBackend: 'groq', groqApiKey: '' }),
-    ).toThrowError(/Settings → Providers/);
-  });
-
-  test('groq backend with a GROQ_API_KEY passes', () => {
-    expect(() =>
-      validateWhisperCredentials({ whisperBackend: 'groq', groqApiKey: 'gsk_test' }),
-    ).not.toThrow();
-  });
-
   test('local backend with neither URL nor model path aborts at startup', () => {
     expect(() => validateWhisperCredentials({ whisperBackend: 'local' })).toThrowError(
       /WHISPER_BACKEND=local.*WHISPER_LOCAL_SIDECAR_URL.*WHISPER_MODEL_PATH/s,
@@ -695,24 +416,6 @@ describe('pcm16ToWav', () => {
 });
 
 describe('transcription prompt (meeting vocabulary)', () => {
-  test('groq sends the prompt with a clip and with streamed audio, and none when absent', async () => {
-    const forms: FormData[] = [];
-    const fakeFetch = (async (_u: string, init: RequestInit) => {
-      forms.push(init.body as FormData);
-      return new Response(JSON.stringify({ text: 'ok' }), { status: 200 });
-    }) as unknown as typeof fetch;
-    const w = new GroqWhisperBackend({
-      backend: 'groq',
-      logger,
-      groqApiKey: 'gsk_test',
-      fetchImpl: fakeFetch,
-    });
-    await w.transcribeClip(Buffer.from('c'), 'wav', { prompt: 'Terms: WECA.' });
-    await w.transcribe(new Int16Array([1, 2]), { prompt: 'Terms: CRSTS.' });
-    await w.transcribeClip(Buffer.from('c'), 'wav');
-    expect(forms.map((f) => f.get('prompt'))).toEqual(['Terms: WECA.', 'Terms: CRSTS.', null]);
-  });
-
   test('local backend unwraps a wav clip and sends the prompt in the request envelope', async () => {
     const seen: Record<string, unknown>[] = [];
     let binary = 0;

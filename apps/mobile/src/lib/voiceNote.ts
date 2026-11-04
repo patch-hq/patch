@@ -11,7 +11,7 @@
 //
 // WHY UPLOAD, NOT WSS-STREAM: the earlier streaming rewrite depended on the
 // brand-new `PatchVoiceMic` native module AND on the host emitting live STT
-// partials — but the production Groq backend is NOT streaming (whisper.ts:
+// partials — but the speech-to-text backend re-reads a clip rather than streaming (whisper.ts:
 // "Streaming partials are out-of-scope"), so the live transcript was always
 // blank, and a quick hold/release raced the async WSS-open so `session_start` /
 // `session_end` were never sent and the note SILENTLY vanished (worst on the

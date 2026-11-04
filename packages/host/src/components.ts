@@ -116,6 +116,37 @@ export const COMPONENT_SPECS: readonly ComponentSpec[] = [
     ],
   },
   {
+    // Speech-to-text on this machine's CPU through sherpa-onnx, which the host
+    // artifact ships: weights only, no Python runtime. Installed, it is the
+    // host's speech-to-text unless WHISPER_BACKEND names another.
+    id: 'parakeet',
+    label: 'Parakeet (local speech-to-text)',
+    bytes: 670_478_772,
+    sentinel: 'encoder.int8.onnx',
+    files: [
+      {
+        name: 'tokens.txt',
+        url: `${HF}/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/main/tokens.txt`,
+        bytes: 93_939,
+      },
+      {
+        name: 'decoder.int8.onnx',
+        url: `${HF}/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/main/decoder.int8.onnx`,
+        bytes: 11_845_275,
+      },
+      {
+        name: 'joiner.int8.onnx',
+        url: `${HF}/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/main/joiner.int8.onnx`,
+        bytes: 6_355_277,
+      },
+      {
+        name: 'encoder.int8.onnx',
+        url: `${HF}/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/main/encoder.int8.onnx`,
+        bytes: 652_184_281,
+      },
+    ],
+  },
+  {
     id: 'whisper',
     label: 'Whisper (local STT)',
     bytes: 1_500_000_000,

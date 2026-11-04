@@ -243,7 +243,7 @@ A move from the server's copy (`POST /api/chats/:id/move` with `fromServerCopy: 
 
 ### Settings (server ↔ host, server → surfaces)
 
-Shared settings live on the server (`01-server.md` § Settings). Surfaces change them over REST — `PATCH /api/settings`, the `/api/accounts` routes, and `PUT`/`DELETE /api/providers/keys/:keyId` for provider keys (a key id is one of `gemini`, `openai`, `groq`) — and the reply to each is the committed result. None of them asks a host, so none of them waits for one or fails because one is offline.
+Shared settings live on the server (`01-server.md` § Settings). Surfaces change them over REST — `PATCH /api/settings`, the `/api/accounts` routes, and `PUT`/`DELETE /api/providers/keys/:keyId` for provider keys (a key id is one of `gemini`, `openai`, `elevenlabs`, `deepgram`) — and the reply to each is the committed result. None of them asks a host, so none of them waits for one or fails because one is offline.
 
 | Type                         | Direction         | Payload                                                                                                                                                                                                                   |
 | ---------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

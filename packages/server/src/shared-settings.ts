@@ -286,6 +286,8 @@ export class SharedSettingsService {
         this.secrets = StoredSecrets.parse(
           JSON.parse(decrypt(this.key, readFileSync(this.secretsPath, 'utf8'), this.secretsPath)),
         );
+        // Groq transcription is gone: its key is not sent on to hosts again.
+        delete this.secrets.providerKeys.groq;
       } catch (err) {
         this.problem = `The stored accounts and keys can't be read: ${(err as Error).message}. ${fix}`;
       }
@@ -382,7 +384,7 @@ export class SharedSettingsService {
         connected: a.authJson !== null,
         ...(a.email ? { email: a.email } : {}),
       })),
-      providerKeys: (['gemini', 'openai', 'groq'] as const).map((id) => {
+      providerKeys: (['gemini', 'openai'] as const).map((id) => {
         const value = this.secrets.providerKeys[id];
         return value ? { id, set: true, last4: value.slice(-4) } : { id, set: false };
       }),
@@ -583,7 +585,7 @@ export class SharedSettingsService {
       this.secrets.codex.push({ ...account, ...(idTaken ? { id: randomUUID() } : {}) });
       added.push(`OpenAI ${account.label}`);
     }
-    for (const id of ['gemini', 'openai', 'groq'] as const) {
+    for (const id of ['gemini', 'openai'] as const) {
       const value = imported.secrets.providerKeys[id];
       if (value && !this.secrets.providerKeys[id]) {
         this.secrets.providerKeys[id] = value;

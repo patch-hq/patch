@@ -75,19 +75,18 @@ describe('costing a call', () => {
     expect(callSummaryLine(c)).toContain('price unknown');
   });
 
-  it('costs local STT at Groq rates with the 10s minimum per request', () => {
+  it('costs speech-to-text on this machine at nothing', () => {
     const c = costCall({
       ...base,
       engine: {
         backend: 'local',
-        model: 'whisper-large-v3-turbo',
+        model: 'parakeet',
         tokens: null,
-        stt: { requests: 3, audioSeconds: 7, billedSeconds: 30 },
+        stt: { requests: 3, audioSeconds: 7, billedSeconds: 7 },
       },
       handoffs: 0,
     });
-    expect(c.engineUsd).toBeCloseTo((30 * 0.04) / 3600, 9);
-    expect(callSummaryLine(c)).toBe('Call 0:52 · Local · $0.00033');
+    expect(c.engineUsd).toBe(0);
   });
 });
 
@@ -95,13 +94,15 @@ describe('voice ledger', () => {
   it("keeps every call on disk and totals this month's and all-time spend", () => {
     const path = join(mkdtempSync(join(tmpdir(), 'patch-ledger-')), 'voice-usage.jsonl');
     const ledger = createVoiceLedger(path);
-    // 9000 billed seconds of Groq STT at $0.04 per hour is $0.10 a call.
+    // Ten minutes of an ElevenLabs agent on Haiku, the same price each call.
     const engine: EngineCosting = {
-      backend: 'local',
-      model: 'x',
+      backend: 'elevenlabs',
+      model: 'claude-haiku-4-5',
       tokens: null,
-      stt: { requests: 1, audioSeconds: 10, billedSeconds: 9000 },
+      stt: null,
+      agentSeconds: 600,
     };
+    const each = elevenLabsCostUsd('claude-haiku-4-5', 600)!;
     ledger.record(costCall({ ...base, engine }));
     ledger.record(
       costCall({
@@ -116,8 +117,8 @@ describe('voice ledger', () => {
     const t = reopened.totals(Date.UTC(2026, 9, 20));
     expect(t.allCalls).toBe(2);
     expect(t.monthCalls).toBe(1);
-    expect(t.allUsd).toBeCloseTo(0.2, 9);
-    expect(t.monthUsd).toBeCloseTo(0.1, 9);
+    expect(t.allUsd).toBeCloseTo(2 * each, 9);
+    expect(t.monthUsd).toBeCloseTo(each, 9);
   });
 });
 

@@ -46,11 +46,10 @@ No JavaScript files. No Rust on the Node side.
 - MCP server (`patch-tools-server`) implemented with @modelcontextprotocol/sdk, launched per SDK query, communicates over UDS.
 - Silero VAD via onnxruntime-node, reading `silero_vad.onnx` out of the host's own install directory (§ Two shipping shapes).
 - AEC: NLMS pure-TS canceller in the host; ~12-18 dB attenuation; voice device firmware does the heavy lifting via hardware AEC.
-- Kokoro and local Whisper are provisioned after install, per host (`02-host.md` § Optional components). The host creates the Python environment (uv) and downloads those weights on demand.
+- Kokoro, Parakeet and local Whisper are provisioned after install, per host (`02-host.md` § Optional components). The host creates the Python environment (uv) and downloads those weights on demand.
 - Whisper backend is pluggable per `WHISPER_BACKEND` env var:
-  - `groq` (default): direct REST call to Groq's Whisper endpoint. Nothing to install.
   - `local`: spawn faster-whisper as a long-running Python sidecar (`uv run` → FastAPI, PCM in via WS, transcript out). Model: `medium.en`.
-  - `parakeet`: NVIDIA Parakeet TDT v3 (int8) in-process on the CPU via `sherpa-onnx-node`; model dir in `PARAKEET_MODEL_DIR`. No quota, no network, punctuates itself. Dictation's `host` engine adds a streaming FastConformer transducer (`PARAKEET_STREAMING_MODEL_DIR`) in worker threads for the live words.
+  - `parakeet` (what an installed Parakeet component selects when the variable is unset): NVIDIA Parakeet TDT v3 (int8) in-process on the CPU via `sherpa-onnx-node`; model dir in `PARAKEET_MODEL_DIR` or the component's directory. No quota, no network, punctuates itself. Dictation's `host` engine adds a streaming FastConformer transducer (`PARAKEET_STREAMING_MODEL_DIR`) in worker threads for the live words.
 - Kokoro TTS as a long-running Python sidecar (same shape as faster-whisper). Streams 24 kHz mono.
 
 ## Wire protocol package (`packages/wire`)

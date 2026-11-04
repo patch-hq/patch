@@ -144,7 +144,7 @@ describe('loadConfig', () => {
   // spec/11: the host "installs and runs on a machine carrying only an OS".
   // Voice is an optional component and the artifact ships no STT credential and
   // no TTS weights, so defaulting these to a real backend made every fresh
-  // install abort at boot on a missing GROQ_API_KEY. Unset means the component
+  // install abort at boot on a missing speech-to-text key. Unset means the component
   // is not installed — not a quiet downgrade to a stub.
   it('leaves voice off when no backend is named, so a bare machine can boot', () => {
     const cfg = loadConfig({ env: { ...base } });
@@ -152,13 +152,17 @@ describe('loadConfig', () => {
     expect(cfg.audio.kokoroBackend).toBe('off');
   });
 
-  it('still aborts when a voice backend IS named but its credential is absent', () => {
-    const env = { ...base, WHISPER_BACKEND: 'groq' };
-    delete env['GROQ_API_KEY'];
-    const cfg = loadConfig({ env });
-    expect(cfg.audio.whisperBackend).toBe('groq');
-    // The eager boot check is what aborts; config still reports the choice.
-    expect(cfg.audio.groqApiKey).toBeUndefined();
+  it('still reports a named voice backend; the eager boot check is what aborts on a missing credential', () => {
+    const cfg = loadConfig({ env: { ...base, WHISPER_BACKEND: 'elevenlabs' } });
+    expect(cfg.audio.whisperBackend).toBe('elevenlabs');
+    expect(cfg.audio.whisperBackendExplicit).toBe(true);
+  });
+
+  it('boots a machine still set to the retired Groq engine, with no speech-to-text, and says why', () => {
+    const cfg = loadConfig({ env: { ...base, WHISPER_BACKEND: 'groq' } });
+    expect(cfg.audio.whisperBackend).toBe('off');
+    expect(cfg.audio.whisperBackendRetired).toBe('groq');
+    expect(cfg.audio.whisperBackendExplicit).toBe(false);
   });
 
   it('rejects an invalid WHISPER_BACKEND (NO FALLBACK)', () => {
