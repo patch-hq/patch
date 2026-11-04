@@ -438,6 +438,40 @@ describe('createRealSdkBackend — one-shot option wiring', () => {
     });
   });
 
+  it('asks for a structured answer when given a schema, and returns it on the result', async () => {
+    const calls: Array<{ options: Record<string, unknown> }> = [];
+    const { createRealSdkBackend } = await loadRealBackend((args) => {
+      calls.push(args as { options: Record<string, unknown> });
+      return (async function* () {
+        yield {
+          type: 'result',
+          subtype: 'success',
+          session_id: 's',
+          result: 'Done.',
+          structured_output: { ok: true },
+        };
+      })();
+    });
+    const schema = { type: 'object', properties: { ok: { type: 'boolean' } } };
+    const out = await drain(
+      createRealSdkBackend().run({
+        prompt: 'Answer',
+        inferenceProfile: 'classifier',
+        outputSchema: schema,
+        cwd: '/tmp',
+        abortController: new AbortController(),
+        oauthAccessToken: 'tok',
+        permissionMode: 'bypassPermissions',
+      }),
+    );
+    expect(calls[0]!.options).toMatchObject({
+      outputFormat: { type: 'json_schema', schema },
+      maxTurns: 3,
+      tools: [],
+    });
+    expect(out.find((e) => e.type === 'result')).toMatchObject({ structured: { ok: true } });
+  });
+
   it('gives research calls web search and nothing else of the coding agent', async () => {
     const calls: Array<{ options: Record<string, unknown> }> = [];
     const { createRealSdkBackend } = await loadRealBackend((args) => {

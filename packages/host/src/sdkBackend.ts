@@ -72,6 +72,8 @@ export interface SdkEnvelope {
   content?: string;
   /** Capture this on result messages → meta.claudeSessionId. */
   sessionId?: string;
+  /** On a `result` envelope of a run given `outputSchema`: the answer, matching it. */
+  structured?: unknown;
   /** Tool-call envelope. */
   tool?: { name: string; args: unknown; callId: string };
   toolResult?: { name: string; callId: string; result: unknown; isError?: boolean };
@@ -153,6 +155,12 @@ export interface SdkRunOptions {
    * remember the same cost-sensitive set of SDK options.
    */
   inferenceProfile?: 'classifier' | 'research' | undefined;
+  /**
+   * With an inference profile: the answer must match this JSON schema. The SDK
+   * makes the model fill it (retrying a reply that does not fit), and the
+   * `result` envelope carries the parsed object as `structured`.
+   */
+  outputSchema?: Record<string, unknown> | undefined;
   /** Images sent alongside `prompt` as content blocks. One-shot path only. */
   images?: Array<{ mediaType: string; data: string }> | undefined;
   cwd: string;
@@ -1243,6 +1251,17 @@ const RESEARCH_SYSTEM_PROMPT =
   'Follow the user instruction exactly. Use web search to check what you are asked about, then return only the requested answer.';
 
 function inferenceProfileOptions(opts: SdkRunOptions): Partial<Options> {
+  const base = inferenceProfileBase(opts);
+  if (opts.outputSchema === undefined || opts.inferenceProfile === undefined) return base;
+  // A structured answer is a tool call the SDK checks and then a closing turn, so it needs two.
+  return {
+    ...base,
+    outputFormat: { type: 'json_schema', schema: opts.outputSchema },
+    maxTurns: Math.max(base.maxTurns ?? 1, 3),
+  };
+}
+
+function inferenceProfileBase(opts: SdkRunOptions): Partial<Options> {
   // Same bare run as a classifier, plus web search and a few turns to use it.
   if (opts.inferenceProfile === 'research') {
     return {
@@ -2398,7 +2417,15 @@ export function translateSdkMessage(
   if (type === 'result') {
     const sessionId = typeof m['session_id'] === 'string' ? m['session_id'] : undefined;
     const result = typeof m['result'] === 'string' ? m['result'] : undefined;
-    return [{ type: 'result', sessionId, content: result, raw: msg }];
+    return [
+      {
+        type: 'result',
+        sessionId,
+        content: result,
+        ...(m['structured_output'] !== undefined ? { structured: m['structured_output'] } : {}),
+        raw: msg,
+      },
+    ];
   }
   if (type === 'rate_limit_event') {
     const info = m['rate_limit_info'];

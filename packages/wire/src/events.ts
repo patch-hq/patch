@@ -2174,7 +2174,7 @@ export const SharedSettings = z
     meetingAnalysisModel: z.string().min(1),
     /** The model that repairs mis-heard names in transcript lines before analysis. */
     meetingCleanupModel: z.string().min(1),
-    /** The speech-to-text model for meetings: a faster-whisper model directory (local) or a Groq model name. Empty is the host's own configured model. */
+    /** Retired: meetings are transcribed on the listening device. Kept so older clients and stored files still parse; nothing reads it. */
     meetingTranscriptionModel: z.string(),
     /** Seconds between analysis passes at the Normal meeting speed. */
     meetingAnalyseSeconds: z.number().int().min(5).max(300),

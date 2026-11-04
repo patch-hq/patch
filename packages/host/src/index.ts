@@ -786,7 +786,6 @@ async function startHost(
     research: DEFAULT_MEETING_MODEL,
   };
   let meetingResearchSeconds = DEFAULT_MEETING_RESEARCH_SECONDS;
-  let meetingTranscriptionModel = '';
   let goalEvalPrompt: string = persistedHostState.goalEvalPrompt ?? DEFAULT_GOAL_EVAL_PROMPT;
   // Settings → Prompts: the check-in a running background task sends its agent.
   let watchCheckInPrompt: string =
@@ -1823,11 +1822,6 @@ async function startHost(
       research: shared.meetingResearchModel,
     };
     meetingResearchSeconds = shared.meetingResearchSeconds;
-    if (shared.meetingTranscriptionModel !== meetingTranscriptionModel) {
-      meetingTranscriptionModel = shared.meetingTranscriptionModel;
-      whisper?.useModel?.(meetingTranscriptionModel);
-      logger.info({ meetingTranscriptionModel }, 'meeting transcription model changed');
-    }
     if (
       shared.watchCheckInPrompt !== watchCheckInPrompt ||
       shared.watchCheckInMinutes !== watchCheckInMinutes
@@ -4405,6 +4399,7 @@ async function startHost(
       runOnAccountWithCredit,
       cwd: hostCwd,
       model: () => meetingModels.analysis,
+      logger: logger.child({ component: 'meeting' }),
     }),
     correct: makeMeetingCorrector({
       sdkBackend,
@@ -5061,8 +5056,6 @@ async function startHost(
     });
     await liveRecognizer.warm();
   }
-  // Shared settings may have landed before the backend existed.
-  if (meetingTranscriptionModel !== '') whisper.useModel?.(meetingTranscriptionModel);
   dictationTranscribers = createDictationTranscribers({
     logger: logger.child({ component: 'hosted-stt' }),
     local: whisper,

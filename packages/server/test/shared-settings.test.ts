@@ -147,6 +147,21 @@ describe('SharedSettingsService', () => {
     expect('stalledThresholdMinutes' in loaded).toBe(false);
   });
 
+  it('moves a meeting model still on the retired default to the current one, and keeps a chosen one', () => {
+    writeFileSync(
+      join(dir, 'settings.json'),
+      JSON.stringify({
+        meetingAnalysisModel: 'claude-haiku-4-5-20251001',
+        meetingCleanupModel: 'claude-haiku-4-5-20251001',
+        meetingResearchModel: 'claude-opus-5-5',
+      }),
+    );
+    const loaded = make().current();
+    expect(loaded.meetingAnalysisModel).toBe('claude-sonnet-5-5');
+    expect(loaded.meetingCleanupModel).toBe('claude-sonnet-5-5');
+    expect(loaded.meetingResearchModel).toBe('claude-opus-5-5');
+  });
+
   it('gives every deployment a stable public name from its generated identity key', () => {
     const first = service.current().agentIdentity.name;
     expect(make().current().agentIdentity.name).toBe(first);
@@ -685,11 +700,11 @@ describe('shared settings routes', () => {
         built.app.inject({ method: 'PATCH', url: '/api/settings', headers: auth, payload });
       const before = await built.app.inject({ method: 'GET', url: '/api/settings', headers: auth });
       expect(before.json().preferences).toMatchObject({
-        meetingAnalysisModel: 'claude-haiku-4-5-20251001',
-        meetingCleanupModel: 'claude-haiku-4-5-20251001',
+        meetingAnalysisModel: 'claude-sonnet-5-5',
+        meetingCleanupModel: 'claude-sonnet-5-5',
         meetingTranscriptionModel: '',
         meetingAnalyseSeconds: 15,
-        meetingResearchModel: 'claude-haiku-4-5-20251001',
+        meetingResearchModel: 'claude-sonnet-5-5',
         meetingResearchSeconds: 60,
       });
       const res = await patch({

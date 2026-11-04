@@ -349,26 +349,25 @@ describe('the researcher', () => {
 
   it('rejects a verdict outside correct, off, unclear rather than papering over it', () => {
     expect(() =>
-      parseResearch(
-        '{"cards":[{"kind":"fact","title":"x","bullets":["y"],"verdict":"explained"}]}',
-      ),
+      parseResearch({
+        cards: [{ kind: 'fact', title: 'x', bullets: ['y'], verdict: 'explained' }],
+      }),
     ).toThrow(/verdict/);
   });
 
-  it('parses fenced JSON and rejects a malformed reply', () => {
-    expect(parseResearch('```json\n{"cards":[]}\n```')).toEqual({ cards: [] });
-    expect(() => parseResearch('nothing')).toThrow(/no JSON/);
+  it('takes the structured answer and rejects a malformed one', () => {
+    expect(parseResearch({ cards: [] })).toEqual({ cards: [] });
+    expect(() => parseResearch('nothing')).toThrow();
     expect(() =>
-      parseResearch('{"cards":[{"kind":"gossip","title":"x","bullets":["y"]}]}'),
+      parseResearch({ cards: [{ kind: 'gossip', title: 'x', bullets: ['y'] }] }),
     ).toThrow();
   });
 
-  it('runs the research profile on the chosen model and reads the last message as the answer', async () => {
+  it('runs the research profile on the chosen model and takes the structured answer', async () => {
     const sdkBackend = createMockSdkBackend();
     sdkBackend.enqueue([
       { type: 'assistant', content: 'Let me search for that.' },
-      { type: 'assistant', content: '{"cards":[]}' },
-      { type: 'result', sessionId: 's' },
+      { type: 'result', sessionId: 's', structured: { cards: [] } },
     ]);
     const run = makeMeetingResearcher({
       sdkBackend,
@@ -380,6 +379,7 @@ describe('the researcher', () => {
       cards: [],
     });
     expect(sdkBackend.lastOptions()?.inferenceProfile).toBe('research');
+    expect(sdkBackend.lastOptions()?.outputSchema).toMatchObject({ type: 'object' });
     expect(sdkBackend.lastOptions()?.model).toBe('claude-sonnet-5');
   });
 

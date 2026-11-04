@@ -29,6 +29,8 @@ import { dirname, join } from 'node:path';
 import type { Logger } from 'pino';
 import {
   DEFAULT_SHARED_SETTINGS,
+  DEFAULT_MEETING_MODEL,
+  RETIRED_MEETING_MODEL,
   EMPTY_SHARED_SECRETS,
   PROVIDER_KEY_MIN_LENGTH,
   SharedSecrets,
@@ -326,6 +328,12 @@ export class SharedSettingsService {
       delete raw['stalledThresholdMinutes'];
       delete raw['sweepPrompt'];
       raw['sweepEnabled'] = false;
+    }
+    // Every default is written into the file, so a changed default never reaches
+    // an existing install. A meeting model still on the retired default moves to
+    // the current one; a model someone picked is left alone.
+    for (const key of ['meetingAnalysisModel', 'meetingCleanupModel', 'meetingResearchModel']) {
+      if (raw[key] === RETIRED_MEETING_MODEL) raw[key] = DEFAULT_MEETING_MODEL;
     }
     const parsed = SharedSettings.partial().strict().safeParse(raw);
     if (!parsed.success) {
