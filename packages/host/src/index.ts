@@ -4465,6 +4465,7 @@ async function startHost(
       runOnAccountWithCredit,
       cwd: hostCwd,
       model: () => meetingModels.analysis,
+      onDropped: (chatId, msg) => logger.warn({ chatId }, `meeting: ${msg}`),
     }),
     correct: makeMeetingCorrector({
       sdkBackend,
@@ -6965,6 +6966,7 @@ export async function handleServerEvent(
           event.source,
           Buffer.from(event.audioBase64, 'base64'),
           event.speakerName,
+          event.device,
         );
         return;
       }

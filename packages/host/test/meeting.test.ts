@@ -1247,6 +1247,26 @@ describe('meetingGen', () => {
     expect(() => parseMeetingAnalysis('sorry')).toThrow(/no JSON/);
     expect(() => parseMeetingAnalysis('{"now":1}')).toThrow();
   });
+  it('drops only the invalid items and treats null as absent', () => {
+    const dropped: string[] = [];
+    const a = parseMeetingAnalysis(
+      JSON.stringify({
+        now: { headline: 'h', bullets: [], who: 'w' },
+        topics: [{ title: 't', points: [] }, { title: 5 }],
+        actions: [
+          { kind: 'other', owner: null, title: 'a', why: 'y' },
+          { kind: 'mine', title: 'b' },
+          { kind: 'mine', owner: null, title: 'c', why: 'ok' },
+        ],
+        summary: 'a string',
+      }),
+      (m) => dropped.push(m),
+    );
+    expect(a.topics).toHaveLength(1);
+    expect(a.actions.map((x) => x.title)).toEqual(['c']);
+    expect(a.summary).toBeUndefined();
+    expect(dropped).toHaveLength(4);
+  });
 
   it('an empty new transcript tells the model to write from the notes', () => {
     const p = buildMeetingPrompt({
