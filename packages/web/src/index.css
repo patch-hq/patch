@@ -17364,9 +17364,9 @@ select.permission-mode.is-pending {
   font-size: 14px;
 }
 .lifecycle-view-count {
-  font-family: var(--font-mono, monospace);
-  font-size: 12px;
-  color: var(--ink-muted, var(--ink));
+  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+  font-size: var(--text-min);
+  color: var(--text-muted);
 }
 .lifecycle-view-close {
   margin-left: auto;
@@ -17375,6 +17375,6 @@ select.permission-mode.is-pending {
   padding: 4px;
   border: 0;
   background: none;
-  color: var(--ink-muted, var(--ink));
+  color: var(--text-muted);
   cursor: pointer;
 }

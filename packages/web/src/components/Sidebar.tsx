@@ -39,7 +39,6 @@ import {
   ChevronDown,
   ChevronRight,
   ExternalLink,
-  X,
   Ear,
   Phone,
   PanelRightOpen,
@@ -678,7 +677,7 @@ function RegularSidebar({
               aria-label={`Close ${LIFECYCLE_LABELS[openKind].toLowerCase()}`}
               onClick={closeView}
             >
-              <X size={14} aria-hidden />
+              <CloseIcon size={16} />
             </button>
           </div>
         ) : null}
