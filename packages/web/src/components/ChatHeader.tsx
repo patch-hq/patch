@@ -40,6 +40,7 @@ import {
   Eraser,
   ListPlus,
   Target,
+  Copy,
 } from 'lucide-react';
 import { useSideThreadsStore } from '../stores/sideThreadsStore.js';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -128,6 +129,15 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [menuOpen]);
+
+  // Copy the chat ID so it can be quoted in bug reports. NO FALLBACK: a
+  // rejected clipboard write toasts the error.
+  function copyChatId(): void {
+    setMenuOpen(false);
+    navigator.clipboard.writeText(row.chatId).catch((err: unknown) => {
+      pushError(failed('copying chat ID'), undefined, (err as Error).message);
+    });
+  }
 
   // The hamburger dropdown that replaces the whole icon rail at narrow widths
   // (see the file-header comment). Same anchored-pop-up dismissal contract as
@@ -480,6 +490,16 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
                   >
                     <Target size={14} aria-hidden />
                     Set goal…
+                  </button>
+                  <button
+                    type="button"
+                    className="head-menu-item"
+                    data-testid="action-copy-chat-id"
+                    role="menuitem"
+                    onClick={copyChatId}
+                  >
+                    <Copy size={14} aria-hidden />
+                    Copy chat ID
                   </button>
                   {canAddTasks ? (
                     <button

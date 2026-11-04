@@ -472,3 +472,17 @@ describe('uiStore background-task fold (spec/14 § Background task bar)', () => 
     expect(fresh.useUiStore.getState().backgroundTasksCollapsed).toBe(false);
   });
 });
+
+describe('uiStore lifecycle toggles', () => {
+  it('opening one lifecycle section closes the others; closing leaves them alone', () => {
+    const s = useUiStore.getState();
+    s.setHiddenOpen(true);
+    s.setArchivedOpen(true);
+    expect(useUiStore.getState().hiddenOpen).toBe(false);
+    expect(useUiStore.getState().archivedOpen).toBe(true);
+    s.setAutomationsOpen(true);
+    expect(useUiStore.getState().archivedOpen).toBe(false);
+    s.setAutomationsOpen(false);
+    expect(useUiStore.getState().automationsOpen).toBe(false);
+  });
+});

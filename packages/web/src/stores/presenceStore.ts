@@ -133,6 +133,14 @@ interface PresenceState {
   hostsSeeded: boolean;
   failedAttempts: number;
   lastClose: WsCloseInfo | null;
+  /**
+   * Set by a going-away notice (close 4503) and kept until a connection opens or
+   * the surface gives up waiting. `version` is the release the server said it is
+   * restarting into, when it said. Separate from `lastClose`, which the failed
+   * redials during the restart overwrite.
+   */
+  restarting: { version: string | null; at: number } | null;
+  setRestarting(r: { version: string | null; at: number } | null): void;
   /** Account / surface info, populated after `auth.ok`. */
   accountId: string | null;
   surfaceId: string | null;
@@ -212,6 +220,7 @@ export const usePresenceStore = create<PresenceState>((set) => ({
   hostsSeeded: false,
   failedAttempts: 0,
   lastClose: null,
+  restarting: null,
   accountId: null,
   surfaceId: null,
   setConnection(s) {
@@ -317,7 +326,10 @@ export const usePresenceStore = create<PresenceState>((set) => ({
     });
   },
   noteWsOpen(url) {
-    set({ wsUrl: url, everConnected: true, failedAttempts: 0 });
+    set({ wsUrl: url, everConnected: true, failedAttempts: 0, restarting: null });
+  },
+  setRestarting(r) {
+    set({ restarting: r });
   },
   noteWsClose(info) {
     set((s) => ({ lastClose: info, failedAttempts: s.failedAttempts + 1 }));

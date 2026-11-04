@@ -38,7 +38,13 @@ export function offlineBannerText(
   conn: ConnectionState,
   outageVisible: boolean,
   serverLost = false,
+  restarting: { version: string | null } | null = null,
 ): string | null {
+  // A going-away notice is shown the moment it arrives: it is not an outage to
+  // wait out, so it skips the disconnect grace.
+  if (restarting && conn !== 'connected') {
+    return `Restarting${restarting.version ? ` into ${restarting.version}` : ''}`;
+  }
   if (!outageVisible) return null;
   if (serverLost && (conn === 'reconnecting' || conn === 'offline')) {
     return 'Server unreachable. Retrying';

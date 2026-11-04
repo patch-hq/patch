@@ -1,4 +1,5 @@
 import { CodexRuntime } from './codexRuntime.js';
+import { inWorkSlice } from './workSlice.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -75,19 +76,20 @@ export class CodexClient {
       this.options.executable ??
       process.env['PATCH_CODEX_EXECUTABLE'] ??
       (await new CodexRuntime(join(homedir(), '.patch/backends/codex')).ensure());
-    const child = spawn(
-      executable,
-      [
-        'app-server',
-        '--stdio',
-        ...(this.options.externalAuth
-          ? ['-c', 'cli_auth_credentials_store="ephemeral"']
-          : this.options.credentialStore === 'existing'
-            ? []
-            : ['-c', `cli_auth_credentials_store="${this.options.credentialStore ?? 'keyring'}"`]),
-      ],
-      { env, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] },
-    );
+    const launch = inWorkSlice(executable, [
+      'app-server',
+      '--stdio',
+      ...(this.options.externalAuth
+        ? ['-c', 'cli_auth_credentials_store="ephemeral"']
+        : this.options.credentialStore === 'existing'
+          ? []
+          : ['-c', `cli_auth_credentials_store="${this.options.credentialStore ?? 'keyring'}"`]),
+    ]);
+    const child = spawn(launch.command, launch.args, {
+      env,
+      detached: process.platform !== 'win32',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
     this.child = child;
     // Always drain stderr so its pipe never fills; hand lines on only redacted.
     const onStderr = this.options.onStderr;
