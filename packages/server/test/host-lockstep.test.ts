@@ -11,8 +11,48 @@ import { generateUserKeypair, mintDaemonKey } from '@patch/auth';
 import { WireTestClient } from '@patch/wire/test-client';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
-import { hostLockstep } from '../src/host-lockstep.js';
+import { hostLockstep, hostStageTarget } from '../src/host-lockstep.js';
 import { VERSION } from '../src/version.js';
+
+describe('hostStageTarget', () => {
+  it('stages a published build newer than both the server and the host', () => {
+    expect(
+      hostStageTarget({
+        serverVersion: '0.1.10',
+        hostVersion: '0.1.10',
+        publishedVersion: '0.1.11',
+      }),
+    ).toBe('0.1.11');
+  });
+
+  it('stages nothing when the published build is the server version or older', () => {
+    for (const published of ['0.1.10', '0.1.9']) {
+      expect(
+        hostStageTarget({
+          serverVersion: '0.1.10',
+          hostVersion: '0.1.10',
+          publishedVersion: published,
+        }),
+      ).toBeNull();
+    }
+  });
+
+  it('stages nothing for a host already on the published build, or an unparseable version', () => {
+    expect(
+      hostStageTarget({
+        serverVersion: '0.1.10',
+        hostVersion: '0.1.11',
+        publishedVersion: '0.1.11',
+      }),
+    ).toBeNull();
+    expect(
+      hostStageTarget({ serverVersion: 'dev', hostVersion: '0.1.10', publishedVersion: '0.1.11' }),
+    ).toBeNull();
+    expect(
+      hostStageTarget({ serverVersion: '0.1.10', hostVersion: '0.1.10', publishedVersion: null }),
+    ).toBeNull();
+  });
+});
 
 describe('hostLockstep', () => {
   it('a host on the server version is in step', () => {
@@ -145,6 +185,7 @@ describe('host hello brings a stale host in step', () => {
     });
     const frames: string[] = [];
     daemon.on('host.update', (ev) => frames.push(`host.update:${ev.hostId}`));
+    daemon.on('host.stage', (ev) => frames.push(`host.stage:${ev.hostId}:${ev.version}`));
     await daemon.connect();
     await daemon.waitFor('auth.ok');
     // host.update, when sent, follows auth.ok on the same socket immediately.
@@ -237,6 +278,47 @@ describe('host hello brings a stale host in step', () => {
       c.recheck();
       await new Promise((r) => setTimeout(r, 150));
       expect(c.frames).toEqual(['host.update:daemon-1', 'host.update:daemon-1']);
+    } finally {
+      await c.close();
+    }
+  });
+
+  function bumped(): string {
+    const [a, b, c] = VERSION.split('.');
+    return `${a}.${b}.${Number(c) + 1}`;
+  }
+
+  it('tells a host in step to stage a release mirrored ahead of the server', async () => {
+    publish(VERSION);
+    const c = await connectHost(VERSION);
+    try {
+      expect(c.frames).toEqual([]);
+      const next = bumped();
+      publish(next);
+      c.recheck();
+      await new Promise((r) => setTimeout(r, 150));
+      expect(c.frames).toEqual([`host.stage:daemon-1:${next}`]);
+    } finally {
+      await c.close();
+    }
+  });
+
+  it('tells a host that connects while a release waits to stage it', async () => {
+    const next = bumped();
+    publish(next);
+    const c = await connectHost(VERSION);
+    try {
+      expect(c.frames).toEqual([`host.stage:daemon-1:${next}`]);
+    } finally {
+      await c.close();
+    }
+  });
+
+  it('does not stage when auto-update is off', async () => {
+    publish(bumped());
+    const c = await connectHost(VERSION, { autoUpdateHosts: false });
+    try {
+      expect(c.frames).toEqual([]);
     } finally {
       await c.close();
     }

@@ -107,6 +107,11 @@ export interface ServerLinkOptions {
   /** Tells a machine sleep from a real drop. Without it every drop is classified as planned or unexplained only. */
   sleepDetector?: SleepDetector;
   /**
+   * Called when the server's going-away notice arrives, with the version it is
+   * restarting into (null for a plain restart). Fires after `onDisconnected`.
+   */
+  onServerRestarting?: (intoVersion: string | null) => void;
+  /**
    * Called when a frame arrives BEFORE `auth.ok` that this host cannot decode
    * — in practice the greeting itself. The server and host ship in lockstep,
    * so a greeting this reader rejects means the server has moved on and this
@@ -451,10 +456,9 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
       if (code === CLOSE_SERVER_RESTARTING && !stopped) {
         restartingUntil = Date.now() + RESTART_WINDOW_MS;
         attempt = 0;
-        log.info(
-          { into: restartingVersion(reason.toString('utf8')) },
-          'server-link: server is restarting; reconnecting now',
-        );
+        const into = restartingVersion(reason.toString('utf8'));
+        log.info({ into }, 'server-link: server is restarting; reconnecting now');
+        opts.onServerRestarting?.(into);
         connect();
         return;
       }

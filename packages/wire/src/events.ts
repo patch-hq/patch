@@ -5062,6 +5062,21 @@ export const HostUpdateEvent = z
   .strict();
 export type HostUpdateEvent = z.infer<typeof HostUpdateEvent>;
 
+/**
+ * Server → host: a release has been mirrored; download and verify `version`
+ * now and keep it staged (not installed). The host installs it when the server
+ * announces it is restarting into that version (spec/11 § Updates in lockstep),
+ * so a release costs one drop, not two.
+ */
+export const HostStageEvent = z
+  .object({
+    type: z.literal('host.stage'),
+    ...hostIdField,
+    version: z.string().min(1),
+  })
+  .strict();
+export type HostStageEvent = z.infer<typeof HostStageEvent>;
+
 /** Surface → host: designate a project root on that host (spec/04 § Folders). */
 export const HostFolderAddEvent = z
   .object({
@@ -9235,6 +9250,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   HostComponentRemoveEvent,
   HostComponentProgressEvent,
   HostUpdateEvent,
+  HostStageEvent,
   HostFolderAddEvent,
   HostFolderRemoveEvent,
   HostClaudeMemoryDeleteEvent,
@@ -9542,6 +9558,7 @@ export const EVENT_SCHEMAS = {
   'host.component_remove': HostComponentRemoveEvent,
   'host.component_progress': HostComponentProgressEvent,
   'host.update': HostUpdateEvent,
+  'host.stage': HostStageEvent,
   'host.folder_add': HostFolderAddEvent,
   'host.folder_remove': HostFolderRemoveEvent,
   'host.claude_memory_delete': HostClaudeMemoryDeleteEvent,

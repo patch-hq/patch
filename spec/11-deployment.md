@@ -311,6 +311,29 @@ immutable` — safe to cache forever because a rebuild changes their filename.
 - Single monorepo: `projects/patch/` contains `packages/{server,host,cli,web,wire,auth,desktop}` and `apps/mobile`.
 - Built in place on one box — no registry, no CI.
 
+### Updates in lockstep
+
+Server and hosts must run one version, because the wire protocol can change
+between versions. A release therefore costs each host one drop, not two:
+
+- When the server sees a mirrored release newer than itself, it sends every
+  connected host (and each host that connects while the release is waiting)
+  `host.stage {version}`. The host downloads and verifies that build and keeps
+  it staged, without installing. A host with auto-update off ignores it.
+- When the server restarts into that release, its going-away notice carries the
+  target version (`server restarting into <version>`). A host with exactly that
+  version staged installs it at once, from the staged copy, without contacting
+  the server (which is down). The server and the host come back together.
+- A host without it staged (offline, failed download) updates on reconnect, as
+  before: the server sees it behind and sends `host.update`.
+- The swap holds for running turns exactly as an ordinary update does. Claude
+  turns survive a host restart as detached runners, but turns of other
+  harnesses do not, so those still defer the install.
+- A failed stage is logged as an error and the host falls to the reconnect
+  update; it is never hidden.
+- Staged builds live in `<patchHome>/staged/<version>`; those at or below the
+  running version are removed on start.
+
 ## Mobile updates (Android)
 
 The phone updates the way the hosts and the desktop app do: from the server it
