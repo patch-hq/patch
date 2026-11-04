@@ -62,6 +62,7 @@ import {
   folderLabels,
   type PermissionMode,
   type StatusKind,
+  SNOOZE_UNTIL_COMPLETE,
 } from '@patch/wire';
 import { StatusBadge } from './StatusBadge.js';
 import { ProjectSnoozeMenu } from './ProjectSnoozeMenu.js';
@@ -84,6 +85,7 @@ import { formatWakeTime } from './SnoozeMenu.js';
 import { snoozedRowsForStore } from '../lib/snoozedRows.js';
 import { folderBackPill, rowBack } from '../lib/snoozeBack.js';
 import { deriveChatTitle } from '../lib/chatTitle.js';
+import { applySnooze } from '../lib/snoozeApply.js';
 import { useAmbiguousHostLabel } from '../lib/hostLabel.js';
 import { stripMarkdown } from '../lib/stripMarkdown.js';
 import {
@@ -2288,6 +2290,23 @@ const ChatRowView = memo(function ChatRowView({
               icon: <Clock size={14} aria-hidden />,
               run: () =>
                 useUiStore.getState().openSnoozeSheet({ kind: 'chat', chatId: row.chatId }),
+            },
+          ]),
+      ...(snoozed || !(row.activity === 'running' || row.goal !== null)
+        ? []
+        : [
+            {
+              id: 'snooze-until-done',
+              label: 'Snooze until done',
+              icon: <Clock size={14} aria-hidden />,
+              run: () =>
+                applySnooze({
+                  targets: [row],
+                  until: SNOOZE_UNTIL_COMPLETE,
+                  name: stripMarkdown(deriveChatTitle(row.name)),
+                  isProject: false,
+                  navigate,
+                }),
             },
           ]),
       ...(hidden
