@@ -224,7 +224,6 @@ export function ChatSearchResults({
       ctrl.abort();
     };
     // `ask` is rebuilt every render; the key already captures what it reads.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
   // A run belongs to one query AND one scope; anything else is not shown.
@@ -293,7 +292,6 @@ export function ChatSearchResults({
         .filter(inScope)
         .filter((h, i, all) => all.findIndex((o) => o.chatId === h.chatId) === i)
         .sort(compareChatSearchHits),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [current, section, automations],
   );
   // Until a machine answers, the chats this surface already holds for it stand
@@ -306,7 +304,6 @@ export function ChatSearchResults({
     return localSearchHits(Object.values(chats), query, fullText).filter(
       (h) => (unscoped || pending.has(h.hostId)) && !have.has(h.chatId) && inScope(h),
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searching, current, chats, query, fullText, answered, section, automations]);
 
   // A host is named by what the surface already calls it (its self-reported
@@ -318,7 +315,6 @@ export function ChatSearchResults({
       if (h.state === 'done') for (const st of h.statuses) m.set(st.hostId, st.hostName);
     }
     return m;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current]);
   const hostName = (hostId: string): string =>
     presence[hostId]?.host?.hostName ?? serverNames.get(hostId) ?? hostId;
