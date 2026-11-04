@@ -37,6 +37,45 @@ const openTopic = (page: Page, text: string) =>
     .getByTestId('meeting-topic-toggle')
     .click();
 
+/**
+ * A stand-in desktop shell: it takes the audio and "transcribes" it, sending one
+ * final line for the mic only when it is stopped, as the real one does with the
+ * utterance still in progress at End.
+ */
+async function fakeDesktop(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const pushed: Record<string, number> = { mic: 0, system: 0 };
+    let onText: ((t: unknown) => void) | null = null;
+    (window as unknown as { __pushed: typeof pushed }).__pushed = pushed;
+    (window as unknown as { patch: object }).patch = {
+      startSystemAudio: async () => {},
+      stopSystemAudio: () => {},
+      onSystemAudio: () => () => {},
+      startMeetingTranscription: async () => {},
+      pushMeetingAudio: (source: 'mic' | 'system', pcm: Int16Array) => {
+        pushed[source] += pcm.length;
+      },
+      flushMeetingTranscription: async () => {},
+      stopMeetingTranscription: async () => {
+        await new Promise((r) => setTimeout(r, 200));
+        onText?.({
+          source: 'mic',
+          text: 'last words before the end',
+          startedAt: Date.now() - 1500,
+          endedAt: Date.now() - 200,
+          final: true,
+        });
+      },
+      onMeetingText: (cb: (t: unknown) => void) => {
+        onText = cb;
+        return () => {
+          onText = null;
+        };
+      },
+    };
+  });
+}
+
 test.describe('meeting mode — live', () => {
   test('the meeting sits across the top of the chat, full width, over the messages and composer', async ({
     page,
@@ -827,6 +866,7 @@ test.describe('meeting mode — after', () => {
   });
 
   test('Resume starts listening again and asks the host to resume', async ({ page }) => {
+    await fakeDesktop(page);
     await page.goto(URL_ENDED);
     await page.getByTestId('meeting-resume').click();
     await expect
@@ -847,20 +887,12 @@ test.describe('meeting mode — start', () => {
     expect(Math.abs(meeting!.y - call!.y)).toBeLessThan(2);
     await expect(page.getByTestId('meeting-panel')).toHaveCount(0);
   });
-
-  test('a denied microphone starts no meeting and says why', async ({ page }) => {
-    await page.addInitScript(() => {
-      navigator.mediaDevices.getUserMedia = () => Promise.reject(new Error('Permission denied'));
-    });
-    await page.goto('/app/dev-harness.html?chat=chat_tools');
-    await page.getByTestId('meeting-btn').click();
-    await expect(page.getByText(/Could not start the meeting/)).toBeVisible();
-    expect(await sent(page, 'meeting.control_request')).toHaveLength(0);
-  });
 });
 
-test.describe('meeting mode — capture with a real (fake) microphone', () => {
-  test('start asks the host to start; audio goes up as WAV clips; End flushes them before it ends', async ({
+test.describe('meeting mode — capture on the device, with a real (fake) microphone', () => {
+  test.beforeEach(async ({ page }) => fakeDesktop(page));
+
+  test('start asks the host to start; only text goes up; End waits for the last words', async ({
     page,
   }) => {
     await page.goto('/app/dev-harness.html?chat=chat_tools');
@@ -890,29 +922,46 @@ test.describe('meeting mode — capture with a real (fake) microphone', () => {
     await expect(page.getByTestId('meeting-btn')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByTestId('meeting-not-listening')).toHaveCount(0);
 
-    // Ending flushes the partial clip ahead of the end request.
-    await page.waitForTimeout(3000);
+    // The mic is handed to the shell, never sent anywhere as audio.
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as unknown as { __pushed: { mic: number } }).__pushed.mic),
+      )
+      .toBeGreaterThan(16000);
     await page.getByTestId('meeting-end').click();
+    await expect.poll(async () => (await sent(page, 'meeting.control_request')).length).toBe(2);
     const events = (
       await page.evaluate(
         () =>
-          (
-            window as unknown as {
-              __wsSent: Array<{
-                type: string;
-                source?: string;
-                audioBase64?: string;
-                action?: string;
-              }>;
-            }
-          ).__wsSent,
+          (window as unknown as { __wsSent: Array<{ type: string; action?: string }> }).__wsSent,
       )
     ).filter((e) => e.type.startsWith('meeting.'));
-    const audio = events.filter((e) => e.type === 'meeting.audio');
-    expect(audio.length).toBeGreaterThanOrEqual(1);
-    expect(audio[0]!.source).toBe('mic');
-    expect(Buffer.from(audio[0]!.audioBase64!, 'base64').subarray(0, 4).toString()).toBe('RIFF');
+    expect(events.some((e) => e.type === 'meeting.audio')).toBe(false);
+    expect(events.at(-2)).toMatchObject({
+      type: 'meeting.lines',
+      source: 'mic',
+      lines: [{ text: 'last words before the end' }],
+    });
     expect(events.at(-1)).toMatchObject({ type: 'meeting.control_request', action: 'end' });
+  });
+
+  test('a denied microphone starts no meeting and says why', async ({ page }) => {
+    await page.addInitScript(() => {
+      navigator.mediaDevices.getUserMedia = () => Promise.reject(new Error('Permission denied'));
+    });
+    await page.goto('/app/dev-harness.html?chat=chat_tools');
+    await page.getByTestId('meeting-btn').click();
+    await expect(page.getByText(/Could not start the meeting.*Permission denied/)).toBeVisible();
+    expect(await sent(page, 'meeting.control_request')).toHaveLength(0);
+  });
+});
+
+test.describe('meeting mode — a browser with no desktop app', () => {
+  test('cannot listen, and says to use the desktop app', async ({ page }) => {
+    await page.goto('/app/dev-harness.html?chat=chat_tools');
+    await page.getByTestId('meeting-btn').click();
+    await expect(page.getByText(/listen from the Patch desktop app/)).toBeVisible();
+    expect(await sent(page, 'meeting.control_request')).toHaveLength(0);
   });
 });
 

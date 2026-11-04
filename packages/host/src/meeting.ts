@@ -1,12 +1,12 @@
-// Meeting mode (host side). A chat can listen to a meeting: surfaces upload
-// short audio clips, the host transcribes them with the LOCAL Whisper (never a
-// paid STT), and about every 30s one cheap model pass folds the new transcript
-// into Now / Discussed / Actions. The raw transcript is never posted as chat
+// Meeting mode (host side). A chat can listen to a meeting: the surface that
+// hears it transcribes on its own device and sends text lines (audio never
+// reaches the host), and every few seconds one model pass folds the new
+// transcript into Now / Discussed / Actions. The raw transcript is never posted as chat
 // messages; it reaches the chat's model as a system-reminder on the user's next
 // turn (see `contextFor`).
 //
 // The analysis loop is a host timer, not a page timer, so it keeps going while
-// a window is hidden. NO FALLBACK: a failed transcription or analysis is
+// a window is hidden. NO FALLBACK: a failed analysis is
 // logged and put on `state.error` for the panel to show; it is never swallowed.
 
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -163,22 +163,19 @@ export interface CorrectInput {
   lines: { speaker: string; text: string }[];
 }
 
+/** One line transcribed on a surface's device. */
+export interface IncomingLine {
+  text: string;
+  /** Wall-clock ms the utterance began. */
+  spokenAt: number;
+  /** Who the call app showed speaking, for a system line. */
+  speakerName?: string | undefined;
+  /** A distinct voice the device told apart; 0 is the owner. */
+  voice?: number | undefined;
+}
+
 export interface MeetingDeps {
   dir: string;
-  /** Local Whisper only. */
-  transcribe: (wav: Buffer) => Promise<string>;
-  /**
-   * Local diarisation: transcribes a `them` clip and says which distinct voice
-   * spoke each stretch. `session` is stable for the whole meeting so voice
-   * numbers stay the same across clips. Omitted: `them` stays one speaker.
-   */
-  transcribeVoices?: (session: string, wav: Buffer) => Promise<{ text: string; voice: number }[]>;
-  /**
-   * True once the owner has a voice print. Then every clip (mic included) is
-   * diarised and voice 0 is the owner: those lines are 'you' whichever channel
-   * they came in on, so in-room speech with no app still reads as the owner.
-   */
-  hasVoiceprint?: () => boolean;
   analyse: (input: AnalyseInput) => Promise<MeetingAnalysis>;
   /**
    * Cheap pass over new transcript lines that repairs mis-heard names and places
@@ -232,23 +229,6 @@ interface Runtime {
   researching: Promise<void> | undefined;
   /** Serialises analysis and write-ups. */
   chain: Promise<void>;
-  /** Serialises transcription alone, so a slow analysis pass never holds clips back. */
-  txChain: Promise<void>;
-}
-
-/** Consecutive segments from one voice read as one line. */
-function mergeVoiceRuns(
-  segs: { text: string; voice: number }[],
-): { text: string; voice: number }[] {
-  const out: { text: string; voice: number }[] = [];
-  for (const g of segs) {
-    const text = g.text.trim();
-    if (text === '') continue;
-    const last = out[out.length - 1];
-    if (last && last.voice === g.voice) last.text += ` ${text}`;
-    else out.push({ text, voice: g.voice });
-  }
-  return out;
 }
 
 /** How far apart (ms of meeting time) a mic line and a system line can be and still be one utterance. */
@@ -390,7 +370,6 @@ export class MeetingManager {
       lastResearchAt: 0,
       researching: undefined,
       chain: Promise.resolve(),
-      txChain: Promise.resolve(),
     };
     this.runtimes.set(chatId, rt);
     this.armTimer(chatId, rt);
@@ -444,7 +423,6 @@ export class MeetingManager {
     rt.state.endedAt = t;
     this.disarmTimer(rt);
     this.commit(chatId, rt);
-    await rt.txChain;
     await this.enqueue(rt, async () => {
       await this.analyse(chatId, rt, true);
       await this.writeUp(chatId, rt);
@@ -460,7 +438,6 @@ export class MeetingManager {
         `chat ${chatId}'s meeting is ${rt.state.status}: end it before deleting`,
       );
     }
-    await rt.txChain;
     await rt.chain;
     this.runtimes.delete(chatId);
     rmSync(this.file(chatId), { force: true });
@@ -523,97 +500,88 @@ export class MeetingManager {
 
   // ---- audio ----
 
-  /** Resolves once the clip is transcribed and on the state. */
-  ingestAudio(
-    chatId: string,
-    source: 'mic' | 'system',
-    wav: Buffer,
-    speakerName?: string,
-  ): Promise<void> {
+  /**
+   * Lines a surface transcribed on its own device (spec/07 § Meeting
+   * transcription). Each is placed at the meeting time it was said; a line from
+   * before the meeting's current stretch began lands at that stretch's start.
+   */
+  ingestLines(chatId: string, source: 'mic' | 'system', lines: IncomingLine[]): void {
     const rt = this.load(chatId);
     if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
-    // A surface flushes its last clip before sending End; later audio is a bug.
+    // A surface flushes its last lines before sending End; later lines are a bug.
     if (rt.state.status === 'ended') {
       throw new MeetingError(`chat ${chatId}'s meeting has ended`);
     }
-    const at = meetingElapsedMs(rt.state, this.now());
-    const next = rt.txChain.then(async () => {
-      const speaker = source === 'mic' ? 'you' : 'them';
-      const printed = !!this.deps.transcribeVoices && !!this.deps.hasVoiceprint?.();
-      let pieces: { text: string; voice?: number }[];
-      try {
-        if (this.deps.transcribeVoices && (speaker === 'them' || printed)) {
-          pieces = mergeVoiceRuns(
-            await this.deps.transcribeVoices(`${chatId}:${rt.state.startedAt}`, wav),
-          );
-        } else {
-          pieces = [{ text: (await this.deps.transcribe(wav)).trim() }];
-        }
-      } catch (err) {
-        rt.state.error = `transcription failed: ${(err as Error).message}`;
-        this.deps.logger.error(
-          { chatId, err: (err as Error).message },
-          'meeting: transcription failed',
+    const nowAt = meetingElapsedMs(rt.state, this.now());
+    const placed = (spokenAt: number): number => {
+      if (rt.state.resumedAt === undefined) return nowAt;
+      const at = rt.state.elapsedBaseMs + (spokenAt - rt.state.resumedAt);
+      return Math.min(nowAt, Math.max(rt.state.elapsedBaseMs, at));
+    };
+    const speaker = source === 'mic' ? 'you' : 'them';
+    let added = false;
+    for (const line of lines) {
+      const text = line.text.trim();
+      if (text === '' || TRANSCRIPT_NOISE.test(text)) continue;
+      const at = placed(line.spokenAt);
+      const lineSpeaker = line.voice === 0 ? 'you' : line.voice !== undefined ? 'them' : speaker;
+      const recentMic = rt.state.transcript
+        .filter((l) => l.speaker === 'you' && Math.abs(at - l.at) <= ECHO_WINDOW_MS)
+        .map((l) => l.text);
+      // The owner's voice returning through system audio is not a second speaker.
+      if (lineSpeaker === 'them' && source === 'system' && isMicEcho(text, recentMic)) continue;
+      if (lineSpeaker === 'you' && source === 'mic') {
+        // The system line can land first: retract its echo now the mic text is known.
+        // Only lines no pass has consumed yet, so the progress markers stay valid.
+        const floor = Math.max(
+          rt.analysedUpTo,
+          rt.deliveredUpTo,
+          rt.correctedUpTo,
+          rt.researchedUpTo,
         );
-        this.commit(chatId, rt);
-        return;
+        const before = rt.state.transcript.length;
+        rt.state.transcript = rt.state.transcript.filter(
+          (l, i) =>
+            !(
+              l.speaker === 'them' &&
+              i >= floor &&
+              Math.abs(at - l.at) <= ECHO_WINDOW_MS &&
+              isMicEcho(l.text, [text])
+            ),
+        );
+        if (rt.state.transcript.length !== before) added = true;
       }
-      let added = false;
-      const recentMic = () =>
-        rt.state.transcript
-          .filter((l) => l.speaker === 'you' && Math.abs(at - l.at) <= ECHO_WINDOW_MS)
-          .map((l) => l.text);
-      for (const { text, voice } of pieces) {
-        if (text === '' || TRANSCRIPT_NOISE.test(text)) continue;
-        // Voice 0 is the owner's print; any other voice is someone else, even on the mic.
-        const lineSpeaker =
-          printed && voice !== undefined ? (voice === 0 ? 'you' : 'them') : speaker;
-        // The owner's voice returning through system audio is not a second speaker.
-        if (lineSpeaker === 'them' && source === 'system' && isMicEcho(text, recentMic())) continue;
-        if (lineSpeaker === 'you' && source === 'mic') {
-          // The system clip can land first: retract its echo now the mic text is known.
-          // Only lines no pass has consumed yet, so the progress markers stay valid.
-          const floor = Math.max(
-            rt.analysedUpTo,
-            rt.deliveredUpTo,
-            rt.correctedUpTo,
-            rt.researchedUpTo,
-          );
-          const before = rt.state.transcript.length;
-          rt.state.transcript = rt.state.transcript.filter(
-            (l, i) =>
-              !(
-                l.speaker === 'them' &&
-                i >= floor &&
-                Math.abs(at - l.at) <= ECHO_WINDOW_MS &&
-                isMicEcho(l.text, [text])
-              ),
-          );
-          if (rt.state.transcript.length !== before) added = true;
-        }
-        rt.state.transcript.push({
-          at,
-          speaker: lineSpeaker,
-          ...(voice !== undefined && voice !== 0 ? { voice } : {}),
-          ...(lineSpeaker === 'them' && speakerName ? { name: speakerName } : {}),
-          text,
-        });
-        added = true;
-      }
-      if (!added) return;
-      if (rt.state.transcript.length > MAX_TRANSCRIPT_LINES) {
-        const drop = rt.state.transcript.length - MAX_TRANSCRIPT_LINES;
-        rt.state.transcript.splice(0, drop);
-        rt.analysedUpTo = Math.max(0, rt.analysedUpTo - drop);
-        rt.deliveredUpTo = Math.max(0, rt.deliveredUpTo - drop);
-        rt.correctedUpTo = Math.max(0, rt.correctedUpTo - drop);
-        rt.researchedUpTo = Math.max(0, rt.researchedUpTo - drop);
-      }
-      rt.state.error = null;
-      this.commit(chatId, rt);
-    });
-    rt.txChain = next.catch(() => undefined);
-    return next;
+      const entry = {
+        at,
+        speaker: lineSpeaker,
+        ...(line.voice !== undefined && line.voice !== 0 ? { voice: line.voice } : {}),
+        ...(lineSpeaker === 'them' && line.speakerName ? { name: line.speakerName } : {}),
+        text,
+      } as const;
+      // Lines from two sources arrive independently: keep the transcript in time order,
+      // but never move a line in front of one a pass has already consumed.
+      const floor = Math.max(
+        rt.analysedUpTo,
+        rt.deliveredUpTo,
+        rt.correctedUpTo,
+        rt.researchedUpTo,
+      );
+      let i = rt.state.transcript.length;
+      while (i > floor && rt.state.transcript[i - 1]!.at > at) i--;
+      rt.state.transcript.splice(i, 0, entry);
+      added = true;
+    }
+    if (!added) return;
+    if (rt.state.transcript.length > MAX_TRANSCRIPT_LINES) {
+      const drop = rt.state.transcript.length - MAX_TRANSCRIPT_LINES;
+      rt.state.transcript.splice(0, drop);
+      rt.analysedUpTo = Math.max(0, rt.analysedUpTo - drop);
+      rt.deliveredUpTo = Math.max(0, rt.deliveredUpTo - drop);
+      rt.correctedUpTo = Math.max(0, rt.correctedUpTo - drop);
+      rt.researchedUpTo = Math.max(0, rt.researchedUpTo - drop);
+    }
+    rt.state.error = null;
+    this.commit(chatId, rt);
   }
 
   /** Show `name` for a `them` voice (e.g. the user recognised Them 2 as Priya). */
@@ -1269,7 +1237,6 @@ export class MeetingManager {
       lastResearchAt: 0,
       researching: undefined,
       chain: Promise.resolve(),
-      txChain: Promise.resolve(),
     };
     this.runtimes.set(chatId, rt);
     // A host restart finds the meeting `live` with no audio coming: park it as

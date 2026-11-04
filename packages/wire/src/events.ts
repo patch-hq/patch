@@ -3977,6 +3977,34 @@ export const MeetingAudioEvent = z
 export type MeetingAudioEvent = z.infer<typeof MeetingAudioEvent>;
 
 /**
+ * Surface → host: lines the surface transcribed on its own device (spec/07
+ * § Meeting transcription). Only text leaves the machine. `spokenAt` is the
+ * wall-clock ms the utterance began, so a line is placed when it was said, not
+ * when it arrived. Replaces `meeting.audio`, which a host now refuses.
+ */
+export const MeetingLinesEvent = z
+  .object({
+    type: z.literal('meeting.lines'),
+    chatId: z.string().min(1),
+    source: z.enum(['mic', 'system']),
+    lines: z
+      .array(
+        z
+          .object({
+            text: z.string().trim().min(1).max(4000),
+            spokenAt: z.number().int().nonnegative(),
+            /** Who the call app showed as speaking at the time, when the shell could tell. */
+            speakerName: z.string().min(1).optional(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(50),
+  })
+  .strict();
+export type MeetingLinesEvent = z.infer<typeof MeetingLinesEvent>;
+
+/**
  * Surface → host: act on an action row. `do` runs an agent action in a linked
  * chat, `chat` starts a chat on one of Tom's own, `dismiss` drops any of them,
  * `done` ticks one off and `reopen` unticks it. `owner` reassigns someone
@@ -9233,6 +9261,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   MeetingControlRequestEvent,
   MeetingGetRequestEvent,
   MeetingAudioEvent,
+  MeetingLinesEvent,
   MeetingActionRequestEvent,
   MeetingNotesRequestEvent,
   MeetingMyNotesRequestEvent,
@@ -9539,6 +9568,7 @@ export const EVENT_SCHEMAS = {
   'meeting.control_request': MeetingControlRequestEvent,
   'meeting.get_request': MeetingGetRequestEvent,
   'meeting.audio': MeetingAudioEvent,
+  'meeting.lines': MeetingLinesEvent,
   'meeting.action_request': MeetingActionRequestEvent,
   'meeting.notes_request': MeetingNotesRequestEvent,
   'meeting.my_notes_request': MeetingMyNotesRequestEvent,

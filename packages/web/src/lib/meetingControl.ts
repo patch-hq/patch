@@ -1,6 +1,10 @@
 // meetingControl — what the Meeting button, the panel and the action cards do.
 // Capture is acquired BEFORE the host is told to start, so a denied mic never
 // leaves a live meeting that hears nothing.
+//
+// The desktop app transcribes on this device (spec/07 § Meeting transcription):
+// audio goes to the shell, text comes back, and only text is sent to the host
+// as `meeting.lines`. A browser with no desktop app cannot listen.
 
 import { SpeakerLog } from './speakerLog.js';
 import {
@@ -26,6 +30,8 @@ import {
 } from './meetingCapture.js';
 
 let capture: MeetingCapture | null = null;
+/** Undoes the transcription listeners for the capture in progress. */
+let stopListening: (() => void) | null = null;
 
 const SETTINGS_KEY = 'patch.meeting.liveness';
 
@@ -62,7 +68,6 @@ export function setMeetingSpeed(chatId: string, speed: string): void {
   if (!(speed in MEETING_SPEEDS)) throw new Error(`unknown meeting speed ${speed}`);
   localStorage.setItem(SETTINGS_KEY, speed);
   const settings = speedSettings(speed);
-  capture?.setClipSeconds(settings.clipSeconds);
   ws().send({ type: 'meeting.control_request', chatId, action: 'tune', settings });
 }
 
@@ -77,11 +82,6 @@ let stopSpeakerWatch: (() => void) | null = null;
 
 /** How long the call app may go without showing a single participant before the meeting says so. */
 export const NO_PARTICIPANTS_AFTER_MS = 90_000;
-
-/** Seconds of 16 kHz mono PCM16 in a WAV clip (44-byte header). */
-function wavSeconds(wavBytes: number): number {
-  return Math.max(0, wavBytes - 44) / 2 / 16000;
-}
 
 /** Ask the shell who is lit up on the call. A failure is shown, and the meeting carries on with "Them". */
 function watchSpeakers(bridge: PatchDesktopBridge): void {
@@ -118,9 +118,8 @@ function watchSpeakers(bridge: PatchDesktopBridge): void {
  * error about it either.
  */
 export async function acquireSources(opts: { names?: boolean } = {}): Promise<MeetingSources> {
+  const bridge = deviceTranscriber();
   const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
-  const bridge = getDesktopBridge();
-  if (!bridge) return { mic };
   try {
     if (!bridge.startSystemAudio || !bridge.onSystemAudio) {
       throw new Error('this desktop app is too old to hear the call. Update Patch');
@@ -144,7 +143,7 @@ function systemFeed(bridge: PatchDesktopBridge): PcmFeed {
         onPcm(new Int16Array(copy.buffer, copy.byteOffset, copy.byteLength / 2));
       });
       const offFailed = bridge.onSystemAudioFailed?.(({ message }) => {
-        stopCapture();
+        void stopCapture();
         useUiStore.getState().pushError(`System audio stopped: ${message}`);
       });
       return () => {
@@ -158,38 +157,125 @@ function systemFeed(bridge: PatchDesktopBridge): PcmFeed {
   };
 }
 
+/** The shell, when it can transcribe here. Meetings never send audio off the device. */
+function deviceTranscriber(): PatchDesktopBridge &
+  Required<
+    Pick<
+      PatchDesktopBridge,
+      | 'startMeetingTranscription'
+      | 'pushMeetingAudio'
+      | 'flushMeetingTranscription'
+      | 'stopMeetingTranscription'
+      | 'onMeetingText'
+    >
+  > {
+  const bridge = getDesktopBridge();
+  if (!bridge) {
+    throw new Error(
+      'Meetings are transcribed on your computer, so they listen from the Patch desktop app',
+    );
+  }
+  const {
+    startMeetingTranscription,
+    pushMeetingAudio,
+    flushMeetingTranscription,
+    stopMeetingTranscription,
+    onMeetingText,
+  } = bridge;
+  if (
+    !startMeetingTranscription ||
+    !pushMeetingAudio ||
+    !flushMeetingTranscription ||
+    !stopMeetingTranscription ||
+    !onMeetingText
+  ) {
+    throw new Error('This desktop app is too old to transcribe meetings. Update Patch');
+  }
+  return {
+    ...bridge,
+    startMeetingTranscription: startMeetingTranscription.bind(bridge),
+    pushMeetingAudio: pushMeetingAudio.bind(bridge),
+    flushMeetingTranscription: flushMeetingTranscription.bind(bridge),
+    stopMeetingTranscription: stopMeetingTranscription.bind(bridge),
+    onMeetingText: onMeetingText.bind(bridge),
+  };
+}
+
+/** Sends what this device transcribed to the host, and shows what it is still hearing. */
+function listen(chatId: string, bridge: ReturnType<typeof deviceTranscriber>): () => void {
+  const store = useMeetingStore.getState();
+  const offText = bridge.onMeetingText((t) => {
+    if (!t.final) {
+      store.setHearing(t.source, t.text);
+      return;
+    }
+    store.setHearing(t.source, null);
+    // Who was lit up for most of the utterance.
+    const speakerName =
+      t.source === 'system' ? speakerLog.dominant(t.startedAt, t.endedAt) : undefined;
+    try {
+      ws().send({
+        type: 'meeting.lines',
+        chatId,
+        source: t.source,
+        lines: [
+          {
+            text: t.text,
+            spokenAt: Math.round(t.startedAt),
+            ...(speakerName ? { speakerName } : {}),
+          },
+        ],
+      });
+    } catch (err) {
+      report('Meeting line not sent', err);
+    }
+  });
+  const offError = bridge.onMeetingTranscribeError?.(({ message }) =>
+    report('Transcription failed', new Error(message)),
+  );
+  let told = false;
+  const offProgress = bridge.onMeetingTranscribeProgress?.((p) => {
+    if (!told) {
+      told = true;
+      useUiStore
+        .getState()
+        .pushNotice(
+          'Downloading the speech model for meetings (about 670 MB, once). The meeting starts when it is ready.',
+        );
+    }
+    store.setModelProgress(p.total ? Math.min(1, p.received / p.total) : 0);
+  });
+  return () => {
+    offText();
+    offError?.();
+    offProgress?.();
+    store.setModelProgress(null);
+  };
+}
+
 async function beginCapture(chatId: string, opts: { names?: boolean } = {}): Promise<void> {
   // 'new' is the new-chat screen's placeholder, not a chat: no host owns it, so
-  // the server would drop every control frame and clip sent for it.
+  // the server would drop every control frame and line sent for it.
   if (chatId === 'new') throw new Error('Send a first message to create the chat, then start it');
+  const bridge = deviceTranscriber();
+  stopListening?.();
+  stopListening = listen(chatId, bridge);
+  try {
+    // The first meeting downloads the speech model; nothing is captured until it is ready.
+    await bridge.startMeetingTranscription();
+  } catch (err) {
+    stopListening();
+    stopListening = null;
+    throw new Error(`Speech model unavailable: ${(err as Error).message}`);
+  }
+  useMeetingStore.getState().setModelProgress(null);
   const sources = await acquireSources(opts);
   try {
     capture = startMeetingCapture(
       sources,
-      (source, audioBase64) => {
-        try {
-          // Who was lit up for most of the stretch this clip covers.
-          const now = Date.now();
-          const speakerName =
-            source === 'system'
-              ? speakerLog.dominant(now - wavSeconds(audioBase64.length * 0.75) * 1000, now)
-              : undefined;
-          ws().send({
-            type: 'meeting.audio',
-            chatId,
-            source,
-            audioBase64,
-            ...(speakerName ? { speakerName } : {}),
-          });
-        } catch (err) {
-          useUiStore.getState().pushError(`Meeting audio not sent: ${(err as Error).message}`);
-        }
-      },
-      {
-        clipSeconds: speedSettings(getMeetingSpeed()).clipSeconds,
-        // A long silence from the far end: the call is over.
-        onSilence: () => endMeeting(chatId),
-      },
+      (source, pcm) => bridge.pushMeetingAudio(source, pcm, Date.now()),
+      // A long silence from the far end: the call is over.
+      { onSilence: () => void endMeeting(chatId) },
     );
   } catch (err) {
     sources.mic?.getTracks().forEach((t) => t.stop());
@@ -213,7 +299,7 @@ export async function startMeeting(chatId: string, opts: { names?: boolean } = {
       settings: speedSettings(getMeetingSpeed()),
     });
   } catch (err) {
-    stopCapture();
+    void stopCapture();
     report('Could not start the meeting', err);
   }
 }
@@ -232,8 +318,12 @@ export function nameMeetingVoice(chatId: string, voice: number, name: string): v
   ws().send({ type: 'meeting.control_request', chatId, action: 'name_voice', voice, name });
 }
 
-export function pauseMeeting(chatId: string): void {
+export async function pauseMeeting(chatId: string): Promise<void> {
   capture?.setPaused(true);
+  // What was being said as Pause was pressed still belongs to the meeting.
+  await getDesktopBridge()
+    ?.flushMeetingTranscription?.()
+    .catch((err: unknown) => report('Transcription failed', err));
   ws().send({ type: 'meeting.control_request', chatId, action: 'pause' });
 }
 
@@ -248,14 +338,14 @@ export async function resumeEndedMeeting(chatId: string): Promise<void> {
     await beginCapture(chatId);
     ws().send({ type: 'meeting.control_request', chatId, action: 'resume' });
   } catch (err) {
-    stopCapture();
+    void stopCapture();
     report('Could not resume the meeting', err);
   }
 }
 
-/** Flushes the last audio first, so it reaches the host ahead of `end`. */
-export function endMeeting(chatId: string): void {
-  stopCapture();
+/** Waits for the last words to be transcribed and sent, so they reach the host ahead of `end`. */
+export async function endMeeting(chatId: string): Promise<void> {
+  await stopCapture();
   ws().send({ type: 'meeting.control_request', chatId, action: 'end' });
 }
 
@@ -358,15 +448,26 @@ export function requestMeeting(chatId: string): void {
   getActiveWs()?.send({ type: 'meeting.get_request', chatId });
 }
 
-function stopCapture(): void {
+/** Stops hearing; resolves once everything already heard has been transcribed and sent. */
+async function stopCapture(): Promise<void> {
+  const had = capture;
   capture?.stop();
+  capture = null;
+  const bridge = getDesktopBridge();
+  if (had && bridge?.stopMeetingTranscription) {
+    await bridge
+      .stopMeetingTranscription()
+      .catch((err: unknown) => report('Transcription failed', err));
+  }
   stopSpeakerWatch?.();
   stopSpeakerWatch = null;
-  capture = null;
+  stopListening?.();
+  stopListening = null;
   useMeetingStore.getState().setCapturing(null);
 }
 
 /** Test seam. */
 export function __resetMeetingControlForTests(): void {
   capture = null;
+  stopListening = null;
 }

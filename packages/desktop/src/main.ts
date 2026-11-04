@@ -92,6 +92,8 @@ import {
   type MeetingPermissionKind,
 } from './meeting-permissions';
 import { watchSpeakers } from './meeting-speakers';
+import { MeetingTranscriber, type MeetingSource } from './meeting-transcriber';
+import { ensureMeetingModels, meetingModelPaths } from './meeting-models';
 import {
   buildNotificationExtras,
   decideDesktopIntent,
@@ -1490,6 +1492,61 @@ function setupAutoUpdater(): void {
     });
     meetingPermissionDeps.rememberCallAudio();
     sender.once('destroyed', () => systemAudio.stop());
+  });
+  // Meeting mode: transcription on this Mac (meeting-transcriber.ts). The renderer
+  // feeds the mic (after its echo canceller) and the call audio; text comes back,
+  // and only text goes on to the meeting's host. The first meeting downloads the
+  // speech model, with progress, and fails visibly if it cannot.
+  let transcriber: MeetingTranscriber | null = null;
+  ipcMain.handle('patch:meeting-transcribe:start', async (e) => {
+    const sender = e.sender;
+    const paths = meetingModelPaths(app.getPath('userData'));
+    await ensureMeetingModels(paths, (p) => {
+      if (!sender.isDestroyed()) sender.send('patch:meeting-transcribe:progress', p);
+    });
+    await transcriber?.close().catch(() => undefined);
+    const own = new MeetingTranscriber({
+      parakeetDir: paths.parakeetDir,
+      vadModel: paths.vadModel,
+      onText: (t) => {
+        if (!sender.isDestroyed()) sender.send('patch:meeting-transcribe:text', t);
+      },
+      onError: (err) => {
+        if (!sender.isDestroyed()) {
+          sender.send('patch:meeting-transcribe:error', { message: err.message });
+        }
+      },
+    });
+    transcriber = own;
+    sender.once('destroyed', () => {
+      if (transcriber === own) transcriber = null;
+      void own.close().catch(() => undefined);
+    });
+  });
+  ipcMain.on(
+    'patch:meeting-transcribe:push',
+    (e, source: MeetingSource, pcm: Uint8Array, at: number) => {
+      if (!transcriber) return;
+      const samples = new Int16Array(
+        pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength - (pcm.byteLength % 2)),
+      );
+      try {
+        transcriber.push(source, samples, at);
+      } catch (err) {
+        if (!e.sender.isDestroyed()) {
+          e.sender.send('patch:meeting-transcribe:error', { message: (err as Error).message });
+        }
+      }
+    },
+  );
+  // Resolves once every utterance in progress has been read and sent back as final.
+  ipcMain.handle('patch:meeting-transcribe:flush', async () => {
+    await transcriber?.flush();
+  });
+  ipcMain.handle('patch:meeting-transcribe:stop', async () => {
+    const t = transcriber;
+    transcriber = null;
+    await t?.close();
   });
   // Meeting mode: where the three macOS permissions stand, and asking for one.
   // Null off macOS, where there is nothing to set up.

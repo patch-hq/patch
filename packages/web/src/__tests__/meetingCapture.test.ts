@@ -1,76 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  ClipBuilder,
-  MIN_TAIL_SECONDS,
   SILENCE_RMS,
-  bytesToBase64,
-  pcm16ToWav,
   rmsOfPcm16,
   startMeetingCapture,
   AUTO_END_SILENCE_SECONDS,
 } from '../lib/meetingCapture.js';
 
 const loud = (n: number): Int16Array => new Int16Array(n).fill(8000);
-
-describe('pcm16ToWav', () => {
-  it('writes a 16 kHz mono PCM16 header', () => {
-    const wav = pcm16ToWav(loud(100));
-    const v = new DataView(wav.buffer);
-    expect(String.fromCharCode(...wav.subarray(0, 4))).toBe('RIFF');
-    expect(String.fromCharCode(...wav.subarray(8, 12))).toBe('WAVE');
-    expect(v.getUint16(22, true)).toBe(1);
-    expect(v.getUint32(24, true)).toBe(16000);
-    expect(v.getUint32(40, true)).toBe(200);
-    expect(wav.length).toBe(244);
-  });
-});
-
-describe('bytesToBase64', () => {
-  it('round-trips large buffers', () => {
-    const b = new Uint8Array(100_000).map((_, i) => i % 251);
-    expect(Uint8Array.from(atob(bytesToBase64(b)), (c) => c.charCodeAt(0))).toEqual(b);
-  });
-});
-
-describe('ClipBuilder', () => {
-  it('cuts a clip each time the clip length is full', () => {
-    const clips: Uint8Array[] = [];
-    const b = new ClipBuilder((w) => clips.push(w), 2);
-    for (let i = 0; i < 5; i++) b.push(loud(16000)); // 5 s
-    expect(clips).toHaveLength(2);
-    expect(clips[0]!.length).toBe(44 + 2 * 16000 * 2);
-  });
-
-  it('drops a silent clip instead of sending it to Whisper', () => {
-    const clips: Uint8Array[] = [];
-    const b = new ClipBuilder((w) => clips.push(w), 1);
-    b.push(new Int16Array(16000));
-    expect(clips).toHaveLength(0);
-    expect(rmsOfPcm16(new Int16Array(10))).toBeLessThan(SILENCE_RMS);
-  });
-
-  it('setClipSeconds shortens the clip from now on, flushing a buffer already long enough', () => {
-    const clips: Uint8Array[] = [];
-    const b = new ClipBuilder((w) => clips.push(w), 15);
-    b.push(loud(16000 * 4));
-    expect(clips).toHaveLength(0);
-    b.setClipSeconds(3);
-    expect(clips).toHaveLength(1);
-    b.push(loud(16000 * 3));
-    expect(clips).toHaveLength(2);
-  });
-
-  it('flush sends a worthwhile tail and discards a trivial one', () => {
-    const clips: Uint8Array[] = [];
-    const b = new ClipBuilder((w) => clips.push(w), 15);
-    b.push(loud(16000 * MIN_TAIL_SECONDS));
-    b.flush();
-    expect(clips).toHaveLength(1);
-    b.push(loud(1000));
-    b.flush();
-    expect(clips).toHaveLength(1);
-  });
-});
 
 describe('startMeetingCapture', () => {
   class Ctx {
@@ -117,7 +53,7 @@ describe('startMeetingCapture', () => {
   });
 
   it('captures system audio from a PCM feed, with no stream or screen involved', () => {
-    const clips: Array<[string, string]> = [];
+    const heard: Array<[string, number]> = [];
     let push: ((pcm: Int16Array) => void) | null = null;
     const unsubscribe = vi.fn();
     const stopFeed = vi.fn();
@@ -131,15 +67,14 @@ describe('startMeetingCapture', () => {
           stop: stopFeed,
         },
       },
-      (source, wav) => clips.push([source, wav]),
-      { AudioContextImpl: Ctx as never, clipSeconds: 1 },
+      (source, pcm) => heard.push([source, pcm.length]),
+      { AudioContextImpl: Ctx as never },
     );
     push!(loud(16000));
-    expect(clips).toHaveLength(1);
-    expect(clips[0]![0]).toBe('system');
+    expect(heard).toEqual([['system', 16000]]);
     capture.setPaused(true);
     push!(loud(16000));
-    expect(clips).toHaveLength(1);
+    expect(heard).toHaveLength(1);
     capture.stop();
     expect(unsubscribe).toHaveBeenCalledOnce();
     expect(stopFeed).toHaveBeenCalledOnce();
@@ -159,7 +94,7 @@ describe('startMeetingCapture', () => {
       };
     }
     vi.stubGlobal('MediaStream', function () {});
-    const clips: Array<[string, string]> = [];
+    const loudness: Record<string, number[]> = { mic: [], system: [] };
     let push: ((pcm: Int16Array) => void) | null = null;
     const capture = startMeetingCapture(
       {
@@ -172,8 +107,8 @@ describe('startMeetingCapture', () => {
           stop: () => {},
         },
       },
-      (source, wav) => clips.push([source, wav]),
-      { AudioContextImpl: RecCtx as never, clipSeconds: 4 },
+      (source, pcm) => loudness[source]!.push(rmsOfPcm16(pcm)),
+      { AudioContextImpl: RecCtx as never },
     );
     // Someone on the call talks for 24 s; the laptop speakers put it into the mic 150 ms later.
     let seed = 3;
@@ -195,10 +130,11 @@ describe('startMeetingCapture', () => {
       procs[0]!.onaudioprocess!({ inputBuffer: { getChannelData: () => mic } });
     }
     capture.stop();
-    const heard = (source: string): number => clips.filter(([s]) => s === source).length;
-    expect(heard('system')).toBeGreaterThanOrEqual(5);
-    // The mic clips that survive are only the first seconds, before the canceller has locked on.
-    expect(heard('mic')).toBeLessThanOrEqual(2);
+    // Once the canceller has locked on (a few seconds in), the mic is near silence.
+    const settled = loudness.mic!.slice(Math.floor(loudness.mic!.length / 2));
+    const mean = (a: number[]): number => a.reduce((x, y) => x + y, 0) / a.length;
+    expect(mean(loudness.system!)).toBeGreaterThan(0.02);
+    expect(mean(settled)).toBeLessThan(SILENCE_RMS * 2);
   });
 
   it('rejects when there is nothing to capture', () => {
@@ -229,7 +165,6 @@ describe('auto-end on a long silence', () => {
     const onSilence = vi.fn();
     startMeetingCapture({ system: f.src }, () => {}, {
       AudioContextImpl: class {} as never,
-      clipSeconds: 10,
       onSilence,
     });
     for (let i = 0; i < AUTO_END_SILENCE_SECONDS / 10 - 1; i++) f.push(quiet(10));
@@ -245,7 +180,6 @@ describe('auto-end on a long silence', () => {
     const onSilence = vi.fn();
     startMeetingCapture({ system: f.src }, () => {}, {
       AudioContextImpl: class {} as never,
-      clipSeconds: 10,
       onSilence,
     });
     for (let i = 0; i < 25; i++) f.push(quiet(10));

@@ -40,6 +40,12 @@ async function fakeShell(page: Page, perms: Perms, opts: { seen?: boolean } = {}
         },
         stopMeetingSpeakers: () => {},
         onMeetingSpeakers: () => () => {},
+        // Transcription on this device: nothing heard in these tests.
+        startMeetingTranscription: async () => {},
+        pushMeetingAudio: () => {},
+        flushMeetingTranscription: async () => {},
+        stopMeetingTranscription: async () => {},
+        onMeetingText: () => () => {},
       };
     },
     { perms, seen: opts.seen ?? false },

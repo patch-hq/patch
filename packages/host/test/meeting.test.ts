@@ -19,6 +19,7 @@ import {
   type MeetingDeps,
   type MeetingPrompts,
 } from '../src/meeting.js';
+import { TestMeetings } from './meetingDevice.js';
 import {
   buildMeetingPrompt,
   makeMeetingAnalyser,
@@ -68,8 +69,8 @@ describe('MeetingManager', () => {
   let ticks: (() => void)[];
   let n: number;
 
-  const make = (extra: Partial<MeetingDeps> = {}): MeetingManager =>
-    new MeetingManager({
+  const make = (extra: Partial<MeetingDeps> = {}): TestMeetings =>
+    new TestMeetings({
       ...extra,
       dir,
       transcribe,
@@ -109,23 +110,6 @@ describe('MeetingManager', () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-  it('keeps transcribing clips while a slow analysis pass is still running', async () => {
-    const m = make();
-    m.start('c1');
-    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
-    let release!: () => void;
-    analyse.mockImplementationOnce(
-      () => new Promise<MeetingAnalysis>((r) => (release = () => r(analysis()))),
-    );
-    const tick = m.tick('c1');
-    await Promise.resolve();
-    transcribe.mockResolvedValueOnce('said during the slow pass');
-    await m.ingestAudio('c1', 'mic', Buffer.from('b'));
-    expect(m.get('c1')!.transcript.map((l) => l.text)).toContain('said during the slow pass');
-    release();
-    await tick;
-  });
-
   it('drops a system line that is the mic speech returning, in either clip order', async () => {
     const m = make();
     m.start('c1');
@@ -160,58 +144,6 @@ describe('MeetingManager', () => {
     transcribe.mockResolvedValueOnce('so the ledger split needs to land before black friday');
     await m.ingestAudio('c1', 'system', Buffer.from('d'));
     expect(m.get('c1')!.transcript.map((l) => l.speaker)).toEqual(['you', 'them', 'them', 'them']);
-  });
-
-  it("splits a Them clip into numbered voices and merges a voice's consecutive stretches", async () => {
-    diarise = true;
-    const m = make();
-    m.start('c1');
-    transcribeVoices.mockResolvedValueOnce([
-      { text: 'Shall we start?', voice: 1 },
-      { text: 'Yes please.', voice: 1 },
-      { text: 'I have the numbers.', voice: 2 },
-    ]);
-    await m.ingestAudio('c1', 'system', Buffer.from('a'));
-    expect(m.get('c1')?.transcript.map((l) => [l.speaker, l.voice, l.text])).toEqual([
-      ['them', 1, 'Shall we start? Yes please.'],
-      ['them', 2, 'I have the numbers.'],
-    ]);
-    expect(transcribeVoices).toHaveBeenCalledWith('c1:1000000', expect.any(Buffer));
-    expect(transcribe).not.toHaveBeenCalled();
-  });
-
-  it('with a voice print, the mic is diarised: voice 0 is you, others are Them', async () => {
-    diarise = true;
-    const m = make({ hasVoiceprint: () => true });
-    m.start('c1');
-    transcribeVoices.mockResolvedValueOnce([
-      { text: 'Right, my update.', voice: 0 },
-      { text: 'Go on then.', voice: 1 },
-    ]);
-    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
-    expect(m.get('c1')?.transcript.map((l) => [l.speaker, l.voice, l.text])).toEqual([
-      ['you', undefined, 'Right, my update.'],
-      ['them', 1, 'Go on then.'],
-    ]);
-    expect(transcribe).not.toHaveBeenCalled();
-  });
-
-  it('with a voice print, your voice on the system channel is still you', async () => {
-    diarise = true;
-    const m = make({ hasVoiceprint: () => true });
-    m.start('c1');
-    transcribeVoices.mockResolvedValueOnce([{ text: 'Me in the room', voice: 0 }]);
-    await m.ingestAudio('c1', 'system', Buffer.from('a'));
-    expect(m.get('c1')?.transcript[0]?.speaker).toBe('you');
-  });
-
-  it('never diarises the mic without a voice print, and keeps one Them label without a diariser', async () => {
-    diarise = true;
-    const m = make();
-    m.start('c1');
-    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
-    expect(transcribeVoices).not.toHaveBeenCalled();
-    expect(m.get('c1')?.transcript[0]).toEqual({ at: 0, speaker: 'you', text: 'hello there' });
   });
 
   it('labels voices in the analysis input, and a name replaces the number', async () => {
@@ -260,16 +192,6 @@ describe('MeetingManager', () => {
     const m = make();
     m.start('c1');
     expect(() => m.nameVoice('c1', 3, 'X')).toThrow(MeetingError);
-  });
-
-  it('a failed diarised transcription lands on state.error', async () => {
-    diarise = true;
-    const m = make();
-    m.start('c1');
-    transcribeVoices.mockRejectedValueOnce(new Error('DIARISE_MODEL_PATH is not set'));
-    await m.ingestAudio('c1', 'system', Buffer.from('a'));
-    expect(m.get('c1')?.error).toContain('DIARISE_MODEL_PATH');
-    expect(m.get('c1')?.transcript).toEqual([]);
   });
 
   it('stamps a Them line with the speaker the call app lit up, and never a You line', async () => {
@@ -348,7 +270,7 @@ describe('MeetingManager', () => {
 
   it('settings default, are tunable mid-meeting, and set the analysis interval', () => {
     const intervals: number[] = [];
-    const m = new MeetingManager({
+    const m = new TestMeetings({
       prompts: () => PROMPTS,
       dir,
       transcribe,
@@ -394,13 +316,18 @@ describe('MeetingManager', () => {
     ]);
   });
 
-  it('transcribes with no vocabulary prompt, even once names are known', async () => {
-    // A prompt made from earlier text gets parroted back over unclear audio.
+  it('places a device line at the time it was said and keeps the two sources in time order', () => {
     const m = make();
     m.start('c1');
-    await m.ingestAudio('c1', 'system', Buffer.from('a'), 'Priya Shah');
-    await m.ingestAudio('c1', 'mic', Buffer.from('b'));
-    for (const call of transcribe.mock.calls) expect(call).toHaveLength(1);
+    clock += 20_000;
+    m.ingestLines('c1', 'mic', [{ text: 'said at fifteen', spokenAt: 1_000_000 + 15_000 }]);
+    m.ingestLines('c1', 'system', [{ text: 'said at twelve', spokenAt: 1_000_000 + 12_000 }]);
+    m.ingestLines('c1', 'system', [{ text: 'from before the start', spokenAt: 900_000 }]);
+    expect(m.get('c1')!.transcript.map((l) => [l.at, l.speaker, l.text])).toEqual([
+      [0, 'them', 'from before the start'],
+      [12_000, 'them', 'said at twelve'],
+      [15_000, 'you', 'said at fifteen'],
+    ]);
   });
 
   it('drops silent clips instead of adding empty lines', async () => {
@@ -432,16 +359,6 @@ describe('MeetingManager', () => {
       ['Mid', 400_000],
       ['Late', 610_000],
     ]);
-  });
-
-  it('puts a transcription failure on state.error and clears it on the next success', async () => {
-    const m = make();
-    m.start('c1');
-    transcribe.mockRejectedValueOnce(new Error('sidecar down'));
-    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
-    expect(m.get('c1')?.error).toContain('sidecar down');
-    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
-    expect(m.get('c1')?.error).toBeNull();
   });
 
   it('tick analyses only new lines and merges topics and actions once', async () => {
@@ -915,7 +832,7 @@ describe('MeetingManager', () => {
     expect(s.summary?.headline).toBe('Split in November');
     expect(s.elapsedBaseMs).toBe(52 * 60_000);
     expect(analyse.mock.calls[0]![0].final).toBe(true);
-    expect(() => m.ingestAudio('c1', 'mic', Buffer.from('a'))).toThrow(/ended/);
+    expect(() => m.ingestLines('c1', 'mic', [{ text: 'late', spokenAt: clock }])).toThrow(/ended/);
     expect(() => m.start('c1')).not.toThrow(); // a new meeting may follow
   });
 
@@ -1309,7 +1226,7 @@ describe('editable meeting prompts', () => {
     const dir2 = mkdtempSync(join(tmpdir(), 'meeting-p-'));
     let current = PROMPTS;
     const seen: MeetingPrompts[] = [];
-    const m = new MeetingManager({
+    const m = new TestMeetings({
       dir: dir2,
       transcribe: async () => 'hello',
       analyse: async (i) => {
@@ -1433,10 +1350,10 @@ describe('makeMeetingAnalyser', () => {
 });
 
 describe('meeting events on the host link', () => {
-  it('routes control, audio, action and get events to the manager', async () => {
+  it('routes control, lines, action and get events to the manager', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'meeting-ev-'));
     const sent: WireEvent[] = [];
-    const m = new MeetingManager({
+    const m = new TestMeetings({
       prompts: () => PROMPTS,
       dir,
       transcribe: async () => 'hi',
@@ -1449,10 +1366,10 @@ describe('meeting events on the host link', () => {
       handleServerEvent(e, {} as never, (x) => sent.push(x), logger, { meetings: m } as never);
     await send({ type: 'meeting.control_request', chatId: 'c', action: 'start' });
     await send({
-      type: 'meeting.audio',
+      type: 'meeting.lines',
       chatId: 'c',
       source: 'mic',
-      audioBase64: Buffer.from('x').toString('base64'),
+      lines: [{ text: 'hi', spokenAt: Date.now() }],
     });
     expect(m.get('c')?.transcript).toHaveLength(1);
     await m.tick('c');
@@ -1484,9 +1401,25 @@ describe('meeting events on the host link', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it('refuses meeting audio: meetings are transcribed on the device', async () => {
+    const errors: WireEvent[] = [];
+    const daemon = { allocErrorSeq: () => 0 } as never;
+    await handleServerEvent(
+      { type: 'meeting.audio', chatId: 'c', source: 'mic', audioBase64: 'AA==' },
+      daemon,
+      (x) => errors.push(x),
+      logger,
+      { meetings: {} } as never,
+    );
+    expect(errors[0]).toMatchObject({
+      type: 'chat.error',
+      error: { message: expect.stringMatching(/transcribed on your device/) },
+    });
+  });
+
   it('routes the action edits to the manager', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'meeting-ev-'));
-    const m = new MeetingManager({
+    const m = new TestMeetings({
       prompts: () => PROMPTS,
       dir,
       transcribe: async () => 'hi',
@@ -1570,9 +1503,9 @@ describe('transcript correction pass', () => {
     analyse: (i: AnalyseInput) => Promise<MeetingAnalysis>,
     texts: string[],
     glossary: string[] = ['WECA: Leca, Weka, WEPA'],
-  ): MeetingManager => {
+  ): TestMeetings => {
     const q = [...texts];
-    return new MeetingManager({
+    return new TestMeetings({
       prompts: () => PROMPTS,
       dir,
       transcribe: async () => q.shift() as string,

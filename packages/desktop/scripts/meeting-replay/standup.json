@@ -1,0 +1,41 @@
+{
+  "title": "Synthetic stand-up: three people, one on the mic",
+  "voices": { "Tom": "am_michael", "Priya": "bf_emma", "Marco": "bm_george" },
+  "local": "Tom",
+  "lines": [
+    ["Tom", "Morning both. Let's keep this short. Priya, do you want to start?"],
+    [
+      "Priya",
+      "Sure. I finished the migration script for the billing tables yesterday. It runs cleanly on staging, but it takes about forty minutes on the full data set."
+    ],
+    ["Marco", "Forty minutes is too long for a deploy window. Can we split it into batches?"],
+    [
+      "Priya",
+      "Yes, I think so. I'll split it into batches of ten thousand rows and rerun it on staging today."
+    ],
+    ["Tom", "Good. Marco, what about the login bug?"],
+    [
+      "Marco",
+      "I found it. The session cookie was being set without the secure flag on the preview domain, so Safari dropped it. The fix is a one line change. I'll open the pull request this morning."
+    ],
+    ["Tom", "Great. Is that the same issue Alcatraz was flagging last week?"],
+    [
+      "Marco",
+      "Same root cause, yes. Alcatraz checks the cookie flags on every preview deploy, which is how we spotted it."
+    ],
+    [
+      "Priya",
+      "One thing from me. We still haven't decided whether the export feature ships behind a flag."
+    ],
+    [
+      "Tom",
+      "Let's decide now. I'd rather ship it behind a flag and turn it on for the design team first."
+    ],
+    ["Marco", "Agreed. Flag first, then everyone next week if nothing breaks."],
+    ["Priya", "Fine by me. I'll add the flag when I do the batching change."],
+    ["Tom", "And I'll write the note to the design team so they know it's coming. Anything else?"],
+    ["Marco", "No, that's it from me."],
+    ["Priya", "Nothing else. Thanks."],
+    ["Tom", "Thanks both. Talk tomorrow."]
+  ]
+}

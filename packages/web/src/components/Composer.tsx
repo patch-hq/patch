@@ -2707,7 +2707,7 @@ export const Composer = forwardRef(function Composer(
                       onStartMeeting
                         ? onStartMeeting()
                         : inMeeting
-                          ? endMeeting(chatId)
+                          ? void endMeeting(chatId)
                           : void beginMeeting(chatId)
                     }
                     disabled={voiceDisabled && !inMeeting}

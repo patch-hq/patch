@@ -146,6 +146,52 @@ contextBridge.exposeInMainWorld('patch', {
   ): Promise<'granted' | 'missing' | 'unknown'> {
     return ipcRenderer.invoke('patch:meeting-permission:request', kind);
   },
+  /**
+   * Meeting transcription on this device. `start` downloads the speech model on
+   * first use (progress via onMeetingTranscribeProgress) and rejects if it cannot.
+   */
+  startMeetingTranscription(): Promise<void> {
+    return ipcRenderer.invoke('patch:meeting-transcribe:start');
+  },
+  pushMeetingAudio(source: 'mic' | 'system', pcm: Int16Array, at: number): void {
+    ipcRenderer.send(
+      'patch:meeting-transcribe:push',
+      source,
+      new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength),
+      at,
+    );
+  },
+  flushMeetingTranscription(): Promise<void> {
+    return ipcRenderer.invoke('patch:meeting-transcribe:flush');
+  },
+  stopMeetingTranscription(): Promise<void> {
+    return ipcRenderer.invoke('patch:meeting-transcribe:stop');
+  },
+  onMeetingText(
+    cb: (t: {
+      source: 'mic' | 'system';
+      text: string;
+      startedAt: number;
+      endedAt: number;
+      final: boolean;
+    }) => void,
+  ): () => void {
+    const handler = (_: unknown, t: Parameters<typeof cb>[0]): void => cb(t);
+    ipcRenderer.on('patch:meeting-transcribe:text', handler);
+    return () => ipcRenderer.removeListener('patch:meeting-transcribe:text', handler);
+  },
+  onMeetingTranscribeProgress(
+    cb: (p: { received: number; total: number | null; phase: 'downloading' | 'unpacking' }) => void,
+  ): () => void {
+    const handler = (_: unknown, p: Parameters<typeof cb>[0]): void => cb(p);
+    ipcRenderer.on('patch:meeting-transcribe:progress', handler);
+    return () => ipcRenderer.removeListener('patch:meeting-transcribe:progress', handler);
+  },
+  onMeetingTranscribeError(cb: (e: { message: string }) => void): () => void {
+    const handler = (_: unknown, payload: { message: string }): void => cb(payload);
+    ipcRenderer.on('patch:meeting-transcribe:error', handler);
+    return () => ipcRenderer.removeListener('patch:meeting-transcribe:error', handler);
+  },
   onSystemAudio(cb: (pcm: Uint8Array) => void): () => void {
     const handler = (_: unknown, pcm: Uint8Array): void => cb(pcm);
     ipcRenderer.on('patch:system-audio', handler);

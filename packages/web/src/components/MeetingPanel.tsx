@@ -377,7 +377,7 @@ function MeetingHead({ chatId, meeting }: { chatId: string; meeting: MeetingStat
           data-testid="meeting-pause"
           aria-label="Pause"
           title="Pause"
-          onClick={() => pauseMeeting(chatId)}
+          onClick={() => void pauseMeeting(chatId)}
         >
           <Pause size={16} aria-hidden="true" />
         </button>
@@ -400,7 +400,7 @@ function MeetingHead({ chatId, meeting }: { chatId: string; meeting: MeetingStat
           data-testid="meeting-end"
           aria-label="End"
           title="End"
-          onClick={() => endMeeting(chatId)}
+          onClick={() => void endMeeting(chatId)}
         >
           <Square size={14} aria-hidden="true" />
         </button>
@@ -971,9 +971,31 @@ export function justSaid(transcript: MeetingState['transcript']): MeetingState['
   return recent.length >= JUST_SAID_MIN_LINES ? recent : transcript.slice(-JUST_SAID_MIN_LINES);
 }
 
+/** What this device is hearing and has not finished transcribing: greyed, after the last line. */
+function Hearing({ chatId }: { chatId: string }) {
+  const here = useMeetingStore((s) => s.capturingChatId === chatId);
+  const hearing = useMeetingStore((s) => s.hearing);
+  if (!here) return null;
+  return (
+    <>
+      {(['system', 'mic'] as const).map((source) =>
+        hearing[source] ? (
+          <div key={source} data-testid="meeting-hearing" className="mm-ln prov">
+            <b>{source === 'mic' ? 'You' : 'Them'}</b>
+            <span>{hearing[source]}</span>
+          </div>
+        ) : null,
+      )}
+    </>
+  );
+}
+
 function JustSaid({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
   const lines = justSaid(meeting.transcript);
-  if (lines.length === 0) return null;
+  const hearing = useMeetingStore(
+    (s) => s.capturingChatId === chatId && Boolean(s.hearing.mic ?? s.hearing.system),
+  );
+  if (lines.length === 0 && !hearing) return null;
   return (
     <div className="mm-said" data-testid="meeting-tail">
       <div className="mm-sect">Just said</div>
@@ -983,6 +1005,7 @@ function JustSaid({ chatId, meeting }: { chatId: string; meeting: MeetingState }
           <span>{l.text}</span>
         </div>
       ))}
+      <Hearing chatId={chatId} />
     </div>
   );
 }
@@ -1121,6 +1144,7 @@ function TranscriptList({ chatId, meeting }: { chatId: string; meeting: MeetingS
             </span>
           </div>
         ))}
+        <Hearing chatId={chatId} />
       </div>
     </div>
   );
