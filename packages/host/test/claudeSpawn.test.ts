@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  ABORT_KILL_GRACE_MS,
   confirmRefusal,
   linkUserConfigIntoResumeDir,
   spawnClaudeInGroup,
@@ -51,6 +52,23 @@ describe('spawnClaudeInGroup', () => {
     const { pid } = await start(ac.signal);
     ac.abort();
     await until(() => !alive(pid));
+    expect(alive(pid)).toBe(false);
+  });
+
+  it('abort kills a claude that ignores SIGTERM', async () => {
+    const stubborn = `process.on('SIGTERM',()=>{});console.log(process.pid);setInterval(()=>{},1000)`;
+    const ac = new AbortController();
+    const p = spawnClaudeInGroup({
+      command: process.execPath,
+      args: ['-e', stubborn],
+      env: process.env,
+      signal: ac.signal,
+    });
+    const pid = await new Promise<number>((res) =>
+      p.stdout.once('data', (d) => res(Number(String(d).trim()))),
+    );
+    ac.abort();
+    await until(() => !alive(pid), ABORT_KILL_GRACE_MS + 3000);
     expect(alive(pid)).toBe(false);
   });
 

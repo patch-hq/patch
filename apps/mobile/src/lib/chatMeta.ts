@@ -73,6 +73,22 @@ export async function writeLoopMessage(
   }
 }
 
+/**
+ * Cancel the chat's pending wake — one-shot or loop alike; both are the one
+ * wake slot, and `loop: null` clears it. Not optimistic: the host echoes
+ * `chat.state` with no wake, which is what removes the bar. Returns whether
+ * the host accepted it.
+ */
+export async function cancelWake(chatId: string): Promise<boolean> {
+  try {
+    await api.setLoop(chatId, null);
+    return true;
+  } catch (e) {
+    fail('cancelling wake', e);
+    return false;
+  }
+}
+
 /** Replace the chat's task list — always the WHOLE list, as the host expects. */
 export async function writeTodos(chatId: string, next: TodoItem[]): Promise<void> {
   const prev = row(chatId).todos;

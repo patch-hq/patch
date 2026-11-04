@@ -873,6 +873,13 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     ],
   },
   'patch.stop': { type: 'patch.stop', sourceChatId: 'c1', targetChatId: 'c2' },
+  'patch.stop.response': {
+    type: 'patch.stop.response',
+    requestId: 'r1',
+    sourceChatId: 'c1',
+    targetChatId: 'c2',
+    ok: true,
+  },
   'patch.job_create': {
     type: 'patch.job_create',
     sourceChatId: 'c1',

@@ -466,6 +466,7 @@ function labelSystemReminder(text: string): string {
   if (text.includes('talked to this chat by voice')) return 'Voice conversation';
   if (text.includes('could not be run on your last reply')) return 'Hook failed';
   if (text.includes('agent_response hook')) return 'Hook advice';
+  if (/^A meeting is .* in this chat/.test(text)) return 'Meeting context';
   return 'System context';
 }
 

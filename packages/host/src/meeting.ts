@@ -17,6 +17,7 @@ import type { Logger } from 'pino';
 import {
   meetingElapsedMs,
   meetingSpeakerLabel,
+  MEETING_OWNER_EVERYONE,
   formatMeetingClock,
   DEFAULT_MEETING_SETTINGS,
   MeetingSettings,
@@ -45,6 +46,8 @@ const MAX_LIVE_CHARS = 300;
 const MAX_TRANSCRIPT_LINES = 4000;
 /** Most name corrections kept for the write-up's tooltips. */
 const NAME_FIX_LIMIT = 200;
+/** Most actions waiting at once; analysis passes add no more past this, so the list stays recognisable. */
+const MAX_PENDING_ACTIONS = 5;
 /** Cap on transcript fed into one analysis pass or one chat turn. */
 const MAX_PROMPT_TRANSCRIPT_CHARS = 12_000;
 
@@ -116,11 +119,18 @@ export interface MeetingPrompts {
   actions: string;
 }
 
+/** How many already-analysed lines each pass re-reads as context. */
+const EARLIER_CONTEXT_LINES = 40;
+/** Names an `other` owner can take that actually mean Tom. */
+const TOM_NAMES = new Set(['tom', 'you', 'me']);
+
 export interface AnalyseInput {
   chatId: string;
   /** What the panel already shows, so the model updates rather than restarts. */
   previous: { now: MeetingNow | null; topics: MeetingTopic[]; actions: MeetingAction[] };
   newLines: { clock: string; speaker: string; text: string }[];
+  /** The lines before `newLines`, already in the notes: context so an owner or commitment is read in the whole conversation. */
+  earlierLines: { clock: string; speaker: string; text: string }[];
   /** The meeting has ended: also return `summary`. */
   final: boolean;
   elapsedMs: number;
@@ -224,8 +234,11 @@ interface Runtime {
   researching: Promise<void> | undefined;
   /** Serialises analysis and write-ups. */
   chain: Promise<void>;
-  /** Serialises transcription alone, so a slow analysis pass never holds clips back. */
-  txChain: Promise<void>;
+  /**
+   * Serialises transcription alone, so a slow analysis pass never holds clips back.
+   * One queue per channel: a slow or rate-limited clip on one must not hold the other behind it.
+   */
+  txChain: Record<'mic' | 'system', Promise<void>>;
 }
 
 /** Consecutive segments from one voice read as one line. */
@@ -282,6 +295,44 @@ export function isMicEcho(systemText: string, micTexts: string[]): boolean {
 
 /** The model complaining about its input instead of writing notes. */
 const META_TEXT = /\bno (new )?transcript\b|nothing (new )?to (process|summari[sz]e)/i;
+
+/** A topic that starts sooner than this after the one before it is a fragment of it. */
+const MIN_TOPIC_MS = 3 * 60_000;
+
+/**
+ * What Whisper emits for silence and noise: bracketed sound tags, bare
+ * punctuation, and its stock sign-offs. None of it is something anyone said.
+ */
+const TRANSCRIPT_NOISE =
+  /^(?:[[(][^\])]*[\])]|[\s.,!?…-]*|(?:you|thank you|thanks|thanks for watching|bye|okay|oh)[\s.!]*)$/i;
+
+const normText = (x: string): string => x.toLowerCase().replace(/\s+/g, ' ').trim();
+
+/**
+ * Folds each unfixed topic that begins within MIN_TOPIC_MS of the unfixed one
+ * before it into that one: its title and points become points there, so nothing
+ * said is lost, but one subject is no longer listed as a run of one-minute lines.
+ * Tom's fixed topics are never merged into or out of.
+ */
+function consolidateTopics(topics: MeetingTopic[]): void {
+  topics.sort((a, b) => a.at - b.at);
+  for (let i = 1; i < topics.length; ) {
+    const prev = topics[i - 1]!;
+    const t = topics[i]!;
+    if (prev.fixed || t.fixed || t.at - prev.at >= MIN_TOPIC_MS) {
+      i++;
+      continue;
+    }
+    const seen = new Set(prev.points.map(normText));
+    for (const point of [t.title, ...t.points]) {
+      if (seen.has(normText(point))) continue;
+      seen.add(normText(point));
+      prev.points.push(point);
+    }
+    prev.decided = prev.decided || t.decided;
+    topics.splice(i, 1);
+  }
+}
 
 export class MeetingError extends Error {
   override readonly name = 'MeetingError';
@@ -344,7 +395,7 @@ export class MeetingManager {
       lastResearchAt: 0,
       researching: undefined,
       chain: Promise.resolve(),
-      txChain: Promise.resolve(),
+      txChain: { mic: Promise.resolve(), system: Promise.resolve() },
     };
     this.runtimes.set(chatId, rt);
     this.armTimer(chatId, rt);
@@ -398,7 +449,7 @@ export class MeetingManager {
     rt.state.endedAt = t;
     this.disarmTimer(rt);
     this.commit(chatId, rt);
-    await rt.txChain;
+    await Promise.all([rt.txChain.mic, rt.txChain.system]);
     await this.enqueue(rt, async () => {
       await this.analyse(chatId, rt, true);
       await this.writeUp(chatId, rt);
@@ -414,7 +465,7 @@ export class MeetingManager {
         `chat ${chatId}'s meeting is ${rt.state.status}: end it before deleting`,
       );
     }
-    await rt.txChain;
+    await Promise.all([rt.txChain.mic, rt.txChain.system]);
     await rt.chain;
     this.runtimes.delete(chatId);
     rmSync(this.file(chatId), { force: true });
@@ -483,15 +534,17 @@ export class MeetingManager {
     source: 'mic' | 'system',
     wav: Buffer,
     speakerName?: string,
+    device?: string,
   ): Promise<void> {
     const rt = this.load(chatId);
     if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
+    if (device !== undefined) rt.state.listeningOn = device;
     // A surface flushes its last clip before sending End; later audio is a bug.
     if (rt.state.status === 'ended') {
       throw new MeetingError(`chat ${chatId}'s meeting has ended`);
     }
     const at = meetingElapsedMs(rt.state, this.now());
-    const next = rt.txChain.then(async () => {
+    const next = rt.txChain[source].then(async () => {
       const speaker = source === 'mic' ? 'you' : 'them';
       const printed = !!this.deps.transcribeVoices && !!this.deps.hasVoiceprint?.();
       let pieces: { text: string; voice?: number }[];
@@ -518,7 +571,7 @@ export class MeetingManager {
           .filter((l) => l.speaker === 'you' && Math.abs(at - l.at) <= ECHO_WINDOW_MS)
           .map((l) => l.text);
       for (const { text, voice } of pieces) {
-        if (text === '') continue;
+        if (text === '' || TRANSCRIPT_NOISE.test(text)) continue;
         // Voice 0 is the owner's print; any other voice is someone else, even on the mic.
         const lineSpeaker =
           printed && voice !== undefined ? (voice === 0 ? 'you' : 'them') : speaker;
@@ -566,7 +619,7 @@ export class MeetingManager {
       rt.state.error = null;
       this.commit(chatId, rt);
     });
-    rt.txChain = next.catch(() => undefined);
+    rt.txChain[source] = next.catch(() => undefined);
     return next;
   }
 
@@ -819,6 +872,7 @@ export class MeetingManager {
     if (action.kind !== 'other') throw new MeetingError(`action ${actionId} has no owner to set`);
     if (action.owner === owner) return;
     action.owner = owner;
+    delete action.absent;
     this.commit(chatId, rt);
   }
 
@@ -836,6 +890,7 @@ export class MeetingManager {
     action.kind = to.kind;
     if (to.owner !== undefined) action.owner = to.owner;
     else delete action.owner;
+    delete action.absent;
     this.commit(chatId, rt);
   }
 
@@ -1035,14 +1090,20 @@ export class MeetingManager {
     try {
       await this.correctLines(chatId, rt);
       const newLines = rt.state.transcript.slice(rt.analysedUpTo, upTo);
+      const earlierLines = rt.state.transcript.slice(
+        Math.max(0, rt.analysedUpTo - EARLIER_CONTEXT_LINES),
+        rt.analysedUpTo,
+      );
+      const toInput = (l: (typeof newLines)[number]) => ({
+        clock: formatMeetingClock(l.at),
+        speaker: meetingSpeakerLabel(l, rt.state.voices),
+        text: l.text,
+      });
       const raw = await this.deps.analyse({
         chatId,
         previous: { now: rt.state.now, topics: rt.state.topics, actions: rt.state.actions },
-        newLines: newLines.map((l) => ({
-          clock: formatMeetingClock(l.at),
-          speaker: meetingSpeakerLabel(l, rt.state.voices),
-          text: l.text,
-        })),
+        newLines: newLines.map(toInput),
+        earlierLines: earlierLines.map(toInput),
         final,
         elapsedMs: meetingElapsedMs(rt.state, this.now()),
         myNotes: rt.state.myNotes ?? '',
@@ -1093,7 +1154,7 @@ export class MeetingManager {
       }
     }
     // Points read oldest first however the model or an edit left them.
-    s.topics.sort((x, y) => x.at - y.at);
+    consolidateTopics(s.topics);
     for (const v of a.voices ?? []) {
       const name = v.name.trim();
       if (name === '' || s.voices?.[String(v.voice)] !== undefined) continue;
@@ -1101,12 +1162,30 @@ export class MeetingManager {
       s.voices = { ...s.voices, [String(v.voice)]: name };
     }
     const norm = (x: string): string => x.toLowerCase().replace(/\s+/g, ' ').trim();
+    const present = new Set(
+      [
+        ...s.transcript.map((l) => meetingSpeakerLabel(l, s.voices)),
+        ...Object.values(s.voices ?? {}),
+      ].map(norm),
+    );
     for (const act of a.actions) {
       if (s.actions.some((x) => norm(x.title) === norm(act.title))) continue;
+      if (s.actions.filter((x) => x.status === 'pending').length >= MAX_PENDING_ACTIONS) break;
+      // The model's owner is only a claim: Tom's own name means the action is Tom's,
+      // and a name nobody spoke under means someone who was not in the meeting.
+      const owner = act.owner?.trim();
+      const toTom = act.kind === 'other' && owner !== undefined && TOM_NAMES.has(norm(owner));
+      const kind = toTom ? 'mine' : act.kind;
+      const absent =
+        kind === 'other' &&
+        owner !== undefined &&
+        norm(owner) !== norm(MEETING_OWNER_EVERYONE) &&
+        !present.has(norm(owner));
       s.actions.push({
         id: this.newId(),
-        kind: act.kind,
-        ...(act.owner !== undefined ? { owner: act.owner } : {}),
+        kind,
+        ...(kind === 'other' && owner !== undefined ? { owner } : {}),
+        ...(absent ? { absent: true } : {}),
         title: act.title,
         why: act.why,
         at: act.atSeconds !== undefined ? act.atSeconds * 1000 : meetingElapsedMs(s, this.now()),
@@ -1198,7 +1277,7 @@ export class MeetingManager {
       lastResearchAt: 0,
       researching: undefined,
       chain: Promise.resolve(),
-      txChain: Promise.resolve(),
+      txChain: { mic: Promise.resolve(), system: Promise.resolve() },
     };
     this.runtimes.set(chatId, rt);
     // A host restart finds the meeting `live` with no audio coming: park it as

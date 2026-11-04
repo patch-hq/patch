@@ -6,7 +6,7 @@ const HARNESS = '/app/dev-harness.html';
 
 test('sort switch is visible above the chats and persists', async ({ page }) => {
   await page.goto(HARNESS);
-  await expect(page.getByTestId('sidebar-chat-sort-last-action')).toHaveAttribute(
+  await expect(page.getByTestId('sidebar-chat-sort-recent')).toHaveAttribute(
     'aria-checked',
     'true',
   );

@@ -315,6 +315,16 @@ describe('composerDraftStore', () => {
       expect(useComposerDraftStore.getState().get('c1')).toBe('');
     });
 
+    it('a clear arriving while focused applies at once when nothing typed here is unconfirmed', () => {
+      const s = useComposerDraftStore.getState();
+      s.applyDraftUpdated('c1', 'synced text', 1000);
+      s.setFocused('c1', true);
+      s.applyDraftCleared('c1', Date.now() + 10_000);
+      expect(useComposerDraftStore.getState().get('c1')).toBe('');
+      expect(useComposerDraftStore.getState().remoteClears['c1']).toBe(1);
+      expect(useComposerDraftStore.getState().pendingRemote['c1']).toBeUndefined();
+    });
+
     it('applyDraftList also defers to focus, holding the snapshot rather than applying it', () => {
       const s = useComposerDraftStore.getState();
       s.setDraft('c1', 'my edit');

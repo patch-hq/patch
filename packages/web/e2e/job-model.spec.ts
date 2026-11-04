@@ -81,6 +81,7 @@ test.describe('job editor — model picker', () => {
     // chosen host's catalogue, not just that one exists.
     await expect(model.locator('option[value=""]')).toHaveText('Job default (Opus 5)');
 
+    await page.getByTestId('job-spawn-host-select').selectOption('d1');
     await page
       .getByTestId('job-spawn-folder')
       .selectOption(JSON.stringify(['d1', '/home/tom/alpha']));
@@ -96,11 +97,14 @@ test.describe('job editor — model picker', () => {
     const folder = page.getByTestId('job-spawn-folder');
     const model = page.getByTestId('job-spawn-model');
 
+    const host = page.getByTestId('job-spawn-host-select');
+    await host.selectOption('d1');
     await folder.selectOption(JSON.stringify(['d1', '/home/tom/alpha']));
     await expect(model.locator('option[value="claude-opus-5"]')).toHaveCount(1);
 
     // d2 serves a different catalogue. Leaving d1's models on screen is how an
     // id the target machine cannot run gets stored.
+    await host.selectOption('d2');
     await folder.selectOption(JSON.stringify(['d2', '/home/tom/beta']));
     await expect(model.locator('option[value="claude-sonnet-4-6"]')).toHaveCount(1);
     await expect(model.locator('option[value="claude-opus-5"]')).toHaveCount(0);

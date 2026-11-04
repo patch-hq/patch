@@ -83,6 +83,70 @@ function chatLinkPath(href: string | undefined): string | null {
 // Root-relative paths that are real routes of the SPA.
 const APP_ROUTE = /^\/(?:chats|pads|jobs|settings|lifecycle)(?:[/?#]|$)/;
 
+// Any link that points at the app itself, in the forms an agent writes them:
+// `patch://<route>` (the scheme the mobile app also opens) or an absolute URL
+// on this app's own origin. Normalised to the in-app path; null for anything
+// that is not a real route of the SPA.
+function appLinkPath(href: string | undefined): string | null {
+  if (!href) return null;
+  if (href.startsWith('patch://')) {
+    const path = `/${href.slice('patch://'.length)}`;
+    return APP_ROUTE.test(path) ? path : null;
+  }
+  if (/^https?:\/\//i.test(href)) {
+    let url: URL;
+    try {
+      url = new URL(href);
+    } catch {
+      return null;
+    }
+    if (url.origin !== window.location.origin) return null;
+    const path = `${url.pathname}${url.search}${url.hash}`;
+    return APP_ROUTE.test(path) ? path : null;
+  }
+  return null;
+}
+
+const BARE_PATCH_LINK = /patch:\/\/[^\s<>()[\]]+/g;
+const TRAILING_PUNCT = /[.,;:!?'"]+$/;
+
+interface MdNode {
+  type: string;
+  value?: string;
+  url?: string;
+  children?: MdNode[];
+}
+
+// remark plugin: bare `patch://...` text is not a GFM autolink, so turn each
+// one that names a real app route into a link node. Text inside links and code
+// is untouched (code is not a text node; links are skipped).
+function remarkPatchLinks() {
+  const visit = (node: MdNode): void => {
+    if (!node.children || node.type === 'link' || node.type === 'linkReference') return;
+    const out: MdNode[] = [];
+    for (const child of node.children) {
+      if (child.type !== 'text' || !child.value?.includes('patch://')) {
+        visit(child);
+        out.push(child);
+        continue;
+      }
+      const text = child.value;
+      let last = 0;
+      for (const m of text.matchAll(BARE_PATCH_LINK)) {
+        const raw = m[0].replace(TRAILING_PUNCT, '');
+        if (!appLinkPath(raw)) continue;
+        const at = m.index ?? 0;
+        if (at > last) out.push({ type: 'text', value: text.slice(last, at) });
+        out.push({ type: 'link', url: raw, children: [{ type: 'text', value: raw }] });
+        last = at + raw.length;
+      }
+      if (last < text.length) out.push({ type: 'text', value: text.slice(last) });
+    }
+    node.children = out;
+  };
+  return (tree: MdNode) => visit(tree);
+}
+
 // A plain click moves to the chat inside the SPA (no reload); a modified
 // click or middle click keeps the browser's own new-tab meaning.
 function ChatLink({ path, children }: { path: string; children: unknown }): JSX.Element {
@@ -155,6 +219,8 @@ const components = {
       return <SkillRef name={href.slice(SKILL_HREF_PREFIX.length)} />;
     const chatPath = chatLinkPath(href);
     if (chatPath) return <ChatLink path={chatPath}>{children}</ChatLink>;
+    const appPath = appLinkPath(href);
+    if (appPath) return <ChatLink path={appPath}>{children}</ChatLink>;
     // Any other root-relative href is either an app route or a local file path
     // an agent wrote as a link. Patch cannot open the latter (the app origin has
     // no such page and the route table answers 404), so show it as plain text
@@ -258,10 +324,12 @@ export function Markdown({
   // agent's pipe-tables render as raw `| col | col |` text.
   const started = performance.now();
   const element = ReactMarkdown({
-    remarkPlugins: [remarkGfm],
+    remarkPlugins: [remarkGfm, remarkPatchLinks],
     components,
     urlTransform: (url) =>
-      chatLinkPath(url) || url.startsWith(SKILL_HREF_PREFIX) ? url : defaultUrlTransform(url),
+      chatLinkPath(url) || appLinkPath(url) || url.startsWith(SKILL_HREF_PREFIX)
+        ? url
+        : defaultUrlTransform(url),
     children: content,
   }) as JSX.Element;
   lastParseMs = performance.now() - started;

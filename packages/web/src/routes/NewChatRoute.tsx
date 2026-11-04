@@ -56,6 +56,7 @@ import { NavHistoryControls } from '../components/NavHistoryControls.js';
 import { UsageCrumb } from '../components/UsageCrumb.js';
 import { Edit3 } from 'lucide-react';
 import { loadModels, useModelCatalog } from '../lib/models.js';
+import { creditDefaultAccountId, modelSpent, useCredit } from '../lib/credit.js';
 import { humaniseError } from '../lib/errorCopy.js';
 import { HostPicker } from '../components/HostPicker.js';
 import { ModelPicker } from '../components/ModelPicker.js';
@@ -366,7 +367,15 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
       mruPair?.hostId ??
       null,
   );
-  const pickerHostId = chosenHostId ?? accountDefaultHostId;
+  // An offline machine is never the selected one, whatever a draft or the last
+  // chat remembered: it reads as unavailable, so the choice falls to the live
+  // default, or to nothing at all and the user picks (spawn then asks).
+  const chosenHostOffline = chosenHostId !== null && presenceHosts[chosenHostId]?.online === false;
+  const candidateHostId = (chosenHostOffline ? null : chosenHostId) ?? accountDefaultHostId;
+  const pickerHostId =
+    candidateHostId !== null && presenceHosts[candidateHostId]?.online === false
+      ? null
+      : candidateHostId;
   useEffect(() => {
     updateDraft(draftId, { hostId: pickerHostId ?? undefined });
   }, [pickerHostId, draftId, updateDraft]);
@@ -530,6 +539,23 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
       ).filter((a) => a.connected),
     [sharedSecrets, effectiveModel],
   );
+  // Default to an account that is in credit: when one of the model's accounts
+  // is spent and another is not, the chat is pinned to the one that is not
+  // until the user chooses, so it never starts on a spent one. Auto stays one click
+  // away, and a choice the user made is never overridden.
+  const credit = useCredit();
+  const accountTouched = useRef(false);
+  const effectiveProvider = providerForModel(effectiveModel);
+  const defaultAccountId = creditDefaultAccountId(credit.rows, effectiveProvider);
+  useEffect(() => {
+    if (accountTouched.current) return;
+    if (!preferableAccounts.some((a) => a.id === defaultAccountId)) return;
+    setPreferredAccountId(defaultAccountId);
+  }, [defaultAccountId, preferableAccounts]);
+  function chooseAccount(id: string | null): void {
+    accountTouched.current = true;
+    setPreferredAccountId(id);
+  }
   // A preference for the other backend's account means nothing; drop it.
   useEffect(() => {
     if (
@@ -567,6 +593,15 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     }
     return out;
   }, [catalogModels, hostModel]);
+  // The account default's provider may be spent while another still has
+  // credit. Until the user picks a model, start on the first catalogue model
+  // whose provider has usage left rather than on one that cannot run.
+  useEffect(() => {
+    if (model !== null || hostModel === null || catalogModels.length === 0) return;
+    if (!modelSpent(hostModel, credit.rows, credit.apiKeyProviders)) return;
+    const next = catalogModels.find((m) => !modelSpent(m.id, credit.rows, credit.apiKeyProviders));
+    if (next) setModel(next.id);
+  }, [model, hostModel, catalogModels, credit]);
   const {
     data: browse,
     isLoading: browseLoading,
@@ -1267,26 +1302,30 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
               data-testid="new-chat-quick-models"
               onKeyDown={handleQuickModelKeyDown}
             >
-              {quickModels.map((id) => (
-                <button
-                  key={id}
-                  ref={(el) => {
-                    if (el) quickModelRefs.current.set(id, el);
-                    else quickModelRefs.current.delete(id);
-                  }}
-                  type="button"
-                  className={`model-quick ${id === effectiveModel ? 'selected' : ''}`}
-                  data-testid={`model-quick-${id}`}
-                  aria-pressed={id === effectiveModel}
-                  disabled={signedOut && !hostHasCreditSource}
-                  onClick={() => chooseModel(id)}
-                >
-                  <span className="quick-label">
-                    {catalogModels.find((m) => m.id === id)?.label ?? id}
-                  </span>
-                  {id === hostModel ? <span className="quick-sub">default</span> : null}
-                </button>
-              ))}
+              {quickModels.map((id) => {
+                const spent = modelSpent(id, credit.rows, credit.apiKeyProviders);
+                return (
+                  <button
+                    key={id}
+                    ref={(el) => {
+                      if (el) quickModelRefs.current.set(id, el);
+                      else quickModelRefs.current.delete(id);
+                    }}
+                    type="button"
+                    className={`model-quick ${id === effectiveModel ? 'selected' : ''} ${spent ? 'is-spent' : ''}`}
+                    data-testid={`model-quick-${id}`}
+                    aria-pressed={id === effectiveModel}
+                    title={spent ? 'No usage remaining on any account' : undefined}
+                    disabled={spent || (signedOut && !hostHasCreditSource)}
+                    onClick={() => chooseModel(id)}
+                  >
+                    <span className="quick-label">
+                      {catalogModels.find((m) => m.id === id)?.label ?? id}
+                    </span>
+                    {id === hostModel ? <span className="quick-sub">default</span> : null}
+                  </button>
+                );
+              })}
             </div>
           ) : null}
           <ModelPicker
@@ -1321,7 +1360,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                 className={`folder-quick ${preferredAccountId === null ? 'selected' : ''}`}
                 data-testid="new-chat-account-auto"
                 aria-checked={preferredAccountId === null}
-                onClick={() => setPreferredAccountId(null)}
+                onClick={() => chooseAccount(null)}
               >
                 Auto
               </button>
@@ -1333,7 +1372,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                   className={`folder-quick ${preferredAccountId === a.id ? 'selected' : ''}`}
                   data-testid={`new-chat-account-${a.id}`}
                   aria-checked={preferredAccountId === a.id}
-                  onClick={() => setPreferredAccountId(a.id)}
+                  onClick={() => chooseAccount(a.id)}
                 >
                   {a.label}
                 </button>
@@ -1349,7 +1388,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
       <AccountUsageStrip
         providerId={providerForModel(effectiveModel)}
         usedAccountId={preferredAccountId ?? chosenAccount?.activeAccountId ?? null}
-        onSelect={setPreferredAccountId}
+        onSelect={chooseAccount}
       />
     </div>
   );

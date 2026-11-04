@@ -24,7 +24,7 @@ import type { Logger } from 'pino';
 import type { AudioEvent, AudioSessionMode } from '@patch/wire/audio';
 import { DEEPGRAM_MODEL } from './hosted-stt.js';
 import { readKey, type KeySource } from './keySource.js';
-import { isStockHallucination } from './partial-filter.js';
+import { PhraseLedger } from './phrase-ledger.js';
 import type { SessionState } from './session.js';
 import type { VoiceSessionLike } from './voice-session-like.js';
 import type { EngineCosting } from './voiceCost.js';
@@ -36,12 +36,6 @@ const DEEPGRAM_LISTEN_WSS = 'wss://api.deepgram.com/v1/listen';
 const ENDPOINTING_MS = 300;
 /** How long a finish waits for Deepgram to flush its last words. */
 export const FINALIZE_TIMEOUT_MS = 3000;
-/** How long a finish waits for the tidy-up of the phrases still in flight. */
-export const TIDY_WAIT_MS = 6000;
-/** Audio kept either side of a phrase's own timestamps, so Whisper hears its edges. */
-const TIDY_PAD_S = 0.25;
-/** Audio held for tidy-up. Past this the oldest goes, and so does its tidy-up. */
-const MAX_KEPT_SECONDS = 30 * 60;
 
 interface DeepgramResult {
   type: 'Results';
@@ -51,18 +45,6 @@ interface DeepgramResult {
   speech_final?: boolean;
   from_finalize?: boolean;
   channel?: { alternatives?: Array<{ transcript?: string }> };
-}
-
-interface Phrase {
-  /** Seconds from the start of the stream. */
-  start: number;
-  end: number;
-  /** Deepgram's finished pieces of it. */
-  pieces: string[];
-  /** Whisper's version, once it has answered. */
-  tidied?: string;
-  /** Deepgram has called the utterance over. */
-  closed: boolean;
 }
 
 export interface DeepgramDictationDeps {
@@ -85,16 +67,9 @@ export class DeepgramDictationSession implements VoiceSessionLike {
   private closed = false;
   private failed = false;
   private readonly pending: Buffer[] = [];
-  private readonly phrases: Phrase[] = [];
+  private readonly ledger: PhraseLedger;
   private interim = '';
   private lastSent = '';
-  /** Every PCM chunk this session received, for cutting phrases out. */
-  private readonly kept: Int16Array[] = [];
-  /** Samples dropped off the front of `kept` once it outgrew its cap. */
-  private droppedSamples = 0;
-  private keptSamples = 0;
-  private readonly tidying = new Set<Promise<void>>();
-  private tidyReported = false;
   private finalizeWaiter: (() => void) | null = null;
   private openWaiter: (() => void) | null = null;
   private micFrames = 0;
@@ -105,6 +80,15 @@ export class DeepgramDictationSession implements VoiceSessionLike {
     this.sessionId = init.sessionId;
     this.chatId = init.chatId;
     this.deps = deps;
+    this.ledger = new PhraseLedger({
+      logger: deps.logger,
+      sessionId: init.sessionId,
+      sendAudio: deps.sendAudio,
+      tidyWith: deps.tidyWith,
+      label: 'deepgram-dictation',
+      isDead: () => this.closed || this.failed,
+      onChange: () => this.emit(),
+    });
   }
 
   onSessionStart(): void {
@@ -177,7 +161,7 @@ export class DeepgramDictationSession implements VoiceSessionLike {
     }
     // COPY: the caller's buffer is reused.
     const copy = pcm.slice();
-    if (this.deps.tidyWith) this.keep(copy);
+    this.ledger.keep(copy);
     const bytes = Buffer.from(copy.buffer, copy.byteOffset, copy.byteLength);
     if (this.open) this.ws!.send(bytes);
     else this.pending.push(bytes);
@@ -212,22 +196,27 @@ export class DeepgramDictationSession implements VoiceSessionLike {
     if (this.failed) return;
     // Anything Deepgram had not finalised by now is still what was heard.
     if (this.interim) {
-      this.currentPhrase(this.phraseEnd()).pieces.push(this.interim);
+      // The words run to the end of the audio. The phrase's stretch has to
+      // cover them, or Whisper reads a cut that stops short of them and its
+      // version of the phrase loses them.
+      const end = this.ledger.streamEnd();
+      const prev = this.ledger.last();
+      const phrase = this.ledger.currentPhrase(prev ? prev.end : 0);
+      phrase.pieces.push(this.interim);
+      phrase.end = end;
       this.interim = '';
     }
-    const last = this.phrases[this.phrases.length - 1];
-    if (last && !last.closed) this.closePhrase(last);
-    if (this.tidying.size > 0) {
-      await Promise.race([
-        Promise.allSettled([...this.tidying]),
-        new Promise((r) => setTimeout(r, TIDY_WAIT_MS)),
-      ]);
-    }
+    const last = this.ledger.last();
+    if (last && !last.closed) this.ledger.closePhrase(last);
+    // Stopping must never make the text worse than the tidied preview: wait
+    // for every tidy-up still in flight. Each is bounded by Whisper's own
+    // request timeout, and a failed one is reported (never a silent raw swap).
+    await this.ledger.settled();
     if (this.failed) return;
     this.deps.sendAudio({
       type: 'audio.transcript_final',
       sessionId: this.sessionId,
-      text: this.text(),
+      text: this.ledger.text(this.interim),
     });
   }
 
@@ -248,13 +237,13 @@ export class DeepgramDictationSession implements VoiceSessionLike {
     const transcript = (r.channel?.alternatives?.[0]?.transcript ?? '').trim();
     if (r.is_final) {
       if (transcript) {
-        const phrase = this.currentPhrase(r.start);
+        const phrase = this.ledger.currentPhrase(r.start);
         phrase.pieces.push(transcript);
         phrase.end = r.start + r.duration;
       }
       this.interim = '';
-      const phrase = this.phrases[this.phrases.length - 1];
-      if (r.speech_final && phrase && !phrase.closed) this.closePhrase(phrase);
+      const phrase = this.ledger.last();
+      if (r.speech_final && phrase && !phrase.closed) this.ledger.closePhrase(phrase);
     } else {
       this.interim = transcript;
     }
@@ -262,92 +251,9 @@ export class DeepgramDictationSession implements VoiceSessionLike {
     if (r.from_finalize) this.finalizeWaiter?.();
   }
 
-  private currentPhrase(start: number): Phrase {
-    const last = this.phrases[this.phrases.length - 1];
-    if (last && !last.closed) return last;
-    const phrase: Phrase = { start, end: start, pieces: [], closed: false };
-    this.phrases.push(phrase);
-    return phrase;
-  }
-
-  private phraseEnd(): number {
-    return (this.droppedSamples + this.keptSamples) / SAMPLE_RATE;
-  }
-
-  private closePhrase(phrase: Phrase): void {
-    phrase.closed = true;
-    const tidy = this.deps.tidyWith;
-    if (!tidy || phrase.pieces.length === 0) return;
-    const pcm = this.cut(phrase.start - TIDY_PAD_S, phrase.end + TIDY_PAD_S);
-    if (pcm === null) return;
-    const job = tidy
-      .transcribe(pcm, { priority: 'final' })
-      .then((text) => {
-        const t = text.trim();
-        if (this.closed || t.length === 0 || isStockHallucination(t)) return;
-        phrase.tidied = t;
-        this.emit();
-      })
-      .catch((err: Error) => {
-        this.deps.logger.error(
-          { sessionId: this.sessionId, err: err.message },
-          'deepgram-dictation: tidy-up failed; the phrase keeps the live words',
-        );
-        if (this.tidyReported || this.closed) return;
-        this.tidyReported = true;
-        this.deps.sendAudio({
-          type: 'audio.error',
-          code: 'whisper_unavailable',
-          message: `Tidying up with Whisper failed (${err.message}); the live words stand.`,
-          sessionId: this.sessionId,
-        });
-      });
-    const tracked: Promise<void> = job.finally(() => this.tidying.delete(tracked));
-    this.tidying.add(tracked);
-  }
-
-  private keep(pcm: Int16Array): void {
-    this.kept.push(pcm);
-    this.keptSamples += pcm.length;
-    while (this.keptSamples > MAX_KEPT_SECONDS * SAMPLE_RATE && this.kept.length > 1) {
-      const gone = this.kept.shift()!;
-      this.keptSamples -= gone.length;
-      this.droppedSamples += gone.length;
-    }
-  }
-
-  /** The kept PCM between two stream times, or null when it has been dropped. */
-  private cut(fromS: number, toS: number): Int16Array | null {
-    const from = Math.max(0, Math.floor(fromS * SAMPLE_RATE)) - this.droppedSamples;
-    const to = Math.min(this.droppedSamples + this.keptSamples, Math.ceil(toS * SAMPLE_RATE));
-    const end = to - this.droppedSamples;
-    if (from < 0 || end <= from) return null;
-    const out = new Int16Array(end - from);
-    let pos = 0;
-    let written = 0;
-    for (const chunk of this.kept) {
-      const cStart = pos;
-      const cEnd = pos + chunk.length;
-      pos = cEnd;
-      if (cEnd <= from) continue;
-      if (cStart >= end) break;
-      const a = Math.max(from, cStart) - cStart;
-      const b = Math.min(end, cEnd) - cStart;
-      out.set(chunk.subarray(a, b), written);
-      written += b - a;
-    }
-    return out;
-  }
-
-  private text(): string {
-    const parts = this.phrases.map((p) => p.tidied ?? p.pieces.join(' '));
-    if (this.interim) parts.push(this.interim);
-    return parts.filter((p) => p.length > 0).join(' ');
-  }
-
   private emit(): void {
     if (this.closed || this.failed) return;
-    const text = this.text();
+    const text = this.ledger.text(this.interim);
     if (text === this.lastSent) return;
     this.lastSent = text;
     this.deps.sendAudio({ type: 'audio.transcript_partial', sessionId: this.sessionId, text });

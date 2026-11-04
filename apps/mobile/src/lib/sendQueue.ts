@@ -167,22 +167,53 @@ export function retryTurn(chatId: string, entry: { role?: string; seq: number })
     useUiStore.getState().pushError('nothing to retry: no earlier text-only message');
     return;
   }
+  forkAt(chatId, src.seq, src.content, 'retry');
+}
+
+/**
+ * The user message Edit changes for `entry`: the row itself, only when it is a
+ * settled text-only user message (attachments would be dropped by the fork).
+ */
+export function editSource(
+  chatId: string,
+  entry: { role?: string; seq: number },
+): { content: string; seq: number } | null {
+  if (entry.role !== 'user') return null;
+  const tl = useChatStore.getState().timelines[chatId] ?? [];
+  const hit = tl.find((e) => e.seq === entry.seq && e.kind === 'message' && e.role === 'user');
+  if (!hit || (hit.content ?? '').length === 0 || (hit.attachments ?? []).length > 0) return null;
+  return { content: hit.content ?? '', seq: hit.seq };
+}
+
+/**
+ * Edit a sent user message: fork the conversation at it with the new text, so
+ * the edit runs on a new track off the turn before it (spec/04 § Branching).
+ */
+export function editTurn(chatId: string, seq: number, message: string): void {
+  if (message.trim().length === 0) {
+    useUiStore.getState().pushError('edit failed: a message cannot be empty');
+    return;
+  }
+  forkAt(chatId, seq, message, 'edit');
+}
+
+function forkAt(chatId: string, seq: number, message: string, verb: 'retry' | 'edit'): void {
   try {
     getWs().send({
       type: 'chat.fork_request',
       chatId,
-      seq: src.seq,
-      message: src.content,
+      seq,
+      message,
       localId: `fork-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     });
   } catch (err) {
-    useUiStore.getState().pushError(`retry failed: ${(err as Error).message}`);
+    useUiStore.getState().pushError(`${verb} failed: ${(err as Error).message}`);
     return;
   }
   useChatStore.setState((s) => ({
     timelines: {
       ...s.timelines,
-      [chatId]: (s.timelines[chatId] ?? []).filter((e) => e.seq < src.seq),
+      [chatId]: (s.timelines[chatId] ?? []).filter((e) => e.seq < seq),
     },
   }));
 }

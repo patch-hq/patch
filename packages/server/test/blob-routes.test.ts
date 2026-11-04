@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import sharp from 'sharp';
 import { generateUserKeypair } from '@patch/auth';
 import type { WireEvent } from '@patch/wire';
 import { buildAll } from '../src/app.js';
@@ -97,6 +98,68 @@ describe('blob routes', () => {
     const built = await boot(link);
     const res = await built.app.inject({ method: 'GET', url: `/api/chats/c1/blob/${SHA}` });
     expect(res.statusCode).toBe(200);
+  });
+
+  it('?w= serves a smaller copy of a still image; without it the original comes back untouched', async () => {
+    const big = await sharp({
+      create: { width: 2000, height: 1000, channels: 3, background: '#c33' },
+    })
+      .png()
+      .toBuffer();
+    const link = new FakeBlobHost(() => ({
+      ok: true,
+      mime: 'image/png',
+      data: big.toString('base64'),
+    }));
+    const built = await boot(link);
+
+    const thumb = await built.app.inject({ method: 'GET', url: `/api/chats/c1/blob/${SHA}?w=480` });
+    expect(thumb.statusCode).toBe(200);
+    expect(thumb.headers['content-type']).toBe('image/png');
+    expect(thumb.headers['content-length']).toBe(String(thumb.rawPayload.byteLength));
+    const meta = await sharp(thumb.rawPayload).metadata();
+    expect(meta.width).toBe(480);
+    expect(meta.height).toBe(240);
+
+    const full = await built.app.inject({ method: 'GET', url: `/api/chats/c1/blob/${SHA}` });
+    expect(full.rawPayload.equals(big)).toBe(true);
+  });
+
+  it('?w= never enlarges, leaves non-images alone, and rejects a bad width', async () => {
+    const small = await sharp({
+      create: { width: 100, height: 50, channels: 3, background: '#3c3' },
+    })
+      .jpeg()
+      .toBuffer();
+    const smallBuilt = await boot(
+      new FakeBlobHost(() => ({ ok: true, mime: 'image/jpeg', data: small.toString('base64') })),
+    );
+    const up = await smallBuilt.app.inject({
+      method: 'GET',
+      url: `/api/chats/c1/blob/${SHA}?w=960`,
+    });
+    expect((await sharp(up.rawPayload).metadata()).width).toBe(100);
+
+    const textBuilt = await boot(
+      new FakeBlobHost(() => ({
+        ok: true,
+        mime: 'text/plain',
+        data: PAYLOAD.toString('base64'),
+      })),
+    );
+    const text = await textBuilt.app.inject({
+      method: 'GET',
+      url: `/api/chats/c1/blob/${SHA}?w=480`,
+    });
+    expect(text.rawPayload.equals(PAYLOAD)).toBe(true);
+
+    for (const w of ['abc', '0', '5', '99999', '-1']) {
+      const bad = await textBuilt.app.inject({
+        method: 'GET',
+        url: `/api/chats/c1/blob/${SHA}?w=${w}`,
+      });
+      expect(bad.statusCode, `w=${w}`).toBe(400);
+    }
   });
 
   it('rejects a sha that is not a content hash before touching anything', async () => {

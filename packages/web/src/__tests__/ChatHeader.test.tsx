@@ -11,6 +11,7 @@ import {
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { ChatHeader } from '../components/ChatHeader.js';
 import { ConfirmModal } from '../components/ConfirmModal.js';
+import { PromptModal } from '../components/PromptModal.js';
 import type { ChatRow } from '../stores/types.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -26,6 +27,7 @@ vi.mock('../api/rest.js', () => ({
     renameChat: vi.fn(),
     archiveChat: vi.fn(),
     rotateChat: vi.fn(),
+    setGoal: vi.fn(),
   },
 }));
 
@@ -106,6 +108,9 @@ describe('ChatHeader', () => {
       .mockReset()
       .mockResolvedValue(undefined as never);
     vi.mocked(api.rotateChat).mockReset().mockResolvedValue({ ok: true });
+    vi.mocked(api.setGoal)
+      .mockReset()
+      .mockResolvedValue(undefined as never);
   });
   afterEach(() => {
     cleanup();
@@ -926,6 +931,39 @@ describe('ChatHeader', () => {
       const trigger = within(screen.getByTestId('menu-snooze-row')).getByTestId('action-snooze');
       expect(trigger).toHaveClass('head-menu-item');
       expect(trigger).not.toHaveClass('head-action');
+    });
+  });
+
+  describe('Set goal (⋯ menu)', () => {
+    it('prompts for a goal and sets it on the chat', async () => {
+      render(
+        <>
+          <ChatHeader row={row()} />
+          <PromptModal />
+        </>,
+      );
+      openMore();
+      fireEvent.click(screen.getByTestId('action-set-goal'));
+      const input = await screen.findByRole('textbox');
+      fireEvent.change(input, { target: { value: 'ship it' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Set goal' }));
+      await act(async () => {});
+      expect(api.setGoal).toHaveBeenCalledWith('c1', 'ship it');
+    });
+
+    it('cancelling the prompt sets nothing', async () => {
+      render(
+        <>
+          <ChatHeader row={row()} />
+          <PromptModal />
+        </>,
+      );
+      openMore();
+      fireEvent.click(screen.getByTestId('action-set-goal'));
+      await screen.findByRole('textbox');
+      fireEvent.keyDown(window, { key: 'Escape' });
+      await act(async () => {});
+      expect(api.setGoal).not.toHaveBeenCalled();
     });
   });
 });

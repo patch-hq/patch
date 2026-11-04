@@ -568,7 +568,14 @@ function MeetingAlerts({ chatId, meeting }: { chatId: string; meeting: MeetingSt
         <AlertLine testid="meeting-research-error" text={meeting.researchError} />
       ) : null}
       {notListening ? (
-        <AlertLine testid="meeting-not-listening" text="This device is not listening">
+        <AlertLine
+          testid="meeting-not-listening"
+          text={
+            meeting.listeningOn
+              ? `Listening on ${meeting.listeningOn}`
+              : 'No device is listening yet'
+          }
+        >
           <button
             type="button"
             className="mm-btn"
@@ -1265,9 +1272,9 @@ const CARD_LABEL: Record<MeetingCard['kind'], string> = {
 };
 const VERDICT_LABEL = { correct: 'Correct', off: 'Off', unclear: 'Unclear' } as const;
 
-/** A research card on one line: kind, what it is about, the verdict and source. Opens to its bullets. */
+/** A research card on one line: kind, what it is about, the verdict and source. Open by default, folds to one line. */
 function ResearchCard({ card }: { card: MeetingCard }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   return (
     <div className="mm-card" data-testid="meeting-card" data-kind={card.kind} data-open={open}>
       <button
@@ -1282,6 +1289,7 @@ function ResearchCard({ card }: { card: MeetingCard }) {
         <span className="mm-line-t" data-testid="meeting-card-title">
           {card.title}
         </span>
+        <ChevronDown className="mm-card-chev" size={14} aria-hidden="true" />
         {card.verdict ? (
           <span
             className="mm-verdict"
@@ -1522,6 +1530,11 @@ function ActionRow({
             onEnter={() => (document.activeElement as HTMLElement | null)?.blur()}
           />
         </span>
+        {action.absent ? (
+          <span className="mm-act-st" data-testid="meeting-action-absent">
+            Not in meeting
+          </span>
+        ) : null}
         {action.chatId ? <ActionChatStatus chatId={action.chatId} /> : null}
         {action.chatId ? (
           <Link

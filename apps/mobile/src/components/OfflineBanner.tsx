@@ -17,7 +17,8 @@ export function OfflineBanner(): React.ReactElement | null {
   const outageVisible = usePresenceStore((s) => s.outageVisible);
   const serverLost = usePresenceStore((s) => s.serverLost);
   const setDiagnosticsOpen = useUiStore((s) => s.setDiagnosticsOpen);
-  const label = offlineBannerText(conn, outageVisible, serverLost);
+  const restarting = usePresenceStore((s) => s.restarting);
+  const label = offlineBannerText(conn, outageVisible, serverLost, restarting);
   if (label === null) return null;
   return (
     <View

@@ -77,6 +77,7 @@ import {
   QUESTION_EXPIRY_SECONDS_DEFAULT,
   DEFAULT_QUESTION_EXPIRED_PROMPT,
   refusingRateLimitScope,
+  rejectedRateLimitScope,
 } from '@patch/wire';
 import type { Logger } from 'pino';
 import { randomUUID } from 'node:crypto';
@@ -159,6 +160,7 @@ import {
   applyUpdate,
   checkForUpdate,
   createArtifactWait,
+  createAutoUpdateSettle,
   describeUpdateRefusal,
   createUpdateGate,
   requestUpdate,
@@ -184,8 +186,10 @@ import {
   describeHost as buildHostDescription,
 } from './host.js';
 import { createPowerWatcher } from './power.js';
+import { createSleepDetector } from './linkDropCause.js';
 import { createServerLink } from './serverLink.js';
 import { createHealthSampler } from './healthReport.js';
+import { checkLaunchPath } from './launchPath.js';
 import { handleJobExec } from './jobExec.js';
 import { handleHostWake } from './hostWake.js';
 import { rotateLog } from './logRotate.js';
@@ -210,6 +214,7 @@ import {
   withBrowserToolsEnabled,
 } from './mcpServers.js';
 import { getPatchToolsPrompt, toolsPromptOverride } from './toolsPrompt.js';
+import { patchToolDescriptions } from './mcp.js';
 import { ComponentManager, ComponentNotOfferedError, componentRuntimeDir } from './components.js';
 import { provisionSidecarRuntime, resolveUv } from './audio/sidecarRuntime.js';
 import { bundledSidecarDir } from './installPaths.js';
@@ -245,6 +250,8 @@ import {
   LocalWhisperBackend,
   type WhisperBackend,
 } from './audio/whisper.js';
+import { ParakeetWhisperBackend } from './audio/parakeet.js';
+import { ParakeetLiveRecognizer } from './audio/parakeet-live.js';
 import { createKokoro, validateKokoroModel } from './audio/kokoro.js';
 import { createElevenLabs, createRoutedTts, type ElevenLabsVoice } from './audio/elevenlabs.js';
 import {
@@ -321,6 +328,12 @@ export interface MainTestHooks {
   validateClaudeToken?: ClaudeTokenValidator;
   /** Where the host's log lines go instead of stdout — lets a test read what boot logged. */
   logStream?: import('pino').DestinationStream;
+  /**
+   * Overrides how long a published build must be the newest before the
+   * scheduled auto-update installs it. Present ONLY so a test can exercise the
+   * boot-time apply without waiting out the real window.
+   */
+  autoUpdateSettleMs?: number;
 }
 
 /**
@@ -489,6 +502,13 @@ async function startHost(
   const logger = testHooks?.logStream
     ? pino(loggerOptions, testHooks.logStream)
     : pino(loggerOptions);
+  const launchMove = checkLaunchPath(config.patchHome, process.execPath);
+  if (launchMove) {
+    logger.warn(
+      launchMove,
+      'patch-daemon: host launch path changed — anything that allow-lists the old path (process killers, firewalls, permissions) must be updated or it will act on this host',
+    );
+  }
   installCrashGuard(logger);
 
   // 0. TCP /healthz — bound FIRST, before anything touches shared state. This
@@ -815,6 +835,15 @@ async function startHost(
   const effectiveToolsPrompt = (): string =>
     harnessToolsPrompt === undefined ? getPatchToolsPrompt() : harnessToolsPrompt;
   let harnessSkills: string[] | 'all' | undefined = persistedHostState.harnessSkills;
+  // Edits of Patch tools' descriptions. The MCP child reads them from its
+  // launch environment, so each turn's child starts from the current set.
+  let toolPromptOverrides: Record<string, string> = persistedHostState.toolPromptOverrides ?? {};
+  const toolPromptDefaults = patchToolDescriptions();
+  const mcpEnv: Record<string, string> = {};
+  const publishToolPrompts = (): void => {
+    mcpEnv['PATCH_TOOL_PROMPTS'] = JSON.stringify(toolPromptOverrides);
+  };
+  publishToolPrompts();
   // The three "layer" toggles (spec/14 § Agent behavior). Unlike the fields
   // above, these always resolve to a concrete boolean — there is no "SDK
   // default" reading for them to fall back to, only a stated default per
@@ -927,6 +956,9 @@ async function startHost(
             currentVersion: VERSION,
             target: BUILD_TARGET,
             patchHome: config.patchHome,
+            // Recorded only once the installer is about to run, so a deferred
+            // or artifact-pending apply leaves the version free to retry.
+            onInstallStart: (version) => hostStateStore.update({ lastAutoUpdateAttempt: version }),
             untilIdle: async () => {
               // Surfaces read this to say "waiting for chats" instead of "behind".
               const held = runningChats().length > 0;
@@ -1084,8 +1116,10 @@ async function startHost(
     onChange: () => emit(describeHost()),
     onError: (err) => logger.warn({ err }, 'power: battery read failed'),
   });
+  const sleepDetector = createSleepDetector();
   const describeHost = (): import('@patch/wire').HostInfoEvent =>
     buildHostDescription({
+      ...(link.lastDrop() ? { lastDisconnect: link.lastDrop() } : {}),
       ...(powerWatcher.current() ? { power: powerWatcher.current() } : {}),
       hostId: selfHostId,
       hostName,
@@ -1149,6 +1183,7 @@ async function startHost(
       ...(harnessSystemPrompt !== undefined ? { harnessSystemPrompt } : {}),
       ...(harnessToolsPrompt !== undefined ? { harnessToolsPrompt } : {}),
       harnessToolsPromptDefault: getPatchToolsPrompt(),
+      toolPromptDefaults,
       ...(harnessSkills !== undefined ? { harnessSkills } : {}),
       harnessMemoryEnabled,
       harnessBrowserToolsEnabled: browserToolsEnabledOf(harnessMcpServers),
@@ -1493,6 +1528,12 @@ async function startHost(
     onUnknownResponse: (requestId) =>
       logger.warn({ requestId }, 'patch.send_to.response for an unknown request; dropping'),
   });
+  const remoteStops = createRemoteRelayCoordinator<undefined>({
+    emit: (event) => emit(event),
+    idPrefix: 'rstop',
+    onUnknownResponse: (requestId) =>
+      logger.warn({ requestId }, 'patch.stop.response for an unknown request; dropping'),
+  });
   const webBotAuthSignatures = createRemoteRelayCoordinator<{
     headers: Record<string, string>;
   }>({
@@ -1585,6 +1626,19 @@ async function startHost(
       )
       .then(() => undefined);
 
+  const stopRemoteChat = (req: { sourceChatId: string; targetChatId: string }): Promise<void> =>
+    remoteStops
+      .call(
+        (requestId) => ({
+          type: 'patch.stop',
+          sourceChatId: req.sourceChatId,
+          targetChatId: req.targetChatId,
+          requestId,
+        }),
+        () => `patch_stop: chat ${req.targetChatId}'s host did not answer in time`,
+      )
+      .then(() => undefined);
+
   // Forward-declared so the onFrame closure (constructed below, before the
   // audio server boots) can route `chat.focus_change` into the surface's open
   // voice session for focus-follow (spec/07 ## Focus-follow). Assigned once the
@@ -1596,6 +1650,7 @@ async function startHost(
   // transport — the mobile voice-note upload path). Assigned once the whisper
   // backend is created at step 8.
   let whisper: WhisperBackend | undefined;
+  let liveRecognizer: ParakeetLiveRecognizer | undefined;
   // The dictation surface's transcribers, one per backend this host has a key
   // for (hosted-stt.ts). Assigned alongside `whisper` at step 8; the
   // transcribe RPC below picks from them by `voiceConfig.dictation.backend`.
@@ -1851,6 +1906,12 @@ async function startHost(
       });
       applyHarnessConfig();
       logger.info('agent behaviour layers changed');
+    }
+    if (JSON.stringify(shared.toolPromptOverrides) !== JSON.stringify(toolPromptOverrides)) {
+      toolPromptOverrides = shared.toolPromptOverrides;
+      publishToolPrompts();
+      hostStateStore.update({ toolPromptOverrides });
+      logger.info('tool prompt overrides changed');
     }
     accountStrategy = shared.accountStrategy;
   };
@@ -2117,6 +2178,7 @@ async function startHost(
     clientGitSha: GIT_SHA,
     clientBuiltAt: BUILT_AT,
     logger,
+    sleepDetector,
     // The server speaks a protocol this build cannot read, so the matching
     // build is (or is about to be) published — go and get it. The update gate
     // joins repeat calls from each reconnect and waits out running turns.
@@ -3191,6 +3253,38 @@ async function startHost(
         remoteSendTos.resolve(event);
         return;
       }
+      if (event.type === 'patch.stop') {
+        // Cross-host `patch_stop`: no requestId is a same-host audit record.
+        const requestId = event.requestId;
+        if (requestId === undefined) return;
+        const answer = (error?: { code: 'chat_not_found' | 'sdk_error'; message: string }): void =>
+          sender({
+            type: 'patch.stop.response',
+            requestId,
+            sourceChatId: event.sourceChatId,
+            targetChatId: event.targetChatId,
+            ok: error === undefined,
+            ...(error ? { error } : {}),
+          });
+        if (!daemon.chatState.has(event.targetChatId)) {
+          answer({ code: 'chat_not_found', message: `no such chat: ${event.targetChatId}` });
+          return;
+        }
+        daemon
+          .stopChat(event.targetChatId)
+          .then(() => answer())
+          .catch((err: unknown) =>
+            answer({
+              code: 'sdk_error',
+              message: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        return;
+      }
+      if (event.type === 'patch.stop.response') {
+        remoteStops.resolve(event);
+        return;
+      }
       if (event.type === 'web_bot_auth.sign_response') {
         if (event.hostId !== selfHostId) return;
         webBotAuthSignatures.resolve(event);
@@ -3609,9 +3703,8 @@ async function startHost(
    * (spec/10-auth.md § Backend credentials — multiple accounts).
    *
    * Priority is the order of the accounts array: failover walks forward from the
-   * account that just failed. In memory — a restart re-probes and re-learns
-   * within one turn, and a stale "exhausted" surviving a top-up is worse than
-   * one extra refused turn.
+   * account that just failed. Persisted in account-availability.json so a
+   * restart keeps what it knew.
    */
   const accountAvailabilityPath = join(config.patchHome, 'account-availability.json');
   const accountRotation = new AccountRotation(
@@ -3897,7 +3990,7 @@ async function startHost(
         const probeWindows = accountUsage?.get(accountId)?.reading.windows;
         if (
           !isAccountExhausted((err as { limit?: LimitFacts }).limit, {
-            probeBlocked: refusingRateLimitScope(probeWindows) !== undefined,
+            probeBlocked: rejectedRateLimitScope(probeWindows) !== undefined,
           })
         ) {
           // Not an account problem, so no other account would answer
@@ -3986,10 +4079,15 @@ async function startHost(
   const translateRecurrenceRule = makeRecurrenceTranslator({
     sdkBackend,
     runOnAccountWithCredit,
+    smallJobModels: config.smallJobModels,
     logger,
   });
   // spec/14 § Message links — the Summarise button's one-shot.
-  const summariseLink = makeLinkSummariser({ sdkBackend, runOnAccountWithCredit });
+  const summariseLink = makeLinkSummariser({
+    sdkBackend,
+    runOnAccountWithCredit,
+    smallJobModels: config.smallJobModels,
+  });
   let pullQueuedFromServer: ((chatId: string) => Promise<ChatInputEvent[]>) | undefined;
   const daemon: Daemon = new Daemon({
     ...(durableTurns ? { durableTurns } : {}),
@@ -4143,10 +4241,12 @@ async function startHost(
       // limit resets on its own, extra usage being off does not.
       const refusing = refusingRateLimitScope(windows);
       const window = refusing ? windows?.[refusing] : undefined;
+      const estimated = refusing !== undefined && rejectedRateLimitScope(windows) === undefined;
       const overage = windows?.overage;
       return {
         ...(account?.label !== undefined ? { label: account.label } : {}),
         ...(refusing !== undefined ? { scope: refusing } : {}),
+        ...(estimated ? { estimated: true as const } : {}),
         ...(window?.utilization !== undefined ? { utilization: window.utilization } : {}),
         ...(window?.resetsAt !== undefined ? { resetsAt: window.resetsAt } : {}),
         ...(overage?.status === 'rejected' ? { overageBlocked: true } : {}),
@@ -4159,6 +4259,7 @@ async function startHost(
     generateTitle: makeTitleGenerator({
       sdkBackend,
       runOnAccountWithCredit,
+      smallJobModels: config.smallJobModels,
       // A Codex chat is titled on its own model, like its goal check (below).
       codex: { sdkBackend: routedBackend, resolveOAuth: resolveModelOAuth },
       logger,
@@ -4167,7 +4268,12 @@ async function startHost(
     // settles, summarise the thread's current status + whether it's paused on a
     // user question or merely complete. Cheap one-shot Haiku, fired async +
     // non-blocking; a failure leaves the previous status unchanged.
-    generateStatus: makeStatusGenerator({ sdkBackend, runOnAccountWithCredit, logger }),
+    generateStatus: makeStatusGenerator({
+      sdkBackend,
+      runOnAccountWithCredit,
+      smallJobModels: config.smallJobModels,
+      logger,
+    }),
     // spec/04 § Goals: after each turn settles on a chat with an active goal,
     // judge the condition against the transcript so far. `routedBackend` +
     // `resolveModelOAuth` (same pair `hook.check_request`'s prompt check uses)
@@ -4181,12 +4287,18 @@ async function startHost(
     // spec/14 § Tool runs: label each closed run of tool calls with what it was
     // for ("Set up the project locally"). Cheap one-shot Haiku, async; a
     // failure is stamped on the run rather than hidden.
-    summarizeToolRun: makeToolRunSummarizer({ sdkBackend, runOnAccountWithCredit, logger }),
+    summarizeToolRun: makeToolRunSummarizer({
+      sdkBackend,
+      runOnAccountWithCredit,
+      smallJobModels: config.smallJobModels,
+      logger,
+    }),
     // spec/04 § Send back — the one-line summary a side branch's conclusion
     // carries into its parent track. Cheap one-shot Haiku, async.
     summarizeBranchSendBack: makeBranchSendBackSummarizer({
       sdkBackend,
       runOnAccountWithCredit,
+      smallJobModels: config.smallJobModels,
       logger,
     }),
     // spec/06 § Session rotation — the handoff digest a scheduled rotation
@@ -4205,7 +4317,7 @@ async function startHost(
     mcpServer: {
       command: mcpBin.command,
       args: mcpBin.args,
-      env: {
+      env: Object.assign(mcpEnv, {
         PATCH_HOST_SOCKET: config.socketPath,
         PATCH_DAEMON_SOCKET: config.socketPath,
         // The child presents this as a Bearer on every socket call (spec/02
@@ -4219,7 +4331,7 @@ async function startHost(
         // PATCH_CHAT_ID is injected per-query in chatRunner.runQuery —
         // the MCP child needs the *current* chatId, not a static one.
         // See group 10 BLOCKER A.2.
-      },
+      }),
     },
     // Group 11: prepend the broadcast `<system-reminder>` for special threads.
     preprocessInput: (req) => {
@@ -4268,6 +4380,9 @@ async function startHost(
     // spec/06 § Manager conversation — persisted global preference.
     managerContextWindow,
     onRateLimit: reportUsage,
+    onTurnEnd: (_chatId, accountId) => {
+      if (accountId !== undefined) void accountUsage?.refreshAfterTurn(accountId);
+    },
     // Computer use is off until granted; Always allow persists to host.json.
     computerUse: {
       alwaysAllowed: () => hostStateStore.get().computerUseAlwaysAllowed === true,
@@ -4354,6 +4469,7 @@ async function startHost(
       runOnAccountWithCredit,
       cwd: hostCwd,
       model: () => meetingModels.analysis,
+      onDropped: (chatId, msg) => logger.warn({ chatId }, `meeting: ${msg}`),
     }),
     correct: makeMeetingCorrector({
       sdkBackend,
@@ -4565,6 +4681,7 @@ async function startHost(
   );
   credentialTimer.unref?.();
 
+  const autoUpdateSettle = createAutoUpdateSettle({ settleMs: testHooks?.autoUpdateSettleMs });
   const refreshUpdateAvailable = async (): Promise<void> => {
     const check = await checkForUpdate({
       serverUrl: config.serverUrl,
@@ -4591,6 +4708,23 @@ async function startHost(
     // published, and a busy machine defers until idle rather than killing a
     // running turn.
     if (autoUpdateHosts && (check.available || check.awaitingArtifact)) {
+      // Deploys come in bursts and each install restarts the host, so wait
+      // until the published build has stopped changing (`AUTO_UPDATE_SETTLE_MS`).
+      // The next scheduled check picks it up; the Update button skips this.
+      if (check.version && !autoUpdateSettle.settled(check.version)) {
+        logger.info(
+          { version: check.version },
+          'self-update: scheduled apply waiting for the published build to settle',
+        );
+        return;
+      }
+      if (check.version && check.version === hostStateStore.get().lastAutoUpdateAttempt) {
+        logger.warn(
+          { version: check.version },
+          'self-update: scheduled apply skipped, this version was already attempted and this host is still not on it; use Update to retry',
+        );
+        return;
+      }
       const result = await applyUpdateOnce();
       if (!result.applied && !result.deferred) {
         logger.warn({ reason: result.message }, 'self-update: scheduled apply refused');
@@ -4604,6 +4738,7 @@ async function startHost(
     logger.warn({ err }, 'power: initial battery read failed');
   });
   powerWatcher.start();
+  sleepDetector.start();
   const updateCheckTimer = setInterval(() => {
     void refreshUpdateAvailable().catch((err: unknown) => {
       logger.warn({ err }, 'self-update: availability check failed');
@@ -4843,6 +4978,7 @@ async function startHost(
     peekRemoteChat,
     historyRemoteChat,
     sendToRemoteChat,
+    stopRemoteChat,
     listDevices: () => presence.enumerate(deviceRegistry.list()),
     // Speakers-channel device-resolution cascade (spec/09 § `### speakers`).
     // Composes the live presence registry; step-4 exhaustion re-routes the
@@ -4954,11 +5090,14 @@ async function startHost(
       logger: whisperLog,
       apiKey: () => providerKeys.get('elevenlabs'),
     });
-  } else
+  } else {
     whisper = createWhisper({
       backend: config.audio.whisperBackend,
       logger: logger.child({ component: 'whisper' }),
       groqApiKey: () => providerKeys.get('groq'),
+      ...(config.audio.parakeetModelDir !== undefined
+        ? { parakeetModelDir: config.audio.parakeetModelDir }
+        : {}),
       ...(config.audio.whisperLocalSidecarUrl !== undefined
         ? { localSidecarUrl: config.audio.whisperLocalSidecarUrl }
         : {}),
@@ -4976,6 +5115,18 @@ async function startHost(
           }
         : {}),
     });
+  }
+  // The on-machine model loads now: a broken install aborts the boot rather
+  // than failing the first word someone says.
+  if (config.audio.whisperBackend === 'parakeet') await (whisper as ParakeetWhisperBackend).warm();
+  // The streaming model for dictation on the `host` engine loads now too.
+  if (config.audio.parakeetStreamingModelDir !== undefined) {
+    liveRecognizer = new ParakeetLiveRecognizer({
+      logger: logger.child({ component: 'parakeet-live' }),
+      modelDir: config.audio.parakeetStreamingModelDir,
+    });
+    await liveRecognizer.warm();
+  }
   // Shared settings may have landed before the backend existed.
   if (meetingTranscriptionModel !== '') whisper.useModel?.(meetingTranscriptionModel);
   dictationTranscribers = createDictationTranscribers({
@@ -5236,6 +5387,7 @@ async function startHost(
     geminiApiKey: () => providerKeys.get('gemini'),
     deepgramApiKey: () => providerKeys.get('deepgram'),
     elevenlabsApiKey: () => providerKeys.get('elevenlabs'),
+    ...(liveRecognizer ? { liveRecognizer } : {}),
     ...(config.audio.geminiLiveModel ? { geminiLiveModel: config.audio.geminiLiveModel } : {}),
     ...(config.audio.geminiLiveModelHeavy
       ? { geminiLiveModelHeavy: config.audio.geminiLiveModelHeavy }
@@ -5330,6 +5482,7 @@ async function startHost(
     await audioServer.close().catch(() => undefined);
     await kokoro.close().catch(() => undefined);
     await whisper.close().catch(() => undefined);
+    await liveRecognizer?.close().catch(() => undefined);
     await link.close().catch(() => undefined);
     await app.close().catch(() => undefined);
     tcp.close();
@@ -6818,6 +6971,7 @@ export async function handleServerEvent(
           event.source,
           Buffer.from(event.audioBase64, 'base64'),
           event.speakerName,
+          event.device,
         );
         return;
       }

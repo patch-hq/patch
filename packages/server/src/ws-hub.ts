@@ -17,6 +17,7 @@ import {
   CLOSE_AUTH_FAILED,
   CLOSE_MALFORMED_FRAME as CLOSE_BAD_FRAME,
   CLOSE_SERVER_RESTARTING,
+  restartingReason,
 } from '@patch/wire';
 import {
   decode,
@@ -409,6 +410,11 @@ export class WsHub {
     return this.hostRoster();
   }
 
+  /** What a host last reported for one backend's accounts, or undefined if it has not. */
+  accountReport(hostId: string, backendId: string): HostAccountEvent | undefined {
+    return this.lastAccountReport.get(hostId)?.get(backendId);
+  }
+
   /**
    * Where the server can reach `hostId`'s own audio WSS to relay a voice
    * session for a chat that lives there (`audio-relay.ts`). `undefined` when
@@ -647,7 +653,7 @@ export class WsHub {
   }
 
   /** Drop all upstream subscriptions (test cleanup). */
-  shutdown(): void {
+  shutdown(restartTarget: string | null = null): void {
     for (const t of this.offlineTimers.values()) clearTimeout(t);
     this.offlineTimers.clear();
     this.hostEventUnsub?.();
@@ -659,7 +665,7 @@ export class WsHub {
     this.newChatAttachmentsUnsub?.();
     for (const conn of this.allConns()) {
       try {
-        conn.socket.close(CLOSE_SERVER_RESTARTING, 'server restarting');
+        conn.socket.close(CLOSE_SERVER_RESTARTING, restartingReason(restartTarget));
       } catch {
         // ignore — socket already gone
         // (intentional swallow during teardown only)

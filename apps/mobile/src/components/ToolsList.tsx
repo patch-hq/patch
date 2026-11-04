@@ -16,6 +16,10 @@ import { ScrollView, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TOOL_CATALOG, type ToolCategory } from '../lib/toolsCatalog';
 import { useToolsStore } from '../stores/toolsStore';
+import { usePresenceStore } from '../stores/presenceStore';
+import { useSettingsStore } from '../stores/settingsStore';
+import { Field, SettingsButton } from './settings/ui';
+import { writePreferences } from './settings/PreferenceSections';
 import { space, textMin, typography, useTheme } from '../lib/theme';
 
 const CATEGORY_LABEL: Record<ToolCategory, string> = {
@@ -24,6 +28,87 @@ const CATEGORY_LABEL: Record<ToolCategory, string> = {
 };
 
 const CATEGORIES: ToolCategory[] = ['native', 'patch'];
+
+/**
+ * The description the model reads for one Patch tool. Edit opens it for
+ * rewriting; Save stores it as a shared setting (the next turn's tools carry
+ * it); Reset drops the edit so the built-in text stands again.
+ */
+function ToolPromptEditor({ tool }: { tool: string }): React.ReactElement | null {
+  const colors = useTheme();
+  const overrides = useSettingsStore((s) => s.data?.preferences.toolPromptOverrides);
+  const builtIn = usePresenceStore(
+    (s) =>
+      Object.values(s.hosts).find((h) => h.host?.toolPromptDefaults?.[tool] !== undefined)?.host
+        ?.toolPromptDefaults?.[tool],
+  );
+  const [draft, setDraft] = React.useState<string | null>(null);
+  const override = overrides?.[tool];
+  const current = override ?? builtIn;
+  // Settings not loaded, or no host has reported the built-in text: nothing to edit from.
+  if (overrides === undefined || current === undefined) return null;
+
+  if (draft === null) {
+    return (
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, marginTop: 2 }}>
+        <SettingsButton
+          testID={`tool-prompt-edit-${tool}`}
+          label="Edit"
+          variant="quiet"
+          onPress={() => setDraft(current)}
+        />
+        {override !== undefined && (
+          <Text
+            testID={`tool-prompt-edited-${tool}`}
+            style={{ color: colors.ink3, fontSize: textMin }}
+          >
+            Edited
+          </Text>
+        )}
+      </View>
+    );
+  }
+  return (
+    <View style={{ marginTop: space.xs, gap: space.xs }}>
+      <Field
+        testID={`tool-prompt-input-${tool}`}
+        accessibilityLabel={`${tool} description`}
+        multiline
+        value={draft}
+        onChangeText={setDraft}
+      />
+      <View style={{ flexDirection: 'row', gap: space.md }}>
+        <SettingsButton
+          testID={`tool-prompt-save-${tool}`}
+          label="Save"
+          disabled={draft.trim() === '' || draft === current}
+          onPress={() => {
+            writePreferences({ toolPromptOverrides: { ...overrides, [tool]: draft } });
+            setDraft(null);
+          }}
+        />
+        <SettingsButton
+          testID={`tool-prompt-cancel-${tool}`}
+          label="Cancel"
+          variant="quiet"
+          onPress={() => setDraft(null)}
+        />
+        {override !== undefined && (
+          <SettingsButton
+            testID={`tool-prompt-reset-${tool}`}
+            label="Reset"
+            variant="quiet"
+            onPress={() => {
+              const { [tool]: _dropped, ...rest } = overrides;
+              writePreferences({ toolPromptOverrides: rest });
+              setDraft(null);
+            }}
+          />
+        )}
+      </View>
+    </View>
+  );
+}
 
 export function ToolsList({ chatId }: { chatId: string }): React.ReactElement {
   const colors = useTheme();
@@ -81,6 +166,7 @@ export function ToolsList({ chatId }: { chatId: string }): React.ReactElement {
                   >
                     {t.label}({t.params})
                   </Text>
+                  {cat === 'patch' && <ToolPromptEditor tool={t.label} />}
                 </View>
                 <Switch
                   testID={`tool-toggle-${t.label}`}

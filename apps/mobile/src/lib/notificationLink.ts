@@ -160,6 +160,7 @@ export function resolveNotificationAction(
   // A batch check-in push carries no chatId and always means "open the Batch
   // tab" — there is no source chat to fall back to and no deepLink to consider.
   if (data['kind'] === 'batch') return { action: { type: 'batch' } };
+  if (data['kind'] === 'host-health') return { action: { type: 'settings' } };
   if (data['kind'] === 'sign-in') return { action: { type: 'settings' } };
   if (data['kind'] === 'app-update') {
     const url = data['deepLink'];

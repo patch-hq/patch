@@ -120,6 +120,33 @@ describe('Artifact card', () => {
     expect(__getLinkingOpenedUrls()).toEqual([`${DEFAULT_SERVER_URL}/api/chats/c1/artifact/a1`]);
   });
 
+  it('shows a spinner while the page loads and an error if the load fails', () => {
+    useChatStore.getState().applyEvent(artifactEvent('a1', 'Bristol bus times', 1));
+    const r = renderRN(<ChatDetailScreen />);
+    actSync(() => findHost(r.root, byTestId('artifact-card')).props.onPress());
+    const webview = findHost(r.root, byTestId('artifact-viewer-webview'));
+    expect(webview.props.startInLoadingState).toBe(true);
+    expect(queryHost(r.root, byTestId('artifact-viewer-error'))).toBeNull();
+
+    actSync(() => webview.props.onError({ nativeEvent: { description: 'net::ERR_TIMED_OUT' } }));
+    expect(hasText(findHost(r.root, byTestId('artifact-viewer-error')), 'net::ERR_TIMED_OUT')).toBe(
+      true,
+    );
+    expect(queryHost(r.root, byTestId('artifact-viewer-webview'))).toBeNull();
+  });
+
+  it('an HTTP error status from the page is shown as an error', () => {
+    useChatStore.getState().applyEvent(artifactEvent('a1', 'Bristol bus times', 1));
+    const r = renderRN(<ChatDetailScreen />);
+    actSync(() => findHost(r.root, byTestId('artifact-card')).props.onPress());
+    actSync(() =>
+      findHost(r.root, byTestId('artifact-viewer-webview')).props.onHttpError({
+        nativeEvent: { statusCode: 503 },
+      }),
+    );
+    expect(hasText(findHost(r.root, byTestId('artifact-viewer-error')), 'HTTP 503')).toBe(true);
+  });
+
   it('republishing the artifact on show reloads the viewer; another artifact does not', () => {
     useChatStore.getState().applyEvent(artifactEvent('a1', 'Bristol bus times', 1));
     const r = renderRN(<ChatDetailScreen />);

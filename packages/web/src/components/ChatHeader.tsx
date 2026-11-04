@@ -39,6 +39,8 @@ import {
   ArrowRightLeft,
   Eraser,
   ListPlus,
+  Target,
+  Copy,
 } from 'lucide-react';
 import { useSideThreadsStore } from '../stores/sideThreadsStore.js';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -74,6 +76,7 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
   const setHidden = useChatStore((s) => s.setHidden);
   const setDisabled = useChatStore((s) => s.setDisabled);
   const setName = useChatStore((s) => s.setName);
+  const setGoal = useChatStore((s) => s.setGoal);
   const pushError = useUiStore((s) => s.pushError);
   const setToolsPanelChatId = useUiStore((s) => s.setToolsPanelChatId);
   const setTaskAddChatId = useUiStore((s) => s.setTaskAddChatId);
@@ -127,6 +130,15 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
     return () => window.removeEventListener('keydown', onKey);
   }, [menuOpen]);
 
+  // Copy the chat ID so it can be quoted in bug reports. NO FALLBACK: a
+  // rejected clipboard write toasts the error.
+  function copyChatId(): void {
+    setMenuOpen(false);
+    navigator.clipboard.writeText(row.chatId).catch((err: unknown) => {
+      pushError(failed('copying chat ID'), undefined, (err as Error).message);
+    });
+  }
+
   // The hamburger dropdown that replaces the whole icon rail at narrow widths
   // (see the file-header comment). Same anchored-pop-up dismissal contract as
   // every other menu here: click-off and Esc.
@@ -175,6 +187,26 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
   // point into the tree.
   function toggleEditor(): void {
     useLayoutStore.getState().toggleTab({ kind: 'page', page: 'files', chatId: row.chatId });
+  }
+
+  // Set / change / clear the chat goal from the menu — the same REST mutation
+  // as `/goal`, optimistic, reverting + toasting on failure (NO FALLBACK). An
+  // empty entry clears the goal. Unlike `/goal` it starts no turn.
+  async function promptGoal(): Promise<void> {
+    const value = await useUiStore.getState().prompt({
+      title: 'Set goal',
+      initialValue: row.goal ?? '',
+      confirmLabel: 'Set goal',
+    });
+    if (value === null) return;
+    const next = value.trim() === '' ? null : value.trim();
+    if (next === (row.goal ?? null)) return;
+    const previous = row.goal ?? null;
+    setGoal(row.chatId, next);
+    void api.setGoal(row.chatId, next).catch((err) => {
+      setGoal(row.chatId, previous);
+      pushError(failed('setting goal'), undefined, (err as Error).message);
+    });
   }
 
   // Archive / unarchive (spec/04 § Lifecycle) — the header's default way to
@@ -446,6 +478,29 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
                     <Wrench size={14} aria-hidden />
                     Tools
                   </button>
+                  <button
+                    type="button"
+                    className="head-menu-item"
+                    data-testid="action-set-goal"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      void promptGoal();
+                    }}
+                  >
+                    <Target size={14} aria-hidden />
+                    Set goal…
+                  </button>
+                  <button
+                    type="button"
+                    className="head-menu-item"
+                    data-testid="action-copy-chat-id"
+                    role="menuitem"
+                    onClick={copyChatId}
+                  >
+                    <Copy size={14} aria-hidden />
+                    Copy chat ID
+                  </button>
                   {canAddTasks ? (
                     <button
                       type="button"
@@ -642,6 +697,19 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
                 >
                   <Wrench size={14} aria-hidden />
                   Tools
+                </button>
+                <button
+                  type="button"
+                  className="head-menu-item"
+                  data-testid="hamburger-set-goal"
+                  role="menuitem"
+                  onClick={() => {
+                    setHamburgerOpen(false);
+                    void promptGoal();
+                  }}
+                >
+                  <Target size={14} aria-hidden />
+                  Set goal…
                 </button>
                 {canAddTasks ? (
                   <button

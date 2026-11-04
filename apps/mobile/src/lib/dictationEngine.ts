@@ -13,6 +13,7 @@ export function dictationEngineFor(dictation: DictationConfig): {
       return { engine: 'phone', tidy: dictation.tidy };
     case 'deepgram':
     case 'elevenlabs':
+    case 'host':
       return { engine: 'stream', tidy: dictation.tidy };
     case 'whisper':
       return { engine: 'whisper', tidy: false };

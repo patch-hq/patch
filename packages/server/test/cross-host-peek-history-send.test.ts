@@ -356,3 +356,60 @@ describe('cross-host patch.send_to — relayed and acknowledged', () => {
     h.dispose();
   });
 });
+
+describe('cross-host patch.stop — relayed to the owning machine', () => {
+  it('relays a requestId-carrying stop to the owner and routes its answer back', () => {
+    const h = harness();
+    h.feed(
+      {
+        type: 'patch.stop',
+        sourceChatId: 'chat-src',
+        targetChatId: 'chat-remote',
+        requestId: 'req-4',
+      } as WireEvent,
+      'host-a',
+    );
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0]!.hostId).toBe('host-b');
+    expect(h.sent[0]!.event).toMatchObject({ type: 'patch.stop', requestId: 'req-4' });
+    h.feed(
+      {
+        type: 'patch.stop.response',
+        requestId: 'req-4',
+        sourceChatId: 'chat-src',
+        targetChatId: 'chat-remote',
+        ok: true,
+      } as WireEvent,
+      'host-b',
+    );
+    expect(h.sent[1]!.hostId).toBe('host-a');
+    expect(h.sent[1]!.event).toMatchObject({ type: 'patch.stop.response', ok: true });
+    h.dispose();
+  });
+
+  it('does not relay a stop without a requestId (same-host audit record)', () => {
+    const h = harness();
+    h.feed(
+      { type: 'patch.stop', sourceChatId: 'chat-src', targetChatId: 'chat-remote' } as WireEvent,
+      'host-a',
+    );
+    expect(h.sent).toHaveLength(0);
+    h.dispose();
+  });
+
+  it('refuses an unknown chat with a response the caller can act on', () => {
+    const h = harness({ owners: {} });
+    h.feed(
+      {
+        type: 'patch.stop',
+        sourceChatId: 'chat-src',
+        targetChatId: 'chat-ghost',
+        requestId: 'req-5',
+      } as WireEvent,
+      'host-a',
+    );
+    const resp = h.sent.find((s) => s.event.type === 'patch.stop.response');
+    expect(resp?.event).toMatchObject({ ok: false, error: { code: 'chat_not_found' } });
+    h.dispose();
+  });
+});

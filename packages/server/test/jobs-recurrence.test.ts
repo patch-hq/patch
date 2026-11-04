@@ -530,4 +530,53 @@ describe('RecurrenceScheduler', () => {
     dispatcher.close();
     await jobs.close();
   });
+
+  it('a COUNT rule that completes after its last run ends the history on that run, not a dispatch-error', async () => {
+    // The rule counts from the 2000 anchor, so the clock sits just before it.
+    let now = Date.UTC(1999, 11, 31);
+    const jobs = new JobStore({
+      dataDir: dir,
+      logger: silentLogger,
+      watch: false,
+      nowMs: () => now,
+    });
+    const link = new InProcessHostLink();
+    const dispatcher = new JobDispatcher({
+      dataDir: dir,
+      hostLink: link,
+      logger: silentLogger,
+      logs: new JobLogs(dir),
+    });
+    const tasks = new Map<string, () => Promise<void>>();
+    const scheduler = new RecurrenceScheduler({
+      jobs,
+      dispatcher,
+      logs: new JobLogs(dir),
+      logger: silentLogger,
+      nowMs: () => now,
+      registerTimer: (jobId, _fireAtMs, cb) => {
+        tasks.set(jobId, cb);
+        return () => tasks.delete(jobId);
+      },
+    });
+    scheduler.start();
+    const job = jobs.create({
+      name: 'one-shot-rule',
+      trigger: recurrenceTrigger('FREQ=DAILY;COUNT=1', 'UTC'),
+      action: { type: 'spawn', hostId: 'd1', folder: '/y', prompt: 'go' },
+    });
+    expect(tasks.has(job.id)).toBe(true);
+    now = Date.UTC(2000, 0, 1, 0, 0, 1);
+    await tasks.get(job.id)!();
+    hostConfirms(link);
+    const entries = readFileSync(join(dir, 'runs', `${job.id}.jsonl`), 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    expect(entries.map((e) => e.status)).toEqual(['ok']);
+    expect(tasks.has(job.id)).toBe(false);
+    scheduler.stop();
+    dispatcher.close();
+    await jobs.close();
+  });
 });

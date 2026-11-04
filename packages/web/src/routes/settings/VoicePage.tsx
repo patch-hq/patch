@@ -81,17 +81,20 @@ const PHONE_DICTATION: readonly PhoneDictationEngine[] = [
   'device',
   'deepgram',
   'elevenlabs',
+  'host',
   'whisper',
 ];
 const COMPUTER_DICTATION: readonly ComputerDictationEngine[] = [
   'deepgram',
   'elevenlabs',
+  'host',
   'whisper',
 ];
 const DICTATION_LABELS: Record<PhoneDictationEngine, string> = {
   device: 'Built-in',
   deepgram: 'Deepgram',
   elevenlabs: 'ElevenLabs',
+  host: 'On this host',
   whisper: 'Whisper',
 };
 

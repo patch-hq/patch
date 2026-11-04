@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { generateUserKeypair, mintSurfaceCredential, mintDaemonKey } from '@patch/auth';
 import { WireTestClient } from '@patch/wire/test-client';
-import { CLOSE_SERVER_RESTARTING } from '@patch/wire';
+import { CLOSE_SERVER_RESTARTING, restartingVersion } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
 import { InProcessHostLink } from '../src/host-link.js';
@@ -1029,6 +1029,37 @@ describe('WS hub relay', () => {
     }
   });
 
+  it('auth.ok reports the bundle on disk now, not the one at boot (web shipped without a restart)', async () => {
+    const user = await generateUserKeypair();
+    const registry = Registry.load(mkdtempSync(join(tmpdir(), 'patch-wshub-ver2-')));
+    registry.bootstrapAccount({ keypair: user });
+    registry.upsertSurface({ surfaceId: 'srf-ver2', surfaceKind: 'web', label: 'b', issuedAt: 1 });
+    const jwt = await mintSurfaceCredential({
+      userPrivateKey: user.privateKey,
+      surfaceId: 'srf-ver2',
+      surfaceKind: 'web',
+      label: 'browser',
+    });
+    const webDir = mkdtempSync(join(tmpdir(), 'patch-wshub-web2-'));
+    const page = (hash: string): string =>
+      `<!doctype html><script type="module" src="/app/assets/index-${hash}.js"></script>`;
+    writeFileSync(join(webDir, 'index.html'), page('OLD'));
+    const h = await startServer({ registry, webDistDir: webDir });
+    try {
+      // A deploy rsyncs a new build under the running server; nobody has
+      // requested index.html through the wildcard route since.
+      writeFileSync(join(webDir, 'index.html'), page('NEW'));
+      const client = new WireTestClient({ url: h.url, auth: jwt });
+      await client.connect();
+      const ok = await client.waitFor('auth.ok');
+      expect(ok.webBundleHash).toBe('assets/index-NEW.js');
+      await client.close();
+    } finally {
+      await h.close();
+      rmSync(webDir, { recursive: true, force: true });
+    }
+  });
+
   it('closes connection (4400) on a malformed inbound frame', async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(14));
     const registry = Registry.load(dir);
@@ -1469,3 +1500,57 @@ async function connectExpectClose(
     });
   });
 }
+
+describe('going-away notice carries the version (spec/12)', () => {
+  it('sends the version it is restarting into, in the close reason of every socket', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'patch-ws-restart-'));
+    try {
+      const user = generateUserKeypair(() => new Uint8Array(32).fill(19));
+      const registry = Registry.load(dir);
+      registry.bootstrapAccount({ keypair: user });
+      registry.upsertSurface({ surfaceId: 'srf-rv', surfaceKind: 'web', label: 'b', issuedAt: 1 });
+      const jwt = await mintSurfaceCredential({
+        userPrivateKey: user.privateKey,
+        surfaceId: 'srf-rv',
+        surfaceKind: 'web',
+        label: 'browser',
+      });
+      const hostLink = new InProcessHostLink();
+      const built = await buildAll({
+        logger: false as never,
+        registry,
+        hostLink,
+        hostOfflineGraceMs: 0,
+        restartTarget: () => '9.9.9',
+      });
+      await built.app.listen({ port: 0, host: '127.0.0.1' });
+      const port = (built.app.server.address() as AddressInfo).port;
+      const WebSocketCtor = (await import('ws')).default;
+      const ws = new WebSocketCtor(`ws://127.0.0.1:${port}/ws`);
+      await new Promise<void>((resolve, reject) => {
+        ws.on('open', () => resolve());
+        ws.on('error', reject);
+      });
+      const closed = new Promise<{ code: number; reason: string }>((resolve) =>
+        ws.on('close', (code: number, reason: Buffer) =>
+          resolve({ code, reason: reason.toString('utf8') }),
+        ),
+      );
+      ws.send(
+        JSON.stringify({
+          type: 'hello',
+          clientType: 'surface-web',
+          clientVersion: '1.0.0',
+          auth: jwt,
+        }),
+      );
+      await new Promise<void>((resolve) => ws.once('message', () => resolve()));
+      await built.app.close();
+      const c = await closed;
+      expect(c.code).toBe(CLOSE_SERVER_RESTARTING);
+      expect(restartingVersion(c.reason)).toBe('9.9.9');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

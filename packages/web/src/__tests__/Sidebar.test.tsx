@@ -23,6 +23,7 @@ function stubOpener(opts: OpenAudioSessionOpts): Promise<AudioSession> {
     sessionId: 'sess-1',
     chatId: opts.chatId,
     setMuted: () => {},
+    finishDictation: () => {},
     isMuted: () => false,
     setSessionMode: () => {},
     speak: () => {},
@@ -2213,36 +2214,45 @@ describe('Sidebar', () => {
     expect(screen.queryByTestId('chat-row-att-work')).not.toBeInTheDocument();
   });
 
-  it('needs-attention mode queues rows oldest-waiting first, and a row that updates again sinks to the bottom instead of jumping to the top', () => {
-    // Todoist: "needs attention queue - updated things should be at the
-    // bottom of the queue".
-    useChatStore
-      .getState()
-      .hydrate([
-        rowFixture({ chatId: 'att-first', folder: '~/pa', lastUpdated: 100 }),
-        rowFixture({ chatId: 'att-second', folder: '~/pa', lastUpdated: 200 }),
-      ]);
+  it('needs-attention mode keeps the stable user-activity order, and an agent update does not move a row', () => {
+    useChatStore.getState().hydrate([
+      rowFixture({
+        chatId: 'att-first',
+        folder: '~/pa',
+        lastUserActivity: 200,
+        lastUpdated: 100,
+      }),
+      rowFixture({
+        chatId: 'att-second',
+        folder: '~/pa',
+        lastUserActivity: 100,
+        lastUpdated: 200,
+      }),
+    ]);
     renderInRouter();
     selectUnreadView();
     const rowIds = (): (string | null)[] =>
       Array.from(document.querySelectorAll('[data-testid^="chat-row-"]')).map((el) =>
         el.getAttribute('data-testid'),
       );
-    // Oldest-waiting ('att-first') queues ahead of the more recently updated one.
+    // Most recent user activity first.
     expect(rowIds().indexOf('chat-row-att-first')).toBeLessThan(
       rowIds().indexOf('chat-row-att-second'),
     );
 
-    // 'att-first' gets updated (host-owned lastUpdated bump, same as a real
-    // chat.state event) — still `done`, but now the most recently updated of
-    // the two. It must sink to the BACK of the queue, not jump to the front.
+    // An agent-driven update bumps lastUpdated only; the order must not change.
     act(() => {
-      useChatStore
-        .getState()
-        .mergeChats([rowFixture({ chatId: 'att-first', folder: '~/pa', lastUpdated: 300 })]);
+      useChatStore.getState().mergeChats([
+        rowFixture({
+          chatId: 'att-second',
+          folder: '~/pa',
+          lastUserActivity: 100,
+          lastUpdated: 300,
+        }),
+      ]);
     });
-    expect(rowIds().indexOf('chat-row-att-second')).toBeLessThan(
-      rowIds().indexOf('chat-row-att-first'),
+    expect(rowIds().indexOf('chat-row-att-first')).toBeLessThan(
+      rowIds().indexOf('chat-row-att-second'),
     );
   });
 

@@ -65,6 +65,22 @@ export const CLOSE_AUTH_FAILED = 4401;
  */
 export const CLOSE_SERVER_RESTARTING = 4503;
 
+/** Close reason for CLOSE_SERVER_RESTARTING; carries the version when it is known. */
+export function restartingReason(version?: string | null): string {
+  return version ? `server restarting into ${version}` : 'server restarting';
+}
+
+/** The version a going-away notice says the server is restarting into, or null. */
+export function restartingVersion(reason: string | undefined): string | null {
+  const m = /^server restarting into (\S+)$/.exec(reason ?? '');
+  return m ? m[1]! : null;
+}
+
+/** After a going-away notice, clients retry at this flat interval until the server is back. */
+export const RESTART_RETRY_MS = 250;
+/** How long a going-away notice stays 'Restarting' before the state falls back to Offline. */
+export const RESTART_WINDOW_MS = 90_000;
+
 // ---------------------------------------------------------------------------
 // Shared atoms
 
@@ -1336,6 +1352,11 @@ export const ChatStateEvent = z
      */
     lastUserActivity: z.number().int().optional(),
     /**
+     * ms epoch the chat was created. Drives the sidebar's Created sort. Optional:
+     * a host predating the field never sends it, and a surface keeps what it knew.
+     */
+    createdAt: z.number().int().nonnegative().optional(),
+    /**
      * The EFFECTIVE permission mode the NEXT turn will use — already resolved
      * by the host through chat override → host default → `auto`
      * (spec/02 § Permission mode). A surface renders this value directly; it
@@ -2278,6 +2299,13 @@ export const SharedSettings = z
     /** `null` = no explicit configuration. */
     harnessSkills: z.union([z.array(z.string().min(1)), z.literal('all')]).nullable(),
     harnessMemoryEnabled: z.boolean(),
+    /**
+     * The user's edits of Patch tools' descriptions (spec/06 § Tool prompts),
+     * keyed by tool name (`patch_spawn`). A tool absent here keeps the
+     * description it is built with; the host hands this to the MCP child at
+     * launch, so an edit reaches the next turn.
+     */
+    toolPromptOverrides: z.record(z.string().min(1), z.string().min(1)),
     accountStrategy: z.object({ claude: AccountStrategy, codex: AccountStrategy }).strict(),
   })
   .strict();
@@ -2357,6 +2385,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   questionExpiredPrompt: DEFAULT_QUESTION_EXPIRED_PROMPT,
   harnessSystemPrompt: '',
   harnessToolsPrompt: null,
+  toolPromptOverrides: {},
   harnessSkills: null,
   harnessMemoryEnabled: false,
   accountStrategy: { claude: 'priority', codex: 'priority' },
@@ -2807,6 +2836,8 @@ export const HostInfoEvent = z
     harnessToolsPrompt: z.string().optional(),
     /** The built-in guidance, so a surface can show it without shipping a copy. */
     harnessToolsPromptDefault: z.string().optional(),
+    /** Each Patch tool's built-in description, by tool name, so a surface can show what an edit replaces. */
+    toolPromptDefaults: z.record(z.string(), z.string()).optional(),
     /**
      * Per-host list of skill names to enable for every chat on this host
      * (`skills: string[] | 'all'` in the SDK query options). `'all'` enables
@@ -2856,6 +2887,22 @@ export const HostInfoEvent = z
       .object({
         onBattery: z.boolean(),
         percent: z.number().min(0).max(100),
+      })
+      .strict()
+      .optional(),
+    /**
+     * Why this host's link to the server last dropped, so a sleeping laptop
+     * can be told from a network or server fault. Absent until a drop happens.
+     */
+    lastDisconnect: z
+      .object({
+        /** ms-epoch the host noticed the drop. */
+        at: z.number().int(),
+        cause: z.enum(['sleep', 'server-restart', 'unexplained']),
+        /** Whole seconds the machine was asleep, when `cause` is `sleep`. */
+        sleptSeconds: z.number().int().nonnegative().optional(),
+        /** WebSocket close code; 1006 means no close frame arrived. */
+        code: z.number().int(),
       })
       .strict()
       .optional(),
@@ -3962,6 +4009,8 @@ export const MeetingAudioEvent = z
     audioBase64: z.string().min(1),
     /** Who was lit up as the active speaker during this system clip, when the shell could tell. */
     speakerName: z.string().min(1).optional(),
+    /** Which device is sending the audio, e.g. "Chrome on a Mac"; other surfaces name it as where the meeting is listening. */
+    device: z.string().min(1).optional(),
   })
   .strict();
 export type MeetingAudioEvent = z.infer<typeof MeetingAudioEvent>;
@@ -5760,9 +5809,30 @@ export const PatchStopEvent = z
     type: z.literal('patch.stop'),
     sourceChatId: z.string().min(1),
     targetChatId: z.string().min(1),
+    /**
+     * Present iff this is a cross-host relay the caller is waiting on (same
+     * convention as `patch.send_to`); absent is a same-host audit record.
+     */
+    requestId: z.string().min(1).optional(),
   })
   .strict();
 export type PatchStopEvent = z.infer<typeof PatchStopEvent>;
+
+/** The owning host's answer to a cross-host `patch_stop`. */
+export const PatchStopResponseEvent = z
+  .object({
+    type: z.literal('patch.stop.response'),
+    requestId: z.string().min(1),
+    sourceChatId: z.string().min(1),
+    targetChatId: z.string().min(1),
+    ok: z.boolean(),
+    error: z
+      .object({ code: ChatErrorCode, message: z.string().min(1) })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type PatchStopResponseEvent = z.infer<typeof PatchStopResponseEvent>;
 
 export const PatchJobCreateEvent = z
   .object({
@@ -8612,12 +8682,22 @@ export type PatchSecretsResponseEvent = z.infer<typeof PatchSecretsResponseEvent
  * so it is never held back for presence the way an ordinary push is.
  * `'sign-in'` is an AI account whose sign-in expired: it has no chat, and a
  * tap opens the accounts settings.
+ * `'host-health'` is a host struggling or offline: it has no chat, and a tap
+ * opens the hosts settings.
  * `'app-update'` is a release that needs a new phone APK (spec/11 § Mobile
  * updates): server-originated and push-only, so no surface or host ever decodes
  * it from the wire; a tap on the phone installs it.
  * Default (omitted) is treated as `'message'`.
  */
-export const NotifyKind = z.enum(['message', 'call', 'batch', 'ask', 'sign-in', 'app-update']);
+export const NotifyKind = z.enum([
+  'message',
+  'call',
+  'batch',
+  'ask',
+  'sign-in',
+  'app-update',
+  'host-health',
+]);
 export type NotifyKind = z.infer<typeof NotifyKind>;
 
 /**
@@ -9259,6 +9339,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchUsageReadRequestEvent,
   PatchUsageReadResponseEvent,
   PatchStopEvent,
+  PatchStopResponseEvent,
   PatchJobCreateEvent,
   PatchJobUpdateEvent,
   PatchJobDeleteEvent,
@@ -9563,6 +9644,7 @@ export const EVENT_SCHEMAS = {
   'patch.usage.read.request': PatchUsageReadRequestEvent,
   'patch.usage.read.response': PatchUsageReadResponseEvent,
   'patch.stop': PatchStopEvent,
+  'patch.stop.response': PatchStopResponseEvent,
   'patch.job_create': PatchJobCreateEvent,
   'patch.job_update': PatchJobUpdateEvent,
   'patch.job_delete': PatchJobDeleteEvent,

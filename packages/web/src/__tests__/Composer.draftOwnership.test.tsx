@@ -84,6 +84,18 @@ describe('Composer — per-chat draft ownership', () => {
   });
 
   describe('server-owned live sync (spec/14 § Composer)', () => {
+    it('text sent on another surface empties a FOCUSED composer straight away', () => {
+      useComposerDraftStore.getState().applyDraftUpdated('c1', 'synced draft', 1000);
+      renderComposer('c1', () => {});
+      const input = screen.getByTestId('composer-input');
+      expect(input).toHaveValue('synced draft');
+      fireEvent.focus(input);
+      act(() => {
+        useComposerDraftStore.getState().applyDraftCleared('c1', Date.now() + 10_000);
+      });
+      expect(input).toHaveValue('');
+    });
+
     it('a draft arriving from another surface appears live, with the composer never focused', () => {
       renderComposer('c1', () => {});
       expect(screen.getByTestId('composer-input')).toHaveValue('');

@@ -1,7 +1,8 @@
 // `patch chats *` — primitives over the host's chats resource.
 //
 // Routes:
-//   list      → GET /chats (uds) | GET /api/chats (rest)
+//   list      → GET /internal/chats (uds, account-wide)  | GET /api/chats (rest)
+//   peek/history <id> → GET /internal/peek|history/:id (uds only; any machine)
 //   get <id>  → GET /chats/:id (uds) | GET /api/chats/:id (rest)
 //   spawn     → POST /internal/spawn (uds) | POST /api/chats (rest)
 //   send-to   → POST /internal/send-to (uds) | POST /api/chats/:id/send-to (rest)
@@ -31,12 +32,23 @@ import { resolveChatId } from './chatId.js';
 
 interface ChatSummary {
   chatId: string;
+  hostId?: string;
   name?: string;
   folder?: string;
   status?: string;
   activity?: string;
   pinned?: boolean;
   lastUpdated?: number;
+}
+
+function requireCallerChat(cmd: string): string {
+  const id = process.env['PATCH_CHAT_ID'];
+  if (!id) {
+    throw new Error(
+      `${cmd} over the host socket needs PATCH_CHAT_ID (run it inside a chat), or use --remote with a CLI credential`,
+    );
+  }
+  return id;
 }
 
 export function registerChatsCommands(program: Command): void {
@@ -50,9 +62,14 @@ export function registerChatsCommands(program: Command): void {
     .action(async (opts: CommonOpts & { archived?: string }) => {
       await run(opts, async () => {
         const t = getTransport(opts);
-        const path = pickPath(t, '/chats', '/api/chats');
-        const qs =
-          opts.archived !== undefined ? `?archived=${encodeURIComponent(opts.archived)}` : '';
+        // Over the host socket the account-wide listing (every machine) is
+        // /internal/chats, which needs the calling chat; bare /chats is this
+        // machine only. REST (/api/chats) is account-wide already.
+        const params = new URLSearchParams();
+        if (opts.archived !== undefined) params.set('archived', opts.archived);
+        if (t.kind === 'uds') params.set('callerChatId', requireCallerChat('chats list'));
+        const path = pickPath(t, '/internal/chats', '/api/chats');
+        const qs = params.size > 0 ? `?${params.toString()}` : '';
         const res = await t.get<{ chats: ChatSummary[] }>(path + qs);
         if (opts.json) {
           emitJson(res);
@@ -66,9 +83,49 @@ export function registerChatsCommands(program: Command): void {
           // H1-d4: print the FULL chatId (a truncated id is ambiguous and
           // rejected downstream as 'chat not found').
           emitText(
-            `${c.chatId}  ${c.status ?? '?'}  ${c.activity ?? '?'}  ${c.folder ?? ''}  ${c.name ?? ''}`,
+            `${c.chatId}  ${c.status ?? '?'}  ${c.activity ?? '?'}  ${c.folder ?? ''}  ${c.name ?? ''}${c.hostId ? `  [${c.hostId.slice(0, 8)}]` : ''}`,
           );
         }
+      });
+    });
+
+  chats
+    .command('peek <id>')
+    .description("A chat's live state plus its recent events, on any machine (images stripped)")
+    .option('--limit <n>', 'Events to return (default 50, max 200)')
+    .option('--json', 'JSON output')
+    .action(async (rawId: string, opts: CommonOpts & { limit?: string }) => {
+      await run(opts, async () => {
+        const t = getTransport(opts);
+        if (t.kind !== 'uds')
+          throw new Error('chats peek needs the host socket (run it on a machine with a host)');
+        const params = new URLSearchParams({ callerChatId: requireCallerChat('chats peek') });
+        if (opts.limit !== undefined) params.set('limit', opts.limit);
+        const res = await t.get<unknown>(
+          `/internal/peek/${encodeURIComponent(rawId)}?${params.toString()}`,
+        );
+        emitJson(res);
+      });
+    });
+
+  chats
+    .command('history <id>')
+    .description("Paginated read of a chat's events, on any machine (images stripped)")
+    .option('--from-seq <n>', 'Event sequence number to start from')
+    .option('--limit <n>', 'Events to return (default 50, max 200)')
+    .option('--json', 'JSON output')
+    .action(async (rawId: string, opts: CommonOpts & { fromSeq?: string; limit?: string }) => {
+      await run(opts, async () => {
+        const t = getTransport(opts);
+        if (t.kind !== 'uds')
+          throw new Error('chats history needs the host socket (run it on a machine with a host)');
+        const params = new URLSearchParams({ callerChatId: requireCallerChat('chats history') });
+        if (opts.fromSeq !== undefined) params.set('fromSeq', opts.fromSeq);
+        if (opts.limit !== undefined) params.set('limit', opts.limit);
+        const res = await t.get<unknown>(
+          `/internal/history/${encodeURIComponent(rawId)}?${params.toString()}`,
+        );
+        emitJson(res);
       });
     });
 

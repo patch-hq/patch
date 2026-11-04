@@ -1298,6 +1298,7 @@ function claudeExecutablePath(): string | undefined {
 function machineOpts(
   opts: SdkRunOptions,
   durable?: DurableTurn,
+  onPid?: (pid: number | undefined) => void,
 ): {
   pathToClaudeCodeExecutable?: string;
   spawnClaudeCodeProcess: (spawnOpts: SpawnOptions) => SpawnedProcess;
@@ -1308,7 +1309,7 @@ function machineOpts(
   const spawnClaudeCodeProcess = durable
     ? durable.spawn
     : (spawnOpts: SpawnOptions): SpawnedProcess =>
-        spawnClaudeInGroup(spawnOpts, opts.onReapRefused);
+        spawnClaudeInGroup(spawnOpts, opts.onReapRefused, onPid);
   return exe === undefined
     ? { spawnClaudeCodeProcess }
     : { pathToClaudeCodeExecutable: exe, spawnClaudeCodeProcess };

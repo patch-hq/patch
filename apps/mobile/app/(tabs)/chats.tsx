@@ -500,6 +500,14 @@ interface Open {
 }
 
 /** Folders by path. A bare `.sort()` would compare each `[path, rows]` pair as the string "path,[object Object]", letting the comma outrank a space. */
+/** The user's own last activity, newest first; chatId breaks ties so equal keys never fall back to arrival order. */
+function byRecentActivity(a: ChatRow, b: ChatRow): number {
+  return (
+    b.lastUserActivity - a.lastUserActivity ||
+    (a.chatId < b.chatId ? -1 : a.chatId > b.chatId ? 1 : 0)
+  );
+}
+
 function byFolderPath(a: [string, ChatRow[]], b: [string, ChatRow[]]): number {
   return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0;
 }
@@ -574,7 +582,7 @@ function buildSections(
 
   const pinned = userActive
     .filter((c) => c.pinned)
-    .sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0));
+    .sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0) || (a.chatId < b.chatId ? -1 : 1));
 
   const folders = new Map<string, ChatRow[]>();
   for (const c of userActive) {
@@ -604,6 +612,14 @@ function buildSections(
       for (const r of shown) out.push({ kind: 'folder-row', row: r });
     }
     if (!anyRows) out.push({ kind: 'attention-empty' });
+    // Archived stays reachable under the Unread filter: it is an archive, not
+    // part of the "what needs me" queue, but it is never hidden.
+    out.push({ kind: 'header', label: 'Archived', toggle: 'archived', count: counts.archived });
+    if (open.archived) {
+      for (const r of [...userArchived].sort((a, b) => b.lastUpdated - a.lastUpdated)) {
+        out.push({ kind: 'archived-row', row: r });
+      }
+    }
     return out;
   }
 
@@ -619,7 +635,7 @@ function buildSections(
     // (when they last sent a message, or chat creation), never `lastUpdated`:
     // an agent reply, a status change, a job tick or a finished turn must
     // not move a row.
-    const shown = matchPinnedOrFolder(rows.sort((a, b) => b.lastUserActivity - a.lastUserActivity));
+    const shown = matchPinnedOrFolder([...rows].sort(byRecentActivity));
     if (shown.length === 0) continue;
     folderRows += shown.length;
     out.push({

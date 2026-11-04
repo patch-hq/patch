@@ -3,6 +3,9 @@ import { render, screen, fireEvent, cleanup, act } from '@testing-library/react'
 import { MemoryRouter, useNavigate } from 'react-router-dom';
 import type { JSX } from 'react';
 import { ToolsPanel } from '../components/ToolsPanel.js';
+import { api } from '../api/rest.js';
+import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
+import { usePresenceStore, type HostPresence } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useToolsStore, loadDisabledFromStorage } from '../stores/toolsStore.js';
 import { useBatchStore } from '../stores/batchStore.js';
@@ -458,5 +461,75 @@ describe('ToolsPanel — closes when the chat it belongs to leaves the screen', 
     act(() => useUiStore.getState().setToolsPanelChatId('c9'));
     expect(screen.getByTestId('tools-panel')).toBeInTheDocument();
     expect(useUiStore.getState().toolsPanelChatId).toBe('c9');
+  });
+});
+
+// spec/06 § Tool prompts — the description the model reads for each Patch tool
+// is editable here; the edit is a shared setting.
+describe('ToolsPanel — editing a Patch tool prompt', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    useToolsStore.getState()._reset();
+    useUiStore.setState({ toolsPanelChatId: 'c1' });
+    usePreferencesStore.setState({ preferences: DEFAULT_PREFERENCES });
+    usePresenceStore.setState({
+      hosts: {
+        h1: {
+          host: { toolPromptDefaults: { patch_peek: 'Built-in peek text.' } },
+        } as unknown as HostPresence,
+      },
+    });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    usePresenceStore.setState({ hosts: {} });
+  });
+
+  it('saves an edit as a shared setting and shows it as edited', async () => {
+    const spy = vi.spyOn(api, 'setPreferences').mockImplementation(
+      async (patch) =>
+        ({
+          preferences: { ...DEFAULT_PREFERENCES, ...patch },
+        }) as never,
+    );
+    renderPanel();
+    fireEvent.click(screen.getByTestId('tool-prompt-edit-patch_peek'));
+    const input = screen.getByTestId('tool-prompt-input-patch_peek') as HTMLTextAreaElement;
+    expect(input.value).toBe('Built-in peek text.');
+    fireEvent.change(input, { target: { value: 'My peek text.' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('tool-prompt-save-patch_peek'));
+    });
+    expect(spy).toHaveBeenCalledWith({ toolPromptOverrides: { patch_peek: 'My peek text.' } });
+    expect(screen.getByTestId('tool-prompt-edited-patch_peek')).toBeInTheDocument();
+  });
+
+  it('opens an existing edit, and Reset removes it', async () => {
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, toolPromptOverrides: { patch_peek: 'Old edit.' } },
+    });
+    const spy = vi.spyOn(api, 'setPreferences').mockImplementation(
+      async (patch) =>
+        ({
+          preferences: { ...DEFAULT_PREFERENCES, ...patch },
+        }) as never,
+    );
+    renderPanel();
+    fireEvent.click(screen.getByTestId('tool-prompt-edit-patch_peek'));
+    expect((screen.getByTestId('tool-prompt-input-patch_peek') as HTMLTextAreaElement).value).toBe(
+      'Old edit.',
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('tool-prompt-reset-patch_peek'));
+    });
+    expect(spy).toHaveBeenCalledWith({ toolPromptOverrides: {} });
+    expect(screen.queryByTestId('tool-prompt-edited-patch_peek')).not.toBeInTheDocument();
+  });
+
+  it('offers no editor on a built-in tool, nor when no host has reported the text', () => {
+    renderPanel();
+    expect(screen.queryByTestId('tool-prompt-edit-Bash')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('tool-prompt-edit-patch_history')).not.toBeInTheDocument();
   });
 });

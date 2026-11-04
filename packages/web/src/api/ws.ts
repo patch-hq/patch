@@ -7,7 +7,15 @@
 //   - exposes `send(event)` for outbound (chat.input, chat.permission_response,
 //     chat.archive_request, chat.pin_request, chat.call_response, etc.)
 
-import { CLOSE_AUTH_FAILED, decodeCompat, type WireEvent } from '@patch/wire';
+import {
+  CLOSE_AUTH_FAILED,
+  CLOSE_SERVER_RESTARTING,
+  RESTART_RETRY_MS,
+  RESTART_WINDOW_MS,
+  decodeCompat,
+  restartingVersion,
+  type WireEvent,
+} from '@patch/wire';
 import { loadCredential } from '../lib/credential.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { saveEvents } from '../lib/transcriptCache.js';
@@ -125,6 +133,8 @@ export const STORE_BATCH_MS = 16;
 export class PatchWs {
   private ws: WebSocket | null = null;
   private backoff = INITIAL_BACKOFF_MS;
+  /** Until when redials stay fast after a going-away notice (0 = not restarting). */
+  private restartingUntil = 0;
   private reconnectTimer: number | null = null;
   private heartbeatTimer: number | null = null;
   /** spec/09 § Presence heuristic — `surface.input` reports, hidden or not. */
@@ -479,6 +489,7 @@ export class PatchWs {
 
     ws.addEventListener('open', () => {
       this.backoff = INITIAL_BACKOFF_MS;
+      this.restartingUntil = 0;
       this.lastInboundAt = Date.now();
       // hello with bearer (per spec/10 — auth is on the hello frame, not
       // a query param, since browsers can't set custom headers on WS).
@@ -597,6 +608,16 @@ export class PatchWs {
         return;
       }
       usePresenceStore.getState().setConnection('reconnecting');
+      // The server said it is going away and when it is back: dial at once
+      // rather than waiting out a backoff, and show 'Restarting' live.
+      if (close.code === CLOSE_SERVER_RESTARTING) {
+        usePresenceStore
+          .getState()
+          .setRestarting({ version: restartingVersion(close.reason), at: Date.now() });
+        this.restartingUntil = Date.now() + RESTART_WINDOW_MS;
+        this.openOnce();
+        return;
+      }
       this.scheduleReconnect();
     });
 
@@ -650,8 +671,15 @@ export class PatchWs {
 
   private scheduleReconnect(): void {
     if (this.closed) return;
-    const delay = this.backoff;
-    this.backoff = Math.min(this.backoff * 2, MAX_BACKOFF_MS);
+    let delay = this.backoff;
+    if (this.restartingUntil > Date.now()) {
+      delay = RESTART_RETRY_MS;
+    } else {
+      this.restartingUntil = 0;
+      // The restart took longer than announced: it is an outage now, not a restart.
+      usePresenceStore.getState().setRestarting(null);
+      this.backoff = Math.min(this.backoff * 2, MAX_BACKOFF_MS);
+    }
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null;
       this.openOnce();

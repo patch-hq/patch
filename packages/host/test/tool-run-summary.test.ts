@@ -280,6 +280,7 @@ describe('toolRunGen', () => {
 
   it('throws when no account can answer, instead of returning nothing', async () => {
     const gen = makeToolRunSummarizer({
+      smallJobModels: ['set-model', 'failover-model'],
       sdkBackend: createMockSdkBackend(),
       runOnAccountWithCredit: async () => null,
     });
@@ -292,6 +293,7 @@ describe('toolRunGen', () => {
     const sdk = createMockSdkBackend();
     sdk.enqueue([{ type: 'assistant', content: 'Searched the web for Haiku pricing' }]);
     const gen = makeToolRunSummarizer({
+      smallJobModels: ['set-model', 'failover-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: async (_label, run) => await run('tok'),
     });

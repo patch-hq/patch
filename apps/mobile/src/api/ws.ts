@@ -8,10 +8,25 @@
 import { useNotificationsStore } from '../stores/notificationsStore';
 import { useViewPositionStore } from '../stores/viewPositionStore';
 import { AppState, type AppStateStatus, type NativeEventSubscription } from 'react-native';
-import { CLOSE_AUTH_FAILED, decodeCompat, type WireEvent } from '@patch/wire';
+import {
+  CLOSE_AUTH_FAILED,
+  CLOSE_SERVER_RESTARTING,
+  RESTART_RETRY_MS,
+  RESTART_WINDOW_MS,
+  decodeCompat,
+  restartingVersion,
+  type WireEvent,
+} from '@patch/wire';
 import { clearCredential, loadCredential } from '../lib/credential';
 import { useChatStore } from '../stores/chatStore';
-import { saveEvents, saveResolution } from '../lib/transcriptCache';
+import {
+  heldCursor,
+  markSynced,
+  needsOfflineSync,
+  pruneTranscripts,
+  saveEvents,
+  saveResolution,
+} from '../lib/transcriptCache';
 import { useFolderStore } from '../stores/folderStore';
 import { useHostRefusalStore } from '../stores/hostRefusalStore';
 import { useSettingsStore } from '../stores/settingsStore';
@@ -54,6 +69,7 @@ export const HEARTBEAT_INTERVAL_MS = 10_000;
  * dozen commits instead of 500+, short enough that a single live message still
  * lands within the same frame it arrived in.
  */
+const PREFETCH_TIMEOUT_MS = 30_000;
 export const STORE_BATCH_MS = 16;
 /**
  * How long the link must be down, with the app in the FOREGROUND, before the
@@ -75,6 +91,8 @@ type TimerHandle = ReturnType<typeof setTimeout>;
 export class PatchWs {
   private ws: WebSocket | null = null;
   private backoff = INITIAL_BACKOFF_MS;
+  /** Until when redials stay fast after a going-away notice (0 = not restarting). */
+  private restartingUntil = 0;
   private reconnectTimer: TimerHandle | null = null;
   private heartbeatTimer: TimerHandle | null = null;
   /** Running while a foreground outage is inside its grace period. */
@@ -96,6 +114,14 @@ export class PatchWs {
   private readonly lastReplayCursor = new Map<string, number>();
   /** True once this client has been greeted; later greetings are reconnects. */
   private greeted = false;
+  /**
+   * Offline reading (spec/12 § Offline reading): chats whose transcript is
+   * being fetched straight into the on-device cache, one at a time. A chat
+   * here is NOT painted into the store — nobody has it open.
+   */
+  private prefetchQueue: Array<{ chatId: string; lastUpdated: number }> = [];
+  private prefetching: { chatId: string; lastUpdated: number } | null = null;
+  private prefetchTimer: TimerHandle | null = null;
 
   constructor(url: string) {
     this.url = url;
@@ -208,6 +234,10 @@ export class PatchWs {
    */
   requestReplay(chatId: string, opts?: { force?: boolean }): void {
     if (!this.ws || this.ws.readyState !== 1) return;
+    // Someone opening a chat takes it over from the background fetch: the
+    // answer now belongs on screen as well as in the cache.
+    if (this.prefetching?.chatId === chatId) this.endPrefetch(false);
+    this.prefetchQueue = this.prefetchQueue.filter((q) => q.chatId !== chatId);
     // `force` drops the per-connection guard: a cached track the host
     // disagrees with is cleared and asked for again from -1, which is the
     // same cursor the first ask used and would otherwise be discarded as a
@@ -218,6 +248,63 @@ export class PatchWs {
     this.lastReplayCursor.set(chatId, fromSeq);
     this.ws.send(JSON.stringify({ type: 'chat.replay', chatId, fromSeq, batch: true }));
     useChatStore.getState().setReplaying(chatId, true);
+  }
+
+  /**
+   * Bring every chat's transcript on this phone level with the roster, so any
+   * chat opens offline (spec/12 § Offline reading). Driven by the roster —
+   * never a timer: a chat is fetched when its `lastUpdated` differs from the
+   * one its held copy was last synced to. One chat in flight at a time, so a
+   * phone never receives a whole library as one burst.
+   */
+  syncTranscripts(): void {
+    const { chats, activeChatId } = useChatStore.getState();
+    pruneTranscripts(new Set(Object.keys(chats)));
+    const hosts = usePresenceStore.getState().hosts;
+    const queued = new Set(this.prefetchQueue.map((q) => q.chatId));
+    for (const row of Object.values(chats)) {
+      if (row.chatId === activeChatId || queued.has(row.chatId)) continue;
+      if (this.prefetching?.chatId === row.chatId) continue;
+      // A host that is down cannot answer; its chats are picked up on the
+      // next roster refresh after it returns.
+      if (hosts[row.hostId]?.online === false) continue;
+      if (!needsOfflineSync(row.chatId, row.lastUpdated)) continue;
+      this.prefetchQueue.push({ chatId: row.chatId, lastUpdated: row.lastUpdated });
+    }
+    this.pumpPrefetch();
+  }
+
+  private pumpPrefetch(): void {
+    if (this.prefetching !== null) return;
+    if (!this.ws || this.ws.readyState !== 1) return;
+    const next = this.prefetchQueue.shift();
+    if (next === undefined) return;
+    this.prefetching = next;
+    this.ws.send(
+      JSON.stringify({
+        type: 'chat.replay',
+        chatId: next.chatId,
+        fromSeq: heldCursor(next.chatId),
+        batch: true,
+      }),
+    );
+    // A host that never answers must be heard about, not waited on for ever.
+    this.prefetchTimer = setTimeout(() => {
+      const stuck = this.prefetching;
+      this.endPrefetch(false);
+      useUiStore
+        .getState()
+        .pushError(`offline copy of chat ${stuck?.chatId ?? ''} timed out — will retry`);
+    }, PREFETCH_TIMEOUT_MS);
+  }
+
+  private endPrefetch(done: boolean): void {
+    const finished = this.prefetching;
+    this.prefetching = null;
+    if (this.prefetchTimer !== null) clearTimeout(this.prefetchTimer);
+    this.prefetchTimer = null;
+    if (done && finished) markSynced(finished.chatId, finished.lastUpdated);
+    this.pumpPrefetch();
   }
 
   private handleAppState = (next: AppStateStatus): void => {
@@ -389,6 +476,13 @@ export class PatchWs {
         this.ws = null;
         this.stopHeartbeat();
         useChatStore.getState().clearReplaying();
+        // The queue is rebuilt from the roster on the next connect.
+        this.prefetchQueue = [];
+        if (this.prefetching !== null) {
+          this.prefetching = null;
+          if (this.prefetchTimer !== null) clearTimeout(this.prefetchTimer);
+          this.prefetchTimer = null;
+        }
       }
       // Record WHY, before the early return — a close during teardown is still
       // the last thing that happened to this socket (spec/12 § Connection
@@ -417,6 +511,20 @@ export class PatchWs {
       // back to `unknown` so the daemon-offline banner does not linger on top
       // of the WS-reconnecting banner (the two states are distinct).
       usePresenceStore.getState().setHost('unknown');
+      // The server said it is going away: dial at once rather than waiting out
+      // a backoff, and show 'Restarting' live (not after the outage grace).
+      if (ev?.code === CLOSE_SERVER_RESTARTING) {
+        usePresenceStore
+          .getState()
+          .setRestarting({ version: restartingVersion(ev.reason), at: Date.now() });
+        this.restartingUntil = Date.now() + RESTART_WINDOW_MS;
+        try {
+          this.openOnce();
+        } catch (err) {
+          useUiStore.getState().pushError(`ws reopen failed: ${(err as Error).message}`);
+        }
+        return;
+      }
       this.scheduleReconnect();
     };
 
@@ -531,8 +639,15 @@ export class PatchWs {
 
   private scheduleReconnect(): void {
     if (this.closed) return;
-    const delay = this.backoff;
-    this.backoff = Math.min(this.backoff * 2, MAX_BACKOFF_MS);
+    let delay = this.backoff;
+    if (this.restartingUntil > Date.now()) {
+      delay = RESTART_RETRY_MS;
+    } else {
+      this.restartingUntil = 0;
+      // The restart took longer than announced: it is an outage now, not a restart.
+      usePresenceStore.getState().setRestarting(null);
+      this.backoff = Math.min(this.backoff * 2, MAX_BACKOFF_MS);
+    }
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       try {
@@ -551,6 +666,7 @@ export class PatchWs {
     }
     if (event.type === 'auth.ok') {
       this.backoff = INITIAL_BACKOFF_MS;
+      this.restartingUntil = 0;
       usePresenceStore.getState().setIdentity(event.accountId, event.surfaceId);
       // The greeting carries EVERY registered host with its presence and the
       // server's cached reports, so the phone's Hosts list is complete from the
@@ -565,6 +681,7 @@ export class PatchWs {
       // renamed, deleted and re-ordered chats need the roster again. The
       // first greeting is covered by bootstrap's cold-start fetch.
       if (this.greeted) void refreshRoster();
+      else this.syncTranscripts();
       this.greeted = true;
       return;
     }
@@ -815,6 +932,12 @@ export class PatchWs {
     // — same events, same order, same reducer — and commit at once: there is
     // nothing still to come that it could coalesce with, and asking for a
     // batch was exactly so the transcript paints once instead of arriving.
+    if (event.type === 'chat.replay_batch' && this.prefetching?.chatId === event.chatId) {
+      // Background fetch for the offline cache: straight to disk, not the store.
+      this.cacheOnly(event.events as WireEvent[]);
+      if (event.done) this.endPrefetch(true);
+      return;
+    }
     if (event.type === 'chat.replay_batch') {
       // Each inner event goes back through dispatch() so it gets the same
       // special-case side effects as a live one (diff rail, voice banner,
@@ -847,6 +970,27 @@ export class PatchWs {
       this.storeFlushTimer = null;
       this.flushStoreQueue();
     }, STORE_BATCH_MS);
+  }
+
+  private cacheOnly(events: WireEvent[]): void {
+    const byChat = new Map<string, unknown[]>();
+    for (const e of events) {
+      const chatId = (e as { chatId?: unknown }).chatId;
+      if (typeof chatId !== 'string') continue;
+      const list = byChat.get(chatId);
+      if (list) list.push(e);
+      else byChat.set(chatId, [e]);
+    }
+    for (const [chatId, list] of byChat) saveEvents(chatId, list);
+    for (const e of events) {
+      if (e.type !== 'chat.permission_response' || e.chatId === undefined) continue;
+      saveResolution(
+        e.chatId,
+        e.requestId,
+        e.decision === 'deny' || e.approve === false ? 'deny' : 'approve',
+        e.answers,
+      );
+    }
   }
 
   /** Commit everything gathered so far. Safe to call with an empty queue. */

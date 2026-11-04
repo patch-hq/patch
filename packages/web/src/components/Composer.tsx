@@ -74,6 +74,7 @@ import { ImageLightbox } from './ImageLightbox.js';
 import { SkillPreviewPanel } from './SkillPreviewPanel.js';
 import type { AttachmentRef, PermissionMode } from '@patch/wire';
 import {
+  backendIdForModel,
   permissionModesFor,
   providerBuiltinCommands,
   providerDescriptor,
@@ -81,6 +82,7 @@ import {
   SPECIAL_THREAD_IDS,
 } from '@patch/wire';
 import { voiceKeyHostStatus } from '@patch/wire/audio';
+import { hostOutage } from '../lib/usage.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { providerConnectedForModel, usePreferencesStore } from '../stores/preferencesStore.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -126,6 +128,7 @@ import {
   spliceCompletion,
 } from '../lib/skillToken.js';
 import { GOAL_COMMAND_NAME, GOAL_COMMAND_DESCRIPTION } from '../lib/goalCommand.js';
+import { JOB_COMMAND_NAME, JOB_COMMAND_DESCRIPTION } from '../lib/jobCommand.js';
 import { CLEAR_COMMAND_NAME, CLEAR_COMMAND_DESCRIPTION } from '../lib/clearCommand.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import { isSubmitChord } from '../lib/submitChord.js';
@@ -563,7 +566,34 @@ export const Composer = forwardRef(function Composer(
   // exception: spawning it has to validate the folder on a live link, so it
   // is refused up front instead of queued (spec/12 § Host-offline UX).
   const isNewChat = chatId === 'new';
-  const sendBlocked = (offline && isNewChat) || claudeDisconnected;
+  // No credit left on any account that could run this chat: the turn would
+  // only park, so the send is refused up front and says why. Same certainty
+  // rule as the out-of-usage banner (an unread account is not "spent"), and
+  // the same per-host account set it counts.
+  const hostAccounts = usePresenceStore((s) =>
+    hostId ? (s.hosts[hostId]?.accounts[backendIdForModel(accountModel)] ?? null) : null,
+  );
+  const [usageNow, setUsageNow] = useState(() => Date.now());
+  const outage = hostOutage(
+    (hostAccounts?.accounts ?? []).filter(
+      (a) =>
+        !accountModel?.startsWith('openai/') ||
+        (a.kind ?? 'chatgpt') === (accountModel.startsWith('openai/api/') ? 'apiKey' : 'chatgpt'),
+    ),
+    usageNow,
+  );
+  const outOfUsage = !claudeDisconnected && outage !== null;
+  const outageResetsAt = outage?.soonest?.resetsAt;
+  useEffect(() => {
+    if (outageResetsAt === undefined) return;
+    // Re-evaluate the moment the pool refills, so Send comes back by itself.
+    const id = window.setTimeout(
+      () => setUsageNow(Date.now()),
+      Math.max(0, outageResetsAt - Date.now()) + 1000,
+    );
+    return () => window.clearTimeout(id);
+  }, [outageResetsAt]);
+  const sendBlocked = (offline && isNewChat) || claudeDisconnected || outOfUsage;
   // The EFFECTIVE approval mode the next turn will use, as the host resolved
   // it and put it on `chat.state` — never re-derived here, since a surface does
   // not hold the host default this was resolved against. `undefined` means the
@@ -680,7 +710,17 @@ export const Composer = forwardRef(function Composer(
     if (seededOnMount.current) seededOnMount.current = false;
     else apply();
     let last = useComposerDraftStore.getState().drafts[chatId] ?? '';
+    let lastClears = useComposerDraftStore.getState().remoteClears[chatId] ?? 0;
     return useComposerDraftStore.subscribe((st) => {
+      // Sent/emptied on another surface while this composer has focus: the
+      // store applied the clear through the focus guard, so empty to match.
+      const clears = st.remoteClears[chatId] ?? 0;
+      if (clears !== lastClears) {
+        lastClears = clears;
+        last = st.drafts[chatId] ?? '';
+        setValue('');
+        return;
+      }
       const next = st.drafts[chatId] ?? '';
       if (next === last) return;
       last = next;
@@ -877,6 +917,7 @@ export const Composer = forwardRef(function Composer(
   const BUILTIN_COMMANDS: { name: string; description: string }[] = [
     { name: CLEAR_COMMAND_NAME, description: CLEAR_COMMAND_DESCRIPTION },
     { name: GOAL_COMMAND_NAME, description: GOAL_COMMAND_DESCRIPTION },
+    { name: JOB_COMMAND_NAME, description: JOB_COMMAND_DESCRIPTION },
   ];
   // Every name a chip can legitimately be — a skill from the folder, or a
   // built-in — used both to recognise a completed chip anywhere in the text
@@ -1435,8 +1476,16 @@ export const Composer = forwardRef(function Composer(
     // The preview's job is over the moment the gesture ends: from here the
     // authoritative transcript is the only text that may reach the input. The
     // last interim words stay drawn until it lands (cleared in `finally`).
-    stopPreview();
+    // On a streaming engine the live session IS the transcript, so it stays
+    // open until the host has answered the finish below.
+    const computerEngine =
+      usePreferencesStore.getState().preferences.voiceConfig.dictation.computer;
+    const streaming = computerEngine === 'deepgram' || computerEngine === 'host';
+    const livePreview = streaming ? previewRef.current : null;
+    if (livePreview) previewRef.current = null;
+    else stopPreview();
     if (!rec) {
+      livePreview?.stop();
       setLivePartial('');
       setMicState('idle');
       pushError('voice: nothing recorded (released too quickly?). Hold a beat longer.');
@@ -1445,8 +1494,20 @@ export const Composer = forwardRef(function Composer(
     setMicState('transcribing');
     try {
       const clip = await rec.stop();
-      const doTranscribe = transcribeClip ?? ((c: Blob) => api.voiceTranscribe(c));
-      const { transcript } = await doTranscribe(clip);
+      let transcript: string;
+      if (streaming) {
+        // NO FALLBACK: a stream that is gone fails the dictation; the clip is
+        // not read by another engine.
+        if (!livePreview) throw new Error('the live dictation never opened');
+        try {
+          transcript = await livePreview.finish();
+        } finally {
+          livePreview.stop();
+        }
+      } else {
+        const doTranscribe = transcribeClip ?? ((c: Blob) => api.voiceTranscribe(c));
+        ({ transcript } = await doTranscribe(clip));
+      }
       const t = transcript.trim();
       const cur = valueRef.current;
       const next = t && cur.trim().length > 0 ? `${cur.trimEnd()} ${t}` : t || cur;
@@ -2785,11 +2846,13 @@ export const Composer = forwardRef(function Composer(
                 /* `↵` is the primary key and `⌘↵` also works — name the primary one
                  (Tom, `patch/todo.md` — "nothing tells you enter sends"). */
                 title={
-                  editingTurn
-                    ? shortcutTitle('Save edit', '↵')
-                    : running
-                      ? shortcutTitle('Queue', '↵')
-                      : shortcutTitle('Send', '↵')
+                  outOfUsage
+                    ? 'Out of usage — can’t send until it resets'
+                    : editingTurn
+                      ? shortcutTitle('Save edit', '↵')
+                      : running
+                        ? shortcutTitle('Queue', '↵')
+                        : shortcutTitle('Send', '↵')
                 }
                 disabled={sendBlocked || resolving || !hasContent}
                 onContextMenu={sendMenu.openAt}

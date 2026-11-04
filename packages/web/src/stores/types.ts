@@ -47,6 +47,8 @@ export interface ChatRow {
    * finished turn never moves a row.
    */
   lastUserActivity: number;
+  /** ms epoch the chat was created; absent until the host reports it. The Created sort key. */
+  createdAt?: number;
   /** Set when this chat is awaiting a permission decision. */
   awaitingPermission: boolean;
   /**

@@ -145,17 +145,19 @@ describe('ChatRoute — background task bar', () => {
   it('gives the one running task its own bar, named, once the live count says something is running', async () => {
     await renderWithTasks(1, [task()]);
     const bar = screen.getByTestId('background-task-bar');
-    expect(bar.dataset['collapsed']).toBe('false');
     expect(screen.getAllByTestId('background-task-bar-task')).toHaveLength(1);
+    expect(bar.textContent).toContain('Task');
     expect(bar.textContent).toContain('Build web package to compile CSS');
-    expect(screen.getByTestId('background-task-bar-count').textContent).toBe('1 background task');
+    // One item is a plain row: no pill, no separate title line.
+    expect(screen.queryByTestId('background-task-bar-toggle')).toBeNull();
+    expect(bar.textContent).not.toContain('background task');
   });
 
   it('shows the last output line of a running task as its progress', async () => {
     const t = Date.now();
     await renderWithTasks(1, [task({ startedAt: t, lastLine: 'step 3 of 9', lastOutputAt: t })]);
     const p = screen.getByTestId('background-task-bar-progress');
-    expect(p.textContent).toBe('step 3 of 9');
+    expect(p.textContent).toBe('· step 3 of 9');
     expect(p.dataset['quiet']).toBe('false');
   });
 
@@ -173,7 +175,7 @@ describe('ChatRoute — background task bar', () => {
       task({ startedAt: t, checkInSec: 3600, nextCheckInAt: t + 3_600_000 }),
     ]);
     const label = screen.getByTestId('background-task-bar-checkin');
-    expect(label.textContent).toMatch(/^next check-in at \d{2}:\d{2}$/);
+    expect(label.textContent).toMatch(/^check-in \d{2}:\d{2} · $/);
     fireEvent.click(label);
     const input = screen.getByTestId('background-task-bar-checkin-input') as HTMLInputElement;
     expect(input.value).toBe('60');
@@ -189,11 +191,11 @@ describe('ChatRoute — background task bar', () => {
     // Never resolves within this test — the bar's EXISTENCE must not wait on it.
     watchListApi.mockReturnValue(new Promise(() => {}));
     renderChat();
-    act(() => setLiveCount(1));
-    expect(screen.getByTestId('background-task-bar-count').textContent).toBe('1 background task');
+    act(() => setLiveCount(3));
+    expect(screen.getByTestId('background-task-bar-count').textContent).toBe('3 running');
   });
 
-  it('draws one bar per running task, newest first', async () => {
+  it('draws one row per running task, newest first, under the pill', async () => {
     await renderWithTasks(2, [
       task({ taskId: 'a', description: 'older', startedAt: 1 }),
       task({ taskId: 'b', description: 'newer', startedAt: 2 }),
@@ -204,26 +206,27 @@ describe('ChatRoute — background task bar', () => {
     expect(rows[1]!.textContent).toContain('older');
   });
 
-  it('every running row carries a spinner glyph', async () => {
+  it('the group row carries a spinner glyph', async () => {
     await renderWithTasks(2, [
       task({ taskId: 'a', startedAt: 1 }),
       task({ taskId: 'b', startedAt: 2 }),
     ]);
     expect(
-      screen.getByTestId('background-task-bar').querySelectorAll('.background-task-bar-spinner'),
-    ).toHaveLength(2);
+      screen.getByTestId('background-task-bar').querySelectorAll('.status-spinner'),
+    ).toHaveLength(1);
   });
 
-  it('collapses the stack to one counted summary line, and back', async () => {
+  it('folds the group to one counted row naming the tasks, and back', async () => {
     await renderWithTasks(2, [
-      task({ taskId: 'a', startedAt: 1 }),
-      task({ taskId: 'b', startedAt: 2 }),
+      task({ taskId: 'a', description: 'older', startedAt: 1 }),
+      task({ taskId: 'b', description: 'newer', startedAt: 2 }),
     ]);
     const toggle = screen.getByTestId('background-task-bar-toggle');
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     fireEvent.click(toggle);
     expect(screen.queryAllByTestId('background-task-bar-task')).toHaveLength(0);
     expect(screen.getByTestId('background-task-bar').dataset['collapsed']).toBe('true');
+    expect(screen.getByTestId('background-task-bar').textContent).toContain('newer, older');
     fireEvent.click(screen.getByTestId('background-task-bar-toggle'));
     expect(screen.getAllByTestId('background-task-bar-task')).toHaveLength(2);
   });
@@ -264,42 +267,11 @@ describe('ChatRoute — background task bar', () => {
     });
   });
 
-  describe('command preview', () => {
-    it('truncates a long command and expands it on click', async () => {
-      const long =
-        'pnpm --filter @patch/web build --with-a-very-long-flag-that-runs-past-the-preview-length';
-      await renderWithTasks(1, [task({ command: long })]);
-      const preview = screen.getByTestId('background-task-bar-command');
-      expect(preview.textContent).not.toBe(long);
-      expect(preview.textContent!.length).toBeLessThan(long.length);
-      fireEvent.click(preview);
-      expect(screen.getByTestId('background-task-bar-command').textContent).toBe(long);
-    });
-
-    it('never cuts the preview through the middle of an emoji', async () => {
-      const cmd = `${'a'.repeat(47)}😀${'b'.repeat(20)}`;
-      await renderWithTasks(1, [task({ command: cmd })]);
-      expect(screen.getByTestId('background-task-bar-command').textContent).toBe(
-        `${'a'.repeat(47)}😀…`,
-      );
-    });
-
-    it('a command short in characters but long in UTF-16 units is shown in full, no ellipsis', async () => {
-      const cmd = '😀'.repeat(30);
-      await renderWithTasks(1, [task({ command: cmd })]);
-      expect(screen.getByTestId('background-task-bar-command').textContent).toBe(cmd);
-    });
-
-    it('clicking the command preview does not also open the terminal', async () => {
-      await renderWithTasks(1, [task()]);
-      fireEvent.click(screen.getByTestId('background-task-bar-command'));
-      expect(useLayoutStore.getState().findTab({ kind: 'terminal', chatId: 'c1' })).toBeNull();
-    });
-
-    it('a short command is shown in full with nothing to expand', async () => {
-      await renderWithTasks(1, [task({ command: 'ls' })]);
-      expect(screen.getByTestId('background-task-bar-command').textContent).toBe('ls');
-    });
+  it('does not show the command or the log path in the row', async () => {
+    await renderWithTasks(1, [task()]);
+    const text = screen.getByTestId('background-task-bar').textContent!;
+    expect(text).not.toContain('pnpm --filter');
+    expect(text).not.toContain('.output');
   });
 
   describe('kill', () => {
@@ -339,7 +311,7 @@ describe('ChatRoute — background task bar', () => {
     it('every task row is a real button, named for the task it opens', async () => {
       await renderWithTasks(1, [task()]);
       const row = screen.getByTestId('background-task-bar-task');
-      expect(row.tagName).toBe('BUTTON');
+      expect(row.getAttribute('role')).toBe('button');
       expect(row.getAttribute('aria-label')).toBe(
         'Show what "Build web package to compile CSS" is doing in the terminal',
       );
@@ -356,35 +328,37 @@ describe('ChatRoute — background task bar', () => {
     });
 
     it('the collapse chevron still folds the stack and does not open a terminal', async () => {
-      await renderWithTasks(1, [task()]);
+      await renderWithTasks(2, [task(), task({ taskId: 't2', startedAt: 2 })]);
       fireEvent.click(screen.getByTestId('background-task-bar-toggle'));
       expect(screen.getByTestId('background-task-bar').dataset['collapsed']).toBe('true');
       expect(useLayoutStore.getState().findTab({ kind: 'terminal', chatId: 'c1' })).toBeNull();
     });
   });
 
-  describe('show all', () => {
+  describe('show ended', () => {
     it('by default draws only the running task, not the ended one', async () => {
-      await renderWithTasks(1, [
+      await renderWithTasks(2, [
         task({ taskId: 'run', startedAt: 2 }),
+        task({ taskId: 'run2', startedAt: 3 }),
         task({ taskId: 'end', status: 'exited', startedAt: 1, endedAt: 5 }),
       ]);
-      expect(screen.getAllByTestId('background-task-bar-task')).toHaveLength(1);
-      expect(screen.getByTestId('background-task-bar-count').textContent).toBe('1 background task');
+      expect(screen.getAllByTestId('background-task-bar-task')).toHaveLength(2);
+      expect(screen.getByTestId('background-task-bar-count').textContent).toBe('2 running');
     });
 
     it('checking it lists the ended task under the running one, struck (data-ended)', async () => {
-      await renderWithTasks(1, [
+      await renderWithTasks(2, [
         task({ taskId: 'run', description: 'still going', startedAt: 2 }),
+        task({ taskId: 'run2', description: 'also going', startedAt: 1 }),
         task({ taskId: 'end', description: 'done', status: 'exited', startedAt: 1, endedAt: 5 }),
       ]);
       fireEvent.click(screen.getByTestId('background-task-bar-show-all'));
       const rows = screen.getAllByTestId('background-task-bar-task');
-      expect(rows).toHaveLength(2);
+      expect(rows).toHaveLength(3);
       expect(rows[0]!.textContent).toContain('still going');
       expect(rows[0]!.dataset['ended']).toBe('false');
-      expect(rows[1]!.textContent).toContain('done');
-      expect(rows[1]!.dataset['ended']).toBe('true');
+      expect(rows[2]!.textContent).toContain('done');
+      expect(rows[2]!.dataset['ended']).toBe('true');
     });
 
     it('an ended row does not spin', async () => {
@@ -399,7 +373,7 @@ describe('ChatRoute — background task bar', () => {
       const ended = screen
         .getAllByTestId('background-task-bar-task')
         .find((r) => r.dataset['ended'] === 'true')!;
-      expect(ended.querySelectorAll('.background-task-bar-spinner')).toHaveLength(0);
+      expect(ended.querySelectorAll('.status-spinner')).toHaveLength(0);
     });
 
     it('takes the bar away when the last running task ends, ended list or not', async () => {

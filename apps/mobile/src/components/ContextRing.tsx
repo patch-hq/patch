@@ -12,7 +12,7 @@ import { summariseContext } from '../lib/contextUsage';
 import { radii, space, typography, useTheme } from '../lib/theme';
 import { ButtonRow, SettingsButton } from './settings/ui';
 
-const SIZE = 22;
+const SIZE = 20;
 const R = 8;
 const C = 2 * Math.PI * R;
 

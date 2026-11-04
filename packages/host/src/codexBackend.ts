@@ -152,7 +152,7 @@ export class CodexTurnError extends TurnFailedError {
  * same way: nothing at all when the caller configured no patch tools server.
  */
 export function codexMcpServers(
-  opts: Pick<SdkRunOptions, 'mcpServer' | 'extraMcpServers' | 'patchMcpOff'>,
+  opts: Pick<SdkRunOptions, 'mcpServer' | 'extraMcpServers' | 'patchMcpOff' | 'disabledTools'>,
 ): Record<string, RpcObject> | undefined {
   if (!opts.mcpServer) return undefined;
   const servers: Record<string, RpcObject> = opts.patchMcpOff
@@ -161,19 +161,47 @@ export function codexMcpServers(
   for (const s of opts.extraMcpServers ?? []) {
     servers[s.name] = { command: s.command, args: s.args, env: s.env, enabled: true };
   }
+  for (const [server, tools] of codexDisabledMcpTools(opts.disabledTools).byServer) {
+    if (servers[server]) servers[server] = { ...servers[server], disabled_tools: tools };
+  }
   return servers;
+}
+
+/**
+ * Splits a chat's exclusion list into what Codex can honour — MCP tools,
+ * named `mcp__<server>__<tool>` and switched off per server with Codex's
+ * `disabled_tools` — and `unsupported`, the native tool names Codex has no
+ * switch for. Those stay a loud error rather than being dropped.
+ */
+export function codexDisabledMcpTools(disabledTools: readonly string[] | undefined): {
+  byServer: Map<string, string[]>;
+  unsupported: string[];
+} {
+  const byServer = new Map<string, string[]>();
+  const unsupported: string[] = [];
+  for (const id of new Set(disabledTools ?? [])) {
+    const m = /^mcp__(.+?)__(.+)$/.exec(id);
+    if (!m) {
+      unsupported.push(id);
+      continue;
+    }
+    byServer.set(m[1]!, [...(byServer.get(m[1]!) ?? []), m[2]!]);
+  }
+  return { byServer, unsupported };
 }
 
 export class CodexBackend implements SdkBackend {
   constructor(
     private accounts: CodexAccounts,
     readonly history: CodexHistory,
-    private readonly runtime: { silenceTimeoutMs?: number } = {},
   ) {}
   async *run(opts: SdkRunOptions): AsyncIterable<SdkEnvelope> {
     const policy = codexPermission(opts.permissionMode);
-    if (opts.disabledTools?.length)
-      throw new Error('Codex tool exclusions must be configured before running this chat');
+    const { unsupported } = codexDisabledMcpTools(opts.disabledTools);
+    if (unsupported.length)
+      throw new Error(
+        `Codex cannot switch off these tools for this chat: ${unsupported.join(', ')}`,
+      );
     const { accountId } = await this.accounts
       .resolveChosen(opts.accountId, opts.model?.startsWith('openai/api/') ? 'apiKey' : 'chatgpt')
       .catch((error: Error) => {
@@ -262,18 +290,10 @@ export class CodexBackend implements SdkBackend {
       yield { type: 'system', sessionId, ...(seedTrim > 0 ? { seedTrim } : {}) };
       const queue: CodexNotification[] = [];
       let wake: (() => void) | undefined;
-      // A live app-server process is not proof that its active turn can still
-      // make progress. In particular, an external process manager can kill a
-      // browser/MCP child and leave Codex waiting forever while Patch's host
-      // socket continues to advertise "online". Bound complete silence so the
-      // chat becomes a visible, retryable error rather than staying `running`
-      // indefinitely. Ten minutes leaves deliberately long tools room to work;
-      // every notification (including tool progress) resets the deadline.
-      const silenceTimeoutMs = this.runtime.silenceTimeoutMs ?? 10 * 60_000;
-      let lastProgressAt = Date.now();
+      // No elapsed-time limit: a long tool is not a failure and the host cannot tell slow from stuck.
+      // Only the user's stop, or the turn itself ending, finishes it.
       const unsubscribe = client.subscribe((message) => {
         if (message.params.threadId === threadId || message.method === 'patch/processFailed') {
-          lastProgressAt = Date.now();
           queue.push(message);
           wake?.();
         }
@@ -398,17 +418,10 @@ export class CodexBackend implements SdkBackend {
             let watchdog: ReturnType<typeof setTimeout> | undefined;
             await new Promise<void>((resolve) => {
               wake = resolve;
-              const remaining = Math.max(1, silenceTimeoutMs - (Date.now() - lastProgressAt));
-              watchdog = setTimeout(resolve, Math.min(60_000, remaining));
+              watchdog = setTimeout(resolve, 60_000);
             });
             clearTimeout(watchdog);
             if (!queue.length && !opts.abortController.signal.aborted) {
-              if (Date.now() - lastProgressAt >= silenceTimeoutMs) {
-                throw new CodexTurnError(
-                  'The agent stopped responding. Its host is still connected, but the active worker or one of its tools is no longer making progress. Retry this message.',
-                  false,
-                );
-              }
               const snapshot = await client.request('thread/read', {
                 threadId,
                 includeTurns: true,

@@ -43,7 +43,7 @@ interface NotifyPayload {
   priority?: 'silent' | 'normal' | 'urgent';
   /** spec/09 § Batch check-in — `'batch'` means the click lands on the batch
    *  view, not a chat (`chatId` is a reserved non-chat sentinel on that one). */
-  kind?: 'message' | 'call' | 'batch' | 'ask' | 'sign-in';
+  kind?: 'message' | 'call' | 'batch' | 'ask' | 'sign-in' | 'host-health';
   actions?: NotifyActionsPayload;
 }
 
@@ -155,6 +155,13 @@ contextBridge.exposeInMainWorld('patch', {
     const handler = (_: unknown, payload: { message: string }): void => cb(payload);
     ipcRenderer.on('patch:system-audio-failed', handler);
     return () => ipcRenderer.removeListener('patch:system-audio-failed', handler);
+  },
+  /** Opt-in raw recording: one PCM16 chunk of a lane, then `end` to close the files. */
+  recordMeetingChunk(lane: string, pcm: Uint8Array): void {
+    ipcRenderer.send('patch:meeting-recording:chunk', lane, pcm);
+  },
+  endMeetingRecording(): Promise<string | null> {
+    return ipcRenderer.invoke('patch:meeting-recording:end');
   },
   startMeetingSpeakers(): void {
     ipcRenderer.send('patch:meeting-speakers:start');

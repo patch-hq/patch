@@ -96,15 +96,15 @@ import {
   X,
   FileText,
   Square,
-  Lock,
-  LockOpen,
-  FilePen,
-  ClipboardList,
-  Sparkles,
+  ShieldCheck,
+  ShieldOff,
+  ShieldAlert,
+  ShieldQuestion,
+  ShieldEllipsis,
   Pencil,
   Plus,
-  Gauge,
-  UserRound,
+  CircleGauge,
+  CircleUserRound,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -112,6 +112,8 @@ import {
   harnessForModel,
   modelSupportsEffort,
   providerBuiltinCommands,
+  providerDescriptor,
+  providerForModel,
   type AttachmentRef,
   type EffortLevel,
   type PermissionMode,
@@ -120,6 +122,7 @@ import { useRouter, type Href } from 'expo-router';
 import { AnchoredMenu } from './AnchoredMenu';
 import { ImageAnnotatorModal, type AnnotatedImage } from './ImageAnnotatorModal';
 import { ModelPicker } from './ModelPicker';
+import { AccountMenu } from './AccountMenu';
 import { ProviderSwitchModal } from './ProviderSwitchModal';
 import { suppressProviderSwitchWarningOrFalse } from '../lib/preferences';
 import { useSettingsStore } from '../stores/settingsStore';
@@ -127,7 +130,6 @@ import {
   PERMISSION_MODE_ORDER,
   offeredPermissionModes,
   permissionModeLabel,
-  permissionModeShortLabel,
 } from '../lib/permissionModes';
 import { receiveImagePaste } from '../lib/nativePaste';
 import * as FileSystem from 'expo-file-system';
@@ -161,6 +163,7 @@ import { startDictationMode, type DictationModeHandle } from '../lib/dictationMo
 import { markDictatedSend } from '../lib/dictatedSends';
 import { voiceKeyRefusal } from '../lib/voiceKeys';
 import { usePresenceStore } from '../stores/presenceStore';
+import { accountsOutage } from '../lib/usage';
 import { hostControlsDisabled, hostControlDisabledReason } from '../lib/connection';
 import { cancelHeld, releaseHeld, sendMessage, type OutgoingFile } from '../lib/sendQueue';
 import { adviseNotes, checkHooks } from '../lib/hookCheck';
@@ -183,7 +186,7 @@ import {
 
 interface Props {
   chatId: string;
-  /** Put the cursor in the input on mount (spec/15 § Composer — opening a chat). */
+  /** Put the cursor in the input on mount. Defaults on for the new-chat draft (sendTarget), off for an existing chat. */
   autoFocus?: boolean;
   /** The chat's folder — sources the skill autocomplete (`/` menu). */
   folder?: string;
@@ -199,6 +202,13 @@ interface Props {
    * attachments stay put for a retry.
    */
   sendTarget?(): Promise<string | null>;
+  /**
+   * New-chat screen only: the standing settings the chat will start with.
+   * There is no chat row to read them from or send changes to, so the screen
+   * owns them and the composer's permissions, model, effort and account
+   * controls read and write these instead — the same controls as in a chat.
+   */
+  setup?: NewChatSetup;
   /**
    * New-chat screen only: bump to send what the composer holds, as if send had
    * been pressed — the resend on a failed new chat. Starts at 0, which sends
@@ -234,14 +244,17 @@ interface Props {
 // is width the model pill needs; the hit slop below keeps the touch target
 // bigger than the drawn button.
 const ICON_SIZE = 20;
+const ICON_STROKE = 1.75;
 const ACTION_SIZE = 36;
+/** The action row's hit area height; the glyphs inside stay 20px. */
+const ACTION_HEIGHT = 40;
 /** Extra touchable margin around the mic/attach targets. */
 const MIC_HIT_SLOP = 12;
 // The mic sits INSIDE the text field, at its bottom-right corner, so it rides
 // with the last line as the field grows. Drawn small and in the quiet ink at
 // rest; the field's right padding keeps text from running under it.
 const FIELD_MIC_SIZE = 32;
-const FIELD_MIC_ICON_SIZE = 18;
+const FIELD_MIC_ICON_SIZE = 20;
 const FIELD_MIC_INSET = (COMPOSER_MIN_HEIGHT - FIELD_MIC_SIZE) / 2;
 const FIELD_PAD_RIGHT = FIELD_MIC_SIZE + FIELD_MIC_INSET + space.xs;
 // The + (what goes into the message) mirrors the mic at the field's
@@ -285,20 +298,35 @@ const EFFORT_LABELS: Record<EffortLevel, string> = {
   max: 'Max',
 };
 
-/** The padlock's glyph for each mode: what the next turn is allowed to do. */
-export function permissionModeIcon(mode: PermissionMode | string): typeof Lock {
+/** The shield's glyph for each mode: what the next turn is allowed to do. */
+export function permissionModeIcon(mode: PermissionMode | string): typeof ShieldCheck {
   switch (mode) {
     case 'acceptEdits':
-      return FilePen;
+      return ShieldEllipsis;
     case 'plan':
-      return ClipboardList;
+      return ShieldQuestion;
     case 'auto':
-      return Sparkles;
+      return ShieldAlert;
     case 'bypassPermissions':
-      return LockOpen;
+      return ShieldOff;
     default:
-      return Lock;
+      return ShieldCheck;
   }
+}
+
+export interface NewChatSetup {
+  hostId: string | null;
+  /** The model the chat will run on (explicit pick, else the host's own). */
+  model: string | null;
+  onModel(modelId: string): void;
+  /** The mode in force, or null while the host's default is unreported. */
+  mode: PermissionMode | null;
+  onMode(mode: PermissionMode): void;
+  effort: EffortLevel | null;
+  onEffort(effort: EffortLevel | null): void;
+  /** The shared account the chat starts on; null is "By strategy". */
+  accountId: string | null;
+  onAccount(accountId: string | null): void;
 }
 
 export function Composer({
@@ -308,6 +336,7 @@ export function Composer({
   dictationFactory,
   dictationModeFactory,
   sendTarget,
+  setup,
   sendRequest = 0,
   onSent,
   autoFocus,
@@ -628,8 +657,8 @@ export function Composer({
       setPendingSend(false);
     }
   }, [running]);
-  const permissionMode = row?.permissionMode;
-  const chatModel = row?.model ?? null;
+  const permissionMode = setup ? (setup.mode ?? undefined) : row?.permissionMode;
+  const chatModel = setup ? setup.model : (row?.model ?? null);
 
   // Model pill (spec/15 § Composer — Model pill; parity with web's header
   // crumb, spec/14 § Model selector). A pick sends `chat.model_request` on the
@@ -663,6 +692,10 @@ export function Composer({
   };
 
   const chooseModel = (modelId: string): void => {
+    if (setup) {
+      setup.onModel(modelId);
+      return;
+    }
     if (modelId === (pendingModel ?? chatModel)) return;
     const crossProvider =
       chatModel !== null && harnessForModel(modelId) !== harnessForModel(chatModel);
@@ -681,7 +714,7 @@ export function Composer({
   const [pendingEffort, setPendingEffort] = React.useState<{ value: EffortLevel | null } | null>(
     null,
   );
-  const chatEffort = row?.effort ?? null;
+  const chatEffort = setup ? setup.effort : (row?.effort ?? null);
   React.useEffect(() => {
     if (pendingEffort !== null && chatEffort === pendingEffort.value) setPendingEffort(null);
   }, [pendingEffort, chatEffort]);
@@ -719,6 +752,10 @@ export function Composer({
     setEffortMenuOpen(false);
     const effort = id === 'default' ? null : (id as EffortLevel);
     if (effort === effortShown) return;
+    if (setup) {
+      setup.onEffort(effort);
+      return;
+    }
     setPendingEffort({ value: effort });
     getWs().send({ type: 'chat.effort_request', chatId, effort });
   };
@@ -738,9 +775,24 @@ export function Composer({
   }));
   const onModeSelect = (id: string): void => {
     if (id === permissionMode) return;
+    if (setup) {
+      setup.onMode(id as PermissionMode);
+      return;
+    }
     getWs().send({ type: 'chat.settings', chatId, permissionMode: id as PermissionMode });
   };
   const ModeIcon = permissionModeIcon(permissionMode ?? 'default');
+  const accountBackend = providerDescriptor(providerForModel(chatModel)).backendId;
+  const accountSelected = setup ? setup.accountId : (row?.account?.id ?? null);
+  const onAccountSelect = (accountId: string | null): void => {
+    if (setup) {
+      setup.onAccount(accountId);
+      return;
+    }
+    // Takes effect from the chat's next turn; the host's chat.state carrying
+    // the new account is the confirmation.
+    getWs().send({ type: 'chat.account_request', chatId, preferredAccountId: accountId });
+  };
   const bypass = permissionMode === 'bypassPermissions';
 
   // Stop (parity with web's stop button + Claude Code's interrupt): the host
@@ -1331,6 +1383,7 @@ export function Composer({
       edit.onSave(draftRef.current.trim());
       return;
     }
+    if (outOfUsage) return;
     // No `linkDown` guard: sending into an existing chat while the link is
     // down queues + flushes on reconnect (Todoist 6hWrcpCQFqXGJpF6; spec/12 §
     // Surface → server disconnect — deliveryTracker already retries
@@ -1465,9 +1518,33 @@ export function Composer({
   const submitRef = React.useRef(sendDraft);
   submitRef.current = sendDraft;
 
+  // No credit left on any account that could run this chat: the turn would
+  // only park, so Send is refused up front (same certainty rule as web).
+  const usageHostId = setup ? setup.hostId : (row?.hostId ?? null);
+  const hostAccounts = usePresenceStore((s) =>
+    usageHostId ? (s.hosts[usageHostId]?.accounts[accountBackend]?.accounts ?? null) : null,
+  );
+  const [usageNow, setUsageNow] = React.useState(() => Date.now());
+  const outage = accountsOutage(
+    (hostAccounts ?? []).filter((a) => !('kind' in a && a.kind === 'apiKey')),
+    usageNow,
+  );
+  const outOfUsage = outage !== null;
+  const outageResetsAt = outage?.resetsAt;
+  React.useEffect(() => {
+    if (outageResetsAt === undefined) return;
+    // Re-evaluate once the pool refills, so Send comes back by itself.
+    const id = setTimeout(
+      () => setUsageNow(Date.now()),
+      Math.max(0, outageResetsAt - Date.now()) + 1000,
+    );
+    return () => clearTimeout(id);
+  }, [outageResetsAt]);
+
   const sendDisabled =
     !edit &&
     (resolving ||
+      outOfUsage ||
       hookChecking ||
       (draft.trim().length === 0 && attachments.length === 0 && micState === 'idle'));
 
@@ -1504,9 +1581,9 @@ export function Composer({
   return (
     <View
       style={{
-        paddingTop: space.md,
-        paddingHorizontal: 20,
-        paddingBottom: 14,
+        paddingTop: space.sm,
+        paddingHorizontal: 10,
+        paddingBottom: space.sm,
         gap: space.xs,
         backgroundColor: colors.paperRaised,
         borderTopWidth: 1,
@@ -1743,7 +1820,7 @@ export function Composer({
       <View testID="composer-input-row" style={{ position: 'relative' }}>
         <TextInput
           ref={inputRef}
-          autoFocus={autoFocus || edit !== undefined}
+          autoFocus={(autoFocus ?? isNewChatDraft) || edit !== undefined}
           {...(edit ? { testID: 'queued-edit-input' } : {})}
           value={body}
           onChangeText={(text) => {
@@ -1963,6 +2040,7 @@ export function Composer({
           <ListeningRing active={micState === 'recording' || dictModeOn} color={colors.red} />
           <Mic
             size={FIELD_MIC_ICON_SIZE}
+            strokeWidth={ICON_STROKE}
             color={
               disabled
                 ? colors.inkFaint
@@ -1996,7 +2074,7 @@ export function Composer({
             accessibilityRole="button"
             accessibilityLabel={dictModeOn ? 'Stop dictation mode' : 'Clear dictation'}
           >
-            <X size={FIELD_MIC_ICON_SIZE} color={colors.ink2} />
+            <X size={FIELD_MIC_ICON_SIZE} strokeWidth={ICON_STROKE} color={colors.ink2} />
           </Pressable>
         ) : (
           <Pressable
@@ -2022,7 +2100,11 @@ export function Composer({
                 : 'Add to message'
             }
           >
-            <Plus size={FIELD_MIC_ICON_SIZE} color={disabled ? colors.inkFaint : colors.ink3} />
+            <Plus
+              size={FIELD_MIC_ICON_SIZE}
+              strokeWidth={ICON_STROKE}
+              color={disabled ? colors.inkFaint : colors.ink3}
+            />
           </Pressable>
         )}
       </View>
@@ -2043,25 +2125,23 @@ export function Composer({
         {/* Settings (spec/15 § Composer): the standing settings for the next
             turn, as icons so the row stays one line — approval mode, model
             by its short name, account, effort. Same order as web. */}
-        {sendTarget === undefined && !edit ? (
+        {!edit ? (
           <View
             testID="composer-settings-row"
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 2, flexShrink: 1 }}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 2, flexShrink: 0 }}
           >
             <Pressable
               testID="permission-mode-padlock"
               onPress={() => setModeMenuOpen(true)}
               // A mode change is a socket frame with nothing to queue it into —
-              // disabled, visibly, rather than dropped (spec/12).
-              disabled={linkDown}
+              // disabled, visibly, rather than dropped (spec/12). Before the
+              // chat exists it is only a pick, so it never disables.
+              disabled={linkDown && !setup}
               style={({ pressed }) => ({
-                minWidth: ACTION_SIZE,
-                height: ACTION_SIZE,
-                flexDirection: 'row',
+                width: ACTION_SIZE,
+                height: ACTION_HEIGHT,
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: 4,
-                paddingHorizontal: space.xs,
                 borderRadius: radii.md,
                 backgroundColor: pressed ? colors.divider : 'transparent',
               })}
@@ -2074,64 +2154,37 @@ export function Composer({
             >
               <ModeIcon
                 size={ICON_SIZE}
-                color={linkDown ? colors.inkFaint : bypass ? colors.red : colors.ink2}
+                strokeWidth={ICON_STROKE}
+                color={bypass ? colors.red : colors.ink3}
               />
-              {permissionMode !== undefined ? (
-                <Text
-                  style={{
-                    ...typography.meta,
-                    color: linkDown ? colors.inkFaint : bypass ? colors.red : colors.ink3,
-                  }}
-                >
-                  {permissionModeShortLabel(permissionMode)}
-                </Text>
-              ) : null}
             </Pressable>
             <ModelPicker
-              hostId={row?.hostId ? row.hostId : null}
-              selected={pendingModel ?? chatModel}
+              hostId={setup ? setup.hostId : row?.hostId ? row.hostId : null}
+              selected={setup ? setup.model : (pendingModel ?? chatModel)}
               pending={pendingModel !== null}
               onSelect={chooseModel}
-              disabled={linkDown}
+              disabled={linkDown && !setup}
               variant="compact"
+              recents
               testID="composer-model-pill"
               note={
-                running
-                  ? 'Applies to your next message — this turn keeps its model'
-                  : 'Applies to your next message'
+                setup
+                  ? undefined
+                  : running
+                    ? 'Applies to your next message — this turn keeps its model'
+                    : 'Applies to your next message'
               }
             />
-            {row?.account ? (
-              <Pressable
-                testID="chat-account"
-                onPress={() => setAccountMenuOpen(true)}
-                style={({ pressed }) => ({
-                  width: ACTION_SIZE,
-                  height: ACTION_SIZE,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  borderRadius: radii.md,
-                  backgroundColor: pressed ? colors.divider : 'transparent',
-                })}
-                accessibilityRole="button"
-                accessibilityLabel={`Account: ${row.account.label}`}
-              >
-                <UserRound size={ICON_SIZE} color={colors.ink2} />
-              </Pressable>
-            ) : null}
             {showEffort ? (
               <Pressable
                 testID="composer-effort"
                 onPress={() => setEffortMenuOpen(true)}
-                disabled={linkDown}
+                disabled={linkDown && !setup}
                 style={({ pressed }) => ({
-                  minWidth: ACTION_SIZE,
-                  height: ACTION_SIZE,
-                  flexDirection: 'row',
+                  width: ACTION_SIZE,
+                  height: ACTION_HEIGHT,
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: 4,
-                  paddingHorizontal: space.xs,
                   borderRadius: radii.md,
                   backgroundColor: pressed ? colors.divider : 'transparent',
                   opacity: pendingEffort !== null ? 0.55 : 1,
@@ -2139,19 +2192,36 @@ export function Composer({
                 accessibilityRole="button"
                 accessibilityLabel={`Thinking effort: ${effortShown === null ? 'the model decides' : EFFORT_LABELS[effortShown]}`}
               >
-                <Gauge size={ICON_SIZE} color={linkDown ? colors.inkFaint : colors.ink2} />
-                <Text
-                  style={{ ...typography.meta, color: linkDown ? colors.inkFaint : colors.ink3 }}
-                >
-                  {effortShown !== null ? EFFORT_LABELS[effortShown] : 'Effort'}
-                </Text>
+                <CircleGauge size={ICON_SIZE} strokeWidth={ICON_STROKE} color={colors.ink3} />
               </Pressable>
             ) : null}
+            <Pressable
+              testID="chat-account"
+              onPress={() => setAccountMenuOpen(true)}
+              style={({ pressed }) => ({
+                width: ACTION_SIZE,
+                height: ACTION_HEIGHT,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: radii.md,
+                backgroundColor: pressed ? colors.divider : 'transparent',
+              })}
+              accessibilityRole="button"
+              accessibilityLabel={`Account: ${
+                setup
+                  ? setup.accountId === null
+                    ? 'by strategy'
+                    : setup.accountId
+                  : (row?.account?.label ?? 'by strategy')
+              }`}
+            >
+              <CircleUserRound size={ICON_SIZE} strokeWidth={ICON_STROKE} color={colors.ink3} />
+            </Pressable>
           </View>
         ) : null}
         <View testID="composer-actions-spacer" style={{ flex: 1, minWidth: space.xs }} />
         {sendTarget === undefined && !edit ? (
-          <ContextRing chatId={chatId} size={ACTION_SIZE} />
+          <ContextRing chatId={chatId} size={ACTION_HEIGHT} />
         ) : null}
         {edit ? (
           <>
@@ -2216,17 +2286,19 @@ export function Composer({
             })}
             accessibilityRole="button"
             accessibilityLabel={
-              hookChecking
-                ? 'Checking…'
-                : resolving
-                  ? 'Sending — creating the chat'
-                  : pendingSend
-                    ? 'Sending…'
-                    : linkDown || daemon !== 'online'
-                      ? 'Send message (queued until the agent reconnects)'
-                      : running
-                        ? 'Send message (queued after the current turn)'
-                        : 'Send message'
+              outOfUsage
+                ? 'Send unavailable — out of usage until it resets'
+                : hookChecking
+                  ? 'Checking…'
+                  : resolving
+                    ? 'Sending — creating the chat'
+                    : pendingSend
+                      ? 'Sending…'
+                      : linkDown || daemon !== 'online'
+                        ? 'Send message (queued until the agent reconnects)'
+                        : running
+                          ? 'Send message (queued after the current turn)'
+                          : 'Send message'
             }
           >
             {sendBusy ? (
@@ -2259,23 +2331,14 @@ export function Composer({
         placement="bottom"
         nonModal
       />
-      {row?.account ? (
-        <AnchoredMenu
-          visible={accountMenuOpen}
-          items={[
-            {
-              id: 'account',
-              label: `On ${row.account.label}`,
-              testID: 'account-menu-current',
-              disabled: true,
-            },
-          ]}
-          onSelect={() => setAccountMenuOpen(false)}
-          onDismiss={() => setAccountMenuOpen(false)}
-          placement="bottom"
-          nonModal
-        />
-      ) : null}
+      <AccountMenu
+        visible={accountMenuOpen}
+        backendId={accountBackend}
+        selectedId={accountSelected}
+        strategySelected={setup ? setup.accountId === null : false}
+        onSelect={onAccountSelect}
+        onDismiss={() => setAccountMenuOpen(false)}
+      />
       <AnchoredMenu
         visible={micMenuOpen}
         items={[

@@ -62,6 +62,7 @@ import {
   folderLabels,
   type PermissionMode,
   type StatusKind,
+  SNOOZE_UNTIL_COMPLETE,
 } from '@patch/wire';
 import { StatusBadge } from './StatusBadge.js';
 import { ProjectSnoozeMenu } from './ProjectSnoozeMenu.js';
@@ -84,6 +85,7 @@ import { formatWakeTime } from './SnoozeMenu.js';
 import { snoozedRowsForStore } from '../lib/snoozedRows.js';
 import { folderBackPill, rowBack } from '../lib/snoozeBack.js';
 import { deriveChatTitle } from '../lib/chatTitle.js';
+import { applySnooze } from '../lib/snoozeApply.js';
 import { useAmbiguousHostLabel } from '../lib/hostLabel.js';
 import { stripMarkdown } from '../lib/stripMarkdown.js';
 import {
@@ -93,6 +95,9 @@ import {
   needsAttention,
   matchesStateFilter,
   sortAttentionQueue,
+  captureOrder,
+  applyFrozenOrder,
+  type FrozenOrder,
   type Grouped,
   type SidebarGrouping,
 } from '../lib/chatGroups.js';
@@ -232,9 +237,19 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
   const chatSort = useUiStore((s) => s.chatSort);
   const grouping = useUiStore((s) => s.grouping);
   const groupSort = useUiStore((s) => s.groupSort);
-  const grouped = useMemo(
+  const fresh = useMemo(
     () => groupChats(Object.values(chats), folderRoster, { chatSort, groupSort }),
     [chats, folderRoster, chatSort, groupSort],
+  );
+  // Nothing reorders while the pointer is over the list: the order is captured
+  // as the pointer enters and held until it leaves, whatever the sort. Row data
+  // (badges, names) keeps updating; only positions wait.
+  const [frozenOrder, setFrozenOrder] = useState<FrozenOrder | null>(null);
+  const freshRef = useRef(fresh);
+  freshRef.current = fresh;
+  const grouped = useMemo(
+    () => (frozenOrder ? applyFrozenOrder(fresh, frozenOrder) : fresh),
+    [fresh, frozenOrder],
   );
 
   // Opening a row in needs-attention mode marks it read, which would
@@ -277,11 +292,8 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
   // in this mode so the list is JUST what needs attention. The Manager control
   // row is unaffected.
   //
-  // Rows are then re-sorted into a FIFO queue (sortAttentionQueue) rather than
-  // kept in groupChats's recency order: the queue is worked through front to
-  // back, so a row that updates again while still in it rejoins the BACK of
-  // the queue instead of jumping back to the front (Todoist: "needs attention
-  // queue - updated things should be at the bottom of the queue").
+  // Rows keep the list's own order (sortAttentionQueue is the same stable
+  // user-activity order), so a row never moves because an agent updated it.
   const view = useMemo(() => {
     // The state filter is applied FIRST and independently of attention mode:
     // "show me what failed" has to work whether or not the queue is on, and a
@@ -422,6 +434,8 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
           showSidebarSkeleton={showSidebarSkeleton}
           view={view}
           grouped={grouped}
+          onListEnter={() => setFrozenOrder(captureOrder(freshRef.current))}
+          onListLeave={() => setFrozenOrder(null)}
           grouping={grouping}
           activeChatId={highlightedChatId}
           activeDraftId={activeDraftId}
@@ -461,6 +475,8 @@ function RegularSidebar({
   showSidebarSkeleton,
   view,
   grouped,
+  onListEnter,
+  onListLeave,
   grouping,
   activeChatId,
   activeDraftId,
@@ -487,6 +503,8 @@ function RegularSidebar({
   sectionCounts,
 }: {
   showSidebarSkeleton: boolean;
+  onListEnter: () => void;
+  onListLeave: () => void;
   view: Grouped;
   grouped: Grouped;
   grouping: SidebarGrouping;
@@ -591,7 +609,7 @@ function RegularSidebar({
       </div>
 
       {/* Manager — always-visible top slot. */}
-      <ManagerRow row={grouped.manager} active={activeChatId} />
+      {activeSearch === null ? <ManagerRow row={grouped.manager} active={activeChatId} /> : null}
 
       {/* Bulk actions for a shift-click selection (spec/14 § Sidebar →
           Selecting multiple rows). Absent while nothing is selected. Part of
@@ -606,7 +624,12 @@ function RegularSidebar({
           Manager, the selection bar) and below (Archived/Deleted, nav, + New
           chat) is fixed, so those controls never scroll out of reach however
           many chats there are. */}
-      <div className="sb-scroll" data-testid="sb-scroll">
+      <div
+        className="sb-scroll"
+        data-testid="sb-scroll"
+        onMouseEnter={onListEnter}
+        onMouseLeave={onListLeave}
+      >
         {activeSearch !== null ? (
           <ChatSearchResults
             query={activeSearch}
@@ -2288,6 +2311,23 @@ const ChatRowView = memo(function ChatRowView({
               icon: <Clock size={14} aria-hidden />,
               run: () =>
                 useUiStore.getState().openSnoozeSheet({ kind: 'chat', chatId: row.chatId }),
+            },
+          ]),
+      ...(snoozed || !(row.activity === 'running' || row.goal !== null)
+        ? []
+        : [
+            {
+              id: 'snooze-until-done',
+              label: 'Snooze until done',
+              icon: <Clock size={14} aria-hidden />,
+              run: () =>
+                applySnooze({
+                  targets: [row],
+                  until: SNOOZE_UNTIL_COMPLETE,
+                  name: stripMarkdown(deriveChatTitle(row.name)),
+                  isProject: false,
+                  navigate,
+                }),
             },
           ]),
       ...(hidden
