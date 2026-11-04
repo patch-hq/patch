@@ -2056,25 +2056,6 @@ export const HostHealthEvent = z
 export type HostHealthEvent = z.infer<typeof HostHealthEvent>;
 
 /**
- * Server → surfaces: a host is online but coping badly, or is no longer. (A host
- * that cannot be reached at all is `host.offline`.) `critical` means the host is
- * holding new turns rather than start work it would not finish.
- */
-export const HostConditionEvent = z
-  .object({
-    type: z.literal('host.condition'),
-    ...hostIdField,
-    state: z.enum(['online', 'struggling']),
-    critical: z.boolean(),
-    reasons: z.array(z.enum(['memory', 'battery', 'load', 'lag', 'slow-link'])),
-    /** The charge, when `battery` is a reason. */
-    batteryPercent: z.number().gte(0).lte(100).optional(),
-    topProcesses: z.array(HostProcessGroup).max(5),
-  })
-  .strict();
-export type HostConditionEvent = z.infer<typeof HostConditionEvent>;
-
-/**
  * Host → server: one backend's credential on one host is missing or expired
  * (spec/10 § Backend credentials). Names BOTH the machine and the backend —
  * a host with two backends can be authenticated on one and not the other, and
@@ -9213,7 +9194,6 @@ export const WireEvent = z.discriminatedUnion('type', [
   HostOnlineEvent,
   HostOfflineEvent,
   HostHealthEvent,
-  HostConditionEvent,
   HostUnauthenticatedEvent,
   HostInfoEvent,
   HostAccountEvent,
@@ -9523,7 +9503,6 @@ export const EVENT_SCHEMAS = {
   'host.online': HostOnlineEvent,
   'host.offline': HostOfflineEvent,
   'host.health': HostHealthEvent,
-  'host.condition': HostConditionEvent,
   'host.unauthenticated': HostUnauthenticatedEvent,
   'host.host': HostInfoEvent,
   'host.account': HostAccountEvent,

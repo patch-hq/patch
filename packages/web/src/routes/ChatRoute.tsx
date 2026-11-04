@@ -83,7 +83,6 @@ import { ClaudeDisconnectedBanner } from '../components/ClaudeDisconnectedBanner
 import { OutOfUsageBanner } from '../components/OutOfUsageBanner.js';
 import { JobBar } from '../components/JobBar.js';
 import { HostOfflineBanner } from '../components/HostOfflineBanner.js';
-import { HostStrugglingBanner } from '../components/HostStrugglingBanner.js';
 import { EmptyChat } from '../components/EmptyChat.js';
 import { ChatNotFound } from '../components/ChatNotFound.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -2223,7 +2222,6 @@ export function ChatRoute({
       <OutOfUsageBanner hostId={row.hostId} model={row.model ?? undefined} chatId={chatId} />
       <MeetingLayout chatId={chatId}>
         <HostOfflineBanner hostId={row.hostId} />
-        <HostStrugglingBanner hostId={row.hostId} />
         <BlobChatIdContext.Provider value={chatId}>
           <PendingApprovalCountContext.Provider value={pendingApprovalCount}>
             <section
