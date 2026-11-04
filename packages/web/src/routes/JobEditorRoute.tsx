@@ -1151,6 +1151,8 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
   // clear `scheduleText`, so a stale unparsed phrase must not block saving a
   // webhook/todoist job that never reads it.
   const scheduleBlocksSave = form.triggerType === 'cron' && scheduleUnparsed;
+  // cron/recurrence fire with nothing but `{ firedAt }`, so there is no payload to send.
+  const hasTriggerPayload = form.triggerType !== 'cron' && form.triggerType !== 'recurrence';
   // A recurrence trigger with no RRULE text has nothing to save — the
   // structured builder always writes SOMETHING into `recurrenceRule` (even
   // an unparseable `BYDAY=` when no weekday is picked), so an empty field
@@ -2387,12 +2389,14 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   (v) => setForm((f) => ({ ...f, spawnSkill: v })),
                   'job-spawn-skill',
                 )}
-                <Toggle
-                  checked={form.includePayload}
-                  onChange={(next) => setForm((f) => ({ ...f, includePayload: next }))}
-                  label="Send agent trigger payload"
-                  testid="job-include-payload"
-                />
+                {hasTriggerPayload ? (
+                  <Toggle
+                    checked={form.includePayload}
+                    onChange={(next) => setForm((f) => ({ ...f, includePayload: next }))}
+                    label="Send agent trigger payload"
+                    testid="job-include-payload"
+                  />
+                ) : null}
                 <div className="field-group">
                   Prompt
                   <PromptEditor
@@ -2510,12 +2514,14 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   (v) => setForm((f) => ({ ...f, messageSkill: v })),
                   'job-message-skill',
                 )}
-                <Toggle
-                  checked={form.includePayload}
-                  onChange={(next) => setForm((f) => ({ ...f, includePayload: next }))}
-                  label="Send agent trigger payload"
-                  testid="job-include-payload"
-                />
+                {hasTriggerPayload ? (
+                  <Toggle
+                    checked={form.includePayload}
+                    onChange={(next) => setForm((f) => ({ ...f, includePayload: next }))}
+                    label="Send agent trigger payload"
+                    testid="job-include-payload"
+                  />
+                ) : null}
                 <div className="field-group">
                   Prompt
                   <PromptEditor
