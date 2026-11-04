@@ -21,6 +21,7 @@ import { useUiStore } from '../stores/uiStore.js';
 import {
   startMeetingCapture,
   type MeetingCapture,
+  type MeetingCaptureDeps,
   type MeetingSources,
   type PcmFeed,
 } from './meetingCapture.js';
@@ -28,6 +29,16 @@ import {
 let capture: MeetingCapture | null = null;
 
 const SETTINGS_KEY = 'patch.meeting.liveness';
+const RECORD_KEY = 'patch.meeting.record-raw';
+
+/** Opt-in: save the raw mic, cleaned mic and system lanes of the next meeting to disk (desktop app only). */
+export function getRecordRaw(): boolean {
+  return localStorage.getItem(RECORD_KEY) === '1';
+}
+export function setRecordRaw(on: boolean): void {
+  if (on) localStorage.setItem(RECORD_KEY, '1');
+  else localStorage.removeItem(RECORD_KEY);
+}
 
 /** Named speeds for the live notes: [label, clip seconds, analysis seconds]. */
 export const MEETING_SPEEDS: Record<string, MeetingSettings & { label: string }> = {
@@ -158,6 +169,19 @@ function systemFeed(bridge: PatchDesktopBridge): PcmFeed {
   };
 }
 
+/** The recording tap when opted in. No desktop shell to write the files is an error, not a skip. */
+function rawTap(): Pick<MeetingCaptureDeps, 'onRaw'> {
+  if (!getRecordRaw()) return {};
+  const bridge = getDesktopBridge();
+  if (!bridge?.recordMeetingChunk) {
+    throw new Error('Raw recording needs the desktop app. Turn it off or update Patch');
+  }
+  return {
+    onRaw: (lane, pcm) =>
+      bridge.recordMeetingChunk!(lane, new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength)),
+  };
+}
+
 async function beginCapture(chatId: string, opts: { names?: boolean } = {}): Promise<void> {
   // 'new' is the new-chat screen's placeholder, not a chat: no host owns it, so
   // the server would drop every control frame and clip sent for it.
@@ -189,6 +213,7 @@ async function beginCapture(chatId: string, opts: { names?: boolean } = {}): Pro
         clipSeconds: speedSettings(getMeetingSpeed()).clipSeconds,
         // A long silence from the far end: the call is over.
         onSilence: () => endMeeting(chatId),
+        ...rawTap(),
       },
     );
   } catch (err) {
@@ -360,6 +385,12 @@ export function requestMeeting(chatId: string): void {
 
 function stopCapture(): void {
   capture?.stop();
+  void getDesktopBridge()
+    ?.endMeetingRecording?.()
+    .then((dir) => {
+      if (dir) useUiStore.getState().pushError(`Meeting audio saved to ${dir}`);
+    })
+    .catch((err: Error) => report('Could not save the meeting recording', err));
   stopSpeakerWatch?.();
   stopSpeakerWatch = null;
   capture = null;
