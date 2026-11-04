@@ -291,6 +291,30 @@ describe('serverLink', () => {
     expect(dialTimes[2]! - dialTimes[1]!).toBeLessThan(1_000);
   });
 
+  it('reports the version a going-away notice names, and null for a plain restart', () => {
+    const sockets: FakeSocket[] = [];
+    const seen: (string | null)[] = [];
+    const link = track(
+      createServerLink({
+        url: 'ws://127.0.0.1:1/ws',
+        daemonKey: 'jwt',
+        clientVersion: '1.0.0',
+        logger: silent,
+        onServerRestarting: (v) => seen.push(v),
+        wsFactory: () => {
+          const s = new FakeSocket();
+          sockets.push(s);
+          return s as never;
+        },
+      }),
+    );
+    link.start();
+    sockets[0]!.close(4503, 'server restarting into 1.2.4');
+    sockets[1]!.close(4503, 'server restarting');
+    sockets[2]!.close(1006);
+    expect(seen).toEqual(['1.2.4', null]);
+  });
+
   it('keeps the normal backoff for an unplanned drop', async () => {
     const sockets: FakeSocket[] = [];
     const link = track(
