@@ -591,7 +591,7 @@ function RegularSidebar({
       </div>
 
       {/* Manager — always-visible top slot. */}
-      <ManagerRow row={grouped.manager} active={activeChatId} />
+      {activeSearch === null ? <ManagerRow row={grouped.manager} active={activeChatId} /> : null}
 
       {/* Bulk actions for a shift-click selection (spec/14 § Sidebar →
           Selecting multiple rows). Absent while nothing is selected. Part of
