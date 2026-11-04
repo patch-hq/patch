@@ -1721,7 +1721,9 @@ describe('Sidebar', () => {
       'title',
       'Archived · 0 (Ctrl+Shift+A)',
     );
-    expect(screen.getByTestId('archived-section')).toBeEmptyDOMElement();
+    expect(
+      screen.getByTestId('archived-section').querySelectorAll('[data-testid^="chat-row-"]'),
+    ).toHaveLength(0);
     expect(screen.queryByTestId('archived-open-main')).toBeNull();
     expect(screen.queryByTestId('archived-search')).toBeNull();
   });
@@ -1814,20 +1816,24 @@ describe('Sidebar', () => {
     expect(screen.getByTestId('chat-search')).toBeInTheDocument();
   });
 
-  // App Updates: "can also open in main window" — LifecyclePanel grows a link
-  // to `/lifecycle/:kind` only once there's something a bigger view would
-  // show; a `0` or not-yet-known count draws no link (covered by the two
-  // "empty is a 0" tests above), so this one pins the positive case.
-  it('a populated section grows an "open in main window" link to /lifecycle/:kind', () => {
+  // The opened section is a view that replaces the chat list, headed by the
+  // server's total and closed by its ×.
+  it('an opened section replaces the list, headed by the server count, and × returns to the list', () => {
     useChatStore
       .getState()
-      .hydrate([rowFixture({ chatId: 'a-open-1', folder: '~/proj', status: 'archived' })]);
-    seedCounts({ archived: 1 });
+      .hydrate([
+        rowFixture({ chatId: 'a-open-1', folder: '~/proj', status: 'archived' }),
+        rowFixture({ chatId: 'live-1', folder: '~/proj' }),
+      ]);
+    seedCounts({ archived: 2148 });
     renderInRouter();
+    expect(screen.getByTestId('chat-row-live-1')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('archived-toggle'));
-    const link = screen.getByTestId('archived-open-main');
-    expect(link).toHaveAttribute('href', '/lifecycle/archived');
-    expect(link).toHaveAttribute('title', 'Open in main window');
+    expect(screen.getByTestId('lifecycle-view-count')).toHaveTextContent('2,148');
+    expect(screen.queryByTestId('chat-row-live-1')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-row-a-open-1')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('lifecycle-view-close'));
+    expect(screen.getByTestId('chat-row-live-1')).toBeInTheDocument();
   });
 
   it('marks the active chat row + a read row with is-read (both class branches)', () => {
@@ -1952,6 +1958,7 @@ describe('Sidebar', () => {
     fireEvent.click(screen.getByTestId('restore-btn-x1'));
     expect(restoreSpy).toHaveBeenCalledWith('x1');
     expect(useChatStore.getState().chats['x1']?.status).toBe('active');
+    fireEvent.click(screen.getByTestId('lifecycle-view-close'));
     await waitFor(() => {
       expect(screen.getByTestId('chat-row-x1')).toBeInTheDocument();
     });
@@ -2021,7 +2028,9 @@ describe('Sidebar', () => {
     renderInRouter();
     fireEvent.click(screen.getByTestId('deleted-toggle'));
     expect(screen.getByTestId('deleted-toggle')).toHaveAttribute('title', 'Deleted · 0');
-    expect(screen.getByTestId('deleted-section')).toBeEmptyDOMElement();
+    expect(
+      screen.getByTestId('deleted-section').querySelectorAll('[data-testid^="chat-row-"]'),
+    ).toHaveLength(0);
   });
 
   it('the Deleted-section fetch effect is cancelled cleanly on unmount', () => {

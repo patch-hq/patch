@@ -108,7 +108,7 @@ describe('Sidebar — hidden chats', () => {
     await waitFor(() => expect(api.hideChat).toHaveBeenCalledWith('c1', false));
     expect(useChatStore.getState().chats['c1']?.hidden).toBe(false);
     // Back in the active list, out of the section.
-    expect(section).not.toContainElement(screen.getByTestId('chat-row-c1'));
+    expect(screen.queryByTestId('chat-row-c1')).toBeNull();
   });
 
   it('a failed Show reverts and surfaces the error', async () => {
@@ -168,7 +168,7 @@ describe('Sidebar — hidden chats', () => {
     renderSidebar();
     fireEvent.click(screen.getByTestId('hidden-toggle'));
     const section = await screen.findByTestId('hidden-section');
-    expect(section).toBeEmptyDOMElement();
+    expect(section.querySelectorAll('[data-testid^="chat-row-"]')).toHaveLength(0);
   });
 });
 

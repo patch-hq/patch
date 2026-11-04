@@ -3032,6 +3032,43 @@ const editorParam = params.get('editor');
 // test actually came to look at (the composer, a transcript link) — the
 // skill-autocomplete specs need the file real, not the tab open.
 const fileStubParam = params.get('fileStub');
+// `?archive=N` — answer the paged archived listing with N synthetic chats, so
+// the windowed Archived view can be exercised at scale in a real browser.
+const archiveSize = Number(new URLSearchParams(window.location.search).get('archive') ?? 0);
+if (archiveSize > 0) {
+  const prevFetch = window.fetch.bind(window);
+  window.fetch = ((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (!url.includes('/api/chats?archived=only')) return prevFetch(input, init);
+    const q = new URL(url, window.location.origin).searchParams;
+    const limit = Number(q.get('limit') ?? 30);
+    const offset = Number(q.get('offset') ?? 0);
+    const end = Math.min(offset + limit, archiveSize);
+    const chats = Array.from({ length: end - offset }, (_, k) => ({
+      chatId: `arch-${offset + k}`,
+      name: `Archived chat ${offset + k}`,
+      preview: null,
+      folder: '~/proj',
+      activity: 'idle',
+      status: 'archived',
+      pinned: false,
+      pinnedAt: null,
+      lastUpdated: Date.now() - (offset + k) * 3_600_000,
+      hostId: 'h1',
+      permissionMode: 'default',
+      jobId: null,
+      statusSummary: null,
+      statusKind: null,
+    }));
+    return Promise.resolve(
+      new Response(JSON.stringify({ chats, nextOffset: end < archiveSize ? end : null }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+  }) as typeof window.fetch;
+}
+
 if (editorParam === 'browse' || fileStubParam === 'skill') {
   // A small NESTED, deliberately UNSORTED, FLAT list — this is the shape
   // `listFilesRecursive` really returns (full relative paths, dirs AND files),

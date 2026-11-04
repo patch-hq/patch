@@ -12,16 +12,7 @@
 // (spec/14 § Sidebar §8) — starting a chat is the most-reached-for action.
 
 import type { JSX, MouseEvent as ReactMouseEvent } from 'react';
-import {
-  createContext,
-  memo,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Pin,
@@ -48,7 +39,7 @@ import {
   ChevronDown,
   ChevronRight,
   ExternalLink,
-  Maximize2,
+  X,
   Ear,
   Phone,
   PanelRightOpen,
@@ -103,6 +94,7 @@ import { navigateAfterArchive } from '../lib/archiveNav.js';
 import { isNearScrollBottom } from '../lib/scrollPaging.js';
 import { searchableQuery, searchHitPath } from '../lib/chatSearch.js';
 import { ChatSearchField, ChatSearchResults, SearchMatchLine } from './ChatSearch.js';
+import { WindowedRows } from './WindowedRows.js';
 import { newChatPath } from '../lib/newChat.js';
 import {
   openChatInNewWindow,
@@ -413,10 +405,14 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
       />
 
       {/* The sidebar's one view dropdown (spec/14 § Sidebar §1b). */}
-      <div className="sidebar-controls">
-        <SidebarViewMenu />
-        {batchMode ? null : <SidebarSortMenu />}
-      </div>
+      {/* A lifecycle view is its own list: the chat list's view and sort
+          controls do not apply to it. */}
+      {hiddenOpen || archivedOpen || snoozedOpen || deletedOpen || automationsOpen ? null : (
+        <div className="sidebar-controls">
+          <SidebarViewMenu />
+          {batchMode ? null : <SidebarSortMenu />}
+        </div>
+      )}
 
       {batchMode ? (
         <>
@@ -547,6 +543,28 @@ function RegularSidebar({
   // Global chat search (spec/03 § Chat search): once the trimmed query is long
   // enough to send, the scrolling band shows results instead of the chat list.
   const activeSearch = searchableQuery(searchQuery);
+  // A lifecycle view (Archived, Hidden, ...) replaces the chat list while open;
+  // the toggles are exclusive, so at most one is.
+  const openKind: LifecycleKind | null = attentionOnly
+    ? null
+    : hiddenOpen
+      ? 'hidden'
+      : archivedOpen
+        ? 'archived'
+        : snoozedOpen
+          ? 'snoozed'
+          : deletedOpen
+            ? 'deleted'
+            : automationsOpen
+              ? 'automations'
+              : null;
+  const closeView = (): void => {
+    setHiddenOpen(false);
+    setArchivedOpen(false);
+    setSnoozedOpen(false);
+    setDeletedOpen(false);
+    setAutomationsOpen(false);
+  };
   // The Channels rows as data — one entry per row the section draws, so the
   // toggle's count is `channelRows.length` rather than a hand-kept literal.
   const channelRows = useMemo(
@@ -603,11 +621,18 @@ function RegularSidebar({
           now (spec/14 § Sidebar §1b) — the `attentionOnly` prop threaded
           through below still drives the filtering, set from there. */}
       <div className="sb-top-row" data-testid="sb-top-row">
-        <ChatSearchField />
+        <ChatSearchField
+          placeholder={
+            openKind !== null && LIFECYCLE_SEARCH.includes(openKind)
+              ? `Search ${LIFECYCLE_LABELS[openKind].toLowerCase()}`
+              : undefined
+          }
+        />
       </div>
 
-      {/* Manager — always-visible top slot. */}
-      {activeSearch === null ? <ManagerRow row={grouped.manager} active={activeChatId} /> : null}
+      {/* Manager — always-visible top slot. Not in a lifecycle view, which is
+          its own list. */}
+      {openKind === null ? <ManagerRow row={grouped.manager} active={activeChatId} /> : null}
 
       {/* Bulk actions for a shift-click selection (spec/14 § Sidebar →
           Selecting multiple rows). Absent while nothing is selected. Part of
@@ -627,11 +652,57 @@ function RegularSidebar({
         data-testid="sb-scroll"
         onMouseEnter={onListEnter}
         onMouseLeave={onListLeave}
+        data-scroll-host
+        onScroll={
+          openKind === null
+            ? undefined
+            : (e) => {
+                if (isNearScrollBottom(e.currentTarget)) bumpLifecycleScrollTick();
+              }
+        }
       >
-        {activeSearch !== null ? (
+        {openKind !== null ? (
+          <div className="lifecycle-view-head" data-testid="lifecycle-view-head">
+            <span className="lifecycle-view-title">{LIFECYCLE_LABELS[openKind]}</span>
+            {sectionCounts !== null ? (
+              <span className="lifecycle-view-count" data-testid="lifecycle-view-count">
+                {sectionCounts[openKind].toLocaleString('en-GB')}
+              </span>
+            ) : null}
+            <button
+              type="button"
+              className="lifecycle-view-close"
+              data-testid="lifecycle-view-close"
+              aria-label={`Close ${LIFECYCLE_LABELS[openKind].toLowerCase()}`}
+              onClick={closeView}
+            >
+              <X size={14} aria-hidden />
+            </button>
+          </div>
+        ) : null}
+        {openKind !== null && activeSearch === null ? (
+          <div className="lifecycle-view" data-testid={`${openKind}-panel`}>
+            {openKind === 'hidden' ? (
+              <HiddenSection hidden={grouped.hidden} activeChatId={activeChatId} />
+            ) : openKind === 'archived' ? (
+              <ArchivedSection archived={grouped.archived} activeChatId={activeChatId} />
+            ) : openKind === 'snoozed' ? (
+              <SnoozedSection snoozed={grouped.snoozed} activeChatId={activeChatId} />
+            ) : openKind === 'deleted' ? (
+              <DeletedSection deleted={grouped.deleted} activeChatId={activeChatId} />
+            ) : (
+              <AutomationsSection automations={grouped.automations} activeChatId={activeChatId} />
+            )}
+          </div>
+        ) : activeSearch !== null ? (
           <ChatSearchResults
             query={activeSearch}
             activeChatId={activeChatId}
+            section={
+              openKind !== null && LIFECYCLE_SEARCH.includes(openKind)
+                ? (openKind as 'hidden' | 'archived' | 'snoozed')
+                : undefined
+            }
             renderRow={(row, hit) => (
               <ChatRowView
                 key={row.chatId}
@@ -1026,52 +1097,6 @@ function RegularSidebar({
               <Zap size={18} aria-hidden className="arch-icon" />
             </button>
           </div>
-
-          {hiddenOpen ? (
-            <LifecyclePanel
-              kind="hidden"
-              label="Hidden"
-              count={sectionCounts === null ? null : sectionCounts.hidden}
-            >
-              <HiddenSection hidden={grouped.hidden} activeChatId={activeChatId} />
-            </LifecyclePanel>
-          ) : null}
-          {archivedOpen ? (
-            <LifecyclePanel
-              kind="archived"
-              label="Archived"
-              count={sectionCounts === null ? null : sectionCounts.archived}
-            >
-              <ArchivedSection archived={grouped.archived} activeChatId={activeChatId} />
-            </LifecyclePanel>
-          ) : null}
-          {snoozedOpen ? (
-            <LifecyclePanel
-              kind="snoozed"
-              label="Snoozed"
-              count={sectionCounts === null ? null : sectionCounts.snoozed}
-            >
-              <SnoozedSection snoozed={grouped.snoozed} activeChatId={activeChatId} />
-            </LifecyclePanel>
-          ) : null}
-          {deletedOpen ? (
-            <LifecyclePanel
-              kind="deleted"
-              label="Deleted"
-              count={sectionCounts === null ? null : sectionCounts.deleted}
-            >
-              <DeletedSection deleted={grouped.deleted} activeChatId={activeChatId} />
-            </LifecyclePanel>
-          ) : null}
-          {automationsOpen ? (
-            <LifecyclePanel
-              kind="automations"
-              label="Automations"
-              count={sectionCounts === null ? null : sectionCounts.automations}
-            >
-              <AutomationsSection automations={grouped.automations} activeChatId={activeChatId} />
-            </LifecyclePanel>
-          ) : null}
         </div>
       )}
 
@@ -1139,83 +1164,15 @@ function BottomNav(): JSX.Element {
 }
 
 type LifecycleKind = 'hidden' | 'archived' | 'snoozed' | 'deleted' | 'automations';
-
-/**
- * Wraps an opened cold-storage list (spec/14 §6) with a small head carrying
- * its label and a link to the same section at `/lifecycle/:kind` — the
- * sidebar's cramped fixed-bottom band is fine for a quick check, but browsing
- * a long Archived list wants the main panel's room (App Updates: "can also
- * open in main window"). Withheld while the section is empty or its count
- * isn't known yet: there's nothing a bigger view would show that the row's
- * own tooltip hasn't already said, and always drawing it would put a second
- * "nothing here" line back into the fixed band the collapsed-empty-count rule
- * (spec/04 § Section counts) exists to keep out of it.
- */
-function LifecyclePanel({
-  kind,
-  label,
-  count,
-  children,
-}: {
-  kind: LifecycleKind;
-  label: string;
-  count: number | null;
-  children: JSX.Element;
-}): JSX.Element {
-  const [filter, setFilter] = useState('');
-  return (
-    <div className="arch-panel" data-testid={`${kind}-panel`}>
-      {count !== null && count > 0 ? (
-        <div className="arch-panel-head">
-          <span className="arch-panel-label">{label}</span>
-          <input
-            type="search"
-            className="arch-panel-filter"
-            data-testid={`${kind}-filter`}
-            placeholder={`Filter ${label.toLowerCase()}…`}
-            aria-label={`Filter ${label.toLowerCase()}`}
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape' && filter !== '') {
-                e.preventDefault();
-                e.stopPropagation();
-                setFilter('');
-              }
-            }}
-          />
-          <Link
-            to={`/lifecycle/${kind}`}
-            className="arch-panel-expand"
-            data-testid={`${kind}-open-main`}
-            title="Open in main window"
-          >
-            <Maximize2 size={14} aria-hidden />
-          </Link>
-        </div>
-      ) : null}
-      <LifecycleFilterContext.Provider value={filter.trim()}>
-        {children}
-      </LifecycleFilterContext.Provider>
-    </div>
-  );
-}
-
-/**
- * The text typed into the enclosing LifecyclePanel's filter box ('' = none, and
- * the default outside a panel, e.g. `/lifecycle/:kind`). Read by the sections
- * below rather than passed as a prop so each one stays a drop-in child.
- */
-const LifecycleFilterContext = createContext('');
-
-/** Case-insensitive match on a row's name and first-message preview. */
-function matchesLifecycleFilter(row: ChatRow, filter: string): boolean {
-  if (filter === '') return true;
-  const f = filter.toLowerCase();
-  return (
-    (row.name ?? '').toLowerCase().includes(f) || (row.preview ?? '').toLowerCase().includes(f)
-  );
-}
+const LIFECYCLE_LABELS: Record<LifecycleKind, string> = {
+  hidden: 'Hidden',
+  archived: 'Archived',
+  snoozed: 'Snoozed',
+  deleted: 'Deleted',
+  automations: 'Automations',
+};
+// The kinds the server's chat search can place a hit in.
+const LIFECYCLE_SEARCH: readonly LifecycleKind[] = ['hidden', 'archived', 'snoozed'];
 
 /** One page's worth of rows at a time (spec/14 § Sidebar item 6: "load a
  *  limited number... then load more on scroll"). */
@@ -1256,12 +1213,6 @@ function useLifecyclePaging(
   const foldRef = useRef(fold);
   foldRef.current = fold;
   const tick = useUiStore((s) => s.lifecycleScrollTick);
-  // A filter only sees the rows already loaded, so while one is typed the
-  // remaining pages are pulled in without waiting for a scroll — otherwise a
-  // match further down the list would silently not show.
-  const filtering = useContext(LifecycleFilterContext) !== '';
-  const filteringRef = useRef(filtering);
-  filteringRef.current = filtering;
   // Baselined to whatever the tick already was, so a bump from a DIFFERENT
   // section that happened before this one ever mounted doesn't read as "the
   // scroll region just moved" on this section's very first render.
@@ -1278,7 +1229,6 @@ function useLifecyclePaging(
           foldRef.current(r.chats);
           nextOffsetRef.current = r.nextOffset;
           setError(null);
-          if (filteringRef.current && r.nextOffset !== null) load(r.nextOffset);
         },
         (e: unknown) => {
           loadingRef.current = false;
@@ -1289,13 +1239,6 @@ function useLifecyclePaging(
     },
     [label],
   );
-
-  useEffect(() => {
-    if (!filtering) return;
-    const next = nextOffsetRef.current;
-    if (next === null || next === undefined) return;
-    load(next);
-  }, [filtering, load]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -1329,7 +1272,6 @@ export function ArchivedSection({
   activeChatId: string | null;
 }): JSX.Element {
   const mergeChats = useChatStore((s) => s.mergeChats);
-  const filter = useContext(LifecycleFilterContext);
 
   // Lazily fold the archived chats into the store a page at a time, starting
   // when the section is first expanded (this component only mounts when
@@ -1399,11 +1341,13 @@ export function ArchivedSection({
           {error}
         </div>
       ) : (
-        archived
-          .filter((c) => matchesLifecycleFilter(c, filter))
-          .map((c) => (
+        <WindowedRows
+          items={archived}
+          itemKey={(c) => c.chatId}
+          renderItem={(c) => (
             <ChatRowView key={c.chatId} row={c} active={activeChatId === c.chatId} archived />
-          ))
+          )}
+        />
       )}
     </section>
   );
@@ -1606,7 +1550,6 @@ export function DeletedSection({
   activeChatId: string | null;
 }): JSX.Element {
   const mergeChats = useChatStore((s) => s.mergeChats);
-  const filter = useContext(LifecycleFilterContext);
 
   const { error } = useLifecyclePaging(
     (opts) => api.listChatsDeleted(opts),
@@ -1657,11 +1600,13 @@ export function DeletedSection({
       ) : (
         // Nothing deleted renders nothing — the toggle's own `0` is the empty
         // state (spec/14 §6).
-        deleted
-          .filter((c) => matchesLifecycleFilter(c, filter))
-          .map((c) => (
+        <WindowedRows
+          items={deleted}
+          itemKey={(c) => c.chatId}
+          renderItem={(c) => (
             <ChatRowView key={c.chatId} row={c} active={activeChatId === c.chatId} deleted />
-          ))
+          )}
+        />
       )}
     </section>
   );
@@ -1681,7 +1626,6 @@ export function HiddenSection({
   activeChatId: string | null;
 }): JSX.Element {
   const mergeChats = useChatStore((s) => s.mergeChats);
-  const filter = useContext(LifecycleFilterContext);
 
   const { error } = useLifecyclePaging(
     (opts) => api.listChatsHidden(opts),
@@ -1744,11 +1688,13 @@ export function HiddenSection({
       ) : (
         // Nothing hidden renders nothing — the toggle's own `0` is the empty
         // state (spec/14 §6).
-        hidden
-          .filter((c) => matchesLifecycleFilter(c, filter))
-          .map((c) => (
+        <WindowedRows
+          items={hidden}
+          itemKey={(c) => c.chatId}
+          renderItem={(c) => (
             <ChatRowView key={c.chatId} row={c} active={activeChatId === c.chatId} hidden />
-          ))
+          )}
+        />
       )}
     </section>
   );
@@ -1768,7 +1714,6 @@ export function SnoozedSection({
   activeChatId: string | null;
 }): JSX.Element {
   const mergeChats = useChatStore((s) => s.mergeChats);
-  const filter = useContext(LifecycleFilterContext);
 
   const { error } = useLifecyclePaging(
     (opts) => api.listChatsSnoozed(opts),
@@ -1785,11 +1730,13 @@ export function SnoozedSection({
       ) : (
         // Nothing snoozed renders nothing — the toggle's own `0` is the empty
         // state (spec/14 §6).
-        snoozed
-          .filter((c) => matchesLifecycleFilter(c, filter))
-          .map((c) => (
+        <WindowedRows
+          items={snoozed}
+          itemKey={(c) => c.chatId}
+          renderItem={(c) => (
             <ChatRowView key={c.chatId} row={c} active={activeChatId === c.chatId} snoozed />
-          ))
+          )}
+        />
       )}
     </section>
   );
@@ -1812,7 +1759,6 @@ export function AutomationsSection({
   activeChatId: string | null;
 }): JSX.Element {
   const mergeChats = useChatStore((s) => s.mergeChats);
-  const filter = useContext(LifecycleFilterContext);
 
   const { error } = useLifecyclePaging(
     (opts) => api.listChatsAutomations(opts),
@@ -1882,11 +1828,13 @@ export function AutomationsSection({
       ) : (
         // No automations renders nothing — the toggle's own `0` is the empty
         // state (spec/14 §6).
-        automations
-          .filter((c) => matchesLifecycleFilter(c, filter))
-          .map((c) => (
+        <WindowedRows
+          items={automations}
+          itemKey={(c) => c.chatId}
+          renderItem={(c) => (
             <ChatRowView key={c.chatId} row={c} active={activeChatId === c.chatId} automations />
-          ))
+          )}
+        />
       )}
     </section>
   );
