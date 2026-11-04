@@ -46,6 +46,8 @@ const MAX_LIVE_CHARS = 300;
 const MAX_TRANSCRIPT_LINES = 4000;
 /** Most name corrections kept for the write-up's tooltips. */
 const NAME_FIX_LIMIT = 200;
+/** Most actions waiting at once; analysis passes add no more past this, so the list stays recognisable. */
+const MAX_PENDING_ACTIONS = 5;
 /** Cap on transcript fed into one analysis pass or one chat turn. */
 const MAX_PROMPT_TRANSCRIPT_CHARS = 12_000;
 
@@ -529,9 +531,11 @@ export class MeetingManager {
     source: 'mic' | 'system',
     wav: Buffer,
     speakerName?: string,
+    device?: string,
   ): Promise<void> {
     const rt = this.load(chatId);
     if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
+    if (device !== undefined) rt.state.listeningOn = device;
     // A surface flushes its last clip before sending End; later audio is a bug.
     if (rt.state.status === 'ended') {
       throw new MeetingError(`chat ${chatId}'s meeting has ended`);
@@ -1163,6 +1167,7 @@ export class MeetingManager {
     );
     for (const act of a.actions) {
       if (s.actions.some((x) => norm(x.title) === norm(act.title))) continue;
+      if (s.actions.filter((x) => x.status === 'pending').length >= MAX_PENDING_ACTIONS) break;
       // The model's owner is only a claim: Tom's own name means the action is Tom's,
       // and a name nobody spoke under means someone who was not in the meeting.
       const owner = act.owner?.trim();
