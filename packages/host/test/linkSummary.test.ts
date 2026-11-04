@@ -3,7 +3,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import pino from 'pino';
-import { makeLinkSummariser, LINK_SUMMARY_MODEL } from '../src/linkSummary.js';
+import { makeLinkSummariser } from '../src/linkSummary.js';
 import { handleLinkSummaryRequest } from '../src/index.js';
 import type { RunOnAccountWithCredit } from '../src/accountFailover.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
@@ -26,12 +26,14 @@ describe('makeLinkSummariser', () => {
       { type: 'assistant', content: '  A summary. ' },
       { type: 'result', sessionId: 's' },
     ]);
-    const out = await makeLinkSummariser({ sdkBackend: sdk, runOnAccountWithCredit: withToken })(
-      input,
-    );
+    const out = await makeLinkSummariser({
+      sdkBackend: sdk,
+      runOnAccountWithCredit: withToken,
+      smallJobModels: ['set-model', 'failover-model'],
+    })(input);
     expect(out).toBe('A summary.');
     const o = sdk.lastOptions();
-    expect(o?.model).toBe(LINK_SUMMARY_MODEL);
+    expect(o?.model).toBe('set-model');
     expect(o?.prompt).toContain('Summarise tersely.');
     expect(o?.prompt).toContain('https://example.com/a');
     expect(o?.prompt).toContain('The page body.');
@@ -41,7 +43,11 @@ describe('makeLinkSummariser', () => {
     const sdk = createMockSdkBackend();
     sdk.enqueue([{ type: 'error', errorMessage: 'overloaded' }]);
     await expect(
-      makeLinkSummariser({ sdkBackend: sdk, runOnAccountWithCredit: withToken })(input),
+      makeLinkSummariser({
+        sdkBackend: sdk,
+        runOnAccountWithCredit: withToken,
+        smallJobModels: ['set-model'],
+      })(input),
     ).rejects.toThrow('overloaded');
   });
 
@@ -49,7 +55,11 @@ describe('makeLinkSummariser', () => {
     const sdk = createMockSdkBackend();
     sdk.enqueue([{ type: 'result', sessionId: 's' }]);
     expect(
-      await makeLinkSummariser({ sdkBackend: sdk, runOnAccountWithCredit: withToken })(input),
+      await makeLinkSummariser({
+        sdkBackend: sdk,
+        runOnAccountWithCredit: withToken,
+        smallJobModels: ['set-model', 'failover-model'],
+      })(input),
     ).toBeNull();
   });
 
@@ -58,6 +68,7 @@ describe('makeLinkSummariser', () => {
       await makeLinkSummariser({
         sdkBackend: createMockSdkBackend(),
         runOnAccountWithCredit: noAccount,
+        smallJobModels: ['set-model', 'failover-model'],
       })(input),
     ).toBeNull();
   });

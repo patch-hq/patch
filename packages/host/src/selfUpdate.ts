@@ -377,6 +377,39 @@ export async function requestUpdate(opts: {
   };
 }
 
+/**
+ * How long a published build must have been the newest one, as seen by this
+ * host's own scheduled checks, before the scheduled auto-update installs it.
+ * Deploys land in bursts, and every install restarts the host and drops the
+ * connection mid-work, so a burst should cost one restart, not one per build.
+ * The Update button and `patch hosts update` ignore this: a person asking
+ * for the update gets it now.
+ */
+export const AUTO_UPDATE_SETTLE_MS = 20 * 60_000;
+
+export interface AutoUpdateSettle {
+  /**
+   * Record that a scheduled check saw `version` published. True once that same
+   * version has been the newest published for `settleMs`; a different version
+   * restarts the clock.
+   */
+  settled(version: string): boolean;
+}
+
+export function createAutoUpdateSettle(
+  cfg: { settleMs?: number; now?: () => number } = {},
+): AutoUpdateSettle {
+  const settleMs = cfg.settleMs ?? AUTO_UPDATE_SETTLE_MS;
+  const now = cfg.now ?? Date.now;
+  let seen: { version: string; since: number } | null = null;
+  return {
+    settled(version) {
+      if (!seen || seen.version !== version) seen = { version, since: now() };
+      return now() - seen.since >= settleMs;
+    },
+  };
+}
+
 export interface ArtifactWait {
   /** True while a wait is in progress. */
   readonly active: boolean;
@@ -501,6 +534,12 @@ export async function applyUpdate(opts: {
    * the time of the request.
    */
   untilIdle?: () => Promise<void>;
+  /**
+   * Called with the build's version once the machine is idle and immediately
+   * before the installer runs — the point at which an install has genuinely
+   * been tried. Deferred and awaiting-artifact paths never reach it.
+   */
+  onInstallStart?: (version: string) => void;
   /** Installer-runner override — test hook, so a unit test starts no process. */
   runInstaller?: (cmd: string, args: string[], fd: number, timeoutMs?: number) => Promise<void>;
   logger: Logger;
@@ -586,6 +625,7 @@ export async function applyUpdate(opts: {
     if (existsSync(node)) chmodSync(node, 0o755);
 
     if (opts.untilIdle) await opts.untilIdle();
+    opts.onInstallStart?.(manifest.version);
     opts.logger.info(
       { from: opts.currentVersion, to: manifest.version, target: opts.target },
       'self-update: verified artifact, handing over to its installer',

@@ -65,8 +65,3 @@ export function formatElapsed(startedAt: number, now: number): string {
   if (minutes > 0) return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
   return `${seconds}s`;
 }
-
-/** The stack's title: what is running — `2 background tasks`. */
-export function backgroundBarTitle(tasks: number): string {
-  return tasks > 0 ? `${tasks} ${tasks === 1 ? 'background task' : 'background tasks'}` : '';
-}

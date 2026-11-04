@@ -121,7 +121,17 @@ i=0
 until mkdir "${LOCK}" 2>/dev/null; do
   HOLDER=$(cat "${LOCK}/pid" 2>/dev/null || true)
   if [ -n "${HOLDER}" ] && ! kill -0 "${HOLDER}" 2>/dev/null; then
-    rm -rf "${LOCK}"
+    # Steal by renaming, then check what was taken: between reading HOLDER and
+    # here the dead holder's lock may have been replaced by a live one, which
+    # must go back untouched rather than be deleted.
+    STALE="${LOCK}.stale.$$"
+    if mv "${LOCK}" "${STALE}" 2>/dev/null; then
+      if [ "$(cat "${STALE}/pid" 2>/dev/null || true)" = "${HOLDER}" ]; then
+        rm -rf "${STALE}"
+      else
+        mv "${STALE}" "${LOCK}"
+      fi
+    fi
     continue
   fi
   i=$((i + 1))
@@ -151,9 +161,10 @@ fi
 "${NODE}" -e "
   const fs = require('fs');
   const [home, target] = process.argv.slice(1);
-  fs.rmSync(home + '/current.new', { force: true });
-  fs.symlinkSync(target, home + '/current.new');
-  fs.renameSync(home + '/current.new', home + '/current');
+  const tmp = home + '/current.new.' + process.pid;
+  fs.rmSync(tmp, { force: true });
+  fs.symlinkSync(target, tmp);
+  fs.renameSync(tmp, home + '/current');
 " "${HOME_DIR}" "${TARGET}"
 echo "installed release ${RELEASE} (${GIT_SHA}) → ${HOME_DIR}/current"
 

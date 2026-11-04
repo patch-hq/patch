@@ -20,7 +20,8 @@
 
 import { notificationClickPath } from './notificationTarget';
 import { parseOpenChat, writeFrontChat } from './front-chat';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { ensureSpotlightIndexed } from './spotlight';
 import {
   app,
   BrowserWindow,
@@ -1015,7 +1016,7 @@ function showNativeNotification(opts: {
   body: string;
   chatId?: string;
   priority?: NotifyPriority;
-  kind?: 'message' | 'call' | 'batch' | 'ask' | 'sign-in';
+  kind?: 'message' | 'call' | 'batch' | 'ask' | 'sign-in' | 'host-health';
   actions?: NotifyActionsPayload;
   /** Set when this toast IS a "Not sent — tap to retry" state: a click retries the same thing instead of opening the chat. */
   retry?: { chatId: string; actions?: NotifyActionsPayload; index?: number; replyText?: string };
@@ -1219,7 +1220,7 @@ function registerIpc(): void {
         body: string;
         chatId?: string;
         priority?: NotifyPriority;
-        kind?: 'message' | 'call' | 'batch' | 'ask' | 'sign-in';
+        kind?: 'message' | 'call' | 'batch' | 'ask' | 'sign-in' | 'host-health';
         actions?: NotifyActionsPayload;
       },
     ) => {
@@ -1835,6 +1836,25 @@ export function bootstrap(): void {
     if (process.platform === 'darwin') {
       app.dock?.show();
     }
+    // Auto-updates swap the bundle in place; keep Spotlight pointed at it.
+    // Not awaited (startup must not wait on mdimport); failure is logged loudly.
+    void ensureSpotlightIndexed({
+      platform: process.platform,
+      isPackaged: app.isPackaged,
+      bundlePath: '/Applications/Patch.app',
+      run: (cmd, args) =>
+        new Promise((resolve, reject) => {
+          const p = spawn(cmd, args);
+          let stdout = '';
+          let stderr = '';
+          p.stdout.on('data', (d) => (stdout += d));
+          p.stderr.on('data', (d) => (stderr += d));
+          p.on('error', reject);
+          p.on('close', (code) => resolve({ code: code ?? -1, stdout, stderr }));
+        }),
+      log: (m) => console.log(m),
+      error: (m) => console.error(m),
+    }).catch((err) => console.error('[spotlight]', err));
     // Which server this app talks to — the remembered one, or the first-run
     // question — before any window shows Patch itself.
     await resolveServer();

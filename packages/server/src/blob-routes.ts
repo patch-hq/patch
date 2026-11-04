@@ -29,6 +29,7 @@ import type { WireEvent } from '@patch/wire';
 import type { ChatRegistry } from './chat-registry.js';
 import type { HostLink } from './host-link.js';
 import type { ChatLogStore } from './chat-log-store.js';
+import { isResizable, parseThumbWidth, resizeImage } from './image-thumb.js';
 
 export interface BlobRoutesDeps {
   logger: Logger;
@@ -79,13 +80,21 @@ export function registerBlobRoutes(app: FastifyInstance, deps: BlobRoutesDeps): 
     w.resolve(event);
   });
 
-  app.get<{ Params: { chatId: string; sha: string } }>(
+  app.get<{ Params: { chatId: string; sha: string }; Querystring: { w?: string } }>(
     '/api/chats/:chatId/blob/:sha',
     async (req, reply) => {
       const { chatId, sha } = req.params;
       if (!SHA_RE.test(sha)) {
         return reply.code(400).send({ error: 'bad_sha', message: 'sha must be 64 hex characters' });
       }
+      const thumb = parseThumbWidth(req.query.w);
+      if (!thumb.ok) return reply.code(400).send({ error: 'bad_width', message: thumb.message });
+      // `?w=` serves a display-size copy of a still image; the sha stays the
+      // content, and (sha, w) the copy, so it is just as immutable.
+      const send = async (bytes: Buffer, mime: string): Promise<Buffer> =>
+        thumb.width !== undefined && isResizable(mime)
+          ? resizeImage(bytes, mime, thumb.width)
+          : bytes;
       const chat = deps.chatRegistry.get(chatId);
       if (!chat) {
         return reply
@@ -95,12 +104,13 @@ export function registerBlobRoutes(app: FastifyInstance, deps: BlobRoutesDeps): 
       // A result the server kept itself needs no host at all, online or not.
       const held = deps.chatLogStore?.readBlob(sha);
       if (held) {
+        const out = await send(held.bytes, held.mime);
         return reply
           .code(200)
           .header('content-type', held.mime)
-          .header('content-length', String(held.bytes.byteLength))
+          .header('content-length', String(out.byteLength))
           .header('cache-control', 'public, max-age=31536000, immutable')
-          .send(held.bytes);
+          .send(out);
       }
       const hostId = chat.hostId;
       if (!deps.hostLink.isOnline(hostId)) {
@@ -138,7 +148,10 @@ export function registerBlobRoutes(app: FastifyInstance, deps: BlobRoutesDeps): 
           .send({ error: code, message: result.error?.message ?? 'blob fetch failed' });
       }
 
-      const bytes = Buffer.from(result.data, 'base64');
+      const bytes = await send(
+        Buffer.from(result.data, 'base64'),
+        result.mime ?? 'application/octet-stream',
+      );
       return reply
         .code(200)
         .header('content-type', result.mime ?? 'application/octet-stream')

@@ -212,3 +212,59 @@ describe('speech in the voice ledger', () => {
     expect(speechCostUsd('eleven_mystery', 100)).toBeNull();
   });
 });
+
+describe('ElevenLabsBackend Voice Design', () => {
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
+  test('designVoicePreviews posts the description and records usage', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      json({
+        previews: [{ generated_voice_id: 'g1', audio_base_64: 'AAA=', duration_secs: 2 }],
+        text: 'hello',
+      }),
+    );
+    const usage: SpeechUsage[] = [];
+    const b = createElevenLabs({
+      apiKey: 'k'.repeat(20),
+      logger,
+      fetchImpl,
+      onUsage: (u) => usage.push(u),
+      now: () => 7,
+    });
+    const out = await b.designVoicePreviews('a calm voice');
+    expect(fetchImpl.mock.calls[0]![0]).toBe('https://api.elevenlabs.io/v1/text-to-voice/design');
+    expect(JSON.parse(fetchImpl.mock.calls[0]![1].body).voice_description).toBe('a calm voice');
+    expect(out).toEqual([
+      { generatedVoiceId: 'g1', audioBase64: 'AAA=', durationSecs: 2, text: 'hello' },
+    ]);
+    expect(usage).toHaveLength(1);
+    expect(usage[0]!.characters).toBe(5);
+  });
+
+  test('a refused design throws with the provider reason', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        json({ detail: { status: 'quota_exceeded', message: 'no credits' } }, 401),
+      );
+    const b = createElevenLabs({ apiKey: 'k'.repeat(20), logger, fetchImpl });
+    await expect(b.designVoicePreviews('x')).rejects.toThrow(/quota_exceeded no credits/);
+  });
+
+  test('saveDesignedVoice returns the new voice id', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(json({ voice_id: 'v9' }));
+    const b = createElevenLabs({ apiKey: 'k'.repeat(20), logger, fetchImpl });
+    const v = await b.saveDesignedVoice({
+      name: 'Patch',
+      description: 'd',
+      generatedVoiceId: 'g1',
+    });
+    expect(v.id).toBe('v9');
+    expect(JSON.parse(fetchImpl.mock.calls[0]![1].body)).toEqual({
+      voice_name: 'Patch',
+      voice_description: 'd',
+      generated_voice_id: 'g1',
+    });
+  });
+});

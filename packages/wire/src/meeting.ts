@@ -302,6 +302,8 @@ export const MeetingAction = z
     kind: MeetingActionKind.default('mine'),
     /** For `other`: the speaker it falls to, or `Everyone`. */
     owner: z.string().min(1).optional(),
+    /** For `other`: the owner never spoke in the meeting, so the action is for someone who was not there. */
+    absent: z.boolean().optional(),
     /** The chat started for it: the agent's linked child chat, or the one Tom started. */
     chatId: z.string().min(1).optional(),
     title: z.string(),

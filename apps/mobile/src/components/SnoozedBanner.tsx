@@ -45,7 +45,7 @@ export function SnoozedBanner({ row }: { row: ChatRow | undefined }): ReactEleme
           color: colors.ink2,
           fontFamily: fonts.bodyMedium,
           fontSize: textMin,
-          flexShrink: 1,
+          flex: 1,
         }}
       >
         Snoozed until {formatWakeTime(row.snoozedUntil)}
@@ -54,7 +54,8 @@ export function SnoozedBanner({ row }: { row: ChatRow | undefined }): ReactEleme
         testID="unsnooze-banner-btn"
         accessibilityLabel="Unsnooze chat"
         onPress={() => applySnooze(row.chatId, null)}
-        style={{ marginLeft: 'auto' }}
+        hitSlop={10}
+        style={{ alignSelf: 'center' }}
       >
         <Text style={{ color: colors.leaf, fontFamily: fonts.bodyMedium, fontSize: textMin }}>
           Unsnooze

@@ -46,7 +46,10 @@ Caller provides:
   and a host carries one from its first successful catalogue read (`02-host.md`
   § Agent backends) — so a spawn on a newly added host needs no model. Until a
   host has read a catalogue it has none, and a spawn there that names no model is
-  an error saying so.
+  an error saying so. When the account's default model belongs to a provider
+  with no account on that host able to run it (signed out, or out of usage), the
+  server starts the chat on the first catalogue model whose provider has one;
+  if none does the default stands. Surfaces show the same choice.
 - No Claude account is named, and a chat has none. Which of the host's stored
   keys a turn runs on is the host's decision, taken afresh for every turn, in
   the stored order (`10-auth.md` § Backend credentials).

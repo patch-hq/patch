@@ -37,18 +37,33 @@ describe('initPush — happy path', () => {
     expect(api.pushRegister).toHaveBeenCalledTimes(1);
   });
 
-  it('the notification handler shows an alert only when backgrounded', async () => {
+  it('the notification handler shows an alert unless it is about the chat on screen', async () => {
     const Notifications = await import('./stubs/expo-notifications');
     const { AppState } = await import('react-native');
+    const { useChatStore } = await import('../src/stores/chatStore');
     const { initPush } = await import('../src/lib/push');
     await initPush();
     const handler = Notifications.__getNotificationHandler() as {
-      handleNotification: () => Promise<{ shouldShowAlert: boolean }>;
+      handleNotification: (n: unknown) => Promise<{ shouldShowAlert: boolean }>;
     };
+    const about = (chatId: string) => ({ request: { content: { data: { chatId } } } });
     AppState.currentState = 'active';
-    await expect(handler.handleNotification()).resolves.toMatchObject({ shouldShowAlert: false });
+    useChatStore.getState().setActiveChat('c1');
+    await expect(handler.handleNotification(about('c1'))).resolves.toMatchObject({
+      shouldShowAlert: false,
+    });
+    await expect(handler.handleNotification(about('c2'))).resolves.toMatchObject({
+      shouldShowAlert: true,
+    });
+    useChatStore.getState().setActiveChat(null);
+    await expect(handler.handleNotification(about('c1'))).resolves.toMatchObject({
+      shouldShowAlert: true,
+    });
     AppState.currentState = 'background';
-    await expect(handler.handleNotification()).resolves.toMatchObject({ shouldShowAlert: true });
+    useChatStore.getState().setActiveChat('c1');
+    await expect(handler.handleNotification(about('c1'))).resolves.toMatchObject({
+      shouldShowAlert: true,
+    });
   });
 });
 

@@ -50,6 +50,7 @@ No JavaScript files. No Rust on the Node side.
 - Whisper backend is pluggable per `WHISPER_BACKEND` env var:
   - `groq` (default): direct REST call to Groq's Whisper endpoint. Nothing to install.
   - `local`: spawn faster-whisper as a long-running Python sidecar (`uv run` → FastAPI, PCM in via WS, transcript out). Model: `medium.en`.
+  - `parakeet`: NVIDIA Parakeet TDT v3 (int8) in-process on the CPU via `sherpa-onnx-node`; model dir in `PARAKEET_MODEL_DIR`. No quota, no network, punctuates itself. Dictation's `host` engine adds a streaming FastConformer transducer (`PARAKEET_STREAMING_MODEL_DIR`) in worker threads for the live words.
 - Kokoro TTS as a long-running Python sidecar (same shape as faster-whisper). Streams 24 kHz mono.
 
 ## Wire protocol package (`packages/wire`)

@@ -150,6 +150,20 @@ export function carryTodoAttachments(next: TodoItem[], prev: TodoItem[]): TodoIt
 }
 
 /**
+ * Keep the history. The agent's TodoWrite replaces its whole list, so a fresh
+ * batch drops everything it finished earlier. The mirror keeps those completed
+ * items (ahead of the new list, oldest first) so the chat's task list reads as
+ * a record of what was done; an empty list is the agent clearing it, and clears
+ * the history too. An item the new list still names is not repeated.
+ */
+export function keepCompletedHistory(next: TodoItem[], prev: TodoItem[]): TodoItem[] {
+  if (next.length === 0) return next;
+  const named = new Set(next.map((t) => t.text));
+  const history = prev.filter((t) => t.status === 'completed' && !named.has(t.text));
+  return history.length === 0 ? next : [...history, ...next];
+}
+
+/**
  * Promote a stalled item from `pending` to `in_progress`, or `null` when there
  * is nothing to change. A turn was demonstrably spent on this item, so showing
  * it as `pending` — never started — is a lie. NO FALLBACK in the other

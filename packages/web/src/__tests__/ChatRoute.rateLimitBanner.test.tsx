@@ -2,6 +2,7 @@
 // different text for a rate-limit vs an overloaded (529) pause. Absent or null
 // rateLimitResumingAt → no banner.
 
+import { setModelCatalog, resetModelCatalog } from '../lib/models';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
@@ -79,6 +80,7 @@ describe('ChatRoute — the limit bubble', () => {
   });
   afterEach(() => {
     cleanup();
+    resetModelCatalog();
     deliveryTracker.reset();
     setActiveWs(null);
   });
@@ -242,6 +244,25 @@ describe('ChatRoute — the limit bubble', () => {
       expect(screen.getAllByTestId('rate-limit-provider-option').map((o) => o.textContent)).toEqual(
         [expect.stringMatching(/./)],
       );
+    });
+
+    it('Change provider moves the model and re-sends in ONE request, never a separate resume', () => {
+      const sent = setup({ resetsAt: Date.now() + 60_000, other: 'out', codex: true });
+      setModelCatalog({
+        status: 'ready',
+        models: [
+          { id: 'claude-opus-5', label: 'Opus' },
+          { id: 'openai/gpt-5-codex', label: 'GPT' },
+        ],
+      });
+      renderChat();
+      fireEvent.click(screen.getByTestId('rate-limit-change-provider'));
+      fireEvent.click(screen.getByTestId('rate-limit-provider-option'));
+      const confirm = screen.queryByTestId('provider-switch-switch');
+      if (confirm) fireEvent.click(confirm);
+      const move = sent.find((e) => e.type === 'chat.model_request');
+      expect(move).toMatchObject({ chatId: 'c1', retry: true });
+      expect(sent).not.toContainEqual({ type: 'chat.resume_now_request', chatId: 'c1' });
     });
 
     it('no other provider: Change provider is greyed with the reason', () => {

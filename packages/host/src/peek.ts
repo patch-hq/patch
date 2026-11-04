@@ -56,3 +56,36 @@ export function buildPeekResult(
   const { events, truncated } = daemon.getRecentEvents(state.chatId, limit);
   return { chat_state, events, truncated };
 }
+
+const MAX_STRING = 8_000;
+
+/**
+ * Peek/history are read by agents, so an inlined image (a screenshot tool
+ * result is base64 in the wire event) costs megabytes of context for nothing.
+ * Replace base64 image sources with a size marker and truncate any other
+ * oversized string. Returns a copy; the stored events are untouched.
+ */
+export function stripBinaryPayloads<T>(value: T): T {
+  return strip(value) as T;
+}
+
+function strip(v: unknown): unknown {
+  if (typeof v === 'string') {
+    return v.length > MAX_STRING
+      ? `${v.slice(0, MAX_STRING)}…[truncated ${v.length - MAX_STRING} chars]`
+      : v;
+  }
+  if (Array.isArray(v)) return v.map(strip);
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    const src = o['source'] as { type?: unknown; data?: unknown; media_type?: unknown } | undefined;
+    if (o['type'] === 'image' && src && src.type === 'base64' && typeof src.data === 'string') {
+      const media = typeof src.media_type === 'string' ? src.media_type : 'image';
+      return { type: 'image', omitted: `[${media} omitted, ${src.data.length} base64 chars]` };
+    }
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(o)) out[k] = strip(val);
+    return out;
+  }
+  return v;
+}

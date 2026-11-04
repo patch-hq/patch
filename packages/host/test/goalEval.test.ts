@@ -54,10 +54,15 @@ describe('parseGoalVerdict', () => {
   });
 
   it('caps an over-long reason with an ellipsis', () => {
-    const out = parseGoalVerdict(`{"verdict":"not_met","reason":"${'a'.repeat(300)}"}`);
+    const out = parseGoalVerdict(`{"verdict":"not_met","reason":"${'a'.repeat(2500)}"}`);
     expect(out).not.toBeNull();
-    expect((out as { reason: string }).reason.length).toBeLessThanOrEqual(220);
+    expect((out as { reason: string }).reason.length).toBeLessThanOrEqual(2000);
     expect((out as { reason: string }).reason.endsWith('…')).toBe(true);
+  });
+
+  it('keeps a multi-sentence reason whole', () => {
+    const reason = 'The work was built and checked. '.repeat(15).trim();
+    expect(parseGoalVerdict(JSON.stringify({ verdict: 'met', reason }))?.reason).toBe(reason);
   });
 
   it('parses a refused verdict', () => {

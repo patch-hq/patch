@@ -275,6 +275,13 @@ export class DurableTurn {
     this.skipUntil = req.attach ? (req.attach.consumed ?? null) : null;
   }
 
+  /** claude's pid, once the runner has started it. */
+  claudePid(): number | undefined {
+    return (
+      readJson<{ claudePid?: number | null }>(join(this.dir, RUNNER_INFO))?.claudePid ?? undefined
+    );
+  }
+
   get runnerUp(): boolean {
     return this.proc !== undefined && !this.proc.finished;
   }

@@ -18,7 +18,7 @@ import React, { useEffect, useState, type ReactElement } from 'react';
 import { Pressable, Text, TextInput } from 'react-native';
 import { AlarmClock } from 'lucide-react-native';
 import type { ChatRow } from '../stores/types';
-import { writeLoopMessage } from '../lib/chatMeta';
+import { cancelWake, writeLoopMessage } from '../lib/chatMeta';
 import { creditPause, formatResume } from '../lib/queueLabel';
 import { BarDetailSheet } from './chatBars/BarDetailSheet';
 import { fonts, radii, space, textMin, useTheme } from '../lib/theme';
@@ -82,6 +82,11 @@ export function WakeBar({ row }: { row: ChatRow | undefined }): ReactElement | n
   async function save(): Promise<void> {
     if (!row || every === undefined) return;
     if (await writeLoopMessage(row.chatId, draft.trim(), every)) setOpen(false);
+  }
+
+  async function cancel(): Promise<void> {
+    if (!row) return;
+    if (await cancelWake(row.chatId)) setOpen(false);
   }
 
   return (
@@ -167,6 +172,17 @@ export function WakeBar({ row }: { row: ChatRow | undefined }): ReactElement | n
               </Pressable>
             </>
           )}
+          <Pressable
+            testID="wake-modal-cancel"
+            accessibilityRole="button"
+            accessibilityLabel={every === undefined ? 'Cancel wake' : 'Stop loop'}
+            onPress={() => void cancel()}
+            style={{ alignSelf: 'flex-start', marginTop: space.md }}
+          >
+            <Text style={{ color: colors.red, fontFamily: fonts.bodyMedium }}>
+              {every === undefined ? 'Cancel wake' : 'Stop loop'}
+            </Text>
+          </Pressable>
         </BarDetailSheet>
       ) : null}
     </>

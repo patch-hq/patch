@@ -213,6 +213,7 @@ describe('UpdatesPage', () => {
     renderPage();
     await loaded();
     expect(screen.getByTestId('version-host-host-a')).toHaveTextContent('0.1.300');
+    expect(screen.getByTestId('version-host-host-a')).toHaveTextContent('Latest 0.1.317');
     const text = screen.getByTestId('settings-version').textContent ?? '';
     expect(text).not.toContain('9b8635f');
     expect(text).not.toContain('pnpm');
@@ -252,6 +253,24 @@ describe('UpdatesPage', () => {
     fireEvent.click(screen.getByTestId('update-now-host-a'));
     expect(send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'host-a', force: true });
     confirm.mockRestore();
+  });
+
+  it('states the server version, installed and latest', async () => {
+    stubFetch(null);
+    renderPage();
+    await loaded();
+    expect(screen.getByTestId('version-server')).toHaveTextContent('Installed 0.1.317');
+    expect(screen.getByTestId('version-server')).toHaveTextContent('Latest 0.1.317');
+  });
+
+  it('shows an up-to-date host as installed only, with no Latest', async () => {
+    stubFetch(null);
+    reportHost('host-a', { hostName: 'laptop', hostVersion: '0.1.317', updateAvailable: false });
+    renderPage();
+    await loaded();
+    const row = screen.getByTestId('version-host-host-a');
+    expect(row).toHaveTextContent('0.1.317');
+    expect(row).not.toHaveTextContent('Latest');
   });
 
   it('does not double-report the agent lagging the server when a host row already says so', async () => {
@@ -383,13 +402,23 @@ describe('UpdatesPage', () => {
   });
 
   describe('inside the Electron shell', () => {
-    it('shows no desktop row or version when the shell is current', async () => {
+    it('shows the Patch app installed and latest version when the shell is current', async () => {
       stubFetch(null);
-      installBridge(shellState());
+      installBridge(shellState({ currentVersion: '0.1.317' }));
+      renderPage();
+      await loaded();
+      await waitFor(() =>
+        expect(screen.getByTestId('version-shell')).toHaveTextContent('Installed 0.1.317'),
+      );
+      expect(screen.getByTestId('version-shell')).toHaveTextContent('Latest 0.1.317');
+      expect(screen.getByTestId('update-status')).toHaveTextContent('Up to date');
+    });
+
+    it('shows no Patch app row outside the desktop shell', async () => {
+      stubFetch(null);
       renderPage();
       await loaded();
       expect(screen.queryByTestId('version-shell')).toBeNull();
-      expect(screen.getByTestId('update-status')).toHaveTextContent('Up to date');
     });
 
     it('reports a staged update as ready to restart', async () => {
@@ -401,7 +430,7 @@ describe('UpdatesPage', () => {
       await waitFor(() =>
         expect(screen.getByTestId('update-status')).toHaveTextContent('restart to apply'),
       );
-      expect(screen.getByTestId('settings-version')).not.toHaveTextContent('0.1.320');
+      expect(screen.getByTestId('version-shell')).toHaveTextContent('Latest 0.1.320');
     });
 
     it('names an install failure as such, not as a failed check', async () => {

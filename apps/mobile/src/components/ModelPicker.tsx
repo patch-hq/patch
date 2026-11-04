@@ -26,6 +26,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Check, ChevronDown } from 'lucide-react-native';
 import { useModelCatalog } from '../lib/models';
 import { compactModelLabel } from '../lib/modelLabel';
+import { recentModelPicks } from '../lib/newChatSetup';
+import { useChatStore } from '../stores/chatStore';
+import { AnchoredMenu } from './AnchoredMenu';
 import { fixed, fonts, radii, space, textMin, useTheme } from '../lib/theme';
 
 export function ModelPicker({
@@ -38,6 +41,7 @@ export function ModelPicker({
   pending = false,
   note,
   highlighted = false,
+  recents = false,
 }: {
   /** The host this chat will run on — the catalogue is that machine's. */
   hostId: string | null;
@@ -54,10 +58,16 @@ export function ModelPicker({
   note?: string;
   /** Fill the pill solid: a model has been chosen and it should read at a glance. */
   highlighted?: boolean;
+  /**
+   * The pill opens a short menu — the host's recent models, then "All models…"
+   * for the full catalogue list — instead of the catalogue straight away.
+   */
+  recents?: boolean;
 }): React.ReactElement {
   const colors = useTheme();
   const insets = useSafeAreaInsets();
   const [open, setOpen] = React.useState(false);
+  const [menuOpen, setMenuOpen] = React.useState(false);
   const compact = variant === 'compact';
   // Latches on the first open, so a compact pill's catalogue — once read —
   // stays for the label and the next open instead of being dropped on close.
@@ -76,6 +86,14 @@ export function ModelPicker({
         ? compactModelLabel(selected, catalogueLabel)
         : (catalogueLabel ?? selected);
 
+  // Read when the menu opens, so a chat changing elsewhere never reorders it.
+  const chats = useChatStore((st) => st.chats);
+  const recentModels = React.useMemo(
+    () => (menuOpen && hostId ? recentModelPicks(chats, hostId, catalog.models) : []),
+    // Deliberately not keyed on `chats`: the list stays frozen while open.
+    [menuOpen, hostId, catalog.models],
+  );
+
   return (
     <>
       <Pressable
@@ -86,7 +104,8 @@ export function ModelPicker({
         disabled={disabled}
         onPress={() => {
           setWanted(true);
-          setOpen(true);
+          if (recents) setMenuOpen(true);
+          else setOpen(true);
         }}
         style={({ pressed }) => ({
           flexDirection: 'row',
@@ -102,28 +121,48 @@ export function ModelPicker({
             : pressed
               ? colors.accentTint
               : colors.paperRaised,
-          // Capped so a long model id can't squeeze the screen title it sits
-          // beside; the label ellipsises inside it. The compact pill also
-          // SHRINKS: on a 360dp phone it is the one thing on the composer row
-          // that gives way, so Send is never pushed off the edge.
-          maxWidth: compact ? 120 : 170,
-          flexShrink: compact ? 1 : 0,
+          // The full pill is capped so a long model id can't squeeze the
+          // screen title it sits beside. The compact pill carries the short
+          // name ("Opus 5.5") and never shrinks or truncates it.
+          ...(compact ? {} : { maxWidth: 170 }),
+          flexShrink: 0,
           opacity: pending ? 0.6 : 1,
         })}
       >
         <Text
-          numberOfLines={1}
+          numberOfLines={compact ? undefined : 1}
           style={{
             color: highlighted ? colors.onAccent : colors.ink2,
             fontFamily: highlighted ? fonts.bodyBold : fonts.body,
             fontSize: textMin,
-            flexShrink: 1,
+            ...(compact ? {} : { flexShrink: 1 }),
           }}
         >
           {label}
         </Text>
         <ChevronDown size={14} color={highlighted ? colors.onAccent : colors.ink3} />
       </Pressable>
+
+      {recents ? (
+        <AnchoredMenu
+          visible={menuOpen}
+          items={[
+            ...recentModels.map((m) => ({
+              id: m.id,
+              label: m.label,
+              testID: `model-menu-option-${m.id}`,
+              selected: m.id === selected,
+            })),
+            { id: '', label: 'All models…', testID: 'model-menu-all' },
+          ]}
+          onSelect={(id) => {
+            if (id === '') setOpen(true);
+            else onSelect(id);
+          }}
+          onDismiss={() => setMenuOpen(false)}
+          placement="bottom"
+        />
+      ) : null}
 
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         {/* Tap anywhere outside to dismiss; nothing is chosen by dismissing. */}

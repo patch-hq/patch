@@ -604,6 +604,14 @@ function buildSections(
       for (const r of shown) out.push({ kind: 'folder-row', row: r });
     }
     if (!anyRows) out.push({ kind: 'attention-empty' });
+    // Archived stays reachable under the Unread filter: it is an archive, not
+    // part of the "what needs me" queue, but it is never hidden.
+    out.push({ kind: 'header', label: 'Archived', toggle: 'archived', count: counts.archived });
+    if (open.archived) {
+      for (const r of [...userArchived].sort((a, b) => b.lastUpdated - a.lastUpdated)) {
+        out.push({ kind: 'archived-row', row: r });
+      }
+    }
     return out;
   }
 

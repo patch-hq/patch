@@ -14,34 +14,30 @@
 // signal), which is exactly why patch_watch exists (sdkBackend.ts's
 // `canUseTool` deny).
 //
-// Unlike the old bar, the user can act on a row here: a kill button (X) ends
-// the task outright (the user's call — the prior "the agent owns the task, no kill
-// control" decision from spec/14-design-web.md is reversed). Each running row
-// also carries its own elapsed clock and a command preview that expands to
-// the full string on click.
+// Drawn through the shared StatusRow (spec/14 § Main chat panel — Status
+// list). One running task is one row; more than one fold into a single
+// "Tasks" row whose pill opens one child row per task. The user can act on a
+// row: ✕ kills the task, and clicking the row tails its output in the terminal.
 //
-// A task that has ENDED is not in the stack, does not turn and is not
-// counted: a bar that keeps a finished task reads as work that is stuck,
-// which is the one thing this readout must never say by accident. The Show
-// all checkbox on the title row brings the ends back as struck-through rows
-// under the running ones.
+// A task that has ENDED is not counted and not listed unless the "show ended"
+// link is on: a bar that keeps a finished task reads as work that is stuck,
+// which is the one thing this readout must never say by accident.
 
 import { Fragment, useEffect, useRef, useState, type JSX } from 'react';
-import { ChevronDown, ChevronUp, LoaderCircle, X } from 'lucide-react';
+import { LoaderCircle, X } from 'lucide-react';
 import type { WatchTaskRow } from '@patch/wire';
-import { headCodePoints } from '@patch/wire';
 import { api } from '../api/rest.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useTerminalStore } from '../stores/terminalStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import {
-  backgroundBarTitle,
   formatElapsed,
   runningWatchTasks,
   sortWatchTasks,
   watchTailCommand,
 } from '../lib/backgroundTasks.js';
+import { StatusPill, StatusRow } from './StatusRow.js';
 
 /**
  * The turning glyph. It carries a class rather than lucide's own
@@ -53,11 +49,8 @@ import {
  * the transcript pulls the eye off what it is sitting above.
  */
 function Spinner(): JSX.Element {
-  return <LoaderCircle className="background-task-bar-spinner" size={16} aria-hidden />;
+  return <LoaderCircle className="status-spinner" size={16} aria-hidden />;
 }
-
-/** How long a command preview shows before it needs a click to see the rest. */
-const COMMAND_PREVIEW_LEN = 48;
 
 /**
  * How often the list is re-polled while the bar is on screen. Gated on the
@@ -71,45 +64,6 @@ const LIST_POLL_MS = 3_000;
 
 /** How often running rows recompute their elapsed-time clock. */
 const CLOCK_TICK_MS = 1_000;
-
-/**
- * A row's command, clipped to a preview that expands to the full string on
- * click. Its own click target — expanding must not also fire a task row's
- * open-terminal click.
- */
-function CommandPreview({
-  command,
-  expanded,
-  onToggle,
-}: {
-  command: string;
-  expanded: boolean;
-  onToggle: () => void;
-}): JSX.Element {
-  const preview = expanded ? command : headCodePoints(command, COMMAND_PREVIEW_LEN);
-  const text = preview === command ? command : `${preview}…`;
-  return (
-    <span
-      className="background-task-bar-command"
-      data-testid="background-task-bar-command"
-      role="button"
-      tabIndex={0}
-      title="Show full command"
-      onClick={(e) => {
-        e.stopPropagation();
-        onToggle();
-      }}
-      onKeyDown={(e) => {
-        if (e.key !== 'Enter' && e.key !== ' ') return;
-        e.preventDefault();
-        e.stopPropagation();
-        onToggle();
-      }}
-    >
-      {text}
-    </span>
-  );
-}
 
 /** Local HH:MM for a check-in time. */
 function formatClock(ms: number): string {
@@ -127,14 +81,15 @@ function ProgressLine({ task, now }: { task: WatchTaskRow; now: number }): JSX.E
   const text = quiet
     ? `no output for ${Math.floor(quietMs / QUIET_AFTER_MS)}h${task.lastLine ? ` · ${task.lastLine}` : ''}`
     : task.lastLine;
+  const shownText = `· ${text}`;
   return (
     <span
-      className="background-task-bar-progress"
+      className="status-muted status-grow"
       data-testid="background-task-bar-progress"
       data-quiet={quiet ? 'true' : 'false'}
       title={task.lastLine}
     >
-      {text}
+      {shownText}
     </span>
   );
 }
@@ -183,7 +138,6 @@ export function BackgroundTaskBar({ chatId }: { chatId: string }): JSX.Element |
   const showAll = useUiStore((s) => s.backgroundTasksShowAll);
   const setShowAll = useUiStore((s) => s.setBackgroundTasksShowAll);
   const queuePending = useTerminalStore((s) => s.queuePending);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [killing, setKilling] = useState<Set<string>>(new Set());
   const [editingCheckIn, setEditingCheckIn] = useState<string | null>(null);
   const [checkInMinutes, setCheckInMinutes] = useState('60');
@@ -197,7 +151,7 @@ export function BackgroundTaskBar({ chatId }: { chatId: string }): JSX.Element |
   const tasks = useWatchTasks(chatId, hasWork);
 
   const anyRunning = tasks.some((t) => t.status === 'running');
-  const ticking = anyRunning && !collapsed;
+  const ticking = anyRunning;
   useEffect(() => {
     if (!ticking) return;
     const timer = window.setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
@@ -264,180 +218,171 @@ export function BackgroundTaskBar({ chatId }: { chatId: string }): JSX.Element |
     setTasksOverride(res.tasks);
   }
 
-  function toggleExpanded(taskId: string): void {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(taskId)) next.delete(taskId);
-      else next.add(taskId);
-      return next;
-    });
-  }
-
   if (!hasWork) return null;
 
-  const shown = showAll ? sortWatchTasks(effectiveTasks) : runningWatchTasks(effectiveTasks);
-  const summary = backgroundBarTitle(liveCount);
+  const running = runningWatchTasks(effectiveTasks);
+  const shown = showAll ? sortWatchTasks(effectiveTasks) : running;
+  const grouped = liveCount > 1 || shown.length > 1;
+  const open = !collapsed;
+  const oldestStart = running.reduce<number | null>(
+    (min, t) => (min === null || t.startedAt < min ? t.startedAt : min),
+    null,
+  );
 
-  return (
-    <div
-      className="background-task-bar"
-      data-testid="background-task-bar"
-      data-collapsed={collapsed ? 'true' : 'false'}
-      role="status"
-    >
-      <div className="background-task-bar-rows">
-        <span className="background-task-bar-row background-task-bar-title">
-          {collapsed ? <Spinner /> : null}
-          <span className="background-task-bar-count" data-testid="background-task-bar-count">
-            {summary}
-          </span>
-          {collapsed ? null : (
-            <label className="background-task-bar-all">
-              <input
-                type="checkbox"
-                checked={showAll}
-                onChange={(e) => setShowAll(e.target.checked)}
-                data-testid="background-task-bar-show-all"
-              />
-              Show all
-            </label>
-          )}
-        </span>
-        {collapsed
-          ? null
-          : shown.map((task) => {
-              const ended = task.status !== 'running';
-              const isExpanded = expanded.has(task.taskId);
-              const label = ended
-                ? `Show what "${task.description}" did in the terminal`
-                : `Show what "${task.description}" is doing in the terminal`;
-              return (
-                <Fragment key={task.taskId}>
-                  <button
-                    type="button"
-                    className="background-task-bar-row"
-                    data-testid="background-task-bar-task"
-                    data-ended={ended ? 'true' : 'false'}
-                    aria-label={label}
-                    title={label}
-                    onClick={() => showTask(task)}
+  function taskRow(task: WatchTaskRow, nested: boolean): JSX.Element {
+    const ended = task.status !== 'running';
+    const label = ended
+      ? `Show what "${task.description}" did in the terminal`
+      : `Show what "${task.description}" is doing in the terminal`;
+    return (
+      <Fragment key={task.taskId}>
+        <StatusRow
+          nested={nested}
+          icon={ended || nested ? null : <Spinner />}
+          label={nested ? undefined : 'Task'}
+          className={`${ended ? 'status-row-ended' : ''} ${nested ? '' : 'status-row-solo'}`}
+          testId="background-task-bar-task"
+          data-ended={ended ? 'true' : 'false'}
+          onActivate={() => showTask(task)}
+          activateLabel={label}
+          meta={
+            ended ? null : (
+              <>
+                {task.nextCheckInAt === undefined ? null : (
+                  <span
+                    className="status-checkin"
+                    data-testid="background-task-bar-checkin"
+                    role="button"
+                    tabIndex={0}
+                    title="Check-in interval"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openCheckInEditor(task);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter' && e.key !== ' ') return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      openCheckInEditor(task);
+                    }}
                   >
-                    {ended ? (
-                      <span className="background-task-bar-nospinner" aria-hidden />
-                    ) : (
-                      <Spinner />
-                    )}
-                    <span
-                      className="background-task-bar-description"
-                      data-testid="background-task-bar-description"
-                    >
-                      {task.description}
-                    </span>
-                    {ended ? null : <ProgressLine task={task} now={now} />}
-                    {ended || task.nextCheckInAt === undefined ? null : (
-                      <span
-                        className="background-task-bar-checkin"
-                        data-testid="background-task-bar-checkin"
-                        role="button"
-                        tabIndex={0}
-                        title="Check-in interval"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openCheckInEditor(task);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key !== 'Enter' && e.key !== ' ') return;
-                          e.preventDefault();
-                          e.stopPropagation();
-                          openCheckInEditor(task);
-                        }}
-                      >
-                        {`next check-in at ${formatClock(task.nextCheckInAt)}`}
-                      </span>
-                    )}
-                    {ended ? null : (
-                      <span
-                        className="background-task-bar-elapsed"
-                        data-testid="background-task-bar-elapsed"
-                      >
-                        {formatElapsed(task.startedAt, now)}
-                      </span>
-                    )}
-                    <CommandPreview
-                      command={task.command}
-                      expanded={isExpanded}
-                      onToggle={() => toggleExpanded(task.taskId)}
-                    />
-                    {ended ? null : (
-                      // A plain span, not a nested `<button>`: this row IS a
-                      // button (spec/14 — "every task row is a real button"),
-                      // and interactive content inside interactive content is
-                      // invalid HTML that browsers silently reparent out of the
-                      // row, breaking the layout this bar depends on.
-                      <span
-                        className="background-task-bar-kill"
-                        data-testid="background-task-bar-kill"
-                        role="button"
-                        tabIndex={0}
-                        aria-label={`Kill "${task.description}"`}
-                        title={`Kill "${task.description}"`}
-                        aria-disabled={killing.has(task.taskId)}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (killing.has(task.taskId)) return;
-                          void killTask(task);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key !== 'Enter' && e.key !== ' ') return;
-                          e.preventDefault();
-                          e.stopPropagation();
-                          if (killing.has(task.taskId)) return;
-                          void killTask(task);
-                        }}
-                      >
-                        <X size={14} aria-hidden />
-                      </span>
-                    )}
-                  </button>
-                  {editingCheckIn === task.taskId ? (
-                    <form
-                      className="background-task-bar-row background-task-bar-checkin-edit"
-                      data-testid="background-task-bar-checkin-form"
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        void saveCheckIn(task);
-                      }}
-                    >
-                      <span>Check in every</span>
-                      <input
-                        type="number"
-                        min={1}
-                        step={1}
-                        value={checkInMinutes}
-                        onChange={(e) => setCheckInMinutes(e.target.value)}
-                        data-testid="background-task-bar-checkin-input"
-                        aria-label="Check-in interval in minutes"
-                      />
-                      <span>min</span>
-                      <button type="submit" data-testid="background-task-bar-checkin-save">
-                        Set
-                      </button>
-                    </form>
-                  ) : null}
-                </Fragment>
-              );
-            })}
+                    {`check-in ${formatClock(task.nextCheckInAt)} · `}
+                  </span>
+                )}
+                <span data-testid="background-task-bar-elapsed">
+                  {formatElapsed(task.startedAt, now)}
+                </span>
+              </>
+            )
+          }
+          action={
+            ended ? null : (
+              // A plain span, not a nested `<button>`: the row is itself a
+              // button, and interactive content inside interactive content is
+              // invalid HTML.
+              <span
+                data-testid="background-task-bar-kill"
+                role="button"
+                tabIndex={0}
+                aria-label={`Kill "${task.description}"`}
+                title={`Kill "${task.description}"`}
+                aria-disabled={killing.has(task.taskId)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (killing.has(task.taskId)) return;
+                  void killTask(task);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter' && e.key !== ' ') return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (killing.has(task.taskId)) return;
+                  void killTask(task);
+                }}
+              >
+                <X size={14} aria-hidden />
+              </span>
+            )
+          }
+        >
+          <span className="status-grow" data-testid="background-task-bar-description">
+            {task.description}
+          </span>
+          {ended ? null : <ProgressLine task={task} now={now} />}
+        </StatusRow>
+        {editingCheckIn === task.taskId ? (
+          <StatusRow nested>
+            <form
+              data-testid="background-task-bar-checkin-form"
+              className="status-checkin-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void saveCheckIn(task);
+              }}
+            >
+              <span>Check in every</span>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={checkInMinutes}
+                onChange={(e) => setCheckInMinutes(e.target.value)}
+                data-testid="background-task-bar-checkin-input"
+                aria-label="Check-in interval in minutes"
+              />
+              <span>min</span>
+              <button type="submit" data-testid="background-task-bar-checkin-save">
+                Set
+              </button>
+            </form>
+          </StatusRow>
+        ) : null}
+      </Fragment>
+    );
+  }
+
+  if (!grouped) {
+    const only = shown[0];
+    return only ? (
+      <div data-testid="background-task-bar" role="status">
+        {taskRow(only, false)}
       </div>
-      <button
-        type="button"
-        className="background-task-bar-toggle"
-        data-testid="background-task-bar-toggle"
-        aria-expanded={!collapsed}
-        aria-label={collapsed ? `Expand ${summary}` : `Collapse ${summary}`}
-        onClick={() => setCollapsed(!collapsed)}
+    ) : null;
+  }
+
+  const summary = `${liveCount} running`;
+  return (
+    <div data-testid="background-task-bar" data-collapsed={open ? 'false' : 'true'} role="status">
+      <StatusRow
+        icon={<Spinner />}
+        label="Tasks"
+        meta={oldestStart === null ? null : formatElapsed(oldestStart, now)}
       >
-        {collapsed ? <ChevronDown size={14} aria-hidden /> : <ChevronUp size={14} aria-hidden />}
-      </button>
+        <StatusPill
+          open={open}
+          onToggle={() => setCollapsed(open)}
+          testId="background-task-bar-toggle"
+          label={open ? `Collapse ${summary}` : `Expand ${summary}`}
+        >
+          <span data-testid="background-task-bar-count">{summary}</span>
+        </StatusPill>
+        {open ? (
+          <button
+            type="button"
+            className="status-link status-link-underline status-muted"
+            data-testid="background-task-bar-show-all"
+            aria-pressed={showAll}
+            onClick={() => setShowAll(!showAll)}
+          >
+            {showAll ? 'hide ended' : 'show ended'}
+          </button>
+        ) : (
+          <span className="status-grow status-names">
+            {running.map((t) => t.description).join(', ')}
+          </span>
+        )}
+      </StatusRow>
+      {open ? shown.map((task) => taskRow(task, true)) : null}
     </div>
   );
 }

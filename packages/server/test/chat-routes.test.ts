@@ -160,6 +160,61 @@ describe('chat REST routes', () => {
     }
   });
 
+  it('POST /api/chats with no model moves off a provider that is out of usage', async () => {
+    const { registry, jwt } = await bootstrap();
+    const hostLink = new InProcessHostLink();
+    const origSend = hostLink.send.bind(hostLink);
+    hostLink.send = (surfaceId, event): void => {
+      origSend(surfaceId, event);
+      if (event.type === 'patch.models.request') {
+        hostLink.emit({
+          type: 'patch.models.response',
+          requestId: event.requestId,
+          hostId: 'd1',
+          models: [
+            { id: 'claude-opus-5', label: 'Opus' },
+            { id: 'openai/gpt-5', label: 'GPT' },
+          ],
+          errors: [],
+        });
+      }
+      if (event.type === 'chat.spawn_request') {
+        hostLink.emit({
+          type: 'chat.spawned',
+          hostId: event.hostId,
+          chatId: event.chatId,
+          folder: event.folder,
+        });
+      }
+    };
+    const built = await makeApp({ registry, hostLink });
+    try {
+      const account = (backendId: string, usage?: object) =>
+        hostLink.emit({
+          type: 'host.account',
+          hostId: 'd1',
+          backendId,
+          connected: true,
+          accounts: [{ id: 'a1', label: 'A', connected: true, ...(usage ? { usage } : {}) }],
+        } as WireEvent);
+      account('claude-code', {
+        session: { status: 'rejected', resetsAt: Date.now() + 3_600_000 },
+      });
+      account('codex');
+      const res = await built.app.inject({
+        method: 'POST',
+        url: '/api/chats',
+        headers: { authorization: `Bearer ${jwt}` },
+        payload: { hostId: 'd1', folder: '/work/proj-A', prompt: 'go' },
+      });
+      expect(res.statusCode).toBe(202);
+      const sent = hostLink.sent.find((x) => x.event.type === 'chat.spawn_request');
+      expect(sent?.event.type === 'chat.spawn_request' && sent.event.model).toBe('openai/gpt-5');
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('POST /api/chats requires JWT', async () => {
     const { registry } = await bootstrap();
     const built = await makeApp({ registry, hostLink: new InProcessHostLink() });

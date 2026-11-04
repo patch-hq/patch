@@ -252,6 +252,50 @@ describe('resuming turns a host restart interrupted', () => {
     expect(second.daemon.chatState.get(chatId)?.activity).toBe('running');
   });
 
+  // live (30 Oct, a chat given four 'Carry on' re-sends 22:01-22:13 and then
+  // left idle for ~43h): the resume clears `pendingTurns` before re-sending, and
+  // the re-sent turn only recorded itself again once `runQuery` got past its
+  // awaited start-up (session load, a dark-wake hold, credentials). A host
+  // killed in that window left nothing on disk saying the turn was owed.
+  it('keeps a re-sent turn recorded as owed while it is still starting up', async () => {
+    const g = gatedBackend();
+    const { home, folder } = setup();
+    const first = hostOver(home, g.backend);
+    const chatId = await chatWithHistory(first.daemon, folder, g);
+    void first.daemon.sendInput({ chatId, message: 'running', localId: 'L1' });
+    await tick();
+    expect(pendingOf(first.metaStore, chatId)).toEqual([
+      { message: 'running', localId: 'L1', retryOfSeq: 2 },
+    ]);
+
+    // The restarted host is in a dark wake, so the re-sent turn is held before it runs.
+    const g2 = gatedBackend();
+    const metaStore = createMetaStore(home);
+    const daemon = new Daemon({
+      hostId: 'd1',
+      metaStore,
+      sdkBackend: g2.backend,
+      oauthAccessToken: 'fake-token',
+      sleepWatch: {
+        check: () => undefined,
+        sleptSince: () => false,
+        isFullyAwake: () => false,
+        dispose: () => undefined,
+      },
+      emit: () => undefined,
+      logger: silent,
+      now: () => 1_700_000_000_000,
+      generateChatId: () => 'chat-x',
+    });
+    daemon.hydrate();
+    await tick();
+
+    expect(g2.prompts).toEqual([]);
+    expect(pendingOf(metaStore, chatId)).toEqual([
+      { message: 'running', localId: 'L1', retryOfSeq: 2 },
+    ]);
+  });
+
   // A turn parked for a stated rate limit closes its failed attempt with
   // outcome `failed`, never `completed`/`stopped` — the settled-head check
   // above must not mistake "legitimately still owed, waiting on a retry" for

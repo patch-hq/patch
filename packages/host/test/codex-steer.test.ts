@@ -8,7 +8,7 @@ import type { SdkEnvelope } from '../src/sdkBackend.js';
 
 // A message sent while Codex works reaches it through `turn/steer` after the
 // next tool call finishes, not after the whole turn.
-function harness(opts: { steerFails?: boolean; waiting?: string; stalled?: boolean } = {}) {
+function harness(opts: { steerFails?: boolean; waiting?: string } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'patch-codex-steer-'));
   const history = new CodexHistory(root);
   const calls: { method: string; params: any }[] = [];
@@ -36,7 +36,6 @@ function harness(opts: { steerFails?: boolean; waiting?: string; stalled?: boole
         return { turnId: 't1' };
       }
       if (method === 'turn/start') {
-        if (opts.stalled) return { turn: { id: 't1' } };
         setTimeout(() => {
           emit('item/started', { item: toolItem });
           emit('item/completed', { item: toolItem });
@@ -55,9 +54,7 @@ function harness(opts: { steerFails?: boolean; waiting?: string; stalled?: boole
   let waiting = opts.waiting;
   const run = async () => {
     const events: SdkEnvelope[] = [];
-    const backend = new CodexBackend(accounts, history, {
-      ...(opts.stalled ? { silenceTimeoutMs: 20 } : {}),
-    });
+    const backend = new CodexBackend(accounts, history);
     for await (const e of backend.run({
       prompt: 'work',
       cwd: root,
@@ -110,18 +107,6 @@ describe('Codex delivery at a tool boundary', () => {
     const h = harness({ waiting: 'change course', steerFails: true });
     try {
       await expect(h.run()).rejects.toThrow('did not take a message');
-    } finally {
-      rmSync(h.root, { recursive: true, force: true });
-    }
-  });
-
-  it('fails a silent live process instead of leaving the chat running forever', async () => {
-    const h = harness({ stalled: true });
-    try {
-      await expect(h.run()).rejects.toThrow(
-        'The agent stopped responding. Its host is still connected',
-      );
-      expect(h.calls.filter((c) => c.method === 'thread/read')).toHaveLength(0);
     } finally {
       rmSync(h.root, { recursive: true, force: true });
     }

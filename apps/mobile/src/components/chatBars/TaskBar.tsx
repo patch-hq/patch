@@ -95,7 +95,7 @@ export function TaskBar({ row }: { row: ChatRow }): ReactElement | null {
           numberOfLines={1}
           style={{ flex: 1, color: colors.ink2, fontSize: textMin }}
         >
-          {todos.length === 0 ? 'Add tasks' : (head ?? 'All tasks done')}
+          {todos.length === 0 ? 'Add tasks' : open ? 'Tasks' : (head ?? 'All tasks done')}
         </Text>
         {draft.length > 0 ? (
           <Text testID="task-bar-queued" style={{ color: colors.ink3, fontSize: textMin }}>

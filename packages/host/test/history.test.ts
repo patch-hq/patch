@@ -1382,6 +1382,13 @@ describe('extractSystemContext (spec/02 § System-reminder disclosure)', () => {
     expect(items.map((i) => i.label)).toEqual(['Broadcast digest', 'Todo list updated']);
   });
 
+  it('labels the meeting reminder "Meeting context"', () => {
+    const prompt =
+      '<system-reminder>\nA meeting is running in this chat (running 3m). Answer questions about it ' +
+      'from what follows.\n</system-reminder>\n\nwhat was decided?';
+    expect(extractSystemContext(prompt)[0]?.label).toBe('Meeting context');
+  });
+
   it('falls back to a generic label for an unrecognised leading block', () => {
     const prompt = '<system-reminder>\nsomething neither builder wrote\n</system-reminder>\n\nhi';
     expect(extractSystemContext(prompt)[0]?.label).toBe('System context');

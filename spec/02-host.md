@@ -65,7 +65,9 @@ every chat on the host can drive the CLI and the skill matches the host it
 describes (`17-cli.md` § Skill).
 
 The host self-updates. It checks the server for a newer build on boot and on a
-schedule, downloads it, and restarts itself under the service manager. A host
+schedule, downloads it, and restarts itself under the service manager. A scheduled
+install waits until the published build has been the newest for 20 minutes, so a burst of deploys
+costs one restart; Update and Update all install at once. A host
 behind the current version shows an update control in Settings → Updates. The shared setting
 `autoUpdateHosts` (default on) governs this: off, a host neither installs on its own schedule nor is told
 to by the server when it connects, and stays put until Update (one host) or Update all is pressed. A
@@ -92,7 +94,9 @@ off"), everything claude said is replayed, and what the previous host had alread
 handled is skipped. A permission the turn was waiting on is asked again. A turn
 whose runner is gone (a reboot) is cut off and re-sent with the reminder, as
 before. A directory belonging to no owed turn is ended and removed. A finished
-turn's directory is removed. An install never prunes a version folder a live
+turn's directory is removed. A runner with no host attached whose claude has been
+silent for 30 minutes ends claude itself, so an orphaned turn finishes as failed
+instead of holding its chat "running". An install never prunes a version folder a live
 runner started from.
 
 ### Desktop app and the local host
@@ -150,6 +154,12 @@ sets it.
 A failed install is reported to surfaces and the host holds turns for that
 backend until it is resolved. Backends are independent: a host with one backend
 unprovisioned keeps running chats on the others.
+
+## Small jobs
+
+Chat titles, status lines, tool-run labels, branch send-back summaries, link summaries and recurrence translation are small one-shot model queries. They share one ordered model list: the first entry is the set model, and each later entry is a failover tried in order when the one before it fails. The default is `claude-haiku-4-5-20251001` then `claude-sonnet-4-5`; `PATCH_SMALL_JOB_MODELS` (comma-separated, set model first) replaces it for the host. An empty entry or a model named twice aborts startup.
+
+This is separate from account failover (`10-auth.md` § Backend credentials): the account gate picks the credential, then the models are walked on it. Each failed model is logged. When every model fails the job fails with an error naming the models tried and the last reason, so a retired or unavailable set model is visible and not covered over. Jobs with their own configured model (goal checks, meeting analysis, manager sweeps, rotation digests) and Codex chats, which run on their own model, are not part of this list.
 
 ## Permission mode
 
@@ -894,6 +904,8 @@ Self-wake vs job vs `CronCreate`: a job (`08-triggers-and-jobs.md`) is an extern
 ## Task list
 
 The agent tracks its work with Claude Code's native TodoWrite tool. The host observes those tool calls and mirrors the list onto chat state as `todos` — `{text, status}` per item, status ∈ pending / in_progress / completed — carried on `chat.state` so every surface can show what the chat is working through (`14-design-web.md` § Main chat panel). The mirror follows the agent's list and is not persisted: a rehydrated chat starts empty until its next TodoWrite.
+
+History: the agent's TodoWrite replaces its whole list, so the mirror keeps the items finished earlier that a new list no longer names, ahead of the new items, so the list stays a record of what was done.
 
 Keeping the agent on the list. When a turn settles idle with items still incomplete, the host fires the head incomplete item back into the chat as a fresh `[todo]`-prefixed turn, so the agent works one focused item at a time instead of drifting. The fired turn carries a `<system-reminder>` telling the agent the line is one of its own TodoWrite items and to mark it in_progress now and completed once it is done; without that cue the agent does the work and leaves the item reading pending for ever.
 

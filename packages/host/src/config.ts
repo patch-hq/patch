@@ -1,5 +1,6 @@
 // Host env config. NO FALLBACKS for required keys.
 
+import { parseSmallJobModels } from './smallJobModels.js';
 import { execFileSync } from 'node:child_process';
 import { homedir, hostname } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -72,6 +73,13 @@ export interface HostConfig {
    * through the server registry.
    */
   hostName: string;
+  /**
+   * The model the small one-shot jobs (titles, status lines, tool-run labels,
+   * send-back and link summaries, recurrence translation) run on, then the
+   * failovers tried in order. PATCH_SMALL_JOB_MODELS, comma-separated, set
+   * model first (spec/02-host.md § Small jobs).
+   */
+  smallJobModels: readonly string[];
   /** Home directory for ~/.patch state. PATCH_HOME override, otherwise ~/.patch. */
   patchHome: string;
   /** Unix domain socket path the local control HTTP listens on. */
@@ -127,7 +135,7 @@ export interface HostConfig {
     host: string;
     /** `host.host.audioRelayHost` — see `loadConfig`'s comment above. */
     relayHost: string | undefined;
-    whisperBackend: 'off' | 'groq' | 'elevenlabs' | 'local' | 'mock';
+    whisperBackend: 'off' | 'groq' | 'elevenlabs' | 'local' | 'parakeet' | 'mock';
     /**
      * GROQ_API_KEY from the environment (required for whisperBackend='groq'
      * unless one is set from Settings → Hosts → Keys, which wins).
@@ -140,6 +148,13 @@ export interface HostConfig {
     whisperLocalSidecarUrl: string | undefined;
     /** faster-whisper model dir (medium.en) — used to spawn the local sidecar. */
     whisperModelPath: string | undefined;
+    /** PARAKEET_MODEL_DIR — the extracted Parakeet TDT v3 model (whisperBackend='parakeet'). */
+    parakeetModelDir: string | undefined;
+    /**
+     * PARAKEET_STREAMING_MODEL_DIR — the extracted streaming FastConformer
+     * transducer that makes dictation's live words on the `host` engine.
+     */
+    parakeetStreamingModelDir: string | undefined;
     kokoroBackend: 'off' | 'real' | 'mock';
     kokoroSidecarUrl: string | undefined;
     /**
@@ -305,10 +320,11 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
     whisperBackendRaw !== 'groq' &&
     whisperBackendRaw !== 'elevenlabs' &&
     whisperBackendRaw !== 'local' &&
+    whisperBackendRaw !== 'parakeet' &&
     whisperBackendRaw !== 'mock'
   ) {
     throw new Error(
-      `Invalid WHISPER_BACKEND: ${whisperBackendRaw} (expected 'off' | 'groq' | 'elevenlabs' | 'local' | 'mock')`,
+      `Invalid WHISPER_BACKEND: ${whisperBackendRaw} (expected 'off' | 'groq' | 'elevenlabs' | 'local' | 'parakeet' | 'mock')`,
     );
   }
   const kokoroBackendRaw = env['KOKORO_BACKEND'] ?? 'off';
@@ -324,7 +340,7 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
   if (vadBackendRaw !== 'silero' && vadBackendRaw !== 'mock') {
     throw new Error(`Invalid VAD_BACKEND: ${vadBackendRaw} (expected 'silero' | 'mock')`);
   }
-  const defaultCap = whisperBackendRaw === 'local' ? 3 : 4;
+  const defaultCap = whisperBackendRaw === 'local' || whisperBackendRaw === 'parakeet' ? 3 : 4;
   const maxConcurrentSessions = intRequired(
     'PATCH_VOICE_MAX_SESSIONS',
     env['PATCH_VOICE_MAX_SESSIONS'],
@@ -332,6 +348,7 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
   );
 
   return {
+    smallJobModels: parseSmallJobModels(env['PATCH_SMALL_JOB_MODELS']),
     hostName:
       env['PATCH_HOST_NAME'] !== undefined && env['PATCH_HOST_NAME'] !== ''
         ? env['PATCH_HOST_NAME']
@@ -362,6 +379,8 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
       elevenlabsApiKey: env['ELEVEN_LABS_API_KEY'],
       whisperLocalSidecarUrl: env['WHISPER_LOCAL_SIDECAR_URL'],
       whisperModelPath: env['WHISPER_MODEL_PATH'],
+      parakeetModelDir: env['PARAKEET_MODEL_DIR'],
+      parakeetStreamingModelDir: env['PARAKEET_STREAMING_MODEL_DIR'],
       kokoroBackend: kokoroBackendRaw,
       kokoroSidecarUrl: env['KOKORO_SIDECAR_URL'],
       kokoroModelPath:

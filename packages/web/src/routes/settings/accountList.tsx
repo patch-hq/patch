@@ -331,6 +331,11 @@ export function UsageBars({
           </div>
         );
       })}
+      {usage.at !== undefined && (
+        <span className="set-sub" data-testid={`${testId}-read-at`}>
+          read {formatReset(usage.at)}
+        </span>
+      )}
     </div>
   );
 }

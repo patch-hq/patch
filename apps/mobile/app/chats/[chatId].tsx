@@ -4,6 +4,7 @@ import { isDictatedSend } from '../../src/lib/dictatedSends';
 import { useViewPositionStore } from '../../src/stores/viewPositionStore';
 import { presentFailure } from '../../src/lib/usage';
 import React from 'react';
+import { formatElapsed as formatToolElapsed } from '../../src/lib/backgroundTasks';
 import {
   Animated,
   Dimensions,
@@ -36,7 +37,6 @@ import {
   ChevronLeft,
   Search,
   Phone,
-  Ear,
   MessageSquare,
   Mic,
   FileText,
@@ -78,6 +78,8 @@ import {
   discardUpload,
   retrySource,
   retryTurn,
+  editTurn,
+  editSource,
   retryUpload,
   sendMessage,
 } from '../../src/lib/sendQueue';
@@ -425,11 +427,19 @@ function ChatDetailBody(): React.ReactElement {
         console.error('dismissChatNotifications failed', e),
       );
     clear();
+    // spec/09 § `### push` — tell the server which chat is in front of the
+    // user, so a notification for any OTHER chat still reaches them. Only
+    // while the app is foregrounded: a backgrounded phone is looking at nothing.
+    const reportFocus = (open: boolean) =>
+      getWs().safeSend({ type: 'chat.focus_change', chatId: open ? chatId : null });
+    if (AppState.currentState === 'active') reportFocus(true);
     const sub = AppState.addEventListener('change', (s) => {
       if (s === 'active') clear();
+      reportFocus(s === 'active');
     });
     return () => {
       sub.remove();
+      reportFocus(false);
       useChatStore.getState().setActiveChat(null);
     };
   }, [chatId]);
@@ -893,9 +903,12 @@ function ChatDetailBody(): React.ReactElement {
       // Follow mode answers "does the user want to stay pinned to the newest
       // message?", which only the user can change — so only a drag changes it.
       // A programmatic re-pin must never turn it off.
+      // The button is different: it answers "is the view off the newest
+      // message?", true however the list got there (a drag, or the keyboard
+      // shrinking the list under a reader who is not following).
+      setShowScrollToBottom(!atNewest);
       if (draggingRef.current) {
         followRef.current = atNewest;
-        setShowScrollToBottom(!atNewest);
         // Only remember a position the user actually chose. Recording our own
         // mid-load offsets meant a chat could be "remembered" at a spot the
         // user never scrolled to. No anchor needed once pinned to the newest
@@ -1147,29 +1160,19 @@ function ChatDetailBody(): React.ReactElement {
         ) : null}
         {/* Call button — the ONLY place a sustained voice CALL is started on
             mobile (spec/15 § Chat detail). Read-only mirror threads have no
-            voice call, so it is hidden there. */}
+            voice call, so it is hidden there. A long press starts hands-free
+            instead — the same sustained session with the line left open
+            (spec/07 § Session modes). */}
         {!readOnlyMirror ? (
           <Pressable
             onPress={() => startVoiceCall(chatId)}
+            onLongPress={() => startVoiceCall(chatId, 'hands-free')}
             style={{ padding: space.sm }}
             accessibilityRole="button"
             accessibilityLabel="Start voice call"
+            accessibilityHint="Long press to start hands-free"
           >
             <Phone size={20} color={colors.ink} />
-          </Pressable>
-        ) : null}
-        {/* Hands-free — the same sustained session, with the line left open
-            (spec/07 § Session modes). It never ends itself on silence, so
-            there is nothing to reopen an hour into plastering a wall, and only
-            an utterance addressed to Patch counts as a turn. */}
-        {!readOnlyMirror ? (
-          <Pressable
-            onPress={() => startVoiceCall(chatId, 'hands-free')}
-            style={{ padding: space.sm }}
-            accessibilityRole="button"
-            accessibilityLabel="Start hands-free"
-          >
-            <Ear size={20} color={colors.ink} />
           </Pressable>
         ) : null}
         {/* Find in this chat (spec/15 § Find in chat). */}
@@ -1438,6 +1441,24 @@ function ChatDetailBody(): React.ReactElement {
 // the row expands its args + (for Edit/Write/MultiEdit) an inline unified
 // diff (spec/15 ## Chat detail). NO side-by-side — the unified renderer is
 // the only diff view on mobile.
+/** A running call's elapsed time, from the host's start stamp. Display only. */
+function ToolElapsed({ since }: { since: number }): React.ReactElement {
+  const colors = useTheme();
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <Text
+      testID="tool-running-elapsed"
+      style={{ ...typography.meta, color: colors.ink3, marginLeft: space.sm }}
+    >
+      {formatToolElapsed(since, now)}
+    </Text>
+  );
+}
+
 function ToolCallItem({
   chatId,
   entry,
@@ -1494,6 +1515,8 @@ function ToolCallItem({
   const phrase =
     labelForRun(ownLabel, [entry.callId])?.summary ?? toolCallSummary(entry.tool, entry.toolArgs);
   const summary = result ? `${phrase} →` : phrase;
+  const chatRunning = useChatStore((s) => s.chats[chatId]?.activity === 'running');
+  const runningSince = !result && chatRunning ? entry.startedAt : undefined;
   // patch_notify calls carrying a deepLink render a tappable link row on the
   // collapsed summary itself — same tap-target the push notification itself
   // opens (spec/09 § `### push`, spec/15 § Chat detail) — rather than
@@ -1535,6 +1558,7 @@ function ToolCallItem({
         >
           {summary}
         </Text>
+        {runningSince !== undefined ? <ToolElapsed since={runningSince} /> : null}
       </Pressable>
       {deepLink ? (
         <Pressable
@@ -1676,7 +1700,7 @@ function ToolResultBody({ chatId, value }: { chatId: string; value: unknown }): 
 }
 
 interface ViewFileView {
-  kind: 'image' | 'pdf' | 'html' | 'file';
+  kind: 'image' | 'pdf' | 'video' | 'html' | 'file';
   /** Server-relative URL of the wrapped page (`/api/chats/:id/artifact/:aid`). */
   url: string;
   name: string;
@@ -1690,7 +1714,8 @@ interface ViewFileView {
 function asViewFile(v: unknown): ViewFileView | null {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return null;
   const { kind, url, name } = v as Record<string, unknown>;
-  if (kind !== 'image' && kind !== 'pdf' && kind !== 'html' && kind !== 'file') return null;
+  if (kind !== 'image' && kind !== 'pdf' && kind !== 'video' && kind !== 'html' && kind !== 'file')
+    return null;
   if (typeof url !== 'string' || !url.startsWith('/api/')) return null;
   if (typeof name !== 'string' || name === '') return null;
   const { width, height, size } = v as Record<string, unknown>;
@@ -2642,6 +2667,11 @@ const TimelineItem = React.memo(function TimelineItem({
             // message is text-only — attachments would be dropped.
             {...(entry.localId === undefined && !entry.queued && retrySource(chatId, entry) !== null
               ? { retry: () => retryTurn(chatId, entry) }
+              : {})}
+            // Edit: a settled text-only user message is replaced by a fork
+            // carrying the new text (spec/04 § Branching).
+            {...(entry.localId === undefined && !entry.queued && editSource(chatId, entry) !== null
+              ? { edit: (next: string) => editTurn(chatId, entry.seq, next) }
               : {})}
             // spec/04 ## Message queueing § Edit — a tap on a queued message
             // opens it for editing in place.

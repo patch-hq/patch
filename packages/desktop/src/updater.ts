@@ -366,7 +366,10 @@ export function initialUpdaterState(args: {
 /**
  * How long to give a successful-looking `quitAndInstall()` call before
  * concluding it silently stalled. electron-updater relaunches within a few
- * seconds on a healthy install; this is generous headroom above that.
+ * seconds on a healthy install, but a slow one (the bundle swap has been seen
+ * taking ~75s) is still a healthy install. Firing early reads that as a stall,
+ * kills ShipIt and asks again, and the shell restarts a second time — so the
+ * bound must sit well above the slowest healthy install.
  *
  * Found live: Squirrel.Mac's ShipIt helper can take the install request and
  * then wedge — a FileCoordination claim granted and never released, no error
@@ -374,7 +377,7 @@ export function initialUpdaterState(args: {
  * upstream of this ever reported that as a failure, so pressing "Restart now"
  * looked like it did nothing at all.
  */
-export const INSTALL_WATCHDOG_MS = 20_000;
+export const INSTALL_WATCHDOG_MS = 120_000;
 
 /**
  * An updater error as one short clause for the banner, which prefixes it with
@@ -590,7 +593,7 @@ export function savePersisted(
 
 /**
  * The Restart button's handler, for the lifetime of the app. Pressing Restart
- * while an install is still pending (the watchdog gives it 20s) used to start a
+ * while an install is still pending (the watchdog gives it two minutes) used to start a
  * second, independent install chain: two `quitAndInstall` calls, two ShipIt
  * kills, two error reports. The check path is single-flight; the install path
  * must be too. The latch releases when the attempt is reported as failed, so

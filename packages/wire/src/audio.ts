@@ -64,14 +64,15 @@ export type VoiceBackend = z.infer<typeof VoiceBackend>;
  * Where dictation's words come from (spec/07 § Dictation engines), named by
  * where the work happens: `device` — the phone's own speech recogniser, on the
  * phone; `deepgram` / `elevenlabs` — streamed to Deepgram or ElevenLabs Scribe
- * as it is spoken; `whisper` — the
- * host's Whisper, which re-reads the recording so far for the live words and
- * the whole clip once it ends.
+ * as it is spoken; `host` — streamed to a streaming speech model on the host,
+ * each finished phrase then read once by the host's accurate transcriber;
+ * `whisper` — the host's Whisper, which re-reads the recording so far for the
+ * live words and the whole clip once it ends.
  */
-export const PhoneDictationEngine = z.enum(['device', 'deepgram', 'elevenlabs', 'whisper']);
+export const PhoneDictationEngine = z.enum(['device', 'deepgram', 'elevenlabs', 'host', 'whisper']);
 export type PhoneDictationEngine = z.infer<typeof PhoneDictationEngine>;
 /** A computer has no recogniser of its own. */
-export const ComputerDictationEngine = z.enum(['deepgram', 'elevenlabs', 'whisper']);
+export const ComputerDictationEngine = z.enum(['deepgram', 'elevenlabs', 'host', 'whisper']);
 export type ComputerDictationEngine = z.infer<typeof ComputerDictationEngine>;
 export type DictationEngine = PhoneDictationEngine;
 
@@ -273,7 +274,9 @@ export function voiceKeyHostStatus(
   backend: VoiceBackend | DictationEngine,
   hosts: ReadonlyArray<{ hostName: string; voiceKeys?: VoiceKeys | undefined }>,
 ): string | null {
-  if (backend === 'local' || backend === 'device' || backend === 'whisper') return null;
+  if (backend === 'local' || backend === 'device' || backend === 'host' || backend === 'whisper') {
+    return null;
+  }
   const missing = hosts.filter((h) => h.voiceKeys !== undefined && h.voiceKeys[backend] !== true);
   if (missing.length === 0) return null;
   const names = missing.map((h) => h.hostName).join(', ');

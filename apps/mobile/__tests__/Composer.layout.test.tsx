@@ -87,14 +87,15 @@ describe('Composer — two-row layout', () => {
     ]);
   });
 
-  it('keeps 20px at the sides, 14px below, and 8px between the field and the action row', () => {
+  it('keeps 10px at the sides, 8px above and below, and 8px between the field and the action row', () => {
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     const inputRow = findHost(r.root, byTestId('composer-input-row'));
     const actionsRow = findHost(r.root, byTestId('composer-actions-row'));
     const outer = inputRow.parent!.parent!.props['style'] as Record<string, number>;
-    expect(outer['paddingLeft'] ?? outer['paddingHorizontal'] ?? outer['padding']).toBe(20);
-    expect(outer['paddingRight'] ?? outer['paddingHorizontal'] ?? outer['padding']).toBe(20);
-    expect(outer['paddingBottom'] ?? outer['padding']).toBe(14);
+    expect(outer['paddingLeft'] ?? outer['paddingHorizontal'] ?? outer['padding']).toBe(10);
+    expect(outer['paddingRight'] ?? outer['paddingHorizontal'] ?? outer['padding']).toBe(10);
+    expect(outer['paddingTop'] ?? outer['padding']).toBe(8);
+    expect(outer['paddingBottom'] ?? outer['padding']).toBe(8);
     const flat = (n: ReactTestInstance): Record<string, number> =>
       Object.assign({}, ...[n.props['style']].flat(Infinity).filter(Boolean));
     const gap = (outer['gap'] ?? 0) + (flat(actionsRow)['marginTop'] ?? 0);

@@ -109,6 +109,11 @@ export interface AudioSession {
    * and feeds the same samples here purely to get live partials back.
    */
   sendPcm(pcm: Int16Array): void;
+  /**
+   * Dictation on a streaming engine: the user has stopped. The host flushes
+   * the engine and answers with one `audio.transcript_final`.
+   */
+  finishDictation(): void;
   /** True while muted. */
   isMuted(): boolean;
   /** Tear the session down: send session_end, stop mic, close WSS. */
@@ -304,6 +309,10 @@ export async function openAudioSession(opts: OpenAudioSessionOpts): Promise<Audi
         speak(text: string): void {
           if (ws.readyState !== WS.OPEN) return;
           ws.send(JSON.stringify({ type: 'audio.speak', sessionId: minted.sessionId, text }));
+        },
+        finishDictation(): void {
+          if (closed || ws.readyState !== WS.OPEN) return;
+          ws.send(JSON.stringify({ type: 'audio.dictation_finish', sessionId: minted.sessionId }));
         },
         sendPcm(pcm: Int16Array): void {
           if (closed || ws.readyState !== WS.OPEN) return;

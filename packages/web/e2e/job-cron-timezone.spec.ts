@@ -66,6 +66,7 @@ test.describe('job editor — cron timezone', () => {
     await page.goto(NEW_JOB);
     await page.getByTestId('job-name').fill('daily email update');
     await page.getByTestId('job-cron-timezone').selectOption('Europe/London');
+    await page.getByTestId('job-spawn-host-select').selectOption('d1');
     await page.getByTestId('job-spawn-folder').selectOption(JSON.stringify(['d1', '/work']));
     await page.getByTestId('job-spawn-prompt').fill('go');
     await page.getByTestId('job-save').click();
@@ -83,6 +84,7 @@ test.describe('job editor — cron timezone', () => {
     await page.goto(NEW_JOB);
     await page.getByTestId('job-name').fill('utc job');
     await page.getByTestId('job-cron-timezone').selectOption('UTC');
+    await page.getByTestId('job-spawn-host-select').selectOption('d1');
     await page.getByTestId('job-spawn-folder').selectOption(JSON.stringify(['d1', '/work']));
     await page.getByTestId('job-spawn-prompt').fill('go');
     await page.getByTestId('job-save').click();
@@ -101,6 +103,7 @@ test.describe('job editor — cron timezone', () => {
     await page.getByTestId('job-schedule-nl').fill('every weekday at 9am');
     await expect(page.getByTestId('job-cron-value')).toHaveText('0 9 * * 1-5');
     await page.getByTestId('job-cron-timezone').selectOption('Europe/London');
+    await page.getByTestId('job-spawn-host-select').selectOption('d1');
     await page.getByTestId('job-spawn-folder').selectOption(JSON.stringify(['d1', '/work']));
     await page.getByTestId('job-spawn-prompt').fill('go');
     await page.getByTestId('job-save').click();

@@ -163,6 +163,7 @@ export * from './modelLabel.js';
 // one copy of the rule, because the host, the usage probe and every surface
 // all render from it.
 export * from './usageWindows.js';
+export * from './availableModel.js';
 export * from './codec.js';
 export * from './host-health.js';
 export * from './codepoints.js';

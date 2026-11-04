@@ -83,12 +83,22 @@ export interface HealthSampler {
   stop(): void;
 }
 
+/** The lag both of two consecutive windows reached. */
+export function sustainedLag(previousMs: number, currentMs: number): number {
+  return Math.min(previousMs, currentMs);
+}
+
 export function createHealthSampler(): HealthSampler {
   const loop = monitorEventLoopDelay({ resolution: 20 });
   loop.enable();
+  let previousLagMs = 0;
   return {
     async sample() {
-      const eventLoopLagMs = loop.max / 1e6;
+      // A host is only "running slowly" when the loop stalled in two reports
+      // running: one GC pause or build burst in a 15 s window is not slowness.
+      const windowLagMs = loop.max / 1e6;
+      const eventLoopLagMs = sustainedLag(previousLagMs, windowLagMs);
+      previousLagMs = windowLagMs;
       loop.reset();
       const base = {
         load1: loadavg()[0]!,

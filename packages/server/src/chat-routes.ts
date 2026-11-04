@@ -24,8 +24,15 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
 import { z } from 'zod';
 import { verifySurfaceCredential } from '@patch/auth';
-import { isReadOnlyMirrorThread, isReservedSpecialThread, TodoItem } from '@patch/wire';
-import type { ChatErrorCode, ChatSpawnRequestEvent, WireEvent } from '@patch/wire';
+import {
+  backendIdForModel,
+  backendUsable,
+  isReadOnlyMirrorThread,
+  isReservedSpecialThread,
+  pickAvailableModel,
+  TodoItem,
+} from '@patch/wire';
+import type { ChatErrorCode, ChatSpawnRequestEvent, ReportedBackend, WireEvent } from '@patch/wire';
 import type { Registry } from './registry.js';
 import type { HostLink } from './host-link.js';
 import type { ChatRegistry } from './chat-registry.js';
@@ -173,6 +180,12 @@ export interface ChatRoutesDeps {
    * host then resolves against the default the server mirrored to it.
    */
   defaultModel?: () => string | undefined;
+  /**
+   * What a host last reported for one backend's accounts — lets a model-less
+   * spawn skip a provider with nothing able to run. Absent leaves the account
+   * default as is.
+   */
+  accountReport?: (hostId: string, backendId: string) => ReportedBackend | undefined;
   /** Override the spawn-error wait window for tests. */
   spawnErrorWaitMs?: number;
 }
@@ -252,6 +265,31 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       );
       return reply.code(UNKNOWN_HOST_STATUS).send(unknownHost);
     }
+    // A spawn naming no model runs on the account default, moved to the first
+    // model whose provider has an account that can run it on THIS machine.
+    // Settled before anything is forwarded; an unreadable catalogue leaves the
+    // account default in place and says so in the log.
+    const availableDefault = async (): Promise<string | undefined> => {
+      const preferred = deps.defaultModel?.();
+      if (parsed.data.model !== undefined || preferred === undefined || !deps.accountReport) {
+        return preferred;
+      }
+      const reportFor = (backendId: string) => deps.accountReport!(parsed.data.hostId, backendId);
+      if (backendUsable(reportFor(backendIdForModel(preferred)))) return preferred;
+      const catalogue = await requestModels(auth.surfaceId, parsed.data.hostId);
+      if (catalogue === 'timeout') {
+        deps.logger.warn(
+          { hostId: parsed.data.hostId, preferred },
+          'default model has no usable account and the catalogue did not answer; keeping it',
+        );
+        return preferred;
+      }
+      return pickAvailableModel({
+        preferred,
+        catalogue: catalogue.models.map((m) => m.id),
+        reportFor,
+      });
+    };
     const chatId = deps.idGenerator();
     const event: ChatSpawnRequestEvent = {
       type: 'chat.spawn_request',
@@ -262,7 +300,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
       ...(parsed.data.parentChatId !== undefined ? { parentChatId: parsed.data.parentChatId } : {}),
       ...(parsed.data.localId !== undefined ? { localId: parsed.data.localId } : {}),
-      ...spawnModelField(parsed.data.model, deps.defaultModel?.()),
+      ...spawnModelField(parsed.data.model, await availableDefault()),
       ...(parsed.data.permissionMode !== undefined
         ? { permissionMode: parsed.data.permissionMode }
         : {}),
@@ -1861,6 +1899,20 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     clearTimeout(w.timeout);
     w.resolve(event);
   });
+  const requestModels = (
+    surfaceId: string,
+    hostId: string,
+  ): Promise<Extract<WireEvent, { type: 'patch.models.response' }> | 'timeout'> => {
+    const requestId = deps.idGenerator();
+    return new Promise((resolveP) => {
+      const timeout = setTimeout(() => {
+        modelsPending.delete(requestId);
+        resolveP('timeout');
+      }, MODELS_REQUEST_TIMEOUT_MS);
+      modelsPending.set(requestId, { resolve: resolveP, timeout });
+      deps.hostLink.send(surfaceId, { type: 'patch.models.request', requestId, hostId });
+    });
+  };
   app.get('/api/models', async (req, reply) => {
     let auth;
     try {
@@ -1883,17 +1935,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       deps.logger.warn({ hostId }, 'GET /api/models rejected: unregistered hostId');
       return reply.code(UNKNOWN_HOST_STATUS).send(unknownHost);
     }
-    const requestId = deps.idGenerator();
-    const result = await new Promise<
-      Extract<WireEvent, { type: 'patch.models.response' }> | 'timeout'
-    >((resolveP) => {
-      const timeout = setTimeout(() => {
-        modelsPending.delete(requestId);
-        resolveP('timeout');
-      }, MODELS_REQUEST_TIMEOUT_MS);
-      modelsPending.set(requestId, { resolve: resolveP, timeout });
-      deps.hostLink.send(auth.surfaceId, { type: 'patch.models.request', requestId, hostId });
-    });
+    const result = await requestModels(auth.surfaceId, hostId);
     if (result === 'timeout') {
       return reply.code(504).send({ error: 'daemon_timeout' });
     }

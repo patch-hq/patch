@@ -876,7 +876,9 @@ export class JobDispatcher {
     );
     const slot = this.takeSlot(w.chatId, w.localId);
     if (slot) this.drain(scopeOf(slot));
-    const wake = setTimeout(() => this.schedulePump(), this.ackRetryDelayMs);
+    // +1ms: a timer can fire a millisecond ahead of Date.now(), and the pump would then
+    // skip this entry as not yet due with nothing left to wake it again.
+    const wake = setTimeout(() => this.schedulePump(), this.ackRetryDelayMs + 1);
     wake.unref?.();
   }
 

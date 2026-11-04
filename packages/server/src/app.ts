@@ -809,6 +809,8 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // below. Sent on auth.ok so surfaces live-reload after a deploy (spec/14 §
   // Live updates). A holder because the SPA is read after WsHub is built.
   let appBundleVersion: string | undefined;
+  // Set once the SPA mount exists; re-reads the served index.html from disk.
+  let readServedBundleVersion: (() => string | undefined) | undefined;
   // Where the mounted SPA lives, filled at mount time. `GET /api/version` re-reads
   // this dir on every request rather than caching at boot: a web deploy rsyncs
   // into the mounted dir, so a cached-at-boot answer would keep reporting the
@@ -822,18 +824,11 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // served below, and read by the hub to bring connecting hosts in step.
   const downloadsDir = process.env.PATCH_DOWNLOADS_DIR ?? '/app/downloads';
   // How each host is coping (spec/03 § Host health). Reports arrive with the
-  // host's heartbeat; surfaces and the user are told when a host starts to struggle.
+  // host's heartbeat; surfaces are told when a host starts to struggle.
   const hostHealth = new HostHealthTracker({
     logger: log.child({ component: 'host-health' }),
     hostName: (hostId) => registry.hostName(hostId) ?? hostId,
     broadcast: (event) => wsHub.sendToAll(event),
-    notify: (message) => {
-      void notificationRouter
-        .route({ type: 'notify', chatId: 'host-health', message, priority: 'normal' })
-        .catch((err: unknown) => {
-          log.warn({ err: (err as Error).message }, 'host health notify failed');
-        });
-    },
     ...(opts.nowMs ? { now: opts.nowMs } : {}),
   });
   hostLink.onEvent((event) => hostHealth.observe(event));
@@ -869,7 +864,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     composerAttachments,
     newChatAttachments,
     idGenerator,
-    getAppVersion: () => appBundleVersion,
+    getAppVersion: () => readServedBundleVersion?.() ?? appBundleVersion,
     serverVersion: VERSION,
     autoUpdateHosts: () => (accountSettings?.current() ?? DEFAULT_SETTINGS).autoUpdateHosts,
     // Read per connect, not cached: a deploy publishes the host and restarts
@@ -985,7 +980,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
           ...(event.deepLink ? { deepLink: event.deepLink } : {}),
         });
       }
-      void notificationRouter.route(event).catch((err: unknown) => {
+      void notificationRouter.route(event, { suppressOn: 'chat-open' }).catch((err: unknown) => {
         log.warn({ err: (err as Error).message }, 'notify route failed');
       });
       return;
@@ -1411,7 +1406,6 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         // is known and do not invent a name for it.
         hostName: h.host?.hostName ?? null,
         online: h.online,
-        runsManager: h.host?.runsManager ?? false,
         ...(h.host?.defaultModel !== undefined ? { defaultModel: h.host.defaultModel } : {}),
       })),
     };
@@ -1787,6 +1781,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     attachmentsDir,
     chatLogStore,
     idGenerator,
+    accountReport: (hostId, backendId) => wsHub.accountReport(hostId, backendId),
     // The account's default model, applied to any spawn that names none. Read
     // per request so a change in Settings reaches the next spawn.
     ...(accountSettings
@@ -2349,6 +2344,15 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       return html;
     };
     readIndexHtml();
+    // The hash told to surfaces on auth.ok must come from disk at that moment.
+    // `/app/` and `/app/index.html` are served by the static plugin, not by
+    // readIndexHtml, so after a `ship web` rsync under a running server the
+    // cached hash stayed on the old bundle: every reload booted the new one,
+    // saw a "different" hash from the server, and offered Update Patch again.
+    readServedBundleVersion = () => {
+      readIndexHtml();
+      return appBundleVersion;
+    };
     // Helmet + static plugin scoped to /app/* via a Fastify child context.
     // Helmet on /api/* would CSP-block legitimate JSON tooling — we keep
     // it tightly scoped here.

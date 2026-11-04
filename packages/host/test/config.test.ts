@@ -3,6 +3,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { join } from 'node:path';
+import { DEFAULT_SMALL_JOB_MODELS } from '../src/smallJobModels.js';
 import { defaultHostName, defaultSocketPath, loadConfig } from '../src/config.js';
 
 const base: NodeJS.ProcessEnv = {
@@ -14,6 +15,19 @@ const base: NodeJS.ProcessEnv = {
 };
 
 describe('loadConfig', () => {
+  it('uses the default small-job model list unless PATCH_SMALL_JOB_MODELS names one', () => {
+    expect(loadConfig({ env: { ...base } }).smallJobModels).toEqual([...DEFAULT_SMALL_JOB_MODELS]);
+    expect(
+      loadConfig({ env: { ...base, PATCH_SMALL_JOB_MODELS: 'm1, m2' } }).smallJobModels,
+    ).toEqual(['m1', 'm2']);
+  });
+
+  it('refuses a malformed PATCH_SMALL_JOB_MODELS at startup (NO FALLBACK)', () => {
+    expect(() => loadConfig({ env: { ...base, PATCH_SMALL_JOB_MODELS: 'm1,,m2' } })).toThrow(
+      /empty entry/,
+    );
+  });
+
   it('loads server URLs from env', () => {
     const cfg = loadConfig({ env: { ...base } });
     expect(cfg.serverWsUrl).toBe('ws://server:3000/ws');

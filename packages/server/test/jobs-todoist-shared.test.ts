@@ -147,6 +147,36 @@ describe('shared todoist webhook ingress', () => {
     }
   });
 
+  it.each([
+    ['junk appended', (g: string) => g + '!!\n -_'],
+    [
+      'junk prepended with canonical trailing bits dropped',
+      (g: string) => '!' + g.slice(0, -1) + '=',
+    ],
+  ])(
+    'returns 401 when the signature has %s but decodes to the real digest',
+    async (_name, mangle) => {
+      const { built, link } = await setup();
+      try {
+        const job = built.jobs.create({
+          name: 'todoist-junksig',
+          trigger: { type: 'todoist' },
+          action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
+        });
+        const { raw, sig } = signed(ADDED);
+        expect(Buffer.from(mangle(sig), 'base64').equals(Buffer.from(sig, 'base64'))).toBe(true);
+        const res = await post(built, raw, mangle(sig));
+        expect(res.statusCode).toBe(401);
+        expect(link.sent.find((s) => s.event.type === 'chat.spawn_request')).toBeUndefined();
+        expect(webhookLines(job.id)).toEqual([]);
+        // The genuine signature still passes.
+        expect((await post(built, raw, sig)).statusCode).toBe(200);
+      } finally {
+        await built.app.close();
+      }
+    },
+  );
+
   it('fans ONE event out to EVERY matching job — both dispatch, both get their own logs', async () => {
     const { built, link } = await setup();
     try {

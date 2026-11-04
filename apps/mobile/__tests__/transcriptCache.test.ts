@@ -5,7 +5,11 @@ import { __clearAllMmkv } from './stubs/mmkv';
 import {
   MAX_CACHED_CHATS,
   __resetPendingForTests,
+  heldCursor,
   loadTranscript,
+  markSynced,
+  needsOfflineSync,
+  pruneTranscripts,
   saveEvents,
   saveResolution,
 } from '../src/lib/transcriptCache';
@@ -95,5 +99,30 @@ describe('transcriptCache', () => {
     expect((c0!.events as { seq: number }[]).map((e) => e.seq)).toEqual([1, 2, 3]);
     // The chat nobody touched is the one that went.
     expect(loadTranscript('c1')).toBeNull();
+  });
+
+  it('reports the held cursor without bumping recency, -1 for an unheld chat', () => {
+    expect(heldCursor('none')).toBe(-1);
+    save('h', 0, 1, 4);
+    expect(heldCursor('h')).toBe(4);
+  });
+
+  it('needs a sync until marked at the roster lastUpdated, then again when it moves', () => {
+    expect(needsOfflineSync('s', 10)).toBe(true);
+    save('s', 0, 1);
+    expect(needsOfflineSync('s', 10)).toBe(true);
+    markSynced('s', 10);
+    expect(needsOfflineSync('s', 10)).toBe(false);
+    expect(needsOfflineSync('s', 11)).toBe(true);
+  });
+
+  it('prunes chats the roster no longer lists', () => {
+    save('keep', 0);
+    save('drop', 0);
+    markSynced('drop', 1);
+    pruneTranscripts(new Set(['keep']));
+    expect(loadTranscript('drop')).toBeNull();
+    expect(loadTranscript('keep')).not.toBeNull();
+    expect(needsOfflineSync('drop', 1)).toBe(true);
   });
 });

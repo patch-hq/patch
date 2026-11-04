@@ -19,6 +19,7 @@ import { useLayoutEffect, useState, type ReactNode, type RefObject } from 'react
 import { createPortal } from 'react-dom';
 import { compactModelLabel } from '@patch/wire';
 import { useModelCatalog } from '../lib/models.js';
+import { modelSpent, useCredit } from '../lib/credit.js';
 import { humaniseError } from '../lib/errorCopy.js';
 import { ErrorDetail } from './ErrorDetail.js';
 
@@ -112,6 +113,7 @@ export function ModelPicker({
   // reads the backend's model list. NO baked-in array — that is what let the
   // picker go stale.
   const catalog = useModelCatalog();
+  const credit = useCredit();
   // A failed load carries the host's code (`oauth_unavailable`, `upstream`).
   // The pop-up reads the sentence; the code stays one click down.
   const problem = humaniseError({ code: catalog.error }, 'models');
@@ -205,25 +207,31 @@ export function ModelPicker({
         </div>
       ) : null}
       <ul className="model-popup-list">
-        {catalog.models.map((m) => (
-          <li key={m.id}>
-            <button
-              type="button"
-              className={`model-option ${m.id === selected ? 'selected' : ''}`}
-              data-testid={`model-option-${m.id}`}
-              role="option"
-              aria-selected={m.id === selected}
-              onClick={() => onSelect(m.id)}
-            >
-              <span className="model-option-name">{m.label}</span>
-              {m.id === selected ? (
-                <span className="model-option-check" aria-hidden>
-                  ✓
-                </span>
-              ) : null}
-            </button>
-          </li>
-        ))}
+        {catalog.models.map((m) => {
+          const spent = modelSpent(m.id, credit.rows, credit.apiKeyProviders);
+          return (
+            <li key={m.id}>
+              <button
+                type="button"
+                className={`model-option ${m.id === selected ? 'selected' : ''} ${spent ? 'is-spent' : ''}`}
+                data-testid={`model-option-${m.id}`}
+                role="option"
+                aria-selected={m.id === selected}
+                aria-disabled={spent}
+                disabled={spent}
+                title={spent ? 'No usage remaining on any account' : undefined}
+                onClick={() => onSelect(m.id)}
+              >
+                <span className="model-option-name">{m.label}</span>
+                {m.id === selected ? (
+                  <span className="model-option-check" aria-hidden>
+                    ✓
+                  </span>
+                ) : null}
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
