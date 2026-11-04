@@ -1336,6 +1336,11 @@ export const ChatStateEvent = z
      */
     lastUserActivity: z.number().int().optional(),
     /**
+     * ms epoch the chat was created. Drives the sidebar's Created sort. Optional:
+     * a host predating the field never sends it, and a surface keeps what it knew.
+     */
+    createdAt: z.number().int().nonnegative().optional(),
+    /**
      * The EFFECTIVE permission mode the NEXT turn will use — already resolved
      * by the host through chat override → host default → `auto`
      * (spec/02 § Permission mode). A surface renders this value directly; it
