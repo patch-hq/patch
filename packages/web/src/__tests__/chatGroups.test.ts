@@ -286,58 +286,39 @@ describe('groupChats — automations', () => {
   });
 });
 
-// sortAttentionQueue (Todoist: "needs attention queue - updated things should
-// be at the bottom of the queue"): a FIFO re-ordering of an already-filtered
-// needs-attention list — opposite of groupChats's own recency-first sort.
+// sortAttentionQueue: the needs-attention list keeps the main list's stable
+// order — the user's own last activity, never agent-driven updates.
 describe('sortAttentionQueue', () => {
   const done = (overrides: Partial<ChatRow> = {}) =>
     row({ lastSeq: 5, lastReadSeq: 1, ...overrides });
-  const permission = (overrides: Partial<ChatRow> = {}) =>
-    row({
-      pendingPermissions: [{ requestId: 'r', tool: 'Bash', args: {}, description: 'x' }],
-      ...overrides,
-    });
 
-  it('queues oldest-updated first, most-recently-updated last', () => {
+  it('orders by last user activity, newest first', () => {
     const rows = [
-      done({ chatId: 'newest', lastUpdated: 300 }),
-      done({ chatId: 'oldest', lastUpdated: 100 }),
-      done({ chatId: 'middle', lastUpdated: 200 }),
+      done({ chatId: 'old', lastUserActivity: 100 }),
+      done({ chatId: 'new', lastUserActivity: 300 }),
+      done({ chatId: 'mid', lastUserActivity: 200 }),
     ];
-    expect(sortAttentionQueue(rows).map((c) => c.chatId)).toEqual(['oldest', 'middle', 'newest']);
+    expect(sortAttentionQueue(rows).map((c) => c.chatId)).toEqual(['new', 'mid', 'old']);
   });
 
-  it('a row that updates again sinks to the bottom instead of jumping to the top', () => {
-    const before = [
-      done({ chatId: 'waiting-longer', lastUpdated: 100 }),
-      done({ chatId: 'just-updated', lastUpdated: 200 }),
-    ];
-    expect(sortAttentionQueue(before).map((c) => c.chatId)).toEqual([
-      'waiting-longer',
-      'just-updated',
-    ]);
-    // "just-updated" updates again — even newer now — it stays at the back,
-    // it does not cut back to the front.
-    const after = [
-      done({ chatId: 'waiting-longer', lastUpdated: 100 }),
-      done({ chatId: 'just-updated', lastUpdated: 400 }),
-    ];
-    expect(sortAttentionQueue(after).map((c) => c.chatId)).toEqual([
-      'waiting-longer',
-      'just-updated',
-    ]);
-  });
-
-  it('permission rows still lead the queue ahead of done rows, regardless of recency', () => {
+  it('a row that updates again, or starts asking permission, does not move', () => {
     const rows = [
-      done({ chatId: 'done-old', lastUpdated: 100 }),
-      permission({ chatId: 'perm-new', lastUpdated: 900 }),
+      done({ chatId: 'a', lastUserActivity: 200, lastUpdated: 900 }),
+      done({
+        chatId: 'b',
+        lastUserActivity: 100,
+        lastUpdated: 999,
+        pendingPermissions: [{ requestId: 'r', tool: 'Bash', args: {}, description: 'x' }],
+      }),
     ];
-    expect(sortAttentionQueue(rows).map((c) => c.chatId)).toEqual(['perm-new', 'done-old']);
+    expect(sortAttentionQueue(rows).map((c) => c.chatId)).toEqual(['a', 'b']);
   });
 
-  it('ties within the same rank fall back to the stable chatId tiebreaker', () => {
-    const rows = [done({ chatId: 'b', lastUpdated: 100 }), done({ chatId: 'a', lastUpdated: 100 })];
+  it('ties fall back to the stable chatId tiebreaker', () => {
+    const rows = [
+      done({ chatId: 'b', lastUserActivity: 100 }),
+      done({ chatId: 'a', lastUserActivity: 100 }),
+    ];
     expect(sortAttentionQueue(rows).map((c) => c.chatId)).toEqual(['a', 'b']);
   });
 });
