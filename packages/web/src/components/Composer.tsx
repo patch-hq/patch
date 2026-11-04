@@ -75,6 +75,7 @@ import { ImageLightbox } from './ImageLightbox.js';
 import { SkillPreviewPanel } from './SkillPreviewPanel.js';
 import type { AttachmentRef, PermissionMode } from '@patch/wire';
 import {
+  backendIdForModel,
   permissionModesFor,
   providerBuiltinCommands,
   providerDescriptor,
@@ -82,6 +83,7 @@ import {
   SPECIAL_THREAD_IDS,
 } from '@patch/wire';
 import { voiceKeyHostStatus } from '@patch/wire/audio';
+import { hostOutage } from '../lib/usage.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { providerConnectedForModel, usePreferencesStore } from '../stores/preferencesStore.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -127,6 +129,7 @@ import {
   spliceCompletion,
 } from '../lib/skillToken.js';
 import { GOAL_COMMAND_NAME, GOAL_COMMAND_DESCRIPTION } from '../lib/goalCommand.js';
+import { JOB_COMMAND_NAME, JOB_COMMAND_DESCRIPTION } from '../lib/jobCommand.js';
 import { CLEAR_COMMAND_NAME, CLEAR_COMMAND_DESCRIPTION } from '../lib/clearCommand.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import { isSubmitChord } from '../lib/submitChord.js';
@@ -572,7 +575,34 @@ export const Composer = forwardRef(function Composer(
   // A new chat is spawned on its host, which validates the folder there, so it
   // cannot be queued for a host that is down — unlike a message to a chat.
   const newChatHostDown = isNewChat && !!hostId && !hostOnline;
-  const sendBlocked = (offline && isNewChat) || claudeDisconnected || newChatHostDown;
+  // No credit left on any account that could run this chat: the turn would
+  // only park, so the send is refused up front and says why. Same certainty
+  // rule as the out-of-usage banner (an unread account is not "spent"), and
+  // the same per-host account set it counts.
+  const hostAccounts = usePresenceStore((s) =>
+    hostId ? (s.hosts[hostId]?.accounts[backendIdForModel(accountModel)] ?? null) : null,
+  );
+  const [usageNow, setUsageNow] = useState(() => Date.now());
+  const outage = hostOutage(
+    (hostAccounts?.accounts ?? []).filter(
+      (a) =>
+        !accountModel?.startsWith('openai/') ||
+        (a.kind ?? 'chatgpt') === (accountModel.startsWith('openai/api/') ? 'apiKey' : 'chatgpt'),
+    ),
+    usageNow,
+  );
+  const outOfUsage = !claudeDisconnected && outage !== null;
+  const outageResetsAt = outage?.soonest?.resetsAt;
+  useEffect(() => {
+    if (outageResetsAt === undefined) return;
+    // Re-evaluate the moment the pool refills, so Send comes back by itself.
+    const id = window.setTimeout(
+      () => setUsageNow(Date.now()),
+      Math.max(0, outageResetsAt - Date.now()) + 1000,
+    );
+    return () => window.clearTimeout(id);
+  }, [outageResetsAt]);
+  const sendBlocked = (offline && isNewChat) || claudeDisconnected || newChatHostDown || outOfUsage;
   // The EFFECTIVE approval mode the next turn will use, as the host resolved
   // it and put it on `chat.state` — never re-derived here, since a surface does
   // not hold the host default this was resolved against. `undefined` means the
@@ -689,7 +719,17 @@ export const Composer = forwardRef(function Composer(
     if (seededOnMount.current) seededOnMount.current = false;
     else apply();
     let last = useComposerDraftStore.getState().drafts[chatId] ?? '';
+    let lastClears = useComposerDraftStore.getState().remoteClears[chatId] ?? 0;
     return useComposerDraftStore.subscribe((st) => {
+      // Sent/emptied on another surface while this composer has focus: the
+      // store applied the clear through the focus guard, so empty to match.
+      const clears = st.remoteClears[chatId] ?? 0;
+      if (clears !== lastClears) {
+        lastClears = clears;
+        last = st.drafts[chatId] ?? '';
+        setValue('');
+        return;
+      }
       const next = st.drafts[chatId] ?? '';
       if (next === last) return;
       last = next;
@@ -886,6 +926,7 @@ export const Composer = forwardRef(function Composer(
   const BUILTIN_COMMANDS: { name: string; description: string }[] = [
     { name: CLEAR_COMMAND_NAME, description: CLEAR_COMMAND_DESCRIPTION },
     { name: GOAL_COMMAND_NAME, description: GOAL_COMMAND_DESCRIPTION },
+    { name: JOB_COMMAND_NAME, description: JOB_COMMAND_DESCRIPTION },
   ];
   // Every name a chip can legitimately be — a skill from the folder, or a
   // built-in — used both to recognise a completed chip anywhere in the text
@@ -2816,11 +2857,13 @@ export const Composer = forwardRef(function Composer(
                 title={
                   newChatHostDown
                     ? hostDownLine(hostView)
-                    : editingTurn
-                      ? shortcutTitle('Save edit', '↵')
-                      : running
-                        ? shortcutTitle('Queue', '↵')
-                        : shortcutTitle('Send', '↵')
+                    : outOfUsage
+                      ? 'Out of usage — can’t send until it resets'
+                      : editingTurn
+                        ? shortcutTitle('Save edit', '↵')
+                        : running
+                          ? shortcutTitle('Queue', '↵')
+                          : shortcutTitle('Send', '↵')
                 }
                 disabled={sendBlocked || resolving || !hasContent}
                 onContextMenu={sendMenu.openAt}

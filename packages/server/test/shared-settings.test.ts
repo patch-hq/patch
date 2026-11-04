@@ -165,6 +165,15 @@ describe('SharedSettingsService', () => {
     expect(make().current().jobAutonomyPrompt).toBe(DEFAULT_JOB_AUTONOMY_PROMPT);
   });
 
+  it('has no tool prompt edits by default, keeps them across a restart, and refuses an empty one', () => {
+    expect(service.current().toolPromptOverrides).toEqual({});
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ sweepEnabled: false }));
+    expect(make().current().toolPromptOverrides).toEqual({});
+    service.update({ toolPromptOverrides: { patch_peek: 'Edited.' } });
+    expect(make().current().toolPromptOverrides).toEqual({ patch_peek: 'Edited.' });
+    expect(() => service.update({ toolPromptOverrides: { patch_peek: '' } })).toThrow();
+  });
+
   it('keeps the newlines in a multi-line job autonomy prompt, across a restart', () => {
     const text = 'First line.\n\nSecond line.\n- third\n';
     service.update({ jobAutonomyPrompt: text });
@@ -679,7 +688,7 @@ describe('shared settings routes', () => {
         meetingAnalysisModel: 'claude-haiku-4-5-20251001',
         meetingCleanupModel: 'claude-haiku-4-5-20251001',
         meetingTranscriptionModel: '',
-        meetingAnalyseSeconds: 15,
+        meetingAnalyseSeconds: 45,
         meetingResearchModel: 'claude-haiku-4-5-20251001',
         meetingResearchSeconds: 60,
       });

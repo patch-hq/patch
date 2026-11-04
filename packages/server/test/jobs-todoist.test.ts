@@ -172,6 +172,32 @@ describe('todoist webhook ingress', () => {
     }
   });
 
+  it('returns 401 when the signature has junk appended but decodes to the real digest', async () => {
+    const { built } = await setup();
+    try {
+      const secret = 'fake-secret';
+      const job = built.jobs.create({
+        name: 'junk-sig',
+        trigger: { type: 'todoist', clientSecret: secret },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'go' },
+      });
+      const payload = JSON.stringify({ event_name: 'item:added' });
+      const sig = createHmac('sha256', secret).update(payload).digest('base64');
+      for (const bad of [sig + '!!\n -_', '!' + sig.slice(0, -1) + '=']) {
+        expect(Buffer.from(bad, 'base64').equals(Buffer.from(sig, 'base64'))).toBe(true);
+        const res = await built.app.inject({
+          method: 'POST',
+          url: `/api/webhooks/todoist/${job.id}`,
+          headers: { 'content-type': 'application/json', 'x-todoist-hmac-sha256': bad },
+          payload,
+        });
+        expect(res.statusCode).toBe(401);
+      }
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('falls back to an empty rawBody when the custom JSON parser did not run (non-JSON content-type)', async () => {
     const { built } = await setup();
     try {

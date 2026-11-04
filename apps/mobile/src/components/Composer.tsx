@@ -163,6 +163,7 @@ import { startDictationMode, type DictationModeHandle } from '../lib/dictationMo
 import { markDictatedSend } from '../lib/dictatedSends';
 import { voiceKeyRefusal } from '../lib/voiceKeys';
 import { usePresenceStore } from '../stores/presenceStore';
+import { accountsOutage } from '../lib/usage';
 import { hostControlsDisabled, hostControlDisabledReason } from '../lib/connection';
 import { cancelHeld, releaseHeld, sendMessage, type OutgoingFile } from '../lib/sendQueue';
 import { adviseNotes, checkHooks } from '../lib/hookCheck';
@@ -185,7 +186,7 @@ import {
 
 interface Props {
   chatId: string;
-  /** Put the cursor in the input on mount (spec/15 § Composer — opening a chat). */
+  /** Put the cursor in the input on mount. Defaults on for the new-chat draft (sendTarget), off for an existing chat. */
   autoFocus?: boolean;
   /** The chat's folder — sources the skill autocomplete (`/` menu). */
   folder?: string;
@@ -1382,6 +1383,7 @@ export function Composer({
       edit.onSave(draftRef.current.trim());
       return;
     }
+    if (outOfUsage) return;
     // No `linkDown` guard: sending into an existing chat while the link is
     // down queues + flushes on reconnect (Todoist 6hWrcpCQFqXGJpF6; spec/12 §
     // Surface → server disconnect — deliveryTracker already retries
@@ -1516,9 +1518,33 @@ export function Composer({
   const submitRef = React.useRef(sendDraft);
   submitRef.current = sendDraft;
 
+  // No credit left on any account that could run this chat: the turn would
+  // only park, so Send is refused up front (same certainty rule as web).
+  const usageHostId = setup ? setup.hostId : (row?.hostId ?? null);
+  const hostAccounts = usePresenceStore((s) =>
+    usageHostId ? (s.hosts[usageHostId]?.accounts[accountBackend]?.accounts ?? null) : null,
+  );
+  const [usageNow, setUsageNow] = React.useState(() => Date.now());
+  const outage = accountsOutage(
+    (hostAccounts ?? []).filter((a) => !('kind' in a && a.kind === 'apiKey')),
+    usageNow,
+  );
+  const outOfUsage = outage !== null;
+  const outageResetsAt = outage?.resetsAt;
+  React.useEffect(() => {
+    if (outageResetsAt === undefined) return;
+    // Re-evaluate once the pool refills, so Send comes back by itself.
+    const id = setTimeout(
+      () => setUsageNow(Date.now()),
+      Math.max(0, outageResetsAt - Date.now()) + 1000,
+    );
+    return () => clearTimeout(id);
+  }, [outageResetsAt]);
+
   const sendDisabled =
     !edit &&
     (resolving ||
+      outOfUsage ||
       hookChecking ||
       (draft.trim().length === 0 && attachments.length === 0 && micState === 'idle'));
 
@@ -1794,7 +1820,7 @@ export function Composer({
       <View testID="composer-input-row" style={{ position: 'relative' }}>
         <TextInput
           ref={inputRef}
-          autoFocus={autoFocus || edit !== undefined}
+          autoFocus={(autoFocus ?? isNewChatDraft) || edit !== undefined}
           {...(edit ? { testID: 'queued-edit-input' } : {})}
           value={body}
           onChangeText={(text) => {
@@ -2260,17 +2286,19 @@ export function Composer({
             })}
             accessibilityRole="button"
             accessibilityLabel={
-              hookChecking
-                ? 'Checking…'
-                : resolving
-                  ? 'Sending — creating the chat'
-                  : pendingSend
-                    ? 'Sending…'
-                    : linkDown || daemon !== 'online'
-                      ? 'Send message (queued until the agent reconnects)'
-                      : running
-                        ? 'Send message (queued after the current turn)'
-                        : 'Send message'
+              outOfUsage
+                ? 'Send unavailable — out of usage until it resets'
+                : hookChecking
+                  ? 'Checking…'
+                  : resolving
+                    ? 'Sending — creating the chat'
+                    : pendingSend
+                      ? 'Sending…'
+                      : linkDown || daemon !== 'online'
+                        ? 'Send message (queued until the agent reconnects)'
+                        : running
+                          ? 'Send message (queued after the current turn)'
+                          : 'Send message'
             }
           >
             {sendBusy ? (

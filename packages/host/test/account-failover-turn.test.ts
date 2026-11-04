@@ -262,7 +262,7 @@ describe('a spent account moves the chat on and the turn runs again', () => {
 });
 
 describe('which account a turn ran on is said (spec/10 § Backend credentials)', () => {
-  function switching(opts: { spent: boolean; until?: number }) {
+  function switching(opts: { spent: boolean; until?: number; bothSpent?: boolean }) {
     const home = mkdtempSync(join(tmpdir(), 'patch-switch-'));
     const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-switch-folder-')));
     const events: WireEvent[] = [];
@@ -281,9 +281,11 @@ describe('which account a turn ran on is said (spec/10 § Backend credentials)',
       },
       accountLabel: (_model, id) => ({ a1: 'work', a2: 'personal' })[id],
       accountSpent: (_model, id) =>
-        id === 'a1' && opts.spent
-          ? { spent: true, ...(opts.until ? { until: opts.until } : {}) }
-          : { spent: false },
+        opts.bothSpent
+          ? { spent: true, until: 1_700_000_500_000 }
+          : id === 'a1' && opts.spent
+            ? { spent: true, ...(opts.until ? { until: opts.until } : {}) }
+            : { spent: false },
       nextAccountAfterExhausted: () => 'a2',
       emit: (e) => events.push(e),
       logger: silent,
@@ -312,6 +314,19 @@ describe('which account a turn ran on is said (spec/10 § Backend credentials)',
       content: 'Switched from work to personal — work is out of credit',
       accountSwitch: { from: 'work', to: 'personal', until: 1_700_000_500_000 },
     });
+  });
+
+  it('a move onto an account that is itself spent is not announced as a switch', async () => {
+    const { daemon, events, folder } = switching({ spent: true, bothSpent: true });
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.sendInput({ chatId, message: 'go' });
+    await vi.waitFor(() =>
+      expect(events.some((e) => e.type === 'chat.idle' || e.type === 'chat.state')).toBe(true),
+    );
+    await new Promise((r) => setTimeout(r, 100));
+    expect(events.some((e) => e.type === 'chat.message' && e.accountSwitch !== undefined)).toBe(
+      false,
+    );
   });
 
   it('a move that is the strategy working, not a spent account, says nothing', async () => {
@@ -433,5 +448,87 @@ describe('an account switch on a chat with no recorded session id', () => {
     await daemon.sendInput({ chatId, message: 'follow up', localId: 'l2' });
     await vi.waitFor(() => expect(seen.length).toBe(2));
     expect(seen[1]!.claudeSessionStore?.reseed?.events.length ?? 0).toBeGreaterThan(0);
+  });
+});
+
+describe('a failure that is not about credit does not spend an account', () => {
+  it('an account the usage probe only FORECASTS as nearly spent is not marked spent by an unrelated crash', async () => {
+    // The lived failure (1 Nov 2026): the host restarted mid-turn, the turn died
+    // with "Cannot write to terminated process" — no limit stated — and the
+    // account it ran on was at 99% of its week. The 98% forecast was read as
+    // proof the crash was about credit, the account was marked spent with that
+    // sentence as the reason, and every chat then reported "every account on
+    // this host is out of credit" while the accounts were still answering.
+    const home = mkdtempSync(join(tmpdir(), 'patch-failover-forecast-'));
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-failover-forecastf-')));
+    const NOW = 1_700_000_000_000;
+    const asked: string[] = [];
+    let id = 0;
+    const daemon = new Daemon({
+      hostId: 'd1',
+      metaStore: createMetaStore(home),
+      sdkBackend: {
+        run: (): AsyncGenerator<SdkEnvelope> => {
+          async function* gen(): AsyncGenerator<SdkEnvelope> {
+            throw new Error('Cannot write to terminated process');
+            yield { type: 'result', raw: {} };
+          }
+          return gen();
+        },
+      },
+      resolveOAuth: () => ({ ok: true as const, accessToken: 'tok', accountId: 'a1' }),
+      accountLimitInfo: () => ({
+        scope: 'week' as const,
+        utilization: 0.99,
+        resetsAt: NOW + 3_600_000,
+        estimated: true,
+      }),
+      nextAccountAfterExhausted: (_chatId, spent) => {
+        asked.push(spent ?? '?');
+        return undefined;
+      },
+      emit: () => undefined,
+      logger: silent,
+      now: () => NOW,
+      generateChatId: () => `chat-${++id}`,
+    });
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.sendInput({ chatId, message: 'go' });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(asked).toEqual([]);
+  });
+
+  it('an account the provider REFUSED is still marked spent when the turn dies of something unstated', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'patch-failover-refused-'));
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-failover-refusedf-')));
+    const NOW = 1_700_000_000_000;
+    const asked: string[] = [];
+    let id = 0;
+    const daemon = new Daemon({
+      hostId: 'd1',
+      metaStore: createMetaStore(home),
+      sdkBackend: {
+        run: (): AsyncGenerator<SdkEnvelope> => {
+          async function* gen(): AsyncGenerator<SdkEnvelope> {
+            throw new Error('Claude Code process exited with code 143');
+            yield { type: 'result', raw: {} };
+          }
+          return gen();
+        },
+      },
+      resolveOAuth: () => ({ ok: true as const, accessToken: 'tok', accountId: 'a1' }),
+      accountLimitInfo: () => ({ scope: 'week' as const, resetsAt: NOW + 3_600_000 }),
+      nextAccountAfterExhausted: (_chatId, spent) => {
+        asked.push(spent ?? '?');
+        return undefined;
+      },
+      emit: () => undefined,
+      logger: silent,
+      now: () => NOW,
+      generateChatId: () => `chat-${++id}`,
+    });
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.sendInput({ chatId, message: 'go' });
+    await vi.waitFor(() => expect(asked).toEqual(['a1']));
   });
 });

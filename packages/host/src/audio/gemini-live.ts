@@ -273,6 +273,9 @@ export function claimsHandoff(text: string): boolean {
   return HANDOFF_CLAIM.test(text);
 }
 
+/** How long a spoken claim waits for its dispatch call before it counts as false. */
+const FALSE_CLAIM_GRACE_MS = 400;
+
 const FALSE_CLAIM_CORRECTION =
   `[System] You just said you had passed something on or done it, but you did not call ` +
   `${DISPATCH_TOOL_NAME}, so nothing was sent and nothing has happened. Tell the user in a few ` +
@@ -447,6 +450,8 @@ export class GeminiLiveSession implements VoiceSessionLike {
   private reply?: VoiceReplyWriter;
   /** Hand-offs to the chat's agent not yet answered. */
   private handoffsInFlight = 0;
+  /** Dispatch calls received so far: a claim is checked against whether one arrived since. */
+  private dispatchCount = 0;
   /** Agent results waiting for a gap in the conversation, in the order they finished. */
   private resultQueue: Array<{ callId: string; request: string; reply: string; readyAt: number }> =
     [];
@@ -1047,6 +1052,17 @@ export class GeminiLiveSession implements VoiceSessionLike {
    * not retried — it is an error the surface shows.
    */
   private guardFalseClaim(spoken: string): void {
+    if (!claimsHandoff(spoken)) return;
+    // The call can reach us just after the turn that spoke the words completes: give it a
+    // moment before deciding the hand-off was never made.
+    const dispatchesBefore = this.dispatchCount;
+    setTimeout(() => {
+      if (this.closed || this.dispatchCount !== dispatchesBefore) return;
+      this.checkFalseClaim(spoken);
+    }, FALSE_CLAIM_GRACE_MS);
+  }
+
+  private checkFalseClaim(spoken: string): void {
     if (
       (this.deps.handoff ?? 'auto') === 'never' ||
       this.dispatchCovers ||
@@ -1169,6 +1185,7 @@ export class GeminiLiveSession implements VoiceSessionLike {
     this.commitUserWords();
     this.finishReply();
     this.handoffsInFlight += 1;
+    this.dispatchCount += 1;
     this.dispatchCovers = true;
     this.dispatchTurnOpen = true;
     this.unpromptedBudget += 1;

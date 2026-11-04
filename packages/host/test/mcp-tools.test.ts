@@ -78,6 +78,31 @@ describe('patch-tools MCP server — full client round-trip', () => {
     await app?.close();
   });
 
+  it('follows a rotated host key when localKey is a function (host restart)', async () => {
+    let current = 'stale-key';
+    const server = buildPatchToolsServer({
+      hostSocketPath: socketPath,
+      chatId: 'caller-1',
+      localKey: () => current,
+    });
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+    const c = new Client({ name: 'test', version: '0.0.0' });
+    await Promise.all([server.connect(serverT), c.connect(clientT)]);
+    try {
+      const stale = (await c.callTool({ name: 'patch_list_chats', arguments: {} })) as {
+        isError?: boolean;
+      };
+      expect(stale.isError).toBe(true);
+      current = LOCAL_KEY;
+      const fresh = (await c.callTool({ name: 'patch_list_chats', arguments: {} })) as {
+        isError?: boolean;
+      };
+      expect(fresh.isError).toBeFalsy();
+    } finally {
+      await c.close();
+    }
+  });
+
   it('sends the one-sentence Pad instruction at initialize', () => {
     expect(client.getInstructions()).toBe(
       'To show a design or UI for the user to react to, use a Pad (patch_pad_create) instead of describing it.',
@@ -287,6 +312,22 @@ describe('patch-tools MCP server — full client round-trip', () => {
       arguments: { chatId: spawned.chatId },
     })) as { content: { text: string }[] };
     expect(JSON.parse(stop.content[0]!.text)).toEqual({ ok: true });
+  });
+
+  it('patch_spawn and patch_send_to can arm a goal on the other chat', async () => {
+    const spawn = (await client.callTool({
+      name: 'patch_spawn',
+      arguments: { folder, goal: 'spawned goal' },
+    })) as { content: { text: string }[] };
+    const { chatId } = JSON.parse(spawn.content[0]!.text) as { chatId: string };
+    const read = (): string | null => daemon.chatState.get(chatId)?.goal ?? null;
+    expect(read()).toBe('spawned goal');
+
+    await client.callTool({
+      name: 'patch_send_to',
+      arguments: { chatId, message: 'hi', goal: 'sent goal' },
+    });
+    expect(read()).toBe('sent goal');
   });
 
   it('patch_list_chats + patch_history return shape', async () => {

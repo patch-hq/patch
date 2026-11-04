@@ -424,8 +424,11 @@ Rules.
   `/api/healthz` stays the public, minimal LB probe.
 - Settings → Updates states whether Patch is up to date and offers a single
   Update control when it is not, plus Check now, the auto-update toggle and
-  when it last checked. Each host is listed with its plain version and a
-  status; the page shows no shas, per-layer rows, drift detail or developer
+  when it last checked. A Versions group states, for the Patch app (desktop
+  shell only) and the server, the installed version and the latest available one
+  ("Installed 0.1.317 · Latest 0.1.320"); each host row likewise shows its
+  installed version and, when it is behind, the latest (the server's version —
+  hosts run in lockstep with it). The page shows no shas, drift detail or developer
   commands. Patch works out what is behind (hosts, drift, the app, the APK) and
   the one Update acts on it. A host that is behind only because its chats are
   mid-turn reports `updateHeld` and reads "waiting for chats to finish" with no

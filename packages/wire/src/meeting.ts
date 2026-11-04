@@ -302,6 +302,8 @@ export const MeetingAction = z
     kind: MeetingActionKind.default('mine'),
     /** For `other`: the speaker it falls to, or `Everyone`. */
     owner: z.string().min(1).optional(),
+    /** For `other`: the owner never spoke in the meeting, so the action is for someone who was not there. */
+    absent: z.boolean().optional(),
     /** The chat started for it: the agent's linked child chat, or the one Tom started. */
     chatId: z.string().min(1).optional(),
     title: z.string(),
@@ -328,7 +330,7 @@ export const MeetingSettings = z
   .strict();
 export type MeetingSettings = z.infer<typeof MeetingSettings>;
 
-export const DEFAULT_MEETING_SETTINGS: MeetingSettings = { clipSeconds: 6, analyseSeconds: 15 };
+export const DEFAULT_MEETING_SETTINGS: MeetingSettings = { clipSeconds: 6, analyseSeconds: 45 };
 
 /** Least gap between live research passes unless Settings say otherwise. */
 export const DEFAULT_MEETING_RESEARCH_SECONDS = 60;
@@ -373,6 +375,8 @@ export const MeetingState = z
     transcript: z.array(MeetingTranscriptLine),
     /** Names given to `them` voices, keyed by voice number as a string. */
     voices: z.record(z.string(), z.string()).optional(),
+    /** The device the meeting's audio last came from; other surfaces show it as where the meeting is listening. */
+    listeningOn: z.string().optional(),
     /** Set when the last analysis or transcription failed; cleared by the next success. */
     error: z.string().nullable(),
   })

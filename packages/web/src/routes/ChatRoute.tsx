@@ -67,6 +67,7 @@ import { api } from '../api/rest.js';
 import { SkillRefChatContext, useSkillTarget } from '../components/SkillRef.js';
 import { linkSkillTokens } from '../lib/skillToken.js';
 import { parseGoalCommand } from '../lib/goalCommand.js';
+import { parseJobCommand, matchJob } from '../lib/jobCommand.js';
 import { parseReminderCommand } from '../lib/reminderCommand.js';
 import { parseLoopCommand } from '../lib/loopCommand.js';
 import { parseClearCommand } from '../lib/clearCommand.js';
@@ -106,6 +107,7 @@ import { MeetingEditChips, MeetingLayout } from '../components/MeetingPanel.js';
 import { isMeetingShown, useMeetingStore } from '../stores/meetingStore.js';
 import { presentFailure } from '../lib/usage.js';
 import { BackgroundTaskBar } from '../components/BackgroundTaskBar.js';
+import { StatusPill, StatusRow } from '../components/StatusRow.js';
 import { BrowserHandoffPanel } from '../components/BrowserHandoffPanel.js';
 import { ArtifactBar } from '../components/ArtifactBar.js';
 import type { ChatEventEntry, DelegateUpdateInfo, LocalAttachment } from '../stores/chatStore.js';
@@ -166,6 +168,7 @@ import {
 } from 'lucide-react';
 import { CloseIcon } from '../components/icons.js';
 import { ImageLightbox, imageDownloadName } from '../components/ImageLightbox.js';
+import { thumbUrl } from '../lib/thumbUrl.js';
 import { failed } from '../lib/errorCopy.js';
 import { isStoppable } from '../stores/types.js';
 
@@ -1679,8 +1682,34 @@ export function ChatRoute({
         setGoal(chatId, prev);
         pushError(failed('setting goal'), undefined, (err as Error).message);
       });
-      if (parsedGoal.goal === null) return;
-      message = parsedGoal.goal;
+      if (parsedGoal.message === '') return;
+      message = parsedGoal.message;
+    }
+    // `/job <name>` fires that job once, now (the Jobs page's "Run now"),
+    // instead of sending a chat turn. REST only; every failure is surfaced.
+    const parsedJob = parseJobCommand(message);
+    if (parsedJob.isJob) {
+      if (parsedJob.query === null) {
+        pushError('usage: /job <name>');
+        return;
+      }
+      const query = parsedJob.query;
+      void (async () => {
+        try {
+          const { jobs } = (await api.listJobs()) as { jobs: { id: string; name: string }[] };
+          const m = matchJob(jobs, query);
+          if (m.kind === 'none') {
+            pushError(`no job matches "${query}"`);
+          } else if (m.kind === 'many') {
+            pushError(`"${query}" matches several jobs: ${m.names.join(', ')}`);
+          } else {
+            await api.runJob(m.id);
+          }
+        } catch (err) {
+          pushError(failed('running job'), undefined, (err as Error).message);
+        }
+      })();
+      return;
     }
     // patch/todo.md — `/remind <text>` sets the chat's reminder INSTEAD of
     // sending a chat turn (a bare `/remind` clears it). REST mutation (no WS),
@@ -3705,7 +3734,7 @@ function MessageAttachments({
               aria-label={`View ${att.name}`}
               onClick={() => setLightbox({ url, alt: att.name })}
             >
-              <img className="msg-attachment-img" src={url} alt={att.name} />
+              <img className="msg-attachment-img" src={thumbUrl(url)} alt={att.name} />
             </button>
           );
         }
@@ -3856,7 +3885,11 @@ function ToolCall({
           <Bell size={13} aria-hidden />
           <span className="tool-call-notify-label">Patch notify · {importance}</span>
         </div>
-        {message ? <div className="tool-call-notify-message">{message}</div> : null}
+        {message ? (
+          <div className="tool-call-notify-message" data-testid="notify-message">
+            <Markdown content={message} />
+          </div>
+        ) : null}
         {deepLink ? (
           <a
             className="tool-call-deeplink"
@@ -4218,7 +4251,7 @@ function ToolImage({ src, width, height, mediaType }: ToolImageSource): JSX.Elem
       >
         <img
           className="tool-field-img"
-          src={src}
+          src={thumbUrl(src)}
           alt=""
           loading="lazy"
           decoding="async"
@@ -4638,19 +4671,24 @@ function liveDelegateForCall(
 }
 
 /**
- * spec/14 § Main chat panel — Running delegates strip: one line per
- * `patch_delegate` subagent still going (label + running time) in the
- * top bars (under the background task bar, drawn like it), so it stays on screen after the tool-call row has scrolled away.
- * Each line opens the subagent's read-only transcript; a subagent leaves the
- * strip the moment it is no longer running or awaiting permission.
+ * spec/14 § Main chat panel — Status list, Agents: the chat's `patch_delegate`
+ * subagents. One running agent is one row; more fold into a single "Agents"
+ * row (pill, first names, longest time, "· N done") that opens to one row per
+ * agent. Each row opens the subagent's read-only transcript.
  */
 function DelegateStrip({ chatId }: { chatId: string }): JSX.Element | null {
   const updates = useChatStore((s) => s.delegateUpdates[chatId] ?? NO_DELEGATES);
+  const open = useUiStore((s) => s.delegatesOpen);
+  const setOpen = useUiStore((s) => s.setDelegatesOpen);
+  const showDone = useUiStore((s) => s.delegatesShowDone);
+  const setShowDone = useUiStore((s) => s.setDelegatesShowDone);
   const [openId, setOpenId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const running = Object.entries(updates).filter(
-    ([, d]) => d.status === 'running' || d.status === 'awaiting-permission',
-  );
+  const isLive = (d: DelegateUpdateInfo): boolean =>
+    d.status === 'running' || d.status === 'awaiting-permission';
+  const all = Object.entries(updates);
+  const running = all.filter(([, d]) => isLive(d));
+  const doneCount = all.length - running.length;
   const any = running.length > 0;
   useEffect(() => {
     if (!any) return;
@@ -4658,30 +4696,86 @@ function DelegateStrip({ chatId }: { chatId: string }): JSX.Element | null {
     return () => clearInterval(t);
   }, [any]);
   if (!any) return null;
+
+  const agentRow = (id: string, d: DelegateUpdateInfo, nested: boolean): JSX.Element => {
+    const live = isLive(d);
+    return (
+      <Fragment key={id}>
+        <StatusRow
+          nested={nested}
+          icon={
+            live && !nested ? (
+              <LoaderCircle className="status-spinner" size={16} aria-hidden />
+            ) : null
+          }
+          label={nested ? undefined : 'Agent'}
+          className={live ? '' : 'status-row-ended'}
+          testId="delegate-strip-open"
+          data-expanded={openId === id ? 'true' : 'false'}
+          onActivate={() => setOpenId(openId === id ? null : id)}
+          activateLabel={`Open transcript of "${d.label}"`}
+          meta={
+            live ? (
+              <span data-testid="delegate-strip-time">{formatElapsed(d.since, now)}</span>
+            ) : null
+          }
+        >
+          <span className="status-grow">{d.label}</span>
+        </StatusRow>
+        {openId === id ? (
+          <DelegateTranscript parentId={chatId} delegateId={id} status={d.status} />
+        ) : null}
+      </Fragment>
+    );
+  };
+
+  if (running.length === 1 && doneCount === 0) {
+    const [id, d] = running[0] as [string, DelegateUpdateInfo];
+    return (
+      <div data-testid="delegate-strip" data-grouped="false">
+        {agentRow(id, d, false)}
+      </div>
+    );
+  }
+
+  const listed = showDone ? [...running, ...all.filter(([, d]) => !isLive(d))] : running;
+  const oldest = running.reduce((min, [, d]) => Math.min(min, d.since), Infinity);
+  const summary = `${running.length} running`;
   return (
-    <div className="delegate-strip background-task-bar" data-testid="delegate-strip">
-      <div className="background-task-bar-rows">
-        {running.map(([id, d]) => (
-          <div key={id} className="delegate-strip-item" data-testid="delegate-strip-item">
+    <div data-testid="delegate-strip" data-grouped="true">
+      <StatusRow
+        icon={<LoaderCircle className="status-spinner" size={16} aria-hidden />}
+        label="Agents"
+        meta={<span data-testid="delegate-strip-time">{formatElapsed(oldest, now)}</span>}
+      >
+        <StatusPill
+          open={open}
+          onToggle={() => setOpen(!open)}
+          testId="delegate-strip-toggle"
+          label={open ? `Collapse ${summary}` : `Expand ${summary}`}
+        >
+          {summary}
+        </StatusPill>
+        {doneCount > 0 ? <span className="status-muted">{`· ${doneCount} done`}</span> : null}
+        {open ? (
+          doneCount > 0 ? (
             <button
               type="button"
-              className="background-task-bar-row"
-              data-testid="delegate-strip-open"
-              aria-expanded={openId === id}
-              onClick={() => setOpenId(openId === id ? null : id)}
+              className="status-link status-link-underline status-muted"
+              data-testid="delegate-strip-show-done"
+              aria-pressed={showDone}
+              onClick={() => setShowDone(!showDone)}
             >
-              <LoaderCircle className="background-task-bar-spinner" size={16} aria-hidden />
-              <span className="background-task-bar-description">{d.label}</span>
-              <span className="background-task-bar-elapsed" data-testid="delegate-strip-time">
-                {formatElapsed(d.since, now)}
-              </span>
+              {showDone ? 'hide done' : 'show done'}
             </button>
-            {openId === id ? (
-              <DelegateTranscript parentId={chatId} delegateId={id} status={d.status} />
-            ) : null}
-          </div>
-        ))}
-      </div>
+          ) : null
+        ) : (
+          <span className="status-grow status-names">
+            {running.map(([, d]) => d.label).join(', ')}
+          </span>
+        )}
+      </StatusRow>
+      {open ? listed.map(([id, d]) => agentRow(id, d, true)) : null}
     </div>
   );
 }
@@ -4947,7 +5041,7 @@ function ViewFileCard({ view, chatId }: { view: ViewFileView; chatId: string }):
         >
           <img
             className="view-file-img"
-            src={view.url}
+            src={thumbUrl(view.url)}
             alt={view.name}
             loading="lazy"
             decoding="async"

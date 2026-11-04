@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -29,5 +29,11 @@ describe('persisted account availability', () => {
     expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual([
       expect.objectContaining({ accountId: 'spent' }),
     ]);
+  });
+
+  it('treats a corrupt file as empty rather than failing', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'patch-account-state-')), 'availability.json');
+    writeFileSync(path, '{not json');
+    expect(readAccountExhaustion(path)).toEqual([]);
   });
 });

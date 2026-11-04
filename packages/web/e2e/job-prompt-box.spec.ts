@@ -129,3 +129,30 @@ test.describe('job editor — the Prompt box is big enough to write a prompt in'
     expect(filterBox.height).toBeLessThan(promptBox.height);
   });
 });
+
+test.describe('job editor — Prompt markdown preview and find', () => {
+  test('Preview renders the prompt as markdown; Find steps through matches', async ({ page }) => {
+    await stubJobApis(page);
+    await page.goto(NEW_JOB);
+
+    const prompt = page.getByTestId('job-spawn-prompt');
+    await prompt.fill('# Heading\n\n- alpha\n- beta\n\nalpha again');
+
+    await page.getByTestId('job-spawn-prompt-preview-tab').click();
+    const preview = page.getByTestId('job-spawn-prompt-preview');
+    await expect(preview.locator('h1')).toHaveText('Heading');
+    await expect(preview.locator('li')).toHaveCount(2);
+    await expect(prompt).toBeHidden();
+
+    await page.getByTestId('job-spawn-prompt-write').click();
+    await expect(prompt).toBeVisible();
+
+    await page.getByTestId('job-spawn-prompt-find-toggle').click();
+    await page.getByTestId('job-spawn-prompt-find-input').fill('alpha');
+    await expect(page.getByTestId('job-spawn-prompt-find-count')).toHaveText('1 of 2');
+    await page.getByTestId('job-spawn-prompt-find-input').press('Enter');
+    await expect(page.getByTestId('job-spawn-prompt-find-count')).toHaveText('2 of 2');
+    // Enter in the find box must not have submitted the form.
+    await expect(page).toHaveURL(/jobs\/new/);
+  });
+});

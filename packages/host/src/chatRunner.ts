@@ -160,6 +160,7 @@ import {
   parseTodoWriteArgs,
   selectNextTodo,
   TODO_PREFIX,
+  keepCompletedHistory,
 } from './todos.js';
 import { execFileSync } from 'node:child_process';
 import { assistantContextTokens, resultContextWindow } from './contextUsage.js';
@@ -412,6 +413,12 @@ export interface HostOptions {
          * for these two, and naming it as the limit hit reads as nonsense.
          */
         scope?: 'session' | 'week';
+        /**
+         * `scope` comes from a forecast (a pool at 98%+), not a refusal. Good
+         * enough to route around the account, not evidence that a failure the
+         * provider never called a limit was about credit.
+         */
+        estimated?: boolean;
         utilization?: number;
         resetsAt?: number;
         /** Extra usage could not cover it — why this is a stop, not a spill. */
@@ -696,8 +703,6 @@ export interface HostOptions {
    * `LIMIT_STALL_GRACE_MS`.
    */
   limitStallGraceMs?: number;
-  /** How often in-flight tool calls are checked against their deadline. Defaults to 5s. */
-  toolWatchdogPollMs?: number;
   /**
    * Enable `agent_response` hooks (spec/20-hooks.md § On the agent's
    * response). When set, the host sends a `hook.agent_response_check_request`
@@ -1311,7 +1316,6 @@ import { hasConversation } from './syntheticTurns.js';
 import { cutAt } from './textClean.js';
 import { untilAborted } from './untilAborted.js';
 import { withLimitStall } from './limitStall.js';
-import { withToolWatchdog } from './toolWatchdog.js';
 import { RepeatFailureGuard, type RepeatTrip } from './repeatFailureGuard.js';
 
 /**
@@ -2491,10 +2495,7 @@ export class Daemon {
       // a loop tick due while the chat's pump is occupied is absorbed rather
       // than queued (see wake.ts `fire`/`onTurnEnd`).
       isBusy: (chatId) => this.pumping.has(chatId),
-      isLimited: (chatId) =>
-        this.limitBlocks.has(chatId) ||
-        this.rateLimitPendingTurns.has(chatId) ||
-        this.rateLimitTimers.has(chatId),
+      isLimited: (chatId) => this.isWaitingOnCredit(chatId),
       now: () => this.opts.now(),
       logger: this.opts.logger,
     });
@@ -2794,6 +2795,17 @@ export class Daemon {
    * transcript: for a typed turn a lost session is reported (spec/04 line 46).
    */
   private readonly owedResend = new Set<string>();
+
+  /**
+   * The head turn a restart put back, from the moment it is re-sent until the
+   * run records itself in `runningTurn`. The resume clears `pendingTurns` before
+   * re-sending (so a turn that takes the host down is not retried forever), but
+   * between that clear and `runQuery` setting `runningTurn` there are awaited
+   * steps (session load, a dark-wake hold, credential resolution): a failure or
+   * another restart in that window used to lose the turn with nothing on disk to
+   * say it was ever owed. Persisted with the rest of `pendingTurns` meanwhile.
+   */
+  private readonly resumeOwed = new Map<string, PendingTurn>();
   /** Chats whose pump is re-sending a turn a host restart cut off (as "carry on"). */
   private readonly interruptedResend = new Set<string>();
   /**
@@ -3615,6 +3627,10 @@ export class Daemon {
         // behind the first in their original order — exactly where they were.
         this.owedResend.add(m.chatId);
         this.interruptedResend.add(m.chatId);
+        if (i === 0) {
+          this.resumeOwed.set(m.chatId, turn);
+          this.persistPendingTurns(m.chatId);
+        }
         void this.sendInput({
           chatId: m.chatId,
           message,
@@ -3637,9 +3653,18 @@ export class Daemon {
           // spec/14 § Job trigger turn — resumed as what it was, same as `origin`.
           ...(turn.jobTrigger ? { jobTrigger: turn.jobTrigger } : {}),
         }).catch((err: unknown) => {
+          // Said in the chat, not only in the log: the turn was owed and did not
+          // start, and a chat left idle with no word is indistinguishable from
+          // one that finished.
+          const reason = err instanceof Error ? err.message : String(err);
           this.opts.logger.error(
             { chatId: m.chatId, err },
             'resume: interrupted turn could not be re-sent',
+          );
+          this.failPreflight(
+            m.chatId,
+            'sdk_error',
+            `The turn cut off by the host restart could not be restarted: ${reason}`,
           );
         });
       }
@@ -3721,6 +3746,33 @@ export class Daemon {
     // state change (spec/02 § Self-wake, "Visible, never invisible").
     this.emitState(chatId);
     return { fireAt };
+  }
+
+  /**
+   * Is this chat stalled on credit, so a self-wake delivered now would only
+   * stack behind the turn that failed?
+   *
+   * Three shapes: blocked by a limit, parked with a turn owed, or ERRORED on a
+   * spent account (`lastError.outOfCredit`, no park or timer). The third was
+   * missing: a loop's wakes kept landing in such a chat, one per tick, and
+   * were all replayed at once when credit returned — the agent saw a pile of
+   * identical wake turns and ended its own loop.
+   */
+  private isWaitingOnCredit(chatId: string): boolean {
+    if (
+      this.limitBlocks.has(chatId) ||
+      this.rateLimitPendingTurns.has(chatId) ||
+      this.rateLimitTimers.has(chatId)
+    ) {
+      return true;
+    }
+    if (this.runs.has(chatId)) return false;
+    const last =
+      (this.opts.metaStore.read(chatId)?.lastError as ChatLastError | undefined) ??
+      this.chatState.get(chatId)?.lastError;
+    // Same cutoff as the resume sweep: a failure older than that is never
+    // resumed, so holding wakes for it would hold them for ever.
+    return last?.outOfCredit === true && this.opts.now() - last.at <= STALE_RETRY_CUTOFF_MS;
   }
 
   /** Cancel a chat's pending self-wake (stop the loop). Returns whether one existed. */
@@ -5059,13 +5111,15 @@ export class Daemon {
     }
     state.hidden = hidden;
     state.hideUntilComplete = untilComplete;
+    this.bumpForSectionMove(state);
     // spec/04 § Hidden — the agent is told on its next turn. Undoing a change
     // the agent was never told about cancels it instead of announcing a no-op.
     const notice = hidden ? 'hidden' : 'shown';
     state.hiddenNotice =
       state.hiddenNotice !== null && state.hiddenNotice !== notice ? null : notice;
-    // Like snooze, moving between sections is not activity: `updatedAt` and
-    // `lastUpdated` stay as they were, so the chat keeps its place by recency.
+    // Like snooze, moving between sections is not activity: `updatedAt` stays
+    // as it was, so the chat keeps its place by recency. `lastUpdated` moves
+    // only so a surface can tell this state from an older roster snapshot.
     this.opts.metaStore.update(chatId, (m) => ({
       ...m,
       hidden,
@@ -5680,8 +5734,10 @@ export class Daemon {
       this.finishSnoozeRecord(chatId, now, opts.byAgent !== true);
     }
     state.snoozedUntil = snoozedUntil;
-    // A snooze is not activity — `lastUpdated` is deliberately untouched so the
-    // chat returns to the list exactly where it left (spec/04 § Snooze).
+    // A snooze is not activity: `updatedAt` is untouched so the chat returns to
+    // the list where it left (spec/04 § Snooze). `lastUpdated` still moves so a
+    // surface can tell this state from an older roster snapshot.
+    this.bumpForSectionMove(state);
     this.opts.metaStore.update(chatId, (m) => ({
       ...m,
       snoozedUntil,
@@ -5690,6 +5746,15 @@ export class Daemon {
     }));
     this.armSnoozeTimer(chatId, snoozedUntil);
     this.emitState(chatId);
+  }
+
+  /**
+   * Hide / snooze change what a surface shows, so `lastUpdated` must move: it is
+   * how a phone tells this state from a stale roster. Strictly increasing, so
+   * two changes in the same millisecond still order.
+   */
+  private bumpForSectionMove(state: { lastUpdated: number }): void {
+    state.lastUpdated = Math.max(this.opts.now(), state.lastUpdated + 1);
   }
 
   /** Running, or idle between turns with a goal still to be judged. */
@@ -6767,6 +6832,7 @@ export class Daemon {
       this.pumping.delete(chatId);
       this.owedResend.delete(chatId);
       this.interruptedResend.delete(chatId);
+      this.resumeOwed.delete(chatId);
       // Normally empty. When a turn threw, whatever queued behind it is dropped
       // here — each was announced with `chat.queued`, so say it is gone or the
       // surface shows it as QUEUED forever.
@@ -7033,12 +7099,16 @@ export class Daemon {
     const running = this.runningTurn.get(chatId);
     const parked = this.parkedTurns.get(chatId);
     const queued = this.turnQueues.get(chatId) ?? [];
+    const resumeOwed = this.resumeOwed.get(chatId);
     // A parked turn is not running (its attempt already failed) and not queued
     // (nothing is pumping it), but it is still owed. Persist it in the same
     // list so a restart mid-park resumes it instead of forgetting it.
     const pendingTurns: PendingTurn[] = [
       ...(running ? [running] : []),
       ...(parked ? [parked] : []),
+      ...(resumeOwed && !running && !parked && !queued.some((q) => q.localId === resumeOwed.localId)
+        ? [resumeOwed]
+        : []),
       // Only what a restart needs to re-send the turn. A queued turn's typed
       // text and prompt builder are live-editing state (spec/04 ## Message
       // queueing § Edit): an edit rewrites `message` itself, so the persisted
@@ -7071,7 +7141,9 @@ export class Daemon {
     const ranOn = this.runningOnAccount.get(chatId);
     const info = this.opts.accountLimitInfo?.(ranOn);
     const probeBlocked =
-      info?.scope !== undefined && (info.resetsAt === undefined || info.resetsAt > this.opts.now());
+      info?.scope !== undefined &&
+      info.estimated !== true &&
+      (info.resetsAt === undefined || info.resetsAt > this.opts.now());
     return isAccountExhausted(limit, { probeBlocked });
   }
 
@@ -8313,7 +8385,6 @@ export class Daemon {
       permissionMode: this.chatPermissionMode(chatId),
       disabledTools: state.disabledTools,
       onReapRefused: (message: string) => this.announceReapRefused(chatId, message),
-      onBashHung: (message: string) => this.announceBashHung(chatId, message),
       onPermissionRequest: (req: {
         tool: string;
         args: Record<string, unknown>;
@@ -9374,6 +9445,7 @@ export class Daemon {
     // loudly; from here on the turn can be killed halfway through with no trace,
     // and this is the trace. Cleared in the `finally` below, so it only survives
     // a host that never got to run one — which is every deploy.
+    this.resumeOwed.delete(chatId);
     this.runningTurn.set(chatId, {
       message: prompt,
       ...(localId !== undefined ? { localId } : {}),
@@ -9847,7 +9919,6 @@ export class Daemon {
       // forever, so patch no longer omits this for any mode — it trusts the
       // SDK's own gating instead.
       onReapRefused: (message: string) => this.announceReapRefused(chatId, message),
-      onBashHung: (message: string) => this.announceBashHung(chatId, message),
       ...this.durableTurnFor(chatId, targetHarness, localId),
       onPermissionRequest: (req: {
         tool: string;
@@ -9933,16 +10004,7 @@ export class Daemon {
         for (;;) {
           try {
             for await (const env of untilAborted(
-              withToolWatchdog(
-                withLimitStall(this.opts.sdkBackend.run(sdkOpts), this.opts.limitStallGraceMs),
-                {
-                  paused: () => this.hasPendingPermission(chatId),
-                  now: this.opts.now,
-                  ...(this.opts.toolWatchdogPollMs !== undefined
-                    ? { pollMs: this.opts.toolWatchdogPollMs }
-                    : {}),
-                },
-              ),
+              withLimitStall(this.opts.sdkBackend.run(sdkOpts), this.opts.limitStallGraceMs),
               abortController.signal,
               (env) => env.type === 'tool_result',
             )) {
@@ -10198,7 +10260,10 @@ export class Daemon {
         // of this error, so it is true for a turn that died of something else
         // entirely while every key was spent, and settled BEFORE the failover
         // walk below can mark another account and change the answer.
-        let hostOutOfCredit = this.opts.hostOutOfCredit?.(chatId) === true;
+        // This aggregate reads Claude's account rotation. Codex failures must
+        // use their own structured limit or account probe below.
+        let hostOutOfCredit =
+          !isCodexModel(state.model) && this.opts.hostOutOfCredit?.(chatId) === true;
         if (
           harnessTraitsForModel(state.model).turnRetrySafe(err) &&
           this.accountOutOfCredit(chatId, limit) &&
@@ -10983,7 +11048,7 @@ export class Daemon {
       this.opts.logger.warn({ chatId }, 'TodoWrite args unrecognised; leaving todo list unchanged');
       return;
     }
-    state.todos = carryTodoAttachments(todos, state.todos);
+    state.todos = keepCompletedHistory(carryTodoAttachments(todos, state.todos), state.todos);
     this.persistTodos(chatId, state.todos);
     state.lastUpdated = this.opts.now();
     this.emitState(chatId);
@@ -14021,20 +14086,6 @@ export class Daemon {
    * what the turn started may still be running. Arrives after the turn has
    * ended, from a timer — a chat deleted in the meantime only gets the log.
    */
-  private announceBashHung(chatId: string, message: string): void {
-    this.opts.logger.error({ chatId }, message);
-    if (!this.chatState.has(chatId)) return;
-    const ev: ChatMessageEvent = {
-      type: 'chat.message',
-      chatId,
-      role: 'system',
-      content: message,
-      seq: this.bumpSeq(chatId),
-      createdAt: this.opts.now(),
-    };
-    this.emit(ev);
-  }
-
   private announceReapRefused(chatId: string, message: string): void {
     this.opts.logger.error({ chatId }, message);
     if (!this.chatState.has(chatId)) return;
@@ -15469,6 +15520,10 @@ export class Daemon {
   ): void {
     const reason = this.opts.accountSpent?.(model, fromId);
     if (!reason?.spent) return;
+    // Both accounts spent (a shared pool, or a rotation walking a spent host):
+    // nothing has credit to move to, so "switched" would be a false claim that
+    // flips back and forth every turn. The turn fails with its own limit message.
+    if (this.opts.accountSpent?.(model, toId)?.spent) return;
     const from = this.opts.accountLabel?.(model, fromId) ?? fromId;
     const to = this.opts.accountLabel?.(model, toId) ?? toId;
     this.emit({
@@ -15786,6 +15841,7 @@ export class Daemon {
       // is: a surface that joins mid-chat converges on the truth without
       // asking.
       lastUserActivity: s.lastUserActivity,
+      createdAt: s.createdAt,
       pinned: s.pinned,
       pinnedAt: s.pinnedAt,
       disabled: s.disabled,

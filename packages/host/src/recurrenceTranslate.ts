@@ -15,10 +15,8 @@
 
 import type { SdkBackend } from './sdkBackend.js';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
+import { runSmallJob } from './smallJobModels.js';
 import type { Logger } from 'pino';
-
-/** Cheap + fast model for the one-shot translator (same as titleGen/statusGen). */
-export const RECURRENCE_TRANSLATE_MODEL = 'claude-haiku-4-5-20251001';
 
 /** Abort a hung translate call so it never leaks a warm SDK query. */
 const RECURRENCE_TRANSLATE_TIMEOUT_MS = 20_000;
@@ -39,6 +37,8 @@ export interface MakeRecurrenceTranslatorOptions {
    * answer.
    */
   runOnAccountWithCredit: RunOnAccountWithCredit;
+  /** The set model and its failovers (smallJobModels.ts). */
+  smallJobModels: readonly string[];
   logger?: Logger;
 }
 
@@ -101,9 +101,10 @@ export function makeRecurrenceTranslator(
   return async function translateRecurrence(
     input: TranslateRecurrenceInput,
   ): Promise<string | null> {
-    return await opts.runOnAccountWithCredit(
+    return await runSmallJob(
+      opts,
       `recurrence translate ${input.requestId}`,
-      async (accessToken) => {
+      async (accessToken, model) => {
         const abortController = new AbortController();
         const timer = setTimeout(() => abortController.abort(), RECURRENCE_TRANSLATE_TIMEOUT_MS);
         try {
@@ -119,7 +120,7 @@ export function makeRecurrenceTranslator(
             resumeSessionId: undefined,
             abortController,
             oauthAccessToken: accessToken,
-            model: RECURRENCE_TRANSLATE_MODEL,
+            model,
             permissionMode: 'bypassPermissions',
           })) {
             if (env.type === 'assistant' && env.content) finalText += env.content;

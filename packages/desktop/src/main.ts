@@ -20,7 +20,8 @@
 
 import { notificationClickPath } from './notificationTarget';
 import { parseOpenChat, writeFrontChat } from './front-chat';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { ensureSpotlightIndexed } from './spotlight';
 import {
   app,
   BrowserWindow,
@@ -91,6 +92,7 @@ import {
   type MeetingPermissionKind,
 } from './meeting-permissions';
 import { watchSpeakers } from './meeting-speakers';
+import { MeetingRecorder } from './meeting-recording';
 import {
   buildNotificationExtras,
   decideDesktopIntent,
@@ -1527,6 +1529,25 @@ function setupAutoUpdater(): void {
     requestMeetingPermission(kind, meetingPermissionDeps),
   );
   ipcMain.on('patch:system-audio:stop', () => systemAudio.stop());
+  // Meeting mode, opt-in: raw lanes saved to userData/meeting-recordings/<time>/
+  // so the system-audio level and the echo canceller can be checked.
+  let recorder: MeetingRecorder | null = null;
+  ipcMain.on('patch:meeting-recording:chunk', (_e, lane: string, pcm: Uint8Array) => {
+    recorder ??= new MeetingRecorder(
+      join(
+        app.getPath('userData'),
+        'meeting-recordings',
+        new Date().toISOString().replace(/[:.]/g, '-'),
+      ),
+    );
+    recorder.append(lane, Buffer.from(pcm));
+  });
+  ipcMain.handle('patch:meeting-recording:end', () => {
+    const done = recorder;
+    recorder = null;
+    done?.end();
+    return done?.dir ?? null;
+  });
   // Meeting mode: who is lit up on the call, read through macOS Accessibility.
   // A failure (e.g. permission not granted) is sent to the renderer to show.
   let stopSpeakers: (() => void) | null = null;
@@ -1856,6 +1877,25 @@ export function bootstrap(): void {
     if (process.platform === 'darwin') {
       app.dock?.show();
     }
+    // Auto-updates swap the bundle in place; keep Spotlight pointed at it.
+    // Not awaited (startup must not wait on mdimport); failure is logged loudly.
+    void ensureSpotlightIndexed({
+      platform: process.platform,
+      isPackaged: app.isPackaged,
+      bundlePath: '/Applications/Patch.app',
+      run: (cmd, args) =>
+        new Promise((resolve, reject) => {
+          const p = spawn(cmd, args);
+          let stdout = '';
+          let stderr = '';
+          p.stdout.on('data', (d) => (stdout += d));
+          p.stderr.on('data', (d) => (stderr += d));
+          p.on('error', reject);
+          p.on('close', (code) => resolve({ code: code ?? -1, stdout, stderr }));
+        }),
+      log: (m) => console.log(m),
+      error: (m) => console.error(m),
+    }).catch((err) => console.error('[spotlight]', err));
     // Which server this app talks to — the remembered one, or the first-run
     // question — before any window shows Patch itself.
     await resolveServer();

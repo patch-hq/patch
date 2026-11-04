@@ -10,13 +10,11 @@
 
 import type { SdkBackend } from './sdkBackend.js';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
+import { runSmallJob } from './smallJobModels.js';
 import type { OAuthCheckResult } from './chatRunner.js';
 import { isCodexModel } from './codexAccounts.js';
 import type { Logger } from 'pino';
 import { cutAt, stripWrappingQuotes } from './textClean.js';
-
-/** Cheap + fast model for the one-shot summariser (spec/04 § Name). */
-export const TITLE_MODEL = 'claude-haiku-4-5-20251001';
 
 /** Abort a hung title call so it never leaks a warm SDK query. */
 const TITLE_TIMEOUT_MS = 60_000;
@@ -41,6 +39,8 @@ export interface MakeTitleGeneratorOptions {
    * answer.
    */
   runOnAccountWithCredit: RunOnAccountWithCredit;
+  /** The set model and its failovers (smallJobModels.ts). */
+  smallJobModels: readonly string[];
   /**
    * How a Codex (ChatGPT) chat is titled: on ITS OWN model through the routed
    * backend and the model-aware credential gate, because a Codex-only host has
@@ -164,8 +164,8 @@ export function makeTitleGenerator(
       }
       return await runTitleQuery(opts.codex.sdkBackend, auth.accessToken, model, input);
     }
-    return await opts.runOnAccountWithCredit(`title gen ${input.chatId}`, (accessToken) =>
-      runTitleQuery(opts.sdkBackend, accessToken, TITLE_MODEL, input),
+    return await runSmallJob(opts, `title gen ${input.chatId}`, (accessToken, model) =>
+      runTitleQuery(opts.sdkBackend, accessToken, model, input),
     );
   };
 }

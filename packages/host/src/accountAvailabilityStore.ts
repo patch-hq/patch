@@ -24,7 +24,9 @@ export function readAccountExhaustion(path: string): PersistedAccountExhaustion[
     });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
-    throw error;
+    // Re-derivable: an unreadable file costs one refused turn, not the host.
+    console.error(`account-availability: ignoring unreadable ${path}:`, error);
+    return [];
   }
 }
 

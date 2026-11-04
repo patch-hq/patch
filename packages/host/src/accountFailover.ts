@@ -26,9 +26,9 @@
 //   reported as unauthenticated. Conflating the two is how a working account
 //   gets thrown away.
 //
-// Held in memory, not persisted: a restart re-probes and re-learns within one
-// turn, and a stale "exhausted" record surviving a top-up would be worse than
-// the extra probe.
+// Persisted with its expiry (accountAvailabilityStore.ts) so a restart does not
+// send the first turn to an account already known to be out. Records with a
+// stated reset lapse on their own; an unreadable file is ignored, not fatal.
 
 /**
  * Why a requested account order cannot be applied, or undefined when it can.

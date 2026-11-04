@@ -74,7 +74,7 @@ test.describe('view_file', () => {
     const picture = page.getByTestId('view-file-image');
     await expect(picture.locator('img')).toHaveAttribute(
       'src',
-      '/api/chats/chat_view_file_image/artifact/beef01',
+      '/api/chats/chat_view_file_image/artifact/beef01?w=960',
     );
 
     await picture.click();

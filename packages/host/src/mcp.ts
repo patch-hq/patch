@@ -36,6 +36,12 @@ export interface PatchToolsServerOptions {
    * case and refuses saying so.
    */
   branchId?: string;
+  /**
+   * The user's edits of tool descriptions, by tool name (spec/06 § Tool
+   * prompts). A tool named here is registered with this text instead of the
+   * one written beside it.
+   */
+  toolPromptOverrides?: Record<string, string>;
 }
 
 interface UdsRequestOptions {
@@ -65,6 +71,36 @@ function definedOnly(o: Record<string, unknown>): Record<string, unknown> {
 /** The one browser tool that is always listed; calling it enables the others. */
 const BROWSER_ENTRY_TOOL = 'patch_browser_open';
 const TAB_ID_PARAM = 'The tabId returned by patch_browser_open (or listed by patch_browser_tabs).';
+/** Each Patch tool's built-in description, by tool name — what an edit replaces. */
+export function patchToolDescriptions(): Record<string, string> {
+  const server = buildPatchToolsServer({
+    hostSocketPath: '/dev/null',
+    chatId: 'defaults',
+    localKey: 'defaults',
+  });
+  const registered = (
+    server as unknown as { _registeredTools: Record<string, { description?: string }> }
+  )._registeredTools;
+  return Object.fromEntries(
+    Object.entries(registered).map(([name, t]) => [name, t.description ?? '']),
+  );
+}
+
+/** PATCH_TOOL_PROMPTS is the host's JSON of overrides; anything else is a bug to surface. */
+export function parseToolPromptOverrides(raw: string | undefined): Record<string, string> {
+  if (raw === undefined || raw === '') return {};
+  const parsed: unknown = JSON.parse(raw);
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('patch-tools-server: PATCH_TOOL_PROMPTS is not an object (NO FALLBACK)');
+  }
+  for (const [k, v] of Object.entries(parsed)) {
+    if (typeof v !== 'string') {
+      throw new Error(`patch-tools-server: PATCH_TOOL_PROMPTS.${k} is not a string (NO FALLBACK)`);
+    }
+  }
+  return parsed as Record<string, string>;
+}
+
 /**
  * Build the MCP server with the full patch tool catalogue. Caller wires it
  * to a transport (stdio in production, in-memory pair in tests).
@@ -88,6 +124,11 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
   const gatedBrowserTools: Array<{ enable: () => void }> = [];
   const registerTool = server.registerTool.bind(server) as typeof server.registerTool;
   server.registerTool = ((name: string, ...rest: unknown[]) => {
+    const override = opts.toolPromptOverrides?.[name];
+    if (override !== undefined) {
+      const config = rest[0] as Record<string, unknown>;
+      rest[0] = { ...config, description: override };
+    }
     const tool = (
       registerTool as (n: string, ...r: unknown[]) => { enable: () => void; disable: () => void }
     )(name, ...rest);
@@ -155,10 +196,18 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
             'Tag prepended to the delivered turn to mark it as spoken input. Leave unset for ordinary text.',
           ),
         localId: z.string().min(1).max(128).optional(),
+        goal: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "Arm a goal on the RECIPIENT chat (replaces any it has), judged by Patch's evaluator after each of its turns. Recipient must be on this machine; otherwise the call is refused and nothing is sent.",
+          ),
       },
     },
-    async ({ chatId, message, voicePrefix, localId }) => {
+    async ({ chatId, message, voicePrefix, localId, goal }) => {
       const body: Record<string, unknown> = { chatId, message, callerChatId };
+      if (goal !== undefined) body['goal'] = goal;
       if (voicePrefix !== undefined) body['voicePrefix'] = voicePrefix;
       if (localId !== undefined) body['localId'] = localId;
       const res = await uds<unknown>({ method: 'POST', path: '/internal/send-to', body });
@@ -311,10 +360,18 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
         prompt: z.string().min(1).optional(),
         model: z.string().min(1).optional(),
         account: z.string().min(1).optional(),
+        goal: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "Arm a goal on the NEW chat, judged by Patch's evaluator after each of its turns. Not allowed together with `host` naming another machine.",
+          ),
       },
     },
-    async ({ folder, host, name, prompt, model, account }) => {
+    async ({ folder, host, name, prompt, model, account, goal }) => {
       const body: Record<string, unknown> = { folder, callerChatId };
+      if (goal !== undefined) body['goal'] = goal;
       if (host !== undefined) body['host'] = host;
       if (account !== undefined) body['account'] = account;
       if (model !== undefined) body['model'] = model;
@@ -1461,7 +1518,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'view_file',
     {
       description:
-        "Show a file to the USER, inline in the chat. The opposite of Read: Read pulls a file into YOUR context to work on; view_file puts it on the user's screen and returns only a short ack, so the contents never enter your context. Use it whenever you want them to LOOK at something — a screenshot or diagram you made or found, a chart, a rendered HTML page, a PDF, or a document you made for them. Images (.png .jpg .jpeg .gif .webp .svg) render as a picture; .mp4 and .webm videos play inline with controls; .pdf renders in a viewer; audio (.mp3 .wav .m4a .ogg .opus .flac .aac) plays in an inline player; .html renders as a live page; Word/Excel/PowerPoint/OpenDocument, .rtf .epub .csv .tsv .txt .md .json and .zip show as a download card (name, size, download link) — use that to hand over a file you produced instead of telling them a path. Images, videos, PDFs, audio and files 7 MB max, pages 2 MB max. file_path may be absolute or relative to the chat folder, but must resolve inside it. Returns { kind, url, name } — having shown it, do not also Read it back to describe it unless asked; they can see it.",
+        "Show a file to the USER, inline in the chat. The opposite of Read: Read pulls a file into YOUR context to work on; view_file puts it on the user's screen and returns only a short ack, so the contents never enter your context. Use it whenever you want them to LOOK at something — a screenshot or diagram you made or found, a chart, a rendered HTML page, a PDF, or a document you made for them. Images (.png .jpg .jpeg .gif .webp .svg) render as a picture; .mp4 and .webm videos play inline with controls; .pdf renders in a viewer; audio (.mp3 .wav .m4a .ogg .opus .flac .aac) plays in an inline player; .html renders as a live page; Word/Excel/PowerPoint/OpenDocument, .rtf .epub .csv .tsv .txt .md .json and .zip show as a download card (name, size, download link) — use that to hand over a file you produced instead of telling them a path. Images, PDFs and audio 7 MB max, videos and files 50 MB max, pages 2 MB max. file_path may be absolute or relative to the chat folder, but must resolve inside it. Returns { kind, url, name } — having shown it, do not also Read it back to describe it unless asked; they can see it.",
       inputSchema: {
         file_path: z.string().min(1),
       },
@@ -1607,6 +1664,7 @@ export async function runPatchToolsServerStdio(): Promise<void> {
   const server = buildPatchToolsServer({
     hostSocketPath,
     chatId,
+    toolPromptOverrides: parseToolPromptOverrides(process.env['PATCH_TOOL_PROMPTS']),
     localKey:
       localKeyFile && localKeyFile.length > 0
         ? () => {

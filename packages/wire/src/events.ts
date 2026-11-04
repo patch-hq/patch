@@ -1344,6 +1344,11 @@ export const ChatStateEvent = z
      */
     lastUserActivity: z.number().int().optional(),
     /**
+     * ms epoch the chat was created. Drives the sidebar's Created sort. Optional:
+     * a host predating the field never sends it, and a surface keeps what it knew.
+     */
+    createdAt: z.number().int().nonnegative().optional(),
+    /**
      * The EFFECTIVE permission mode the NEXT turn will use — already resolved
      * by the host through chat override → host default → `auto`
      * (spec/02 § Permission mode). A surface renders this value directly; it
@@ -2286,6 +2291,13 @@ export const SharedSettings = z
     /** `null` = no explicit configuration. */
     harnessSkills: z.union([z.array(z.string().min(1)), z.literal('all')]).nullable(),
     harnessMemoryEnabled: z.boolean(),
+    /**
+     * The user's edits of Patch tools' descriptions (spec/06 § Tool prompts),
+     * keyed by tool name (`patch_spawn`). A tool absent here keeps the
+     * description it is built with; the host hands this to the MCP child at
+     * launch, so an edit reaches the next turn.
+     */
+    toolPromptOverrides: z.record(z.string().min(1), z.string().min(1)),
     accountStrategy: z.object({ claude: AccountStrategy, codex: AccountStrategy }).strict(),
   })
   .strict();
@@ -2365,6 +2377,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   questionExpiredPrompt: DEFAULT_QUESTION_EXPIRED_PROMPT,
   harnessSystemPrompt: '',
   harnessToolsPrompt: null,
+  toolPromptOverrides: {},
   harnessSkills: null,
   harnessMemoryEnabled: false,
   accountStrategy: { claude: 'priority', codex: 'priority' },
@@ -2815,6 +2828,8 @@ export const HostInfoEvent = z
     harnessToolsPrompt: z.string().optional(),
     /** The built-in guidance, so a surface can show it without shipping a copy. */
     harnessToolsPromptDefault: z.string().optional(),
+    /** Each Patch tool's built-in description, by tool name, so a surface can show what an edit replaces. */
+    toolPromptDefaults: z.record(z.string(), z.string()).optional(),
     /**
      * Per-host list of skill names to enable for every chat on this host
      * (`skills: string[] | 'all'` in the SDK query options). `'all'` enables
@@ -2864,6 +2879,22 @@ export const HostInfoEvent = z
       .object({
         onBattery: z.boolean(),
         percent: z.number().min(0).max(100),
+      })
+      .strict()
+      .optional(),
+    /**
+     * Why this host's link to the server last dropped, so a sleeping laptop
+     * can be told from a network or server fault. Absent until a drop happens.
+     */
+    lastDisconnect: z
+      .object({
+        /** ms-epoch the host noticed the drop. */
+        at: z.number().int(),
+        cause: z.enum(['sleep', 'server-restart', 'unexplained']),
+        /** Whole seconds the machine was asleep, when `cause` is `sleep`. */
+        sleptSeconds: z.number().int().nonnegative().optional(),
+        /** WebSocket close code; 1006 means no close frame arrived. */
+        code: z.number().int(),
       })
       .strict()
       .optional(),
@@ -3970,6 +4001,8 @@ export const MeetingAudioEvent = z
     audioBase64: z.string().min(1),
     /** Who was lit up as the active speaker during this system clip, when the shell could tell. */
     speakerName: z.string().min(1).optional(),
+    /** Which device is sending the audio, e.g. "Chrome on a Mac"; other surfaces name it as where the meeting is listening. */
+    device: z.string().min(1).optional(),
   })
   .strict();
 export type MeetingAudioEvent = z.infer<typeof MeetingAudioEvent>;

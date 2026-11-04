@@ -1,6 +1,7 @@
 // Settings → Updates: whether Patch is up to date, and one Update button when it
-// is not. Each host is listed with its plain version (no shas, no layers, no
-// developer commands — spec/11 § Version reporting). A host that is behind only
+// is not. A Versions group gives the installed and latest version of the Patch
+// app and the server, and each host its installed version (plus the latest when
+// behind) — no shas, no developer commands (spec/11 § Version reporting). A host that is behind only
 // because its chats are mid-turn says so: it updates itself once they finish.
 //
 // Hosts update themselves by default; the toggle turns that off, and then Update
@@ -69,6 +70,10 @@ export function useBehind(): BehindItem[] {
     });
   }
   return items;
+}
+
+function installedLatest(installed: string, latest: string | null): string {
+  return latest ? `Installed ${installed} · Latest ${latest}` : `Installed ${installed}`;
 }
 
 function hostStatus(h: HostPresence): string {
@@ -164,6 +169,28 @@ export function UpdatesPage(): JSX.Element {
         ) : null}
       </Group>
 
+      {report || shell ? (
+        <Group label="Versions" testid="version-layers">
+          {shell ? (
+            <Row
+              title="Patch app"
+              testid="version-shell"
+              sub={installedLatest(
+                shell.currentVersion,
+                shell.availableVersion ?? report?.desktop?.version ?? null,
+              )}
+            />
+          ) : null}
+          {report ? (
+            <Row
+              title="Server"
+              testid="version-server"
+              sub={installedLatest(report.server.version, report.server.version)}
+            />
+          ) : null}
+        </Group>
+      ) : null}
+
       {hosts.length > 0 ? (
         <Group label="Hosts" testid="version-hosts">
           {hosts.map((h) => (
@@ -191,7 +218,13 @@ export function UpdatesPage(): JSX.Element {
                   Update now
                 </button>
               ) : null}
-              {h.host ? <span className="set-val">{h.host.hostVersion}</span> : null}
+              {h.host ? (
+                <span className="set-val">
+                  {h.host.updateAvailable && report
+                    ? installedLatest(h.host.hostVersion, report.server.version)
+                    : h.host.hostVersion}
+                </span>
+              ) : null}
             </Row>
           ))}
         </Group>

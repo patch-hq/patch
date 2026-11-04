@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import pino from 'pino';
-import { sanitizeTitle, makeTitleGenerator, TITLE_MODEL } from '../src/titleGen.js';
+import { sanitizeTitle, makeTitleGenerator } from '../src/titleGen.js';
 import type { RunOnAccountWithCredit } from '../src/accountFailover.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import type { OAuthCheckResult } from '../src/chatRunner.js';
@@ -101,6 +101,7 @@ describe('makeTitleGenerator', () => {
       { type: 'result', sessionId: 'sess-1' },
     ]);
     const generateTitle = makeTitleGenerator({
+      smallJobModels: ['set-model', 'failover-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith(okOAuth),
       logger: silent,
@@ -108,7 +109,7 @@ describe('makeTitleGenerator', () => {
     const title = await generateTitle(baseInput);
     expect(title).toBe('Bus Route Plan');
     const opts = sdk.lastOptions();
-    expect(opts?.model).toBe(TITLE_MODEL);
+    expect(opts?.model).toBe('set-model');
     expect(opts?.inferenceProfile).toBe('classifier');
     expect(opts?.permissionMode).toBe('bypassPermissions');
     expect(opts?.oauthAccessToken).toBe('tok-123');
@@ -124,6 +125,7 @@ describe('makeTitleGenerator', () => {
       { type: 'result', sessionId: 's' },
     ]);
     const generateTitle = makeTitleGenerator({
+      smallJobModels: ['set-model', 'failover-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith(okOAuth),
       logger: silent,
@@ -143,6 +145,7 @@ describe('makeTitleGenerator', () => {
       { type: 'result', sessionId: 'sess-2' },
     ]);
     const generateTitle = makeTitleGenerator({
+      smallJobModels: ['set-model', 'failover-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith(okOAuth),
       logger: silent,
@@ -158,6 +161,7 @@ describe('makeTitleGenerator', () => {
       { type: 'result', sessionId: 'sess-3' },
     ]);
     const generateTitle = makeTitleGenerator({
+      smallJobModels: ['set-model', 'failover-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith(okOAuth),
       logger: silent,
@@ -175,6 +179,7 @@ describe('makeTitleGenerator', () => {
       { type: 'error', errorMessage: 'model overloaded' },
     ]);
     const generateTitle = makeTitleGenerator({
+      smallJobModels: ['set-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith(okOAuth),
       logger: silent,
@@ -182,9 +187,37 @@ describe('makeTitleGenerator', () => {
     await expect(generateTitle(baseInput)).rejects.toThrow('model overloaded');
   });
 
+  it('fails over to the next small-job model when the set model errors', async () => {
+    const sdk = createMockSdkBackend();
+    sdk.enqueue([{ type: 'error', errorMessage: 'model not found' }]);
+    sdk.enqueue([{ type: 'assistant', content: 'Fix Login Bug' }]);
+    const generateTitle = makeTitleGenerator({
+      smallJobModels: ['set-model', 'failover-model'],
+      sdkBackend: sdk,
+      runOnAccountWithCredit: runWith(okOAuth),
+      logger: silent,
+    });
+    expect(await generateTitle(baseInput)).toBe('Fix Login Bug');
+    expect(sdk.lastOptions()?.model).toBe('failover-model');
+  });
+
+  it('rejects, naming every model tried, when the whole small-job list fails', async () => {
+    const sdk = createMockSdkBackend();
+    sdk.enqueue([{ type: 'error', errorMessage: 'model not found' }]);
+    sdk.enqueue([{ type: 'error', errorMessage: 'model overloaded' }]);
+    const generateTitle = makeTitleGenerator({
+      smallJobModels: ['set-model', 'failover-model'],
+      sdkBackend: sdk,
+      runOnAccountWithCredit: runWith(okOAuth),
+      logger: silent,
+    });
+    await expect(generateTitle(baseInput)).rejects.toThrow(/set-model, failover-model.*overloaded/);
+  });
+
   it('resolves to null (without calling the SDK) when OAuth resolution rejects', async () => {
     const sdk = createMockSdkBackend();
     const generateTitle = makeTitleGenerator({
+      smallJobModels: ['set-model', 'failover-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith(() => {
         throw new Error('token store unavailable');
@@ -198,6 +231,7 @@ describe('makeTitleGenerator', () => {
   it('resolves to null when the OAuth gate reports not-ok', async () => {
     const sdk = createMockSdkBackend();
     const generateTitle = makeTitleGenerator({
+      smallJobModels: ['set-model', 'failover-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith(() => ({ ok: false, reason: 'no-oauth-account' })),
       logger: silent,
@@ -208,6 +242,7 @@ describe('makeTitleGenerator', () => {
 
   it('resolves to null with no logger configured at all (optional-chaining paths)', async () => {
     const generateTitle = makeTitleGenerator({
+      smallJobModels: ['set-model', 'failover-model'],
       sdkBackend: createMockSdkBackend(),
       runOnAccountWithCredit: runWith(() => ({ ok: false, reason: 'no-oauth-account' })),
     });
@@ -221,6 +256,7 @@ describe('makeTitleGenerator', () => {
       },
     };
     const generateTitle = makeTitleGenerator({
+      smallJobModels: ['set-model', 'failover-model'],
       sdkBackend: throwingBackend,
       runOnAccountWithCredit: runWith(okOAuth),
       logger: silent,
@@ -241,6 +277,7 @@ describe('makeTitleGenerator', () => {
     ]);
     const resolveOAuth = vi.fn((): OAuthCheckResult => ({ ok: true, accessToken: 'tok' }));
     const generateTitle = makeTitleGenerator({
+      smallJobModels: ['set-model', 'failover-model'],
       sdkBackend: sdk,
       runOnAccountWithCredit: runWith(resolveOAuth),
       logger: silent,
@@ -270,6 +307,7 @@ describe('makeTitleGenerator', () => {
         },
       };
       const generateTitle = makeTitleGenerator({
+        smallJobModels: ['set-model', 'failover-model'],
         sdkBackend: backend,
         runOnAccountWithCredit: runWith(okOAuth),
         logger: silent,
@@ -300,6 +338,7 @@ describe('makeTitleGenerator', () => {
     const resolveOAuth = vi.fn(okOAuth);
     const runOnAccountWithCredit = vi.fn(runWith(okOAuth));
     const generateTitle = makeTitleGenerator({
+      smallJobModels: ['set-model', 'failover-model'],
       sdkBackend: claude,
       runOnAccountWithCredit,
       codex: { sdkBackend: codex, resolveOAuth },
@@ -316,6 +355,7 @@ describe('makeTitleGenerator', () => {
   it('resolves to null for a Codex chat when no Codex credential is available', async () => {
     const codex = createMockSdkBackend();
     const generateTitle = makeTitleGenerator({
+      smallJobModels: ['set-model', 'failover-model'],
       sdkBackend: createMockSdkBackend(),
       runOnAccountWithCredit: runWith(okOAuth),
       codex: {
@@ -330,6 +370,7 @@ describe('makeTitleGenerator', () => {
 
   it('resolves to null for a Codex chat when the host wired no Codex backend', async () => {
     const generateTitle = makeTitleGenerator({
+      smallJobModels: ['set-model', 'failover-model'],
       sdkBackend: createMockSdkBackend(),
       runOnAccountWithCredit: runWith(okOAuth),
       logger: silent,

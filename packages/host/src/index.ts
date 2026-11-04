@@ -78,6 +78,7 @@ import {
   QUESTION_EXPIRY_SECONDS_DEFAULT,
   DEFAULT_QUESTION_EXPIRED_PROMPT,
   refusingRateLimitScope,
+  rejectedRateLimitScope,
 } from '@patch/wire';
 import type { Logger } from 'pino';
 import { randomUUID } from 'node:crypto';
@@ -160,6 +161,7 @@ import {
   applyUpdate,
   checkForUpdate,
   createArtifactWait,
+  createAutoUpdateSettle,
   describeUpdateRefusal,
   createUpdateGate,
   requestUpdate,
@@ -185,6 +187,7 @@ import {
   describeHost as buildHostDescription,
 } from './host.js';
 import { createPowerWatcher } from './power.js';
+import { createSleepDetector } from './linkDropCause.js';
 import { createServerLink } from './serverLink.js';
 import { createHealthSampler } from './healthReport.js';
 import { checkLaunchPath } from './launchPath.js';
@@ -212,6 +215,7 @@ import {
   withBrowserToolsEnabled,
 } from './mcpServers.js';
 import { getPatchToolsPrompt, toolsPromptOverride } from './toolsPrompt.js';
+import { patchToolDescriptions } from './mcp.js';
 import { ComponentManager, ComponentNotOfferedError, componentRuntimeDir } from './components.js';
 import { provisionSidecarRuntime, resolveUv } from './audio/sidecarRuntime.js';
 import { bundledSidecarDir } from './installPaths.js';
@@ -325,6 +329,12 @@ export interface MainTestHooks {
   validateClaudeToken?: ClaudeTokenValidator;
   /** Where the host's log lines go instead of stdout — lets a test read what boot logged. */
   logStream?: import('pino').DestinationStream;
+  /**
+   * Overrides how long a published build must be the newest before the
+   * scheduled auto-update installs it. Present ONLY so a test can exercise the
+   * boot-time apply without waiting out the real window.
+   */
+  autoUpdateSettleMs?: number;
 }
 
 /**
@@ -826,6 +836,15 @@ async function startHost(
   const effectiveToolsPrompt = (): string =>
     harnessToolsPrompt === undefined ? getPatchToolsPrompt() : harnessToolsPrompt;
   let harnessSkills: string[] | 'all' | undefined = persistedHostState.harnessSkills;
+  // Edits of Patch tools' descriptions. The MCP child reads them from its
+  // launch environment, so each turn's child starts from the current set.
+  let toolPromptOverrides: Record<string, string> = persistedHostState.toolPromptOverrides ?? {};
+  const toolPromptDefaults = patchToolDescriptions();
+  const mcpEnv: Record<string, string> = {};
+  const publishToolPrompts = (): void => {
+    mcpEnv['PATCH_TOOL_PROMPTS'] = JSON.stringify(toolPromptOverrides);
+  };
+  publishToolPrompts();
   // The three "layer" toggles (spec/14 § Agent behavior). Unlike the fields
   // above, these always resolve to a concrete boolean — there is no "SDK
   // default" reading for them to fall back to, only a stated default per
@@ -941,6 +960,9 @@ async function startHost(
             currentVersion: VERSION,
             target: BUILD_TARGET,
             patchHome: config.patchHome,
+            // Recorded only once the installer is about to run, so a deferred
+            // or artifact-pending apply leaves the version free to retry.
+            onInstallStart: (version) => hostStateStore.update({ lastAutoUpdateAttempt: version }),
             untilIdle: async () => {
               // Surfaces read this to say "waiting for chats" instead of "behind".
               const held = runningChats().length > 0;
@@ -1102,8 +1124,10 @@ async function startHost(
     onChange: () => emit(describeHost()),
     onError: (err) => logger.warn({ err }, 'power: battery read failed'),
   });
+  const sleepDetector = createSleepDetector();
   const describeHost = (): import('@patch/wire').HostInfoEvent =>
     buildHostDescription({
+      ...(link.lastDrop() ? { lastDisconnect: link.lastDrop() } : {}),
       ...(powerWatcher.current() ? { power: powerWatcher.current() } : {}),
       hostId: selfHostId,
       hostName,
@@ -1167,6 +1191,7 @@ async function startHost(
       ...(harnessSystemPrompt !== undefined ? { harnessSystemPrompt } : {}),
       ...(harnessToolsPrompt !== undefined ? { harnessToolsPrompt } : {}),
       harnessToolsPromptDefault: getPatchToolsPrompt(),
+      toolPromptDefaults,
       ...(harnessSkills !== undefined ? { harnessSkills } : {}),
       harnessMemoryEnabled,
       harnessBrowserToolsEnabled: browserToolsEnabledOf(harnessMcpServers),
@@ -1890,6 +1915,12 @@ async function startHost(
       applyHarnessConfig();
       logger.info('agent behaviour layers changed');
     }
+    if (JSON.stringify(shared.toolPromptOverrides) !== JSON.stringify(toolPromptOverrides)) {
+      toolPromptOverrides = shared.toolPromptOverrides;
+      publishToolPrompts();
+      hostStateStore.update({ toolPromptOverrides });
+      logger.info('tool prompt overrides changed');
+    }
     accountStrategy = shared.accountStrategy;
   };
 
@@ -2155,6 +2186,7 @@ async function startHost(
     clientGitSha: GIT_SHA,
     clientBuiltAt: BUILT_AT,
     logger,
+    sleepDetector,
     // The server speaks a protocol this build cannot read, so the matching
     // build is (or is about to be) published — go and get it. The update gate
     // joins repeat calls from each reconnect and waits out running turns.
@@ -3679,9 +3711,8 @@ async function startHost(
    * (spec/10-auth.md § Backend credentials — multiple accounts).
    *
    * Priority is the order of the accounts array: failover walks forward from the
-   * account that just failed. In memory — a restart re-probes and re-learns
-   * within one turn, and a stale "exhausted" surviving a top-up is worse than
-   * one extra refused turn.
+   * account that just failed. Persisted in account-availability.json so a
+   * restart keeps what it knew.
    */
   const accountAvailabilityPath = join(config.patchHome, 'account-availability.json');
   const accountRotation = new AccountRotation(
@@ -3967,7 +3998,7 @@ async function startHost(
         const probeWindows = accountUsage?.get(accountId)?.reading.windows;
         if (
           !isAccountExhausted((err as { limit?: LimitFacts }).limit, {
-            probeBlocked: refusingRateLimitScope(probeWindows) !== undefined,
+            probeBlocked: rejectedRateLimitScope(probeWindows) !== undefined,
           })
         ) {
           // Not an account problem, so no other account would answer
@@ -4056,10 +4087,15 @@ async function startHost(
   const translateRecurrenceRule = makeRecurrenceTranslator({
     sdkBackend,
     runOnAccountWithCredit,
+    smallJobModels: config.smallJobModels,
     logger,
   });
   // spec/14 § Message links — the Summarise button's one-shot.
-  const summariseLink = makeLinkSummariser({ sdkBackend, runOnAccountWithCredit });
+  const summariseLink = makeLinkSummariser({
+    sdkBackend,
+    runOnAccountWithCredit,
+    smallJobModels: config.smallJobModels,
+  });
   let pullQueuedFromServer: ((chatId: string) => Promise<ChatInputEvent[]>) | undefined;
   const daemon: Daemon = new Daemon({
     ...(durableTurns ? { durableTurns } : {}),
@@ -4213,10 +4249,12 @@ async function startHost(
       // limit resets on its own, extra usage being off does not.
       const refusing = refusingRateLimitScope(windows);
       const window = refusing ? windows?.[refusing] : undefined;
+      const estimated = refusing !== undefined && rejectedRateLimitScope(windows) === undefined;
       const overage = windows?.overage;
       return {
         ...(account?.label !== undefined ? { label: account.label } : {}),
         ...(refusing !== undefined ? { scope: refusing } : {}),
+        ...(estimated ? { estimated: true as const } : {}),
         ...(window?.utilization !== undefined ? { utilization: window.utilization } : {}),
         ...(window?.resetsAt !== undefined ? { resetsAt: window.resetsAt } : {}),
         ...(overage?.status === 'rejected' ? { overageBlocked: true } : {}),
@@ -4229,6 +4267,7 @@ async function startHost(
     generateTitle: makeTitleGenerator({
       sdkBackend,
       runOnAccountWithCredit,
+      smallJobModels: config.smallJobModels,
       // A Codex chat is titled on its own model, like its goal check (below).
       codex: { sdkBackend: routedBackend, resolveOAuth: resolveModelOAuth },
       logger,
@@ -4237,7 +4276,12 @@ async function startHost(
     // settles, summarise the thread's current status + whether it's paused on a
     // user question or merely complete. Cheap one-shot Haiku, fired async +
     // non-blocking; a failure leaves the previous status unchanged.
-    generateStatus: makeStatusGenerator({ sdkBackend, runOnAccountWithCredit, logger }),
+    generateStatus: makeStatusGenerator({
+      sdkBackend,
+      runOnAccountWithCredit,
+      smallJobModels: config.smallJobModels,
+      logger,
+    }),
     // spec/04 § Goals: after each turn settles on a chat with an active goal,
     // judge the condition against the transcript so far. `routedBackend` +
     // `resolveModelOAuth` (same pair `hook.check_request`'s prompt check uses)
@@ -4251,12 +4295,18 @@ async function startHost(
     // spec/14 § Tool runs: label each closed run of tool calls with what it was
     // for ("Set up the project locally"). Cheap one-shot Haiku, async; a
     // failure is stamped on the run rather than hidden.
-    summarizeToolRun: makeToolRunSummarizer({ sdkBackend, runOnAccountWithCredit, logger }),
+    summarizeToolRun: makeToolRunSummarizer({
+      sdkBackend,
+      runOnAccountWithCredit,
+      smallJobModels: config.smallJobModels,
+      logger,
+    }),
     // spec/04 § Send back — the one-line summary a side branch's conclusion
     // carries into its parent track. Cheap one-shot Haiku, async.
     summarizeBranchSendBack: makeBranchSendBackSummarizer({
       sdkBackend,
       runOnAccountWithCredit,
+      smallJobModels: config.smallJobModels,
       logger,
     }),
     // spec/06 § Session rotation — the handoff digest a scheduled rotation
@@ -4275,7 +4325,7 @@ async function startHost(
     mcpServer: {
       command: mcpBin.command,
       args: mcpBin.args,
-      env: {
+      env: Object.assign(mcpEnv, {
         PATCH_HOST_SOCKET: config.socketPath,
         PATCH_DAEMON_SOCKET: config.socketPath,
         // The child presents this as a Bearer on every socket call (spec/02
@@ -4289,7 +4339,7 @@ async function startHost(
         // PATCH_CHAT_ID is injected per-query in chatRunner.runQuery —
         // the MCP child needs the *current* chatId, not a static one.
         // See group 10 BLOCKER A.2.
-      },
+      }),
     },
     // Group 11: prepend the broadcast `<system-reminder>` for special threads.
     preprocessInput: (req) => {
@@ -4427,6 +4477,7 @@ async function startHost(
       runOnAccountWithCredit,
       cwd: hostCwd,
       model: () => meetingModels.analysis,
+      onDropped: (chatId, msg) => logger.warn({ chatId }, `meeting: ${msg}`),
     }),
     correct: makeMeetingCorrector({
       sdkBackend,
@@ -4638,6 +4689,7 @@ async function startHost(
   );
   credentialTimer.unref?.();
 
+  const autoUpdateSettle = createAutoUpdateSettle({ settleMs: testHooks?.autoUpdateSettleMs });
   const refreshUpdateAvailable = async (): Promise<void> => {
     const check = await checkForUpdate({
       serverUrl: config.serverUrl,
@@ -4664,6 +4716,16 @@ async function startHost(
     // published, and a busy machine defers until idle rather than killing a
     // running turn.
     if (autoUpdateHosts && (check.available || check.awaitingArtifact)) {
+      // Deploys come in bursts and each install restarts the host, so wait
+      // until the published build has stopped changing (`AUTO_UPDATE_SETTLE_MS`).
+      // The next scheduled check picks it up; the Update button skips this.
+      if (check.version && !autoUpdateSettle.settled(check.version)) {
+        logger.info(
+          { version: check.version },
+          'self-update: scheduled apply waiting for the published build to settle',
+        );
+        return;
+      }
       if (check.version && check.version === hostStateStore.get().lastAutoUpdateAttempt) {
         logger.warn(
           { version: check.version },
@@ -4671,7 +4733,6 @@ async function startHost(
         );
         return;
       }
-      if (check.version) hostStateStore.update({ lastAutoUpdateAttempt: check.version });
       const result = await applyUpdateOnce();
       if (!result.applied && !result.deferred) {
         logger.warn({ reason: result.message }, 'self-update: scheduled apply refused');
@@ -4685,6 +4746,7 @@ async function startHost(
     logger.warn({ err }, 'power: initial battery read failed');
   });
   powerWatcher.start();
+  sleepDetector.start();
   const updateCheckTimer = setInterval(() => {
     void refreshUpdateAvailable().catch((err: unknown) => {
       logger.warn({ err }, 'self-update: availability check failed');
@@ -6919,6 +6981,7 @@ export async function handleServerEvent(
           event.source,
           Buffer.from(event.audioBase64, 'base64'),
           event.speakerName,
+          event.device,
         );
         return;
       }

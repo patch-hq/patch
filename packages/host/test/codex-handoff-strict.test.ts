@@ -63,7 +63,7 @@ function harness(o: { injectFails?: string; turnStartFails?: string; usage?: boo
   };
   const run = async (strict: boolean) => {
     const events: SdkEnvelope[] = [];
-    const backend = new CodexBackend(accounts, history, {});
+    const backend = new CodexBackend(accounts, history);
     for await (const e of backend.run({
       prompt: 'work',
       cwd: root,

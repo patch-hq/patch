@@ -10,6 +10,10 @@
 // created this way, sparing the one now on screen. A chat that has a message,
 // unsent words in its composer, or a voice note or call running on it is the
 // user's, and stops being watched.
+//
+// The watch list is kept in localStorage: a reload, a quit or a crash while the
+// empty chat is open used to lose it, leaving a bare "New chat" in the sidebar
+// for good. After a restart the list is checked once the chat roster has loaded.
 
 import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
@@ -19,11 +23,35 @@ import { clearComposerDraft, useComposerDraftStore } from '../stores/composerDra
 import { useUiStore } from '../stores/uiStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 
-const unsent = new Set<string>();
+const STORAGE_KEY = 'patch.unsentNewChats';
+
+function load(): Set<string> {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (raw === null) return new Set();
+  try {
+    const ids: unknown = JSON.parse(raw);
+    if (!Array.isArray(ids) || !ids.every((i) => typeof i === 'string')) {
+      throw new Error('not a list of chat ids');
+    }
+    return new Set(ids as string[]);
+  } catch (e) {
+    // Re-derivable: worst case one empty chat stays until deleted by hand.
+    console.error('unsentNewChat: discarding unreadable watch list', e);
+    localStorage.removeItem(STORAGE_KEY);
+    return new Set();
+  }
+}
+
+const unsent = load();
+
+function save(): void {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify([...unsent]));
+}
 
 /** The new-chat screen created `chatId` before anything was sent into it. */
 export function markUnsentNewChat(chatId: string): void {
   unsent.add(chatId);
+  save();
 }
 
 function hasContent(chatId: string): boolean {
@@ -42,12 +70,20 @@ function inUse(chatId: string): boolean {
 
 /** Delete every still-empty chat created by the new-chat screen, except `onScreen`. */
 export function discardUnsentNewChats(onScreen: string | null): void {
+  const { hydrated, chats } = useChatStore.getState();
   for (const chatId of [...unsent]) {
+    // Before the roster has loaded an empty-looking chat may just be unloaded,
+    // and a chat missing from a loaded roster is already gone.
+    if (hydrated && chats[chatId] === undefined) {
+      unsent.delete(chatId);
+      continue;
+    }
     if (hasContent(chatId)) {
       unsent.delete(chatId);
       continue;
     }
     if (chatId === onScreen || inUse(chatId)) continue;
+    if (!hydrated) continue;
     unsent.delete(chatId);
     useChatStore.getState().removeChat(chatId);
     clearComposerDraft(chatId);
@@ -64,13 +100,15 @@ export function discardUnsentNewChats(onScreen: string | null): void {
 /** Mounted once per window: checks on every route change. */
 export function useDiscardUnsentNewChats(): void {
   const { pathname } = useLocation();
+  const hydrated = useChatStore((s) => s.hydrated);
   useEffect(() => {
     const onScreen = /^\/chats\/([^/]+)$/.exec(pathname)?.[1] ?? null;
     discardUnsentNewChats(onScreen);
-  }, [pathname]);
+  }, [pathname, hydrated]);
 }
 
 /** Test seam — forget every watched chat. */
 export function _resetUnsentNewChats(): void {
   unsent.clear();
+  localStorage.removeItem(STORAGE_KEY);
 }

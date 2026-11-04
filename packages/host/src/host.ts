@@ -22,6 +22,7 @@ import type {
   McpServerConfig,
 } from '@patch/wire';
 import type { SdkPermissionMode } from './chatState.js';
+import type { LinkDrop } from './linkDropCause.js';
 
 export { CLAUDE_BACKEND_ID } from '@patch/wire';
 export const CLAUDE_BACKEND_LABEL = 'Claude Code';
@@ -106,6 +107,8 @@ export interface HostDescriptionInput {
   harnessToolsPrompt?: string | undefined;
   /** The built-in patch-tools prompt, so a surface need not ship a copy. */
   harnessToolsPromptDefault?: string | undefined;
+  /** Each Patch tool's built-in description, by tool name. */
+  toolPromptDefaults?: Record<string, string> | undefined;
   /** Per-host skills to enable on every turn (Task 3). */
   harnessSkills?: string[] | 'all' | undefined;
   /** Whether Claude Code's own persistent memory is enabled on this host. */
@@ -123,6 +126,8 @@ export interface HostDescriptionInput {
   harnessClaudeMdEnabled: boolean;
   /** Battery state (`host.host.power`); absent when the machine has no readable battery. */
   power?: { onBattery: boolean; percent: number } | undefined;
+  /** Why this host's server link last dropped (`host.host.lastDisconnect`). */
+  lastDisconnect?: LinkDrop | undefined;
 }
 
 /** Assemble this host's `host.host` self-description. */
@@ -182,6 +187,9 @@ export function describeHost(input: HostDescriptionInput): HostInfoEvent {
     ...(input.harnessToolsPromptDefault !== undefined
       ? { harnessToolsPromptDefault: input.harnessToolsPromptDefault }
       : {}),
+    ...(input.toolPromptDefaults !== undefined
+      ? { toolPromptDefaults: input.toolPromptDefaults }
+      : {}),
     ...(input.harnessSkills !== undefined ? { harnessSkills: input.harnessSkills } : {}),
     // Stated UNCONDITIONALLY, same discipline as `questionExpiry` above: a
     // surface reads the ABSENCE of these as "this host predates the
@@ -192,6 +200,7 @@ export function describeHost(input: HostDescriptionInput): HostInfoEvent {
     ...(input.patchMcpEnabled !== undefined ? { patchMcpEnabled: input.patchMcpEnabled } : {}),
     harnessClaudeMdEnabled: input.harnessClaudeMdEnabled,
     ...(input.power !== undefined ? { power: input.power } : {}),
+    ...(input.lastDisconnect !== undefined ? { lastDisconnect: input.lastDisconnect } : {}),
   };
 }
 

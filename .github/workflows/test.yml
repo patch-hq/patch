@@ -57,6 +57,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
+      # Headroom against the OOM killer (exit 137): the host suite's sidecars,
+      # then headed Chromium, outgrow the runner's RAM. Swap turns a spike into
+      # a slow moment instead of a killed shard.
+      - name: Add swap
+        run: |
+          sudo fallocate -l 6G /mnt/ci-extra.swap
+          sudo chmod 600 /mnt/ci-extra.swap
+          sudo mkswap /mnt/ci-extra.swap
+          sudo swapon /mnt/ci-extra.swap
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @patch/web exec playwright install --with-deps chromium
@@ -70,6 +79,11 @@ jobs:
       # is too small for it (verify.mjs explains); a runner is not.
       # 40 minutes: a shard normally takes 15-25, and one that hung for longer
       # held every later check behind it.
+      # Samples memory every 30s so a 137 can be traced to a process: the log
+      # shows the biggest resident processes leading up to the kill.
+      - name: Memory sampler
+        run: |
+          nohup bash -c 'while true; do echo "--- mem $(date +%T)"; free -m | sed -n 2,3p; ps -eo rss,comm,args --sort=-rss | head -6 | cut -c1-160; sleep 30; done' > /tmp/mem.log 2>&1 &
       - name: The gate
         timeout-minutes: 40
         env:
@@ -80,6 +94,11 @@ jobs:
             printf "ci" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
             node scripts/verify.mjs
           '
+      - name: Memory log and kernel OOM kills
+        if: failure()
+        run: |
+          tail -n 120 /tmp/mem.log || true
+          sudo dmesg 2>/dev/null | grep -i -E "out of memory|oom-kill|killed process" | tail -n 20 || true
 
   # The one check that branch protection and release.yml look at: green only
   # when every shard is. Reports on forks too, where verify is skipped, so it is

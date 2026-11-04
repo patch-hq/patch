@@ -32,6 +32,7 @@ import {
   Pressable,
   ScrollView,
   Text,
+  TextInput,
   View,
   type StyleProp,
   type ViewStyle,
@@ -40,7 +41,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
 import { standardBase64 } from '../lib/servedFile';
 import { useRouter } from 'expo-router';
-import { Copy, GitFork, RotateCcw, TextSelect, X } from 'lucide-react-native';
+import { Copy, GitFork, Pencil, RotateCcw, TextSelect, X } from 'lucide-react-native';
 import { create } from 'zustand';
 import { useUiStore } from '../stores/uiStore';
 import { openSideThreadDraft } from '../lib/sideThreadActions';
@@ -67,13 +68,22 @@ interface MessageActionState {
   sideThread: SideThreadOrigin | undefined;
   /** Present on a settled user row: sends its text again as a new turn. */
   retry: (() => void) | undefined;
-  view: 'sheet' | 'select';
+  /** Present on a settled text-only user row: saves an edited text as a fork. */
+  edit: ((text: string) => void) | undefined;
+  view: 'sheet' | 'select' | 'edit';
   /** The brief confirmation line, or null. */
   toast: string | null;
   /** Bumped by every `setToast`, so the same line shown twice restarts its timer. */
   toastId: number;
-  show(text: string, messageAt?: number, sideThread?: SideThreadOrigin, retry?: () => void): void;
+  show(
+    text: string,
+    messageAt?: number,
+    sideThread?: SideThreadOrigin,
+    retry?: () => void,
+    edit?: (text: string) => void,
+  ): void;
   select(): void;
+  startEdit(): void;
   close(): void;
   setToast(toast: string | null): void;
 }
@@ -83,17 +93,21 @@ const useMessageActionStore = create<MessageActionState>((set) => ({
   messageAt: undefined,
   sideThread: undefined,
   retry: undefined,
+  edit: undefined,
   view: 'sheet',
   toast: null,
   toastId: 0,
-  show(text, messageAt, sideThread, retry) {
+  show(text, messageAt, sideThread, retry, edit) {
     // Clear any toast still lingering from a previous row's long-press —
     // this one hasn't earned a toast yet (MessageLongPress sets it right
     // after, for a row with a messageAt).
-    set({ text, messageAt, sideThread, retry, view: 'sheet', toast: null });
+    set({ text, messageAt, sideThread, retry, edit, view: 'sheet', toast: null });
   },
   select() {
     set({ view: 'select' });
+  },
+  startEdit() {
+    set({ view: 'edit' });
   },
   close() {
     set({
@@ -101,6 +115,7 @@ const useMessageActionStore = create<MessageActionState>((set) => ({
       messageAt: undefined,
       sideThread: undefined,
       retry: undefined,
+      edit: undefined,
       view: 'sheet',
     });
   },
@@ -116,8 +131,9 @@ export function showMessageActions(
   messageAt?: number,
   sideThread?: SideThreadOrigin,
   retry?: () => void,
+  edit?: (text: string) => void,
 ): void {
-  useMessageActionStore.getState().show(text, messageAt, sideThread, retry);
+  useMessageActionStore.getState().show(text, messageAt, sideThread, retry, edit);
 }
 
 /** Test seam: back to closed, no toast. */
@@ -127,6 +143,7 @@ export function __resetMessageActions(): void {
     messageAt: undefined,
     sideThread: undefined,
     retry: undefined,
+    edit: undefined,
     view: 'sheet',
     toast: null,
   });
@@ -183,6 +200,7 @@ export function MessageLongPress({
   messageAt,
   sideThread,
   retry,
+  edit,
   onPress,
   style,
   testID,
@@ -197,6 +215,8 @@ export function MessageLongPress({
   sideThread?: SideThreadOrigin;
   /** A settled user row: the sheet offers Retry, sending this text again as a new turn. */
   retry?: () => void;
+  /** A settled text-only user row: the sheet offers Edit, forking with the new text. */
+  edit?: (text: string) => void;
   style?: StyleProp<ViewStyle>;
   testID?: string;
   children: React.ReactNode;
@@ -214,7 +234,7 @@ export function MessageLongPress({
       style={style}
       onPress={onPress}
       onLongPress={() => {
-        showMessageActions(text, messageAt, sideThread, retry);
+        showMessageActions(text, messageAt, sideThread, retry, edit);
         // The time toasts the instant the long-press fires, not after a
         // further tap inside the sheet it just opened (that was the whole
         // complaint: a message row's time cost a long-press AND a button).
@@ -273,6 +293,8 @@ export function MessageActionsHost(): React.ReactElement {
   const text = useMessageActionStore((s) => s.text);
   const sideThread = useMessageActionStore((s) => s.sideThread);
   const retry = useMessageActionStore((s) => s.retry);
+  const edit = useMessageActionStore((s) => s.edit);
+  const [draft, setDraft] = React.useState('');
   const view = useMessageActionStore((s) => s.view);
   const toast = useMessageActionStore((s) => s.toast);
   const toastId = useMessageActionStore((s) => s.toastId);
@@ -326,6 +348,17 @@ export function MessageActionsHost(): React.ReactElement {
               label="Select text"
               onPress={() => useMessageActionStore.getState().select()}
             />
+            {edit !== undefined ? (
+              <SheetItem
+                testID="message-action-edit"
+                icon={<Pencil size={18} color={colors.ink2} />}
+                label="Edit"
+                onPress={() => {
+                  setDraft(text ?? '');
+                  useMessageActionStore.getState().startEdit();
+                }}
+              />
+            ) : null}
             {retry !== undefined ? (
               <SheetItem
                 testID="message-action-retry"
@@ -356,6 +389,66 @@ export function MessageActionsHost(): React.ReactElement {
           </Pressable>
           {toast !== null && view === 'sheet' ? <Toast message={toast} anchor="top" /> : null}
         </Pressable>
+      </Modal>
+
+      <Modal
+        visible={text !== null && view === 'edit'}
+        transparent
+        animationType="fade"
+        onRequestClose={close}
+      >
+        <View
+          testID="message-edit-view"
+          style={{
+            flex: 1,
+            backgroundColor: colors.paper,
+            paddingTop: insets.top + space.sm,
+            paddingBottom: insets.bottom + space.sm,
+            paddingHorizontal: space.md,
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+            <Pressable
+              testID="message-edit-cancel"
+              onPress={close}
+              accessibilityRole="button"
+              style={{ padding: space.sm }}
+            >
+              <Text style={{ fontSize: 15, fontFamily: fonts.body, color: colors.ink2 }}>
+                Cancel
+              </Text>
+            </Pressable>
+            <View style={{ flex: 1 }} />
+            <Pressable
+              testID="message-edit-save"
+              onPress={() => {
+                const run = edit;
+                const next = draft;
+                close();
+                run?.(next);
+              }}
+              accessibilityRole="button"
+              style={{ padding: space.sm }}
+            >
+              <Text style={{ fontSize: 15, fontFamily: fonts.body, color: colors.ink }}>Save</Text>
+            </Pressable>
+          </View>
+          <TextInput
+            testID="message-edit-input"
+            value={draft}
+            onChangeText={setDraft}
+            multiline
+            autoFocus
+            style={{
+              flex: 1,
+              textAlignVertical: 'top',
+              fontSize: 16,
+              fontFamily: fonts.body,
+              color: colors.ink,
+              paddingTop: space.md,
+            }}
+          />
+        </View>
       </Modal>
 
       <Modal

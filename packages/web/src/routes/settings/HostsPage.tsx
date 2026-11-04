@@ -102,6 +102,12 @@ export function HostsPage(): JSX.Element {
   );
 }
 
+function disconnectLabel(d: NonNullable<HostPresence['host']>['lastDisconnect'] & object): string {
+  if (d.cause === 'sleep') return `Machine slept for ${d.sleptSeconds ?? 0}s`;
+  if (d.cause === 'server-restart') return 'Server restarted';
+  return `Unexplained (close ${d.code})`;
+}
+
 function HostListRow({
   host,
   selected,
@@ -294,6 +300,16 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
                 </>
               }
             />
+            {report.lastDisconnect ? (
+              <Row
+                title="Last disconnect"
+                sub={
+                  <span data-testid={`host-${host.hostId}-last-disconnect`}>
+                    {disconnectLabel(report.lastDisconnect)} · {agoLabel(report.lastDisconnect.at)}
+                  </span>
+                }
+              />
+            ) : null}
             <SettingsVersionRow host={host} />
             {report.permissionOverrides > 0 ? (
               <Row

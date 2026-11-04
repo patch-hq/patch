@@ -103,13 +103,17 @@ export interface RouteOptions {
    * whole point is reaching the phone when the user is away from the machine —
    * the phone being in hand must not suppress it.
    *
+   * `chat-open` is an agent's own `patch_notify`: it is held back only while
+   * the user is looking at the chat that sent it (spec/09 § `### push`). Being
+   * active elsewhere — another chat, another screen — does not hide it.
+   *
    * Server-internal: deliberately NOT a field on `NotifyEvent`. It is a routing
    * decision this server makes, not something a surface has any use for —
    * putting it on the wire would publish an implementation detail. (It was also
    * once unsafe: before spec/03 § Forward compatibility, an older surface
    * rejected any frame carrying a field it did not know.)
    */
-  suppressOn?: 'any' | 'computer';
+  suppressOn?: 'any' | 'computer' | 'chat-open';
 
   /**
    * `desktop` channel only: skip a surface that already has `event.chatId`
@@ -169,7 +173,7 @@ export class NotificationRouter {
           await this.routePush(routed, opts.suppressOn ?? 'any');
           break;
         case 'desktop':
-          this.routeDesktop(routed, opts.skipDesktopIfFocused ?? false);
+          this.routeDesktop(routed, opts.skipDesktopIfFocused ?? opts.suppressOn === 'chat-open');
           break;
         case 'speakers':
           this.routeSpeakers(routed);
@@ -204,7 +208,10 @@ export class NotificationRouter {
     return channel;
   }
 
-  private async routePush(event: NotifyEvent, suppressOn: 'any' | 'computer'): Promise<void> {
+  private async routePush(
+    event: NotifyEvent,
+    suppressOn: 'any' | 'computer' | 'chat-open',
+  ): Promise<void> {
     const account = this.deps.registry.getAccount();
     if (!account) {
       throw new Error('push: no account bootstrapped');
@@ -229,9 +236,11 @@ export class NotificationRouter {
     const isCall = event.kind === 'call';
     const isSilent = event.priority === 'silent';
     const active =
-      suppressOn === 'computer'
-        ? this.deps.presence.isComputerActive(account.accountId, this.now())
-        : this.deps.presence.isActive(account.accountId, this.now());
+      suppressOn === 'chat-open'
+        ? this.deps.presence.isChatOpen(account.accountId, event.chatId, this.now())
+        : suppressOn === 'computer'
+          ? this.deps.presence.isComputerActive(account.accountId, this.now())
+          : this.deps.presence.isActive(account.accountId, this.now());
     // A blocked-on-you ask is held back by nothing: dropping it for presence is
     // how `patch_ask_human` returned ok and the phone never buzzed.
     if (!isCall && !isSilent && event.kind !== 'ask' && active) {

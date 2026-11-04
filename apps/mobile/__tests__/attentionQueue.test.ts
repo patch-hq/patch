@@ -123,49 +123,35 @@ describe('needsAttention', () => {
 });
 
 describe('sortAttentionQueue', () => {
-  it('queues oldest-updated first (FIFO), most-recent last', () => {
+  const r = (chatId: string, o: Partial<Parameters<typeof row>[0]> = {}) =>
+    row({ chatId, lastSeq: 5, lastReadSeq: 0, ...o });
+
+  it("orders by the user's last activity, newest first", () => {
     const rows = [
-      row({ chatId: 'c', lastUpdated: 300, lastSeq: 300, lastReadSeq: 0 }),
-      row({ chatId: 'a', lastUpdated: 100, lastSeq: 100, lastReadSeq: 0 }),
-      row({ chatId: 'b', lastUpdated: 200, lastSeq: 200, lastReadSeq: 0 }),
+      r('a', { lastUserActivity: 100 }),
+      r('c', { lastUserActivity: 300 }),
+      r('b', { lastUserActivity: 200 }),
     ];
-    expect(sortAttentionQueue(rows).map((r) => r.chatId)).toEqual(['a', 'b', 'c']);
+    expect(sortAttentionQueue(rows).map((x) => x.chatId)).toEqual(['c', 'b', 'a']);
   });
 
-  it('permission rows lead the queue regardless of recency', () => {
-    const rows = [
-      row({ chatId: 'done-old', lastUpdated: 10, lastSeq: 10, lastReadSeq: 0 }),
-      row({ chatId: 'perm-new', activity: 'awaiting-permission', lastUpdated: 999 }),
-      row({ chatId: 'done-new', lastUpdated: 500, lastSeq: 500, lastReadSeq: 0 }),
+  it('agent activity and a permission prompt do not move a row', () => {
+    const before = [r('a', { lastUserActivity: 200 }), r('b', { lastUserActivity: 100 })];
+    const after = [
+      r('a', { lastUserActivity: 200, lastUpdated: 999 }),
+      r('b', { lastUserActivity: 100, activity: 'awaiting-permission', lastUpdated: 999 }),
     ];
-    expect(sortAttentionQueue(rows).map((r) => r.chatId)).toEqual([
-      'perm-new',
-      'done-old',
-      'done-new',
-    ]);
+    expect(sortAttentionQueue(before).map((x) => x.chatId)).toEqual(['a', 'b']);
+    expect(sortAttentionQueue(after).map((x) => x.chatId)).toEqual(['a', 'b']);
   });
 
-  it('two permission rows between themselves queue oldest-updated first', () => {
-    const rows = [
-      row({ chatId: 'p2', activity: 'awaiting-permission', lastUpdated: 200 }),
-      row({ chatId: 'p1', activity: 'awaiting-permission', lastUpdated: 100 }),
-    ];
-    expect(sortAttentionQueue(rows).map((r) => r.chatId)).toEqual(['p1', 'p2']);
-  });
-
-  it('breaks a tie in lastUpdated by chatId, stably', () => {
-    const rows = [
-      row({ chatId: 'b', lastUpdated: 100, lastSeq: 100, lastReadSeq: 0 }),
-      row({ chatId: 'a', lastUpdated: 100, lastSeq: 100, lastReadSeq: 0 }),
-    ];
-    expect(sortAttentionQueue(rows).map((r) => r.chatId)).toEqual(['a', 'b']);
+  it('breaks a tie by chatId, stably', () => {
+    const rows = [r('b', { lastUserActivity: 100 }), r('a', { lastUserActivity: 100 })];
+    expect(sortAttentionQueue(rows).map((x) => x.chatId)).toEqual(['a', 'b']);
   });
 
   it('does not mutate the input array', () => {
-    const rows = [
-      row({ chatId: 'b', lastUpdated: 200, lastSeq: 200, lastReadSeq: 0 }),
-      row({ chatId: 'a', lastUpdated: 100, lastSeq: 100, lastReadSeq: 0 }),
-    ];
+    const rows = [r('b', { lastUserActivity: 100 }), r('a', { lastUserActivity: 200 })];
     const copy = [...rows];
     sortAttentionQueue(rows);
     expect(rows).toEqual(copy);

@@ -46,6 +46,7 @@ import {
   WireDecodeError,
 } from '@patch/wire';
 import { EventBuffer, DEFAULT_BUFFER_PER_CHAT } from './eventBuffer.js';
+import { classifyDrop, describeDrop, type LinkDrop, type SleepDetector } from './linkDropCause.js';
 
 /**
  * Backoff schedule in ms. First step is short (250ms) so a transient boot-time
@@ -54,6 +55,13 @@ import { EventBuffer, DEFAULT_BUFFER_PER_CHAT } from './eventBuffer.js';
  * cap.
  */
 export const BACKOFF_SCHEDULE_MS = [250, 1_000, 2_000, 5_000, 10_000, 30_000] as const;
+
+const noSleepDetector: SleepDetector = {
+  start() {},
+  stop() {},
+  sample() {},
+  lastSleep: () => undefined,
+};
 
 /** Default `heartbeatIntervalMs` (see heartbeat note above). */
 export const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
@@ -91,7 +99,9 @@ export interface ServerLinkOptions {
    */
   onAuthed?: (send: (event: WireEvent) => void, greeting: AuthOkEvent) => void;
   /** Called when the link drops (close or error). */
-  onDisconnected?: () => void;
+  onDisconnected?: (drop: LinkDrop) => void;
+  /** Tells a machine sleep from a real drop. Without it every drop is classified as planned or unexplained only. */
+  sleepDetector?: SleepDetector;
   /**
    * Called when a frame arrives BEFORE `auth.ok` that this host cannot decode
    * — in practice the greeting itself. The server and host ship in lockstep,
@@ -155,6 +165,8 @@ export interface ServerLink {
   send(event: WireEvent): void;
   /** Whether the link is currently authed/online. */
   isOnline(): boolean;
+  /** The most recent drop of an authenticated link and its cause, if any. */
+  lastDrop(): LinkDrop | undefined;
   /** Stop reconnecting and close any open socket. */
   /** `code` tells the server why, e.g. CLOSE_HOST_UPDATING. */
   close(code?: number, reason?: string): Promise<void>;
@@ -245,6 +257,7 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
   let online = false;
   // Down since the host started until the first auth.ok, then since each loss.
   let offlineSince: number | null = Date.now();
+  let lastDrop: LinkDrop | undefined;
   let stopped = false;
   let attempt = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -418,8 +431,13 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
       // socket's own heartbeat timer.
       if (ws === socket) stopHeartbeat();
       if (ws === socket) ws = undefined;
-      log.warn({ code, reason: reason.toString('utf8') }, 'server-link: socket closed');
-      if (wasOnline) opts.onDisconnected?.();
+      const drop = classifyDrop(code, opts.sleepDetector ?? noSleepDetector);
+      if (wasOnline) lastDrop = drop;
+      log.warn(
+        { code, reason: reason.toString('utf8'), cause: drop.cause },
+        `server-link: socket closed: ${describeDrop(drop)}`,
+      );
+      if (wasOnline) opts.onDisconnected?.(drop);
       scheduleReconnect();
     });
 
@@ -465,7 +483,10 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
       const wasOnline = online;
       online = false;
       if (wasOnline) offlineSince = Date.now();
-      if (wasOnline) opts.onDisconnected?.();
+      if (wasOnline) {
+        lastDrop = { at: Date.now(), cause: 'unexplained', code: 1000 };
+        opts.onDisconnected?.(lastDrop);
+      }
       socket.close();
       return true;
     },
@@ -498,6 +519,7 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
       }
       return buffer.size();
     },
+    lastDrop: () => lastDrop,
     async close(code?: number, reason?: string): Promise<void> {
       stopped = true;
       if (reconnectTimer) {

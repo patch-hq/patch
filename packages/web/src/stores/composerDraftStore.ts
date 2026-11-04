@@ -125,6 +125,12 @@ interface ComposerDraftStore {
    * so it never overwrites text under the cursor. Resolved on blur.
    */
   pendingRemote: Record<string, PendingRemote>;
+  /**
+   * chatId -> count of remote clears applied straight through a FOCUSED
+   * composer (the text was sent or emptied on another surface and nothing
+   * typed here is unconfirmed). The composer watches this to empty itself.
+   */
+  remoteClears: Record<string, number>;
   /** Record what is currently typed in `chatId`'s composer. */
   setDraft(chatId: string, text: string): void;
   /** Drop `chatId`'s entry (its text was sent, or the chat was deleted). */
@@ -214,6 +220,7 @@ export const useComposerDraftStore = create<ComposerDraftStore>((set, get) => ({
   drafts: initialDrafts,
   focused: {},
   pendingRemote: {},
+  remoteClears: {},
 
   setDraft(chatId, text) {
     // An emptied composer is not a draft, and neither is one holding only
@@ -327,6 +334,23 @@ export const useComposerDraftStore = create<ComposerDraftStore>((set, get) => ({
 
   applyDraftCleared(chatId, updatedAt) {
     if (get().focused[chatId]) {
+      // Nothing typed here is unconfirmed, so the visible text is exactly the
+      // draft the server just dropped — it was sent (or emptied) on another
+      // surface. Holding the clear until blur would leave the sent text
+      // sitting in this composer, so apply it now.
+      if (!pendingOp.has(chatId) && updatedAt >= (localEditAt.get(chatId) ?? 0)) {
+        const drafts = { ...get().drafts };
+        delete drafts[chatId];
+        const pendingRemote = { ...get().pendingRemote };
+        delete pendingRemote[chatId];
+        persistCache(drafts);
+        set({
+          drafts,
+          pendingRemote,
+          remoteClears: { ...get().remoteClears, [chatId]: (get().remoteClears[chatId] ?? 0) + 1 },
+        });
+        return;
+      }
       // A keystroke made after this update was captured is still owed to the
       // server: the update may be the echo of our own earlier send.
       if (updatedAt >= (localEditAt.get(chatId) ?? 0)) pendingOp.delete(chatId);
@@ -356,7 +380,7 @@ export const useComposerDraftStore = create<ComposerDraftStore>((set, get) => ({
     } catch {
       // Nothing to clear if storage is unavailable.
     }
-    set({ drafts: {}, focused: {}, pendingRemote: {} });
+    set({ drafts: {}, focused: {}, pendingRemote: {}, remoteClears: {} });
   },
 }));
 

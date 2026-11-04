@@ -60,6 +60,10 @@ const CODES: ReadonlyArray<readonly [string, Copy]> = [
     },
   ],
   ['no_machine_chosen', { sentence: 'Choose a machine. The model list comes from it.' }],
+  [
+    'daemon_timeout',
+    { sentence: 'That machine isn’t answering. It may be offline. Try again when it’s back.' },
+  ],
   ['unknown_host', { sentence: 'That machine is no longer registered. Pick another one.' }],
   ['folder_not_found', { sentence: 'That folder isn’t on that machine. Pick another project.' }],
   ['chat_not_found', { sentence: 'That chat is gone. Start a new one.' }],

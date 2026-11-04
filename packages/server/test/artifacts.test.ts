@@ -148,7 +148,7 @@ describe('artifacts', () => {
           requestId: 'req-huge',
           artifactId: 'a1ab03',
           html: undefined,
-          raw: { contentType: 'image/png', base64: Buffer.alloc(8_000_000, 7).toString('base64') },
+          raw: { contentType: 'image/png', base64: Buffer.alloc(60_000_000, 7).toString('base64') },
         }),
       );
       expect(huge.ok).toBe(false);
@@ -229,6 +229,88 @@ describe('artifacts', () => {
         headers: { range: 'bytes=99-120' },
       });
       expect(bad.statusCode).toBe(416);
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('serves ranges of a multi-MB video as streamed slices', async () => {
+    const { built, hostLink } = await makeApp();
+    try {
+      const size = 5 * 1024 * 1024;
+      const video = Buffer.alloc(size);
+      for (let i = 0; i < size; i += 1) video[i] = i % 251;
+      const res = await publish(
+        hostLink,
+        publishRequest({
+          artifactId: 'a1ab03',
+          html: undefined,
+          raw: { contentType: 'video/mp4', base64: video.toString('base64') },
+        }),
+      );
+      const get = (range?: string) =>
+        built.app.inject({
+          method: 'GET',
+          url: res.url!,
+          headers: range === undefined ? {} : { range },
+        });
+
+      const mid = await get('bytes=3000000-3000099');
+      expect(mid.statusCode).toBe(206);
+      expect(mid.headers['content-range']).toBe(`bytes 3000000-3000099/${size}`);
+      expect(mid.headers['content-length']).toBe('100');
+      expect(mid.rawPayload.equals(video.subarray(3000000, 3000100))).toBe(true);
+
+      const suffix = await get('bytes=-50');
+      expect(suffix.statusCode).toBe(206);
+      expect(suffix.headers['content-range']).toBe(`bytes ${size - 50}-${size - 1}/${size}`);
+      expect(suffix.rawPayload.equals(video.subarray(size - 50))).toBe(true);
+
+      const open = await get(`bytes=${size - 10}-`);
+      expect(open.statusCode).toBe(206);
+      expect(open.rawPayload.equals(video.subarray(size - 10))).toBe(true);
+
+      const whole = await get();
+      expect(whole.statusCode).toBe(200);
+      expect(whole.headers['content-length']).toBe(String(size));
+      expect(whole.rawPayload.equals(video)).toBe(true);
+
+      expect((await get(`bytes=${size}-`)).statusCode).toBe(416);
+
+      // No numbers at all is malformed, not an out-of-range request.
+      const bare = await get('bytes=-');
+      expect(bare.statusCode).toBe(200);
+      expect(bare.rawPayload.equals(video)).toBe(true);
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  // Opened directly, a video is the browser's own media page. A `sandbox` CSP on
+  // it gives the page an opaque origin and Chrome blocks the video fetch as
+  // cross-origin, leaving a player that cannot play. Video and audio cannot run
+  // script, so they go without it (still nosniff).
+  it('serves raw video and audio without the sandbox CSP so a direct link plays', async () => {
+    const { built, hostLink } = await makeApp();
+    try {
+      for (const [id, contentType] of [
+        ['a1ab03', 'video/mp4'],
+        ['a1ab04', 'audio/mpeg'],
+      ] as const) {
+        const res = await publish(
+          hostLink,
+          publishRequest({
+            artifactId: id,
+            html: undefined,
+            raw: { contentType, base64: Buffer.from('0123456789abcdef').toString('base64') },
+          }),
+        );
+        for (const headers of [{}, { range: 'bytes=4-7' }]) {
+          const get = await built.app.inject({ method: 'GET', url: res.url!, headers });
+          expect(get.headers['content-security-policy']).toBeUndefined();
+          expect(get.headers['x-content-type-options']).toBe('nosniff');
+        }
+      }
     } finally {
       await built.app.close();
     }

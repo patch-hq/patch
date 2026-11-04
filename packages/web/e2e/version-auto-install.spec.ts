@@ -124,6 +124,28 @@ test.describe('version panel — updates wait to be taken', () => {
     await expect(row).not.toContainText('installing');
   });
 
+  test('states installed and latest versions for the app and the server', async ({ page }) => {
+    await asDesktopShell(page, SHELL);
+    await page.goto(SETTINGS);
+
+    await expect(page.getByTestId('version-shell')).toContainText(
+      'Installed 0.1.899 · Latest 0.1.900',
+    );
+    await expect(page.getByTestId('version-server')).toContainText(
+      'Installed 0.1.900 · Latest 0.1.900',
+    );
+  });
+
+  test('the versions read the same at phone width, and a browser has no app row', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.goto(SETTINGS);
+
+    await expect(page.getByTestId('version-server')).toContainText('Installed 0.1.900');
+    await expect(page.getByTestId('version-shell')).toHaveCount(0);
+  });
+
   test('the banner offers the restart, and only a click takes it', async ({ page }) => {
     await asDesktopShell(page, SHELL);
     await page.goto(SETTINGS);

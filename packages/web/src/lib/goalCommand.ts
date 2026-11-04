@@ -11,20 +11,32 @@ export interface GoalCommand {
   isGoal: boolean;
   /** The goal to set — `null` clears it. Only meaningful when `isGoal`. */
   goal: string | null;
+  /**
+   * The message to send as the turn: the input with the `/goal` token removed.
+   * Empty when nothing but the command was typed. Only meaningful when `isGoal`.
+   */
+  message: string;
 }
 
-const NOT_GOAL: GoalCommand = { isGoal: false, goal: null };
+const NOT_GOAL: GoalCommand = { isGoal: false, goal: null, message: '' };
 
 /**
- * Parse a composer message. Returns `{ isGoal: true, goal }` when the message
- * is a `/goal` command — `goal` is the trimmed text after the command, or
- * `null` when nothing followed (a clear). Any other message → `isGoal: false`.
+ * Parse a composer message. `/goal` is a command wherever it appears as its own
+ * word (start of the message or after whitespace). The goal is the text after
+ * it (`null` when nothing follows — a clear); text before it stays part of the
+ * message sent. Any message without a `/goal` word → `isGoal: false`.
  */
 export function parseGoalCommand(message: string): GoalCommand {
-  const m = /^\/goal(?:\s+([\s\S]*))?$/i.exec(message.trim());
+  const text = message.trim();
+  const m = /(^|\s)\/goal(?=\s|$)/i.exec(text);
   if (!m) return NOT_GOAL;
-  const rest = (m[1] ?? '').trim();
-  return { isGoal: true, goal: rest.length > 0 ? rest : null };
+  const before = text.slice(0, m.index + m[1]!.length).trim();
+  const rest = text.slice(m.index + m[0].length).trim();
+  return {
+    isGoal: true,
+    goal: rest.length > 0 ? rest : null,
+    message: [before, rest].filter((x) => x.length > 0).join(' '),
+  };
 }
 
 /** The built-in command entry for the slash-command autocomplete dropdown. */

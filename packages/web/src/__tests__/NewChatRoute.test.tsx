@@ -1552,6 +1552,35 @@ describe('/chats/new', () => {
     expect(screen.getByTestId('new-chat-account-c1').getAttribute('aria-checked')).toBe('true');
   });
 
+  it('defaults to the account that is in credit when the first one is spent, and keeps a later choice', async () => {
+    setSharedAccounts({ claude: [{ connected: true }, { connected: true }] });
+    reportAccounts('d1', [
+      {
+        id: 'c0',
+        label: 'Claude 0',
+        connected: true,
+        usage: {
+          session: { status: 'rejected', utilization: 1, resetsAt: Date.now() + 3_600_000 },
+        },
+      },
+      {
+        id: 'c1',
+        label: 'Claude 1',
+        connected: true,
+        usage: { session: { status: 'allowed', utilization: 0.1 } },
+      },
+    ]);
+    stubPickerFetch({ folders: [] });
+    renderPicker();
+
+    await screen.findByTestId('new-chat-account');
+    await waitFor(() =>
+      expect(screen.getByTestId('new-chat-account-c1')).toHaveAttribute('aria-checked', 'true'),
+    );
+    fireEvent.click(screen.getByTestId('new-chat-account-auto'));
+    expect(screen.getByTestId('new-chat-account-auto')).toHaveAttribute('aria-checked', 'true');
+  });
+
   it('says when a window was not reported rather than drawing an empty bar', async () => {
     setSharedAccounts({ claude: [{ connected: true }] });
     reportAccounts('d1', [

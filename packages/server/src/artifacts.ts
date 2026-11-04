@@ -23,7 +23,15 @@
 //      `PUT .../storage` (same `?sig=` the page was opened with).
 
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Logger } from 'pino';
@@ -32,14 +40,16 @@ import { verifySurfaceCredential } from '@patch/auth';
 import type { HostLink } from './host-link.js';
 import type { Registry } from './registry.js';
 import { SIGNIN_PAGE_CSP, signInPage, wantsHtml } from './signin-page.js';
+import { isResizable, parseThumbWidth, resizeImage } from './image-thumb.js';
 
 const BRIDGE_SURFACE_ID = 'artifact-bridge';
 /** Ids are daemon-minted hex digests; charset-validate before touching the fs. */
 const ID_RE = /^[0-9a-f]{2,64}$/;
 /** Mirrors the host-side ceiling (spec/14 § Artifacts), post-wrapping. */
 const MAX_ARTIFACT_BYTES = 3 * 1024 * 1024;
-/** Raw (image) bodies are base64 of up to 7 MB of source, so they get their own ceiling. */
-const MAX_RAW_ARTIFACT_BYTES = 10 * 1024 * 1024;
+/** Raw bodies (images, PDFs, videos, files) are base64 of up to 50 MB of source
+ * (the host's video/file cap), so they get their own ceiling: 50 MB * 4/3, rounded up. */
+const MAX_RAW_ARTIFACT_BYTES = 70 * 1024 * 1024;
 /** Opaque origin: agent-authored script cannot touch the SPA's origin.
  * Popups are allowed, and escape the sandbox, so a `target=_blank` link opens
  * a working page; the artifact itself stays opaque either way. */
@@ -315,7 +325,7 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
 
   app.get<{
     Params: { chatId: string; artifactId: string };
-    Querystring: { sig?: string; exp?: string };
+    Querystring: { sig?: string; exp?: string; w?: string };
   }>('/api/chats/:chatId/artifact/:artifactId', { logLevel: 'warn' }, async (req, reply) => {
     const { chatId, artifactId } = req.params;
     if (!safeChatId(chatId) || !ID_RE.test(artifactId)) {
@@ -347,11 +357,15 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
       reply
         .code(200)
         .header('content-type', meta.contentType)
-        // The type is agent-chosen: sandbox it like a page so a `text/html`
-        // raw publish cannot run in the SPA's origin.
-        .header('content-security-policy', ARTIFACT_CSP)
         .header('x-content-type-options', 'nosniff')
         .header('referrer-policy', 'no-referrer');
+      // The type is agent-chosen: sandbox it like a page so a `text/html` raw
+      // publish cannot run in the SPA's origin. Video and audio are exempt: they
+      // cannot run script, and the sandbox gives a directly opened media page an
+      // opaque origin, which makes Chrome block the video's own fetch.
+      if (!/^(video|audio)\//.test(meta.contentType)) {
+        reply.header('content-security-policy', ARTIFACT_CSP);
+      }
       if (meta.filename !== undefined) {
         // RFC 5987 form carries any unicode/quote safely; the plain `filename`
         // is the ASCII-only fallback older clients read.
@@ -361,26 +375,36 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
           `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(meta.filename)}`,
         );
       }
-      const body = readFileSync(binFile);
+      // `?w=` — a display-size copy of a still image (see image-thumb.ts).
+      const thumb = parseThumbWidth(req.query.w);
+      if (!thumb.ok) return reply.code(400).send({ error: 'bad_width', message: thumb.message });
+      if (thumb.width !== undefined && isResizable(meta.contentType)) {
+        const resized = await resizeImage(readFileSync(binFile), meta.contentType, thumb.width);
+        return reply.header('content-length', resized.length).send(resized);
+      }
+      // Stream from disk: a video can be 50 MB and a <video> issues many Range
+      // requests, so never load the whole file on the event loop.
+      const size = statSync(binFile).size;
       // A <video> seeks with byte-range requests; without a 206 it can only
       // play from the start.
       if (meta.contentType.startsWith('video/')) {
         reply.header('accept-ranges', 'bytes');
         const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
-        if (m) {
-          const start = m[1] === '' ? Math.max(0, body.length - Number(m[2])) : Number(m[1]);
-          const end =
-            m[1] === '' || m[2] === '' ? body.length - 1 : Math.min(Number(m[2]), body.length - 1);
-          if (start > end || start >= body.length) {
-            return reply.code(416).header('content-range', `bytes */${body.length}`).send();
+        // `bytes=-` (no numbers) is malformed: ignore it and serve the whole file.
+        if (m && (m[1] !== '' || m[2] !== '')) {
+          const start = m[1] === '' ? Math.max(0, size - Number(m[2])) : Number(m[1]);
+          const end = m[1] === '' || m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1);
+          if (start > end || start >= size) {
+            return reply.code(416).header('content-range', `bytes */${size}`).send();
           }
           return reply
             .code(206)
-            .header('content-range', `bytes ${start}-${end}/${body.length}`)
-            .send(body.subarray(start, end + 1));
+            .header('content-range', `bytes ${start}-${end}/${size}`)
+            .header('content-length', end - start + 1)
+            .send(createReadStream(binFile, { start, end }));
         }
       }
-      return reply.send(body);
+      return reply.header('content-length', size).send(createReadStream(binFile));
     }
     const file = join(dir, `${artifactId}.html`);
     if (!existsSync(file)) {

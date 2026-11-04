@@ -35,6 +35,8 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -42,6 +44,7 @@ import {
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as ed from '@noble/ed25519';
@@ -197,18 +200,32 @@ export async function bundle(esb, entry, outfile) {
     // never starts; verified 2026-10-04 that the darwin-arm64 bundle builds
     // and loads with it external.
     //
+    // sherpa-onnx-node is the same kind as fsevents: a native `.node` addon
+    // (per-platform sibling package) that esbuild cannot bundle, taking every
+    // lane down with "No loader is configured for .node files". It backs only
+    // the opt-in Parakeet dictation engines, which are gated on PARAKEET_*_DIR
+    // model dirs and are not part of the artifact; a host that selects one
+    // without the addon installed fails loudly at its import.
+    //
     // playwright-core is the fourth: it is shipped beside the bundle (see
     // copyPlaywrightCore) because it locates its own package.json as
     // `path.join(__dirname, '..')`, which only holds while it sits one folder
     // inside its package. Flattened into host.mjs that resolves to the parent
     // of the install directory and every browser tool dies with MODULE_NOT_FOUND.
+    //
+    // sherpa-onnx-node is the fifth: its loader statically requires the
+    // per-platform `.node` addon, which esbuild cannot bundle ("No loader is
+    // configured for .node files"). It is shipped beside the bundle with its
+    // platform package (see copySherpaOnnx).
     external: [
       'onnxruntime-node',
       '@anthropic-ai/claude-agent-sdk',
       'chromium-bidi/*',
       'fsevents',
+      'sherpa-onnx-node',
       'playwright-core',
       'playwright-core/*',
+      'sherpa-onnx-node',
     ],
     banner: {
       // The bundle is ESM but some dependencies reach for CJS globals.
@@ -330,6 +347,43 @@ export function copyPlaywrightCore(outDir) {
 }
 
 /**
+ * Copy sherpa-onnx-node and this platform's addon package into the artifact's
+ * `node_modules`, side by side: the loader requires `../sherpa-onnx-<os>-<arch>`.
+ */
+function copySherpaOnnx(outDir, t) {
+  const require = createRequire(join(DAEMON, 'package.json'));
+  let pkgJson;
+  try {
+    pkgJson = require.resolve('sherpa-onnx-node/package.json');
+  } catch (err) {
+    die(`sherpa-onnx-node is not installed (run pnpm install): ${err.message}`);
+  }
+  const platformPkg = `sherpa-onnx-${t.platform}-${t.arch}`;
+  const version = JSON.parse(readFileSync(pkgJson, 'utf8')).version;
+  // pnpm installs only the addon for the machine it runs on, so a cross-arch
+  // target (linux-arm64 built on an x64 runner) is fetched from the registry at
+  // the exact version sherpa-onnx-node was installed at.
+  const fetchDir = mkdtempSync(join(tmpdir(), 'sherpa-'));
+  try {
+    execFileSync('npm', ['pack', `${platformPkg}@${version}`, '--pack-destination', fetchDir], {
+      stdio: ['ignore', 'ignore', 'inherit'],
+    });
+    const tgz = readdirSync(fetchDir).find((n) => n.endsWith('.tgz'));
+    if (!tgz) die(`npm pack ${platformPkg}@${version} produced no tarball`);
+    execFileSync('tar', ['-xzf', join(fetchDir, tgz), '-C', fetchDir]);
+  } catch (err) {
+    die(`could not fetch ${platformPkg}@${version}: ${err.message}`);
+  }
+  const dest = join(outDir, 'node_modules');
+  cpSync(dirname(pkgJson), join(dest, 'sherpa-onnx-node'), { recursive: true, dereference: true });
+  cpSync(join(fetchDir, 'package'), join(dest, platformPkg), { recursive: true });
+  rmSync(fetchDir, { recursive: true, force: true });
+  if (!existsSync(join(dest, platformPkg, 'sherpa-onnx.node'))) {
+    die(`${platformPkg} has no sherpa-onnx.node`);
+  }
+}
+
+/**
  * macOS: every Mach-O in the artifact is signed with the project identity,
  * hardened runtime ON. The entitlements are not optional — V8 JITs, and without
  * `allow-jit` the signed Node dies at startup with "Failed to reserve virtual
@@ -417,6 +471,7 @@ async function buildTarget(t, ctx) {
   // on a machine that has nothing installed but this artifact.
   copyAgentSdk(outDir);
   copyPlaywrightCore(outDir);
+  copySherpaOnnx(outDir, t);
 
   // 4. the VAD model
   const model = join(vendor, 'models', 'silero_vad.onnx');

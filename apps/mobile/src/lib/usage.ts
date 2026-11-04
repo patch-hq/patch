@@ -5,7 +5,7 @@
 // Times are formatted by hand rather than with toLocale*, which is unreliable
 // under Hermes; they are always in the phone's own zone.
 
-import type { RateLimitWindow } from '@patch/wire';
+import { rateLimitWindowsBlocked, type RateLimitWindow } from '@patch/wire';
 
 export type UsageScope = 'session' | 'week' | 'overage';
 
@@ -43,14 +43,15 @@ export function formatUtilization(win: RateLimitWindow | undefined): string {
 }
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const pad = (n: number): string => String(n).padStart(2, '0');
 
-/** A reset instant in the phone's zone — `10:40`, or `Wed 17:58` when not today. */
+/** A reset instant in the phone's zone — `10:40`, or `Tue 3 Nov 15:00` when not today. */
 export function formatReset(at: number, now: number = Date.now()): string {
   const d = new Date(at);
   const time = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
   if (new Date(now).toDateString() === d.toDateString()) return time;
-  return `${WEEKDAYS[d.getDay()]} ${time}`;
+  return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} ${time}`;
 }
 
 /** How long until an instant, coarsely — `in 28 min`, `in 3 h`, `now`. */
@@ -94,4 +95,30 @@ export function presentFailure(content: string, now: number = Date.now()): strin
     const at = Date.parse(iso);
     return Number.isNaN(at) ? iso : formatReset(at, now);
   });
+}
+
+/**
+ * Every connected account is spent, as of `now` — and the ms-epoch the first
+ * of them comes back (undefined when none states a reset).
+ *
+ * Returns null unless it is certain, the same rule as web's `hostOutage`: no
+ * connected account, an account with no reading, or any account still usable
+ * all mean "not out". Unknown is not spent.
+ */
+export function accountsOutage(
+  accounts: readonly { connected: boolean; usage?: AccountUsage }[],
+  now: number = Date.now(),
+): { resetsAt?: number } | null {
+  const connected = accounts.filter((a) => a.connected);
+  if (connected.length === 0) return null;
+  let soonest: number | undefined;
+  for (const a of connected) {
+    if (!a.usage || !rateLimitWindowsBlocked(a.usage, now)) return null;
+    for (const w of [a.usage.session, a.usage.week]) {
+      if (w?.resetsAt !== undefined && w.resetsAt > now) {
+        soonest = soonest === undefined ? w.resetsAt : Math.min(soonest, w.resetsAt);
+      }
+    }
+  }
+  return soonest === undefined ? {} : { resetsAt: soonest };
 }

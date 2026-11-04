@@ -1076,6 +1076,20 @@ describe('GeminiLiveSession — false hand-off claims', () => {
     expect(corrections(ws)).toHaveLength(0);
   });
 
+  test('a dispatch call that lands just after the claiming turn completes is not called unsent', async () => {
+    const { deps, lastWs } = makeDeps();
+    const session = new GeminiLiveSession(makeInit(), deps);
+    const ws = await openSession(session, lastWs);
+    say(ws, 'check my train times today', "I've passed that on.");
+    ws.serverSend({
+      toolCall: {
+        functionCalls: [{ id: 'c1', name: DISPATCH_TOOL_NAME, args: { request: 'trains' } }],
+      },
+    });
+    await new Promise((r) => setTimeout(r, 700));
+    expect(corrections(ws)).toHaveLength(0);
+  });
+
   test('ordinary speech is left alone', async () => {
     const { deps, lastWs } = makeDeps();
     const session = new GeminiLiveSession(makeInit(), deps);

@@ -434,6 +434,43 @@ describe('Markdown chat links', () => {
     expect(container.querySelector('a[data-chat-link]')?.getAttribute('href')).toBe('/jobs/abc');
   });
 
+  it.each([
+    ['[p](patch://pads/x1)', '/pads/x1'],
+    ['[j](patch://jobs)', '/jobs'],
+    ['[j](patch://jobs/abc?tab=1)', '/jobs/abc?tab=1'],
+    [`[o](${window.location.origin}/pads/x1)`, '/pads/x1'],
+  ])('renders %s as an in-app link', (md, href) => {
+    const { container, queryByTestId } = renderLinked(md);
+    const a = container.querySelector('a[data-chat-link]');
+    expect(a?.getAttribute('href')).toBe(href);
+    expect(queryByTestId('link-summary-toggle')).toBeNull();
+  });
+
+  it('a click on a patch:// pad link navigates in-app', () => {
+    const { container, getByTestId } = renderLinked('[p](patch://pads/x1)');
+    const a = container.querySelector('a[data-chat-link]') as HTMLAnchorElement;
+    expect(fireEvent.click(a)).toBe(false);
+    expect(getByTestId('where').textContent).toBe('/pads/x1');
+  });
+
+  it('turns bare patch:// text into an in-app link', () => {
+    const { container } = renderLinked('see patch://pads/x1 and patch://chats/abc.');
+    const hrefs = [...container.querySelectorAll('a[data-chat-link]')].map((a) =>
+      a.getAttribute('href'),
+    );
+    expect(hrefs).toEqual(['/pads/x1', '/chats/abc']);
+  });
+
+  it('does not link bare patch:// text inside inline code', () => {
+    const { container } = renderLinked('run `patch://pads/x1`');
+    expect(container.querySelector('a')).toBeNull();
+  });
+
+  it('does not open an unknown patch:// route', () => {
+    const { container } = renderLinked('[z](patch://nonsense/1)');
+    expect(container.querySelector('a[data-chat-link]')).toBeNull();
+  });
+
   it('leaves protocol-relative and external links alone', () => {
     const { container } = renderLinked('[a](//example.com/x) [b](https://example.com/x)');
     expect(container.querySelector('a[data-chat-link]')).toBeNull();
