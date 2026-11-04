@@ -409,6 +409,11 @@ export class WsHub {
     return this.hostRoster();
   }
 
+  /** What a host last reported for one backend's accounts, or undefined if it has not. */
+  accountReport(hostId: string, backendId: string): HostAccountEvent | undefined {
+    return this.lastAccountReport.get(hostId)?.get(backendId);
+  }
+
   /**
    * Where the server can reach `hostId`'s own audio WSS to relay a voice
    * session for a chat that lives there (`audio-relay.ts`). `undefined` when
