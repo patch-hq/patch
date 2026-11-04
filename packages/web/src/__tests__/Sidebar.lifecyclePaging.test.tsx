@@ -94,13 +94,13 @@ describe('Sidebar — lifecycle icon row: selected state', () => {
     expect(toggle).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('two panels open together each carry the selected state independently', () => {
+  it('toggles are exclusive: opening one lifecycle panel closes the previous one', () => {
     renderSidebar();
     fireEvent.click(screen.getByTestId('hidden-toggle'));
-    fireEvent.click(screen.getByTestId('archived-toggle'));
     expect(screen.getByTestId('hidden-toggle').className).toMatch(/\bactive\b/);
+    fireEvent.click(screen.getByTestId('archived-toggle'));
     expect(screen.getByTestId('archived-toggle').className).toMatch(/\bactive\b/);
-    // Untouched toggles stay unselected.
+    expect(screen.getByTestId('hidden-toggle').className).not.toMatch(/\bactive\b/);
     expect(screen.getByTestId('deleted-toggle').className).not.toMatch(/\bactive\b/);
   });
 });
