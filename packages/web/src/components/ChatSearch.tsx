@@ -236,7 +236,10 @@ export function ChatSearchResults({
   const chats = useChatStore((s) => s.chats);
   const waiting = settled === null && failed === null;
   const settledHits = useMemo(
-    () => (settled?.hits ?? []).filter((h) => section === undefined || h.section === section),
+    () =>
+      (settled?.hits ?? []).filter(
+        (h) => h.section !== 'manager' && (section === undefined || h.section === section),
+      ),
     [settled, section],
   );
   const local = useMemo(
@@ -244,6 +247,7 @@ export function ChatSearchResults({
       waiting
         ? localSearchHits(Object.values(chats), query, fullText).filter(
             (h) =>
+              h.section !== 'manager' &&
               (section === undefined || h.section === section) &&
               (includeArchived || h.section !== 'archived') &&
               (includeHidden || h.section !== 'hidden'),

@@ -1056,6 +1056,18 @@ interface UiState {
 let pendingConfirmResolve: ((result: boolean) => void) | null = null;
 let pendingPromptResolve: ((value: string | null) => void) | null = null;
 
+/**
+ * The sidebar's lifecycle icons (Hidden, Archived, Snoozed, Deleted,
+ * Automations) are one-at-a-time toggles: opening one closes the others.
+ */
+const NO_LIFECYCLE_OPEN = {
+  hiddenOpen: false,
+  archivedOpen: false,
+  snoozedOpen: false,
+  deletedOpen: false,
+  automationsOpen: false,
+};
+
 export const useUiStore = create<UiState>((set, get) => ({
   codexSignInHost: null,
   setCodexSignInHost: (hostId) => set({ codexSignInHost: hostId }),
@@ -1124,19 +1136,19 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ channelsOpen: v });
   },
   setArchivedOpen(v) {
-    set({ archivedOpen: v });
+    set(v ? { ...NO_LIFECYCLE_OPEN, archivedOpen: true } : { archivedOpen: false });
   },
   setDeletedOpen(v) {
-    set({ deletedOpen: v });
+    set(v ? { ...NO_LIFECYCLE_OPEN, deletedOpen: true } : { deletedOpen: false });
   },
   setSnoozedOpen(v) {
-    set({ snoozedOpen: v });
+    set(v ? { ...NO_LIFECYCLE_OPEN, snoozedOpen: true } : { snoozedOpen: false });
   },
   setHiddenOpen(v) {
-    set({ hiddenOpen: v });
+    set(v ? { ...NO_LIFECYCLE_OPEN, hiddenOpen: true } : { hiddenOpen: false });
   },
   setAutomationsOpen(v) {
-    set({ automationsOpen: v });
+    set(v ? { ...NO_LIFECYCLE_OPEN, automationsOpen: true } : { automationsOpen: false });
   },
   setExpiredJobsOpen(v) {
     set({ expiredJobsOpen: v });
