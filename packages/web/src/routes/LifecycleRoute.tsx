@@ -79,6 +79,7 @@ export function LifecycleRoute(): JSX.Element {
     <main
       className="lifecycle-route"
       data-testid="lifecycle-route"
+      data-scroll-host
       onScroll={(e) => {
         if (isNearScrollBottom(e.currentTarget)) bumpLifecycleScrollTick();
       }}

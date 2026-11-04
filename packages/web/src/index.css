@@ -17345,3 +17345,36 @@ select.permission-mode.is-pending {
   content-visibility: auto;
   contain-intrinsic-size: auto 40px;
 }
+
+/* A lifecycle view (Archived, Hidden, ...) heads the list it replaces. */
+.lifecycle-view-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 14px 8px;
+  margin: 0 0 4px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--line);
+}
+.lifecycle-view-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+.lifecycle-view-count {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--ink-muted, var(--ink));
+}
+.lifecycle-view-close {
+  margin-left: auto;
+  align-self: center;
+  display: inline-flex;
+  padding: 4px;
+  border: 0;
+  background: none;
+  color: var(--ink-muted, var(--ink));
+  cursor: pointer;
+}

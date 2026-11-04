@@ -82,6 +82,7 @@ describe('sidebar row context menu', () => {
     useUiStore.getState().setChannelsOpen(false);
     useUiStore.getState().setArchivedOpen(false);
     useUiStore.getState().setDeletedOpen(false);
+    useUiStore.setState({ snoozedOpen: false, hiddenOpen: false, automationsOpen: false });
     useUiStore.getState().setAttentionOnly(false);
     useUiStore.getState().setSearchQuery('');
     useUiStore.setState({ errors: [], forgottenFolders: [], toolsPanelChatId: null });
@@ -452,6 +453,7 @@ describe('sidebar row context menu over a multi-selection', () => {
     useVoiceStore.setState({ activeDevices: {} });
     useUiStore.getState().setArchivedOpen(false);
     useUiStore.getState().setDeletedOpen(false);
+    useUiStore.setState({ snoozedOpen: false, hiddenOpen: false, automationsOpen: false });
     useUiStore.getState().setAttentionOnly(false);
     useUiStore.getState().setSearchQuery('');
     useUiStore.setState({ errors: [], forgottenFolders: [], toolsPanelChatId: null });
