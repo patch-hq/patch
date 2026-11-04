@@ -1062,13 +1062,13 @@ body {
      `.sb-lifecycle` scroll and the other bands don't: a visible scrollbar eats
      10px off the scrolling bands' content box and nothing off the fixed ones,
      which is where two of the four ragged edges came from. Those two bands
-     reserve the gutter permanently (`scrollbar-gutter: stable`, so the rows
-     also stop shifting as the list crosses the overflow threshold) and reset
+     reserve the gutter (`scrollbar-gutter: stable`) while `.sb-scrolling` is set
+     on the sidebar, i.e. only when a band really shows a scrollbar, and reset
      the token back to the plain inset for their own children; everywhere else
      the rows pay the gutter themselves. Both then land on the same line
      whether or not a scrollbar is showing. */
   --sb-inset: 8px;
-  --sb-inset-right: calc(var(--sb-inset) + var(--scrollbar-w));
+  --sb-inset-right: var(--sb-inset);
   background: var(--bg-panel);
   border-right: 1px solid var(--line);
   /* ONE gap per seam. This is a FLEX column, and flex margins never collapse —
@@ -1976,14 +1976,14 @@ a.ch-row:hover {
    order is the filled segment. Same pill outline as the view trigger beside it. */
 .sidebar-sort-seg {
   display: flex;
-  flex: 1 1 100%;
-  padding: 2px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0;
+  border: none;
 }
 .sidebar-sort-seg button {
   flex: 1;
-  padding: 3px 8px;
+  padding: 3px 4px;
   color: var(--ink-3);
   font-size: var(--text-min);
   font-weight: 500;
@@ -2327,7 +2327,6 @@ a.ch-row:hover {
   flex: 1 1000 auto;
   min-height: 0;
   overflow-y: auto;
-  scrollbar-gutter: stable;
   --sb-inset-right: var(--sb-inset);
   /* The list runs right to the lifecycle divider, so rows clip and the
      scrollbar ends at that line, not a margin above it. The breathing room
@@ -2354,7 +2353,6 @@ a.ch-row:hover {
   min-height: 0;
   max-height: min(30%, 300px);
   overflow-y: auto;
-  scrollbar-gutter: stable;
   --sb-inset-right: var(--sb-inset);
   /* Sets the group apart from the chat list with a CLEAR divider (App Updates:
      "clear divider between open list and the main chats"). No margin above it:
@@ -2378,6 +2376,17 @@ a.ch-row:hover {
    as long as the band overflows, at exactly the `--scrollbar-w` the bands
    already reserve as their gutter. Both properties have to be reset — either
    one left set is enough for Blink to keep ignoring the pseudo-elements. */
+/* The gutter is reserved only while a band really draws a scrollbar: the
+   sidebar gets `.sb-scrolling` (Sidebar.tsx, useBandsScrolling) then, and the
+   fixed rows and both bands all pay the gutter together so edges stay aligned. */
+.sb.sb-scrolling {
+  --sb-inset-right: calc(var(--sb-inset) + var(--scrollbar-w));
+}
+.sb.sb-scrolling .sb-scroll,
+.sb.sb-scrolling .sb-lifecycle {
+  scrollbar-gutter: stable;
+  --sb-inset-right: var(--sb-inset);
+}
 .sb-scroll,
 .sb-lifecycle {
   scrollbar-width: auto;
