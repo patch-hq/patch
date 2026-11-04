@@ -21,7 +21,9 @@ export function swipeOrder(chats: Record<string, ChatRow>): string[] {
       !isHidden(c) &&
       !isSnoozed(c),
   );
-  const pinned = live.filter((c) => c.pinned).sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0));
+  const pinned = live
+    .filter((c) => c.pinned)
+    .sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0) || (a.chatId < b.chatId ? -1 : 1));
   const folders = new Map<string, ChatRow[]>();
   for (const c of live) {
     if (c.pinned) continue;
@@ -34,7 +36,11 @@ export function swipeOrder(chats: Record<string, ChatRow>): string[] {
   for (const c of pinned) out.push(c.chatId);
   const paths = [...folders.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   for (const p of paths) {
-    for (const c of folders.get(p)!.sort((a, b) => b.lastUserActivity - a.lastUserActivity)) {
+    for (const c of [...folders.get(p)!].sort(
+      (a, b) =>
+        b.lastUserActivity - a.lastUserActivity ||
+        (a.chatId < b.chatId ? -1 : a.chatId > b.chatId ? 1 : 0),
+    )) {
       out.push(c.chatId);
     }
   }
