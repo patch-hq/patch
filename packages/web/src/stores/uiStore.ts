@@ -958,6 +958,8 @@ interface UiState {
   setSearchIncludeArchived(v: boolean): void;
   setSearchIncludeHidden(v: boolean): void;
   setSidebarWidth(w: number): void;
+  /** Double-click on the sidebar divider: back to the default width. */
+  resetSidebarWidth(): void;
   setThreadsPanelWidth(w: number): void;
   setToolsPanelWidth(w: number): void;
   /** Rebind the dictate shortcut (persisted per machine). */
@@ -1223,6 +1225,11 @@ export const useUiStore = create<UiState>((set, get) => ({
   setSidebarMini(v) {
     persistBool(SIDEBAR_MINI_KEY, v);
     set({ sidebarMini: v });
+  },
+  resetSidebarWidth() {
+    persistBool(SIDEBAR_MINI_KEY, false);
+    persistWidth(SIDEBAR_W_KEY, DEFAULT_SIDEBAR_W);
+    set({ sidebarWidth: DEFAULT_SIDEBAR_W, sidebarMini: false });
   },
   setSidebarWidth(w) {
     if (w < SIDEBAR_MINI_BELOW) {

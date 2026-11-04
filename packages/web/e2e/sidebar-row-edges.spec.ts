@@ -30,7 +30,7 @@ const ROW_SELECTORS = [
   '.ch-row',
   '.sb-top-row',
   '.sb .empty-hint',
-  '.nav-row',
+  '.nav-tabs',
   '.new-chat-row',
 ];
 
@@ -158,10 +158,10 @@ test.describe('sidebar row edges', () => {
         '.batch-row',
         '.sb .empty-hint',
         '.sb-row.special',
-        '.nav-row',
+        '.nav-tabs',
         '.new-chat-row',
       ]),
-      6,
+      4,
     );
   });
 });
