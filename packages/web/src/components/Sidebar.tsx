@@ -22,8 +22,6 @@ import {
   Pencil,
   PackageOpen,
   Boxes,
-  Calendar,
-  Settings,
   RotateCcw,
   FolderPlus,
   FileText,
@@ -42,9 +40,7 @@ import {
   Ear,
   Phone,
   PanelRightOpen,
-  Folder,
   Target,
-  Layers,
 } from 'lucide-react';
 import { CloseIcon, DeleteIcon } from './icons.js';
 import {
@@ -406,17 +402,11 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
       />
 
       {/* The sidebar's one view dropdown (spec/14 § Sidebar §1b). */}
-      {/* A lifecycle view is its own list: the chat list's view and sort
-          controls do not apply to it. */}
-      {hiddenOpen || archivedOpen || snoozedOpen || deletedOpen || automationsOpen ? null : (
-        <div className="sidebar-controls">
-          <SidebarViewMenu />
-          {batchMode ? null : <SidebarSortMenu />}
-        </div>
-      )}
-
       {batchMode ? (
         <>
+          <div className="sidebar-controls">
+            <SidebarViewMenu />
+          </div>
           {/* Manager stays reachable from its top slot even in batch view. */}
           <ManagerRow row={grouped.manager} active={highlightedChatId} />
           <div className="sb-scroll" data-testid="sb-scroll">
@@ -621,14 +611,24 @@ function RegularSidebar({
           chats needing attention is the sidebar view dropdown's Unread option
           now (spec/14 § Sidebar §1b) — the `attentionOnly` prop threaded
           through below still drives the filtering, set from there. */}
-      <div className="sb-top-row" data-testid="sb-top-row">
-        <ChatSearchField
-          placeholder={
-            openKind !== null && LIFECYCLE_SEARCH.includes(openKind)
-              ? `Search ${LIFECYCLE_LABELS[openKind].toLowerCase()}`
-              : undefined
-          }
-        />
+      <div className="sb-header" data-testid="sb-header">
+        <div className="sb-top-row" data-testid="sb-top-row">
+          <ChatSearchField
+            placeholder={
+              openKind !== null && LIFECYCLE_SEARCH.includes(openKind)
+                ? `Search ${LIFECYCLE_LABELS[openKind].toLowerCase()}`
+                : undefined
+            }
+          />
+        </div>
+        {/* A lifecycle view is its own list: the chat list's view and sort
+            controls do not apply to it. */}
+        {openKind === null ? (
+          <div className="sidebar-controls">
+            <SidebarViewMenu />
+            <SidebarSortMenu />
+          </div>
+        ) : null}
       </div>
 
       {/* Manager — always-visible top slot. Not in a lifecycle view, which is
@@ -1127,38 +1127,40 @@ function BottomNav(): JSX.Element {
   return (
     <>
       <nav className="sb-bottom" data-testid="bottom-nav">
-        <button
-          type="button"
-          className={`nav-row ${filesActive ? 'active' : ''}`}
-          data-testid="nav-files"
-          onClick={() => useLayoutStore.getState().openTab({ kind: 'page', page: 'host-files' })}
-        >
-          <Folder size={16} aria-hidden className="nav-icon" /> Files
-        </button>
-        <OpenableLink
-          to="/pads"
-          opens={{ kind: 'page', page: 'pads' }}
-          className={`nav-row ${onPads ? 'active' : ''}`}
-          data-testid="nav-pads"
-        >
-          <Layers size={16} aria-hidden className="nav-icon" /> Pads
-        </OpenableLink>
-        <OpenableLink
-          to="/jobs"
-          opens={{ kind: 'page', page: 'jobs' }}
-          className={`nav-row ${onJobs ? 'active' : ''}`}
-          data-testid="nav-jobs"
-        >
-          <Calendar size={16} aria-hidden className="nav-icon" /> Jobs
-        </OpenableLink>
-        <OpenableLink
-          to="/settings"
-          opens={{ kind: 'page', page: 'settings' }}
-          className={`nav-row ${onSettings ? 'active' : ''}`}
-          data-testid="nav-settings"
-        >
-          <Settings size={16} aria-hidden className="nav-icon" /> Settings
-        </OpenableLink>
+        <div className="nav-tabs" data-testid="nav-tabs">
+          <button
+            type="button"
+            className={`nav-row ${filesActive ? 'active' : ''}`}
+            data-testid="nav-files"
+            onClick={() => useLayoutStore.getState().openTab({ kind: 'page', page: 'host-files' })}
+          >
+            Files
+          </button>
+          <OpenableLink
+            to="/pads"
+            opens={{ kind: 'page', page: 'pads' }}
+            className={`nav-row ${onPads ? 'active' : ''}`}
+            data-testid="nav-pads"
+          >
+            Pads
+          </OpenableLink>
+          <OpenableLink
+            to="/jobs"
+            opens={{ kind: 'page', page: 'jobs' }}
+            className={`nav-row ${onJobs ? 'active' : ''}`}
+            data-testid="nav-jobs"
+          >
+            Jobs
+          </OpenableLink>
+          <OpenableLink
+            to="/settings"
+            opens={{ kind: 'page', page: 'settings' }}
+            className={`nav-row ${onSettings ? 'active' : ''}`}
+            data-testid="nav-settings"
+          >
+            Settings
+          </OpenableLink>
+        </div>
       </nav>
     </>
   );

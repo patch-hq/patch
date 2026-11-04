@@ -134,7 +134,7 @@ test.describe('the selection bar is pinned above the chat list', () => {
       return {
         bar: read('[data-testid="selection-bar"]'),
         tabs: read('[data-testid="chat-search"]'),
-        nav: read('.nav-row'),
+        nav: read('.nav-tabs'),
       };
     });
     expect(edges.bar.left).toBe(edges.tabs.left);

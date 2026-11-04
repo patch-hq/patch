@@ -3965,6 +3965,7 @@ function Harness(): JSX.Element {
   const sidebarWidth = useUiStore((s) => s.sidebarWidth);
   const sidebarMini = useUiStore((s) => s.sidebarMini);
   const setSidebarWidth = useUiStore((s) => s.setSidebarWidth);
+  const resetSidebarWidth = useUiStore((s) => s.resetSidebarWidth);
   // `?route=/sidebar-window` — AppShell serves this as a BARE route (no docked
   // sidebar, no chat panel, no editor rail), so the harness mirrors that shape
   // instead of nesting it in the three-column shell. Rendering it inside the
@@ -4001,6 +4002,8 @@ function Harness(): JSX.Element {
             side="left"
             width={sidebarMini ? SIDEBAR_MINI_WIDTH : sidebarWidth}
             onResize={setSidebarWidth}
+            onReset={resetSidebarWidth}
+            className="grip"
             testId="sidebar-divider"
           />
         )}

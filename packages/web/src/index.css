@@ -677,6 +677,25 @@ body {
 .col-divider:active::after {
   background: var(--accent);
 }
+/* The sidebar's divider carries a visible grab handle (spec/14 § Layout): a
+   short pill centred on the line, so the drag target is discoverable. */
+.col-divider.grip::before {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 0;
+  width: 5px;
+  height: 36px;
+  margin-top: -18px;
+  border-radius: 2px;
+  background: var(--accent-soft);
+  pointer-events: none;
+}
+.col-divider.grip:hover::before,
+.col-divider.grip:active::before {
+  background: var(--accent);
+}
 
 /* The web panel's divider (spec/14 § Links and the web panel): the panel
    itself is a native Electron view outside this document, so unlike the
@@ -2600,21 +2619,46 @@ a.ch-row:hover {
   cursor: default;
 }
 
+/* Search field + view/sort controls as ONE fixed header (spec/14 § Sidebar §1).
+   Opaque with a hard bottom edge, above the scroll band in stacking order, so a
+   list row can never show through or across it. */
+.sb-header {
+  display: flow-root;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+  background: var(--bg-panel);
+  /* One gap per seam (see `.sb`): the header owns the gap above it. */
+  margin-top: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.sb-header .sb-top-row {
+  margin-top: 0;
+}
+
 .sb-bottom {
   /* Pinned to the bottom by the growing `.sb-scroll` band above it (not an auto
      margin here — that would split the free space with the lifecycle group). */
   flex-shrink: 0;
-  padding: 12px var(--sb-inset-right) 12px var(--sb-inset);
+  padding: 8px 0;
   border-top: 1px solid var(--line-soft);
+}
+/* The tabs row: Files, Pads, Jobs, Settings side by side, on the sidebar's one
+   column (`--sb-inset`). */
+.nav-tabs {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 4px;
+  margin: 0 var(--sb-inset-right) 0 var(--sb-inset);
 }
 .nav-row {
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
+  justify-content: center;
   gap: 10px;
-  padding: 9px 12px;
+  padding: 7px 8px;
   color: var(--ink-2);
   text-decoration: none;
   font-size: var(--text-min);
@@ -2624,12 +2668,10 @@ a.ch-row:hover {
    it opens a tab rather than navigating — so it needs the Link rows'
    browser-default resets undone. */
 button.nav-row {
-  width: 100%;
   background: none;
   border: none;
   font: inherit;
   cursor: pointer;
-  text-align: left;
 }
 .nav-row:hover {
   background: var(--bg-soft);
@@ -17278,14 +17320,38 @@ select.permission-mode.is-pending {
 }
 
 /* Job Prompt: Write/Preview tabs and a find bar over the textarea (PromptEditor). */
-.prompt-editor { display: flex; flex-direction: column; gap: 8px; }
-.prompt-editor-bar { display: flex; justify-content: space-between; align-items: center; }
-.prompt-editor-tabs { display: flex; gap: 4px; }
+.prompt-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.prompt-editor-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.prompt-editor-tabs {
+  display: flex;
+  gap: 4px;
+}
 .prompt-editor-bar button,
-.prompt-editor-find button { font-size: 15px; padding: 2px 10px; }
-.prompt-editor-tabs button[aria-selected='true'] { font-weight: 600; text-decoration: underline; }
-.prompt-editor-find { display: flex; align-items: center; gap: 8px; }
-.prompt-editor-find input { flex: 1; min-width: 0; }
+.prompt-editor-find button {
+  font-size: 15px;
+  padding: 2px 10px;
+}
+.prompt-editor-tabs button[aria-selected='true'] {
+  font-weight: 600;
+  text-decoration: underline;
+}
+.prompt-editor-find {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.prompt-editor-find input {
+  flex: 1;
+  min-width: 0;
+}
 .prompt-editor-preview {
   min-height: 240px;
   padding: 8px 12px;
