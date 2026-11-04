@@ -3587,7 +3587,7 @@ export class Daemon {
         const head = pending[0];
         if (disk && disk.state !== 'lost' && disk.localId === head?.localId) {
           unclaimed.delete(m.chatId);
-          this.durableAttach.set(m.chatId, disk.consumed);
+          this.durableAttach.set(m.chatId, { consumed: disk.consumed, localId: head?.localId });
           if (disk.accountId !== undefined) this.durableAccount.set(m.chatId, disk.accountId);
           reattach = true;
           this.opts.logger.info(
@@ -6736,7 +6736,31 @@ export class Daemon {
    * how far that host got through the turn's output. The next turn this chat
    * starts is that same turn, reattached (`durableTurn.ts`), not a new claude.
    */
-  private readonly durableAttach = new Map<string, Consumed | null>();
+  private readonly durableAttach = new Map<
+    string,
+    { consumed: Consumed | null; localId: string | undefined }
+  >();
+
+  /**
+   * The surviving turn this run carries on, or undefined. The marker belongs to
+   * one turn (its localId); any other turn of the chat is a new claude. A
+   * marker that outlives its turn is dropped loudly, never handed to a later
+   * message, which would reattach to a turn that is no longer on disk.
+   */
+  takeDurableAttach(chatId: string, localId: string | undefined): Consumed | null | undefined {
+    const marker = this.durableAttach.get(chatId);
+    if (marker === undefined) return undefined;
+    if (marker.localId !== localId) {
+      this.opts.logger.error(
+        { chatId, markerLocalId: marker.localId, localId },
+        'durable turn: a turn other than the one marked for reattach started; the marker was stale and is dropped',
+      );
+      this.durableAttach.delete(chatId);
+      this.durableAccount.delete(chatId);
+      return undefined;
+    }
+    return marker.consumed;
+  }
 
   /** The account a surviving turn was started on, by chat — it outlives the host's own memory. */
   private readonly durableAccount = new Map<string, string>();
@@ -6748,7 +6772,7 @@ export class Daemon {
   ): Pick<SdkRunOptions, 'durableTurn'> {
     const config = this.opts.durableTurns;
     if (!config || harness !== 'claude') return {};
-    const attach = this.durableAttach.get(chatId);
+    const attach = this.takeDurableAttach(chatId, localId);
     this.durableAttach.delete(chatId);
     return {
       durableTurn: {
@@ -9299,9 +9323,10 @@ export class Daemon {
         previous !== undefined && oauth.accountId !== undefined && previous !== oauth.accountId;
       // A reattached turn is still running on the account it was started on,
       // whatever the host resolves to now: a refusal has to be blamed there.
-      const carriedOn = this.durableAttach.has(chatId)
-        ? this.durableAccount.get(chatId)
-        : undefined;
+      const carriedOn =
+        this.durableAttach.has(chatId) && this.durableAttach.get(chatId)?.localId === localId
+          ? this.durableAccount.get(chatId)
+          : undefined;
       this.durableAccount.delete(chatId);
       if (carriedOn !== undefined) this.runningOnAccount.set(chatId, carriedOn);
       else if (oauth.accountId === undefined) this.runningOnAccount.delete(chatId);
