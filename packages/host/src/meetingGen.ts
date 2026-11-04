@@ -98,13 +98,67 @@ export function buildMeetingPrompt(input: AnalyseInput): string {
   ].join('\n');
 }
 
-/** First `{` to last `}` — models wrap JSON in prose or fences despite being told not to. */
-export function parseMeetingAnalysis(raw: string): MeetingAnalysis {
+/** Drops `null` object keys so the model's "no value" reads as absent. */
+function nullsAsAbsent(v: unknown): unknown {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return v;
+  return Object.fromEntries(
+    Object.entries(v as Record<string, unknown>).filter(([, x]) => x !== null),
+  );
+}
+
+/**
+ * Keeps each valid item of a list and drops the rest, reporting each drop, so
+ * one malformed item cannot discard the whole pass.
+ */
+function keepValid(
+  name: string,
+  items: unknown,
+  item: z.ZodTypeAny,
+  onDrop: (msg: string) => void,
+): unknown[] {
+  if (!Array.isArray(items)) throw new Error(`meeting analysis: ${name} is not a list`);
+  const out: unknown[] = [];
+  items.forEach((raw, i) => {
+    const r = item.safeParse(nullsAsAbsent(raw));
+    if (r.success) out.push(r.data);
+    else
+      onDrop(
+        `${name}[${i}] dropped: ${r.error.issues.map((x) => `${x.path.join('.')} ${x.message}`).join('; ')}`,
+      );
+  });
+  return out;
+}
+
+/**
+ * First `{` to last `}` — models wrap JSON in prose or fences despite being told not to.
+ * `now` must be valid, but an invalid topic, action, voice or summary is dropped
+ * (reported through `onDrop`) rather than failing the whole pass.
+ */
+export function parseMeetingAnalysis(
+  raw: string,
+  onDrop: (msg: string) => void = () => {},
+): MeetingAnalysis {
   const start = raw.indexOf('{');
   const end = raw.lastIndexOf('}');
   if (start < 0 || end <= start)
     throw new Error(`no JSON object in model reply: ${raw.slice(0, 120)}`);
-  return MeetingAnalysis.parse(JSON.parse(raw.slice(start, end + 1)));
+  const obj = JSON.parse(raw.slice(start, end + 1)) as Record<string, unknown>;
+  if (obj === null || typeof obj !== 'object' || Array.isArray(obj))
+    throw new Error('meeting analysis: reply is not an object');
+  const shape = MeetingAnalysis.shape;
+  const actionItem = shape.actions.element;
+  const summary = shape.summary.safeParse(nullsAsAbsent(obj['summary']));
+  if (!summary.success && obj['summary'] !== undefined && obj['summary'] !== null)
+    onDrop(`summary dropped: ${summary.error.issues.map((x) => x.message).join('; ')}`);
+  return MeetingAnalysis.parse({
+    now: shape.now.parse(obj['now']),
+    topics: keepValid('topics', obj['topics'] ?? [], shape.topics.element, onDrop),
+    actions: keepValid('actions', obj['actions'] ?? [], actionItem, onDrop),
+    ...(obj['voices'] == null
+      ? {}
+      : { voices: keepValid('voices', obj['voices'], shape.voices.unwrap().element, onDrop) }),
+    ...(summary.success ? { summary: summary.data } : {}),
+  });
 }
 
 export function makeMeetingAnalyser(opts: {
@@ -113,6 +167,8 @@ export function makeMeetingAnalyser(opts: {
   cwd: string;
   /** Read fresh each pass so a Settings change applies mid-meeting. */
   model: () => string;
+  /** Told about each item of a reply that was dropped for being invalid. */
+  onDropped?: (chatId: string, msg: string) => void;
 }): (input: AnalyseInput) => Promise<MeetingAnalysis> {
   return async function analyse(input) {
     const result = await opts.runOnAccountWithCredit(
@@ -149,7 +205,7 @@ export function makeMeetingAnalyser(opts: {
     );
     if (result === null || result === undefined)
       throw new Error('no account could run the meeting analysis');
-    return parseMeetingAnalysis(result);
+    return parseMeetingAnalysis(result, (msg) => opts.onDropped?.(input.chatId, msg));
   };
 }
 

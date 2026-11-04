@@ -85,6 +85,12 @@ Everything live is in `~/.patch-server`:
 | `server.env`          | config + secrets (the unit's `EnvironmentFile`)                |
 | `logs/server.log`     | the server's output                                            |
 
+The port is held by a `patch-server.socket` unit, not by the server: a release
+restarts only `patch-server.service`, and requests that arrive meanwhile wait in
+the socket's queue for the new process (no 502 from Caddy). Only an install that
+changes where the server listens restarts the socket, and the first install
+after upgrading from a server that held its own port has one short gap.
+
 To roll back by hand, set the channel to `off` (or the next mirror check
 reinstalls the newer release), point `current` at an older release and restart:
 

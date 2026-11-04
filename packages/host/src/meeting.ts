@@ -46,6 +46,8 @@ const MAX_LIVE_CHARS = 300;
 const MAX_TRANSCRIPT_LINES = 4000;
 /** Most name corrections kept for the write-up's tooltips. */
 const NAME_FIX_LIMIT = 200;
+/** Most actions waiting at once; analysis passes add no more past this, so the list stays recognisable. */
+const MAX_PENDING_ACTIONS = 5;
 /** Cap on transcript fed into one analysis pass or one chat turn. */
 const MAX_PROMPT_TRANSCRIPT_CHARS = 12_000;
 
@@ -232,8 +234,11 @@ interface Runtime {
   researching: Promise<void> | undefined;
   /** Serialises analysis and write-ups. */
   chain: Promise<void>;
-  /** Serialises transcription alone, so a slow analysis pass never holds clips back. */
-  txChain: Promise<void>;
+  /**
+   * Serialises transcription alone, so a slow analysis pass never holds clips back.
+   * One queue per channel: a slow or rate-limited clip on one must not hold the other behind it.
+   */
+  txChain: Record<'mic' | 'system', Promise<void>>;
 }
 
 /** Consecutive segments from one voice read as one line. */
@@ -390,7 +395,7 @@ export class MeetingManager {
       lastResearchAt: 0,
       researching: undefined,
       chain: Promise.resolve(),
-      txChain: Promise.resolve(),
+      txChain: { mic: Promise.resolve(), system: Promise.resolve() },
     };
     this.runtimes.set(chatId, rt);
     this.armTimer(chatId, rt);
@@ -444,7 +449,7 @@ export class MeetingManager {
     rt.state.endedAt = t;
     this.disarmTimer(rt);
     this.commit(chatId, rt);
-    await rt.txChain;
+    await Promise.all([rt.txChain.mic, rt.txChain.system]);
     await this.enqueue(rt, async () => {
       await this.analyse(chatId, rt, true);
       await this.writeUp(chatId, rt);
@@ -460,7 +465,7 @@ export class MeetingManager {
         `chat ${chatId}'s meeting is ${rt.state.status}: end it before deleting`,
       );
     }
-    await rt.txChain;
+    await Promise.all([rt.txChain.mic, rt.txChain.system]);
     await rt.chain;
     this.runtimes.delete(chatId);
     rmSync(this.file(chatId), { force: true });
@@ -529,15 +534,17 @@ export class MeetingManager {
     source: 'mic' | 'system',
     wav: Buffer,
     speakerName?: string,
+    device?: string,
   ): Promise<void> {
     const rt = this.load(chatId);
     if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
+    if (device !== undefined) rt.state.listeningOn = device;
     // A surface flushes its last clip before sending End; later audio is a bug.
     if (rt.state.status === 'ended') {
       throw new MeetingError(`chat ${chatId}'s meeting has ended`);
     }
     const at = meetingElapsedMs(rt.state, this.now());
-    const next = rt.txChain.then(async () => {
+    const next = rt.txChain[source].then(async () => {
       const speaker = source === 'mic' ? 'you' : 'them';
       const printed = !!this.deps.transcribeVoices && !!this.deps.hasVoiceprint?.();
       let pieces: { text: string; voice?: number }[];
@@ -612,7 +619,7 @@ export class MeetingManager {
       rt.state.error = null;
       this.commit(chatId, rt);
     });
-    rt.txChain = next.catch(() => undefined);
+    rt.txChain[source] = next.catch(() => undefined);
     return next;
   }
 
@@ -1163,6 +1170,7 @@ export class MeetingManager {
     );
     for (const act of a.actions) {
       if (s.actions.some((x) => norm(x.title) === norm(act.title))) continue;
+      if (s.actions.filter((x) => x.status === 'pending').length >= MAX_PENDING_ACTIONS) break;
       // The model's owner is only a claim: Tom's own name means the action is Tom's,
       // and a name nobody spoke under means someone who was not in the meeting.
       const owner = act.owner?.trim();
@@ -1269,7 +1277,7 @@ export class MeetingManager {
       lastResearchAt: 0,
       researching: undefined,
       chain: Promise.resolve(),
-      txChain: Promise.resolve(),
+      txChain: { mic: Promise.resolve(), system: Promise.resolve() },
     };
     this.runtimes.set(chatId, rt);
     // A host restart finds the meeting `live` with no audio coming: park it as

@@ -9,7 +9,7 @@ import { useUiStore } from '../stores/uiStore.js';
 describe('Settings → Chats → Order projects by', () => {
   beforeEach(() => {
     localStorage.clear();
-    useUiStore.setState({ chatSort: 'last-action', groupSort: 'same-as-chats' });
+    useUiStore.setState({ chatSort: 'recent', groupSort: 'same-as-chats' });
   });
   afterEach(() => cleanup());
 

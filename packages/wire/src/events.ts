@@ -1336,6 +1336,11 @@ export const ChatStateEvent = z
      */
     lastUserActivity: z.number().int().optional(),
     /**
+     * ms epoch the chat was created. Drives the sidebar's Created sort. Optional:
+     * a host predating the field never sends it, and a surface keeps what it knew.
+     */
+    createdAt: z.number().int().nonnegative().optional(),
+    /**
      * The EFFECTIVE permission mode the NEXT turn will use — already resolved
      * by the host through chat override → host default → `auto`
      * (spec/02 § Permission mode). A surface renders this value directly; it
@@ -2869,6 +2874,22 @@ export const HostInfoEvent = z
       })
       .strict()
       .optional(),
+    /**
+     * Why this host's link to the server last dropped, so a sleeping laptop
+     * can be told from a network or server fault. Absent until a drop happens.
+     */
+    lastDisconnect: z
+      .object({
+        /** ms-epoch the host noticed the drop. */
+        at: z.number().int(),
+        cause: z.enum(['sleep', 'server-restart', 'unexplained']),
+        /** Whole seconds the machine was asleep, when `cause` is `sleep`. */
+        sleptSeconds: z.number().int().nonnegative().optional(),
+        /** WebSocket close code; 1006 means no close frame arrived. */
+        code: z.number().int(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type HostInfoEvent = z.infer<typeof HostInfoEvent>;
@@ -3972,6 +3993,8 @@ export const MeetingAudioEvent = z
     audioBase64: z.string().min(1),
     /** Who was lit up as the active speaker during this system clip, when the shell could tell. */
     speakerName: z.string().min(1).optional(),
+    /** Which device is sending the audio, e.g. "Chrome on a Mac"; other surfaces name it as where the meeting is listening. */
+    device: z.string().min(1).optional(),
   })
   .strict();
 export type MeetingAudioEvent = z.infer<typeof MeetingAudioEvent>;

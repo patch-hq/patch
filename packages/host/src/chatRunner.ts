@@ -15841,6 +15841,7 @@ export class Daemon {
       // is: a surface that joins mid-chat converges on the truth without
       // asking.
       lastUserActivity: s.lastUserActivity,
+      createdAt: s.createdAt,
       pinned: s.pinned,
       pinnedAt: s.pinnedAt,
       disabled: s.disabled,

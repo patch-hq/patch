@@ -211,11 +211,50 @@ if [ "${SYSTEM}" = 1 ] && [ -n "${RUNTIME_DIR}" ]; then
 RuntimeDirectoryMode=0750
 RuntimeDirectoryPreserve=yes"
 fi
+# The socket unit owns the port (or Unix socket) and keeps it across restarts of
+# the service, so a release never leaves a moment with nothing listening: requests
+# that arrive while the new process starts wait in the kernel's queue and the new
+# process accepts them. The server takes the socket from systemd (LISTEN_FDS).
+LISTEN_HOST_ENV=$(sed -n 's/^HOST=//p' "${ENV_FILE}" | tail -n 1)
+PORT=$(sed -n 's/^PORT=//p' "${ENV_FILE}" | tail -n 1)
+[ -n "${PORT}" ] || die "PORT is not set in ${ENV_FILE}"
+if [ -n "${SOCKET_ENV}" ]; then
+  SOCKET_LISTEN="ListenStream=${SOCKET_ENV}
+SocketMode=0660"
+  if [ "${SYSTEM}" = 1 ]; then
+    SOCKET_LISTEN="${SOCKET_LISTEN}
+SocketUser=${RUN_USER}
+SocketGroup=${RUN_USER}"
+  fi
+else
+  SOCKET_LISTEN="ListenStream=${LISTEN_HOST_ENV:-127.0.0.1}:${PORT}"
+fi
+SOCKET_UNIT="${UNIT_DIR}/patch-server.socket"
+SOCKET_NEW="${SOCKET_UNIT}.new.$$"
+cat > "${SOCKET_NEW}" <<EOF
+# Written by the Patch server installer. Re-running it rewrites this file.
+[Unit]
+Description=Patch server socket
+
+[Socket]
+${SOCKET_LISTEN}
+Accept=no
+FreeBind=yes
+
+[Install]
+WantedBy=sockets.target
+EOF
+# Changing where it listens means the socket itself must be replaced; otherwise
+# it is left alone, which is the whole point.
+SOCKET_CHANGED=0
+cmp -s "${SOCKET_NEW}" "${SOCKET_UNIT}" 2>/dev/null || SOCKET_CHANGED=1
+mv "${SOCKET_NEW}" "${SOCKET_UNIT}"
 cat > "${UNIT_DIR}/patch-server.service" <<EOF
 # Written by the Patch server installer. Re-running it rewrites this file.
 [Unit]
 Description=Patch server
-After=network-online.target
+After=network-online.target patch-server.socket
+Requires=patch-server.socket
 
 [Service]
 Type=simple
@@ -235,16 +274,22 @@ StandardError=append:${HOME_DIR}/logs/server.log
 WantedBy=${WANTED_BY}
 EOF
 ${SYSTEMCTL} daemon-reload
-${SYSTEMCTL} enable patch-server >/dev/null 2>&1
+${SYSTEMCTL} enable patch-server.socket patch-server >/dev/null 2>&1
+if ! ${SYSTEMCTL} is-active --quiet patch-server.socket; then
+  # First install, or an upgrade from a server that held the port itself: that
+  # process must let go before the socket unit can take the port. The one gap.
+  ${SYSTEMCTL} stop patch-server
+  ${SYSTEMCTL} start patch-server.socket
+elif [ "${SOCKET_CHANGED}" = 1 ]; then
+  ${SYSTEMCTL} restart patch-server.socket
+fi
 ${SYSTEMCTL} restart patch-server
 
-PORT=$(sed -n 's/^PORT=//p' "${ENV_FILE}" | tail -n 1)
-[ -n "${PORT}" ] || die "PORT is not set in ${ENV_FILE}"
 if [ -n "${SOCKET_ENV}" ]; then
-  HEALTH_CURL="curl -sf --unix-socket ${SOCKET_ENV} http://localhost/api/healthz"
+  HEALTH_CURL="curl -sf --max-time 5 --unix-socket ${SOCKET_ENV} http://localhost/api/healthz"
   WHERE="${SOCKET_ENV}"
 else
-  HEALTH_CURL="curl -sf http://127.0.0.1:${PORT}/api/healthz"
+  HEALTH_CURL="curl -sf --max-time 5 http://127.0.0.1:${PORT}/api/healthz"
   WHERE=":${PORT}"
 fi
 i=0

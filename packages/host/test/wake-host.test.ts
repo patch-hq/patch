@@ -185,18 +185,16 @@ describe('self-wake on the host (spec/02 § Self-wake)', () => {
     daemon.scheduleWake(chatId, { in: '0', message: 'nag: go to bed' });
     await tick(60);
 
-    // The wake must have QUEUED behind the running turn, not been dropped.
+    // The wake is HELD (not queued behind the turn): nothing in the queue, record kept waiting.
     const queued = events.find(
       (e) =>
         e.type === 'chat.queued' && (e as { message?: string }).message === '[wake] nag: go to bed',
     );
-    expect(queued, 'wake should queue behind the running turn').toBeDefined();
-    // It has not run yet — the first turn is still blocking the pump.
+    expect(queued, 'wake must not stack in the queue').toBeUndefined();
     expect(b.prompts).not.toContain('[wake] nag: go to bed');
-    // The one-shot wake file cleared on fire (it's now in the turn queue).
-    expect(daemon.peekWake(chatId)).toBeNull();
+    expect(daemon.peekWake(chatId)?.waiting).toBe(true);
 
-    // Release the first turn; the queued wake then drains and runs.
+    // Release the first turn; the held wake is delivered when it ends.
     b.releaseNext(); // release 'busy work'
     await tick();
     b.releaseNext(); // release the dequeued wake turn

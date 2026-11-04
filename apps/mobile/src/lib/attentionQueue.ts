@@ -30,23 +30,13 @@ export function needsAttention(row: ChatRow): boolean {
 }
 
 /**
- * Re-orders an already-filtered needs-attention list into a FIFO queue:
- * oldest-waiting first, most-recently-updated LAST — the opposite of the
- * Chats tab's own recency order, because the queue is worked through front to
- * back and a row that updates again while still in it should rejoin the BACK
- * of the queue rather than cut back to the front. `permission` rows still
- * come first within the queue — a paused yes/no is a stronger signal than a
- * finished-and-unread chat — but two permission rows (or two done rows)
- * between themselves queue oldest first, same as the rest.
+ * Orders an already-filtered needs-attention list the same way the Chats tab
+ * orders its folders: the user's own last activity, newest first, chatId as the
+ * tiebreak. Nothing an agent does changes that key, so a row never moves under
+ * the thumb while the queue is being worked through.
  */
 export function sortAttentionQueue(rows: readonly ChatRow[]): ChatRow[] {
-  return [...rows].sort(
-    (a, b) => attentionRank(a) - attentionRank(b) || a.lastUpdated - b.lastUpdated || cmpId(a, b),
-  );
-}
-
-function attentionRank(row: ChatRow): number {
-  return deriveBadge(row) === 'permission' ? 0 : 1;
+  return [...rows].sort((a, b) => b.lastUserActivity - a.lastUserActivity || cmpId(a, b));
 }
 
 /** Stable, data-only tiebreaker so ties never resolve to insertion order. */

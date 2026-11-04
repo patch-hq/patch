@@ -126,6 +126,22 @@ describe('MeetingManager', () => {
     await tick;
   });
 
+  it('does not hold the mic channel behind a stalled system clip', async () => {
+    diarise = true;
+    const m = make();
+    m.start('c1');
+    let release!: () => void;
+    transcribeVoices.mockImplementationOnce(
+      () => new Promise((r) => (release = () => r([{ text: 'late system words', voice: 1 }]))),
+    );
+    const stalled = m.ingestAudio('c1', 'system', Buffer.from('s'));
+    transcribe.mockResolvedValueOnce('prompt mic words');
+    await m.ingestAudio('c1', 'mic', Buffer.from('m'));
+    expect(m.get('c1')!.transcript.map((l) => l.text)).toEqual(['prompt mic words']);
+    release();
+    await stalled;
+  });
+
   it('drops a system line that is the mic speech returning, in either clip order', async () => {
     const m = make();
     m.start('c1');
@@ -364,10 +380,10 @@ describe('MeetingManager', () => {
       clearInterval: () => undefined,
     });
     m.start('c1');
-    expect(m.get('c1')?.settings).toEqual({ clipSeconds: 6, analyseSeconds: 15 });
+    expect(m.get('c1')?.settings).toEqual({ clipSeconds: 6, analyseSeconds: 45 });
     m.tune('c1', { clipSeconds: 3, analyseSeconds: 8 });
     expect(m.get('c1')?.settings).toEqual({ clipSeconds: 3, analyseSeconds: 8 });
-    expect(intervals).toEqual([15_000, 8_000]);
+    expect(intervals).toEqual([45_000, 8_000]);
     expect(() => m.tune('c1', { clipSeconds: 1, analyseSeconds: 8 })).toThrow();
     expect(() => m.tune('nope', { clipSeconds: 3, analyseSeconds: 8 })).toThrow(MeetingError);
   });
@@ -481,6 +497,30 @@ describe('MeetingManager', () => {
     expect(s2.topics[0]!.points).toEqual(['Own service', 'November']);
     expect(s2.actions).toHaveLength(1); // duplicate title ignored
     expect(analyse.mock.calls[1]![0].newLines).toHaveLength(1);
+  });
+
+  it('keeps at most five actions waiting, however many a pass proposes', async () => {
+    const m = make();
+    m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    analyse.mockResolvedValueOnce(
+      analysis({
+        actions: Array.from({ length: 8 }, (_, i) => ({
+          kind: 'mine' as const,
+          title: `Do thing ${i}`,
+          why: 'said so',
+        })),
+      }),
+    );
+    await m.tick('c1');
+    expect(m.get('c1')!.actions).toHaveLength(5);
+  });
+
+  it('records the device the audio came from', async () => {
+    const m = make();
+    m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'), undefined, 'Chrome on a Mac');
+    expect(m.get('c1')!.listeningOn).toBe('Chrome on a Mac');
   });
 
   it('stores My notes with the meeting, broadcasts it, reloads it and leaves it alone through analysis', async () => {
@@ -1230,6 +1270,26 @@ describe('meetingGen', () => {
   it('rejects a reply with no JSON or the wrong shape', () => {
     expect(() => parseMeetingAnalysis('sorry')).toThrow(/no JSON/);
     expect(() => parseMeetingAnalysis('{"now":1}')).toThrow();
+  });
+  it('drops only the invalid items and treats null as absent', () => {
+    const dropped: string[] = [];
+    const a = parseMeetingAnalysis(
+      JSON.stringify({
+        now: { headline: 'h', bullets: [], who: 'w' },
+        topics: [{ title: 't', points: [] }, { title: 5 }],
+        actions: [
+          { kind: 'other', owner: null, title: 'a', why: 'y' },
+          { kind: 'mine', title: 'b' },
+          { kind: 'mine', owner: null, title: 'c', why: 'ok' },
+        ],
+        summary: 'a string',
+      }),
+      (m) => dropped.push(m),
+    );
+    expect(a.topics).toHaveLength(1);
+    expect(a.actions.map((x) => x.title)).toEqual(['c']);
+    expect(a.summary).toBeUndefined();
+    expect(dropped).toHaveLength(4);
   });
 
   it('an empty new transcript tells the model to write from the notes', () => {
