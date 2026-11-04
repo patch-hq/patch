@@ -2557,7 +2557,7 @@ a.ch-row:hover {
   background: var(--accent-strong);
 }
 .sb-search-dot.failed {
-  background: var(--danger, #b3261e);
+  background: var(--danger);
 }
 .sb-search-dot.searching {
   width: 10px;
