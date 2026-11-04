@@ -9,6 +9,8 @@ import {
   nextChatAfterArchive,
   stepVisibleChat,
   sortAttentionQueue,
+  captureOrder,
+  applyFrozenOrder,
 } from '../lib/chatGroups.js';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
 import type { ChatRow } from '../stores/types.js';
@@ -577,40 +579,79 @@ describe('groupChats — sidebar ordering (spec/14 § Sidebar ordering)', () => 
 
 describe('groupChats ordering choice', () => {
   const rows = [
-    row({ chatId: 'a1', name: 'Zed', folder: '~/alpha', lastUserActivity: 10, lastUpdated: 50 }),
-    row({ chatId: 'a2', name: 'Bob', folder: '~/alpha', lastUserActivity: 20, lastUpdated: 5 }),
-    row({ chatId: 'b1', name: 'Mid', folder: '~/beta', lastUserActivity: 15, lastUpdated: 90 }),
+    row({
+      chatId: 'a1',
+      name: 'Zed',
+      folder: '~/alpha',
+      lastUserActivity: 10,
+      lastUpdated: 50,
+      createdAt: 300,
+    }),
+    row({
+      chatId: 'a2',
+      name: 'Bob',
+      folder: '~/alpha',
+      lastUserActivity: 20,
+      lastUpdated: 5,
+      createdAt: 100,
+    }),
+    row({
+      chatId: 'b1',
+      name: 'Mid',
+      folder: '~/beta',
+      lastUserActivity: 15,
+      lastUpdated: 90,
+      createdAt: 200,
+    }),
   ];
-  it('defaults to last action for chats and projects', () => {
+  it('defaults to Recent (last message the user sent) for chats and projects', () => {
     const g = groupChats(rows);
     expect(g.folders.map((f) => f.folder)).toEqual(['~/alpha', '~/beta']);
     expect(g.folders[0]!.rows.map((r) => r.chatId)).toEqual(['a2', 'a1']);
   });
-  it('last update orders by any activity', () => {
-    const g = groupChats(rows, [], { chatSort: 'last-update', groupSort: 'last-update' });
-    expect(g.folders.map((f) => f.folder)).toEqual(['~/beta', '~/alpha']);
-    expect(g.folders[1]!.rows.map((r) => r.chatId)).toEqual(['a1', 'a2']);
+  it('Created orders newest-created first and ignores agent activity', () => {
+    const g = groupChats(rows, [], { chatSort: 'created', groupSort: 'created' });
+    expect(g.folders.map((f) => f.folder)).toEqual(['~/alpha', '~/beta']);
+    expect(g.folders[0]!.rows.map((r) => r.chatId)).toEqual(['a1', 'a2']);
+    const bumped = rows.map((x) => ({ ...x, lastUpdated: x.lastUpdated + 1000 }));
+    const h = groupChats(bumped, [], { chatSort: 'created', groupSort: 'created' });
+    expect(h.folders[0]!.rows.map((r) => r.chatId)).toEqual(['a1', 'a2']);
   });
   it('projects follow the chat sort when Same as chats is selected', () => {
-    const g = groupChats(rows, [], { chatSort: 'last-update', groupSort: 'same-as-chats' });
-    expect(g.folders.map((f) => f.folder)).toEqual(['~/beta', '~/alpha']);
-    expect(g.folders[1]!.rows.map((r) => r.chatId)).toEqual(['a1', 'a2']);
+    const g = groupChats(rows, [], { chatSort: 'created', groupSort: 'same-as-chats' });
+    expect(g.folders[0]!.rows.map((r) => r.chatId)).toEqual(['a1', 'a2']);
   });
   it('chat sort and project sort are independent; name is A-Z', () => {
-    const g = groupChats(rows, [], { chatSort: 'name', groupSort: 'last-action' });
+    const g = groupChats(rows, [], { chatSort: 'name', groupSort: 'recent' });
     expect(g.folders.map((f) => f.folder)).toEqual(['~/alpha', '~/beta']);
     expect(g.folders[0]!.rows.map((r) => r.chatId)).toEqual(['a2', 'a1']);
-    const h = groupChats(rows, [], { chatSort: 'last-action', groupSort: 'name' });
+    const h = groupChats(rows, [], { chatSort: 'recent', groupSort: 'name' });
     expect(h.folders.map((f) => f.folder)).toEqual(['~/alpha', '~/beta']);
     const r = groupChats(
       rows.map((x) => ({ ...x, folder: x.folder === '~/alpha' ? '~/zzz' : x.folder })),
       [],
-      {
-        chatSort: 'last-action',
-        groupSort: 'name',
-      },
+      { chatSort: 'recent', groupSort: 'name' },
     );
     expect(r.folders.map((f) => f.folder)).toEqual(['~/beta', '~/zzz']);
+  });
+});
+
+describe('frozen order while hovered', () => {
+  it('holds positions against a re-sort but takes fresh row data, and new rows lead', () => {
+    const before = groupChats([
+      row({ chatId: 'a', folder: '~/p', lastUserActivity: 20 }),
+      row({ chatId: 'b', folder: '~/p', lastUserActivity: 10 }),
+    ]);
+    const frozen = captureOrder(before);
+    const after = groupChats([
+      row({ chatId: 'a', folder: '~/p', lastUserActivity: 20, name: 'renamed' }),
+      row({ chatId: 'b', folder: '~/p', lastUserActivity: 99 }),
+      row({ chatId: 'n', folder: '~/p', lastUserActivity: 1 }),
+    ]);
+    expect(after.folders[0]!.rows.map((r) => r.chatId)).toEqual(['b', 'a', 'n']);
+    const held = applyFrozenOrder(after, frozen);
+    expect(held.folders[0]!.rows.map((r) => r.chatId)).toEqual(['n', 'a', 'b']);
+    expect(held.folders[0]!.rows[1]!.name).toBe('renamed');
   });
 });
 

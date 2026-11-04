@@ -255,7 +255,7 @@ describe('SidebarViewMenu', () => {
 describe('SidebarSortMenu (outside the view dropdown)', () => {
   beforeEach(() => {
     localStorage.clear();
-    useUiStore.setState({ chatSort: 'last-action', groupSort: 'same-as-chats' });
+    useUiStore.setState({ chatSort: 'recent', groupSort: 'same-as-chats' });
   });
   afterEach(() => cleanup());
   it('is not part of the view dropdown', () => {
@@ -274,11 +274,8 @@ describe('SidebarSortMenu (outside the view dropdown)', () => {
         <SidebarSortMenu />
       </MemoryRouter>,
     );
-    expect(screen.getByTestId('sidebar-chat-sort-last-action')).toHaveAttribute(
-      'aria-checked',
-      'true',
-    );
-    expect(screen.getByTestId('sidebar-chat-sort-last-update')).toBeTruthy();
+    expect(screen.getByTestId('sidebar-chat-sort-recent')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('sidebar-chat-sort-created')).toBeTruthy();
     fireEvent.click(screen.getByTestId('sidebar-chat-sort-name'));
     expect(screen.getByTestId('sidebar-chat-sort-name')).toHaveAttribute('aria-checked', 'true');
     expect(useUiStore.getState().chatSort).toBe('name');

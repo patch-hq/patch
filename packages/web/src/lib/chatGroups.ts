@@ -103,24 +103,25 @@ export function chatsInProject(all: ChatRow[], folder: string, hostId: string): 
 }
 
 /**
- * How the active list is ordered (spec/14 § Sidebar ordering). `last-action` is
- * the user's own last send or the chat's creation — the default, because it is
- * the only key an agent reply cannot move. `last-update` is any activity at all
- * (agent replies, job ticks), `name` is case-insensitive A-Z.
+ * How the active list is ordered (spec/14 § Sidebar ordering). `recent` is the
+ * time of the last message the user sent (or the chat's creation if they never
+ * have) — the only key an agent reply cannot move. `created` is when the chat
+ * was made, newest first, and never changes. `name` is case-insensitive A-Z and
+ * never changes either.
  */
-export type ChatSort = 'last-action' | 'last-update' | 'name';
+export type ChatSort = 'recent' | 'created' | 'name';
 
 /** Projects normally follow the chat sort; choosing a concrete value decouples them. */
 export type GroupSort = ChatSort | 'same-as-chats';
 
 /** `short` is the sidebar switch's text; `label` is its full name. */
 export const CHAT_SORTS: ReadonlyArray<{ value: ChatSort; label: string; short: string }> = [
-  { value: 'last-action', label: 'My recent activity', short: 'Mine' },
-  { value: 'last-update', label: 'Latest updates', short: 'Latest' },
-  { value: 'name', label: 'Name', short: 'A–Z' },
+  { value: 'recent', label: 'Recent', short: 'Recent' },
+  { value: 'created', label: 'Created', short: 'Created' },
+  { value: 'name', label: 'Name', short: 'Name' },
 ];
 
-export const DEFAULT_CHAT_SORT: ChatSort = 'last-action';
+export const DEFAULT_CHAT_SORT: ChatSort = 'recent';
 
 /** Independent choices: how chats order within a project, and how projects order. */
 export interface ChatOrdering {
@@ -140,10 +141,10 @@ function chatLabel(c: ChatRow): string {
 /** Comparator for two chats under `sort`; ends in the chatId tiebreaker. */
 function cmpChats(sort: ChatSort): (a: ChatRow, b: ChatRow) => number {
   switch (sort) {
-    case 'last-action':
+    case 'recent':
       return (a, b) => b.lastUserActivity - a.lastUserActivity || cmpId(a, b);
-    case 'last-update':
-      return (a, b) => b.lastUpdated - a.lastUpdated || cmpId(a, b);
+    case 'created':
+      return (a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0) || cmpId(a, b);
     case 'name':
       return (a, b) =>
         chatLabel(a).localeCompare(chatLabel(b), undefined, { sensitivity: 'base' }) || cmpId(a, b);
@@ -152,20 +153,20 @@ function cmpChats(sort: ChatSort): (a: ChatRow, b: ChatRow) => number {
 
 /** Comparator for two projects: by the newest row (or, for name, the folder's basename). */
 function cmpFolders(sort: ChatSort): (a: FolderGroup, b: FolderGroup) => number {
-  const newest = (rows: ChatRow[], key: 'lastUserActivity' | 'lastUpdated'): number =>
-    Math.max(...rows.map((r) => r[key]), 0);
+  const newest = (rows: ChatRow[], key: 'lastUserActivity' | 'createdAt'): number =>
+    Math.max(...rows.map((r) => r[key] ?? 0), 0);
   const base = (f: string): string => f.split('/').filter(Boolean).pop() ?? f;
   return (a, b) => {
     switch (sort) {
-      case 'last-action':
+      case 'recent':
         return (
           newest(b.rows, 'lastUserActivity') - newest(a.rows, 'lastUserActivity') ||
           a.folder.localeCompare(b.folder) ||
           a.hostId.localeCompare(b.hostId)
         );
-      case 'last-update':
+      case 'created':
         return (
-          newest(b.rows, 'lastUpdated') - newest(a.rows, 'lastUpdated') ||
+          newest(b.rows, 'createdAt') - newest(a.rows, 'createdAt') ||
           a.folder.localeCompare(b.folder) ||
           a.hostId.localeCompare(b.hostId)
         );
@@ -571,4 +572,52 @@ export function stepVisibleChat(
   const idx = currentChatId ? order.indexOf(currentChatId) : -1;
   if (idx < 0) return (delta > 0 ? order[0] : order[order.length - 1]) ?? null;
   return order[(idx + delta + order.length) % order.length] ?? null;
+}
+
+/**
+ * The drawn order of the Pinned and project lists at one moment, kept so the
+ * list can hold still while the pointer is over it.
+ */
+export interface FrozenOrder {
+  pinned: string[];
+  folders: string[];
+  rows: Record<string, string[]>;
+}
+
+export function captureOrder(g: Pick<Grouped, 'pinned' | 'folders'>): FrozenOrder {
+  return {
+    pinned: g.pinned.map((c) => c.chatId),
+    folders: g.folders.map((f) => f.key),
+    rows: Object.fromEntries(g.folders.map((f) => [f.key, f.rows.map((r) => r.chatId)])),
+  };
+}
+
+/** Stable re-order by a frozen id list; ids it never saw (new rows) lead, in their own order. */
+function byFrozen<T>(items: T[], id: (t: T) => string, order: readonly string[] | undefined): T[] {
+  if (!order) return items;
+  const rank = new Map(order.map((k, i) => [k, i]));
+  const unseen = items.filter((t) => !rank.has(id(t)));
+  const seen = items
+    .filter((t) => rank.has(id(t)))
+    .sort((a, b) => rank.get(id(a))! - rank.get(id(b))!);
+  return [...unseen, ...seen];
+}
+
+/**
+ * Fresh row data in the frozen order: a row's badge and name keep updating, but
+ * nothing moves while the pointer is over the list. The order catches up when
+ * it leaves.
+ */
+export function applyFrozenOrder<G extends Pick<Grouped, 'pinned' | 'folders'>>(
+  g: G,
+  frozen: FrozenOrder,
+): G {
+  return {
+    ...g,
+    pinned: byFrozen(g.pinned, (c) => c.chatId, frozen.pinned),
+    folders: byFrozen(g.folders, (f) => f.key, frozen.folders).map((f) => ({
+      ...f,
+      rows: byFrozen(f.rows, (r) => r.chatId, frozen.rows[f.key]),
+    })),
+  };
 }
