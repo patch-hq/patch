@@ -202,62 +202,82 @@ describe('sidebar chat search', () => {
     expect(screen.getAllByTestId('chat-search-hit')).toHaveLength(1);
   });
 
-  it('a Full text box, unticked by default, re-runs the search with message text when ticked', async () => {
+  it('a Titles / Full text switch re-runs the search with message text when switched', async () => {
     search.mockResolvedValue(response({ hits: [hit({ chatId: 'srv' })], total: 1 }));
-    useChatStore
-      .getState()
-      .hydrate([chat({ chatId: 'loc', name: 'Bus timetable', preview: 'about bus times' })]);
     renderSidebar();
     type('bus');
     await settle();
-    const box = screen.getByTestId('chat-search-fulltext');
-    expect(box).not.toBeChecked();
+    const full = screen.getByTestId('chat-search-fulltext');
+    expect(screen.getByTestId('chat-search-titles')).toHaveAttribute('aria-pressed', 'true');
     expect(search.mock.calls[0]![1]).toMatchObject({ fullText: false });
 
     search.mockClear();
-    fireEvent.click(box);
-    expect(box).toBeChecked();
+    fireEvent.click(full);
+    expect(full).toHaveAttribute('aria-pressed', 'true');
     // The old scope's answer is not shown for the new scope while it loads.
     expect(screen.queryByTestId('chat-search-hit')).toBeNull();
     await settle();
     expect(search).toHaveBeenCalledTimes(1);
-    expect(search.mock.calls[0]![0]).toBe('bus');
     expect(search.mock.calls[0]![1]).toMatchObject({ fullText: true });
     expect(screen.getAllByTestId('chat-search-hit')).toHaveLength(1);
   });
 
-  it('an Archived box, unticked by default, re-runs the search including archived chats when ticked', async () => {
+  it('always searches archived and hidden chats, with no checkboxes for them', async () => {
     search.mockResolvedValue(response({ hits: [hit({ chatId: 'srv' })], total: 1 }));
     renderSidebar();
     type('bus');
     await settle();
-    const box = screen.getByTestId('chat-search-archived');
-    expect(box).not.toBeChecked();
-    expect(search.mock.calls[0]![1]).toMatchObject({ includeArchived: false });
-
-    search.mockClear();
-    fireEvent.click(box);
-    expect(box).toBeChecked();
-    await settle();
-    expect(search).toHaveBeenCalledTimes(1);
-    expect(search.mock.calls[0]![1]).toMatchObject({ includeArchived: true });
+    expect(search.mock.calls[0]![1]).toMatchObject({ includeArchived: true, includeHidden: true });
+    expect(screen.queryByTestId('chat-search-archived')).toBeNull();
+    expect(screen.queryByTestId('chat-search-hidden')).toBeNull();
   });
 
-  it('a Hidden box, unticked by default, re-runs the search including hidden chats when ticked', async () => {
-    search.mockResolvedValue(response({ hits: [hit({ chatId: 'srv' })], total: 1 }));
+  it('asks each host separately, shows its progress, and says no results only when all answered', async () => {
+    usePresenceStore.setState({
+      hosts: { d1: { host: { hostName: 'Hetzner' } }, d2: { host: { hostName: 'Mac' } } } as never,
+    });
+    const slow = deferred<ChatSearchResponse>();
+    search.mockImplementation((_q, opts) =>
+      opts?.hostId === 'd2' ? slow.promise : Promise.resolve(response({ hits: [] })),
+    );
     renderSidebar();
     type('bus');
     await settle();
-    const box = screen.getByTestId('chat-search-hidden');
-    expect(box).not.toBeChecked();
-    expect(search.mock.calls[0]![1]).toMatchObject({ includeHidden: false });
+    expect(search.mock.calls.map((c) => c[1]?.hostId).sort()).toEqual(['d1', 'd2']);
+    expect(screen.getByTestId('chat-search-progress-d1')).toHaveAttribute('data-state', 'done');
+    expect(screen.getByTestId('chat-search-progress-d2')).toHaveAttribute(
+      'data-state',
+      'searching',
+    );
+    expect(screen.queryByTestId('chat-search-empty')).toBeNull();
+    await act(async () => {
+      slow.resolve(response({ hits: [hit({ chatId: 'm1', hostId: 'd2' })], total: 1 }));
+    });
+    expect(screen.getByTestId('chat-search-progress-d2')).toHaveAttribute('data-state', 'done');
+    expect(screen.getAllByTestId('chat-search-hit')).toHaveLength(1);
+  });
 
-    search.mockClear();
-    fireEvent.click(box);
-    expect(box).toBeChecked();
+  it('says no results once every host has answered with nothing', async () => {
+    usePresenceStore.setState({ hosts: { d1: { host: { hostName: 'Hetzner' } } } as never });
+    search.mockResolvedValue(response({ hits: [] }));
+    renderSidebar();
+    type('bus');
     await settle();
-    expect(search).toHaveBeenCalledTimes(1);
-    expect(search.mock.calls[0]![1]).toMatchObject({ includeHidden: true });
+    expect(screen.getByTestId('chat-search-empty')).toBeInTheDocument();
+  });
+
+  it('hides the Manager row and Manager hits while searching, and names the open view in the placeholder', async () => {
+    search.mockResolvedValue(
+      response({ hits: [hit({ chatId: 'mgr', section: 'manager' }), hit({ chatId: 'ok' })] }),
+    );
+    useUiStore.getState().setArchivedOpen(true);
+    renderSidebar();
+    expect(screen.getByTestId('chat-search')).toHaveAttribute('placeholder', 'Search archived');
+    useUiStore.getState().setArchivedOpen(false);
+    type('bus');
+    await settle();
+    expect(screen.getAllByTestId('chat-search-hit')).toHaveLength(1);
+    expect(screen.queryByTestId('manager-glyph')).toBeNull();
   });
 
   it('only the latest query’s response renders — a late answer to an older one is dropped', async () => {

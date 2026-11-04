@@ -2513,6 +2513,65 @@ a.ch-row:hover {
   font-size: var(--text-min);
   cursor: pointer;
 }
+.sb-search-mode {
+  display: flex;
+  margin: 0 var(--sb-inset-right) 6px var(--sb-inset);
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--bg-elevated);
+}
+.sb-search-mode-opt {
+  flex: 1;
+  padding: 3px 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--ink-3);
+  font-size: var(--text-min);
+  cursor: pointer;
+}
+.sb-search-mode-opt.on {
+  background: var(--accent-tint);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+.sb-search-hosts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 var(--sb-inset-right) 4px var(--sb-inset);
+  padding: 0 14px;
+  color: var(--ink-3);
+  font-size: var(--text-min);
+}
+.sb-search-host-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.sb-search-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-strong);
+}
+.sb-search-dot.failed {
+  background: var(--danger, #b3261e);
+}
+.sb-search-dot.searching {
+  width: 10px;
+  height: 10px;
+  background: transparent;
+  border: 1.5px solid var(--line);
+  border-top-color: var(--accent-strong);
+  animation: sb-search-spin 0.8s linear infinite;
+}
+@keyframes sb-search-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .sb-row.search-hit {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto;
@@ -17263,14 +17322,38 @@ select.permission-mode.is-pending {
 }
 
 /* Job Prompt: Write/Preview tabs and a find bar over the textarea (PromptEditor). */
-.prompt-editor { display: flex; flex-direction: column; gap: 8px; }
-.prompt-editor-bar { display: flex; justify-content: space-between; align-items: center; }
-.prompt-editor-tabs { display: flex; gap: 4px; }
+.prompt-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.prompt-editor-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.prompt-editor-tabs {
+  display: flex;
+  gap: 4px;
+}
 .prompt-editor-bar button,
-.prompt-editor-find button { font-size: 15px; padding: 2px 10px; }
-.prompt-editor-tabs button[aria-selected='true'] { font-weight: 600; text-decoration: underline; }
-.prompt-editor-find { display: flex; align-items: center; gap: 8px; }
-.prompt-editor-find input { flex: 1; min-width: 0; }
+.prompt-editor-find button {
+  font-size: 15px;
+  padding: 2px 10px;
+}
+.prompt-editor-tabs button[aria-selected='true'] {
+  font-weight: 600;
+  text-decoration: underline;
+}
+.prompt-editor-find {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.prompt-editor-find input {
+  flex: 1;
+  min-width: 0;
+}
 .prompt-editor-preview {
   min-height: 240px;
   padding: 8px 12px;

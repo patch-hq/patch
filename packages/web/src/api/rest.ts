@@ -448,6 +448,8 @@ export const api = {
       fullText?: boolean;
       includeArchived?: boolean;
       includeHidden?: boolean;
+      /** Search this one machine only. */
+      hostId?: string;
       signal?: AbortSignal;
     } = {},
   ) => {
@@ -461,6 +463,7 @@ export const api = {
     if (opts.includeHidden !== undefined) {
       params.set('includeHidden', String(opts.includeHidden));
     }
+    if (opts.hostId !== undefined) params.set('hostId', opts.hostId);
     return request<ChatSearchResponse>(
       `/api/chats/search?${params.toString()}`,
       opts.signal === undefined ? {} : { signal: opts.signal },

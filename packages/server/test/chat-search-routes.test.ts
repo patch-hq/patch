@@ -275,6 +275,36 @@ describe('chat search route', () => {
     }
   });
 
+  it('hostId scopes the search to one machine and refuses an unknown one', async () => {
+    const link = new FakeSearchHosts((hostId) => ({
+      ok: true,
+      hits: [hit('x', hostId)],
+      total: 1,
+      searchedChats: 1,
+      transcriptsMissing: 0,
+    }));
+    const { built, auth } = await boot(link);
+    try {
+      const res = await built.app.inject({
+        method: 'GET',
+        url: search('q=boiler&hostId=mac'),
+        headers: auth,
+      });
+      expect(res.statusCode).toBe(200);
+      const body = ChatSearchResponse.parse(res.json());
+      expect(body.hosts.map((h) => h.hostId)).toEqual(['mac']);
+      expect(link.asked.map((a) => a.hostId)).toEqual(['mac']);
+      const bad = await built.app.inject({
+        method: 'GET',
+        url: search('q=boiler&hostId=nope'),
+        headers: auth,
+      });
+      expect(bad.statusCode).toBe(404);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('pages the merged list, asking each host for its top offset+limit', async () => {
     const d1 = Array.from({ length: 5 }, (_, i) =>
       hit(`a${i}`, 'd1', { lastUpdated: 100 - 2 * i }),

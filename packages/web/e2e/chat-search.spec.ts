@@ -257,7 +257,7 @@ test.describe('sidebar chat search', () => {
     await expect(page.getByTestId('chat-search-hit')).toHaveAttribute('data-chat-id', 'chat_md');
   });
 
-  test('a Full text box, unticked by default, asks for message text when ticked', async ({
+  test('the Titles / Full text switch asks for message text when switched to Full text', async ({
     page,
   }) => {
     const scopes: (string | null)[] = [];
@@ -275,18 +275,21 @@ test.describe('sidebar chat search', () => {
     await page.getByTestId('chat-search').fill('"lorem ipsum"');
     await expect(page.getByTestId('chat-search-hit')).toHaveCount(2);
     const box = page.getByTestId('chat-search-fulltext');
-    await expect(box).not.toBeChecked();
+    await expect(box).toHaveAttribute('aria-pressed', 'false');
     expect(scopes).toEqual(['false']);
 
-    await box.check();
+    await box.click();
     await expect(page.getByTestId('chat-search-hit')).toHaveCount(2);
     expect(scopes).toEqual(['false', 'true']);
   });
 
-  test('a Hidden box, unticked by default, asks for hidden chats when ticked', async ({ page }) => {
-    const scopes: (string | null)[] = [];
+  test('search always includes hidden and archived chats, with no boxes for them', async ({
+    page,
+  }) => {
+    const scopes: string[] = [];
     await stubSearch(page, (route, q) => {
-      scopes.push(new URL(route.request().url()).searchParams.get('includeHidden'));
+      const u = new URL(route.request().url()).searchParams;
+      scopes.push(`${u.get('includeHidden')}/${u.get('includeArchived')}`);
       return route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -298,12 +301,8 @@ test.describe('sidebar chat search', () => {
 
     await page.getByTestId('chat-search').fill('"lorem ipsum"');
     await expect(page.getByTestId('chat-search-hit')).toHaveCount(2);
-    const box = page.getByTestId('chat-search-hidden');
-    await expect(box).not.toBeChecked();
-    expect(scopes).toEqual(['false']);
-
-    await box.check();
-    await expect(page.getByTestId('chat-search-hit')).toHaveCount(2);
-    expect(scopes).toEqual(['false', 'true']);
+    expect(scopes).toEqual(['true/true']);
+    await expect(page.getByTestId('chat-search-hidden')).toHaveCount(0);
+    await expect(page.getByTestId('chat-search-archived')).toHaveCount(0);
   });
 });
