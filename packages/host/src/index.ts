@@ -3699,9 +3699,8 @@ async function startHost(
    * (spec/10-auth.md § Backend credentials — multiple accounts).
    *
    * Priority is the order of the accounts array: failover walks forward from the
-   * account that just failed. In memory — a restart re-probes and re-learns
-   * within one turn, and a stale "exhausted" surviving a top-up is worse than
-   * one extra refused turn.
+   * account that just failed. Persisted in account-availability.json so a
+   * restart keeps what it knew.
    */
   const accountAvailabilityPath = join(config.patchHome, 'account-availability.json');
   const accountRotation = new AccountRotation(
