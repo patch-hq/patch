@@ -705,6 +705,10 @@ interface FormState {
   concurrency: string;
   /** True when the loaded job had a limit, so emptying the field must save `null` to remove it. */
   loadedConcurrency: boolean;
+  /** Minutes a fire may hold its slot before it is stopped. Empty string means the server default. */
+  timeoutMinutes: string;
+  /** True when the loaded job had a timeout, so emptying the field must save `null` to restore the default. */
+  loadedTimeoutMinutes: boolean;
   /** The run window (spec/08 § Run window). `windowOn` is editor state: unticked saves `window: null`. */
   windowOn: boolean;
   windowStart: string;
@@ -775,6 +779,8 @@ const DEFAULT_FORM: FormState = {
   gateOn: false,
   concurrency: '',
   loadedConcurrency: false,
+  timeoutMinutes: '',
+  loadedTimeoutMinutes: false,
   gateHostId: '',
   gateFolder: '',
   gateCommand: '',
@@ -2081,6 +2087,30 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
           </label>
         </section>
 
+        <section className="form-group" data-testid="group-timeout">
+          <h2 className="form-group-title">
+            Timeout <span className="form-group-opt">· optional</span>
+          </h2>
+          <label>
+            Minutes before a fire is stopped
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={form.timeoutMinutes}
+              onChange={(e) => {
+                const next = e.target.value;
+                setForm((f) => ({ ...f, timeoutMinutes: next }));
+              }}
+              placeholder="240"
+              data-testid="job-timeout-minutes"
+            />
+            <p className="field-hint">
+              A fire still holding its slot after this long is stopped. Empty means 240 (4 hours).
+            </p>
+          </label>
+        </section>
+
         <section className="form-group" data-testid="group-window">
           <h2 className="form-group-title">
             Run window <span className="form-group-opt">· optional</span>
@@ -2953,6 +2983,10 @@ function jobToForm(job: Job): FormState {
     f.concurrency = String(job.concurrency);
     f.loadedConcurrency = true;
   }
+  if (job.timeoutMinutes !== undefined) {
+    f.timeoutMinutes = String(job.timeoutMinutes);
+    f.loadedTimeoutMinutes = true;
+  }
   if (job.window) {
     f.windowOn = true;
     f.windowStart = job.window.start;
@@ -3000,9 +3034,10 @@ function jobToForm(job: Job): FormState {
   return f;
 }
 
-function formToBody(
-  form: FormState,
-): Omit<JobCreateBody, 'concurrency'> & { concurrency?: number | null } {
+function formToBody(form: FormState): Omit<JobCreateBody, 'concurrency' | 'timeoutMinutes'> & {
+  concurrency?: number | null;
+  timeoutMinutes?: number | null;
+} {
   let trigger: JobTrigger;
   switch (form.triggerType) {
     case 'cron':
@@ -3160,6 +3195,11 @@ function formToBody(
       ? { concurrency: Number(form.concurrency) }
       : form.loadedConcurrency
         ? { concurrency: null }
+        : {}),
+    ...(form.timeoutMinutes.trim() !== ''
+      ? { timeoutMinutes: Number(form.timeoutMinutes) }
+      : form.loadedTimeoutMinutes
+        ? { timeoutMinutes: null }
         : {}),
     window: form.windowOn
       ? { start: form.windowStart, end: form.windowEnd, timezone: form.windowTimezone }
