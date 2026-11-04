@@ -11,7 +11,6 @@ import { ChatHeader } from '../components/ChatHeader.js';
 import type { ChatRow } from '../stores/types.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
-import { api } from '../api/rest.js';
 
 vi.mock('../api/rest.js', () => ({
   api: { deleteChat: vi.fn(), pinChat: vi.fn(), hideChat: vi.fn(async () => undefined) },
