@@ -17317,3 +17317,16 @@ select.permission-mode.is-pending {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Lifecycle lists (Archived / Hidden / Snoozed / Deleted / Automations) hold
+   rows a page at a time, but a long archive still piles up thousands of nodes
+   as it is scrolled. Off-screen rows skip layout and paint until they near the
+   viewport; rows have variable height, so the size is remembered once seen. */
+.sb-archived .sb-row,
+.sb-hidden .sb-row,
+.sb-snoozed .sb-row,
+.sb-deleted .sb-row,
+.sb-automations .sb-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 40px;
+}
