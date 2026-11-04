@@ -2,6 +2,7 @@
 //
 //   GET /api/chats/search?q=<query>&limit=<n>&offset=<n>&fullText=<true|false>
 //                         &includeArchived=<true|false>&includeHidden=<true|false>
+//                         &hostId=<id>   (optional: search one machine only)
 //
 // Searches every chat on every host (archived and hidden ones only on request) — names and the full text of what was
 // said. The transcripts live on the hosts (the server holds none), so this
@@ -253,6 +254,7 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
       fullText?: string;
       includeArchived?: string;
       includeHidden?: string;
+      hostId?: string;
     };
   }>('/api/chats/search', async (req, reply) => {
     let auth;
@@ -319,8 +321,15 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
     // Each host sends its own top `depth`; the merged top `depth` is always
     // inside their union, so this page is exact.
     const depth = Math.min(offset + limit, CHAT_SEARCH_MAX_DEPTH);
+    // `hostId` scopes the search to one machine, so a surface can ask every
+    // host separately and show each one's progress as it answers.
+    const only = (req.query?.hostId ?? '').toString();
+    const asked = only === '' ? hostIds() : hostIds().filter((id) => id === only);
+    if (only !== '' && asked.length === 0) {
+      return reply.code(404).send({ error: 'unknown_host', message: `no such machine: ${only}` });
+    }
     const outcomes = await Promise.all(
-      hostIds().map((hostId) =>
+      asked.map((hostId) =>
         askHost(hostId, auth.surfaceId, query, depth, fullText, includeArchived, includeHidden),
       ),
     );
