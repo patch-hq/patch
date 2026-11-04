@@ -43,6 +43,7 @@ import { dirname, join, resolve } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import type { SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
 import { linkUserConfigIntoResumeDir } from './claudeSpawn.js';
+import { inWorkSlice } from './workSlice.js';
 import {
   RUNNER_EXIT,
   RUNNER_IN,
@@ -320,18 +321,18 @@ export class DurableTurn {
       startedAt: Date.now(),
     });
     const logFd = openSync(join(this.dir, RUNNER_LOG), 'a');
-    const child = spawn(
-      this.req.config.runner.command,
-      [...this.req.config.runner.args, this.dir],
-      {
-        cwd: this.dir,
-        // Its own session: launchd/systemd stopping the host, or the host's
-        // own process group going, must not reach it.
-        detached: true,
-        stdio: ['pipe', 'ignore', logFd],
-        windowsHide: true,
-      },
-    );
+    const launch = inWorkSlice(this.req.config.runner.command, [
+      ...this.req.config.runner.args,
+      this.dir,
+    ]);
+    const child = spawn(launch.command, launch.args, {
+      cwd: this.dir,
+      // Its own session: launchd/systemd stopping the host, or the host's
+      // own process group going, must not reach it.
+      detached: true,
+      stdio: ['pipe', 'ignore', logFd],
+      windowsHide: true,
+    });
     closeSync(logFd);
     const proc = new RunnerProcess(this, 'fresh');
     // The spawn spec — credentials included — travels over the pipe, never

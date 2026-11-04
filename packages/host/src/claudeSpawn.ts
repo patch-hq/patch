@@ -3,6 +3,7 @@ import { existsSync, lstatSync, symlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { newTurnTag, TURN_TAG_ENV, killTagged } from './turnTag.js';
+import { inWorkSlice } from './workSlice.js';
 import type { SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
 
 /** What a resumed chat needs from the user's own Claude config dir. */
@@ -61,7 +62,8 @@ export function spawnClaudeInGroup(
 ): SpawnedProcess {
   linkUserConfigIntoResumeDir(opts.env);
   const turnTag = newTurnTag();
-  const child = spawn(opts.command, opts.args, {
+  const launch = inWorkSlice(opts.command, opts.args);
+  const child = spawn(launch.command, launch.args, {
     cwd: opts.cwd,
     env: { ...opts.env, [TURN_TAG_ENV]: turnTag },
     stdio: ['pipe', 'pipe', 'ignore'],

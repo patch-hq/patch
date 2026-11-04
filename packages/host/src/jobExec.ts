@@ -17,6 +17,7 @@ import type { Logger } from 'pino';
 import type { JobExecRequestEvent, WireEvent } from '@patch/wire';
 import { SCRIPT_ACTION_OUTPUT_LIMIT } from '@patch/wire/jobs';
 import { expandHome } from './expandHome.js';
+import { inWorkSlice } from './workSlice.js';
 
 /**
  * Bytes of each stream held while the command runs. Only the tail is ever
@@ -114,7 +115,8 @@ export function handleJobExec(
   //
   // The command travels in the ENVIRONMENT rather than inside the `-c` string so
   // there is no quoting to get wrong — a gate is full of quotes and heredocs.
-  const child = spawn('/bin/bash', ['-lc', 'exec /bin/bash -c "$PATCH_JOB_COMMAND"'], {
+  const launch = inWorkSlice('/bin/bash', ['-lc', 'exec /bin/bash -c "$PATCH_JOB_COMMAND"']);
+  const child = spawn(launch.command, launch.args, {
     cwd: folder,
     env: { ...process.env, PATCH_JOB_COMMAND: event.command },
     timeout: event.timeoutMs,
