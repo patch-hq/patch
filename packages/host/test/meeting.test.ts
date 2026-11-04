@@ -126,6 +126,22 @@ describe('MeetingManager', () => {
     await tick;
   });
 
+  it('does not hold the mic channel behind a stalled system clip', async () => {
+    diarise = true;
+    const m = make();
+    m.start('c1');
+    let release!: () => void;
+    transcribeVoices.mockImplementationOnce(
+      () => new Promise((r) => (release = () => r([{ text: 'late system words', voice: 1 }]))),
+    );
+    const stalled = m.ingestAudio('c1', 'system', Buffer.from('s'));
+    transcribe.mockResolvedValueOnce('prompt mic words');
+    await m.ingestAudio('c1', 'mic', Buffer.from('m'));
+    expect(m.get('c1')!.transcript.map((l) => l.text)).toEqual(['prompt mic words']);
+    release();
+    await stalled;
+  });
+
   it('drops a system line that is the mic speech returning, in either clip order', async () => {
     const m = make();
     m.start('c1');

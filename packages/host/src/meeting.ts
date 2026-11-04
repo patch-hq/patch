@@ -232,8 +232,11 @@ interface Runtime {
   researching: Promise<void> | undefined;
   /** Serialises analysis and write-ups. */
   chain: Promise<void>;
-  /** Serialises transcription alone, so a slow analysis pass never holds clips back. */
-  txChain: Promise<void>;
+  /**
+   * Serialises transcription alone, so a slow analysis pass never holds clips back.
+   * One queue per channel: a slow or rate-limited clip on one must not hold the other behind it.
+   */
+  txChain: Record<'mic' | 'system', Promise<void>>;
 }
 
 /** Consecutive segments from one voice read as one line. */
@@ -390,7 +393,7 @@ export class MeetingManager {
       lastResearchAt: 0,
       researching: undefined,
       chain: Promise.resolve(),
-      txChain: Promise.resolve(),
+      txChain: { mic: Promise.resolve(), system: Promise.resolve() },
     };
     this.runtimes.set(chatId, rt);
     this.armTimer(chatId, rt);
@@ -444,7 +447,7 @@ export class MeetingManager {
     rt.state.endedAt = t;
     this.disarmTimer(rt);
     this.commit(chatId, rt);
-    await rt.txChain;
+    await Promise.all([rt.txChain.mic, rt.txChain.system]);
     await this.enqueue(rt, async () => {
       await this.analyse(chatId, rt, true);
       await this.writeUp(chatId, rt);
@@ -460,7 +463,7 @@ export class MeetingManager {
         `chat ${chatId}'s meeting is ${rt.state.status}: end it before deleting`,
       );
     }
-    await rt.txChain;
+    await Promise.all([rt.txChain.mic, rt.txChain.system]);
     await rt.chain;
     this.runtimes.delete(chatId);
     rmSync(this.file(chatId), { force: true });
@@ -537,7 +540,7 @@ export class MeetingManager {
       throw new MeetingError(`chat ${chatId}'s meeting has ended`);
     }
     const at = meetingElapsedMs(rt.state, this.now());
-    const next = rt.txChain.then(async () => {
+    const next = rt.txChain[source].then(async () => {
       const speaker = source === 'mic' ? 'you' : 'them';
       const printed = !!this.deps.transcribeVoices && !!this.deps.hasVoiceprint?.();
       let pieces: { text: string; voice?: number }[];
@@ -612,7 +615,7 @@ export class MeetingManager {
       rt.state.error = null;
       this.commit(chatId, rt);
     });
-    rt.txChain = next.catch(() => undefined);
+    rt.txChain[source] = next.catch(() => undefined);
     return next;
   }
 
@@ -1269,7 +1272,7 @@ export class MeetingManager {
       lastResearchAt: 0,
       researching: undefined,
       chain: Promise.resolve(),
-      txChain: Promise.resolve(),
+      txChain: { mic: Promise.resolve(), system: Promise.resolve() },
     };
     this.runtimes.set(chatId, rt);
     // A host restart finds the meeting `live` with no audio coming: park it as
