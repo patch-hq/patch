@@ -173,7 +173,11 @@ export class NotificationRouter {
           await this.routePush(routed, opts.suppressOn ?? 'any');
           break;
         case 'desktop':
-          this.routeDesktop(routed, opts.skipDesktopIfFocused ?? opts.suppressOn === 'chat-open');
+          this.routeDesktop(
+            routed,
+            event.priority !== 'urgent' &&
+              (opts.skipDesktopIfFocused ?? opts.suppressOn === 'chat-open'),
+          );
           break;
         case 'speakers':
           this.routeSpeakers(routed);
@@ -225,9 +229,8 @@ export class NotificationRouter {
     // count is the caller's call (see RouteOptions).
     //
     // The three levels are the agent's decision, not ours -- we only carry out
-    // what each one means. 'urgent' is 'normal' with a more urgent sound, so it
-    // is held back exactly as 'normal' is; only a call ring goes through
-    // regardless. 'silent' is never suppressed, which reads backwards until you
+    // what each one means. 'urgent' and a call ring go through regardless of
+    // presence: the user asked to be reached, even with the chat open. 'silent' is never suppressed, which reads backwards until you
     // see what it is for: it
     // makes no sound and asks for nothing now, so its whole value is being
     // there on the phone the next time the user looks. Suppressing it would
@@ -243,7 +246,7 @@ export class NotificationRouter {
           : this.deps.presence.isActive(account.accountId, this.now());
     // A blocked-on-you ask is held back by nothing: dropping it for presence is
     // how `patch_ask_human` returned ok and the phone never buzzed.
-    if (!isCall && !isSilent && event.kind !== 'ask' && active) {
+    if (!isUrgent && !isSilent && event.kind !== 'ask' && active) {
       this.deps.logger.info(
         {
           chatId: event.chatId,
