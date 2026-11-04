@@ -53,6 +53,9 @@ interface MeetingStoreState {
   /** Per chat: which tab of the meeting panel is open. Absent is Notes. */
   view: Record<string, MeetingView>;
   setView(chatId: string, view: MeetingView): void;
+  /** Bumped to bring a meeting's notes back to where the meeting is. */
+  feedJump: Record<string, number>;
+  jumpFeed(chatId: string): void;
   /** Per chat: the ended meeting is folded into one line and the chat has the room. */
   folded: Record<string, true>;
   setFolded(chatId: string, folded: boolean): void;
@@ -87,6 +90,9 @@ export const useMeetingStore = create<MeetingStoreState>((set) => ({
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   view: {},
   setView: (chatId, view) => set((s) => ({ view: { ...s.view, [chatId]: view } })),
+  feedJump: {},
+  jumpFeed: (chatId) =>
+    set((s) => ({ feedJump: { ...s.feedJump, [chatId]: (s.feedJump[chatId] ?? 0) + 1 } })),
   folded: readFolded(),
   setFolded: (chatId, folded) =>
     set((s) => {
@@ -128,6 +134,7 @@ export const useMeetingStore = create<MeetingStoreState>((set) => ({
       promptEditor: null,
       settingsOpen: false,
       view: {},
+      feedJump: {},
     }),
 }));
 

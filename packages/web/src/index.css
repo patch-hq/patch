@@ -14551,10 +14551,15 @@ select.permission-mode.is-pending {
   color: var(--ink-3);
   cursor: pointer;
 }
-.mm-icon:hover,
-.mm-icon[aria-pressed='true'] {
+.mm-icon:hover {
   color: var(--ink);
   background: var(--bg-soft);
+}
+/* The view shown: accent, so Notes and Transcript read as a selected pair. */
+.mm-icon[aria-pressed='true'] {
+  color: var(--accent-strong);
+  background: var(--accent-tint);
+  border-color: var(--accent-soft);
 }
 .mm-icon:disabled {
   cursor: default;
@@ -14590,8 +14595,69 @@ select.permission-mode.is-pending {
 .mm-feed {
   gap: 4px;
 }
+/* Topics fade with age rather than folding: smaller, fainter, fewer bullets. */
 .mm-topic {
-  font-size: 14px;
+  font-size: 16px;
+  margin-bottom: 6px;
+}
+.mm-topic[data-age='1'] {
+  font-size: 15px;
+}
+.mm-topic[data-age='2'],
+.mm-topic[data-age='3'] {
+  font-size: var(--text-min);
+  margin-bottom: 2px;
+}
+.mm-topic[data-age='2'] .nm,
+.mm-topic[data-age='3'] .nm {
+  color: var(--ink-2);
+}
+.mm-topic[data-age='3'] ul {
+  color: var(--ink-3);
+}
+.mm-more {
+  all: unset;
+  align-self: flex-start;
+  font-size: var(--text-min);
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+.mm-more:hover {
+  color: var(--ink-2);
+}
+/* What the meeting is on now: one line, kept at the top of the notes. */
+.mm-now {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 8px 20px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--line);
+  font-size: 15px;
+}
+.mm-now-k {
+  flex: none;
+  font-size: var(--text-min);
+  font-weight: 700;
+  color: var(--accent-strong);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.mm-now-t {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink);
+  font-weight: 500;
+}
+.mm-status {
+  font-size: var(--text-min);
+  color: var(--ink-faint);
+  padding: 2px 0;
 }
 .mm-topic-h {
   display: flex;
@@ -14640,7 +14706,7 @@ select.permission-mode.is-pending {
   color: var(--ink-2);
 }
 .mm-topic-b {
-  margin: 2px 0 6px 24px;
+  margin: 2px 0 2px 0;
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -14722,6 +14788,16 @@ select.permission-mode.is-pending {
 .mm-actions {
   display: flex;
   flex-direction: column;
+}
+.mm-sect-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 10px 0 2px;
+}
+.mm-sect-row .mm-sect {
+  margin: 0;
 }
 /* What was just said, word for word, at the foot of the feed. */
 .mm-said {
@@ -16932,15 +17008,26 @@ select.permission-mode.is-pending {
   font-size: var(--text-min);
 }
 
-/* Research cards (meeting mode): one line, opening to the bullets. Type is the chip's colour, never a left bar. */
+/* Research cards (meeting mode): always open, read at a glance. Type is the chip's colour, never a left bar. */
 .mm-card {
-  font-size: 14px;
+  font-size: 15px;
+  margin: 6px 0;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
 }
 .mm-card-h {
-  all: unset;
-  box-sizing: border-box;
-  width: 100%;
-  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.mm-card-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--ink);
+  overflow-wrap: anywhere;
 }
 .mm-card[data-kind='fact'] .mm-chip {
   background: var(--waiting-tint);
@@ -16951,12 +17038,13 @@ select.permission-mode.is-pending {
   color: var(--permission);
 }
 .mm-card-b {
-  margin: 2px 0 4px 8px;
+  margin-top: 4px;
 }
 .mm-card ul {
   margin: 0;
   padding-left: 18px;
   color: var(--ink-2);
+  line-height: 1.45;
 }
 .mm-verdict {
   font-size: var(--text-min);
@@ -17263,14 +17351,38 @@ select.permission-mode.is-pending {
 }
 
 /* Job Prompt: Write/Preview tabs and a find bar over the textarea (PromptEditor). */
-.prompt-editor { display: flex; flex-direction: column; gap: 8px; }
-.prompt-editor-bar { display: flex; justify-content: space-between; align-items: center; }
-.prompt-editor-tabs { display: flex; gap: 4px; }
+.prompt-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.prompt-editor-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.prompt-editor-tabs {
+  display: flex;
+  gap: 4px;
+}
 .prompt-editor-bar button,
-.prompt-editor-find button { font-size: 15px; padding: 2px 10px; }
-.prompt-editor-tabs button[aria-selected='true'] { font-weight: 600; text-decoration: underline; }
-.prompt-editor-find { display: flex; align-items: center; gap: 8px; }
-.prompt-editor-find input { flex: 1; min-width: 0; }
+.prompt-editor-find button {
+  font-size: 15px;
+  padding: 2px 10px;
+}
+.prompt-editor-tabs button[aria-selected='true'] {
+  font-weight: 600;
+  text-decoration: underline;
+}
+.prompt-editor-find {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.prompt-editor-find input {
+  flex: 1;
+  min-width: 0;
+}
 .prompt-editor-preview {
   min-height: 240px;
   padding: 8px 12px;

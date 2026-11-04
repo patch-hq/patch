@@ -29,14 +29,6 @@ const applyMeeting = (page: Page, patch: Record<string, unknown>) =>
     store.getState().apply('chat_tools', { ...cur, ...p });
   }, patch);
 
-/** Opens a folded topic in the feed by a piece of its summary. */
-const openTopic = (page: Page, text: string) =>
-  page
-    .getByTestId('meeting-topic')
-    .filter({ hasText: text })
-    .getByTestId('meeting-topic-toggle')
-    .click();
-
 /**
  * A stand-in desktop shell: it takes the audio and "transcribes" it, sending one
  * final line for the mic only when it is stopped, as the real one does with the
@@ -186,7 +178,7 @@ test.describe('meeting mode — live', () => {
     await expect(page.getByTestId('meeting-people')).toHaveText('Ada · Bo · You · 1 unknown');
   });
 
-  test('the feed runs oldest first: topics with how long each ran, the newest open, the rest folded', async ({
+  test('the feed runs oldest first: topics with how long each ran, older ones smaller, none folded', async ({
     page,
   }) => {
     await page.goto(URL_LIVE);
@@ -197,14 +189,15 @@ test.describe('meeting mode — live', () => {
       '22:05–31:40 · 10 min',
       /^31:40–3\d:\d\d · \d min$/,
     ]);
-    await expect(topics.nth(0)).not.toHaveAttribute('data-open', 'true');
-    await expect(topics.nth(1)).not.toHaveAttribute('data-open', 'true');
-    await expect(topics.nth(2)).toHaveAttribute('data-open', 'true');
+    await expect(page.getByTestId('meeting-topic-toggle')).toHaveCount(0);
+    await expect(topics.nth(2)).toHaveAttribute('data-age', '0');
+    await expect(topics.nth(0)).toHaveAttribute('data-age', '1');
+    const size = (i: number) =>
+      topics.nth(i).evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+    expect(await size(0)).toBeLessThan(await size(2));
     await expect(topics.nth(2)).toContainText('Sandbox out of credit');
-    await expect(topics.nth(0)).not.toContainText('Ships Monday');
     await expect(topics.locator('.decw')).toHaveText(['Decided', 'Decided']);
-    // opening a folded topic shows its detail and what came up in it
-    await openTopic(page, 'release 4.2');
+    // an older topic still shows its detail and what came up in it, with nothing to open
     await expect(topics.nth(0)).toContainText('Ships Monday');
     await expect(topics.nth(0).getByTestId('meeting-card')).toHaveCount(1);
     await expect(topics.nth(0).getByTestId('meeting-note')).toContainText(
@@ -213,9 +206,6 @@ test.describe('meeting mode — live', () => {
     await expect(topics.nth(0).getByTestId('meeting-feed-action')).toContainText(
       'Find dates for the vendor review',
     );
-    // and the newest folds away when asked
-    await topics.nth(2).getByTestId('meeting-topic-toggle').click();
-    await expect(topics.nth(2)).not.toHaveAttribute('data-open', 'true');
   });
 
   test('actions and then what was just said close the feed, in the same scroll', async ({
@@ -300,7 +290,6 @@ test.describe('meeting mode — live', () => {
 
   test('a note is edited in place, and emptying it removes it', async ({ page }) => {
     await page.goto(URL_LIVE);
-    await openTopic(page, 'release 4.2');
     const text = page.getByTestId('meeting-note-text').first();
     await text.click();
     await page.keyboard.press('ControlOrMeta+a');
@@ -469,7 +458,6 @@ test.describe('meeting mode — live', () => {
     page,
   }) => {
     await page.goto(URL_LIVE);
-    await openTopic(page, 'release 4.2');
     const t = page.getByTestId('meeting-topic').filter({ hasText: 'release 4.2' });
     await t.getByTestId('meeting-point-title').click();
     await page.keyboard.press('Enter');
@@ -492,10 +480,9 @@ test.describe('meeting mode — live', () => {
     await expect(lines.first()).toContainText('busiest week of the year');
     await newest.getByTestId('meeting-point-time').click();
     await expect(newest.getByTestId('meeting-point-lines')).toHaveCount(0);
-    // on a folded topic it opens the topic with its lines
+    // an older topic shows its lines the same way
     const first = page.getByTestId('meeting-topic').first();
     await first.getByTestId('meeting-point-time').click();
-    await expect(first).toHaveAttribute('data-open', 'true');
     await expect(first.getByTestId('meeting-point-lines')).toHaveText(
       'No transcript for this topic',
     );
@@ -655,12 +642,34 @@ test.describe('meeting mode — live', () => {
     expect(actions).toEqual(['pause', 'resume', 'end']);
   });
 
-  test('a live meeting this device is not capturing says so, and offers Listen here', async ({
+  test('Notes, pressed while showing the notes, brings them back to the newest', async ({
     page,
   }) => {
     await page.goto(URL_LIVE);
-    await expect(page.getByTestId('meeting-not-listening')).toBeVisible();
-    await expect(page.getByTestId('meeting-listen-here')).toBeVisible();
+    await page.setViewportSize({ width: 900, height: 500 });
+    const feed = page.getByTestId('meeting-points');
+    await feed.evaluate((el) => (el.scrollTop = 0));
+    await page.getByTestId('meeting-view-notes').click();
+    await expect
+      .poll(() => feed.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
+      .toBeLessThan(4);
+    await expect(page.getByTestId('meeting-now-headline')).toBeVisible();
+  });
+
+  test('a live meeting heard on another device says so quietly; heard by nobody, it says that', async ({
+    page,
+  }) => {
+    await page.goto(URL_LIVE);
+    await expect(page.getByTestId('meeting-listening-elsewhere')).toHaveText(
+      'Listening on another device',
+    );
+    await expect(page.getByTestId('meeting-not-listening')).toHaveCount(0);
+    await applyMeeting(page, {
+      live: null,
+      transcript: [{ at: 1000, speaker: 'you', text: 'hello' }],
+    });
+    await expect(page.getByTestId('meeting-not-listening')).toContainText('No device is listening');
+    await expect(page.getByTestId('meeting-listening-elsewhere')).toHaveCount(0);
   });
 
   test('a host error is one line under the header, and shows in full on click', async ({
@@ -704,13 +713,11 @@ test.describe('meeting mode — after', () => {
     await expect(page.getByTestId('composer-input')).toBeEnabled();
   });
 
-  test('everything folds to its one-line summary; the write-up heads them, folded too', async ({
-    page,
-  }) => {
+  test('topics are never folded; the write-up heads them, folded', async ({ page }) => {
     await page.goto(URL_ENDED);
     const topics = page.getByTestId('meeting-topic');
     await expect(topics).toHaveCount(3);
-    for (const t of await topics.all()) await expect(t).not.toHaveAttribute('data-open', 'true');
+    await expect(page.getByTestId('meeting-topic-toggle')).toHaveCount(0);
     const [sum, first] = await Promise.all([
       page.getByTestId('meeting-summary').boundingBox(),
       topics.first().boundingBox(),
@@ -1005,12 +1012,10 @@ test.describe('meeting mode — editing prompts mid-call', () => {
 });
 
 test.describe('meeting mode — research cards', () => {
-  test('one line each, the type by the chip colour, opening to bullets and source', async ({
+  test('shown open, the type by the chip colour, with bullets and source and nothing to click', async ({
     page,
   }) => {
     await page.goto(URL_LIVE);
-    await openTopic(page, 'release 4.2');
-    await openTopic(page, 'points ledger');
     const cards = page.getByTestId('meeting-card');
     await expect(cards).toHaveCount(3);
     await expect(cards.getByTestId('meeting-card-kind')).toHaveText([
@@ -1027,15 +1032,14 @@ test.describe('meeting mode — research cards', () => {
     );
     expect(new Set(colours).size).toBe(3);
     for (const c of await cards.all()) {
-      expect((await c.boundingBox())!.height).toBeLessThan(30);
       expect(await c.evaluate((el) => getComputedStyle(el).borderLeftWidth)).toBe('0px');
+      await expect(c.getByTestId('meeting-card-body')).toBeVisible();
     }
     const fact = page.locator('[data-testid=meeting-card][data-kind=fact]');
     await expect(fact.getByTestId('meeting-card-title')).toHaveText(
       '"The ferry carries about fifty cars"',
     );
     await expect(fact.getByTestId('meeting-card-verdict')).toHaveText('Off');
-    await fact.locator('.mm-card-h').click();
     await expect(fact.locator('li')).toHaveText(['The operator lists a deck capacity of 40 cars']);
     const link = fact.getByTestId('meeting-card-source');
     await expect(link).toHaveText('Operator fleet page');
@@ -1102,8 +1106,7 @@ test.describe('meeting mode — research cards', () => {
 
   test('an ended meeting keeps its cards; research is locked', async ({ page }) => {
     await page.goto('/app/dev-harness.html?chat=chat_tools&meeting=ended');
-    await openTopic(page, 'points ledger');
-    await expect(page.getByTestId('meeting-card')).toHaveCount(2);
+    await expect(page.getByTestId('meeting-card')).toHaveCount(3);
     await page.getByTestId('meeting-cog').click();
     await expect(page.getByTestId('meeting-research-on')).toBeDisabled();
   });
