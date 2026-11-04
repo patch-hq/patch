@@ -304,20 +304,24 @@ describe('Unread option (spec/15 § Needs attention)', () => {
     expect(hasText(r.root, 'Nothing needs attention')).toBe(true);
   });
 
-  it('queues FIFO — oldest-updated first, permission leading — not the normal recency order', () => {
-    useChatStore
-      .getState()
-      .hydrate([
-        row({ chatId: 'newest-done', folder: 'work', lastUpdated: 300 }),
-        row({ chatId: 'oldest-done', folder: 'work', lastUpdated: 100 }),
-        row({ chatId: 'perm', folder: 'work', lastUpdated: 999, activity: 'awaiting-permission' }),
-      ]);
+  it('keeps the normal order — last user activity, newest first — and an agent update or permission prompt does not move a row', () => {
+    useChatStore.getState().hydrate([
+      row({ chatId: 'newest-done', folder: 'work', lastUpdated: 300, lastUserActivity: 300 }),
+      row({ chatId: 'oldest-done', folder: 'work', lastUpdated: 100, lastUserActivity: 100 }),
+      row({
+        chatId: 'perm',
+        folder: 'work',
+        lastUpdated: 999,
+        lastUserActivity: 200,
+        activity: 'awaiting-permission',
+      }),
+    ]);
     const r = renderRN(<ChatsScreen />);
     selectUnread(r);
     const names = findAllHost(r.root, byType('Text'))
       .map((t) => (typeof t.children[0] === 'string' ? t.children[0] : ''))
       .filter((t) => ['newest-done', 'oldest-done', 'perm'].includes(t));
-    expect(names).toEqual(['perm', 'oldest-done', 'newest-done']);
+    expect(names).toEqual(['newest-done', 'perm', 'oldest-done']);
   });
 
   it('holds the just-opened row (greyed, still listed) until you navigate to a DIFFERENT chat', () => {

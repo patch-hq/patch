@@ -121,7 +121,7 @@ describe('Settings → Prompts → Meetings models', () => {
     await flush();
     expect(get(r, 'meeting-analysis-model')).toBeTruthy();
     expect(get(r, 'meeting-cleanup-model')).toBeTruthy();
-    expect(get(r, 'meeting-analyse-seconds').props.value).toBe('15');
+    expect(get(r, 'meeting-analyse-seconds').props.value).toBe('45');
 
     // Meetings are transcribed on the listening device: there is no model to pick here.
     expect(r.root.findAll((n) => n.props.testID === 'meeting-transcription-model')).toHaveLength(0);
@@ -129,7 +129,7 @@ describe('Settings → Prompts → Meetings models', () => {
     await actAsync(() => get(r, 'meeting-analyse-seconds').props.onChangeText('2'));
     await actAsync(() => get(r, 'meeting-analyse-seconds').props.onBlur());
     expect(api.setPreferences).not.toHaveBeenCalledWith({ meetingAnalyseSeconds: 2 });
-    expect(get(r, 'meeting-analyse-seconds').props.value).toBe('15');
+    expect(get(r, 'meeting-analyse-seconds').props.value).toBe('45');
 
     await actAsync(() => get(r, 'meeting-analyse-seconds').props.onChangeText('30'));
     await actAsync(async () => {

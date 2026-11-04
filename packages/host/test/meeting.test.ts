@@ -286,10 +286,10 @@ describe('MeetingManager', () => {
       clearInterval: () => undefined,
     });
     m.start('c1');
-    expect(m.get('c1')?.settings).toEqual({ clipSeconds: 6, analyseSeconds: 15 });
+    expect(m.get('c1')?.settings).toEqual({ clipSeconds: 6, analyseSeconds: 45 });
     m.tune('c1', { clipSeconds: 3, analyseSeconds: 8 });
     expect(m.get('c1')?.settings).toEqual({ clipSeconds: 3, analyseSeconds: 8 });
-    expect(intervals).toEqual([15_000, 8_000]);
+    expect(intervals).toEqual([45_000, 8_000]);
     expect(() => m.tune('c1', { clipSeconds: 1, analyseSeconds: 8 })).toThrow();
     expect(() => m.tune('nope', { clipSeconds: 3, analyseSeconds: 8 })).toThrow(MeetingError);
   });
@@ -398,6 +398,30 @@ describe('MeetingManager', () => {
     expect(s2.topics[0]!.points).toEqual(['Own service', 'November']);
     expect(s2.actions).toHaveLength(1); // duplicate title ignored
     expect(analyse.mock.calls[1]![0].newLines).toHaveLength(1);
+  });
+
+  it('keeps at most five actions waiting, however many a pass proposes', async () => {
+    const m = make();
+    m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    analyse.mockResolvedValueOnce(
+      analysis({
+        actions: Array.from({ length: 8 }, (_, i) => ({
+          kind: 'mine' as const,
+          title: `Do thing ${i}`,
+          why: 'said so',
+        })),
+      }),
+    );
+    await m.tick('c1');
+    expect(m.get('c1')!.actions).toHaveLength(5);
+  });
+
+  it('records the device the lines came from', () => {
+    const m = make();
+    m.start('c1');
+    m.ingestLines('c1', 'mic', [{ text: 'hi', spokenAt: clock }], 'Patch on a Mac');
+    expect(m.get('c1')!.listeningOn).toBe('Patch on a Mac');
   });
 
   it('stores My notes with the meeting, broadcasts it, reloads it and leaves it alone through analysis', async () => {
@@ -1161,6 +1185,22 @@ describe('meetingGen', () => {
   it('rejects a wrong top level', () => {
     expect(() => parseMeetingAnalysis('sorry')).toThrow(/not an object/);
     expect(() => parseMeetingAnalysis({ now: 1, topics: [], actions: [] })).toThrow();
+  });
+  it('drops only the invalid items and treats null as absent', () => {
+    const { analysis: a, dropped } = parseMeetingAnalysis({
+      now: { headline: 'h', bullets: [], who: 'w' },
+      topics: [{ title: 't', points: [] }, { title: 5 }],
+      actions: [
+        { kind: 'other', owner: null, title: 'a', why: 'y' },
+        { kind: 'mine', title: 'b' },
+        { kind: 'mine', owner: null, title: 'c', why: 'ok' },
+      ],
+      summary: 'a string',
+    });
+    expect(a.topics).toHaveLength(1);
+    expect(a.actions.map((x) => x.title)).toEqual(['c']);
+    expect(a.summary).toBeNull();
+    expect(dropped).toHaveLength(4);
   });
 
   it('an empty new transcript tells the model to write from the notes', () => {

@@ -1018,6 +1018,8 @@ test.describe('meeting mode — research cards', () => {
     await page.goto(URL_LIVE);
     const cards = page.getByTestId('meeting-card');
     await expect(cards).toHaveCount(3);
+    // Bullets show without a click.
+    await expect(cards.first().locator('li').first()).toBeVisible();
     await expect(cards.getByTestId('meeting-card-kind')).toHaveText([
       'Answer',
       'Fact check',
@@ -1045,6 +1047,8 @@ test.describe('meeting mode — research cards', () => {
     await expect(link).toHaveText('Operator fleet page');
     await expect(link).toHaveAttribute('href', 'https://example.org/fleet');
     await expect(link).toHaveAttribute('target', '_blank');
+    await fact.locator('.mm-card-h').click();
+    await expect(fact.locator('li')).toHaveCount(0);
   });
 
   test('the research switch tells the host, and a failed pass shows under the header', async ({

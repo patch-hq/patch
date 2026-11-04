@@ -25,21 +25,34 @@ import { useUiStore } from '../stores/uiStore.js';
 import {
   startMeetingCapture,
   type MeetingCapture,
+  type MeetingCaptureDeps,
   type MeetingSources,
   type PcmFeed,
 } from './meetingCapture.js';
+
+import { deviceLabel } from './deviceLabel.js';
 
 let capture: MeetingCapture | null = null;
 /** Undoes the transcription listeners for the capture in progress. */
 let stopListening: (() => void) | null = null;
 
 const SETTINGS_KEY = 'patch.meeting.liveness';
+const RECORD_KEY = 'patch.meeting.record-raw';
+
+/** Opt-in: save the raw mic, cleaned mic and system lanes of the next meeting to disk (desktop app only). */
+export function getRecordRaw(): boolean {
+  return localStorage.getItem(RECORD_KEY) === '1';
+}
+export function setRecordRaw(on: boolean): void {
+  if (on) localStorage.setItem(RECORD_KEY, '1');
+  else localStorage.removeItem(RECORD_KEY);
+}
 
 /** Named speeds for the live notes: [label, clip seconds, analysis seconds]. */
 export const MEETING_SPEEDS: Record<string, MeetingSettings & { label: string }> = {
   fast: { label: 'Fast', clipSeconds: 3, analyseSeconds: 8 },
   normal: { label: 'Normal', ...DEFAULT_MEETING_SETTINGS },
-  slow: { label: 'Slow (cheaper)', clipSeconds: 15, analyseSeconds: 30 },
+  slow: { label: 'Slow (cheaper)', clipSeconds: 15, analyseSeconds: 90 },
 };
 
 /** The speeds as they stand now: Normal's analysis interval is the account setting. */
@@ -225,6 +238,7 @@ function listen(chatId: string, bridge: ReturnType<typeof deviceTranscriber>): (
             ...(speakerName ? { speakerName } : {}),
           },
         ],
+        device: deviceLabel(),
       });
     } catch (err) {
       report('Meeting line not sent', err);
@@ -253,6 +267,19 @@ function listen(chatId: string, bridge: ReturnType<typeof deviceTranscriber>): (
   };
 }
 
+/** The recording tap when opted in. No desktop shell to write the files is an error, not a skip. */
+function rawTap(): Pick<MeetingCaptureDeps, 'onRaw'> {
+  if (!getRecordRaw()) return {};
+  const bridge = getDesktopBridge();
+  if (!bridge?.recordMeetingChunk) {
+    throw new Error('Raw recording needs the desktop app. Turn it off or update Patch');
+  }
+  return {
+    onRaw: (lane, pcm) =>
+      bridge.recordMeetingChunk!(lane, new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength)),
+  };
+}
+
 async function beginCapture(chatId: string, opts: { names?: boolean } = {}): Promise<void> {
   // 'new' is the new-chat screen's placeholder, not a chat: no host owns it, so
   // the server would drop every control frame and line sent for it.
@@ -275,7 +302,7 @@ async function beginCapture(chatId: string, opts: { names?: boolean } = {}): Pro
       sources,
       (source, pcm) => bridge.pushMeetingAudio(source, pcm, Date.now()),
       // A long silence from the far end: the call is over.
-      { onSilence: () => void endMeeting(chatId) },
+      { onSilence: () => void endMeeting(chatId), ...rawTap() },
     );
   } catch (err) {
     sources.mic?.getTracks().forEach((t) => t.stop());
@@ -459,6 +486,12 @@ async function stopCapture(): Promise<void> {
       .stopMeetingTranscription()
       .catch((err: unknown) => report('Transcription failed', err));
   }
+  void getDesktopBridge()
+    ?.endMeetingRecording?.()
+    .then((dir) => {
+      if (dir) useUiStore.getState().pushError(`Meeting audio saved to ${dir}`);
+    })
+    .catch((err: Error) => report('Could not save the meeting recording', err));
   stopSpeakerWatch?.();
   stopSpeakerWatch = null;
   stopListening?.();

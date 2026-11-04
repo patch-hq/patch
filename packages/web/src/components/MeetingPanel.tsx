@@ -602,7 +602,9 @@ function MeetingAlerts({ chatId, meeting }: { chatId: string; meeting: MeetingSt
       ) : null}
       {listening === 'elsewhere' ? (
         <div className="mm-status" data-testid="meeting-listening-elsewhere">
-          Listening on another device
+          {meeting.listeningOn
+            ? `Listening on ${meeting.listeningOn}`
+            : 'Listening on another device'}
         </div>
       ) : null}
       {listening === 'nobody' ? (

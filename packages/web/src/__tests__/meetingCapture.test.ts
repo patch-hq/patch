@@ -137,6 +137,18 @@ describe('startMeetingCapture', () => {
     expect(mean(settled)).toBeLessThan(SILENCE_RMS * 2);
   });
 
+  it('taps the system lane before the silence gate, so a near-silent tap is still recorded', () => {
+    const raw: Array<[string, number]> = [];
+    let push: ((pcm: Int16Array) => void) | null = null;
+    startMeetingCapture(
+      { system: { subscribe: (cb) => ((push = cb), () => {}), stop: () => {} } },
+      () => {},
+      { AudioContextImpl: Ctx as never, onRaw: (lane, pcm) => raw.push([lane, pcm.length]) },
+    );
+    push!(new Int16Array(1600));
+    expect(raw).toEqual([['system', 1600]]);
+  });
+
   it('rejects when there is nothing to capture', () => {
     expect(() => startMeetingCapture({}, () => {}, { AudioContextImpl: Ctx as never })).toThrow(
       /no audio sources/,

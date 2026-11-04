@@ -191,12 +191,17 @@ export function parseMeetingAnalysis(raw: unknown): {
   const topics = keep('topics', shape.topics.element, r['topics']) ?? [];
   const actions = keep('actions', shape.actions.element, r['actions']) ?? [];
   const voices = keep('voices', shape.voices.unwrap().element, r['voices']);
+  let summary: unknown = r['summary'] ?? null;
+  if (summary !== null && !shape.summary.safeParse(summary).success) {
+    dropped.push('summary: not a headline and bullets');
+    summary = null;
+  }
   const analysis = MeetingAnalysis.parse({
     now: r['now'],
     topics,
     actions,
     ...(voices !== undefined ? { voices } : {}),
-    summary: r['summary'] ?? null,
+    summary,
   });
   return { analysis, dropped };
 }

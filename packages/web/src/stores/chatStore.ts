@@ -214,6 +214,7 @@ interface ChatState {
         | 'rateLimitResumingAt'
         | 'resumeKind'
         | 'lastUserActivity'
+        | 'createdAt'
       > & {
         preview?: string | null;
         goal?: string | null;
@@ -246,6 +247,7 @@ interface ChatState {
         // back to the existing value, then to `lastUpdated` (spec/14 § Sidebar
         // ordering).
         lastUserActivity?: number;
+        createdAt?: number;
       }
     >,
   ): void;
@@ -293,6 +295,7 @@ interface ChatState {
         | 'rateLimitResumingAt'
         | 'resumeKind'
         | 'lastUserActivity'
+        | 'createdAt'
       > & {
         preview?: string | null;
         goal?: string | null;
@@ -327,6 +330,7 @@ interface ChatState {
         // back to the existing value, then to `lastUpdated` (spec/14 § Sidebar
         // ordering).
         lastUserActivity?: number;
+        createdAt?: number;
       }
     >,
   ): void;
@@ -1134,6 +1138,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         r.backgroundTasks !== undefined ? r.backgroundTasks : (existing?.backgroundTasks ?? null);
       const context = r.context !== undefined ? r.context : (existing?.context ?? null);
       const lastUserActivity = snapshotUserActivity(r, existing);
+      const createdAt = r.createdAt ?? existing?.createdAt;
       if (existing) {
         // Keep the live-stream + local fields; refresh the server-authoritative
         // ones (name, folder, activity, status, pinned, lastUpdated) from REST.
@@ -1179,6 +1184,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           backgroundTasks,
           context,
           lastUserActivity,
+          ...(createdAt !== undefined ? { createdAt } : {}),
           lastReadSeq,
         };
       } else {
@@ -1208,6 +1214,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           backgroundTasks,
           context,
           lastUserActivity,
+          ...(createdAt !== undefined ? { createdAt } : {}),
         };
         next[r.chatId] =
           persisted !== undefined
@@ -1288,6 +1295,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         r.backgroundTasks !== undefined ? r.backgroundTasks : (existing?.backgroundTasks ?? null);
       const context = r.context !== undefined ? r.context : (existing?.context ?? null);
       const lastUserActivity = snapshotUserActivity(r, existing);
+      const createdAt = r.createdAt ?? existing?.createdAt;
       if (existing) {
         const lastReadSeq =
           persisted !== undefined
@@ -1321,6 +1329,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           backgroundTasks,
           context,
           lastUserActivity,
+          ...(createdAt !== undefined ? { createdAt } : {}),
           lastReadSeq,
         };
       } else {
@@ -1350,6 +1359,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           backgroundTasks,
           context,
           lastUserActivity,
+          ...(createdAt !== undefined ? { createdAt } : {}),
         };
         next[r.chatId] =
           persisted !== undefined
@@ -1753,6 +1763,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // spec/14 § Sidebar ordering — an older host never sends the
             // field, so keep what is known rather than losing the sort key.
             lastUserActivity: event.lastUserActivity ?? row.lastUserActivity,
+            createdAt: event.createdAt ?? row.createdAt,
             awaitingPermission: hasPending || event.activity === 'awaiting-permission',
             // Rate-limit auto-resume timestamp — null when no retry is pending,
             // set when the host schedules one, cleared when it fires. Null is

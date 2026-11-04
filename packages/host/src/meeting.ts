@@ -46,6 +46,8 @@ const MAX_LIVE_CHARS = 300;
 const MAX_TRANSCRIPT_LINES = 4000;
 /** Most name corrections kept for the write-up's tooltips. */
 const NAME_FIX_LIMIT = 200;
+/** Most actions waiting at once; analysis passes add no more past this, so the list stays recognisable. */
+const MAX_PENDING_ACTIONS = 5;
 /** Cap on transcript fed into one analysis pass or one chat turn. */
 const MAX_PROMPT_TRANSCRIPT_CHARS = 12_000;
 
@@ -505,7 +507,12 @@ export class MeetingManager {
    * transcription). Each is placed at the meeting time it was said; a line from
    * before the meeting's current stretch began lands at that stretch's start.
    */
-  ingestLines(chatId: string, source: 'mic' | 'system', lines: IncomingLine[]): void {
+  ingestLines(
+    chatId: string,
+    source: 'mic' | 'system',
+    lines: IncomingLine[],
+    device?: string,
+  ): void {
     const rt = this.load(chatId);
     if (!rt) throw new MeetingError(`chat ${chatId} has no meeting`);
     // A surface flushes its last lines before sending End; later lines are a bug.
@@ -519,7 +526,8 @@ export class MeetingManager {
       return Math.min(nowAt, Math.max(rt.state.elapsedBaseMs, at));
     };
     const speaker = source === 'mic' ? 'you' : 'them';
-    let added = false;
+    let added = device !== undefined && rt.state.listeningOn !== device;
+    if (device !== undefined) rt.state.listeningOn = device;
     for (const line of lines) {
       const text = line.text.trim();
       if (text === '' || TRANSCRIPT_NOISE.test(text)) continue;
@@ -1131,6 +1139,7 @@ export class MeetingManager {
     );
     for (const act of a.actions) {
       if (s.actions.some((x) => norm(x.title) === norm(act.title))) continue;
+      if (s.actions.filter((x) => x.status === 'pending').length >= MAX_PENDING_ACTIONS) break;
       // The model's owner is only a claim: Tom's own name means the action is Tom's,
       // and a name nobody spoke under means someone who was not in the meeting.
       const owner = act.owner?.trim();

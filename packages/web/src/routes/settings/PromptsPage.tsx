@@ -18,12 +18,11 @@ import {
 import { DEFAULT_JOB_AUTONOMY_PROMPT } from '@patch/wire/jobs';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
-import { useUiStore } from '../../stores/uiStore.js';
-import { failed } from '../../lib/errorCopy.js';
 import { useModelOptions } from './modelOptions.js';
 import { PositiveNumberInput } from './PositiveNumberInput.js';
 import { Group, Pills, Row, SettingsPage } from './ui.js';
 import { patchShared } from './sharedWrite.js';
+import type { AccountPreferences } from '../../api/rest.js';
 
 type Mode = 'default' | 'custom';
 
@@ -124,13 +123,11 @@ function PromptRow({
 export function MeetingModelRows(): JSX.Element {
   const p = usePreferencesStore((s) => s.preferences);
   const loaded = usePreferencesStore((s) => s.loaded);
-  const update = usePreferencesStore((s) => s.update);
-  const pushError = useUiStore((s) => s.pushError);
   const analysisModel = useModelOptions(p.meetingAnalysisModel);
   const cleanupModel = useModelOptions(p.meetingCleanupModel);
   const researchModel = useModelOptions(p.meetingResearchModel);
-  const write = (patch: Parameters<typeof update>[0]): void => {
-    void update(patch).catch((e: Error) => pushError(failed('settings'), undefined, e.message));
+  const write = (patch: Partial<AccountPreferences>): void => {
+    void patchShared('meeting settings', patch);
   };
   return (
     <>
@@ -150,6 +147,11 @@ export function MeetingModelRows(): JSX.Element {
         </select>
         <span className="set-unit">writes the live notes</span>
       </Row>
+      {analysisModel.problem && (
+        <p className="set-sub" role="alert" data-testid="meeting-model-problem">
+          {analysisModel.problem.text}
+        </p>
+      )}
       <Row title="Clean-up model">
         <select
           aria-label="Meeting clean-up model"

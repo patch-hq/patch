@@ -122,6 +122,9 @@ export interface PatchDesktopBridge {
     hide(targetId: string): void;
     onInput(cb: (e: { targetId: string }) => void): () => void;
   };
+  /** Opt-in raw meeting recording to disk; `end` resolves with the folder, null if nothing was written. */
+  recordMeetingChunk?(lane: string, pcm: Uint8Array): void;
+  endMeetingRecording?(): Promise<string | null>;
   startMeetingSpeakers?(): void;
   stopMeetingSpeakers?(): void;
   onMeetingSpeakers?(cb: (e: { participants: string[]; speaking: string[] }) => void): () => void;

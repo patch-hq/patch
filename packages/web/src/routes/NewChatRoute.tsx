@@ -367,7 +367,15 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
       mruPair?.hostId ??
       null,
   );
-  const pickerHostId = chosenHostId ?? accountDefaultHostId;
+  // An offline machine is never the selected one, whatever a draft or the last
+  // chat remembered: it reads as unavailable, so the choice falls to the live
+  // default, or to nothing at all and the user picks (spawn then asks).
+  const chosenHostOffline = chosenHostId !== null && presenceHosts[chosenHostId]?.online === false;
+  const candidateHostId = (chosenHostOffline ? null : chosenHostId) ?? accountDefaultHostId;
+  const pickerHostId =
+    candidateHostId !== null && presenceHosts[candidateHostId]?.online === false
+      ? null
+      : candidateHostId;
   useEffect(() => {
     updateDraft(draftId, { hostId: pickerHostId ?? undefined });
   }, [pickerHostId, draftId, updateDraft]);

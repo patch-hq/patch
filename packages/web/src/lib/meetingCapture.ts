@@ -42,6 +42,11 @@ export interface MeetingCaptureDeps {
   /** Called once when the far end (system audio, else the mic) has been silent for AUTO_END_SILENCE_SECONDS. */
   onSilence?: () => void;
   silenceSeconds?: number;
+  /**
+   * Opt-in tap on the continuous audio before the silence gate and clip cutting:
+   * the mic as heard, the mic after echo cancellation, and the system tap.
+   */
+  onRaw?: (lane: 'mic-raw' | 'mic-clean' | 'system', pcm: Int16Array) => void;
 }
 
 /** Audio that is already 16 kHz mono PCM16, e.g. the desktop shell's system-audio tap. */
@@ -122,6 +127,8 @@ export function startMeetingCapture(
       const raw = downsample(e.inputBuffer.getChannelData(0));
       // While paused the canceller still sees the mic, to keep it in step with the reference.
       const pcm = aec ? aec.processMic(raw) : raw;
+      deps.onRaw?.('mic-raw', raw);
+      deps.onRaw?.('mic-clean', pcm);
       if (!paused) deliver('mic', pcm);
     };
     src.connect(processor);
@@ -149,6 +156,7 @@ export function startMeetingCapture(
     const unsubscribe = feed.subscribe((pcm) => {
       // The reference runs while paused too, so the canceller's timeline stays continuous.
       aec?.pushFar(pcm);
+      deps.onRaw?.('system', pcm);
       if (!paused) deliver('system', pcm);
     });
     lanes.push({

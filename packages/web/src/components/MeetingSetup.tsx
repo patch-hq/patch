@@ -2,9 +2,10 @@
 // once as a gentle introduction, and again when Meeting is pressed with
 // something still missing.
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import type { MeetingPermissionKind } from '../lib/desktopBridge.js';
+import { getRecordRaw, setRecordRaw } from '../lib/meetingControl.js';
 import {
   allowPermission,
   missing,
@@ -24,6 +25,7 @@ export function MeetingSetupPopover({ chatId }: { chatId: string }) {
   const permissions = useMeetingSetup((s) => s.permissions);
   const asking = useMeetingSetup((s) => s.asking);
   const close = useMeetingSetup((s) => s.close);
+  const [recordRaw, setRecord] = useState(getRecordRaw);
   const shown = open !== null && open.chatId === chatId && permissions !== null;
 
   // Accessibility is switched on in System Settings: check again on coming back.
@@ -94,6 +96,21 @@ export function MeetingSetupPopover({ chatId }: { chatId: string }) {
           </div>
         );
       })}
+      <label className="mm-perm" data-testid="meeting-record-raw-row">
+        <span className="n">
+          Save raw audio
+          <small>Mic, cleaned mic and call audio, kept on this Mac</small>
+        </span>
+        <input
+          type="checkbox"
+          data-testid="meeting-record-raw"
+          checked={recordRaw}
+          onChange={(e) => {
+            setRecordRaw(e.target.checked);
+            setRecord(e.target.checked);
+          }}
+        />
+      </label>
       {starting ? (
         <div className="mm-setup-acts">
           {onlyNames ? (

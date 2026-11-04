@@ -22,6 +22,7 @@ import type {
   McpServerConfig,
 } from '@patch/wire';
 import type { SdkPermissionMode } from './chatState.js';
+import type { LinkDrop } from './linkDropCause.js';
 
 export { CLAUDE_BACKEND_ID } from '@patch/wire';
 export const CLAUDE_BACKEND_LABEL = 'Claude Code';
@@ -125,6 +126,8 @@ export interface HostDescriptionInput {
   harnessClaudeMdEnabled: boolean;
   /** Battery state (`host.host.power`); absent when the machine has no readable battery. */
   power?: { onBattery: boolean; percent: number } | undefined;
+  /** Why this host's server link last dropped (`host.host.lastDisconnect`). */
+  lastDisconnect?: LinkDrop | undefined;
 }
 
 /** Assemble this host's `host.host` self-description. */
@@ -197,6 +200,7 @@ export function describeHost(input: HostDescriptionInput): HostInfoEvent {
     ...(input.patchMcpEnabled !== undefined ? { patchMcpEnabled: input.patchMcpEnabled } : {}),
     harnessClaudeMdEnabled: input.harnessClaudeMdEnabled,
     ...(input.power !== undefined ? { power: input.power } : {}),
+    ...(input.lastDisconnect !== undefined ? { lastDisconnect: input.lastDisconnect } : {}),
   };
 }
 

@@ -719,7 +719,7 @@ describe('shared settings routes', () => {
         meetingAnalysisModel: 'claude-sonnet-5-5',
         meetingCleanupModel: 'claude-sonnet-5-5',
         meetingTranscriptionModel: '',
-        meetingAnalyseSeconds: 15,
+        meetingAnalyseSeconds: 45,
         meetingResearchModel: 'claude-sonnet-5-5',
         meetingResearchSeconds: 60,
       });

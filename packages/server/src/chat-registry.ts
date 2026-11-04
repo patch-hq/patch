@@ -141,6 +141,8 @@ export interface ChatSummary {
    * sort behaviour before this field existed.
    */
   lastUserActivity: number;
+  /** ms epoch the chat was created, when the host reports it (sidebar Created sort). */
+  createdAt?: number;
   /**
    * The job whose `spawn` action created this chat (spec/08 § Action), or
    * `null` for a chat a user/surface spawned. Looked up from the injected
@@ -458,6 +460,9 @@ export class ChatRegistry {
         // omitting the field) is what we want, and `??` would treat that
         // placeholder `0` as a known value and get stuck on it.
         lastUserActivity: event.lastUserActivity || existing?.lastUserActivity || event.lastUpdated,
+        ...((event.createdAt ?? existing?.createdAt) !== undefined
+          ? { createdAt: (event.createdAt ?? existing?.createdAt) as number }
+          : {}),
         // jobId is set once, at spawn time, and never changes — chat.state
         // carries no jobId field, so it always just carries the existing value
         // forward.
