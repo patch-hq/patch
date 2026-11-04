@@ -186,6 +186,7 @@ import {
   describeHost as buildHostDescription,
 } from './host.js';
 import { createPowerWatcher } from './power.js';
+import { createSleepDetector } from './linkDropCause.js';
 import { createServerLink } from './serverLink.js';
 import { createHealthSampler } from './healthReport.js';
 import { checkLaunchPath } from './launchPath.js';
@@ -1115,8 +1116,10 @@ async function startHost(
     onChange: () => emit(describeHost()),
     onError: (err) => logger.warn({ err }, 'power: battery read failed'),
   });
+  const sleepDetector = createSleepDetector();
   const describeHost = (): import('@patch/wire').HostInfoEvent =>
     buildHostDescription({
+      ...(link.lastDrop() ? { lastDisconnect: link.lastDrop() } : {}),
       ...(powerWatcher.current() ? { power: powerWatcher.current() } : {}),
       hostId: selfHostId,
       hostName,
@@ -2175,6 +2178,7 @@ async function startHost(
     clientGitSha: GIT_SHA,
     clientBuiltAt: BUILT_AT,
     logger,
+    sleepDetector,
     // The server speaks a protocol this build cannot read, so the matching
     // build is (or is about to be) published — go and get it. The update gate
     // joins repeat calls from each reconnect and waits out running turns.
@@ -4734,6 +4738,7 @@ async function startHost(
     logger.warn({ err }, 'power: initial battery read failed');
   });
   powerWatcher.start();
+  sleepDetector.start();
   const updateCheckTimer = setInterval(() => {
     void refreshUpdateAvailable().catch((err: unknown) => {
       logger.warn({ err }, 'self-update: availability check failed');

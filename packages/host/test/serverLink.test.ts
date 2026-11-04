@@ -196,6 +196,39 @@ describe('serverLink', () => {
     expect(link.isOnline()).toBe(true);
   });
 
+  it('records the cause of a drop: sleep when the clocks diverged, else unexplained', async () => {
+    const server = await startFakeServer();
+    servers.push(server);
+    const drops: Array<{ cause: string; sleptSeconds?: number }> = [];
+    let slept: { endedAt: number; ms: number } | undefined;
+    const link = track(
+      createServerLink({
+        url: server.url,
+        daemonKey: 'jwt',
+        clientVersion: '1.0.0',
+        logger: silent,
+        sleepDetector: {
+          start() {},
+          stop() {},
+          sample() {},
+          lastSleep: () => slept,
+        },
+        onDisconnected: (d) => drops.push(d),
+      }),
+    );
+    link.start();
+    await waitFor(() => link.isOnline());
+    expect(link.lastDrop()).toBeUndefined();
+    server.dropClient();
+    await waitFor(() => drops.length === 1);
+    expect(link.lastDrop()?.cause).toBe('unexplained');
+    await waitFor(() => link.isOnline());
+    slept = { endedAt: Date.now(), ms: 900_000 };
+    server.dropClient();
+    await waitFor(() => drops.length === 2);
+    expect(link.lastDrop()).toMatchObject({ cause: 'sleep', sleptSeconds: 900 });
+  });
+
   it('the default first reconnect backoff step is short (spec/12 ≤1s)', () => {
     // spec/12 ## Surface connection state model: "its first reconnect backoff
     // step is short (≤1s) so a transient miss recovers within about a second."

@@ -2874,6 +2874,22 @@ export const HostInfoEvent = z
       })
       .strict()
       .optional(),
+    /**
+     * Why this host's link to the server last dropped, so a sleeping laptop
+     * can be told from a network or server fault. Absent until a drop happens.
+     */
+    lastDisconnect: z
+      .object({
+        /** ms-epoch the host noticed the drop. */
+        at: z.number().int(),
+        cause: z.enum(['sleep', 'server-restart', 'unexplained']),
+        /** Whole seconds the machine was asleep, when `cause` is `sleep`. */
+        sleptSeconds: z.number().int().nonnegative().optional(),
+        /** WebSocket close code; 1006 means no close frame arrived. */
+        code: z.number().int(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type HostInfoEvent = z.infer<typeof HostInfoEvent>;

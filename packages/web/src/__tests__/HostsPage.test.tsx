@@ -318,7 +318,27 @@ describe('Settings → Hosts', () => {
     expect(screen.queryByTestId('host-host-c-power')).toBeNull();
   });
 
-  it('shows the host\'s settings.json editor on the machine page', () => {
+  it("shows why the host's server link last dropped on the machine page", () => {
+    reportHost('host-a', {
+      hostName: 'laptop',
+      lastDisconnect: { at: Date.now() - 60_000, cause: 'sleep', sleptSeconds: 960, code: 1006 },
+    });
+    reportHost('host-b', {
+      hostName: 'desk',
+      lastDisconnect: { at: Date.now() - 60_000, cause: 'unexplained', code: 1006 },
+    });
+    renderPage('hosts');
+    openRow('host-a');
+    expect(screen.getByTestId('host-host-a-last-disconnect')).toHaveTextContent(
+      'Machine slept for 960s',
+    );
+    openRow('host-b');
+    expect(screen.getByTestId('host-host-b-last-disconnect')).toHaveTextContent(
+      'Unexplained (close 1006)',
+    );
+  });
+
+  it("shows the host's settings.json editor on the machine page", () => {
     reportHost('host-a', { hostName: 'laptop' });
     reportClaudeSettings('host-a', [], '{"model":"sonnet"}');
     renderPage('hosts');
