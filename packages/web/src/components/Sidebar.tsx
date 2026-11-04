@@ -12,7 +12,17 @@
 // (spec/14 § Sidebar §8) — starting a chat is the most-reached-for action.
 
 import type { JSX, MouseEvent as ReactMouseEvent } from 'react';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Pin,
@@ -323,9 +333,15 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
     [attentionOnly, stateFilter, collapsedFolders],
   );
 
+  // Reserve the scrollbar's gutter only while a scrolling band actually shows
+  // one (see `.sb-scrolling` in index.css).
+  const asideRef = useRef<HTMLElement>(null);
+  const scrolling = useBandsScrolling(asideRef);
+
   return (
     <aside
-      className="sb"
+      ref={asideRef}
+      className={`sb${scrolling ? ' sb-scrolling' : ''}`}
       data-testid="sidebar"
       style={{ width: standalone ? '100%' : sidebarWidth }}
     >
@@ -449,6 +465,44 @@ export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): 
       )}
     </aside>
   );
+}
+
+/**
+ * True while any of the sidebar's scrolling bands (`.sb-scroll`,
+ * `.sb-lifecycle`) overflows, i.e. is drawing a scrollbar. Re-measured when a
+ * band or its content changes size or children.
+ */
+function useBandsScrolling(asideRef: { current: HTMLElement | null }): boolean {
+  const [scrolling, setScrolling] = useState(false);
+  useLayoutEffect(() => {
+    const aside = asideRef.current;
+    if (!aside) return;
+    const measure = (): void => {
+      const bands = aside.querySelectorAll<HTMLElement>('.sb-scroll, .sb-lifecycle');
+      setScrolling(Array.from(bands).some((b) => b.scrollHeight > b.clientHeight));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    const mo = new MutationObserver(() => {
+      ro.disconnect();
+      aside.querySelectorAll('.sb-scroll, .sb-lifecycle').forEach((b) => {
+        ro.observe(b);
+        Array.from(b.children).forEach((c) => ro.observe(c));
+      });
+      measure();
+    });
+    mo.observe(aside, { childList: true, subtree: true });
+    mo.takeRecords();
+    aside.querySelectorAll('.sb-scroll, .sb-lifecycle').forEach((b) => {
+      ro.observe(b);
+      Array.from(b.children).forEach((c) => ro.observe(c));
+    });
+    return () => {
+      ro.disconnect();
+      mo.disconnect();
+    };
+  }, [asideRef]);
+  return scrolling;
 }
 
 /**
