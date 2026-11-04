@@ -1781,6 +1781,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     attachmentsDir,
     chatLogStore,
     idGenerator,
+    accountReport: (hostId, backendId) => wsHub.accountReport(hostId, backendId),
     // The account's default model, applied to any spawn that names none. Read
     // per request so a change in Settings reaches the next spawn.
     ...(accountSettings

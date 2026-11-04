@@ -28,7 +28,15 @@ import React from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ChevronDown, ChevronLeft, Ear, Folder, Phone } from 'lucide-react-native';
-import { folderName, type EffortLevel, type PermissionMode } from '@patch/wire';
+import {
+  backendIdForModel,
+  backendUsable,
+  folderName,
+  pickAvailableModel,
+  type EffortLevel,
+  type PermissionMode,
+} from '@patch/wire';
+import { useModelCatalog } from '../src/lib/models';
 import { api, ApiError } from '../src/api/rest';
 import { getWs } from '../src/api/ws';
 import { FolderPickerSheet } from '../src/components/FolderPickerSheet';
@@ -128,7 +136,23 @@ export default function NewChat(): React.ReactElement {
   const [model, setModel] = React.useState<string | null>(
     reopened ? (openedDraft?.model ?? null) : hereHostId ? null : (last?.model ?? null),
   );
-  const effectiveModel = model ?? hostModel;
+  // The account default moves to the first model whose provider has an account
+  // that can run it on this machine — the same rule the server applies when a
+  // spawn names no model, so what is shown here is what the chat will run on.
+  // The catalogue is read only when the default itself cannot run.
+  const hostAccounts = usePresenceStore((s) => (hostId ? s.hosts[hostId]?.accounts : undefined));
+  const defaultCanRun =
+    hostModel === null || backendUsable(hostAccounts?.[backendIdForModel(hostModel)]);
+  const defaultCatalogue = useModelCatalog(defaultCanRun ? null : hostId);
+  const availableDefault =
+    hostModel === null
+      ? null
+      : pickAvailableModel({
+          preferred: hostModel,
+          catalogue: defaultCatalogue.models.map((m) => m.id),
+          reportFor: (backendId) => hostAccounts?.[backendId],
+        });
+  const effectiveModel = model ?? availableDefault;
 
   // Sync host/folder/model picks into the draft (spec/14 § New chat drafts —
   // every surface's Drafts list shows the same drafts, live). Text itself
