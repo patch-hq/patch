@@ -85,12 +85,21 @@ export function spawnClaudeInGroup(
       throw e;
     }
   };
+  // A stop must end the turn now, like Ctrl-C on a command. SIGTERM lets claude
+  // and whatever it runs wind down, but anything that ignores it (a trapped
+  // shell, a hung tool) would keep the turn alive; after a short grace the
+  // whole group is killed outright.
+  let killTimer: NodeJS.Timeout | undefined;
   const onAbort = (): void => {
     killGroup('SIGTERM');
+    killTimer ??= setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) killGroup('SIGKILL');
+    }, ABORT_KILL_GRACE_MS);
   };
   if (opts.signal.aborted) onAbort();
   else opts.signal.addEventListener('abort', onAbort, { once: true });
   child.once('exit', () => {
+    clearTimeout(killTimer);
     opts.signal.removeEventListener('abort', onAbort);
     // Whatever claude left behind is in its group: sweep it.
     killGroup('SIGKILL');
@@ -111,6 +120,9 @@ export function spawnClaudeInGroup(
     off: child.off.bind(child) as SpawnedProcess['off'],
   };
 }
+
+/** How long an aborted claude gets to exit on SIGTERM before its group is SIGKILLed. */
+export const ABORT_KILL_GRACE_MS = 1500;
 
 const REFUSAL_RECHECK_MS = [50, 250, 1000];
 
