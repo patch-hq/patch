@@ -19,7 +19,7 @@ import {
   ChevronRight,
   Circle,
   CircleCheck,
-  CircleDot,
+  LoaderCircle,
   Paperclip,
   Plus,
   X,
@@ -47,9 +47,9 @@ const STATUS_LABEL: Record<TodoItem['status'], string> = {
 };
 
 function StatusIcon({ status }: { status: TodoItem['status'] }): JSX.Element {
-  if (status === 'completed') return <CircleCheck size={14} aria-hidden />;
-  if (status === 'in_progress') return <CircleDot size={14} aria-hidden />;
-  return <Circle size={14} aria-hidden />;
+  if (status === 'completed') return <CircleCheck size={16} aria-hidden />;
+  if (status === 'in_progress') return <LoaderCircle className="task-spin" size={16} aria-hidden />;
+  return <Circle className="task-pending-icon" size={16} aria-hidden />;
 }
 
 export function TaskBar({ row }: { row: ChatRow }): JSX.Element | null {
