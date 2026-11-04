@@ -201,8 +201,23 @@ describe('createClaudeSessionStore', () => {
     const loaded = await store.load({ projectKey: 'p', sessionId: 'sess-new' });
     expect(loaded).toHaveLength(2);
     expect((loaded![1] as { message: { content: string } }).message.content).toContain('banana');
-    // Never written to disk by load() itself — only append() (dual-write from
-    // the live session that follows) touches the mirror.
-    expect(existsSync(join(nativeDir, 'sess-new.jsonl'))).toBe(false);
+    // The reseed is persisted to the mirror so live entries chain onto it and
+    // a later resume (no reseed option) still sees the history.
+    const path = join(nativeDir, 'sess-new.jsonl');
+    expect(existsSync(path)).toBe(true);
+    const tail = loaded![1] as { uuid: string };
+    await store.append({ projectKey: 'p', sessionId: 'sess-new' }, [
+      { type: 'assistant', uuid: 'live-1', parentUuid: tail.uuid, message: REAL_REPLY },
+    ]);
+    const later = createClaudeSessionStore({
+      chatId: 'c1',
+      folder: '/w',
+      nativeDir,
+      claudeProjectsRoot: tmp(),
+      logger: silent,
+    });
+    const resumed = await later.load({ projectKey: 'p', sessionId: 'sess-new' });
+    expect(resumed).toHaveLength(3);
+    expect(JSON.stringify(resumed)).toContain('banana');
   });
 });
