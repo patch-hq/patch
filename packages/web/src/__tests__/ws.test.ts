@@ -13,6 +13,7 @@ import {
   STORE_BATCH_MS,
   __resetWireMismatchReloadForTests,
 } from '../api/ws.js';
+import { RESTART_WINDOW_MS } from '@patch/wire';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -36,9 +37,9 @@ class FakeWS {
   send(data: string): void {
     this.sent.push(data);
   }
-  close(): void {
+  close(code?: number, reason?: string): void {
     this.readyState = 3;
-    this.emit('close', {});
+    this.emit('close', { code, reason });
   }
   addEventListener(name: string, cb: (e: MessageEvent) => void): void {
     (this.listeners[name] ??= []).push(cb);
@@ -162,6 +163,49 @@ describe('PatchWs connection lifecycle', () => {
     expect(FakeWS.instances.length).toBe(2); // not yet
     vi.advanceTimersByTime(1000); // now at 2000ms since the second drop
     expect(FakeWS.instances.length).toBe(3);
+    ws.close();
+  });
+
+  it('a going-away notice redials at once and shows Restarting with the target version', async () => {
+    vi.useFakeTimers();
+    const { ws, fake } = await connectAndOpen();
+    fake.close(4503, 'server restarting into 1.2.4');
+    // No timer advance: the redial is immediate, not a backoff step.
+    expect(FakeWS.instances.length).toBe(2);
+    expect(usePresenceStore.getState().restarting?.version).toBe('1.2.4');
+    // The server is still down: retries are a flat 250ms, not 1s, 2s, 4s...
+    FakeWS.instances[1]!.close(1006, '');
+    vi.advanceTimersByTime(250);
+    expect(FakeWS.instances.length).toBe(3);
+    FakeWS.instances[2]!.close(1006, '');
+    vi.advanceTimersByTime(250);
+    expect(FakeWS.instances.length).toBe(4);
+    expect(usePresenceStore.getState().restarting?.version).toBe('1.2.4');
+    // Back: the state clears the moment the connection returns.
+    FakeWS.instances[3]!.open();
+    expect(usePresenceStore.getState().restarting).toBeNull();
+    ws.close();
+  });
+
+  it('falls back to Offline behaviour when the restart outlasts its window', async () => {
+    vi.useFakeTimers();
+    const { ws, fake } = await connectAndOpen();
+    fake.close(4503, 'server restarting');
+    expect(usePresenceStore.getState().restarting?.version).toBeNull();
+    vi.advanceTimersByTime(RESTART_WINDOW_MS + 1000);
+    FakeWS.instances[FakeWS.instances.length - 1]!.close(1006, '');
+    expect(usePresenceStore.getState().restarting).toBeNull();
+    ws.close();
+  });
+
+  it('an unplanned drop is not a restart and keeps the normal backoff', async () => {
+    vi.useFakeTimers();
+    const { ws, fake } = await connectAndOpen();
+    fake.close(1006, '');
+    expect(usePresenceStore.getState().restarting).toBeNull();
+    expect(FakeWS.instances.length).toBe(1);
+    vi.advanceTimersByTime(1000);
+    expect(FakeWS.instances.length).toBe(2);
     ws.close();
   });
 

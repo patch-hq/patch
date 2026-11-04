@@ -4,6 +4,7 @@
 // the FakeWebSocket test double (installed as `global.WebSocket`) so every
 // scenario is driven deterministically without a real socket.
 
+import { RESTART_WINDOW_MS } from '@patch/wire';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { AppState, __emitAppStateChange } from 'react-native';
 import {
@@ -1160,6 +1161,40 @@ describe('reconnect with backoff', () => {
     expect(usePresenceStore.getState().daemon).toBe('unknown');
     vi.advanceTimersByTime(1000);
     expect(FakeWebSocket.instances.length).toBe(2); // reopened
+  });
+
+  it('a going-away notice redials at once, retries flat, and shows Restarting until the link returns', () => {
+    connectAndOpen();
+    FakeWebSocket.last().emitClose(4503, 'server restarting into 1.2.4');
+    // No timer advance: the redial is immediate.
+    expect(FakeWebSocket.instances.length).toBe(2);
+    expect(usePresenceStore.getState().restarting?.version).toBe('1.2.4');
+    FakeWebSocket.last().emitClose(1006, '');
+    vi.advanceTimersByTime(250);
+    expect(FakeWebSocket.instances.length).toBe(3);
+    FakeWebSocket.last().emitClose(1006, '');
+    vi.advanceTimersByTime(250);
+    expect(FakeWebSocket.instances.length).toBe(4);
+    expect(usePresenceStore.getState().restarting?.version).toBe('1.2.4');
+    FakeWebSocket.last().emitOpen();
+    expect(usePresenceStore.getState().restarting).toBeNull();
+  });
+
+  it('an unplanned drop is not a restart and keeps the normal backoff', () => {
+    connectAndOpen();
+    FakeWebSocket.last().emitClose(1006, '');
+    expect(usePresenceStore.getState().restarting).toBeNull();
+    expect(FakeWebSocket.instances.length).toBe(1);
+    vi.advanceTimersByTime(1000);
+    expect(FakeWebSocket.instances.length).toBe(2);
+  });
+
+  it('gives up on Restarting when the restart outlasts its window', () => {
+    connectAndOpen();
+    FakeWebSocket.last().emitClose(4503, 'server restarting');
+    vi.advanceTimersByTime(RESTART_WINDOW_MS + 1000);
+    FakeWebSocket.last().emitClose(1006, '');
+    expect(usePresenceStore.getState().restarting).toBeNull();
   });
 
   it('does not reconnect after an explicit close()', () => {
