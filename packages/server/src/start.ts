@@ -29,8 +29,8 @@ export async function startServer(
   if (relay) app.addHook('onClose', async () => relay.stop());
   let stopMirror: (() => void) | undefined;
   app.addHook('onClose', async () => stopMirror?.());
+  const fd = activatedFd();
   try {
-    const fd = activatedFd();
     if (fd !== undefined) {
       // systemd owns the socket and keeps it across restarts (socket-activation.ts).
       // Fastify passes these options to net.Server.listen, which takes `fd`; its types omit it.
