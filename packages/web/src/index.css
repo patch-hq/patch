@@ -10914,7 +10914,7 @@ main.empty-state p {
   color: var(--ink-3);
 }
 .task-row-pending .task-text {
-  color: var(--ink-1, var(--ink-2));
+  color: var(--ink-2);
 }
 .task-pending-icon {
   stroke-dasharray: 2.5 3;
