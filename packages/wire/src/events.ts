@@ -65,6 +65,22 @@ export const CLOSE_AUTH_FAILED = 4401;
  */
 export const CLOSE_SERVER_RESTARTING = 4503;
 
+/** Close reason for CLOSE_SERVER_RESTARTING; carries the version when it is known. */
+export function restartingReason(version?: string | null): string {
+  return version ? `server restarting into ${version}` : 'server restarting';
+}
+
+/** The version a going-away notice says the server is restarting into, or null. */
+export function restartingVersion(reason: string | undefined): string | null {
+  const m = /^server restarting into (\S+)$/.exec(reason ?? '');
+  return m ? m[1]! : null;
+}
+
+/** After a going-away notice, clients retry at this flat interval until the server is back. */
+export const RESTART_RETRY_MS = 250;
+/** How long a going-away notice stays 'Restarting' before the state falls back to Offline. */
+export const RESTART_WINDOW_MS = 90_000;
+
 // ---------------------------------------------------------------------------
 // Shared atoms
 
@@ -3993,6 +4009,8 @@ export const MeetingAudioEvent = z
     audioBase64: z.string().min(1),
     /** Who was lit up as the active speaker during this system clip, when the shell could tell. */
     speakerName: z.string().min(1).optional(),
+    /** Which device is sending the audio, e.g. "Chrome on a Mac"; other surfaces name it as where the meeting is listening. */
+    device: z.string().min(1).optional(),
   })
   .strict();
 export type MeetingAudioEvent = z.infer<typeof MeetingAudioEvent>;

@@ -39,8 +39,12 @@
 import WebSocket from 'ws';
 import type { Logger } from 'pino';
 import {
+  CLOSE_SERVER_RESTARTING,
+  RESTART_RETRY_MS,
+  RESTART_WINDOW_MS,
   decodeCompat,
   encode,
+  restartingVersion,
   type AuthOkEvent,
   type WireEvent,
   WireDecodeError,
@@ -259,6 +263,8 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
   let lastDrop: LinkDrop | undefined;
   let stopped = false;
   let attempt = 0;
+  // Until when redials stay fast after the server's going-away notice (0 = none).
+  let restartingUntil = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -314,7 +320,9 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
 
   function scheduleReconnect(): void {
     if (stopped) return;
-    const wait = backoffMs();
+    let wait = backoffMs();
+    if (restartingUntil > Date.now()) wait = RESTART_RETRY_MS;
+    else restartingUntil = 0;
     attempt += 1;
     log.info({ wait, attempt }, 'server-link: scheduling reconnect');
     reconnectTimer = setTimeout(connect, wait);
@@ -412,6 +420,7 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
         online = true;
         offlineSince = null;
         attempt = 0;
+        restartingUntil = 0;
         log.info('server-link: authenticated (auth.ok)');
         flushBuffer();
         opts.onAuthed?.(rawSend, event);
@@ -437,6 +446,18 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
         `server-link: socket closed: ${describeDrop(drop)}`,
       );
       if (wasOnline) opts.onDisconnected?.(drop);
+      // The server said it is going away: dial at once instead of entering the
+      // backoff, then keep a short flat retry until it is back.
+      if (code === CLOSE_SERVER_RESTARTING && !stopped) {
+        restartingUntil = Date.now() + RESTART_WINDOW_MS;
+        attempt = 0;
+        log.info(
+          { into: restartingVersion(reason.toString('utf8')) },
+          'server-link: server is restarting; reconnecting now',
+        );
+        connect();
+        return;
+      }
       scheduleReconnect();
     });
 

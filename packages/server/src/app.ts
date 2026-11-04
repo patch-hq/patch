@@ -21,6 +21,7 @@ import {
   type HealthzResponse,
   type WireEvent,
   CLOSE_SERVER_RESTARTING,
+  restartingReason,
 } from '@patch/wire';
 import { verifySurfaceCredential, verifyDaemonKey } from '@patch/auth';
 import { GIT_SHA, SERVER_SHA, VERSION } from './version.js';
@@ -148,6 +149,12 @@ export interface BuildOptions {
   registry?: Registry;
   /** Inject the host link (tests). Production uses InboundHostLink. */
   hostLink?: HostLink;
+  /**
+   * The version this server is about to restart into, read when it shuts down
+   * and sent to every host and surface in the going-away notice. Null when it
+   * is not known (a plain restart).
+   */
+  restartTarget?: () => string | null;
   /**
    * Shared HMAC secret for voice session tokens (spec/13). Surfaces present
    * the minted token to the host's audio WSS where the same secret verifies.
@@ -349,8 +356,8 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         websocketServer?: { clients: Set<{ close(c: number, r: string): void }> };
       }
     ).websocketServer;
-    for (const client of server?.clients ?? [])
-      client.close(CLOSE_SERVER_RESTARTING, 'server restarting');
+    const reason = restartingReason(opts.restartTarget?.() ?? null);
+    for (const client of server?.clients ?? []) client.close(CLOSE_SERVER_RESTARTING, reason);
     done();
   });
   await app.register(websocketPlugin, {
@@ -1006,7 +1013,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
 
   // Tear everything down on Fastify close so port-0 tests don't leak handles.
   app.addHook('onClose', async () => {
-    wsHub.shutdown();
+    wsHub.shutdown(opts.restartTarget?.() ?? null);
     await hostLink.close();
   });
 
