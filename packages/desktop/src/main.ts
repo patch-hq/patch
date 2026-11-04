@@ -92,6 +92,7 @@ import {
   type MeetingPermissionKind,
 } from './meeting-permissions';
 import { watchSpeakers } from './meeting-speakers';
+import { MeetingRecorder } from './meeting-recording';
 import {
   buildNotificationExtras,
   decideDesktopIntent,
@@ -1516,6 +1517,25 @@ function setupAutoUpdater(): void {
     requestMeetingPermission(kind, meetingPermissionDeps),
   );
   ipcMain.on('patch:system-audio:stop', () => systemAudio.stop());
+  // Meeting mode, opt-in: raw lanes saved to userData/meeting-recordings/<time>/
+  // so the system-audio level and the echo canceller can be checked.
+  let recorder: MeetingRecorder | null = null;
+  ipcMain.on('patch:meeting-recording:chunk', (_e, lane: string, pcm: Uint8Array) => {
+    recorder ??= new MeetingRecorder(
+      join(
+        app.getPath('userData'),
+        'meeting-recordings',
+        new Date().toISOString().replace(/[:.]/g, '-'),
+      ),
+    );
+    recorder.append(lane, Buffer.from(pcm));
+  });
+  ipcMain.handle('patch:meeting-recording:end', () => {
+    const done = recorder;
+    recorder = null;
+    done?.end();
+    return done?.dir ?? null;
+  });
   // Meeting mode: who is lit up on the call, read through macOS Accessibility.
   // A failure (e.g. permission not granted) is sent to the renderer to show.
   let stopSpeakers: (() => void) | null = null;

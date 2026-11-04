@@ -9,6 +9,8 @@ import {
   nextChatAfterArchive,
   stepVisibleChat,
   sortAttentionQueue,
+  captureOrder,
+  applyFrozenOrder,
 } from '../lib/chatGroups.js';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
 import type { ChatRow } from '../stores/types.js';
@@ -286,58 +288,39 @@ describe('groupChats — automations', () => {
   });
 });
 
-// sortAttentionQueue (Todoist: "needs attention queue - updated things should
-// be at the bottom of the queue"): a FIFO re-ordering of an already-filtered
-// needs-attention list — opposite of groupChats's own recency-first sort.
+// sortAttentionQueue: the needs-attention list keeps the main list's stable
+// order — the user's own last activity, never agent-driven updates.
 describe('sortAttentionQueue', () => {
   const done = (overrides: Partial<ChatRow> = {}) =>
     row({ lastSeq: 5, lastReadSeq: 1, ...overrides });
-  const permission = (overrides: Partial<ChatRow> = {}) =>
-    row({
-      pendingPermissions: [{ requestId: 'r', tool: 'Bash', args: {}, description: 'x' }],
-      ...overrides,
-    });
 
-  it('queues oldest-updated first, most-recently-updated last', () => {
+  it('orders by last user activity, newest first', () => {
     const rows = [
-      done({ chatId: 'newest', lastUpdated: 300 }),
-      done({ chatId: 'oldest', lastUpdated: 100 }),
-      done({ chatId: 'middle', lastUpdated: 200 }),
+      done({ chatId: 'old', lastUserActivity: 100 }),
+      done({ chatId: 'new', lastUserActivity: 300 }),
+      done({ chatId: 'mid', lastUserActivity: 200 }),
     ];
-    expect(sortAttentionQueue(rows).map((c) => c.chatId)).toEqual(['oldest', 'middle', 'newest']);
+    expect(sortAttentionQueue(rows).map((c) => c.chatId)).toEqual(['new', 'mid', 'old']);
   });
 
-  it('a row that updates again sinks to the bottom instead of jumping to the top', () => {
-    const before = [
-      done({ chatId: 'waiting-longer', lastUpdated: 100 }),
-      done({ chatId: 'just-updated', lastUpdated: 200 }),
-    ];
-    expect(sortAttentionQueue(before).map((c) => c.chatId)).toEqual([
-      'waiting-longer',
-      'just-updated',
-    ]);
-    // "just-updated" updates again — even newer now — it stays at the back,
-    // it does not cut back to the front.
-    const after = [
-      done({ chatId: 'waiting-longer', lastUpdated: 100 }),
-      done({ chatId: 'just-updated', lastUpdated: 400 }),
-    ];
-    expect(sortAttentionQueue(after).map((c) => c.chatId)).toEqual([
-      'waiting-longer',
-      'just-updated',
-    ]);
-  });
-
-  it('permission rows still lead the queue ahead of done rows, regardless of recency', () => {
+  it('a row that updates again, or starts asking permission, does not move', () => {
     const rows = [
-      done({ chatId: 'done-old', lastUpdated: 100 }),
-      permission({ chatId: 'perm-new', lastUpdated: 900 }),
+      done({ chatId: 'a', lastUserActivity: 200, lastUpdated: 900 }),
+      done({
+        chatId: 'b',
+        lastUserActivity: 100,
+        lastUpdated: 999,
+        pendingPermissions: [{ requestId: 'r', tool: 'Bash', args: {}, description: 'x' }],
+      }),
     ];
-    expect(sortAttentionQueue(rows).map((c) => c.chatId)).toEqual(['perm-new', 'done-old']);
+    expect(sortAttentionQueue(rows).map((c) => c.chatId)).toEqual(['a', 'b']);
   });
 
-  it('ties within the same rank fall back to the stable chatId tiebreaker', () => {
-    const rows = [done({ chatId: 'b', lastUpdated: 100 }), done({ chatId: 'a', lastUpdated: 100 })];
+  it('ties fall back to the stable chatId tiebreaker', () => {
+    const rows = [
+      done({ chatId: 'b', lastUserActivity: 100 }),
+      done({ chatId: 'a', lastUserActivity: 100 }),
+    ];
     expect(sortAttentionQueue(rows).map((c) => c.chatId)).toEqual(['a', 'b']);
   });
 });
@@ -596,40 +579,79 @@ describe('groupChats — sidebar ordering (spec/14 § Sidebar ordering)', () => 
 
 describe('groupChats ordering choice', () => {
   const rows = [
-    row({ chatId: 'a1', name: 'Zed', folder: '~/alpha', lastUserActivity: 10, lastUpdated: 50 }),
-    row({ chatId: 'a2', name: 'Bob', folder: '~/alpha', lastUserActivity: 20, lastUpdated: 5 }),
-    row({ chatId: 'b1', name: 'Mid', folder: '~/beta', lastUserActivity: 15, lastUpdated: 90 }),
+    row({
+      chatId: 'a1',
+      name: 'Zed',
+      folder: '~/alpha',
+      lastUserActivity: 10,
+      lastUpdated: 50,
+      createdAt: 300,
+    }),
+    row({
+      chatId: 'a2',
+      name: 'Bob',
+      folder: '~/alpha',
+      lastUserActivity: 20,
+      lastUpdated: 5,
+      createdAt: 100,
+    }),
+    row({
+      chatId: 'b1',
+      name: 'Mid',
+      folder: '~/beta',
+      lastUserActivity: 15,
+      lastUpdated: 90,
+      createdAt: 200,
+    }),
   ];
-  it('defaults to last action for chats and projects', () => {
+  it('defaults to Recent (last message the user sent) for chats and projects', () => {
     const g = groupChats(rows);
     expect(g.folders.map((f) => f.folder)).toEqual(['~/alpha', '~/beta']);
     expect(g.folders[0]!.rows.map((r) => r.chatId)).toEqual(['a2', 'a1']);
   });
-  it('last update orders by any activity', () => {
-    const g = groupChats(rows, [], { chatSort: 'last-update', groupSort: 'last-update' });
-    expect(g.folders.map((f) => f.folder)).toEqual(['~/beta', '~/alpha']);
-    expect(g.folders[1]!.rows.map((r) => r.chatId)).toEqual(['a1', 'a2']);
+  it('Created orders newest-created first and ignores agent activity', () => {
+    const g = groupChats(rows, [], { chatSort: 'created', groupSort: 'created' });
+    expect(g.folders.map((f) => f.folder)).toEqual(['~/alpha', '~/beta']);
+    expect(g.folders[0]!.rows.map((r) => r.chatId)).toEqual(['a1', 'a2']);
+    const bumped = rows.map((x) => ({ ...x, lastUpdated: x.lastUpdated + 1000 }));
+    const h = groupChats(bumped, [], { chatSort: 'created', groupSort: 'created' });
+    expect(h.folders[0]!.rows.map((r) => r.chatId)).toEqual(['a1', 'a2']);
   });
   it('projects follow the chat sort when Same as chats is selected', () => {
-    const g = groupChats(rows, [], { chatSort: 'last-update', groupSort: 'same-as-chats' });
-    expect(g.folders.map((f) => f.folder)).toEqual(['~/beta', '~/alpha']);
-    expect(g.folders[1]!.rows.map((r) => r.chatId)).toEqual(['a1', 'a2']);
+    const g = groupChats(rows, [], { chatSort: 'created', groupSort: 'same-as-chats' });
+    expect(g.folders[0]!.rows.map((r) => r.chatId)).toEqual(['a1', 'a2']);
   });
   it('chat sort and project sort are independent; name is A-Z', () => {
-    const g = groupChats(rows, [], { chatSort: 'name', groupSort: 'last-action' });
+    const g = groupChats(rows, [], { chatSort: 'name', groupSort: 'recent' });
     expect(g.folders.map((f) => f.folder)).toEqual(['~/alpha', '~/beta']);
     expect(g.folders[0]!.rows.map((r) => r.chatId)).toEqual(['a2', 'a1']);
-    const h = groupChats(rows, [], { chatSort: 'last-action', groupSort: 'name' });
+    const h = groupChats(rows, [], { chatSort: 'recent', groupSort: 'name' });
     expect(h.folders.map((f) => f.folder)).toEqual(['~/alpha', '~/beta']);
     const r = groupChats(
       rows.map((x) => ({ ...x, folder: x.folder === '~/alpha' ? '~/zzz' : x.folder })),
       [],
-      {
-        chatSort: 'last-action',
-        groupSort: 'name',
-      },
+      { chatSort: 'recent', groupSort: 'name' },
     );
     expect(r.folders.map((f) => f.folder)).toEqual(['~/beta', '~/zzz']);
+  });
+});
+
+describe('frozen order while hovered', () => {
+  it('holds positions against a re-sort but takes fresh row data, and new rows lead', () => {
+    const before = groupChats([
+      row({ chatId: 'a', folder: '~/p', lastUserActivity: 20 }),
+      row({ chatId: 'b', folder: '~/p', lastUserActivity: 10 }),
+    ]);
+    const frozen = captureOrder(before);
+    const after = groupChats([
+      row({ chatId: 'a', folder: '~/p', lastUserActivity: 20, name: 'renamed' }),
+      row({ chatId: 'b', folder: '~/p', lastUserActivity: 99 }),
+      row({ chatId: 'n', folder: '~/p', lastUserActivity: 1 }),
+    ]);
+    expect(after.folders[0]!.rows.map((r) => r.chatId)).toEqual(['b', 'a', 'n']);
+    const held = applyFrozenOrder(after, frozen);
+    expect(held.folders[0]!.rows.map((r) => r.chatId)).toEqual(['n', 'a', 'b']);
+    expect(held.folders[0]!.rows[1]!.name).toBe('renamed');
   });
 });
 

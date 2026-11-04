@@ -3,7 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const send = vi.fn();
 vi.mock('../api/ws.js', () => ({ getActiveWs: () => ({ send }) }));
 
-import { startMeeting, listenHere, meetingSpeeds, setMeetingSpeed } from '../lib/meetingControl.js';
+import {
+  startMeeting,
+  listenHere,
+  meetingSpeeds,
+  setMeetingSpeed,
+  getRecordRaw,
+  setRecordRaw,
+} from '../lib/meetingControl.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { useMeetingStore } from '../stores/meetingStore.js';
@@ -52,5 +59,34 @@ describe('meeting speeds', () => {
       expect.objectContaining({ action: 'tune', settings: { clipSeconds: 6, analyseSeconds: 45 } }),
     );
     usePreferencesStore.setState({ preferences: prefs });
+  });
+});
+
+describe('opt-in raw recording', () => {
+  it('is off until chosen, and remembered', () => {
+    localStorage.removeItem('patch.meeting.record-raw');
+    expect(getRecordRaw()).toBe(false);
+    setRecordRaw(true);
+    expect(getRecordRaw()).toBe(true);
+    setRecordRaw(false);
+    expect(getRecordRaw()).toBe(false);
+  });
+
+  it('starting with it on and no desktop shell fails loudly instead of recording nothing', async () => {
+    const getUserMedia = vi
+      .fn()
+      .mockResolvedValue({ getTracks: () => [], getAudioTracks: () => [] });
+    Object.defineProperty(globalThis.navigator, 'mediaDevices', {
+      value: { getUserMedia },
+      configurable: true,
+    });
+    const pushError = vi.spyOn(useUiStore.getState(), 'pushError');
+    setRecordRaw(true);
+    await startMeeting('c1');
+    setRecordRaw(false);
+    expect(pushError).toHaveBeenCalledWith(
+      expect.stringMatching(/Raw recording needs the desktop/),
+    );
+    expect(useMeetingStore.getState().capturingChatId).toBeNull();
   });
 });

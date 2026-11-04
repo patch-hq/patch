@@ -78,6 +78,8 @@ export interface ChatSummaryRow {
    * to `lastUpdated`.
    */
   lastUserActivity?: number;
+  /** ms epoch the chat was created; an older server omits it. */
+  createdAt?: number;
   /** The job whose `spawn` action created this chat, or null (spec/08 § Action). */
   jobId: string | null;
   /**
