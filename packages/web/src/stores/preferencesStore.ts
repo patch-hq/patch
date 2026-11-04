@@ -67,6 +67,13 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => ({
   },
   async update(patch) {
     const { preferences } = await api.setPreferences(patch);
+    // NO FALLBACK: a save the server did not commit as asked is a failure, not a success.
+    for (const [key, want] of Object.entries(patch)) {
+      const got = (preferences as unknown as Record<string, unknown>)[key];
+      if (JSON.stringify(got) !== JSON.stringify(want)) {
+        throw new Error(`the server did not save ${key}`);
+      }
+    }
     set({ preferences, loaded: true });
   },
 }));
