@@ -1569,6 +1569,7 @@ describe('JobEditorRoute (single-page form)', () => {
         }),
       );
       renderNew();
+      fireEvent.change(screen.getByTestId('job-trigger-type'), { target: { value: 'webhook' } });
       expect((screen.getByTestId('job-include-payload') as HTMLInputElement).checked).toBe(true);
       fireEvent.change(screen.getByTestId('job-name'), { target: { value: 'plain' } });
       await choosePickerFolder('d1', '/Users/tom/projects/portfolio');
@@ -1581,8 +1582,18 @@ describe('JobEditorRoute (single-page form)', () => {
       vi.unstubAllGlobals();
     });
 
+    it('hides Send agent trigger payload for cron and recurrence triggers, shows it for webhook', () => {
+      renderNew();
+      expect(screen.queryByTestId('job-include-payload')).toBeNull();
+      fireEvent.change(screen.getByTestId('job-trigger-type'), { target: { value: 'recurrence' } });
+      expect(screen.queryByTestId('job-include-payload')).toBeNull();
+      fireEvent.change(screen.getByTestId('job-trigger-type'), { target: { value: 'webhook' } });
+      expect(screen.getByTestId('job-include-payload')).toBeTruthy();
+    });
+
     it('draws Send agent trigger payload directly under Skill, above Prompt', () => {
       renderNew();
+      fireEvent.change(screen.getByTestId('job-trigger-type'), { target: { value: 'webhook' } });
       const skill = screen.getByTestId('job-spawn-skill');
       const toggle = screen.getByTestId('job-include-payload');
       const prompt = screen.getByTestId('job-spawn-prompt');
@@ -1613,6 +1624,7 @@ describe('JobEditorRoute (single-page form)', () => {
       );
       renderNew();
       fireEvent.change(screen.getByTestId('job-name'), { target: { value: 'quiet' } });
+      fireEvent.change(screen.getByTestId('job-trigger-type'), { target: { value: 'webhook' } });
       await choosePickerFolder('d1', '/Users/tom/projects/portfolio');
       fireEvent.change(screen.getByTestId('job-spawn-prompt'), { target: { value: 'go' } });
       fireEvent.click(screen.getByTestId('job-include-payload'));
