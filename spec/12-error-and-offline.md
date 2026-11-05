@@ -347,6 +347,13 @@ sent again.
   always offered beside Retry and never replaced by it. Neither is offered for a
   failure that will recur unchanged (input too large): there only "Retry
   anyway" is drawn.
+- **Restart interruptions.** Retry in place is only for a person choosing to
+  re-run a turn. A host restart that cuts a turn off never stamps `retryOfSeq`:
+  the history shows an inline line, "Turn interrupted by restart", then the
+  host's automated re-send as its own message, then the next attempt's output,
+  all in time order. Chats written before this, whose restart re-sends carried
+  `retryOfSeq`, are replayed the same way (the re-send after a legacy marker is
+  unfolded), so nothing sits behind a pager.
 - The link between attempts is written to the chat's `retryMarks` and spliced
   back on at replay. The agent's own transcript records each attempt as an
   ordinary user turn and knows nothing about the one it repeats, so without this
