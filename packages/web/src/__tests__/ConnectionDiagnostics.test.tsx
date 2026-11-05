@@ -72,6 +72,28 @@ afterEach(() => {
 });
 
 describe('runDiagnostics', () => {
+  it("waits for a dial already in flight, so the report is not the previous attempt's outcome", async () => {
+    stubFetch(HEALTHY);
+    usePresenceStore.setState({ connection: 'reconnecting', everConnected: true });
+    const pending = runDiagnostics();
+    await new Promise((r) => setTimeout(r, 20));
+    usePresenceStore.setState({ connection: 'connected' });
+    const report = await pending;
+    expect(report.checks.find((c) => c.id === 'websocket')!.status).toBe('pass');
+  });
+
+  it('gives every failing check a next step and none to a passing one', async () => {
+    stubFetch({
+      ...HEALTHY,
+      '/api/daemon/healthz': { status: 503 },
+    });
+    usePresenceStore.setState({ connection: 'offline', everConnected: true });
+    const report = await runDiagnostics();
+    for (const c of report.checks) {
+      expect(c.fix !== undefined, c.id).toBe(c.status === 'fail');
+    }
+    expect(formatReport(report)).toContain('fix:');
+  });
   it('passes every check when the credential, server and agent are all healthy', async () => {
     stubFetch(HEALTHY);
     usePresenceStore.setState({ connection: 'connected', everConnected: true });
@@ -196,11 +218,13 @@ describe('runDiagnostics', () => {
       failedAttempts: 3,
       lastClose: { code: 1006, reason: 'abnormal closure', at: 1_700_000_000_000 },
     });
+    // The dial in flight fails, which ends the wait.
+    setTimeout(() => usePresenceStore.setState({ failedAttempts: 4 }), 10);
     const report = await runDiagnostics();
     const socket = report.checks.find((c) => c.id === 'websocket')!;
     expect(socket.status).toBe('fail');
     expect(socket.detail).toContain('reconnecting');
-    expect(socket.detail).toContain('3');
+    expect(socket.detail).toContain('4');
     expect(socket.detail).toContain('1006');
     expect(socket.detail).toContain('abnormal closure');
     expect(report.wsUrl).toBe('ws://test/ws');
@@ -280,9 +304,32 @@ describe('ConnectionDiagnostics screen', () => {
     );
   });
 
+  it('opening dials fresh when not connected, and does not when connected', async () => {
+    stubFetch(HEALTHY);
+    const reconnectNow = vi.fn();
+    setActiveWs({ reconnectNow } as unknown as PatchWs);
+    usePresenceStore.setState({ connection: 'offline' });
+    render(<ConnectionDiagnostics />);
+    await waitFor(() => expect(screen.queryByTestId('diagnostics-running')).toBeNull());
+    expect(reconnectNow).toHaveBeenCalledTimes(1);
+    cleanup();
+    usePresenceStore.setState({ connection: 'connected' });
+    render(<ConnectionDiagnostics />);
+    await waitFor(() => expect(screen.queryByTestId('diagnostics-running')).toBeNull());
+    expect(reconnectNow).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the next step under a failing check', async () => {
+    stubFetch(HEALTHY);
+    usePresenceStore.setState({ connection: 'offline' });
+    render(<ConnectionDiagnostics />);
+    await waitFor(() => expect(screen.getByTestId('fix-websocket')).toBeTruthy());
+    expect(screen.queryByTestId('fix-server')).toBeNull();
+  });
+
   it('names the live connection when everything answers but the socket is down', async () => {
     stubFetch(HEALTHY);
-    usePresenceStore.setState({ connection: 'reconnecting' });
+    usePresenceStore.setState({ connection: 'offline' });
     render(<ConnectionDiagnostics />);
     await waitFor(() =>
       expect(screen.getByTestId('diagnostics-headline')).toHaveTextContent(/live connection/i),
@@ -305,6 +352,7 @@ describe('ConnectionDiagnostics screen', () => {
     render(<ConnectionDiagnostics />);
     await waitFor(() => expect(screen.getByTestId('check-server')).toBeInTheDocument());
     const before = fetchFn.mock.calls.length;
+    reconnectNow.mockClear();
     fireEvent.click(screen.getByTestId('diagnostics-retry'));
     expect(reconnectNow).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(fetchFn.mock.calls.length).toBeGreaterThan(before));

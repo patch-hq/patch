@@ -12877,6 +12877,11 @@ main.empty-state p {
   color: var(--ink-3);
   overflow-wrap: anywhere;
 }
+.conn-check-fix {
+  grid-column: 1 / -1;
+  font-size: var(--text-min);
+  color: var(--ink);
+}
 .conn-diagnostics-actions {
   display: flex;
   gap: 10px;
