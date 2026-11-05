@@ -1085,6 +1085,7 @@ describe('serverLink', () => {
           clientVersion: '1',
           logger: silent,
           heartbeatIntervalMs: 1_000,
+          heartbeatMissesAllowed: 1,
           backoffSchedule: [10],
           wsFactory: () => sockets[idx++]!,
           onDisconnected: () => {
@@ -1123,6 +1124,34 @@ describe('serverLink', () => {
 
       vi.advanceTimersByTime(10);
       expect(idx).toBe(2);
+    });
+
+    it('tolerates late pongs under the default miss allowance, terminating only after repeated silence', () => {
+      const socket = new FakeSocket();
+      const link = track(
+        createServerLink({
+          url: 'ws://x',
+          daemonKey: 'k',
+          clientVersion: '1',
+          logger: silent,
+          heartbeatIntervalMs: 1_000,
+          wsFactory: () => socket as unknown as WebSocket,
+        }),
+      );
+      link.start();
+      socket.readyState = WS.OPEN;
+      socket.emit('open');
+      vi.advanceTimersByTime(1_000); // ping 1
+      vi.advanceTimersByTime(1_000); // miss 1
+      vi.advanceTimersByTime(1_000); // miss 2
+      expect(socket.terminated).toBe(false);
+      socket.emit('pong'); // a late pong resets the count
+      vi.advanceTimersByTime(1_000); // ping again
+      vi.advanceTimersByTime(1_000); // miss 1
+      vi.advanceTimersByTime(1_000); // miss 2
+      expect(socket.terminated).toBe(false);
+      vi.advanceTimersByTime(1_000); // miss 3 -> terminated
+      expect(socket.terminated).toBe(true);
     });
 
     it('does not resurrect a heartbeat for a socket already superseded by a reconnect', () => {
