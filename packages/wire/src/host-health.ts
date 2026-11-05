@@ -101,6 +101,7 @@ export function describeHostCondition(
 
 /** Why a host dropped off, in a sentence fragment: "Mac went to sleep". */
 export function describeHostOffline(hostName: string, reason: string | undefined): string {
+  if (reason === 'updating') return `${hostName} is installing an update`;
   if (reason === 'battery') return `${hostName} ran out of battery`;
   if (reason === 'asleep') return `${hostName} went to sleep`;
   if (reason === 'unresponsive') return `${hostName} stopped responding`;

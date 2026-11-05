@@ -67,3 +67,17 @@ export function windowChrome(platform: string): WindowChrome {
     trafficLightPosition: { ...TRAFFIC_LIGHT_POSITION },
   };
 }
+
+/**
+ * Where to put the lights so their centre lands on `centre` — the middle of
+ * whatever strip the SPA is showing at the window's top edge (an update or
+ * reconnecting banner). That strip is the title bar while it is up, so the
+ * lights belong inside it, not pinned to the sidebar row it pushed down. Null,
+ * or anything that is not a sane number, puts them back on the brand row.
+ */
+export function trafficLightPositionFor(centre: unknown): { x: number; y: number } {
+  if (typeof centre !== 'number' || !Number.isFinite(centre) || centre < 10 || centre > 120) {
+    return { ...TRAFFIC_LIGHT_POSITION };
+  }
+  return { x: TRAFFIC_LIGHT_POSITION.x, y: Math.round(centre - TRAFFIC_LIGHT_DIAMETER / 2) };
+}

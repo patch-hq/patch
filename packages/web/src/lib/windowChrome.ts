@@ -16,10 +16,19 @@
 // NO FALLBACK: a plain browser has no bridge and gets no inset at all, rather
 // than a guess based on user-agent sniffing.
 
+import { useEffect } from 'react';
 import { getDesktopBridge } from './desktopBridge.js';
 
 /** Set on <html> when this window's content runs under the traffic lights. */
 export const OVERLAY_TITLE_BAR_CLASS = 'overlay-titlebar';
+
+/**
+ * Set alongside it when the shell can move the lights. A banner at the top is
+ * then the title bar: the lights sit centred inside it at its natural height,
+ * instead of the banner being stretched down to reach lights pinned for the
+ * sidebar row (which left them hugging its bottom edge, off the text's line).
+ */
+export const SEATABLE_LIGHTS_CLASS = 'lights-seatable';
 
 /**
  * Routes the shell only ever loads into a `frame: false` popover — the tray
@@ -55,8 +64,60 @@ export function applyOverlayTitleBarClass(
  */
 export function initWindowChrome(): void {
   const bridge = getDesktopBridge();
-  applyOverlayTitleBarClass(document.documentElement, {
+  const o = {
     overlayTitleBar: bridge?.overlayTitleBar === true,
     pathname: window.location.pathname,
-  });
+  };
+  applyOverlayTitleBarClass(document.documentElement, o);
+  document.documentElement.classList.toggle(
+    SEATABLE_LIGHTS_CLASS,
+    hasOverlayTitleBar(o) && typeof bridge?.seatTrafficLights === 'function',
+  );
+}
+
+/**
+ * The lights' centre for a shell whose first child is `top`: the middle of a
+ * banner, or null (the brand row) when the first thing is the app itself.
+ */
+export function lightsCentreFor(top: Element | null): number | null {
+  if (top === null || top.classList.contains('three-col')) return null;
+  const r = top.getBoundingClientRect();
+  return r.height > 0 ? Math.round(r.top + r.height / 2) : null;
+}
+
+/**
+ * Keep the traffic lights on whatever strip is the window's top row. Watches
+ * the shell's children (banners come and go) and that strip's size, and tells
+ * the shell only when the answer changes.
+ */
+export function useSeatTrafficLights(el: HTMLElement | null): void {
+  useEffect(() => {
+    const bridge = getDesktopBridge();
+    if (el === null || !document.documentElement.classList.contains(SEATABLE_LIGHTS_CLASS)) return;
+    const seat = bridge?.seatTrafficLights;
+    if (typeof seat !== 'function') return;
+    let sent: number | null | undefined;
+    let watched: Element | null = null;
+    const update = (): void => {
+      const top = el.firstElementChild;
+      if (top !== watched) {
+        if (watched !== null) sizes.unobserve(watched);
+        watched = top;
+        if (top !== null) sizes.observe(top);
+      }
+      const centre = lightsCentreFor(top);
+      if (centre === sent) return;
+      sent = centre;
+      seat.call(bridge, centre);
+    };
+    const sizes = new ResizeObserver(update);
+    const children = new MutationObserver(update);
+    children.observe(el, { childList: true });
+    update();
+    return () => {
+      children.disconnect();
+      sizes.disconnect();
+      seat.call(bridge, null);
+    };
+  }, [el]);
 }

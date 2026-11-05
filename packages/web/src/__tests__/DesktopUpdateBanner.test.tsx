@@ -168,18 +168,18 @@ describe('DesktopUpdateBanner', () => {
     expect(buttons[0]).toHaveAttribute('data-testid', 'desktop-update-restart');
   });
 
-  it('does not stay on "Updating…" forever when the shell never answers the press', async () => {
+  it('does not stay on "Restarting…" forever when the shell never answers the press', async () => {
     vi.useFakeTimers();
     const install = vi.fn();
     installBridge(state(), install);
     render(<DesktopUpdateBanner />);
     await act(async () => {});
     fireEvent.click(screen.getByTestId('desktop-update-restart'));
-    expect(screen.getByTestId('desktop-update-restart')).toHaveTextContent('Updating');
+    expect(screen.getByTestId('desktop-update-restart')).toHaveTextContent('Restarting');
     await act(async () => {
       vi.advanceTimersByTime(310_000);
     });
-    expect(screen.getByTestId('desktop-update-restart')).toHaveTextContent('Update Patch');
+    expect(screen.getByTestId('desktop-update-restart')).toHaveTextContent('Restart Patch');
     expect(screen.getByTestId('desktop-update-restart')).not.toBeDisabled();
     expect(screen.getByTestId('desktop-update-error')).toHaveTextContent(
       'Update failed. Try again.',
@@ -201,7 +201,7 @@ describe('DesktopUpdateBanner', () => {
     await act(async () => {});
     fireEvent.click(screen.getByTestId('desktop-update-restart'));
     expect(install).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId('desktop-update-restart')).toHaveTextContent('Updating');
+    expect(screen.getByTestId('desktop-update-restart')).toHaveTextContent('Restarting');
     await act(async () => {
       calls.forEach((cb) =>
         cb(state({ lastResult: 'error', lastErrorKind: 'install', lastError: 'refused: adhoc' })),

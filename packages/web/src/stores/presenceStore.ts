@@ -67,7 +67,7 @@ export interface HostPresence {
    * condition to report.
    */
   condition?: HostConditionEvent | null;
-  /** Why the host dropped off, when the server could tell (`host.offline` reason). */
+  /** Why the host dropped off, when the server could tell (`host.offline` reason); 'updating' means it is installing an update and will be back shortly. */
   offlineReason?: string | null;
 }
 

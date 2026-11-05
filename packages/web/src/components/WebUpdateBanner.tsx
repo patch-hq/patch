@@ -92,7 +92,7 @@ export function WebUpdateBanner(): JSX.Element | null {
         disabled={pressed}
         onClick={press}
       >
-        {pressed ? 'Updating…' : 'Update Patch'}
+        {pressed ? 'Restarting…' : 'Restart Patch'}
       </button>
     </div>
   );
