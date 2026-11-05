@@ -959,6 +959,12 @@ export class GeminiLiveSession implements VoiceSessionLike {
     if (sc.turnComplete) this.endTurn();
   }
 
+  /** The model's whole answer to this turn was punctuation: it said nothing and meant to. */
+  private modelDeclinedToAnswer(): boolean {
+    const said = this.turnModelText.trim();
+    return said !== '' && !/[\p{L}\p{N}]/u.test(said);
+  }
+
   /** The model finished a turn: close it out for the chat, the surface and the usage count. */
   private endTurn(): void {
     const wasRelaying = this.relaying;
@@ -1013,6 +1019,25 @@ export class GeminiLiveSession implements VoiceSessionLike {
     // VoiceSession.endStream's identical guard. A turn that handed off to the
     // agent is waiting on it, not lost.
     if (
+      this.turnHadInput &&
+      !this.turnHadAudioOut &&
+      !this.turnInterrupted &&
+      this.handoffsInFlight === 0 &&
+      this.modelDeclinedToAnswer()
+    ) {
+      // Gemini heard something it could not make speech of (background noise it
+      // transcribed as a stray foreign-script fragment) and answered with bare
+      // punctuation, e.g. "...". That is the model choosing silence, not a lost reply:
+      // logged, but not a call failure.
+      this.deps.logger.warn(
+        {
+          sessionId: this.init.sessionId,
+          heard: this.inputTranscriptBuf.trim(),
+          model: this.turnModelText.trim(),
+        },
+        'gemini-live: the model answered what it heard with no words and no audio',
+      );
+    } else if (
       this.turnHadInput &&
       !this.turnHadAudioOut &&
       !this.turnInterrupted &&

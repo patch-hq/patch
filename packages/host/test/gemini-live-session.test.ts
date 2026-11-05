@@ -379,6 +379,17 @@ describe('GeminiLiveSession — audio out + turn lifecycle', () => {
     );
   });
 
+  test('a turn the model answers with bare "..." and no audio is not a call failure', async () => {
+    const { deps, lastWs, audioEvents } = makeDeps();
+    const session = new GeminiLiveSession(makeInit(), deps);
+    const ws = await openSession(session, lastWs);
+    ws.serverSend({ serverContent: { inputTranscription: { text: 'ఆహ్ మనం' } } });
+    ws.serverSend({ serverContent: { outputTranscription: { text: '...' } } });
+    ws.serverSend({ serverContent: { turnComplete: true } });
+    await vi.waitFor(() => expect(audioEvents.some((e) => e.type === 'audio.tts_end')).toBe(true));
+    expect(audioEvents.some((e) => e.type === 'audio.error')).toBe(false);
+  });
+
   test('a light-layer-only turn with no dispatch still produces exactly one transcript_final + tts_end', async () => {
     const { deps, lastWs, audioEvents, submitUserTurn } = makeDeps();
     const session = new GeminiLiveSession(makeInit(), deps);
