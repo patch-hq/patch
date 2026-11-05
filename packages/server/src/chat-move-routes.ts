@@ -108,7 +108,9 @@ export function buildTakeoverBundle(
         }
       : {}),
     nextSeq: 0,
-    createdAt: chat.lastUserActivity || chat.lastUpdated || now,
+    // The host's own creation time when it reported one; the activity guess
+    // only for a host that predates the field.
+    createdAt: chat.createdAt ?? (chat.lastUserActivity || chat.lastUpdated || now),
     updatedAt: chat.lastUpdated || now,
     lastUserActivity: chat.lastUserActivity,
   };
