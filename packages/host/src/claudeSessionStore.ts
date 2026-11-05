@@ -17,7 +17,14 @@
 // Whatever it loads, it hands the model only the conversation: every entry
 // the harness wrote itself is stripped first (`syntheticTurns.ts`).
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import type { SessionKey, SessionStore, SessionStoreEntry } from '@anthropic-ai/claude-agent-sdk';
 import type { Logger } from 'pino';
@@ -122,6 +129,27 @@ export function createClaudeSessionStore(opts: ClaudeSessionStoreOptions): Sessi
     },
   };
 
+  // The reseeded history must live in the mirror, not just in memory: the
+  // SDK's live entries chain onto its tail, and every later resume reads the
+  // mirror. Without this the mirror starts mid-chain (first parentUuid points
+  // at nothing) and the model resumes with no history. Reseed uuids are
+  // content-derived, so a retried reseed rewrites the same entries; anything
+  // already appended after them is kept.
+  function persistReseed(key: SessionKey, seeded: SessionStoreEntry[]): void {
+    mkdirSync(opts.nativeDir, { recursive: true });
+    const path = mirrorPath(key);
+    const seededUuids = new Set<string>();
+    for (const e of seeded) if (e.uuid) seededUuids.add(e.uuid);
+    const existing = existsSync(path) ? parseJsonl(readFileSync(path, 'utf8')) : [];
+    const kept = existing.filter((e) => !e.uuid || !seededUuids.has(e.uuid));
+    const tmp = `${path}.tmp-${process.pid}`;
+    writeFileSync(tmp, [...seeded, ...kept].map((e) => JSON.stringify(e) + '\n').join(''));
+    renameSync(tmp, path);
+    const seen = new Set<string>(seededUuids);
+    for (const e of kept) if (e.uuid) seen.add(e.uuid);
+    seenUuidsByPath.set(path, seen);
+  }
+
   function loadRaw(key: SessionKey): SessionStoreEntry[] | null {
     if (opts.reseed && key.sessionId === opts.reseed.sessionId) {
       const entries = toClaudeSessionEntries(opts.reseed.events, {
@@ -133,6 +161,7 @@ export function createClaudeSessionStore(opts: ClaudeSessionStoreOptions): Sessi
         { chatId: opts.chatId, sessionId: opts.reseed.sessionId, entries: entries.length },
         "claude session store: reseeded from the chat's own log",
       );
+      persistReseed(key, entries as ClaudeSessionEntry[] as SessionStoreEntry[]);
       return entries as ClaudeSessionEntry[] as SessionStoreEntry[];
     }
     const mirrored = mirrorPath(key);

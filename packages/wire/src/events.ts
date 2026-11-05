@@ -65,6 +65,22 @@ export const CLOSE_AUTH_FAILED = 4401;
  */
 export const CLOSE_SERVER_RESTARTING = 4503;
 
+/** Close reason for CLOSE_SERVER_RESTARTING; carries the version when it is known. */
+export function restartingReason(version?: string | null): string {
+  return version ? `server restarting into ${version}` : 'server restarting';
+}
+
+/** The version a going-away notice says the server is restarting into, or null. */
+export function restartingVersion(reason: string | undefined): string | null {
+  const m = /^server restarting into (\S+)$/.exec(reason ?? '');
+  return m ? m[1]! : null;
+}
+
+/** After a going-away notice, clients retry at this flat interval until the server is back. */
+export const RESTART_RETRY_MS = 250;
+/** How long a going-away notice stays 'Restarting' before the state falls back to Offline. */
+export const RESTART_WINDOW_MS = 90_000;
+
 // ---------------------------------------------------------------------------
 // Shared atoms
 
@@ -2874,6 +2890,22 @@ export const HostInfoEvent = z
       })
       .strict()
       .optional(),
+    /**
+     * Why this host's link to the server last dropped, so a sleeping laptop
+     * can be told from a network or server fault. Absent until a drop happens.
+     */
+    lastDisconnect: z
+      .object({
+        /** ms-epoch the host noticed the drop. */
+        at: z.number().int(),
+        cause: z.enum(['sleep', 'server-restart', 'unexplained']),
+        /** Whole seconds the machine was asleep, when `cause` is `sleep`. */
+        sleptSeconds: z.number().int().nonnegative().optional(),
+        /** WebSocket close code; 1006 means no close frame arrived. */
+        code: z.number().int(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type HostInfoEvent = z.infer<typeof HostInfoEvent>;
@@ -3977,6 +4009,8 @@ export const MeetingAudioEvent = z
     audioBase64: z.string().min(1),
     /** Who was lit up as the active speaker during this system clip, when the shell could tell. */
     speakerName: z.string().min(1).optional(),
+    /** Which device is sending the audio, e.g. "Chrome on a Mac"; other surfaces name it as where the meeting is listening. */
+    device: z.string().min(1).optional(),
   })
   .strict();
 export type MeetingAudioEvent = z.infer<typeof MeetingAudioEvent>;
@@ -5027,6 +5061,21 @@ export const HostUpdateEvent = z
   })
   .strict();
 export type HostUpdateEvent = z.infer<typeof HostUpdateEvent>;
+
+/**
+ * Server → host: a release has been mirrored; download and verify `version`
+ * now and keep it staged (not installed). The host installs it when the server
+ * announces it is restarting into that version (spec/11 § Updates in lockstep),
+ * so a release costs one drop, not two.
+ */
+export const HostStageEvent = z
+  .object({
+    type: z.literal('host.stage'),
+    ...hostIdField,
+    version: z.string().min(1),
+  })
+  .strict();
+export type HostStageEvent = z.infer<typeof HostStageEvent>;
 
 /** Surface → host: designate a project root on that host (spec/04 § Folders). */
 export const HostFolderAddEvent = z
@@ -9201,6 +9250,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   HostComponentRemoveEvent,
   HostComponentProgressEvent,
   HostUpdateEvent,
+  HostStageEvent,
   HostFolderAddEvent,
   HostFolderRemoveEvent,
   HostClaudeMemoryDeleteEvent,
@@ -9508,6 +9558,7 @@ export const EVENT_SCHEMAS = {
   'host.component_remove': HostComponentRemoveEvent,
   'host.component_progress': HostComponentProgressEvent,
   'host.update': HostUpdateEvent,
+  'host.stage': HostStageEvent,
   'host.folder_add': HostFolderAddEvent,
   'host.folder_remove': HostFolderRemoveEvent,
   'host.claude_memory_delete': HostClaudeMemoryDeleteEvent,

@@ -163,6 +163,9 @@ import {
   createAutoUpdateSettle,
   describeUpdateRefusal,
   createUpdateGate,
+  pruneStaged,
+  stageUpdate,
+  stagedBuild,
   requestUpdate,
   waitUntilNoRunningTurns,
 } from './selfUpdate.js';
@@ -186,6 +189,7 @@ import {
   describeHost as buildHostDescription,
 } from './host.js';
 import { createPowerWatcher } from './power.js';
+import { createSleepDetector } from './linkDropCause.js';
 import { createServerLink } from './serverLink.js';
 import { createHealthSampler } from './healthReport.js';
 import { checkLaunchPath } from './launchPath.js';
@@ -936,6 +940,101 @@ async function startHost(
       emit(describeHost());
     },
   });
+  const applyNow = async (stagedVersion?: string): ReturnType<typeof applyUpdate> => {
+    try {
+      return await applyUpdateGated({
+        serverUrl: config.serverUrl,
+        ...(stagedVersion ? { stagedVersion } : {}),
+        internalToken: config.internalToken,
+        currentVersion: VERSION,
+        target: BUILD_TARGET,
+        patchHome: config.patchHome,
+        // Recorded only once the installer is about to run, so a deferred
+        // or artifact-pending apply leaves the version free to retry.
+        onInstallStart: (version) => hostStateStore.update({ lastAutoUpdateAttempt: version }),
+        untilIdle: async () => {
+          // Surfaces read this to say "waiting for chats" instead of "behind".
+          const held = runningChats().length > 0;
+          if (held) {
+            updateHeld = true;
+            emit(describeHost());
+          }
+          try {
+            await waitUntilNoRunningTurns({
+              runningChats,
+              logger,
+              onIdle: () => daemon.commitToInstall(),
+              force: () => forceInstall,
+            });
+          } finally {
+            forceInstall = false;
+            if (held) {
+              updateHeld = false;
+              emit(describeHost());
+            }
+          }
+        },
+        logger,
+      });
+    } finally {
+      // Reached only if the installer did not take this process down.
+      daemon.releaseInstall();
+    }
+  };
+  // A build staged ahead of the server's restart (spec/11 § Updates in
+  // lockstep). Anything left from an older run that is no longer ahead goes.
+  pruneStaged(config.patchHome, VERSION);
+  let staging: Promise<void> | null = null;
+  const stageAhead = (version: string): void => {
+    if (!autoUpdateHosts) {
+      logger.info({ version }, 'self-update: not staging (auto-update is off on this host)');
+      return;
+    }
+    if (version === VERSION || staging) return;
+    staging = stageUpdate({
+      serverUrl: config.serverUrl,
+      internalToken: config.internalToken,
+      currentVersion: VERSION,
+      target: BUILD_TARGET,
+      patchHome: config.patchHome,
+      version,
+    })
+      .then((r) =>
+        logger[r.staged ? 'info' : 'error']({ version, result: r.message }, 'self-update: stage'),
+      )
+      .catch((err: unknown) => logger.error({ err, version }, 'self-update: stage crashed'))
+      .finally(() => {
+        staging = null;
+      });
+  };
+  /**
+   * The server says it is restarting into `version`. With that build staged,
+   * install it now so host and server come back together; without it, do
+   * nothing — the reconnect update takes over, as before. Holds for running
+   * turns like any update.
+   */
+  const swapToStaged = (version: string | null): void => {
+    if (!version || version === VERSION || !autoUpdateHosts) return;
+    if (!stagedBuild(config.patchHome, version)) {
+      logger.warn(
+        { version },
+        'self-update: server restarting into a build not staged here; will update on reconnect',
+      );
+      return;
+    }
+    logger.info(
+      { version },
+      'self-update: server restarting into the staged build; installing it now',
+    );
+    void applyNow(version).then(
+      (r) =>
+        logger[r.applied ? 'info' : 'error'](
+          { result: r.message },
+          'self-update: staged swap finished',
+        ),
+      (err: unknown) => logger.error({ err }, 'self-update: staged swap failed'),
+    );
+  };
   const applyUpdateOnce = (): ReturnType<typeof applyUpdate> =>
     requestUpdate({
       runningChats,
@@ -947,46 +1046,7 @@ async function startHost(
           currentVersion: VERSION,
           target: BUILD_TARGET,
         }),
-      apply: async () => {
-        try {
-          return await applyUpdateGated({
-            serverUrl: config.serverUrl,
-            internalToken: config.internalToken,
-            currentVersion: VERSION,
-            target: BUILD_TARGET,
-            patchHome: config.patchHome,
-            // Recorded only once the installer is about to run, so a deferred
-            // or artifact-pending apply leaves the version free to retry.
-            onInstallStart: (version) => hostStateStore.update({ lastAutoUpdateAttempt: version }),
-            untilIdle: async () => {
-              // Surfaces read this to say "waiting for chats" instead of "behind".
-              const held = runningChats().length > 0;
-              if (held) {
-                updateHeld = true;
-                emit(describeHost());
-              }
-              try {
-                await waitUntilNoRunningTurns({
-                  runningChats,
-                  logger,
-                  onIdle: () => daemon.commitToInstall(),
-                  force: () => forceInstall,
-                });
-              } finally {
-                forceInstall = false;
-                if (held) {
-                  updateHeld = false;
-                  emit(describeHost());
-                }
-              }
-            },
-            logger,
-          });
-        } finally {
-          // Reached only if the installer did not take this process down.
-          daemon.releaseInstall();
-        }
-      },
+      apply: () => applyNow(),
     });
 
   /**
@@ -1115,8 +1175,10 @@ async function startHost(
     onChange: () => emit(describeHost()),
     onError: (err) => logger.warn({ err }, 'power: battery read failed'),
   });
+  const sleepDetector = createSleepDetector();
   const describeHost = (): import('@patch/wire').HostInfoEvent =>
     buildHostDescription({
+      ...(link.lastDrop() ? { lastDisconnect: link.lastDrop() } : {}),
       ...(powerWatcher.current() ? { power: powerWatcher.current() } : {}),
       hostId: selfHostId,
       hostName,
@@ -2175,6 +2237,7 @@ async function startHost(
     clientGitSha: GIT_SHA,
     clientBuiltAt: BUILT_AT,
     logger,
+    sleepDetector,
     // The server speaks a protocol this build cannot read, so the matching
     // build is (or is about to be) published — go and get it. The update gate
     // joins repeat calls from each reconnect and waits out running turns.
@@ -2189,6 +2252,7 @@ async function startHost(
           logger.error({ err }, 'self-update: failed after an unreadable server greeting'),
       );
     },
+    onServerRestarting: swapToStaged,
     onAuthed: (sender, greeting) => {
       linkOnline = true;
       // Adopt the account's machine roster from the greeting, so a cross-chat
@@ -2835,6 +2899,11 @@ async function startHost(
           }
           throw err;
         }
+        return;
+      }
+      if (event.type === 'host.stage') {
+        if (!isForThisHost(event.hostId, event.type)) return;
+        stageAhead(event.version);
         return;
       }
       if (event.type === 'host.update') {
@@ -4734,6 +4803,7 @@ async function startHost(
     logger.warn({ err }, 'power: initial battery read failed');
   });
   powerWatcher.start();
+  sleepDetector.start();
   const updateCheckTimer = setInterval(() => {
     void refreshUpdateAvailable().catch((err: unknown) => {
       logger.warn({ err }, 'self-update: availability check failed');
@@ -6966,6 +7036,7 @@ export async function handleServerEvent(
           event.source,
           Buffer.from(event.audioBase64, 'base64'),
           event.speakerName,
+          event.device,
         );
         return;
       }

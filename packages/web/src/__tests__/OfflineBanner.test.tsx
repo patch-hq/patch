@@ -3,14 +3,18 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { CLOSE_SERVER_RESTARTING } from '@patch/wire';
 import { OfflineBanner } from '../components/OfflineBanner.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 
 describe('OfflineBanner', () => {
   beforeEach(() => {
-    usePresenceStore.setState({ connection: 'offline', everConnected: true, lastClose: null });
+    usePresenceStore.setState({
+      connection: 'offline',
+      everConnected: true,
+      lastClose: null,
+      restarting: null,
+    });
   });
 
   it('renders nothing when connected', () => {
@@ -59,20 +63,22 @@ describe('OfflineBanner', () => {
     useUiStore.setState({ diagnosticsOpen: false });
   });
 
-  it('explains a server restart instead of a bare "Reconnecting…"', () => {
+  it('shows Restarting with the target version, live, instead of a bare "Reconnecting…"', () => {
     usePresenceStore.getState().setConnection('reconnecting');
-    usePresenceStore
-      .getState()
-      .noteWsClose({ code: CLOSE_SERVER_RESTARTING, reason: 'server restarting', at: Date.now() });
+    usePresenceStore.getState().setRestarting({ version: '1.2.4', at: Date.now() });
     render(<OfflineBanner />);
-    expect(screen.getByTestId('offline-banner')).toHaveTextContent(
-      'Server is updating — back in a moment',
-    );
+    expect(screen.getByTestId('offline-banner')).toHaveTextContent('Restarting into 1.2.4');
   });
 
-  it('goes back to "Reconnecting…" once a later close is not a restart', () => {
+  it('says plain Restarting when the notice carries no version', () => {
     usePresenceStore.getState().setConnection('reconnecting');
-    usePresenceStore.getState().noteWsClose({ code: CLOSE_SERVER_RESTARTING, reason: '', at: 1 });
+    usePresenceStore.getState().setRestarting({ version: null, at: 1 });
+    render(<OfflineBanner />);
+    expect(screen.getByTestId('offline-banner')).toHaveTextContent(/^Restarting\s*Diagnose$/);
+  });
+
+  it('shows Reconnecting… for an unplanned drop', () => {
+    usePresenceStore.getState().setConnection('reconnecting');
     usePresenceStore.getState().noteWsClose({ code: 1006, reason: '', at: 2 });
     render(<OfflineBanner />);
     expect(screen.getByTestId('offline-banner')).toHaveTextContent('Reconnecting…');

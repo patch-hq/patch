@@ -5,8 +5,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { SharedState } from '../api/rest.js';
 
 const settings = vi.fn();
+const setPreferences = vi.fn();
 vi.mock('../api/rest.js', () => ({
-  api: { settings: () => settings() },
+  api: { settings: () => settings(), setPreferences: (p: unknown) => setPreferences(p) },
 }));
 
 const { usePreferencesStore, DEFAULT_PREFERENCES } = await import('../stores/preferencesStore.js');
@@ -50,5 +51,21 @@ describe('preferencesStore.load', () => {
     const s = usePreferencesStore.getState();
     expect(s.shared?.version).toBe(2);
     expect(s.preferences.addressWord).toBe('new');
+  });
+});
+
+describe('preferencesStore.update', () => {
+  it('rejects when the server answers without the value that was sent', async () => {
+    setPreferences.mockResolvedValueOnce({ preferences: DEFAULT_PREFERENCES });
+    await expect(
+      usePreferencesStore.getState().update({ meetingTranscriptionModel: 'x' }),
+    ).rejects.toThrow('did not save meetingTranscriptionModel');
+  });
+
+  it('settles on the committed preferences when they match', async () => {
+    const preferences = { ...DEFAULT_PREFERENCES, meetingTranscriptionModel: 'x' };
+    setPreferences.mockResolvedValueOnce({ preferences });
+    await usePreferencesStore.getState().update({ meetingTranscriptionModel: 'x' });
+    expect(usePreferencesStore.getState().preferences.meetingTranscriptionModel).toBe('x');
   });
 });

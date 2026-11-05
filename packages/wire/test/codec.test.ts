@@ -270,6 +270,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     totalBytes: 340_000_000,
   },
   'host.update': { type: 'host.update', hostId: 'host-a' },
+  'host.stage': { type: 'host.stage', hostId: 'host-a', version: '0.1.5' },
   'host.folder_add': { type: 'host.folder_add', hostId: 'host-a', path: '/work/new' },
   'host.folder_remove': { type: 'host.folder_remove', hostId: 'host-a', path: '/work/old' },
   'host.claude_memory_delete': {

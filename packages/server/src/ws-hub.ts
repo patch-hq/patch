@@ -17,6 +17,7 @@ import {
   CLOSE_AUTH_FAILED,
   CLOSE_MALFORMED_FRAME as CLOSE_BAD_FRAME,
   CLOSE_SERVER_RESTARTING,
+  restartingReason,
 } from '@patch/wire';
 import {
   decode,
@@ -49,7 +50,7 @@ import type { ServerQueue } from './server-queue.js';
 import type { NewChatDraftStore } from './new-chat-drafts.js';
 import type { DraftAttachmentStore } from './draft-attachments.js';
 import { InputDedupe } from './dedupe.js';
-import { hostLockstep } from './host-lockstep.js';
+import { hostLockstep, hostStageTarget } from './host-lockstep.js';
 
 /**
  * Message shown to the user when an in-flight chat is force-resolved to
@@ -652,7 +653,7 @@ export class WsHub {
   }
 
   /** Drop all upstream subscriptions (test cleanup). */
-  shutdown(): void {
+  shutdown(restartTarget: string | null = null): void {
     for (const t of this.offlineTimers.values()) clearTimeout(t);
     this.offlineTimers.clear();
     this.hostEventUnsub?.();
@@ -664,7 +665,7 @@ export class WsHub {
     this.newChatAttachmentsUnsub?.();
     for (const conn of this.allConns()) {
       try {
-        conn.socket.close(CLOSE_SERVER_RESTARTING, 'server restarting');
+        conn.socket.close(CLOSE_SERVER_RESTARTING, restartingReason(restartTarget));
       } catch {
         // ignore — socket already gone
         // (intentional swallow during teardown only)
@@ -1254,6 +1255,13 @@ export class WsHub {
     const serverVersion = this.deps.serverVersion;
     if (!serverVersion || !this.deps.publishedHost) return;
     const publishedVersion = this.deps.publishedHost()?.version ?? null;
+    // A release is mirrored and this server has not restarted into it yet: have
+    // the host download it now, so it can swap the moment the server does.
+    const stage = hostStageTarget({ serverVersion, hostVersion, publishedVersion });
+    if (stage && (!this.deps.autoUpdateHosts || this.deps.autoUpdateHosts())) {
+      log.info({ hostId, hostVersion, serverVersion, stage }, 'telling host to stage the release');
+      socket.send(encode({ type: 'host.stage', hostId, version: stage }));
+    }
     const step = hostLockstep({ serverVersion, hostVersion, publishedVersion });
     const ctx = { hostId, hostVersion, serverVersion, publishedVersion };
     switch (step.kind) {

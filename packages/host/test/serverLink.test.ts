@@ -46,10 +46,10 @@ class FakeSocket extends EventEmitter {
     this.terminated = true;
     this.close();
   }
-  close(): void {
+  close(code = 1000, reason = ''): void {
     if (this.readyState === WS.CLOSED) return;
     this.readyState = WS.CLOSED;
-    this.emit('close', 1000, Buffer.from(''));
+    this.emit('close', code, Buffer.from(reason));
   }
 }
 
@@ -196,6 +196,39 @@ describe('serverLink', () => {
     expect(link.isOnline()).toBe(true);
   });
 
+  it('records the cause of a drop: sleep when the clocks diverged, else unexplained', async () => {
+    const server = await startFakeServer();
+    servers.push(server);
+    const drops: Array<{ cause: string; sleptSeconds?: number }> = [];
+    let slept: { endedAt: number; ms: number } | undefined;
+    const link = track(
+      createServerLink({
+        url: server.url,
+        daemonKey: 'jwt',
+        clientVersion: '1.0.0',
+        logger: silent,
+        sleepDetector: {
+          start() {},
+          stop() {},
+          sample() {},
+          lastSleep: () => slept,
+        },
+        onDisconnected: (d) => drops.push(d),
+      }),
+    );
+    link.start();
+    await waitFor(() => link.isOnline());
+    expect(link.lastDrop()).toBeUndefined();
+    server.dropClient();
+    await waitFor(() => drops.length === 1);
+    expect(link.lastDrop()?.cause).toBe('unexplained');
+    await waitFor(() => link.isOnline());
+    slept = { endedAt: Date.now(), ms: 900_000 };
+    server.dropClient();
+    await waitFor(() => drops.length === 2);
+    expect(link.lastDrop()).toMatchObject({ cause: 'sleep', sleptSeconds: 900 });
+  });
+
   it('the default first reconnect backoff step is short (spec/12 ≤1s)', () => {
     // spec/12 ## Surface connection state model: "its first reconnect backoff
     // step is short (≤1s) so a transient miss recovers within about a second."
@@ -229,6 +262,79 @@ describe('serverLink', () => {
     // Comfortably under a second (the short leading step), and not instant.
     expect(firstBackoff).toBeLessThan(1_000);
     expect(firstBackoff).toBeGreaterThanOrEqual(150);
+  });
+
+  it('redials at once on a going-away notice, then retries flat (not the backoff schedule)', async () => {
+    const sockets: FakeSocket[] = [];
+    const dialTimes: number[] = [];
+    const link = track(
+      createServerLink({
+        url: 'ws://127.0.0.1:1/ws',
+        daemonKey: 'jwt',
+        clientVersion: '1.0.0',
+        logger: silent,
+        // A schedule this slow would fail the test if the notice used it.
+        backoffSchedule: [5_000, 5_000],
+        wsFactory: () => {
+          const s = new FakeSocket();
+          sockets.push(s);
+          dialTimes.push(Date.now());
+          return s as never;
+        },
+      }),
+    );
+    link.start();
+    sockets[0]!.close(4503, 'server restarting into 1.2.4');
+    expect(sockets.length).toBe(2); // immediate, synchronous redial
+    sockets[1]!.close(1006);
+    await waitFor(() => sockets.length >= 3, 1_000);
+    expect(dialTimes[2]! - dialTimes[1]!).toBeLessThan(1_000);
+  });
+
+  it('reports the version a going-away notice names, and null for a plain restart', () => {
+    const sockets: FakeSocket[] = [];
+    const seen: (string | null)[] = [];
+    const link = track(
+      createServerLink({
+        url: 'ws://127.0.0.1:1/ws',
+        daemonKey: 'jwt',
+        clientVersion: '1.0.0',
+        logger: silent,
+        onServerRestarting: (v) => seen.push(v),
+        wsFactory: () => {
+          const s = new FakeSocket();
+          sockets.push(s);
+          return s as never;
+        },
+      }),
+    );
+    link.start();
+    sockets[0]!.close(4503, 'server restarting into 1.2.4');
+    sockets[1]!.close(4503, 'server restarting');
+    sockets[2]!.close(1006);
+    expect(seen).toEqual(['1.2.4', null]);
+  });
+
+  it('keeps the normal backoff for an unplanned drop', async () => {
+    const sockets: FakeSocket[] = [];
+    const link = track(
+      createServerLink({
+        url: 'ws://127.0.0.1:1/ws',
+        daemonKey: 'jwt',
+        clientVersion: '1.0.0',
+        logger: silent,
+        backoffSchedule: [300],
+        wsFactory: () => {
+          const s = new FakeSocket();
+          sockets.push(s);
+          return s as never;
+        },
+      }),
+    );
+    link.start();
+    sockets[0]!.close(1006);
+    expect(sockets.length).toBe(1);
+    await waitFor(() => sockets.length === 2, 1_000);
   });
 
   it('reconnects with backoff after a drop and re-sends hello', async () => {
