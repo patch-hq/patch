@@ -1008,6 +1008,15 @@ const retractedChatIds = new Set<string>();
 const rosteredChatIds = new Set<string>();
 /** `${chatId}::${localId}` of turns whose persisted echo has landed, so a late `chat.queued` is ignored. */
 const settledLocalIds = new Set<string>();
+
+/**
+ * True once a turn's persisted echo has landed. The optimistic entry loses its
+ * `localId` when that happens, so a lookup by `localId` cannot tell "sent" from
+ * "removed" — this can.
+ */
+export function isLocalIdSettled(chatId: string, localId: string): boolean {
+  return settledLocalIds.has(`${chatId}::${localId}`);
+}
 const RETRACTED_LIMIT = 200;
 
 /** A turn's move to another account, with when the spent one comes back. */

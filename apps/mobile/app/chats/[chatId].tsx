@@ -62,6 +62,7 @@ import { apiUrl, getRoute } from '../../src/config';
 import { loadTranscript, dropTranscript, setBranch } from '../../src/lib/transcriptCache';
 import { api } from '../../src/api/rest';
 import {
+  isLocalIdSettled,
   useChatStore,
   type ChatEventEntry,
   type LocalAttachment,
@@ -342,7 +343,7 @@ function ChatDetailBody(): React.ReactElement {
     useUiStore
       .getState()
       .pushError(
-        still
+        still || isLocalIdSettled(chatId, queuedEdit.localId)
           ? 'That message had already been sent — your edit is in the composer.'
           : 'That message was removed from the queue — your edit is in the composer.',
       );

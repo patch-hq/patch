@@ -48,7 +48,7 @@ import { SnoozeDivider } from '../components/SnoozeDivider.js';
 import type { WireEvent } from '@patch/wire';
 import type { Job, JobTrigger } from '@patch/wire/jobs';
 import { describeTrigger } from '../lib/jobDescribe.js';
-import { useChatStore } from '../stores/chatStore.js';
+import { isLocalIdSettled, useChatStore } from '../stores/chatStore.js';
 import { loadTranscript, dropTranscript, setBranch, trimCache } from '../lib/transcriptCache.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
@@ -1395,13 +1395,13 @@ export function ChatRoute({
     const still = timeline.find((e) => e.kind === 'message' && e.localId === queuedEdit.localId);
     if (still?.queued) return;
     pushError(
-      still
+      still || isLocalIdSettled(chatId, queuedEdit.localId)
         ? 'That message had already been sent — your edit is in the composer.'
         : 'That message was removed from the queue — your edit is in the composer.',
     );
     setComposerInsert({ text: queuedEdit.text, nonce: Date.now() });
     setQueuedEdit(null);
-  }, [timeline, queuedEdit, pushError]);
+  }, [timeline, queuedEdit, pushError, chatId]);
 
   const handleEditQueued = useCallback(
     (entry: ChatEventEntry, text: string): void => {
