@@ -4,6 +4,8 @@
 // re-reading; everything before the switch still rides the target's own
 // prompt cache.
 
+import { transcriptFor } from './helpers/chatTranscript.js';
+import { encodeFolder } from '../src/history.js';
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -147,7 +149,7 @@ describe('spec/04 § History — riding the cache back across a provider switch'
   });
 
   it('a return to a previously-used harness resumes its OWN session and sends only the delta', async () => {
-    const { daemon, mockClaude, mockCodex, folder, metaStore, home } = setup();
+    const { daemon, mockClaude, mockCodex, folder, metaStore } = setup();
     const chatId = await daemon.spawnChat({ folder, model: CLAUDE_MODEL });
     await daemon.sendInput({ chatId, message: 'hello claude', localId: 'l1' });
     const claudeSessionA = metaStore.read(chatId)!.claudeSessionId!;
@@ -163,13 +165,16 @@ describe('spec/04 § History — riding the cache back across a provider switch'
     // Resumed the SAME Claude session — not a fresh one, not rebuilt.
     const claudeOpts = mockClaude.lastOptions()!;
     expect(claudeOpts.resumeSessionId).toBe(claudeSessionA);
-    expect(claudeOpts.claudeSessionStore?.reseed).toBeUndefined();
     expect(metaStore.read(chatId)!.claudeSessionId).toBe(claudeSessionA);
 
     // The mirror got exactly the DELTA (the codex turn), threaded onto
     // whatever was already known about this session (not rebuilt).
-    const nativeDir = join(home, 'chats', chatId, 'native', 'claude');
-    const mirrorPath = join(nativeDir, `${claudeSessionA}.jsonl`);
+    const mirrorPath = join(
+      claudeOpts.claudeConfigDir!,
+      'projects',
+      encodeFolder(folder),
+      `${claudeSessionA}.jsonl`,
+    );
     expect(existsSync(mirrorPath)).toBe(true);
     const mirrorLines = readFileSync(mirrorPath, 'utf8')
       .split('\n')
@@ -379,7 +384,7 @@ describe('spec/04 § History — "switch and compact" (optional cheap path)', ()
     expect(digestCalls[0]!.model).toBe(CODEX_MODEL);
 
     const claudeOpts = mockClaude.lastOptions()!;
-    expect(JSON.stringify(claudeOpts.claudeSessionStore?.reseed)).toContain(
+    expect(JSON.stringify(transcriptFor(claudeOpts))).toContain(
       'remember the deploy key rotates monthly',
     );
   });

@@ -631,6 +631,8 @@ export interface HostOptions {
     resumeSessionId: string;
     folder: string;
     model?: string | null;
+    /** The chat's own `CLAUDE_CONFIG_DIR`, where a Claude session's file lives. */
+    claudeConfigDir?: string;
   }) => Promise<string | null>;
   /**
    * What the catalogue and the harnesses have reported about each model's
@@ -1354,7 +1356,14 @@ import {
   type ChatMovePaths,
   attachmentsDirFor,
 } from './chatMove.js';
-import { createClaudeSessionStore } from './claudeSessionStore.js';
+import {
+  chatClaudeDir,
+  chatTranscriptPath,
+  createClaudeSessionStore,
+  entriesSince,
+  transcriptSize,
+  type ClaudeSessionStore,
+} from './claudeSessionStore.js';
 import { isCodexModel } from './codexAccounts.js';
 import { hasConversation } from './syntheticTurns.js';
 import { cutAt } from './textClean.js';
@@ -5371,6 +5380,7 @@ export class Daemon {
       chatId,
       resumeSessionId: outgoingSessionId,
       folder: state.folder,
+      claudeConfigDir: this.claudeConfigDirFor(chatId),
     });
     if (digest === null) {
       this.opts.logger.warn(
@@ -7731,7 +7741,7 @@ export class Daemon {
       sessionId,
       seq: previousSeq,
       seqIndex: this.canonicalSeqIndex(chatId),
-      nativeDir: this.nativeClaudeDirFor(chatId),
+      chatDir: this.chatDirFor(chatId),
     });
   }
 
@@ -7782,7 +7792,7 @@ export class Daemon {
           sessionId,
           seq: req.seq,
           seqIndex: this.canonicalSeqIndex(req.chatId),
-          nativeDir: this.nativeClaudeDirFor(req.chatId),
+          chatDir: this.chatDirFor(req.chatId),
         }) ?? this.unpersistedForkPoint(req.chatId, sessionId, req.seq))
       : req.seq === 0
         ? { resumeAtUuid: null }
@@ -7885,7 +7895,7 @@ export class Daemon {
             sessionId,
             seq: req.seq,
             seqIndex: this.canonicalSeqIndex(req.chatId),
-            nativeDir: this.nativeClaudeDirFor(req.chatId),
+            chatDir: this.chatDirFor(req.chatId),
           })
         : null;
     if (!point) {
@@ -8442,10 +8452,15 @@ export class Daemon {
           env: { ...this.opts.mcpServer.env, PATCH_CHAT_ID: chatId, PATCH_BRANCH_ID: branchId },
         }
       : undefined;
+    const sideResumeId = branch?.sessionId ?? state.claudeSessionId;
+    const sideOnClaude = this.harnessOf(chatId) === 'claude';
+    if (sideOnClaude && sideResumeId)
+      await this.claudeSessionStoreFor(chatId, state.folder).prepare(sideResumeId);
     const sdkOpts: SdkRunOptions = {
       prompt: composedPrompt,
       cwd: state.folder,
-      resumeSessionId: branch?.sessionId ?? state.claudeSessionId,
+      resumeSessionId: sideResumeId,
+      ...(sideOnClaude ? { claudeConfigDir: this.claudeConfigDirFor(chatId) } : {}),
       ...(fork ? { fork } : {}),
       abortController,
       oauthAccessToken: oauth.accessToken,
@@ -9102,7 +9117,7 @@ export class Daemon {
         this.historyReader.hasSession({
           folder: state.folder,
           sessionId: state.claudeSessionId,
-          nativeDir: this.nativeClaudeDirFor(state.chatId),
+          chatDir: this.chatDirFor(state.chatId),
         })
       )
         continue;
@@ -9277,7 +9292,7 @@ export class Daemon {
       !this.historyReader.hasSession({
         folder: state.folder,
         sessionId: state.claudeSessionId,
-        nativeDir: this.nativeClaudeDirFor(chatId),
+        chatDir: this.chatDirFor(chatId),
       })
     ) {
       this.opts.logger.warn(
@@ -9316,7 +9331,7 @@ export class Daemon {
       typeof state.claudeSessionId === 'string' &&
       state.claudeSessionId.length > 0
     ) {
-      let loaded: Awaited<ReturnType<ReturnType<typeof createClaudeSessionStore>['load']>>;
+      let loaded: Awaited<ReturnType<ClaudeSessionStore['load']>>;
       try {
         loaded = await this.claudeSessionStoreFor(chatId, state.folder).load({
           projectKey: chatId,
@@ -9899,23 +9914,18 @@ export class Daemon {
           ),
         }));
       }
-      // Claude's resume rides the SDK's own SessionStore, which we drive
-      // ourselves here rather than through `sessionStoreOptFor` (sdkBackend.ts)
-      // so the delta lands in the mirror BEFORE the resume call, threaded onto
-      // the existing session's own last entry rather than a disconnected
-      // second root (spec/04 § History).
+      // Claude resumes in place from the chat's own config dir, so the delta
+      // is appended to that file BEFORE the resume call, threaded onto the
+      // existing session's own last entry rather than a disconnected second
+      // root (spec/04 § History).
       if (resumeExistingNativeSessionId && targetHarness === 'claude') {
         const store = this.claudeSessionStoreFor(chatId, state.folder);
         const key = { projectKey: chatId, sessionId: resumeExistingNativeSessionId };
         const existing = await store.load(key);
-        // `load()` can source `existing` from the harness's own on-disk
-        // transcript when this session predates the mirror (never resumed
-        // through this feature before). `append()` only ever writes the
-        // MIRROR, so without re-affirming `existing` there first, appending
-        // just the delta would leave the mirror holding ONLY the delta — the
-        // next resume would find that non-empty mirror and lose everything
-        // before it. A no-op (dedup by uuid) when `existing` already WAS the
-        // mirror's own content.
+        // `load()` can source `existing` from the old mirror or the shared
+        // store when this session has not been migrated yet. `append()` only
+        // ever writes the chat's own file, so re-affirm `existing` there first
+        // (a no-op, dedup by uuid, once it is already there).
         if (existing && existing.length > 0) await store.append(key, existing);
         const startParentUuid = existing?.at(-1)?.['uuid'];
         await store.append(
@@ -9929,40 +9939,52 @@ export class Daemon {
         );
       }
     }
+    const claudeResumeId: string | undefined =
+      resumeExistingNativeSessionId ??
+      ((isProviderSwitch || isNativeRebuild) && targetHarness === 'claude'
+        ? randomUUID()
+        : fork?.resumeAtUuid === null
+          ? // Editing the FIRST message: the shared prefix is empty, so there is
+            // nothing to resume. Resuming the parent would carry the original
+            // message and everything after it into the new track.
+            undefined
+          : state.claudeSessionId);
+    // Claude runs under the chat's own config dir: make its one conversation
+    // file ready (migrate / reseed / strip) and remember where it ends, so
+    // what Claude itself writes on resume can be surfaced after the turn.
+    let claudeTranscript: { path: string; size: number } | undefined;
+    if (targetHarness === 'claude' && claudeResumeId !== undefined) {
+      await createClaudeSessionStore({
+        chatId,
+        folder: state.folder,
+        chatDir: this.chatDirFor(chatId),
+        claudeProjectsRoot: this.claudeProjectsRoot,
+        logger: this.opts.logger,
+        // Only a from-scratch rebuild reseeds — a resume of an existing
+        // session already had its delta appended above.
+        ...((isProviderSwitch || isNativeRebuild) &&
+        !resumeExistingNativeSessionId &&
+        reconstructTrack
+          ? {
+              reseed: {
+                sessionId: claudeResumeId,
+                events: reconstructTrack,
+                model: state.model ?? null,
+              },
+            }
+          : {}),
+      }).prepare(claudeResumeId);
+      const path = chatTranscriptPath(this.chatDirFor(chatId), state.folder, claudeResumeId);
+      claudeTranscript = { path, size: transcriptSize(path) };
+    }
     const sdkOpts: SdkRunOptions = {
       prompt,
       cwd: state.folder,
       // Keys the persistent warm-session map (PATCH_PERSISTENT_SESSIONS=1);
       // ignored by the one-shot default path.
       chatId,
-      resumeSessionId:
-        resumeExistingNativeSessionId ??
-        ((isProviderSwitch || isNativeRebuild) && targetHarness === 'claude'
-          ? randomUUID()
-          : fork?.resumeAtUuid === null
-            ? // Editing the FIRST message: the shared prefix is empty, so there is
-              // nothing to resume. Resuming the parent would carry the original
-              // message and everything after it into the new track.
-              undefined
-            : state.claudeSessionId),
-      ...(targetHarness === 'claude'
-        ? {
-            claudeSessionStore: {
-              nativeDir: this.nativeClaudeDirFor(chatId),
-              claudeProjectsRoot: this.claudeProjectsRoot,
-              logger: this.opts.logger,
-              onAppend: (entries) => this.noteMirroredEntries(chatId, entries),
-              // Only a from-scratch rebuild reseeds — a resume of an existing
-              // session already had its delta appended to the mirror above,
-              // so a PLAIN resume picks it up.
-              ...((isProviderSwitch || isNativeRebuild) &&
-              !resumeExistingNativeSessionId &&
-              reconstructTrack
-                ? { reseed: { events: reconstructTrack, model: state.model ?? null } }
-                : {}),
-            },
-          }
-        : {}),
+      resumeSessionId: claudeResumeId,
+      ...(targetHarness === 'claude' ? { claudeConfigDir: this.claudeConfigDirFor(chatId) } : {}),
       ...((isProviderSwitch || isNativeRebuild) && targetHarness === 'codex' && reconstructTrack
         ? resumeExistingNativeSessionId
           ? { codexAppendItems: { events: reconstructTrack } }
@@ -10084,6 +10106,7 @@ export class Daemon {
     );
 
     let sawResult = false;
+    let transcriptScanned = false;
     const run = (async (): Promise<boolean> => {
       try {
         for (;;) {
@@ -10094,6 +10117,16 @@ export class Daemon {
               (env) => env.type === 'tool_result',
             )) {
               if (env.type === 'result' || env.type === 'error') sawResult = true;
+              // What Claude itself wrote to the file on resume (a `No response
+              // requested.`) never crosses the SDK stream: read it back once,
+              // as soon as the process is talking (spec/02 § Per-turn process).
+              if (!transcriptScanned && claudeTranscript) {
+                transcriptScanned = true;
+                this.noteMirroredEntries(
+                  chatId,
+                  entriesSince(claudeTranscript.path, claudeTranscript.size),
+                );
+              }
               this.handleEnvelope(chatId, env, userMessageSeq);
             }
             // A stream that closes without the provider's final `result` (or an error
@@ -10118,11 +10151,22 @@ export class Daemon {
                 : undefined;
             if (!tighter) throw err;
             if (targetHarness === 'codex') sdkOpts.codexReseed = { events: tighter };
-            else if (sdkOpts.claudeSessionStore) {
-              sdkOpts.claudeSessionStore.reseed = {
-                events: tighter,
-                model: state.model ?? null,
-              };
+            else if (claudeResumeId !== undefined) {
+              // The rejected handoff produced no output, so the file holds only
+              // the seed that was too big: replace it outright.
+              await createClaudeSessionStore({
+                chatId,
+                folder: state.folder,
+                chatDir: this.chatDirFor(chatId),
+                claudeProjectsRoot: this.claudeProjectsRoot,
+                logger: this.opts.logger,
+                reseed: {
+                  sessionId: claudeResumeId,
+                  events: tighter,
+                  model: state.model ?? null,
+                  replace: true,
+                },
+              }).prepare(claudeResumeId);
             }
           }
         }
@@ -14268,20 +14312,22 @@ export class Daemon {
     return harnessOfModel(this.chatState.get(chatId)?.model);
   }
 
-  /** `~/.patch/chats/<chatId>/native/claude` — the Claude session mirror
-   * (spec/04 § History — the native resume cache). */
-  private nativeClaudeDirFor(chatId: string): string {
-    return join(dirname(this.opts.metaStore.pathFor(chatId)), 'native', 'claude');
+  /** `~/.patch/chats/<chatId>` — the chat's own dir. */
+  private chatDirFor(chatId: string): string {
+    return dirname(this.opts.metaStore.pathFor(chatId));
   }
 
-  private claudeSessionStoreFor(
-    chatId: string,
-    folder: string,
-  ): ReturnType<typeof createClaudeSessionStore> {
+  /** `~/.patch/chats/<chatId>/claude` — the chat's own `CLAUDE_CONFIG_DIR`
+   * (spec/04 § History): its one conversation file, resumed in place. */
+  private claudeConfigDirFor(chatId: string): string {
+    return chatClaudeDir(this.chatDirFor(chatId));
+  }
+
+  private claudeSessionStoreFor(chatId: string, folder: string): ClaudeSessionStore {
     return createClaudeSessionStore({
       chatId,
       folder,
-      nativeDir: this.nativeClaudeDirFor(chatId),
+      chatDir: this.chatDirFor(chatId),
       claudeProjectsRoot: this.claudeProjectsRoot,
       logger: this.opts.logger,
     });
@@ -14467,6 +14513,7 @@ export class Daemon {
           chatId,
           resumeSessionId: state.claudeSessionId,
           folder: state.folder,
+          claudeConfigDir: this.claudeConfigDirFor(chatId),
           model: state.model ?? null,
         }),
         new Promise<null>((resolve) => {
@@ -14808,6 +14855,7 @@ export class Daemon {
       chatId,
       resumeSessionId: outgoingSessionId,
       folder,
+      claudeConfigDir: this.claudeConfigDirFor(chatId),
       model: outgoingModel,
     });
     if (digest === null) {

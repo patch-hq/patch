@@ -187,6 +187,13 @@ export function markRestoredImages(input: readonly SessionStoreEntry[]): Session
       (att.content as { type?: unknown } | null)?.type === 'image' ||
       rendered.some((r) => hasImage((r as { content?: unknown } | null)?.content));
     if (!isImage) return e as SessionStoreEntry;
+    // Already marked (the transcript is rewritten in place on every resume).
+    const first = rendered[0] as { content?: unknown } | null;
+    if (
+      typeof first?.content === 'string' &&
+      first.content.includes('Earlier context, not a new message: the image')
+    )
+      return e as SessionStoreEntry;
     const name = String(att.displayPath ?? att.filename ?? 'an image');
     const when = typeof att.filename === 'string' ? readAt.get(att.filename) : undefined;
     const note = {
