@@ -118,30 +118,6 @@ describe('applyUpdate from a staged build', () => {
     expect(runInstaller.mock.calls[0]![0]).toBe(join(stagedBuild(home, '0.2.0')!, 'install'));
   });
 
-  it('holds on untilIdle before installing, as an ordinary update does', async () => {
-    await stageUpdate({ ...base(), version: '0.2.0', fetchImpl: release('0.2.0') });
-    const order: string[] = [];
-    let release_!: () => void;
-    const idle = new Promise<void>((r) => (release_ = r));
-    const done = applyUpdate({
-      ...base(),
-      logger,
-      stagedVersion: '0.2.0',
-      fetchImpl: serverDown,
-      untilIdle: async () => {
-        order.push('waiting');
-        await idle;
-      },
-      runInstaller: async () => {
-        order.push('install');
-      },
-    });
-    await vi.waitFor(() => expect(order).toEqual(['waiting']));
-    release_();
-    await done;
-    expect(order).toEqual(['waiting', 'install']);
-  });
-
   it('says so when nothing is staged for that version, and installs nothing', async () => {
     const runInstaller = vi.fn(async () => {});
     const res = await applyUpdate({

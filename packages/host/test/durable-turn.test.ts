@@ -22,6 +22,7 @@ import {
   versionDirsInUse,
   type DurableTurnConfig,
 } from '../src/durableTurn.js';
+import { RUNNER_PROTOCOL } from '../src/turnRunner.js';
 import { pruneOldVersions } from '../src/installer/main.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -246,6 +247,49 @@ describe('a durable turn', () => {
     writeFileSync(join(dir, 'turn.json'), JSON.stringify({ chatId: 'c5', localId: 'L5' }));
     writeFileSync(join(dir, 'runner.json'), JSON.stringify({ pid: 2 ** 22 + 1, claudePid: null }));
     expect(inspectTurn(cfg, 'c5')?.state).toBe('lost');
+  });
+});
+
+describe('runner protocol version', () => {
+  it('a runner states its protocol in runner.json, and the host reads it', async () => {
+    const { cfg, cwd } = fresh();
+    const turn = new DurableTurn({ config: cfg, chatId: 'p1', localId: 'LP', log });
+    const d = drive(turn.spawn({ ...spawnOpts, cwd }));
+    d.send(initialize('r1'));
+    d.send(prompt);
+    await d.until(() => texts(d.lines).includes('a1'), 'a1');
+    expect(JSON.parse(readFileSync(join(turn.dir, 'runner.json'), 'utf8')).protocol).toBe(
+      RUNNER_PROTOCOL,
+    );
+    expect(inspectTurn(cfg, 'p1')?.protocol).toBe(RUNNER_PROTOCOL);
+    detachDurableTurns();
+    resetDurableTurnsForTest();
+    writeFileSync(join(cwd, 'go'), '');
+    for (let i = 0; i < 200 && inspectTurn(cfg, 'p1')?.state !== 'exited'; i++) await sleep(25);
+  }, 30000);
+
+  it('a runner from before the field speaks protocol 1', () => {
+    const { cfg } = fresh();
+    const dir = join(cfg.turnsDir, 'p2');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'turn.json'), JSON.stringify({ chatId: 'p2' }));
+    writeFileSync(join(dir, 'runner.json'), JSON.stringify({ pid: process.pid, claudePid: null }));
+    writeFileSync(join(dir, 's'), '');
+    expect(inspectTurn(cfg, 'p2')?.protocol).toBe(1);
+  });
+
+  it('refuses, loudly, to reattach to a runner speaking a protocol it does not know', () => {
+    const { cfg, cwd } = fresh();
+    const dir = join(cfg.turnsDir, 'p3');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'turn.json'), JSON.stringify({ chatId: 'p3' }));
+    writeFileSync(
+      join(dir, 'runner.json'),
+      JSON.stringify({ pid: process.pid, protocol: 999, claudePid: null }),
+    );
+    writeFileSync(join(dir, 's'), '');
+    const turn = new DurableTurn({ config: cfg, chatId: 'p3', attach: { consumed: null }, log });
+    expect(() => turn.spawn({ ...spawnOpts, cwd })).toThrow(/protocol 999/);
   });
 });
 

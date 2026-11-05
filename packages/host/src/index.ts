@@ -167,7 +167,6 @@ import {
   stageUpdate,
   stagedBuild,
   requestUpdate,
-  waitUntilNoRunningTurns,
 } from './selfUpdate.js';
 import { updateClaudeCli } from './claudeCliUpdate.js';
 import {
@@ -908,16 +907,11 @@ async function startHost(
   let updateAvailable = false;
   // A newer build is published but this machine's artifact is still being built.
   let updatePending = false;
-  let updateHeld = false;
-  let forceInstall = false;
 
   // See `createUpdateGate` — joins every caller (the `host.update` wire event
   // and `patch hosts update`'s local control command) onto one in-flight
   // attempt rather than letting a second click race the installer.
   const applyUpdateGated = createUpdateGate();
-  // Never restart under a running turn: the installer waits for the machine to
-  // go idle, and a request made mid-turn is answered as deferred at once.
-  const runningChats = (): string[] => daemon.runningChatIds();
   // A deploy publishes this machine's artifact a minute or two after the
   // version bump. Wait that out quietly; only a build that
   // is STILL missing after the window is shown to the user.
@@ -940,47 +934,20 @@ async function startHost(
       emit(describeHost());
     },
   });
-  const applyNow = async (stagedVersion?: string): ReturnType<typeof applyUpdate> => {
-    try {
-      return await applyUpdateGated({
-        serverUrl: config.serverUrl,
-        ...(stagedVersion ? { stagedVersion } : {}),
-        internalToken: config.internalToken,
-        currentVersion: VERSION,
-        target: BUILD_TARGET,
-        patchHome: config.patchHome,
-        // Recorded only once the installer is about to run, so a deferred
-        // or artifact-pending apply leaves the version free to retry.
-        onInstallStart: (version) => hostStateStore.update({ lastAutoUpdateAttempt: version }),
-        untilIdle: async () => {
-          // Surfaces read this to say "waiting for chats" instead of "behind".
-          const held = runningChats().length > 0;
-          if (held) {
-            updateHeld = true;
-            emit(describeHost());
-          }
-          try {
-            await waitUntilNoRunningTurns({
-              runningChats,
-              logger,
-              onIdle: () => daemon.commitToInstall(),
-              force: () => forceInstall,
-            });
-          } finally {
-            forceInstall = false;
-            if (held) {
-              updateHeld = false;
-              emit(describeHost());
-            }
-          }
-        },
-        logger,
-      });
-    } finally {
-      // Reached only if the installer did not take this process down.
-      daemon.releaseInstall();
-    }
-  };
+  const applyNow = (stagedVersion?: string): ReturnType<typeof applyUpdate> =>
+    applyUpdateGated({
+      serverUrl: config.serverUrl,
+      ...(stagedVersion ? { stagedVersion } : {}),
+      internalToken: config.internalToken,
+      currentVersion: VERSION,
+      target: BUILD_TARGET,
+      patchHome: config.patchHome,
+      // Recorded only once the installer is about to run, so a deferred
+      // or artifact-pending apply leaves the version free to retry.
+      onInstallStart: (version) => hostStateStore.update({ lastAutoUpdateAttempt: version }),
+      logger,
+    });
+
   // A build staged ahead of the server's restart (spec/11 § Updates in
   // lockstep). Anything left from an older run that is no longer ahead goes.
   pruneStaged(config.patchHome, VERSION);
@@ -1037,7 +1004,6 @@ async function startHost(
   };
   const applyUpdateOnce = (): ReturnType<typeof applyUpdate> =>
     requestUpdate({
-      runningChats,
       logger,
       artifactWait,
       check: () =>
@@ -1195,7 +1161,6 @@ async function startHost(
       // no newer build" rather than a claim that none exists.
       updateAvailable,
       updatePending,
-      updateHeld,
       permissionModeDefault: daemon.permissionModeDefault(),
       permissionOverrides: daemon.permissionOverrideCount(),
       ...(defaultModel !== undefined ? { defaultModel } : {}),
@@ -2908,13 +2873,6 @@ async function startHost(
       }
       if (event.type === 'host.update') {
         if (!isForThisHost(event.hostId, event.type)) return;
-        if (event.force === true && updateHeld) {
-          // The install is already waiting on chats; the hold loop sees this on
-          // its next poll and installs over them.
-          logger.warn('host.update forced: installing over running turns');
-          forceInstall = true;
-          return;
-        }
         // Apply the published build. A successful apply ends with the service
         // manager restarting this process, so the frames below are only ever
         // reached on refusal — which is exactly when the surface needs words.

@@ -21,13 +21,10 @@ import {
   appendFileSync,
   existsSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
   renameSync,
-  statSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SessionKey, SessionStore, SessionStoreEntry } from '@anthropic-ai/claude-agent-sdk';
 import type { Logger } from 'pino';
@@ -57,39 +54,6 @@ export interface ClaudeSessionStoreOptions {
    * only place the host gets to see it (spec/02 § Per-turn process).
    */
   onAppend?: (entries: readonly SessionStoreEntry[]) => void;
-  /** Where the SDK puts its throwaway `claude-resume-*` dirs. Defaults to the OS temp dir. */
-  resumeTmpRoot?: string;
-}
-
-/**
- * A resumed run writes its transcript under a throwaway
- * `<tmp>/claude-resume-*` config dir, and the SDK copies it to the store in
- * batches that flush when a turn's result arrives. A run killed before then —
- * a host restart mid-turn — leaves everything it did only in that temp file,
- * and the next resume, which reads the store, comes back with no memory of it
- * (2026-11-05: eight overnight restarts, 913 transcript rows never merged).
- * Returns the entries of every such leftover transcript for `sessionId`,
- * oldest first.
- */
-function leftoverResumeTranscripts(root: string, sessionId: string): SessionStoreEntry[][] {
-  let dirs: string[];
-  try {
-    dirs = readdirSync(root).filter((n) => n.startsWith('claude-resume-'));
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return [];
-    throw e;
-  }
-  const found: Array<{ mtime: number; path: string }> = [];
-  for (const d of dirs) {
-    const projects = join(root, d, 'projects');
-    if (!existsSync(projects)) continue;
-    for (const proj of readdirSync(projects)) {
-      const path = join(projects, proj, `${sessionId}.jsonl`);
-      if (existsSync(path)) found.push({ mtime: statSync(path).mtimeMs, path });
-    }
-  }
-  found.sort((a, b) => a.mtime - b.mtime);
-  return found.map((f) => parseJsonl(readFileSync(f.path, 'utf8')));
 }
 
 function parseJsonl(text: string): SessionStoreEntry[] {
@@ -145,7 +109,6 @@ export function createClaudeSessionStore(opts: ClaudeSessionStoreOptions): Sessi
     },
 
     async load(key) {
-      if (!key.subpath && !opts.reseed) mergeLeftoverTranscripts(key);
       const loaded = loadRaw(key);
       if (loaded === null) return null;
       const result = stripSyntheticTurns(loaded);
@@ -165,32 +128,6 @@ export function createClaudeSessionStore(opts: ClaudeSessionStoreOptions): Sessi
       return markRestoredImages(result.entries);
     },
   };
-
-  /** Copy what killed earlier runs left only in their temp transcripts into the mirror. */
-  function mergeLeftoverTranscripts(key: SessionKey): void {
-    const transcripts = leftoverResumeTranscripts(opts.resumeTmpRoot ?? tmpdir(), key.sessionId);
-    if (transcripts.length === 0) return;
-    mkdirSync(opts.nativeDir, { recursive: true });
-    const path = mirrorPath(key);
-    const seen = seenSetFor(path);
-    let merged = 0;
-    for (const entries of transcripts) {
-      const fresh = entries.filter((e) => e.uuid && !seen.has(e.uuid));
-      if (fresh.length === 0) continue;
-      appendFileSync(
-        path,
-        newlineIfTorn(path) + fresh.map((e) => JSON.stringify(e) + '\n').join(''),
-      );
-      for (const e of fresh) if (e.uuid) seen.add(e.uuid);
-      merged += fresh.length;
-    }
-    if (merged > 0) {
-      opts.logger.info(
-        { chatId: opts.chatId, sessionId: key.sessionId, merged },
-        'claude session store: merged transcript left in a resume temp dir back into the mirror',
-      );
-    }
-  }
 
   // The reseeded history must live in the mirror, not just in memory: the
   // SDK's live entries chain onto its tail, and every later resume reads the

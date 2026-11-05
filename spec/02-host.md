@@ -73,11 +73,11 @@ behind the current version shows an update control in Settings → Updates. The 
 to by the server when it connects, and stays put until Update (one host) or Update all is pressed. A
 host whose server greeting it cannot read still updates. A failed
 update leaves the running version in place and reports the failure to surfaces.
-A restart does not end a Claude turn (§ Turns outlive the host), so the install
-does not wait for those. An update asked for while any chat on the host is running
-something that would not survive — a turn on another harness — is accepted as
-deferred at once (the asker is often one of those turns), and the install waits
-until no such chat is running, checked again after the download.
+An install never waits for running turns, and no surface offers to force one: a
+restart does not end a Claude turn (§ Turns outlive the host), so the host updates
+whenever it likes. A turn on another harness has no runner and is re-sent after the
+restart. The only thing that defers an update is a build whose artifact for this
+machine is still being built.
 
 ### Turns outlive the host
 
@@ -98,6 +98,17 @@ turn's directory is removed. A runner with no host attached whose claude has bee
 silent for 30 minutes ends claude itself, so an orphaned turn finishes as failed
 instead of holding its chat "running". An install never prunes a version folder a live
 runner started from.
+
+A turn's identity for reattachment is the id it is re-sent under. A turn that never
+had one (a spawn prompt, so every job-fired chat's first turn) is given one when it
+is re-sent, and that same id is what marks the turn to reattach to.
+
+Each runner states the protocol it speaks in `runner.json` (`protocol`; absent means
+1). Runners are tiny and change rarely. Because a runner lives for exactly one turn,
+a new protocol needs no coordination: the old runner finishes its own turn, the
+chat's next turn starts on a new runner, and the host never holds anything for it.
+A host asked to reattach to a runner whose protocol it does not speak fails that
+turn loudly rather than guessing.
 
 ### Desktop app and the local host
 
