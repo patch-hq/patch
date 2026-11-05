@@ -28,7 +28,6 @@ import { encodeFolder, translateAttachment } from './history.js';
 import { resolveClaudeExecutable } from './claudeExecutable.js';
 import { discoverSkills, skillsReloader } from './projectSkills.js';
 import { McpSupervisor, MCP_START_TIMEOUT_MS, supervisorHooks } from './mcpSupervisor.js';
-import { createClaudeSessionStore } from './claudeSessionStore.js';
 import { readSidecar, type DocMode } from './docSidecar.js';
 import type { TrackEntry } from './nativeReconstruct.js';
 // Type-only import — erased at runtime, so it does NOT trigger the heavy lazy
@@ -39,12 +38,10 @@ import type {
   Options,
   Query,
   SDKUserMessage,
-  SessionStoreEntry,
   SettingSource,
   SpawnedProcess,
   SpawnOptions,
 } from '@anthropic-ai/claude-agent-sdk';
-import type { Logger } from 'pino';
 
 /** A little over the longest hand-off (`timeoutSeconds` max 3600). */
 const MCP_TOOL_TIMEOUT_MS = 3_660_000;
@@ -302,26 +299,13 @@ export interface SdkRunOptions {
     sessionAllow?: boolean;
   }>;
   /**
-   * Wires the SDK's `sessionStore` option (spec/04 § History — the native
-   * resume cache, and a seamless provider switch onto Claude). Absent for the
-   * mock and for any caller not yet passing it; the real backend then falls
-   * back to the SDK's own local-disk resume, exactly as before this existed.
+   * The chat's own Claude config dir (`~/.patch/chats/<chatId>/claude`, spec/04
+   * § History). Claude runs under it as `CLAUDE_CONFIG_DIR`, so the one
+   * conversation file is read and written in place on every turn and resume.
+   * Absent for the mock and for any caller not passing it: Claude then uses
+   * its own default config dir.
    */
-  claudeSessionStore?: {
-    /** `~/.patch/chats/<chatId>/native/claude` — mirrored on every append. */
-    nativeDir: string;
-    claudeProjectsRoot: string;
-    logger: Logger;
-    /**
-     * Set only when `resumeSessionId` should NOT resume normally — a switch
-     * onto Claude, or reseeding a session the mirror and local disk have both
-     * lost. `events` is the chat's own track (oldest first), synthesized into
-     * a native session via `toClaudeSessionEntries`.
-     */
-    reseed?: { events: readonly TrackEntry[]; model: string | null };
-    /** Each batch of entries newly mirrored — see `ClaudeSessionStoreOptions.onAppend`. */
-    onAppend?: (entries: readonly SessionStoreEntry[]) => void;
-  };
+  claudeConfigDir?: string;
   /**
    * Set only for a switch onto Codex (or reseeding a Codex chat whose thread
    * is gone): starts a FRESH thread and injects the chat's own track as
@@ -1081,6 +1065,7 @@ export function buildSdkEnv(opts: SdkRunOptions): {
   const env: Record<string, string | undefined> = { ...process.env };
   delete env['ANTHROPIC_API_KEY'];
   env['CLAUDE_CODE_OAUTH_TOKEN'] = opts.oauthAccessToken;
+  if (opts.claudeConfigDir !== undefined) env['CLAUDE_CONFIG_DIR'] = opts.claudeConfigDir;
   // An unattended agent must not reach the 1Password desktop app: with the
   // integration on, every `op` call raises a macOS "would like to access data
   // from other apps" prompt, blamed on the host. Off, `op` fails fast (service
@@ -1857,37 +1842,6 @@ export function rejectedForWindowNamedIn(
 }
 
 /**
- * `sessionStore` for this run, or `{}` when the caller hasn't wired one
- * (mock-backend tests, or a call site not yet passing it) — the SDK then
- * falls back to its own local-disk resume, unaffected.
- */
-function sessionStoreOptFor(opts: SdkRunOptions): {
-  sessionStore?: ReturnType<typeof createClaudeSessionStore>;
-} {
-  if (!opts.claudeSessionStore) return {};
-  const cs = opts.claudeSessionStore;
-  return {
-    sessionStore: createClaudeSessionStore({
-      chatId: opts.chatId ?? '',
-      folder: opts.cwd,
-      nativeDir: cs.nativeDir,
-      claudeProjectsRoot: cs.claudeProjectsRoot,
-      logger: cs.logger,
-      ...(cs.onAppend ? { onAppend: cs.onAppend } : {}),
-      ...(cs.reseed && opts.resumeSessionId
-        ? {
-            reseed: {
-              sessionId: opts.resumeSessionId,
-              events: cs.reseed.events,
-              model: cs.reseed.model,
-            },
-          }
-        : {}),
-    }),
-  };
-}
-
-/**
  * The SDK `hooks` option that delivers {@link SdkRunOptions.onToolBoundary}
  * text at each tool boundary. Empty when the run has no boundary callback, so a
  * run without one is configured exactly as before.
@@ -2001,7 +1955,6 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
       abortController: opts.abortController,
       resume: opts.resumeSessionId,
       ...forkOptsFor(opts),
-      ...sessionStoreOptFor(opts),
       ...(opts.model !== undefined ? { model: opts.model } : {}),
       ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
       permissionMode: live.mode,
@@ -2204,7 +2157,6 @@ function openPersistSession(opts: SdkRunOptions, query: SdkModule['query']): Per
       cwd: opts.cwd,
       resume: opts.resumeSessionId,
       ...forkOptsFor(opts),
-      ...sessionStoreOptFor(opts),
       ...(opts.model !== undefined ? { model: opts.model } : {}),
       ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
       permissionMode: opts.permissionMode ?? 'auto',

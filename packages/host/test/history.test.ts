@@ -350,12 +350,14 @@ describe('history reader', () => {
     ).toEqual({ resumeAtUuid: 'u3' });
   });
 
-  it("resolves fork/side points from the chat's session mirror when it holds turns Claude Code's own transcript never got", () => {
+  it("resolves fork/side points from the chat's own conversation file when it holds turns the shared transcript never got", () => {
     const root = mkdtempSync(join(tmpdir(), 'patch-history-'));
-    const nativeDir = mkdtempSync(join(tmpdir(), 'patch-native-'));
+    const chatDir = mkdtempSync(join(tmpdir(), 'patch-chat-'));
     const folder = '/work/proj';
     const dir = join(root, encodeFolder(folder));
     mkdirSync(dir, { recursive: true });
+    const nativeDir = join(chatDir, 'claude', 'projects', encodeFolder(folder));
+    mkdirSync(nativeDir, { recursive: true });
     const sessionId = 'session-mirrored';
     const user = (uuid: string, text: string) =>
       JSON.stringify({ type: 'user', uuid, message: { content: text } });
@@ -374,12 +376,12 @@ describe('history reader', () => {
     const reader = createHistoryReader({ claudeProjectsRoot: root });
     const seqIndex = () => recordedIndex([0, 1, 2, 3]);
 
-    expect(
-      reader.forkPoint({ folder, sessionId, seq: 2, seqIndex: seqIndex(), nativeDir }),
-    ).toEqual({ resumeAtUuid: 'u2' });
-    expect(
-      reader.sidePoint({ folder, sessionId, seq: 3, seqIndex: seqIndex(), nativeDir }),
-    ).toEqual({ resumeAtUuid: 'u4' });
+    expect(reader.forkPoint({ folder, sessionId, seq: 2, seqIndex: seqIndex(), chatDir })).toEqual({
+      resumeAtUuid: 'u2',
+    });
+    expect(reader.sidePoint({ folder, sessionId, seq: 3, seqIndex: seqIndex(), chatDir })).toEqual({
+      resumeAtUuid: 'u4',
+    });
   });
 
   it('throws (NO FALLBACK) when JSONL file missing', () => {
@@ -407,16 +409,21 @@ describe('history reader', () => {
     expect(reader.hasSession({ folder, sessionId: 'now-here' })).toBe(true);
   });
 
-  it("hasSession() counts a non-empty session mirror when Claude Code's own transcript is gone", () => {
+  it("hasSession() counts a non-empty conversation file in the chat's own dir, and a not-yet-migrated old mirror", () => {
     const root = mkdtempSync(join(tmpdir(), 'patch-history-'));
-    const nativeDir = mkdtempSync(join(tmpdir(), 'patch-native-'));
+    const chatDir = mkdtempSync(join(tmpdir(), 'patch-chat-'));
     const folder = '/work/proj';
     const reader = createHistoryReader({ claudeProjectsRoot: root });
-    writeFileSync(join(nativeDir, 'empty.jsonl'), '', 'utf8');
-    expect(reader.hasSession({ folder, sessionId: 'empty', nativeDir })).toBe(false);
-    writeFileSync(join(nativeDir, 'mirrored.jsonl'), '{"type":"user"}\n', 'utf8');
-    expect(reader.hasSession({ folder, sessionId: 'mirrored', nativeDir })).toBe(true);
-    expect(reader.hasSession({ folder, sessionId: 'mirrored' })).toBe(false);
+    const own = join(chatDir, 'claude', 'projects', encodeFolder(folder));
+    mkdirSync(own, { recursive: true });
+    mkdirSync(join(chatDir, 'native', 'claude'), { recursive: true });
+    writeFileSync(join(own, 'empty.jsonl'), '', 'utf8');
+    expect(reader.hasSession({ folder, sessionId: 'empty', chatDir })).toBe(false);
+    writeFileSync(join(own, 'live.jsonl'), '{"type":"user"}\n', 'utf8');
+    expect(reader.hasSession({ folder, sessionId: 'live', chatDir })).toBe(true);
+    expect(reader.hasSession({ folder, sessionId: 'live' })).toBe(false);
+    writeFileSync(join(chatDir, 'native', 'claude', 'old.jsonl'), '{"type":"user"}\n', 'utf8');
+    expect(reader.hasSession({ folder, sessionId: 'old', chatDir })).toBe(true);
   });
 
   it('createHistoryReader() defaults to ~/.claude/projects when no override is given', () => {

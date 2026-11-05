@@ -503,7 +503,9 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobRoutesDeps): vo
       }
       if (!deps.jobLogs) return reply.code(503).send({ error: 'job logs not configured' });
       const rawLimit = req.query?.limit;
-      const limit = rawLimit ? Math.min(JOB_LOG_MAX_LIMIT, Math.max(1, Number(rawLimit) || 50)) : 50;
+      const limit = rawLimit
+        ? Math.min(JOB_LOG_MAX_LIMIT, Math.max(1, Number(rawLimit) || 50))
+        : 50;
       return reply.code(200).send({ runs: deps.jobLogs.readRuns(req.params.id, limit) });
     },
   );
@@ -535,7 +537,9 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobRoutesDeps): vo
       }
       if (!deps.jobLogs) return reply.code(503).send({ error: 'job logs not configured' });
       const rawLimit = req.query?.limit;
-      const limit = rawLimit ? Math.min(JOB_LOG_MAX_LIMIT, Math.max(1, Number(rawLimit) || 50)) : 50;
+      const limit = rawLimit
+        ? Math.min(JOB_LOG_MAX_LIMIT, Math.max(1, Number(rawLimit) || 50))
+        : 50;
       return reply.code(200).send({ webhooks: deps.jobLogs.readWebhooks(req.params.id, limit) });
     },
   );

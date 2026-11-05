@@ -9,6 +9,7 @@
 // that has credit. So what a failure has to name is the key the turn RAN on,
 // which arrives on the credential itself — nothing is stamped on the chat.
 
+import { transcriptFor } from './helpers/chatTranscript.js';
 import { describe, expect, it, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -402,7 +403,7 @@ describe('an account switch carries the conversation over', () => {
     await vi.waitFor(() => expect(seen.length).toBeGreaterThanOrEqual(3));
     await vi.waitFor(() => expect(seen.length).toBeGreaterThanOrEqual(3));
     const rerun = seen[2]!;
-    expect(rerun.claudeSessionStore?.reseed?.events.length ?? 0).toBeGreaterThan(0);
+    expect(transcriptFor(rerun).length).toBeGreaterThan(0);
     // The message is folded into its original bubble, not drawn a second time.
     const userMsgs = events.filter(
       (e) => e.type === 'chat.message' && e.role === 'user' && e.content === 'second question',
@@ -447,7 +448,7 @@ describe('an account switch on a chat with no recorded session id', () => {
     account = 'a2';
     await daemon.sendInput({ chatId, message: 'follow up', localId: 'l2' });
     await vi.waitFor(() => expect(seen.length).toBe(2));
-    expect(seen[1]!.claudeSessionStore?.reseed?.events.length ?? 0).toBeGreaterThan(0);
+    expect(transcriptFor(seen[1]!).length).toBeGreaterThan(0);
   });
 });
 

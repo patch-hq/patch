@@ -138,7 +138,7 @@ marks where the switch happened — a quiet divider in the transcript, not an
 alarming notice.
 
 Riding the cache: a return to a harness this track used BEFORE resumes ITS
-OWN prior session (the SDK's `SessionStore` mirror for Claude,
+OWN prior session (the chat's own Claude conversation file for Claude,
 `thread/resume` + `thread/inject_items` for Codex) and hands over only the
 delta — what happened elsewhere since the switch away — rather than
 rebuilding the whole track from scratch. The track remembers, per branch,
@@ -215,6 +215,7 @@ nothing is a usage error naming the offending text, and no change is sent.
 ## History
 
 - Location and format: a chat's own record is `~/.patch/chats/<chatId>/events.jsonl` — an append-only log, one record per message, tool call, result, artifact, permission decision, and turn or session boundary, independent of any harness (`principles.md` § History ownership). A tool result too large to keep inline, or one carrying an inline image, is moved out of line into a content-addressed blob store and replaced by a reference. The harness's own native session history (`~/.claude/projects/<encoded-folder>/...jsonl` for Claude) still exists on disk, but is a resumption cache the harness reads from, not the record.
+- The Claude conversation file: each chat has ONE, in its own Claude config dir (`~/.patch/chats/<id>/claude`, set as `CLAUDE_CONFIG_DIR`), which Claude reads and writes directly on every turn and resume — no temporary copy is made. Before a turn the host migrates a session that still lives in the old `native/claude` mirror or the shared `~/.claude/projects` (copied in once), applies a reseed, and takes harness-written entries out of the file (kept beside it in `<sessionId>.jsonl.stripped`). The user's skills, agents, commands, plugins, settings and `CLAUDE.md` are linked into the dir at spawn.
 - Access: surfaces request via `chat.replay {chatId, fromSeq, branchId?}` (WS, `fromSeq` exclusive) or `GET /api/chats/:id/history?since=<seq>&branchId=<id>` (HTTP, `since` inclusive). Both take an optional `branchId` — absent means the chat's active branch — and this is how the Side threads panel (`14-design-web.md`, `15-design-mobile.md`) pulls a tab's content: a side branch's messages are not broadcast live (§ Parallel branches), so the panel reads them through this path instead, polling the HTTP route while the branch is `running` and once more on open otherwise. The host reads a chat's active track straight from its own log — no merge with any harness transcript needed, since the log already carries live and historical events in one place, in the order they were shown. A branch's track is its own records plus its ancestors' up to (and, for a side thread, including) the message it forked from — an edit fork excludes the edited message itself, since the fork provides its own replacement. The two cursors above use deliberately opposite boundary conventions — see `12-error-and-offline.md` § Replay vs history cursors before mixing them.
 - A failed turn is a quiet system note on replay, never the harsher live `chat.error` — the log never carries `chat.error` itself (it isn't a lasting fact about the chat, unlike the turn's own outcome).
 - Command turns: the agent does not persist a slash-command invocation as sent. It records the command name and its arguments separately, with the arguments trimmed and the separator that followed the name discarded, plus the command's own expansion and output as further turns. A replay therefore reconstructs the invocation as `/name args` and drops the expansion and output turns, so history shows what was asked and not the command's internals. The host emits the live user message for such a turn in that same reconstructed form: the live event and its persisted copy must be one payload identity, or the turn has two, its persisted copy gets a newly allocated `seq` instead of the one it was emitted at, and it replays out of order and twice.
@@ -253,7 +254,7 @@ finished or failed.
   at the new host. The target announces the chat with `chat.spawned` +
   `chat.state`, which is how every surface learns its new host and folder.
 - What moves: the chat's `~/.patch/chats/<id>/` directory (history log, meta,
-  native session mirror), the blobs its log references, the attachments its turns
+  own Claude conversation under `claude/projects/`), the blobs its log references, the attachments its turns
   carried with their manifest entries, and the harness's own transcript for each
   of its sessions. Every record of the old folder as a session's working
   directory is rewritten to the new one, so the next turn resumes the SAME
@@ -397,7 +398,7 @@ A chat is not a line, it is a graph. Any user turn can be edited, which does not
 
 `chat.fork_request {chatId, seq, message, localId}` — `seq` is the seq of the user message being edited, `message` its replacement text.
 
-1. The host resolves the fork point: the last persisted transcript entry strictly before `seq` (its transcript `uuid`). The transcript is the one the session resumes from — the chat's session mirror (`native/claude/`) when it has one, else the agent's own file — because a long session's later turns can exist only in the mirror. Everything up to and including that entry is the shared prefix; the edited turn replaces what came after.
+1. The host resolves the fork point: the last persisted transcript entry strictly before `seq` (its transcript `uuid`). The transcript is the one the session resumes from — the chat's own conversation file (`~/.patch/chats/<id>/claude/projects/…`), which Claude reads and writes in place on every turn; a chat not yet migrated is read from its old mirror (`native/claude/`) or the shared `~/.claude/projects` until its next resume copies it in. Everything up to and including that entry is the shared prefix; the edited turn replaces what came after.
 2. It creates a new branch (`parentBranchId` = the currently active branch, `forkFromSeq` = `seq`) and makes it active.
 3. It runs `message` as that branch's first turn with the SDK forking the parent session at the fork point (`resume` = parent session, `resumeSessionAt` = the fork-point uuid, `forkSession: true`), so the new track starts with the shared prefix as its context and gets its own session id. The parent session is left as it was, so the original track stays intact and re-openable.
 4. It emits `chat.branches` (the whole graph + the new active branch), then the turn streams normally.

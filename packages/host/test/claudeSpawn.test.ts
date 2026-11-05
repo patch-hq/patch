@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   ABORT_KILL_GRACE_MS,
   confirmRefusal,
-  linkUserConfigIntoResumeDir,
+  linkUserConfigIntoChatDir,
   spawnClaudeInGroup,
 } from '../src/claudeSpawn.js';
 
@@ -150,37 +150,43 @@ describe('spawnClaudeInGroup, signalling a group that is already dying', () => {
   });
 });
 
-describe('linkUserConfigIntoResumeDir', () => {
+describe('linkUserConfigIntoChatDir', () => {
   const mk = () => {
     const root = mkdtempSync(join(tmpdir(), 'cfg-'));
     const real = join(root, 'real');
     const resume = join(root, 'claude-resume-abc');
     mkdirSync(join(real, 'skills', 'good-copy'), { recursive: true });
-    mkdirSync(resume);
+    mkdirSync(resume, { recursive: true });
     writeFileSync(join(real, 'settings.json'), '{}');
     return { root, real, resume };
   };
 
-  it('links skills and settings into a claude-resume dir', () => {
+  it('links skills and settings into a chat’s config dir', () => {
     const { real, resume } = mk();
-    linkUserConfigIntoResumeDir({ CLAUDE_CONFIG_DIR: resume }, real);
+    linkUserConfigIntoChatDir({ CLAUDE_CONFIG_DIR: resume }, real);
     expect(existsSync(join(resume, 'skills', 'good-copy'))).toBe(true);
     expect(existsSync(join(resume, 'settings.json'))).toBe(true);
     expect(existsSync(join(resume, 'agents'))).toBe(false);
   });
 
-  it('leaves an ordinary config dir alone', () => {
+  it('creates the chat’s config dir when it is not there yet', () => {
     const { root, real } = mk();
-    const other = join(root, 'other');
-    mkdirSync(other);
-    linkUserConfigIntoResumeDir({ CLAUDE_CONFIG_DIR: other }, real);
-    expect(existsSync(join(other, 'skills'))).toBe(false);
+    const fresh = join(root, 'chats', 'c2', 'claude');
+    linkUserConfigIntoChatDir({ CLAUDE_CONFIG_DIR: fresh }, real);
+    expect(existsSync(join(fresh, 'skills', 'good-copy'))).toBe(true);
+  });
+
+  it('leaves the real config dir alone', () => {
+    const { real } = mk();
+    linkUserConfigIntoChatDir({ CLAUDE_CONFIG_DIR: real }, real);
+    expect(existsSync(join(real, 'settings.json'))).toBe(true);
+    expect(lstatSync(join(real, 'settings.json')).isSymbolicLink()).toBe(false);
   });
 
   it('is idempotent', () => {
     const { real, resume } = mk();
-    linkUserConfigIntoResumeDir({ CLAUDE_CONFIG_DIR: resume }, real);
-    linkUserConfigIntoResumeDir({ CLAUDE_CONFIG_DIR: resume }, real);
+    linkUserConfigIntoChatDir({ CLAUDE_CONFIG_DIR: resume }, real);
+    linkUserConfigIntoChatDir({ CLAUDE_CONFIG_DIR: resume }, real);
     expect(existsSync(join(resume, 'skills'))).toBe(true);
   });
 

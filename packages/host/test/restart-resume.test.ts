@@ -15,6 +15,7 @@ import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
 import { Daemon, INTERRUPTED_TURN_REMINDER, interruptedTurnResend } from '../src/chatRunner.js';
 import { createMetaStore, type MetaStore } from '../src/meta.js';
+import { entryText, transcriptFor } from './helpers/chatTranscript.js';
 import { createMockSdkBackend, TurnFailedError, type SdkBackend } from '../src/sdkBackend.js';
 
 /** What the head turn 'running' is re-sent as. */
@@ -766,9 +767,9 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
     }
 
     const reseedOf = (o: Opts) =>
-      (o.claudeSessionStore?.reseed?.events ?? []).filter(
-        (t) => t.event.type === 'chat.message',
-      ) as Array<{ event: { role: string; content: string } }>;
+      transcriptFor(o)
+        .filter((e) => e.type === 'user' || e.type === 'assistant')
+        .map((e) => ({ event: { role: e.message?.role ?? '', content: entryText(e) } }));
     // System lines (e.g. the 'host restarted' note) are in the track but dropped
     // by the reconstruction, so the model never receives them.
     const reseededTexts = (o: Opts): string[] =>

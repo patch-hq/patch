@@ -22,6 +22,7 @@ import { describe, expect, it } from 'vitest';
 import { loadClaudeOAuth } from '@patch/auth';
 import type { LoggedEvent } from '@patch/wire';
 import { createRealSdkBackend, type SdkEnvelope } from '../src/sdkBackend.js';
+import { chatClaudeDir, createClaudeSessionStore } from '../src/claudeSessionStore.js';
 import { CodexAccounts } from '../src/codexAccounts.js';
 import { CodexHistory } from '../src/codexHistory.js';
 import { CodexBackend } from '../src/codexBackend.js';
@@ -64,11 +65,19 @@ describe(`I-native Claude reseed (live OAuth)${realClaudeEnabled() ? '' : ` — 
   maybeClaude(
     'a synthesized Claude session resumes for real and the model can quote an earlier turn',
     async () => {
-      const nativeDir = mkdtempSync(join(tmpdir(), 'patch-reseed-claude-native-'));
+      const chatDir = mkdtempSync(join(tmpdir(), 'patch-reseed-claude-chat-'));
       const projectsRoot = mkdtempSync(join(tmpdir(), 'patch-reseed-claude-projects-'));
       try {
         const backend = createRealSdkBackend();
         const freshSessionId = randomUUID();
+        await createClaudeSessionStore({
+          chatId: 'reseed-test',
+          folder: '/tmp',
+          chatDir,
+          claudeProjectsRoot: projectsRoot,
+          logger: (await import('pino')).default({ level: 'silent' }),
+          reseed: { sessionId: freshSessionId, events: plantedTrack(), model: null },
+        }).prepare(freshSessionId);
         const events: SdkEnvelope[] = [];
         for await (const ev of backend.run({
           prompt:
@@ -76,12 +85,7 @@ describe(`I-native Claude reseed (live OAuth)${realClaudeEnabled() ? '' : ` — 
           cwd: '/tmp',
           chatId: 'reseed-test',
           resumeSessionId: freshSessionId,
-          claudeSessionStore: {
-            nativeDir,
-            claudeProjectsRoot: projectsRoot,
-            logger: (await import('pino')).default({ level: 'silent' }),
-            reseed: { events: plantedTrack(), model: null },
-          },
+          claudeConfigDir: chatClaudeDir(chatDir),
           abortController: new AbortController(),
           oauthAccessToken: claudeToken!,
         })) {
@@ -93,7 +97,7 @@ describe(`I-native Claude reseed (live OAuth)${realClaudeEnabled() ? '' : ` — 
           .join('');
         expect(assistantText).toContain(CODEWORD);
       } finally {
-        rmSync(nativeDir, { recursive: true, force: true });
+        rmSync(chatDir, { recursive: true, force: true });
         rmSync(projectsRoot, { recursive: true, force: true });
       }
     },

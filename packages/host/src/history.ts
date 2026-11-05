@@ -32,7 +32,7 @@
 // records it, so from that read onward the number is stable. NO FALLBACK to a
 // line-derived number: every event returned here carries a real canonical seq.
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { SystemContextItem, WireEvent } from '@patch/wire';
@@ -42,6 +42,7 @@ import {
   TRANSCRIPT_METADATA_KEY,
 } from './compaction.js';
 import { isModelOutput } from './sdkBackend.js';
+import { findTranscript } from './claudeSessionStore.js';
 
 export interface HistoryReaderOptions {
   /** Override ~/.claude/projects — used by tests. */
@@ -84,13 +85,12 @@ export interface ForkPointOptions {
   seq: number;
   seqIndex: CanonicalSeqIndex;
   /**
-   * The chat's session mirror (`~/.patch/chats/<id>/native/claude`). Patch
-   * drives Claude's session store, so a session's later turns can live ONLY
-   * here while Claude Code's own transcript stops growing; the fork point is
-   * resolved against the same file the resumed session is loaded from
-   * (mirror first, as `claudeSessionStore.load` does).
+   * The chat's own dir (`~/.patch/chats/<id>`). A chat's Claude runs under
+   * `<chatDir>/claude`, so its conversation file lives there; the fork point is
+   * resolved against the same file the chat resumes (`findTranscript`: the
+   * chat's own file, then the pre-migration mirror, then the shared store).
    */
-  nativeDir?: string;
+  chatDir?: string;
 }
 
 export interface ForkPoint {
@@ -132,12 +132,10 @@ export interface HistoryReader {
    * system message in its place (see `walk()`).
    */
   /**
-   * Whether the session can be resumed. Pass `nativeDir` for a Claude session:
-   * once a turn resumes through Patch's session store the SDK runs it from a
-   * throwaway config dir, so Claude Code's own transcript stops existing and
-   * the mirror is the only copy.
+   * Whether the session can be resumed. Pass `chatDir` for a Claude session:
+   * each chat's transcript lives in its own config dir, not the shared one.
    */
-  hasSession(opts: { folder: string; sessionId: string; nativeDir?: string }): boolean;
+  hasSession(opts: { folder: string; sessionId: string; chatDir?: string }): boolean;
 }
 
 export function defaultClaudeProjectsRoot(): string {
@@ -281,17 +279,23 @@ export function createHistoryReader(opts: HistoryReaderOptions = {}): HistoryRea
     return events.filter((ev) => (ev as { seq: number }).seq > req.fromSeq);
   }
 
-  function hasSession(opts: { folder: string; sessionId: string; nativeDir?: string }): boolean {
+  function hasSession(opts: { folder: string; sessionId: string; chatDir?: string }): boolean {
     return forkTranscriptPath(opts) !== null;
   }
 
-  /** The transcript a session resumes from: its mirror when non-empty, else Claude Code's own file. */
+  /** The transcript a session resumes from: the chat's own file, else the shared store. */
   function forkTranscriptPath(
-    opts: Pick<ForkPointOptions, 'folder' | 'sessionId' | 'nativeDir'>,
+    opts: Pick<ForkPointOptions, 'folder' | 'sessionId' | 'chatDir'>,
   ): string | null {
-    if (opts.nativeDir !== undefined) {
-      const mirrored = join(opts.nativeDir, `${opts.sessionId}.jsonl`);
-      if (existsSync(mirrored) && statSync(mirrored).size > 0) return mirrored;
+    if (opts.chatDir !== undefined) {
+      return (
+        findTranscript({
+          chatDir: opts.chatDir,
+          folder: opts.folder,
+          sessionId: opts.sessionId,
+          claudeProjectsRoot: root,
+        })?.path ?? null
+      );
     }
     const path = jsonlPath(opts.folder, opts.sessionId);
     return existsSync(path) ? path : null;

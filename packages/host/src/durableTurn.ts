@@ -42,7 +42,7 @@ import { connect, type Socket } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import type { SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
-import { linkUserConfigIntoResumeDir } from './claudeSpawn.js';
+import { linkUserConfigIntoChatDir } from './claudeSpawn.js';
 import { inWorkSlice } from './workSlice.js';
 import {
   RUNNER_EXIT,
@@ -296,7 +296,7 @@ export class DurableTurn {
 
   /** The SDK's `spawnClaudeCodeProcess`. */
   spawn = (opts: SpawnOptions): SpawnedProcess => {
-    linkUserConfigIntoResumeDir(opts.env);
+    linkUserConfigIntoChatDir(opts.env);
     liveTurns.add(this);
     const proc = this.req.attach ? this.reattach() : this.start(opts);
     this.proc = proc;

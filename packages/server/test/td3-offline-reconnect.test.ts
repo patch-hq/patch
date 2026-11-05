@@ -32,6 +32,7 @@ import { buildAll, type BuiltApp } from '../src/app.js';
 import { Registry } from '../src/registry.js';
 import { Daemon } from '../../host/src/chatRunner.js';
 import { createMetaStore } from '../../host/src/meta.js';
+import { transcriptTexts } from '../../host/test/helpers/chatTranscript.js';
 import { createMockSdkBackend, type MockSdkBackend } from '../../host/src/sdkBackend.js';
 import { createServerLink, type ServerLink } from '../../host/src/serverLink.js';
 
@@ -636,10 +637,8 @@ describe('TD3 — offline/reconnect (live mock-backend stack)', () => {
     const runOpts = restarted.sdk.lastOptions()!;
     expect(runOpts.resumeSessionId).toBeTruthy();
     expect(runOpts.resumeSessionId).not.toBe('sess-to-corrupt');
-    // And it is not contextless: the earlier turn is handed to the new session.
-    const reseeded = (runOpts.claudeSessionStore?.reseed?.events ?? [])
-      .filter((t) => t.event.type === 'chat.message')
-      .map((t) => (t.event as { content?: unknown }).content);
+    // And it is not contextless: the earlier turn is in the new session's file.
+    const reseeded = transcriptTexts(runOpts);
     expect(reseeded).toContain('turn1');
 
     // No error reaches the surface, and the host is still alive and idle.
