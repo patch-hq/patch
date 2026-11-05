@@ -1287,11 +1287,11 @@ describe('createRealSdkBackend — permission mode is honoured or the turn dies'
     expect(err.requested).toBe('auto');
     expect(err.effective).toBe('default');
     expect(err.message).toBe(
-      'Permission mode requested: auto. Mode that ran: default. Model: unknown. Claude Code version: unknown.',
+      "Claude Code changed permission mode 'auto' to 'default'. Turn refused.",
     );
   });
 
-  it('reports model and Claude Code version from init, and no guessed cause', async () => {
+  it('keeps model and Claude Code version on the error, and no guessed cause', async () => {
     const { createRealSdkBackend } = await loadRealBackend(() => {
       async function* gen(): AsyncGenerator<unknown> {
         yield {
@@ -1313,8 +1313,9 @@ describe('createRealSdkBackend — permission mode is honoured or the turn dies'
       }),
     ).catch((e: unknown) => e as Error);
     expect(err.message).toBe(
-      'Permission mode requested: auto. Mode that ran: default. Model: claude-opus-4. Claude Code version: 2.1.5.',
+      "Claude Code changed permission mode 'auto' to 'default'. Turn refused.",
     );
+    expect(err).toMatchObject({ model: 'claude-opus-4', claudeCodeVersion: '2.1.5' });
     expect(err.message).not.toMatch(/because|commonly|too old/);
   });
 
