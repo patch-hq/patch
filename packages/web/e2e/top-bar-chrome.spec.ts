@@ -115,6 +115,17 @@ test.describe('the sidebar brand row', () => {
 });
 
 test.describe('the chat panel header', () => {
+  test("names the model beside the title, on the title's line", async ({ page }) => {
+    // `recency=machine` seeds the open chat with a model (claude-haiku-4-5).
+    await page.goto(`${HARNESS}&recency=machine`);
+    const model = page.getByTestId('chat-head-model');
+    await expect(model).toBeVisible();
+    await expect(model).toHaveText('Haiku 4.5');
+    const m = (await model.boundingBox())!;
+    const t = (await page.getByTestId('chat-title').boundingBox())!;
+    expect(Math.abs(m.y + m.height / 2 - (t.y + t.height / 2))).toBeLessThan(t.height / 2);
+  });
+
   test('Back / Forward lead the header, in its own left zone ahead of the title', async ({
     page,
   }) => {

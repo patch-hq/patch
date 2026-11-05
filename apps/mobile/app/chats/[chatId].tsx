@@ -52,6 +52,7 @@ import {
   folderName,
   hasTaskNotification,
   isReservedSpecialThread,
+  compactModelLabel,
   taskNotificationSummary,
   labelForRun,
   parseAskHuman,
@@ -1128,6 +1129,15 @@ function ChatDetailBody(): React.ReactElement {
             {title}
           </Text>
         </Pressable>
+        {row?.model ? (
+          <Text
+            testID="chat-model"
+            style={{ ...typography.meta, color: colors.ink3 }}
+            numberOfLines={1}
+          >
+            {compactModelLabel(row.model)}
+          </Text>
+        ) : null}
         {runningWorkers > 0 ? (
           <View
             testID="header-workers"

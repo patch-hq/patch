@@ -23,7 +23,7 @@ import { api } from '../api/rest.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import type { ChatRow } from '../stores/types.js';
-import { SPECIAL_THREAD_IDS } from '@patch/wire';
+import { SPECIAL_THREAD_IDS, compactModelLabel } from '@patch/wire';
 import { isHidden } from '../stores/types.js';
 import {
   Edit3,
@@ -364,6 +364,11 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
                 aria-label="waiting on you"
               >
                 ! waiting on you
+              </span>
+            ) : null}
+            {row.model !== null && row.model !== '' ? (
+              <span className="chat-head-model" data-testid="chat-head-model">
+                {compactModelLabel(row.model)}
               </span>
             ) : null}
             {/* Open in new window sits beside the title (spec/14 § Chat panel

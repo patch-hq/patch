@@ -3310,6 +3310,12 @@ button.nav-row {
 /* The chat header's `waiting on you` pill is the SAME state as the sidebar's
    `permission` badge, so it carries the same hue — left on `--waiting` it would
    give one state two different colours on two surfaces of the same screen. */
+.chat-head-model {
+  align-self: center;
+  color: var(--ink-3);
+  font-size: var(--text-min);
+  white-space: nowrap;
+}
 .waiting-pill {
   align-self: flex-start;
   margin-top: 6px;
