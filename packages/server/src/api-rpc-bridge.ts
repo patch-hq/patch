@@ -32,6 +32,7 @@ const ALLOWED_PREFIXES = [
 export function isRelayablePath(path: string): boolean {
   if (!path.startsWith('/api/') || path.includes('..') || path.includes('//')) return false;
   const bare = path.split('?')[0]!;
+  if (bare === '/api/auth/me') return true;
   return ALLOWED_PREFIXES.some((p) => bare === p || bare.startsWith(p + '/'));
 }
 

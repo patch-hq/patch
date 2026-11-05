@@ -254,13 +254,21 @@ export function registerDoctorCommand(program: Command): void {
           checks['undeliveredNotifications'] = undelivered;
         }
 
-        // --- credential validity (best-effort, REST only) ---
+        // --- authentication ---
+        // On a machine with a host the CLI is the host's: calls go over its
+        // socket and link, so there is no separate credential to expire. Only a
+        // machine with no host needs (and checks) its own credential.
         try {
-          const jwt = bearerToken();
-          const rest = new RestClient({ serverUrl: config.serverUrl, bearer: jwt });
-          const me = await rest.get<unknown>('/api/auth/me');
+          if (config.hostSocket !== null && config.daemonLocalKey !== null) {
+            const t = buildTransport(config, { forceRest: true });
+            checks['authMe'] = await t.get<unknown>('/api/auth/me');
+            checks['authVia'] = 'host';
+          } else {
+            const rest = new RestClient({ serverUrl: config.serverUrl, bearer: bearerToken() });
+            checks['authMe'] = await rest.get<unknown>('/api/auth/me');
+            checks['authVia'] = 'credential';
+          }
           checks['credentialValid'] = true;
-          checks['authMe'] = me;
         } catch (err) {
           checks['credentialValid'] = false;
           checks['credentialError'] = (err as Error).message;
