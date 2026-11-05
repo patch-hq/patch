@@ -39,7 +39,7 @@ export const JOB_ID_REGEX = /^j_[0-9A-HJKMNP-TV-Z]{26}$/;
  * trimmed; this only bounds one read, so a delivery from yesterday is still
  * reachable with a larger `--limit`.
  */
-export const JOB_LOG_MAX_LIMIT = 2000;
+export const JOB_LOG_MAX_LIMIT = 5000;
 
 export class InvalidJobIdError extends Error {
   constructor(jobId: string) {
