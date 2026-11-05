@@ -984,6 +984,43 @@ export function attachmentFileName(id: string, name: string): string {
  */
 const ATTACHMENT_BLOCK_HEADER = '[Attachments]';
 
+/**
+ * The inline line a restart-interrupted turn leaves in the history, before the
+ * host's automated re-send. Hosts before 2026-11-05 wrote the legacy text on
+ * the same re-send, which replay recognises so those chats show the same way.
+ */
+const RESTART_INTERRUPTION_MARKER = 'Turn interrupted by restart';
+const LEGACY_RESTART_INTERRUPTION_MARKER =
+  'Host restarted — the running turn was cut off and has been re-sent';
+
+/**
+ * Replay of a chat written before restarts stopped folding: the host's re-send
+ * after a restart carried `retryOfSeq`, which surfaces fold into the original
+ * bubble behind a pager. A re-send that follows the restart marker is drawn as
+ * its own message instead, and the marker's legacy text is rewritten, so an
+ * old chat shows the same history a new one does.
+ */
+export function restartResendAsOwnMessage<E extends { type: string }>(
+  ev: E,
+  state: { afterMarker: boolean },
+): E {
+  if (ev.type !== 'chat.message') return ev;
+  const msg = ev as unknown as { role: string; content: string; retryOfSeq?: number };
+  if (msg.role === 'system') {
+    if (msg.content === LEGACY_RESTART_INTERRUPTION_MARKER) {
+      state.afterMarker = true;
+      return { ...ev, content: RESTART_INTERRUPTION_MARKER } as E;
+    }
+    if (msg.content === RESTART_INTERRUPTION_MARKER) state.afterMarker = true;
+    return ev;
+  }
+  if (msg.role !== 'user' || !state.afterMarker) return ev;
+  state.afterMarker = false;
+  if (msg.retryOfSeq === undefined) return ev;
+  const { retryOfSeq: _folded, ...own } = msg;
+  return own as unknown as E;
+}
+
 /** Total attempts `maybeGenerateTitle` makes before leaving a chat unnamed. */
 const TITLE_GEN_ATTEMPTS = 5;
 
@@ -3625,6 +3662,18 @@ export class Daemon {
         // pass: `sendInput` sets the chat's `pumping` guard before its first
         // await, so the second and later turns here see a live pump and queue
         // behind the first in their original order — exactly where they were.
+        if (i === 0 && headIsInterrupted) {
+          // Said in the chat history, not only the log: a reader needs to know
+          // why the turn started over (spec/12 § Restart interruptions).
+          this.emit({
+            type: 'chat.message',
+            chatId: m.chatId,
+            role: 'system',
+            content: RESTART_INTERRUPTION_MARKER,
+            seq: this.bumpSeq(m.chatId),
+            createdAt: this.opts.now(),
+          });
+        }
         this.owedResend.add(m.chatId);
         this.interruptedResend.add(m.chatId);
         if (i === 0) {
@@ -3649,7 +3698,13 @@ export class Daemon {
           // the re-send NAMES it rather than asking for a second one. Absent
           // only on a turn interrupted before its `chat.message` ever landed
           // (nothing was drawn, so there is nothing to fold into).
-          ...(turn.retryOfSeq !== undefined ? { retryOfSeq: turn.retryOfSeq } : {}),
+          // EXCEPT a turn the restart cut off: retry-in-place is for a person
+          // choosing to re-run a turn. Folding a restart's re-send into the
+          // original bubble hid everything between attempts behind the pager
+          // (spec/12 § Restart interruptions), so it draws as its own message.
+          ...(turn.retryOfSeq !== undefined && !(i === 0 && headIsInterrupted)
+            ? { retryOfSeq: turn.retryOfSeq }
+            : {}),
           // spec/14 § Job trigger turn — resumed as what it was, same as `origin`.
           ...(turn.jobTrigger ? { jobTrigger: turn.jobTrigger } : {}),
         }).catch((err: unknown) => {
@@ -6097,6 +6152,7 @@ export class Daemon {
         }
       }
     }
+    const restartState = { afterMarker: false };
     for (const record of records) {
       if (
         record.rec.k === 'permission.request' &&
@@ -6133,7 +6189,9 @@ export class Daemon {
         // long chat's bytes — one measured chat shipped 23 MB to draw 150 KB
         // of conversation — and every one of those rows arrives collapsed, so
         // the surface fetches a body only when the reader opens that row.
-        emitToSurface(this.chatLog.externalizeForReplay(chatId, ev));
+        emitToSurface(
+          this.chatLog.externalizeForReplay(chatId, restartResendAsOwnMessage(ev, restartState)),
+        );
       } else if (record.rec.k === 'turn.end' && record.rec.outcome === 'failed') {
         emitToSurface({
           type: 'chat.message',
