@@ -26,6 +26,7 @@
 // happen at any moment.
 
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
   closeSync,
@@ -275,10 +276,21 @@ export class DurableTurn {
   private consumed: Consumed | null;
   private consumedDirty = false;
   private readonly skipUntil: Consumed | null;
+  /**
+   * Turn directories are per chat, so a newer turn of the chat reuses the one
+   * this turn made. The id in turn.json says whose it is: a turn that has been
+   * replaced must not remove or kill the runner of the turn that replaced it.
+   */
+  private readonly ownerId: string | undefined;
 
   constructor(private readonly req: DurableTurnRequest) {
     this.chatId = req.chatId;
     this.dir = turnDirFor(req.config, req.chatId);
+    // A reattached turn carries on the previous host's directory, so it takes
+    // that directory's owner id (none, for one written before ids existed).
+    this.ownerId = req.attach
+      ? readJson<{ ownerId?: string }>(join(this.dir, TURN_META))?.ownerId
+      : randomUUID();
     this.consumed = req.attach?.consumed ?? null;
     this.skipUntil = req.attach ? (req.attach.consumed ?? null) : null;
   }
@@ -323,6 +335,7 @@ export class DurableTurn {
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
     writeJsonAtomic(join(this.dir, TURN_META), {
       chatId: this.chatId,
+      ownerId: this.ownerId,
       ...(this.req.localId !== undefined ? { localId: this.req.localId } : {}),
       ...(this.req.accountId !== undefined ? { accountId: this.req.accountId } : {}),
       startedAt: Date.now(),
@@ -426,19 +439,30 @@ export class DurableTurn {
     liveTurns.delete(this);
     const proc = this.proc;
     if (!proc || proc.exited) {
-      rmSync(this.dir, { recursive: true, force: true });
+      this.removeDirIfOwned();
       return;
     }
     proc.kill('SIGKILL');
     const timer = setTimeout(() => {
+      if (!this.ownsDir()) return;
       this.req.log.warn({ chatId: this.chatId }, 'durable turn: runner did not exit; retiring it');
       retireTurn(this.dir);
     }, 5000);
     timer.unref();
     proc.once('exit', () => {
       clearTimeout(timer);
-      rmSync(this.dir, { recursive: true, force: true });
+      this.removeDirIfOwned();
     });
+  }
+
+  /** False once a newer turn of this chat has taken the directory over. */
+  private ownsDir(): boolean {
+    const meta = readJson<{ ownerId?: string }>(join(this.dir, TURN_META));
+    return meta === undefined || meta.ownerId === this.ownerId;
+  }
+
+  private removeDirIfOwned(): void {
+    if (this.ownsDir()) rmSync(this.dir, { recursive: true, force: true });
   }
 
   get isDetaching(): boolean {

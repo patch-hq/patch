@@ -202,6 +202,32 @@ describe('a durable turn', () => {
     second.release();
   }, 30000);
 
+  it('a replaced turn releasing leaves the newer turn of the same chat running', async () => {
+    const { cfg, cwd } = fresh();
+    const first = new DurableTurn({ config: cfg, chatId: 'c5', localId: 'L5a', log });
+    const d1 = drive(first.spawn({ ...spawnOpts, cwd }));
+    d1.send(initialize('r1'));
+    d1.send(prompt);
+    await d1.until(() => texts(d1.lines).includes('a1'), 'first a1');
+    // A new message arrives before the first turn has been released.
+    const second = new DurableTurn({ config: cfg, chatId: 'c5', localId: 'L5b', log });
+    const d2 = drive(second.spawn({ ...spawnOpts, cwd }));
+    d2.send(initialize('r1'));
+    d2.send(prompt);
+    await d2.until(() => texts(d2.lines).includes('a1'), 'second a1');
+    first.release();
+    // Past the 5s the replaced turn gives its runner before retiring it.
+    await sleep(5600);
+    expect(existsSync(second.dir)).toBe(true);
+    expect(inspectTurn(cfg, 'c5')?.state).toBe('live');
+    writeFileSync(join(cwd, 'go'), '');
+    await d2.until(() => d2.lines.some((l) => l['type'] === 'result'), 'second result');
+    d2.send({ type: 'control_request', request_id: 'x', request: { subtype: 'noop' } });
+    await d2.exited;
+    second.release();
+    expect(existsSync(second.dir)).toBe(false);
+  }, 30000);
+
   it('retireTurn ends a runner and claude and removes the directory', async () => {
     const { cfg, cwd } = fresh();
     const turn = new DurableTurn({ config: cfg, chatId: 'c4', localId: 'L4', log });
