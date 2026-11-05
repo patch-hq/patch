@@ -19,6 +19,7 @@ import { escapesFolder } from './pathEscape.js';
 import { invalidateGitDirtyCache } from './git-dirty.js';
 import { invalidateFilesRecursiveCache } from './files-recursive.js';
 import { discoverClaudeMcpServers } from './claudeConfigMcp.js';
+import { SharedMcpPool } from './sharedMcp.js';
 // Host's session manager.
 //
 // Owns chat_state, the per-chat AbortControllers, the per-chat seq counter,
@@ -106,6 +107,7 @@ import {
 import { type MetaStore, type ChatMeta, type UnreadableChat } from './meta.js';
 import {
   PermissionModeDowngradedError,
+  type ExtraMcpServer,
   type SdkBackend,
   type SdkEnvelope,
   type SdkRunOptions,
@@ -326,6 +328,12 @@ export interface HostOptions {
    * `~/.claude.json`/`~/.claude/settings.json` of whatever machine runs it.
    */
   discoverClaudeMcpServers?: (folder: string) => McpServerConfig[];
+  /**
+   * Shares each MCP server across chats instead of starting one per chat
+   * (`sharedMcp.ts`). Defaults to a pool on a real backend; absent on a mock
+   * one, where chats get the plain stdio entries.
+   */
+  sharedMcp?: SharedMcpPool;
   /**
    * OAuth gate (spec/10-auth.md "Claude OAuth — non-negotiable"). Called
    * BEFORE every SDK `query()` — re-reads ~/.claude.json so a credential that
@@ -2495,6 +2503,8 @@ export class Daemon {
       now: options.now ?? (() => Date.now()),
       generateChatId: options.generateChatId ?? (() => ulid()),
       discoverClaudeMcpServers: options.discoverClaudeMcpServers ?? discoverClaudeMcpServers,
+      sharedMcp:
+        options.sharedMcp ?? (options.sdkBackendKind === 'real' ? new SharedMcpPool() : undefined),
     };
     // Build the OAuth gate. `resolveOAuth` wins; otherwise wrap the static
     // token into an always-ok resolver (test convenience). NO FALLBACK:
@@ -3154,8 +3164,19 @@ export class Daemon {
     this.stopping = true;
   }
 
+  /** The chat's extra MCP servers, as URLs of the host's shared copies when a pool is configured. */
+  private async shareMcp(servers: McpServerConfig[], folder: string): Promise<ExtraMcpServer[]> {
+    const pool = this.opts.sharedMcp;
+    if (!pool || servers.length === 0) return servers;
+    await pool.listen();
+    return servers.map((s) => ({ name: s.name, url: pool.urlFor(s, folder) }));
+  }
+
   shutdown(): void {
     this.beginShutdown();
+    void this.opts.sharedMcp?.close().catch((err: unknown) => {
+      this.opts.logger.error({ err }, 'shutdown: shared MCP pool close failed');
+    });
     for (const t of this.snoozeTimers.values()) clearTimeout(t);
     this.snoozeTimers.clear();
     if (this.snoozeSweep !== null) clearInterval(this.snoozeSweep);
@@ -8449,7 +8470,10 @@ export class Daemon {
           branchId,
           req.decisionReason,
         ),
-      extraMcpServers: this.opts.discoverClaudeMcpServers(state.folder),
+      extraMcpServers: await this.shareMcp(
+        this.opts.discoverClaudeMcpServers(state.folder),
+        state.folder,
+      ),
       ...(this.harnessConfig.patchMcpEnabled === false ? { patchMcpOff: true } : {}),
     };
 
@@ -10025,10 +10049,13 @@ export class Daemon {
       // inside Patch, so it is the one that should win.
       // Undefined (mock/test callers that never configured harness) reads as
       // none, same as every other harness field's absence.
-      extraMcpServers: [
-        ...this.opts.discoverClaudeMcpServers(state.folder),
-        ...(this.harnessConfig.mcpServers ?? []),
-      ],
+      extraMcpServers: await this.shareMcp(
+        [
+          ...this.opts.discoverClaudeMcpServers(state.folder),
+          ...(this.harnessConfig.mcpServers ?? []),
+        ],
+        state.folder,
+      ),
       ...(this.harnessConfig.patchMcpEnabled === false ? { patchMcpOff: true } : {}),
     };
     // Record + log the resume argument so it's observable on the live host

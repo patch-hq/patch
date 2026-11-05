@@ -234,9 +234,7 @@ export interface SdkRunOptions {
    * `codexBackend.ts`. Only alongside `mcpServer`: a caller that configured no
    * tools server gets none of these either. Absent/empty ⇒ `patch` alone.
    */
-  extraMcpServers?:
-    | Array<{ name: string; command: string; args: string[]; env: Record<string, string> }>
-    | undefined;
+  extraMcpServers?: ExtraMcpServer[] | undefined;
   /**
    * The user turned Patch's own tools server off on this host (Settings → MCP).
    * `patch` is then left out of the wired servers; the rest of the list still
@@ -1048,12 +1046,17 @@ async function loadSdk(): Promise<SdkModule> {
   return sdkModule;
 }
 
-type StdioMcpServerConfig = {
-  type: 'stdio';
-  command: string;
-  args: string[];
-  env: Record<string, string>;
-};
+/**
+ * A server a chat gets beside `patch`: a stdio child of its own, or (once the
+ * host shares it, `sharedMcp.ts`) the URL of the host's one shared copy.
+ */
+export type ExtraMcpServer =
+  | { name: string; command: string; args: string[]; env: Record<string, string> }
+  | { name: string; url: string };
+
+type StdioMcpServerConfig =
+  | { type: 'stdio'; command: string; args: string[]; env: Record<string, string> }
+  | { type: 'http'; url: string };
 
 const IDLE_COMPACT_NEVER_TOKENS = 1_000_000_000;
 
@@ -1136,7 +1139,9 @@ export function buildSdkEnv(opts: SdkRunOptions): {
         ...Object.fromEntries(
           (opts.extraMcpServers ?? []).map((s) => [
             s.name,
-            { type: 'stdio' as const, command: s.command, args: s.args, env: s.env },
+            'url' in s
+              ? { type: 'http' as const, url: s.url }
+              : { type: 'stdio' as const, command: s.command, args: s.args, env: s.env },
           ]),
         ),
       }
