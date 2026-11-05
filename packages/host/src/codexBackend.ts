@@ -159,7 +159,10 @@ export function codexMcpServers(
     ? {}
     : { patch: { ...opts.mcpServer, enabled: true } };
   for (const s of opts.extraMcpServers ?? []) {
-    servers[s.name] = { command: s.command, args: s.args, env: s.env, enabled: true };
+    servers[s.name] =
+      'url' in s
+        ? { url: s.url, enabled: true }
+        : { command: s.command, args: s.args, env: s.env, enabled: true };
   }
   for (const [server, tools] of codexDisabledMcpTools(opts.disabledTools).byServer) {
     if (servers[server]) servers[server] = { ...servers[server], disabled_tools: tools };
