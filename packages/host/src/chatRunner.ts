@@ -9601,8 +9601,15 @@ export class Daemon {
     let userMessageSeq: number | undefined;
     // spec/04 § Handoff budget — a retried provider switch delivers the message
     // already in the log; it does not append a second copy of it.
+    // spec/02 § Turns outlive the host — a reattached turn is the SAME turn
+    // still running, so its prompt already has a bubble: nothing is re-recorded.
+    const reattachesDrawnTurn =
+      retryOfSeq !== undefined &&
+      this.durableAttach.has(chatId) &&
+      this.durableAttach.get(chatId)?.localId === localId;
     const reusesLoggedMessage =
-      retryOfSeq !== undefined && this.reuseLoggedUserMessage.get(chatId) === retryOfSeq;
+      retryOfSeq !== undefined &&
+      (reattachesDrawnTurn || this.reuseLoggedUserMessage.get(chatId) === retryOfSeq);
     if (reusesLoggedMessage) {
       this.reuseLoggedUserMessage.delete(chatId);
       userMessageSeq = retryOfSeq;

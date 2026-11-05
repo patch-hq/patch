@@ -15,7 +15,12 @@ import type { SdkBackend, SdkRunOptions } from '../src/sdkBackend.js';
 const silent = pino({ level: 'silent' });
 const tick = (ms = 15): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-function host(home: string, backend: SdkBackend, durableTurns: DurableTurnConfig) {
+function host(
+  home: string,
+  backend: SdkBackend,
+  durableTurns: DurableTurnConfig,
+  events: unknown[] = [],
+) {
   let id = 0;
   const metaStore = createMetaStore(home);
   const daemon = new Daemon({
@@ -24,7 +29,7 @@ function host(home: string, backend: SdkBackend, durableTurns: DurableTurnConfig
     sdkBackend: backend,
     oauthAccessToken: 'fake-token',
     durableTurns,
-    emit: () => undefined,
+    emit: (e) => void events.push(e),
     logger: silent,
     now: () => 1_700_000_000_000,
     generateChatId: () => `chat-${++id}`,
@@ -87,10 +92,11 @@ async function interruptedChat(state: 'live' | 'exited' | 'lost') {
       yield { type: 'result', sessionId: 'sess2' };
     },
   };
-  const second = host(home, secondBackend, cfg);
+  const secondEvents: unknown[] = [];
+  const second = host(home, secondBackend, cfg, secondEvents);
   second.daemon.hydrate();
   await tick(60);
-  return { seen, dir, chatId, cfg };
+  return { seen, dir, chatId, cfg, secondEvents };
 }
 
 describe('resuming a turn that outlived the host', () => {
@@ -148,6 +154,17 @@ describe('resuming a turn that outlived the host', () => {
     expect(seen[0]?.prompt).toBe('job prompt');
     expect(seen[0]?.durableTurn?.attach).toEqual({ consumed: { offset: 7, envelopes: -1 } });
   });
+
+  it.each(['live', 'exited'] as const)(
+    'adds no user message to the chat when it reattaches to a %s turn',
+    async (state) => {
+      const { secondEvents } = await interruptedChat(state);
+      const userMessages = (secondEvents as Array<{ type: string; role?: string }>).filter(
+        (e) => e.type === 'chat.message' && e.role === 'user',
+      );
+      expect(userMessages).toEqual([]);
+    },
+  );
 
   it('cuts a turn off when its runner is gone, and clears the directory', async () => {
     const { seen, dir } = await interruptedChat('lost');
