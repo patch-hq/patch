@@ -76,6 +76,7 @@ import { connectionSummary } from '../lib/connectionSummary.js';
 import { api, ApiError } from '../api/rest.js';
 import type { ChatRow, DisplayBadge, SectionCounts } from '../stores/types.js';
 import { formatWakeTime } from './SnoozeMenu.js';
+import { StableNavigateProvider, useStableNavigate } from '../lib/useStableNavigate.js';
 import { snoozedRowsForStore } from '../lib/snoozedRows.js';
 import { folderBackPill, rowBack } from '../lib/snoozeBack.js';
 import { deriveChatTitle } from '../lib/chatTitle.js';
@@ -157,7 +158,15 @@ function useSettledBadge(row: ChatRow): DisplayBadge {
   return shown;
 }
 
-export function Sidebar({ standalone = false }: { standalone?: boolean } = {}): JSX.Element {
+export function Sidebar(props: { standalone?: boolean } = {}): JSX.Element {
+  return (
+    <StableNavigateProvider>
+      <SidebarInner {...props} />
+    </StableNavigateProvider>
+  );
+}
+
+function SidebarInner({ standalone = false }: { standalone?: boolean } = {}): JSX.Element {
   const collapseGlyphs = useActionGlyphs('toggleSidebar');
   const chats = useChatStore((s) => s.chats);
   const hydrated = useChatStore((s) => s.hydrated);
@@ -2041,7 +2050,8 @@ const ChatRowView = memo(function ChatRowView({
   const badge = useSettledBadge(row);
   const goalMet = row.goal === null && row.lastGoal?.outcome === 'met';
   const hostLabel = useAmbiguousHostLabel(row);
-  const navigate = useNavigate();
+  // Stable and context-free: a row must not re-render just because the location changed.
+  const navigate = useStableNavigate();
   const menu = useContextMenu();
   // Multi-select (spec/14 § Sidebar → Selecting multiple rows). Only ordinary
   // list rows take part: special threads, and the Archived/Deleted/Automations
