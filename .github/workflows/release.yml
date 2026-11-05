@@ -182,6 +182,20 @@ jobs:
             sleep 10
           done
           exit 1
+      - name: Fetch the Gradle distribution
+        working-directory: apps/mobile/android
+        run: |
+          set -euo pipefail
+          # services.gradle.org occasionally times out; the wrapper gives up
+          # after one try, so warm its cache with retries before the build.
+          for attempt in 1 2 3 4; do
+            if ./gradlew --version -q; then
+              exit 0
+            fi
+            echo "gradle download attempt $attempt failed" >&2
+            sleep 15
+          done
+          exit 1
       - name: Release signing key
         env:
           KEYSTORE_B64: ${{ secrets.PATCH_ANDROID_KEYSTORE_B64 }}
