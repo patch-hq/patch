@@ -72,13 +72,16 @@ test.describe('sidebar row edges', () => {
     await page.locator('.sb-row').first().waitFor();
     // Expand the collapsible sections so their rows are in the same stack.
     await page.getByTestId('channels-toggle').click();
-    await page.getByTestId('archived-toggle').click();
     await expect(page.getByTestId('channels-list')).toBeVisible();
-    await expect(page.getByTestId('archived-section')).toBeVisible();
 
-    // 9 of the 11 selectors render in this seed (`.batch-tabs` and the rest do;
-    // `.sb .empty-hint` appears once Archived is open and empty).
-    expectOneColumn(await edges(page, ROW_SELECTORS), 9);
+    // 8 of the 9 selectors render in this seed (`.sb .empty-hint` needs an
+    // open, empty lifecycle view).
+    expectOneColumn(await edges(page, ROW_SELECTORS), 8);
+
+    // An open lifecycle view replaces the chat list; its rows keep the column.
+    await page.getByTestId('archived-toggle').click();
+    await expect(page.getByTestId('archived-section')).toBeVisible();
+    expectOneColumn(await edges(page, ['.sb-row', '.sb-top-row', '.nav-row', '.new-chat-row']), 4);
   });
 
   test('the edges hold once the scroll band grows a scrollbar', async ({ page }) => {

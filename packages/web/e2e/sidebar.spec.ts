@@ -251,11 +251,9 @@ test.describe('sidebar', () => {
     expect(lcBox.y).toBeGreaterThanOrEqual(scBox.y + scBox.height - 1);
   });
 
-  test('an EXPANDED lifecycle section sits directly below the icon row, closer to it than the row is to the chat list', async ({
+  test('an EXPANDED lifecycle section replaces the chat list, above the icon row', async ({
     page,
   }) => {
-    // The list belongs to the icon row that opened it: it must sit close under
-    // that row. The chat list above runs right to the divider (no gap).
     await page.route('**/api/chats?archived=only*', (r) =>
       r.fulfill({
         status: 200,
@@ -280,24 +278,26 @@ test.describe('sidebar', () => {
     );
     await page.setViewportSize({ width: 1280, height: 1000 });
     await page.goto(HARNESS);
-
-    const icons = page.getByTestId('sb-lifecycle-icons');
+    await expect(page.locator('.sb-scroll [data-testid="chat-row-chat_bus"]')).toBeVisible();
 
     await page.getByTestId('archived-toggle').click();
     const section = page.getByTestId('archived-section');
     await expect(section).toBeVisible();
+    await expect(page.getByTestId('lifecycle-view-head')).toContainText('Archived');
+    // The chat list is gone while the view is open.
+    await expect(page.locator('.sb-scroll [data-testid="chat-row-chat_bus"]')).toHaveCount(0);
 
-    const iconsBox = (await icons.boundingBox())!;
+    // The view lives in the scrolling band, which sits above the icon row.
+    const iconsBox = (await page.getByTestId('sb-lifecycle-icons').boundingBox())!;
     const secBox = (await section.boundingBox())!;
-    const scroller = page.getByTestId('sb-scroll');
-    const scBox = (await scroller.boundingBox())!;
+    const scBox = (await page.getByTestId('sb-scroll').boundingBox())!;
+    expect(secBox.y).toBeGreaterThanOrEqual(scBox.y - 1);
+    expect(secBox.y + secBox.height).toBeLessThanOrEqual(iconsBox.y + 1);
 
-    // Order: chat list, icon row, then the opened list.
-    expect(scBox.y + scBox.height).toBeLessThanOrEqual(iconsBox.y + 1);
-    expect(iconsBox.y).toBeLessThan(secBox.y);
-
-    const gapToOwnList = secBox.y - (iconsBox.y + iconsBox.height);
-    expect(gapToOwnList).toBeLessThan(12);
+    // Closing it brings the chat list back.
+    await page.getByTestId('lifecycle-view-close').click();
+    await expect(section).toHaveCount(0);
+    await expect(page.locator('.sb-scroll [data-testid="chat-row-chat_bus"]')).toBeVisible();
   });
 
   test('+ New chat sits at the TOP of the sidebar, under the brand row and above everything else', async ({
@@ -476,7 +476,7 @@ test.describe('sidebar', () => {
     await expect(page.getByTestId('deleted-section')).toBeVisible();
   });
 
-  test('an EXPANDED archived list caps at half the sidebar and scrolls itself, nav still fixed', async ({
+  test('an EXPANDED archived list scrolls inside the chat-list band, nav still fixed', async ({
     page,
   }) => {
     await page.route('**/api/chats?archived=only*', (r) =>
@@ -503,7 +503,7 @@ test.describe('sidebar', () => {
     await seedManyChats(page, 60);
 
     const sidebar = page.getByTestId('sidebar');
-    const lifecycle = page.getByTestId('sb-lifecycle');
+    const scroller = page.getByTestId('sb-scroll');
     const bottomNav = page.getByTestId('bottom-nav');
     const fab = page.getByTestId('new-chat-fab');
 
@@ -511,17 +511,13 @@ test.describe('sidebar', () => {
     await expect(page.getByTestId('archived-section')).toBeVisible();
 
     const sbBox = (await sidebar.boundingBox())!;
-    // Capped at half the sidebar, and scrolling within itself.
-    await expect
-      .poll(async () => (await lifecycle.boundingBox())!.height)
-      .toBeLessThanOrEqual(sbBox.height * 0.5 + 1);
-    const lcMetrics = await lifecycle.evaluate((el) => ({
+    const metrics = await scroller.evaluate((el) => ({
       scrollHeight: el.scrollHeight,
       clientHeight: el.clientHeight,
       overflowY: getComputedStyle(el).overflowY,
     }));
-    expect(lcMetrics.overflowY).toBe('auto');
-    expect(lcMetrics.scrollHeight).toBeGreaterThan(lcMetrics.clientHeight);
+    expect(metrics.overflowY).toBe('auto');
+    expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
 
     // Nav + New chat still fully on screen.
     for (const el of [bottomNav, fab]) {
