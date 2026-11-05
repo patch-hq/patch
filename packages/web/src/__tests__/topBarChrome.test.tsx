@@ -180,12 +180,11 @@ describe('the top row stylesheet', () => {
     expect(css).toMatch(/\.overlay-titlebar \.chat-head-left,/);
   });
 
-  it('punches the banner Diagnose button out of the offline banner drag region', () => {
-    // `.offline-banner` is a drag region on the desktop shell; a button inside
-    // one takes no clicks, so Diagnose did nothing without this.
-    expect(css).toMatch(
-      /\.overlay-titlebar \.offline-banner,[^{]*\{[^}]*-webkit-app-region:\s*drag;/,
-    );
+  it('moves banners below the content and keeps their buttons clickable', () => {
+    // Banners are no longer a drag region: they sit at the bottom of the shell
+    // (`order`) so the top row stays level with the traffic lights. Their
+    // buttons still opt out of drag so they take clicks.
+    expect(css).toMatch(/\.overlay-titlebar :is\(\.offline-banner,[^)]*\)\s*\{[^}]*order:\s*2;/);
     expect(css).toMatch(
       /\.overlay-titlebar \.banner-diagnose\s*\{[^}]*-webkit-app-region:\s*no-drag;/,
     );
