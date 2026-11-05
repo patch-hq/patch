@@ -8582,6 +8582,39 @@ export const PatchApiResponseEvent = z
 export type PatchApiResponseEvent = z.infer<typeof PatchApiResponseEvent>;
 
 // ---------------------------------------------------------------------------
+// Server event relay: `patch logs` on a host machine tails the server's event
+// stream through the host's link instead of opening its own /ws with a paired
+// credential. The host subscribes on the CLI's behalf; the server sends each
+// matching account event back as `patch.events.event`. Consumed by the host and
+// the server's events bridge; never fanned out to surfaces.
+
+export const PatchEventsSubscribeEvent = z
+  .object({
+    type: z.literal('patch.events.subscribe'),
+    subscriptionId: z.string().min(1),
+  })
+  .strict();
+export type PatchEventsSubscribeEvent = z.infer<typeof PatchEventsSubscribeEvent>;
+
+export const PatchEventsUnsubscribeEvent = z
+  .object({
+    type: z.literal('patch.events.unsubscribe'),
+    subscriptionId: z.string().min(1),
+  })
+  .strict();
+export type PatchEventsUnsubscribeEvent = z.infer<typeof PatchEventsUnsubscribeEvent>;
+
+export const PatchEventsEventEvent = z
+  .object({
+    type: z.literal('patch.events.event'),
+    subscriptionId: z.string().min(1),
+    /** The relayed server event, as the surfaces saw it. */
+    event: z.record(z.unknown()),
+  })
+  .strict();
+export type PatchEventsEventEvent = z.infer<typeof PatchEventsEventEvent>;
+
+// ---------------------------------------------------------------------------
 // Secrets (spec/15 § Settings tab — Secrets)
 //
 // The host owns the key-value secret store (it injects them into chats), the
@@ -9440,6 +9473,9 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchAccountsResponseEvent,
   PatchApiRequestEvent,
   PatchApiResponseEvent,
+  PatchEventsSubscribeEvent,
+  PatchEventsUnsubscribeEvent,
+  PatchEventsEventEvent,
   // Secrets
   SecretsListEvent,
   SecretsUpdatedEvent,
@@ -9736,6 +9772,9 @@ export const EVENT_SCHEMAS = {
   'patch.accounts.response': PatchAccountsResponseEvent,
   'patch.api.request': PatchApiRequestEvent,
   'patch.api.response': PatchApiResponseEvent,
+  'patch.events.subscribe': PatchEventsSubscribeEvent,
+  'patch.events.unsubscribe': PatchEventsUnsubscribeEvent,
+  'patch.events.event': PatchEventsEventEvent,
   'secrets.list': SecretsListEvent,
   'secrets.updated': SecretsUpdatedEvent,
   'patch.secrets.set_request': PatchSecretsSetRequestEvent,

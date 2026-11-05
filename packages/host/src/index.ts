@@ -1,4 +1,5 @@
 import { AccountsClient, ServerApiClient } from './accountsClient.js';
+import { ServerEventsClient } from './serverEventsClient.js';
 import { CodexAccounts, CODEX_BACKEND_ID, isCodexModel } from './codexAccounts.js';
 import { createSleepGuard } from './sleepGuard.js';
 import { createSleepWatch } from './sleepWatch.js';
@@ -2376,6 +2377,10 @@ async function startHost(
         serverApiClient.handleResponse(event);
         return;
       }
+      if (event.type === 'patch.events.event') {
+        serverEventsClient.handleEvent(event);
+        return;
+      }
       if (event.type === 'patch.accounts.response') {
         accountsClient.handleResponse(event);
         return;
@@ -3498,6 +3503,7 @@ async function startHost(
     },
     onDisconnected: () => {
       linkOnline = false;
+      serverEventsClient.endAll('host→server link dropped');
       artifactPublisher.failAll(
         'artifact publish: host→server link dropped before the server answered',
       );
@@ -4650,6 +4656,7 @@ async function startHost(
   // The shared accounts, asked of the server over the same link.
   const accountsClient = new AccountsClient({ emit, isLinkOnline: () => linkOnline });
   const serverApiClient = new ServerApiClient({ emit, isLinkOnline: () => linkOnline });
+  const serverEventsClient = new ServerEventsClient({ emit, isLinkOnline: () => linkOnline });
   // spec/04 § Message queueing — the server-run queue's tool-boundary pull.
   const queuePull = new QueuePullClient({ emit, isLinkOnline: () => linkOnline });
   pullQueuedFromServer = (chatId) => queuePull.pull(chatId);
@@ -5045,6 +5052,7 @@ async function startHost(
     padRequest: padClient.request,
     accountsRpc: accountsClient.request,
     serverApi: serverApiClient.request,
+    serverEvents: serverEventsClient,
     heldAccounts: heldAccountsFor,
     meetingAgentEdit: (chatId, edit) => meetings!.agentEdit(chatId, edit),
     // Live link diagnostics + spec/12 link-drop control on the control UDS.

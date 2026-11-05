@@ -64,6 +64,7 @@ import {
   type ViewFileKind,
 } from './artifacts.js';
 import { buildPreviewHtml, previewable } from './viewFilePreview.js';
+import type { ServerEventsClient } from './serverEventsClient.js';
 import { PadInputError, bundleDir, type PadRequest } from './pads.js';
 import {
   AccountRefError,
@@ -192,6 +193,11 @@ export interface BuildOptions {
    * (`/server-api`). Unset, that endpoint 503s.
    */
   serverApi?: ServerApiRpc;
+  /**
+   * The account's event stream over the link, for the machine's own CLI
+   * (`/server-events`, newline-delimited JSON). Unset, that endpoint 503s.
+   */
+  serverEvents?: Pick<ServerEventsClient, 'subscribe'>;
   /**
    * The accounts this machine holds for the backend a model runs on (Claude
    * when no model is named), so `account` on a spawn can be a label.
@@ -1673,6 +1679,48 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         .code(code === 'link_offline' ? 503 : code === 'timeout' ? 504 : 500)
         .send({ error: code, message: err instanceof Error ? err.message : String(err) });
     }
+  });
+  // `patch logs` on this machine: the account's events, relayed over the link.
+  app.get('/server-events', async (req, reply) => {
+    const auth = checkAuth(req);
+    if (!auth.ok) return reply.code(401).send({ error: auth.reason });
+    if (!opts.serverEvents) {
+      return reply.code(503).send({
+        error: 'server_events_unavailable',
+        message: 'the server link is not wired on this host',
+      });
+    }
+    const raw = reply.raw;
+    let stop: (() => void) | null = null;
+    let ended = false;
+    const finish = (): void => {
+      if (ended) return;
+      ended = true;
+      stop?.();
+      raw.end();
+    };
+    try {
+      stop = opts.serverEvents.subscribe({
+        onEvent: (event) => {
+          if (!ended) raw.write(JSON.stringify(event) + '\n');
+        },
+        onEnd: (reason) => {
+          if (!ended) raw.write(JSON.stringify({ type: 'stream.error', message: reason }) + '\n');
+          stop = null;
+          finish();
+        },
+      });
+    } catch (err) {
+      const code = err instanceof AccountsRpcError ? err.code : 'internal';
+      return reply
+        .code(code === 'link_offline' ? 503 : 500)
+        .send({ error: code, message: err instanceof Error ? err.message : String(err) });
+    }
+    reply.hijack();
+    raw.writeHead(200, { 'content-type': 'application/x-ndjson', 'cache-control': 'no-store' });
+    // Headers out now so the CLI knows the subscription is live.
+    raw.write('');
+    req.raw.on('close', finish);
   });
   app.get('/accounts', async (req, reply) => {
     const auth = checkAuth(req);

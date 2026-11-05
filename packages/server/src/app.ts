@@ -103,6 +103,7 @@ import { registerJobRoutes } from './jobs/routes.js';
 import { attachJobsRpcBridge } from './jobs/rpc-bridge.js';
 import { attachAccountsRpcBridge } from './accounts-rpc-bridge.js';
 import { attachApiRpcBridge } from './api-rpc-bridge.js';
+import { attachEventsRpcBridge } from './events-rpc-bridge.js';
 import type { Job, JobsInterface } from './jobs/types.js';
 import { HookStore } from './hooks/store.js';
 import { HookRunner } from './hooks/runner.js';
@@ -2238,6 +2239,13 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     logger: log.child({ component: 'api-rpc-bridge' }),
   });
 
+  // ...and tails the account's events the same way (`patch logs`).
+  const detachEventsBridge = attachEventsRpcBridge({
+    link: hostLink,
+    onBroadcast: (tap) => wsHub.onBroadcast(tap),
+    logger: log.child({ component: 'events-rpc-bridge' }),
+  });
+
   registerJobRoutes(app, {
     logger: log.child({ component: 'jobs-routes' }),
     registry,
@@ -2305,6 +2313,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     detachJobsBridge();
     detachAccountsBridge?.();
     detachApiBridge();
+    detachEventsBridge();
     if (jobs instanceof JobStore) await jobs.close();
     if (hooks instanceof HookStore) await hooks.close();
   });
