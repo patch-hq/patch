@@ -1480,12 +1480,7 @@ export class PermissionModeDowngradedError extends Error {
     readonly model?: string,
     readonly claudeCodeVersion?: string,
   ) {
-    // Facts only: what was asked for, what ran, and what it ran on. Claude Code
-    // does not say why it substituted, so neither does this message.
-    super(
-      `Permission mode requested: ${requested}. Mode that ran: ${effective}. ` +
-        `Model: ${model ?? 'unknown'}. Claude Code version: ${claudeCodeVersion ?? 'unknown'}.`,
-    );
+    super(`Claude Code changed permission mode '${requested}' to '${effective}'. Turn refused.`);
     this.name = 'PermissionModeDowngradedError';
   }
 }

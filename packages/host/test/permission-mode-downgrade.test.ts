@@ -63,6 +63,10 @@ describe('a downgrade to any OTHER mode still refuses the turn', () => {
     const errors = events.filter((e): e is ChatErrorEvent => e.type === 'chat.error');
     expect(errors).toHaveLength(1);
     expect(errors[0]?.error.code).toBe('permission_mode_downgraded');
+    // Brief and factual: states what changed, does not guess at causes.
+    expect(errors[0]?.error.message).toBe(
+      "Claude Code changed permission mode 'bypassPermissions' to 'default'. Turn refused.",
+    );
     expect(daemon.chatState.get(chatId)?.activity).toBe('errored');
     // The chat's OWN configured mode is untouched — only a person's own choice
     // (or the plan exception) may change it.
