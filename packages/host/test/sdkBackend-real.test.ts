@@ -1286,8 +1286,63 @@ describe('createRealSdkBackend — permission mode is honoured or the turn dies'
     ).catch((e: unknown) => e as Error & { requested: string; effective: string });
     expect(err.requested).toBe('auto');
     expect(err.effective).toBe('default');
-    expect(err.message).toContain("'auto'");
-    expect(err.message).toContain("'default'");
+    expect(err.message).toBe(
+      'Permission mode requested: auto. Mode that ran: default. Model: unknown. Claude Code version: unknown.',
+    );
+  });
+
+  it('reports model and Claude Code version from init, and no guessed cause', async () => {
+    const { createRealSdkBackend } = await loadRealBackend(() => {
+      async function* gen(): AsyncGenerator<unknown> {
+        yield {
+          ...(initWith('default') as object),
+          model: 'claude-opus-4',
+          claude_code_version: '2.1.5',
+        };
+      }
+      return gen();
+    });
+    const backend = createRealSdkBackend();
+    const err = await drain(
+      backend.run({
+        prompt: 'hi',
+        cwd: '/tmp',
+        abortController: new AbortController(),
+        oauthAccessToken: 'tok',
+        permissionMode: 'auto',
+      }),
+    ).catch((e: unknown) => e as Error);
+    expect(err.message).toBe(
+      'Permission mode requested: auto. Mode that ran: default. Model: claude-opus-4. Claude Code version: 2.1.5.',
+    );
+    expect(err.message).not.toMatch(/because|commonly|too old/);
+  });
+
+  it('a mode switched while the turn runs neither fails nor reaches the turn', async () => {
+    let setLive: (c: string, m: 'bypassPermissions') => Promise<void> = () =>
+      Promise.reject(new Error('module not loaded'));
+    const { createRealSdkBackend, setLiveRunPermissionMode } = await loadRealBackend(() => {
+      async function* gen(): AsyncGenerator<unknown> {
+        // The user switched to bypass before init arrived; Claude still reports `auto`.
+        await setLive('chat-switch', 'bypassPermissions');
+        yield initWith('auto');
+        yield { type: 'result', session_id: 'sess-init', result: 'done' };
+      }
+      return gen();
+    });
+    setLive = setLiveRunPermissionMode;
+    const backend = createRealSdkBackend();
+    const out = await drain(
+      backend.run({
+        prompt: 'hi',
+        chatId: 'chat-switch',
+        cwd: '/tmp',
+        abortController: new AbortController(),
+        oauthAccessToken: 'tok',
+        permissionMode: 'auto',
+      }),
+    );
+    expect(out.some((e) => e.type === 'result')).toBe(true);
   });
 
   it('runs normally when the mode comes back as asked', async () => {

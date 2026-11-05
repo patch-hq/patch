@@ -232,14 +232,19 @@ the agent's own transcript, which has no notion of them, so they replay in
 place after a restart like the rest of the chat.
 
 Claude Code can resolve a turn onto a different mode than the one it was
-given — the host's `claude` build too old for the mode, or the chat's model
-not supporting it — and does not refuse the combination itself, it silently
-substitutes one and carries on. The host compares the mode Claude Code
-actually resolved against the one requested and, for every substitution
+given and does not refuse the combination itself, it silently substitutes one
+and carries on. The host compares the mode Claude Code actually resolved
+against the one requested at turn start and, for every substitution
 target except `plan`, refuses the turn: the chat's status becomes `errored`
-and the transcript states both modes and why, because the remaining targets
+and the error states facts only — the mode requested, the mode that ran, the
+model and the Claude Code version, with no guessed cause — because the remaining targets
 (`default` in practice) block on a human approving every tool call, which for
 an unattended chat is a dead end rather than a degraded mode.
+
+A mode change made while a turn is running applies from the next turn. It never
+fails, interrupts or is compared against the running turn: the check above is
+against the mode the turn started with. (A turn running in `plan` is the one
+exception: moving it off `plan`, as "Approve & resume" does, reaches it now.)
 
 A turn Claude Code lands on `plan` is not refused. `plan` blocks a turn the
 same way `default` does — a decision per tool call — so it is exactly what a

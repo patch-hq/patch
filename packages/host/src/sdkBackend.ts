@@ -1477,14 +1477,14 @@ export class PermissionModeDowngradedError extends Error {
   constructor(
     readonly requested: string,
     readonly effective: string,
+    readonly model?: string,
+    readonly claudeCodeVersion?: string,
   ) {
+    // Facts only: what was asked for, what ran, and what it ran on. Claude Code
+    // does not say why it substituted, so neither does this message.
     super(
-      `Claude Code downgraded permission mode '${requested}' to '${effective}'. ` +
-        `The mode this turn was given is unavailable — commonly because the host's ` +
-        `\`claude\` build is too old for it, or because the chat's model does not ` +
-        `support it — and running on '${effective}' instead would ask for approval on ` +
-        `every tool call. Choose a mode this host can honour, update the host's ` +
-        `\`claude\`, or move the chat to a model that supports the mode.`,
+      `Permission mode requested: ${requested}. Mode that ran: ${effective}. ` +
+        `Model: ${model ?? 'unknown'}. Claude Code version: ${claudeCodeVersion ?? 'unknown'}.`,
     );
     this.name = 'PermissionModeDowngradedError';
   }
@@ -1502,14 +1502,23 @@ export class PermissionModeDowngradedError extends Error {
  * field at all — that is not the same as a mismatch, and inventing one would
  * fail every turn on that host).
  */
-function permissionModeMismatch(msg: unknown, requested: string): string | undefined {
+function permissionModeMismatch(
+  msg: unknown,
+  requested: string,
+): { effective: string; model?: string; claudeCodeVersion?: string } | undefined {
   if (typeof msg !== 'object' || msg === null) return undefined;
   const m = msg as Record<string, unknown>;
   if (m['type'] !== 'system' || m['subtype'] !== 'init') return undefined;
   const effective = m['permissionMode'];
   if (typeof effective !== 'string') return undefined;
   if (effective === requested) return undefined;
-  return effective;
+  return {
+    effective,
+    ...(typeof m['model'] === 'string' ? { model: m['model'] } : {}),
+    ...(typeof m['claude_code_version'] === 'string'
+      ? { claudeCodeVersion: m['claude_code_version'] }
+      : {}),
+  };
 }
 
 /**
@@ -1519,9 +1528,18 @@ function permissionModeMismatch(msg: unknown, requested: string): string | undef
  * and `persistentRun` so the two paths can't drift on which target is the
  * exception.
  */
-function permissionModeMismatchEnvelope(requested: string, effective: string): SdkEnvelope {
+function permissionModeMismatchEnvelope(
+  requested: string,
+  found: { effective: string; model?: string; claudeCodeVersion?: string },
+): SdkEnvelope {
+  const { effective } = found;
   if (effective !== 'plan') {
-    throw new PermissionModeDowngradedError(requested, effective);
+    throw new PermissionModeDowngradedError(
+      requested,
+      effective,
+      found.model,
+      found.claudeCodeVersion,
+    );
   }
   return { type: 'system', permissionModeAutoDowngrade: { requested, effective: 'plan' } };
 }
@@ -1963,6 +1981,10 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   // is what every later decision in this turn reads, and `setLiveRunPermissionMode`
   // is how a change reaches the process itself.
   const live: LiveRun = { mode: opts.permissionMode ?? 'auto' };
+  // The mode this turn was ASKED to start in. Claude Code's `init` reports the
+  // mode it started in, so that is what it is checked against — never `live.mode`,
+  // which a mid-turn switch may already have moved.
+  const startedMode = live.mode;
   // A skill added or edited mid-turn reaches this process at the next tool
   // boundary (a new process on the next turn reads them anyway).
   const reloadSkills = skillsReloader(opts.cwd, () => q.reloadPlugins());
@@ -2019,10 +2041,10 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
       // A process that listed its skills before one was added would answer
       // "unknown command" for it; reload now, before the prompt is handled.
       if (skillsMissingFromInit(msg, opts.cwd).length > 0) await q.reloadPlugins();
-      const mismatch = permissionModeMismatch(msg, live.mode);
+      const mismatch = permissionModeMismatch(msg, startedMode);
       limitEvents.assertNotAnError(msg);
       if (mismatch !== undefined && plan.skip === 0) {
-        yield permissionModeMismatchEnvelope(live.mode, mismatch);
+        yield permissionModeMismatchEnvelope(startedMode, mismatch);
       }
       // Recorded as each envelope is handled — the consumer handles it before
       // asking for the next — so a restart resumes exactly after it. Streaming
@@ -2082,11 +2104,10 @@ export function trackLiveRun(
 }
 
 /**
- * Put the chat's running Claude Code process on `mode` now. A process takes its
- * mode from the turn that spawned it, so without this a mode chosen mid-turn
- * (e.g. "Approve & resume bypass" on a plan-mode card) only changed what the
- * chat displayed while the process kept gating every tool call. No-op when the
- * chat has no turn in flight: the next turn starts on the chat's stored mode.
+ * Move a running plan-mode turn onto `mode` now (e.g. "Approve & resume
+ * bypass" on a plan-mode card). No-op for a turn in any other mode, and when the
+ * chat has no turn in flight: the change applies from the next turn, which
+ * starts on the chat's stored mode.
  */
 export async function setLiveRunPermissionMode(
   chatId: string,
@@ -2094,6 +2115,11 @@ export async function setLiveRunPermissionMode(
 ): Promise<void> {
   const live = liveRuns.get(chatId);
   if (!live) return;
+  // A switch made while a turn runs applies from the NEXT turn: it never
+  // reaches, fails or interrupts the turn in flight. The one exception is a
+  // turn sitting in `plan`, which is how "Approve & resume bypass" moves the
+  // process out of plan.
+  if (live.mode !== 'plan') return;
   live.mode = mode;
   await live.query?.setPermissionMode(mode);
 }
