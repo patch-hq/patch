@@ -453,11 +453,8 @@ Rules.
   installed version and, when it is behind, the latest (the server's version —
   hosts run in lockstep with it). The page shows no shas, drift detail or developer
   commands. Patch works out what is behind (hosts, drift, the app, the APK) and
-  the one Update acts on it. A host that is behind only because its chats are
-  mid-turn reports `updateHeld` and reads "waiting for chats to finish" with no
-  Update control: the install applies itself once they finish. That row offers
-  "Update now" behind a confirmation, which sends `host.update` with `force` and
-  installs over the running turns, stopping them. A failed read or failed shell check reads as
+  the one Update acts on it. Running chats never hold a host's update, so a host row has no waiting state and no
+  force control. A failed read or failed shell check reads as
   "Couldn't check", never as up to date. `GET /api/version` still carries the
   full per-layer report for diagnostics.
 - Unknown reads as unknown. An unstamped, missing or unreadable layer is

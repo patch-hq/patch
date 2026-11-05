@@ -58,6 +58,15 @@ export const RUNNER_EXIT = 'exit.json';
 export const RUNNER_INFO = 'runner.json';
 
 /**
+ * The socket/file protocol this runner speaks, written to `runner.json`. A
+ * runner is tiny and rarely changes; when its protocol does, bump this. Runners
+ * are per turn, so an old one finishes its own turn and the chat's next turn
+ * starts on a new one — a host never has to wait for, or hold, anything.
+ * Runners that predate the field speak protocol 1.
+ */
+export const RUNNER_PROTOCOL = 1;
+
+/**
  * How long a runner waits with no host attached and claude silent before it
  * ends claude itself. A claude that is waiting on something only a host can
  * answer (a permission prompt) would otherwise hold the runner, and the chat's
@@ -146,6 +155,7 @@ export async function runTurnRunner(dir: string): Promise<void> {
   // (installer/main.ts `pruneOldVersions`).
   writeJsonAtomic(join(dir, RUNNER_INFO), {
     pid: process.pid,
+    protocol: RUNNER_PROTOCOL,
     claudePid: pgid ?? null,
     script: process.argv[1] ?? null,
   });

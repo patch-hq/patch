@@ -30,7 +30,7 @@ import {
   flush,
 } from './testUtils/render';
 import { api } from '../src/api/rest';
-import { __clearLastAlert, __getLastAlert } from './stubs/react-native';
+import { __clearLastAlert } from './stubs/react-native';
 import { __resetRouterMock } from './stubs/expo-router';
 import { getLastCheckedAt, runUpdateCheck } from '../src/lib/updateCheck';
 import { refreshPublishedApk, usePublishedApkStore } from '../src/lib/publishedApk';
@@ -370,21 +370,6 @@ describe('Settings — Updates — hosts behind', () => {
     expect(wsMock.send).toHaveBeenCalledTimes(2);
     expect(wsMock.send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'h1' });
     expect(wsMock.send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'h2' });
-  });
-
-  it('a host held for running chats says so, offers no Update, and Update now asks before forcing', async () => {
-    reportHost('h1', { updateAvailable: true, updateHeld: true });
-    const r = await mount();
-    expect(status(r)).toBe('Updating when your chats are idle');
-    expect(queryHost(r.root, byTestId('update-all'))).toBeNull();
-    expect(textOf(findHost(r.root, byTestId('version-host-h1')))).toContain(
-      'Update waiting for chats to finish',
-    );
-    await actAsync(() => findHost(r.root, byTestId('update-now-h1')).props.onPress());
-    expect(wsMock.send).not.toHaveBeenCalled();
-    const confirm = __getLastAlert()?.buttons?.find((b) => b.text === 'Update now');
-    await actAsync(() => confirm?.onPress?.());
-    expect(wsMock.send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'h1', force: true });
   });
 
   it('offers no Update when the only host behind is offline', async () => {

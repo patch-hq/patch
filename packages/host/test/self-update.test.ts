@@ -245,84 +245,22 @@ describe('createUpdateGate: concurrent callers join one attempt', () => {
   });
 });
 
-// 2026-09-29: an update clicked at 00:06 BST restarted the host 18s later and
-// killed a chat's long-running command mid-turn. The restart waits for idle.
-describe('requestUpdate: never restarts under a running turn', () => {
+// An install never waits for turns: a Claude turn runs under its own runner and
+// carries on across the restart (spec/02 § Turns outlive the host). 2026-11-05:
+// with jobs firing all night, a hold for idle meant the host never updated.
+describe('requestUpdate: turns do not hold an install', () => {
   const logger = { info() {}, warn() {}, error() {} } as never;
   const available = async () => ({ available: true, version: '0.2.0', reason: 'newer' });
 
-  it('with nothing running, applies at once and reports the apply', async () => {
+  it('applies at once and reports the apply, whatever is running', async () => {
     const { requestUpdate } = await import('../src/selfUpdate.js');
     const apply = vi.fn().mockResolvedValue({ applied: true, message: 'updated' });
-    const res = await requestUpdate({ runningChats: () => [], check: available, apply, logger });
+    const res = await requestUpdate({ check: available, apply, logger });
     expect(res).toEqual({ applied: true, message: 'updated' });
     expect(apply).toHaveBeenCalledTimes(1);
   });
 
-  it('mid-turn, answers deferred at once instead of waiting on the turn', async () => {
-    const { requestUpdate } = await import('../src/selfUpdate.js');
-    // An apply that never settles stands in for one held until idle: the
-    // caller (often the running turn itself) must not wait on it.
-    const apply = vi.fn(() => new Promise<never>(() => undefined));
-    const res = await requestUpdate({
-      runningChats: () => ['chat-a'],
-      check: available,
-      apply,
-      logger,
-    });
-    expect(res.deferred).toBe(true);
-    expect(res.applied).toBe(false);
-    expect(res.message).toContain('0.2.0');
-    expect(res.message).toContain('1 running turn finishes');
-    expect(apply).toHaveBeenCalledTimes(1);
-  });
-
-  it('mid-turn with nothing to update to, refuses and starts nothing', async () => {
-    const { requestUpdate } = await import('../src/selfUpdate.js');
-    const apply = vi.fn();
-    const res = await requestUpdate({
-      runningChats: () => ['chat-a'],
-      check: async () => ({ available: false, version: '0.1.0', reason: 'already current' }),
-      apply,
-      logger,
-    });
-    expect(res).toEqual({ applied: false, message: 'already current' });
-    expect(apply).not.toHaveBeenCalled();
-  });
-
-  it('waitUntilNoRunningTurns holds until the last turn finishes', async () => {
-    const { waitUntilNoRunningTurns } = await import('../src/selfUpdate.js');
-    const states = [['a', 'b'], ['b'], []];
-    let reads = 0;
-    const sleep = vi.fn(async () => undefined);
-    await waitUntilNoRunningTurns({
-      runningChats: () => states[Math.min(reads++, states.length - 1)]!,
-      logger,
-      sleep,
-    });
-    expect(reads).toBe(3);
-    expect(sleep).toHaveBeenCalledTimes(2);
-  });
-
-  it('waitUntilNoRunningTurns installs over running turns once forced, and says so', async () => {
-    const { waitUntilNoRunningTurns } = await import('../src/selfUpdate.js');
-    let forced = false;
-    const onIdle = vi.fn();
-    const sleep = vi.fn(async () => {
-      forced = true;
-    });
-    await waitUntilNoRunningTurns({
-      runningChats: () => ['a'],
-      logger,
-      sleep,
-      onIdle,
-      force: () => forced,
-    });
-    expect(sleep).toHaveBeenCalledTimes(1);
-    expect(onIdle).toHaveBeenCalledTimes(1);
-  });
-
-  it('applyUpdate holds the installer on untilIdle, after the artifact verifies', async () => {
+  it('applyUpdate goes from a verified artifact straight to the installer', async () => {
     const { applyUpdate } = await import('../src/selfUpdate.js');
     const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } = await import('node:fs');
     const { execFileSync } = await import('node:child_process');
@@ -347,9 +285,7 @@ describe('requestUpdate: never restarts under a running turn', () => {
           ? new Response(JSON.stringify(manifest))
           : new Response(bytes)) as unknown as typeof fetch;
       const order: string[] = [];
-      let release!: () => void;
-      const idle = new Promise<void>((r) => (release = r));
-      const done = applyUpdate({
+      await applyUpdate({
         serverUrl: 'http://s',
         internalToken: 'secret-internal-token',
         currentVersion: '0.1.0',
@@ -357,11 +293,6 @@ describe('requestUpdate: never restarts under a running turn', () => {
         patchHome: join(dir, 'home'),
         logger,
         fetchImpl,
-        untilIdle: async () => {
-          order.push('waiting');
-          await idle;
-          order.push('idle');
-        },
         onInstallStart: (v) => {
           order.push(`start:${v}`);
         },
@@ -369,12 +300,7 @@ describe('requestUpdate: never restarts under a running turn', () => {
           order.push('install');
         },
       });
-      await vi.waitFor(() => expect(order).toEqual(['waiting']));
-      // Held for idle: nothing has been attempted yet, so nothing is recorded.
-      expect(order).not.toContain('start:0.2.0');
-      release();
-      await done;
-      expect(order).toEqual(['waiting', 'idle', 'start:0.2.0', 'install']);
+      expect(order).toEqual(['start:0.2.0', 'install']);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -384,31 +310,6 @@ describe('requestUpdate: never restarts under a running turn', () => {
 // 2026-10-04/05: a deploy publishes linux-x64 first and darwin-arm64 a minute
 // later, so a Mac polling in between saw a newer version with no artifact for
 // it and toasted "did not update" on a deploy that was fine.
-describe('a deferred apply', () => {
-  it('requestUpdate never reaches the install-start hook while turns are running', async () => {
-    const { requestUpdate } = await import('../src/selfUpdate.js');
-    const logger = { info() {}, warn() {}, error() {} } as never;
-    const onInstallStart = vi.fn();
-    let finish!: () => void;
-    const held = new Promise<void>((r) => (finish = r));
-    const res = await requestUpdate({
-      runningChats: () => ['chat'],
-      logger,
-      check: async () => ({ available: true, version: '0.2.0', reason: '' }),
-      // Stand-in for applyUpdate: holds on idle, and only then signals start.
-      apply: async () => {
-        await held;
-        onInstallStart('0.2.0');
-        return { applied: true, message: 'ok' };
-      },
-    });
-    expect(res.deferred).toBe(true);
-    expect(onInstallStart).not.toHaveBeenCalled();
-    finish();
-    await vi.waitFor(() => expect(onInstallStart).toHaveBeenCalledWith('0.2.0'));
-  });
-});
-
 describe('a newer build with no artifact for this target yet', () => {
   const logger = { info() {}, warn() {}, error() {} } as never;
   const manifest = (artifacts: string[], version = '0.2.0') =>
@@ -463,7 +364,6 @@ describe('a newer build with no artifact for this target yet', () => {
     const apply = vi.fn().mockResolvedValue({ applied: true, message: 'updated' });
     const wait = createArtifactWait({ windowMs: 300_000, pollMs: 15_000, sleep, onGiveUp });
     const res = await requestUpdate({
-      runningChats: () => [],
       check,
       apply,
       logger,
@@ -498,7 +398,7 @@ describe('a newer build with no artifact for this target yet', () => {
       onPendingChange,
       now: () => now,
     });
-    await requestUpdate({ runningChats: () => [], check, apply, logger, artifactWait: wait });
+    await requestUpdate({ check, apply, logger, artifactWait: wait });
     await wait.settled();
     expect(now).toBeGreaterThan(60_000);
     expect(sleep).toHaveBeenCalledWith(120_000);
@@ -515,7 +415,7 @@ describe('a newer build with no artifact for this target yet', () => {
     const check = vi.fn(() => checks[Math.min(n++, 1)]!());
     const apply = vi.fn().mockResolvedValue({ applied: false, message: 'bad signature' });
     const wait = createArtifactWait({ sleep: async () => undefined, onGiveUp });
-    await requestUpdate({ runningChats: () => [], check, apply, logger, artifactWait: wait });
+    await requestUpdate({ check, apply, logger, artifactWait: wait });
     await wait.settled();
     expect(onGiveUp).toHaveBeenCalledWith('bad signature');
   });
@@ -526,7 +426,7 @@ describe('a newer build with no artifact for this target yet', () => {
     const sleep = () => new Promise<void>((r) => (release = r));
     const check = vi.fn(awaiting);
     const wait = createArtifactWait({ windowMs: 60_000, pollMs: 15_000, sleep, onGiveUp: vi.fn() });
-    const opts = { runningChats: () => [], check, apply: vi.fn(), logger, artifactWait: wait };
+    const opts = { check, apply: vi.fn(), logger, artifactWait: wait };
     await requestUpdate(opts);
     await requestUpdate(opts);
     expect(wait.active).toBe(true);
