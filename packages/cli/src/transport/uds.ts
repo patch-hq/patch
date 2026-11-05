@@ -90,6 +90,79 @@ export class UdsClient {
     });
   }
 
+  /**
+   * Read a newline-delimited JSON stream until the daemon ends it, `signal`
+   * aborts, or `onLine` returns false. Resolves when the stream is over; a
+   * non-2xx answer rejects like `request`.
+   */
+  stream(
+    path: string,
+    onLine: (line: unknown) => boolean | void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const headers: Record<string, string> = { host: 'patch-daemon' };
+      if (this.localKey) headers['authorization'] = `Bearer ${this.localKey}`;
+      const req = httpRequest(
+        { socketPath: this.socketPath, method: 'GET', path, headers },
+        (res) => {
+          const status = res.statusCode ?? 0;
+          if (status < 200 || status >= 300) {
+            const chunks: Buffer[] = [];
+            res.on('data', (c: Buffer) => chunks.push(c));
+            res.on('end', () => {
+              const text = Buffer.concat(chunks).toString('utf8');
+              let parsed: unknown = text;
+              try {
+                parsed = JSON.parse(text);
+              } catch {
+                // keep as text
+              }
+              const err =
+                parsed && typeof parsed === 'object' && 'message' in parsed
+                  ? String((parsed as { message: unknown }).message)
+                  : `GET ${path} → ${status}`;
+              reject(new UdsError(status, parsed, err));
+            });
+            return;
+          }
+          let buf = '';
+          let done = false;
+          const stop = (): void => {
+            if (done) return;
+            done = true;
+            req.destroy();
+            resolve();
+          };
+          signal?.addEventListener('abort', stop, { once: true });
+          res.setEncoding('utf8');
+          res.on('data', (chunk: string) => {
+            buf += chunk;
+            let i: number;
+            while ((i = buf.indexOf('\n')) >= 0) {
+              const line = buf.slice(0, i);
+              buf = buf.slice(i + 1);
+              if (line === '') continue;
+              if (onLine(JSON.parse(line)) === false) return stop();
+            }
+          });
+          res.on('end', () => {
+            if (done) return;
+            done = true;
+            resolve();
+          });
+          res.on('error', (e) => {
+            if (!done) reject(e);
+          });
+        },
+      );
+      req.on('error', (e) => {
+        if (!signal?.aborted) reject(e);
+      });
+      req.end();
+    });
+  }
+
   get<T>(path: string): Promise<T> {
     return this.request<T>('GET', path);
   }

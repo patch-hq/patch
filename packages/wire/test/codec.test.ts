@@ -1589,6 +1589,13 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     status: 200,
     body: { version: 1 },
   },
+  'patch.events.subscribe': { type: 'patch.events.subscribe', subscriptionId: 's1' },
+  'patch.events.unsubscribe': { type: 'patch.events.unsubscribe', subscriptionId: 's1' },
+  'patch.events.event': {
+    type: 'patch.events.event',
+    subscriptionId: 's1',
+    event: { type: 'host.online', hostId: 'h1' },
+  },
   'secrets.list': {
     type: 'secrets.list',
     secrets: [

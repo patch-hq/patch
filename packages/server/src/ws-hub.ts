@@ -1820,6 +1820,9 @@ export class WsHub {
       event.type === 'patch.accounts.response' ||
       event.type === 'patch.api.request' ||
       event.type === 'patch.api.response' ||
+      event.type === 'patch.events.subscribe' ||
+      event.type === 'patch.events.unsubscribe' ||
+      event.type === 'patch.events.event' ||
       event.type === 'patch.host_files.response' ||
       // The summary is answered over REST to the one caller that asked.
       event.type === 'patch.link_summary.response' ||
@@ -1908,6 +1911,11 @@ export class WsHub {
         this.lastAccountReport.set(event.hostId, perBackend);
       }
       perBackend.set(event.backendId, event);
+    }
+    // What surfaces are about to see, for the host-link event relay. Addressed
+    // (per-surface) frames are not account events and are not tapped.
+    if (!('forSurfaceId' in event)) {
+      for (const tap of this.eventTaps) tap(event);
     }
     // Per-surface replay events: route only to the requesting surface.
     if (
@@ -2101,6 +2109,14 @@ export class WsHub {
    */
   republishAllHosts(): void {
     for (const hostId of this.registeredHostIds()) this.republishHost(hostId);
+  }
+
+  private readonly eventTaps = new Set<(event: WireEvent) => void>();
+
+  /** Observe every account-scoped event headed for surfaces. Returns unsub. */
+  onBroadcast(tap: (event: WireEvent) => void): () => void {
+    this.eventTaps.add(tap);
+    return () => this.eventTaps.delete(tap);
   }
 
   /** Send to all connected surfaces. Returns count delivered. */
