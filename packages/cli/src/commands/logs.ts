@@ -36,7 +36,7 @@ export function registerLogsCommands(program: Command): void {
           try {
             bearer = bearerToken();
           } catch {
-            fail(opts, new Error('not authenticated — run `patch auth login`'));
+            fail(opts, new Error('not authenticated: no host on this machine and no credential — run `patch auth login`'));
           }
           const limit =
             opts.limit !== undefined ? parseLimit(opts.limit) : Number.POSITIVE_INFINITY;
