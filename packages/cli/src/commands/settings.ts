@@ -62,6 +62,23 @@ function parseValue(raw: string): unknown {
   }
 }
 
+const BOOLEAN_WORDS: Record<string, boolean> = {
+  true: true,
+  false: false,
+  on: true,
+  off: false,
+  yes: true,
+  no: false,
+};
+
+/** For an on/off setting: true/false, on/off or yes/no (any case). Anything else is an error. */
+export function parseBooleanValue(key: string, raw: string): boolean {
+  const v = BOOLEAN_WORDS[raw.trim().toLowerCase()];
+  if (v === undefined)
+    throw new Error(`${key} is on/off — got "${raw}" (use on, off, yes, no, true or false)`);
+  return v;
+}
+
 function backendOf(name: string): ProviderBackendId {
   try {
     return providerDescriptor(providerByName(name)).backendId as ProviderBackendId;
@@ -156,9 +173,13 @@ export function registerSettingsCommands(program: Command): void {
     .action(async (key: string, value: string, opts: CommonOpts) => {
       await run(opts, async () => {
         const field = SETTING_KEYS[key] ?? key;
-        const res = await server(opts).patch<unknown>('/api/settings', {
-          [field]: parseValue(value),
-        });
+        // Only on/off settings take the words; a text setting may legitimately be "off".
+        const current = await server(opts).get<SharedState>('/api/settings/shared');
+        const next =
+          typeof current.settings[field] === 'boolean'
+            ? parseBooleanValue(key, value)
+            : parseValue(value);
+        const res = await server(opts).patch<unknown>('/api/settings', { [field]: next });
         if (opts.json) emitJson(res);
         else emitText(`${field}: ${value}`);
       });
