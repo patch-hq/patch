@@ -10,14 +10,20 @@ const A = '01M3N32N9T7V75JCV7XHY9NRHM';
 const B = '01M3N32NAAAAAAAAAAAAAAAAAA';
 const C = '01M3N6CN87R4K73FD3PRWPN0RW';
 
-function fake(kind: 'uds' | 'rest', chats: string[]): Transport & { gets: string[] } {
+process.env['PATCH_CHAT_ID'] = 'caller-1';
+
+function fake(
+  kind: 'uds' | 'rest',
+  chats: string[],
+  names: Record<string, string> = {},
+): Transport & { gets: string[] } {
   const gets: string[] = [];
   const t = {
     kind,
     gets,
     async get<T>(path: string): Promise<T> {
       gets.push(path);
-      return { chats: chats.map((chatId) => ({ chatId })) } as T;
+      return { chats: chats.map((chatId) => ({ chatId, name: names[chatId] })) } as T;
     },
     post: async () => {
       throw new Error('unused');
@@ -35,7 +41,7 @@ function fake(kind: 'uds' | 'rest', chats: string[]): Transport & { gets: string
 test('a unique prefix resolves to the full id, archived chats included', async () => {
   const t = fake('uds', [A, C]);
   assert.equal(await resolveChatId(t, '01M3N32N'), A);
-  assert.deepEqual(t.gets, ['/chats?archived=include']);
+  assert.deepEqual(t.gets, ['/internal/chats?archived=include&callerChatId=caller-1']);
 });
 
 test('prefixes are case-insensitive and resolve over REST against the account list', async () => {
@@ -60,5 +66,17 @@ test('an ambiguous prefix is refused, naming every match', async () => {
 });
 
 test('a prefix nothing matches says so rather than 404ing on the prefix', async () => {
-  await assert.rejects(resolveChatId(fake('uds', [C]), '01M3N32N'), /no chat on this machine/);
+  await assert.rejects(resolveChatId(fake('uds', [C]), '01M3N32N'), /no chat on this account/);
+});
+
+test('a chat is found by its exact name, on any machine', async () => {
+  const t = fake('uds', [A, C], { [C]: 'Deploy watcher' });
+  assert.equal(await resolveChatId(t, 'deploy watcher'), C);
+});
+
+test('a name two chats share is refused, naming both', async () => {
+  await assert.rejects(
+    resolveChatId(fake('uds', [A, C], { [A]: 'dup', [C]: 'dup' }), 'dup'),
+    /ambiguous/,
+  );
 });

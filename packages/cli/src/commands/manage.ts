@@ -82,6 +82,7 @@ export function registerManageCommands(program: Command): void {
             const res = await t.post<{ ok: true; queued: boolean }>('/internal/send-to', {
               chatId: id,
               message,
+              callerChatId: process.env['PATCH_CHAT_ID'],
             });
             if (opts.json) emitJson(res);
             else emitText('queued');
