@@ -5,7 +5,6 @@ import {
   harnessModesInclude,
 } from './harnesses.js';
 import {
-  hasDurableTurn,
   inspectTurnDir,
   listTurnDirs,
   retireTurn,
@@ -6782,11 +6781,14 @@ export class Daemon {
    * process would cut off. Self-update holds its installer until this is empty.
    * A chat parked on a permission card is excluded: nothing is executing, and
    * a card nobody answers would otherwise hold the install forever.
+   *
+   * A turn running under a durable runner is held for too: it is meant to
+   * reattach after the restart, but 2026-11-05 a job-fired turn on the Mac was
+   * cut off by eight overnight self-updates and lost its work, so an install
+   * does not rely on that.
    */
   runningChatIds(): string[] {
-    return [...this.pumping].filter(
-      (chatId) => !this.isParkedOnPermission(chatId) && !hasDurableTurn(chatId),
-    );
+    return [...this.pumping].filter((chatId) => !this.isParkedOnPermission(chatId));
   }
 
   /**
