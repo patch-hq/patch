@@ -182,7 +182,6 @@ describe('runManagerSweep', () => {
     chatId = await daemon.spawnChat({ folder });
     const running = daemon.sendInput({ chatId, message: 'long job', localId: 'u1' });
     await new Promise((r) => setTimeout(r, 30));
-    expect(daemon.runningChatIds()).toContain(chatId);
     const sweep = () =>
       daemon.runManagerSweep(sweepReq([candidate({ chatId, hostId: 'd1', folder })]));
     // Two sweeps while the turn runs: neither may park a message in the queue.

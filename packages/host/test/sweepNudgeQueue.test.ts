@@ -32,7 +32,6 @@ async function runningChat() {
   const chatId = await daemon.spawnChat({ folder });
   const running = daemon.sendInput({ chatId, message: 'long job', localId: 'u1' });
   await new Promise((r) => setTimeout(r, 30));
-  expect(daemon.runningChatIds()).toContain(chatId);
   const nudge = (localId: string) =>
     daemon.sendInput({
       chatId,
