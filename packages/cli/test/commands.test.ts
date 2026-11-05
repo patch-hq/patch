@@ -1183,3 +1183,84 @@ test('doctor --json: folderAccess is unknown over REST (only the host can answer
     },
   );
 });
+
+test('chats send-to over the host socket sends the calling chat so the host can relay to another machine', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'patch-cli-sendto-'));
+  writeFileSync(join(dir, 'machine.json'), JSON.stringify({ serverUrl: 'http://127.0.0.1:1' }));
+  const sock = join(dir, 'host.sock');
+  let body = '';
+  const server: Server = createServer((req, res) => {
+    const parts: Buffer[] = [];
+    req.on('data', (c: Buffer) => parts.push(c));
+    req.on('end', () => {
+      body = Buffer.concat(parts).toString();
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, queued: true }));
+    });
+  });
+  await new Promise<void>((ok) => server.listen(sock, ok));
+  try {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      PATCH_HOME: dir,
+      PATCH_DAEMON_SOCKET: sock,
+      PATCH_DAEMON_LOCAL_KEY: 'k',
+      PATCH_CHAT_ID: 'caller-1',
+    };
+    const r = await runCli(['chats', 'send-to', '01M6M96YR9EG5TZ6J8SPPSC50D', 'hi', '--json'], env);
+    assert.equal(r.code, 0, `stderr=${r.stderr} stdout=${r.stdout}`);
+    assert.deepEqual(JSON.parse(body), {
+      chatId: '01M6M96YR9EG5TZ6J8SPPSC50D',
+      message: 'hi',
+      callerChatId: 'caller-1',
+    });
+    delete env['PATCH_CHAT_ID'];
+    const bad = await runCli(['chats', 'send-to', '01M6M96YR9EG5TZ6J8SPPSC50D', 'hi'], env);
+    assert.notEqual(bad.code, 0);
+  } finally {
+    await new Promise<void>((ok) => server.close(() => ok()));
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+const CHAT_ON_B = '01M6M96YR9EG5TZ6J8SPPSC50D';
+function sendToHostHandler(sent: string[]) {
+  return (req: { url?: string; method?: string }) => {
+    if (req.url === '/api/hosts')
+      return {
+        status: 200,
+        body: {
+          hosts: [
+            { hostId: 'hostaaaa', hostName: 'Netcup', online: true },
+            { hostId: 'hostbbbb', hostName: 'Mac', online: true },
+          ],
+        },
+      };
+    if (req.url === '/api/chats?archived=include')
+      return { status: 200, body: { chats: [{ chatId: CHAT_ON_B, hostId: 'hostbbbb' }] } };
+    if (req.url === `/api/chats/${CHAT_ON_B}/send-to` && req.method === 'POST') {
+      sent.push(req.url);
+      return { status: 200, body: { ok: true, queued: true, localId: 'l1' } };
+    }
+    return { status: 404, body: { error: 'not found' } };
+  };
+}
+
+test('chats send-to --host: delivers when the chat is on that machine', async () => {
+  const sent: string[] = [];
+  await withSetup(sendToHostHandler(sent), async (env) => {
+    const r = await runCli(['chats', 'send-to', CHAT_ON_B, 'hi', '--host', 'Mac', '--json'], env);
+    assert.equal(r.code, 0, `stderr=${r.stderr} stdout=${r.stdout}`);
+  });
+  assert.equal(sent.length, 1);
+});
+
+test('chats send-to --host: refuses, sending nothing, when the chat is on a different machine', async () => {
+  const sent: string[] = [];
+  await withSetup(sendToHostHandler(sent), async (env) => {
+    const r = await runCli(['chats', 'send-to', CHAT_ON_B, 'hi', '--host', 'Netcup'], env);
+    assert.notEqual(r.code, 0);
+    assert.match(r.stderr + r.stdout, /is on hostbbbb, not Netcup/);
+  });
+  assert.equal(sent.length, 0);
+});

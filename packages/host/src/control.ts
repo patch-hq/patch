@@ -120,7 +120,7 @@ function parseRunsLimit(
   if (!Number.isInteger(n) || n <= 0) {
     return { ok: false, message: `--limit must be a positive integer (got ${raw})` };
   }
-  return { ok: true, value: Math.min(200, n) };
+  return { ok: true, value: Math.min(2000, n) };
 }
 
 export interface BuildOptions {

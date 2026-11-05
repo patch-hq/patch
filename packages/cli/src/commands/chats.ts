@@ -213,24 +213,45 @@ export function registerChatsCommands(program: Command): void {
 
   chats
     .command('send-to <id> [message]')
-    .description('Deliver a user-turn into a chat')
+    .description('Deliver a user-turn into a chat on any machine')
     .option('--message <message>', 'Message body (alternative to positional)')
+    .option(
+      '--host <host>',
+      'Require the chat to live on this machine (name or hostId prefix); sends via the server',
+    )
     .option('--json', 'JSON output')
     .action(
       async (
         rawId: string,
         positional: string | undefined,
-        opts: CommonOpts & { message?: string },
+        opts: CommonOpts & { message?: string; host?: string },
       ) => {
         await run(opts, async () => {
           const message = positional ?? opts.message;
           if (!message) throw new Error('chats send-to: <message> or --message is required');
-          const t = getTransport(opts);
-          const id = await resolveChatId(t, rawId);
+          // --host goes through the server: another machine's socket is not
+          // reachable from here, and the server routes by the chat's owner.
+          const t = getTransport(opts.host !== undefined ? { ...opts, remote: true } : opts);
+          const caller = t.kind === 'uds' ? requireCallerChat('chats send-to') : undefined;
+          const id = await resolveChatId(t, rawId, caller);
+          if (opts.host !== undefined) {
+            const hostId = await resolveHost({ ...opts, host: opts.host });
+            const { chats } = await t.get<{ chats: ChatSummary[] }>('/api/chats?archived=include');
+            const chat = chats.find((c) => c.chatId === id);
+            if (!chat) throw new Error(`no chat ${id} on this account`);
+            if (chat.hostId !== hostId) {
+              throw new Error(
+                `chat ${id} is on ${chat.hostId ?? 'an unknown machine'}, not ${opts.host}. Nothing was sent.`,
+              );
+            }
+          }
           if (t.kind === 'uds') {
+            // callerChatId lets the host relay to the owning machine when the
+            // chat is not here (patch_send_to does the same).
             const res = await t.post<{ ok: true; queued: boolean }>('/internal/send-to', {
               chatId: id,
               message,
+              callerChatId: caller,
             });
             if (opts.json) emitJson(res);
             else emitText('queued');

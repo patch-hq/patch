@@ -12,14 +12,31 @@ import { pickPath } from './_common.js';
 const ULID_LENGTH = 26;
 const ULID_PREFIX = /^[0-9A-HJKMNP-TV-Z]+$/;
 
-export async function resolveChatId(t: Transport, id: string): Promise<string> {
+/**
+ * `anyHostCaller`: resolve against every machine's chats, not just this one's.
+ * Over the host socket that is the account-wide `/internal/chats`, which needs
+ * the calling chat's id; over REST the listing is account-wide already.
+ */
+export async function resolveChatId(
+  t: Transport,
+  id: string,
+  anyHostCaller?: string,
+): Promise<string> {
   const upper = id.toUpperCase();
   if (id.length >= ULID_LENGTH || !ULID_PREFIX.test(upper)) return id;
-  const path = pickPath(t, '/chats', '/api/chats');
-  const { chats } = await t.get<{ chats: { chatId: string }[] }>(`${path}?archived=include`);
+  const path =
+    anyHostCaller !== undefined
+      ? pickPath(t, '/internal/chats', '/api/chats')
+      : pickPath(t, '/chats', '/api/chats');
+  const qs =
+    anyHostCaller !== undefined && t.kind === 'uds'
+      ? `?archived=include&callerChatId=${encodeURIComponent(anyHostCaller)}`
+      : '?archived=include';
+  const { chats } = await t.get<{ chats: { chatId: string }[] }>(`${path}${qs}`);
   const matches = chats.map((c) => c.chatId).filter((c) => c.startsWith(upper));
   if (matches.length === 1) return matches[0]!;
-  const where = t.kind === 'uds' ? 'on this machine' : 'on this account';
+  const where =
+    t.kind === 'uds' && anyHostCaller === undefined ? 'on this machine' : 'on this account';
   if (matches.length === 0) {
     throw new Error(`no chat ${where} has an id starting ${id}`);
   }
