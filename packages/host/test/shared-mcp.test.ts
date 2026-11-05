@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -70,8 +70,17 @@ describe('SharedMcpPool', () => {
     await pool.listen();
     const a = await connect(pool.urlFor(spec));
     const first = await pid(a);
-    await (pool as unknown as { reap(): Promise<void> }).reap();
-    expect(pool.runningCount()).toBe(0);
+    // The server counts a request in flight until its response socket closes,
+    // which can land just after the client has the reply; the periodic sweep
+    // retries, so the test does too.
+    const p = pool;
+    await vi.waitFor(
+      async () => {
+        await (p as unknown as { reap(): Promise<void> }).reap();
+        expect(p.runningCount()).toBe(0);
+      },
+      { timeout: 5_000, interval: 25 },
+    );
     expect(await pid(a)).not.toBe(first);
     await a.close();
   });
