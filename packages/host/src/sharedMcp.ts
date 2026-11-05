@@ -323,7 +323,7 @@ export class SharedMcpPool {
           await s.transport.close().catch(() => undefined);
         }
       }
-      if (sh.upstream && sh.inflight === 0 && now - sh.lastUsed > this.idleMs) {
+      if (sh.upstream && sh.inflight === 0 && now - sh.lastUsed >= this.idleMs) {
         this.log(`shared mcp: stopping idle ${sh.spec.name}`);
         await this.stopUpstream(sh);
       }
