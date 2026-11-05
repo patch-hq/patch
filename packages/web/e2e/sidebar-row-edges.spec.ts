@@ -81,7 +81,7 @@ test.describe('sidebar row edges', () => {
     // An open lifecycle view replaces the chat list; its rows keep the column.
     await page.getByTestId('archived-toggle').click();
     await expect(page.getByTestId('archived-section')).toBeVisible();
-    expectOneColumn(await edges(page, ['.sb-row', '.sb-top-row', '.nav-row', '.new-chat-row']), 4);
+    expectOneColumn(await edges(page, ['.sb-row', '.sb-top-row', '.nav-tabs', '.new-chat-row']), 3);
   });
 
   test('the edges hold once the scroll band grows a scrollbar', async ({ page }) => {
