@@ -262,83 +262,18 @@ function installedVersion(patchHome: string): string | undefined {
 export interface ApplyResult {
   applied: boolean;
   message: string;
-  /**
-   * The update is real and will apply, but not yet: chats on this machine are
-   * mid-turn, and the installer's restart would kill them (see `requestUpdate`).
-   */
+  /** The update is real and will apply, but not yet: this machine's artifact is still being built (see `requestUpdate`). */
   deferred?: boolean;
 }
 
 /**
- * Resolves once no chat on this machine is running a turn. The installer
- * restarts the service, which kills every turn in flight and every command
- * those turns are running (2026-09-29: an update clicked at 00:06 BST killed a
- * chat's long-running command 18s later), so nothing may reach it while a turn
- * is live. Polled rather than evented: the answer only has to be right at the
- * moment it is read, and a missed edge would hold an update forever.
- */
-const HOLD_WARN_EVERY_MS = 10 * 60_000;
-
-export async function waitUntilNoRunningTurns(opts: {
-  runningChats: () => string[];
-  logger: Logger;
-  pollMs?: number;
-  sleep?: (ms: number) => Promise<void>;
-  now?: () => number;
-  /**
-   * Called synchronously in the same tick the idle read returns, so nothing
-   * can resume a turn between "idle" and the caller acting on it.
-   */
-  onIdle?: () => void;
-  /** True when the user chose to install over running turns (`host.update` force). */
-  force?: () => boolean;
-}): Promise<void> {
-  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const now = opts.now ?? Date.now;
-  const started = now();
-  let lastWarn = started;
-  let logged = false;
-  for (;;) {
-    const running = opts.runningChats();
-    if (running.length === 0 || opts.force?.()) {
-      if (running.length > 0) {
-        opts.logger.warn({ chats: running }, 'self-update: installing over running turns (forced)');
-      }
-      opts.onIdle?.();
-      return;
-    }
-    // A hold that outlasts any plausible turn is a bug somewhere, not a turn:
-    // say so every WARN_EVERY_MS so it is visible instead of silent.
-    if (now() - lastWarn >= HOLD_WARN_EVERY_MS) {
-      lastWarn = now();
-      opts.logger.warn(
-        { chats: running, heldMinutes: Math.round((lastWarn - started) / 60_000) },
-        'self-update: still holding the install for running turns',
-      );
-    }
-    if (!logged) {
-      opts.logger.info(
-        { chats: running },
-        'self-update: holding the install until running turns finish',
-      );
-      logged = true;
-    }
-    await sleep(opts.pollMs ?? 2000);
-  }
-}
-
-/**
  * The front door for "apply the published build" (the Update button's
- * `host.update` frame and `patch hosts update`). With nothing running it is
- * `apply` itself. With turns running it still answers at once — the caller is
- * often one of those turns (a deploy run from a chat), and waiting on its own
- * turn to end would never return — so it confirms there IS an update, starts
- * the apply in the background (which holds before the installer until the
- * machine is idle) and reports it as deferred. No update to apply is refused
- * immediately, exactly as before.
+ * `host.update` frame and `patch hosts update`). Turns do not hold it: they run
+ * under their own runners and carry on across the restart (spec/02 § Turns
+ * outlive the host). The one thing that defers it is a build whose artifact for
+ * this machine is still being built.
  */
 export async function requestUpdate(opts: {
-  runningChats: () => string[];
   check: () => Promise<UpdateCheck>;
   apply: () => Promise<ApplyResult>;
   logger: Logger;
@@ -356,26 +291,7 @@ export async function requestUpdate(opts: {
       };
     }
   }
-  const running = opts.runningChats();
-  if (running.length === 0) return opts.apply();
-  const check = await opts.check();
-  if (!check.available) return { applied: false, message: check.reason };
-  opts.apply().then(
-    (result) =>
-      opts.logger[result.applied ? 'info' : 'warn'](
-        { result: result.message },
-        'self-update: deferred update finished',
-      ),
-    (err: unknown) => opts.logger.error({ err }, 'self-update: deferred update failed'),
-  );
-  const n = running.length;
-  return {
-    applied: false,
-    deferred: true,
-    message:
-      `update to ${check.version ?? 'the published build'} will apply once ${n} ` +
-      `running turn${n === 1 ? '' : 's'} finish${n === 1 ? 'es' : ''} — restarting now would kill ${n === 1 ? 'it' : 'them'}`,
-  };
+  return opts.apply();
 }
 
 /**
@@ -709,15 +625,7 @@ export async function applyUpdate(opts: {
   /** `~/.patch` — where `current` says which version this machine will run. */
   patchHome: string;
   /**
-   * Awaited after the artifact is verified and immediately before the
-   * installer runs (which restarts this service). The download can take long
-   * enough for a turn to start, so the idle check belongs here, not only at
-   * the time of the request.
-   */
-  untilIdle?: () => Promise<void>;
-  /**
-   * Called with the build's version once the machine is idle and immediately
-   * before the installer runs — the point at which an install has genuinely
+   * Called with the build's version immediately before the installer runs — the point at which an install has genuinely
    * been tried. Deferred and awaiting-artifact paths never reach it.
    */
   onInstallStart?: (version: string) => void;
@@ -754,7 +662,6 @@ export async function applyUpdate(opts: {
       version = fetched.version;
     }
 
-    if (opts.untilIdle) await opts.untilIdle();
     opts.onInstallStart?.(version);
     opts.logger.info(
       { from: opts.currentVersion, to: version, target: opts.target },

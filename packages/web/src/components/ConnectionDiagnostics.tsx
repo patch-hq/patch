@@ -52,7 +52,12 @@ export function ConnectionDiagnostics({ onDismiss }: { onDismiss?: () => void })
     });
   }, []);
 
-  useEffect(run, [run]);
+  // Opening is as fresh as Retry: a surface that is not connected dials now,
+  // so the first look never reports the outcome of an attempt made before it.
+  useEffect(() => {
+    if (usePresenceStore.getState().connection !== 'connected') getActiveWs()?.reconnectNow();
+    run();
+  }, [run]);
 
   const retry = (): void => {
     // Don't wait out the backoff — dial now, then re-probe.
@@ -94,6 +99,11 @@ export function ConnectionDiagnostics({ onDismiss }: { onDismiss?: () => void })
                 <span className="conn-check-label">{c.label}</span>
                 <span className="conn-check-status">{c.status === 'pass' ? 'OK' : 'FAILED'}</span>
                 <span className="conn-check-detail">{c.detail}</span>
+                {c.fix ? (
+                  <span className="conn-check-fix" data-testid={`fix-${c.id}`}>
+                    {c.fix}
+                  </span>
+                ) : null}
               </li>
             ))}
           </ul>

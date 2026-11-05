@@ -49,6 +49,7 @@ import {
   RUNNER_IN,
   RUNNER_INFO,
   RUNNER_OUT,
+  RUNNER_PROTOCOL,
   RUNNER_SOCKET,
   type RunnerExit,
 } from './turnRunner.js';
@@ -118,11 +119,16 @@ function isAlive(pid: number): boolean {
   }
 }
 
+/** The runner protocols this host can talk to. */
+export const SUPPORTED_RUNNER_PROTOCOLS: readonly number[] = [RUNNER_PROTOCOL];
+
 export interface TurnOnDisk {
   dir: string;
   chatId: string;
   localId?: string;
   accountId?: string;
+  /** The protocol the turn's runner speaks (1 when its runner.json predates the field). */
+  protocol: number;
   /**
    * `live`: the runner is up (claude may or may not still be running);
    * `exited`: claude finished while no host was attached and everything it
@@ -143,7 +149,7 @@ export function inspectTurnDir(dir: string): TurnOnDisk | undefined {
     join(dir, TURN_META),
   );
   if (!meta) return undefined;
-  const info = readJson<{ pid: number }>(join(dir, RUNNER_INFO));
+  const info = readJson<{ pid: number; protocol?: number }>(join(dir, RUNNER_INFO));
   const exited = existsSync(join(dir, RUNNER_EXIT));
   const live =
     !exited && info !== undefined && isAlive(info.pid) && existsSync(join(dir, RUNNER_SOCKET));
@@ -152,6 +158,7 @@ export function inspectTurnDir(dir: string): TurnOnDisk | undefined {
     chatId: meta.chatId,
     ...(meta.localId !== undefined ? { localId: meta.localId } : {}),
     ...(meta.accountId !== undefined ? { accountId: meta.accountId } : {}),
+    protocol: info?.protocol ?? 1,
     state: exited ? 'exited' : live ? 'live' : 'lost',
     consumed: readJson<Consumed>(join(dir, CONSUMED)) ?? null,
   };
@@ -364,6 +371,11 @@ export class DurableTurn {
     const disk = inspectTurnDir(this.dir);
     if (!disk || disk.state === 'lost') {
       throw new Error(`durable turn: nothing to reattach to for chat ${this.chatId}`);
+    }
+    if (!SUPPORTED_RUNNER_PROTOCOLS.includes(disk.protocol)) {
+      throw new Error(
+        `durable turn: chat ${this.chatId}'s runner speaks protocol ${disk.protocol}; this host speaks ${SUPPORTED_RUNNER_PROTOCOLS.join(', ')}`,
+      );
     }
     const proc = new RunnerProcess(this, 'attach', readAttachState(this.dir));
     this.req.log.info(

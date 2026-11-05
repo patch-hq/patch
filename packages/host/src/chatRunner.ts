@@ -5,7 +5,6 @@ import {
   harnessModesInclude,
 } from './harnesses.js';
 import {
-  hasDurableTurn,
   inspectTurnDir,
   listTurnDirs,
   retireTurn,
@@ -3613,6 +3612,10 @@ export class Daemon {
       // verbatim and reattaches, and a permission it was waiting on is asked
       // again by the reattached turn itself.
       let reattach = false;
+      // The id the head turn is re-sent under. A turn that never had one (a
+      // spawn prompt) gets it here, once, so the reattach marker names the very
+      // id the re-send runs with.
+      const resendLocalId = pending[0]?.localId ?? randomUUID();
       const turnsConfig = this.opts.durableTurns;
       if (
         turnsConfig &&
@@ -3624,7 +3627,7 @@ export class Daemon {
         const head = pending[0];
         if (disk && disk.state !== 'lost' && disk.localId === head?.localId) {
           unclaimed.delete(m.chatId);
-          this.durableAttach.set(m.chatId, { consumed: disk.consumed, localId: head?.localId });
+          this.durableAttach.set(m.chatId, { consumed: disk.consumed, localId: resendLocalId });
           if (disk.accountId !== undefined) this.durableAccount.set(m.chatId, disk.accountId);
           reattach = true;
           this.opts.logger.info(
@@ -3683,7 +3686,7 @@ export class Daemon {
         void this.sendInput({
           chatId: m.chatId,
           message,
-          localId: turn.localId ?? randomUUID(),
+          localId: i === 0 ? resendLocalId : (turn.localId ?? randomUUID()),
           // The chat's accepted localIds are in its history log, so this
           // original id is already "seen" — say it is a re-send, not a
           // surface redelivery (see `SendInputOptions.redeliver`).
@@ -6778,18 +6781,6 @@ export class Daemon {
    * and every surface flashes a done badge — while it is still working.
    */
   /**
-   * Chats with a turn running or a queue draining — what a restart of this
-   * process would cut off. Self-update holds its installer until this is empty.
-   * A chat parked on a permission card is excluded: nothing is executing, and
-   * a card nobody answers would otherwise hold the install forever.
-   */
-  runningChatIds(): string[] {
-    return [...this.pumping].filter(
-      (chatId) => !this.isParkedOnPermission(chatId) && !hasDurableTurn(chatId),
-    );
-  }
-
-  /**
    * Chats whose turn the previous host left running under its runner, mapped to
    * how far that host got through the turn's output. The next turn this chat
    * starts is that same turn, reattached (`durableTurn.ts`), not a new claude.
@@ -6844,29 +6835,6 @@ export class Daemon {
         log: this.opts.logger,
       },
     };
-  }
-
-  /**
-   * Set once self-update has seen the machine idle and is about to launch the
-   * installer (which restarts this process). From then until `releaseInstall`
-   * a user answer to a permission card is refused: it would resume a turn the
-   * installer is about to kill.
-   */
-  private installCommitted = false;
-
-  commitToInstall(): void {
-    this.installCommitted = true;
-  }
-
-  releaseInstall(): void {
-    this.installCommitted = false;
-  }
-
-  private isParkedOnPermission(chatId: string): boolean {
-    if (this.chatState.get(chatId)?.activity !== 'awaiting-permission') return false;
-    const prefix = `${chatId}::`;
-    for (const key of this.sideBranchRunning) if (key.startsWith(prefix)) return false;
-    return true;
   }
 
   private hasQueuedTurns(chatId: string): boolean {
@@ -12857,11 +12825,6 @@ export class Daemon {
     /** Daemon-internal only: who decided, for the history log. Absent → the user. */
     by?: PermissionDecisionBy;
   }): void {
-    if (this.installCommitted && ev.by === undefined) {
-      throw new Error(
-        'permission response refused: a self-update is installing and this host is about to restart; answer after it comes back',
-      );
-    }
     // A person answering means somebody saw the prompt: the chat stays listed.
     if (ev.by === undefined) {
       for (const k of this.pendingPermissionEvents.keys()) {

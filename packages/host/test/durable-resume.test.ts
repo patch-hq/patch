@@ -36,13 +36,16 @@ function host(home: string, backend: SdkBackend, durableTurns: DurableTurnConfig
 function leaveTurn(
   cfg: DurableTurnConfig,
   chatId: string,
-  localId: string,
+  localId: string | undefined,
   state: 'live' | 'exited' | 'lost',
   consumed?: { offset: number; envelopes: number },
 ): string {
   const dir = join(cfg.turnsDir, chatId);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'turn.json'), JSON.stringify({ chatId, localId }));
+  writeFileSync(
+    join(dir, 'turn.json'),
+    JSON.stringify({ chatId, ...(localId !== undefined ? { localId } : {}) }),
+  );
   if (consumed) writeFileSync(join(dir, 'consumed.json'), JSON.stringify(consumed));
   if (state === 'exited') writeFileSync(join(dir, 'exit.json'), '{"code":0,"signal":null}');
   if (state === 'live') {
@@ -106,6 +109,45 @@ describe('resuming a turn that outlived the host', () => {
       expect(seen[0]?.durableTurn?.config).toBe(cfg);
     },
   );
+
+  // A job-fired chat's first turn is its spawn prompt, which carries no
+  // localId. 2026-11-05: the re-send was given a fresh random id, the marker
+  // (undefined) never matched it, and the reattach was dropped as stale — eight
+  // times, each cutting the turn off.
+  it('reattaches to a spawn-prompt turn that has no localId', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'patch-dres-'));
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-dresf-')));
+    const cfg: DurableTurnConfig = {
+      turnsDir: join(home, 'turns'),
+      runner: { command: 'unused', args: [] },
+    };
+    const firstBackend: SdkBackend = {
+      async *run() {
+        await new Promise<void>(() => undefined);
+      },
+    };
+    const first = host(home, firstBackend, cfg);
+    const chatId = await first.daemon.spawnChat({ folder, prompt: 'job prompt' });
+    await tick();
+    leaveTurn(cfg, chatId, undefined, 'live', { offset: 7, envelopes: -1 });
+
+    const seen: SdkRunOptions[] = [];
+    const second = host(
+      home,
+      {
+        async *run(opts) {
+          seen.push(opts);
+          yield { type: 'result', sessionId: 's2' };
+        },
+      },
+      cfg,
+    );
+    second.daemon.hydrate();
+    await tick(60);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.prompt).toBe('job prompt');
+    expect(seen[0]?.durableTurn?.attach).toEqual({ consumed: { offset: 7, envelopes: -1 } });
+  });
 
   it('cuts a turn off when its runner is gone, and clears the directory', async () => {
     const { seen, dir } = await interruptedChat('lost');

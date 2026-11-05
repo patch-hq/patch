@@ -26,6 +26,8 @@ export interface DiagnosticCheck {
   status: CheckStatus;
   /** The real evidence — HTTP status, thrown error message, version strings. */
   detail: string;
+  /** What the user can do about a failure, in one sentence; absent on a pass. */
+  fix?: string;
   /** The failure was a certificate/TLS error, not a plain network one. */
   tls?: boolean;
 }
@@ -133,6 +135,59 @@ async function checkAgent(): Promise<DiagnosticCheck> {
   }
 }
 
+/** One sentence of next step per failing check; the evidence stays in `detail`. */
+function fixFor(c: DiagnosticCheck): string | undefined {
+  if (c.status === 'pass') return undefined;
+  switch (c.id) {
+    case 'credential':
+      return 'Pair this phone again.';
+    case 'server':
+      return c.tls === true
+        ? 'Fix the certificate or the phone clock, or re-pair against the right address.'
+        : 'Check the phone has internet and that the server is running and its address is right.';
+    case 'agent':
+      return c.detail.includes('401')
+        ? 'Pair this phone again.'
+        : c.detail.startsWith('not checked')
+          ? 'Pair this phone again.'
+          : c.detail.includes('no agent')
+            ? 'Wake the machine that runs the agent and make sure Patch is running there.'
+            : 'Check the server is running and reachable, then retry.';
+    case 'websocket':
+      return 'Tap Retry now. If it keeps failing while the server check passes, a proxy, VPN or firewall is blocking live connections.';
+    case 'protocol':
+      return 'Update this app to the latest version.';
+  }
+}
+
+/** How long a diagnostics run waits for a dial already in flight to settle. */
+export const WS_SETTLE_TIMEOUT_MS = 5_000;
+
+/**
+ * The live-connection check must describe the attempt happening NOW, not the
+ * one that finished before the user pressed Diagnose: if a dial is in flight,
+ * wait (bounded) for it to connect or fail.
+ */
+function waitForWsToSettle(): Promise<void> {
+  const inFlight = (): boolean => {
+    const c = usePresenceStore.getState().connection;
+    return c === 'connecting' || c === 'reconnecting';
+  };
+  if (!inFlight()) return Promise.resolve();
+  const startAttempts = usePresenceStore.getState().failedAttempts;
+  return new Promise((resolve) => {
+    const done = (): void => {
+      clearTimeout(timer);
+      unsubscribe();
+      resolve();
+    };
+    const timer = setTimeout(done, WS_SETTLE_TIMEOUT_MS);
+    const unsubscribe = usePresenceStore.subscribe((st) => {
+      if (st.connection === 'connected' || st.failedAttempts > startAttempts) done();
+    });
+  });
+}
+
 function checkWebsocket(): DiagnosticCheck {
   const { connection, wsUrl, failedAttempts, lastClose, everConnected } =
     usePresenceStore.getState();
@@ -191,7 +246,11 @@ function checkProtocol(): DiagnosticCheck {
 
 export async function runDiagnostics(): Promise<DiagnosticsReport> {
   const credential = checkCredential();
-  const [server, agent] = await Promise.all([checkServer(), checkAgent()]);
+  const [server, agent] = await Promise.all([
+    checkServer(),
+    checkAgent(),
+    waitForWsToSettle(),
+  ]).then(([a, b]) => [a, b] as const);
   const { wsUrl } = usePresenceStore.getState();
   const build = mobileBuildInfo();
   return {
@@ -200,7 +259,10 @@ export async function runDiagnostics(): Promise<DiagnosticsReport> {
     route: getRoute()?.kind ?? 'none',
     wsUrl: wsUrl ?? '(none)',
     build: `${build.version} · ${build.gitSha ?? '(no sha)'} · built ${build.builtAt ?? '(unknown)'}`,
-    checks: [credential, server, agent, checkWebsocket(), checkProtocol()],
+    checks: [credential, server, agent, checkWebsocket(), checkProtocol()].map((c) => {
+      const fix = fixFor(c);
+      return fix === undefined ? c : { ...c, fix };
+    }),
   };
 }
 
@@ -214,6 +276,9 @@ export function formatReport(r: DiagnosticsReport): string {
     `ws url:    ${r.wsUrl}`,
     `surface:   ${r.build}`,
     '',
-    ...r.checks.map((c) => `[${c.status === 'pass' ? 'OK  ' : 'FAIL'}] ${c.id}: ${c.detail}`),
+    ...r.checks.flatMap((c) => [
+      `[${c.status === 'pass' ? 'OK  ' : 'FAIL'}] ${c.id}: ${c.detail}`,
+      ...(c.fix ? [`       fix: ${c.fix}`] : []),
+    ]),
   ].join('\n');
 }
