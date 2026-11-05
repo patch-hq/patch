@@ -71,6 +71,13 @@ const noSleepDetector: SleepDetector = {
 export const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
 
 /**
+ * Default `heartbeatMissesAllowed`. A busy machine (2026-11-05: load ~40 on 14
+ * cores) answers a pong late; one missed pong must not drop a healthy link.
+ * 3 misses at 15s means ~45-60s of silence before the socket is terminated.
+ */
+export const DEFAULT_HEARTBEAT_MISSES_ALLOWED = 3;
+
+/**
  * Event types this host has already reported as unknown (spec/03 § Forward
  * compatibility). One line the first time is the useful signal — "this host is
  * behind the server"; a line per frame is just volume.
@@ -134,6 +141,11 @@ export interface ServerLinkOptions {
    * for tests, which use a tiny value rather than waiting out the default.
    */
   heartbeatIntervalMs?: number;
+  /**
+   * Consecutive pings that may go unanswered before the socket is terminated.
+   * Tolerates a host too loaded to answer promptly. Defaults to 3.
+   */
+  heartbeatMissesAllowed?: number;
   /**
    * Test-hook gate (TD3 harness). When `true`, `severForTest` /
    * `bufferSizeForTest` become operative. NEVER set in production: the host
@@ -260,6 +272,10 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
   });
 
   const heartbeatIntervalMs = opts.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
+  const heartbeatMissesAllowed = Math.max(
+    1,
+    opts.heartbeatMissesAllowed ?? DEFAULT_HEARTBEAT_MISSES_ALLOWED,
+  );
 
   let ws: WebSocket | undefined;
   let online = false;
@@ -307,17 +323,26 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
    */
   function startHeartbeat(socket: WebSocket): void {
     stopHeartbeat();
-    let isAlive = true;
+    let missed = 0;
+    let awaiting = false;
     socket.on('pong', () => {
-      isAlive = true;
+      awaiting = false;
+      missed = 0;
     });
     heartbeatTimer = setInterval(() => {
-      if (!isAlive) {
-        log.warn('server-link: no pong since the last ping; terminating stale socket');
-        socket.terminate();
-        return;
+      if (awaiting) {
+        missed += 1;
+        if (missed >= heartbeatMissesAllowed) {
+          log.warn(
+            { missed },
+            'server-link: no pong after repeated pings; terminating stale socket',
+          );
+          socket.terminate();
+          return;
+        }
+        log.warn({ missed }, 'server-link: pong late; host may be under load');
       }
-      isAlive = false;
+      awaiting = true;
       socket.ping();
     }, heartbeatIntervalMs);
     heartbeatTimer.unref?.();
