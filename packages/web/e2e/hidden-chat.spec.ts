@@ -108,6 +108,8 @@ test.describe('Hidden sidebar section', () => {
 
     await expect.poll(() => posts).toEqual([{ chatId: 'hid_run', body: { hidden: false } }]);
     await expect(section.getByTestId('chat-row-hid_run')).toHaveCount(0);
+    // The open view replaces the chat list; closing it shows the chat there.
+    await page.getByTestId('lifecycle-view-close').click();
     await expect(page.locator('.sb-scroll [data-testid="chat-row-hid_run"]')).toBeVisible();
     // Show does not open the chat.
     await expect(page.getByTestId('hidden-banner')).toHaveCount(0);
@@ -126,6 +128,7 @@ test.describe('Hidden sidebar section', () => {
 
     await expect(page.getByTestId('error-toasts')).toContainText(/show failed/i);
     await expect(section.getByTestId('chat-row-chat_hidden')).toBeVisible();
+    await page.getByTestId('lifecycle-view-close').click();
     await expect(page.locator('.sb-scroll [data-testid="chat-row-chat_hidden"]')).toHaveCount(0);
   });
 
@@ -134,7 +137,6 @@ test.describe('Hidden sidebar section', () => {
   }) => {
     await stubServer(page);
     await page.goto('/app/dev-harness.html?chat=chat_md');
-    await page.getByTestId('hidden-toggle').click();
     await expect(page.locator('.sb-scroll [data-testid="chat-row-chat_bus"]')).toBeVisible();
 
     await page.evaluate(() => {
@@ -160,6 +162,7 @@ test.describe('Hidden sidebar section', () => {
     });
 
     await expect(page.locator('.sb-scroll [data-testid="chat-row-chat_bus"]')).toHaveCount(0);
+    await page.getByTestId('hidden-toggle').click();
     await expect(page.getByTestId('hidden-section').getByTestId('chat-row-chat_bus')).toBeVisible();
   });
 });
