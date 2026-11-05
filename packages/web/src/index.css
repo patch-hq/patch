@@ -467,36 +467,21 @@ body {
   -webkit-app-region: no-drag;
 }
 
-/* .offline-banner and .desktop-update-banner both sit in flow at the very top
- * of the shell (§ Banners below) — the same row the traffic lights occupy on
- * an overlay title bar. Without this they draw their coloured background
- * straight under the lights: correct pixels, wrong effect, since a banner
- * background is not a title bar and the lights end up looking like they are
- * floating on top of a strip that does not belong to them. Match padding to
- * `.sb-brand`'s own inset rather than centring within the full width, so the
- * banner's content clears the lights the same way every other top-row
- * element already does. */
-.overlay-titlebar .offline-banner,
-.overlay-titlebar .desktop-update-banner {
-  padding-left: var(--overlay-titlebar-inset);
-  -webkit-app-region: drag;
-  /* The banner's own text is short enough that its natural height falls short
-     of the lights' bottom edge — the seam Tom saw, the top of each light sat
-     in the banner's colour and the bottom in whatever rendered next. Grown to
-     clear them with the same margin `.sb-brand` gives them for free, and
-     centred so that growth lands as equal padding rather than all below the
-     text. */
-  min-height: calc(var(--overlay-titlebar-lights-bottom) + 3px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/* Banners (reconnecting, server updating, agent offline, staged update) are
+ * in-flow strips at the top of the shell (§ Banners below). On an overlay
+ * title bar that top row belongs to the traffic lights: the native lights are
+ * pinned at a fixed spot and the brand row / chat header are lined up with
+ * them, so a banner stacked above the row shoved the whole row down and left
+ * the lights stranded on the banner (Tom, 5 Nov: banners push the desktop
+ * window buttons down). Here the banners are moved to the bottom of the shell
+ * instead — still in flow, so they cover nothing — and the top row stays put
+ * whichever banners are showing. */
+.overlay-titlebar :is(.offline-banner, .daemon-offline-banner, .desktop-update-banner) {
+  order: 2;
 }
-/* A banner above the sidebar already clears the lights, so the rows below it
- * sit clear of them by position. Keeping the lights inset on them as well
- * pushed the wordmark 84px in under an empty coloured strip — the banner
- * "looks messy". */
-.overlay-titlebar :is(.offline-banner, .desktop-update-banner) ~ * .sb-brand {
-  padding-left: 20px;
+.overlay-titlebar .daemon-offline-banner {
+  border-bottom: 0;
+  border-top: 1px solid var(--line-soft);
 }
 .overlay-titlebar .desktop-update-restart,
 .overlay-titlebar .banner-diagnose {

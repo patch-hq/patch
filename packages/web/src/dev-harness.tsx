@@ -3575,6 +3575,7 @@ if (params.get('meeting') === 'demo') {
 // FLOW above the columns, which is the one thing jsdom cannot show. `?voiceLine`
 // seeds what the line last heard-and-dropped, for the heard-not-sent state.
 const voiceParam = params.get('voice');
+const shellParam = params.get('shell') !== null || voiceParam !== null;
 if (voiceParam === 'call' || voiceParam === 'hands-free') {
   useVoiceStore.getState().startCall(chatId, voiceParam);
   useVoiceStore.getState().setCallPhase('listening');
@@ -3984,7 +3985,7 @@ function Harness(): JSX.Element {
   const columns = (
     <div
       className={`three-col ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}
-      style={voiceParam === null ? { height: '100vh' } : { flex: '1 1 auto', minHeight: 0 }}
+      style={!shellParam ? { height: '100vh' } : { flex: '1 1 auto', minHeight: 0 }}
     >
       <MemoryRouter initialEntries={[initialRoute]}>
         <GlobalShortcuts />
@@ -4057,7 +4058,7 @@ function Harness(): JSX.Element {
   // Without `?voice` the harness is the columns alone, exactly as every layout
   // spec already measures them. With it, they sit under the real app-shell
   // column so the bar is laid out against them for real.
-  if (voiceParam === null) return withChrome;
+  if (!shellParam) return withChrome;
   return (
     <div className="app-shell" data-testid="app-shell" style={{ height: '100vh' }}>
       <VoiceBar />
