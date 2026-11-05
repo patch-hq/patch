@@ -122,7 +122,7 @@ What it runs. The screen runs the diagnostics itself, on open and on every Retry
 | Credential | stored surface credential present + well-formed JWT                                                                                   | "not paired" from "paired but rejected"                                                                     |
 | Server     | `GET /api/healthz` (public)                                                                                                           | server unreachable (DNS/TLS/offline machine) from server up; reports `version`+`gitSha`                     |
 | Host links | `GET /api/daemon/healthz` (authed) — one line per registered host, 401 on a bad credential                                            | a host being down from the server being down from a rejected credential — the whole point                   |
-| WebSocket  | live surface state: URL, connection state, failed-attempt count, last close code/reason                                               | a socket that failed to open from one that opened and dropped                                               |
+| WebSocket  | live surface state, after any dial in flight has settled: URL, connection state, failed-attempt count, last close code/reason         | a socket that failed to open from one that opened and dropped                                               |
 | Protocol   | what forward compatibility absorbed this session (`03-wire-protocol.md` § Forward compatibility): fields ignored, event types dropped | a surface that is merely a little behind its agent from one that is missing behaviour the agent already has |
 
 The Protocol check is the one place a surface admits it is older than its agent,
@@ -134,7 +134,9 @@ implement at all. It is listed last so an upstream failure — no credential, no
 server, no host — still supplies the screen's headline; being behind is never
 the story when the link is down.
 
-Each check renders pass/fail with its actual detail text (HTTP status, thrown network error message, version strings) — a check that could not run says so, and renders as its own state rather than a pass.
+Each check renders pass/fail with its actual detail text (HTTP status, thrown network error message, version strings) — a check that could not run says so, and renders as its own state rather than a pass. Every failing check also carries one sentence saying what the user can do about it (pair again, wake the agent's machine, check the network, update the app), shown under its detail and included in the copied report; a passing check has none.
+
+Opening is as fresh as Retry. A surface that is not connected dials immediately when the screen opens, and the WebSocket check waits (up to 5s) for a dial already in flight to connect or fail before it reports, so the first look describes the attempt happening now and never the outcome of one made before Diagnose was pressed.
 
 On mobile, Settings → Account → Reconnect to server opens diagnostics even while offline. Diagnostics includes Pair again, available while checks are running, which closes the overlay and opens the pairing scanner. A saved credential without a server route is incomplete pairing: startup opens pairing instead of the tabs and does not start network services. Completing pairing starts the connection and app services immediately, without restarting the app.
 

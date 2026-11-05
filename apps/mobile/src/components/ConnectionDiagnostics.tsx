@@ -64,7 +64,12 @@ export function ConnectionDiagnostics({
     });
   }, []);
 
-  React.useEffect(run, [run]);
+  // Opening is as fresh as Retry: a surface that is not connected dials now,
+  // so the first look never reports the outcome of an attempt made before it.
+  React.useEffect(() => {
+    if (usePresenceStore.getState().connection !== 'connected') getWs().reconnectNow();
+    run();
+  }, [run]);
 
   const retry = (): void => {
     // Don't wait out the backoff — dial now, then re-probe.
@@ -164,6 +169,14 @@ export function ConnectionDiagnostics({
                   {c.status === 'pass' ? 'OK' : 'FAILED'}
                 </Text>
                 <Text style={{ ...typography.meta, color: colors.ink3 }}>{c.detail}</Text>
+                {c.fix ? (
+                  <Text
+                    testID={`fix-${c.id}`}
+                    style={{ ...typography.meta, color: colors.ink, marginTop: space.xs }}
+                  >
+                    {c.fix}
+                  </Text>
+                ) : null}
               </View>
             ))}
           </ScrollView>
