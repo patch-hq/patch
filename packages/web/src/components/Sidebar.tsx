@@ -13,10 +13,8 @@
 
 import type { JSX, MouseEvent as ReactMouseEvent } from 'react';
 import {
-  createContext,
   memo,
   useCallback,
-  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
