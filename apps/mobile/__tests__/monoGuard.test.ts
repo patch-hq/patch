@@ -30,8 +30,8 @@ const ALLOWED: Record<string, [number, string]> = {
       "and a patch_ask_human card's device code",
   ],
   'src/components/BackgroundTaskBar.tsx': [
-    2,
-    'the shell command a background task is running or a monitor is watching (row preview and modal)',
+    3,
+    'the shell command a background task is running or a monitor is watching (row preview and modal), and its output log in the modal',
   ],
   'app/hosts/[hostId]/edit.tsx': [1, 'the file editor'],
   'app/chats/[chatId]/doc.tsx': [1, 'the document editor text area, which shows the file verbatim'],
