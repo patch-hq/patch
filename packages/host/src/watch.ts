@@ -28,7 +28,6 @@
 
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
 import {
-  appendFileSync,
   closeSync,
   statSync,
   existsSync,
