@@ -16,7 +16,7 @@ const CHAT = 'chat_cache_question';
 type CacheWindow = {
   __transcriptCache: {
     saveEvents(chatId: string, events: unknown[]): Promise<void>;
-    loadTranscript(chatId: string): Promise<{ resolutions: unknown[] } | null>;
+    loadTranscript(chatId: string): Promise<{ events: unknown[]; resolutions: unknown[] } | null>;
   };
 };
 
@@ -53,6 +53,16 @@ async function seedAndReload(page: Page, event: Record<string, unknown>): Promis
     (e) => (window as unknown as CacheWindow).__transcriptCache.saveEvents(e.chatId as string, [e]),
     event,
   );
+  // saveEvents resolves before its IndexedDB transaction commits, so a reload
+  // straight after can abort the write under load. Wait until it is readable.
+  await expect
+    .poll(() =>
+      page.evaluate(async (chatId) => {
+        const t = await (window as unknown as CacheWindow).__transcriptCache.loadTranscript(chatId);
+        return t?.events.length ?? 0;
+      }, event.chatId as string),
+    )
+    .toBe(1);
   await page.reload();
 }
 
