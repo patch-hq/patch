@@ -11,6 +11,7 @@ import {
 } from '@patch/wire';
 import {
   MeetingManager,
+  MeetingNotice,
   MeetingError,
   type AnalyseInput,
   type CorrectInput,
@@ -458,6 +459,16 @@ describe('MeetingManager', () => {
     expect(m.get('c1')?.error).toContain('sidecar down');
     await m.ingestAudio('c1', 'mic', Buffer.from('a'));
     expect(m.get('c1')?.error).toBeNull();
+  });
+
+  it('shows a setup notice as itself, not as a transcription failure', async () => {
+    const m = make();
+    m.start('c1');
+    transcribe.mockRejectedValueOnce(
+      new MeetingNotice('Setting up speech recognition on this machine (40%).'),
+    );
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    expect(m.get('c1')?.error).toBe('Setting up speech recognition on this machine (40%).');
   });
 
   it('tick analyses only new lines and merges topics and actions once', async () => {
