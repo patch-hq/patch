@@ -280,6 +280,13 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     params: "path: string, format: 'docx' | 'pdf' | 'md'",
   },
   {
+    name: patchToolId('patch_wake_status'),
+    label: 'patch_wake_status',
+    category: 'patch',
+    description: "Reads this chat's pending self-wake or loop without changing it.",
+    params: '(no params)',
+  },
+  {
     name: patchToolId('patch_cancel_wake'),
     label: 'patch_cancel_wake',
     category: 'patch',
