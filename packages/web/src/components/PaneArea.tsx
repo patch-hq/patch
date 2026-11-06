@@ -26,7 +26,9 @@ import type {
 } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/rest.js';
+import { ArtifactPane } from './ArtifactPane.js';
 import {
+  LayoutTemplate,
   ExternalLink,
   Files,
   Globe,
@@ -130,6 +132,7 @@ function tabTitle(
   chatName: string | null | undefined,
   jobs: { jobs: { id: string; name: string }[] } | undefined,
   padName?: string,
+  artifactTitle?: string,
 ): string {
   const d = tab.descriptor;
   switch (d.kind) {
@@ -161,6 +164,8 @@ function tabTitle(
           return padName ?? 'Pad';
         case 'new-pad':
           return 'New Pad';
+        case 'artifact':
+          return artifactTitle ?? 'Artifact';
       }
   }
 }
@@ -191,6 +196,8 @@ function tabIcon(d: TabDescriptor): JSX.Element | null {
         case 'pad':
         case 'new-pad':
           return <Layers size={13} aria-hidden />;
+        case 'artifact':
+          return <LayoutTemplate size={13} aria-hidden />;
       }
   }
 }
@@ -646,6 +653,8 @@ function TabContent({
           return <PadPane padId={d.padId} />;
         case 'new-pad':
           return <NewPadPage chatId={d.chatId} />;
+        case 'artifact':
+          return <ArtifactPane chatId={d.chatId} artifactId={d.artifactId} url={d.url} />;
       }
   }
 }
@@ -831,7 +840,14 @@ function PaneTab({ tab, active, dragOver, ...on }: PaneTabProps): JSX.Element {
     queryFn: () => api.getPad(padId as string),
     enabled: padId !== null,
   });
-  const title = tabTitle(tab, row?.name, jobs, pad?.name);
+  const artifactTitle = useChatStore((st) => {
+    const d = tab.descriptor;
+    if (d.kind !== 'page' || d.page !== 'artifact') return undefined;
+    return st.timelines[d.chatId]?.find(
+      (e) => e.kind === 'artifact' && e.artifactId === d.artifactId,
+    )?.artifactTitle;
+  });
+  const title = tabTitle(tab, row?.name, jobs, pad?.name, artifactTitle);
   const dirty = isTabDirty(tab);
   return (
     <div

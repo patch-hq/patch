@@ -101,27 +101,27 @@ test.describe('Settings → Updates at phone width', () => {
   });
 });
 
-test.describe('chat header hamburger menu at phone width', () => {
+test.describe('chat header ⋯ menu at phone width', () => {
   test.use({ viewport: PHONE });
 
   test.beforeEach(async ({ page }) => {
     await page.goto('/app/dev-harness.html?chat=chat_bus');
     await expect(page.locator('.chat-head')).toBeVisible();
-    await page.getByTestId('action-hamburger').click();
-    await expect(page.getByTestId('head-hamburger-menu')).toBeVisible();
+    await page.getByTestId('action-more').click();
+    await expect(page.getByTestId('head-menu')).toBeVisible();
   });
 
   test('every menu item is a single line, and the menu stays inside the window', async ({
     page,
   }) => {
-    const menu = page.getByTestId('head-hamburger-menu');
+    const menu = page.getByTestId('head-menu');
     const menuBox = (await menu.boundingBox())!;
     expect(menuBox.x).toBeGreaterThanOrEqual(0);
     expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(PHONE.width);
 
     const items = menu.locator('.head-menu-item');
     const count = await items.count();
-    expect(count).toBeGreaterThan(5);
+    expect(count).toBeGreaterThan(3);
     const heights: number[] = [];
     for (let i = 0; i < count; i++) heights.push((await items.nth(i).boundingBox())!.height);
     // The wrapped item was 62px against its siblings' 37px. One line each means

@@ -1,7 +1,6 @@
 // Artifacts in the transcript (spec/14 § Artifacts): a `chat.artifact` event
 // becomes its own card — title + source filename, nothing else — and clicking
-// it SHOWS the page in the desktop web panel (the "page Patch wants to show
-// you" case), falling to a new tab on the plain web surface.
+// it opens the page as a tab in the chat's group (desktop and web alike).
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
@@ -9,6 +8,7 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ChatRoute } from '../routes/ChatRoute.js';
 import { useChatStore } from '../stores/chatStore.js';
+import { useLayoutStore } from '../stores/layoutStore.js';
 import type { WireEvent } from '@patch/wire';
 
 function renderChat(chatId: string) {
@@ -56,9 +56,10 @@ describe('ChatRoute — artifact card', () => {
     expect(card).toHaveTextContent('out/buses.html');
   });
 
-  it('opens the page in the desktop web panel when clicked', () => {
+  it('opens the artifact as a tab in the chat group when clicked, on desktop too', () => {
     const chatId = 'c-art2';
     const openPanel = vi.fn();
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
     (window as unknown as { patch?: unknown }).patch = { openPanel };
     useChatStore.getState().applyEvent(artifact(chatId));
     useChatStore.getState().setActiveChat(chatId);
@@ -66,21 +67,16 @@ describe('ChatRoute — artifact card', () => {
     renderChat(chatId);
     fireEvent.click(screen.getByTestId('artifact-card'));
 
-    expect(openPanel).toHaveBeenCalledTimes(1);
-    expect(openPanel.mock.calls[0]![0]).toContain(`/api/chats/${chatId}/artifact/abc123`);
-  });
-
-  it('opens a new tab when there is no desktop shell', () => {
-    const chatId = 'c-art3';
-    const open = vi.spyOn(window, 'open').mockReturnValue(null);
-    useChatStore.getState().applyEvent(artifact(chatId));
-    useChatStore.getState().setActiveChat(chatId);
-
-    renderChat(chatId);
-    fireEvent.click(screen.getByTestId('artifact-card'));
-
-    expect(open).toHaveBeenCalledTimes(1);
-    expect(String(open.mock.calls[0]![0])).toContain(`/api/chats/${chatId}/artifact/abc123`);
+    expect(openPanel).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+    const tab = useLayoutStore.getState().findTab({
+      kind: 'page',
+      page: 'artifact',
+      chatId,
+      artifactId: 'abc123',
+      url: '',
+    });
+    expect(tab).toBeDefined();
   });
 
   it('republishing the same artifact updates the existing card instead of adding one', () => {

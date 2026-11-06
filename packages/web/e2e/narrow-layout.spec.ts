@@ -113,7 +113,7 @@ test.describe('narrow-width layout', () => {
     await expect(page.getByTestId('sidebar')).toBeVisible();
   });
 
-  test('the chat-header action icons collapse into a hamburger at 375px rather than shrinking or scrolling', async ({
+  test('the chat-header controls fit a 375px window as icons, without shrinking or scrolling', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 375, height: 800 });
@@ -124,19 +124,18 @@ test.describe('narrow-width layout', () => {
     // The action row itself never exceeds the viewport width.
     expect(actionsBox.width).toBeLessThanOrEqual(375);
 
-    // Too narrow for the full rail: the individual icons are hidden and a
-    // single hamburger trigger takes their place.
-    await expect(page.getByTestId('head-action-rail')).not.toBeVisible();
-    const hamburger = page.getByTestId('action-hamburger');
-    await expect(hamburger).toBeVisible();
-    // It keeps the same real tap size as any other header icon (32px), not squashed.
-    const iconBox = (await hamburger.boundingBox())!;
-    expect(iconBox.width).toBeGreaterThanOrEqual(28);
+    // A group header has no hamburger (spec/14 § Groups): the tool buttons
+    // drop their labels to icons and the rail stays, at the usual tap size.
+    await expect(page.getByTestId('action-hamburger')).not.toBeVisible();
+    await expect(page.locator('.group-tool-label').first()).toBeHidden();
+    await expect(page.getByTestId('group-tool-files')).toBeVisible();
+    const more = (await page.getByTestId('action-more').boundingBox())!;
+    expect(more.width).toBeGreaterThanOrEqual(28);
+    expect(more.x + more.width).toBeLessThanOrEqual(375);
 
-    // Opening it reveals every action, labelled.
-    await hamburger.click();
-    await expect(page.getByTestId('head-hamburger-menu')).toBeVisible();
-    await expect(page.getByTestId('hamburger-archive')).toBeVisible();
+    // Everything else is behind ⋯.
+    await page.getByTestId('action-more').click();
+    await expect(page.getByTestId('head-menu')).toBeVisible();
   });
 
   test('at 1280px (plenty of room) the full icon rail shows directly and the hamburger stays hidden', async ({
