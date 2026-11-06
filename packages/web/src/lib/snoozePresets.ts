@@ -101,12 +101,16 @@ export function distinctPresets(presets: ReadonlyArray<SnoozePreset>): SnoozePre
   return kept.map((k) => k.preset);
 }
 
-/** "Until complete": wakes when the chat's work is done, not at a time. Offered only for a chat with work to wait for. */
+/** "Until complete": wakes when the chat's work is done, not at a time. Enabled only for a chat with work to wait for. */
 export const UNTIL_COMPLETE_PRESET: SnoozePreset = {
   id: 'until-complete',
   label: 'Until complete',
   resolve: () => SNOOZE_UNTIL_COMPLETE,
 };
+
+/** Why "Until complete" is greyed out: shown as the tooltip / accessibility hint. */
+export const UNTIL_COMPLETE_DISABLED_TIP =
+  'Needs running work to wait for: this chat has no running turn or open goal.';
 
 /**
  * A wake time wherever a surface names one outside the sheet — the sidebar's

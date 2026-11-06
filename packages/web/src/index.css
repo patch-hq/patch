@@ -16394,8 +16394,12 @@ select.permission-mode.is-pending {
   cursor: pointer;
   text-align: left;
 }
-.snooze-preset:hover {
+.snooze-preset:hover:not(:disabled) {
   background: var(--accent-tint);
+}
+.snooze-preset:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .snooze-preset.on {
   background: var(--ink);

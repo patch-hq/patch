@@ -24,6 +24,7 @@ import {
   snoozePresets,
   distinctPresets,
   UNTIL_COMPLETE_PRESET,
+  UNTIL_COMPLETE_DISABLED_TIP,
   formatElapsed,
   formatWakeAt,
   resolveSliderHours,
@@ -99,13 +100,10 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
       : target.kind === 'chats'
         ? `${targets.length} chats`
         : stripMarkdown(deriveChatTitle(targets[0]?.name ?? null));
-  // Offered only when every chat has work to wait for; the host refuses the rest.
+  // Enabled only when every chat has work to wait for; the host refuses the rest.
   const canUntilComplete =
     targets.length > 0 && targets.every((c) => c.activity === 'running' || c.goal !== null);
-  const presets = [
-    ...distinctPresets(allPresets),
-    ...(canUntilComplete ? [UNTIL_COMPLETE_PRESET] : []),
-  ];
+  const presets = [...distinctPresets(allPresets), UNTIL_COMPLETE_PRESET];
   const wake = wakeFor(selected, customValue, allPresets, sliderIndex);
   const canConfirm = selected !== null && targets.length > 0;
 
@@ -211,6 +209,12 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
               className={`snooze-preset${selected === p.id ? ' on' : ''}`}
               data-testid={`snooze-sheet-preset-${p.id}`}
               aria-pressed={selected === p.id}
+              disabled={p.id === UNTIL_COMPLETE_PRESET.id && !canUntilComplete}
+              title={
+                p.id === UNTIL_COMPLETE_PRESET.id && !canUntilComplete
+                  ? UNTIL_COMPLETE_DISABLED_TIP
+                  : undefined
+              }
               onClick={() => {
                 setSelected(p.id);
                 rootRef.current?.focus();

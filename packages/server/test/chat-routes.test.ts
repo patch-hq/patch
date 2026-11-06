@@ -1468,7 +1468,7 @@ describe('chat REST routes', () => {
     }
   });
 
-  it('POST /api/chats/:id/hide forwards untilComplete, and rejects it without hidden', async () => {
+  it('POST /api/chats/:id/hide no longer accepts untilComplete', async () => {
     const { registry, jwt } = await bootstrap();
     const hostLink = new InProcessHostLink();
     const built = await makeApp({ registry, hostLink });
@@ -1481,10 +1481,8 @@ describe('chat REST routes', () => {
           headers: { authorization: `Bearer ${jwt}` },
           payload,
         });
-      expect((await post({ hidden: true, untilComplete: true })).statusCode).toBe(200);
-      const sent = hostLink.sent.find((s) => s.event.type === 'chat.hide_request');
-      expect(sent?.event).toMatchObject({ hidden: true, untilComplete: true });
-      expect((await post({ hidden: false, untilComplete: true })).statusCode).toBe(400);
+      expect((await post({ hidden: true, untilComplete: true })).statusCode).toBe(400);
+      expect((await post({ hidden: true })).statusCode).toBe(200);
     } finally {
       await built.app.close();
     }

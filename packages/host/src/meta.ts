@@ -404,8 +404,8 @@ export const ChatMeta = z
      */
     hidden: z.boolean().optional(),
     /**
-     * Hidden only until the running work completes (spec/04 § Hidden → Hide until
-     * complete). Meaningful only while `hidden`; cleared with it. Absent ⇒ false.
+     * Legacy, no longer read or written: "Hide until complete" was removed. Kept
+     * only so a meta.json written by an older host still parses (the schema is strict).
      */
     hideUntilComplete: z.boolean().optional(),
     /**
