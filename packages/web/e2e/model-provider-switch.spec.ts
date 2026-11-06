@@ -201,6 +201,6 @@ test.describe('model control — provider-switch confirmation', () => {
     // hidden) checkbox — same click pattern every other Toggle e2e test here
     // uses (e.g. batch-notify-all-complete.spec.ts).
     await toggle.click({ force: true });
-    expect(getPatches()).toEqual([{ suppressProviderSwitchWarning: false }]);
+    await expect.poll(() => getPatches()).toEqual([{ suppressProviderSwitchWarning: false }]);
   });
 });
