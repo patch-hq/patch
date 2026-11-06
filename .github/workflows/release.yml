@@ -7,7 +7,7 @@
 #
 # Servers follow a channel (`patch-server channel dev|stable`), mirror its
 # newest release and update themselves; hosts, the desktop app and the phone
-# update from their server. Nothing here depends on anyone's machine being
+# update from their server. Nothing here depends on anyone's host being
 # awake.
 #
 # Runs only in the project's public repository (every job is guarded below):
@@ -180,6 +180,20 @@ jobs:
             echo "sdkmanager attempt $attempt failed" >&2
             rm -rf "$ANDROID_HOME/ndk/26.1.10909125"
             sleep 10
+          done
+          exit 1
+      - name: Fetch the Gradle distribution
+        working-directory: apps/mobile/android
+        run: |
+          set -euo pipefail
+          # services.gradle.org occasionally times out; the wrapper gives up
+          # after one try, so warm its cache with retries before the build.
+          for attempt in 1 2 3 4; do
+            if ./gradlew --version -q; then
+              exit 0
+            fi
+            echo "gradle download attempt $attempt failed" >&2
+            sleep 15
           done
           exit 1
       - name: Release signing key

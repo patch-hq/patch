@@ -11,7 +11,7 @@
 // while this is the unconditional doorbell.
 //
 // Desktop always fires; push fires only when no computer surface is active. The
-// asymmetry is the whole feature: the toast is free when you are at the machine
+// asymmetry is the whole feature: the toast is free when you are at the host
 // (and delivered nowhere when you aren't), the push is what reaches you when
 // you have walked away.
 
@@ -117,7 +117,7 @@ export class ChatCompletionNotifier {
 
     // spec/09 § Whose turn it was. A chat finishing is only news if the user is
     // waiting on it. A turn the host started for itself — a self-wake tick, a
-    // todo auto-advance, another agent's `send_to` — is the machine talking to
+    // todo auto-advance, another agent's `send_to` — is the host talking to
     // itself, and a watcher on a five-minute loop would otherwise ring the
     // doorbell all day. Absent means `user`: a host predating the field never
     // sends one, and reading that as `user` keeps the behaviour it already had

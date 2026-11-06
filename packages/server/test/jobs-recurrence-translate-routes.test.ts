@@ -39,7 +39,7 @@ describe('POST /api/jobs/recurrence/translate', () => {
       surfaceKind: 'terminal',
       label: 'cli',
     });
-    // `d1` must be a REGISTERED machine — every host-addressed route refuses
+    // `d1` must be a REGISTERED host — every host-addressed route refuses
     // an id that is not (spec/04 § Spawn).
     registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     return { registry, jwt };

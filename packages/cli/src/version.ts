@@ -8,7 +8,7 @@
 //   a CHECKOUT — `packages/cli/src/index.ts` — has the package.json above it.
 //
 // Reading only the second is what made every `patch` command on a freshly
-// installed machine die at startup, before parsing a single argument.
+// installed host die at startup, before parsing a single argument.
 //
 // NO FALLBACK: with neither present this throws, naming both places. A CLI that
 // invents a version number is worse than one that admits it doesn't know.

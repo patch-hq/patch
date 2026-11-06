@@ -55,11 +55,11 @@ deploy/downloads/*.apk
 .stryker-tmp/
 reports/mutation/
 
-# Personal delivery scripts — machine-specific targets (my box, my phone).
+# Personal delivery scripts — host-specific targets (my box, my phone).
 # Never part of a clone; the generic build/deploy lives in package.json.
 scripts/local/
 
-# Claude Code local state — machine-specific settings + agent worktrees.
+# Claude Code local state — host-specific settings + agent worktrees.
 .claude/settings.local.json
 .claude/worktrees/
 

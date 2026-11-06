@@ -16,7 +16,7 @@
 //      in that same project's `enabledMcpjsonServers`. That array is how the
 //      `claude` CLI itself records that a human clicked "yes" on its
 //      trust-this-project prompt; an entry nobody has ever approved on this
-//      machine is not one Claude's own process would run either, so Patch
+//      host is not one Claude's own process would run either, so Patch
 //      doesn't run it unattended.
 //
 // Only stdio servers (a `command` to spawn) are representable — remote/SSE

@@ -9,7 +9,7 @@ import { loadConfig, configFilePath, configHomeDir, defaultHostSocketPath } from
 
 // Every env var loadConfig reads. The helper clears ALL of them rather than just
 // pointing PATCH_HOME at a temp dir: an ambient PATCH_SERVER_URL outranks the
-// config file, so on a machine where patch is actually configured — which
+// config file, so on a host where patch is actually configured — which
 // includes the box that deploys it — the temp file under test was ignored and
 // these tests failed. Green on a laptop, red where it counts.
 const CONFIG_ENV = [
@@ -44,20 +44,14 @@ test('loadConfig: no server URL configured anywhere throws', () => {
 
 test('loadConfig: falls back to the host machine.json serverUrl', () => {
   withTempPatchHome((dir) => {
-    writeFileSync(
-      join(dir, 'machine.json'),
-      JSON.stringify({ serverUrl: 'https://machine.example' }),
-    );
-    assert.equal(loadConfig().serverUrl, 'https://machine.example');
+    writeFileSync(join(dir, 'machine.json'), JSON.stringify({ serverUrl: 'https://host.example' }));
+    assert.equal(loadConfig().serverUrl, 'https://host.example');
   });
 });
 
 test('loadConfig: config.json outranks machine.json', () => {
   withTempPatchHome((dir) => {
-    writeFileSync(
-      join(dir, 'machine.json'),
-      JSON.stringify({ serverUrl: 'https://machine.example' }),
-    );
+    writeFileSync(join(dir, 'machine.json'), JSON.stringify({ serverUrl: 'https://host.example' }));
     writeFileSync(join(dir, 'config.json'), JSON.stringify({ serverUrl: 'https://cfg.example' }));
     assert.equal(loadConfig().serverUrl, 'https://cfg.example');
   });

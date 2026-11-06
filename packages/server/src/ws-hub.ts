@@ -17,6 +17,7 @@ import {
   CLOSE_AUTH_FAILED,
   CLOSE_MALFORMED_FRAME as CLOSE_BAD_FRAME,
   CLOSE_SERVER_RESTARTING,
+  restartingReason,
 } from '@patch/wire';
 import {
   decode,
@@ -28,7 +29,6 @@ import {
   type AuthOkHost,
   type ClaudeSettingsListEvent,
   type HostAccountEvent,
-  type HostConditionEvent,
   type HostInfoEvent,
   type FoldersListEvent,
   type WireEvent,
@@ -49,7 +49,7 @@ import type { ServerQueue } from './server-queue.js';
 import type { NewChatDraftStore } from './new-chat-drafts.js';
 import type { DraftAttachmentStore } from './draft-attachments.js';
 import { InputDedupe } from './dedupe.js';
-import { hostLockstep } from './host-lockstep.js';
+import { hostLockstep, hostStageTarget } from './host-lockstep.js';
 
 /**
  * Message shown to the user when an in-flight chat is force-resolved to
@@ -171,17 +171,15 @@ export interface WsHubDeps {
    * running → errored → running, and the host is not announced offline. Default 5000.
    */
   hostOfflineGraceMs?: number;
-  /** A host's current struggling condition, if any, to greet a new surface with. */
-  hostCondition?: (hostId: string) => HostConditionEvent | null;
   /** Why a host that is down went down (`describeHostOffline`), if known. */
   hostOfflineReason?: (hostId: string) => string | undefined;
-  /** A surface on a host's own machine said the machine is going to sleep, or is awake. */
-  onMachineSleep?: (hostId: string, asleep: boolean) => void;
+  /** A surface on a host's own host said the host is going to sleep, or is awake. */
+  onHostSleep?: (hostId: string, asleep: boolean) => void;
   /** Told of each chat forced to `errored` by a host-link loss (chat completion notifier). */
   onChatLinkLost?: (chatId: string) => void;
   /**
    * Server-owned composer drafts (spec/14 § Composer, spec/15 § Composer).
-   * Account-wide, not per-machine — set/clear frames from a surface write
+   * Account-wide, not per-host — set/clear frames from a surface write
    * straight here, and the hub broadcasts every change to every OTHER
    * connected surface. Optional only so the many existing unit tests that
    * construct a bare hub and don't touch drafts don't all need one; production
@@ -290,7 +288,7 @@ export class WsHub {
   private readonly lastHostReport = new Map<string, HostInfoEvent>();
   /**
    * The last `host.account` per (hostId, backendId). Keyed per BACKEND, not
-   * per host: a machine can be connected on one backend and logged out on
+   * per host: a host can be connected on one backend and logged out on
    * another, and collapsing them would lose exactly the distinction Settings
    * has to show (spec/10 § Backend credentials).
    */
@@ -311,15 +309,15 @@ export class WsHub {
    */
   private readonly lastClaudeSettings = new Map<string, ClaudeSettingsListEvent>();
   /**
-   * Which machine each live terminal session's shell is running on —
+   * Which host each live terminal session's shell is running on —
    * `sessionId → hostId`, stamped from `patch.terminal.open` (the only
    * terminal frame that carries a `hostId`; spec/03 § Terminal sessions).
    *
    * Every later frame for that session (`input`, `signal`, `close`) names only
    * the `sessionId`, so without this table the host link falls through to the
-   * account-default machine and the keystrokes land on whichever host
+   * account-default host and the keystrokes land on whichever host
    * attached last — a shell opened on host A becomes unreachable the moment a
-   * second machine is online. Routing is by SESSION, not by "whatever the link
+   * second host is online. Routing is by SESSION, not by "whatever the link
    * points at". NO FALLBACK: a session id we have never seen is refused.
    */
   private readonly terminalSessionHost = new Map<string, string>();
@@ -352,17 +350,17 @@ export class WsHub {
   }
 
   /**
-   * Every host id in the registry — ANY number of machines (spec/01 § "a relay
-   * for any number of machines"). Callers must already handle N.
+   * Every host id in the registry — ANY number of hosts (spec/01 § "a relay
+   * for any number of hosts"). Callers must already handle N.
    */
   private registeredHostIds(): string[] {
-    // Single source of truth with the host-addressing gate: a revoked machine
+    // Single source of truth with the host-addressing gate: a revoked host
     // is not registered, so it must not appear in the roster either — otherwise
-    // a surface renders a machine whose every frame is refused.
+    // a surface renders a host whose every frame is refused.
     const ids = this.deps.registry.registeredHostIds();
     // A link can be attached before (or without) a registry record in dev and
     // test bring-ups. It is still a real host with a real id, and a surface
-    // must see it in the roster — otherwise the machine it is talking to is
+    // must see it in the roster — otherwise the host it is talking to is
     // absent from its own Hosts list.
     for (const linked of this.deps.hostLink.onlineHostIds()) {
       if (!ids.includes(linked)) ids.push(linked);
@@ -371,19 +369,19 @@ export class WsHub {
   }
 
   /**
-   * The Manager machine (spec/06). Exactly one machine holds it: the
-   * registry's explicit choice, else the first registered machine.
+   * The Manager host (spec/06). Exactly one host holds it: the
+   * registry's explicit choice, else the first registered host.
    */
   private managerHostId(): string | null {
     return this.deps.registry.managerHostId() ?? this.registeredHostIds()[0] ?? null;
   }
 
   /**
-   * Apply the SERVER-owned fields to a machine's self-description before it
+   * Apply the SERVER-owned fields to a host's self-description before it
    * reaches a surface: the user-editable name (`host.rename` is surface →
    * server) and whether it runs the Manager. The registry is the authority
-   * for both, so exactly one machine can claim the Manager and a rename survives the
-   * machine restarting.
+   * for both, so exactly one host can claim the Manager and a rename survives the
+   * host restarting.
    */
   private withServerOwnedHostFields(event: HostInfoEvent): HostInfoEvent {
     const name = this.deps.registry.hostName(event.hostId);
@@ -398,12 +396,12 @@ export class WsHub {
    * The `auth.ok` host roster: EVERY registered host with its presence and the
    * server's cached reports about it. A host that has never spoken gets
    * `host: null` and no accounts — the server says what it knows and does not
-   * invent a description for a machine it has not heard from.
+   * invent a description for a host it has not heard from.
    */
   /**
    * The same roster the greeting carries, for `GET /api/hosts` (spec/01
    * § Endpoints). One source of truth: a REST caller and a connecting surface
-   * must never be told different things about which machines exist.
+   * must never be told different things about which hosts exist.
    */
   hosts(): AuthOkHost[] {
     return this.hostRoster();
@@ -470,16 +468,16 @@ export class WsHub {
     return { type: 'host.offline', hostId, ...(reason !== undefined ? { reason } : {}) };
   }
 
-  /** Tell every surface and machine a host's status changed; on offline, resolve what died with it. */
+  /** Tell every surface and host a host's status changed; on offline, resolve what died with it. */
   private announceHostStatus(hostId: string, status: 'online' | 'offline'): void {
     const ev: WireEvent =
       status === 'online' ? { type: 'host.online', hostId } : this.hostOfflineEvent(hostId);
     for (const conn of this.allConns()) {
       conn.socket.send(encode(ev));
     }
-    // Machines need the roster too: an agent's cross-chat call naming another
-    // machine has to fail INSIDE the turn when that machine is down (spec/03
-    // § Cross-chat tools), which means the calling machine must know it is
+    // Hosts need the roster too: an agent's cross-chat call naming another
+    // host has to fail INSIDE the turn when that host is down (spec/03
+    // § Cross-chat tools), which means the calling host must know it is
     // down without asking.
     for (const otherId of this.deps.hostLink.onlineHostIds()) {
       if (otherId === hostId) continue;
@@ -490,17 +488,17 @@ export class WsHub {
     // turn-completion / activity event will never arrive, so a chat left in
     // `running` / `awaiting-permission` would spin forever — a SILENT failure
     // (the reported bug). Resolve those chats to `errored` LOUDLY so the UI
-    // unsticks and the user can retry. Only chats on the machine that went
-    // away: another machine's turns are unaffected. NO FALLBACK. spec/12 +
+    // unsticks and the user can retry. Only chats on the host that went
+    // away: another host's turns are unaffected. NO FALLBACK. spec/12 +
     // spec/04.
     this.resolveInFlightChatsOnHostOffline(hostId);
-    // Every shell on that machine died with it. Drop the routes so a
+    // Every shell on that host died with it. Drop the routes so a
     // surface still holding those ids is told `unknown_session` instead of
     // having its keystrokes buffered for a shell that no longer exists.
     for (const [sessionId, host] of this.terminalSessionHost.entries()) {
       if (host === hostId) this.terminalSessionHost.delete(sessionId);
     }
-    // Same reasoning for a search mid-walk on that machine — it died with
+    // Same reasoning for a search mid-walk on that host — it died with
     // the host, and a cancel for it would otherwise route nowhere.
     for (const [searchId, host] of this.hostSearchHost.entries()) {
       if (host === hostId) this.hostSearchHost.delete(searchId);
@@ -510,8 +508,8 @@ export class WsHub {
   constructor(private readonly deps: WsHubDeps) {
     // Pipe host → surfaces.
     this.hostEventUnsub = deps.hostLink.onEvent((event) => this.onHostEvent(event));
-    // Presence names the machine it describes: the link tells us WHICH machine
-    // changed, so a surface can never mistake one machine going offline for
+    // Presence names the host it describes: the link tells us WHICH host
+    // changed, so a surface can never mistake one host going offline for
     // another's. NO unaddressed presence frame is ever sent.
     this.hostStatusUnsub = deps.hostLink.onHostStatus((hostId, status) => {
       if (status === 'online') this.hostLastSeenAt.set(hostId, Date.now());
@@ -543,7 +541,7 @@ export class WsHub {
         this.offlineTimers.set(hostId, timer);
       }
     });
-    // Composer drafts are account-wide, not per-machine (spec/14 § Composer):
+    // Composer drafts are account-wide, not per-host (spec/14 § Composer):
     // every change — from a surface's own `composer_draft.set`/`clear`, or
     // from the chat-delete REST route clearing one server-side — fans out to
     // EVERY connected surface, including the one that sent it (harmless: it
@@ -652,7 +650,7 @@ export class WsHub {
   }
 
   /** Drop all upstream subscriptions (test cleanup). */
-  shutdown(): void {
+  shutdown(restartTarget: string | null = null): void {
     for (const t of this.offlineTimers.values()) clearTimeout(t);
     this.offlineTimers.clear();
     this.hostEventUnsub?.();
@@ -664,7 +662,7 @@ export class WsHub {
     this.newChatAttachmentsUnsub?.();
     for (const conn of this.allConns()) {
       try {
-        conn.socket.close(CLOSE_SERVER_RESTARTING, 'server restarting');
+        conn.socket.close(CLOSE_SERVER_RESTARTING, restartingReason(restartTarget));
       } catch {
         // ignore — socket already gone
         // (intentional swallow during teardown only)
@@ -1028,7 +1026,7 @@ export class WsHub {
       }),
     );
 
-    // Composer drafts (spec/14 § Composer): account-wide, not per-machine, so
+    // Composer drafts (spec/14 § Composer): account-wide, not per-host, so
     // unlike the per-host loop below this is sent once, right after auth.ok —
     // a newly-connecting surface needs the full snapshot even if every host is
     // asleep.
@@ -1076,7 +1074,7 @@ export class WsHub {
     // Greet with each registered host's presence. Every registered host is
     // named — including ones that have never connected — so a surface can
     // render the whole Hosts list without waiting for a `host.online` that
-    // an asleep machine will never send.
+    // an asleep host will never send.
     for (const hostId of this.registeredHostIds()) {
       socket.send(
         encode(
@@ -1085,16 +1083,14 @@ export class WsHub {
             : this.hostOfflineEvent(hostId),
         ),
       );
-      const condition = this.deps.hostCondition?.(hostId);
-      if (condition) socket.send(encode(condition));
-      // Each machine's folder registry, from the greeting alone (spec/03 §
+      // Each host's folder registry, from the greeting alone (spec/03 §
       // Host events — `folders.list` is "sent on connect"). A host only emits
       // it when its own link authenticates, so a surface that connects later
       // would otherwise have an empty picker until something changed on that
-      // machine. The server replays its cached snapshot per machine.
+      // host. The server replays its cached snapshot per host.
       const folders = this.lastFolderList.get(hostId);
       if (folders) socket.send(encode(folders));
-      // Each machine's Claude Code settings + memory entries, same reasoning
+      // Each host's Claude Code settings + memory entries, same reasoning
       // (spec/03 § Host events — `claude_settings.list` is "sent on connect").
       const claudeSettings = this.lastClaudeSettings.get(hostId);
       if (claudeSettings) socket.send(encode(claudeSettings));
@@ -1254,6 +1250,13 @@ export class WsHub {
     const serverVersion = this.deps.serverVersion;
     if (!serverVersion || !this.deps.publishedHost) return;
     const publishedVersion = this.deps.publishedHost()?.version ?? null;
+    // A release is mirrored and this server has not restarted into it yet: have
+    // the host download it now, so it can swap the moment the server does.
+    const stage = hostStageTarget({ serverVersion, hostVersion, publishedVersion });
+    if (stage && (!this.deps.autoUpdateHosts || this.deps.autoUpdateHosts())) {
+      log.info({ hostId, hostVersion, serverVersion, stage }, 'telling host to stage the release');
+      socket.send(encode({ type: 'host.stage', hostId, version: stage }));
+    }
     const step = hostLockstep({ serverVersion, hostVersion, publishedVersion });
     const ctx = { hostId, hostVersion, serverVersion, publishedVersion };
     switch (step.kind) {
@@ -1298,9 +1301,9 @@ export class WsHub {
   }
 
   /**
-   * Re-publish a machine's self-description to every surface after the SERVER
+   * Re-publish a host's self-description to every surface after the SERVER
    * changed something it owns (its name, whether it runs the Manager). Without this the
-   * change would only appear the next time the machine happened to speak.
+   * change would only appear the next time the host happened to speak.
    */
   private republishHost(hostId: string): void {
     const cached = this.lastHostReport.get(hostId);
@@ -1321,12 +1324,12 @@ export class WsHub {
     });
 
     // ---- host addressing gate (spec/03 § Host events, spec/04 § Spawn) ----
-    // Every surface→server frame that carries a `hostId` names ONE machine.
-    // If that machine is not registered against this account the frame is
+    // Every surface→server frame that carries a `hostId` names ONE host.
+    // If that host is not registered against this account the frame is
     // refused HERE, before any id is allocated or anything is relayed, and the
     // surface is told which value was wrong. Relaying it would hand the work to
     // whichever host happens to be attached — indistinguishable from correct
-    // routing while one machine is online, and the wrong filesystem the moment
+    // routing while one host is online, and the wrong filesystem the moment
     // there are two. NO FALLBACK.
     // Gated by TYPE, not merely by "has a hostId": a frame of a type that is
     // not valid surface→server at all must still be rejected as a bad type
@@ -1348,7 +1351,7 @@ export class WsHub {
           chatId,
           error: {
             code: 'host_not_registered',
-            message: `no machine registered with hostId: ${addressed}`,
+            message: `no host registered with hostId: ${addressed}`,
           },
           // Control error with no chat behind it — never a replayable stream event.
           seq: OUT_OF_BAND_SEQ,
@@ -1394,7 +1397,7 @@ export class WsHub {
       }
       case 'surface.input': {
         if (event.machineHostId !== undefined) {
-          this.deps.onMachineSleep?.(event.machineHostId, event.away === 'asleep');
+          this.deps.onHostSleep?.(event.machineHostId, event.away === 'asleep');
         }
         this.deps.presence.input(conn.accountId, conn.surfaceId, event.idleMs, Date.now(), {
           scope: event.scope,
@@ -1527,9 +1530,9 @@ export class WsHub {
         return;
       }
       // ---- host-scoped controls the SERVER owns (spec/03 § Host events) ----
-      // The registry entry — not the machine — holds the user-editable name and
-      // which machine runs the Manager, so these two are answered here and the result is
-      // pushed to every surface. The machine is told as well, so its own CLI
+      // The registry entry — not the host — holds the user-editable name and
+      // which host runs the Manager, so these two are answered here and the result is
+      // pushed to every surface. The host is told as well, so its own CLI
       // and self-description agree with the registry.
       case 'host.rename': {
         try {
@@ -1546,8 +1549,8 @@ export class WsHub {
         this.republishHost(event.hostId);
         return;
       }
-      // ---- host-scoped controls the MACHINE owns ----
-      // Relayed to the machine the frame names (never to whichever machine
+      // ---- host-scoped controls the HOST owns ----
+      // Relayed to the host the frame names (never to whichever host
       // happens to be attached — the gate above already refused an id this
       // account has not registered).
       case 'host.settings':
@@ -1564,7 +1567,7 @@ export class WsHub {
       // pending state ("Adding…") then had nothing to resolve it, so the account
       // simply never appeared and nothing said why.
       //
-      // Anything relayed to a machine needs a case here as well as a wire type,
+      // Anything relayed to a host needs a case here as well as a wire type,
       // a UI sender and a host handler; three of those four are no use.
       case 'host.backend_add_account':
       case 'host.backend_usage_refresh':
@@ -1631,7 +1634,7 @@ export class WsHub {
         // back to this surface alone (onHostEvent's forSurfaceId path) rather
         // than fanning a shell's output out to every connected client.
         //
-        // `open` is the ONLY terminal frame that names a machine, so it is also
+        // `open` is the ONLY terminal frame that names a host, so it is also
         // where this session's host is recorded for every later frame.
         this.terminalSessionHost.set(event.sessionId, event.hostId);
         const tagged: WireEvent = { ...event, forSurfaceId: conn.surfaceId };
@@ -1641,7 +1644,7 @@ export class WsHub {
       case 'patch.host_search.request': {
         // spec/03 § Host search. Same reasoning as `patch.terminal.open`: a
         // search is per-SURFACE, and `request` is the only host-search frame
-        // that names a machine, so it is where this search's host is
+        // that names a host, so it is where this search's host is
         // recorded for the `cancel` that might follow.
         this.hostSearchHost.set(event.searchId, event.hostId);
         const tagged: WireEvent = { ...event, forSurfaceId: conn.surfaceId };
@@ -1663,9 +1666,9 @@ export class WsHub {
       case 'patch.terminal.signal':
       case 'patch.terminal.resize':
       case 'patch.terminal.close': {
-        // Route by SESSION: the shell lives on exactly one machine and these
+        // Route by SESSION: the shell lives on exactly one host and these
         // frames carry no hostId of their own. Falling through to the link's
-        // account-default machine would deliver a host-A session's keystrokes
+        // account-default host would deliver a host-A session's keystrokes
         // to host B. NO FALLBACK — an unknown session is refused to the surface
         // that sent it.
         const hostId = this.terminalSessionHost.get(event.sessionId);
@@ -1813,6 +1816,9 @@ export class WsHub {
       event.type === 'patch.accounts.response' ||
       event.type === 'patch.api.request' ||
       event.type === 'patch.api.response' ||
+      event.type === 'patch.events.subscribe' ||
+      event.type === 'patch.events.unsubscribe' ||
+      event.type === 'patch.events.event' ||
       event.type === 'patch.host_files.response' ||
       // The summary is answered over REST to the one caller that asked.
       event.type === 'patch.link_summary.response' ||
@@ -1832,14 +1838,14 @@ export class WsHub {
       event.type === 'settings.account_signed_in' ||
       event.type === 'web_bot_auth.sign_request' ||
       event.type === 'web_bot_auth.sign_response' ||
-      // Health reports are consumed by the host-health tracker, which tells
-      // surfaces the resulting condition (spec/03 § Host health).
+      // Health reports are consumed by the host-health tracker, which uses them
+      // to explain a host going offline (spec/03 § Host health).
       event.type === 'host.health'
     ) {
       return;
     }
     // A session that has ended can no longer be addressed — forget which
-    // machine it was on so a stale id is refused rather than mis-routed.
+    // host it was on so a stale id is refused rather than mis-routed.
     if (event.type === 'patch.terminal.exit') {
       this.terminalSessionHost.delete(event.sessionId);
     }
@@ -1853,16 +1859,16 @@ export class WsHub {
       this.lastHostReport.set(event.hostId, event);
       this.hostLastSeenAt.set(event.hostId, Date.now());
       // The name and the Manager flag are SERVER-owned (spec/03: `host.rename` is
-      // surface → server, `host.set_manager` server → host). Overwrite what the machine
+      // surface → server, `host.set_manager` server → host). Overwrite what the host
       // reported before any surface sees it, so a rename is not undone by the
-      // machine's next self-description and two machines can never both claim
+      // host's next self-description and two hosts can never both claim
       // the Manager.
       event = this.withServerOwnedHostFields(event);
     }
     if (event.type === 'folders.list' || event.type === 'folders.updated') {
-      // Cache per machine so a late-joining surface gets the snapshot in its
+      // Cache per host so a late-joining surface gets the snapshot in its
       // greeting (see handleHello). `folders.updated` supersedes it: both carry
-      // the COMPLETE list for that machine.
+      // the COMPLETE list for that host.
       this.lastFolderList.set(event.hostId, {
         type: 'folders.list',
         hostId: event.hostId,
@@ -1871,9 +1877,9 @@ export class WsHub {
       });
     }
     if (event.type === 'claude_settings.list' || event.type === 'claude_settings.updated') {
-      // Cache per machine so a late-joining surface gets the snapshot in its
+      // Cache per host so a late-joining surface gets the snapshot in its
       // greeting (see handleHello). `claude_settings.updated` supersedes it:
-      // both carry the COMPLETE state for that machine.
+      // both carry the COMPLETE state for that host.
       this.lastClaudeSettings.set(event.hostId, {
         type: 'claude_settings.list',
         hostId: event.hostId,
@@ -1901,6 +1907,11 @@ export class WsHub {
         this.lastAccountReport.set(event.hostId, perBackend);
       }
       perBackend.set(event.backendId, event);
+    }
+    // What surfaces are about to see, for the host-link event relay. Addressed
+    // (per-surface) frames are not account events and are not tapped.
+    if (!('forSurfaceId' in event)) {
+      for (const tap of this.eventTaps) tap(event);
     }
     // Per-surface replay events: route only to the requesting surface.
     if (
@@ -2065,12 +2076,12 @@ export class WsHub {
   }
 
   /**
-   * A machine was removed from the account (`DELETE /api/hosts/:hostId`):
+   * A host was removed from the account (`DELETE /api/hosts/:hostId`):
    * forget everything cached about it — its self-description, account and
    * folder/settings reports, last-seen time and terminal routes — so no later
    * greeting replays it, and tell every connected surface `host.removed` so
    * its host list drops it now. A surface that was not connected learns it
-   * from its next `auth.ok`, whose roster no longer names the machine.
+   * from its next `auth.ok`, whose roster no longer names the host.
    */
   removeHost(hostId: string): number {
     this.lastHostReport.delete(hostId);
@@ -2088,12 +2099,20 @@ export class WsHub {
   }
 
   /**
-   * Re-publish every machine's self-description after the Manager machine moved
-   * without anyone choosing it (the Manager machine was removed), so exactly one
-   * machine reads as running the Manager on every surface.
+   * Re-publish every host's self-description after the Manager host moved
+   * without anyone choosing it (the Manager host was removed), so exactly one
+   * host reads as running the Manager on every surface.
    */
   republishAllHosts(): void {
     for (const hostId of this.registeredHostIds()) this.republishHost(hostId);
+  }
+
+  private readonly eventTaps = new Set<(event: WireEvent) => void>();
+
+  /** Observe every account-scoped event headed for surfaces. Returns unsub. */
+  onBroadcast(tap: (event: WireEvent) => void): () => void {
+    this.eventTaps.add(tap);
+    return () => this.eventTaps.delete(tap);
   }
 
   /** Send to all connected surfaces. Returns count delivered. */

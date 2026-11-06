@@ -12,7 +12,7 @@ export interface FoundSkill {
 /**
  * Every `.claude/skills` directory a chat in `folder` can draw on, nearest
  * first: the folder's own, then each ancestor's (a chat in `projects/app`
- * still sees the repo root's skills), then the machine's `~/.claude/skills`.
+ * still sees the repo root's skills), then the host's `~/.claude/skills`.
  */
 export function skillDirs(folder: string, home = process.env['HOME'] ?? homedir()): string[] {
   const dirs: string[] = [];
@@ -78,7 +78,7 @@ export function skillCatalogueText(skills: readonly FoundSkill[]): string | unde
     return `- ${s.name}: ${d} (${s.file})`;
   });
   return [
-    'Project and machine skills (from .claude/skills). When the user types /<name> or the task matches one, read its SKILL.md at the path given and follow it.',
+    'Project and host skills (from .claude/skills). When the user types /<name> or the task matches one, read its SKILL.md at the path given and follow it.',
     ...lines,
   ].join('\n');
 }

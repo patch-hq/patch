@@ -6,7 +6,7 @@
 // (`host.claude_memory_delete`), asked first.
 //
 // The list is the host's `claude_settings.*` snapshot, sent whole on connect
-// and after every edit, so it settles on what the machine actually holds. A
+// and after every edit, so it settles on what the host actually holds. A
 // refused edit comes back as the host's own sentence (hostRefusalStore).
 
 import React from 'react';
@@ -64,7 +64,7 @@ function HostMemories({ host }: { host: HostPresence }): React.ReactElement {
   const [type, setType] = React.useState<MemoryTypeFilter>('all');
   const hostId = host.hostId;
   // Whether Claude Code keeps memory is shared (spec/01 § Settings); the
-  // entries live on each machine.
+  // entries live on each host.
   const enabled = useSettingsStore((st) => st.data?.preferences.harnessMemoryEnabled);
   const memories = host.claudeSettings?.memories ?? null;
   const groups = memories ? groupMemories(filterMemories(memories, query, type)) : [];

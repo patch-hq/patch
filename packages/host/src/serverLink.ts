@@ -39,8 +39,12 @@
 import WebSocket from 'ws';
 import type { Logger } from 'pino';
 import {
+  CLOSE_SERVER_RESTARTING,
+  RESTART_RETRY_MS,
+  RESTART_WINDOW_MS,
   decodeCompat,
   encode,
+  restartingVersion,
   type AuthOkEvent,
   type WireEvent,
   WireDecodeError,
@@ -65,6 +69,13 @@ const noSleepDetector: SleepDetector = {
 
 /** Default `heartbeatIntervalMs` (see heartbeat note above). */
 export const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
+
+/**
+ * Default `heartbeatMissesAllowed`. A busy host (2026-11-05: load ~40 on 14
+ * cores) answers a pong late; one missed pong must not drop a healthy link.
+ * 3 misses at 15s means ~45-60s of silence before the socket is terminated.
+ */
+export const DEFAULT_HEARTBEAT_MISSES_ALLOWED = 3;
 
 /**
  * Event types this host has already reported as unknown (spec/03 § Forward
@@ -93,15 +104,20 @@ export interface ServerLinkOptions {
   onFrame?: (event: WireEvent, send: (e: WireEvent) => void) => void;
   /**
    * Called once the server has accepted us (after `auth.ok`). The greeting
-   * carries the account's machine roster with presence, which this machine
-   * needs so a cross-chat call naming another machine can fail inside the turn
-   * when that machine is down (spec/03 § Cross-chat tools).
+   * carries the account's host roster with presence, which this host
+   * needs so a cross-chat call naming another host can fail inside the turn
+   * when that host is down (spec/03 § Cross-chat tools).
    */
   onAuthed?: (send: (event: WireEvent) => void, greeting: AuthOkEvent) => void;
   /** Called when the link drops (close or error). */
   onDisconnected?: (drop: LinkDrop) => void;
-  /** Tells a machine sleep from a real drop. Without it every drop is classified as planned or unexplained only. */
+  /** Tells a host sleep from a real drop. Without it every drop is classified as planned or unexplained only. */
   sleepDetector?: SleepDetector;
+  /**
+   * Called when the server's going-away notice arrives, with the version it is
+   * restarting into (null for a plain restart). Fires after `onDisconnected`.
+   */
+  onServerRestarting?: (intoVersion: string | null) => void;
   /**
    * Called when a frame arrives BEFORE `auth.ok` that this host cannot decode
    * — in practice the greeting itself. The server and host ship in lockstep,
@@ -125,6 +141,11 @@ export interface ServerLinkOptions {
    * for tests, which use a tiny value rather than waiting out the default.
    */
   heartbeatIntervalMs?: number;
+  /**
+   * Consecutive pings that may go unanswered before the socket is terminated.
+   * Tolerates a host too loaded to answer promptly. Defaults to 3.
+   */
+  heartbeatMissesAllowed?: number;
   /**
    * Test-hook gate (TD3 harness). When `true`, `severForTest` /
    * `bufferSizeForTest` become operative. NEVER set in production: the host
@@ -153,7 +174,7 @@ export interface ServerLinkDiagnostics {
   /**
    * Epoch ms the link has been down since: the last time it was lost, or when
    * the host started if it has not yet connected. `null` while online. How a
-   * surface on this machine tells "briefly reconnecting" from "server lost".
+   * surface on this host tells "briefly reconnecting" from "server lost".
    */
   offlineSince: number | null;
 }
@@ -251,6 +272,10 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
   });
 
   const heartbeatIntervalMs = opts.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
+  const heartbeatMissesAllowed = Math.max(
+    1,
+    opts.heartbeatMissesAllowed ?? DEFAULT_HEARTBEAT_MISSES_ALLOWED,
+  );
 
   let ws: WebSocket | undefined;
   let online = false;
@@ -259,6 +284,8 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
   let lastDrop: LinkDrop | undefined;
   let stopped = false;
   let attempt = 0;
+  // Until when redials stay fast after the server's going-away notice (0 = none).
+  let restartingUntil = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -296,17 +323,26 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
    */
   function startHeartbeat(socket: WebSocket): void {
     stopHeartbeat();
-    let isAlive = true;
+    let missed = 0;
+    let awaiting = false;
     socket.on('pong', () => {
-      isAlive = true;
+      awaiting = false;
+      missed = 0;
     });
     heartbeatTimer = setInterval(() => {
-      if (!isAlive) {
-        log.warn('server-link: no pong since the last ping; terminating stale socket');
-        socket.terminate();
-        return;
+      if (awaiting) {
+        missed += 1;
+        if (missed >= heartbeatMissesAllowed) {
+          log.warn(
+            { missed },
+            'server-link: no pong after repeated pings; terminating stale socket',
+          );
+          socket.terminate();
+          return;
+        }
+        log.warn({ missed }, 'server-link: pong late; host may be under load');
       }
-      isAlive = false;
+      awaiting = true;
       socket.ping();
     }, heartbeatIntervalMs);
     heartbeatTimer.unref?.();
@@ -314,7 +350,9 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
 
   function scheduleReconnect(): void {
     if (stopped) return;
-    const wait = backoffMs();
+    let wait = backoffMs();
+    if (restartingUntil > Date.now()) wait = RESTART_RETRY_MS;
+    else restartingUntil = 0;
     attempt += 1;
     log.info({ wait, attempt }, 'server-link: scheduling reconnect');
     reconnectTimer = setTimeout(connect, wait);
@@ -412,6 +450,7 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
         online = true;
         offlineSince = null;
         attempt = 0;
+        restartingUntil = 0;
         log.info('server-link: authenticated (auth.ok)');
         flushBuffer();
         opts.onAuthed?.(rawSend, event);
@@ -437,6 +476,17 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
         `server-link: socket closed: ${describeDrop(drop)}`,
       );
       if (wasOnline) opts.onDisconnected?.(drop);
+      // The server said it is going away: dial at once instead of entering the
+      // backoff, then keep a short flat retry until it is back.
+      if (code === CLOSE_SERVER_RESTARTING && !stopped) {
+        restartingUntil = Date.now() + RESTART_WINDOW_MS;
+        attempt = 0;
+        const into = restartingVersion(reason.toString('utf8'));
+        log.info({ into }, 'server-link: server is restarting; reconnecting now');
+        opts.onServerRestarting?.(into);
+        connect();
+        return;
+      }
       scheduleReconnect();
     });
 

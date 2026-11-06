@@ -1,5 +1,5 @@
 // Settings → Computer use (spec/06 § Browser tools). Whether an agent is
-// driving a machine's browser lives on that machine, so this is a read-through:
+// driving a host's browser lives on that host, so this is a read-through:
 // ask each online host for its status, or tell one to stop. NO FALLBACK: a host
 // that does not answer is reported as such, never as "idle".
 

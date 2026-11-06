@@ -223,7 +223,7 @@ describe('FolderRegistry.browse', () => {
   });
 
   // Browsing is NOT confined to the registered roots. The host runs with this
-  // machine's user's whole authority — a chat can `cd` anywhere the moment it
+  // host's user's whole authority — a chat can `cd` anywhere the moment it
   // starts — so confining the PICKER protected nothing and only stopped someone
   // opening a chat in a folder they had not registered first. Roots are the
   // shortcuts the picker OFFERS, not a boundary.

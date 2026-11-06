@@ -20,7 +20,7 @@ export interface ChatRow {
   name: string | null;
   /**
    * The host this chat runs on (spec/03 § `chat.spawned`). Every host-scoped
-   * question about a chat — which machine's credential gates it, whose
+   * question about a chat — which host's credential gates it, whose
    * filesystem its folder is on — needs it, and '' is the honest value for a
    * row the surface has not seen spawned yet.
    */
@@ -250,7 +250,7 @@ export function isSnoozed(row: { snoozedUntil: number | null }, now: number = Da
 
 /**
  * Hidden ⇔ flagged hidden AND still active (spec/04 § Hidden). An archived chat
- * may keep `hidden: true` — it is where a machine message starting it again
+ * may keep `hidden: true` — it is where a host message starting it again
  * returns it to — but it is drawn as archived.
  */
 export function isHidden(row: { hidden: boolean; status: ChatStatus }): boolean {

@@ -91,7 +91,7 @@ describe('/internal/spawn account', () => {
     }
   });
 
-  it('refuses an account the machine does not hold and creates no chat', async () => {
+  it('refuses an account the host does not hold and creates no chat', async () => {
     const { daemon, jobs, folder, spawned } = setup();
     const app = await buildControl({ localKey: KEY, daemon, jobs, heldAccounts: () => HELD });
     try {
@@ -110,7 +110,7 @@ describe('/internal/spawn account', () => {
     }
   });
 
-  it('sends the resolved id with a cross-machine spawn', async () => {
+  it('sends the resolved id with a cross-host spawn', async () => {
     const { daemon, jobs, folder } = setup();
     const calls: Array<{ preferredAccountId?: string }> = [];
     const app = await buildControl({

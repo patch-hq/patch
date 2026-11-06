@@ -268,7 +268,7 @@ describe('C1 ANTHROPIC_API_KEY stripping (real SDK backend)', () => {
 // stack / local-dev can run agent turns without a real `claude login`.
 describe('C1 makeResolveOAuth — backend-aware gate', () => {
   /**
-   * Loader options describing ONLY the fixture's machine. `env: {}` and a
+   * Loader options describing ONLY the fixture's host. `env: {}` and a
    * non-darwin platform shut out the env token and the Keychain, but patch's own
    * store outranks every legacy source and defaults to `~/.patch/claude-oauth.json`
    * in the REAL home — so on a host that has connected an account through patch

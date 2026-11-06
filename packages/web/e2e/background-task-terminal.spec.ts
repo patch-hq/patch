@@ -73,10 +73,9 @@ test.describe('background task → terminal', () => {
 
     await rows.nth(1).click();
 
-    // The terminal tab replaces the chat tab in the pane (spec/14 § Panes
-    // and tabs — a plain open replaces the active tab).
+    // The terminal opens in its own pane along the bottom; the chat stays.
     await expect(page.getByTestId('terminal-pane')).toBeVisible();
-    await expect(page.getByTestId('chat-stream')).toHaveCount(0);
+    await expect(page.getByTestId('chat-stream')).toBeVisible();
 
     // The command really went to the shell, with this task's id in it.
     await expect.poll(async () => (await inputs(page)).length).toBe(1);

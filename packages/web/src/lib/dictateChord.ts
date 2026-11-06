@@ -2,7 +2,7 @@
 // changed in Settings → Voice. It drives the open chat's composer mic
 // (lib/composerMic.ts), or a voice note where there is no composer.
 //
-// Kept per machine in localStorage: a chord belongs to the keyboard it is
+// Kept per host in localStorage: a chord belongs to the keyboard it is
 // pressed on, not to the account. ⌘ (Ctrl off-Mac) is always part of it, so
 // the chord can never swallow a key being typed.
 //

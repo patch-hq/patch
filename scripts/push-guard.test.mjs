@@ -21,7 +21,7 @@ test('a private key is refused except in the known fixture places', () => {
   assert.deepEqual(scanText('packages/server/test/fcm.test.ts', key), []);
 });
 
-test('a value from this machine settings is refused wherever it appears', () => {
+test('a value from this host settings is refused wherever it appears', () => {
   const secret = 'abcdef0123456789-SECRET-VALUE';
   assert.equal(scanText('docs/notes.md', `token is ${secret} ok`, [secret]).length, 1);
   assert.deepEqual(scanText('docs/notes.md', 'nothing here', [secret]), []);

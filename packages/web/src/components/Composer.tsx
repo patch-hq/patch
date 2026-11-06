@@ -270,7 +270,7 @@ export interface ComposerProps {
   /**
    * The host this chat runs on. Credentials and presence are per host (spec/10
    * § Surface in Settings, spec/04 § Spawn), so whether sending is possible is
-   * a question about THIS machine. `null` (or '') means the host isn't known
+   * a question about THIS host. `null` (or '') means the host isn't known
    * yet — a brand-new chat with no folder chosen — and nothing about a
    * credential can be asserted, so sending is not blocked on that ground.
    */
@@ -528,7 +528,7 @@ export const Composer = forwardRef(function Composer(
   const offline = connection !== 'connected';
   // Provider accounts are the user's, shared by every host (spec/10), so what
   // gates sending is whether any account is connected for this model, never
-  // which machine the chat runs on.
+  // which host the chat runs on.
   const storedModel = useChatStore((s) => s.chats[chatId]?.model);
   const accountModel = selectedModel ?? storedModel;
   const claudeDisconnected =
@@ -540,7 +540,7 @@ export const Composer = forwardRef(function Composer(
   // — there's nothing to upload/stream into.
   const voiceDisabled = offline || !hostOnline;
   // Dictation that is certain to fail is not offered: web/desktop dictation on
-  // an engine whose key this chat's machine lacks is refused at the host, so
+  // an engine whose key this chat's host lacks is refused at the host, so
   // the mic greys out and says why. Unknown (host not reported) is not blocked.
   const computerDictationEngine = usePreferencesStore(
     (s) => s.preferences.voiceConfig.dictation.computer,

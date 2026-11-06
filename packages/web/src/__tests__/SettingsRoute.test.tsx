@@ -95,7 +95,7 @@ describe('Settings shell — one pane tab, pages as internal state', () => {
       'Hooks',
       'Computer use',
       'Activity',
-      'Machines',
+      'Hosts',
       'Agent identity',
       'Providers',
       'Notifications',
@@ -237,7 +237,7 @@ describe('Settings nav — Updates pip', () => {
   });
 });
 
-// Only what belongs to one machine is chosen per host now — MCP servers and
+// Only what belongs to one host is chosen per host now — MCP servers and
 // Claude Code's memory entries (spec/01 § Settings). Memories is the page used
 // here: which host it shows is said by its unreported/empty line.
 describe('Settings host switcher (per-host pages)', () => {
@@ -268,7 +268,7 @@ describe('Settings host switcher (per-host pages)', () => {
     expect(screen.queryByTestId('host-d1-memory-unreported')).toBeNull();
   });
 
-  it('switching hosts changes which machine the page shows, and the choice is shared', async () => {
+  it('switching hosts changes which host the page shows, and the choice is shared', async () => {
     vi.stubGlobal('fetch', makeFetch());
     reportHost('d1', { hostName: 'mac', runsManager: false });
     reportHost('d2', { hostName: 'hetzner', runsManager: true });
@@ -310,7 +310,7 @@ describe('Settings host switcher (per-host pages)', () => {
     clearHosts();
     renderSettings('/settings/memories');
     await waitFor(() =>
-      expect(screen.getByTestId('settings-no-hosts')).toHaveTextContent('No machines yet'),
+      expect(screen.getByTestId('settings-no-hosts')).toHaveTextContent('No hosts yet'),
     );
   });
 
@@ -656,7 +656,7 @@ describe('Settings → Voice', () => {
       expect(await screen.findByTestId('dictate-chord')).toHaveTextContent('Ctrl+Shift+D');
     });
 
-    it('Change records the next chord with ⌘ in it, and keeps it for this machine', async () => {
+    it('Change records the next chord with ⌘ in it, and keeps it for this host', async () => {
       vi.stubGlobal('fetch', makeFetch());
       renderSettings('/settings/voice');
       fireEvent.click(await screen.findByTestId('dictate-chord-change'));
@@ -982,9 +982,7 @@ describe('Settings → Voice', () => {
       renderSettings('/settings/voice');
       const select = (await screen.findByTestId('kokoro-voice')) as HTMLSelectElement;
       expect(select.value).toBe('');
-      expect(screen.getByTestId('voice-speaking')).toHaveTextContent(
-        'Each machine’s Kokoro default',
-      );
+      expect(screen.getByTestId('voice-speaking')).toHaveTextContent('Each host’s Kokoro default');
     });
 
     it('writes a new chat-name interval on blur and on Enter, and refuses a negative one', async () => {
@@ -1096,12 +1094,12 @@ describe('Settings → Agent', () => {
       await waitFor(() => expect(server.writes).toEqual([{ defaultModel: 'claude-sonnet-5' }]));
     });
 
-    it('says there is no machine to read the list from, keeping the saved value', async () => {
+    it('says there is no host to read the list from, keeping the saved value', async () => {
       vi.stubGlobal('fetch', makeFetch());
       clearHosts();
       renderSettings('/settings/agent');
       await waitFor(() =>
-        expect(screen.getByTestId('default-model-no-host')).toHaveTextContent('No single machine'),
+        expect(screen.getByTestId('default-model-no-host')).toHaveTextContent('No single host'),
       );
       expect((screen.getByTestId('default-model') as HTMLSelectElement).value).toBe(
         usePreferencesStore.getState().preferences.defaultModel,

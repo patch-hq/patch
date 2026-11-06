@@ -73,7 +73,7 @@ A surface already shows its own dropped link (the banner, after the 3s grace). W
 
 - The host reports how long its link has been down (`offlineSince` in `/internal/diag/link`: since the loss, or since start if it never connected; `null` while online).
 - The desktop app, on a Mac that runs a host, reads that from the host's control socket every 15s from its main process. Past one minute it sets the tray tooltip to "server unreachable" and raises one native notification, and clears both when the link returns. A host it cannot read is logged, never treated as healthy.
-- When the server is shutting down to restart (a deploy or self-update) it closes every surface socket with code 4503 (`CLOSE_SERVER_RESTARTING`). Unlike 4401 this is retryable; the surface keeps dialling, but its banner reads "Server is updating — back in a moment" instead of "Reconnecting…" until a later close that is not a restart, or a reconnect, replaces it. A server killed without a clean shutdown still shows "Reconnecting…".
+- When the server is shutting down to restart (a deploy or self-update, on SIGTERM) it closes every host and surface socket with code 4503 (`CLOSE_SERVER_RESTARTING`), the reason being `server restarting into <version>` when the release it will run next is known (the release `current` points at) and `server restarting` when it is not. Unlike 4401 this is retryable, and it means _come back now_: the client redials immediately instead of entering its backoff, then retries at a flat 250 ms until the server answers, for at most 90 seconds. The state is shown live, with no grace period: the banner reads "Restarting into <version>" ("Restarting" without a version) instead of "Reconnecting…", and clears the moment the connection returns. If the server is still down after 90 seconds, or the drop was unplanned (no notice, including a server killed without a clean shutdown), the surface is in the ordinary reconnecting/offline state with normal backoff.
 - The phone's banner, after a minute of foreground outage, changes from "Reconnecting…" to "Server unreachable. Retrying", and reverts on reconnect.
 
 ### Hosts fail independently
@@ -101,7 +101,7 @@ A host being unreachable is a first-class, explained UI state. When a surface kn
 - Navigation stays fully available — the user can read history and browse chats/settings everywhere.
 - A chat on an offline host offers Continue on another host, which moves the chat from the server's copy (`04-chats-and-folders.md` § Moving a chat to another host).
 - The composer stays usable and QUEUES. A message into an existing chat, or an editor save, sent while its host is offline is ACCEPTED, rendered in a distinct "Host offline — will send when it reconnects" state (never worded as merely "Queued", which reads as the agent being busy; a message already queued behind a turn has its chip read "Host offline" while the host is down), buffered, and delivered automatically on reconnect (see Guaranteed input delivery below). It is always accepted and always delivered. Spawning a new chat on an offline host is refused up front instead, because the folder cannot be validated (`04-chats-and-folders.md` § Spawn). Only real-time-only controls that genuinely cannot be queued — a voice note/call, where audio is ephemeral — render visibly disabled with a host-offline reason.
-- Only chat messages and document saves queue. A document save from a surface into an offline host is accepted and sent without the read-back or conflict check (they need the host), and says it will save when the host reconnects. Host settings do not queue: a machine's name, Update and Sign in are disabled while it is offline, with no error raised.
+- Only chat messages and document saves queue. A document save from a surface into an offline host is accepted and sent without the read-back or conflict check (they need the host), and says it will save when the host reconnects. Host settings do not queue: a host's name, Update and Sign in are disabled while it is offline, with no error raised.
 - File browsing, file open and document history on an offline host show a calm "Host offline" in place of the content. A `host_offline` answer is a state, never an error toast or red error line.
 - This state is distinct from WS-`reconnecting` and is shown as such.
 
@@ -120,9 +120,9 @@ What it runs. The screen runs the diagnostics itself, on open and on every Retry
 | Check      | How                                                                                                                                   | Distinguishes                                                                                               |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | Credential | stored surface credential present + well-formed JWT                                                                                   | "not paired" from "paired but rejected"                                                                     |
-| Server     | `GET /api/healthz` (public)                                                                                                           | server unreachable (DNS/TLS/offline machine) from server up; reports `version`+`gitSha`                     |
+| Server     | `GET /api/healthz` (public)                                                                                                           | server unreachable (DNS/TLS/offline host) from server up; reports `version`+`gitSha`                        |
 | Host links | `GET /api/daemon/healthz` (authed) — one line per registered host, 401 on a bad credential                                            | a host being down from the server being down from a rejected credential — the whole point                   |
-| WebSocket  | live surface state: URL, connection state, failed-attempt count, last close code/reason                                               | a socket that failed to open from one that opened and dropped                                               |
+| WebSocket  | live surface state, after any dial in flight has settled: URL, connection state, failed-attempt count, last close code/reason         | a socket that failed to open from one that opened and dropped                                               |
 | Protocol   | what forward compatibility absorbed this session (`03-wire-protocol.md` § Forward compatibility): fields ignored, event types dropped | a surface that is merely a little behind its agent from one that is missing behaviour the agent already has |
 
 The Protocol check is the one place a surface admits it is older than its agent,
@@ -134,7 +134,9 @@ implement at all. It is listed last so an upstream failure — no credential, no
 server, no host — still supplies the screen's headline; being behind is never
 the story when the link is down.
 
-Each check renders pass/fail with its actual detail text (HTTP status, thrown network error message, version strings) — a check that could not run says so, and renders as its own state rather than a pass.
+Each check renders pass/fail with its actual detail text (HTTP status, thrown network error message, version strings) — a check that could not run says so, and renders as its own state rather than a pass. Every failing check also carries one sentence saying what the user can do about it (pair again, wake the agent's host, check the network, update the app), shown under its detail and included in the copied report; a passing check has none.
+
+Opening is as fresh as Retry. A surface that is not connected dials immediately when the screen opens, and the WebSocket check waits (up to 5s) for a dial already in flight to connect or fail before it reports, so the first look describes the attempt happening now and never the outcome of one made before Diagnose was pressed.
 
 On mobile, Settings → Account → Reconnect to server opens diagnostics even while offline. Diagnostics includes Pair again, available while checks are running, which closes the overlay and opens the pairing scanner. A saved credential without a server route is incomplete pairing: startup opens pairing instead of the tabs and does not start network services. Completing pairing starts the connection and app services immediately, without restarting the app.
 
@@ -347,6 +349,13 @@ sent again.
   always offered beside Retry and never replaced by it. Neither is offered for a
   failure that will recur unchanged (input too large): there only "Retry
   anyway" is drawn.
+- **Restart interruptions.** Retry in place is only for a person choosing to
+  re-run a turn. A host restart that cuts a turn off never stamps `retryOfSeq`:
+  the history shows an inline line, "Turn interrupted by restart", then the
+  host's automated re-send as its own message, then the next attempt's output,
+  all in time order. Chats written before this, whose restart re-sends carried
+  `retryOfSeq`, are replayed the same way (the re-send after a legacy marker is
+  unfolded), so nothing sits behind a pager.
 - The link between attempts is written to the chat's `retryMarks` and spliced
   back on at replay. The agent's own transcript records each attempt as an
   ordinary user turn and knows nothing about the one it repeats, so without this

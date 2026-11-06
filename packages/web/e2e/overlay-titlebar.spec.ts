@@ -222,124 +222,152 @@ test.describe('overlay title bar', () => {
   });
 });
 
-test('an offline banner clears the lights too, top edge and bottom edge alike', async ({
-  page,
-}) => {
+// Tom, 5 Nov: banners pushed the desktop window buttons down. The traffic
+// lights are native and pinned; the top row (brand row, chat header) is lined
+// up with them. A banner stacked ABOVE that row moved it away from the lights.
+// So with every banner state showing, the top row must sit exactly where it
+// does with none, and the banner must not cover it.
+const UPDATER_STATE = {
+  currentVersion: '0.1.899',
+  gitSha: '9b8635f',
+  builtAt: '2026-09-07T09:00:00.000Z',
+  feedUrl: 'https://patch.tomchambers.me/api/desktop/',
+  disabledReason: null,
+  lastCheckedAt: '2026-09-07T11:55:00.000Z',
+  lastResult: 'downloaded',
+  lastError: null,
+  lastErrorKind: null,
+  availableVersion: '0.1.900',
+  downloaded: true,
+  checking: false,
+};
+
+type Presence = {
+  getState: () => {
+    noteWsOpen: (url: string) => void;
+    setConnection: (s: string) => void;
+    noteClose: (c: { code: number; reason: string }) => void;
+    seedHosts: (...a: unknown[]) => void;
+    setHostOnline: (id: string, online: boolean) => void;
+  };
+};
+
+const BANNERS: {
+  name: string;
+  testId: string;
+  show: (page: import('@playwright/test').Page) => Promise<void>;
+}[] = [
+  {
+    name: 'reconnecting',
+    testId: 'offline-banner',
+    show: (page) =>
+      page.evaluate(() => {
+        const p = (window as unknown as { __presenceStore: Presence }).__presenceStore.getState();
+        p.noteWsOpen('ws://harness');
+        p.setConnection('reconnecting');
+      }),
+  },
+  {
+    name: 'server restarting',
+    testId: 'offline-banner',
+    show: (page) =>
+      page.evaluate(() => {
+        const store = (window as unknown as { __presenceStore: { setState: (s: unknown) => void } })
+          .__presenceStore;
+        // CLOSE_SERVER_RESTARTING (spec/12): the server announced it is going.
+        store.setState({
+          everConnected: true,
+          connection: 'reconnecting',
+          lastClose: { code: 4503, reason: 'server restarting', at: Date.now() },
+        });
+      }),
+  },
+  {
+    name: 'agent offline',
+    testId: 'daemon-offline-banner',
+    show: (page) =>
+      page.evaluate(() => {
+        const store = (window as unknown as { __presenceStore: { setState: (s: unknown) => void } })
+          .__presenceStore;
+        store.setState({ connection: 'connected', hostsSeeded: true, hostOnline: false });
+      }),
+  },
+  { name: 'staged update', testId: 'desktop-update-banner', show: async () => {} },
+];
+
+for (const banner of BANNERS) {
+  test(`banner "${banner.name}" leaves the top row where the window buttons are`, async ({
+    page,
+  }) => {
+    await page.addInitScript((state) => {
+      (window as unknown as { patch: unknown }).patch = {
+        overlayTitleBar: true,
+        getUpdaterState: () => Promise.resolve({ ...state, staleSince: new Date().toISOString() }),
+        checkForUpdates: () => Promise.resolve(undefined),
+        onUpdaterState: () => () => {},
+        installUpdate: () => {},
+      };
+    }, UPDATER_STATE);
+    // A shell column, like the real app, so banners lay out as they do there.
+    // The staged-update banner is the only one that needs no trigger, so the
+    // baseline is measured with it hidden via a stub-less boot.
+    await page.goto(`${HARNESS}&shell`);
+    await expect(page.getByTestId('sidebar')).toBeVisible();
+
+    const topRow = async () => {
+      const brand = (await page.locator('.sb-brand').boundingBox())!;
+      const mark = (await page.locator('.brand-mark').boundingBox())!;
+      const collapse = (await page.getByTestId('sidebar-collapse').boundingBox())!;
+      return { brand, mark, collapse };
+    };
+
+    // Baseline: the staged-update banner is present from boot, so for that
+    // case compare against the sidebar's own invariant instead of a clean run.
+    await banner.show(page);
+    const el = page.getByTestId(banner.testId);
+    await expect(el).toBeVisible();
+    const withBanner = await topRow();
+
+    // The row is flush to the window's top, clears the lights horizontally,
+    // and is exactly where it is with no banner (y=0, inset intact).
+    expect(withBanner.brand.y).toBe(0);
+    await expect(page.locator('.sb-brand')).toHaveCSS('padding-left', `${INSET}px`);
+    expect(withBanner.mark.x).toBeGreaterThanOrEqual(LIGHTS_RIGHT_EDGE);
+    expect(withBanner.collapse.y + withBanner.collapse.height / 2).toBeLessThan(
+      LIGHTS_BOTTOM_EDGE + 3,
+    );
+
+    // The banner is below the top row, not over it, and the app still fills
+    // the window (nothing pushed off the bottom).
+    const b = (await el.boundingBox())!;
+    expect(b.y).toBeGreaterThanOrEqual(withBanner.brand.y + withBanner.brand.height);
+    const vp = page.viewportSize()!;
+    expect(b.y + b.height).toBeLessThanOrEqual(vp.height + 1);
+  });
+}
+
+test('the top row does not move when a banner appears or goes', async ({ page }) => {
   await asDesktopWindow(page);
-  await page.goto(HARNESS);
+  await page.goto(`${HARNESS}&shell`);
+  await expect(page.getByTestId('sidebar')).toBeVisible();
+  const before = (await page.getByTestId('sidebar-collapse').boundingBox())!;
   await page.evaluate(() => {
-    // The banner is for a link that was up and dropped, never one still being made.
-    const presence = (
-      window as unknown as {
-        __presenceStore: {
-          getState: () => { noteWsOpen: (url: string) => void; setConnection: (s: string) => void };
-        };
-      }
-    ).__presenceStore.getState();
-    presence.noteWsOpen('ws://harness');
-    presence.setConnection('reconnecting');
+    const p = (window as unknown as { __presenceStore: Presence }).__presenceStore.getState();
+    p.noteWsOpen('ws://harness');
+    p.setConnection('reconnecting');
   });
-
-  const banner = page.getByTestId('offline-banner');
-  await expect(banner).toBeVisible();
-  await expect(banner).toHaveCSS('padding-left', `${INSET}px`);
-  const bannerBox = (await banner.boundingBox())!;
-  expect(bannerBox.y).toBe(0);
-  expect(bannerBox.height).toBeGreaterThanOrEqual(LIGHTS_BOTTOM_EDGE);
-});
-
-test('a staged update banner clears the lights too, and its button still clicks', async ({
-  page,
-}) => {
-  // The banner sits in flow at the very top of the shell, same as .sb-brand —
-  // without the inset its coloured background draws straight under the
-  // lights (live screenshot: "banner is not clean, messes up").
-  await page.addInitScript(() => {
-    (window as unknown as { patch: unknown }).patch = {
-      overlayTitleBar: true,
-      getUpdaterState: () =>
-        Promise.resolve({
-          currentVersion: '0.1.899',
-          gitSha: '9b8635f',
-          builtAt: '2026-09-07T09:00:00.000Z',
-          feedUrl: 'https://patch.tomchambers.me/api/desktop/',
-          disabledReason: null,
-          lastCheckedAt: '2026-09-07T11:55:00.000Z',
-          lastResult: 'downloaded',
-          lastError: null,
-          lastErrorKind: null,
-          availableVersion: '0.1.900',
-          downloaded: true,
-          checking: false,
-          staleSince: new Date().toISOString(),
-        }),
-      checkForUpdates: () => Promise.resolve(undefined),
-      onUpdaterState: () => () => {},
-      installUpdate: () => {},
-    };
+  await expect(page.getByTestId('offline-banner')).toBeVisible();
+  const during = (await page.getByTestId('sidebar-collapse').boundingBox())!;
+  expect(during.y).toBe(before.y);
+  expect(during.x).toBe(before.x);
+  await page.evaluate(() => {
+    (window as unknown as { __presenceStore: Presence }).__presenceStore
+      .getState()
+      .setConnection('connected');
   });
-  await page.goto(HARNESS);
-
-  const banner = page.getByTestId('desktop-update-banner');
-  await expect(banner).toBeVisible();
-  await expect(banner).toHaveCSS('padding-left', `${INSET}px`);
-  // The banner itself spans the full width regardless of its own padding —
-  // same as .sb-brand above, the measurement that matters is where its
-  // CONTENT starts, since that is what the lights would otherwise cover.
-  const dot = (await banner.locator('.dot').boundingBox())!;
-  expect(dot.x).toBeGreaterThanOrEqual(LIGHTS_RIGHT_EDGE);
-  // And tall enough to fully contain them — the banner sits at y=0, same as
-  // the lights, so its own box height must clear their bottom edge or it cuts
-  // them at the seam with whatever renders next.
-  const bannerBox = (await banner.boundingBox())!;
-  expect(bannerBox.y).toBe(0);
-  expect(bannerBox.height).toBeGreaterThanOrEqual(LIGHTS_BOTTOM_EDGE);
-
-  // Drags like the rest of the top row, but the button is punched back out —
-  // same shape as .chat-head-actions above.
-  const region = (loc: ReturnType<typeof page.locator>): Promise<string> =>
-    loc.evaluate((el) => getComputedStyle(el).getPropertyValue('-webkit-app-region').trim());
-  expect(await region(banner)).toBe('drag');
-  expect(await region(page.getByTestId('desktop-update-restart'))).toBe('no-drag');
-  await page.getByTestId('desktop-update-restart').click();
-});
-
-test('with a banner above it the sidebar brand row drops the lights inset', async ({ page }) => {
-  // The banner already clears the lights, so the row below it sits clear of
-  // them by position. Keeping the 84px inset there too pushed the wordmark
-  // off to the right under an empty strip (App Updates: "when update
-  // banner, looks messy").
-  await page.addInitScript(() => {
-    (window as unknown as { patch: unknown }).patch = {
-      overlayTitleBar: true,
-      getUpdaterState: () =>
-        Promise.resolve({
-          currentVersion: '0.1.899',
-          gitSha: '9b8635f',
-          builtAt: '2026-09-07T09:00:00.000Z',
-          feedUrl: 'https://patch.tomchambers.me/api/desktop/',
-          disabledReason: null,
-          lastCheckedAt: '2026-09-07T11:55:00.000Z',
-          lastResult: 'downloaded',
-          lastError: null,
-          lastErrorKind: null,
-          availableVersion: '0.1.900',
-          downloaded: true,
-          checking: false,
-          staleSince: new Date().toISOString(),
-        }),
-      checkForUpdates: () => Promise.resolve(undefined),
-      onUpdaterState: () => () => {},
-      installUpdate: () => {},
-    };
-  });
-  await page.goto(HARNESS);
-  const banner = page.getByTestId('desktop-update-banner');
-  await expect(banner).toBeVisible();
-  await expect(page.locator('.sb-brand')).toHaveCSS('padding-left', '20px');
-  const bannerBox = (await banner.boundingBox())!;
-  const brand = (await page.locator('.sb-brand').boundingBox())!;
-  expect(brand.y).toBeGreaterThanOrEqual(bannerBox.y + bannerBox.height);
+  await expect(page.getByTestId('offline-banner')).toBeHidden();
+  const after = (await page.getByTestId('sidebar-collapse').boundingBox())!;
+  expect(after.y).toBe(before.y);
 });
 
 test('the signed-out desktop keeps a full-width drag strip and usable sign-in controls', async ({

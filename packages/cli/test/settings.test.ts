@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Command } from 'commander';
-import { registerSettingsCommands } from '../src/commands/settings.js';
+import { parseBooleanValue, registerSettingsCommands } from '../src/commands/settings.js';
 
 function build(): Command {
   const program = new Command();
@@ -47,7 +47,7 @@ test('keys has list (default), set and revoke', () => {
   for (const name of ['list', 'set', 'revoke']) assert.ok(subs.includes(name), `keys ${name}`);
 });
 
-test('none of them takes a machine to change — only adopt and keys set name one to read from', () => {
+test('none of them takes a host to change — only adopt and keys set name one to read from', () => {
   for (const name of ['settings', 'accounts', 'keys']) {
     for (const cmd of group(name).commands) {
       const takesHost = cmd.options.some((o) => o.long === '--host');
@@ -57,4 +57,12 @@ test('none of them takes a machine to change — only adopt and keys set name on
       assert.equal(takesHost, readsFromHost, `${name} ${cmd.name()} --host`);
     }
   }
+});
+
+test('on/off settings accept on, off, yes, no, true, false', () => {
+  for (const w of ['on', 'yes', 'true', 'ON'])
+    assert.equal(parseBooleanValue('auto-update', w), true);
+  for (const w of ['off', 'no', 'false', 'Off'])
+    assert.equal(parseBooleanValue('auto-update', w), false);
+  assert.throws(() => parseBooleanValue('auto-update', 'maybe'), /on\/off/);
 });

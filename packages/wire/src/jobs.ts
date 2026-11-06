@@ -158,7 +158,7 @@ export type JobTrigger = z.infer<typeof JobTrigger>;
  *
  * Optional, and its absence is a real setting rather than a missing one: an
  * action storing no model leaves each fire to take that host's last-used model,
- * so the job tracks the machine instead of pinning a value that will eventually
+ * so the job tracks the host instead of pinning a value that will eventually
  * be retired. Both states must survive a round-trip through the editor.
  *
  * Shared between the two actions rather than written twice so they cannot drift
@@ -265,7 +265,7 @@ const jobActionIncludePayloadField = { includePayload: z.boolean().optional() };
 /**
  * A folder-carrying action names the HOST it runs on (spec/08 § Action: the
  * action is dispatched to the host it names). The folder alone is ambiguous
- * once there is more than one machine — the same path on two hosts is two
+ * once there is more than one host — the same path on two hosts is two
  * different directories — so the host travels with it.
  */
 export const SpawnAction = z
@@ -286,7 +286,7 @@ export const SpawnAction = z
      * OPTIONAL here but never absent on the wire: omitted, the dispatcher sends
      * `'auto'` rather than leaving the field off. A job's mode is the job's
      * business, not the host's — a host whose default is a blocking mode (set
-     * by whoever is sitting at that machine) would otherwise stall every
+     * by whoever is sitting at that host) would otherwise stall every
      * unattended job that lands on it, with nobody watching the archived chat
      * it stalled in. The schema keeps it optional so a job written before this
      * field existed still parses, and so an editor can express "unset".

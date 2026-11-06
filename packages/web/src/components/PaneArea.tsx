@@ -26,7 +26,9 @@ import type {
 } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/rest.js';
+import { ArtifactPane } from './ArtifactPane.js';
 import {
+  LayoutTemplate,
   ExternalLink,
   Files,
   Globe,
@@ -35,11 +37,11 @@ import {
   Settings as SettingsIcon,
   TerminalSquare,
   Layers,
+  Plus,
 } from 'lucide-react';
 import {
   GROUP_COLOURS,
   MIN_GROUP_WIDTH_PX,
-  countPanes,
   firstLeaf,
   isTabDirty,
   useLayoutStore,
@@ -55,6 +57,8 @@ import { SPECIAL_THREAD_IDS } from '@patch/wire';
 import { deriveChatTitle } from '../lib/chatTitle.js';
 import { stripMarkdown } from '../lib/stripMarkdown.js';
 import { StatusBadge } from './StatusBadge.js';
+import { ChatHeader } from './ChatHeader.js';
+import { GroupHeaderContext } from '../lib/groupHeaderContext.js';
 import { useChatBadge } from './ChatStatusBadge.js';
 import { openTabInNewWindow } from '../lib/newWindow.js';
 import { CloseIcon } from './icons.js';
@@ -128,6 +132,7 @@ function tabTitle(
   chatName: string | null | undefined,
   jobs: { jobs: { id: string; name: string }[] } | undefined,
   padName?: string,
+  artifactTitle?: string,
 ): string {
   const d = tab.descriptor;
   switch (d.kind) {
@@ -159,6 +164,8 @@ function tabTitle(
           return padName ?? 'Pad';
         case 'new-pad':
           return 'New Pad';
+        case 'artifact':
+          return artifactTitle ?? 'Artifact';
       }
   }
 }
@@ -189,6 +196,8 @@ function tabIcon(d: TabDescriptor): JSX.Element | null {
         case 'pad':
         case 'new-pad':
           return <Layers size={13} aria-hidden />;
+        case 'artifact':
+          return <LayoutTemplate size={13} aria-hidden />;
       }
   }
 }
@@ -300,11 +309,7 @@ export function PaneArea({ ws }: { ws: PatchWs | null }): JSX.Element {
   const minFraction = rowWidth > 0 ? MIN_GROUP_WIDTH_PX / rowWidth : 0;
 
   return (
-    <div
-      ref={rowRef}
-      className={`group-row${cards ? ' group-row-cards' : ''}`}
-      data-testid="group-row"
-    >
+    <div ref={rowRef} className="group-row" data-testid="group-row">
       {visible.map((group, i) => {
         const index = groups.indexOf(group);
         const focused = group.id === focusedGroupId;
@@ -318,29 +323,48 @@ export function PaneArea({ ws }: { ws: PatchWs | null }): JSX.Element {
               />
             ) : null}
             <GroupCtx.Provider value={{ group, focused }}>
-              <GroupCard
-                group={group}
-                index={index}
-                cards={cards}
-                focused={focused}
-                size={fits ? group.size : 1}
-              >
-                <PaneNodeView node={group.root} ws={ws} totalPanes={countPanes(group.root)} />
-              </GroupCard>
-              {active.map(({ pane, tab }) => (
-                <HostedTab
-                  key={`${group.id}:${tab.id}`}
-                  hostKey={`${group.id}:${tab.id}`}
-                  tab={tab}
-                  focused={focused && pane.id === group.activePaneId}
-                  ws={ws}
-                />
-              ))}
+              <HeaderScope chatId={group.chatId}>
+                <GroupCard
+                  group={group}
+                  index={index}
+                  cards={cards}
+                  focused={focused}
+                  size={fits ? group.size : 1}
+                >
+                  <PaneNodeView node={group.root} ws={ws} />
+                </GroupCard>
+                {active.map(({ pane, tab }) => (
+                  <HostedTab
+                    key={`${group.id}:${tab.id}`}
+                    hostKey={`${group.id}:${tab.id}`}
+                    tab={tab}
+                    focused={focused && pane.id === group.activePaneId}
+                    ws={ws}
+                  />
+                ))}
+              </HeaderScope>
             </GroupCtx.Provider>
           </Fragment>
         );
       })}
     </div>
+  );
+}
+
+/** Tells the chat tabs inside a group that the group card draws their chat's
+ *  header — once the chat's row is loaded, since the card header needs it. */
+function HeaderScope({
+  chatId,
+  children,
+}: {
+  chatId: string | null;
+  children: ReactNode;
+}): JSX.Element {
+  const loaded = useChatStore((s) => (chatId ? s.chats[chatId] !== undefined : false));
+  return (
+    <GroupHeaderContext.Provider value={loaded ? chatId : null}>
+      {children}
+    </GroupHeaderContext.Provider>
   );
 }
 
@@ -362,27 +386,31 @@ function GroupCard({
   const focusGroup = useLayoutStore((s) => s.focusGroup);
   const closeGroup = useLayoutStore((s) => s.closeGroup);
   const chat = useChatStore((s) => (group.chatId ? s.chats[group.chatId] : undefined));
-  const name = group.chatId === null ? 'Empty group' : chatTitle(group.chatId, chat?.name);
   const colour = groupColourClass(index);
-  return (
-    <section
-      className={`group-card ${colour}${cards ? ' group-card-framed' : ''}${focused ? ' group-card-focused' : ''}`}
-      style={{ flexGrow: size, flexBasis: 0 }}
-      data-testid={`group-${group.id}`}
-      data-group-index={index + 1}
-      data-focused={focused}
-      onPointerDownCapture={() => {
-        if (!focused) focusGroup(group.id);
-      }}
-    >
-      {cards ? (
-        <header className="group-head" data-testid="group-head">
-          <span className="group-name">
-            <span className="group-num" data-testid="group-num">
+  const header =
+    group.chatId !== null && chat ? (
+      <ChatHeader
+        row={chat}
+        group={{
+          groupId: group.id,
+          index,
+          numbered: cards,
+          onClose: cards ? () => closeGroup(group.id) : null,
+        }}
+      />
+    ) : (
+      <header className="group-head" data-testid="group-head">
+        <span className="group-name">
+          {cards ? (
+            <span className={`group-num ${colour}`} data-testid="group-num">
               {index + 1}
             </span>
-            <span className="group-title">{name}</span>
+          ) : null}
+          <span className="group-title">
+            {group.chatId === null ? 'Empty group' : chatTitle(group.chatId, undefined)}
           </span>
+        </span>
+        {cards ? (
           <button
             type="button"
             className="group-close"
@@ -393,24 +421,29 @@ function GroupCard({
           >
             <CloseIcon size={14} />
           </button>
-        </header>
-      ) : null}
+        ) : null}
+      </header>
+    );
+  return (
+    <section
+      className={`group-card group-card-framed ${colour}${focused ? ' group-card-focused' : ''}`}
+      style={{ flexGrow: size, flexBasis: 0 }}
+      data-testid={`group-${group.id}`}
+      data-group-index={index + 1}
+      data-focused={focused}
+      onPointerDownCapture={() => {
+        if (!focused) focusGroup(group.id);
+      }}
+    >
+      {header}
       <div className="group-body">{children}</div>
     </section>
   );
 }
 
-function PaneNodeView({
-  node,
-  ws,
-  totalPanes,
-}: {
-  node: PaneNode;
-  ws: PatchWs | null;
-  totalPanes: number;
-}): JSX.Element {
+function PaneNodeView({ node, ws }: { node: PaneNode; ws: PatchWs | null }): JSX.Element {
   const resizeSplit = useLayoutStore((s) => s.resizeSplit);
-  if (node.type === 'leaf') return <Pane pane={node} totalPanes={totalPanes} />;
+  if (node.type === 'leaf') return <Pane pane={node} />;
   return (
     <div
       className={`pane-split pane-split-${node.direction}`}
@@ -428,7 +461,7 @@ function PaneNodeView({
             className="pane-split-child"
             style={{ flexGrow: child.size, flexBasis: 0, flexShrink: 1, minWidth: 0, minHeight: 0 }}
           >
-            <PaneNodeView node={child.pane} ws={ws} totalPanes={totalPanes} />
+            <PaneNodeView node={child.pane} ws={ws} />
           </div>
         </Fragment>
       ))}
@@ -440,7 +473,7 @@ function PaneNodeView({
 // imported twice under two names in the same file.
 import { PaneDivider as PaneDividerHandle } from './PaneDivider.js';
 
-function Pane({ pane, totalPanes }: { pane: LeafPane; totalPanes: number }): JSX.Element {
+function Pane({ pane }: { pane: LeafPane }): JSX.Element {
   const { group, focused: groupFocused } = useGroupView();
   const setActivePane = useLayoutStore((s) => s.setActivePane);
   const moveTab = useLayoutStore((s) => s.moveTab);
@@ -514,11 +547,6 @@ function Pane({ pane, totalPanes }: { pane: LeafPane; totalPanes: number }): JSX
   }, [onContentDragOver, onContentDragLeave, onContentDrop]);
 
   const activeTab = pane.tabs.find((t) => t.id === pane.activeTabId) ?? null;
-  // A single pane holding a single tab is the common case — today's plain
-  // chat view — and draws no tab bar at all (spec/14 § Panes and tabs): there
-  // is nothing yet to switch between, reorder, or move. The bar earns its
-  // place the moment there's a second tab, anywhere, or a second pane.
-  const showTabBar = pane.tabs.length > 1 || totalPanes > 1;
   // The pane in the window's top-left corner: its tab bar is the row the
   // desktop shell's window controls float over (spec/05 § Window chrome).
   const isOrigin = useLayoutStore(
@@ -533,7 +561,7 @@ function Pane({ pane, totalPanes }: { pane: LeafPane; totalPanes: number }): JSX
         if (!focused) setActivePane(pane.id);
       }}
     >
-      {showTabBar ? <TabBar pane={pane} focused={focused} /> : null}
+      <TabBar pane={pane} focused={focused} />
       <div ref={contentRef} className="pane-content" data-testid={`pane-content-${pane.id}`}>
         {dropEdge ? (
           <div className={`pane-dropzone pane-dropzone-${dropEdge}`} data-testid="pane-dropzone" />
@@ -625,6 +653,8 @@ function TabContent({
           return <PadPane padId={d.padId} />;
         case 'new-pad':
           return <NewPadPage chatId={d.chatId} />;
+        case 'artifact':
+          return <ArtifactPane chatId={d.chatId} artifactId={d.artifactId} url={d.url} />;
       }
   }
 }
@@ -639,6 +669,8 @@ function TabBar({ pane, focused }: { pane: LeafPane; focused: boolean }): JSX.El
   const moveTab = useLayoutStore((s) => s.moveTab);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const menu = useContextMenu();
+  const newMenu = useContextMenu();
+  const chatId = useGroupView().group.chatId;
   const [menuTab, setMenuTab] = useState<Tab | null>(null);
 
   return (
@@ -726,6 +758,27 @@ function TabBar({ pane, focused }: { pane: LeafPane; focused: boolean }): JSX.El
           else moveTab(payload.paneId, payload.tabId, pane.id, pane.tabs.length);
         }}
       />
+      <button
+        type="button"
+        className="pane-tab-new"
+        aria-label="New tab"
+        title="New tab"
+        data-testid={`tab-new-${pane.id}`}
+        onClick={(e) => {
+          setActivePane(pane.id);
+          setMenuTab(null);
+          newMenu.openAt(e);
+        }}
+      >
+        <Plus size={16} aria-hidden />
+      </button>
+      <ContextMenu
+        anchor={newMenu.anchor}
+        items={newTabItems(chatId)}
+        onClose={newMenu.close}
+        label="New tab"
+        testId={`tab-new-menu-${pane.id}`}
+      />
       {multiplePanes && (
         <button
           type="button"
@@ -787,7 +840,14 @@ function PaneTab({ tab, active, dragOver, ...on }: PaneTabProps): JSX.Element {
     queryFn: () => api.getPad(padId as string),
     enabled: padId !== null,
   });
-  const title = tabTitle(tab, row?.name, jobs, pad?.name);
+  const artifactTitle = useChatStore((st) => {
+    const d = tab.descriptor;
+    if (d.kind !== 'page' || d.page !== 'artifact') return undefined;
+    return st.timelines[d.chatId]?.find(
+      (e) => e.kind === 'artifact' && e.artifactId === d.artifactId,
+    )?.artifactTitle;
+  });
+  const title = tabTitle(tab, row?.name, jobs, pad?.name, artifactTitle);
   const dirty = isTabDirty(tab);
   return (
     <div
@@ -853,6 +913,30 @@ function PaneTab({ tab, active, dragOver, ...on }: PaneTabProps): JSX.Element {
       </button>
     </div>
   );
+}
+
+/** The + menu: what can be opened as a tab in this group — its chat's tools,
+ *  then the app's pages. Every item opens an ordinary tab. */
+function newTabItems(chatId: string | null): ContextMenuItem[] {
+  const item = (id: string, label: string, d: TabDescriptor): ContextMenuItem => ({
+    id,
+    label,
+    icon: tabIcon(d),
+    run: () => useLayoutStore.getState().openTab(d, { placement: 'tab' }),
+  });
+  return [
+    ...(chatId === null
+      ? []
+      : [
+          item('new-chat', 'Chat', { kind: 'chat', chatId }),
+          item('new-terminal', 'Terminal', { kind: 'terminal', chatId }),
+          item('new-files', 'Files', { kind: 'page', page: 'files', chatId }),
+          item('new-browser', 'Browser', { kind: 'browser', chatId }),
+        ]),
+    item('new-pads', 'Pads', { kind: 'page', page: 'pads' }),
+    item('new-jobs', 'Jobs', { kind: 'page', page: 'jobs' }),
+    item('new-settings', 'Settings', { kind: 'page', page: 'settings' }),
+  ];
 }
 
 function tabContextItems(tab: Tab, pane: LeafPane): ContextMenuItem[] {

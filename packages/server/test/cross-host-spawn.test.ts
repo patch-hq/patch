@@ -1,10 +1,10 @@
 // The cross-host `patch.spawn` round trip (spec/03 § Cross-chat tools).
 //
 // The defect this file locks down: the bridge relayed `patch.spawn` and then
-// carried NOTHING back, so a target machine that refused the spawn (no model
+// carried NOTHING back, so a target host that refused the spawn (no model
 // catalogue, unknown folder) left the calling agent's tool call reporting
 // success for a chat that was never created. Every case below asserts the
-// outcome reaches the CALLING machine.
+// outcome reaches the CALLING host.
 
 import { describe, it, expect, vi } from 'vitest';
 import pino from 'pino';
@@ -66,7 +66,7 @@ const spawnFrame = (over: Partial<Record<string, unknown>> = {}): WireEvent =>
   }) as WireEvent;
 
 describe('cross-host patch.spawn — the answer comes back', () => {
-  it('relays the request to the named machine, carrying the requestId', () => {
+  it('relays the request to the named host, carrying the requestId', () => {
     const h = harness();
     h.feed(spawnFrame(), 'host-a');
     expect(h.sent).toHaveLength(1);
@@ -75,7 +75,7 @@ describe('cross-host patch.spawn — the answer comes back', () => {
     h.dispose();
   });
 
-  it('routes a SUCCESS response back to the machine that asked, not the target', () => {
+  it('routes a SUCCESS response back to the host that asked, not the target', () => {
     const h = harness();
     h.feed(spawnFrame(), 'host-a');
     h.sent.length = 0;
@@ -116,7 +116,7 @@ describe('cross-host patch.spawn — the answer comes back', () => {
         ok: false,
         error: {
           code: 'no_model_catalogue',
-          message: 'machine host-b has never read a model catalogue',
+          message: 'host host-b has never read a model catalogue',
         },
       } as WireEvent,
       'host-b',
@@ -166,7 +166,7 @@ describe('cross-host patch.spawn — the answer comes back', () => {
     h.dispose();
   });
 
-  it('answers an OFFLINE target with a refusal response naming the machine', () => {
+  it('answers an OFFLINE target with a refusal response naming the host', () => {
     const h = harness({ online: ['host-a'] });
     h.feed(spawnFrame(), 'host-a');
     const resp = h.sent.find((s) => s.event.type === 'patch.spawn.response');
@@ -175,7 +175,7 @@ describe('cross-host patch.spawn — the answer comes back', () => {
     h.dispose();
   });
 
-  it('does not relay a spawn naming the machine that raised it (audit frame)', () => {
+  it('does not relay a spawn naming the host that raised it (audit frame)', () => {
     const h = harness();
     h.feed(spawnFrame({ hostId: 'host-a', requestId: undefined }), 'host-a');
     expect(h.sent).toHaveLength(0);

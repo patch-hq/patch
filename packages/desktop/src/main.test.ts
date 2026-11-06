@@ -588,7 +588,7 @@ test('preload.ts exposes onMenubarVisibility for the menu-bar heartbeat gate', (
 
 test("the shell offers NO native folder picker (spec/04 - browsing is the host's FS)", () => {
   // The host usually runs on another host, so a folder chosen from THIS
-  // machine's disk is a path the host does not have and every chat spawned
+  // host's disk is a path the host does not have and every chat spawned
   // into it dies with folder_not_found. The desktop app browses the host's
   // tree like every other surface — so neither half of the old native-picker
   // bridge may exist.
@@ -713,7 +713,7 @@ test('every BrowserWindow disables backgroundThrottling (hidden windows must sti
 // A deploy used to run `install-to-applications.cjs` as a `postdist` hook: it
 // quit Patch, replaced /Applications/Patch.app and never relaunched it, so
 // every deploy left the desktop dead until the user started it by hand. The shell
-// now follows a deploy the same way any other machine would — over the update
+// now follows a deploy the same way any other host would — over the update
 // feed, which relaunches on install.
 
 test('the deploy no longer replaces /Applications under the running app (no postdist on `dist`)', () => {
@@ -836,8 +836,19 @@ test('every install path goes through quitAndInstallNow, not a bare quitAndInsta
 
 test('the install IPC re-checks for the newest build before installing', () => {
   const src = readFileSync(join(here, 'main.ts'), 'utf8');
-  assert.match(src, /ipcMain\.on\('patch:updater:install', \(\) => \{\s*void installLatest\(\);/);
+  assert.match(
+    src,
+    /ipcMain\.on\('patch:updater:install', \(\) => \{\s*logUpdate\('install-requested'[^\n]*\n\s*void installLatest\(\);/,
+  );
   assert.match(src, /createLatestInstaller\(/);
+});
+
+test('the updater log records launch, install press and banner reports', () => {
+  const src = readFileSync(join(here, 'main.ts'), 'utf8');
+  assert.match(src, /logUpdate\(\s*'launch'/);
+  assert.match(src, /logUpdate\('install-requested'/);
+  assert.match(src, /ipcMain\.on\('patch:updater:log-banner'/);
+  assert.match(readFileSync(join(here, 'preload.ts'), 'utf8'), /logUpdateBanner\(/);
 });
 
 test('preload.ts exposes checkForUpdateNow and installUpdate to the SPA', () => {
@@ -865,7 +876,7 @@ test('a finished download does NOT install itself', () => {
   );
   assert.match(
     src,
-    /ipcMain\.on\('patch:updater:install', \(\) => \{\s*void installLatest\(\);/,
+    /ipcMain\.on\('patch:updater:install', \(\) => \{\s*logUpdate\('install-requested'[^\n]*\n\s*void installLatest\(\);/,
     'the only install path is the one the user presses',
   );
 });

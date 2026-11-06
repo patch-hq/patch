@@ -2,7 +2,7 @@
 // knows more. A laptop that slept (lid closed, or a dark wake) loses its
 // connection without any network or server fault, and the log could not tell
 // that from a real outage. Sleep is detected by comparing the wall clock with
-// a monotonic clock: monotonic time does not advance while the machine is
+// a monotonic clock: monotonic time does not advance while the host is
 // suspended on macOS or Linux, so any gap between the two is time spent asleep.
 
 import { CLOSE_SERVER_RESTARTING } from '@patch/wire';
@@ -97,7 +97,7 @@ export function classifyDrop(
 export function describeDrop(drop: LinkDrop): string {
   switch (drop.cause) {
     case 'sleep':
-      return `machine slept for ${drop.sleptSeconds}s`;
+      return `host slept for ${drop.sleptSeconds}s`;
     case 'server-restart':
       return 'server restarting (planned)';
     case 'unexplained':

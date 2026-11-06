@@ -48,11 +48,12 @@ import { SnoozeDivider } from '../components/SnoozeDivider.js';
 import type { WireEvent } from '@patch/wire';
 import type { Job, JobTrigger } from '@patch/wire/jobs';
 import { describeTrigger } from '../lib/jobDescribe.js';
-import { useChatStore } from '../stores/chatStore.js';
+import { isLocalIdSettled, useChatStore } from '../stores/chatStore.js';
 import { loadTranscript, dropTranscript, setBranch, trimCache } from '../lib/transcriptCache.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { ChatHeader } from '../components/ChatHeader.js';
+import { useGroupDrawsHeaderFor } from '../lib/groupHeaderContext.js';
 import { RateLimitCard } from '../components/RateLimitCard.js';
 import { ChatFind } from '../components/ChatFind.js';
 import { ArchivedBanner } from '../components/ArchivedBanner.js';
@@ -83,7 +84,6 @@ import { ClaudeDisconnectedBanner } from '../components/ClaudeDisconnectedBanner
 import { OutOfUsageBanner } from '../components/OutOfUsageBanner.js';
 import { JobBar } from '../components/JobBar.js';
 import { HostOfflineBanner } from '../components/HostOfflineBanner.js';
-import { HostStrugglingBanner } from '../components/HostStrugglingBanner.js';
 import { EmptyChat } from '../components/EmptyChat.js';
 import { ChatNotFound } from '../components/ChatNotFound.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -119,7 +119,6 @@ import {
 } from '../lib/sideThreadActions.js';
 import { openDiffForFile } from '../lib/openDiff.js';
 import { openArtifact } from '../lib/openArtifact.js';
-import { closeArtifactPanel, notePanelInset, showArtifactFor } from '../lib/artifactPanel.js';
 import { PadCard, padIdOfArtifact } from '../components/PadCard.js';
 import { getDesktopBridge } from '../lib/desktopBridge.js';
 import { useComposerDraftStore } from '../stores/composerDraftStore.js';
@@ -424,8 +423,7 @@ export function ChatRoute({
   /**
    * Whether this is the focused pane's active tab. With several `ChatRoute`s
    * mounted at once, only the focused one may claim `chatStore.activeChatId`
-   * and the desktop artifact panel — both are singular, app-wide "the chat
-   * you're looking at right now" concepts (spec/14 § Panes and tabs).
+   * — a singular, app-wide "the chat you're looking at right now" concept (spec/14 § Panes and tabs).
    * Defaults to true so every pre-existing render site (still one `ChatRoute`
    * at a time) is unaffected.
    */
@@ -523,30 +521,6 @@ export function ChatRoute({
     if (!focused) return;
     void api.markBatchOpened(chatId).catch(() => undefined);
   }, [chatId, focused]);
-
-  // spec/14 § Artifacts — the desktop web panel shows the artifact belonging to
-  // the chat you are looking at. Opening a chat shows its artifact (or closes
-  // the panel if it has none), and a width-0 inset we did not drive is the user
-  // closing the panel themselves, which makes this chat forget its artifact.
-  // The browser surface has no panel and no bridge, so all of this no-ops.
-  // Gated on `focused` for the same reason as `activeChatId` above — the panel
-  // is one Electron view shared across every pane, not one per tab.
-  useEffect(() => {
-    if (!focused) return;
-    const bridge = getDesktopBridge();
-    const off = bridge?.onPanelInset?.(({ width }) => notePanelInset(chatId, width));
-    showArtifactFor(chatId);
-    return off;
-  }, [chatId, focused]);
-
-  // Leaving the chat route entirely (settings, jobs, a new chat) — or losing
-  // focus to a different pane — puts the panel away; regaining it re-opens
-  // the chat's artifact through the effect above. Separate from it so a chat
-  // SWITCH (same focused tab, different chatId) does not close-then-reopen.
-  useEffect(() => {
-    if (!focused) return;
-    return closeArtifactPanel;
-  }, [focused]);
 
   // Load this chat's transcript on open. The connect-time replay loop only
   // covers chats known when the socket opened; a chat that first appears
@@ -697,6 +671,7 @@ export function ChatRoute({
   const meetingFolded = useMeetingStore((s) => s.folded[chatId] === true);
   const meetingShown = isMeetingShown(meeting, meetingFolded);
   const chatDrop = useWholeChatDrop(composerRef);
+  const groupDrawsHeader = useGroupDrawsHeaderFor(chatId);
   // Follow mode: while true we keep the latest message pinned in view. A fresh
   // open starts in follow mode; the user scrolling UP to read history turns it
   // off; scrolling back to the bottom turns it on again. Programmatic scrolls
@@ -1395,13 +1370,13 @@ export function ChatRoute({
     const still = timeline.find((e) => e.kind === 'message' && e.localId === queuedEdit.localId);
     if (still?.queued) return;
     pushError(
-      still
+      still || isLocalIdSettled(chatId, queuedEdit.localId)
         ? 'That message had already been sent — your edit is in the composer.'
         : 'That message was removed from the queue — your edit is in the composer.',
     );
     setComposerInsert({ text: queuedEdit.text, nonce: Date.now() });
     setQueuedEdit(null);
-  }, [timeline, queuedEdit, pushError]);
+  }, [timeline, queuedEdit, pushError, chatId]);
 
   const handleEditQueued = useCallback(
     (entry: ChatEventEntry, text: string): void => {
@@ -1586,7 +1561,7 @@ export function ChatRoute({
       });
       const timer = setTimeout(() => {
         unsubscribe();
-        pushError(failed('edit'), undefined, 'the machine did not confirm the new track');
+        pushError(failed('edit'), undefined, 'the host did not confirm the new track');
       }, 15000);
       return true;
     },
@@ -2187,7 +2162,7 @@ export function ChatRoute({
           {chatDrop.dropBlocked ? 'Can’t attach right now' : 'Drop to attach'}
         </div>
       ) : null}
-      <ChatHeader row={row} />
+      {groupDrawsHeader ? null : <ChatHeader row={row} />}
       <ChatFind
         key={chatId}
         streamRef={streamRef}
@@ -2215,15 +2190,14 @@ export function ChatRoute({
       <ArchivedBanner row={row} />
       <HiddenBanner row={row} />
       <SnoozedBanner row={row} />
-      {/* Provider accounts are shared by every host (spec/10): no machine is named. */}
+      {/* Provider accounts are shared by every host (spec/10): no host is named. */}
       <ClaudeDisconnectedBanner model={row.model ?? undefined} />
-      {/* And so is credit. Every chat on a spent machine says so, because the
+      {/* And so is credit. Every chat on a spent host says so, because the
           per-chat bubble only reaches whichever chat you happen to have open —
           it cannot tell you that the other twenty are stuck too. */}
       <OutOfUsageBanner hostId={row.hostId} model={row.model ?? undefined} chatId={chatId} />
       <MeetingLayout chatId={chatId}>
         <HostOfflineBanner hostId={row.hostId} />
-        <HostStrugglingBanner hostId={row.hostId} />
         <BlobChatIdContext.Provider value={chatId}>
           <PendingApprovalCountContext.Provider value={pendingApprovalCount}>
             <section
@@ -3311,7 +3285,7 @@ function MessageEntry({
               <CloudOff size={12} strokeWidth={2.5} aria-hidden />
             )}
           </span>
-          {hostOnline ? 'Sending…' : 'Machine offline — will send when it reconnects'}
+          {hostOnline ? 'Sending…' : 'Host offline — will send when it reconnects'}
         </div>
       ) : null}
       {/* spec/14 § Messages — the per-message meta strip: facts ABOUT the turn
@@ -4026,7 +4000,7 @@ function ToolCall({
  * is reachable through a chat on the same (host, folder), makes the row a
  * link to it — same containment rule and same `resolveSkillLink` the Jobs
  * view's Skill field already uses, so a skill living outside this chat's
- * folder (a machine-wide one) states why instead of offering a link that
+ * folder (a host-wide one) states why instead of offering a link that
  * would 404. The tooltip is the skill's own frontmatter `description:`,
  * fetched alongside its path via `GET /api/skills`.
  */
@@ -5871,8 +5845,8 @@ function PermissionCard({
  * back up.
  */
 /**
- * The turn is held because its machine is in a dark wake (lid shut, waking
- * briefly for maintenance). Not an error: it runs as soon as the machine is
+ * The turn is held because its host is in a dark wake (lid shut, waking
+ * briefly for maintenance). Not an error: it runs as soon as the host is
  * fully awake, and the notice goes when it does.
  */
 function WakeHoldBubble({

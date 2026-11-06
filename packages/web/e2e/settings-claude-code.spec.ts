@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { setClaudeSettings, settingsUrl, stubSettingsApi, wsSent } from './settingsHarness.js';
 
 // Real-browser e2e for a host's Claude Code settings.json (Settings →
-// Hosts) — that machine's own file, edited in place — and its memory
+// Hosts) — that host's own file, edited in place — and its memory
 // entries (Settings → Memories): spec/02 § Claude Code settings.
 const HOSTS = settingsUrl('hosts');
 const EDITOR = 'host-d1-claude-settings';
@@ -17,7 +17,7 @@ const FEEDBACK = {
   body: 'Write real tests.',
 };
 
-/** Open the settings.json editor on the machine page, holding `json`. */
+/** Open the settings.json editor on the host page, holding `json`. */
 async function openEditor(page: import('@playwright/test').Page, json: string): Promise<void> {
   await stubSettingsApi(page);
   await page.goto(HOSTS);
@@ -31,7 +31,7 @@ test.describe('Settings → Agent / Memories / Hosts → Claude Code settings', 
     await stubSettingsApi(page);
   });
 
-  test('settings.json is on the machine page, and Providers and Agent do not carry it', async ({
+  test('settings.json is on the host page, and Providers and Agent do not carry it', async ({
     page,
   }) => {
     await page.goto(HOSTS);
@@ -69,7 +69,7 @@ test.describe('Settings → Agent / Memories / Hosts → Claude Code settings', 
         hostId: 'd1',
         text: '{"model":"sonnet"}',
       });
-    // Still open: nothing is shown as saved until the machine says so.
+    // Still open: nothing is shown as saved until the host says so.
     await expect(page.getByTestId(`${EDITOR}-json`)).toBeVisible();
     await setClaudeSettings(page, [], { settingsJson: '{"model":"sonnet"}' });
     await expect(page.getByTestId(`${EDITOR}-json`)).toHaveCount(0);

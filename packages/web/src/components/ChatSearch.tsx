@@ -41,7 +41,11 @@ const PAGE = 20;
  * a transcript that chord is the browser's find bar (spec/14 § Reserved OS
  * chords).
  */
-export function ChatSearchField(): JSX.Element {
+export function ChatSearchField({
+  placeholder = 'Search chats…',
+}: {
+  placeholder?: string;
+}): JSX.Element {
   const query = useUiStore((s) => s.searchQuery);
   const setQuery = useUiStore((s) => s.setSearchQuery);
   return (
@@ -52,8 +56,8 @@ export function ChatSearchField(): JSX.Element {
         data-testid="chat-search"
         data-search-input
         data-search-global
-        placeholder="Search chats…"
-        aria-label="Search chats"
+        placeholder={placeholder}
+        aria-label={placeholder}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => {

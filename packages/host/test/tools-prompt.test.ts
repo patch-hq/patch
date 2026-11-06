@@ -5,12 +5,12 @@ import { describe, it, expect } from 'vitest';
 import { getPatchToolsPrompt, toolsPromptOverride } from '../src/toolsPrompt.js';
 
 describe('getPatchToolsPrompt', () => {
-  it("says what patch's tools are for, and nothing about any particular machine", () => {
+  it("says what patch's tools are for, and nothing about any particular host", () => {
     const prompt = getPatchToolsPrompt();
     expect(prompt).toContain('# Patch tools');
     expect(prompt).toContain('patch_artifact');
     // Host facts (headless, no browser, localhost goes nowhere) are the
-    // machine's own instructions, which the user owns — not patch's.
+    // host's own instructions, which the user owns — not patch's.
     expect(prompt).not.toContain('localhost');
     expect(prompt).not.toContain('Headless');
   });

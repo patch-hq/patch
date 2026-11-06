@@ -7,7 +7,7 @@
 // that composer's own settings row, exactly as in a chat; this screen only
 // holds the picks (`setup`) and hands them to the create call.
 //
-//   Project — one pill, `<folder> · <machine>`, opening the folder picker sheet
+//   Project — one pill, `<folder> · <host>`, opening the folder picker sheet
 //            (one search box; picking a folder picks its host too).
 //
 // NOTHING exists server-side until the first send. The composer's send asks
@@ -137,7 +137,7 @@ export default function NewChat(): React.ReactElement {
     reopened ? (openedDraft?.model ?? null) : hereHostId ? null : (last?.model ?? null),
   );
   // The account default moves to the first model whose provider has an account
-  // that can run it on this machine — the same rule the server applies when a
+  // that can run it on this host — the same rule the server applies when a
   // spawn names no model, so what is shown here is what the chat will run on.
   // The catalogue is read only when the default itself cannot run.
   const hostAccounts = usePresenceStore((s) => (hostId ? s.hosts[hostId]?.accounts : undefined));
@@ -205,7 +205,7 @@ export default function NewChat(): React.ReactElement {
       return;
     }
     if (id !== hostId) {
-      // A model and a mode belong to the machine they were picked on; neither
+      // A model and a mode belong to the host they were picked on; neither
       // carries over to another.
       setModel(null);
       setMode(null);
@@ -222,7 +222,7 @@ export default function NewChat(): React.ReactElement {
   const createChat = async (): Promise<string | null> => {
     const pushError = useUiStore.getState().pushError;
     if (hostId === null) {
-      pushError('Choose which machine to start the chat on.');
+      pushError('Choose which host to start the chat on.');
       return null;
     }
     if (folder === null) {

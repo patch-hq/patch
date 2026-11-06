@@ -87,7 +87,7 @@ export function useModelCatalog(): ModelCatalog {
 }
 
 let inFlight: Promise<void> | null = null;
-/** Which machine the cached catalogue belongs to — null before any load. */
+/** Which host the cached catalogue belongs to — null before any load. */
 let loadedFor: string | null = null;
 
 /**
@@ -96,8 +96,8 @@ let loadedFor: string | null = null;
  * picker can show it.
  */
 export function loadModels(hostId: string | null, force = false): Promise<void> {
-  // The catalogue is PER MACHINE (spec/02 § Model catalogue) — `/api/models`
-  // requires the machine whose catalogue is being read, and rejects a call that
+  // The catalogue is PER HOST (spec/02 § Model catalogue) — `/api/models`
+  // requires the host whose catalogue is being read, and rejects a call that
   // names none. Asking without one produced `invalid query` and an empty picker.
   if (!hostId) {
     setModelCatalog({
@@ -110,12 +110,12 @@ export function loadModels(hostId: string | null, force = false): Promise<void> 
     return Promise.resolve();
   }
   if (inFlight && loadedFor === hostId) return inFlight;
-  // A different machine means a different catalogue; a cached one must not be
+  // A different host means a different catalogue; a cached one must not be
   // shown for it.
   if (!force && catalog.status === 'ready' && loadedFor === hostId) return Promise.resolve();
   loadedFor = hostId;
   setModelCatalog({ models: catalog.models, status: 'loading' });
-  // A request superseded by one for another machine must neither land its
+  // A request superseded by one for another host must neither land its
   // catalogue nor clear the newer request's in-flight slot.
   const req: Promise<void> = api
     .models(hostId)
@@ -143,15 +143,15 @@ export function loadModels(hostId: string | null, force = false): Promise<void> 
 }
 
 // There is deliberately NO surface-local "last used model" here, and no default
-// model id. Last-used follows the MACHINE, not the surface that asked
+// model id. Last-used follows the HOST, not the surface that asked
 // (spec/04-chats-and-folders.md § Spawn: "a host records the model of each chat
-// spawned on it, so the last-used value follows the machine rather than the
+// spawned on it, so the last-used value follows the host rather than the
 // surface that asked"). The host reports it as `host.host.defaultModel`, and
 // a spawn that names no model resolves against it on the host.
 //
 // A browser-local copy plus a hard-coded starting id is what made the surface's
 // default win: a first-run browser sent `claude-opus-5` on every spawn and
-// overwrote whatever the machine was actually last used on.
+// overwrote whatever the host was actually last used on.
 
 /** A provider's connected accounts changed; refresh only the visible host. */
 export async function refreshModelsForHost(hostId: string): Promise<void> {

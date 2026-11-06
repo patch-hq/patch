@@ -20,9 +20,9 @@
 // so the target cannot be built (spec/11 § Host installation).
 //
 // What is deliberately NOT in here: the agent backend (provisioned on the
-// machine), the Python environment the voice sidecars need, and the large model
+// host), the Python environment the voice sidecars need, and the large model
 // weights (Kokoro ~340 MB, local Whisper ~1.5 GB) — those are optional
-// components the host downloads per machine.
+// components the host downloads per host.
 //
 // NO FALLBACK anywhere: a missing vendored input, a missing signing key or a
 // failed signature aborts the build. An unsigned or half-built artifact would
@@ -34,6 +34,7 @@ import {
   copyFileSync,
   cpSync,
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -56,6 +57,64 @@ ed.etc.sha512Sync = (...m) => sha512(ed.etc.concatBytes(...m));
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DAEMON = join(REPO_ROOT, 'packages', 'host');
+
+/**
+ * macOS: the runtime ships as a signed `Patch Host.app`, sealed whole. TCC
+ * stores Allow against the bundle id and checks it against the bundle's
+ * signature, so the Info.plist has to be inside that signature: an Info.plist
+ * dropped next to a separately signed binary leaves a bundle that fails
+ * `codesign --verify`, and every Allow is saved and then never matches.
+ * The plist carries no version, so the bundle only changes when node does.
+ */
+const HOST_APP_NAME = 'Patch Host.app';
+
+function hostAppInfoPlist() {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>${HOST_APP_BUNDLE_ID}</string>
+  <key>CFBundleName</key>
+  <string>Patch Host</string>
+  <key>CFBundleExecutable</key>
+  <string>patch-host</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>LSUIElement</key>
+  <true/>
+</dict>
+</plist>
+`;
+}
+
+function signHostApp(outDir, identity) {
+  const app = join(outDir, HOST_APP_NAME);
+  const exe = join(app, 'Contents', 'MacOS', 'patch-host');
+  rmSync(app, { recursive: true, force: true });
+  mkdirSync(dirname(exe), { recursive: true });
+  writeFileSync(join(app, 'Contents', 'Info.plist'), hostAppInfoPlist());
+  copyFileSync(join(outDir, 'node'), exe);
+  chmodSync(exe, 0o755);
+  sh('codesign', [
+    '--force',
+    '--timestamp=none',
+    '--identifier',
+    HOST_APP_BUNDLE_ID,
+    '--options',
+    'runtime',
+    '--entitlements',
+    process.env.PATCH_CODESIGN_ENTITLEMENTS ?? join(DAEMON, 'installer', 'host-entitlements.plist'),
+    '--sign',
+    identity,
+    app,
+  ]);
+  sh('codesign', ['--verify', '--strict', '--deep', '--verbose=2', app]);
+  // `node` becomes a hard link to the bundle's executable, so the tarball
+  // carries the binary once.
+  rmSync(join(outDir, 'node'));
+  linkSync(exe, join(outDir, 'node'));
+}
 
 /** The three shipping targets. */
 export const TARGETS = [
@@ -178,7 +237,7 @@ export async function bundle(esb, entry, outfile) {
     //   onnxruntime-node                a native addon         → native/
     //   @anthropic-ai/claude-agent-sdk  spawns its own program → node_modules/
     // External means "not inlined", NOT "not shipped". Treating the SDK as
-    // something the machine would supply is what left every installed host
+    // something the host would supply is what left every installed host
     // unable to run a single turn.
     //
     // chromium-bidi is a THIRD exception, but of a different kind: it is
@@ -277,18 +336,18 @@ function copyNativeAddons(vendor, t, outDir) {
 /**
  * Copy the agent SDK into the artifact's own `node_modules`, so the host's
  * bare `import('@anthropic-ai/claude-agent-sdk')` resolves from beside
- * `host.mjs` on any machine.
+ * `host.mjs` on any host.
  *
  * It is external to the BUNDLE because it spawns its own program files and
- * cannot be flattened into one .mjs — not because it belongs to the machine. It
+ * cannot be flattened into one .mjs — not because it belongs to the host. It
  * is an ordinary library dependency of the host, and treating it as the
- * machine's problem is what left every installed host unable to run a turn:
+ * host's problem is what left every installed host unable to run a turn:
  * an artifact has no node_modules on any parent of its program, so a bare
  * specifier could never have resolved to anything.
  *
  * The per-platform `claude-agent-sdk-<os>-<arch>` packages are deliberately NOT
  * copied: each is a ~200 MB Claude Code binary, and the host runs the
- * machine's own `claude` instead, passed as `pathToClaudeCodeExecutable`
+ * host's own `claude` instead, passed as `pathToClaudeCodeExecutable`
  * (spec/02 § Agent backends — "so a host runs the same `claude` the user runs").
  * ~4 MB of library travels; the CLI does not.
  */
@@ -360,7 +419,7 @@ function copySherpaOnnx(outDir, t) {
   }
   const platformPkg = `sherpa-onnx-${t.platform}-${t.arch}`;
   const version = JSON.parse(readFileSync(pkgJson, 'utf8')).version;
-  // pnpm installs only the addon for the machine it runs on, so a cross-arch
+  // pnpm installs only the addon for the host it runs on, so a cross-arch
   // target (linux-arm64 built on an x64 runner) is fetched from the registry at
   // the exact version sherpa-onnx-node was installed at.
   const fetchDir = mkdtempSync(join(tmpdir(), 'sherpa-'));
@@ -389,8 +448,6 @@ function copySherpaOnnx(outDir, t) {
  * `allow-jit` the signed Node dies at startup with "Failed to reserve virtual
  * memory for CodeRange" while still passing `codesign --verify`.
  */
-const HOST_CODESIGN_IDENTIFIER = 'dev.patch.host';
-
 function codesignMacArtifact(outDir, machos) {
   const identity = process.env.PATCH_CODESIGN_IDENTITY ?? process.env.CSC_NAME;
   if (!identity) {
@@ -411,22 +468,19 @@ function codesignMacArtifact(outDir, machos) {
     );
   }
   for (const file of machos) {
-    // The runtime's signing identifier is the host app's bundle id, not "node":
-    // the installer wraps it in a .app with that id, and TCC keys its
-    // Allow/Don't Allow on the pair. Keep in step with HOST_APP_BUNDLE_ID.
-    const identifier = file === join(outDir, 'node') ? ['--identifier', HOST_APP_BUNDLE_ID] : [];
+    // The runtime's signing identifier must be the host app's bundle id: the
+    // installer wraps it in a .app with that id, and TCC stores Allow against
+    // the bundle id but checks it against the signing identifier. If the two
+    // differ, every Allow is recorded and then never matches, so macOS
+    // re-prompts on every child process. Exactly one --identifier: codesign
+    // takes the last, which is how an earlier stray one silently won.
     sh('codesign', [
       '--force',
-      ...identifier,
       '--timestamp=none',
       '--identifier',
-      basename(file) === 'node' ? 'patch-host' : basename(file),
+      basename(file) === 'node' ? HOST_APP_BUNDLE_ID : basename(file),
       '--options',
       'runtime',
-      // A stable identifier of our own: the copied Node binary otherwise signs
-      // as `node`, and macOS keys a privacy decision on it, so one Don't Allow
-      // would not stick across updates (and would collide with any other node).
-      ...(basename(file) === 'node' ? ['--identifier', HOST_CODESIGN_IDENTIFIER] : []),
       '--entitlements',
       entitlements,
       '--sign',
@@ -468,7 +522,7 @@ async function buildTarget(t, ctx) {
   const binDir = copyNativeAddons(vendor, t, outDir);
 
   // 3b. the agent SDK, beside the bundle, so the host's bare import resolves
-  // on a machine that has nothing installed but this artifact.
+  // on a host that has nothing installed but this artifact.
   copyAgentSdk(outDir);
   copyPlaywrightCore(outDir);
   copySherpaOnnx(outDir, t);
@@ -483,9 +537,9 @@ async function buildTarget(t, ctx) {
   copyFileSync(turnModel, join(outDir, 'smart_turn.onnx'));
 
   // 5. the patch CLI itself. The artifact shipped the patch-cli SKILL — which
-  // tells every chat on the machine to run `patch chats list` and friends — but
+  // tells every chat on the host to run `patch chats list` and friends — but
   // no `patch` binary, so the skill's first instruction failed on a freshly
-  // installed machine. Ship the program the skill documents.
+  // installed host. Ship the program the skill documents.
   await bundle(
     esb,
     join(REPO_ROOT, 'packages', 'cli', 'src', 'index.ts'),
@@ -496,7 +550,7 @@ async function buildTarget(t, ctx) {
   cpSync(join(DAEMON, 'skill'), join(outDir, 'skill'), { recursive: true });
 
   // 6b. the voice sidecars' SOURCE — a few KB of Python each, and none of the
-  // ~2 GB of wheels they need. Those are built per machine when the user
+  // ~2 GB of wheels they need. Those are built per host when the user
   // installs the component (spec/02 § Optional components); the source has to
   // be here for there to be anything to build. Without it an artifact-installed
   // host could download 340 MB of Kokoro weights and still never say a word,
@@ -555,6 +609,7 @@ async function buildTarget(t, ctx) {
         .filter((f) => existsSync(f)),
       join(outDir, 'node'),
     ]);
+    signHostApp(outDir, codesignIdentity);
   }
 
   // 9. the tarball + its detached project signature

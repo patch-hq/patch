@@ -3,7 +3,7 @@
 // `stripSyntheticTurns` is the rule; `claudeSessionStore.load()` applies it to
 // every Claude resume.
 
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
@@ -14,7 +14,7 @@ import { Daemon } from '../src/chatRunner.js';
 import { createHistoryReader, encodeFolder } from '../src/history.js';
 import { createMetaStore } from '../src/meta.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
-import { createClaudeSessionStore } from '../src/claudeSessionStore.js';
+import { chatTranscriptPath, createClaudeSessionStore } from '../src/claudeSessionStore.js';
 import { markRestoredImages, stripSyntheticTurns } from '../src/syntheticTurns.js';
 
 type E = SessionStoreEntry & { uuid?: string; parentUuid?: string | null };
@@ -205,11 +205,12 @@ describe('stripSyntheticTurns', () => {
   });
 });
 
-describe('claudeSessionStore.load() hands back only the conversation', () => {
+describe('the chat’s conversation file hands the model only the conversation', () => {
   const silent = pino({ level: 'silent' });
 
-  it('strips synthetic turns from the native mirror on resume', async () => {
-    const nativeDir = mkdtempSync(join(tmpdir(), 'patch-native-'));
+  it('strips synthetic turns from the old mirror when it is migrated and resumed', async () => {
+    const chatDir = mkdtempSync(join(tmpdir(), 'patch-chat-'));
+    const nativeDir = join(chatDir, 'native', 'claude');
     mkdirSync(nativeDir, { recursive: true });
     const lines = [
       user('u1', null, 'hi'),
@@ -224,15 +225,21 @@ describe('claudeSessionStore.load() hands back only the conversation', () => {
     const store = createClaudeSessionStore({
       chatId: 'c1',
       folder: '/work',
-      nativeDir,
+      chatDir,
       claudeProjectsRoot: mkdtempSync(join(tmpdir(), 'patch-cc-')),
       logger: silent,
     });
     const loaded = await store.load({ projectKey: 'p', sessionId: 'sess' });
     expect(texts(loaded ?? [])).toEqual(['hi', expect.stringContaining('hello')]);
+    await store.prepare('sess');
+    const inPlace = readFileSync(chatTranscriptPath(chatDir, '/work', 'sess'), 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l));
+    expect(texts(inPlace)).toEqual(['hi', expect.stringContaining('hello')]);
   });
 
-  it('strips them from the harness transcript when there is no mirror yet', async () => {
+  it('strips them from the shared transcript when the chat has no file of its own yet', async () => {
     const root = mkdtempSync(join(tmpdir(), 'patch-cc-'));
     const dir = join(root, '-work');
     mkdirSync(dir, { recursive: true });
@@ -250,7 +257,7 @@ describe('claudeSessionStore.load() hands back only the conversation', () => {
     const store = createClaudeSessionStore({
       chatId: 'c1',
       folder: '/work',
-      nativeDir: mkdtempSync(join(tmpdir(), 'patch-native-')),
+      chatDir: mkdtempSync(join(tmpdir(), 'patch-chat-')),
       claudeProjectsRoot: root,
       logger: silent,
     });

@@ -82,6 +82,7 @@ export function registerManageCommands(program: Command): void {
             const res = await t.post<{ ok: true; queued: boolean }>('/internal/send-to', {
               chatId: id,
               message,
+              callerChatId: process.env['PATCH_CHAT_ID'],
             });
             if (opts.json) emitJson(res);
             else emitText('queued');
@@ -118,7 +119,7 @@ export function registerManageCommands(program: Command): void {
           const qs = from !== undefined ? `?${fromParam}=${from}` : '';
           const path = pickPath(
             t,
-            // callerChatId lets the host relay a chat owned by another machine.
+            // callerChatId lets the host relay a chat owned by another host.
             `/internal/history/${encodeURIComponent(id)}${qs}${qs ? '&' : '?'}callerChatId=cli`,
             `/api/chats/${encodeURIComponent(id)}/history${qs}`,
           );

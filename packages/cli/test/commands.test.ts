@@ -1183,3 +1183,42 @@ test('doctor --json: folderAccess is unknown over REST (only the host can answer
     },
   );
 });
+
+test('chats send-to over the host socket sends the calling chat so the host can relay to another host', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'patch-cli-sendto-'));
+  writeFileSync(join(dir, 'machine.json'), JSON.stringify({ serverUrl: 'http://127.0.0.1:1' }));
+  const sock = join(dir, 'host.sock');
+  let body = '';
+  const server: Server = createServer((req, res) => {
+    const parts: Buffer[] = [];
+    req.on('data', (c: Buffer) => parts.push(c));
+    req.on('end', () => {
+      body = Buffer.concat(parts).toString();
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, queued: true }));
+    });
+  });
+  await new Promise<void>((ok) => server.listen(sock, ok));
+  try {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      PATCH_HOME: dir,
+      PATCH_DAEMON_SOCKET: sock,
+      PATCH_DAEMON_LOCAL_KEY: 'k',
+      PATCH_CHAT_ID: 'caller-1',
+    };
+    const r = await runCli(['chats', 'send-to', '01M6M96YR9EG5TZ6J8SPPSC50D', 'hi', '--json'], env);
+    assert.equal(r.code, 0, `stderr=${r.stderr} stdout=${r.stdout}`);
+    assert.deepEqual(JSON.parse(body), {
+      chatId: '01M6M96YR9EG5TZ6J8SPPSC50D',
+      message: 'hi',
+      callerChatId: 'caller-1',
+    });
+    delete env['PATCH_CHAT_ID'];
+    const bad = await runCli(['chats', 'send-to', '01M6M96YR9EG5TZ6J8SPPSC50D', 'hi'], env);
+    assert.notEqual(bad.code, 0);
+  } finally {
+    await new Promise<void>((ok) => server.close(() => ok()));
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -1,6 +1,6 @@
 // The host on this Mac (spec/02 § Desktop app and the local host).
 //
-// The desktop app is a surface, but it is the one surface sitting on a machine
+// The desktop app is a surface, but it is the one surface sitting on a host
 // that can also be a host, so it offers to make it one: it runs the same
 // installer anyone runs from a shell, with the pairing code the SPA mints, and
 // the host it leaves behind is an ordinary launchd service with its own

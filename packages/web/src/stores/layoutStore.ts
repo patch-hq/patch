@@ -15,10 +15,7 @@
 import { create } from 'zustand';
 
 /** A page tab's own kind — spec/14 § Panes and tabs: "pages (Jobs, a job's
- *  editor, Settings)". The built-in web panel and artifacts stay a native,
- *  OS-level second window (`lib/artifactPanel.ts`) — they are not DOM content
- *  this app renders, so there is nothing for a pane to host; they keep their
- *  existing opening mechanism unchanged. */
+ *  editor, Settings)", and an artifact the chat published (spec/14 § Artifacts). */
 export type PageKind =
   | 'jobs'
   | 'job'
@@ -27,7 +24,8 @@ export type PageKind =
   | 'host-files'
   | 'pads'
   | 'pad'
-  | 'new-pad';
+  | 'new-pad'
+  | 'artifact';
 
 export type TabDescriptor =
   | { kind: 'chat'; chatId: string }
@@ -39,11 +37,13 @@ export type TabDescriptor =
   | { kind: 'page'; page: 'job'; jobId: string }
   | { kind: 'page'; page: 'settings' }
   | { kind: 'page'; page: 'files'; chatId: string }
-  /** A machine's filesystem by absolute path, no chat (spec/14 § File browser). Singleton. */
+  /** A host's filesystem by absolute path, no chat (spec/14 § File browser). Singleton. */
   | { kind: 'page'; page: 'host-files' }
   | { kind: 'page'; page: 'pads' }
   | { kind: 'page'; page: 'pad'; padId: string }
-  | { kind: 'page'; page: 'new-pad'; chatId?: string };
+  | { kind: 'page'; page: 'new-pad'; chatId?: string }
+  /** A page the chat published with `patch_artifact` (spec/14 § Artifacts). `url` is the signed, server-served URL. */
+  | { kind: 'page'; page: 'artifact'; chatId: string; artifactId: string; url: string };
 
 export interface Tab {
   /** Stable identity — `tabKey(descriptor)`. Also the React key. */
@@ -80,6 +80,10 @@ export type PaneNode = LeafPane | SplitPane;
 export interface GroupLayout {
   root: PaneNode;
   activePaneId: string;
+  /** Where the user last put a terminal ('bottom' class) or a files/browser/
+   *  editor tab ('side' class): that pane, while it still exists, is where
+   *  the next such tab opens (spec/14 § Opening things). */
+  toolHomes?: Partial<Record<ToolClass, string>>;
 }
 
 /** One chat's workspace (spec/14 § Groups). */
@@ -127,6 +131,20 @@ function genId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
+/** Terminal, Files, Browser and Editor are ordinary tabs; the class only says
+ *  where one opens when nothing else decides (spec/14 § Opening things). */
+export type ToolClass = 'bottom' | 'side';
+
+/** Share of the group a freshly opened tool pane takes. */
+export const TOOL_PANE_FRACTION: Record<ToolClass, number> = { bottom: 0.3, side: 0.36 };
+
+export function toolClass(descriptor: TabDescriptor): ToolClass | null {
+  if (descriptor.kind === 'terminal') return 'bottom';
+  if (descriptor.kind === 'browser') return 'side';
+  if (descriptor.kind === 'page' && descriptor.page === 'files') return 'side';
+  return null;
+}
+
 export function tabKey(descriptor: TabDescriptor): string {
   switch (descriptor.kind) {
     case 'chat':
@@ -144,7 +162,9 @@ export function tabKey(descriptor: TabDescriptor): string {
           ? `page:files:${descriptor.chatId}`
           : descriptor.page === 'pad'
             ? `page:pad:${descriptor.padId}`
-            : `page:${descriptor.page}`;
+            : descriptor.page === 'artifact'
+              ? `page:artifact:${descriptor.chatId}:${descriptor.artifactId}`
+              : `page:${descriptor.page}`;
   }
 }
 
@@ -181,7 +201,7 @@ interface Found {
 }
 
 /** Depth-first search for a tab by key, anywhere under `node`. */
-function findTabByKey(node: PaneNode, key: string): Found | null {
+export function findTabByKey(node: PaneNode, key: string): Found | null {
   if (node.type === 'leaf') {
     const index = node.tabs.findIndex((t) => t.id === key);
     return index === -1 ? null : { pane: node, tab: node.tabs[index] as Tab, index };
@@ -327,7 +347,7 @@ interface LayoutState {
    * focused pane, in which case close it instead — a toggle, for a keyboard
    * chord that used to open/close a docked rail (⌥E, ⌃\`).
    */
-  toggleTab(descriptor: TabDescriptor): void;
+  toggleTab(descriptor: TabDescriptor, opts?: OpenTabOptions): void;
   clearPendingSeq(tabId: string): void;
   /** Close every tab in every pane whose descriptor matches `pred` — used
    *  when the thing a tab points at is gone (spec/04 § Delete). */
@@ -388,6 +408,12 @@ export function isTabDescriptor(v: unknown): v is TabDescriptor {
           return d['chatId'] === undefined || typeof d['chatId'] === 'string';
         case 'files':
           return typeof d['chatId'] === 'string';
+        case 'artifact':
+          return (
+            typeof d['chatId'] === 'string' &&
+            typeof d['artifactId'] === 'string' &&
+            typeof d['url'] === 'string'
+          );
         default:
           return false;
       }
@@ -460,7 +486,15 @@ function parseGroupLayout(v: unknown): GroupLayout | null {
     typeof o['activePaneId'] === 'string' && findPane(root, o['activePaneId'])
       ? o['activePaneId']
       : firstLeaf(root).id;
-  return { root, activePaneId };
+  const toolHomes: Partial<Record<ToolClass, string>> = {};
+  const rawHomes = o['toolHomes'];
+  if (typeof rawHomes === 'object' && rawHomes !== null) {
+    for (const c of ['bottom', 'side'] as const) {
+      const id = (rawHomes as Record<string, unknown>)[c];
+      if (typeof id === 'string' && findPane(root, id)) toolHomes[c] = id;
+    }
+  }
+  return { root, activePaneId, ...(Object.keys(toolHomes).length > 0 ? { toolHomes } : {}) };
 }
 
 function normaliseSizes(groups: Group[]): Group[] {
@@ -566,7 +600,11 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
   const initialFocused = initial.groups.find((g) => g.id === initial.focusedGroupId)!;
 
   /** Write the focused group's tree (and mirror it at the top level), persist. */
-  function commit(patch: { root?: PaneNode; activePaneId?: string }): void {
+  function commit(patch: {
+    root?: PaneNode;
+    activePaneId?: string;
+    toolHomes?: GroupLayout['toolHomes'];
+  }): void {
     const s = get();
     const groups = s.groups.map((g) =>
       g.id === s.focusedGroupId ? withChat({ ...g, ...patch }) : g,
@@ -630,7 +668,11 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
       const cur = s.groups.find((g) => g.id === s.focusedGroupId)!;
       const layouts = { ...cur.layouts };
       if (cur.chatId !== null)
-        layouts[cur.chatId] = { root: cur.root, activePaneId: cur.activePaneId };
+        layouts[cur.chatId] = {
+          root: cur.root,
+          activePaneId: cur.activePaneId,
+          ...(cur.toolHomes ? { toolHomes: cur.toolHomes } : {}),
+        };
       const remembered = layouts[chatId];
       let next: GroupLayout;
       if (remembered) {
@@ -670,7 +712,8 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
       } else {
         next = fresh();
       }
-      const updated = withChat({ ...cur, ...next, chatId, layouts });
+      const { toolHomes: _stale, ...curRest } = cur;
+      const updated = withChat({ ...curRest, ...next, chatId, layouts });
       commitGroups(
         s.groups.map((g) => (g.id === cur.id ? updated : g)),
         cur.id,
@@ -727,7 +770,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
       return findTabByKey(get().root, tabKey(descriptor));
     },
 
-    toggleTab(descriptor) {
+    toggleTab(descriptor, opts) {
       const state = get();
       const found = findTabByKey(state.root, tabKey(descriptor));
       if (
@@ -737,7 +780,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
       ) {
         get().closeTab(found.pane.id, found.tab.id);
       } else {
-        get().openTab(descriptor);
+        get().openTab(descriptor, opts);
       }
     },
 
@@ -763,12 +806,48 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
         return;
       }
 
-      const target = resolvePane(state.root, opts.paneId ?? state.activePaneId);
       const tab: Tab = {
         id: key,
         descriptor,
         ...(opts.seq !== undefined ? { pendingSeq: opts.seq } : {}),
       };
+
+      // Terminal / Files / Browser / Editor with no placement asked for: open
+      // where the user last put one, else beside an existing one, else in a
+      // new pane along the bottom (terminal) or right (the rest).
+      const cls = toolClass(descriptor);
+      if (cls !== null && opts.paneId === undefined && opts.placement === undefined) {
+        const focused = get().groups.find((g) => g.id === get().focusedGroupId);
+        const homeId = focused?.toolHomes?.[cls];
+        const home = homeId !== undefined ? findPane(state.root, homeId) : null;
+        const sibling =
+          home && home.type === 'leaf'
+            ? home
+            : findFirstMatch(state.root, (d) => toolClass(d) === cls)?.pane;
+        if (sibling) {
+          const root =
+            rebuild(state.root, sibling.id, (pane) =>
+              pane.type === 'leaf'
+                ? { ...pane, tabs: [...pane.tabs, tab], activeTabId: tab.id }
+                : pane,
+            ) ?? state.root;
+          commit({ root, activePaneId: sibling.id });
+          return;
+        }
+        const newLeaf = makeLeaf([tab], tab.id);
+        commit({
+          root: splitRoot(
+            state.root,
+            newLeaf,
+            cls === 'bottom' ? 'bottom' : 'right',
+            TOOL_PANE_FRACTION[cls],
+          ),
+          activePaneId: newLeaf.id,
+        });
+        return;
+      }
+
+      const target = resolvePane(state.root, opts.paneId ?? state.activePaneId);
 
       if (opts.placement === 'split') {
         const edge = opts.edge ?? 'right';
@@ -931,7 +1010,11 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
         return { ...pane, tabs, activeTabId: tab.id };
       });
       const finalRoot = root ?? defaultRoot();
-      commit({ root: finalRoot, activePaneId: toPaneId });
+      commit({
+        root: finalRoot,
+        activePaneId: toPaneId,
+        toolHomes: withToolHome(focusedHomes(get()), tab, toPaneId),
+      });
     },
 
     splitWithTab(fromPaneId, tabId, targetPaneId, edge) {
@@ -947,7 +1030,11 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
       if (fromPaneId === targetPaneId && fromPane.tabs.length === 1) return;
 
       const { root, newLeafId } = movePaneTabToSplit(state.root, fromPane, tab, targetPaneId, edge);
-      commit({ root, activePaneId: newLeafId });
+      commit({
+        root,
+        activePaneId: newLeafId,
+        toolHomes: withToolHome(focusedHomes(get()), tab, newLeafId),
+      });
     },
 
     splitActivePane(paneId, edge, tabId) {
@@ -959,7 +1046,11 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
       if (!tab) return;
 
       const { root, newLeafId } = movePaneTabToSplit(state.root, pane, tab, paneId, edge);
-      commit({ root, activePaneId: newLeafId });
+      commit({
+        root,
+        activePaneId: newLeafId,
+        toolHomes: withToolHome(focusedHomes(get()), tab, newLeafId),
+      });
     },
 
     resizeSplit(splitId, childIndex, delta) {
@@ -1036,6 +1127,33 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
     },
   };
 });
+
+function focusedHomes(s: { groups: Group[]; focusedGroupId: string }): GroupLayout['toolHomes'] {
+  return s.groups.find((g) => g.id === s.focusedGroupId)?.toolHomes;
+}
+
+/** `homes` with `tab`'s class (if it is a tool tab) now living in `paneId`. */
+function withToolHome(
+  homes: GroupLayout['toolHomes'],
+  tab: Tab,
+  paneId: string,
+): GroupLayout['toolHomes'] {
+  const cls = toolClass(tab.descriptor);
+  return cls === null ? homes : { ...homes, [cls]: paneId };
+}
+
+/** Add `leaf` along `edge` of the whole group, taking `fraction` of it. */
+function splitRoot(root: PaneNode, leaf: LeafPane, edge: SplitEdge, fraction: number): PaneNode {
+  const direction: 'row' | 'column' = edge === 'left' || edge === 'right' ? 'row' : 'column';
+  const before = edge === 'left' || edge === 'top';
+  const rest = root.type === 'split' && root.direction === direction ? root.children : null;
+  const existing = rest
+    ? rest.map((c) => ({ ...c, size: c.size * (1 - fraction) }))
+    : [{ pane: root, size: 1 - fraction }];
+  const added = { pane: leaf as PaneNode, size: fraction };
+  const children = before ? [added, ...existing] : [...existing, added];
+  return { type: 'split', id: genId('split'), direction, children };
+}
 
 /** The leaf directly beside `paneId` on `edge`, or null when nothing sits there.
  *  Looks through the nearest ancestor split running that axis with a sibling on

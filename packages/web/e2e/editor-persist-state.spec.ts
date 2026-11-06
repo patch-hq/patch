@@ -46,7 +46,7 @@ test.describe('the file browser reopens where it was left', () => {
     await page.keyboard.press('ControlOrMeta+w');
     await expect(page.getByTestId('files-page')).toHaveCount(0);
     await page.reload();
-    await page.getByTestId('action-editor').click();
+    await page.getByTestId('group-tool-editor').click();
 
     // Same expanded directory, same filter.
     await expect(page.getByTestId('browse-filter')).toHaveValue('ind');
@@ -79,7 +79,7 @@ test.describe('the file browser reopens where it was left', () => {
     // chat (same restore-on-reload path as the test above), then reopen the
     // same file through the tree.
     await page.reload();
-    await page.getByTestId('action-editor').click();
+    await page.getByTestId('group-tool-editor').click();
     await page.getByTestId('tree-row-foo.ts').click();
     await expect(page.getByTestId('browse-meta-name')).toHaveText('foo.ts', MONACO_MOUNT);
     await expect(page.getByTestId('browse-save')).toBeDisabled();

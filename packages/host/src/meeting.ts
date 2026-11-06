@@ -271,6 +271,9 @@ export function isMicEcho(systemText: string, micTexts: string[]): boolean {
 }
 
 /** The model complaining about its input instead of writing notes. */
+/** Below this many transcript characters there is nothing to write up. */
+const NEAR_EMPTY_TRANSCRIPT_CHARS = 5;
+
 const META_TEXT = /\bno (new )?transcript\b|nothing (new )?to (process|summari[sz]e)/i;
 
 /** A topic that starts sooner than this after the one before it is a fragment of it. */
@@ -467,6 +470,11 @@ export class MeetingManager {
       return;
     }
     const s = rt.state;
+    if (s.transcript.reduce((n, l) => n + l.text.trim().length, 0) < NEAR_EMPTY_TRANSCRIPT_CHARS) {
+      s.writeupError = 'no transcript content';
+      this.commit(chatId, rt);
+      return;
+    }
     try {
       const w = await this.deps.writeup({
         chatId,
@@ -482,12 +490,6 @@ export class MeetingManager {
         prompts: this.deps.prompts(),
       });
       const parsed = MeetingWriteup.parse(w);
-      if (
-        META_TEXT.test(
-          `${parsed.title} ${parsed.sections.flatMap((x) => x.items.map((i) => i.text)).join(' ')}`,
-        )
-      )
-        throw new MeetingError(`write-up returned model commentary: ${parsed.title}`);
       s.writeup = parsed;
       s.writeupError = null;
       // The write-up's title names the chat: it is where a title is read.

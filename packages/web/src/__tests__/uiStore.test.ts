@@ -59,6 +59,14 @@ describe('uiStore layout widths (spec/14 ## Layout — drag-resize persists)', (
     expect(useUiStore.getState().sidebarWidth).toBe(600);
   });
 
+  it('resetSidebarWidth puts the sidebar back at the default 280 and leaves mini mode', () => {
+    useUiStore.getState().setSidebarWidth(450);
+    useUiStore.getState().resetSidebarWidth();
+    expect(useUiStore.getState().sidebarWidth).toBe(280);
+    expect(useUiStore.getState().sidebarMini).toBe(false);
+    expect(localStorage.getItem('patch.layout.sidebarWidth')).toBe('280');
+  });
+
   // Mini sidebar (Todoist, Patch Updates): dragging the divider narrower than
   // the full sidebar can go turns it into a status-dot rail; dragging back out
   // restores it. The full width is left alone so the rail expands to where it was.

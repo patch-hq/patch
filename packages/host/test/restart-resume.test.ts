@@ -15,6 +15,7 @@ import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
 import { Daemon, INTERRUPTED_TURN_REMINDER, interruptedTurnResend } from '../src/chatRunner.js';
 import { createMetaStore, type MetaStore } from '../src/meta.js';
+import { entryText, transcriptFor } from './helpers/chatTranscript.js';
 import { createMockSdkBackend, TurnFailedError, type SdkBackend } from '../src/sdkBackend.js';
 
 /** What the head turn 'running' is re-sent as. */
@@ -492,7 +493,7 @@ describe('resuming turns a host restart interrupted', () => {
   // both names the bubble it folds into and carries the restart reminder out of
   // band. A surface folding on `retryOfSeq` must find the reminder right there
   // on the same event; it is nowhere else.
-  it('emits the re-send with retryOfSeq AND the restart reminder as systemContext', async () => {
+  it('emits the re-send without retryOfSeq, with the restart reminder as systemContext', async () => {
     const g1 = gatedBackend();
     const { home, folder } = setup();
     const first = hostOver(home, g1.backend);
@@ -511,7 +512,7 @@ describe('resuming turns a host restart interrupted', () => {
     );
     expect(resent).toHaveLength(1);
     expect(resent[0]!.content).toBe('Carry on');
-    expect(resent[0]!.retryOfSeq).toBe(2);
+    expect(resent[0]!.retryOfSeq).toBeUndefined();
     expect(resent[0]!.systemContext).toEqual([
       {
         source: 'patch',
@@ -571,12 +572,12 @@ describe('resuming turns a host restart interrupted', () => {
     await tick();
 
     // Killed again mid-resume: still owed, so the NEXT host picks it up too.
-    // The anchor survives the resume: every later attempt names the ORIGINAL
-    // bubble, never the rung before it, so N restarts leave one bubble with
-    // N+1 attempts rather than a chain of N+1 bubbles.
-    expect(pendingOf(second.metaStore, chatId)).toEqual([
-      { message: RESENT, localId: 'L1', retryOfSeq: 2 },
-    ]);
+    // The re-send is its own bubble (a restart never folds), and that bubble
+    // is the anchor a later non-restart retry would name.
+    const pendingAfter = pendingOf(second.metaStore, chatId);
+    expect(pendingAfter).toHaveLength(1);
+    expect(pendingAfter[0]).toMatchObject({ message: RESENT, localId: 'L1' });
+    expect(pendingAfter[0]!.retryOfSeq).not.toBe(2);
 
     const g3 = gatedBackend();
     const third = hostOver(home, g3.backend);
@@ -766,10 +767,15 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
     }
 
     const reseedOf = (o: Opts) =>
-      (o.claudeSessionStore?.reseed?.events ?? []).filter(
-        (t) => t.event.type === 'chat.message',
-      ) as Array<{ event: { role: string; content: string } }>;
-    const reseededTexts = (o: Opts): string[] => reseedOf(o).map((t) => t.event.content);
+      transcriptFor(o)
+        .filter((e) => e.type === 'user' || e.type === 'assistant')
+        .map((e) => ({ event: { role: e.message?.role ?? '', content: entryText(e) } }));
+    // System lines (e.g. the 'host restarted' note) are in the track but dropped
+    // by the reconstruction, so the model never receives them.
+    const reseededTexts = (o: Opts): string[] =>
+      reseedOf(o)
+        .filter((t) => t.event.role !== 'system')
+        .map((t) => t.event.content);
 
     function hostWith(home: string, backend: SdkBackend, extra: Record<string, unknown> = {}) {
       const metaStore = createMetaStore(home);
@@ -903,5 +909,59 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
       expect(texts).toContain('turn two');
       await g2.drain();
     });
+  });
+});
+
+describe('a restart says so in the chat', () => {
+  it('records a system line when an interrupted turn is re-sent', async () => {
+    const g = gatedBackend();
+    const { home, folder } = setup();
+    const first = hostOver(home, g.backend);
+    const chatId = await chatWithHistory(first.daemon, folder, g);
+    void first.daemon.sendInput({ chatId, message: 'running', localId: 'L1' });
+    await tick();
+
+    const second = hostOver(home, createMockSdkBackend());
+    second.daemon.hydrate();
+    await tick(50);
+
+    const lines = second.events.filter(
+      (e) =>
+        e.type === 'chat.message' &&
+        e.role === 'system' &&
+        e.content === 'Turn interrupted by restart',
+    );
+    expect(lines).toHaveLength(1);
+  });
+
+  // spec/12 § Restart interruptions — a restart's re-send is its own message,
+  // never an attempt folded into the original bubble.
+  it('draws the re-send as its own message, not a retry of the original', async () => {
+    const g = gatedBackend();
+    const { home, folder } = setup();
+    const first = hostOver(home, g.backend);
+    const chatId = await chatWithHistory(first.daemon, folder, g);
+    void first.daemon.sendInput({ chatId, message: 'running', localId: 'L1' });
+    await tick();
+
+    const second = hostOver(home, createMockSdkBackend());
+    second.daemon.hydrate();
+    await tick(50);
+
+    const users = second.events.filter(
+      (e): e is Extract<WireEvent, { type: 'chat.message' }> =>
+        e.type === 'chat.message' && e.role === 'user',
+    );
+    expect(users.length).toBeGreaterThan(0);
+    for (const u of users) expect(u.retryOfSeq).toBeUndefined();
+
+    const replayed: WireEvent[] = [];
+    second.daemon.replayChat(chatId, 0, (ev) => replayed.push(ev));
+    const order = replayed
+      .filter((e) => e.type === 'chat.message')
+      .map((e) => `${(e as { role: string }).role}:${(e as { content: string }).content}`);
+    const marker = order.indexOf('system:Turn interrupted by restart');
+    expect(marker).toBeGreaterThan(-1);
+    expect(order[marker + 1]).toBe('user:Carry on');
   });
 });

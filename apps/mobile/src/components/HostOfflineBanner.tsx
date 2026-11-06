@@ -17,7 +17,7 @@ export function HostOfflineBanner(): React.ReactElement | null {
   const router = useRouter();
   const daemon = usePresenceStore((s) => s.daemon);
   const setDiagnosticsOpen = useUiStore((s) => s.setDiagnosticsOpen);
-  // Why each machine dropped off, where the server could tell from its last heartbeat.
+  // Why each host dropped off, where the server could tell from its last heartbeat.
   const why = usePresenceStore((s) =>
     Object.values(s.hosts)
       .filter((h) => !h.online && h.offlineReason)
@@ -33,7 +33,7 @@ export function HostOfflineBanner(): React.ReactElement | null {
       testID="daemon-offline-banner"
       onPress={() => router.push('/(tabs)/settings')}
       accessibilityRole="button"
-      accessibilityLabel="Machine offline — open Settings to see the machine status"
+      accessibilityLabel="Host offline — open Settings to see the host status"
       style={{
         backgroundColor: colors.waitingTint,
         borderColor: colors.waiting,

@@ -52,7 +52,7 @@ describe('pads', () => {
           (s) => s.event.type === 'patch.pad.response' && s.event.requestId === requestId,
         );
         if (hit) {
-          expect(hit.hostId).toBe('d1'); // the reply goes back to the asking machine
+          expect(hit.hostId).toBe('d1'); // the reply goes back to the asking host
           return hit.event as Res;
         }
         await new Promise((r) => setTimeout(r, 10));

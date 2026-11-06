@@ -1,7 +1,7 @@
 // Host self-update (spec/02 § Installation, spec/11 § Host installation).
 //
-// The server is the single channel a machine gets its host from: the same
-// manifest that feeds a brand-new install feeds every existing machine's
+// The server is the single channel a host gets its host from: the same
+// manifest that feeds a brand-new install feeds every existing host's
 // update, so publishing a build is what makes both see it.
 //
 // What this module will NOT do:
@@ -27,6 +27,7 @@ import {
   mkdirSync,
   mkdtempSync,
   openSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   rmSync,
@@ -106,7 +107,7 @@ export function compareVersions(a: string, b: string): number | null {
 }
 
 /**
- * Is a newer build published for THIS machine's os/arch? A machine that is not
+ * Is a newer build published for THIS host's os/arch? A host that is not
  * running from a built artifact has no target to match and no version to
  * compare, so it reports "no update" with that as the stated reason — never a
  * silent false.
@@ -214,7 +215,7 @@ function redactToken(text: string, token: string): string {
   return text.split(token).join('<internal-token>');
 }
 
-/** The version `~/.patch/current` points at — what this machine will run next. */
+/** The version `~/.patch/current` points at — what this host will run next. */
 /**
  * Run the installer in a new process group (see applyUpdate), writing to
  * `fd`, and resolve when it exits. A non-zero exit rejects with its code.
@@ -261,83 +262,18 @@ function installedVersion(patchHome: string): string | undefined {
 export interface ApplyResult {
   applied: boolean;
   message: string;
-  /**
-   * The update is real and will apply, but not yet: chats on this machine are
-   * mid-turn, and the installer's restart would kill them (see `requestUpdate`).
-   */
+  /** The update is real and will apply, but not yet: this host's artifact is still being built (see `requestUpdate`). */
   deferred?: boolean;
 }
 
 /**
- * Resolves once no chat on this machine is running a turn. The installer
- * restarts the service, which kills every turn in flight and every command
- * those turns are running (2026-09-29: an update clicked at 00:06 BST killed a
- * chat's long-running command 18s later), so nothing may reach it while a turn
- * is live. Polled rather than evented: the answer only has to be right at the
- * moment it is read, and a missed edge would hold an update forever.
- */
-const HOLD_WARN_EVERY_MS = 10 * 60_000;
-
-export async function waitUntilNoRunningTurns(opts: {
-  runningChats: () => string[];
-  logger: Logger;
-  pollMs?: number;
-  sleep?: (ms: number) => Promise<void>;
-  now?: () => number;
-  /**
-   * Called synchronously in the same tick the idle read returns, so nothing
-   * can resume a turn between "idle" and the caller acting on it.
-   */
-  onIdle?: () => void;
-  /** True when the user chose to install over running turns (`host.update` force). */
-  force?: () => boolean;
-}): Promise<void> {
-  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const now = opts.now ?? Date.now;
-  const started = now();
-  let lastWarn = started;
-  let logged = false;
-  for (;;) {
-    const running = opts.runningChats();
-    if (running.length === 0 || opts.force?.()) {
-      if (running.length > 0) {
-        opts.logger.warn({ chats: running }, 'self-update: installing over running turns (forced)');
-      }
-      opts.onIdle?.();
-      return;
-    }
-    // A hold that outlasts any plausible turn is a bug somewhere, not a turn:
-    // say so every WARN_EVERY_MS so it is visible instead of silent.
-    if (now() - lastWarn >= HOLD_WARN_EVERY_MS) {
-      lastWarn = now();
-      opts.logger.warn(
-        { chats: running, heldMinutes: Math.round((lastWarn - started) / 60_000) },
-        'self-update: still holding the install for running turns',
-      );
-    }
-    if (!logged) {
-      opts.logger.info(
-        { chats: running },
-        'self-update: holding the install until running turns finish',
-      );
-      logged = true;
-    }
-    await sleep(opts.pollMs ?? 2000);
-  }
-}
-
-/**
  * The front door for "apply the published build" (the Update button's
- * `host.update` frame and `patch hosts update`). With nothing running it is
- * `apply` itself. With turns running it still answers at once — the caller is
- * often one of those turns (a deploy run from a chat), and waiting on its own
- * turn to end would never return — so it confirms there IS an update, starts
- * the apply in the background (which holds before the installer until the
- * machine is idle) and reports it as deferred. No update to apply is refused
- * immediately, exactly as before.
+ * `host.update` frame and `patch hosts update`). Turns do not hold it: they run
+ * under their own runners and carry on across the restart (spec/02 § Turns
+ * outlive the host). The one thing that defers it is a build whose artifact for
+ * this host is still being built.
  */
 export async function requestUpdate(opts: {
-  runningChats: () => string[];
   check: () => Promise<UpdateCheck>;
   apply: () => Promise<ApplyResult>;
   logger: Logger;
@@ -351,30 +287,11 @@ export async function requestUpdate(opts: {
       return {
         applied: false,
         deferred: true,
-        message: `${early.version ?? 'the published build'} is still being built for this machine — will update as soon as it is published`,
+        message: `${early.version ?? 'the published build'} is still being built for this host — will update as soon as it is published`,
       };
     }
   }
-  const running = opts.runningChats();
-  if (running.length === 0) return opts.apply();
-  const check = await opts.check();
-  if (!check.available) return { applied: false, message: check.reason };
-  opts.apply().then(
-    (result) =>
-      opts.logger[result.applied ? 'info' : 'warn'](
-        { result: result.message },
-        'self-update: deferred update finished',
-      ),
-    (err: unknown) => opts.logger.error({ err }, 'self-update: deferred update failed'),
-  );
-  const n = running.length;
-  return {
-    applied: false,
-    deferred: true,
-    message:
-      `update to ${check.version ?? 'the published build'} will apply once ${n} ` +
-      `running turn${n === 1 ? '' : 's'} finish${n === 1 ? 'es' : ''} — restarting now would kill ${n === 1 ? 'it' : 'them'}`,
-  };
+  return opts.apply();
 }
 
 /**
@@ -515,39 +432,86 @@ export function createUpdateGate(apply: typeof applyUpdate = applyUpdate): typeo
   };
 }
 
+/** What a stage or apply needs of the published build: verified, unpacked, installer ready. */
+type BuildResult = { ok: true; extracted: string } | { ok: false; message: string };
+
 /**
- * Download, verify and install the published build, then hand over to the new
- * artifact's installer (which re-registers the unit and restarts the service —
- * so a successful apply typically ends with this process being replaced).
+ * Download the artifact, check its digest and signature, and unpack it into
+ * `work`. Shared by an ordinary apply (a temp dir) and by staging ahead of a
+ * server restart (a kept dir), so both verify identically.
  */
-export async function applyUpdate(opts: {
-  serverUrl: string;
-  internalToken: string;
-  currentVersion: string;
-  target: string | undefined;
-  /** `~/.patch` — where `current` says which version this machine will run. */
-  patchHome: string;
-  /**
-   * Awaited after the artifact is verified and immediately before the
-   * installer runs (which restarts this service). The download can take long
-   * enough for a turn to start, so the idle check belongs here, not only at
-   * the time of the request.
-   */
-  untilIdle?: () => Promise<void>;
-  /**
-   * Called with the build's version once the machine is idle and immediately
-   * before the installer runs — the point at which an install has genuinely
-   * been tried. Deferred and awaiting-artifact paths never reach it.
-   */
-  onInstallStart?: (version: string) => void;
-  /** Installer-runner override — test hook, so a unit test starts no process. */
-  runInstaller?: (cmd: string, args: string[], fd: number, timeoutMs?: number) => Promise<void>;
-  logger: Logger;
-  fetchImpl?: typeof fetch;
-  /** Per-step network limit; defaults to UPDATE_STEP_TIMEOUT_MS. */
-  timeoutMs?: number;
-}): Promise<ApplyResult> {
-  const stepMs = opts.timeoutMs ?? UPDATE_STEP_TIMEOUT_MS;
+async function fetchVerifiedBuild(
+  f: typeof fetch,
+  base: string,
+  artifact: ManifestArtifact,
+  manifest: HostManifest,
+  work: string,
+  stepMs: number,
+): Promise<BuildResult> {
+  const res = await fetchBounded(f, `${base}/api/host/${artifact.file}`, stepMs);
+  if (!res.ok) {
+    return { ok: false, message: `could not download ${artifact.file}: HTTP ${res.status}` };
+  }
+  const bytes = Buffer.from(await res.arrayBuffer());
+
+  const digest = createHash('sha256').update(bytes).digest('hex');
+  if (digest !== artifact.sha256) {
+    // Refuse loudly: a digest mismatch is a corrupted or substituted artifact,
+    // never something to install and hope about.
+    return {
+      ok: false,
+      message: `refusing to install ${artifact.file}: sha256 ${digest} does not match the manifest`,
+    };
+  }
+  if (
+    !verifyArtifactSignature({
+      sha256Hex: digest,
+      signatureB64Url: artifact.sig,
+      publicKeyB64Url: manifest.signingPublicKey,
+    })
+  ) {
+    return {
+      ok: false,
+      message: `refusing to install ${artifact.file}: its signature does not verify against the project signing key`,
+    };
+  }
+
+  const tar = join(work, artifact.file);
+  writeFileSync(tar, bytes);
+  await execFileAsync('tar', ['-xzf', tar, '-C', work], { timeout: stepMs });
+  // The tarball holds one top-level directory named for the build.
+  const extracted = join(work, artifact.file.replace(/\.tar\.gz$/, ''));
+  const installer = join(extracted, 'install');
+  if (!existsSync(installer)) {
+    return {
+      ok: false,
+      message: `the downloaded artifact carries no installer at ${installer}`,
+    };
+  }
+  chmodSync(installer, 0o755);
+  const node = join(extracted, 'node');
+  if (existsSync(node)) chmodSync(node, 0o755);
+
+  return { ok: true, extracted };
+}
+
+type FetchedBuild =
+  | { ok: true; extracted: string; version: string }
+  | { ok: false; message: string };
+
+/** Ask the server what is published for this host and fetch it into `work`. */
+async function fetchPublishedBuild(
+  opts: {
+    serverUrl: string;
+    internalToken: string;
+    currentVersion: string;
+    target: string | undefined;
+    fetchImpl?: typeof fetch;
+  },
+  stepMs: number,
+  base: string,
+  work: string,
+): Promise<FetchedBuild> {
   const check = await checkForUpdate({
     serverUrl: opts.serverUrl,
     currentVersion: opts.currentVersion,
@@ -559,11 +523,9 @@ export async function applyUpdate(opts: {
   // check's own failure message carries whatever the fetch layer said, and that
   // has been seen to include the token.
   if (!check.available) {
-    return { applied: false, message: redactToken(check.reason, opts.internalToken) };
+    return { ok: false, message: redactToken(check.reason, opts.internalToken) };
   }
-
   const f = opts.fetchImpl ?? fetch;
-  const base = opts.serverUrl.replace(/\/+$/, '');
   let manifest: HostManifest;
   try {
     manifest = (await (
@@ -571,63 +533,138 @@ export async function applyUpdate(opts: {
     ).json()) as HostManifest;
   } catch (err) {
     return {
-      applied: false,
+      ok: false,
       message: `self-update failed: ${redactToken((err as Error).message, opts.internalToken)}`,
     };
   }
   const artifact = manifest.artifacts.find((a) => a.target === opts.target);
-  if (!artifact) return { applied: false, message: `no artifact for ${opts.target}` };
+  if (!artifact) return { ok: false, message: `no artifact for ${opts.target}` };
+  const built = await fetchVerifiedBuild(f, base, artifact, manifest, work, stepMs);
+  return built.ok ? { ...built, version: manifest.version } : built;
+}
 
+const STAGED_READY = '.staged-ready';
+
+function stagedRoot(patchHome: string): string {
+  return join(patchHome, 'staged');
+}
+
+/** The unpacked, verified build staged for `version`, or null when there is none. */
+export function stagedBuild(patchHome: string, version: string): string | null {
+  const dir = join(stagedRoot(patchHome), version);
+  if (!existsSync(join(dir, STAGED_READY))) return null;
+  const sub = readdirSync(dir).find((n) => n !== STAGED_READY);
+  return sub && existsSync(join(dir, sub, 'install')) ? join(dir, sub) : null;
+}
+
+/** Remove staged builds at or below the running version (and any half-written one). */
+export function pruneStaged(patchHome: string, running: string): void {
+  const root = stagedRoot(patchHome);
+  if (!existsSync(root)) return;
+  for (const name of readdirSync(root)) {
+    const cmp = compareVersions(name, running);
+    if (cmp === null || cmp <= 0 || !existsSync(join(root, name, STAGED_READY))) {
+      rmSync(join(root, name), { recursive: true, force: true });
+    }
+  }
+}
+
+/**
+ * Download and verify `version` and keep it for the server's restart into it
+ * (spec/11 § Updates in lockstep). Installs nothing. Refuses when the server's
+ * published build is not that version: a stale instruction must not stage the
+ * wrong build. Any other staged build is dropped.
+ */
+export async function stageUpdate(opts: {
+  serverUrl: string;
+  internalToken: string;
+  currentVersion: string;
+  target: string | undefined;
+  patchHome: string;
+  version: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<{ staged: boolean; message: string }> {
+  if (stagedBuild(opts.patchHome, opts.version)) {
+    return { staged: true, message: `${opts.version} is already staged` };
+  }
+  const stepMs = opts.timeoutMs ?? UPDATE_STEP_TIMEOUT_MS;
+  const base = opts.serverUrl.replace(/\/+$/, '');
+  const dir = join(stagedRoot(opts.patchHome), opts.version);
+  rmSync(stagedRoot(opts.patchHome), { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  try {
+    const fetched = await fetchPublishedBuild(opts, stepMs, base, dir);
+    if (!fetched.ok) throw new Error(fetched.message);
+    if (fetched.version !== opts.version) {
+      throw new Error(`the server publishes ${fetched.version}, not ${opts.version}`);
+    }
+    // The tarball itself is not needed once unpacked.
+    for (const n of readdirSync(dir)) if (n.endsWith('.tar.gz')) rmSync(join(dir, n));
+    writeFileSync(join(dir, STAGED_READY), `${opts.version}\n`);
+    return { staged: true, message: `staged ${opts.version}` };
+  } catch (err) {
+    rmSync(dir, { recursive: true, force: true });
+    return {
+      staged: false,
+      message: `staging ${opts.version} failed: ${redactToken((err as Error).message, opts.internalToken)}`,
+    };
+  }
+}
+
+/**
+ * Download, verify and install the published build, then hand over to the new
+ * artifact's installer (which re-registers the unit and restarts the service —
+ * so a successful apply typically ends with this process being replaced).
+ */
+export async function applyUpdate(opts: {
+  serverUrl: string;
+  internalToken: string;
+  currentVersion: string;
+  target: string | undefined;
+  /** `~/.patch` — where `current` says which version this host will run. */
+  patchHome: string;
+  /**
+   * Called with the build's version immediately before the installer runs — the point at which an install has genuinely
+   * been tried. Deferred and awaiting-artifact paths never reach it.
+   */
+  onInstallStart?: (version: string) => void;
+  /**
+   * Install the build already staged for this version (see `stageUpdate`)
+   * instead of asking the server for one. Used when the server has announced it
+   * is restarting into that version: it is down, so nothing can be fetched.
+   */
+  stagedVersion?: string;
+  /** Installer-runner override — test hook, so a unit test starts no process. */
+  runInstaller?: (cmd: string, args: string[], fd: number, timeoutMs?: number) => Promise<void>;
+  logger: Logger;
+  fetchImpl?: typeof fetch;
+  /** Per-step network limit; defaults to UPDATE_STEP_TIMEOUT_MS. */
+  timeoutMs?: number;
+}): Promise<ApplyResult> {
+  const stepMs = opts.timeoutMs ?? UPDATE_STEP_TIMEOUT_MS;
+  const base = opts.serverUrl.replace(/\/+$/, '');
   const work = mkdtempSync(join(tmpdir(), 'patch-update-'));
   try {
-    const res = await fetchBounded(f, `${base}/api/host/${artifact.file}`, stepMs);
-    if (!res.ok) {
-      return { applied: false, message: `could not download ${artifact.file}: HTTP ${res.status}` };
-    }
-    const bytes = Buffer.from(await res.arrayBuffer());
-
-    const digest = createHash('sha256').update(bytes).digest('hex');
-    if (digest !== artifact.sha256) {
-      // Refuse loudly: a digest mismatch is a corrupted or substituted artifact,
-      // never something to install and hope about.
-      return {
-        applied: false,
-        message: `refusing to install ${artifact.file}: sha256 ${digest} does not match the manifest`,
-      };
-    }
-    if (
-      !verifyArtifactSignature({
-        sha256Hex: digest,
-        signatureB64Url: artifact.sig,
-        publicKeyB64Url: manifest.signingPublicKey,
-      })
-    ) {
-      return {
-        applied: false,
-        message: `refusing to install ${artifact.file}: its signature does not verify against the project signing key`,
-      };
+    let extracted: string;
+    let version: string;
+    if (opts.stagedVersion) {
+      const staged = stagedBuild(opts.patchHome, opts.stagedVersion);
+      if (!staged) {
+        return { applied: false, message: `no staged build for ${opts.stagedVersion}` };
+      }
+      extracted = staged;
+      version = opts.stagedVersion;
+    } else {
+      const fetched = await fetchPublishedBuild(opts, stepMs, base, work);
+      if (!fetched.ok) return { applied: false, message: fetched.message };
+      extracted = fetched.extracted;
+      version = fetched.version;
     }
 
-    const tar = join(work, artifact.file);
-    writeFileSync(tar, bytes);
-    await execFileAsync('tar', ['-xzf', tar, '-C', work], { timeout: stepMs });
-    // The tarball holds one top-level directory named for the build.
-    const extracted = join(work, artifact.file.replace(/\.tar\.gz$/, ''));
-    const installer = join(extracted, 'install');
-    if (!existsSync(installer)) {
-      return {
-        applied: false,
-        message: `the downloaded artifact carries no installer at ${installer}`,
-      };
-    }
-    chmodSync(installer, 0o755);
-    const node = join(extracted, 'node');
-    if (existsSync(node)) chmodSync(node, 0o755);
-
-    if (opts.untilIdle) await opts.untilIdle();
-    opts.onInstallStart?.(manifest.version);
+    opts.onInstallStart?.(version);
     opts.logger.info(
-      { from: opts.currentVersion, to: manifest.version, target: opts.target },
+      { from: opts.currentVersion, to: version, target: opts.target },
       'self-update: verified artifact, handing over to its installer',
     );
     // The installer RESTARTS the service — which kills this very process, since
@@ -648,7 +685,7 @@ export async function applyUpdate(opts: {
     let installerOutput = '';
     try {
       await (opts.runInstaller ?? runDetached)(
-        installer,
+        join(extracted, 'install'),
         ['--non-interactive', '--server', base, '--internal-token', opts.internalToken],
         out,
         ...(opts.timeoutMs ? [opts.timeoutMs] : []),
@@ -661,17 +698,17 @@ export async function applyUpdate(opts: {
     installerOutput = `${readFileSync(logPath, 'utf8').slice(started)}\n${installerOutput}`.trim();
 
     const installed = installedVersion(opts.patchHome);
-    if (installed === manifest.version) {
+    if (installed === version) {
       opts.logger.info(
         { installed, output: installerOutput },
         'self-update: applied (the service restart may have interrupted this call)',
       );
-      return { applied: true, message: `updated ${opts.currentVersion} → ${manifest.version}` };
+      return { applied: true, message: `updated ${opts.currentVersion} → ${version}` };
     }
     return {
       applied: false,
       message:
-        `self-update did not take: this machine is still on ${installed ?? 'an unknown version'}. ` +
+        `self-update did not take: this host is still on ${installed ?? 'an unknown version'}. ` +
         redactToken(installerOutput, opts.internalToken),
     };
   } catch (err) {

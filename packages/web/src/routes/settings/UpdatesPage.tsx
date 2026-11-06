@@ -78,7 +78,6 @@ function installedLatest(installed: string, latest: string | null): string {
 
 function hostStatus(h: HostPresence): string {
   if (!h.online) return 'Offline';
-  if (h.host?.updateHeld) return 'Update waiting for chats to finish';
   if (h.host?.updatePending) return 'Update on its way';
   return h.host?.updateAvailable ? 'Update available' : 'Up to date';
 }
@@ -89,16 +88,11 @@ export function UpdatesPage(): JSX.Element {
   const behind = useBehind();
   const autoUpdate = usePreferencesStore((s) => s.preferences.autoUpdateHosts);
   const loaded = usePreferencesStore((s) => s.loaded);
-  const updatable = behind.flatMap((b) =>
-    b.kind === 'host' && b.host.online && b.host.host?.updateHeld !== true ? [b.host] : [],
-  );
+  const updatable = behind.flatMap((b) => (b.kind === 'host' && b.host.online ? [b.host] : []));
   const shellReady = shell?.lastResult === 'downloaded';
   const shellBusy = shell?.checking === true || shell?.lastResult === 'update-available';
   const upToDate = behind.length === 0 && !shellReady && !shellBusy;
   const hosts = sortHosts(Object.values(usePresenceStore((s) => s.hosts)));
-  // Behind only because chats are running: nothing for the user to do.
-  const onlyWaiting =
-    behind.length > 0 && behind.every((b) => b.kind === 'host' && b.host.host?.updateHeld === true);
 
   const checkAll = (): void => {
     void refetch();
@@ -109,7 +103,6 @@ export function UpdatesPage(): JSX.Element {
   if (error || shell?.lastResult === 'error') status = 'Couldn’t check';
   else if (!report) status = 'Checking…';
   else if (shellReady) status = 'Update ready — restart to apply';
-  else if (onlyWaiting) status = 'Updating when your chats are idle';
   else if (!upToDate) status = shellBusy && behind.length === 0 ? 'Checking…' : 'Update available';
 
   return (
@@ -200,24 +193,6 @@ export function UpdatesPage(): JSX.Element {
               testid={`version-host-${h.hostId}`}
               sub={h.host ? hostStatus(h) : 'not reported'}
             >
-              {h.host?.updateHeld && h.online ? (
-                <button
-                  type="button"
-                  className="set-btn"
-                  data-testid={`update-now-${h.hostId}`}
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        `Update ${hostLabel(h)} now? Chats running on it will be stopped mid-turn.`,
-                      )
-                    ) {
-                      sendToHost(h, { type: 'host.update', hostId: h.hostId, force: true });
-                    }
-                  }}
-                >
-                  Update now
-                </button>
-              ) : null}
               {h.host ? (
                 <span className="set-val">
                   {h.host.updateAvailable && report

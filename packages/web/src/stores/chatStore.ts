@@ -32,7 +32,7 @@ import {
   type PendingPermission,
   type SectionCounts,
 } from './types.js';
-import { refreshArtifact } from '../lib/artifactPanel.js';
+import { refreshArtifact } from '../lib/artifactRefresh.js';
 import { saveResolution } from '../lib/transcriptCache.js';
 import { loadReadState, saveReadWatermark } from '../lib/readState.js';
 import { clearComposerDraft } from './composerDraftStore.js';
@@ -1008,6 +1008,15 @@ const retractedChatIds = new Set<string>();
 const rosteredChatIds = new Set<string>();
 /** `${chatId}::${localId}` of turns whose persisted echo has landed, so a late `chat.queued` is ignored. */
 const settledLocalIds = new Set<string>();
+
+/**
+ * True once a turn's persisted echo has landed. The optimistic entry loses its
+ * `localId` when that happens, so a lookup by `localId` cannot tell "sent" from
+ * "removed" — this can.
+ */
+export function isLocalIdSettled(chatId: string, localId: string): boolean {
+  return settledLocalIds.has(`${chatId}::${localId}`);
+}
 const RETRACTED_LIMIT = 200;
 
 /** A turn's move to another account, with when the spent one comes back. */
@@ -2530,7 +2539,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             list[existing] = entry;
             timelines[event.chatId] = list;
             // The agent edited a page it already published: refresh it if the
-            // desktop panel is showing it.
+            // artifact tab is showing it.
             refreshArtifact(event.url);
           } else {
             pushTimeline(event.chatId, entry);

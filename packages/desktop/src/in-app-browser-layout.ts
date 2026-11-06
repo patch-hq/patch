@@ -5,7 +5,7 @@
 // same file as the InAppBrowser controller cannot be unit-tested at all. The
 // geometry used to live there behind a comment claiming it was "pure so it can be
 // unit-tested without Electron" — which was not true of the file it sat in, and
-// its test failed on any machine without an Electron binary. Same seam-and-fake
+// its test failed on any host without an Electron binary. Same seam-and-fake
 // split as permissions.ts and context-menu.ts.
 /** Height (px) of the toolbar strip at the top of the panel. */
 export const TOOLBAR_HEIGHT = 44;

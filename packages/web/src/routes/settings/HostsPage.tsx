@@ -1,9 +1,9 @@
 // Settings → Hosts (spec/02 § Host identity, spec/11 § Host installation).
 //
-// Every machine registered to the account, with its presence, and — for the
+// Every host registered to the account, with its presence, and — for the
 // one selected — its name, what it runs, and removing it.
 //
-// State comes from the live host reports. A machine that has not reported yet
+// State comes from the live host reports. A host that has not reported yet
 // is shown as awaiting its first report rather than being given a fabricated
 // name or an assumed platform: unknown must never render as known.
 
@@ -34,13 +34,13 @@ import { ClaudeSettingsEditor } from './ProvidersPage.js';
 function installCommandProblem(err: unknown): string {
   const code = err instanceof Error ? err.message : String(err);
   if (code === 'nothing_published') {
-    return 'No machine build has been published yet, so there is no install command to give.';
+    return 'No host build has been published yet, so there is no install command to give.';
   }
   if (code === 'no_build_for_os') {
-    return 'No machine build has been published for that operating system yet.';
+    return 'No host build has been published for that operating system yet.';
   }
   if (code === 'no_public_url') {
-    return 'This server has no public address configured, so it cannot say where a new machine should download from.';
+    return 'This server has no public address configured, so it cannot say where a new host should download from.';
   }
   return code;
 }
@@ -55,14 +55,14 @@ export function HostsPage(): JSX.Element {
   const hosts = usePresenceStore((s) => s.hosts);
   const rows = sortHosts(Object.values(hosts));
   // Selecting a host here is the same choice the per-host pages' switcher
-  // makes, so opening Agent next shows the machine just looked at.
+  // makes, so opening Agent next shows the host just looked at.
   const { hostId: selected, select } = useSettingsHost();
   const [adding, setAdding] = useState(false);
   const host = selected === null ? null : (hosts[selected] ?? null);
 
   return (
     <SettingsPage
-      title="Machines"
+      title="Hosts"
       testid="settings-hosts"
       actions={
         <button
@@ -80,7 +80,7 @@ export function HostsPage(): JSX.Element {
       <ThisMac />
       <Group testid="hosts-list">
         {rows.length === 0 ? (
-          <Note testid="hosts-empty">No machines yet</Note>
+          <Note testid="hosts-empty">No hosts yet</Note>
         ) : (
           rows.map((h) => (
             <HostListRow
@@ -102,7 +102,7 @@ export function HostsPage(): JSX.Element {
 }
 
 function disconnectLabel(d: NonNullable<HostPresence['host']>['lastDisconnect'] & object): string {
-  if (d.cause === 'sleep') return `Machine slept for ${d.sleptSeconds ?? 0}s`;
+  if (d.cause === 'sleep') return `Host slept for ${d.sleptSeconds ?? 0}s`;
   if (d.cause === 'server-restart') return 'Server restarted';
   return `Unexplained (close ${d.code})`;
 }
@@ -183,9 +183,9 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
   function commitRename(): void {
     const next = draft.trim();
     if (next.length === 0) {
-      // spec/02: a machine must always have a name; an empty rename is refused
+      // spec/02: a host must always have a name; an empty rename is refused
       // rather than leaving a nameless row.
-      pushError('a machine name cannot be empty');
+      pushError('a host name cannot be empty');
       return;
     }
     if (next === report?.hostName) return;
@@ -193,8 +193,8 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
   }
 
   /**
-   * Set a backend's credential ON THAT MACHINE. A pasted token wins; leaving it
-   * blank re-adopts whatever that machine's own agent CLI already holds — which
+   * Set a backend's credential ON THAT HOST. A pasted token wins; leaving it
+   * blank re-adopts whatever that host's own agent CLI already holds — which
    * is the fix when a token expired and was renewed on the box itself.
    */
   async function connectBackend(backendId: string, backendLabel: string): Promise<void> {
@@ -210,7 +210,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
     }
     // A Claude account is shared by every host (spec/01 § Settings): a pasted
     // token is added for all of them, and a blank one adopts the login already
-    // on this machine.
+    // on this host.
     const entered = await useUiStore.getState().prompt({
       title: `Sign in to ${backendLabel}`,
       message: `Paste a token from \`claude setup-token\`, or leave blank to use the login already on ${name}. Either way it is added for every host:`,
@@ -259,7 +259,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
               <input
                 type="text"
                 className="set-word"
-                aria-label="Machine name"
+                aria-label="Host name"
                 data-testid={`host-${host.hostId}-name-input`}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
@@ -280,7 +280,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
               />
             </Row>
             <Row
-              title="Machine"
+              title="Host"
               sub={
                 <>
                   <span data-testid={`host-${host.hostId}-platform`}>
@@ -329,9 +329,9 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
             >
               {/* A backend that is logged out or absent is the ONE state a person
                   has to act on, and the row said so while offering nothing to
-                  click — which is what sent someone to SSH into the machine and
+                  click — which is what sent someone to SSH into the host and
                   run `claude login` by hand. The credential can be set over the
-                  wire, so offer it here, on the machine it belongs to. */}
+                  wire, so offer it here, on the host it belongs to. */}
               {b.state !== 'present' ? (
                 <button
                   type="button"
@@ -404,7 +404,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
       {report ? <ClaudeSettingsEditor host={host} /> : null}
 
       <div className="set-card set-card-gap">
-        <Row title="Remove this machine">
+        <Row title="Remove this host">
           <button
             type="button"
             className="set-btn danger"
@@ -485,7 +485,7 @@ function ThisMac(): JSX.Element | null {
       <div className="set-row">
         <div className="set-row-head">
           <div className="set-row-text">
-            <span className="set-row-title">Machine</span>
+            <span className="set-row-title">Host</span>
             <span className="set-sub">Not installed</span>
           </div>
           <button
@@ -516,7 +516,7 @@ function osOptionsFrom(targets: string[]): { value: 'macos' | 'linux'; label: st
 }
 
 /**
- * Adding a machine. The registration code and the install command BOTH come
+ * Adding a host. The registration code and the install command BOTH come
  * from the server — this screen mints nothing, and never composes the command
  * itself (spec/11 § Host installation).
  */
@@ -550,11 +550,11 @@ function AddHost({ onClose }: { onClose: () => void }): JSX.Element {
     manifest.isError || (manifest.data !== undefined && options.length === 0);
 
   return (
-    <Group label="Add a machine" testid="add-host-panel">
+    <Group label="Add a host" testid="add-host-panel">
       {manifest.isPending ? <Note>…</Note> : null}
       {nothingPublished ? (
         <Note testid="add-host-error">
-          No machine build has been published yet. Publish one with <code>pnpm build:host</code>.
+          No host build has been published yet. Publish one with <code>pnpm build:host</code>.
         </Note>
       ) : null}
       {!nothingPublished && options.length > 0 ? (
@@ -563,7 +563,7 @@ function AddHost({ onClose }: { onClose: () => void }): JSX.Element {
               platform itself, so every OS produced the SAME command. What the
               OS actually decides is whether a build EXISTS, stated here. */}
           <div className="set-row stack">
-            <span className="set-row-title">Run on the new machine</span>
+            <span className="set-row-title">Run on the new host</span>
             {install.data ? (
               <pre className="set-pre" data-testid="add-host-command">
                 {install.data.command}

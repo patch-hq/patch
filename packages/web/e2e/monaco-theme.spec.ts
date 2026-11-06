@@ -16,7 +16,7 @@ import { test, expect } from '@playwright/test';
 const HARNESS = '/app/dev-harness.html?chat=chat_bus&editor=diff';
 
 // Monaco is a big lazy chunk (~2s to first paint on an idle box, worse with
-// four Playwright workers sharing the machine). Only the mount gets headroom.
+// four Playwright workers sharing the host). Only the mount gets headroom.
 const MONACO_MOUNT = { timeout: 20_000 };
 
 /**

@@ -4,7 +4,7 @@
 // and silent about the UI, which is how prod served an 8-day-old SPA for a week
 // with nothing in the product able to say so. So these tests are mostly about the
 // page refusing to look healthy when it isn't: drift is shown with a remedy, a
-// machine with a newer host waiting is listed with an Update button, a shell
+// host with a newer host waiting is listed with an Update button, a shell
 // that cannot self-update says why, and a failed check never reads as fine.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -221,40 +221,6 @@ describe('UpdatesPage', () => {
     expect(screen.queryByTestId('version-drift')).toBeNull();
   });
 
-  it('says a host is waiting for chats, with no Update button, when its update is held', async () => {
-    stubFetch(null);
-    reportHost('host-a', { hostName: 'laptop', updateAvailable: true, updateHeld: true });
-    usePresenceStore.getState().setHostOnline('host-a', true);
-    renderPage();
-    await loaded();
-    expect(screen.getByTestId('update-status')).toHaveTextContent(
-      'Updating when your chats are idle',
-    );
-    expect(screen.getByTestId('version-host-host-a')).toHaveTextContent(
-      'Update waiting for chats to finish',
-    );
-    expect(screen.queryByTestId('update-all')).toBeNull();
-  });
-
-  it('Update now on a held host forces the install, but only after confirming', async () => {
-    stubFetch(null);
-    reportHost('host-a', { hostName: 'laptop', updateAvailable: true, updateHeld: true });
-    usePresenceStore.getState().setHostOnline('host-a', true);
-    const send = vi.fn();
-    setActiveWs({ send } as unknown as PatchWs);
-    const confirm = vi
-      .spyOn(window, 'confirm')
-      .mockReturnValueOnce(false)
-      .mockReturnValueOnce(true);
-    renderPage();
-    await loaded();
-    fireEvent.click(screen.getByTestId('update-now-host-a'));
-    expect(send).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByTestId('update-now-host-a'));
-    expect(send).toHaveBeenCalledWith({ type: 'host.update', hostId: 'host-a', force: true });
-    confirm.mockRestore();
-  });
-
   it('states the server version, installed and latest', async () => {
     stubFetch(null);
     renderPage();
@@ -271,24 +237,6 @@ describe('UpdatesPage', () => {
     const row = screen.getByTestId('version-host-host-a');
     expect(row).toHaveTextContent('0.1.317');
     expect(row).not.toHaveTextContent('Latest');
-  });
-
-  it('does not double-report the agent lagging the server when a host row already says so', async () => {
-    stubFetch({
-      drift: [
-        {
-          kind: 'daemon-server-mismatch',
-          detail: 'the agent (1.1.580) is a different build to the server (1.1.594)',
-          remedy: 'pnpm ship server',
-        },
-      ],
-    });
-    reportHost('host-a', { hostName: 'laptop', updateAvailable: true, updateHeld: true });
-    renderPage();
-    await loaded();
-    expect(screen.getByTestId('update-status')).toHaveTextContent(
-      'Updating when your chats are idle',
-    );
   });
 
   it('says Update available when the report has drift, without printing it', async () => {

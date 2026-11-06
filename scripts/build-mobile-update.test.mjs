@@ -135,3 +135,27 @@ test('the committed certificate is a code-signing certificate valid for years', 
   const yearsLeft = (Date.parse(cert.validTo) - Date.now()) / (365 * 24 * 3600 * 1000);
   assert.ok(yearsLeft > 5, `certificate expires in ${yearsLeft.toFixed(1)} years`);
 });
+
+test('two asset paths with identical bytes are one release file', () => {
+  const same = Buffer.from('same font bytes');
+  const { files } = buildManifest({
+    metadata: {
+      fileMetadata: {
+        android: {
+          bundle: 'b.hbc',
+          assets: [
+            { path: 'assets/x', ext: 'ttf' },
+            { path: 'assets/y', ext: 'ttf' },
+          ],
+        },
+      },
+    },
+    readFile: (p) => (p === 'b.hbc' ? Buffer.from('bundle') : same),
+    expoClient: { name: 'Patch', runtimeVersion: '0.1.6' },
+    runtimeVersion: '0.1.6',
+    releaseBase: 'https://github.com/o/r/releases/download/dev-1.2.3',
+    createdAt: '2026-10-19T00:00:00.000Z',
+  });
+  const names = files.map((f) => f.name);
+  assert.equal(new Set(names).size, names.length);
+});

@@ -1,4 +1,4 @@
-// Settings → Computer use: GET /api/browser-use reads each online machine's
+// Settings → Computer use: GET /api/browser-use reads each online host's
 // status; POST /api/browser-use/:hostId/stop tells one to stop.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -71,7 +71,7 @@ describe('Computer use API', () => {
     }
   });
 
-  it('reports each online machine’s status', async () => {
+  it('reports each online host’s status', async () => {
     const { built, headers, answer } = await setup();
     try {
       const pending = built.app.inject({ method: 'GET', url: '/api/browser-use', headers });
@@ -86,7 +86,7 @@ describe('Computer use API', () => {
     }
   });
 
-  it('stop sends a stop request to that machine and returns its answer', async () => {
+  it('stop sends a stop request to that host and returns its answer', async () => {
     const { built, headers, answer, requests } = await setup();
     try {
       const pending = built.app.inject({
@@ -104,7 +104,7 @@ describe('Computer use API', () => {
     }
   });
 
-  it('stop on an offline machine is a 409, not a silent success', async () => {
+  it('stop on an offline host is a 409, not a silent success', async () => {
     const { built, headers } = await setup();
     try {
       const res = await built.app.inject({

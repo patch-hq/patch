@@ -109,6 +109,7 @@ export function AppShell(): JSX.Element {
   const sidebarWidth = useUiStore((s) => s.sidebarWidth);
   const sidebarMini = useUiStore((s) => s.sidebarMini);
   const setSidebarWidth = useUiStore((s) => s.setSidebarWidth);
+  const resetSidebarWidth = useUiStore((s) => s.resetSidebarWidth);
   const setChannelsOpen = useUiStore((s) => s.setChannelsOpen);
   const setArchivedOpen = useUiStore((s) => s.setArchivedOpen);
   const setCheatSheetOpen = useUiStore((s) => s.setCheatSheetOpen);
@@ -564,7 +565,7 @@ export function AppShell(): JSX.Element {
           useLayoutStore.getState().openTab({ kind: 'page', page: 'host-files' });
           return;
         }
-        useLayoutStore.getState().openTab({ kind: 'page', page: 'files', chatId: activeChatId });
+        useLayoutStore.getState().toggleTab({ kind: 'page', page: 'files', chatId: activeChatId });
       },
       onSearchInFiles: () => {
         // ⌘⇧F — search in files (spec/14 § File browser). The chat's own tree
@@ -659,6 +660,8 @@ export function AppShell(): JSX.Element {
             side="left"
             width={sidebarMini ? SIDEBAR_MINI_WIDTH : sidebarWidth}
             onResize={setSidebarWidth}
+            onReset={resetSidebarWidth}
+            className="grip"
             testId="sidebar-divider"
           />
         )}

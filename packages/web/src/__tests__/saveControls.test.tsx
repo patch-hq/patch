@@ -157,7 +157,7 @@ describe('the host rename commits from the field', () => {
     fireEvent.blur(field());
     const onBlur = said();
     expect(renames()).toEqual([]);
-    expect(onBlur).toEqual(['a machine name cannot be empty']);
+    expect(onBlur).toEqual(['a host name cannot be empty']);
     expect(onChord).toEqual(onBlur);
     expect(onEnter).toEqual(onBlur);
   });

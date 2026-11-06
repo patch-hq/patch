@@ -5,13 +5,7 @@
 // The server can be reachable while the host is down.
 
 import { create } from 'zustand';
-import type {
-  AuthOkHost,
-  ClaudeMemoryEntry,
-  HostAccountEvent,
-  HostConditionEvent,
-  HostInfoEvent,
-} from '@patch/wire';
+import type { AuthOkHost, ClaudeMemoryEntry, HostAccountEvent, HostInfoEvent } from '@patch/wire';
 
 // WS link states. On first launch we are `connecting` — a neutral, quiet
 // state that must NEVER render an offline/reconnecting treatment before a
@@ -64,14 +58,9 @@ export interface HostPresence {
    * That host's Claude Code settings.json + memory entries
    * (`claude_settings.list` / `.updated`, spec/02 § Claude Code settings).
    * Absent/null until the host has reported it — Settings then draws no editor
-   * rather than an empty one that would read as "this machine has none".
+   * rather than an empty one that would read as "this host has none".
    */
   claudeSettings?: { settingsJson: string; memories: ClaudeMemoryEntry[] } | null;
-  /**
-   * Why this online host is struggling (`host.condition`); null or absent while
-   * it is coping. Dropped when the host goes offline.
-   */
-  condition?: HostConditionEvent | null;
   /** Why the host dropped off, when the server could tell (`host.offline` reason). */
   offlineReason?: string | null;
 }
@@ -79,7 +68,7 @@ export interface HostPresence {
 /**
  * One backend's credential state on one host, or `null` when that host has not
  * reported it yet. The ONLY way to ask "is Claude connected?" — the question is
- * meaningless without naming a machine, so the answer always takes one.
+ * meaningless without naming a host, so the answer always takes one.
  */
 export function hostAccount(
   hosts: Record<string, HostPresence>,
@@ -125,7 +114,7 @@ interface PresenceState {
   setServerLost(v: boolean): void;
   /**
    * Every registered host, keyed by hostId, seeded from the `auth.ok`
-   * greeting so the list is complete even for machines that are asleep.
+   * greeting so the list is complete even for hosts that are asleep.
    */
   hosts: Record<string, HostPresence>;
   /**
@@ -146,6 +135,14 @@ interface PresenceState {
   everConnected: boolean;
   failedAttempts: number;
   lastClose: WsCloseInfo | null;
+  /**
+   * Set by a going-away notice (close 4503) and kept until a connection opens or
+   * the surface gives up waiting. `version` is the release the server said it is
+   * restarting into, when it said. Separate from `lastClose`, which the failed
+   * redials during the restart overwrite.
+   */
+  restarting: { version: string | null; at: number } | null;
+  setRestarting(r: { version: string | null; at: number } | null): void;
   accountId: string | null;
   surfaceId: string | null;
   setConnection(s: ConnectionState): void;
@@ -161,8 +158,6 @@ interface PresenceState {
   setHosts(hosts: AuthOkHost[]): void;
   /** One host's presence changed (`host.online` / `host.offline`). */
   setHostOnline(hostId: string, online: boolean, offlineReason?: string): void;
-  /** One host's condition (`host.condition`). */
-  setHostCondition(condition: HostConditionEvent): void;
   /** One host's self-description (`host.host`). */
   setHostReport(report: HostInfoEvent): void;
   /** One backend's credential state on one host (`host.account`). */
@@ -194,14 +189,14 @@ const anyOnline = (hosts: Record<string, HostPresence>): boolean =>
  * The host a host-scoped action targets when the user has not picked one: the
  * only registered host, else the only online one. With several candidates there
  * is no right answer, so this returns null and the caller refuses
- * — sending a host-scoped edit to a guessed machine is precisely what
+ * — sending a host-scoped edit to a guessed host is precisely what
  * `hostId` exists to prevent.
  */
 export function defaultHostId(hosts: Record<string, HostPresence>): string | null {
   const all = Object.values(hosts);
   if (all.length === 1) return (all[0] as HostPresence).hostId;
-  // Hosts come and go: with several registered, the one live machine is the
-  // unambiguous target; two live machines are a choice, not a guess.
+  // Hosts come and go: with several registered, the one live host is the
+  // unambiguous target; two live hosts are a choice, not a guess.
   const online = all.filter((h) => h.online);
   return online.length === 1 ? (online[0] as HostPresence).hostId : null;
 }
@@ -219,6 +214,7 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
   everConnected: false,
   failedAttempts: 0,
   lastClose: null,
+  restarting: null,
   accountId: null,
   surfaceId: null,
   setAuthRejected(reason) {
@@ -265,20 +261,10 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
           online,
           ...(online
             ? { lastSeenAt: Date.now(), offlineReason: null }
-            : { condition: null, offlineReason: offlineReason ?? null }),
+            : { offlineReason: offlineReason ?? null }),
         },
       };
       return { hosts, daemon: anyOnline(hosts) ? 'online' : 'offline' };
-    });
-  },
-  setHostCondition(condition) {
-    set((s) => {
-      const prev = s.hosts[condition.hostId] ?? blankHost(condition.hostId);
-      const hosts = {
-        ...s.hosts,
-        [condition.hostId]: { ...prev, condition: condition.state === 'online' ? null : condition },
-      };
-      return { hosts };
     });
   },
   setHostReport(report) {
@@ -330,7 +316,10 @@ export const usePresenceStore = create<PresenceState>((set, get) => ({
     });
   },
   noteWsOpen(url) {
-    set({ wsUrl: url, everConnected: true, failedAttempts: 0 });
+    set({ wsUrl: url, everConnected: true, failedAttempts: 0, restarting: null });
+  },
+  setRestarting(r) {
+    set({ restarting: r });
   },
   noteWsClose(info) {
     set((s) => ({ lastClose: info, failedAttempts: s.failedAttempts + 1 }));

@@ -115,7 +115,7 @@ describe.runIf(modelPresent)('real Silero VAD inference', () => {
 });
 
 // --- Mocked onnxruntime-node: exercises the Silero factory/session/state
-// machine WITHOUT a real ONNX model file (group 13/E1 coverage gap). The
+// host WITHOUT a real ONNX model file (group 13/E1 coverage gap). The
 // real dep (`onnxruntime-node`) is a normal package dependency and IS
 // installed, but no `silero_vad.onnx` ships in this worktree — so the
 // `describe.runIf(modelPresent)` block above never runs in CI here. We

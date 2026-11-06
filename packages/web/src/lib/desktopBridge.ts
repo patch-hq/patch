@@ -112,7 +112,7 @@ export interface PatchDesktopBridge {
    */
   /**
    * spec/02 § Browser — In the Patch app. The agent's tabs, when the host on
-   * this machine keeps its browser in this app: a large view shows the tab
+   * this host keeps its browser in this app: a large view shows the tab
    * itself laid over its place in the window. `onInput` says the user pressed
    * or typed in a tab being shown. Absent on a shell that predates it.
    */
@@ -148,11 +148,11 @@ export interface PatchDesktopBridge {
   getUpdaterState?(): Promise<DesktopUpdaterState>;
   /**
    * spec/09 § Presence heuristic — milliseconds since the last input anywhere
-   * on the machine. Absent on shells that predate it, and in a browser.
+   * on the host. Absent on shells that predate it, and in a browser.
    */
   getSystemIdleMs?(): Promise<number>;
   /**
-   * spec/09 § Presence heuristic — idle time plus `away` while the machine is
+   * spec/09 § Presence heuristic — idle time plus `away` while the host is
    * locked or asleep. Absent on shells that predate it, which have only
    * `getSystemIdleMs`.
    */
@@ -177,12 +177,14 @@ export interface PatchDesktopBridge {
   copyImagePng?(png: Uint8Array): Promise<void>;
   /**
    * Open a file with its default app, or reveal it in the file manager, on the
-   * machine the shell runs on. Only meaningful for a file the shell's own host
+   * host the shell runs on. Only meaningful for a file the shell's own host
    * wrote. Absent in a browser and on shells that predate it.
    */
   openPath?(path: string, mode: 'file' | 'folder'): Promise<void>;
   /** Run a check now and resolve with the resulting state. */
   checkForUpdates?(): Promise<DesktopUpdaterState>;
+  /** Report what an update banner showed (or that it cleared) to the shell's updater log. */
+  logUpdateBanner?(shown: boolean, text: string): void;
   /** Subscribe to state pushes from main (download progress, errors). */
   onUpdaterState?(cb: (state: DesktopUpdaterState) => void): () => void;
   /**
@@ -199,17 +201,14 @@ export interface PatchDesktopBridge {
   installUpdate?(): void;
   /**
    * spec/14 § Links and the web panel — ask the shell to SHOW a page in the
-   * right-docked web panel. This is Patch showing you something (an artifact, a
-   * preview). A link the user clicks can land in the same panel, but it gets
+   * right-docked web panel. This is Patch showing you something (a
+   * preview; artifacts are tabs, not this panel). A link the user clicks can land in the same panel, but it gets
    * there in the main process (the shell's own link policy decides from the
    * click's gesture), never through this bridge.
    */
   openPanel?(url: string): void;
   /**
-   * spec/14 § Artifacts — ask the shell to CLOSE the right-docked web panel.
-   * The panel shows the artifact belonging to the chat you are in, so opening a
-   * chat that has none (or leaving the chat route) has to be able to put it
-   * away again, not just replace its page.
+   * Ask the shell to CLOSE the right-docked web panel.
    */
   closePanel?(): void;
   /**
@@ -311,3 +310,15 @@ export function useDesktopUpdaterState(): DesktopUpdaterState | null {
 export type MeetingPermissionKind = 'microphone' | 'callAudio' | 'accessibility';
 export type MeetingPermissionState = 'granted' | 'missing' | 'unknown';
 export type MeetingPermissions = Record<MeetingPermissionKind, MeetingPermissionState>;
+
+/**
+ * Record in the shell's updater log whether an update prompt is on screen and
+ * what it says. No bridge (a browser) → nothing to record into, not an error.
+ */
+export function useLogUpdateBanner(source: 'desktop' | 'web', text: string | null): void {
+  useEffect(() => {
+    const bridge = getDesktopBridge();
+    if (!bridge?.logUpdateBanner) return;
+    bridge.logUpdateBanner(text !== null, `${source}: ${text ?? 'cleared'}`);
+  }, [source, text]);
+}

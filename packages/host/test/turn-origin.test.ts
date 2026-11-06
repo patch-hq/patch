@@ -244,7 +244,7 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
       await tick();
       const first = daemon.sendInput({
         chatId,
-        message: 'from the machine',
+        message: 'from the host',
         localId: 'm1',
         origin: 'machine',
       });
@@ -271,7 +271,7 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
       await tick();
       const second = daemon.sendInput({
         chatId,
-        message: 'from the machine',
+        message: 'from the host',
         localId: 'm1',
         origin: 'machine',
       });
@@ -385,7 +385,7 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
 
     // A machine turn (self-wake / send_to) interrupted by the user's promoted
     // message. The interrupted turn's own origin must not settle either — it
-    // would be a `machine` frame the notifier silently drops, splitting one
+    // would be a `host` frame the notifier silently drops, splitting one
     // drain into two settles.
     {
       const g = abortableGated();
@@ -394,7 +394,7 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
       await tick();
       void daemon.sendInput({
         chatId,
-        message: 'from the machine',
+        message: 'from the host',
         localId: 'm1',
         origin: 'machine',
       });
@@ -453,7 +453,7 @@ describe('turn origin (spec/09 § Whose turn it was)', () => {
     });
     await tick(80);
 
-    // The turn is on disk as owed, tagged machine.
+    // The turn is on disk as owed, tagged host.
     expect(metaStore.read(chatId)?.pendingTurns?.[0]?.origin).toBe('machine');
 
     // A fresh host over the same home re-sends it.

@@ -23,7 +23,7 @@ import type { HostLink } from '../host-link.js';
 import { checkRegisteredHost, UNKNOWN_HOST_STATUS } from '../host-addressing.js';
 import { JobCreateBody, JobPatchBody, type JobsInterface } from './types.js';
 import { JobLogs } from './logs.js';
-import { JOB_ID_REGEX } from './logs.js';
+import { JOB_ID_REGEX, JOB_LOG_MAX_LIMIT } from './logs.js';
 import type { JobAlerts } from './alerts.js';
 import { JobValidationError } from './validate.js';
 import type { JobDispatcher } from './dispatcher.js';
@@ -503,7 +503,9 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobRoutesDeps): vo
       }
       if (!deps.jobLogs) return reply.code(503).send({ error: 'job logs not configured' });
       const rawLimit = req.query?.limit;
-      const limit = rawLimit ? Math.min(200, Math.max(1, Number(rawLimit) || 50)) : 50;
+      const limit = rawLimit
+        ? Math.min(JOB_LOG_MAX_LIMIT, Math.max(1, Number(rawLimit) || 50))
+        : 50;
       return reply.code(200).send({ runs: deps.jobLogs.readRuns(req.params.id, limit) });
     },
   );
@@ -535,7 +537,9 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobRoutesDeps): vo
       }
       if (!deps.jobLogs) return reply.code(503).send({ error: 'job logs not configured' });
       const rawLimit = req.query?.limit;
-      const limit = rawLimit ? Math.min(200, Math.max(1, Number(rawLimit) || 50)) : 50;
+      const limit = rawLimit
+        ? Math.min(JOB_LOG_MAX_LIMIT, Math.max(1, Number(rawLimit) || 50))
+        : 50;
       return reply.code(200).send({ webhooks: deps.jobLogs.readWebhooks(req.params.id, limit) });
     },
   );

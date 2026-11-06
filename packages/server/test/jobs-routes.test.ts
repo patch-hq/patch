@@ -12,7 +12,7 @@ import { Registry } from '../src/registry.js';
 import { InProcessHostLink } from '../src/host-link.js';
 import { registerJobRoutes } from '../src/jobs/routes.js';
 import { JobStore } from '../src/jobs/store.js';
-import { JobLogs } from '../src/jobs/logs.js';
+import { JobLogs, JOB_LOG_MAX_LIMIT } from '../src/jobs/logs.js';
 import { JobListEntry, JobWithCounts } from '../src/jobs/types.js';
 import type { JobsInterface, Job, JobCreateBody, JobPatchBody } from '../src/jobs/types.js';
 
@@ -1381,6 +1381,35 @@ describe('jobs REST routes', () => {
         });
         expect(res.statusCode).toBe(200);
         expect((res.json() as { webhooks: unknown[] }).webhooks).toEqual([]);
+      } finally {
+        await app.close();
+        await store.close();
+      }
+    });
+
+    it('GET /webhooks can read past 200 deliveries and clamps at JOB_LOG_MAX_LIMIT', async () => {
+      const store = new JobStore({ dataDir: dir, logger: silentLogger, watch: false });
+      const job = store.create({
+        name: 'long-history',
+        trigger: { type: 'cron', expression: '0 9 * * *' },
+        action: { type: 'spawn', hostId: 'd1', folder: '/x', prompt: 'x' },
+      });
+      const logs = new JobLogs(dir);
+      for (let i = 1; i <= JOB_LOG_MAX_LIMIT + 5; i++) {
+        logs.appendWebhook({ ts: i, jobId: job.id, signature: 'ok', status: 200 } as never);
+      }
+      const { app, jwt } = await rawApp(store, { withJobLogs: true });
+      try {
+        const get = async (q: string) =>
+          (
+            await app.inject({
+              method: 'GET',
+              url: `/api/jobs/${job.id}/webhooks?limit=${q}`,
+              headers: { authorization: `Bearer ${jwt}` },
+            })
+          ).json() as { webhooks: unknown[] };
+        expect((await get('500')).webhooks).toHaveLength(500);
+        expect((await get('999999')).webhooks).toHaveLength(JOB_LOG_MAX_LIMIT);
       } finally {
         await app.close();
         await store.close();

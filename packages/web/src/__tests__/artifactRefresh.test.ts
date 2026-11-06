@@ -1,10 +1,10 @@
-// spec/14 § Artifacts — when the agent republishes the artifact the desktop
-// panel is showing, the panel reloads it; any other artifact is left alone.
+// spec/14 § Artifacts — when the agent republishes a page, an open artifact tab
+// for that same page reloads; any other artifact is left alone.
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { WireEvent } from '@patch/wire';
 import { useChatStore } from '../stores/chatStore.js';
-import { _resetArtifactPanel, rememberArtifact } from '../lib/artifactPanel.js';
+import { onArtifactRefresh } from '../lib/artifactRefresh.js';
 
 const artifact = (artifactId: string, seq: number): WireEvent =>
   ({
@@ -18,37 +18,19 @@ const artifact = (artifactId: string, seq: number): WireEvent =>
     seq,
   }) as WireEvent;
 
-const origin = window.location.origin;
-
-describe('republishing the artifact on show', () => {
-  let openPanel: ReturnType<typeof vi.fn>;
+describe('republishing an artifact', () => {
   beforeEach(() => {
     useChatStore.getState()._reset();
-    _resetArtifactPanel();
-    openPanel = vi.fn();
-    (window as unknown as { patch?: unknown }).patch = { openPanel, closePanel: vi.fn() };
-  });
-  afterEach(() => {
-    delete (window as unknown as { patch?: unknown }).patch;
-    _resetArtifactPanel();
   });
 
-  it('reloads the panel with the republished URL', () => {
+  it('notifies listeners with the republished page path', () => {
+    const listener = vi.fn();
+    const off = onArtifactRefresh(listener);
     useChatStore.getState().applyEvent(artifact('aaa', 1));
-    rememberArtifact('chat_a', `${origin}/api/chats/chat_a/artifact/aaa?sig=abc`);
+    expect(listener).not.toHaveBeenCalled(); // first publish is not a refresh
     useChatStore.getState().applyEvent(artifact('aaa', 2));
-    expect(openPanel).toHaveBeenCalledTimes(1);
-    expect(openPanel).toHaveBeenCalledWith(`${origin}/api/chats/chat_a/artifact/aaa?sig=abc`);
-  });
-
-  it('leaves the panel alone when a different artifact is republished', () => {
-    rememberArtifact('chat_a', `${origin}/api/chats/chat_a/artifact/aaa?sig=abc`);
-    useChatStore.getState().applyEvent(artifact('bbb', 2));
-    expect(openPanel).not.toHaveBeenCalled();
-  });
-
-  it('does nothing when no panel is open', () => {
-    useChatStore.getState().applyEvent(artifact('aaa', 2));
-    expect(openPanel).not.toHaveBeenCalled();
+    off();
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith('/api/chats/chat_a/artifact/aaa');
   });
 });

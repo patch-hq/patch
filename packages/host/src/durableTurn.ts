@@ -22,10 +22,11 @@
 //     a permission prompt, a hook — is delivered again, so the new host asks
 //     it again; one it did answer (`in.jsonl` holds the answer) is not.
 //
-// Nothing here waits for an idle machine: the point is that a restart can
+// Nothing here waits for an idle host: the point is that a restart can
 // happen at any moment.
 
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
   closeSync,
@@ -36,18 +37,21 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  copyFileSync,
   writeFileSync,
 } from 'node:fs';
 import { connect, type Socket } from 'node:net';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import type { SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
-import { linkUserConfigIntoResumeDir } from './claudeSpawn.js';
+import { linkUserConfigIntoChatDir } from './claudeSpawn.js';
+import { inWorkSlice } from './workSlice.js';
 import {
   RUNNER_EXIT,
   RUNNER_IN,
   RUNNER_INFO,
   RUNNER_OUT,
+  RUNNER_PROTOCOL,
   RUNNER_SOCKET,
   type RunnerExit,
 } from './turnRunner.js';
@@ -117,11 +121,16 @@ function isAlive(pid: number): boolean {
   }
 }
 
+/** The runner protocols this host can talk to. */
+export const SUPPORTED_RUNNER_PROTOCOLS: readonly number[] = [RUNNER_PROTOCOL];
+
 export interface TurnOnDisk {
   dir: string;
   chatId: string;
   localId?: string;
   accountId?: string;
+  /** The protocol the turn's runner speaks (1 when its runner.json predates the field). */
+  protocol: number;
   /**
    * `live`: the runner is up (claude may or may not still be running);
    * `exited`: claude finished while no host was attached and everything it
@@ -142,7 +151,7 @@ export function inspectTurnDir(dir: string): TurnOnDisk | undefined {
     join(dir, TURN_META),
   );
   if (!meta) return undefined;
-  const info = readJson<{ pid: number }>(join(dir, RUNNER_INFO));
+  const info = readJson<{ pid: number; protocol?: number }>(join(dir, RUNNER_INFO));
   const exited = existsSync(join(dir, RUNNER_EXIT));
   const live =
     !exited && info !== undefined && isAlive(info.pid) && existsSync(join(dir, RUNNER_SOCKET));
@@ -151,6 +160,7 @@ export function inspectTurnDir(dir: string): TurnOnDisk | undefined {
     chatId: meta.chatId,
     ...(meta.localId !== undefined ? { localId: meta.localId } : {}),
     ...(meta.accountId !== undefined ? { accountId: meta.accountId } : {}),
+    protocol: info?.protocol ?? 1,
     state: exited ? 'exited' : live ? 'live' : 'lost',
     consumed: readJson<Consumed>(join(dir, CONSUMED)) ?? null,
   };
@@ -162,6 +172,23 @@ export function listTurnDirs(config: DurableTurnConfig): string[] {
   return readdirSync(config.turnsDir, { withFileTypes: true })
     .filter((d) => d.isDirectory())
     .map((d) => d.name);
+}
+
+const KEPT_LOGS = 20;
+
+/**
+ * A turn directory is deleted when its turn ends, and runner.log with it. When
+ * the turn ended abnormally that log is the only record of why, so copy it to
+ * `turn-failures/` beside the turns directory first (newest 20 kept).
+ */
+export function keepRunnerLog(dir: string, reason: string): void {
+  const log = join(dir, RUNNER_LOG);
+  if (!existsSync(log)) return;
+  const dest = join(dirname(dirname(dir)), 'turn-failures');
+  mkdirSync(dest, { recursive: true });
+  copyFileSync(log, join(dest, `${Date.now()}-${basename(dir)}-${reason}.log`));
+  const old = readdirSync(dest).sort().slice(0, -KEPT_LOGS);
+  for (const f of old) rmSync(join(dest, f), { force: true });
 }
 
 /**
@@ -267,10 +294,21 @@ export class DurableTurn {
   private consumed: Consumed | null;
   private consumedDirty = false;
   private readonly skipUntil: Consumed | null;
+  /**
+   * Turn directories are per chat, so a newer turn of the chat reuses the one
+   * this turn made. The id in turn.json says whose it is: a turn that has been
+   * replaced must not remove or kill the runner of the turn that replaced it.
+   */
+  private readonly ownerId: string | undefined;
 
   constructor(private readonly req: DurableTurnRequest) {
     this.chatId = req.chatId;
     this.dir = turnDirFor(req.config, req.chatId);
+    // A reattached turn carries on the previous host's directory, so it takes
+    // that directory's owner id (none, for one written before ids existed).
+    this.ownerId = req.attach
+      ? readJson<{ ownerId?: string }>(join(this.dir, TURN_META))?.ownerId
+      : randomUUID();
     this.consumed = req.attach?.consumed ?? null;
     this.skipUntil = req.attach ? (req.attach.consumed ?? null) : null;
   }
@@ -288,7 +326,7 @@ export class DurableTurn {
 
   /** The SDK's `spawnClaudeCodeProcess`. */
   spawn = (opts: SpawnOptions): SpawnedProcess => {
-    linkUserConfigIntoResumeDir(opts.env);
+    linkUserConfigIntoChatDir(opts.env);
     liveTurns.add(this);
     const proc = this.req.attach ? this.reattach() : this.start(opts);
     this.proc = proc;
@@ -310,28 +348,30 @@ export class DurableTurn {
         { chatId: this.chatId, dir: this.dir },
         'durable turn: a previous turn of this chat was still on disk; ending it',
       );
+      keepRunnerLog(this.dir, 'leftover');
       retireTurn(this.dir);
     }
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
     writeJsonAtomic(join(this.dir, TURN_META), {
       chatId: this.chatId,
+      ownerId: this.ownerId,
       ...(this.req.localId !== undefined ? { localId: this.req.localId } : {}),
       ...(this.req.accountId !== undefined ? { accountId: this.req.accountId } : {}),
       startedAt: Date.now(),
     });
     const logFd = openSync(join(this.dir, RUNNER_LOG), 'a');
-    const child = spawn(
-      this.req.config.runner.command,
-      [...this.req.config.runner.args, this.dir],
-      {
-        cwd: this.dir,
-        // Its own session: launchd/systemd stopping the host, or the host's
-        // own process group going, must not reach it.
-        detached: true,
-        stdio: ['pipe', 'ignore', logFd],
-        windowsHide: true,
-      },
-    );
+    const launch = inWorkSlice(this.req.config.runner.command, [
+      ...this.req.config.runner.args,
+      this.dir,
+    ]);
+    const child = spawn(launch.command, launch.args, {
+      cwd: this.dir,
+      // Its own session: launchd/systemd stopping the host, or the host's
+      // own process group going, must not reach it.
+      detached: true,
+      stdio: ['pipe', 'ignore', logFd],
+      windowsHide: true,
+    });
     closeSync(logFd);
     const proc = new RunnerProcess(this, 'fresh');
     // The spawn spec — credentials included — travels over the pipe, never
@@ -363,6 +403,11 @@ export class DurableTurn {
     const disk = inspectTurnDir(this.dir);
     if (!disk || disk.state === 'lost') {
       throw new Error(`durable turn: nothing to reattach to for chat ${this.chatId}`);
+    }
+    if (!SUPPORTED_RUNNER_PROTOCOLS.includes(disk.protocol)) {
+      throw new Error(
+        `durable turn: chat ${this.chatId}'s runner speaks protocol ${disk.protocol}; this host speaks ${SUPPORTED_RUNNER_PROTOCOLS.join(', ')}`,
+      );
     }
     const proc = new RunnerProcess(this, 'attach', readAttachState(this.dir));
     this.req.log.info(
@@ -413,19 +458,32 @@ export class DurableTurn {
     liveTurns.delete(this);
     const proc = this.proc;
     if (!proc || proc.exited) {
-      rmSync(this.dir, { recursive: true, force: true });
+      this.removeDirIfOwned();
       return;
     }
     proc.kill('SIGKILL');
     const timer = setTimeout(() => {
+      if (!this.ownsDir()) return;
       this.req.log.warn({ chatId: this.chatId }, 'durable turn: runner did not exit; retiring it');
+      keepRunnerLog(this.dir, 'unresponsive');
       retireTurn(this.dir);
     }, 5000);
     timer.unref();
     proc.once('exit', () => {
       clearTimeout(timer);
-      rmSync(this.dir, { recursive: true, force: true });
+      this.removeDirIfOwned();
     });
+  }
+
+  /** False once a newer turn of this chat has taken the directory over. */
+  private ownsDir(): boolean {
+    const meta = readJson<{ ownerId?: string }>(join(this.dir, TURN_META));
+    return meta === undefined || meta.ownerId === this.ownerId;
+  }
+
+  private removeDirIfOwned(): void {
+    if (this.ownsDir() && this.proc?.failure) keepRunnerLog(this.dir, 'failed');
+    if (this.ownsDir()) rmSync(this.dir, { recursive: true, force: true });
   }
 
   get isDetaching(): boolean {
@@ -747,9 +805,12 @@ class RunnerProcess extends EventEmitter implements SpawnedProcess {
     setImmediate(() => this.emit('exit', code, signal));
   }
 
+  failure: string | undefined;
+
   fail(err: Error): void {
     if (this.finished) return;
     this.finished = true;
+    this.failure = err.message;
     this.turn.logger.error({ chatId: this.turn.chatId, err: err.message }, 'durable turn failed');
     // The SDK listens for this from the moment it spawns; after it has let go
     // there is no one to tell but the log.

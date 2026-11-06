@@ -23,10 +23,10 @@ import { dirname, join } from 'node:path';
 
 type QueryFactory = (args: { prompt: unknown; options: Record<string, unknown> }) => unknown;
 
-// `loadSdk` prefers the backend PROVISIONED on the machine (spec/02 § Agent
+// `loadSdk` prefers the backend PROVISIONED on the host (spec/02 § Agent
 // backends) over the ambient package. Point every test at an empty patch home
 // so what it exercises is the mocked bare specifier, and never whatever this
-// developer's own machine happens to have provisioned.
+// developer's own host happens to have provisioned.
 let emptyPatchHome: string;
 let priorPatchHome: string | undefined;
 
@@ -769,7 +769,7 @@ describe('createRealSdkBackend — where the agent backend comes from', () => {
   it('says the ARTIFACT is incomplete when the SDK will not load', () => {
     // The SDK is the host's own library dependency and ships inside the
     // artifact (scripts/build-host.mjs copies it beside host.mjs). It is not
-    // something a machine is expected to have, so "install it on this host" is
+    // something a host is expected to have, so "install it on this host" is
     // the wrong advice — a build that cannot load it is a broken build.
     // Asserted on the source rather than by breaking the import, because the
     // monorepo always resolves it.
@@ -779,7 +779,7 @@ describe('createRealSdkBackend — where the agent backend comes from', () => {
     expect(src).not.toContain('provisionedAgentSdkEntry');
   });
 
-  it("runs every query against the MACHINE's claude, not a bundled one", async () => {
+  it("runs every query against the HOST's claude, not a bundled one", async () => {
     // spec/02 § Agent backends: "a host runs the same `claude` the user runs".
     // The artifact carries ~4 MB of library and never the ~200 MB CLI, so
     // without this option the SDK looks for a platform package that isn't there
@@ -1320,8 +1320,64 @@ describe('createRealSdkBackend — permission mode is honoured or the turn dies'
     ).catch((e: unknown) => e as Error & { requested: string; effective: string });
     expect(err.requested).toBe('auto');
     expect(err.effective).toBe('default');
-    expect(err.message).toContain("'auto'");
-    expect(err.message).toContain("'default'");
+    expect(err.message).toBe(
+      "Claude Code changed permission mode 'auto' to 'default'. Turn refused.",
+    );
+  });
+
+  it('keeps model and Claude Code version on the error, and no guessed cause', async () => {
+    const { createRealSdkBackend } = await loadRealBackend(() => {
+      async function* gen(): AsyncGenerator<unknown> {
+        yield {
+          ...(initWith('default') as object),
+          model: 'claude-opus-4',
+          claude_code_version: '2.1.5',
+        };
+      }
+      return gen();
+    });
+    const backend = createRealSdkBackend();
+    const err = await drain(
+      backend.run({
+        prompt: 'hi',
+        cwd: '/tmp',
+        abortController: new AbortController(),
+        oauthAccessToken: 'tok',
+        permissionMode: 'auto',
+      }),
+    ).catch((e: unknown) => e as Error);
+    expect(err.message).toBe(
+      "Claude Code changed permission mode 'auto' to 'default'. Turn refused.",
+    );
+    expect(err).toMatchObject({ model: 'claude-opus-4', claudeCodeVersion: '2.1.5' });
+    expect(err.message).not.toMatch(/because|commonly|too old/);
+  });
+
+  it('a mode switched while the turn runs neither fails nor reaches the turn', async () => {
+    let setLive: (c: string, m: 'bypassPermissions') => Promise<void> = () =>
+      Promise.reject(new Error('module not loaded'));
+    const { createRealSdkBackend, setLiveRunPermissionMode } = await loadRealBackend(() => {
+      async function* gen(): AsyncGenerator<unknown> {
+        // The user switched to bypass before init arrived; Claude still reports `auto`.
+        await setLive('chat-switch', 'bypassPermissions');
+        yield initWith('auto');
+        yield { type: 'result', session_id: 'sess-init', result: 'done' };
+      }
+      return gen();
+    });
+    setLive = setLiveRunPermissionMode;
+    const backend = createRealSdkBackend();
+    const out = await drain(
+      backend.run({
+        prompt: 'hi',
+        chatId: 'chat-switch',
+        cwd: '/tmp',
+        abortController: new AbortController(),
+        oauthAccessToken: 'tok',
+        permissionMode: 'auto',
+      }),
+    );
+    expect(out.some((e) => e.type === 'result')).toBe(true);
   });
 
   it('runs normally when the mode comes back as asked', async () => {

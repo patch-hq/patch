@@ -43,18 +43,19 @@ test.describe('task bar', () => {
     expect(bar!.y + bar!.height).toBeLessThanOrEqual(stream!.y + 1);
   });
 
-  test('expands to the full list, with completed items struck through', async ({ page }) => {
+  test('expands to the full list, with completed items greyed', async ({ page }) => {
     await page.goto(HARNESS);
     await page.getByTestId('task-bar-summary').click();
     const rows = page.getByTestId('task-row');
     await expect(rows).toHaveCount(3);
     await expect(rows.nth(0)).toContainText('read the current indexer');
     await expect(rows.nth(2)).toContainText('schedule it nightly');
-    const decoration = await rows
-      .nth(0)
-      .getByTestId('task-text')
-      .evaluate((el) => getComputedStyle(el).textDecorationLine);
-    expect(decoration).toContain('line-through');
+    const colour = (i: number) =>
+      rows
+        .nth(i)
+        .getByTestId('task-text')
+        .evaluate((el) => getComputedStyle(el).color);
+    expect(await colour(0)).not.toBe(await colour(2));
     // Collapsing puts it away again.
     await page.getByTestId('task-bar-summary').click();
     await expect(page.getByTestId('task-bar-list')).toHaveCount(0);

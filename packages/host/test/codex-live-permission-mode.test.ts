@@ -6,10 +6,13 @@ import { CodexHistory } from '../src/codexHistory.js';
 import { CodexBackend } from '../src/codexBackend.js';
 import { setLiveRunPermissionMode } from '../src/sdkBackend.js';
 
-// A mode chosen while a Codex turn is running reaches that turn: Codex fixed its
-// approval policy when the turn began, so the host answers its approval requests
-// itself once the chat is on bypass.
-async function runWithApproval(switchTo: 'bypassPermissions' | undefined) {
+// A mode chosen while a Codex turn is running applies from the next turn, except
+// that a turn sitting in plan moves at once ("Approve & resume bypass"): the host
+// then answers Codex's approval requests itself.
+async function runWithApproval(
+  switchTo: 'bypassPermissions' | undefined,
+  startMode: 'default' | 'plan' = 'default',
+) {
   const root = mkdtempSync(join(tmpdir(), 'patch-codex-live-mode-'));
   const history = new CodexHistory(root);
   let listener: ((m: any) => void) | undefined;
@@ -51,7 +54,7 @@ async function runWithApproval(switchTo: 'bypassPermissions' | undefined) {
     cwd: root,
     chatId: 'c',
     model: 'gpt',
-    permissionMode: 'default',
+    permissionMode: startMode,
     oauthAccessToken: '',
     abortController: new AbortController(),
     onPermissionRequest: async (r: any) => {
@@ -65,8 +68,13 @@ async function runWithApproval(switchTo: 'bypassPermissions' | undefined) {
 }
 
 describe('Codex live permission mode', () => {
-  it('approves without asking once the chat is switched to bypass mid-turn', async () => {
-    const { responses, asked } = await runWithApproval('bypassPermissions');
+  it('keeps asking when a default-mode turn is switched to bypass mid-turn', async () => {
+    const { asked } = await runWithApproval('bypassPermissions');
+    expect(asked).toHaveLength(1);
+  });
+
+  it('approves without asking once a plan-mode turn is switched to bypass', async () => {
+    const { responses, asked } = await runWithApproval('bypassPermissions', 'plan');
     expect(asked).toHaveLength(0);
     expect(responses).toEqual([{ id: 7, result: { decision: 'accept' } }]);
   });

@@ -34,6 +34,13 @@ import type { JobRunStatus } from '@patch/wire/jobs';
  */
 export const JOB_ID_REGEX = /^j_[0-9A-HJKMNP-TV-Z]{26}$/;
 
+/**
+ * Most rows a runs/webhooks read returns. The files are append-only and never
+ * trimmed; this only bounds one read, so a delivery from yesterday is still
+ * reachable with a larger `--limit`.
+ */
+export const JOB_LOG_MAX_LIMIT = 5000;
+
 export class InvalidJobIdError extends Error {
   constructor(jobId: string) {
     super(`invalid jobId format: ${jobId}`);
@@ -98,7 +105,7 @@ export interface RunLogEntry {
    * Where the fire went. `chatId` is present only once the host has confirmed
    * a chat (spec/08 ## Execution model step 6) — a fire that never landed must
    * not carry one. `hostId` names the host on every folder-addressed fire,
-   * so `dispatch-error` / `buffered` say WHICH machine (spec/08 ## Logs).
+   * so `dispatch-error` / `buffered` say WHICH host (spec/08 ## Logs).
    */
   action?: {
     type: 'spawn' | 'message' | 'continue' | 'script';

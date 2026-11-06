@@ -1,10 +1,10 @@
 // The host installer (spec/02 § Installation, spec/10 § Host registration,
 // spec/11 § Host installation).
 //
-// The live proof of this code is an artifact installing on a bare machine; what
+// The live proof of this code is an artifact installing on a bare host; what
 // is pinned here is the behaviour that is expensive to re-prove and easy to
 // regress: the platform refusal, the authority notice, the unit contents, the
-// named pairing failures, and the machine identity.
+// named pairing failures, and the host identity.
 
 import { readdirSync, utimesSync } from 'node:fs';
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
@@ -67,6 +67,12 @@ function makeArtifact(target = BUILD.target): string {
   writeFileSync(join(dir, 'build-info.json'), JSON.stringify({ ...BUILD, target }));
   writeFileSync(join(dir, 'host.mjs'), '// bundled host\n');
   writeFileSync(join(dir, 'node'), '#!/bin/sh\n');
+  if (target.startsWith('darwin')) {
+    const app = join(dir, 'Patch Host.app', 'Contents');
+    mkdirSync(join(app, 'MacOS'), { recursive: true });
+    writeFileSync(join(app, 'MacOS', 'patch-host'), '#!/bin/sh\n');
+    writeFileSync(join(app, 'Info.plist'), '<string>me.tomchambers.patch-host</string>\n');
+  }
   writeFileSync(join(dir, 'silero_vad.onnx'), 'onnx');
   writeFileSync(join(dir, 'install'), '#!/bin/sh\n');
   mkdirSync(join(dir, 'skill', 'patch-cli'), { recursive: true });
@@ -89,7 +95,7 @@ function makeCtx(over: Partial<InstallerContext> & { home: string }): InstallerC
     ...(over.serviceOps ? { serviceOps: over.serviceOps } : {}),
     ...(over.loginShellPath ? { loginShellPath: over.loginShellPath } : {}),
     // The suite provisions no sandbox: installing packages and loading an
-    // AppArmor profile is the machine's business, not a unit test's. The step
+    // AppArmor profile is the host's business, not a unit test's. The step
     // itself is covered in installer-sandbox.test.ts.
     provisionSandbox: over.provisionSandbox ?? (async () => {}),
   };
@@ -132,7 +138,7 @@ function recordingOps(
 }
 
 describe('the authority notice (spec/10 § The authority of a turn)', () => {
-  it('names the user, the machine and the home, and states the whole authority', () => {
+  it('names the user, the host and the home, and states the whole authority', () => {
     const text = authorityNotice('tom', 'laptop', '/Users/tom');
     expect(text).toContain('laptop');
     expect(text).toContain("tom's whole");
@@ -171,7 +177,7 @@ describe('an artifact for the wrong platform', () => {
     const res = await runInstaller(ctx);
     expect(res.code).toBe(65);
     const { err } = streams(ctx);
-    expect(err).toContain('this artifact is for darwin-arm64, but this machine is linux-x64');
+    expect(err).toContain('this artifact is for darwin-arm64, but this host is linux-x64');
     expect(err).toContain('Nothing has been installed');
     expect(ops.registered).toBe(0);
     expect(() => statSync(join(home, '.patch'))).toThrow();
@@ -317,7 +323,7 @@ describe('pairing failures are named, not lumped together', () => {
     expect((r as { message: string }).message).toContain('http://unreachable.invalid');
   });
 
-  it('submits the code together with this machine’s public key, and mints nothing', async () => {
+  it('submits the code together with this host’s public key, and mints nothing', async () => {
     let seen: unknown;
     await redeemPairingCode({
       serverUrl: 'http://s',
@@ -341,7 +347,7 @@ describe('pairing failures are named, not lumped together', () => {
   });
 });
 
-describe('a machine that cannot reach the server', () => {
+describe('a host that cannot reach the server', () => {
   it('still leaves a registered service, and says the code could not be submitted', async () => {
     const home = mkTmp('patch-home-');
     const ops = recordingOps();
@@ -379,7 +385,7 @@ describe('a machine that cannot reach the server', () => {
   });
 });
 
-describe('a machine that is already registered', () => {
+describe('a host that is already registered', () => {
   it('re-uses the stored credential rather than pairing again', async () => {
     const home = mkTmp('patch-home-');
     mkdirSync(join(home, '.patch'), { recursive: true });
@@ -406,8 +412,8 @@ describe('a machine that is already registered', () => {
   });
 });
 
-describe('re-running the installer WITH a code on a machine already registered', () => {
-  // spec/10: "Registration is per machine and idempotent." This used to abort
+describe('re-running the installer WITH a code on a host already registered', () => {
+  // spec/10: "Registration is per host and idempotent." This used to abort
   // 75 and tell the user to "enter a fresh code" — advice that can never work,
   // because every fresh code hits the same 409. Only the code-less re-run was
   // idempotent, so the documented recovery path was a dead end.
@@ -421,9 +427,9 @@ describe('re-running the installer WITH a code on a machine already registered',
       home,
       serviceOps: ops,
       argv: ['--non-interactive', '--server', 'http://s', '--internal-token', 't', '--code', 'c'],
-      // 409 is the server saying "a machine is already registered".
+      // 409 is the server saying "a host is already registered".
       fetchImpl: (async () =>
-        new Response('a machine is already registered', {
+        new Response('a host is already registered', {
           status: 409,
         })) as unknown as typeof fetch,
     });
@@ -440,7 +446,7 @@ describe('an install whose service does not stay up', () => {
   // The regression this guards: `systemctl restart` and `launchctl kickstart`
   // both exit 0 for a unit that starts and immediately dies, so the installer
   // printed "service started" and exited 0 over a host that crash-looped
-  // forever. A person was told the machine was installed and working when it
+  // forever. A person was told the host was installed and working when it
   // was registered and permanently offline.
   it('reports the failure and exits non-zero rather than claiming success', async () => {
     const home = mkTmp('patch-home-');
@@ -459,12 +465,12 @@ describe('an install whose service does not stay up', () => {
     expect(ops.started).toBe(1);
     const err = streams(ctx).err;
     expect(err).toContain('the service was started but is not running');
-    // It must not claim the machine is ready to use.
+    // It must not claim the host is ready to use.
     expect(streams(ctx).out).not.toContain('It appears under Settings → Hosts');
   });
 });
 
-describe('what the install puts on the machine', () => {
+describe('what the install puts on the host', () => {
   it('replaces a legacy CLI symlink without overwriting the bundled JavaScript', async () => {
     const home = mkTmp('patch-home-');
     const artifactDir = makeArtifact('linux-x64');
@@ -565,8 +571,8 @@ describe('what the install puts on the machine', () => {
     expect(nodes[0]).toBe(exe);
     expect(readFileSync(exe, 'utf8')).toBe('#!/bin/sh\n');
     const plist = readFileSync(join(runtime, 'Patch Host.app', 'Contents', 'Info.plist'), 'utf8');
-    expect(plist).toContain('<string>me.tomchambers.patch-host</string>');
-    expect(plist).toContain('<string>patch-host</string>');
+    // The signed bundle from the artifact, copied whole, never rewritten here.
+    expect(plist).toBe('<string>me.tomchambers.patch-host</string>\n');
     expect(existsSync(join(runtime, 'patch-host'))).toBe(false);
   });
 
@@ -635,7 +641,7 @@ describe('what the install puts on the machine', () => {
     expect(readFileSync(join(skill, 'SKILL.md'), 'utf8')).toContain('patch-cli');
   });
 
-  it('carries the machine’s settings into the unit, and keeps them on a bare re-run', async () => {
+  it('carries the host’s settings into the unit, and keeps them on a bare re-run', async () => {
     const home = mkTmp('patch-home-');
     let captured: Record<string, string> = {};
     const ops: ServiceOps = {
@@ -713,7 +719,7 @@ describe('installer plumbing', () => {
     expect(() => readBuildInfo(dir)).toThrow('not stamped');
   });
 
-  it('passes only the documented machine settings through', () => {
+  it('passes only the documented host settings through', () => {
     expect(
       passThroughEnv({
         WHISPER_BACKEND: 'parakeet',
@@ -724,7 +730,7 @@ describe('installer plumbing', () => {
     ).toEqual({ WHISPER_BACKEND: 'parakeet' });
   });
 
-  it('stores machine settings 0600 under the user’s own patch home', () => {
+  it('stores host settings 0600 under the user’s own patch home', () => {
     const patchHome = mkTmp('patch-home-');
     writeMachineSettings(patchHome, { serverUrl: 'http://s', env: { A: 'b' } });
     expect(readMachineSettings(patchHome)).toEqual({ serverUrl: 'http://s', env: { A: 'b' } });
@@ -733,7 +739,7 @@ describe('installer plumbing', () => {
   });
 });
 
-describe('the machine’s own identity', () => {
+describe('the host’s own identity', () => {
   let patchHome: string;
   beforeEach(() => {
     patchHome = mkTmp('patch-identity-');
@@ -776,7 +782,7 @@ describe('the shipping targets (spec/11 § Host installation)', () => {
   });
 });
 
-describe('a machine added with only a pairing code (no --internal-token)', () => {
+describe('a host added with only a pairing code (no --internal-token)', () => {
   function pairingServer(body: Record<string, unknown>): {
     fetchImpl: typeof fetch;
     completes: () => number;

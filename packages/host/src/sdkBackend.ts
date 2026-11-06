@@ -28,7 +28,6 @@ import { encodeFolder, translateAttachment } from './history.js';
 import { resolveClaudeExecutable } from './claudeExecutable.js';
 import { discoverSkills, skillsReloader } from './projectSkills.js';
 import { McpSupervisor, MCP_START_TIMEOUT_MS, supervisorHooks } from './mcpSupervisor.js';
-import { createClaudeSessionStore } from './claudeSessionStore.js';
 import { readSidecar, type DocMode } from './docSidecar.js';
 import type { TrackEntry } from './nativeReconstruct.js';
 // Type-only import — erased at runtime, so it does NOT trigger the heavy lazy
@@ -39,12 +38,10 @@ import type {
   Options,
   Query,
   SDKUserMessage,
-  SessionStoreEntry,
   SettingSource,
   SpawnedProcess,
   SpawnOptions,
 } from '@anthropic-ai/claude-agent-sdk';
-import type { Logger } from 'pino';
 
 /** A little over the longest hand-off (`timeoutSeconds` max 3600). */
 const MCP_TOOL_TIMEOUT_MS = 3_660_000;
@@ -242,9 +239,7 @@ export interface SdkRunOptions {
    * `codexBackend.ts`. Only alongside `mcpServer`: a caller that configured no
    * tools server gets none of these either. Absent/empty ⇒ `patch` alone.
    */
-  extraMcpServers?:
-    | Array<{ name: string; command: string; args: string[]; env: Record<string, string> }>
-    | undefined;
+  extraMcpServers?: ExtraMcpServer[] | undefined;
   /**
    * The user turned Patch's own tools server off on this host (Settings → MCP).
    * `patch` is then left out of the wired servers; the rest of the list still
@@ -312,26 +307,13 @@ export interface SdkRunOptions {
     sessionAllow?: boolean;
   }>;
   /**
-   * Wires the SDK's `sessionStore` option (spec/04 § History — the native
-   * resume cache, and a seamless provider switch onto Claude). Absent for the
-   * mock and for any caller not yet passing it; the real backend then falls
-   * back to the SDK's own local-disk resume, exactly as before this existed.
+   * The chat's own Claude config dir (`~/.patch/chats/<chatId>/claude`, spec/04
+   * § History). Claude runs under it as `CLAUDE_CONFIG_DIR`, so the one
+   * conversation file is read and written in place on every turn and resume.
+   * Absent for the mock and for any caller not passing it: Claude then uses
+   * its own default config dir.
    */
-  claudeSessionStore?: {
-    /** `~/.patch/chats/<chatId>/native/claude` — mirrored on every append. */
-    nativeDir: string;
-    claudeProjectsRoot: string;
-    logger: Logger;
-    /**
-     * Set only when `resumeSessionId` should NOT resume normally — a switch
-     * onto Claude, or reseeding a session the mirror and local disk have both
-     * lost. `events` is the chat's own track (oldest first), synthesized into
-     * a native session via `toClaudeSessionEntries`.
-     */
-    reseed?: { events: readonly TrackEntry[]; model: string | null };
-    /** Each batch of entries newly mirrored — see `ClaudeSessionStoreOptions.onAppend`. */
-    onAppend?: (entries: readonly SessionStoreEntry[]) => void;
-  };
+  claudeConfigDir?: string;
   /**
    * Set only for a switch onto Codex (or reseeding a Codex chat whose thread
    * is gone): starts a FRESH thread and injects the chat's own track as
@@ -1037,12 +1019,12 @@ let sdkModule: SdkModule | undefined;
  * A bare specifier, because the SDK is the host's own library dependency and
  * TRAVELS WITH IT: the artifact carries it in a `node_modules` beside
  * `host.mjs` (scripts/build-host.mjs), and a source checkout has it in the
- * monorepo's. It is not something a machine is expected to have, and nothing
+ * monorepo's. It is not something a host is expected to have, and nothing
  * installs it per host any more.
  *
- * What the machine DOES supply is the Claude Code binary the SDK drives — see
+ * What the host DOES supply is the Claude Code binary the SDK drives — see
  * `claudeExecutable.ts`. The two are separate on purpose: ~4 MB of library in
- * the artifact, ~200 MB of CLI already on the machine.
+ * the artifact, ~200 MB of CLI already on the host.
  */
 async function loadSdk(): Promise<SdkModule> {
   if (sdkModule) return sdkModule;
@@ -1056,12 +1038,17 @@ async function loadSdk(): Promise<SdkModule> {
   return sdkModule;
 }
 
-type StdioMcpServerConfig = {
-  type: 'stdio';
-  command: string;
-  args: string[];
-  env: Record<string, string>;
-};
+/**
+ * A server a chat gets beside `patch`: a stdio child of its own, or (once the
+ * host shares it, `sharedMcp.ts`) the URL of the host's one shared copy.
+ */
+export type ExtraMcpServer =
+  | { name: string; command: string; args: string[]; env: Record<string, string> }
+  | { name: string; url: string };
+
+type StdioMcpServerConfig =
+  | { type: 'stdio'; command: string; args: string[]; env: Record<string, string> }
+  | { type: 'http'; url: string };
 
 const IDLE_COMPACT_NEVER_TOKENS = 1_000_000_000;
 
@@ -1086,6 +1073,7 @@ export function buildSdkEnv(opts: SdkRunOptions): {
   const env: Record<string, string | undefined> = { ...process.env };
   delete env['ANTHROPIC_API_KEY'];
   env['CLAUDE_CODE_OAUTH_TOKEN'] = opts.oauthAccessToken;
+  if (opts.claudeConfigDir !== undefined) env['CLAUDE_CONFIG_DIR'] = opts.claudeConfigDir;
   // An unattended agent must not reach the 1Password desktop app: with the
   // integration on, every `op` call raises a macOS "would like to access data
   // from other apps" prompt, blamed on the host. Off, `op` fails fast (service
@@ -1144,7 +1132,9 @@ export function buildSdkEnv(opts: SdkRunOptions): {
         ...Object.fromEntries(
           (opts.extraMcpServers ?? []).map((s) => [
             s.name,
-            { type: 'stdio' as const, command: s.command, args: s.args, env: s.env },
+            'url' in s
+              ? { type: 'http' as const, url: s.url }
+              : { type: 'stdio' as const, command: s.command, args: s.args, env: s.env },
           ]),
         ),
       }
@@ -1296,7 +1286,7 @@ function inferenceProfileBase(opts: SdkRunOptions): Partial<Options> {
  * The Claude Code binary every query runs, as `pathToClaudeCodeExecutable`
  * (spec/02 § Agent backends — "so a host runs the same `claude` the user runs").
  *
- * Resolved ONCE per process: it is a property of the machine, not of a turn.
+ * Resolved ONCE per process: it is a property of the host, not of a turn.
  * Absent, the option is omitted and the SDK says what it looked for — the
  * artifact carries the library, never the ~200 MB CLI, so there is nothing for
  * it to fall back to and nothing here should pretend otherwise.
@@ -1313,8 +1303,8 @@ function claudeExecutablePath(): string | undefined {
   return claudeExecutable;
 }
 
-/** SDK options shared by both run paths, including the machine's CLI. */
-function machineOpts(
+/** SDK options shared by both run paths, including the host's CLI. */
+function hostOpts(
   opts: SdkRunOptions,
   durable?: DurableTurn,
   onPid?: (pid: number | undefined) => void,
@@ -1496,15 +1486,10 @@ export class PermissionModeDowngradedError extends Error {
   constructor(
     readonly requested: string,
     readonly effective: string,
+    readonly model?: string,
+    readonly claudeCodeVersion?: string,
   ) {
-    super(
-      `Claude Code downgraded permission mode '${requested}' to '${effective}'. ` +
-        `The mode this turn was given is unavailable — commonly because the host's ` +
-        `\`claude\` build is too old for it, or because the chat's model does not ` +
-        `support it — and running on '${effective}' instead would ask for approval on ` +
-        `every tool call. Choose a mode this host can honour, update the host's ` +
-        `\`claude\`, or move the chat to a model that supports the mode.`,
-    );
+    super(`Claude Code changed permission mode '${requested}' to '${effective}'. Turn refused.`);
     this.name = 'PermissionModeDowngradedError';
   }
 }
@@ -1521,14 +1506,23 @@ export class PermissionModeDowngradedError extends Error {
  * field at all — that is not the same as a mismatch, and inventing one would
  * fail every turn on that host).
  */
-function permissionModeMismatch(msg: unknown, requested: string): string | undefined {
+function permissionModeMismatch(
+  msg: unknown,
+  requested: string,
+): { effective: string; model?: string; claudeCodeVersion?: string } | undefined {
   if (typeof msg !== 'object' || msg === null) return undefined;
   const m = msg as Record<string, unknown>;
   if (m['type'] !== 'system' || m['subtype'] !== 'init') return undefined;
   const effective = m['permissionMode'];
   if (typeof effective !== 'string') return undefined;
   if (effective === requested) return undefined;
-  return effective;
+  return {
+    effective,
+    ...(typeof m['model'] === 'string' ? { model: m['model'] } : {}),
+    ...(typeof m['claude_code_version'] === 'string'
+      ? { claudeCodeVersion: m['claude_code_version'] }
+      : {}),
+  };
 }
 
 /**
@@ -1538,9 +1532,18 @@ function permissionModeMismatch(msg: unknown, requested: string): string | undef
  * and `persistentRun` so the two paths can't drift on which target is the
  * exception.
  */
-function permissionModeMismatchEnvelope(requested: string, effective: string): SdkEnvelope {
+function permissionModeMismatchEnvelope(
+  requested: string,
+  found: { effective: string; model?: string; claudeCodeVersion?: string },
+): SdkEnvelope {
+  const { effective } = found;
   if (effective !== 'plan') {
-    throw new PermissionModeDowngradedError(requested, effective);
+    throw new PermissionModeDowngradedError(
+      requested,
+      effective,
+      found.model,
+      found.claudeCodeVersion,
+    );
   }
   return { type: 'system', permissionModeAutoDowngrade: { requested, effective: 'plan' } };
 }
@@ -1858,37 +1861,6 @@ export function rejectedForWindowNamedIn(
 }
 
 /**
- * `sessionStore` for this run, or `{}` when the caller hasn't wired one
- * (mock-backend tests, or a call site not yet passing it) — the SDK then
- * falls back to its own local-disk resume, unaffected.
- */
-function sessionStoreOptFor(opts: SdkRunOptions): {
-  sessionStore?: ReturnType<typeof createClaudeSessionStore>;
-} {
-  if (!opts.claudeSessionStore) return {};
-  const cs = opts.claudeSessionStore;
-  return {
-    sessionStore: createClaudeSessionStore({
-      chatId: opts.chatId ?? '',
-      folder: opts.cwd,
-      nativeDir: cs.nativeDir,
-      claudeProjectsRoot: cs.claudeProjectsRoot,
-      logger: cs.logger,
-      ...(cs.onAppend ? { onAppend: cs.onAppend } : {}),
-      ...(cs.reseed && opts.resumeSessionId
-        ? {
-            reseed: {
-              sessionId: opts.resumeSessionId,
-              events: cs.reseed.events,
-              model: cs.reseed.model,
-            },
-          }
-        : {}),
-    }),
-  };
-}
-
-/**
  * The SDK `hooks` option that delivers {@link SdkRunOptions.onToolBoundary}
  * text at each tool boundary. Empty when the run has no boundary callback, so a
  * run without one is configured exactly as before.
@@ -1982,6 +1954,10 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   // is what every later decision in this turn reads, and `setLiveRunPermissionMode`
   // is how a change reaches the process itself.
   const live: LiveRun = { mode: opts.permissionMode ?? 'auto' };
+  // The mode this turn was ASKED to start in. Claude Code's `init` reports the
+  // mode it started in, so that is what it is checked against — never `live.mode`,
+  // which a mid-turn switch may already have moved.
+  const startedMode = live.mode;
   // A skill added or edited mid-turn reaches this process at the next tool
   // boundary (a new process on the next turn reads them anyway).
   const reloadSkills = skillsReloader(opts.cwd, () => q.reloadPlugins());
@@ -1998,7 +1974,6 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
       abortController: opts.abortController,
       resume: opts.resumeSessionId,
       ...forkOptsFor(opts),
-      ...sessionStoreOptFor(opts),
       ...(opts.model !== undefined ? { model: opts.model } : {}),
       ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
       permissionMode: live.mode,
@@ -2008,7 +1983,7 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
           }
         : {}),
       ...SHARED_OPTS,
-      ...machineOpts(opts, durable),
+      ...hostOpts(opts, durable),
       ...withMcpSupervisor(boundaryHooks(boundaryOpts), sup),
       disallowedTools: disallowedToolsFor(opts),
       env,
@@ -2038,10 +2013,10 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
       // A process that listed its skills before one was added would answer
       // "unknown command" for it; reload now, before the prompt is handled.
       if (skillsMissingFromInit(msg, opts.cwd).length > 0) await q.reloadPlugins();
-      const mismatch = permissionModeMismatch(msg, live.mode);
+      const mismatch = permissionModeMismatch(msg, startedMode);
       limitEvents.assertNotAnError(msg);
       if (mismatch !== undefined && plan.skip === 0) {
-        yield permissionModeMismatchEnvelope(live.mode, mismatch);
+        yield permissionModeMismatchEnvelope(startedMode, mismatch);
       }
       // Recorded as each envelope is handled — the consumer handles it before
       // asking for the next — so a restart resumes exactly after it. Streaming
@@ -2101,11 +2076,10 @@ export function trackLiveRun(
 }
 
 /**
- * Put the chat's running Claude Code process on `mode` now. A process takes its
- * mode from the turn that spawned it, so without this a mode chosen mid-turn
- * (e.g. "Approve & resume bypass" on a plan-mode card) only changed what the
- * chat displayed while the process kept gating every tool call. No-op when the
- * chat has no turn in flight: the next turn starts on the chat's stored mode.
+ * Move a running plan-mode turn onto `mode` now (e.g. "Approve & resume
+ * bypass" on a plan-mode card). No-op for a turn in any other mode, and when the
+ * chat has no turn in flight: the change applies from the next turn, which
+ * starts on the chat's stored mode.
  */
 export async function setLiveRunPermissionMode(
   chatId: string,
@@ -2113,6 +2087,11 @@ export async function setLiveRunPermissionMode(
 ): Promise<void> {
   const live = liveRuns.get(chatId);
   if (!live) return;
+  // A switch made while a turn runs applies from the NEXT turn: it never
+  // reaches, fails or interrupts the turn in flight. The one exception is a
+  // turn sitting in `plan`, which is how "Approve & resume bypass" moves the
+  // process out of plan.
+  if (live.mode !== 'plan') return;
   live.mode = mode;
   await live.query?.setPermissionMode(mode);
 }
@@ -2197,7 +2176,6 @@ function openPersistSession(opts: SdkRunOptions, query: SdkModule['query']): Per
       cwd: opts.cwd,
       resume: opts.resumeSessionId,
       ...forkOptsFor(opts),
-      ...sessionStoreOptFor(opts),
       ...(opts.model !== undefined ? { model: opts.model } : {}),
       ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
       permissionMode: opts.permissionMode ?? 'auto',
@@ -2211,7 +2189,7 @@ function openPersistSession(opts: SdkRunOptions, query: SdkModule['query']): Per
           }
         : {}),
       ...SHARED_OPTS,
-      ...machineOpts(opts),
+      ...hostOpts(opts),
       ...withMcpSupervisor(boundaryHooks(opts), sup),
       disallowedTools: disallowedToolsFor(opts),
       env,

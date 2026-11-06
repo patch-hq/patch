@@ -2,7 +2,7 @@
 //
 // Routes:
 //   list      → GET /internal/chats (uds, account-wide)  | GET /api/chats (rest)
-//   peek/history <id> → GET /internal/peek|history/:id (uds only; any machine)
+//   peek/history <id> → GET /internal/peek|history/:id (uds only; any host)
 //   get <id>  → GET /chats/:id (uds) | GET /api/chats/:id (rest)
 //   spawn     → POST /internal/spawn (uds) | POST /api/chats (rest)
 //   send-to   → POST /internal/send-to (uds) | POST /api/chats/:id/send-to (rest)
@@ -12,7 +12,7 @@
 //   archive   → POST /chats/:id/archive (uds) | POST /api/chats/:id/archive (rest)
 //   pin       → POST /api/chats/:id/pin (rest)
 //   rename    → POST /api/chats/:id/rename (rest)
-//   move      → POST /api/chats/:id/move (rest — the server drives both machines)
+//   move      → POST /api/chats/:id/move (rest — the server drives both hosts)
 //
 // All commands accept `--json`. Without `--json`, output is a small table.
 
@@ -62,9 +62,9 @@ export function registerChatsCommands(program: Command): void {
     .action(async (opts: CommonOpts & { archived?: string }) => {
       await run(opts, async () => {
         const t = getTransport(opts);
-        // Over the host socket the account-wide listing (every machine) is
+        // Over the host socket the account-wide listing (every host) is
         // /internal/chats, which needs the calling chat; bare /chats is this
-        // machine only. REST (/api/chats) is account-wide already.
+        // host only. REST (/api/chats) is account-wide already.
         const params = new URLSearchParams();
         if (opts.archived !== undefined) params.set('archived', opts.archived);
         if (t.kind === 'uds') params.set('callerChatId', requireCallerChat('chats list'));
@@ -91,7 +91,7 @@ export function registerChatsCommands(program: Command): void {
 
   chats
     .command('peek <id>')
-    .description("A chat's live state plus its recent events, on any machine (images stripped)")
+    .description("A chat's live state plus its recent events, on any host (images stripped)")
     .option('--limit <n>', 'Events to return (default 50, max 200)')
     .option('--json', 'JSON output')
     .action(async (rawId: string, opts: CommonOpts & { limit?: string }) => {
@@ -102,7 +102,7 @@ export function registerChatsCommands(program: Command): void {
         const params = new URLSearchParams({ callerChatId: requireCallerChat('chats peek') });
         if (opts.limit !== undefined) params.set('limit', opts.limit);
         const res = await t.get<unknown>(
-          `/internal/peek/${encodeURIComponent(rawId)}?${params.toString()}`,
+          `/internal/peek/${encodeURIComponent(await resolveChatId(t, rawId))}?${params.toString()}`,
         );
         emitJson(res);
       });
@@ -110,7 +110,7 @@ export function registerChatsCommands(program: Command): void {
 
   chats
     .command('history <id>')
-    .description("Paginated read of a chat's events, on any machine (images stripped)")
+    .description("Paginated read of a chat's events, on any host (images stripped)")
     .option('--from-seq <n>', 'Event sequence number to start from')
     .option('--limit <n>', 'Events to return (default 50, max 200)')
     .option('--json', 'JSON output')
@@ -123,7 +123,7 @@ export function registerChatsCommands(program: Command): void {
         if (opts.fromSeq !== undefined) params.set('fromSeq', opts.fromSeq);
         if (opts.limit !== undefined) params.set('limit', opts.limit);
         const res = await t.get<unknown>(
-          `/internal/history/${encodeURIComponent(rawId)}?${params.toString()}`,
+          `/internal/history/${encodeURIComponent(await resolveChatId(t, rawId))}?${params.toString()}`,
         );
         emitJson(res);
       });
@@ -137,8 +137,20 @@ export function registerChatsCommands(program: Command): void {
       await run(opts, async () => {
         const t = getTransport(opts);
         const id = await resolveChatId(t, rawId);
-        const path = pickPath(t, `/chats/${id}`, `/api/chats/${id}`);
-        const res = await t.get<unknown>(path);
+        // The host socket's /chats/:id knows only this host's chats, so over
+        // it the chat is read from the account-wide listing.
+        let res: unknown;
+        if (t.kind === 'uds') {
+          const params = new URLSearchParams({
+            archived: 'include',
+            callerChatId: requireCallerChat('chats get'),
+          });
+          const { chats } = await t.get<{ chats: ChatSummary[] }>(`/internal/chats?${params}`);
+          res = chats.find((c) => c.chatId === id);
+          if (!res) throw new Error(`no chat ${id} on this account`);
+        } else {
+          res = await t.get<unknown>(`/api/chats/${id}`);
+        }
         if (opts.json) emitJson(res);
         else emitText(JSON.stringify(res, null, 2));
       });
@@ -213,7 +225,7 @@ export function registerChatsCommands(program: Command): void {
 
   chats
     .command('send-to <id> [message]')
-    .description('Deliver a user-turn into a chat')
+    .description('Deliver a user-turn into a chat on any host')
     .option('--message <message>', 'Message body (alternative to positional)')
     .option('--json', 'JSON output')
     .action(
@@ -226,11 +238,15 @@ export function registerChatsCommands(program: Command): void {
           const message = positional ?? opts.message;
           if (!message) throw new Error('chats send-to: <message> or --message is required');
           const t = getTransport(opts);
+          const caller = t.kind === 'uds' ? requireCallerChat('chats send-to') : undefined;
           const id = await resolveChatId(t, rawId);
           if (t.kind === 'uds') {
+            // callerChatId lets the host relay to the owning host when the
+            // chat is not here (patch_send_to does the same).
             const res = await t.post<{ ok: true; queued: boolean }>('/internal/send-to', {
               chatId: id,
               message,
+              callerChatId: caller,
             });
             if (opts.json) emitJson(res);
             else emitText('queued');
@@ -355,15 +371,15 @@ export function registerChatsCommands(program: Command): void {
   chats
     .command('move <id>')
     .description(
-      'Move a chat to another machine, to run in --folder there (spec/04 § Moving a chat to another host)',
+      'Move a chat to another host, to run in --folder there (spec/04 § Moving a chat to another host)',
     )
-    .requiredOption('--host <host>', 'The machine to move it to: a host name or hostId prefix')
-    .requiredOption('--folder <folder>', 'Absolute folder on that machine')
+    .requiredOption('--host <host>', 'The host to move it to: a host name or hostId prefix')
+    .requiredOption('--folder <folder>', 'Absolute folder on that host')
     .option('--json', 'JSON output')
     .action(async (rawId: string, opts: CommonOpts & { host: string; folder: string }) => {
       await run(opts, async () => {
-        // Only the server can reach both machines, so this is REST even from
-        // the machine the chat is on.
+        // Only the server can reach both hosts, so this is REST even from
+        // the host the chat is on.
         const hostId = await resolveHost(opts);
         const t = getTransport({ ...opts, remote: true });
         const id = await resolveChatId(t, rawId);

@@ -76,7 +76,7 @@ export class RelayService {
     return this.host?.status() ?? { connected: false, sessions: 0, lastError: null };
   }
 
-  /** Begin holding the channel. `target` is where this server listens, as this machine reaches it. */
+  /** Begin holding the channel. `target` is where this server listens, as this host reaches it. */
   start(target: string): void {
     if (this.host) return;
     this.host = new RelayHost({

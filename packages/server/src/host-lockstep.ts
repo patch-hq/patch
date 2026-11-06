@@ -1,4 +1,4 @@
-// The server and every host run one version. A release ships both, but a machine that was asleep, off or cut off
+// The server and every host run one version. A release ships both, but a host that was asleep, off or cut off
 // at the time comes back on the old build — and on 2026-09-30 an old host that
 // could not read the new server's greeting sat wedged until it was updated by
 // hand. So the server checks every host as it connects and, when the host is
@@ -42,4 +42,24 @@ export function hostLockstep(opts: {
     return { kind: 'update', to: opts.serverVersion };
   }
   return { kind: 'unpublished', published: opts.publishedVersion };
+}
+
+/**
+ * The build to tell a host to stage ahead of a server restart: the published
+ * host build when it is newer than the server running now (a release has been
+ * mirrored and the server has not restarted into it yet) and the host is not
+ * already on it. Null when there is nothing to stage.
+ */
+export function hostStageTarget(opts: {
+  serverVersion: string;
+  hostVersion: string;
+  publishedVersion: string | null;
+}): string | null {
+  const published = opts.publishedVersion ? parse(opts.publishedVersion) : null;
+  const server = parse(opts.serverVersion);
+  const host = parse(opts.hostVersion);
+  if (!published || !server || !host) return null;
+  if (compare(published, server) <= 0) return null;
+  if (compare(published, host) <= 0) return null;
+  return opts.publishedVersion;
 }

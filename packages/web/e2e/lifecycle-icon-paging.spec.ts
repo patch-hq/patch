@@ -64,7 +64,7 @@ test.describe('Sidebar lifecycle icon row — selected state + scroll paging', (
     expect(archivedColor).toBe(before);
   });
 
-  test('scrolling the lifecycle band near its bottom loads the next page of Hidden', async ({
+  test('scrolling an open lifecycle view near its bottom loads the next page of Hidden', async ({
     page,
   }) => {
     const page1 = {
@@ -99,7 +99,7 @@ test.describe('Sidebar lifecycle icon row — selected state + scroll paging', (
     // A real scroll, in a real layout — 30 rows overflow the band's 300px cap
     // (spec/14 § Scroll regions), so this is a genuine "user scrolled" signal,
     // not a synthetic event with mocked geometry.
-    const band = page.getByTestId('sb-lifecycle');
+    const band = page.getByTestId('sb-scroll');
     await band.evaluate((el) => {
       el.scrollTop = el.scrollHeight;
       el.dispatchEvent(new Event('scroll'));
@@ -107,8 +107,13 @@ test.describe('Sidebar lifecycle icon row — selected state + scroll paging', (
 
     await expect(page.getByTestId('chat-row-h-more')).toBeVisible();
     expect(calls).toBe(2);
-    // The first page's rows are still there.
-    await expect(page.getByTestId('chat-row-h0')).toBeVisible();
+    // The view is windowed: 31 rows are loaded but only those near the
+    // viewport are drawn.
+    const drawn = await page
+      .getByTestId('hidden-section')
+      .locator('[data-testid^="chat-row-"]')
+      .count();
+    expect(drawn).toBeLessThan(31);
   });
 
   test('the icon row stays pinned in view while an open section is scrolled', async ({ page }) => {
@@ -134,60 +139,17 @@ test.describe('Sidebar lifecycle icon row — selected state + scroll paging', (
     await page.getByTestId('hidden-toggle').click();
     await expect(page.getByTestId('chat-row-h0')).toBeVisible();
 
-    const band = page.getByTestId('sb-lifecycle');
+    const band = page.getByTestId('sb-scroll');
     await band.evaluate((el) => {
       el.scrollTop = el.scrollHeight;
     });
 
+    // The icon row sits outside the scrolling view, so it stays on screen.
     const bandBox = await band.boundingBox();
     const iconsBox = await page.getByTestId('sb-lifecycle-icons').boundingBox();
     expect(bandBox).not.toBeNull();
     expect(iconsBox).not.toBeNull();
-    // The icons must sit inside the band's visible box, not scrolled above it.
-    expect(iconsBox!.y).toBeGreaterThanOrEqual(bandBox!.y - 1);
+    expect(iconsBox!.y).toBeGreaterThanOrEqual(bandBox!.y + bandBox!.height - 1);
     await expect(page.getByTestId('archived-toggle')).toBeInViewport();
-  });
-
-  test('scrolled rows never show above the pinned icon bar', async ({ page }) => {
-    await page.route('**/api/chats/counts', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ hidden: 30, archived: 0, snoozed: 0, deleted: 0, automations: 0 }),
-      }),
-    );
-    await page.route('**/api/chats?hidden=only*', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          chats: Array.from({ length: 30 }, (_, i) => hiddenRow(`h${i}`, i)),
-          nextOffset: null,
-        }),
-      }),
-    );
-    await page.goto(HARNESS);
-    await page.getByTestId('hidden-toggle').click();
-    await expect(page.getByTestId('hidden-section')).toBeVisible();
-
-    const band = page.getByTestId('sb-lifecycle');
-    await band.evaluate((el) => {
-      el.scrollTop = 120;
-    });
-    // The element painted at the band's top edge, just above the icon bar's
-    // top, must be the bar's own background, not a scrolled row.
-    const leak = await page.evaluate(() => {
-      const band = document.querySelector('[data-testid="sb-lifecycle"]')!;
-      const bar = document.querySelector('[data-testid="sb-lifecycle-icons"]')!;
-      const b = band.getBoundingClientRect();
-      const x = bar.getBoundingClientRect().left + 20;
-      for (let y = b.top + 1; y < bar.getBoundingClientRect().top + 4; y += 1) {
-        const hit = document.elementFromPoint(x, y);
-        if (hit && band.contains(hit) && !bar.contains(hit) && hit !== band)
-          return hit.outerHTML.slice(0, 80);
-      }
-      return null;
-    });
-    expect(leak).toBeNull();
   });
 });

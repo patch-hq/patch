@@ -1,5 +1,5 @@
 // spec/06 § Where special threads run — the Manager and Speakers belong to the
-// Manager host. A copy another machine still carries is not the account's.
+// Manager host. A copy another host still carries is not the account's.
 
 import { describe, it, expect } from 'vitest';
 import { EventEmitter } from 'node:events';
@@ -53,7 +53,7 @@ describe('special threads come only from the Manager host', () => {
     ]);
   });
 
-  it('still passes on every ordinary chat from any machine', () => {
+  it('still passes on every ordinary chat from any host', () => {
     const { heard, sockets } = setup('home');
     sockets.other.emit('message', frame('chat-1'));
     sockets.home.emit('message', frame('chat-2'));

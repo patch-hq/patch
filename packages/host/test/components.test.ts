@@ -344,7 +344,7 @@ describe('ComponentManager install', () => {
     expect(stateOf(mgr, 'kokoro').state).toBe('installed');
   });
 
-  it('refuses an id this machine does not offer, naming it', () => {
+  it('refuses an id this host does not offer, naming it', () => {
     const { fetchImpl } = makeUpstream(goodFiles());
     const { mgr } = manager(fetchImpl);
     expect(() => mgr.install('nope')).toThrow(ComponentNotOfferedError);

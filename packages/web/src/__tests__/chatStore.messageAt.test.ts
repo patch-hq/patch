@@ -9,7 +9,7 @@
 // the real time" from "I have no idea".
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useChatStore } from '../stores/chatStore.js';
+import { isLocalIdSettled, useChatStore } from '../stores/chatStore.js';
 
 function spawn(): void {
   useChatStore
@@ -111,5 +111,26 @@ describe('chatStore — messageAt (the real time a message was written)', () => 
     const entry = timeline().find((e) => e.kind === 'message');
     expect(entry?.localId).toBeUndefined();
     expect(entry?.messageAt).toBe(1_700_000_001_000);
+  });
+});
+
+describe('isLocalIdSettled', () => {
+  it('is true once the persisted echo has reconciled the optimistic message', () => {
+    useChatStore.getState()._reset();
+    useChatStore
+      .getState()
+      .applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c9', folder: '~/p' });
+    expect(isLocalIdSettled('c9', 'lid-9')).toBe(false);
+    useChatStore.getState().addLocalMessage('c9', 'hello', 'lid-9');
+    useChatStore.getState().applyEvent({
+      type: 'chat.message',
+      chatId: 'c9',
+      role: 'user',
+      content: 'hello',
+      seq: 2,
+      localId: 'lid-9',
+      createdAt: 1_700_000_001_000,
+    });
+    expect(isLocalIdSettled('c9', 'lid-9')).toBe(true);
   });
 });

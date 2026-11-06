@@ -1,4 +1,4 @@
-// What a running background task is costing the machine (spec/02 § Background
+// What a running background task is costing the host (spec/02 § Background
 // task completions), for the surface's background task bar (spec/14 § Main
 // chat panel — Background task bar).
 //
@@ -218,7 +218,7 @@ export async function measureBackgroundTasks(
 /**
  * The `patch.background_task_stats.request` handler. The chat is checked only
  * so a request routed to the wrong host says so instead of reporting an empty
- * measurement — the tasks directory itself is per-machine, not per-chat.
+ * measurement — the tasks directory itself is per-host, not per-chat.
  */
 export async function handleBackgroundTaskStatsRequest(
   event: PatchBackgroundTaskStatsRequestEvent,

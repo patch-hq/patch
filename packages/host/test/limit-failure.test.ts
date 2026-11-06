@@ -57,7 +57,7 @@ describe('statedLimitOf — the structured fields decide, not the sentence', () 
   it('takes a block that says the account is fine as an answer, not a gap', () => {
     // The prose behind it is not consulted: a structured "allowed" plus a
     // sentence that reads like a limit is the provider contradicting itself,
-    // and the field is the half that is machine-stated.
+    // and the field is the half that is host-stated.
     expect(statedLimitOf({ status: 'allowed' }, PROVIDER_SENTENCE)).toBeUndefined();
   });
 

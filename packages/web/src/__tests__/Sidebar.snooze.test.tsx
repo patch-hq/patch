@@ -118,7 +118,7 @@ describe('Sidebar — snoozed chats', () => {
     fireEvent.click(screen.getByTestId('snoozed-toggle'));
     const section = await screen.findByTestId('snoozed-section');
     expect(screen.getByTestId('snoozed-toggle')).toHaveAttribute('title', 'Snoozed · 0');
-    expect(section).toBeEmptyDOMElement();
+    expect(section.querySelectorAll('[data-testid^="chat-row-"]')).toHaveLength(0);
   });
 });
 

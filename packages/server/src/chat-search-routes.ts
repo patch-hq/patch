@@ -11,7 +11,7 @@
 //
 // NO SILENT OMISSION: every registered host is named in `hosts[]` with what
 // happened to it — searched, offline (not asked), timed out, or failed — so a
-// result list missing a machine's chats always says so. Auth is exactly the
+// result list missing a host's chats always says so. Auth is exactly the
 // other chat routes': a live surface credential.
 
 import type { FastifyInstance } from 'fastify';
@@ -108,11 +108,11 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
     if (event.type !== 'patch.chat_search.response') return;
     const w = pending.get(event.requestId);
     if (!w) return;
-    // Only the machine that was asked may answer for itself.
+    // Only the host that was asked may answer for itself.
     if (event.hostId !== w.hostId || (from !== null && from !== w.hostId)) {
       deps.logger.warn(
         { requestId: event.requestId, asked: w.hostId, answered: event.hostId, from },
-        'chat search: response from a machine that was not asked; ignoring',
+        'chat search: response from a host that was not asked; ignoring',
       );
       return;
     }
@@ -121,7 +121,7 @@ export function registerChatSearchRoutes(app: FastifyInstance, deps: ChatSearchR
     w.resolve(event);
   });
 
-  /** Every machine this account knows: registered ones, plus any attached link. */
+  /** Every host this account knows: registered ones, plus any attached link. */
   function hostIds(): string[] {
     const ids = deps.registry.registeredHostIds();
     for (const linked of deps.hostLink.onlineHostIds()) {

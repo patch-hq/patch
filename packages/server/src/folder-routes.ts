@@ -68,7 +68,7 @@ export function registerFolderRoutes(app: FastifyInstance, deps: FolderRoutesDep
           .send({ error: (e as Error).message })
       );
     }
-    // Grouped by host, because the picker renders one group per machine
+    // Grouped by host, because the picker renders one group per host
     // (spec/04 § Folders). A flat union would make two hosts' identical paths
     // indistinguishable.
     return reply.code(200).send({ hosts: deps.folderRegistry.list() });
@@ -117,8 +117,8 @@ export function registerFolderRoutes(app: FastifyInstance, deps: FolderRoutesDep
       if (!hostId) {
         return reply.code(400).send({ error: 'invalid query', message: 'hostId is required' });
       }
-      // …and it must be a machine this account registered. Browsing an unknown
-      // machine's filesystem must not fall through to whichever host is
+      // …and it must be a host this account registered. Browsing an unknown
+      // host's filesystem must not fall through to whichever host is
       // attached — that would list the wrong host's directories.
       const unknownHost = checkRegisteredHost(deps.registry, hostId);
       if (unknownHost) {

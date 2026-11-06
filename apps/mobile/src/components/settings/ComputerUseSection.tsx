@@ -1,4 +1,4 @@
-// Settings → Computer use: whether an agent is driving a machine's browser
+// Settings → Computer use: whether an agent is driving a host's browser
 // right now, and a Stop that closes its windows and cancels the action. Same
 // REST calls as web's Computer use page.
 
@@ -68,9 +68,9 @@ function ComputerUseList(): React.ReactElement {
     );
   }
   if (hosts === null) return <Muted>Checking…</Muted>;
-  if (hosts.length === 0) return <Muted>No machines are online.</Muted>;
+  if (hosts.length === 0) return <Muted>No hosts are online.</Muted>;
   return (
-    <SettingsSection title="Machines">
+    <SettingsSection title="Hosts">
       {hosts.map((h) => (
         <HostRow
           key={h.hostId}

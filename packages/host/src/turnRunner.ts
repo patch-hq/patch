@@ -3,7 +3,7 @@
 // A turn's `claude` process used to be a child of the host, talking over pipes
 // the host held. When the host went — a self-update, `launchctl kickstart`, a
 // systemd restart — those pipes closed and the turn died with it, which is why
-// an update had to wait for a moment when nothing on the machine was mid-turn.
+// an update had to wait for a moment when nothing on the host was mid-turn.
 //
 // This process sits between the two. The host starts it detached (its own
 // session, so neither launchd's process-group kill nor the host's own exit
@@ -56,6 +56,15 @@ export const RUNNER_OUT = 'out.jsonl';
 export const RUNNER_IN = 'in.jsonl';
 export const RUNNER_EXIT = 'exit.json';
 export const RUNNER_INFO = 'runner.json';
+
+/**
+ * The socket/file protocol this runner speaks, written to `runner.json`. A
+ * runner is tiny and rarely changes; when its protocol does, bump this. Runners
+ * are per turn, so an old one finishes its own turn and the chat's next turn
+ * starts on a new one — a host never has to wait for, or hold, anything.
+ * Runners that predate the field speak protocol 1.
+ */
+export const RUNNER_PROTOCOL = 1;
 
 /**
  * How long a runner waits with no host attached and claude silent before it
@@ -146,6 +155,7 @@ export async function runTurnRunner(dir: string): Promise<void> {
   // (installer/main.ts `pruneOldVersions`).
   writeJsonAtomic(join(dir, RUNNER_INFO), {
     pid: process.pid,
+    protocol: RUNNER_PROTOCOL,
     claudePid: pgid ?? null,
     script: process.argv[1] ?? null,
   });

@@ -101,7 +101,7 @@ The requirement is that no content sits under the bar: pad past useSafeAreaInset
     ${group('Speaking',row('Voice','',sel('af_heart'))+row('Say the chat name every','',`<input type="text" value="3" style="width:50px"> replies`))}
     ${group('Voice devices',row('None paired','','<button class="btn">Pair a device</button>'))}`},
 
-  machines:{title:'Hosts',group:'Setup',html:()=>`
+  hosts:{title:'Hosts',group:'Setup',html:()=>`
     <div class="phead"><h3>Hosts</h3><button class="btn pri">Add a host</button></div>
     ${group('',
       row('<span class="dot"></span> Hetzner','linux · seen 2s ago','<span class="chev">›</span>')+
@@ -148,7 +148,7 @@ The requirement is that no content sits under the bar: pad past useSafeAreaInset
     ${group('This device',row('Sign this device out','','<button class="btn dan">Deactivate</button>'))}`},
 };
 
-const order = ['credit','agent','mcp','memories','manager','voice','machines','keys','devices','updates','account'];
+const order = ['credit','agent','mcp','memories','manager','voice','hosts','keys','devices','updates','account'];
 function renderNav(){
   let last='', h='<h2>Settings</h2>';
   for(const k of order){const p=PAGES[k];

@@ -13,7 +13,6 @@
 // genuinely current: that build is INSTALLED in place, from here.
 
 import React from 'react';
-import { Alert } from 'react-native';
 import * as Updates from 'expo-updates';
 import { useUpdates } from 'expo-updates';
 import type { VersionReport } from '@patch/wire';
@@ -38,6 +37,7 @@ import {
   setTelemetryEnabled,
   telemetryEnabled,
 } from '../../lib/exitLog';
+import { logUpdater, readUpdaterLog, updaterLogText } from '../../lib/updaterLog';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -52,7 +52,7 @@ export function formatWhen(iso: string): string {
 
 /**
  * Whether anything is behind — an update downloaded and waiting for a restart,
- * a newer APK than this phone runs, or a host with a host update. Drives the
+ * a newer APK than this phone runs, or a machine with a host update. Drives the
  * pip on the Settings list's Updates row.
  */
 export function useUpdatesBehind(): boolean {
@@ -66,7 +66,6 @@ export function useUpdatesBehind(): boolean {
 
 function hostStatus(h: HostPresence): string {
   if (!h.online) return 'Offline';
-  if (h.host?.updateHeld) return 'Update waiting for chats to finish';
   if (h.host?.updatePending) return 'Update on its way';
   return h.host?.updateAvailable ? 'Update available' : 'Up to date';
 }
@@ -118,10 +117,7 @@ export function UpdatesPage(): React.ReactElement {
         : null;
 
   const behindHosts = sortedHosts(hosts).filter((h) => h.host?.updateAvailable === true);
-  const heldHosts = behindHosts.filter((h) => h.host?.updateHeld === true);
-  // A held host updates itself once its chats finish; pressing Update would only defer again.
-  const onlineBehind = behindHosts.filter((h) => h.online && h.host?.updateHeld !== true);
-  const onlyWaiting = behindHosts.length > 0 && heldHosts.length === behindHosts.length;
+  const onlineBehind = behindHosts.filter((h) => h.online);
   // The agent lagging the server is the same fact a host row already states.
   const drift = (report?.drift ?? []).filter(
     (d) => !(d.kind === 'daemon-server-mismatch' && behindHosts.length > 0),
@@ -138,8 +134,6 @@ export function UpdatesPage(): React.ReactElement {
   else if (sourceProblem) sentence = sourceProblem;
   else if (failure) sentence = `Couldn't check for updates: ${failure}`;
   else if (reportError) sentence = `Couldn't check for updates: ${reportError}`;
-  else if (onlyWaiting && !pending && !apkAvailable && drift.length === 0)
-    sentence = 'Updating when your chats are idle';
   else if (anyBehind) sentence = 'Update available';
   else if (!report) sentence = 'Checking for updates…';
   else sentence = 'Up to date';
@@ -152,6 +146,7 @@ export function UpdatesPage(): React.ReactElement {
         testID="restart-to-update"
         label="Restart to update"
         onPress={() => {
+          logUpdater('install-requested', 'Restart to update pressed');
           noteIntentionalRestart();
           void Updates.reloadAsync();
         }}
@@ -208,35 +203,7 @@ export function UpdatesPage(): React.ReactElement {
               title={h.host?.hostName ?? h.hostId}
               subtitle={hostStatus(h)}
               testID={`version-host-${h.hostId}`}
-              right={
-                h.host?.updateHeld && h.online ? (
-                  <SettingsButton
-                    testID={`update-now-${h.hostId}`}
-                    label="Update now"
-                    onPress={() =>
-                      Alert.alert(
-                        `Update ${h.host?.hostName ?? h.hostId} now?`,
-                        'Chats running on it will be stopped mid-turn.',
-                        [
-                          { text: 'Cancel', style: 'cancel' },
-                          {
-                            text: 'Update now',
-                            style: 'destructive',
-                            onPress: () =>
-                              void sendToHost(
-                                h.hostId,
-                                { type: 'host.update', hostId: h.hostId, force: true },
-                                'Update',
-                              ),
-                          },
-                        ],
-                      )
-                    }
-                  />
-                ) : h.host ? (
-                  <RowValue>{h.host.hostVersion}</RowValue>
-                ) : null
-              }
+              right={h.host ? <RowValue>{h.host.hostVersion}</RowValue> : null}
             />
           ))}
         </SettingsSection>
@@ -318,6 +285,11 @@ function ExitLogSection(): React.ReactElement {
           onPress={() => void Clipboard.setStringAsync(exitLogText(entries))}
         />
       ) : null}
+      <Row
+        title="Copy updater log"
+        testID="updater-log-copy"
+        onPress={() => void Clipboard.setStringAsync(updaterLogText(readUpdaterLog()))}
+      />
     </SettingsSection>
   );
 }

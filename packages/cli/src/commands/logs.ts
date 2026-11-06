@@ -11,6 +11,7 @@ import { resolveHost } from './hosts.js';
 import { loadConfig } from '../config.js';
 import { bearerToken } from '../auth.js';
 import { PatchWsClient } from '../transport/ws.js';
+import { UdsClient } from '../transport/uds.js';
 
 export function registerLogsCommands(program: Command): void {
   program
@@ -19,7 +20,7 @@ export function registerLogsCommands(program: Command): void {
     .option('--json', 'JSON output')
     .option('--limit <n>', 'exit after N events')
     .option('--server <url>', 'override server URL')
-    .option('--host <h>', "print that machine's daemon.log instead (name or hostId prefix)")
+    .option('--host <h>', "print that host's daemon.log instead (name or hostId prefix)")
     .option('--lines <n>', 'with --host: last N lines (default 200)')
     .action(
       async (
@@ -32,14 +33,30 @@ export function registerLogsCommands(program: Command): void {
           }
           const config = loadConfig();
           const url = wsUrl(opts.server ?? config.serverUrl);
+          const limit =
+            opts.limit !== undefined ? parseLimit(opts.limit) : Number.POSITIVE_INFINITY;
+          // A machine with a host is the host's: the events come relayed over its
+          // socket and link, so there is no credential to hold or expire. An
+          // explicit --server is a different server, which needs its own.
+          if (
+            opts.server === undefined &&
+            config.hostSocket !== null &&
+            config.daemonLocalKey !== null
+          ) {
+            await tailThroughHost(opts, config.hostSocket, config.daemonLocalKey, limit);
+            return;
+          }
           let bearer: string | null = null;
           try {
             bearer = bearerToken();
           } catch {
-            fail(opts, new Error('not authenticated — run `patch auth login`'));
+            fail(
+              opts,
+              new Error(
+                'not authenticated: no host on this host and no credential — run `patch auth login`',
+              ),
+            );
           }
-          const limit =
-            opts.limit !== undefined ? parseLimit(opts.limit) : Number.POSITIVE_INFINITY;
           let count = 0;
           const ws = new PatchWsClient({
             url,
@@ -81,7 +98,37 @@ export function registerLogsCommands(program: Command): void {
     );
 }
 
-/** Read another machine's daemon.log through the server's host-files route. */
+/** Tail the account's events through this host (`/server-events`). */
+async function tailThroughHost(
+  opts: CommonOpts,
+  socketPath: string,
+  localKey: string,
+  limit: number,
+): Promise<void> {
+  const uds = new UdsClient({ socketPath, localKey });
+  const ac = new AbortController();
+  process.on('SIGINT', () => ac.abort());
+  let count = 0;
+  let failure: string | null = null;
+  await uds.stream(
+    '/server-events',
+    (line) => {
+      const event = line as { type?: string; message?: string };
+      if (event.type === 'stream.error') {
+        failure = event.message ?? 'event stream ended';
+        return false;
+      }
+      count++;
+      if (opts.json) emitJson(event);
+      else emitText(`${event.type} ${JSON.stringify(event)}`);
+      return count < limit;
+    },
+    ac.signal,
+  );
+  if (failure !== null) throw new Error(`event stream through the host failed: ${failure}`);
+}
+
+/** Read another host's daemon.log through the server's host-files route. */
 async function printRemoteDaemonLog(
   opts: CommonOpts,
   host: string,

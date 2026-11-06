@@ -206,7 +206,7 @@ export default function JobEditor(): React.ReactElement {
   // "no link to offer" rather than guessing a path.
   const [skillPaths, setSkillPaths] = React.useState<Record<string, string> | undefined>(undefined);
   // The chosen host's model catalogue (spec/15 § Job editor). Live and per
-  // machine, so it is refetched whenever the job moves to a different host —
+  // host, so it is refetched whenever the job moves to a different host —
   // offering host-a's models for a job that fires on host-b is how an
   // unrunnable model id gets stored.
   const [availableModels, setAvailableModels] = React.useState<
@@ -322,7 +322,7 @@ export default function JobEditor(): React.ReactElement {
   // Seed the host the same way the web editor does: the account's default host
   // (the only registered or online one) when there is an unambiguous answer. With
   // several candidates there is none, the field stays empty and
-  // save refuses — better than silently scheduling work onto the wrong machine
+  // save refuses — better than silently scheduling work onto the wrong host
   // (spec/08 § Action).
   React.useEffect(() => {
     if (!isNew || form.spawnHostId !== '' || jobHostId === null) return;
@@ -477,7 +477,7 @@ export default function JobEditor(): React.ReactElement {
   const skillOptions = Array.from(
     new Set([...(skillValue ? [skillValue] : []), ...availableSkills]),
   );
-  // Same rule for models, plus a leading `Machine default` chip: '' is a choice
+  // Same rule for models, plus a leading `Host default` chip: '' is a choice
   // the user has to be able to return to, not just the initial state.
   // The shared accounts the job's chat could start on, for its model's backend.
   const sharedSecrets = useSettingsStore((st) => st.data?.shared?.secrets);
@@ -492,7 +492,7 @@ export default function JobEditor(): React.ReactElement {
     return [{ id: '', label: 'By strategy' }, ...extra, ...held];
   }, [sharedSecrets, form.spawnModel, form.spawnAccount]);
   const modelOptions: Array<{ id: string; label: string }> = [
-    { id: '', label: 'Machine default' },
+    { id: '', label: 'Host default' },
     ...(form.spawnModel && !availableModels.some((m) => m.id === form.spawnModel)
       ? [{ id: form.spawnModel, label: form.spawnModel }]
       : []),
@@ -976,7 +976,7 @@ export default function JobEditor(): React.ReactElement {
           </Pressable>
           {form.gateOn ? (
             <>
-              <Field label="Gate machine">
+              <Field label="Gate host">
                 <Input
                   value={form.gateHostId}
                   onChangeText={(v) => setForm({ ...form, gateHostId: v })}
@@ -1108,10 +1108,10 @@ export default function JobEditor(): React.ReactElement {
                 whole point of the action (@patch/wire `ScriptAction`). */}
               {usesSpawnFields ? (
                 <>
-                  {/* Model (spec/15 § Job editor). Leads with `Machine default`, which is
+                  {/* Model (spec/15 § Job editor). Leads with `Host default`, which is
                 a real setting rather than the lack of one: no stored model means
                 each fire takes whatever that host was last used on, so the job
-                tracks the machine instead of pinning an id that will be retired.
+                tracks the host instead of pinning an id that will be retired.
                 A saved model is always kept as a chip even when the catalogue
                 is empty, so editing another field can't silently unpin it. */}
                   <Field label="Model">
@@ -1127,7 +1127,7 @@ export default function JobEditor(): React.ReactElement {
                           modelOptions.find((m) => m.id === form.spawnModel)?.label ??
                           form.spawnModel
                         }
-                        emptyText="No models on this machine."
+                        emptyText="No models on this host."
                         options={modelOptions}
                         onSelect={(id) =>
                           setForm({

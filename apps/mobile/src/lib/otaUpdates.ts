@@ -29,6 +29,7 @@ import { AppState, type NativeEventSubscription } from 'react-native';
 import * as Updates from 'expo-updates';
 import { recordUpdateCheck } from './updateCheck';
 import { updateSource } from './updateSource';
+import { logUpdater } from './updaterLog';
 
 /**
  * Check for an OTA update and, if one is available, fetch it — and stop there.
@@ -51,12 +52,15 @@ export async function checkForOtaUpdate(): Promise<void> {
     // Record the check so Settings → Version shows an accurate "Last checked",
     // whether or not an update was found.
     recordUpdateCheck(new Date().toISOString());
+    logUpdater('check', result.isAvailable ? 'update available' : 'up to date');
     if (!result.isAvailable) return;
     // Download only. `useUpdates().isUpdatePending` flips once this resolves,
     // which is what puts "An update is downloaded and ready to install." and
     // the "Restart to update" button in Settings → Version.
     await Updates.fetchUpdateAsync();
+    logUpdater('fetched', 'update downloaded, applies on next start');
   } catch (err) {
+    logUpdater('error', `ota check failed: ${String(err)}`);
     console.warn('[ota] update check failed', err);
   }
 }

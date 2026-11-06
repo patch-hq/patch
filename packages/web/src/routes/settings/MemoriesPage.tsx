@@ -46,7 +46,7 @@ export function MemoriesPage(): JSX.Element {
 
 function HostMemories({ host }: { host: HostPresence }): JSX.Element {
   // Whether Claude Code keeps memory at all is shared (spec/01 § Settings); the
-  // entries it wrote live on each machine, under that machine's project paths.
+  // entries it wrote live on each host, under that host's project paths.
   const enabled = usePreferencesStore((s) => s.preferences.harnessMemoryEnabled);
   const loaded = usePreferencesStore((s) => s.loaded);
   const cs = host.claudeSettings;

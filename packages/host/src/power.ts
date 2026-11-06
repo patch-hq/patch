@@ -11,7 +11,7 @@ export interface PowerState {
   percent: number;
 }
 
-/** Parse `pmset -g batt`. Undefined when the machine has no internal battery. */
+/** Parse `pmset -g batt`. Undefined when the host has no internal battery. */
 export function parsePmsetBatt(out: string): PowerState | undefined {
   if (!out.includes('InternalBattery')) return undefined;
   const source = /Now drawing from '([^']+)'/.exec(out);

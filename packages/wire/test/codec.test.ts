@@ -203,14 +203,6 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     intervalMs: 15000,
     topProcesses: [{ name: 'vitest', count: 5, rssBytes: 11811160064 }],
   },
-  'host.condition': {
-    type: 'host.condition',
-    hostId: 'host-a',
-    state: 'struggling',
-    critical: false,
-    reasons: ['memory'],
-    topProcesses: [{ name: 'vitest', count: 5, rssBytes: 11811160064 }],
-  },
   'host.unauthenticated': {
     type: 'host.unauthenticated',
     hostId: 'host-a',
@@ -270,6 +262,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     totalBytes: 340_000_000,
   },
   'host.update': { type: 'host.update', hostId: 'host-a' },
+  'host.stage': { type: 'host.stage', hostId: 'host-a', version: '0.1.5' },
   'host.folder_add': { type: 'host.folder_add', hostId: 'host-a', path: '/work/new' },
   'host.folder_remove': { type: 'host.folder_remove', hostId: 'host-a', path: '/work/old' },
   'host.claude_memory_delete': {
@@ -1594,6 +1587,13 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     status: 200,
     body: { version: 1 },
   },
+  'patch.events.subscribe': { type: 'patch.events.subscribe', subscriptionId: 's1' },
+  'patch.events.unsubscribe': { type: 'patch.events.unsubscribe', subscriptionId: 's1' },
+  'patch.events.event': {
+    type: 'patch.events.event',
+    subscriptionId: 's1',
+    event: { type: 'host.online', hostId: 'h1' },
+  },
   'secrets.list': {
     type: 'secrets.list',
     secrets: [
@@ -2003,7 +2003,7 @@ describe('codec', () => {
   });
 
   test('the rejected value is named, bounded, and reachable at a nested path', () => {
-    // An empty machine name is one of the enumerated unhappy paths: the refusal
+    // An empty host name is one of the enumerated unhappy paths: the refusal
     // must say WHICH field held WHAT, or it is indistinguishable from an edit
     // that silently did not save.
     try {

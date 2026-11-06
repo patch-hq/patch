@@ -75,14 +75,16 @@ async function stubSearch(
 }
 
 test.describe('sidebar chat search', () => {
-  test('sits under the view pill and fills the rows’ shared edges', async ({ page }) => {
+  test('sits in the header above the view pill and fills the rows’ shared edges', async ({
+    page,
+  }) => {
     await page.goto(HARNESS);
     await page.locator('.sb-row').first().waitFor();
     const pill = (await page.getByTestId('sidebar-view-trigger').boundingBox())!;
     const field = (await page.getByTestId('chat-search').boundingBox())!;
     const row = (await page.locator('.sb-scroll .sb-row').first().boundingBox())!;
-    // Its own row, directly under the view pill.
-    expect(field.y).toBeGreaterThanOrEqual(pill.y + pill.height);
+    // Its own row, the top of the fixed header, above the view pill.
+    expect(pill.y).toBeGreaterThanOrEqual(field.y + field.height);
     // Filling to the rows' shared right edge.
     expect(Math.abs(field.x + field.width - (row.x + row.width))).toBeLessThanOrEqual(1);
     // Wide enough to show its placeholder in full.

@@ -22,7 +22,7 @@ No JavaScript files. No Rust on the Node side.
 ### Two shipping shapes
 
 - Server → container. Built from this repo, deployed by the operator (`11-deployment.md`).
-- Host → native binary artifact per OS/arch. esbuild bundles the host to a single JS file, shipped alongside a pinned Node runtime and the platform's prebuilt native addons, installing on a machine with no toolchain (`11-deployment.md` § Host installation).
+- Host → native binary artifact per OS/arch. esbuild bundles the host to a single JS file, shipped alongside a pinned Node runtime and the platform's prebuilt native addons, installing on a host with no toolchain (`11-deployment.md` § Host installation).
   - Native addon: `onnxruntime-node` (Silero VAD), shipped per platform alongside the `silero_vad.onnx` weights it runs (~2 MB — the one model file in the artifact, so VAD works on every host with nothing downloaded). The host's native surface stays at this one addon; each additional native dependency multiplies the build matrix.
   - The agent backend, the large voice weights (Kokoro, local Whisper) and Python are provisioned on the host after install (`02-host.md`).
   - Signed with the project's signing identity; installs an OS service (launchd / systemd user unit).
@@ -72,7 +72,7 @@ Stays "flat files" per spec, but with explicit shape:
 - `/data/broadcasts/<thread>.jsonl` — broadcast log per channel-mediating thread, written as the server routes each notify and read by the Manager host when the user replies (`09-notifications.md` § The broadcast log).
 - `~/.patch/chats/<chatId>/` — host-managed per-chat state (NOT under `/data` — host-local): `meta.json` (chat metadata), `seq` (the persisted sequence counter) and `wake.json` (a pending self-wake), per `02-host.md`.
 
-A host-local file is written and read by the same machine. Anything one machine writes and another reads is server state under `/data`.
+A host-local file is written and read by the same host. Anything one host writes and another reads is server state under `/data`.
 
 Chat history itself stays in Claude Code's native `~/.claude/projects/`; we read it in place.
 
@@ -140,7 +140,7 @@ No SQLite. If we hit limits, that's a separate spec change.
 - Docker Compose as the reference deployment (host sizing in `11-deployment.md`).
 - Two services: `server`, `caddy`. The host is not a container — it installs on each host as an OS service (§ Two shipping shapes, `02-host.md` § Runtime and installation).
 - Caddy as the reverse proxy (auto-TLS via Let's Encrypt). Terminates TLS and reverse-proxies everything to the server, which itself serves the web SPA at `/app` and the desktop feed at `/api/desktop/...`.
-- `pnpm deploy` runs the server via docker compose (`up -d --build`); the server image builds + serves the web SPA. No CI publish, no image registry. The host builds separately as an installable artifact (`pnpm build:host`), published for install and self-update (`11-deployment.md`). Machine-specific delivery (to a remote box / phone) lives in git-ignored `scripts/local/`.
+- `pnpm deploy` runs the server via docker compose (`up -d --build`); the server image builds + serves the web SPA. No CI publish, no image registry. The host builds separately as an installable artifact (`pnpm build:host`), published for install and self-update (`11-deployment.md`). Host-specific delivery (to a remote box / phone) lives in git-ignored `scripts/local/`.
 - Backups: restic nightly cron on `/data` to off-host object storage.
 
 ## Testing
@@ -151,7 +151,7 @@ Which layer a test belongs to is decided by `19-testing.md`. This section is onl
 - The Node runtime's own test runner for the CLI and the desktop shell, with coverage from the runtime's own coverage flags. Both discover tests by pattern.
 - Playwright for the browser layer, driven against the component dev harness rather than a booted stack, so a layout regression is caught without a server in the picture.
 - Maestro for the Android surface layer. It drives a plain debug or release build with no native instrumentation and no separate instrumented build, grants permissions on launch, emits JUnit XML, and exits non-zero on failure. It drives the whole device, so it can see the notification shade and the native incoming-call screen, which is what the voice surface needs and what a grey-box driver scoped to the app's own view tree cannot reach.
-- The Android emulator needs hardware virtualisation, so the surface layer runs only on a machine exposing a KVM device. The deployment box does not.
+- The Android emulator needs hardware virtualisation, so the surface layer runs only on a host exposing a KVM device. The deployment box does not.
 
 ## Tooling
 

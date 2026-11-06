@@ -160,13 +160,17 @@ describe('ChatHeader', () => {
     expect(screen.getByTestId('chat-head').querySelector('.chat-usage-crumb')).toBeNull();
   });
 
-  // patch/todo.md — "show which model is in use on the top bar". Shown as a
-  // third crumb segment next to the folder, not in the cramped action rail.
-  // The model control lives in the composer's action row now (spec/14 §
-  // Composer), beside the approval mode — the header crumb no longer carries it.
-  it('carries no model in the header — it lives in the composer', () => {
-    render(<ChatHeader row={row({ model: 'claude-sonnet-4-6' })} />);
-    expect(screen.queryByTestId('chat-model')).not.toBeInTheDocument();
+  // App Updates: "agents in patch top bar should name the model they are
+  // using". Read-only label beside the title (spec/14 § Chat panel header);
+  // changing the model stays in the composer.
+  it('names the model the chat runs on, in compact form', () => {
+    render(<ChatHeader row={row({ model: 'claude-opus-5-5' })} />);
+    expect(screen.getByTestId('chat-head-model')).toHaveTextContent('Opus 5.5');
+  });
+
+  it('draws no model label when the model is not known', () => {
+    render(<ChatHeader row={row({ model: null })} />);
+    expect(screen.queryByTestId('chat-head-model')).not.toBeInTheDocument();
   });
 
   // G2-d6 / G2-d4: an unnamed chat must NOT show the raw ULID as the header

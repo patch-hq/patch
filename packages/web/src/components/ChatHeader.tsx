@@ -23,7 +23,7 @@ import { api } from '../api/rest.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import type { ChatRow } from '../stores/types.js';
-import { SPECIAL_THREAD_IDS } from '@patch/wire';
+import { SPECIAL_THREAD_IDS, compactModelLabel } from '@patch/wire';
 import { isHidden } from '../stores/types.js';
 import {
   Edit3,
@@ -41,7 +41,15 @@ import {
   ListPlus,
   Target,
   Copy,
+  Folder,
+  Globe,
+  SquareTerminal,
+  X,
 } from 'lucide-react';
+import { StatusBadge } from './StatusBadge.js';
+import { useChatBadge } from './ChatStatusBadge.js';
+import { groupColourClass } from './PaneArea.js';
+import { findTabByKey, tabKey, type TabDescriptor } from '../stores/layoutStore.js';
 import { useSideThreadsStore } from '../stores/sideThreadsStore.js';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { DeleteIcon } from './icons.js';
@@ -69,7 +77,91 @@ function specialThreadLabel(chatId: string): string | null {
 
 const ICON = 18;
 
-export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
+/** Set when the header is a group's header (spec/14 § Groups): it then also
+ *  carries the status badge, the group's number while several groups are on
+ *  screen, the tool buttons and the group's close button. */
+export interface GroupHeaderProps {
+  groupId: string;
+  index: number;
+  numbered: boolean;
+  onClose: (() => void) | null;
+}
+
+function GroupBadge({ row }: { row: ChatRow }): JSX.Element | null {
+  const badge = useChatBadge(row);
+  if (!badge) return null;
+  return (
+    <StatusBadge
+      badge={badge}
+      pendingWake={row.pendingWake ?? null}
+      failureReason={row.lastError?.message ?? null}
+    />
+  );
+}
+
+/** Files, Browser, Editor and Terminal: each toggles that tab in the group's
+ *  focused pane, the same action as any other tab. Labels collapse to icons
+ *  when the group is narrow (`.group-card` is the query container). */
+function GroupTools({ chatId, groupId }: { chatId: string; groupId: string }): JSX.Element {
+  const toggleTab = useLayoutStore((s) => s.toggleTab);
+  const root = useLayoutStore((s) => s.groups.find((g) => g.id === groupId)?.root ?? null);
+  const items: { id: string; label: string; icon: JSX.Element; descriptor: TabDescriptor }[] = [
+    {
+      id: 'files',
+      label: 'Files',
+      icon: <Folder size={16} aria-hidden />,
+      descriptor: { kind: 'page', page: 'files', chatId },
+    },
+    {
+      id: 'browser',
+      label: 'Browser',
+      icon: <Globe size={16} aria-hidden />,
+      descriptor: { kind: 'browser', chatId },
+    },
+    {
+      id: 'editor',
+      label: 'Editor',
+      icon: <Edit3 size={16} aria-hidden />,
+      descriptor: { kind: 'page', page: 'files', chatId },
+    },
+    {
+      id: 'terminal',
+      label: 'Terminal',
+      icon: <SquareTerminal size={16} aria-hidden />,
+      descriptor: { kind: 'terminal', chatId },
+    },
+  ];
+  return (
+    <div className="group-tools" data-testid="group-tools">
+      {items.map((it) => {
+        const open = root !== null && findTabByKey(root, tabKey(it.descriptor)) !== null;
+        return (
+          <button
+            key={it.id}
+            type="button"
+            className={`group-tool${open ? ' on' : ''}`}
+            data-testid={`group-tool-${it.id}`}
+            aria-label={it.label}
+            aria-pressed={open}
+            title={it.label}
+            onClick={() => toggleTab(it.descriptor)}
+          >
+            {it.icon}
+            <span className="group-tool-label">{it.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export function ChatHeader({
+  row,
+  group,
+}: {
+  row: ChatRow;
+  group?: GroupHeaderProps;
+}): JSX.Element {
   const archiveGlyphs = useActionGlyphs('archiveCurrent');
   const setDeleted = useChatStore((s) => s.setDeleted);
   const setArchived = useChatStore((s) => s.setArchived);
@@ -95,9 +187,9 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
   // Otherwise spec/04 § Name: the AI-generated title; until it lands, the folder
   // basename, then "New chat" — never the raw first message or ULID.
   const title = specialThreadLabel(row.chatId) ?? deriveChatTitle(row.name);
-  // The machine this chat is pinned to, by its user-editable name. Falls back
-  // to the raw hostId only while that machine has yet to report a name —
-  // shown rather than hidden, because "which machine is this running on" has no
+  // The host this chat is pinned to, by its user-editable name. Falls back
+  // to the raw hostId only while that host has yet to report a name —
+  // shown rather than hidden, because "which host is this running on" has no
   // safe default answer. An optimistically-seeded row has neither yet
   // (chatStore's `emptyRow` uses `hostId: ''`), and there is nothing to draw.
   const hostReport = usePresenceStore((s) => s.hosts[row.hostId]?.host ?? null);
@@ -298,7 +390,7 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
     }
   }
 
-  // Folder and machine live in the title's hover tooltip (spec/14 § Chat panel
+  // Folder and host live in the title's hover tooltip (spec/14 § Chat panel
   // header), not on screen: the message already names them and a second line
   // cost the bar its height. Each part is included only where genuinely known,
   // so an optimistic row (no host, no folder) gets no tooltip rather than a
@@ -311,7 +403,7 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
 
   return (
     <>
-      <header className="chat-head" data-testid="chat-head">
+      <header className={`chat-head${group ? ' chat-head-group' : ''}`} data-testid="chat-head">
         {/* Far left: Back / Forward alone. Its own zone (spec/14 § Chat panel
           header) rather than a fourth flex child, because it is the zone that
           carries the flex share holding `.chat-head-title` on centre; a
@@ -327,6 +419,15 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
           fixed. The title's tooltip is the folder · host line. */}
         <div className="chat-head-title">
           <div className="chat-head-title-row">
+            {group ? <GroupBadge row={row} /> : null}
+            {group?.numbered ? (
+              <span
+                className={`group-num ${groupColourClass(group.index)}`}
+                data-testid="group-num"
+              >
+                {group.index + 1}
+              </span>
+            ) : null}
             {editing ? (
               <input
                 ref={inputRef}
@@ -366,6 +467,11 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
                 ! waiting on you
               </span>
             ) : null}
+            {row.model !== null && row.model !== '' ? (
+              <span className="chat-head-model" data-testid="chat-head-model">
+                {compactModelLabel(row.model)}
+              </span>
+            ) : null}
             {/* Open in new window sits beside the title (spec/14 § Chat panel
               header) — shown for every chat including special threads. */}
             <button
@@ -388,17 +494,20 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
           "header tooltips should show their shortcut". Actions with no chord
           show the bare name; a tooltip never explains what the button does. */}
         <div className="chat-head-actions" data-testid="chat-head-actions">
+          {group ? <GroupTools chatId={row.chatId} groupId={group.groupId} /> : null}
           <div className="head-action-rail" data-testid="head-action-rail">
-            <button
-              type="button"
-              className="head-action"
-              data-testid="action-editor"
-              aria-label="Editor"
-              title="Editor"
-              onClick={toggleEditor}
-            >
-              <Edit3 size={ICON} aria-hidden />
-            </button>
+            {group ? null : (
+              <button
+                type="button"
+                className="head-action"
+                data-testid="action-editor"
+                aria-label="Editor"
+                title="Editor"
+                onClick={toggleEditor}
+              >
+                <Edit3 size={ICON} aria-hidden />
+              </button>
+            )}
             {/* spec/14 § Side threads panel — "A Threads icon in the chat
               header opens the panel with all this chat's side threads."
               Absent until the chat actually has one. */}
@@ -865,6 +974,18 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
             ) : null}
           </div>
         </div>
+        {group?.onClose ? (
+          <button
+            type="button"
+            className="head-action group-close"
+            aria-label="Close group"
+            title="Close group"
+            data-testid="group-close"
+            onClick={group.onClose}
+          >
+            <X size={14} aria-hidden />
+          </button>
+        ) : null}
         {moveOpen ? <MoveChatModal row={row} onClose={() => setMoveOpen(false)} /> : null}
       </header>
     </>

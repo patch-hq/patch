@@ -113,6 +113,9 @@ addEventListener('pagehide',function(){if(timer!==null){clearTimeout(timer);flus
 Object.defineProperty(window,'localStorage',{value:ls,configurable:true});
 Object.defineProperty(window,'sessionStorage',{value:ss,configurable:true});
 addEventListener('click',function(e){var a=e.target&&e.target.closest&&e.target.closest('a[href]');if(!a||e.defaultPrevented)return;var h=a.getAttribute('href');if(!h||h.charAt(0)==='#'||!/^(https?:|mailto:|tel:)/i.test(a.href))return;e.preventDefault();window.open(a.href,'_blank','noopener')});
+function nav(){parent.postMessage({type:'patch:artifact-nav',canGoBack:navigation.canGoBack,canGoForward:navigation.canGoForward},'*')}
+addEventListener('message',function(e){var d=e.data;if(!d||d.type!=='patch:artifact-go')return;if(d.dir==='back')history.back();else if(d.dir==='forward')history.forward()});
+if(window.navigation){nav();navigation.addEventListener('navigatesuccess',nav)}
 })();</script>`;
 }
 
@@ -202,9 +205,9 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
   const unsub = deps.hostLink.onEvent((event: WireEvent, fromHostId: string | null) => {
     if (event.type !== 'patch.artifact.publish_request') return;
     const parsed = PatchArtifactPublishRequestEvent.safeParse(event);
-    // Answer the machine that asked. `send()` would route by the chat's registry
-    // entry or the Manager machine — a chat the server has not mapped yet,
-    // or one on a non-Manager machine, never got its answer and the host sat out its
+    // Answer the host that asked. `send()` would route by the chat's registry
+    // entry or the Manager host — a chat the server has not mapped yet,
+    // or one on a non-Manager host, never got its answer and the host sat out its
     // timeout (`502 view_file_publish_failed: artifact publish timed out`).
     const reply = (out: WireEvent): void => {
       if (fromHostId !== null) deps.hostLink.sendTo(fromHostId, BRIDGE_SURFACE_ID, out);

@@ -1,7 +1,7 @@
 // This host's identity as the rest of the system sees it (spec/02 § Host
 // identity, § Agent backends, § Optional components).
 //
-// A host is one machine among several. Everything it says about itself —
+// A host is one host among several. Everything it says about itself —
 // what it is called, what it runs on, which agent backends it has provisioned,
 // which large model weights are on its disk — is gathered here and emitted as
 // a single `host.host` self-description, so there is exactly one place that
@@ -29,11 +29,11 @@ export const CLAUDE_BACKEND_LABEL = 'Claude Code';
 
 export interface HostDescriptionInput {
   hostId: string;
-  /** User-editable label; defaults to the machine's hostname at registration. */
+  /** User-editable label; defaults to the host's hostname at registration. */
   hostName: string;
   hostVersion: string;
   /**
-   * The source commit and build instant stamped into this machine's artifact
+   * The source commit and build instant stamped into this host's artifact
    * (spec/11 § Version reporting). Absent when the host runs from a source
    * checkout rather than a built artifact — absent is the honest value, never
    * a guess.
@@ -41,10 +41,8 @@ export interface HostDescriptionInput {
   gitSha?: string | undefined;
   builtAt?: string | undefined;
   updateAvailable: boolean;
-  /** A newer build is published but not yet built for this machine. */
+  /** A newer build is published but not yet built for this host. */
   updatePending?: boolean | undefined;
-  /** An update is held until this machine's running turns finish. */
-  updateHeld?: boolean | undefined;
   permissionModeDefault: SdkPermissionMode;
   permissionOverrides: number;
   /**
@@ -124,7 +122,7 @@ export interface HostDescriptionInput {
   patchMcpEnabled?: boolean | undefined;
   /** Always true now: the shipped Manager/Speakers CLAUDE.md always loads. */
   harnessClaudeMdEnabled: boolean;
-  /** Battery state (`host.host.power`); absent when the machine has no readable battery. */
+  /** Battery state (`host.host.power`); absent when the host has no readable battery. */
   power?: { onBattery: boolean; percent: number } | undefined;
   /** Why this host's server link last dropped (`host.host.lastDisconnect`). */
   lastDisconnect?: LinkDrop | undefined;
@@ -143,7 +141,6 @@ export function describeHost(input: HostDescriptionInput): HostInfoEvent {
     ...(input.builtAt !== undefined ? { builtAt: input.builtAt } : {}),
     updateAvailable: input.updateAvailable,
     ...(input.updatePending ? { updatePending: true } : {}),
-    ...(input.updateHeld ? { updateHeld: true } : {}),
     permissionModeDefault: input.permissionModeDefault,
     permissionOverrides: input.permissionOverrides,
     ...(input.defaultModel !== undefined ? { defaultModel: input.defaultModel } : {}),

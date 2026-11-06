@@ -1,7 +1,7 @@
 // spec/14 ## Main chat panel — a `Skill` tool call's row names the skill and
 // links to its own `SKILL.md`, the same Edit-link mechanism the Jobs view's
 // Skill field already offers (`resolveSkillLink`, `openFileInBrowser`). A
-// skill living outside the chat's folder (machine-wide) states why instead
+// skill living outside the chat's folder (host-wide) states why instead
 // of offering a link that would 404 — same containment rule, same UX.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';

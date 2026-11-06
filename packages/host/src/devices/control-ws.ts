@@ -47,7 +47,7 @@ export interface DeviceControlDeps {
   /**
    * The five-minute adoption window (spec/16). Optional so existing callers
    * keep working; when unset an unknown device is refused, which is the safe
-   * direction — a machine with no adoption support must not admit strangers.
+   * direction — a host with no adoption support must not admit strangers.
    */
   adoption?: { announce(deviceId: string): { adopted: boolean; reason?: string } };
   presence: PresenceRegistry;
@@ -139,7 +139,7 @@ export class DeviceControlServer {
     });
     let record = this.deps.registry.get(claims.surface_id);
     if (!record) {
-      // A device this machine has never seen. It joins ONLY through an open
+      // A device this host has never seen. It joins ONLY through an open
       // adoption window — which is what `patch hosts pair-device` opens
       // (spec/16 § Adoption). Until this, the window was opened and nothing
       // consulted it: an unknown device was refused unconditionally, so the

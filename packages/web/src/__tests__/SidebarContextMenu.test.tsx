@@ -21,7 +21,7 @@ import { useLayoutStore } from '../stores/layoutStore.js';
 import { useSelectionStore } from '../stores/selectionStore.js';
 import * as newWindow from '../lib/newWindow.js';
 import { api } from '../api/rest.js';
-import { SPECIAL_THREAD_IDS } from '@patch/wire';
+import { SPECIAL_THREAD_IDS, SNOOZE_UNTIL_COMPLETE } from '@patch/wire';
 import type { ChatRow } from '../stores/types.js';
 
 function rowFixture(overrides: Partial<ChatRow> = {}): ChatRow {
@@ -82,6 +82,7 @@ describe('sidebar row context menu', () => {
     useUiStore.getState().setChannelsOpen(false);
     useUiStore.getState().setArchivedOpen(false);
     useUiStore.getState().setDeletedOpen(false);
+    useUiStore.setState({ snoozedOpen: false, hiddenOpen: false, automationsOpen: false });
     useUiStore.getState().setAttentionOnly(false);
     useUiStore.getState().setSearchQuery('');
     useUiStore.setState({ errors: [], forgottenFolders: [], toolsPanelChatId: null });
@@ -182,6 +183,28 @@ describe('sidebar row context menu', () => {
     const until = useChatStore.getState().chats['c1']?.snoozedUntil as number;
     expect(until).toBeGreaterThanOrEqual(before + 3_600_000);
     expect(snooze).toHaveBeenCalledWith('c1', until, expect.any(String));
+  });
+
+  it('Snooze until done is offered only for a running chat and snoozes it until complete at once', async () => {
+    useChatStore.getState().hydrate([rowFixture({ activity: 'running' })]);
+    const snooze = vi.spyOn(api, 'snoozeChat').mockResolvedValue(undefined as never);
+    renderSidebar();
+
+    rightClick(screen.getByTestId('chat-row-c1'));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId(`${MENU}-snooze-until-done`));
+    });
+    expect(screen.queryByTestId(MENU)).toBeNull();
+    expect(screen.queryByTestId('snooze-sheet')).toBeNull();
+    expect(snooze).toHaveBeenCalledWith('c1', SNOOZE_UNTIL_COMPLETE, expect.any(String));
+    expect(useChatStore.getState().chats['c1']?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
+  });
+
+  it('an idle chat with no goal has no Snooze until done', () => {
+    useChatStore.getState().hydrate([rowFixture()]);
+    renderSidebar();
+    rightClick(screen.getByTestId('chat-row-c1'));
+    expect(screen.queryByTestId(`${MENU}-snooze-until-done`)).toBeNull();
   });
 
   it('pins through the row’s own pin action', async () => {
@@ -430,6 +453,7 @@ describe('sidebar row context menu over a multi-selection', () => {
     useVoiceStore.setState({ activeDevices: {} });
     useUiStore.getState().setArchivedOpen(false);
     useUiStore.getState().setDeletedOpen(false);
+    useUiStore.setState({ snoozedOpen: false, hiddenOpen: false, automationsOpen: false });
     useUiStore.getState().setAttentionOnly(false);
     useUiStore.getState().setSearchQuery('');
     useUiStore.setState({ errors: [], forgottenFolders: [], toolsPanelChatId: null });

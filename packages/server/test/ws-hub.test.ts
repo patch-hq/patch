@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { generateUserKeypair, mintSurfaceCredential, mintDaemonKey } from '@patch/auth';
 import { WireTestClient } from '@patch/wire/test-client';
-import { CLOSE_SERVER_RESTARTING } from '@patch/wire';
+import { CLOSE_SERVER_RESTARTING, restartingVersion } from '@patch/wire';
 import { buildAll } from '../src/app.js';
 import { Registry } from '../src/registry.js';
 import { InProcessHostLink } from '../src/host-link.js';
@@ -729,7 +729,7 @@ describe('WS hub relay', () => {
       expect(ev.type).toBe('host.offline');
       // Fix 4 (TB1): wire spec documents daemon.offline as `{}` — no `reason`.
       expect((ev as { reason?: unknown }).reason).toBeUndefined();
-      // Presence names the machine it describes — an anonymous offline frame
+      // Presence names the host it describes — an anonymous offline frame
       // tells a surface nothing about WHICH host went away.
       expect(Object.keys(ev).sort()).toEqual(['hostId', 'type']);
       expect(ev).toMatchObject({ hostId: 'd1' });
@@ -781,12 +781,12 @@ describe('WS hub relay', () => {
     // webBundleHash}` where `hosts[]` is `{hostId, online, lastSeenAt, host,
     // accounts[]}` per REGISTERED host. That roster is the authoritative
     // presence carrier — a surface renders the whole Hosts list from the
-    // greeting alone, including machines that are down.
+    // greeting alone, including hosts that are down.
     //
     // The roster is keyed off the REGISTRY, so a host only appears once it is
     // actually registered against the account. An offline link contributes no
     // id of its own (it is not in `onlineHostIds()`), which is exactly right:
-    // an unregistered, offline machine is not a host of this account.
+    // an unregistered, offline host is not a host of this account.
     const user = generateUserKeypair(() => new Uint8Array(32).fill(34));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
@@ -815,8 +815,8 @@ describe('WS hub relay', () => {
       const okPromise = client.waitFor('auth.ok');
       const offlinePromise = client.waitFor('host.offline');
 
-      // 1. The auth.ok roster names the machine and says it is down. The server
-      //    invents no description for a machine it has never heard from.
+      // 1. The auth.ok roster names the host and says it is down. The server
+      //    invents no description for a host it has never heard from.
       const ok = await okPromise;
       expect(ok.hosts).toEqual([
         {
@@ -829,7 +829,7 @@ describe('WS hub relay', () => {
         },
       ]);
 
-      // 2. The standalone presence frame agrees, and names the machine it
+      // 2. The standalone presence frame agrees, and names the host it
       //    describes — an anonymous offline frame tells a surface nothing about
       //    WHICH host went away. No `reason`: spec/03 documents no such field.
       const ev = await offlinePromise;
@@ -1335,9 +1335,9 @@ describe('WS hub host gate', () => {
   // server redeploy" — full stack (real WS host + surface sockets, real
   // Registry, real InboundHostLink) proof that a chat-scoped frame whose
   // host the registry mirror doesn't know yet is held rather than guessed at
-  // an ONLINE-but-wrong registered machine, and that the requesting surface
+  // an ONLINE-but-wrong registered host, and that the requesting surface
   // is told plainly (`daemon_unavailable`) rather than left hanging.
-  it('a chat-scoped frame whose host is unknown is not misrouted to a different, already-connected registered machine, and the surface is told daemon_unavailable if it never resolves', async () => {
+  it('a chat-scoped frame whose host is unknown is not misrouted to a different, already-connected registered host, and the surface is told daemon_unavailable if it never resolves', async () => {
     const { registry, user } = bootstrappedRegistry(69);
     registry.setDaemonKey({ hostId: 'daemon-1', publicKey: user.publicKey, issuedAt: 1 });
     registry.setDaemonKey({ hostId: 'daemon-2', publicKey: user.publicKey, issuedAt: 1 });
@@ -1361,9 +1361,9 @@ describe('WS hub host gate', () => {
       });
       const surface = new WireTestClient({ url: h.url, auth: surfaceJwt });
       await surface.connect();
-      await surface.waitFor('host.offline'); // greeting — neither machine connected yet
+      await surface.waitFor('host.offline'); // greeting — neither host connected yet
 
-      // daemon-1 is this account's home/default machine (registered first)
+      // daemon-1 is this account's home/default host (registered first)
       // and IS connected — but it has never heard of 'c1'; it lives on
       // daemon-2, which stays offline for the whole test.
       const host1 = new WireTestClient({ url: h.url, clientType: 'host', auth: daemon1Key });
@@ -1500,3 +1500,57 @@ async function connectExpectClose(
     });
   });
 }
+
+describe('going-away notice carries the version (spec/12)', () => {
+  it('sends the version it is restarting into, in the close reason of every socket', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'patch-ws-restart-'));
+    try {
+      const user = generateUserKeypair(() => new Uint8Array(32).fill(19));
+      const registry = Registry.load(dir);
+      registry.bootstrapAccount({ keypair: user });
+      registry.upsertSurface({ surfaceId: 'srf-rv', surfaceKind: 'web', label: 'b', issuedAt: 1 });
+      const jwt = await mintSurfaceCredential({
+        userPrivateKey: user.privateKey,
+        surfaceId: 'srf-rv',
+        surfaceKind: 'web',
+        label: 'browser',
+      });
+      const hostLink = new InProcessHostLink();
+      const built = await buildAll({
+        logger: false as never,
+        registry,
+        hostLink,
+        hostOfflineGraceMs: 0,
+        restartTarget: () => '9.9.9',
+      });
+      await built.app.listen({ port: 0, host: '127.0.0.1' });
+      const port = (built.app.server.address() as AddressInfo).port;
+      const WebSocketCtor = (await import('ws')).default;
+      const ws = new WebSocketCtor(`ws://127.0.0.1:${port}/ws`);
+      await new Promise<void>((resolve, reject) => {
+        ws.on('open', () => resolve());
+        ws.on('error', reject);
+      });
+      const closed = new Promise<{ code: number; reason: string }>((resolve) =>
+        ws.on('close', (code: number, reason: Buffer) =>
+          resolve({ code, reason: reason.toString('utf8') }),
+        ),
+      );
+      ws.send(
+        JSON.stringify({
+          type: 'hello',
+          clientType: 'surface-web',
+          clientVersion: '1.0.0',
+          auth: jwt,
+        }),
+      );
+      await new Promise<void>((resolve) => ws.once('message', () => resolve()));
+      await built.app.close();
+      const c = await closed;
+      expect(c.code).toBe(CLOSE_SERVER_RESTARTING);
+      expect(restartingVersion(c.reason)).toBe('9.9.9');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

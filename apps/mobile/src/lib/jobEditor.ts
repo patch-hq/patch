@@ -34,7 +34,7 @@ export function buildGroupOptions(jobs: readonly { group?: string }[]): string[]
  * none (spec/15 § Job editor). Mobile addresses a skill's file through the
  * host files API — hostId + absolute path, no chat in between (spec/03 §
  * Host files) — so unlike web's chat-scoped file browser it reaches a skill
- * anywhere on the host, including a machine-wide one under `~/.claude/skills`
+ * anywhere on the host, including a host-wide one under `~/.claude/skills`
  * that sits outside every project folder. NO FALLBACK: a path is never
  * guessed, and a link that would fail is never rendered — the caller shows
  * `reason` instead.
@@ -55,9 +55,9 @@ export function resolveSkillEditTarget(input: {
   // An older host answers without paths at all (the field is optional
   // precisely so it can) — say so rather than construct a path from the name.
   // That is a DIFFERENT case from `paths` being present but missing just this
-  // skill's key, which is the normal result for a machine-level skill asked
+  // skill's key, which is the normal result for a host-level skill asked
   // about from a host that genuinely doesn't have it.
-  if (input.paths === undefined) return { reason: 'machine does not report skill files' };
+  if (input.paths === undefined) return { reason: 'host does not report skill files' };
   const path = input.paths[input.skill];
   if (path === undefined) return { reason: 'skill not found on this host' };
   return { hostId: input.hostId, path };
@@ -201,7 +201,7 @@ export const DEFAULT_FORM: FormState = {
   spawnFolder: '',
   spawnPrompt: '',
   spawnSkill: '',
-  // Host default — a new job pins nothing, so it tracks the machine rather
+  // Host default — a new job pins nothing, so it tracks the host rather
   // than freezing a model id that will eventually be retired.
   spawnModel: '',
   spawnAccount: '',
@@ -329,14 +329,14 @@ export function validateForm(form: FormState): string | null {
   // A gate with no host or folder would be asked nowhere, and the server's own
   // `JobGate` refuses it — say so here, where there is someone to tell.
   if (form.gateOn && form.gateCommand.trim().length > 0) {
-    if (!form.gateHostId.trim()) return 'Choose which machine the gate command runs on.';
+    if (!form.gateHostId.trim()) return 'Choose which host the gate command runs on.';
     if (!form.gateFolder.trim()) return 'Choose a folder for the gate command to run in.';
   }
   const usesSpawnFields = form.actionType === 'spawn' || form.actionType === 'continue';
   // A `script` action is validated on its own terms: a host, a folder and a
   // command, and NO first turn (spec/08 § Action — `script`).
   if (form.actionType === 'script') {
-    if (!form.spawnHostId.trim()) return 'Choose which machine the command runs on.';
+    if (!form.spawnHostId.trim()) return 'Choose which host the command runs on.';
     if (!form.spawnFolder.trim()) return 'Choose a folder for the command to run in.';
     if (!form.scriptCommand.trim()) return 'Enter the command to run.';
     return null;
@@ -345,7 +345,7 @@ export function validateForm(form: FormState): string | null {
   // A job fires unattended, so one that cannot name a host would dispatch
   // nowhere. Refuse at save time, where there is someone to tell.
   if (usesSpawnFields && !form.spawnHostId.trim()) {
-    return 'Choose which machine the chat runs on.';
+    return 'Choose which host the chat runs on.';
   }
   if (usesSpawnFields && !form.spawnFolder.trim()) {
     return 'Choose a folder for the chat.';

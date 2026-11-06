@@ -120,6 +120,7 @@ describe('patch-tools MCP server — full client round-trip', () => {
         'patch_browser_open',
         'patch_call',
         'patch_cancel_wake',
+        'patch_wake_status',
         'patch_doc_comment',
         'patch_doc_convert',
         'patch_doc_export',
@@ -214,6 +215,34 @@ describe('patch-tools MCP server — full client round-trip', () => {
     const cancelRes = JSON.parse(cancel.content[0]!.text) as { ok: boolean; cancelled: boolean };
     expect(cancelRes).toEqual({ ok: true, cancelled: true });
     expect(daemon.peekWake('caller-1')).toBeNull();
+  });
+
+  it('re-arming an identical loop keeps the schedule; a different one reports the replacement; patch_wake_status reads it', async () => {
+    metaStore.write({
+      chatId: 'caller-1',
+      folder,
+      name: null,
+      nextSeq: 0,
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    const call = async (name: string, args: Record<string, unknown>) =>
+      JSON.parse(
+        ((await client.callTool({ name, arguments: args })) as { content: { text: string }[] })
+          .content[0]!.text,
+      ) as Record<string, unknown>;
+    const first = await call('patch_loop', { message: 'poll', every: '5m' });
+    expect(first['replaced']).toBeUndefined();
+    const again = await call('patch_loop', { message: 'poll', every: '5m' });
+    expect(again['unchanged']).toBe(true);
+    expect(again['fireAt']).toBe(first['fireAt']);
+    const status = await call('patch_wake_status', {});
+    expect((status['pending'] as { fireAt: number }).fireAt).toBe(first['fireAt']);
+    const changed = await call('patch_loop', { message: 'poll', every: '10m' });
+    expect(changed['unchanged']).toBeUndefined();
+    expect(String(changed['note'])).toContain('Replaced a pending loop');
+    await call('patch_cancel_wake', {});
+    expect((await call('patch_wake_status', {}))['pending']).toBeNull();
   });
 
   // patch_goal_set/get/clear need a REAL chatId in `daemon.chatState` (unlike

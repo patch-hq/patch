@@ -13,7 +13,7 @@ function at(t: { now: number }) {
 }
 
 describe('device adoption window', () => {
-  it('is closed until the machine opens one', () => {
+  it('is closed until the host opens one', () => {
     const t = { now: 1_000 };
     const a = at(t);
     expect(a.isOpen()).toBe(false);
@@ -62,7 +62,7 @@ describe('device adoption window', () => {
     const a = at(t);
     a.open();
     expect(a.announce('spk-1').adopted).toBe(true);
-    // The same machine (or another) opens a fresh window later.
+    // The same host (or another) opens a fresh window later.
     t.now += ADOPTION_WINDOW_MS * 2;
     a.open();
     expect(a.announce('spk-2').adopted).toBe(true);

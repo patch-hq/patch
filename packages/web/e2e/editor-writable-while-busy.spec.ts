@@ -74,7 +74,7 @@ async function typeIntoEditor(page: Page, text: string) {
   await expect(monaco).toBeVisible(MONACO_MOUNT);
 
   // Wait for the file's content to actually be IN the editor before typing.
-  // The content arrives from a stubbed fetch, and under a loaded machine it can
+  // The content arrives from a stubbed fetch, and under a loaded host it can
   // land after the first keystroke — Monaco then re-renders and moves the
   // cursor, scattering the token across the file.
   await expect(editorPane.getByText('const line0 = 0;')).toBeVisible(MONACO_MOUNT);

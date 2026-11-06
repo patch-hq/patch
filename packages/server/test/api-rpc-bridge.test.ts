@@ -20,6 +20,7 @@ describe('isRelayablePath', () => {
     expect(isRelayablePath('/api/settings/shared')).toBe(true);
     expect(isRelayablePath('/api/accounts/claude-code/order')).toBe(true);
     expect(isRelayablePath('/api/hosts?x=1')).toBe(true);
+    expect(isRelayablePath('/api/auth/me')).toBe(true);
     expect(isRelayablePath('/api/auth/pair/start')).toBe(false);
     expect(isRelayablePath('/api/settingsX')).toBe(false);
     expect(isRelayablePath('/api/settings/../auth')).toBe(false);

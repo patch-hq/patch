@@ -1,15 +1,15 @@
-// What this machine can say about nobody being at it (spec/09 § Presence
+// What this host can say about nobody being at it (spec/09 § Presence
 // heuristic). Input idle time answers "has someone touched it lately"; this adds
-// the cases where the machine knows better than the clock: the screen is locked,
-// the session is switched out, or the machine is going to sleep (a closed lid
+// the cases where the host knows better than the clock: the screen is locked,
+// the session is switched out, or the host is going to sleep (a closed lid
 // included).
 
 export type Away = 'locked' | 'asleep';
 
 export interface SystemPresenceReport {
-  /** Milliseconds since the last input anywhere on the machine. */
+  /** Milliseconds since the last input anywhere on the host. */
   idleMs: number;
-  /** Set while nobody is at the machine. */
+  /** Set while nobody is at the host. */
   away?: Away;
 }
 

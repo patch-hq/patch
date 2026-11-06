@@ -26,12 +26,16 @@ import {
   UNTIL_COMPLETE_PRESET,
   formatElapsed,
   formatWakeAt,
+  resolveSliderHours,
+  SNOOZE_SLIDER_HOURS,
+  snoozeSliderLabel,
   type SnoozePreset,
 } from '../lib/snoozePresets.js';
 import { applySnooze } from '../lib/snoozeApply.js';
 import type { ChatRow } from '../stores/types.js';
 
 const CUSTOM = 'custom';
+const SLIDER = 'slider';
 
 /** A sensible starting point for Custom: an hour out, rounded up to the next quarter hour. */
 function suggestedCustom(): string {
@@ -46,8 +50,10 @@ function wakeFor(
   selected: string | null,
   customValue: string,
   all: ReadonlyArray<SnoozePreset>,
+  sliderIndex: number,
 ): number | null {
   if (selected === null) return null;
+  if (selected === SLIDER) return resolveSliderHours(SNOOZE_SLIDER_HOURS[sliderIndex]!);
   if (selected === CUSTOM) {
     // The picker gives a LOCAL wall-clock string; Date parses it in the
     // user's own zone, which is what "snooze until 9am" means to them.
@@ -73,6 +79,7 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [customValue, setCustomValue] = useState('');
+  const [sliderIndex, setSliderIndex] = useState(SNOOZE_SLIDER_HOURS.indexOf(3));
 
   // A project and a multi-selection are both "several chats"; only the title differs.
   const isProject = target.kind !== 'chat';
@@ -99,7 +106,7 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
     ...distinctPresets(allPresets),
     ...(canUntilComplete ? [UNTIL_COMPLETE_PRESET] : []),
   ];
-  const wake = wakeFor(selected, customValue, allPresets);
+  const wake = wakeFor(selected, customValue, allPresets, sliderIndex);
   const canConfirm = selected !== null && targets.length > 0;
 
   useEffect(() => {
@@ -121,7 +128,7 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
       }
       at = wake;
     } else {
-      at = wakeFor(selected, '', allPresets)!;
+      at = wakeFor(selected, '', allPresets, sliderIndex)!;
     }
     close();
     if (target.kind === 'chats') useSelectionStore.getState().clear();
@@ -226,6 +233,28 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
             <span>Custom…</span>
           </button>
         </div>
+        <label className="snooze-slider" data-testid="snooze-sheet-slider-row">
+          <span className="snooze-slider-label">Or snooze for</span>
+          <input
+            type="range"
+            min={0}
+            max={SNOOZE_SLIDER_HOURS.length - 1}
+            step={1}
+            value={sliderIndex}
+            className={selected === SLIDER ? 'on' : ''}
+            data-testid="snooze-sheet-slider"
+            aria-label="Snooze for"
+            aria-valuetext={snoozeSliderLabel(SNOOZE_SLIDER_HOURS[sliderIndex]!)}
+            onPointerDown={() => setSelected(SLIDER)}
+            onChange={(e) => {
+              setSelected(SLIDER);
+              setSliderIndex(Number(e.target.value));
+            }}
+          />
+          <span className="snooze-slider-value" data-testid="snooze-sheet-slider-value">
+            {selected === SLIDER ? snoozeSliderLabel(SNOOZE_SLIDER_HOURS[sliderIndex]!) : ''}
+          </span>
+        </label>
         {selected === CUSTOM ? (
           <DateTimeField
             inline

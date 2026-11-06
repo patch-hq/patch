@@ -390,7 +390,7 @@ test('no screen name of the app is baked into the judgement', () => {
   }
 });
 
-test("picks the machine's first AVD when none is named — no hardcoded device", () => {
+test("picks the host's first AVD when none is named — no hardcoded device", () => {
   assert.deepEqual(pickAvd(undefined, ['Pixel_7', 'gp-e2e']), { avd: 'Pixel_7' });
 });
 
@@ -404,7 +404,7 @@ test('a named AVD that does not exist lists what does, rather than "no device"',
   assert.match(res.why, /Pixel_7/);
 });
 
-test('a machine with no emulator says so and says how to fix it', () => {
+test('a host with no emulator says so and says how to fix it', () => {
   const res = pickAvd(undefined, []);
   assert.match(res.why, /no Android emulator/);
   assert.match(res.why, /Device Manager/);
@@ -498,11 +498,11 @@ test('foregroundPackage names the app owning the focused window', () => {
   assert.equal(foregroundPackage('  mCurrentFocus=null'), null);
 });
 
-test("pickAvd prefers the harness's own AVD over whatever is first on the machine", () => {
+test("pickAvd prefers the harness's own AVD over whatever is first on the host", () => {
   assert.deepEqual(pickAvd(undefined, ['Pixel_7', 'gp-e2e', DEDICATED_AVD]), {
     avd: DEDICATED_AVD,
   });
-  // No dedicated one → the old behaviour, first on the machine.
+  // No dedicated one → the old behaviour, first on the host.
   assert.deepEqual(pickAvd(undefined, ['Pixel_7', 'gp-e2e']), { avd: 'Pixel_7' });
   // An explicit choice still wins over both.
   assert.deepEqual(pickAvd('gp-e2e', ['Pixel_7', 'gp-e2e', DEDICATED_AVD]), { avd: 'gp-e2e' });

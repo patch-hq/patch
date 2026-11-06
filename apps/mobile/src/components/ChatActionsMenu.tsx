@@ -11,7 +11,7 @@
 // - Tools pushes the full-screen per-chat tools page (app/chats/[chatId]/tools).
 // - Documents pushes the chat-folder document browser (app/chats/[chatId]/docs).
 // - Add tasks (only while the chat has no list) summons the task bar, open.
-// - Move to… pushes the Move page (app/chats/[chatId]/move): another machine,
+// - Move to… pushes the Move page (app/chats/[chatId]/move): another host,
 //   and the folder the chat will run in there.
 // - Show / Pin / Snooze / Archive call the very functions the Chats-tab row
 //   tools call.
@@ -76,7 +76,7 @@ export function ChatActionsMenu({
     // No fallback to the picker: a chat whose host is not known yet (not yet
     // spawned) has no "here" to start another in, and saying so is honest.
     if (!row || row.hostId === '' || row.folder === '') {
-      useUiStore.getState().pushError("new chat failed: this chat's machine isn't known yet");
+      useUiStore.getState().pushError("new chat failed: this chat's host isn't known yet");
       return;
     }
     router.push({

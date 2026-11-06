@@ -444,7 +444,7 @@ test.describe('gated job — the decision and the work are separate', () => {
       action: { folder: string; hostId: string };
     };
     expect(body.gate.command).toContain('test -s queue || exit 1');
-    // The gate is asked on the same machine, in the same folder, as the work.
+    // The gate is asked on the same host, in the same folder, as the work.
     expect(body.gate.folder).toBe(body.action.folder);
     expect(body.gate.hostId).toBe(body.action.hostId);
   });

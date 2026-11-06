@@ -4,9 +4,9 @@
 // only turns a chat's files into a bundle and a bundle back into files.
 //
 // What a chat IS on disk, and so what a bundle carries:
-//   - `~/.patch/chats/<id>/` — the history log, meta, seq index and the native
-//     Claude session mirror (`native/claude/<sessionId>.jsonl`), which is what
-//     the next turn on the target resumes from.
+//   - `~/.patch/chats/<id>/` — the history log, meta, seq index and the chat's
+//     Claude conversation (`claude/projects/<folder>/<sessionId>.jsonl`), which
+//     is what the next turn on the target resumes from.
 //   - the blobs its log references (`~/.patch/blobs/sha256/..`), since a large
 //     tool result is only a `$blob` pointer in the log.
 //   - the attachments its turns carried (`~/.patch/attachments/<folder>/`), with
@@ -15,7 +15,7 @@
 //     of last resort when the mirror is missing or started late.
 //
 // The folder is the one thing that changes: the same work usually lives at a
-// different path on another machine (`/Users/tom/wpp/Unite` → `/home/tom/Unite`),
+// different path on another host (`/Users/tom/wpp/Unite` → `/home/tom/Unite`),
 // so every place the old folder is recorded as the session's working directory
 // is rewritten to the new one.
 
@@ -94,6 +94,10 @@ function filesUnder(root: string): string[] {
   const walk = (dir: string): void => {
     for (const name of readdirSync(dir)) {
       const abs = join(dir, name);
+      // The chat's Claude config dir holds links to the user's own skills,
+      // settings and credentials: only the conversation under `projects/` is
+      // the chat's, the rest is rebuilt on the host it lands on.
+      if (dir === join(root, 'claude') && name !== 'projects') continue;
       const st = statSync(abs);
       if (st.isDirectory()) walk(abs);
       else if (st.isFile() && !TEMP_FILE.test(name)) out.push(abs);
@@ -265,7 +269,13 @@ export function writeMoveBundle(
       const kind = f.path.slice(0, slash);
       const rel = safeRel(f.path.slice(slash + 1));
       if (kind === 'chat') {
-        const dest = join(stage, ...rel.split('/'));
+        // The conversation lives under `claude/projects/<encoded folder>/`, and
+        // the encoded folder is the new one on this host.
+        const parts = rel.split('/');
+        if (parts[0] === 'claude' && parts[1] === 'projects' && parts.length > 3) {
+          parts[2] = encodeFolder(folder);
+        }
+        const dest = join(stage, ...parts);
         mkdirSync(dirname(dest), { recursive: true });
         if (rel === 'meta.json') {
           metaSeen = true;
@@ -282,7 +292,10 @@ export function writeMoveBundle(
             updatedAt: now,
           };
           writeFileSync(dest, JSON.stringify(moved, null, 2));
-        } else if (rel.startsWith('native/claude/') && rel.endsWith('.jsonl')) {
+        } else if (
+          (rel.startsWith('native/claude/') || rel.startsWith('claude/projects/')) &&
+          rel.endsWith('.jsonl')
+        ) {
           writeFileSync(dest, rehomeJsonl(bytes.toString('utf8'), from, folder));
         } else {
           writeFileSync(dest, bytes);

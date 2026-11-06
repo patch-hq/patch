@@ -2,7 +2,7 @@
 # Bind the canonical patch working-copy path (~/projects/patch) to the real
 # checkout, idempotently.
 #
-# `patch` is its own repo but on some machines the checkout lives nested inside
+# `patch` is its own repo but on some hosts the checkout lives nested inside
 # the portfolio monorepo (~/projects/portfolio/projects/patch). The spec,
 # plans, and build harness all address files by the canonical absolute root
 # ~/projects/patch, so that path MUST resolve to the live checkout for those

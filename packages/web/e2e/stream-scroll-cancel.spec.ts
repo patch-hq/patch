@@ -107,6 +107,18 @@ test.describe('scrolling up while a reply streams in', () => {
     // 20 small notches up — ~600px of deliberate scrolling, delivered the way
     // a trackpad delivers it.
     await scrollBy(page, -30, 20);
+    // Wheel scrolling can still be animating when the last event returns, most
+    // visibly on a slow runner; measure from where the view has come to rest,
+    // not from mid-glide (CI saw a 122px drift that was the glide, not a re-pin).
+    let previousTop = -1;
+    await expect
+      .poll(async () => {
+        const top = await stream.evaluate((el) => el.scrollTop);
+        const rested = top === previousTop;
+        previousTop = top;
+        return rested;
+      })
+      .toBe(true);
     const afterWheel = await stream.evaluate((el) => el.scrollTop);
     const gapAfterWheel = await stream.evaluate(
       (el) => el.scrollHeight - el.clientHeight - el.scrollTop,

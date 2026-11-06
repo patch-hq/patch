@@ -102,13 +102,12 @@ const queryClient = new QueryClient({
 const openingJobTriggerFixture =
   new URLSearchParams(window.location.search).get('chat') === 'chat_job_trigger';
 
-// `?recency=machine` gives the new-chat screen's recently used models
+// `?recency=host` gives the new-chat screen's recently used models
 // something to ignore: a job-spawned chat and the Manager thread, both NEWER
 // than the one chat a person started (`chat_bus`), each on a model of its own
 // (spec/14 § Sidebar §8). Scoped to the param for the same reason as
 // `openingJobTriggerFixture` — a `jobId` fills the Automations group.
-const machineRecencyFixture =
-  new URLSearchParams(window.location.search).get('recency') === 'machine';
+const hostRecencyFixture = new URLSearchParams(window.location.search).get('recency') === 'host';
 
 // Hydrate the real chat store with the three special threads plus a regular
 // chat, exactly as the host would emit them.
@@ -124,10 +123,10 @@ useChatStore.getState().hydrate([
     pinned: true,
     pinnedAt: 50,
     disabled: false,
-    lastUpdated: machineRecencyFixture ? 90 : 3,
-    ...(machineRecencyFixture ? { model: 'claude-haiku-4-5' } : {}),
+    lastUpdated: hostRecencyFixture ? 90 : 3,
+    ...(hostRecencyFixture ? { model: 'claude-haiku-4-5' } : {}),
   },
-  ...(machineRecencyFixture
+  ...(hostRecencyFixture
     ? [
         {
           chatId: 'jobchat-nightly',
@@ -673,6 +672,20 @@ useChatStore.getState().hydrate([
     hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'tool-paired-fixture',
+    folder: '/home/tom/projects/portfolio',
+    activity: 'idle',
+    status: 'active',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 0,
+  },
+  // A published artifact (spec/14 § Artifacts) — drives the artifact-as-tab e2e.
+  {
+    chatId: 'chat_artifact',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'artifact-fixture',
     folder: '/home/tom/projects/portfolio',
     activity: 'idle',
     status: 'active',
@@ -2104,6 +2117,18 @@ useChatStore.setState((s) => ({
         at: 1,
       },
     ],
+    // spec/14 § Artifacts — a published page, opened as a tab.
+    chat_artifact: [
+      {
+        seq: 0,
+        kind: 'artifact',
+        artifactId: 'art001',
+        artifactTitle: 'Bus times',
+        artifactUrl: '/api/chats/chat_artifact/artifact/art001?sig=s',
+        artifactPath: 'out/buses.html',
+        at: 0,
+      },
+    ],
     // spec/14 § Viewing files — the row IS the file, in a sandboxed frame.
     chat_view_file: [
       {
@@ -2896,7 +2921,7 @@ if (verbosityParam === 'off' || verbosityParam === 'summary' || verbosityParam =
 usePresenceStore.getState().setConnection('connected');
 // The `auth.ok` greeting, as the server replays it: one registered host, online,
 // with its own credential and its own last-used model. The last-used model lives
-// on the MACHINE (spec/04 § Spawn), so without a host here the new-chat picker
+// on the HOST (spec/04 § Spawn), so without a host here the new-chat picker
 // has nothing to preselect and no host to spawn on — exactly as in the real app.
 usePresenceStore.getState().setHosts([
   {
@@ -2944,9 +2969,9 @@ usePresenceStore.getState().setHosts([
   },
 ]);
 
-// `?hosts=two` adds a second machine, so the new-chat screen has a choice of
+// `?hosts=two` adds a second host, so the new-chat screen has a choice of
 // where to run (spec/14 §8). It publishes its own folder registry, as a real
-// host does, so choosing it offers that machine's folders and nobody else's.
+// host does, so choosing it offers that host's folders and nobody else's.
 if (new URLSearchParams(window.location.search).get('hosts') === 'two') {
   const home = usePresenceStore.getState().hosts['d1'];
   usePresenceStore.getState().setHosts([
@@ -3031,6 +3056,43 @@ const editorParam = params.get('editor');
 // test actually came to look at (the composer, a transcript link) — the
 // skill-autocomplete specs need the file real, not the tab open.
 const fileStubParam = params.get('fileStub');
+// `?archive=N` — answer the paged archived listing with N synthetic chats, so
+// the windowed Archived view can be exercised at scale in a real browser.
+const archiveSize = Number(new URLSearchParams(window.location.search).get('archive') ?? 0);
+if (archiveSize > 0) {
+  const prevFetch = window.fetch.bind(window);
+  window.fetch = ((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (!url.includes('/api/chats?archived=only')) return prevFetch(input, init);
+    const q = new URL(url, window.location.origin).searchParams;
+    const limit = Number(q.get('limit') ?? 30);
+    const offset = Number(q.get('offset') ?? 0);
+    const end = Math.min(offset + limit, archiveSize);
+    const chats = Array.from({ length: end - offset }, (_, k) => ({
+      chatId: `arch-${offset + k}`,
+      name: `Archived chat ${offset + k}`,
+      preview: null,
+      folder: '~/proj',
+      activity: 'idle',
+      status: 'archived',
+      pinned: false,
+      pinnedAt: null,
+      lastUpdated: Date.now() - (offset + k) * 3_600_000,
+      hostId: 'h1',
+      permissionMode: 'default',
+      jobId: null,
+      statusSummary: null,
+      statusKind: null,
+    }));
+    return Promise.resolve(
+      new Response(JSON.stringify({ chats, nextOffset: end < archiveSize ? end : null }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+  }) as typeof window.fetch;
+}
+
 if (editorParam === 'browse' || fileStubParam === 'skill') {
   // A small NESTED, deliberately UNSORTED, FLAT list — this is the shape
   // `listFilesRecursive` really returns (full relative paths, dirs AND files),
@@ -3537,6 +3599,7 @@ if (params.get('meeting') === 'demo') {
 // FLOW above the columns, which is the one thing jsdom cannot show. `?voiceLine`
 // seeds what the line last heard-and-dropped, for the heard-not-sent state.
 const voiceParam = params.get('voice');
+const shellParam = params.get('shell') !== null || voiceParam !== null;
 if (voiceParam === 'call' || voiceParam === 'hands-free') {
   useVoiceStore.getState().startCall(chatId, voiceParam);
   useVoiceStore.getState().setCallPhase('listening');
@@ -3927,6 +3990,7 @@ function Harness(): JSX.Element {
   const sidebarWidth = useUiStore((s) => s.sidebarWidth);
   const sidebarMini = useUiStore((s) => s.sidebarMini);
   const setSidebarWidth = useUiStore((s) => s.setSidebarWidth);
+  const resetSidebarWidth = useUiStore((s) => s.resetSidebarWidth);
   // `?route=/sidebar-window` — AppShell serves this as a BARE route (no docked
   // sidebar, no chat panel, no editor rail), so the harness mirrors that shape
   // instead of nesting it in the three-column shell. Rendering it inside the
@@ -3945,7 +4009,7 @@ function Harness(): JSX.Element {
   const columns = (
     <div
       className={`three-col ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}
-      style={voiceParam === null ? { height: '100vh' } : { flex: '1 1 auto', minHeight: 0 }}
+      style={!shellParam ? { height: '100vh' } : { flex: '1 1 auto', minHeight: 0 }}
     >
       <MemoryRouter initialEntries={[initialRoute]}>
         <GlobalShortcuts />
@@ -3963,6 +4027,8 @@ function Harness(): JSX.Element {
             side="left"
             width={sidebarMini ? SIDEBAR_MINI_WIDTH : sidebarWidth}
             onResize={setSidebarWidth}
+            onReset={resetSidebarWidth}
+            className="grip"
             testId="sidebar-divider"
           />
         )}
@@ -4016,7 +4082,7 @@ function Harness(): JSX.Element {
   // Without `?voice` the harness is the columns alone, exactly as every layout
   // spec already measures them. With it, they sit under the real app-shell
   // column so the bar is laid out against them for real.
-  if (voiceParam === null) return withChrome;
+  if (!shellParam) return withChrome;
   return (
     <div className="app-shell" data-testid="app-shell" style={{ height: '100vh' }}>
       <VoiceBar />

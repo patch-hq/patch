@@ -36,7 +36,7 @@ export const SETTINGS_PAGES: { id: SettingsPageId; title: string; group: string 
   { id: 'hooks', title: 'Hooks', group: 'Agents' },
   { id: 'computer', title: 'Computer use', group: 'Agents' },
   { id: 'activity', title: 'Activity', group: 'Agents' },
-  { id: 'hosts', title: 'Machines', group: 'Setup' },
+  { id: 'hosts', title: 'Hosts', group: 'Setup' },
   { id: 'identity', title: 'Agent identity', group: 'Setup' },
   { id: 'providers', title: 'Providers', group: 'Setup' },
   { id: 'notifications', title: 'Notifications', group: 'Setup' },

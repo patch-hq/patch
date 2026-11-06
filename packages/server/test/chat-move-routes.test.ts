@@ -1,5 +1,5 @@
 // Moving a chat between hosts (spec/04 § Moving a chat to another host) — the
-// server half: it drives export → import → retire across two machines, points
+// server half: it drives export → import → retire across two hosts, points
 // its mirror at the new one, and stops loudly at whichever step fails. The
 // host half is tested between two real hosts in
 // packages/host/test/chat-move.test.ts.
@@ -25,7 +25,7 @@ const BUNDLE = {
   attachments: {},
 };
 
-/** Two machines, each answering move steps with whatever the test says. */
+/** Two hosts, each answering move steps with whatever the test says. */
 class FakeHosts extends InProcessHostLink {
   readonly steps: Array<{ hostId: string; op: ChatMoveOp; event: Req }> = [];
   readonly restores: Array<{ hostId: string; event: WireEvent }> = [];
@@ -248,6 +248,7 @@ describe('POST /api/chats/:id/move', () => {
             activity: 'idle',
             lastUpdated: 1234,
             lastUserActivity: 1200,
+            createdAt: 100,
             folder: '/Users/tom/Unite',
             goal: 'Ship the plan',
             reminder: 'Check the risks',
@@ -325,6 +326,7 @@ describe('POST /api/chats/:id/move', () => {
             { branchId: 'c1-b0', parentBranchId: null },
             { branchId: 'c1-b1', parentBranchId: 'c1-b0' },
           ],
+          createdAt: 100,
           updatedAt: 1234,
           lastUserActivity: 1200,
           nextSeq: 0,

@@ -474,6 +474,7 @@ describe('MeetingManager', () => {
     );
     const m = make();
     m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
     void m.end('c1');
     await vi.waitFor(() => expect(writeup).toHaveBeenCalled());
     const deleted = m.delete('c1');
@@ -767,9 +768,28 @@ describe('MeetingManager', () => {
     await expect(make().regenerateWriteup('nope')).rejects.toThrow(MeetingError);
   });
 
+  it('shows whatever the model returns, even a title-only reply', async () => {
+    const m = make();
+    m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
+    writeup.mockResolvedValueOnce({ title: 'Meeting Write-up – 4 November 2026', sections: [] });
+    await m.end('c1');
+    expect(m.get('c1')!.writeup!.title).toBe('Meeting Write-up – 4 November 2026');
+    expect(m.get('c1')!.writeupError).toBeNull();
+  });
+
+  it('an empty transcript says so and never calls the model', async () => {
+    const m = make();
+    m.start('c1');
+    await m.end('c1');
+    expect(writeup).not.toHaveBeenCalled();
+    expect(m.get('c1')!.writeupError).toBe('no transcript content');
+  });
+
   it('a failed write-up is put on the state, not swallowed, and Regenerate clears it', async () => {
     const m = make();
     m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
     writeup.mockRejectedValueOnce(new Error('model down'));
     await m.end('c1');
     expect(m.get('c1')!.writeup ?? null).toBeNull();
@@ -803,6 +823,7 @@ describe('MeetingManager', () => {
   it('Resume reopens an ended meeting and the write-up stays until it ends again', async () => {
     const m = make();
     m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
     clock += 60_000;
     await m.end('c1');
     clock += 600_000;

@@ -3,7 +3,14 @@
 // that comes up after a restart.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
@@ -22,6 +29,7 @@ import {
   versionDirsInUse,
   type DurableTurnConfig,
 } from '../src/durableTurn.js';
+import { RUNNER_PROTOCOL } from '../src/turnRunner.js';
 import { pruneOldVersions } from '../src/installer/main.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -201,6 +209,57 @@ describe('a durable turn', () => {
     second.release();
   }, 30000);
 
+  it('a replaced turn releasing leaves the newer turn of the same chat running', async () => {
+    const { cfg, cwd } = fresh();
+    const first = new DurableTurn({ config: cfg, chatId: 'c5', localId: 'L5a', log });
+    const d1 = drive(first.spawn({ ...spawnOpts, cwd }));
+    d1.send(initialize('r1'));
+    d1.send(prompt);
+    await d1.until(() => texts(d1.lines).includes('a1'), 'first a1');
+    // A new message arrives before the first turn has been released.
+    const second = new DurableTurn({ config: cfg, chatId: 'c5', localId: 'L5b', log });
+    const d2 = drive(second.spawn({ ...spawnOpts, cwd }));
+    d2.send(initialize('r1'));
+    d2.send(prompt);
+    await d2.until(() => texts(d2.lines).includes('a1'), 'second a1');
+    first.release();
+    // Past the 5s the replaced turn gives its runner before retiring it.
+    await sleep(5600);
+    expect(existsSync(second.dir)).toBe(true);
+    expect(inspectTurn(cfg, 'c5')?.state).toBe('live');
+    writeFileSync(join(cwd, 'go'), '');
+    await d2.until(() => d2.lines.some((l) => l['type'] === 'result'), 'second result');
+    d2.send({ type: 'control_request', request_id: 'x', request: { subtype: 'noop' } });
+    await d2.exited;
+    second.release();
+    expect(existsSync(second.dir)).toBe(false);
+  }, 30000);
+
+  it('keeps runner.log when the runner dies without reporting claude exit', async () => {
+    const { cfg, cwd } = fresh();
+    const turn = new DurableTurn({ config: cfg, chatId: 'c7', localId: 'L7', log });
+    const proc = turn.spawn({ ...spawnOpts, cwd });
+    proc.on('error', () => undefined);
+    const d = drive(proc);
+    d.send(initialize('r1'));
+    d.send(prompt);
+    await d.until(() => texts(d.lines).includes('a1'), 'a1');
+    const info = JSON.parse(readFileSync(join(turn.dir, 'runner.json'), 'utf8')) as {
+      pid: number;
+      claudePid: number;
+    };
+    writeFileSync(join(turn.dir, 'runner.log'), 'runner stderr marker\n');
+    process.kill(info.pid, 'SIGKILL');
+    await sleep(300);
+    turn.release();
+    await sleep(6000);
+    expect(existsSync(turn.dir)).toBe(false);
+    const kept = join(root, 'turn-failures');
+    const files = readdirSync(kept);
+    expect(files).toHaveLength(1);
+    expect(readFileSync(join(kept, files[0] as string), 'utf8')).toContain('runner stderr marker');
+  }, 30000);
+
   it('retireTurn ends a runner and claude and removes the directory', async () => {
     const { cfg, cwd } = fresh();
     const turn = new DurableTurn({ config: cfg, chatId: 'c4', localId: 'L4', log });
@@ -246,6 +305,49 @@ describe('a durable turn', () => {
     writeFileSync(join(dir, 'turn.json'), JSON.stringify({ chatId: 'c5', localId: 'L5' }));
     writeFileSync(join(dir, 'runner.json'), JSON.stringify({ pid: 2 ** 22 + 1, claudePid: null }));
     expect(inspectTurn(cfg, 'c5')?.state).toBe('lost');
+  });
+});
+
+describe('runner protocol version', () => {
+  it('a runner states its protocol in runner.json, and the host reads it', async () => {
+    const { cfg, cwd } = fresh();
+    const turn = new DurableTurn({ config: cfg, chatId: 'p1', localId: 'LP', log });
+    const d = drive(turn.spawn({ ...spawnOpts, cwd }));
+    d.send(initialize('r1'));
+    d.send(prompt);
+    await d.until(() => texts(d.lines).includes('a1'), 'a1');
+    expect(JSON.parse(readFileSync(join(turn.dir, 'runner.json'), 'utf8')).protocol).toBe(
+      RUNNER_PROTOCOL,
+    );
+    expect(inspectTurn(cfg, 'p1')?.protocol).toBe(RUNNER_PROTOCOL);
+    detachDurableTurns();
+    resetDurableTurnsForTest();
+    writeFileSync(join(cwd, 'go'), '');
+    for (let i = 0; i < 200 && inspectTurn(cfg, 'p1')?.state !== 'exited'; i++) await sleep(25);
+  }, 30000);
+
+  it('a runner from before the field speaks protocol 1', () => {
+    const { cfg } = fresh();
+    const dir = join(cfg.turnsDir, 'p2');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'turn.json'), JSON.stringify({ chatId: 'p2' }));
+    writeFileSync(join(dir, 'runner.json'), JSON.stringify({ pid: process.pid, claudePid: null }));
+    writeFileSync(join(dir, 's'), '');
+    expect(inspectTurn(cfg, 'p2')?.protocol).toBe(1);
+  });
+
+  it('refuses, loudly, to reattach to a runner speaking a protocol it does not know', () => {
+    const { cfg, cwd } = fresh();
+    const dir = join(cfg.turnsDir, 'p3');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'turn.json'), JSON.stringify({ chatId: 'p3' }));
+    writeFileSync(
+      join(dir, 'runner.json'),
+      JSON.stringify({ pid: process.pid, protocol: 999, claudePid: null }),
+    );
+    writeFileSync(join(dir, 's'), '');
+    const turn = new DurableTurn({ config: cfg, chatId: 'p3', attach: { consumed: null }, log });
+    expect(() => turn.spawn({ ...spawnOpts, cwd })).toThrow(/protocol 999/);
   });
 });
 

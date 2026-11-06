@@ -132,7 +132,7 @@ describe('slash commands', () => {
     const none = deps({ hostId: null });
     runSlashCommand('/model opus', none);
     expect(none.pushError).toHaveBeenCalledWith(
-      'model failed: this chat has no machine to read models from',
+      'model failed: this chat has no host to read models from',
     );
     const broken = deps();
     broken.api.models.mockRejectedValue(new Error('offline'));

@@ -38,7 +38,13 @@ export function offlineBannerText(
   conn: ConnectionState,
   outageVisible: boolean,
   serverLost = false,
+  restarting: { version: string | null } | null = null,
 ): string | null {
+  // A going-away notice is shown the moment it arrives: it is not an outage to
+  // wait out, so it skips the disconnect grace.
+  if (restarting && conn !== 'connected') {
+    return `Restarting${restarting.version ? ` into ${restarting.version}` : ''}`;
+  }
   if (!outageVisible) return null;
   if (serverLost && (conn === 'reconnecting' || conn === 'offline')) {
     return 'Server unreachable. Retrying';
@@ -79,7 +85,7 @@ export function hostControlDisabledReason(
   if (conn === 'offline') return 'Offline — no connection to the server.';
   if (conn === 'unauthenticated') return 'Signed out — link this device again.';
   // WS connected — the only remaining blocker is the host.
-  if (daemon === 'offline') return 'Machine offline — paused until your Hetzner box reconnects.';
-  if (daemon === 'unknown') return 'Connecting to machine…';
+  if (daemon === 'offline') return 'Host offline — paused until your Hetzner box reconnects.';
+  if (daemon === 'unknown') return 'Connecting to host…';
   return null;
 }

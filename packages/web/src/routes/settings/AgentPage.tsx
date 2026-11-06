@@ -53,10 +53,10 @@ export function AgentPage(): JSX.Element {
  * The account's default model (spec/02 § Agent backends, spec/14 § `/settings`).
  *
  * The model EVERY new chat starts on — opened from a surface, fired by a job, or
- * started on a machine — unless it names its own. One decision, in one place.
+ * started on a host — unless it names its own. One decision, in one place.
  *
  * It used to resolve through each HOST's last-used model: whatever the last chat
- * on that machine happened to pick. So one throwaway cheap-model chat silently
+ * on that host happened to pick. So one throwaway cheap-model chat silently
  * moved every later model-less spawn onto it, unattended jobs included, through
  * deploys and purchases, until someone happened to pick something else.
  */

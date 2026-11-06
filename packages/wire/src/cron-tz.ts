@@ -73,7 +73,7 @@ export function isValidTimeZone(tz: string): boolean {
 
 /**
  * Throw unless `tz` is a valid IANA zone. NO FALLBACK: a job whose zone this
- * machine cannot resolve must be refused at write time, never quietly demoted
+ * host cannot resolve must be refused at write time, never quietly demoted
  * to UTC — the whole point of the field is that the user's 9am is their 9am.
  */
 export function assertValidTimeZone(tz: string): void {

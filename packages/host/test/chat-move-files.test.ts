@@ -4,7 +4,14 @@
 
 import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -180,5 +187,44 @@ describe('chat move bundle', () => {
     writeFileSync(join(project, 'sess-1.jsonl'), '{}');
     writeMoveBundle(bundle, dst.folder, dst, 99);
     expect(readFileSync(join(project, 'sess-1.jsonl'), 'utf8')).toContain('"uuid":"u1"');
+  });
+
+  it('carries the chat’s own conversation file, not the links into the user’s config, and re-homes it', () => {
+    const src = paths();
+    seedChat(src);
+    const claude = join(src.chatsRoot, CHAT, 'claude');
+    const proj = join(claude, 'projects', encodeFolder(src.folder));
+    mkdirSync(proj, { recursive: true });
+    writeFileSync(
+      join(proj, 'sess-1.jsonl'),
+      JSON.stringify({ uuid: 'u9', cwd: src.folder, type: 'user' }) + '\n',
+    );
+    // What the host links in from the user's config dir must not travel.
+    const skills = mkdtempSync(join(tmpdir(), 'patch-movefiles-skills-'));
+    writeFileSync(join(skills, 'SECRET.md'), 'x');
+    symlinkSync(skills, join(claude, 'skills'));
+    writeFileSync(join(claude, 'settings.json'), '{}');
+
+    const bundle = buildMoveBundle(CHAT, src);
+    const names = bundle.files.map((f) => f.path);
+    expect(names).toContain(`chat/claude/projects/${encodeFolder(src.folder)}/sess-1.jsonl`);
+    expect(names.filter((n) => n.startsWith('chat/claude/') && !n.includes('/projects/'))).toEqual(
+      [],
+    );
+
+    const dst = paths();
+    writeMoveBundle(bundle, dst.folder, dst, 99);
+    const landed = join(
+      dst.chatsRoot,
+      CHAT,
+      'claude',
+      'projects',
+      encodeFolder(dst.folder),
+      'sess-1.jsonl',
+    );
+    expect(readFileSync(landed, 'utf8')).toContain(`"cwd":${JSON.stringify(dst.folder)}`);
+    expect(
+      existsSync(join(dst.chatsRoot, CHAT, 'claude', 'projects', encodeFolder(src.folder))),
+    ).toBe(false);
   });
 });

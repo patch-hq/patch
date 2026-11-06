@@ -4,7 +4,7 @@
 // A turn runs with the host user's full authority. The control socket is an
 // entry point to that authority — `/internal/*` is the MCP child's surface, and
 // it spawns chats, fires notifications and edits jobs — so every route on it is
-// gated. Same user, same machine remains the real boundary; the key closes the
+// gated. Same user, same host remains the real boundary; the key closes the
 // case where some OTHER process running as that user reaches the socket.
 //
 // The host is the only party that mints it. There is deliberately no way to
@@ -214,7 +214,7 @@ describe('the control socket is gated as a whole', () => {
   });
 
   // End-to-end of the documented flow: the host writes the key, and a caller
-  // on that machine reads it from the file rather than being told it.
+  // on that host reads it from the file rather than being told it.
   it('a caller that reads ~/.patch/local.key is admitted', async () => {
     const patchHome = join(home, '.patch');
     mkdirSync(patchHome, { recursive: true });

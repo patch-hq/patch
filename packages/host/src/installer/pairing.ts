@@ -3,11 +3,11 @@
 // The code is minted by the SERVER when an already-linked surface asks for one
 // (Settings → Hosts → Add host / `patch hosts add`), and rendered by that
 // surface. The installer only ever REDEEMS it: it submits the code together
-// with this machine's public key and takes back the `daemonKey` the server
+// with this host's public key and takes back the `daemonKey` the server
 // mints. It mints nothing itself.
 //
 // Every failure is named, because "pairing failed" is useless to somebody
-// standing at a machine: an expired code, an already-used code, a code the
+// standing at a host: an expired code, an already-used code, a code the
 // server never issued and an unreachable server all need different next steps.
 
 import type { HostIdentity } from '../identity.js';
@@ -59,7 +59,7 @@ async function readError(res: Response): Promise<ServerError> {
 }
 
 /**
- * Submit the code + this machine's public key, then collect the minted
+ * Submit the code + this host's public key, then collect the minted
  * `daemonKey`. Returns a named failure rather than throwing, so the installer
  * can print the one sentence that tells the user what to do next.
  */
@@ -105,7 +105,7 @@ export async function redeemPairingCode(opts: RedeemOptions): Promise<PairResult
         ok: false,
         kind: 'code_used',
         message:
-          'that pairing code has already been used. A code registers exactly one machine — ' +
+          'that pairing code has already been used. A code registers exactly one host — ' +
           'ask the surface for a fresh one and run the installer again.',
       };
     }
@@ -126,7 +126,7 @@ export async function redeemPairingCode(opts: RedeemOptions): Promise<PairResult
         ok: false,
         kind: 'no_account',
         message:
-          'that server has no account yet, so it cannot register a machine. ' +
+          'that server has no account yet, so it cannot register a host. ' +
           'Link a surface first (`patch auth bootstrap`).',
       };
     }

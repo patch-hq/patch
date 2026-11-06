@@ -1,7 +1,7 @@
 // The frame every Settings page is drawn in (design/settings-redesign, phone
 // layout): a back arrow and the page title, the page's one main action on the
 // right when it has one, the host switcher under the title on pages whose
-// controls belong to one machine, then the page's groups.
+// controls belong to one host, then the page's groups.
 //
 // A page is pushed on the root stack ABOVE the tabs, so no tab bar sits under
 // it: its scroll content pads itself past the system navigation bar's inset

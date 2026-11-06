@@ -79,7 +79,8 @@ export function buildManifest({
     const body = readFile(path);
     const key = md5(body);
     const name = `mobile-update-${key}.${launch ? 'bundle' : ext}`;
-    files.push({ from: path, name });
+    // Two paths with identical bytes share one content-keyed name: one release file.
+    if (!files.some((f) => f.name === name)) files.push({ from: path, name });
     return {
       hash: sha256(body).toString('base64url'),
       key,

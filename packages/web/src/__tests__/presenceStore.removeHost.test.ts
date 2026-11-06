@@ -1,4 +1,4 @@
-// presenceStore.removeHost — a machine removed from the account (Settings →
+// presenceStore.removeHost — a host removed from the account (Settings →
 // Hosts → Remove, or the server's `host.removed`) is forgotten whole: its
 // presence, its self-description, its credentials and its Claude Code
 // settings, with the account-wide "is any host up" flag recomputed from what

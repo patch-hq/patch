@@ -1,7 +1,7 @@
 # Deployment and installation
 
 The server is deployed once by the operator. A host is installed on each host
-machine, from a signed binary artifact, onto a machine that has only an OS on it.
+host, from a signed binary artifact, onto a host that has only an OS on it.
 § Reference deployment covers the server; § Host installation covers the
 host.
 
@@ -32,8 +32,8 @@ components installed needs headroom for Node and the agent's own work.
 
 ## Topology
 
-One server; one host per host machine. The server and a host commonly share a
-machine, and deploy and update independently.
+One server; one host per host. The server and a host commonly share a
+host, and deploy and update independently.
 
 ```
    ┌─────────────────────────────────────┐
@@ -44,7 +44,7 @@ machine, and deploy and update independently.
   ┌────────┴─────────┐   ┌────────┴──────────────┐
   │ HOST: rented box │   │ HOST: laptop (behind  │
   │ (often the same  │   │ NAT — no inbound      │
-  │  machine as the  │   │ address needed)       │
+  │  host as the  │   │ address needed)       │
   │  server)         │   │                       │
   │  patch-daemon    │   │  patch-daemon         │
   │   agent backend  │   │   agent backend       │
@@ -174,7 +174,7 @@ x64/arm64. macOS x64 is not a target: `onnxruntime-node` ships no darwin-x64
 binary, and every artifact carries VAD rather than making it an optional
 download, so the target cannot be built. Requirements on the result:
 
-- It installs and runs on a machine carrying only an OS.
+- It installs and runs on a host carrying only an OS.
 - It is signed with the project's signing identity, which is what the self-update path verifies against.
 - It reports its version, which drives the stale-host indicator in Settings →
   Hosts and the host's self-update against the server's manifest.
@@ -230,7 +230,7 @@ TODOIST_WEBHOOK_SECRET=...
 # (02-host.md § Optional components).
 
 # Agent backend credential (host)
-# Optional. This machine's own login, like `claude login`: adopted as the first
+# Optional. This host's own login, like `claude login`: adopted as the first
 # shared account when the server holds none, and offered for adoption from
 # Settings otherwise. The shared accounts on the server are what turns use.
 # See 10-auth.md.
@@ -270,7 +270,7 @@ version manifest: that one channel feeds both a new host's install command and
 every existing host's self-update (`02-host.md`).
 
 Nothing host-specific is committed. Getting a build to a particular place — a
-remote box, a phone — is machine-specific and lives in a git-ignored
+remote box, a phone — is host-specific and lives in a git-ignored
 `scripts/local/`.
 
 The rules that must hold, wherever it runs:
@@ -304,6 +304,29 @@ immutable` — safe to cache forever because a rebuild changes their filename.
 
 - Single monorepo: `projects/patch/` contains `packages/{server,host,cli,web,wire,auth,desktop}` and `apps/mobile`.
 - Built in place on one box — no registry, no CI.
+
+### Updates in lockstep
+
+Server and hosts must run one version, because the wire protocol can change
+between versions. A release therefore costs each host one drop, not two:
+
+- When the server sees a mirrored release newer than itself, it sends every
+  connected host (and each host that connects while the release is waiting)
+  `host.stage {version}`. The host downloads and verifies that build and keeps
+  it staged, without installing. A host with auto-update off ignores it.
+- When the server restarts into that release, its going-away notice carries the
+  target version (`server restarting into <version>`). A host with exactly that
+  version staged installs it at once, from the staged copy, without contacting
+  the server (which is down). The server and the host come back together.
+- A host without it staged (offline, failed download) updates on reconnect, as
+  before: the server sees it behind and sends `host.update`.
+- The swap holds for running turns exactly as an ordinary update does. Claude
+  turns survive a host restart as detached runners, but turns of other
+  harnesses do not, so those still defer the install.
+- A failed stage is logged as an error and the host falls to the reconnect
+  update; it is never hidden.
+- Staged builds live in `<patchHome>/staged/<version>`; those at or below the
+  running version are removed on start.
 
 ## Mobile updates (Android)
 
@@ -424,11 +447,8 @@ Rules.
   installed version and, when it is behind, the latest (the server's version —
   hosts run in lockstep with it). The page shows no shas, drift detail or developer
   commands. Patch works out what is behind (hosts, drift, the app, the APK) and
-  the one Update acts on it. A host that is behind only because its chats are
-  mid-turn reports `updateHeld` and reads "waiting for chats to finish" with no
-  Update control: the install applies itself once they finish. That row offers
-  "Update now" behind a confirmation, which sends `host.update` with `force` and
-  installs over the running turns, stopping them. A failed read or failed shell check reads as
+  the one Update acts on it. Running chats never hold a host's update, so a host row has no waiting state and no
+  force control. A failed read or failed shell check reads as
   "Couldn't check", never as up to date. `GET /api/version` still carries the
   full per-layer report for diagnostics.
 - Unknown reads as unknown. An unstamped, missing or unreadable layer is

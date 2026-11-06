@@ -2,8 +2,8 @@
 // (spec/01 § Settings, spec/17 § Commands).
 //
 // These change what every host runs on, so they go to the SERVER wherever the
-// CLI runs — never a machine's own socket. With no server reachable they fail,
-// naming it, rather than changing one machine behind the others' backs.
+// CLI runs — never a host's own socket. With no server reachable they fail,
+// naming it, rather than changing one host behind the others' backs.
 
 import { Command } from 'commander';
 import {
@@ -62,6 +62,23 @@ function parseValue(raw: string): unknown {
   }
 }
 
+const BOOLEAN_WORDS: Record<string, boolean> = {
+  true: true,
+  false: false,
+  on: true,
+  off: false,
+  yes: true,
+  no: false,
+};
+
+/** For an on/off setting: true/false, on/off or yes/no (any case). Anything else is an error. */
+export function parseBooleanValue(key: string, raw: string): boolean {
+  const v = BOOLEAN_WORDS[raw.trim().toLowerCase()];
+  if (v === undefined)
+    throw new Error(`${key} is on/off — got "${raw}" (use on, off, yes, no, true or false)`);
+  return v;
+}
+
 function backendOf(name: string): ProviderBackendId {
   try {
     return providerDescriptor(providerByName(name)).backendId as ProviderBackendId;
@@ -84,7 +101,7 @@ const viewOf = (state: SharedState): AccountsView => ({
 });
 
 /**
- * List / reorder / set strategy for the shared accounts. On a machine with a
+ * List / reorder / set strategy for the shared accounts. On a host with a
  * running host this goes over the host's own socket — the host relays it to the
  * server on its existing link, so no separate login is needed. Anywhere else it
  * is REST with the paired credential. One path is chosen up front, never both.
@@ -156,9 +173,13 @@ export function registerSettingsCommands(program: Command): void {
     .action(async (key: string, value: string, opts: CommonOpts) => {
       await run(opts, async () => {
         const field = SETTING_KEYS[key] ?? key;
-        const res = await server(opts).patch<unknown>('/api/settings', {
-          [field]: parseValue(value),
-        });
+        // Only on/off settings take the words; a text setting may legitimately be "off".
+        const current = await server(opts).get<SharedState>('/api/settings/shared');
+        const next =
+          typeof current.settings[field] === 'boolean'
+            ? parseBooleanValue(key, value)
+            : parseValue(value);
+        const res = await server(opts).patch<unknown>('/api/settings', { [field]: next });
         if (opts.json) emitJson(res);
         else emitText(`${field}: ${value}`);
       });
@@ -284,8 +305,8 @@ export function registerSettingsCommands(program: Command): void {
 
   accounts
     .command('adopt <backend>')
-    .description("Store a machine's own login as a shared account")
-    .option('--host <h>', 'machine name or hostId prefix (default: the only machine online)')
+    .description("Store a host's own login as a shared account")
+    .option('--host <h>', 'host name or hostId prefix (default: the only host online)')
     .option('--json', 'JSON output')
     .action(async (backend: string, opts: CommonOpts & { host?: string }) => {
       await run(opts, async () => {
@@ -321,9 +342,9 @@ export function registerSettingsCommands(program: Command): void {
   keys
     .command('set <keyId> [value]')
     .description(
-      "Set a key for every host; with --host and no value, adopt that machine's environment key",
+      "Set a key for every host; with --host and no value, adopt that host's environment key",
     )
-    .option('--host <h>', 'machine name or hostId prefix to adopt from')
+    .option('--host <h>', 'host name or hostId prefix to adopt from')
     .option('--json', 'JSON output')
     .action(
       async (keyId: string, value: string | undefined, opts: CommonOpts & { host?: string }) => {
@@ -355,7 +376,7 @@ export function registerSettingsCommands(program: Command): void {
     });
 }
 
-/** `--host`, or the only machine that is online when none is named. */
+/** `--host`, or the only host that is online when none is named. */
 async function onlineHost(opts: CommonOpts & { host?: string }): Promise<string> {
   if (opts.host !== undefined) return resolveHost(opts);
   const { hosts } = await server(opts).get<{
@@ -364,7 +385,7 @@ async function onlineHost(opts: CommonOpts & { host?: string }): Promise<string>
   const online = hosts.filter((h) => h.online);
   if (online.length !== 1) {
     throw new Error(
-      `${online.length === 0 ? 'no machine is online' : 'more than one machine is online'} — name one with --host`,
+      `${online.length === 0 ? 'no host is online' : 'more than one host is online'} — name one with --host`,
     );
   }
   return (online[0] as { hostId: string }).hostId;

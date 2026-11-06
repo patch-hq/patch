@@ -25,6 +25,7 @@ import { api, ApiError, type CrashReport } from '../api/rest';
 import { store } from './credential';
 import { mobileBuildInfo } from './buildInfo';
 import { useUiStore } from '../stores/uiStore';
+import { logUpdater } from './updaterLog';
 import { beginSession, logExit, noteCrashed, telemetryEnabled, trackSession } from './exitLog';
 
 const PENDING_KEY = 'patch.crash.pending';
@@ -163,6 +164,7 @@ export async function collectNativeCrash(): Promise<void> {
 /** Everything the app does at startup for crash capture. */
 export function startCrashCapture(): void {
   const launch = beginSession();
+  logUpdater('launch', 'app started');
   trackSession();
   if (launch.unexplained && launch.entry) {
     void recordExit(launch.entry.detail, launch.entry.at);

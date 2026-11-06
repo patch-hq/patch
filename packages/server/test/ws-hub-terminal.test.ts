@@ -35,7 +35,7 @@ class FakeSocket extends EventEmitter {
 function makeHub(): { hub: WsHub; link: InProcessHostLink } {
   const registry = Registry.load(mkdtempSync(join(tmpdir(), 'patch-wshub-term-')));
   const account = registry.bootstrapAccount();
-  // `patch.terminal.open` names a machine, and the hub refuses one that is not
+  // `patch.terminal.open` names a host, and the hub refuses one that is not
   // registered (spec/03 § Host events) — so the fixture registers it.
   registry.setDaemonKey({ hostId: 'd1', publicKey: account.userPublicKey, issuedAt: 1 });
   const link = new InProcessHostLink();

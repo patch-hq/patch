@@ -34,7 +34,7 @@ function setup() {
   return { m, p, changes: () => changes };
 }
 
-test('reports idle time in milliseconds and no away while the user is at the machine', () => {
+test('reports idle time in milliseconds and no away while the user is at the host', () => {
   const { m, p } = setup();
   m.idle = 7;
   assert.deepEqual(p.read(), { idleMs: 7000 });
@@ -74,7 +74,7 @@ test("the OS's own locked state counts where the session locks without the event
   assert.equal(p.read().away, 'locked');
 });
 
-test('an idle but unlocked machine is not away: idle time alone is the server’s call', () => {
+test('an idle but unlocked host is not away: idle time alone is the server’s call', () => {
   const { m, p } = setup();
   m.idle = 3600;
   m.state = 'idle';

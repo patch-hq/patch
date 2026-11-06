@@ -2,12 +2,12 @@
 // spec/04 § Spawn — "A spawn naming an unregistered host is an error").
 //
 // Every route and every surface frame that carries a `hostId` names ONE
-// machine. The id is checked against the account's registered machines HERE,
+// host. The id is checked against the account's registered hosts HERE,
 // at the ingress, and a name that is not among them is refused with the
 // offending value in the body. It is deliberately not left to the routing
-// layer: with a single machine attached, "route to the named host" and "route
+// layer: with a single host attached, "route to the named host" and "route
 // to whatever is connected" are indistinguishable, so a missing check looks
-// correct right up until a second machine exists and the work silently runs on
+// correct right up until a second host exists and the work silently runs on
 // the wrong filesystem.
 //
 // NO FALLBACK: never coerced to the only/attached host, never dropped
@@ -20,12 +20,12 @@ export interface UnregisteredHostError {
   error: 'unknown_host';
   message: string;
   hostId: string;
-  /** The machines that ARE registered, so a surface can say what to pick. */
+  /** The hosts that ARE registered, so a surface can say what to pick. */
   knownHosts: string[];
 }
 
 /**
- * `null` when `hostId` names a registered machine; otherwise the 404 body
+ * `null` when `hostId` names a registered host; otherwise the 404 body
  * naming the offending value.
  */
 export function checkRegisteredHost(
@@ -36,11 +36,11 @@ export function checkRegisteredHost(
   const knownHosts = registry.registeredHostIds();
   return {
     error: 'unknown_host',
-    message: `no machine registered with hostId: ${hostId}`,
+    message: `no host registered with hostId: ${hostId}`,
     hostId,
     knownHosts,
   };
 }
 
-/** HTTP status for an unregistered machine — the named resource does not exist. */
+/** HTTP status for an unregistered host — the named resource does not exist. */
 export const UNKNOWN_HOST_STATUS = 404;

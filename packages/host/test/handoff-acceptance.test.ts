@@ -397,7 +397,6 @@ describe('recovery', () => {
     await s.daemon.sendInput({ chatId, message: 'back on claude', localId: 'back' });
     const opts = s.mockClaude.lastOptions()!;
     expect(opts.resumeSessionId).toBe(claudeSession);
-    expect(opts.claudeSessionStore?.reseed).toBeUndefined();
   });
 
   it('a linked fresh chat is seeded with the same handoff and records continuedFrom', async () => {

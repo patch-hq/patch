@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process';
-import { existsSync, lstatSync, symlinkSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, symlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { newTurnTag, TURN_TAG_ENV, killTagged } from './turnTag.js';
+import { inWorkSlice } from './workSlice.js';
 import type { SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
 
 /** What a resumed chat needs from the user's own Claude config dir. */
@@ -13,22 +14,24 @@ const USER_CONFIG_ENTRIES = [
   'plugins',
   'settings.json',
   'CLAUDE.md',
+  '.credentials.json',
 ];
 
 /**
- * A chat resumed from the session store runs under a throwaway
- * `CLAUDE_CONFIG_DIR` (`/tmp/claude-resume-<id>`) the SDK fills with only the
- * transcript and credentials — so none of the user's own skills, agents,
- * commands or settings load. Link them in from the real config dir. A no-op
- * for any other config dir. Throws on a failed link: a resumed chat silently
- * missing its skills is the bug this exists to prevent.
+ * Each chat runs under its own `CLAUDE_CONFIG_DIR`
+ * (`~/.patch/chats/<id>/claude`), holding only its transcript — so none of the
+ * user's own skills, agents, commands or settings would load. Link them in
+ * from the real config dir, and the credentials file if there is one. A no-op
+ * when the config dir is the real one. Throws on a failed link: a chat
+ * silently missing its skills is the bug this exists to prevent.
  */
-export function linkUserConfigIntoResumeDir(
+export function linkUserConfigIntoChatDir(
   env: SpawnOptions['env'],
   realDir: string = process.env['CLAUDE_CONFIG_DIR'] ?? join(homedir(), '.claude'),
 ): void {
   const dir = env['CLAUDE_CONFIG_DIR'];
-  if (dir === undefined || !basename(dir).startsWith('claude-resume-') || dir === realDir) return;
+  if (dir === undefined || dir === realDir) return;
+  mkdirSync(dir, { recursive: true });
   for (const name of USER_CONFIG_ENTRIES) {
     const src = join(realDir, name);
     const dest = join(dir, name);
@@ -59,9 +62,10 @@ export function spawnClaudeInGroup(
   onRefused?: (message: string) => void,
   onPid?: (pid: number | undefined) => void,
 ): SpawnedProcess {
-  linkUserConfigIntoResumeDir(opts.env);
+  linkUserConfigIntoChatDir(opts.env);
   const turnTag = newTurnTag();
-  const child = spawn(opts.command, opts.args, {
+  const launch = inWorkSlice(opts.command, opts.args);
+  const child = spawn(launch.command, launch.args, {
     cwd: opts.cwd,
     env: { ...opts.env, [TURN_TAG_ENV]: turnTag },
     stdio: ['pipe', 'pipe', 'ignore'],
@@ -85,12 +89,21 @@ export function spawnClaudeInGroup(
       throw e;
     }
   };
+  // A stop must end the turn now, like Ctrl-C on a command. SIGTERM lets claude
+  // and whatever it runs wind down, but anything that ignores it (a trapped
+  // shell, a hung tool) would keep the turn alive; after a short grace the
+  // whole group is killed outright.
+  let killTimer: NodeJS.Timeout | undefined;
   const onAbort = (): void => {
     killGroup('SIGTERM');
+    killTimer ??= setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) killGroup('SIGKILL');
+    }, ABORT_KILL_GRACE_MS);
   };
   if (opts.signal.aborted) onAbort();
   else opts.signal.addEventListener('abort', onAbort, { once: true });
   child.once('exit', () => {
+    clearTimeout(killTimer);
     opts.signal.removeEventListener('abort', onAbort);
     // Whatever claude left behind is in its group: sweep it.
     killGroup('SIGKILL');
@@ -111,6 +124,9 @@ export function spawnClaudeInGroup(
     off: child.off.bind(child) as SpawnedProcess['off'],
   };
 }
+
+/** How long an aborted claude gets to exit on SIGTERM before its group is SIGKILLed. */
+export const ABORT_KILL_GRACE_MS = 1500;
 
 const REFUSAL_RECHECK_MS = [50, 250, 1000];
 

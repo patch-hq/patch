@@ -11,6 +11,7 @@
 // the provider has merely refused it: feeding the next chat to a wall that has
 // just refused the first only repeats the refusal N times.
 
+import { transcriptFor } from './helpers/chatTranscript.js';
 import { describe, expect, it } from 'vitest';
 import { mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -149,7 +150,7 @@ describe('a turn resumed onto a session with no transcript', () => {
           seen.push({
             prompt: opts.prompt,
             resume: opts.resumeSessionId,
-            reseed: opts.claudeSessionStore?.reseed !== undefined,
+            reseed: transcriptFor(opts).length > 0,
           });
           async function* gen(): AsyncGenerator<SdkEnvelope> {
             if (mode.limited) throw limitError(NO_RESET_SPEND_LIMIT);
@@ -229,7 +230,7 @@ describe('a chat that never answered anything', () => {
         run: (opts): AsyncGenerator<SdkEnvelope> => {
           runs.push({
             resume: opts.resumeSessionId,
-            reseed: opts.claudeSessionStore?.reseed !== undefined,
+            reseed: transcriptFor(opts).length > 0,
           });
           async function* gen(): AsyncGenerator<SdkEnvelope> {
             if (limited) throw limitError(NO_RESET_SPEND_LIMIT);

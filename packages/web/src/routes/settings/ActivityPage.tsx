@@ -1,5 +1,5 @@
 // Settings → Activity — "things agents did": every cross-chat tool call
-// (patch_send_to, patch_peek, patch_spawn, …) across every machine, read
+// (patch_send_to, patch_peek, patch_spawn, …) across every host, read
 // through each one's own bounded tool-calls.jsonl (GET /api/tool-log,
 // mirroring patch_activity's /api/activity).
 
@@ -11,7 +11,7 @@ import { Group, Note, Row, SettingsPage } from './ui.js';
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 // The server's own cap (TOOL_LOG_MAX_PAGE_SIZE) — a day's worth of tool calls
-// on a personal machine is never close to this, so "Load older" paging by day
+// on a personal host is never close to this, so "Load older" paging by day
 // (below) only ever needs the truncated note as a backstop, not real paging.
 const PAGE_SIZE = 500;
 

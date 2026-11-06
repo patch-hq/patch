@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Assembles the vendored build inputs for `scripts/build-host.mjs` from public
-// sources, so a clean machine (CI, a contributor) can build a host without a
+// sources, so a clean host (CI, a contributor) can build a host without a
 // directory somebody copied around by hand.
 //
 //   <out>/node/node-v<pin>-<target>/bin/node   nodejs.org, checked against SHASUMS256.txt

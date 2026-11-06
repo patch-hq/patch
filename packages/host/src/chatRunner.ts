@@ -5,7 +5,6 @@ import {
   harnessModesInclude,
 } from './harnesses.js';
 import {
-  hasDurableTurn,
   inspectTurnDir,
   listTurnDirs,
   retireTurn,
@@ -20,6 +19,7 @@ import { escapesFolder } from './pathEscape.js';
 import { invalidateGitDirtyCache } from './git-dirty.js';
 import { invalidateFilesRecursiveCache } from './files-recursive.js';
 import { discoverClaudeMcpServers } from './claudeConfigMcp.js';
+import { SharedMcpPool } from './sharedMcp.js';
 // Host's session manager.
 //
 // Owns chat_state, the per-chat AbortControllers, the per-chat seq counter,
@@ -107,6 +107,7 @@ import {
 import { type MetaStore, type ChatMeta, type UnreadableChat } from './meta.js';
 import {
   PermissionModeDowngradedError,
+  type ExtraMcpServer,
   type SdkBackend,
   type SdkEnvelope,
   type SdkRunOptions,
@@ -254,12 +255,12 @@ export interface HostOptions {
   /**
    * This host's id (spec/02 § Host identity). Every frame the host emits is
    * addressed with it — an unaddressed `chat.spawned` would leave the server
-   * unable to say which machine a chat lives on. Required: there is no sane
+   * unable to say which host a chat lives on. Required: there is no sane
    * placeholder, and a wrong one silently binds chats to another host.
    */
   hostId: string;
   /**
-   * The host's DEFAULT permission mode, applying to new chats on this machine
+   * The host's DEFAULT permission mode, applying to new chats on this host
    * (spec/02 § Permission mode). Omitted → `auto`, which is the documented
    * base of the resolution chain, not a fallback for a failed read.
    */
@@ -267,13 +268,13 @@ export interface HostOptions {
   /**
    * The model a spawn that names none runs on — the ACCOUNT's `defaultModel`,
    * mirrored to this host by the server (spec/02 § Agent backends, spec/04
-   * § Spawn). Returning `undefined` means no default has reached this machine,
+   * § Spawn). Returning `undefined` means no default has reached this host,
    * and such a spawn is REFUSED saying exactly that — never quietly handed to
    * the SDK's own default, which would silently run the chat on a model nobody
    * chose.
    *
    * This replaced `lastUsedModel`, which was DERIVED: it took the model of
-   * whatever chat last ran on the machine, so one throwaway cheap-model chat
+   * whatever chat last ran on the host, so one throwaway cheap-model chat
    * silently moved every later model-less spawn — every unattended job included
    * — onto it, and it stayed there until someone happened to pick something
    * else. Nothing writes back to this now; a default is a decision, in one
@@ -324,9 +325,15 @@ export interface HostOptions {
    * (`claudeConfigMcp.ts`), merged into `extraMcpServers` ahead of the host's
    * own Settings → MCP list. Defaults to the real reader; tests inject a stub
    * (usually `() => []`) so a suite's result never depends on the ambient
-   * `~/.claude.json`/`~/.claude/settings.json` of whatever machine runs it.
+   * `~/.claude.json`/`~/.claude/settings.json` of whatever host runs it.
    */
   discoverClaudeMcpServers?: (folder: string) => McpServerConfig[];
+  /**
+   * Shares each MCP server across chats instead of starting one per chat
+   * (`sharedMcp.ts`). Defaults to a pool on a real backend; absent on a mock
+   * one, where chats get the plain stdio entries.
+   */
+  sharedMcp?: SharedMcpPool;
   /**
    * OAuth gate (spec/10-auth.md "Claude OAuth — non-negotiable"). Called
    * BEFORE every SDK `query()` — re-reads ~/.claude.json so a credential that
@@ -508,16 +515,16 @@ export interface HostOptions {
   preprocessInput?: (req: SendInputOptions) => string | undefined;
   /** Hook called once the agent has committed a response on a chat (per turn). */
   onTurnCommitted?: (chatId: string) => void;
-  /** Held from the start of a chat's pump until it settles, so the host machine cannot sleep mid-turn. */
+  /** Held from the start of a chat's pump until it settles, so the host cannot sleep mid-turn. */
   sleepGuard?: SleepGuard;
   /**
-   * True while the machine is too short of memory to start more work. A turn
+   * True while the host is too short of memory to start more work. A turn
    * that would start is queued instead and runs when this goes false
    * (`releaseHeldTurns`), rather than being cut off when the kernel kills
    * something.
    */
   holdTurns?: () => boolean;
-  /** Tells a turn that died because the machine slept from one that failed on its own. */
+  /** Tells a turn that died because the host slept from one that failed on its own. */
   sleepWatch?: SleepWatch;
   /**
    * Optional AI title summariser (spec/04 § Name). When set, the host fires
@@ -624,6 +631,8 @@ export interface HostOptions {
     resumeSessionId: string;
     folder: string;
     model?: string | null;
+    /** The chat's own `CLAUDE_CONFIG_DIR`, where a Claude session's file lives. */
+    claudeConfigDir?: string;
   }) => Promise<string | null>;
   /**
    * What the catalogue and the harnesses have reported about each model's
@@ -763,7 +772,7 @@ export interface HostOptions {
   browser?: BrowserManager;
   /** Deployment signing stays on the paired server; the host receives only this RPC facade. */
   webBotAuth?: WebBotAuthConfig;
-  /** spec/02 § Browser — In the Patch app: the app on this machine hosts the agent's browser. */
+  /** spec/02 § Browser — In the Patch app: the app on this host hosts the agent's browser. */
   appBrowser?: AppBrowserLink;
   /**
    * Computer use (`patch_browser_mouse` / `patch_browser_key`) is off by
@@ -895,7 +904,7 @@ export interface SpawnChatOptions {
  */
 const SDK_RETRY_BACKOFF_MS = [10_000, 30_000, 90_000];
 
-/** How often a turn held for a sleeping machine asks whether it has woken. */
+/** How often a turn held for a sleeping host asks whether it has woken. */
 const WAKE_POLL_MS = 15_000;
 
 /** Re-sends for a session the SDK aborted unasked: one resumed, one on a fresh session. */
@@ -977,12 +986,49 @@ export function attachmentFileName(id: string, name: string): string {
 /**
  * Header line that opens the attachment block folded into a user turn's prompt
  * (spec/14 & spec/15 § Composer). Kept human-readable so Claude reads the files
- * by path, but STABLE + machine-parseable (see `parseAttachmentBlock`) so the
+ * by path, but STABLE + host-parseable (see `parseAttachmentBlock`) so the
  * host can lift the refs back out on replay and RE-EMIT them structurally —
  * the block is never shown as literal transcript text (spec/14 § Composer —
  * attachments "render inline in the stream", never as a raw marker).
  */
 const ATTACHMENT_BLOCK_HEADER = '[Attachments]';
+
+/**
+ * The inline line a restart-interrupted turn leaves in the history, before the
+ * host's automated re-send. Hosts before 2026-11-05 wrote the legacy text on
+ * the same re-send, which replay recognises so those chats show the same way.
+ */
+const RESTART_INTERRUPTION_MARKER = 'Turn interrupted by restart';
+const LEGACY_RESTART_INTERRUPTION_MARKER =
+  'Host restarted — the running turn was cut off and has been re-sent';
+
+/**
+ * Replay of a chat written before restarts stopped folding: the host's re-send
+ * after a restart carried `retryOfSeq`, which surfaces fold into the original
+ * bubble behind a pager. A re-send that follows the restart marker is drawn as
+ * its own message instead, and the marker's legacy text is rewritten, so an
+ * old chat shows the same history a new one does.
+ */
+export function restartResendAsOwnMessage<E extends { type: string }>(
+  ev: E,
+  state: { afterMarker: boolean },
+): E {
+  if (ev.type !== 'chat.message') return ev;
+  const msg = ev as unknown as { role: string; content: string; retryOfSeq?: number };
+  if (msg.role === 'system') {
+    if (msg.content === LEGACY_RESTART_INTERRUPTION_MARKER) {
+      state.afterMarker = true;
+      return { ...ev, content: RESTART_INTERRUPTION_MARKER } as E;
+    }
+    if (msg.content === RESTART_INTERRUPTION_MARKER) state.afterMarker = true;
+    return ev;
+  }
+  if (msg.role !== 'user' || !state.afterMarker) return ev;
+  state.afterMarker = false;
+  if (msg.retryOfSeq === undefined) return ev;
+  const { retryOfSeq: _folded, ...own } = msg;
+  return own as unknown as E;
+}
 
 /** Total attempts `maybeGenerateTitle` makes before leaving a chat unnamed. */
 const TITLE_GEN_ATTEMPTS = 5;
@@ -1310,7 +1356,14 @@ import {
   type ChatMovePaths,
   attachmentsDirFor,
 } from './chatMove.js';
-import { createClaudeSessionStore } from './claudeSessionStore.js';
+import {
+  chatClaudeDir,
+  chatTranscriptPath,
+  createClaudeSessionStore,
+  entriesSince,
+  transcriptSize,
+  type ClaudeSessionStore,
+} from './claudeSessionStore.js';
 import { isCodexModel } from './codexAccounts.js';
 import { hasConversation } from './syntheticTurns.js';
 import { cutAt } from './textClean.js';
@@ -1471,7 +1524,7 @@ export function chatInputToSendOptions(event: ChatInputEvent): SendInputOptions 
     // A Pad's delivery is system input too (not typed), but the user's own Send
     // started it, so it still counts as the user's activity.
     ...(event.source?.kind === 'job' || event.source?.kind === 'pad' ? { jobTrigger: true } : {}),
-    // A `machine` origin is an agent's CLI send-to, not a person: it must not
+    // A `host` origin is an agent's CLI send-to, not a person: it must not
     // move the chat up the sidebar (spec/14 § Sidebar ordering).
     ...(event.source?.kind === 'job' || event.origin === 'machine' ? {} : { fromUser: true }),
     ...(event.origin === 'machine' ? { origin: 'machine' as const } : {}),
@@ -1520,7 +1573,7 @@ export interface SendInputOptions {
    * advancing) and an agent's `patch_send_to` have to say anything.
    *
    * It decides whether the turn SETTLING raises a chat-completion notification,
-   * and nothing else: a `machine` turn runs exactly like a `user` one.
+   * and nothing else: a `host` turn runs exactly like a `user` one.
    */
   origin?: TurnOrigin;
   /**
@@ -1696,7 +1749,7 @@ interface QueuedTurn {
 }
 
 /**
- * A spawn named no model on a machine that has never read a model catalogue
+ * A spawn named no model on a host that has never read a model catalogue
  * successfully (spec/04 § Spawn). NO FALLBACK: running it on a hard-coded model
  * id would silently pick a model nobody chose.
  */
@@ -1705,16 +1758,16 @@ export class NoModelCatalogueError extends Error {
   /**
    * `reason` is supplied when the catalogue could not be READ just now (a model
    * change has to check the id against it — spec/04 § Model), as against the
-   * spawn case, where the machine has simply never read one. Both leave the
+   * spawn case, where the host has simply never read one. Both leave the
    * caller with no list to pick from, so they share a code, but the provider's
    * own complaint is worth carrying when there is one.
    */
   constructor(hostId: string, reason?: string) {
     super(
       reason === undefined
-        ? `machine ${hostId} has never read a model catalogue, so it has no last-used model; ` +
-            `name a model on the spawn or connect the backend credential on that machine`
-        : `machine ${hostId} could not read its model catalogue, so the model could not be ` +
+        ? `host ${hostId} has never read a model catalogue, so it has no last-used model; ` +
+            `name a model on the spawn or connect the backend credential on that host`
+        : `host ${hostId} could not read its model catalogue, so the model could not be ` +
             `checked: ${reason}`,
     );
     this.name = 'NoModelCatalogueError';
@@ -1731,7 +1784,7 @@ export class NoModelCatalogueError extends Error {
 export class UnknownModelError extends Error {
   readonly code = 'unknown_model' as const;
   constructor(hostId: string, model: string) {
-    super(`machine ${hostId} offers no model with id: ${model}`);
+    super(`host ${hostId} offers no model with id: ${model}`);
     this.name = 'UnknownModelError';
   }
 }
@@ -2459,6 +2512,8 @@ export class Daemon {
       now: options.now ?? (() => Date.now()),
       generateChatId: options.generateChatId ?? (() => ulid()),
       discoverClaudeMcpServers: options.discoverClaudeMcpServers ?? discoverClaudeMcpServers,
+      sharedMcp:
+        options.sharedMcp ?? (options.sdkBackendKind === 'real' ? new SharedMcpPool() : undefined),
     };
     // Build the OAuth gate. `resolveOAuth` wins; otherwise wrap the static
     // token into an always-ok resolver (test convenience). NO FALLBACK:
@@ -2556,7 +2611,7 @@ export class Daemon {
   private readonly snoozeTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /**
    * Wall-clock backstop for snooze expiry. setTimeout counts monotonic time,
-   * which pauses while the host machine sleeps, so a snooze armed over a
+   * which pauses while the host sleeps, so a snooze armed over a
    * weekend fires hours or days late. This sweep compares `now()` instead.
    */
   private snoozeSweep: ReturnType<typeof setInterval> | null = null;
@@ -3093,7 +3148,7 @@ export class Daemon {
   private readonly sessionAbortCount = new Map<string, number>();
   /** Armed generic-error retries, so shutdown can cancel them. */
   private readonly sdkRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  /** Chats whose turn is held until the machine is fully awake, and since when. */
+  /** Chats whose turn is held until the host is fully awake, and since when. */
   private readonly waitingForWakeSince = new Map<string, number>();
   /** Set once the host starts going down; see `beginShutdown`. */
   private stopping = false;
@@ -3118,8 +3173,19 @@ export class Daemon {
     this.stopping = true;
   }
 
+  /** The chat's extra MCP servers, as URLs of the host's shared copies when a pool is configured. */
+  private async shareMcp(servers: McpServerConfig[], folder: string): Promise<ExtraMcpServer[]> {
+    const pool = this.opts.sharedMcp;
+    if (!pool || servers.length === 0) return servers;
+    await pool.listen();
+    return servers.map((s) => ({ name: s.name, url: pool.urlFor(s, folder) }));
+  }
+
   shutdown(): void {
     this.beginShutdown();
+    void this.opts.sharedMcp?.close().catch((err: unknown) => {
+      this.opts.logger.error({ err }, 'shutdown: shared MCP pool close failed');
+    });
     for (const t of this.snoozeTimers.values()) clearTimeout(t);
     this.snoozeTimers.clear();
     if (this.snoozeSweep !== null) clearInterval(this.snoozeSweep);
@@ -3453,7 +3519,16 @@ export class Daemon {
           { chatId },
           'resume: a durable turn on disk belongs to no owed turn; ending it',
         );
-        if (durable) retireTurn(turnDirFor(durable, chatId));
+        if (!durable) continue;
+        // One unreadable folder must not stop the rest being retired.
+        try {
+          retireTurn(turnDirFor(durable, chatId));
+        } catch (err) {
+          this.opts.logger.error(
+            { chatId, dir: turnDirFor(durable, chatId), err },
+            'resume: could not retire a leftover durable turn (unreadable turn files); it is left on disk',
+          );
+        }
       }
     }
   }
@@ -3576,6 +3651,10 @@ export class Daemon {
       // verbatim and reattaches, and a permission it was waiting on is asked
       // again by the reattached turn itself.
       let reattach = false;
+      // The id the head turn is re-sent under. A turn that never had one (a
+      // spawn prompt) gets it here, once, so the reattach marker names the very
+      // id the re-send runs with.
+      const resendLocalId = pending[0]?.localId ?? randomUUID();
       const turnsConfig = this.opts.durableTurns;
       if (
         turnsConfig &&
@@ -3583,11 +3662,22 @@ export class Daemon {
         !headAlreadySettled &&
         waitingHead !== 'retry'
       ) {
-        const disk = inspectTurnDir(turnDirFor(turnsConfig, m.chatId));
+        let disk: ReturnType<typeof inspectTurnDir>;
+        try {
+          disk = inspectTurnDir(turnDirFor(turnsConfig, m.chatId));
+        } catch (err) {
+          // A corrupt turn file: this chat's turn is treated as cut off, and the
+          // folder stays in `unclaimed` so it still gets a retire attempt.
+          this.opts.logger.error(
+            { chatId: m.chatId, dir: turnDirFor(turnsConfig, m.chatId), err },
+            'resume: the durable turn folder is unreadable; treating the turn as cut off',
+          );
+          disk = undefined;
+        }
         const head = pending[0];
         if (disk && disk.state !== 'lost' && disk.localId === head?.localId) {
           unclaimed.delete(m.chatId);
-          this.durableAttach.set(m.chatId, disk.consumed);
+          this.durableAttach.set(m.chatId, { consumed: disk.consumed, localId: resendLocalId });
           if (disk.accountId !== undefined) this.durableAccount.set(m.chatId, disk.accountId);
           reattach = true;
           this.opts.logger.info(
@@ -3625,6 +3715,18 @@ export class Daemon {
         // pass: `sendInput` sets the chat's `pumping` guard before its first
         // await, so the second and later turns here see a live pump and queue
         // behind the first in their original order — exactly where they were.
+        if (i === 0 && headIsInterrupted) {
+          // Said in the chat history, not only the log: a reader needs to know
+          // why the turn started over (spec/12 § Restart interruptions).
+          this.emit({
+            type: 'chat.message',
+            chatId: m.chatId,
+            role: 'system',
+            content: RESTART_INTERRUPTION_MARKER,
+            seq: this.bumpSeq(m.chatId),
+            createdAt: this.opts.now(),
+          });
+        }
         this.owedResend.add(m.chatId);
         this.interruptedResend.add(m.chatId);
         if (i === 0) {
@@ -3634,7 +3736,7 @@ export class Daemon {
         void this.sendInput({
           chatId: m.chatId,
           message,
-          localId: turn.localId ?? randomUUID(),
+          localId: i === 0 ? resendLocalId : (turn.localId ?? randomUUID()),
           // The chat's accepted localIds are in its history log, so this
           // original id is already "seen" — say it is a re-send, not a
           // surface redelivery (see `SendInputOptions.redeliver`).
@@ -3649,7 +3751,13 @@ export class Daemon {
           // the re-send NAMES it rather than asking for a second one. Absent
           // only on a turn interrupted before its `chat.message` ever landed
           // (nothing was drawn, so there is nothing to fold into).
-          ...(turn.retryOfSeq !== undefined ? { retryOfSeq: turn.retryOfSeq } : {}),
+          // EXCEPT a turn the restart cut off: retry-in-place is for a person
+          // choosing to re-run a turn. Folding a restart's re-send into the
+          // original bubble hid everything between attempts behind the pager
+          // (spec/12 § Restart interruptions), so it draws as its own message.
+          ...(turn.retryOfSeq !== undefined && !(i === 0 && headIsInterrupted)
+            ? { retryOfSeq: turn.retryOfSeq }
+            : {}),
           // spec/14 § Job trigger turn — resumed as what it was, same as `origin`.
           ...(turn.jobTrigger ? { jobTrigger: turn.jobTrigger } : {}),
         }).catch((err: unknown) => {
@@ -3697,7 +3805,7 @@ export class Daemon {
       message: string;
       notAfter?: string;
     },
-  ): { fireAt: number } {
+  ): { fireAt: number; unchanged?: true; replaced?: WakeRecord } {
     if (!this.chatState.get(chatId) && !this.opts.metaStore.read(chatId)) {
       throw new ChatNotFoundError(chatId);
     }
@@ -3731,6 +3839,21 @@ export class Daemon {
       if (Number.isNaN(na)) throw new Error(`scheduleWake: invalid 'notAfter': ${opts.notAfter}`);
       notAfter = na;
     }
+    const prior = this.wake.peek(chatId);
+    // Re-arming the identical loop (same message, cadence, cutoff; no explicit
+    // first fire) must not push the next fire time forward — an agent that
+    // re-arms to "confirm" would otherwise starve the loop for ever.
+    if (
+      prior &&
+      every !== undefined &&
+      !hasIn &&
+      !hasAt &&
+      prior.every === every &&
+      prior.message === message &&
+      prior.notAfter === notAfter
+    ) {
+      return { fireAt: prior.fireAt, unchanged: true };
+    }
     const rec: WakeRecord = {
       chatId,
       message,
@@ -3745,7 +3868,7 @@ export class Daemon {
     // replaced) wake must reach them immediately — not at the next unrelated
     // state change (spec/02 § Self-wake, "Visible, never invisible").
     this.emitState(chatId);
-    return { fireAt };
+    return prior ? { fireAt, replaced: prior } : { fireAt };
   }
 
   /**
@@ -4176,7 +4299,7 @@ export class Daemon {
     return this.browser.tabs();
   }
 
-  /** Settings → Computer use: is the agent driving this machine right now? */
+  /** Settings → Computer use: is the agent driving this host right now? */
   computerUseStatus(): ComputerUseStatus {
     return this.browser.status();
   }
@@ -4282,11 +4405,11 @@ export class Daemon {
     const archivedAt = null;
     const hidden = req.hidden === true;
     // spec/04 § Spawn — model is optional at every spawn site and resolves ON
-    // THE MACHINE: the model named, else the account default mirrored here. A
-    // machine with neither refuses the spawn saying so.
+    // THE HOST: the model named, else the account default mirrored here. A
+    // host with neither refuses the spawn saying so.
     //
     // Nothing is written BACK from here. The resolved model used to be recorded
-    // as the machine's last-used, which made the next model-less spawn inherit
+    // as the host's last-used, which made the next model-less spawn inherit
     // it — so the default drifted with whatever anyone last ran, and every
     // unattended job drifted with it.
     let model = req.model;
@@ -4728,7 +4851,7 @@ export class Daemon {
     );
   }
 
-  /** Deliver a machine message into `parentChatId`, lazy-hydrating it from
+  /** Deliver a host message into `parentChatId`, lazy-hydrating it from
    *  disk like `deliverWatch`/`deliverWake` do, dropping silently if the
    *  parent chat is gone. */
   private deliverToParent(parentChatId: string, message: string): void {
@@ -5292,6 +5415,7 @@ export class Daemon {
       chatId,
       resumeSessionId: outgoingSessionId,
       folder: state.folder,
+      claudeConfigDir: this.claudeConfigDirFor(chatId),
     });
     if (digest === null) {
       this.opts.logger.warn(
@@ -6039,7 +6163,7 @@ export class Daemon {
    * replay deliberately did not send (spec/04 § History — blobs).
    *
    * Scoped to a chat this host actually has: the blob store is shared across
-   * every chat on the machine, so without this check any host could be asked
+   * every chat on the host, so without this check any host could be asked
    * to hand back any sha anyone happened to learn. `null` means this host
    * holds no such blob, which is a 404 and not an error.
    */
@@ -6097,6 +6221,7 @@ export class Daemon {
         }
       }
     }
+    const restartState = { afterMarker: false };
     for (const record of records) {
       if (
         record.rec.k === 'permission.request' &&
@@ -6133,7 +6258,9 @@ export class Daemon {
         // long chat's bytes — one measured chat shipped 23 MB to draw 150 KB
         // of conversation — and every one of those rows arrives collapsed, so
         // the surface fetches a body only when the reader opens that row.
-        emitToSurface(this.chatLog.externalizeForReplay(chatId, ev));
+        emitToSurface(
+          this.chatLog.externalizeForReplay(chatId, restartResendAsOwnMessage(ev, restartState)),
+        );
       } else if (record.rec.k === 'turn.end' && record.rec.outcome === 'failed') {
         emitToSurface({
           type: 'chat.message',
@@ -6566,7 +6693,7 @@ export class Daemon {
     // already unblocked by the time this turn queues behind it, so the drain
     // that follows is the ordinary one.
     //
-    // Only a PERSON's message is an answer. A machine-started turn (self-wake,
+    // Only a PERSON's message is an answer. A host-started turn (self-wake,
     // `patch_send_to`, todo advance), a job fire, a hook or goal resubmit says
     // nothing about the question: letting it through denied the question the
     // user was in the middle of answering, so their submitted answers hit a
@@ -6626,7 +6753,7 @@ export class Daemon {
       // (`chat.resume_now_request`) is how someone who knows better lifts it.
       return;
     }
-    // The machine is too short of memory to start more work: queue the turn (the
+    // The host is too short of memory to start more work: queue the turn (the
     // surface shows it as waiting) and let `releaseHeldTurns` run it. A chat
     // already holding turns keeps queueing so they run in the order they came.
     if (this.memoryHeld.has(req.chatId) || this.opts.holdTurns?.() === true) {
@@ -6720,23 +6847,35 @@ export class Daemon {
    * and every surface flashes a done badge — while it is still working.
    */
   /**
-   * Chats with a turn running or a queue draining — what a restart of this
-   * process would cut off. Self-update holds its installer until this is empty.
-   * A chat parked on a permission card is excluded: nothing is executing, and
-   * a card nobody answers would otherwise hold the install forever.
-   */
-  runningChatIds(): string[] {
-    return [...this.pumping].filter(
-      (chatId) => !this.isParkedOnPermission(chatId) && !hasDurableTurn(chatId),
-    );
-  }
-
-  /**
    * Chats whose turn the previous host left running under its runner, mapped to
    * how far that host got through the turn's output. The next turn this chat
    * starts is that same turn, reattached (`durableTurn.ts`), not a new claude.
    */
-  private readonly durableAttach = new Map<string, Consumed | null>();
+  private readonly durableAttach = new Map<
+    string,
+    { consumed: Consumed | null; localId: string | undefined }
+  >();
+
+  /**
+   * The surviving turn this run carries on, or undefined. The marker belongs to
+   * one turn (its localId); any other turn of the chat is a new claude. A
+   * marker that outlives its turn is dropped loudly, never handed to a later
+   * message, which would reattach to a turn that is no longer on disk.
+   */
+  takeDurableAttach(chatId: string, localId: string | undefined): Consumed | null | undefined {
+    const marker = this.durableAttach.get(chatId);
+    if (marker === undefined) return undefined;
+    if (marker.localId !== localId) {
+      this.opts.logger.error(
+        { chatId, markerLocalId: marker.localId, localId },
+        'durable turn: a turn other than the one marked for reattach started; the marker was stale and is dropped',
+      );
+      this.durableAttach.delete(chatId);
+      this.durableAccount.delete(chatId);
+      return undefined;
+    }
+    return marker.consumed;
+  }
 
   /** The account a surviving turn was started on, by chat — it outlives the host's own memory. */
   private readonly durableAccount = new Map<string, string>();
@@ -6748,7 +6887,7 @@ export class Daemon {
   ): Pick<SdkRunOptions, 'durableTurn'> {
     const config = this.opts.durableTurns;
     if (!config || harness !== 'claude') return {};
-    const attach = this.durableAttach.get(chatId);
+    const attach = this.takeDurableAttach(chatId, localId);
     this.durableAttach.delete(chatId);
     return {
       durableTurn: {
@@ -6762,29 +6901,6 @@ export class Daemon {
         log: this.opts.logger,
       },
     };
-  }
-
-  /**
-   * Set once self-update has seen the machine idle and is about to launch the
-   * installer (which restarts this process). From then until `releaseInstall`
-   * a user answer to a permission card is refused: it would resume a turn the
-   * installer is about to kill.
-   */
-  private installCommitted = false;
-
-  commitToInstall(): void {
-    this.installCommitted = true;
-  }
-
-  releaseInstall(): void {
-    this.installCommitted = false;
-  }
-
-  private isParkedOnPermission(chatId: string): boolean {
-    if (this.chatState.get(chatId)?.activity !== 'awaiting-permission') return false;
-    const prefix = `${chatId}::`;
-    for (const key of this.sideBranchRunning) if (key.startsWith(prefix)) return false;
-    return true;
   }
 
   private hasQueuedTurns(chatId: string): boolean {
@@ -7288,8 +7404,8 @@ export class Daemon {
   }
 
   /**
-   * Hold a turn until the machine is in a full wake. Surfaces see
-   * `waitingForWakeSince` for as long as it is held. Returns once the machine
+   * Hold a turn until the host is in a full wake. Surfaces see
+   * `waitingForWakeSince` for as long as it is held. Returns once the host
    * is awake, or the turn is stopped.
    */
   private async holdUntilFullyAwake(
@@ -7301,7 +7417,7 @@ export class Daemon {
     this.emitState(chatId);
     this.opts.logger.info(
       { chatId },
-      'machine is in a dark wake — holding the turn until it is fully awake',
+      'host is in a dark wake — holding the turn until it is fully awake',
     );
     try {
       while (!signal.aborted) {
@@ -7660,7 +7776,7 @@ export class Daemon {
       sessionId,
       seq: previousSeq,
       seqIndex: this.canonicalSeqIndex(chatId),
-      nativeDir: this.nativeClaudeDirFor(chatId),
+      chatDir: this.chatDirFor(chatId),
     });
   }
 
@@ -7711,7 +7827,7 @@ export class Daemon {
           sessionId,
           seq: req.seq,
           seqIndex: this.canonicalSeqIndex(req.chatId),
-          nativeDir: this.nativeClaudeDirFor(req.chatId),
+          chatDir: this.chatDirFor(req.chatId),
         }) ?? this.unpersistedForkPoint(req.chatId, sessionId, req.seq))
       : req.seq === 0
         ? { resumeAtUuid: null }
@@ -7814,7 +7930,7 @@ export class Daemon {
             sessionId,
             seq: req.seq,
             seqIndex: this.canonicalSeqIndex(req.chatId),
-            nativeDir: this.nativeClaudeDirFor(req.chatId),
+            chatDir: this.chatDirFor(req.chatId),
           })
         : null;
     if (!point) {
@@ -8371,10 +8487,15 @@ export class Daemon {
           env: { ...this.opts.mcpServer.env, PATCH_CHAT_ID: chatId, PATCH_BRANCH_ID: branchId },
         }
       : undefined;
+    const sideResumeId = branch?.sessionId ?? state.claudeSessionId;
+    const sideOnClaude = this.harnessOf(chatId) === 'claude';
+    if (sideOnClaude && sideResumeId)
+      await this.claudeSessionStoreFor(chatId, state.folder).prepare(sideResumeId);
     const sdkOpts: SdkRunOptions = {
       prompt: composedPrompt,
       cwd: state.folder,
-      resumeSessionId: branch?.sessionId ?? state.claudeSessionId,
+      resumeSessionId: sideResumeId,
+      ...(sideOnClaude ? { claudeConfigDir: this.claudeConfigDirFor(chatId) } : {}),
       ...(fork ? { fork } : {}),
       abortController,
       oauthAccessToken: oauth.accessToken,
@@ -8399,7 +8520,10 @@ export class Daemon {
           branchId,
           req.decisionReason,
         ),
-      extraMcpServers: this.opts.discoverClaudeMcpServers(state.folder),
+      extraMcpServers: await this.shareMcp(
+        this.opts.discoverClaudeMcpServers(state.folder),
+        state.folder,
+      ),
       ...(this.harnessConfig.patchMcpEnabled === false ? { patchMcpOff: true } : {}),
     };
 
@@ -9028,7 +9152,7 @@ export class Daemon {
         this.historyReader.hasSession({
           folder: state.folder,
           sessionId: state.claudeSessionId,
-          nativeDir: this.nativeClaudeDirFor(state.chatId),
+          chatDir: this.chatDirFor(state.chatId),
         })
       )
         continue;
@@ -9203,7 +9327,7 @@ export class Daemon {
       !this.historyReader.hasSession({
         folder: state.folder,
         sessionId: state.claudeSessionId,
-        nativeDir: this.nativeClaudeDirFor(chatId),
+        chatDir: this.chatDirFor(chatId),
       })
     ) {
       this.opts.logger.warn(
@@ -9242,7 +9366,7 @@ export class Daemon {
       typeof state.claudeSessionId === 'string' &&
       state.claudeSessionId.length > 0
     ) {
-      let loaded: Awaited<ReturnType<ReturnType<typeof createClaudeSessionStore>['load']>>;
+      let loaded: Awaited<ReturnType<ClaudeSessionStore['load']>>;
       try {
         loaded = await this.claudeSessionStoreFor(chatId, state.folder).load({
           projectKey: chatId,
@@ -9267,8 +9391,8 @@ export class Daemon {
       }
     }
 
-    // A turn never starts while the machine is in a dark wake: it would die when
-    // the machine drops back to sleep. Before the credential is read, so a long
+    // A turn never starts while the host is in a dark wake: it would die when
+    // the host drops back to sleep. Before the credential is read, so a long
     // wait never runs on a stale token; a stop during the wait lands on the
     // aborted check below.
     if (this.opts.sleepWatch?.isFullyAwake() === false) {
@@ -9299,9 +9423,10 @@ export class Daemon {
         previous !== undefined && oauth.accountId !== undefined && previous !== oauth.accountId;
       // A reattached turn is still running on the account it was started on,
       // whatever the host resolves to now: a refusal has to be blamed there.
-      const carriedOn = this.durableAttach.has(chatId)
-        ? this.durableAccount.get(chatId)
-        : undefined;
+      const carriedOn =
+        this.durableAttach.has(chatId) && this.durableAttach.get(chatId)?.localId === localId
+          ? this.durableAccount.get(chatId)
+          : undefined;
       this.durableAccount.delete(chatId);
       if (carriedOn !== undefined) this.runningOnAccount.set(chatId, carriedOn);
       else if (oauth.accountId === undefined) this.runningOnAccount.delete(chatId);
@@ -9550,8 +9675,15 @@ export class Daemon {
     let userMessageSeq: number | undefined;
     // spec/04 § Handoff budget — a retried provider switch delivers the message
     // already in the log; it does not append a second copy of it.
+    // spec/02 § Turns outlive the host — a reattached turn is the SAME turn
+    // still running, so its prompt already has a bubble: nothing is re-recorded.
+    const reattachesDrawnTurn =
+      retryOfSeq !== undefined &&
+      this.durableAttach.has(chatId) &&
+      this.durableAttach.get(chatId)?.localId === localId;
     const reusesLoggedMessage =
-      retryOfSeq !== undefined && this.reuseLoggedUserMessage.get(chatId) === retryOfSeq;
+      retryOfSeq !== undefined &&
+      (reattachesDrawnTurn || this.reuseLoggedUserMessage.get(chatId) === retryOfSeq);
     if (reusesLoggedMessage) {
       this.reuseLoggedUserMessage.delete(chatId);
       userMessageSeq = retryOfSeq;
@@ -9817,23 +9949,18 @@ export class Daemon {
           ),
         }));
       }
-      // Claude's resume rides the SDK's own SessionStore, which we drive
-      // ourselves here rather than through `sessionStoreOptFor` (sdkBackend.ts)
-      // so the delta lands in the mirror BEFORE the resume call, threaded onto
-      // the existing session's own last entry rather than a disconnected
-      // second root (spec/04 § History).
+      // Claude resumes in place from the chat's own config dir, so the delta
+      // is appended to that file BEFORE the resume call, threaded onto the
+      // existing session's own last entry rather than a disconnected second
+      // root (spec/04 § History).
       if (resumeExistingNativeSessionId && targetHarness === 'claude') {
         const store = this.claudeSessionStoreFor(chatId, state.folder);
         const key = { projectKey: chatId, sessionId: resumeExistingNativeSessionId };
         const existing = await store.load(key);
-        // `load()` can source `existing` from the harness's own on-disk
-        // transcript when this session predates the mirror (never resumed
-        // through this feature before). `append()` only ever writes the
-        // MIRROR, so without re-affirming `existing` there first, appending
-        // just the delta would leave the mirror holding ONLY the delta — the
-        // next resume would find that non-empty mirror and lose everything
-        // before it. A no-op (dedup by uuid) when `existing` already WAS the
-        // mirror's own content.
+        // `load()` can source `existing` from the old mirror or the shared
+        // store when this session has not been migrated yet. `append()` only
+        // ever writes the chat's own file, so re-affirm `existing` there first
+        // (a no-op, dedup by uuid, once it is already there).
         if (existing && existing.length > 0) await store.append(key, existing);
         const startParentUuid = existing?.at(-1)?.['uuid'];
         await store.append(
@@ -9847,40 +9974,52 @@ export class Daemon {
         );
       }
     }
+    const claudeResumeId: string | undefined =
+      resumeExistingNativeSessionId ??
+      ((isProviderSwitch || isNativeRebuild) && targetHarness === 'claude'
+        ? randomUUID()
+        : fork?.resumeAtUuid === null
+          ? // Editing the FIRST message: the shared prefix is empty, so there is
+            // nothing to resume. Resuming the parent would carry the original
+            // message and everything after it into the new track.
+            undefined
+          : state.claudeSessionId);
+    // Claude runs under the chat's own config dir: make its one conversation
+    // file ready (migrate / reseed / strip) and remember where it ends, so
+    // what Claude itself writes on resume can be surfaced after the turn.
+    let claudeTranscript: { path: string; size: number } | undefined;
+    if (targetHarness === 'claude' && claudeResumeId !== undefined) {
+      await createClaudeSessionStore({
+        chatId,
+        folder: state.folder,
+        chatDir: this.chatDirFor(chatId),
+        claudeProjectsRoot: this.claudeProjectsRoot,
+        logger: this.opts.logger,
+        // Only a from-scratch rebuild reseeds — a resume of an existing
+        // session already had its delta appended above.
+        ...((isProviderSwitch || isNativeRebuild) &&
+        !resumeExistingNativeSessionId &&
+        reconstructTrack
+          ? {
+              reseed: {
+                sessionId: claudeResumeId,
+                events: reconstructTrack,
+                model: state.model ?? null,
+              },
+            }
+          : {}),
+      }).prepare(claudeResumeId);
+      const path = chatTranscriptPath(this.chatDirFor(chatId), state.folder, claudeResumeId);
+      claudeTranscript = { path, size: transcriptSize(path) };
+    }
     const sdkOpts: SdkRunOptions = {
       prompt,
       cwd: state.folder,
       // Keys the persistent warm-session map (PATCH_PERSISTENT_SESSIONS=1);
       // ignored by the one-shot default path.
       chatId,
-      resumeSessionId:
-        resumeExistingNativeSessionId ??
-        ((isProviderSwitch || isNativeRebuild) && targetHarness === 'claude'
-          ? randomUUID()
-          : fork?.resumeAtUuid === null
-            ? // Editing the FIRST message: the shared prefix is empty, so there is
-              // nothing to resume. Resuming the parent would carry the original
-              // message and everything after it into the new track.
-              undefined
-            : state.claudeSessionId),
-      ...(targetHarness === 'claude'
-        ? {
-            claudeSessionStore: {
-              nativeDir: this.nativeClaudeDirFor(chatId),
-              claudeProjectsRoot: this.claudeProjectsRoot,
-              logger: this.opts.logger,
-              onAppend: (entries) => this.noteMirroredEntries(chatId, entries),
-              // Only a from-scratch rebuild reseeds — a resume of an existing
-              // session already had its delta appended to the mirror above,
-              // so a PLAIN resume picks it up.
-              ...((isProviderSwitch || isNativeRebuild) &&
-              !resumeExistingNativeSessionId &&
-              reconstructTrack
-                ? { reseed: { events: reconstructTrack, model: state.model ?? null } }
-                : {}),
-            },
-          }
-        : {}),
+      resumeSessionId: claudeResumeId,
+      ...(targetHarness === 'claude' ? { claudeConfigDir: this.claudeConfigDirFor(chatId) } : {}),
       ...((isProviderSwitch || isNativeRebuild) && targetHarness === 'codex' && reconstructTrack
         ? resumeExistingNativeSessionId
           ? { codexAppendItems: { events: reconstructTrack } }
@@ -9974,10 +10113,13 @@ export class Daemon {
       // inside Patch, so it is the one that should win.
       // Undefined (mock/test callers that never configured harness) reads as
       // none, same as every other harness field's absence.
-      extraMcpServers: [
-        ...this.opts.discoverClaudeMcpServers(state.folder),
-        ...(this.harnessConfig.mcpServers ?? []),
-      ],
+      extraMcpServers: await this.shareMcp(
+        [
+          ...this.opts.discoverClaudeMcpServers(state.folder),
+          ...(this.harnessConfig.mcpServers ?? []),
+        ],
+        state.folder,
+      ),
       ...(this.harnessConfig.patchMcpEnabled === false ? { patchMcpOff: true } : {}),
     };
     // Record + log the resume argument so it's observable on the live host
@@ -9999,6 +10141,7 @@ export class Daemon {
     );
 
     let sawResult = false;
+    let transcriptScanned = false;
     const run = (async (): Promise<boolean> => {
       try {
         for (;;) {
@@ -10009,6 +10152,16 @@ export class Daemon {
               (env) => env.type === 'tool_result',
             )) {
               if (env.type === 'result' || env.type === 'error') sawResult = true;
+              // What Claude itself wrote to the file on resume (a `No response
+              // requested.`) never crosses the SDK stream: read it back once,
+              // as soon as the process is talking (spec/02 § Per-turn process).
+              if (!transcriptScanned && claudeTranscript) {
+                transcriptScanned = true;
+                this.noteMirroredEntries(
+                  chatId,
+                  entriesSince(claudeTranscript.path, claudeTranscript.size),
+                );
+              }
               this.handleEnvelope(chatId, env, userMessageSeq);
             }
             // A stream that closes without the provider's final `result` (or an error
@@ -10033,11 +10186,22 @@ export class Daemon {
                 : undefined;
             if (!tighter) throw err;
             if (targetHarness === 'codex') sdkOpts.codexReseed = { events: tighter };
-            else if (sdkOpts.claudeSessionStore) {
-              sdkOpts.claudeSessionStore.reseed = {
-                events: tighter,
-                model: state.model ?? null,
-              };
+            else if (claudeResumeId !== undefined) {
+              // The rejected handoff produced no output, so the file holds only
+              // the seed that was too big: replace it outright.
+              await createClaudeSessionStore({
+                chatId,
+                folder: state.folder,
+                chatDir: this.chatDirFor(chatId),
+                claudeProjectsRoot: this.claudeProjectsRoot,
+                logger: this.opts.logger,
+                reseed: {
+                  sessionId: claudeResumeId,
+                  events: tighter,
+                  model: state.model ?? null,
+                  replace: true,
+                },
+              }).prepare(claudeResumeId);
             }
           }
         }
@@ -10202,8 +10366,8 @@ export class Daemon {
         }
         const errMsg = (err as Error).message ?? String(err);
         turnError = { code: 'sdk_error', message: errMsg };
-        // A turn that died because the machine slept under it did not fail:
-        // it is owed again once the machine is properly awake, and none of the
+        // A turn that died because the host slept under it did not fail:
+        // it is owed again once the host is properly awake, and none of the
         // retry budgets below are spent on it.
         this.opts.sleepWatch?.check();
         const sleptThrough =
@@ -10211,11 +10375,11 @@ export class Daemon {
         if (sleptThrough) {
           // Not reported as an error: nothing is wrong with the turn. It goes
           // round again at once, the wake gate at the top of the next attempt
-          // holds it (visibly) until the machine is fully awake, and the
+          // holds it (visibly) until the host is fully awake, and the
           // re-send folds onto the turn's own bubble.
           this.opts.logger.warn(
             { chatId, errMsg },
-            'turn died while the machine slept — re-sending it, held until the machine is fully awake',
+            'turn died while the host slept — re-sending it, held until the host is fully awake',
           );
           turnOutcome = 'interrupted';
           turnError = undefined;
@@ -11208,7 +11372,7 @@ export class Daemon {
     const state = this.chatState.get(chatId);
     if (!state || state.goal !== condition) return;
     // The chat was archived or deleted while the judge was thinking: a
-    // continuation turn now would be a machine message, which un-archives it.
+    // continuation turn now would be a host message, which un-archives it.
     if (state.status !== 'active') {
       this.opts.logger.info(
         { chatId, status: state.status },
@@ -11451,7 +11615,7 @@ export class Daemon {
    * The API refused this host's Claude credential (spec/10-auth.md § Backend
    * credentials). Reported exactly like a credential that was missing at the
    * gate: `host.unauthenticated` so Settings and the disconnected banner stop
-   * claiming this machine is signed in, plus a `chat.error` in words so the turn
+   * claiming this host is signed in, plus a `chat.error` in words so the turn
    * doesn't just vanish. The raw API JSON stays in the log — it names no action
    * the person reading the chat can take. Callers settle the chat's activity.
    */
@@ -12774,11 +12938,6 @@ export class Daemon {
     /** Daemon-internal only: who decided, for the history log. Absent → the user. */
     by?: PermissionDecisionBy;
   }): void {
-    if (this.installCommitted && ev.by === undefined) {
-      throw new Error(
-        'permission response refused: a self-update is installing and this host is about to restart; answer after it comes back',
-      );
-    }
     // A person answering means somebody saw the prompt: the chat stays listed.
     if (ev.by === undefined) {
       for (const k of this.pendingPermissionEvents.keys()) {
@@ -14095,7 +14254,7 @@ export class Daemon {
       role: 'system',
       content:
         `The host could not stop the processes this chat's last turn started ` +
-        `(${message}). They may still be running on this machine.`,
+        `(${message}). They may still be running on this host.`,
       seq: this.bumpSeq(chatId),
       createdAt: this.opts.now(),
     };
@@ -14188,20 +14347,22 @@ export class Daemon {
     return harnessOfModel(this.chatState.get(chatId)?.model);
   }
 
-  /** `~/.patch/chats/<chatId>/native/claude` — the Claude session mirror
-   * (spec/04 § History — the native resume cache). */
-  private nativeClaudeDirFor(chatId: string): string {
-    return join(dirname(this.opts.metaStore.pathFor(chatId)), 'native', 'claude');
+  /** `~/.patch/chats/<chatId>` — the chat's own dir. */
+  private chatDirFor(chatId: string): string {
+    return dirname(this.opts.metaStore.pathFor(chatId));
   }
 
-  private claudeSessionStoreFor(
-    chatId: string,
-    folder: string,
-  ): ReturnType<typeof createClaudeSessionStore> {
+  /** `~/.patch/chats/<chatId>/claude` — the chat's own `CLAUDE_CONFIG_DIR`
+   * (spec/04 § History): its one conversation file, resumed in place. */
+  private claudeConfigDirFor(chatId: string): string {
+    return chatClaudeDir(this.chatDirFor(chatId));
+  }
+
+  private claudeSessionStoreFor(chatId: string, folder: string): ClaudeSessionStore {
     return createClaudeSessionStore({
       chatId,
       folder,
-      nativeDir: this.nativeClaudeDirFor(chatId),
+      chatDir: this.chatDirFor(chatId),
       claudeProjectsRoot: this.claudeProjectsRoot,
       logger: this.opts.logger,
     });
@@ -14387,6 +14548,7 @@ export class Daemon {
           chatId,
           resumeSessionId: state.claudeSessionId,
           folder: state.folder,
+          claudeConfigDir: this.claudeConfigDirFor(chatId),
           model: state.model ?? null,
         }),
         new Promise<null>((resolve) => {
@@ -14728,6 +14890,7 @@ export class Daemon {
       chatId,
       resumeSessionId: outgoingSessionId,
       folder,
+      claudeConfigDir: this.claudeConfigDirFor(chatId),
       model: outgoingModel,
     });
     if (digest === null) {
@@ -15293,11 +15456,11 @@ export class Daemon {
   /**
    * The mode the chat's NEXT turn will use: chat override → host default →
    * `auto` (spec/02 § Permission mode). Resolved here, on the
-   * machine that owns both scopes, and carried on `chat.state` so no surface
+   * host that owns both scopes, and carried on `chat.state` so no surface
    * has to re-derive it from a host default it does not have.
    */
   /**
-   * Whether this machine currently holds a usable backend credential — a LIVE
+   * Whether this host currently holds a usable backend credential — a LIVE
    * re-read, not the boot-time snapshot, so a `claude login` since boot counts.
    * Callers use it to refuse a dispatch before creating a chat that could never
    * run a turn: spawning first made the server settle the run as `ok` for work
@@ -15590,7 +15753,7 @@ export class Daemon {
       try {
         known = await this.opts.knownModelIds();
       } catch (err) {
-        // Can't check ⇒ can't honour. Reported as "this machine has no
+        // Can't check ⇒ can't honour. Reported as "this host has no
         // catalogue" because from the caller's side that is exactly the
         // situation: there is no list to pick from right now.
         throw new NoModelCatalogueError(this.opts.hostId, (err as Error).message);

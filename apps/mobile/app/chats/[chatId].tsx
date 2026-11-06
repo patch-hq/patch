@@ -52,6 +52,7 @@ import {
   folderName,
   hasTaskNotification,
   isReservedSpecialThread,
+  compactModelLabel,
   taskNotificationSummary,
   labelForRun,
   parseAskHuman,
@@ -62,6 +63,7 @@ import { apiUrl, getRoute } from '../../src/config';
 import { loadTranscript, dropTranscript, setBranch } from '../../src/lib/transcriptCache';
 import { api } from '../../src/api/rest';
 import {
+  isLocalIdSettled,
   useChatStore,
   type ChatEventEntry,
   type LocalAttachment,
@@ -305,7 +307,7 @@ function ChatDetailBody(): React.ReactElement {
     });
     return () => sub.remove();
   }, []);
-  // Which machine the chat runs on, for the header crumb (spec/15 § Chat detail).
+  // Which host the chat runs on, for the header crumb (spec/15 § Chat detail).
   const hostLabel = usePresenceStore((s) =>
     row?.hostId ? (s.hosts[row.hostId]?.host?.hostName ?? row.hostId).trim() : '',
   );
@@ -342,7 +344,7 @@ function ChatDetailBody(): React.ReactElement {
     useUiStore
       .getState()
       .pushError(
-        still
+        still || isLocalIdSettled(chatId, queuedEdit.localId)
           ? 'That message had already been sent — your edit is in the composer.'
           : 'That message was removed from the queue — your edit is in the composer.',
       );
@@ -1127,6 +1129,15 @@ function ChatDetailBody(): React.ReactElement {
             {title}
           </Text>
         </Pressable>
+        {row?.model ? (
+          <Text
+            testID="chat-model"
+            style={{ ...typography.meta, color: colors.ink3 }}
+            numberOfLines={1}
+          >
+            {compactModelLabel(row.model)}
+          </Text>
+        ) : null}
         {runningWorkers > 0 ? (
           <View
             testID="header-workers"
@@ -2865,7 +2876,7 @@ const TimelineItem = React.memo(function TimelineItem({
               )}
             </View>
             <Text testID="delivery-pending" style={{ color: colors.ink3, fontSize: textMin }}>
-              {hostOnline ? 'Sending…' : 'Machine offline — will send when it reconnects'}
+              {hostOnline ? 'Sending…' : 'Host offline — will send when it reconnects'}
             </Text>
           </View>
         ) : null}
