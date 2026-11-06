@@ -26,9 +26,8 @@
 // bug (a background completion nobody outside the tree can observe) rather
 // than fix it.
 
-import { type ChildProcess, spawn } from 'node:child_process';
+import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
 import {
-  appendFileSync,
   closeSync,
   statSync,
   existsSync,
@@ -78,8 +77,10 @@ export const WatchRecord = z
     endedAt: z.number().int().optional(),
     /** Sidecar the wrapper writes the real exit code to. Present = the host can tell "finished" from "killed by a host restart". */
     exitFile: z.string().min(1).optional(),
-    /** How many times the host re-ran this command after a restart killed it. */
-    restarts: z.number().int().nonnegative().optional(),
+    /** The process's start time as the OS reports it, so a re-attach can tell the task from an unrelated process that inherited its pid after a reboot. */
+    pidStart: z.string().min(1).optional(),
+    /** Set when the process vanished with no exit code: the task was killed by a restart and is NOT re-run. */
+    killed: z.boolean().optional(),
   })
   .strict();
 export type WatchRecord = z.infer<typeof WatchRecord>;
@@ -98,6 +99,10 @@ export interface WatchSchedulerDeps {
   generateTaskId?(): string;
   /** Injectable liveness probe for a bare pid (no live handle held). */
   isAlive?(pid: number): boolean;
+  /** Injectable: the OS-reported start time of a pid (undefined = no such process). */
+  processStart?(pid: number): string | undefined;
+  /** Injectable: when the machine last booted (epoch ms). */
+  bootTime?(): number | undefined;
   /** How often the resident poll runs. Default 3000ms. */
   pollMs?: number;
   /**
@@ -114,13 +119,12 @@ const WATCH_DIR = 'watch';
 /** Metadata tag on the delivered turn — data not directive, like wake.ts's `[wake]`. */
 export const WATCH_PREFIX = '[watch]';
 const DEFAULT_POLL_MS = 3_000;
-/** A watch killed by host restarts this many times is given up on rather than looping forever. */
-export const MAX_WATCH_RESTARTS = 3;
 /**
  * Runs the command, then records its real exit code in a sidecar file. If the
  * whole group is killed (host restart, reboot) the wrapper dies with it and no
- * sidecar appears — that absence is how an interrupted watch is told apart
- * from one that finished while the host was down.
+ * sidecar appears — that absence is how a killed watch is told apart from one
+ * that finished while the host was down. Patch never re-runs it: it cannot know
+ * whether the command is safe to run twice.
  */
 const WRAPPER = 'sh -c "$1"; c=$?; echo $c > "$2.tmp" && mv "$2.tmp" "$2"; exit $c';
 export const DEFAULT_CHECK_IN_MS = 60 * 60 * 1000;
@@ -166,10 +170,40 @@ function defaultIsAlive(pid: number): boolean {
   }
 }
 
+/** Start time of a pid as `ps` prints it; undefined when there is no such process. */
+function defaultProcessStart(pid: number): string | undefined {
+  try {
+    const out = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
+      encoding: 'utf8',
+      env: { ...process.env, LC_ALL: 'C' },
+    }).trim();
+    return out === '' ? undefined : out;
+  } catch {
+    return undefined;
+  }
+}
+
+/** When the machine booted (epoch ms), or undefined if the OS will not say. */
+function defaultBootTime(): number | undefined {
+  try {
+    if (process.platform === 'linux') {
+      const m = /^btime (\d+)$/m.exec(readFileSync('/proc/stat', 'utf8'));
+      return m ? Number(m[1]) * 1000 : undefined;
+    }
+    const out = execFileSync('sysctl', ['-n', 'kern.boottime'], { encoding: 'utf8' });
+    const m = /sec = (\d+)/.exec(out);
+    return m ? Number(m[1]) * 1000 : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export class WatchScheduler {
   private readonly liveHandles = new Map<string, ChildProcess>();
   private readonly spawnFn: typeof spawn;
   private readonly isAliveFn: (pid: number) => boolean;
+  private readonly processStartFn: (pid: number) => string | undefined;
+  private readonly bootTimeFn: () => number | undefined;
   private readonly generateTaskId: () => string;
   private readonly setIntervalFn: (cb: () => void, ms: number) => ReturnType<typeof setInterval>;
   private readonly clearIntervalFn: (t: ReturnType<typeof setInterval>) => void;
@@ -178,6 +212,8 @@ export class WatchScheduler {
   constructor(private readonly deps: WatchSchedulerDeps) {
     this.spawnFn = deps.spawnFn ?? spawn;
     this.isAliveFn = deps.isAlive ?? defaultIsAlive;
+    this.processStartFn = deps.processStart ?? defaultProcessStart;
+    this.bootTimeFn = deps.bootTime ?? defaultBootTime;
     this.generateTaskId = deps.generateTaskId ?? (() => randomUUID());
     this.setIntervalFn = deps.setIntervalFn ?? ((cb, ms) => setInterval(cb, ms));
     this.clearIntervalFn = deps.clearIntervalFn ?? ((t) => clearInterval(t));
@@ -241,6 +277,7 @@ export class WatchScheduler {
       rmSync(outputFile, { force: true });
       throw err;
     }
+    const pidStart = this.processStartFn(child.pid!);
     const rec: WatchRecord = {
       chatId: opts.chatId,
       taskId,
@@ -250,6 +287,7 @@ export class WatchScheduler {
       outputFile,
       exitFile,
       pid: child.pid!,
+      ...(pidStart !== undefined ? { pidStart } : {}),
       startedAt: this.deps.now(),
       timeoutSec: opts.timeoutSec,
       ...(opts.checkInSec !== undefined ? { checkInSec: opts.checkInSec } : {}),
@@ -408,18 +446,26 @@ export class WatchScheduler {
           continue;
         }
         // Re-attached after a restart: no handle, just the bare pid.
-        if (!this.isAliveFn(rec.pid)) {
+        if (!this.isOurProcess(rec)) {
           await this.settleOrphan(rec);
         }
       }
     }
   }
 
+  /** Alive AND the same process: after a reboot a saved pid can belong to something unrelated. */
+  private isOurProcess(rec: WatchRecord): boolean {
+    if (!this.isAliveFn(rec.pid)) return false;
+    if (rec.pidStart === undefined) return true;
+    return this.processStartFn(rec.pid) === rec.pidStart;
+  }
+
   /**
    * A re-attached record whose process is gone. With a sidecar exit code it
-   * finished on its own; without one the host restart killed it, so run it
-   * again (up to MAX_WATCH_RESTARTS). Records from before the sidecar existed
-   * can't be told apart and keep the old "exit status unknown" completion.
+   * finished on its own; without one it was killed (host restart or reboot).
+   * Patch never re-runs it — the agent is told and decides. Records from
+   * before the sidecar existed can't be told apart and keep the old "exit
+   * status unknown" completion.
    */
   private async settleOrphan(rec: WatchRecord): Promise<void> {
     if (rec.exitFile === undefined) return this.complete(rec, null, null);
@@ -427,51 +473,27 @@ export class WatchScheduler {
       const code = Number.parseInt(readFileSync(rec.exitFile, 'utf8').trim(), 10);
       return this.complete(rec, Number.isNaN(code) ? null : code, null);
     }
-    const restarts = rec.restarts ?? 0;
-    if (restarts >= MAX_WATCH_RESTARTS) {
-      return this.complete(
-        rec,
-        null,
-        null,
-        `was interrupted by host restarts ${restarts} times and not run again`,
-      );
-    }
-    let child: ChildProcess;
-    try {
-      appendFileSync(
-        rec.outputFile,
-        `\n--- host restarted; re-running (restart ${restarts + 1}) ---\n`,
-      );
-      child = this.spawnProcess(
-        rec.chatId,
-        rec.taskId,
-        rec.command,
-        rec.cwd,
-        rec.outputFile,
-        rec.exitFile,
-      );
-    } catch (err) {
-      this.deps.logger.error(
-        { chatId: rec.chatId, taskId: rec.taskId, err },
-        'watch: restart failed',
-      );
-      return this.complete(
-        rec,
-        null,
-        null,
-        'was interrupted by a host restart and could not be re-run',
-      );
-    }
-    this.liveHandles.set(rec.taskId, child);
+    const boot = this.bootTimeFn();
+    const cause =
+      boot !== undefined && boot > rec.startedAt
+        ? process.platform === 'darwin'
+          ? 'the Mac rebooted'
+          : 'the machine rebooted'
+        : 'the host restarted';
     this.writeRecord({
       ...rec,
-      pid: child.pid!,
-      startedAt: this.deps.now(),
-      restarts: restarts + 1,
+      status: 'failed',
+      killed: true,
+      exitCode: null,
+      signal: null,
+      endedAt: this.deps.now(),
     });
+    const tail = this.output(rec.chatId, rec.taskId, 10);
     await this.send(
       rec,
-      `${WATCH_PREFIX} "${rec.description}" was interrupted by a host restart and has been started again from the beginning (restart ${restarts + 1}). Command: ${rec.command}.`,
+      `${WATCH_PREFIX} "${rec.description}" was killed because ${cause}, and has NOT been re-run. ` +
+        `Command: ${rec.command}. Last output:\n${tail === '' ? '(none)' : tail}\n` +
+        `Call patch_watch_output("${rec.taskId}") for the full output. Decide whether to run it again.`,
     );
   }
 

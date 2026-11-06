@@ -165,6 +165,14 @@ export interface CorrectInput {
   lines: { speaker: string; text: string }[];
 }
 
+/**
+ * A clip that could not be transcribed for a reason the panel states as-is
+ * (e.g. the speech model is still being set up), not as a failure.
+ */
+export class MeetingNotice extends Error {
+  override readonly name = 'MeetingNotice';
+}
+
 export interface MeetingDeps {
   dir: string;
   /** Local Whisper only. */
@@ -559,7 +567,10 @@ export class MeetingManager {
           pieces = [{ text: (await this.deps.transcribe(wav)).trim() }];
         }
       } catch (err) {
-        rt.state.error = `transcription failed: ${(err as Error).message}`;
+        rt.state.error =
+          err instanceof MeetingNotice
+            ? err.message
+            : `transcription failed: ${(err as Error).message}`;
         this.deps.logger.error(
           { chatId, err: (err as Error).message },
           'meeting: transcription failed',

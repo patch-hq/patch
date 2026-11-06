@@ -130,7 +130,7 @@ import {
 } from './sdkBackend.js';
 import { makeTitleGenerator } from './titleGen.js';
 import { makeStatusGenerator } from './statusGen.js';
-import { MeetingManager, type MeetingPrompts } from './meeting.js';
+import { MeetingManager, MeetingNotice, type MeetingPrompts } from './meeting.js';
 import {
   makeMeetingAnalyser,
   makeMeetingCorrector,
@@ -252,6 +252,7 @@ import {
   validateWhisperCredentials,
   UnsupportedClipFormatError,
   LocalWhisperBackend,
+  UnconfiguredWhisperBackend,
   type WhisperBackend,
 } from './audio/whisper.js';
 import { ParakeetWhisperBackend } from './audio/parakeet.js';
@@ -1333,12 +1334,17 @@ async function startHost(
    * Optional components (spec/02 § Optional components) — real downloads onto
    * this host's disk, with live progress.
    */
+  /** Set once the audio stack exists (step 8): re-picks the STT engine when a component settles. */
+  let onComponentsSettled = (): void => {};
   const components = new ComponentManager({
     root: join(config.patchHome, 'components'),
     hostId: selfHostId,
     emit: (event) => link.send(event),
     logger: logger.child({ component: 'components' }),
-    onSettled: () => publishHost(),
+    onSettled: () => {
+      publishHost();
+      onComponentsSettled();
+    },
     // spec/02 § Optional components: a voice component's weights are useless
     // without the Python sidecar that reads them, and the artifact carries that
     // sidecar's source and none of its wheels. Installing the component is where
@@ -4454,12 +4460,42 @@ async function startHost(
   // Meeting mode (meeting.ts). Local Whisper unless the host opts in with
   // MEETING_STT=elevenlabs: a meeting is hours of audio, so a paid STT backend is
   // never picked just because a key exists.
+  // Starts (or re-tries, at most once a minute after a failure) the Whisper
+  // component download and returns the notice a meeting clip shows meanwhile.
+  let lastSpeechModelTry = 0;
+  const preparingSpeechModel = (): MeetingNotice => {
+    const c = components.describe().find((x) => x.id === 'whisper');
+    if (c?.state === 'downloading') {
+      return new MeetingNotice(
+        `Setting up speech recognition on this machine (${Math.round((c.progress ?? 0) * 100)}%). Transcription starts when it is ready.`,
+      );
+    }
+    if (c?.state === 'failed' && Date.now() - lastSpeechModelTry < 60_000) {
+      return new MeetingNotice(
+        `Speech recognition could not be set up on this machine: ${c.error ?? 'unknown error'}. Retrying shortly.`,
+      );
+    }
+    lastSpeechModelTry = Date.now();
+    components.install('whisper');
+    return new MeetingNotice(
+      'Setting up speech recognition on this machine. Transcription starts when it is ready.',
+    );
+  };
   const scribeVoiceMaps = new Map<string, ScribeVoiceMap>();
   meetings = new MeetingManager({
     dir: join(config.patchHome, 'meetings'),
     transcribe: async (wav) => {
       if (!dictationTranscribers)
         throw new Error('host audio stack not ready — whisper unavailable');
+      // A meeting needs no setup: on a machine with no speech model and no
+      // engine chosen, the first clip fetches the model. Until it lands each
+      // clip says so (it is not transcribed — never a made-up transcript).
+      if (
+        whisper instanceof UnconfiguredWhisperBackend &&
+        process.env['WHISPER_BACKEND'] === undefined
+      ) {
+        throw preparingSpeechModel();
+      }
       return dictationTranscribers.local.transcribeClip(wav, 'wav');
     },
     // Voice separation needs the local sidecar and its speaker model; without
@@ -5136,15 +5172,44 @@ async function startHost(
   //    (The server-link dial happens earlier — right after the host graph is
   //    wired — so surfaces connect promptly rather than waiting on this stack.)
   const whisperLog = logger.child({ component: 'whisper' });
-  if (config.audio.whisperBackend === 'elevenlabs') {
-    whisper = new ElevenLabsScribeBackend({
-      logger: whisperLog,
-      apiKey: () => providerKeys.get('elevenlabs'),
-    });
-  } else {
-    whisper = createWhisper({
+  // spec/02 § Optional components: installing the speech model is what turns
+  // local speech-to-text ON, the same contract as Kokoro below. A machine that
+  // has the Whisper component (weights verified, runtime built) transcribes
+  // with it whether or not WHISPER_BACKEND is set; an explicit env var still
+  // wins (`mock` for tests, `off` to hold a machine quiet, or a hosted engine).
+  const whisperFromComponent = (): boolean =>
+    process.env['WHISPER_BACKEND'] === undefined &&
+    components.describe().find((c) => c.id === 'whisper')?.state === 'installed';
+  const buildWhisper = (): WhisperBackend => {
+    if (config.audio.whisperBackend === 'elevenlabs') {
+      return new ElevenLabsScribeBackend({
+        logger: whisperLog,
+        apiKey: () => providerKeys.get('elevenlabs'),
+      });
+    }
+    if (whisperFromComponent()) {
+      logger.info(
+        { component: 'whisper' },
+        'STT enabled: the Whisper component is installed on this machine',
+      );
+      const sidecarDir = process.env['WHISPER_SIDECAR_CWD'] ?? bundledSidecarDir('whisper');
+      return createWhisper({
+        backend: 'local',
+        logger: whisperLog,
+        localModelPath: join(config.patchHome, 'components', 'whisper'),
+        localSidecarCwd: sidecarDir,
+        localSidecarEnv: {
+          UV_PROJECT_ENVIRONMENT: components.runtimeDir('whisper'),
+          // Import the sidecar from THIS host version's source (see the Kokoro
+          // note below: an update prunes the folder the venv was built from).
+          PYTHONPATH: join(sidecarDir, 'src'),
+        },
+        uvPath: uvCandidates(config.patchHome).find((p) => existsSync(p)) ?? 'uv',
+      });
+    }
+    return createWhisper({
       backend: config.audio.whisperBackend,
-      logger: logger.child({ component: 'whisper' }),
+      logger: whisperLog,
       groqApiKey: () => providerKeys.get('groq'),
       ...(config.audio.parakeetModelDir !== undefined
         ? { parakeetModelDir: config.audio.parakeetModelDir }
@@ -5166,7 +5231,18 @@ async function startHost(
           }
         : {}),
     });
-  }
+  };
+  const installWhisper = (next: WhisperBackend): void => {
+    whisper = next;
+    if (meetingTranscriptionModel !== '') next.useModel?.(meetingTranscriptionModel);
+    dictationTranscribers = createDictationTranscribers({
+      logger: logger.child({ component: 'hosted-stt' }),
+      local: next,
+      deepgramApiKey: () => providerKeys.get('deepgram'),
+      elevenlabsApiKey: () => providerKeys.get('elevenlabs'),
+    });
+  };
+  installWhisper(buildWhisper());
   // The on-host model loads now: a broken install aborts the boot rather
   // than failing the first word someone says.
   if (config.audio.whisperBackend === 'parakeet') await (whisper as ParakeetWhisperBackend).warm();
@@ -5178,14 +5254,18 @@ async function startHost(
     });
     await liveRecognizer.warm();
   }
-  // Shared settings may have landed before the backend existed.
-  if (meetingTranscriptionModel !== '') whisper.useModel?.(meetingTranscriptionModel);
-  dictationTranscribers = createDictationTranscribers({
-    logger: logger.child({ component: 'hosted-stt' }),
-    local: whisper,
-    deepgramApiKey: () => providerKeys.get('deepgram'),
-    elevenlabsApiKey: () => providerKeys.get('elevenlabs'),
-  });
+  // Installing or removing the Whisper component takes effect at once, not at
+  // the next restart: the engine follows the component.
+  onComponentsSettled = () => {
+    const current = whisper;
+    if (current === undefined) return;
+    const wantLocal = whisperFromComponent();
+    const isOff = current instanceof UnconfiguredWhisperBackend;
+    if (process.env['WHISPER_BACKEND'] !== undefined) return;
+    if (wantLocal === !isOff) return;
+    installWhisper(buildWhisper());
+    void current.close().catch(() => undefined);
+  };
   // spec/02 § Optional components: voice is a component the user installs on a
   // host, and installing it is what turns it ON. A host that has installed
   // Kokoro — weights verified AND its Python runtime built — can speak, whether
@@ -5329,7 +5409,15 @@ async function startHost(
     port: config.audio.port,
     logger: logger.child({ component: 'audio' }),
     internalToken: config.internalToken,
-    whisper,
+    // Forwards to whichever engine is current, so installing the speech model
+    // reaches voice sessions too, without a restart.
+    whisper: new Proxy({} as WhisperBackend, {
+      get: (_t, key) => {
+        const cur = whisper as unknown as Record<PropertyKey, unknown>;
+        const v = cur[key];
+        return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(cur) : v;
+      },
+    }),
     // Every place that speaks goes through this: the voice session (calls, house
     // speakers, announcements) takes whichever engine Settings chose.
     kokoro: createRoutedTts({ kokoro, elevenlabs, choice: () => ttsBackend }),
@@ -5532,7 +5620,7 @@ async function startHost(
     audioRelayBridge.dispose();
     await audioServer.close().catch(() => undefined);
     await kokoro.close().catch(() => undefined);
-    await whisper.close().catch(() => undefined);
+    await whisper?.close().catch(() => undefined);
     await liveRecognizer?.close().catch(() => undefined);
     await link.close().catch(() => undefined);
     await app.close().catch(() => undefined);

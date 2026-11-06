@@ -108,50 +108,26 @@ export function PromptsPage(): React.ReactElement {
 /** The meeting models and how often the notes are refreshed, saved on blur like the other fields. */
 function MeetingControls({ preferences }: { preferences: AccountPreferences }): React.ReactElement {
   const [seconds, setSeconds] = React.useState(String(preferences.meetingAnalyseSeconds));
-  const [stt, setStt] = React.useState(preferences.meetingTranscriptionModel);
   React.useEffect(
     () => setSeconds(String(preferences.meetingAnalyseSeconds)),
     [preferences.meetingAnalyseSeconds],
   );
-  React.useEffect(
-    () => setStt(preferences.meetingTranscriptionModel),
-    [preferences.meetingTranscriptionModel],
-  );
   return (
     <>
       <ModelChoice
-        label="Analysis model"
+        label="Analysis"
         testID="meeting-analysis-model"
         value={preferences.meetingAnalysisModel}
         onSelect={(id) => writePreferences({ meetingAnalysisModel: id })}
       />
       <ModelChoice
-        label="Clean-up model"
+        label="Clean-up"
         testID="meeting-cleanup-model"
         value={preferences.meetingCleanupModel}
         onSelect={(id) => writePreferences({ meetingCleanupModel: id })}
       />
       <Row
-        title="Transcription model"
-        subtitle="Model directory (local) or Groq model name; empty is the host's"
-        right={
-          <Field
-            testID="meeting-transcription-model"
-            accessibilityLabel="Meeting transcription model"
-            value={stt}
-            placeholder="Host default"
-            onChangeText={setStt}
-            style={{ width: 160 }}
-            onBlur={() => {
-              const next = stt.trim();
-              if (next !== preferences.meetingTranscriptionModel)
-                writePreferences({ meetingTranscriptionModel: next });
-            }}
-          />
-        }
-      />
-      <Row
-        title="Analyse every"
+        title="Update notes every"
         right={
           <>
             <Field
@@ -171,7 +147,7 @@ function MeetingControls({ preferences }: { preferences: AccountPreferences }): 
                   writePreferences({ meetingAnalyseSeconds: next });
               }}
             />
-            <Muted>seconds (5–300)</Muted>
+            <Muted>seconds</Muted>
           </>
         }
       />

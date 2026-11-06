@@ -42,6 +42,7 @@ function toWireRow(rec: WatchRecord & WatchProgress & { nextCheckInAt?: number }
     startedAt: rec.startedAt,
     ...(rec.timeoutSec !== undefined ? { timeoutSec: rec.timeoutSec } : {}),
     ...(rec.timedOut ? { timedOut: true } : {}),
+    ...(rec.killed ? { killed: true } : {}),
     ...(rec.checkInSec !== undefined ? { checkInSec: rec.checkInSec } : {}),
     ...(rec.nextCheckInAt !== undefined ? { nextCheckInAt: rec.nextCheckInAt } : {}),
     ...(rec.lastLine !== undefined ? { lastLine: rec.lastLine } : {}),

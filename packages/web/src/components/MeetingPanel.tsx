@@ -68,8 +68,9 @@ import { parseMeetingNotes, type MeetingNote } from '../lib/meetingNotes.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import type { AccountPreferences } from '../api/rest.js';
 import { patchShared } from '../routes/settings/sharedWrite.js';
-import { MeetingModelRows } from '../routes/settings/PromptsPage.js';
-import { Group } from '../routes/settings/ui.js';
+import { MeetingModelRows, MeetingTimingRows } from '../routes/settings/PromptsPage.js';
+import { Group, Pills, Row } from '../routes/settings/ui.js';
+import { Toggle } from './Toggle.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
@@ -596,44 +597,44 @@ function MeetingAlerts({ chatId, meeting }: { chatId: string; meeting: MeetingSt
 /** The meeting's switch: the agent researching what is said as the call goes. */
 export function MeetingSwitches({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
   return (
-    <div className="mm-switches">
-      <label className="mm-switch">
-        <input
-          type="checkbox"
-          data-testid="meeting-research-on"
-          checked={meeting.researchOn === true}
-          disabled={meeting.status === 'ended'}
-          onChange={(e) => setMeetingResearch(chatId, e.target.checked)}
-        />
-        Agent researches during call
-      </label>
-    </div>
+    <Row title="Agent researches during call">
+      <Toggle
+        testid="meeting-research-on"
+        checked={meeting.researchOn === true}
+        disabled={meeting.status === 'ended'}
+        onChange={(next) => setMeetingResearch(chatId, next)}
+      />
+    </Row>
   );
 }
 
-/** What the settings button opens: the switch, how often notes update, models, and every prompt. */
+/** What the settings button opens: this meeting, the models, timing, and every prompt. */
 function MeetingSettingsPane({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
+  const speeds = Object.keys(MEETING_SPEEDS);
   return (
     <div className="mm-settings" data-testid="meeting-settings">
-      <MeetingSwitches chatId={chatId} meeting={meeting} />
-      {meeting.status !== 'ended' ? (
-        <label className="mm-speed">
-          Notes update
-          <select
-            data-testid="meeting-speed"
-            value={speedOf(meeting)}
-            onChange={(e) => setMeetingSpeed(chatId, e.target.value)}
-          >
-            {Object.entries(MEETING_SPEEDS).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : null}
-      <Group label="Models and timing" testid="meeting-models">
+      <Group label="This meeting">
+        <MeetingSwitches chatId={chatId} meeting={meeting} />
+        {meeting.status !== 'ended' ? (
+          <Row title="Notes update">
+            <Pills
+              label="Notes update speed"
+              testid="meeting-speed"
+              options={speeds}
+              labels={Object.fromEntries(
+                speeds.map((k) => [k, MEETING_SPEEDS[k]!.label.replace(/ \(.*\)$/, '')]),
+              )}
+              value={speedOf(meeting)}
+              onChange={(next) => setMeetingSpeed(chatId, next)}
+            />
+          </Row>
+        ) : null}
+      </Group>
+      <Group label="Models" testid="meeting-models">
         <MeetingModelRows />
+      </Group>
+      <Group label="Timing" testid="meeting-timing">
+        <MeetingTimingRows />
       </Group>
       <div className="mm-label">Prompts</div>
       <div className="mm-prompts" data-testid="meeting-prompts">

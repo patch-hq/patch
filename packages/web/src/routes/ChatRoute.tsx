@@ -598,6 +598,9 @@ export function ChatRoute({
   // refetched, never merged into something that looks plausible. Loud,
   // because a cache disagreeing with its host is worth knowing about.
   const cachedBranch = useRef<string | null>(null);
+  // The branch an edit made on this screen moved the chat onto — its timeline is
+  // already right, so the stale-cache refetch below must not run for it.
+  const editedToBranchRef = useRef<string | null>(null);
   const activeBranchId = useChatStore((s) => s.branchGraphs[chatId]?.activeBranchId ?? null);
   useEffect(() => {
     if (!ws || activeBranchId === null) return;
@@ -608,6 +611,17 @@ export function ChatRoute({
       );
       cachedBranch.current = null;
       void dropTranscript(chatId);
+      // An edit made on THIS screen has already trimmed the old track off the
+      // timeline and is streaming the new one in beneath the shared prefix.
+      // Wiping and replaying it here let the live echo and reply land first and
+      // the prefix replay after them — the edited message drawn above the turns
+      // that precede it. The cache is still dropped (it holds the old track).
+      if (editedToBranchRef.current === activeBranchId) {
+        editedToBranchRef.current = null;
+        cachedBranch.current = activeBranchId;
+        void setBranch(chatId, activeBranchId);
+        return;
+      }
       useChatStore.getState().clearTimeline(chatId);
       ws.requestReplay(chatId, { force: true });
       return;
@@ -1549,9 +1563,11 @@ export function ChatRoute({
         (useChatStore.getState().timelines[chatId] ?? []).filter((e) => e.seq >= seq),
       );
       const unsubscribe = useChatStore.subscribe((s) => {
-        if (s.branchGraphs[chatId]?.activeBranchId === before) return;
+        const now = s.branchGraphs[chatId]?.activeBranchId;
+        if (now === before) return;
         unsubscribe();
         clearTimeout(timer);
+        editedToBranchRef.current = now ?? null;
         useChatStore.setState((st) => ({
           timelines: {
             ...st.timelines,

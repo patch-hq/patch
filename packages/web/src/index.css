@@ -9812,6 +9812,9 @@ button.set-row-open:focus-visible {
 .set-num {
   width: 88px;
 }
+.set-row-ctrl input[type='number'] {
+  width: 88px;
+}
 .set-word {
   width: 180px;
 }
@@ -17591,8 +17594,9 @@ select.permission-mode.is-pending {
     display: none;
   }
 }
-.status-grow[data-quiet='true'] {
-  color: var(--amber);
+.status-killed {
+  color: var(--danger);
+  font-weight: 600;
 }
 
 /* Folded Artifacts row: the links after the pill, clipped at the row's edge. */

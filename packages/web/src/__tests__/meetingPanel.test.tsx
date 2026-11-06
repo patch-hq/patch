@@ -94,7 +94,7 @@ describe('MeetingSwitches', () => {
     const research = screen.getByTestId('meeting-research-on') as HTMLInputElement;
     expect(research.checked).toBe(true);
     expect(research.disabled).toBe(false);
-    expect(screen.getByLabelText('Agent researches during call')).toBeTruthy();
+    expect(screen.getByText('Agent researches during call')).toBeTruthy();
     expect(screen.queryByTestId('meeting-agent-runs')).toBeNull();
   });
 

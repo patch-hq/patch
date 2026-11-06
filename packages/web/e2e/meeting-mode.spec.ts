@@ -466,7 +466,7 @@ test.describe('meeting mode — live', () => {
   test('the speed option tunes the host', async ({ page }) => {
     await page.goto(URL_LIVE);
     await page.getByTestId('meeting-cog').click();
-    await page.getByTestId('meeting-speed').selectOption('fast');
+    await page.getByTestId('meeting-speed-fast').click();
     const reqs = (await sent(page, 'meeting.control_request')) as Array<{
       action: string;
       settings?: { clipSeconds: number; analyseSeconds: number };
@@ -1007,7 +1007,7 @@ test.describe('meeting mode — research cards', () => {
   }) => {
     await page.goto(URL_LIVE);
     await page.getByTestId('meeting-cog').click();
-    await page.getByTestId('meeting-research-on').uncheck();
+    await page.getByTestId('meeting-research-on').uncheck({ force: true });
     await expect.poll(async () => (await sent(page, 'meeting.research_request')).length).toBe(1);
     expect((await sent(page, 'meeting.research_request'))[0]).toMatchObject({ on: false });
     await page.getByTestId('meeting-view-notes').click();
