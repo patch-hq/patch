@@ -234,6 +234,19 @@ useChatStore.getState().hydrate([
     disabled: false,
     lastUpdated: 5,
   },
+  {
+    chatId: 'chat_longcell',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'Delivery Monitor Setup',
+    folder: '/home/tom/projects/portfolio',
+    activity: 'idle',
+    status: 'active',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 5,
+  },
   // A chat whose permission mode was changed part-way through (spec/02 §
   // Permission mode) — drives the mode-change line e2e. On its own fixture so
   // the transcript-spacing and markdown specs' chats keep their exact shape.
@@ -1312,6 +1325,23 @@ const wideTableReply: ChatEventEntry[] = [
     at: 2,
   },
 ];
+// A 4-column table with long cells and an unbreakable URL, the phone-width shape
+// from the Delivery Monitor Setup chat (spec/14 § Wide tables).
+const longCellTableReply: ChatEventEntry[] = [
+  { seq: 1, kind: 'message', role: 'user', content: 'set up the delivery monitor', at: 1 },
+  {
+    seq: 2,
+    kind: 'message',
+    role: 'assistant',
+    content: [
+      '| Step | What it does | Where it runs | Source |',
+      '| --- | --- | --- | --- |',
+      '| Poll the carrier | Checks every tracking number against the carrier page and records each status change | Hetzner cron, every fifteen minutes | https://tracking.example.com/parcels/status/abcdef0123456789abcdef0123456789 |',
+      '| Notify | Sends a push to the phone when the status changes to out for delivery | FCM from the server | https://notifications.example.com/v1/projects/delivery-monitor/messages:send |',
+    ].join('\n'),
+    at: 2,
+  },
+];
 // A `Monitor` call on the bus-watch chat, predating `Monitor`/`TaskStop` being
 // disallowed (spec/14 § Monitors (historical)): the tool call plus the result
 // that reports its task id. Proves a pre-existing transcript still replays
@@ -1900,6 +1930,7 @@ useChatStore.setState((s) => ({
     chat_bus: [...markdownReply, ...monitorEntries],
     chat_md: [...markdownReply, compactionEntry],
     chat_table: wideTableReply,
+    chat_longcell: longCellTableReply,
     chat_perm_mode: permissionModeEntries,
     chat_perm_mode_auto: permissionModeAutomaticEntries,
     chat_tools: toolRunEntries,

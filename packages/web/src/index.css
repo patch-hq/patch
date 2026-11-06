@@ -4791,6 +4791,14 @@ button.nav-row {
    break mid-word as the last resort — the desktop rule above keeps words whole
    because there scrolling is available. */
 @media (max-width: 640px) {
+  /* The wrapper is the scroller here, because the table is `display: table`
+     and cannot scroll itself. Cells wrap to fit; anything that still cannot
+     shrink (an icon, an image) grows past the screen and scrolls under the
+     finger instead of being clipped at the edge
+     (Todoist: "Wide markdown tables don't scroll horizontally in chat"). */
+  .content.md .md-table-wrap {
+    overflow-x: auto;
+  }
   .content.md table {
     display: table;
     width: 100%;
