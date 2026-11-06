@@ -511,6 +511,11 @@ export const api = {
     request<{ stopped: boolean }>(`/api/chats/${chatId}/watch/${encodeURIComponent(taskId)}/stop`, {
       method: 'POST',
     }),
+  // Last lines of a task's combined stdout+stderr, for the detail sheet's log.
+  watchOutput: (chatId: string, taskId: string, tail = 200) =>
+    request<{ output: string }>(
+      `/api/chats/${chatId}/watch/${encodeURIComponent(taskId)}/output?tail=${tail}`,
+    ),
   // POST /api/chats/:id/snooze — `snoozedUntil` is ABSOLUTE ms epoch, resolved
   // from a preset delta on this surface (spec/04 § Snooze); `null` unsnoozes.
   // The server rejects a past timestamp with 400 and that rejection is left to

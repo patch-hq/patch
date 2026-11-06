@@ -954,6 +954,19 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     ok: true,
     updated: true,
   },
+  'patch.watch_output.request': {
+    type: 'patch.watch_output.request',
+    requestId: 'wo1',
+    chatId: 'c1',
+    taskId: 't1',
+    tail: 200,
+  },
+  'patch.watch_output.response': {
+    type: 'patch.watch_output.response',
+    requestId: 'wo1',
+    ok: true,
+    output: 'line one\nline two',
+  },
   'patch.files.request': {
     type: 'patch.files.request',
     requestId: 'fr1',

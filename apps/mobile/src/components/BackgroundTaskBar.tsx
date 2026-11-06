@@ -13,7 +13,7 @@
 // running, and the bar never waits on the poll to appear.
 
 import React, { useEffect, useState, type ReactElement } from 'react';
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ChevronDown, ChevronUp, X } from 'lucide-react-native';
 import type { WatchTaskRow } from '@patch/wire';
@@ -66,6 +66,75 @@ function useWatchTasks(chatId: string, enabled: boolean): WatchTaskRow[] {
   }, [chatId, enabled]);
 
   return tasks;
+}
+
+/** Last lines of a task's output; re-read every poll while the task runs. */
+function useWatchLog(
+  chatId: string,
+  taskId: string,
+  running: boolean,
+): { output: string | null; error: string | null } {
+  const [output, setOutput] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    const load = async (): Promise<void> => {
+      try {
+        const res = await api.watchOutput(chatId, taskId);
+        if (!live) return;
+        setOutput(res.output);
+        setError(null);
+      } catch (e) {
+        if (live) setError((e as Error).message);
+      }
+    };
+    void load();
+    if (!running) {
+      return () => {
+        live = false;
+      };
+    }
+    const timer = setInterval(() => void load(), LIST_POLL_MS);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [chatId, taskId, running]);
+  return { output, error };
+}
+
+function WatchLog({
+  chatId,
+  taskId,
+  running,
+}: {
+  chatId: string;
+  taskId: string;
+  running: boolean;
+}): ReactElement {
+  const colors = useTheme();
+  const { output, error } = useWatchLog(chatId, taskId, running);
+  return (
+    <View testID="background-task-modal-log" style={{ marginTop: space.md }}>
+      {error !== null ? (
+        <Text testID="background-task-modal-log-error" style={{ color: colors.red }}>
+          Couldn't load the log: {error}
+        </Text>
+      ) : output === null ? (
+        <ActivityIndicator size="small" color={colors.ink2} />
+      ) : (
+        <ScrollView style={{ maxHeight: 320 }} nestedScrollEnabled>
+          <Text
+            testID="background-task-modal-log-text"
+            selectable
+            style={{ color: colors.ink2, fontFamily: fonts.mono, fontSize: textMin }}
+          >
+            {output === '' ? 'No output yet.' : output}
+          </Text>
+        </ScrollView>
+      )}
+    </View>
+  );
 }
 
 export function BackgroundTaskBar({ chatId }: { chatId: string }): ReactElement | null {
@@ -309,6 +378,11 @@ export function BackgroundTaskBar({ chatId }: { chatId: string }): ReactElement 
           >
             {detailTask.command}
           </Text>
+          <WatchLog
+            chatId={chatId}
+            taskId={detailTask.taskId}
+            running={detailTask.status === 'running'}
+          />
           <View style={{ flexDirection: 'row', gap: space.lg, marginTop: space.md }}>
             {row ? (
               <Pressable

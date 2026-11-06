@@ -203,6 +203,7 @@ import { ModelLimits } from './handoffRun.js';
 import { handleBackgroundTaskStatsRequest } from './backgroundTaskStats.js';
 import {
   handleWatchCheckInRequest,
+  handleWatchOutputRequest,
   handleWatchListRequest,
   handleWatchStopRequest,
 } from './watchRequests.js';
@@ -2440,6 +2441,7 @@ async function startHost(
             stopWatch: (chatId, taskId) => daemon.stopWatch(chatId, taskId),
             setWatchCheckIn: (chatId, taskId, sec) =>
               daemon.setWatchTaskCheckIn(chatId, taskId, sec),
+            watchOutput: (chatId, taskId, tail) => daemon.watchOutput(chatId, taskId, tail),
           },
           sender,
           logger,
@@ -2455,6 +2457,23 @@ async function startHost(
             stopWatch: (chatId, taskId) => daemon.stopWatch(chatId, taskId),
             setWatchCheckIn: (chatId, taskId, sec) =>
               daemon.setWatchTaskCheckIn(chatId, taskId, sec),
+            watchOutput: (chatId, taskId, tail) => daemon.watchOutput(chatId, taskId, tail),
+          },
+          sender,
+          logger,
+        );
+        return;
+      }
+      if (event.type === 'patch.watch_output.request') {
+        handleWatchOutputRequest(
+          event,
+          {
+            hasChat: (chatId) => daemon.chatState.get(chatId) !== undefined,
+            listWatch: (chatId) => daemon.listWatch(chatId),
+            stopWatch: (chatId, taskId) => daemon.stopWatch(chatId, taskId),
+            setWatchCheckIn: (chatId, taskId, sec) =>
+              daemon.setWatchTaskCheckIn(chatId, taskId, sec),
+            watchOutput: (chatId, taskId, tail) => daemon.watchOutput(chatId, taskId, tail),
           },
           sender,
           logger,
@@ -2470,6 +2489,7 @@ async function startHost(
             stopWatch: (chatId, taskId) => daemon.stopWatch(chatId, taskId),
             setWatchCheckIn: (chatId, taskId, sec) =>
               daemon.setWatchTaskCheckIn(chatId, taskId, sec),
+            watchOutput: (chatId, taskId, tail) => daemon.watchOutput(chatId, taskId, tail),
           },
           sender,
           logger,

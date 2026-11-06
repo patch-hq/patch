@@ -16,6 +16,7 @@ import type { Logger } from 'pino';
 import type {
   PatchWatchCheckInRequestEvent,
   PatchWatchListRequestEvent,
+  PatchWatchOutputRequestEvent,
   PatchWatchStopRequestEvent,
   WatchTaskRow,
   WireEvent,
@@ -27,6 +28,7 @@ export interface WatchRequestsDeps {
   listWatch(chatId: string): (WatchRecord & WatchProgress & { nextCheckInAt?: number })[];
   setWatchCheckIn(chatId: string, taskId: string, checkInSec: number): boolean;
   stopWatch(chatId: string, taskId: string): boolean;
+  watchOutput(chatId: string, taskId: string, tail: number): string;
 }
 
 /** `WatchRecord` (daemon-internal: also carries chatId/cwd/pid) → the wire row a surface gets. */
@@ -143,6 +145,43 @@ export function handleWatchCheckInRequest(
       requestId: event.requestId,
       ok: false,
       error: { code: 'internal', message: (err as Error).message },
+    });
+  }
+}
+
+export function handleWatchOutputRequest(
+  event: PatchWatchOutputRequestEvent,
+  deps: WatchRequestsDeps,
+  sender: (e: WireEvent) => void,
+  logger: Logger,
+): void {
+  if (!deps.hasChat(event.chatId)) {
+    sender({
+      type: 'patch.watch_output.response',
+      requestId: event.requestId,
+      ok: false,
+      error: { code: 'chat_not_found', message: `chat not found: ${event.chatId}` },
+    });
+    return;
+  }
+  try {
+    const output = deps.watchOutput(event.chatId, event.taskId, event.tail);
+    sender({ type: 'patch.watch_output.response', requestId: event.requestId, ok: true, output });
+  } catch (err) {
+    const message = (err as Error).message;
+    // WatchScheduler.output throws "no such task" for an unknown id.
+    const code = message.includes('no such task') ? 'task_not_found' : 'internal';
+    if (code === 'internal') {
+      logger.warn(
+        { err: message, chatId: event.chatId, taskId: event.taskId },
+        'patch.watch_output.request: watchOutput failed',
+      );
+    }
+    sender({
+      type: 'patch.watch_output.response',
+      requestId: event.requestId,
+      ok: false,
+      error: { code, message },
     });
   }
 }

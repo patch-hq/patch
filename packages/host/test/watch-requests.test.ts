@@ -5,7 +5,7 @@
 // the wire shape (WatchRecord → WatchTaskRow) and the chat_not_found gate
 // every RPC in this family shares.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import pino from 'pino';
 import type { WireEvent } from '@patch/wire';
 import type { WatchRecord } from '../src/watch.js';
@@ -13,6 +13,7 @@ import {
   handleWatchCheckInRequest,
   handleWatchListRequest,
   handleWatchStopRequest,
+  handleWatchOutputRequest,
   type WatchRequestsDeps,
 } from '../src/watchRequests.js';
 
@@ -36,6 +37,7 @@ function deps(overrides: Partial<WatchRequestsDeps> = {}): WatchRequestsDeps {
     listWatch: () => [RUNNING],
     stopWatch: () => true,
     setWatchCheckIn: () => true,
+    watchOutput: () => '',
     ...overrides,
   };
 }
@@ -205,6 +207,41 @@ describe('handleWatchCheckInRequest', () => {
   it('refuses an unknown chat', () => {
     const sent: WireEvent[] = [];
     handleWatchCheckInRequest(request, deps({ hasChat: () => false }), (e) => sent.push(e), silent);
+    expect(sent[0]).toMatchObject({ ok: false, error: { code: 'chat_not_found' } });
+  });
+});
+
+describe('handleWatchOutputRequest', () => {
+  const request = {
+    type: 'patch.watch_output.request' as const,
+    requestId: 'r4',
+    chatId: 'c1',
+    taskId: 't1',
+    tail: 50,
+  };
+
+  it('answers with the tail of the task output', () => {
+    const sent: WireEvent[] = [];
+    const watchOutput = vi.fn(() => 'a\nb');
+    handleWatchOutputRequest(request, deps({ watchOutput }), (e) => sent.push(e), silent);
+    expect(watchOutput).toHaveBeenCalledWith('c1', 't1', 50);
+    expect(sent).toEqual([
+      { type: 'patch.watch_output.response', requestId: 'r4', ok: true, output: 'a\nb' },
+    ]);
+  });
+
+  it('answers task_not_found for an unknown task', () => {
+    const sent: WireEvent[] = [];
+    const watchOutput = (): string => {
+      throw new Error('patch_watch_output: no such task t1');
+    };
+    handleWatchOutputRequest(request, deps({ watchOutput }), (e) => sent.push(e), silent);
+    expect(sent[0]).toMatchObject({ ok: false, error: { code: 'task_not_found' } });
+  });
+
+  it('refuses a chat this host does not have', () => {
+    const sent: WireEvent[] = [];
+    handleWatchOutputRequest(request, deps({ hasChat: () => false }), (e) => sent.push(e), silent);
     expect(sent[0]).toMatchObject({ ok: false, error: { code: 'chat_not_found' } });
   });
 });
