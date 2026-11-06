@@ -2,42 +2,27 @@
 // chat is in the true centre + raised (a raised green button so the affordance is
 // obvious for one-handed use) via a custom tabBarButton (NewChatTabButton)
 // rather than the default icon+label cell that Chats/Jobs/Settings use.
-// Voice is a plain icon+label tab, but its button still wraps the rendered
-// children to carry the hold-to-talk-to-Manager gesture.
+// Files is a plain icon+label tab drawn by React Navigation.
 //
 // Tabs/Tabs.Screen are host nodes in the expo-router stub (no real
 // navigator), so the tabBarIcon/tabBarButton render-prop functions are
 // invoked directly here — that's the only way their bodies run under test.
 
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { renderRN, findAllHost, findHost, byType, actSync } from './testUtils/render';
-
-const { startVoiceNoteSpy, releaseVoiceNoteIfHeldSpy } = vi.hoisted(() => ({
-  startVoiceNoteSpy: vi.fn(),
-  releaseVoiceNoteIfHeldSpy: vi.fn(),
-}));
-vi.mock('../src/lib/voiceNote', () => ({
-  startVoiceNote: startVoiceNoteSpy,
-  releaseVoiceNoteIfHeld: releaseVoiceNoteIfHeldSpy,
-}));
 
 import { routerMock } from './stubs/expo-router';
 import { useVoiceStore } from '../src/stores/voiceStore';
 import TabLayout from '../app/(tabs)/_layout';
 
-beforeEach(() => {
-  startVoiceNoteSpy.mockClear();
-  releaseVoiceNoteIfHeldSpy.mockClear();
-});
-
 describe('TabLayout — screen options', () => {
   // the user's order: New chat is the raised button in the true centre (index 2 of
-  // 5), with Voice as a plain tab to its right.
-  it('renders the five tab screens in order (chats, jobs, new-chat, voice, settings)', () => {
+  // 5), with Files as a plain tab to its right.
+  it('renders the five tab screens in order (chats, jobs, new-chat, files, settings)', () => {
     const r = renderRN(<TabLayout />);
     const screens = findAllHost(r.root, byType('Tabs.Screen'));
-    expect(screens.map((s) => s.props.name)).toEqual(['chats', 'jobs', 'new', 'voice', 'settings']);
+    expect(screens.map((s) => s.props.name)).toEqual(['chats', 'jobs', 'new', 'files', 'settings']);
   });
 
   // Jobs is a bottom tab, not a Settings sub-screen (spec/15 § Navigation
@@ -70,25 +55,26 @@ describe('TabLayout — screen options', () => {
     expect(newChat.props.options.tabBarButton).toBeDefined();
   });
 
-  // Voice is a regular tab: an icon + title React Navigation draws like the
-  // others (its button only adds the hold gesture), sitting right of New chat.
-  it('the voice tab is a regular tab immediately right of new-chat', () => {
+  // Files is a regular tab: an icon + title React Navigation draws like the
+  // others, sitting right of New chat.
+  it('the files tab is a regular tab immediately right of new-chat', () => {
     const r = renderRN(<TabLayout />);
     const screens = findAllHost(r.root, byType('Tabs.Screen'));
     const names = screens.map((s) => s.props.name);
-    expect(names.indexOf('voice')).toBe(names.indexOf('new') + 1);
-    const voice = screens.find((s) => s.props.name === 'voice')!;
-    expect(voice.props.options.title).toBe('Voice');
-    expect(voice.props.options.tabBarIcon).toBeDefined();
-    expect(voice.props.listeners).toBeUndefined();
+    expect(names.indexOf('files')).toBe(names.indexOf('new') + 1);
+    const files = screens.find((s) => s.props.name === 'files')!;
+    expect(files.props.options.title).toBe('Files');
+    expect(files.props.options.tabBarIcon).toBeDefined();
+    expect(files.props.options.tabBarButton).toBeUndefined();
+    expect(files.props.listeners).toBeUndefined();
   });
 
-  it('the voice tab icon renders a Phone glyph, distinct from the composer dictate Mic', () => {
+  it('the files tab icon renders a Folder glyph', () => {
     const r = renderRN(<TabLayout />);
     const screens = findAllHost(r.root, byType('Tabs.Screen'));
-    const voice = screens.find((s) => s.props.name === 'voice')!;
-    const icon = voice.props.options.tabBarIcon({ color: '#111', size: 20 });
-    expect(icon.type.displayName ?? icon.type.name).toBe('Phone');
+    const files = screens.find((s) => s.props.name === 'files')!;
+    const icon = files.props.options.tabBarIcon({ color: '#111', size: 20 });
+    expect(icon.type.displayName ?? icon.type.name).toBe('Folder');
   });
 
   // The New chat tab is an ACTION, not a destination. Letting it focus and
@@ -140,68 +126,6 @@ describe('TabLayout — NewChatTabButton (raised plus)', () => {
     expect(pressable.props.accessibilityLabel).toBe('New chat');
   });
 });
-
-describe('TabLayout — VoiceTabButton (plain tab, hold-to-talk)', () => {
-  function renderVoiceButton(onPress = vi.fn()): ReturnType<typeof renderRN> {
-    const r = renderRN(<TabLayout />);
-    const screens = findAllHost(r.root, byType('Tabs.Screen'));
-    const voice = screens.find((s) => s.props.name === 'voice')!;
-    const VoiceTabButton = voice.props.options.tabBarButton;
-    return renderRN(
-      <VoiceTabButton onPress={onPress}>
-        <></>
-      </VoiceTabButton>,
-    );
-  }
-
-  it('tapping (onPress) forwards to the navigator-supplied onPress (opens the Voice tab)', () => {
-    const onPress = vi.fn();
-    const r = renderVoiceButton(onPress);
-    const pressable = findHost(r.root, byType('Pressable'));
-    actSync(() => {
-      (pressable.props as { onPress: () => void }).onPress();
-    });
-    expect(onPress).toHaveBeenCalledTimes(1);
-  });
-
-  it('long-pressing starts a hold-to-talk voice note targeting the Manager chat', () => {
-    const r = renderVoiceButton();
-    const pressable = findHost(r.root, byType('Pressable'));
-    actSync(() => {
-      (pressable.props as { onLongPress: () => void }).onLongPress();
-    });
-    expect(startVoiceNoteSpy).toHaveBeenCalledWith('thread_manager', 'hold');
-  });
-
-  it('releasing (onPressOut) sends the held note via releaseVoiceNoteIfHeld', () => {
-    const r = renderVoiceButton();
-    const pressable = findHost(r.root, byType('Pressable'));
-    actSync(() => {
-      (pressable.props as { onPressOut: () => void }).onPressOut();
-    });
-    expect(releaseVoiceNoteIfHeldSpy).toHaveBeenCalledWith('thread_manager');
-  });
-
-  it('renders the accessibility label for the hold-to-talk gesture', () => {
-    const r = renderVoiceButton();
-    const pressable = findHost(r.root, byType('Pressable'));
-    expect(pressable.props.accessibilityLabel).toBe('Voice tab — tap-to-talk Manager');
-  });
-
-  it('renders its children (the icon+label React Navigation composed) rather than a hardcoded glyph', () => {
-    const screens = findAllHost(renderRN(<TabLayout />).root, byType('Tabs.Screen'));
-    const voice = screens.find((s) => s.props.name === 'voice')!;
-    const VoiceTabButton = voice.props.options.tabBarButton;
-    const marker = <TestMarker />;
-    const r = renderRN(<VoiceTabButton onPress={vi.fn()}>{marker}</VoiceTabButton>);
-    const pressable = findHost(r.root, byType('Pressable'));
-    expect(pressable.props.children).toBe(marker);
-  });
-});
-
-function TestMarker(): null {
-  return null;
-}
 
 // spec/15 § Voice states — while a call is open, the on-call pill floats just
 // above the tab bar on every tab; with no call there is nothing there.
