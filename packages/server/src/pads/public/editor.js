@@ -573,7 +573,7 @@
       post({ kind: 'move', target: target(d.el), dx: Math.round(d.base.x + dx), dy: Math.round(d.base.y + dy) });
     } else if (d.mode === 'press' || d.mode === 'press-sel') {
       var t = d.el, now = Date.now();
-      if (t && lastTap && lastTap.el === t && now - lastTap.t < 380) { lastTap = null; editText(t); return; }
+      if (t && lastTap && lastTap.el === t && now - lastTap.t < 380) { lastTap = null; openAt(t, local(e)); return; }
       lastTap = { el: t, t: now };
       sel = t || null;
       draw();
@@ -703,7 +703,7 @@
       if (!moved) {
         // A tap on a handle (small elements are mostly handle) still counts toward a double-tap to edit.
         var now = Date.now();
-        if (lastTap && lastTap.el === d.el && now - lastTap.t < 380) { lastTap = null; editText(d.el); return; }
+        if (lastTap && lastTap.el === d.el && now - lastTap.t < 380) { lastTap = null; openAt(d.el, null); return; }
         lastTap = { el: d.el, t: now };
         draw();
         return;
@@ -716,6 +716,22 @@
   }
 
   // ---------- text ----------
+  // Only an element with text of its own is editable. A container would become
+  // one big editor that selects everything inside it.
+  function ownsText(node) {
+    return Array.prototype.some.call(node.childNodes, function (c) { return c.nodeType === 3 && c.nodeValue.trim(); });
+  }
+  // Double-click: edit text the element owns; on a group, step in to the
+  // element under the pointer instead (and edit it if it owns text).
+  function openAt(node, pt) {
+    if (ownsText(node)) { editText(node); return; }
+    var inner = pt ? hit(pt) : null;
+    if (inner && inner !== node && node.contains(inner)) {
+      sel = inner;
+      if (ownsText(inner)) { editText(inner); return; }
+    } else sel = node;
+    draw();
+  }
   function editText(node) {
     if (!node) return;
     sel = node;
@@ -856,7 +872,7 @@
     else if (k === 'delete' || k === 'backspace') deleteSelected();
     else if (k.indexOf('arrow') === 0) nudge(k, e.shiftKey ? 10 : 1);
     else if (k === 'enter' && e.shiftKey) selectRelative('parent');
-    else if (k === 'enter') editText(sel);
+    else if (k === 'enter' && ownsText(sel)) editText(sel);
     else if (k === 'tab') selectRelative(e.shiftKey ? 'prev' : 'next');
     else return;
     e.preventDefault();
