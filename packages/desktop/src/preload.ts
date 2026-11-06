@@ -298,6 +298,10 @@ contextBridge.exposeInMainWorld('patch', {
   installUpdate(): void {
     ipcRenderer.send('patch:updater:install');
   },
+  // What the update banner said (or that it cleared), for the updater log.
+  logUpdateBanner(shown: boolean, text: string): void {
+    ipcRenderer.send('patch:updater:log-banner', { shown, text });
+  },
   onUpdaterState(cb: (state: unknown) => void): () => void {
     const handler = (_: unknown, state: unknown): void => cb(state);
     ipcRenderer.on('patch:updater-state', handler);

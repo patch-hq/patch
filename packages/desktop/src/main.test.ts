@@ -836,8 +836,19 @@ test('every install path goes through quitAndInstallNow, not a bare quitAndInsta
 
 test('the install IPC re-checks for the newest build before installing', () => {
   const src = readFileSync(join(here, 'main.ts'), 'utf8');
-  assert.match(src, /ipcMain\.on\('patch:updater:install', \(\) => \{\s*void installLatest\(\);/);
+  assert.match(
+    src,
+    /ipcMain\.on\('patch:updater:install', \(\) => \{\s*logUpdate\('install-requested'[^\n]*\n\s*void installLatest\(\);/,
+  );
   assert.match(src, /createLatestInstaller\(/);
+});
+
+test('the updater log records launch, install press and banner reports', () => {
+  const src = readFileSync(join(here, 'main.ts'), 'utf8');
+  assert.match(src, /logUpdate\(\s*'launch'/);
+  assert.match(src, /logUpdate\('install-requested'/);
+  assert.match(src, /ipcMain\.on\('patch:updater:log-banner'/);
+  assert.match(readFileSync(join(here, 'preload.ts'), 'utf8'), /logUpdateBanner\(/);
 });
 
 test('preload.ts exposes checkForUpdateNow and installUpdate to the SPA', () => {
@@ -865,7 +876,7 @@ test('a finished download does NOT install itself', () => {
   );
   assert.match(
     src,
-    /ipcMain\.on\('patch:updater:install', \(\) => \{\s*void installLatest\(\);/,
+    /ipcMain\.on\('patch:updater:install', \(\) => \{\s*logUpdate\('install-requested'[^\n]*\n\s*void installLatest\(\);/,
     'the only install path is the one the user presses',
   );
 });

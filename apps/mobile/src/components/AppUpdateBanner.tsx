@@ -2,9 +2,10 @@
 // update check can deliver — one on another native runtime — and it installs in
 // place: tap, it downloads, Android's installer opens.
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Pressable, Text } from 'react-native';
 import { installApk, useApkInstallStore } from '../lib/apkInstall';
+import { logPromptChange } from '../lib/updaterLog';
 import { usePublishedApkStore } from '../lib/publishedApk';
 import { radii, space, typography, useTheme } from '../lib/theme';
 
@@ -12,14 +13,19 @@ export function AppUpdateBanner(): React.ReactElement | null {
   const colors = useTheme();
   const apk = usePublishedApkStore((s) => s.apk);
   const install = useApkInstallStore((s) => s.state);
-  if (!apk?.needsInstall) return null;
+  const needsInstall = !!apk?.needsInstall;
   const busy = install.phase === 'downloading' || install.phase === 'installing';
-  const text =
-    install.phase === 'downloading'
+  const text = !apk
+    ? null
+    : install.phase === 'downloading'
       ? `Downloading Patch ${apk.version}${install.fraction !== null ? ` · ${Math.round(install.fraction * 100)}%` : ''}`
       : install.phase === 'installing'
         ? `Installing Patch ${apk.version}`
         : `Install Patch ${apk.version}`;
+  // The log records the wording, not every download-percent tick.
+  const shown = needsInstall && text !== null ? text.replace(/ · \d+%$/, '') : null;
+  useEffect(() => logPromptChange('apk', shown), [shown]);
+  if (!apk || !needsInstall || text === null) return null;
   return (
     <Pressable
       testID="app-update-banner"
