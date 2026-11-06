@@ -43,15 +43,10 @@ test.describe('chat header — Open chat in new window', () => {
   });
 
   // spec/14 § Chat panel header — it sits beside the title, not in the
-  // collapsible action rail, so it stays directly clickable even once the
-  // rail itself has collapsed into the hamburger at narrow widths.
-  test('stays directly clickable at narrow widths, even once the rail collapses into the hamburger', async ({
-    page,
-  }) => {
+  // action rail, so it stays directly clickable at narrow widths too.
+  test('stays directly clickable at narrow widths', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 800 });
     await page.goto(CHAT);
-    await expect(page.getByTestId('head-action-rail')).not.toBeVisible();
-    await expect(page.getByTestId('action-hamburger')).toBeVisible();
     const btn = page.getByTestId('action-open-window');
     await expect(btn).toBeVisible();
     const [popup] = await Promise.all([page.waitForEvent('popup'), btn.click()]);

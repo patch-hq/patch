@@ -12,15 +12,7 @@
 // (spec/14 § Sidebar §8) — starting a chat is the most-reached-for action.
 
 import type { JSX, MouseEvent as ReactMouseEvent } from 'react';
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Pin,

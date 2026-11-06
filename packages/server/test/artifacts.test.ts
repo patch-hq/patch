@@ -103,6 +103,9 @@ describe('artifacts', () => {
       expect(unshimmed(get.body)).toBe(PAGE);
       // Plain links would navigate the frame itself; the shim routes them to a new tab.
       expect(get.body).toContain("window.open(a.href,'_blank','noopener')");
+      // The artifact tab's back/forward buttons talk to the page through the shim.
+      expect(get.body).toContain("'patch:artifact-nav'");
+      expect(get.body).toContain("'patch:artifact-go'");
     } finally {
       await built.app.close();
     }
