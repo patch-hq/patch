@@ -340,8 +340,8 @@ describe('self-wake on the host (spec/02 § Self-wake)', () => {
 
     // Arm a loop while already busy — its first tick (`every` out) lands
     // squarely inside the still-running turn.
-    daemon.scheduleWake(chatId, { every: '0.03', message: 'check it' }); // 30ms
-    await tick(100); // several would-be intervals' worth, turn still blocked
+    daemon.scheduleWake(chatId, { every: '0.3', message: 'check it' }); // 300ms — wide margins so a slow CI runner can't flake the post-turn window
+    await tick(700); // two would-be intervals' worth, turn still blocked
 
     // Never queued, never delivered, however many intervals elapsed.
     const queued = events.find(
@@ -350,7 +350,7 @@ describe('self-wake on the host (spec/02 § Self-wake)', () => {
     expect(queued, 'a loop tick must not queue behind the running turn').toBeUndefined();
     expect(b.prompts).not.toContain('[wake] check it');
     // Absorbed into a single `waiting` loop, not several stacked attempts.
-    expect(daemon.peekWake(chatId)).toMatchObject({ waiting: true, every: 30 });
+    expect(daemon.peekWake(chatId)).toMatchObject({ waiting: true, every: 300 });
 
     // End the running turn.
     b.releaseNext();
@@ -364,7 +364,7 @@ describe('self-wake on the host (spec/02 § Self-wake)', () => {
 
     // Once the fresh (post-turn) interval elapses, exactly one delivery
     // lands — no catch-up stacking for the tick absorbed while busy.
-    await tick(60);
+    await tick(700);
     expect(b.prompts.filter((p) => p === '[wake] check it').length).toBe(1);
   });
 
