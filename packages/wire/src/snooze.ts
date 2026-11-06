@@ -52,6 +52,24 @@ export function isSnoozeUntilComplete(until: number | null | undefined): boolean
   return until === SNOOZE_UNTIL_COMPLETE;
 }
 
+/**
+ * The stops of the Snooze sheet's duration slider (spec/04 § Snooze), in hours,
+ * shared so web and mobile offer the same steps. The slider moves between these,
+ * never between arbitrary values.
+ */
+export const SNOOZE_SLIDER_HOURS: readonly number[] = [1, 2, 3, 4, 6, 8, 12, 24, 48, 72, 168];
+
+/** `3` → "3 hours", `1` → "1 hour", `24` → "1 day", `168` → "1 week". */
+export function snoozeSliderLabel(hours: number): string {
+  const [n, unit] =
+    hours % 168 === 0
+      ? [hours / 168, 'week']
+      : hours % 24 === 0
+        ? [hours / 24, 'day']
+        : [hours, 'hour'];
+  return `${n} ${unit}${n === 1 ? '' : 's'}`;
+}
+
 /** How many records a chat keeps. */
 export const MAX_SNOOZE_RECORDS = 20;
 

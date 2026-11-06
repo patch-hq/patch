@@ -8,6 +8,8 @@ import {
   SNOOZE_UNTIL_COMPLETE,
   formatWakeAt,
   snoozeDividerText,
+  SNOOZE_SLIDER_HOURS,
+  snoozeSliderLabel,
   type SnoozeRecord,
 } from '../src/index.js';
 
@@ -108,5 +110,24 @@ describe('until complete', () => {
     expect(formatWakeAt(SNOOZE_UNTIL_COMPLETE)).toBe('when done');
     const open = rec({ until: SNOOZE_UNTIL_COMPLETE, endedAt: null, startedAt: 1_700_000_000_000 });
     expect(snoozeDividerText(open)).toMatch(/^Snoozed \d\d:\d\d – until complete$/);
+  });
+});
+
+describe('snooze slider stops', () => {
+  it('are ascending and labelled in hours, days and weeks', () => {
+    expect([...SNOOZE_SLIDER_HOURS]).toEqual([...SNOOZE_SLIDER_HOURS].sort((a, b) => a - b));
+    expect(SNOOZE_SLIDER_HOURS.map(snoozeSliderLabel)).toEqual([
+      '1 hour',
+      '2 hours',
+      '3 hours',
+      '4 hours',
+      '6 hours',
+      '8 hours',
+      '12 hours',
+      '1 day',
+      '2 days',
+      '3 days',
+      '1 week',
+    ]);
   });
 });
