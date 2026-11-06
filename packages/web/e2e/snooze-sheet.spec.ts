@@ -120,6 +120,35 @@ test.describe('snooze sheet', () => {
     expect(box.y + box.height).toBeLessThanOrEqual(view.height);
   });
 
+  test('the duration slider snoozes for the chosen number of hours', async ({ page }) => {
+    const calls = await stubSnooze(page);
+    await seed(page, THREE());
+    await page.getByTestId('action-more').click();
+    await page.getByTestId('action-snooze').click();
+    const slider = page.getByTestId('snooze-sheet-slider');
+    await expect(page.getByTestId('snooze-sheet-slider-value')).toHaveText('');
+    await expect(page.getByTestId('snooze-sheet-confirm')).toBeDisabled();
+    // A real keyboard drive: focus, then step right from 3 hours to 4 hours.
+    await slider.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(page.getByTestId('snooze-sheet-slider-value')).toHaveText('4 hours');
+    await expect(page.getByTestId('snooze-sheet-confirm')).toContainText('Snooze until');
+    await page.screenshot({ path: '/tmp/snooze-slider.png' });
+    // Choosing a preset deselects the slider.
+    await page.getByTestId('snooze-sheet-preset-1-day').click();
+    await expect(page.getByTestId('snooze-sheet-slider-value')).toHaveText('');
+    await page.getByTestId('snooze-sheet-preset-custom').click();
+    await slider.focus();
+    await page.keyboard.press('ArrowLeft');
+    await expect(page.getByTestId('snooze-sheet-slider-value')).toHaveText('3 hours');
+    const before = Date.now();
+    await page.getByTestId('snooze-sheet-confirm').click();
+    await expect.poll(() => calls.length).toBe(1);
+    const until = calls[0]!.body['snoozedUntil'] as number;
+    expect(until).toBeGreaterThanOrEqual(before + 3 * HOUR);
+    expect(until).toBeLessThan(before + 3 * HOUR + 60_000);
+  });
+
   test('Until complete is offered for a running chat and sends the sentinel', async ({ page }) => {
     const calls = await stubSnooze(page);
     await seed(page, THREE());

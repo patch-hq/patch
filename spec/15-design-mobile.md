@@ -259,7 +259,7 @@ A voice note draws its overlay over the bottom of the screen; a call docks its b
 
 ### Snooze sheet
 
-Snoozing a chat (the row sheet's or the chat ⋯ menu's Snooze chat) or a project (the project header's clock) opens a bottom sheet with the web sheet's sections (`14-design-web.md` § Snooze sheet; `04-chats-and-folders.md` § Snooze): title and name (or "Snooze <project>" and "<N> chats"), the presets in a two-column grid each with its wake time, `Custom…` revealing a field typed as `YYYY-MM-DD HH:mm`, the "Run in background" box when a chat in the set is running, the rule line, `Cancel`, and the primary button ("Snooze" disabled until a preset is chosen, then "Snooze until <wake>" / "Snooze <N> until <wake>"). The sheet pads past the system navigation bar's inset once. Confirming shows the dark toast with `Undo`.
+Snoozing a chat (the row sheet's or the chat ⋯ menu's Snooze chat) or a project (the project header's clock) opens a bottom sheet with the web sheet's sections (`14-design-web.md` § Snooze sheet; `04-chats-and-folders.md` § Snooze): title and name (or "Snooze <project>" and "<N> chats"), the presets in a two-column grid each with its wake time, a duration slider under the grid (a track of stops over `SNOOZE_SLIDER_HOURS`, drag or tap to choose, the span — "3 hours" — beside it; pure JS so it ships OTA), `Custom…` revealing a field typed as `YYYY-MM-DD HH:mm`, the "Run in background" box when a chat in the set is running, the rule line, `Cancel`, and the primary button ("Snooze" disabled until a preset is chosen, then "Snooze until <wake>" / "Snooze <N> until <wake>"). The sheet pads past the system navigation bar's inset once. Confirming shows the dark toast with `Undo`.
 
 ## Side threads screen
 

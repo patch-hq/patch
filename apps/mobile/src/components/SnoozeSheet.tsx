@@ -13,7 +13,7 @@ import { AlarmClock, Settings } from 'lucide-react-native';
 import { useRouter, type Href } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { create } from 'zustand';
-import { formatElapsed, formatWakeAt } from '@patch/wire';
+import { formatElapsed, formatWakeAt, SNOOZE_SLIDER_HOURS, snoozeSliderLabel } from '@patch/wire';
 import type { ChatRow } from '../stores/types';
 import { useChatStore } from '../stores/chatStore';
 import { useUiStore } from '../stores/uiStore';
@@ -51,14 +51,25 @@ export function showSnoozeSheet(target: SnoozeSheetTarget): void {
 }
 
 const CUSTOM = 'custom';
+const SLIDER = 'slider';
+const SLIDER_DEFAULT = SNOOZE_SLIDER_HOURS.indexOf(3);
+
+/** The stop a touch at `x` of a track `width` wide lands on. */
+export function sliderIndexAt(x: number, width: number): number {
+  const last = SNOOZE_SLIDER_HOURS.length - 1;
+  if (width <= 0) return 0;
+  return Math.min(last, Math.max(0, Math.round((x / width) * last)));
+}
 
 /** The wake time for the chosen option, or null while there is none to show. */
 function wakeFor(
   selected: string | null,
   customValue: string,
   all: readonly SnoozePreset[],
+  sliderIndex: number,
 ): number | null {
   if (selected === null) return null;
+  if (selected === SLIDER) return Date.now() + SNOOZE_SLIDER_HOURS[sliderIndex]! * 3_600_000;
   if (selected === CUSTOM) {
     try {
       return parseCustomSnooze(customValue);
@@ -91,6 +102,8 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): React.ReactElemen
   });
   const [selected, setSelected] = React.useState<string | null>(null);
   const [customValue, setCustomValue] = React.useState('');
+  const [sliderIndex, setSliderIndex] = React.useState(SLIDER_DEFAULT);
+  const [trackWidth, setTrackWidth] = React.useState(0);
 
   const isProject = target.kind === 'project';
   const targets: ChatRow[] = isProject
@@ -108,7 +121,7 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): React.ReactElemen
     ...distinctPresets(allPresets),
     ...(canUntilComplete ? [UNTIL_COMPLETE_PRESET] : []),
   ];
-  const wake = wakeFor(selected, customValue, allPresets);
+  const wake = wakeFor(selected, customValue, allPresets, sliderIndex);
   const wakeText =
     wake === null ? '' : selected === UNTIL_COMPLETE_PRESET.id ? 'complete' : formatWakeAt(wake);
   const canConfirm = selected !== null && targets.length > 0;
@@ -125,7 +138,7 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): React.ReactElemen
         return;
       }
     } else {
-      at = wakeFor(selected, '', allPresets)!;
+      at = wakeFor(selected, '', allPresets, sliderIndex)!;
     }
     close();
     applySnoozeSet({ targets, until: at, name, isProject });
@@ -239,6 +252,60 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): React.ReactElemen
                   </Pressable>
                 );
               })}
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+              <Text style={{ ...typography.meta, color: colors.ink3 }}>Or snooze for</Text>
+              <View
+                testID="snooze-sheet-slider"
+                accessibilityRole="adjustable"
+                accessibilityLabel="Snooze for"
+                accessibilityValue={{ text: snoozeSliderLabel(SNOOZE_SLIDER_HOURS[sliderIndex]!) }}
+                onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
+                onStartShouldSetResponder={() => true}
+                onMoveShouldSetResponder={() => true}
+                onResponderTerminationRequest={() => false}
+                onResponderGrant={(e) => {
+                  setSelected(SLIDER);
+                  setSliderIndex(sliderIndexAt(e.nativeEvent.locationX, trackWidth));
+                }}
+                onResponderMove={(e) =>
+                  setSliderIndex(sliderIndexAt(e.nativeEvent.locationX, trackWidth))
+                }
+                style={{ flex: 1, height: 40, justifyContent: 'center' }}
+              >
+                <View
+                  pointerEvents="none"
+                  style={{ height: 2, borderRadius: 1, backgroundColor: colors.divider }}
+                />
+                {SNOOZE_SLIDER_HOURS.map((h, i) => (
+                  <View
+                    key={h}
+                    pointerEvents="none"
+                    style={{
+                      position: 'absolute',
+                      left: `${(i / (SNOOZE_SLIDER_HOURS.length - 1)) * 100}%`,
+                      marginLeft: i === sliderIndex ? -10 : -3,
+                      width: i === sliderIndex ? 20 : 6,
+                      height: i === sliderIndex ? 20 : 6,
+                      borderRadius: 10,
+                      backgroundColor:
+                        i === sliderIndex && selected === SLIDER ? colors.ink : colors.ink3,
+                      opacity: i === sliderIndex || selected !== SLIDER ? 1 : 0.4,
+                    }}
+                  />
+                ))}
+              </View>
+              <Text
+                testID="snooze-sheet-slider-value"
+                style={{
+                  ...typography.secondary,
+                  color: colors.ink,
+                  minWidth: 64,
+                  textAlign: 'right',
+                }}
+              >
+                {selected === SLIDER ? snoozeSliderLabel(SNOOZE_SLIDER_HOURS[sliderIndex]!) : ''}
+              </Text>
             </View>
             {selected === CUSTOM ? (
               <TextInput

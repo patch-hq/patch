@@ -18,7 +18,12 @@ import type { SnoozeRecord } from '@patch/wire';
 import { useChatStore } from '../src/stores/chatStore';
 import { useUiStore } from '../src/stores/uiStore';
 import { usePresenceStore } from '../src/stores/presenceStore';
-import { SnoozeSheet, useSnoozeSheetStore, showSnoozeSheet } from '../src/components/SnoozeSheet';
+import {
+  SnoozeSheet,
+  useSnoozeSheetStore,
+  showSnoozeSheet,
+  sliderIndexAt,
+} from '../src/components/SnoozeSheet';
 import { SnoozeDivider } from '../src/components/SnoozeDivider';
 import { ErrorToasts } from '../src/components/ErrorToasts';
 import ChatsScreen from '../app/(tabs)/chats';
@@ -150,6 +155,46 @@ describe('the Snooze sheet', () => {
       new Date(2026, 9, 16, 7, 0, 0, 0).getTime(),
       expect.any(String),
     );
+  });
+
+  it('the duration slider: touching it selects it, dragging moves the stop, confirm sends now + span', () => {
+    seedThree();
+    const r = renderRN(<SnoozeSheet />);
+    actSync(() => showSnoozeSheet({ kind: 'chat', chatId: 'c' }));
+    const track = (): ReturnType<typeof findHost> =>
+      findHost(r.root, byTestId('snooze-sheet-slider'));
+    expect(textOf(findHost(r.root, byTestId('snooze-sheet-slider-value')))).toBe('');
+    actSync(() => track().props['onLayout']({ nativeEvent: { layout: { width: 100 } } }));
+    // 11 stops over 100px: x=20 is stop 2 (3 hours).
+    actSync(() => track().props['onResponderGrant']({ nativeEvent: { locationX: 20 } }));
+    expect(textOf(findHost(r.root, byTestId('snooze-sheet-slider-value')))).toBe('3 hours');
+    expect(hasText(findHost(r.root, byTestId('snooze-sheet-confirm')), 'Snooze until')).toBe(true);
+    actSync(() => track().props['onResponderMove']({ nativeEvent: { locationX: 100 } }));
+    expect(textOf(findHost(r.root, byTestId('snooze-sheet-slider-value')))).toBe('1 week');
+    actSync(() => track().props['onResponderMove']({ nativeEvent: { locationX: 20 } }));
+    press(r, 'snooze-sheet-confirm');
+    expect(snoozeChatSpy).toHaveBeenCalledWith('c', NOW + 3 * 3_600_000, expect.any(String));
+  });
+
+  it('a preset chosen after the slider deselects it', () => {
+    seedThree();
+    const r = renderRN(<SnoozeSheet />);
+    actSync(() => showSnoozeSheet({ kind: 'chat', chatId: 'c' }));
+    actSync(() =>
+      findHost(r.root, byTestId('snooze-sheet-slider')).props['onResponderGrant']({
+        nativeEvent: { locationX: 0 },
+      }),
+    );
+    press(r, 'snooze-sheet-preset-1-day');
+    expect(textOf(findHost(r.root, byTestId('snooze-sheet-slider-value')))).toBe('');
+    press(r, 'snooze-sheet-confirm');
+    expect(snoozeChatSpy).toHaveBeenCalledWith('c', NOW + 24 * 3_600_000, expect.any(String));
+  });
+
+  it('sliderIndexAt clamps to the first and last stop', () => {
+    expect(sliderIndexAt(-30, 100)).toBe(0);
+    expect(sliderIndexAt(500, 100)).toBe(10);
+    expect(sliderIndexAt(5, 0)).toBe(0);
   });
 
   it('the cog closes the sheet and opens Settings → Chats', () => {

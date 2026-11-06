@@ -7,6 +7,8 @@
 
 import { DEFAULT_SHARED_SETTINGS, SNOOZE_UNTIL_COMPLETE, formatWakeAt } from '@patch/wire';
 
+export { SNOOZE_SLIDER_HOURS, snoozeSliderLabel } from '@patch/wire';
+
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -76,6 +78,11 @@ export function snoozePresets({ morningHour, eveningHour }: SnoozeHours): Snooze
       resolve: () => resolveNextMondayAt(morningHour),
     },
   ];
+}
+
+/** The wake time for a slider stop: now plus `hours`, resolved at the moment of choosing. */
+export function resolveSliderHours(hours: number): number {
+  return Date.now() + hours * HOUR;
 }
 
 /** The presets at the default hours (spec/14 § Chat panel header). */
