@@ -1336,7 +1336,7 @@ const longCellTableReply: ChatEventEntry[] = [
     content: [
       '| Step | What it does | Where it runs | Source |',
       '| --- | --- | --- | --- |',
-      '| Poll the carrier | Checks every tracking number against the carrier page and records each status change | Hetzner cron, every fifteen minutes | https://tracking.example.com/parcels/status/abcdef0123456789abcdef0123456789 |',
+      '| Poll the carrier | Checks every tracking number against the carrier page and records each status change | Server cron, every fifteen minutes | https://tracking.example.com/parcels/status/abcdef0123456789abcdef0123456789 |',
       '| Notify | Sends a push to the phone when the status changes to out for delivery | FCM from the server | https://notifications.example.com/v1/projects/delivery-monitor/messages:send |',
     ].join('\n'),
     at: 2,
