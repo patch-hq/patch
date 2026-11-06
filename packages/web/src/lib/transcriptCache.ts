@@ -159,6 +159,14 @@ export async function saveEvents(chatId: string, events: unknown[]): Promise<voi
     const db = await openDb();
     if (!db) return;
     const tx = db.transaction([EVENTS, CHATS], 'readwrite');
+    // Resolve only once the transaction has COMMITTED: a reload straight after
+    // the last request settles can abort an uncommitted write, and the cache
+    // would come back without the events the caller was told were saved.
+    const committed = new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
     const store = tx.objectStore(EVENTS);
     for (const { event, seq } of keepable) store.put({ chatId, seq, event });
     const chats = tx.objectStore(CHATS);
@@ -168,6 +176,7 @@ export async function saveEvents(chatId: string, events: unknown[]): Promise<voi
       branchId: existing?.branchId ?? null,
       openedAt: Date.now(),
     } satisfies CachedChatMeta);
+    await committed;
   } catch (err) {
     console.warn('[patch] transcript cache write failed:', (err as Error).message);
   }
