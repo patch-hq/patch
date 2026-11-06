@@ -3519,7 +3519,16 @@ export class Daemon {
           { chatId },
           'resume: a durable turn on disk belongs to no owed turn; ending it',
         );
-        if (durable) retireTurn(turnDirFor(durable, chatId));
+        if (!durable) continue;
+        // One unreadable folder must not stop the rest being retired.
+        try {
+          retireTurn(turnDirFor(durable, chatId));
+        } catch (err) {
+          this.opts.logger.error(
+            { chatId, dir: turnDirFor(durable, chatId), err },
+            'resume: could not retire a leftover durable turn (unreadable turn files); it is left on disk',
+          );
+        }
       }
     }
   }
@@ -3653,7 +3662,18 @@ export class Daemon {
         !headAlreadySettled &&
         waitingHead !== 'retry'
       ) {
-        const disk = inspectTurnDir(turnDirFor(turnsConfig, m.chatId));
+        let disk: ReturnType<typeof inspectTurnDir>;
+        try {
+          disk = inspectTurnDir(turnDirFor(turnsConfig, m.chatId));
+        } catch (err) {
+          // A corrupt turn file: this chat's turn is treated as cut off, and the
+          // folder stays in `unclaimed` so it still gets a retire attempt.
+          this.opts.logger.error(
+            { chatId: m.chatId, dir: turnDirFor(turnsConfig, m.chatId), err },
+            'resume: the durable turn folder is unreadable; treating the turn as cut off',
+          );
+          disk = undefined;
+        }
         const head = pending[0];
         if (disk && disk.state !== 'lost' && disk.localId === head?.localId) {
           unclaimed.delete(m.chatId);
