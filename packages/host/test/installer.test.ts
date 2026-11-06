@@ -225,17 +225,19 @@ describe('the service unit', () => {
   it('systemd: credentials go in a 0600 EnvironmentFile, never inline in the unit', () => {
     const unit = systemdUnit({
       ...def,
-      secretEnv: { PATCH_INTERNAL_TOKEN: 'tok-xyz', GROQ_API_KEY: 'gsk_abc' },
+      secretEnv: { PATCH_INTERNAL_TOKEN: 'tok-xyz', CLAUDE_CODE_OAUTH_TOKEN: 'sk_abc' },
     });
     expect(unit).toContain('EnvironmentFile=/home/u/.patch/daemon-secrets.env');
     expect(unit).not.toContain('tok-xyz');
-    expect(unit).not.toContain('gsk_abc');
+    expect(unit).not.toContain('sk_abc');
     expect(systemdSecretsFile({ A: 'a"b\\c' })).toBe('A="a\\"b\\\\c"\n');
     expect(systemdUnit(def)).not.toContain('EnvironmentFile');
   });
 
   it('launchd: credentials still reach the plist (no EnvironmentFile there)', () => {
-    expect(launchdPlist({ ...def, secretEnv: { GROQ_API_KEY: 'gsk_abc' } })).toContain('gsk_abc');
+    expect(launchdPlist({ ...def, secretEnv: { CLAUDE_CODE_OAUTH_TOKEN: 'sk_abc' } })).toContain(
+      'sk_abc',
+    );
   });
 
   it('launchd: start-at-boot, always-restart, and NO working directory', () => {
@@ -655,11 +657,11 @@ describe('what the install puts on the host', () => {
     const first = makeCtx({
       home,
       serviceOps: ops,
-      env: { GROQ_API_KEY: 'gk', WHISPER_BACKEND: 'groq' },
+      env: { PARAKEET_MODEL_DIR: '/models/parakeet', WHISPER_BACKEND: 'parakeet' },
       argv: ['--non-interactive', '--server', 'http://s', '--internal-token', 't'],
     });
     await runInstaller(first);
-    expect(captured['GROQ_API_KEY']).toBe('gk');
+    expect(captured['WHISPER_BACKEND']).toBe('parakeet');
     expect(captured['VAD_BACKEND']).toBe('silero');
     expect(captured['VAD_MODEL_PATH']).toBe(
       join(home, '.patch', 'versions', '9.9.9', 'silero_vad.onnx'),
@@ -670,9 +672,22 @@ describe('what the install puts on the host', () => {
     captured = {};
     const second = makeCtx({ home, serviceOps: ops, argv: ['--non-interactive'] });
     await runInstaller(second);
-    expect(captured['GROQ_API_KEY']).toBe('gk');
+    expect(captured['PARAKEET_MODEL_DIR']).toBe('/models/parakeet');
     expect(captured['PATCH_SERVER_URL']).toBe('http://s');
     expect(captured['PATCH_INTERNAL_TOKEN']).toBe('t');
+
+    // A machine installed when Groq existed loses its Groq settings on a re-run,
+    // rather than carrying the key into the unit in the clear.
+    const stored = readMachineSettings(join(home, '.patch'));
+    writeMachineSettings(join(home, '.patch'), {
+      ...stored,
+      env: { ...stored.env, WHISPER_BACKEND: 'groq', GROQ_API_KEY: 'gsk_old' },
+    });
+    captured = {};
+    await runInstaller(makeCtx({ home, serviceOps: ops, argv: ['--non-interactive'] }));
+    expect(captured['GROQ_API_KEY']).toBeUndefined();
+    expect(captured['WHISPER_BACKEND']).toBeUndefined();
+    expect(captured['PARAKEET_MODEL_DIR']).toBe('/models/parakeet');
   });
 });
 
@@ -705,9 +720,14 @@ describe('installer plumbing', () => {
   });
 
   it('passes only the documented host settings through', () => {
-    expect(passThroughEnv({ GROQ_API_KEY: 'g', SOMETHING_ELSE: 'x', TZ: '' })).toEqual({
-      GROQ_API_KEY: 'g',
-    });
+    expect(
+      passThroughEnv({
+        WHISPER_BACKEND: 'parakeet',
+        GROQ_API_KEY: 'g',
+        SOMETHING_ELSE: 'x',
+        TZ: '',
+      }),
+    ).toEqual({ WHISPER_BACKEND: 'parakeet' });
   });
 
   it('stores host settings 0600 under the user’s own patch home', () => {

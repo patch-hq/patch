@@ -37,7 +37,6 @@ const KEYS = {
   providerKeys: [
     { id: 'gemini' as const, set: true, last4: 'WXYZ' },
     { id: 'openai' as const, set: false },
-    { id: 'groq' as const, set: false },
   ],
 };
 
@@ -97,24 +96,24 @@ describe('Settings → Providers → Provider keys', () => {
     loadShared({ secrets: KEYS });
     reportHost('host-a', {
       hostName: 'hetzner',
-      providerKeys: [{ id: 'groq', source: 'env', last4: '1234', envSet: true }],
+      providerKeys: [{ id: 'openai', source: 'env', last4: '1234', envSet: true }],
     });
     usePresenceStore.getState().setHostOnline('host-a', true);
     const adopted = sharedState({
       version: 2,
       secrets: {
-        providerKeys: [...KEYS.providerKeys.slice(0, 2), { id: 'groq', set: true, last4: '1234' }],
+        providerKeys: [KEYS.providerKeys[0]!, { id: 'openai', set: true, last4: '1234' }],
       },
     });
     const adopt = vi.spyOn(api, 'adoptProviderKey').mockResolvedValue(adopted);
     renderSection();
-    expect(screen.getByTestId('provider-key-groq-status')).toHaveTextContent(
+    expect(screen.getByTestId('provider-key-openai-status')).toHaveTextContent(
       'From the environment on hetzner',
     );
-    fireEvent.click(screen.getByTestId('provider-key-groq-adopt'));
-    await waitFor(() => expect(adopt).toHaveBeenCalledWith('groq', 'host-a'));
+    fireEvent.click(screen.getByTestId('provider-key-openai-adopt'));
+    await waitFor(() => expect(adopt).toHaveBeenCalledWith('openai', 'host-a'));
     await waitFor(() =>
-      expect(screen.getByTestId('provider-key-groq-status')).toHaveTextContent('Set · ends 1234'),
+      expect(screen.getByTestId('provider-key-openai-status')).toHaveTextContent('Set · ends 1234'),
     );
   });
 
@@ -123,11 +122,7 @@ describe('Settings → Providers → Provider keys', () => {
     const next = sharedState({
       version: 2,
       secrets: {
-        providerKeys: [
-          KEYS.providerKeys[0]!,
-          { id: 'openai', set: true, last4: '0000' },
-          KEYS.providerKeys[2]!,
-        ],
+        providerKeys: [KEYS.providerKeys[0]!, { id: 'openai', set: true, last4: '0000' }],
       },
     });
     const set = vi.spyOn(api, 'setProviderKey').mockResolvedValue(next);

@@ -54,7 +54,7 @@ We don't let a backend's storage decide what a chat remembers. Patch keeps each 
 - We don't wrap or transform the agent's prompts.
 - We don't layer a second permission system on top of the agent's. A human editor save is never refused on the grounds that the agent is mid-turn either — the two writers are kept apart by writing atomically, not by locking one of them out.
 - We don't summarise, abridge, or rewrite chat content. `patch_peek` returns raw messages.
-- We don't hold the agent's model API keys. The backend holds its own credentials; we inherit. (The keys the host itself calls providers with — hosted voice, Groq Whisper — are patch's own configuration, set once in Settings and shared by every host: `02-host.md` § Provider keys.)
+- We don't hold the agent's model API keys. The backend holds its own credentials; we inherit. (The keys the host itself calls providers with — hosted voice, dictation — are patch's own configuration, set once in Settings and shared by every host: `02-host.md` § Provider keys.)
 - We don't compete with the agent on UX. Same prompt, same rendering, same flags. Wire-level pass-through.
 
 If the agent adopts a feature, the corresponding patch feature is removed.

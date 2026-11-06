@@ -63,7 +63,7 @@ export interface DeviceControlDeps {
   /**
    * Max concurrent device voice sessions (spec/07 §Concurrency on the host).
    * Matches the whisper concurrency cap (config.audio.maxConcurrentSessions:
-   * 3 for local-whisper, 4 for Groq). Devices run in parallel up to this cap;
+   * 3 on this machine's CPU, 4 on a hosted engine). Devices run in parallel up to this cap;
    * events beyond it queue.
    */
   maxConcurrentSessions: number;

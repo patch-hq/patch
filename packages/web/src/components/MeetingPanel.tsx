@@ -1,6 +1,6 @@
 // Meeting mode: the meeting sits across the top of the chat, full width, with a
 // bar under it that drags to give the meeting or the chat more room. One feed
-// carries the meeting: topics summarised at the top (folded the further back
+// carries the meeting: topics summarised at the top (smaller the further back
 // they are), research and notes in among them, then the actions to deal with,
 // then what was just said. The transcript is the other view. Pure view of the
 // host's MeetingState; every control goes through lib/meetingControl.
@@ -65,6 +65,7 @@ import {
 import { writeupBodyHtml, writeupFromBody, writeupText } from '../lib/meetingWriteup.js';
 import { isMeetingShown, useMeetingStore, type MeetingView } from '../stores/meetingStore.js';
 import { parseMeetingNotes, type MeetingNote } from '../lib/meetingNotes.js';
+import { getDesktopBridge } from '../lib/desktopBridge.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import type { AccountPreferences } from '../api/rest.js';
 import { patchShared } from '../routes/settings/sharedWrite.js';
@@ -340,7 +341,10 @@ function MeetingHead({ chatId, meeting }: { chatId: string; meeting: MeetingStat
   const settingsOpen = useMeetingStore((s) => s.settingsOpen);
   const setSettingsOpen = useMeetingStore((s) => s.setSettingsOpen);
   const ended = meeting.status === 'ended';
+  const jumpFeed = useMeetingStore((s) => s.jumpFeed);
   const show = (v: MeetingView) => {
+    // Already on the notes, the button brings them back to where the meeting is.
+    if (v === 'notes' && view === 'notes' && !settingsOpen) jumpFeed(chatId);
     setView(chatId, v);
     setSettingsOpen(false);
   };
@@ -377,7 +381,7 @@ function MeetingHead({ chatId, meeting }: { chatId: string; meeting: MeetingStat
           data-testid="meeting-pause"
           aria-label="Pause"
           title="Pause"
-          onClick={() => pauseMeeting(chatId)}
+          onClick={() => void pauseMeeting(chatId)}
         >
           <Pause size={16} aria-hidden="true" />
         </button>
@@ -400,7 +404,7 @@ function MeetingHead({ chatId, meeting }: { chatId: string; meeting: MeetingStat
           data-testid="meeting-end"
           aria-label="End"
           title="End"
-          onClick={() => endMeeting(chatId)}
+          onClick={() => void endMeeting(chatId)}
         >
           <Square size={14} aria-hidden="true" />
         </button>
@@ -556,37 +560,75 @@ function AlertLine({
   );
 }
 
+/** How long without a new line before a live meeting counts as heard by nobody. */
+const HEARD_RECENTLY_MS = 90_000;
+
+/**
+ * Where the meeting is being heard, from this device's point of view. Lines
+ * still arriving mean another device has it; none for a while means nobody does.
+ */
+export function listeningState(
+  meeting: MeetingState,
+  here: boolean,
+  now: number,
+): 'here' | 'elsewhere' | 'nobody' | 'paused' {
+  if (meeting.status !== 'live') return 'paused';
+  if (here) return 'here';
+  const last = meeting.transcript.at(-1)?.at;
+  const elapsed = meetingElapsedMs(meeting, now);
+  const heard =
+    (meeting.live ?? null) !== null || (last !== undefined && elapsed - last < HEARD_RECENTLY_MS);
+  return heard ? 'elsewhere' : 'nobody';
+}
+
 /** Everything that has gone wrong with the meeting, under the tabs. */
 function MeetingAlerts({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
   const capturing = useMeetingStore((s) => s.capturingChatId === chatId);
-  const notListening = meeting.status === 'live' && !capturing;
-  if (!meeting.error && !meeting.researchError && !notListening) return null;
+  const now = useNow(meeting.status === 'live' && !capturing);
+  const listening = listeningState(meeting, capturing, now);
+  const canListen = getDesktopBridge() !== undefined;
+  if (
+    !meeting.error &&
+    !meeting.researchError &&
+    listening !== 'elsewhere' &&
+    listening !== 'nobody'
+  )
+    return null;
   return (
     <div className="mm-alerts">
       {meeting.error ? <AlertLine testid="meeting-error" text={meeting.error} /> : null}
       {meeting.researchError ? (
         <AlertLine testid="meeting-research-error" text={meeting.researchError} />
       ) : null}
-      {notListening ? (
+      {listening === 'elsewhere' ? (
+        <div className="mm-status" data-testid="meeting-listening-elsewhere">
+          {meeting.listeningOn
+            ? `Listening on ${meeting.listeningOn}`
+            : 'Listening on another device'}
+        </div>
+      ) : null}
+      {listening === 'nobody' ? (
         <AlertLine
           testid="meeting-not-listening"
           text={
-            meeting.listeningOn
-              ? `Listening on ${meeting.listeningOn}`
-              : 'No device is listening yet'
+            canListen
+              ? 'No device is listening to this meeting'
+              : 'No device is listening. Open this meeting in the Patch desktop app to listen'
           }
         >
-          <button
-            type="button"
-            className="mm-btn"
-            data-testid="meeting-listen-here"
-            onClick={(e) => {
-              e.stopPropagation();
-              void listenHere(chatId);
-            }}
-          >
-            Listen here
-          </button>
+          {canListen ? (
+            <button
+              type="button"
+              className="mm-btn"
+              data-testid="meeting-listen-here"
+              onClick={(e) => {
+                e.stopPropagation();
+                void listenHere(chatId);
+              }}
+            >
+              Listen here
+            </button>
+          ) : null}
         </AlertLine>
       ) : null}
     </div>
@@ -785,28 +827,46 @@ interface PointFocus {
 }
 
 /**
- * One topic: a chevron, its one-line summary and when it ran. Open, its
- * bullets and whatever came up in it. Every piece of text is edited in place.
+ * How far back a topic sits: 0 is the newest, 3 the oldest tier. Older topics
+ * are drawn smaller and fainter, with fewer bullets, rather than folded away.
+ */
+export function topicAge(indexFromNewest: number): 0 | 1 | 2 | 3 {
+  if (indexFromNewest <= 0) return 0;
+  if (indexFromNewest <= 2) return 1;
+  if (indexFromNewest <= 5) return 2;
+  return 3;
+}
+
+/** Bullets shown before "more": fewer the older the topic, and a short topic never gets a long list. */
+export function bulletsShown(age: 0 | 1 | 2 | 3, start: number, end: number): number {
+  const byAge = [Infinity, 3, 2, 1][age]!;
+  const short = end - start < 2 * 60_000 ? 2 : Infinity;
+  return Math.min(byAge, short);
+}
+
+/**
+ * One topic: its summary line and when it ran, then its bullets and whatever
+ * came up in it. Never folded: older topics are smaller and denser instead.
+ * Every piece of text is edited in place.
  */
 function TopicRow({
   chatId,
   meeting,
   ft,
-  open,
-  onToggle,
+  age,
   focus,
   setFocus,
 }: {
   chatId: string;
   meeting: MeetingState;
   ft: FeedTopic;
-  open: boolean;
-  onToggle: () => void;
+  age: 0 | 1 | 2 | 3;
   focus: PointFocus | null;
   setFocus: (f: PointFocus | null) => void;
 }) {
   const t = ft.topic;
   const [said, setSaid] = useState(false);
+  const [all, setAll] = useState(false);
   const decision = DECISION.exec(t.title);
   const titleText = unknownSpeaker(decision ? t.title.slice(decision[0].length) : t.title);
   const wants = (bullet: number | null) =>
@@ -824,26 +884,21 @@ function TopicRow({
     if (text === '') edit({ op: 'remove_bullet', topicId: t.id, index: i });
     else if (text !== t.points[i]) edit({ op: 'set_bullet', topicId: t.id, index: i, text });
   };
-  const lines = open && said ? linesBehind(meeting, ft.start, ft.end) : [];
+  const lines = said ? linesBehind(meeting, ft.start, ft.end) : [];
+  // A bullet being edited or just added is always shown.
+  const editing = focus !== null && focus.topicId === t.id && focus.bullet !== null;
+  const limit = all || editing ? Infinity : bulletsShown(age, ft.start, ft.end);
+  const shown = t.points.slice(0, limit);
+  const hidden = t.points.length - shown.length;
 
   return (
     <div
       className="mm-topic"
       data-testid="meeting-topic"
-      data-open={open ? 'true' : undefined}
+      data-age={age}
       data-decided={decision ? 'true' : undefined}
     >
       <div className="mm-topic-h">
-        <button
-          type="button"
-          className="mm-chev"
-          data-testid="meeting-topic-toggle"
-          aria-expanded={open}
-          aria-label={open ? 'Fold' : 'Open'}
-          onClick={onToggle}
-        >
-          <ChevronRight size={14} aria-hidden="true" />
-        </button>
         <div className="nm">
           {decision ? <span className="decw">Decided</span> : null}
           <Editable
@@ -866,21 +921,18 @@ function TopicRow({
           type="button"
           className="mm-span"
           data-testid="meeting-point-time"
-          title={open ? 'Show what was said' : 'Open'}
-          aria-pressed={open && said}
-          onClick={() => {
-            if (!open) onToggle();
-            setSaid(open ? !said : true);
-          }}
+          title="Show what was said"
+          aria-pressed={said}
+          onClick={() => setSaid(!said)}
         >
           {topicSpanLabel(ft.start, ft.end)}
         </button>
       </div>
-      {open ? (
+      {shown.length > 0 || ft.items.length > 0 || said ? (
         <div className="mm-topic-b">
-          {t.points.length > 0 ? (
+          {shown.length > 0 ? (
             <ul>
-              {t.points.map((p, i) => (
+              {shown.map((p, i) => (
                 <li key={i}>
                   <Editable
                     value={p}
@@ -901,6 +953,16 @@ function TopicRow({
                 </li>
               ))}
             </ul>
+          ) : null}
+          {hidden > 0 ? (
+            <button
+              type="button"
+              className="mm-more"
+              data-testid="meeting-point-more"
+              onClick={() => setAll(true)}
+            >
+              {hidden} more
+            </button>
           ) : null}
           {ft.items.map((item) => (
             <FeedItemRow key={feedItemKey(item)} chatId={chatId} item={item} />
@@ -978,9 +1040,31 @@ export function justSaid(transcript: MeetingState['transcript']): MeetingState['
   return recent.length >= JUST_SAID_MIN_LINES ? recent : transcript.slice(-JUST_SAID_MIN_LINES);
 }
 
+/** What this device is hearing and has not finished transcribing: greyed, after the last line. */
+function Hearing({ chatId }: { chatId: string }) {
+  const here = useMeetingStore((s) => s.capturingChatId === chatId);
+  const hearing = useMeetingStore((s) => s.hearing);
+  if (!here) return null;
+  return (
+    <>
+      {(['system', 'mic'] as const).map((source) =>
+        hearing[source] ? (
+          <div key={source} data-testid="meeting-hearing" className="mm-ln prov">
+            <b>{source === 'mic' ? 'You' : 'Them'}</b>
+            <span>{hearing[source]}</span>
+          </div>
+        ) : null,
+      )}
+    </>
+  );
+}
+
 function JustSaid({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
   const lines = justSaid(meeting.transcript);
-  if (lines.length === 0) return null;
+  const hearing = useMeetingStore(
+    (s) => s.capturingChatId === chatId && Boolean(s.hearing.mic ?? s.hearing.system),
+  );
+  if (lines.length === 0 && !hearing) return null;
   return (
     <div className="mm-said" data-testid="meeting-tail">
       <div className="mm-sect">Just said</div>
@@ -990,18 +1074,32 @@ function JustSaid({ chatId, meeting }: { chatId: string; meeting: MeetingState }
           <span>{l.text}</span>
         </div>
       ))}
+      <Hearing chatId={chatId} />
+    </div>
+  );
+}
+
+/** What the meeting is on right now: one line, kept in view at the top of the notes while live. */
+function NowLine({ meeting }: { meeting: MeetingState }) {
+  const now = meeting.now;
+  if (!now || now.headline.trim() === '') return null;
+  return (
+    <div className="mm-now" data-testid="meeting-now">
+      <span className="mm-now-k">Now</span>
+      <span className="mm-now-t" data-testid="meeting-now-headline">
+        {now.headline}
+      </span>
     </div>
   );
 }
 
 /**
- * The one feed: topics oldest first — the newest open while live, the rest
- * folded to their summary line — then the actions, then while live what was
- * just said. Once ended, the write-up heads it, folded.
+ * The one feed: topics oldest first, each smaller and denser the further back
+ * it is, then the actions, then while live what was just said. Once ended, the
+ * write-up heads it, folded.
  */
 function Feed({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
   const [focus, setFocus] = useState<PointFocus | null>(null);
-  const [toggled, setToggled] = useState<ReadonlySet<string>>(() => new Set());
   const live = meeting.status !== 'ended';
   const now = useNow(meeting.status === 'live');
   const endMs = live ? meetingElapsedMs(meeting, now) : meeting.elapsedBaseMs;
@@ -1009,22 +1107,17 @@ function Feed({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
     () => feedTopics(meeting, endMs),
     [meeting.topics, meeting.cards, meeting.actions, meeting.myNotes, endMs],
   );
-  const newest = topics.at(-1)?.topic.id;
-  const toggle = (id: string) =>
-    setToggled((s) => {
-      const next = new Set(s);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
   // Live, the newest stays in view; once ended, the top does.
+  const jump = useMeetingStore((s) => s.feedJump[chatId] ?? 0);
   const scroller = usePinnedScroll(
     [topics.length, meeting.transcript.length, meeting.actions],
     live,
+    jump,
   );
 
   return (
     <div className="mm-scroll" data-testid="meeting-points" ref={scroller}>
+      {live ? <NowLine meeting={meeting} /> : null}
       <div className="mm-col mm-feed">
         {!live ? <WriteupFold chatId={chatId} meeting={meeting} /> : null}
         {topics.length === 0 && before.length === 0 && live ? (
@@ -1033,22 +1126,17 @@ function Feed({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
         {before.map((item) => (
           <FeedItemRow key={feedItemKey(item)} chatId={chatId} item={item} />
         ))}
-        {topics.map((ft) => {
-          const id = ft.topic.id;
-          const open = (live && id === newest) !== toggled.has(id);
-          return (
-            <TopicRow
-              key={id}
-              chatId={chatId}
-              meeting={meeting}
-              ft={ft}
-              open={open}
-              onToggle={() => toggle(id)}
-              focus={focus}
-              setFocus={setFocus}
-            />
-          );
-        })}
+        {topics.map((ft, i) => (
+          <TopicRow
+            key={ft.topic.id}
+            chatId={chatId}
+            meeting={meeting}
+            ft={ft}
+            age={topicAge(topics.length - 1 - i)}
+            focus={focus}
+            setFocus={setFocus}
+          />
+        ))}
         {live ? (
           <AddLine
             label="Add note"
@@ -1064,7 +1152,7 @@ function Feed({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
 }
 
 /** Keeps a scroller at the bottom as content arrives, unless Tom has scrolled up to read. */
-function usePinnedScroll(deps: unknown[], pin = true) {
+function usePinnedScroll(deps: unknown[], pin = true, jump = 0) {
   const ref = useRef<HTMLDivElement>(null);
   const pinned = useRef(pin);
   useEffect(() => {
@@ -1083,6 +1171,13 @@ function usePinnedScroll(deps: unknown[], pin = true) {
     const el = ref.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
   }, deps);
+  // Asked to come back (the Notes button): the newest while live, the top once ended.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || jump === 0) return;
+    pinned.current = pin;
+    el.scrollTop = pin ? el.scrollHeight : 0;
+  }, [jump]);
   return ref;
 }
 
@@ -1128,6 +1223,7 @@ function TranscriptList({ chatId, meeting }: { chatId: string; meeting: MeetingS
             </span>
           </div>
         ))}
+        <Hearing chatId={chatId} />
       </div>
     </div>
   );
@@ -1272,24 +1368,17 @@ const CARD_LABEL: Record<MeetingCard['kind'], string> = {
 };
 const VERDICT_LABEL = { correct: 'Correct', off: 'Off', unclear: 'Unclear' } as const;
 
-/** A research card on one line: kind, what it is about, the verdict and source. Open by default, folds to one line. */
+/** A research card, always open so it can be read at a glance: kind, subject, verdict, the explanation and its source. */
 function ResearchCard({ card }: { card: MeetingCard }) {
-  const [open, setOpen] = useState(true);
   return (
-    <div className="mm-card" data-testid="meeting-card" data-kind={card.kind} data-open={open}>
-      <button
-        type="button"
-        className="mm-line mm-card-h"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-      >
+    <div className="mm-card" data-testid="meeting-card" data-kind={card.kind}>
+      <div className="mm-card-h">
         <span className="mm-chip" data-testid="meeting-card-kind">
           {CARD_LABEL[card.kind]}
         </span>
-        <span className="mm-line-t" data-testid="meeting-card-title">
+        <span className="mm-card-title" data-testid="meeting-card-title">
           {card.title}
         </span>
-        <ChevronDown className="mm-card-chev" size={14} aria-hidden="true" />
         {card.verdict ? (
           <span
             className="mm-verdict"
@@ -1299,14 +1388,16 @@ function ResearchCard({ card }: { card: MeetingCard }) {
             {VERDICT_LABEL[card.verdict]}
           </span>
         ) : null}
-      </button>
-      {open ? (
-        <div className="mm-card-b">
-          <ul>
-            {card.bullets.map((b, i) => (
-              <li key={i}>{b}</li>
-            ))}
-          </ul>
+      </div>
+      {card.bullets.length > 0 || card.source ? (
+        <div className="mm-card-b" data-testid="meeting-card-body">
+          {card.bullets.length > 0 ? (
+            <ul>
+              {card.bullets.map((b, i) => (
+                <li key={i}>{b}</li>
+              ))}
+            </ul>
+          ) : null}
           {card.source ? (
             <a
               className="mm-card-src"
@@ -1629,15 +1720,17 @@ export function ActionsList({ chatId, meeting }: { chatId: string; meeting: Meet
   const people = knownPeople(meeting);
   return (
     <div className="mm-actions" data-testid="meeting-actions">
-      <div className="mm-sect">Actions</div>
+      <div className="mm-sect-row">
+        <div className="mm-sect">Actions</div>
+        <AddLine
+          label="Add action"
+          testid="meeting-action-add"
+          onAdd={(text) => addAction(chatId, text, 'mine')}
+        />
+      </div>
       {open.map((a) => (
         <ActionRow key={a.id} chatId={chatId} meeting={meeting} action={a} people={people} />
       ))}
-      <AddLine
-        label="Add action"
-        testid="meeting-action-add"
-        onAdd={(text) => addAction(chatId, text, 'mine')}
-      />
     </div>
   );
 }

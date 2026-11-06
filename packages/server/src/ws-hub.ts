@@ -1594,6 +1594,7 @@ export class WsHub {
       case 'meeting.control_request':
       case 'meeting.get_request':
       case 'meeting.audio':
+      case 'meeting.lines':
       case 'patch.browser_view.watch':
       case 'patch.browser_view.stop':
       case 'patch.browser_handoff.input':

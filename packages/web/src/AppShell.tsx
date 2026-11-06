@@ -331,7 +331,7 @@ export function AppShell(): JSX.Element {
         bridge.onMeetingSignal(({ phase }) => {
           if (phase === 'ended') {
             const capturing = useMeetingStore.getState().capturingChatId;
-            if (capturing) endMeeting(capturing);
+            if (capturing) void endMeeting(capturing);
             return;
           }
           // The invite starts the meeting in a new chat, never whichever one

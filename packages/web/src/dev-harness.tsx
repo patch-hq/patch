@@ -2953,8 +2953,7 @@ usePresenceStore.getState().setHosts([
       voiceKeys: { gemini: false, openai: false, deepgram: false, elevenlabs: false },
       providerKeys: [
         { id: 'gemini', source: 'none', envSet: false },
-        { id: 'openai', source: 'none', envSet: false },
-        { id: 'groq', source: 'env', last4: 'q9Zk', envSet: true },
+        { id: 'openai', source: 'env', last4: 'q9Zk', envSet: true },
         { id: 'deepgram', source: 'none', envSet: false },
         { id: 'elevenlabs', source: 'none', envSet: false },
       ],

@@ -40,7 +40,8 @@
     "ulid": "^2.3.0",
     "unified": "^11.0.5",
     "ws": "^8.18.0",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "zod-to-json-schema": "3.25.2"
   },
   "optionalDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.126"

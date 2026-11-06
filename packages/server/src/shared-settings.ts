@@ -29,6 +29,8 @@ import { dirname, join } from 'node:path';
 import type { Logger } from 'pino';
 import {
   DEFAULT_SHARED_SETTINGS,
+  DEFAULT_MEETING_MODEL,
+  RETIRED_MEETING_MODEL,
   EMPTY_SHARED_SECRETS,
   PROVIDER_KEY_MIN_LENGTH,
   SharedSecrets,
@@ -284,6 +286,8 @@ export class SharedSettingsService {
         this.secrets = StoredSecrets.parse(
           JSON.parse(decrypt(this.key, readFileSync(this.secretsPath, 'utf8'), this.secretsPath)),
         );
+        // Groq transcription is gone: its key is not sent on to hosts again.
+        delete this.secrets.providerKeys.groq;
       } catch (err) {
         this.problem = `The stored accounts and keys can't be read: ${(err as Error).message}. ${fix}`;
       }
@@ -326,6 +330,12 @@ export class SharedSettingsService {
       delete raw['stalledThresholdMinutes'];
       delete raw['sweepPrompt'];
       raw['sweepEnabled'] = false;
+    }
+    // Every default is written into the file, so a changed default never reaches
+    // an existing install. A meeting model still on the retired default moves to
+    // the current one; a model someone picked is left alone.
+    for (const key of ['meetingAnalysisModel', 'meetingCleanupModel', 'meetingResearchModel']) {
+      if (raw[key] === RETIRED_MEETING_MODEL) raw[key] = DEFAULT_MEETING_MODEL;
     }
     const parsed = SharedSettings.partial().strict().safeParse(raw);
     if (!parsed.success) {
@@ -374,7 +384,7 @@ export class SharedSettingsService {
         connected: a.authJson !== null,
         ...(a.email ? { email: a.email } : {}),
       })),
-      providerKeys: (['gemini', 'openai', 'groq'] as const).map((id) => {
+      providerKeys: (['gemini', 'openai'] as const).map((id) => {
         const value = this.secrets.providerKeys[id];
         return value ? { id, set: true, last4: value.slice(-4) } : { id, set: false };
       }),
@@ -575,7 +585,7 @@ export class SharedSettingsService {
       this.secrets.codex.push({ ...account, ...(idTaken ? { id: randomUUID() } : {}) });
       added.push(`OpenAI ${account.label}`);
     }
-    for (const id of ['gemini', 'openai', 'groq'] as const) {
+    for (const id of ['gemini', 'openai'] as const) {
       const value = imported.secrets.providerKeys[id];
       if (value && !this.secrets.providerKeys[id]) {
         this.secrets.providerKeys[id] = value;

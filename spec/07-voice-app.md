@@ -13,7 +13,7 @@ Every voice interaction is fundamentally the same shape — a two-way exchange w
 
 Each conversational surface independently picks a `backend` (`local` / `gemini` / `openai` / `elevenlabs`) and a `layer` (`direct` / `light` / `heavy`). Dictation is not a cell of this matrix: it picks where its words come from instead (§ Dictation engines). Nobody has used this long enough to know the right answer for any of the four, including whether they should even be different from each other — this is deliberately a matrix to test against, not a decision baked into the architecture. See `packages/server/src/settings.ts` for the exact schema and current defaults (everything starts on `local`/`direct` — no surface defaults to a paid backend or an unbuilt front layer). Settings presents each cell as one choice of engine rather than two axes: `Local`, `Gemini Flash` (`gemini`/`light`), `Gemini Thinking` (`gemini`/`heavy`), `OpenAI mini` (`openai`/`light`), `OpenAI` (`openai`/`heavy`), `ElevenLabs Haiku` (`elevenlabs`/`light`), `ElevenLabs Sonnet` (`elevenlabs`/`heavy`).
 
-- **`backend: local`** — the self-hosted pipeline: Whisper → (see `layer` below) → Kokoro, all on the host. Free beyond Groq's few-dollars-a-month STT cost.
+- **`backend: local`** — the self-hosted pipeline: Parakeet → (see `layer` below) → Kokoro, all on the host. Nothing is billed per minute.
 - **`backend: gemini` / `openai`** — on hands-free and call, a hosted realtime speech-to-speech session (Gemini Live / OpenAI Realtime) IS the fast voice end to end: it hears and speaks directly, no separate STT/TTS steps. Real per-minute spend; see § The fast voice and the chat's agent.
 - **`backend: elevenlabs`** — ElevenLabs Agents: the host provisions a throwaway agent per session (front LLM from the layer — Claude Haiku for `light`, Claude Sonnet for `heavy`, overridable per host; the chat briefing in its prompt; `dispatch_to_patch` and `look_back` as client tools answered by the host), opens a conversation on a signed URL over a server-side WebSocket, relays 16 kHz mic PCM in and 24 kHz agent audio out, and deletes the agent and its tools when the session ends. Billed by the call minute ($0.08/min on every plan, plus the LLM's own per-minute charge from credits), recorded in the voice cost ledger by call length. Hands-free cannot stop the agent answering, so an unaddressed transcript is reported heard-but-not-sent and the agent's reply to it is dropped (its audio and words never reach the surface or the chat); unlike `openai` it is still in the agent's context and still billed. Key: `ELEVEN_LABS_API_KEY`; failures reach the surface as `elevenlabs_unavailable`.
 - **`layer: direct`** — the turn talks straight to Manager, unfronted. Manager stays exactly as configured elsewhere (`defaultModel`, folder, tools) — this axis never changes what Manager is, only whether something sits in front of it. Only meaningful for `backend: local`: `gemini`/`openai` are hosted speech-to-speech sessions, so choosing one already means routing through their model first — there is no "direct" bypass of it, and `direct` on a hosted backend runs as `light` (Settings says so on that cell).
@@ -78,12 +78,12 @@ The summary lands in the chat as one quiet line when the session ends — `Call 
 
 The host runs, for any surface on `backend: local`:
 
-- STT — switchable in Settings → Voice: Groq Whisper (`whisper-large-v3-turbo`, cloud, faster, offers partials) or local `faster-whisper medium.en` (no cloud dependency, ~400ms slower, no partials — see § Live transcript for why).
+- STT — Parakeet TDT v3 on the host's CPU (the Parakeet component; offers partials), or `faster-whisper medium.en` with `WHISPER_BACKEND=local` (slower, no partials — see § Live transcript for why). There is no cloud speech-to-text for `local`.
 - Agent — Manager, on `layer: direct` (the only implemented `local` layer today — see § Voice is a config matrix above).
 - TTS — Kokoro (`hexgrad/Kokoro-82M`), 24 kHz PCM16 output.
 - VAD — Silero (`silero_vad.onnx`), for end-of-utterance and barge-in.
 
-The large model files are downloaded per host, on demand, from the app (`02-host.md` § Optional components). Kokoro is ~340 MB including voices; a local Whisper model is ~1.5 GB. `silero_vad.onnx` is ~2 MB and sits inside the host artifact instead (`02-host.md` § Installation), so VAD and barge-in work on every host with nothing downloaded.
+The large model files are downloaded per host, on demand, from the app (`02-host.md` § Optional components). Kokoro is ~340 MB including voices; Parakeet is ~670 MB; a local Whisper model is ~1.5 GB. `silero_vad.onnx` is ~2 MB and sits inside the host artifact instead (`02-host.md` § Installation), so VAD and barge-in work on every host with nothing downloaded.
 
 Voice is a per-host capability: a host advertises the components it has, and a chat's voice runs on that chat's own host, so speaking to it needs Kokoro installed there (backend `local`) or a Gemini/OpenAI key configured (`gemini`/`openai`). A surface disables the affordance where a component is missing and names the host and the component; on first use it offers the download or the key prompt in place, in a single prompt naming the size/cost and the host.
 
@@ -94,9 +94,9 @@ Voice is a per-host capability: a host advertises the components it has, and a c
 
 A session for a host that is offline is refused with `audio.error {code: 'host_unreachable'}` before any audio is accepted, same discipline as `session_not_found`; so is one whose host-side tunnelled bridge fails to connect locally (voice not installed on that host) — the failure always reads as that host's own, never silently running a different host's pipeline.
 
-### Whisper transcription params
+### Transcription params
 
-The Groq transcription request pins `language=en` and `temperature=0`.
+Parakeet decodes greedily and punctuates and capitalises itself; there is no prompt and no temperature to set.
 
 ### Latency
 
@@ -113,13 +113,13 @@ The user's words appear in the chat timeline as they speak, on every backend. On
 
 `backend: local` and dictation on Whisper only — a hosted session (`gemini`/`openai`) streams the user's words as the provider transcribes them, and the live dictation engines stream theirs (§ Dictation engines), each sent as `audio.transcript_partial` with no workaround needed.
 
-No Whisper backend streams — each answers one whole clip at a time. An interim transcript is therefore produced by re-transcribing the growing utterance prefix about once a second while the user is still speaking, each answer going out as `audio.transcript_partial` (`03-wire-protocol.md`).
+No `local` backend streams — each answers one whole clip at a time. An interim transcript is therefore produced by re-transcribing the growing utterance prefix about once a second while the user is still speaking, each answer going out as `audio.transcript_partial` (`03-wire-protocol.md`).
 
-Whether that is worth doing is a per-backend decision, because every pass costs a whole extra transcription request. Groq answers a short clip in well under a second; a model running on the host's own CPU (`local`) is slower per pass, but the session keeps only one partial pass in flight and spaces passes by a second of new audio, so the final queues behind at most one pass. Both offer partials. An unconfigured backend has nothing to ask. A backend that offers no partials emits none at all, and its surfaces show the microphone's input level while the user speaks instead of words.
+Whether that is worth doing is a per-backend decision, because every pass costs a whole extra transcription request. Parakeet answers a short clip in well under a second on two cores and re-reads only the last few seconds of a long utterance; faster-whisper is slower per pass, but the session keeps only one partial pass in flight and spaces passes by a second of new audio, so the final queues behind at most one pass. Parakeet offers partials; faster-whisper does not. An unconfigured backend has nothing to ask. A backend that offers no partials emits none at all, and its surfaces show the microphone's input level while the user speaks instead of words.
 
 Two rules keep the interim text from costing the user the transcript that matters:
 
-- A quota reserve. A partial is refused once the requests already made in the rolling minute reach the partial budget, which sits below the provider's per-minute limit. A long sentence can spend its whole allowance on the preview and the final — the request that becomes the user's words — still has slots to run in. A final is never refused to make room for a partial. A refused partial skips that pass only; the next second of speech asks again, so the preview slows down rather than freezing for the rest of the utterance.
+- One decode at a time. A final never waits behind more than the one partial pass already running, and never behind a later one.
 - A hallucination filter, on partials only. Whisper answers a short or near-silent prefix with a stock phrase ("Thank you.", "you", subtitle credits) rather than with an empty string, and one of those painted into a user's input reads as words they said. A partial whose whole text is one of those phrases is dropped and the next pass gets the chance instead. A final is never filtered: if the user did say "Thank you.", that is the turn.
 
 The interim text is a guess at a half-finished sentence, not a recognition, and each pass is independent of the last — so it rewrites itself as the user talks and a word can change after it has appeared. Every surface therefore renders it as a preview marked as in progress — the greyed placeholder ink on web/desktop; on mobile, where the words are the main thing on screen while the keyboard is away, full reading ink on an accent tint — and discards it outright the moment the authoritative transcript arrives. It is never left as text the user has to notice is wrong and edit.
@@ -150,14 +150,14 @@ phone/web ──audio WSS (PCM16 mic in, PCM16 audio out)──▶ patch host
                                                           back to surface speaker
 ```
 
-Cost: ~$3–5/month for Groq Whisper at heavy use, plus the cost of the host running the host + Kokoro.
+Cost: nothing per minute; the host's CPU runs Parakeet and Kokoro.
 
 Latency:
 
 | Stage                                  | Time          |
 | -------------------------------------- | ------------- |
 | Audio WSS surface → host               | ~50–150 ms    |
-| Groq Whisper streaming + EOS           | ~50–100 ms    |
+| Parakeet final pass after EOS          | ~100–300 ms   |
 | Agent response (short, no heavy tools) | ~500–800 ms   |
 | Kokoro first audio byte                | ~150–200 ms   |
 | host → surface speaker                 | ~50–150 ms    |
@@ -210,7 +210,7 @@ Patch injects no system prompts at runtime (`principles.md` § No system-prompt 
 
 ## Concurrency on the host
 
-Multiple voice surfaces can have audio sessions open at the same time (phone + voice device, e.g. partner using kitchen device while user is on phone Manager call). With Groq doing STT remotely, only Kokoro and the AEC pipeline run on the host — the baseline host sizing (`11-deployment.md`) has headroom for ~3 concurrent sessions. Beyond that, size up. With local Whisper the larger sizing handles ~2–3 concurrent.
+Multiple voice surfaces can have audio sessions open at the same time (phone + voice device, e.g. partner using kitchen device while user is on phone Manager call). Parakeet, Kokoro and the AEC pipeline all run on the host; the baseline host sizing (`11-deployment.md`) has headroom for ~3 concurrent sessions. Beyond that, size up. With local Whisper the larger sizing handles ~2–3 concurrent.
 
 ## Barge-in
 
@@ -370,6 +370,17 @@ The composer mic can be left open. A plain click or tap is ordinary dictation; r
 - **Live preview.** While an utterance is being spoken its interim words show greyed in the input, as in tap-dictation (§ Dictation into the composer), so the speaker can see what is being captured; they clear when the utterance ends and the message is sent. A preview failure is shown and never ends the mode.
 - **Status and ending.** While it is open the composer shows `Dictating` (on web/desktop `Dictating…`), changing to a sending state while a transcript is pending, and the mic reads as active. Clicking or tapping the mic, `esc` on web/desktop, the clear control on mobile, or leaving the chat ends it and releases the microphone; whatever was said but not yet cut into an utterance is dropped. It cannot be started while a tap-dictation or a voice note is in progress.
 - **Failures are shown.** A microphone that cannot open, a failed transcription, a failed turn check (a host without the model, or one too old to answer within ten seconds) and a refused backend each surface as an error and are never silent; none of them ends the mode. A failed turn check leaves that utterance to the long pause.
+
+### Meeting transcription
+
+A meeting is transcribed on the computer that hears it, by the desktop app, and only text leaves that computer. Audio never goes to a host, a server or a hosted speech service, so there is no request quota to fall behind on and nothing is billed per minute.
+
+- **Engine.** Parakeet TDT v3 (int8) through sherpa-onnx, in the desktop app's main process (`desktop/src/meeting-transcriber.ts`). The model is too big to ship inside the app, so the first meeting downloads it into the app's data directory (about 670 MB, once) and says so; a meeting does not start without it, and a failed download is an error naming what failed.
+- **Cutting.** Each source (mic and call audio) runs its own Silero voice-activity detector. A line is one utterance, ended by a pause of 0.4 s or cut at 12 s, never a fixed slice that splits words, and silence never reaches the recogniser, so there are no lines invented from a quiet call.
+- **Live words.** While someone is still talking, the utterance so far is re-read about twice a second and shown greyed on the listening device (§ Meeting mode in `14-design-web.md`). When they pause it is read once more as a whole and sent as final with `meeting.lines`, stamped with the time it began. One decode runs at a time: finals queue in order, and a partial is skipped while anything else is decoding.
+- **Echo.** On laptop speakers the mic hears the call. The echo canceller removes most of it before transcription; a mic line whose words are mostly what the call said at the same moment is then dropped as what the canceller left, and so is a mic line of one or two words heard wholly while the call was talking (residue garbled past matching), so a remote speaker is never also credited to the local one. The cost is that a short "yes" said over someone else is not transcribed. A mic line waits for the call side of the same moment to be transcribed (at most 4 s) before it is sent.
+- **End and Pause** wait for every utterance already heard to come back as final and be sent, so the last words are never lost.
+- **Testing without a call.** `pnpm --filter @patch/desktop meeting:replay <dir>` plays `mic.wav` and `system.wav` from a directory through the same echo canceller and transcriber, paced like live audio, and prints each line with how long after the speech it landed. With a `truth.json` it also reports lines missed, credited to the wrong side, or not said at all. `scripts/meeting-replay/generate.py` renders a script of who says what into those files with Kokoro voices, with the call leaking into the mic at a chosen level.
 
 ## Overlay surfaces — placement summary
 

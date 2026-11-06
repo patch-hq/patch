@@ -53,7 +53,7 @@ class FakeTranscribeHost extends InProcessHostLink {
         type: 'patch.voice_note.transcribe_response',
         requestId: event.requestId,
         ok: false,
-        error: { code: 'transcription_failed', message: 'groq 500' },
+        error: { code: 'transcription_failed', message: 'stt 500' },
       });
     }
   }

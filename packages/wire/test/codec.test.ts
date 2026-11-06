@@ -307,7 +307,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
         },
       ],
       codex: [{ id: 'c1', label: 'ChatGPT', kind: 'chatgpt', authJson: null }],
-      providerKeys: { groq: 'gsk_example_not_real_000' },
+      providerKeys: { gemini: 'AIza_example_not_real_000' },
     },
   },
   'settings.applied': { type: 'settings.applied', hostId: 'host-a', version: 3 },
@@ -318,7 +318,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     secrets: {
       claude: [{ id: 'a1', label: 'Work', connected: true, organizationId: 'org-1' }],
       codex: [],
-      providerKeys: [{ id: 'groq', set: true, last4: '0000' }],
+      providerKeys: [{ id: 'gemini', set: true, last4: '0000' }],
     },
     hosts: [{ hostId: 'host-a', appliedVersion: 3 }],
   },
@@ -333,14 +333,14 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     requestId: 'ad1',
     hostId: 'host-a',
     kind: 'provider-key',
-    id: 'groq',
+    id: 'gemini',
   },
   'settings.adopt.response': {
     type: 'settings.adopt.response',
     requestId: 'ad1',
     hostId: 'host-a',
     ok: true,
-    result: { kind: 'provider-key', id: 'groq', value: 'gsk_example_not_real_000' },
+    result: { kind: 'provider-key', id: 'gemini', value: 'AIza_example_not_real_000' },
   },
   'settings.account_signed_in': {
     type: 'settings.account_signed_in',
@@ -503,6 +503,12 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   'meeting.control_request': { type: 'meeting.control_request', chatId: 'c1', action: 'start' },
   'meeting.get_request': { type: 'meeting.get_request', chatId: 'c1' },
   'meeting.audio': { type: 'meeting.audio', chatId: 'c1', source: 'mic', audioBase64: 'AA==' },
+  'meeting.lines': {
+    type: 'meeting.lines',
+    chatId: 'c1',
+    source: 'system',
+    lines: [{ text: 'Hello', spokenAt: 1000, speakerName: 'Priya' }],
+  },
   'meeting.notes_request': {
     type: 'meeting.notes_request',
     chatId: 'c',

@@ -250,7 +250,6 @@ import {
   createWhisper,
   validateWhisperCredentials,
   UnsupportedClipFormatError,
-  LocalWhisperBackend,
   type WhisperBackend,
 } from './audio/whisper.js';
 import { ParakeetWhisperBackend } from './audio/parakeet.js';
@@ -262,8 +261,7 @@ import {
   pickDictationTranscriber,
   type DictationTranscribers,
 } from './audio/hosted-stt.js';
-import { ElevenLabsScribeBackend, ScribeVoiceMap } from './audio/elevenlabs-stt.js';
-import { costCall } from './audio/voiceCost.js';
+import { ElevenLabsScribeBackend } from './audio/elevenlabs-stt.js';
 import { createSileroVadFactory, validateVadModel, MockVad, type Vad } from './audio/vad.js';
 import { DeviceRegistry } from './devices/registry.js';
 import { PresenceRegistry } from './devices/presence.js';
@@ -436,14 +434,14 @@ async function startHost(
   // 0. Deployment credential gate (group H1, spec/11-deployment.md § Env): the
   // whisper backend's credential is validated EAGERLY, before OAuth, before the
   // healthz listener, before the /ws dial — "Validation must happen before any
-  // attempt to serve requests. No silent fallback to a degraded mode." A `groq`
-  // host with no GROQ_API_KEY would otherwise present a green audio WSS that
+  // attempt to serve requests. No silent fallback to a degraded mode." An
+  // `elevenlabs` host with no key would otherwise present a green audio WSS that
   // 500s the first real utterance — exactly the degraded mode the deployment
-  // contract forbids. (This supersedes the earlier group-14 lazy-fail affordance.)
+  // contract forbids.
   //
   // The key itself may come from this host's provider-key store (spec/02
   // § Provider keys) — set from Settings → Hosts → Keys — which wins over the
-  // environment. The store refuses to revoke the one Groq key a `groq` host has,
+  // environment. The store refuses to revoke the one key such a host has,
   // since the host would then not start to be given another.
   const providerKeys = new ProviderKeyStore({
     path: providerKeysPath(config.patchHome),
@@ -451,12 +449,8 @@ async function startHost(
       gemini: config.audio.geminiApiKey,
       openai: config.audio.openaiApiKey,
       elevenlabs: config.audio.elevenLabsApiKey,
-      groq: config.audio.groqApiKey,
       deepgram: config.audio.deepgramApiKey,
     },
-    ...(config.audio.whisperBackend === 'groq'
-      ? { requiredToStart: { groq: 'This host transcribes with Groq (WHISPER_BACKEND=groq)' } }
-      : {}),
     ...(config.audio.whisperBackend === 'elevenlabs'
       ? {
           requiredToStart: {
@@ -467,7 +461,6 @@ async function startHost(
   });
   validateWhisperCredentials({
     ...config.audio,
-    groqApiKey: providerKeys.get('groq'),
     elevenlabsApiKey: providerKeys.get('elevenlabs'),
   });
   // spec/07 § Python sidecar lifecycle: KOKORO_MODEL_PATH must be validated at
@@ -792,7 +785,6 @@ async function startHost(
     research: DEFAULT_MEETING_MODEL,
   };
   let meetingResearchSeconds = DEFAULT_MEETING_RESEARCH_SECONDS;
-  let meetingTranscriptionModel = '';
   let goalEvalPrompt: string = persistedHostState.goalEvalPrompt ?? DEFAULT_GOAL_EVAL_PROMPT;
   // Settings → Prompts: the check-in a running background task sends its agent.
   let watchCheckInPrompt: string =
@@ -1853,11 +1845,6 @@ async function startHost(
       research: shared.meetingResearchModel,
     };
     meetingResearchSeconds = shared.meetingResearchSeconds;
-    if (shared.meetingTranscriptionModel !== meetingTranscriptionModel) {
-      meetingTranscriptionModel = shared.meetingTranscriptionModel;
-      whisper?.useModel?.(meetingTranscriptionModel);
-      logger.info({ meetingTranscriptionModel }, 'meeting transcription model changed');
-    }
     if (
       shared.watchCheckInPrompt !== watchCheckInPrompt ||
       shared.watchCheckInMinutes !== watchCheckInMinutes
@@ -4431,74 +4418,16 @@ async function startHost(
     // between spawns is reflected immediately.
   });
   daemon.setWatchCheckIn({ intervalMs: watchCheckInMinutes * 60_000, prompt: watchCheckInPrompt });
-  // Meeting mode (meeting.ts). Local Whisper unless the host opts in with
-  // MEETING_STT=elevenlabs: a meeting is hours of audio, so a paid STT backend is
-  // never picked just because a key exists.
-  const scribeVoiceMaps = new Map<string, ScribeVoiceMap>();
+  // Meeting mode (meeting.ts). The surface hearing the meeting transcribes it on
+  // its own device and sends text (meeting.lines); no audio reaches this host.
   meetings = new MeetingManager({
     dir: join(config.patchHome, 'meetings'),
-    transcribe: async (wav) => {
-      if (!dictationTranscribers)
-        throw new Error('host audio stack not ready — whisper unavailable');
-      return dictationTranscribers.local.transcribeClip(wav, 'wav');
-    },
-    // Voice separation needs the local sidecar and its speaker model; without
-    // DIARISE_MODEL_PATH the sidecar refuses rather than merging voices.
-    // MEETING_STT=elevenlabs opts a host into paid Scribe for meetings, with its
-    // own diarisation. Chosen explicitly, never as a fallback: a missing key or a
-    // failed request fails the clip. Usage goes on the voice ledger.
-    ...(process.env['MEETING_STT'] === 'elevenlabs'
-      ? {
-          transcribeVoices: async (session: string, wav: Buffer) => {
-            const scribe = dictationTranscribers?.elevenlabs;
-            if (!(scribe instanceof ElevenLabsScribeBackend)) {
-              throw new Error(
-                'MEETING_STT=elevenlabs but this host has no ElevenLabs key (ELEVEN_LABS_API_KEY)',
-              );
-            }
-            const startedAt = Date.now();
-            const runs = await scribe.transcribeDiarised(wav);
-            const audioSeconds = Math.max(0, wav.length - 44) / 32000;
-            const sep = session.lastIndexOf(':');
-            voiceLedger.record(
-              costCall({
-                sessionId: `meeting-stt-${startedAt}`,
-                chatId: session.slice(0, sep),
-                surfaceKind: 'meeting',
-                startedAt,
-                endedAt: Date.now(),
-                engine: {
-                  backend: 'local',
-                  model: scribe.costModel,
-                  tokens: null,
-                  stt: { requests: 1, audioSeconds, billedSeconds: audioSeconds },
-                },
-                handoffs: 0,
-              }),
-            );
-            let map = scribeVoiceMaps.get(session);
-            if (!map) scribeVoiceMaps.set(session, (map = new ScribeVoiceMap()));
-            return map.assign(runs);
-          },
-        }
-      : process.env['DIARISE_MODEL_PATH']
-        ? {
-            transcribeVoices: async (session: string, wav: Buffer) => {
-              if (!(whisper instanceof LocalWhisperBackend))
-                throw new Error('DIARISE_MODEL_PATH is set but WHISPER_BACKEND is not local');
-              return whisper.transcribeVoices(session, wav);
-            },
-          }
-        : {}),
-    ...(process.env['VOICEPRINT_PATH']
-      ? { hasVoiceprint: () => existsSync(process.env['VOICEPRINT_PATH'] as string) }
-      : {}),
     analyse: makeMeetingAnalyser({
       sdkBackend,
       runOnAccountWithCredit,
       cwd: hostCwd,
       model: () => meetingModels.analysis,
-      onDropped: (chatId, msg) => logger.warn({ chatId }, `meeting: ${msg}`),
+      logger: logger.child({ component: 'meeting' }),
     }),
     correct: makeMeetingCorrector({
       sdkBackend,
@@ -5116,19 +5045,37 @@ async function startHost(
   //    (The server-link dial happens earlier — right after the host graph is
   //    wired — so surfaces connect promptly rather than waiting on this stack.)
   const whisperLog = logger.child({ component: 'whisper' });
-  if (config.audio.whisperBackend === 'elevenlabs') {
+  // spec/02 § Optional components: an installed Parakeet is the host's
+  // speech-to-text unless WHISPER_BACKEND names another, the same way an
+  // installed Kokoro turns speech on.
+  const parakeetInstalled =
+    components.describe().find((c) => c.id === 'parakeet')?.state === 'installed';
+  const sttBackend =
+    !config.audio.whisperBackendExplicit && parakeetInstalled
+      ? ('parakeet' as const)
+      : config.audio.whisperBackend;
+  const parakeetModelDir =
+    config.audio.parakeetModelDir ??
+    (parakeetInstalled ? join(config.patchHome, 'components', 'parakeet') : undefined);
+  const sttOffReason =
+    config.audio.whisperBackendRetired !== undefined
+      ? `Speech-to-text was set to ${config.audio.whisperBackendRetired}, which Patch no longer offers. ` +
+        'Install Parakeet from Settings → Hosts to transcribe on this machine.'
+      : undefined;
+  if (sttOffReason !== undefined && sttBackend === 'off') whisperLog.error(sttOffReason);
+  if (sttBackend !== config.audio.whisperBackend)
+    whisperLog.info('speech-to-text: the Parakeet component is installed on this machine');
+  if (sttBackend === 'elevenlabs') {
     whisper = new ElevenLabsScribeBackend({
       logger: whisperLog,
       apiKey: () => providerKeys.get('elevenlabs'),
     });
   } else {
     whisper = createWhisper({
-      backend: config.audio.whisperBackend,
+      backend: sttBackend,
       logger: logger.child({ component: 'whisper' }),
-      groqApiKey: () => providerKeys.get('groq'),
-      ...(config.audio.parakeetModelDir !== undefined
-        ? { parakeetModelDir: config.audio.parakeetModelDir }
-        : {}),
+      ...(sttOffReason !== undefined ? { offReason: sttOffReason } : {}),
+      ...(parakeetModelDir !== undefined ? { parakeetModelDir } : {}),
       ...(config.audio.whisperLocalSidecarUrl !== undefined
         ? { localSidecarUrl: config.audio.whisperLocalSidecarUrl }
         : {}),
@@ -5149,7 +5096,7 @@ async function startHost(
   }
   // The on-host model loads now: a broken install aborts the boot rather
   // than failing the first word someone says.
-  if (config.audio.whisperBackend === 'parakeet') await (whisper as ParakeetWhisperBackend).warm();
+  if (sttBackend === 'parakeet') await (whisper as ParakeetWhisperBackend).warm();
   // The streaming model for dictation on the `host` engine loads now too.
   if (config.audio.parakeetStreamingModelDir !== undefined) {
     liveRecognizer = new ParakeetLiveRecognizer({
@@ -5158,8 +5105,6 @@ async function startHost(
     });
     await liveRecognizer.warm();
   }
-  // Shared settings may have landed before the backend existed.
-  if (meetingTranscriptionModel !== '') whisper.useModel?.(meetingTranscriptionModel);
   dictationTranscribers = createDictationTranscribers({
     logger: logger.child({ component: 'hosted-stt' }),
     local: whisper,
@@ -5897,9 +5842,9 @@ export async function handleFoldersBrowseRequest(
  * spec/07 § End-to-end voice transport — transcribe a mobile voice-note clip.
  *
  * The server round-trips the uploaded m4a (base64) over the host link; the
- * host runs it through its Whisper backend's "uploaded clip" path (Groq
- * accepts m4a directly; the local faster-whisper backend refuses it with a
- * typed `unsupported_format`) and replies with the transcript or a typed error.
+ * host runs it through its speech-to-text backend's "uploaded clip" path
+ * (Parakeet decodes the m4a with ffmpeg; the local faster-whisper backend
+ * refuses it with a typed `unsupported_format`) and replies with the transcript or a typed error.
  * The server, on `ok`, injects the transcript as the chat's next user turn.
  * NO FALLBACK — every failure is reported, never swallowed into a blank note.
  */
@@ -6997,11 +6942,17 @@ export async function handleServerEvent(
         return;
       }
       case 'meeting.audio': {
-        await requireMeetings(accounts).ingestAudio(
+        // Meetings are transcribed on the device that hears them (spec/07 § Meeting
+        // transcription). A surface still sending audio predates that.
+        throw new Error(
+          'Meeting audio is now transcribed on your device: update the Patch desktop app to listen to meetings',
+        );
+      }
+      case 'meeting.lines': {
+        requireMeetings(accounts).ingestLines(
           event.chatId,
           event.source,
-          Buffer.from(event.audioBase64, 'base64'),
-          event.speakerName,
+          event.lines,
           event.device,
         );
         return;

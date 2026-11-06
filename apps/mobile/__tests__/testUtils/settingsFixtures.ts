@@ -25,7 +25,6 @@ export function settingsFixture(patch: Partial<SettingsResponse> = {}): Settings
         providerKeys: [
           { id: 'gemini', set: false },
           { id: 'openai', set: false },
-          { id: 'groq', set: false },
         ],
       },
       hosts: [],

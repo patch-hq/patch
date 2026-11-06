@@ -579,10 +579,10 @@ describe('TE1 voice host pipeline e2e', () => {
   });
 
   test('E1-10: a REAL backend with its model/credential absent fails loudly — no silent fallback', () => {
-    // Whisper groq with no key.
+    // ElevenLabs Scribe with no key.
     expect(() =>
-      validateWhisperCredentials({ whisperBackend: 'groq', groqApiKey: undefined }),
-    ).toThrow(/Settings → Providers/);
+      validateWhisperCredentials({ whisperBackend: 'elevenlabs', elevenlabsApiKey: undefined }),
+    ).toThrow(/ELEVEN_LABS_API_KEY/);
     // Whisper local with neither URL nor model path.
     expect(() => validateWhisperCredentials({ whisperBackend: 'local' })).toThrow(
       /WHISPER_MODEL_PATH/,

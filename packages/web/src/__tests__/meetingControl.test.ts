@@ -85,7 +85,7 @@ describe('opt-in raw recording', () => {
     await startMeeting('c1');
     setRecordRaw(false);
     expect(pushError).toHaveBeenCalledWith(
-      expect.stringMatching(/Raw recording needs the desktop/),
+      expect.stringMatching(/listen from the Patch desktop app/),
     );
     expect(useMeetingStore.getState().capturingChatId).toBeNull();
   });

@@ -362,7 +362,7 @@ describe('Composer — send while dictating', () => {
     await actAsync(() => {
       findHost(r.root, byLabel('Dictate into message')).props['onPress']();
     });
-    sessions[0]!.finish.mockRejectedValueOnce(new Error('groq 500'));
+    sessions[0]!.finish.mockRejectedValueOnce(new Error('stt 500'));
     await actAsync(() => {
       findHost(r.root, byLabel('Send message')).props['onPress']();
     });
@@ -370,7 +370,7 @@ describe('Composer — send while dictating', () => {
     expect(submitSpy).not.toHaveBeenCalled();
     expect(findHost(r.root, byType('TextInput')).props['value']).toBe('typed first');
     expect(useUiStore.getState().errors.at(-1)?.message).toBe(
-      'voice transcription failed: groq 500',
+      'voice transcription failed: stt 500',
     );
   });
 });
@@ -773,12 +773,12 @@ describe('Composer — dictation error paths (NO silent drop)', () => {
     await actAsync(() => {
       findHost(r.root, byLabel('Dictate into message')).props['onPress']();
     });
-    sessions[0]!.finish.mockRejectedValueOnce(new Error('groq 500'));
+    sessions[0]!.finish.mockRejectedValueOnce(new Error('stt 500'));
     await actAsync(() => {
       findHost(r.root, byLabel('Dictate into message')).props['onPress']();
     });
     expect(useUiStore.getState().errors.at(-1)?.message).toBe(
-      'voice transcription failed: groq 500',
+      'voice transcription failed: stt 500',
     );
     expect(findHost(r.root, byType('TextInput')).props['value']).toBe('');
   });

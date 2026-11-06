@@ -129,7 +129,7 @@ describe('Settings → Prompts', () => {
     await waitFor(() => expect(server.writes).toEqual([{ meetingNotesPrompt: 'Terse.' }]));
   });
 
-  it('shows the meeting models and interval, and writes the transcription model and interval', async () => {
+  it('shows the meeting models and interval, and writes the interval', async () => {
     const server = serve();
     renderSettings('/settings/prompts');
     const analysis = (await screen.findByTestId('meeting-analysis-model')) as HTMLSelectElement;
@@ -137,15 +137,8 @@ describe('Settings → Prompts', () => {
     expect((screen.getByTestId('meeting-cleanup-model') as HTMLSelectElement).value).toBe(
       DEFAULT_MEETING_MODEL,
     );
-    const stt = screen.getByTestId('meeting-transcription-model') as HTMLInputElement;
-    expect(stt.value).toBe('');
-    fireEvent.change(stt, { target: { value: ' /models/whisper/small.en ' } });
-    fireEvent.blur(stt);
-    await waitFor(() =>
-      expect(server.writes).toContainEqual({
-        meetingTranscriptionModel: '/models/whisper/small.en',
-      }),
-    );
+    // Meetings are transcribed on the listening device: there is no model to pick here.
+    expect(screen.queryByTestId('meeting-transcription-model')).toBeNull();
     fireEvent.change(screen.getByTestId('meeting-analyse-seconds'), { target: { value: '40' } });
     await waitFor(() => expect(server.writes).toContainEqual({ meetingAnalyseSeconds: 40 }));
     // Out of range is never sent.

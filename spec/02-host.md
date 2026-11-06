@@ -393,8 +393,10 @@ Each host advertises the components it has. A surface disables an affordance
 whose component is missing and names what is needed. An interrupted download
 resumes, and a component counts as installed once its size and digest verify.
 
-Remote backends install nothing: with `WHISPER_BACKEND=groq`, STT is a cloud
-call.
+Parakeet (speech-to-text) is a component like Kokoro: installing it makes it the
+host's speech-to-text unless `WHISPER_BACKEND` names another. A host still set to
+the retired `groq` starts with no speech-to-text and says to install Parakeet
+whenever a transcript is asked for.
 
 ## Browser
 
@@ -726,8 +728,7 @@ the same operations (§ Control IPC).
 
 The paid services the host itself calls each need an API key: Gemini
 (`GEMINI_API_KEY`) and OpenAI Realtime (`OPENAI_REALTIME_API_KEY`) for hosted
-voice, Groq (`GROQ_API_KEY`) for Whisper when `WHISPER_BACKEND=groq`
-(`07-voice-app.md` § Voice is a config matrix), and Deepgram
+voice, ElevenLabs (`ELEVEN_LABS_API_KEY`) for Scribe and its voices, and Deepgram
 (`DEEPGRAM_API_KEY`) for live dictation (`07-voice-app.md` § Dictation engines). These are the host's own
 keys, not the agent's (the agent's credentials are its backend's, `10-auth.md`),
 and not Secrets (which are injected into chats, `15-design-mobile.md` §
@@ -749,14 +750,13 @@ Settings → Providers and used by every host.
   surface now without its key.
 - Set takes a value of at least 16 characters with no whitespace (a pasted
   value is trimmed); anything else is refused as `invalid_value`.
-- The Groq key cannot be revoked while any host runs `WHISPER_BACKEND=groq`
-  with none in its environment (`required`, naming the host): that host
-  refuses to start without it, and would not come back up to be given
-  another. Replace it instead.
+- The ElevenLabs key cannot be revoked while any host runs
+  `WHISPER_BACKEND=elevenlabs` with none in its environment (`required`, naming
+  the host): that host refuses to start without it, and would not come back up
+  to be given another. Replace it instead.
 - Patch never asks a person to set an environment variable, and an agent relaying a refusal never does either. Every message that reaches a surface names the key ("no Deepgram key is set") and Settings → Providers as where to add it, never the variable's name; Settings shows no variable names. The environment remains a source a host can read (above), but only for an operator who chose it. Deepgram, for dictation on the `deepgram` engine, is set there like every other key. `test/no-env-var-prompts.test.ts` fails on any credential variable name in a message.
-- A missing key never stops a host, except for that Groq one. Voice refuses
-  the surface's sessions (`voice_key_missing`), and a transcription on a
-  missing Groq key fails naming where to set it.
+- A missing key never stops a host, except for that ElevenLabs one. Voice
+  refuses the surface's sessions (`voice_key_missing`).
 
 ## Responsibilities
 

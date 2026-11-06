@@ -1,9 +1,11 @@
-// The meeting-mode analysis pass (see meeting.ts): one cheap one-shot model
-// call that reads the new transcript plus what the panel already shows and
-// returns the updated Now / Discussed / Actions as JSON. Same shape as
-// statusGen.ts, except a failure THROWS: the manager puts it on the panel.
+// The meeting-mode model passes (see meeting.ts): one-shot model calls that
+// read the transcript and return the notes, name corrections, research cards
+// or write-up. Each answer must match a schema the SDK makes the model fill, so
+// there is no text to parse. A failure THROWS: the manager puts it on the panel.
 
 import { z } from 'zod';
+import { zodToJsonSchema } from 'zod-to-json-schema';
+import type { Logger } from 'pino';
 import type { SdkBackend } from './sdkBackend.js';
 import type { RunOnAccountWithCredit } from './accountFailover.js';
 import {
@@ -36,6 +38,64 @@ export function meetingTimeoutMs(topicCount: number): number {
     MEETING_TIMEOUT_MAX_MS,
     MEETING_TIMEOUT_MS + topicCount * MEETING_TIMEOUT_PER_TOPIC_MS,
   );
+}
+
+/** The JSON schema a structured answer must match, from its zod schema. */
+function schemaOf(schema: z.ZodTypeAny): Record<string, unknown> {
+  const json = zodToJsonSchema(schema, { $refStrategy: 'none', target: 'jsonSchema7' });
+  const { $schema: _drop, ...rest } = json as Record<string, unknown>;
+  return rest;
+}
+
+interface StructuredRun {
+  sdkBackend: SdkBackend;
+  runOnAccountWithCredit: RunOnAccountWithCredit;
+  cwd: string;
+  model: () => string;
+}
+
+/**
+ * One model call whose answer must match `schema`: the SDK makes the model fill
+ * it, so there is no text to dig JSON out of. NO FALLBACK: a run that ends
+ * without a structured answer is an error.
+ */
+async function runStructured(
+  opts: StructuredRun,
+  what: string,
+  prompt: string,
+  schema: Record<string, unknown>,
+  profile: 'classifier' | 'research',
+  timeoutMs: number,
+): Promise<unknown> {
+  const result = await opts.runOnAccountWithCredit(what, async (accessToken) => {
+    const abortController = new AbortController();
+    const timer = setTimeout(() => abortController.abort(), timeoutMs);
+    try {
+      let structured: unknown;
+      for await (const env of opts.sdkBackend.run({
+        prompt,
+        inferenceProfile: profile,
+        outputSchema: schema,
+        cwd: opts.cwd,
+        resumeSessionId: undefined,
+        abortController,
+        oauthAccessToken: accessToken,
+        model: opts.model(),
+        permissionMode: 'bypassPermissions',
+      })) {
+        if (env.type === 'result' && env.structured !== undefined) structured = env.structured;
+        else if (env.type === 'error')
+          throw new Error(env.errorMessage ?? 'meeting: SDK error envelope');
+      }
+      return { structured };
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+  if (result === null || result === undefined) throw new Error(`no account could run the ${what}`);
+  if (result.structured === undefined)
+    throw new Error(`the ${what} ended without a structured answer`);
+  return result.structured;
 }
 
 export function buildMeetingPrompt(input: AnalyseInput): string {
@@ -83,7 +143,7 @@ export function buildMeetingPrompt(input: AnalyseInput): string {
       ? transcript
       : '(none: everything said so far is already in the notes above. Do not comment on this; write the reply from the notes.)',
     '',
-    'Reply with ONE JSON object and nothing else, with exactly these keys:',
+    'Answer in the given structure. The keys mean:',
     '{"now":{"headline":"","bullets":[""],"who":""},',
     ' "topics":[{"id":"existing topic id to update, or null for a new topic","title":"short","points":["short key points"],"decided":false,"atSeconds":0}],',
     ' "voices":[{"voice":2,"name":"only for a Them N voice whose name is clear"}],',
@@ -98,68 +158,55 @@ export function buildMeetingPrompt(input: AnalyseInput): string {
   ].join('\n');
 }
 
-/** Drops `null` object keys so the model's "no value" reads as absent. */
-function nullsAsAbsent(v: unknown): unknown {
-  if (v === null || typeof v !== 'object' || Array.isArray(v)) return v;
-  return Object.fromEntries(
-    Object.entries(v as Record<string, unknown>).filter(([, x]) => x !== null),
-  );
-}
-
 /**
- * Keeps each valid item of a list and drops the rest, reporting each drop, so
- * one malformed item cannot discard the whole pass.
+ * The analysis answer, item by item: one action or topic the model got wrong
+ * (an owner missing for someone else's action) is dropped and named in
+ * `dropped`, rather than throwing away the whole pass and freezing the notes.
+ * A wrong top level is still an error.
  */
-function keepValid(
-  name: string,
-  items: unknown,
-  item: z.ZodTypeAny,
-  onDrop: (msg: string) => void,
-): unknown[] {
-  if (!Array.isArray(items)) throw new Error(`meeting analysis: ${name} is not a list`);
-  const out: unknown[] = [];
-  items.forEach((raw, i) => {
-    const r = item.safeParse(nullsAsAbsent(raw));
-    if (r.success) out.push(r.data);
-    else
-      onDrop(
-        `${name}[${i}] dropped: ${r.error.issues.map((x) => `${x.path.join('.')} ${x.message}`).join('; ')}`,
-      );
-  });
-  return out;
-}
-
-/**
- * First `{` to last `}` — models wrap JSON in prose or fences despite being told not to.
- * `now` must be valid, but an invalid topic, action, voice or summary is dropped
- * (reported through `onDrop`) rather than failing the whole pass.
- */
-export function parseMeetingAnalysis(
-  raw: string,
-  onDrop: (msg: string) => void = () => {},
-): MeetingAnalysis {
-  const start = raw.indexOf('{');
-  const end = raw.lastIndexOf('}');
-  if (start < 0 || end <= start)
-    throw new Error(`no JSON object in model reply: ${raw.slice(0, 120)}`);
-  const obj = JSON.parse(raw.slice(start, end + 1)) as Record<string, unknown>;
-  if (obj === null || typeof obj !== 'object' || Array.isArray(obj))
-    throw new Error('meeting analysis: reply is not an object');
+export function parseMeetingAnalysis(raw: unknown): {
+  analysis: MeetingAnalysis;
+  dropped: string[];
+} {
+  if (typeof raw !== 'object' || raw === null) throw new Error('meeting analysis is not an object');
+  const r = raw as Record<string, unknown>;
+  const dropped: string[] = [];
   const shape = MeetingAnalysis.shape;
-  const actionItem = shape.actions.element;
-  const summary = shape.summary.safeParse(nullsAsAbsent(obj['summary']));
-  if (!summary.success && obj['summary'] !== undefined && obj['summary'] !== null)
-    onDrop(`summary dropped: ${summary.error.issues.map((x) => x.message).join('; ')}`);
-  return MeetingAnalysis.parse({
-    now: shape.now.parse(obj['now']),
-    topics: keepValid('topics', obj['topics'] ?? [], shape.topics.element, onDrop),
-    actions: keepValid('actions', obj['actions'] ?? [], actionItem, onDrop),
-    ...(obj['voices'] == null
-      ? {}
-      : { voices: keepValid('voices', obj['voices'], shape.voices.unwrap().element, onDrop) }),
-    ...(summary.success ? { summary: summary.data } : {}),
+  const keep = <T>(key: string, item: z.ZodType<T>, list: unknown): T[] | undefined => {
+    if (list === undefined || list === null) return undefined;
+    if (!Array.isArray(list)) throw new Error(`meeting analysis ${key} is not a list`);
+    const out: T[] = [];
+    list.forEach((x, i) => {
+      // A null field is the model saying "none": the same as leaving it out.
+      const cleaned =
+        typeof x === 'object' && x !== null
+          ? Object.fromEntries(Object.entries(x).filter(([k, v]) => v !== null || k === 'id'))
+          : x;
+      const p = item.safeParse(cleaned);
+      if (p.success) out.push(p.data);
+      else dropped.push(`${key}[${i}]: ${p.error.issues.map((e) => e.message).join('; ')}`);
+    });
+    return out;
+  };
+  const topics = keep('topics', shape.topics.element, r['topics']) ?? [];
+  const actions = keep('actions', shape.actions.element, r['actions']) ?? [];
+  const voices = keep('voices', shape.voices.unwrap().element, r['voices']);
+  let summary: unknown = r['summary'] ?? null;
+  if (summary !== null && !shape.summary.safeParse(summary).success) {
+    dropped.push('summary: not a headline and bullets');
+    summary = null;
+  }
+  const analysis = MeetingAnalysis.parse({
+    now: r['now'],
+    topics,
+    actions,
+    ...(voices !== undefined ? { voices } : {}),
+    summary,
   });
+  return { analysis, dropped };
 }
+
+const MEETING_ANALYSIS_SCHEMA = schemaOf(MeetingAnalysis);
 
 export function makeMeetingAnalyser(opts: {
   sdkBackend: SdkBackend;
@@ -167,45 +214,21 @@ export function makeMeetingAnalyser(opts: {
   cwd: string;
   /** Read fresh each pass so a Settings change applies mid-meeting. */
   model: () => string;
-  /** Told about each item of a reply that was dropped for being invalid. */
-  onDropped?: (chatId: string, msg: string) => void;
+  logger?: Logger;
 }): (input: AnalyseInput) => Promise<MeetingAnalysis> {
   return async function analyse(input) {
-    const result = await opts.runOnAccountWithCredit(
-      `meeting ${input.chatId}`,
-      async (accessToken) => {
-        const abortController = new AbortController();
-        const timer = setTimeout(
-          () => abortController.abort(),
-          meetingTimeoutMs(input.previous.topics.length),
-        );
-        try {
-          let finalText = '';
-          let deltaText = '';
-          for await (const env of opts.sdkBackend.run({
-            prompt: buildMeetingPrompt(input),
-            inferenceProfile: 'classifier',
-            cwd: opts.cwd,
-            resumeSessionId: undefined,
-            abortController,
-            oauthAccessToken: accessToken,
-            model: opts.model(),
-            permissionMode: 'bypassPermissions',
-          })) {
-            if (env.type === 'assistant' && env.content) finalText += env.content;
-            else if (env.type === 'assistant_delta' && env.content) deltaText += env.content;
-            else if (env.type === 'error')
-              throw new Error(env.errorMessage ?? 'meeting: SDK error envelope');
-          }
-          return finalText !== '' ? finalText : deltaText;
-        } finally {
-          clearTimeout(timer);
-        }
-      },
+    const raw = await runStructured(
+      opts,
+      `meeting analysis`,
+      buildMeetingPrompt(input),
+      MEETING_ANALYSIS_SCHEMA,
+      'classifier',
+      meetingTimeoutMs(input.previous.topics.length),
     );
-    if (result === null || result === undefined)
-      throw new Error('no account could run the meeting analysis');
-    return parseMeetingAnalysis(result, (msg) => opts.onDropped?.(input.chatId, msg));
+    const { analysis, dropped } = parseMeetingAnalysis(raw);
+    if (dropped.length > 0)
+      opts.logger?.warn({ chatId: input.chatId, dropped }, 'meeting: analysis items dropped');
+    return analysis;
   };
 }
 
@@ -225,17 +248,15 @@ export function buildCorrectionPrompt(input: CorrectInput): string {
     'Lines to correct (JSON array of {speaker,text}):',
     JSON.stringify(input.lines),
     '',
-    `Reply with ONE JSON array of exactly ${input.lines.length} strings, the corrected text of each line in order, and nothing else.`,
+    `Answer in the given structure: "lines" holds exactly ${input.lines.length} strings, the corrected text of each line in order.`,
   ].join('\n');
 }
 
-/** First `[` to last `]`, same tolerance as the notes parser. */
-export function parseCorrections(raw: string, expected: number): string[] {
-  const start = raw.indexOf('[');
-  const end = raw.lastIndexOf(']');
-  if (start < 0 || end <= start)
-    throw new Error(`no JSON array in correction reply: ${raw.slice(0, 120)}`);
-  const out = z.array(z.string()).parse(JSON.parse(raw.slice(start, end + 1)));
+const Corrections = z.object({ lines: z.array(z.string()) }).strict();
+const CORRECTIONS_SCHEMA = schemaOf(Corrections);
+
+export function parseCorrections(raw: unknown, expected: number): string[] {
+  const out = Corrections.parse(raw).lines;
   if (out.length !== expected)
     throw new Error(`correction returned ${out.length} lines, expected ${expected}`);
   return out;
@@ -249,38 +270,15 @@ export function makeMeetingCorrector(opts: {
   model: () => string;
 }): (input: CorrectInput) => Promise<string[]> {
   return async function correct(input) {
-    const result = await opts.runOnAccountWithCredit(
-      `meeting correct ${input.chatId}`,
-      async (accessToken) => {
-        const abortController = new AbortController();
-        const timer = setTimeout(() => abortController.abort(), MEETING_TIMEOUT_MS);
-        try {
-          let finalText = '';
-          let deltaText = '';
-          for await (const env of opts.sdkBackend.run({
-            prompt: buildCorrectionPrompt(input),
-            inferenceProfile: 'classifier',
-            cwd: opts.cwd,
-            resumeSessionId: undefined,
-            abortController,
-            oauthAccessToken: accessToken,
-            model: opts.model(),
-            permissionMode: 'bypassPermissions',
-          })) {
-            if (env.type === 'assistant' && env.content) finalText += env.content;
-            else if (env.type === 'assistant_delta' && env.content) deltaText += env.content;
-            else if (env.type === 'error')
-              throw new Error(env.errorMessage ?? 'meeting: SDK error envelope');
-          }
-          return finalText !== '' ? finalText : deltaText;
-        } finally {
-          clearTimeout(timer);
-        }
-      },
+    const raw = await runStructured(
+      opts,
+      'meeting correction',
+      buildCorrectionPrompt(input),
+      CORRECTIONS_SCHEMA,
+      'classifier',
+      MEETING_TIMEOUT_MS,
     );
-    if (result === null || result === undefined)
-      throw new Error('no account could run the meeting correction');
-    return parseCorrections(result, input.lines.length);
+    return parseCorrections(raw, input.lines.length);
   };
 }
 
@@ -299,19 +297,17 @@ export function buildResearchPrompt(input: ResearchInput): string {
     '',
     ...MEETING_RESEARCH_RULES,
     '',
-    'Reply with ONE JSON object and nothing else:',
+    'Answer in the given structure. The keys mean:',
     '{"cards":[{"kind":"explained | fact | answer","title":"","atSeconds":0,"bullets":[""],"verdict":"correct | off | unclear (kind fact only; omit for explained and answer)","source":{"name":"","url":""}}]}',
     'atSeconds is the transcript time in seconds that prompted the card.',
   ].join('\n');
 }
 
-export function parseResearch(raw: string): MeetingResearchResult {
-  const start = raw.indexOf('{');
-  const end = raw.lastIndexOf('}');
-  if (start < 0 || end <= start)
-    throw new Error(`no JSON object in research reply: ${raw.slice(0, 120)}`);
-  return MeetingResearchResult.parse(JSON.parse(raw.slice(start, end + 1)));
+export function parseResearch(raw: unknown): MeetingResearchResult {
+  return MeetingResearchResult.parse(raw);
 }
+
+const RESEARCH_SCHEMA = schemaOf(MeetingResearchResult);
 
 export function makeMeetingResearcher(opts: {
   sdkBackend: SdkBackend;
@@ -321,37 +317,15 @@ export function makeMeetingResearcher(opts: {
   model: () => string;
 }): (input: ResearchInput) => Promise<MeetingResearchResult> {
   return async function research(input) {
-    const result = await opts.runOnAccountWithCredit(
-      `meeting research ${input.chatId}`,
-      async (accessToken) => {
-        const abortController = new AbortController();
-        const timer = setTimeout(() => abortController.abort(), RESEARCH_TIMEOUT_MS);
-        try {
-          // Searching takes several turns: only the last message is the answer.
-          let last = '';
-          for await (const env of opts.sdkBackend.run({
-            prompt: buildResearchPrompt(input),
-            inferenceProfile: 'research',
-            cwd: opts.cwd,
-            resumeSessionId: undefined,
-            abortController,
-            oauthAccessToken: accessToken,
-            model: opts.model(),
-            permissionMode: 'bypassPermissions',
-          })) {
-            if (env.type === 'assistant' && env.content) last = env.content;
-            else if (env.type === 'error')
-              throw new Error(env.errorMessage ?? 'meeting: SDK error envelope');
-          }
-          return last;
-        } finally {
-          clearTimeout(timer);
-        }
-      },
+    const raw = await runStructured(
+      opts,
+      'meeting research',
+      buildResearchPrompt(input),
+      RESEARCH_SCHEMA,
+      'research',
+      RESEARCH_TIMEOUT_MS,
     );
-    if (result === null || result === undefined)
-      throw new Error('no account could run the meeting research');
-    return parseResearch(result);
+    return parseResearch(raw);
   };
 }
 
@@ -371,18 +345,16 @@ export function buildWriteupPrompt(input: WriteupInput): string {
     'Transcript:',
     transcript !== '' ? transcript : '(empty: write from the notes alone)',
     '',
-    'Reply with ONE JSON object and nothing else:',
+    'Answer in the given structure. The keys mean:',
     '{"title":"short title of the meeting","sections":[{"heading":"","items":[{"text":"","mine":true}]}]}',
   ].join('\n');
 }
 
-export function parseWriteup(raw: string): MeetingWriteup {
-  const start = raw.indexOf('{');
-  const end = raw.lastIndexOf('}');
-  if (start < 0 || end <= start)
-    throw new Error(`no JSON object in write-up reply: ${raw.slice(0, 120)}`);
-  return MeetingWriteup.parse(JSON.parse(raw.slice(start, end + 1)));
+export function parseWriteup(raw: unknown): MeetingWriteup {
+  return MeetingWriteup.parse(raw);
 }
+
+const WRITEUP_SCHEMA = schemaOf(MeetingWriteup);
 
 export function makeMeetingWriteup(opts: {
   sdkBackend: SdkBackend;
@@ -392,37 +364,14 @@ export function makeMeetingWriteup(opts: {
   model: () => string;
 }): (input: WriteupInput) => Promise<MeetingWriteup> {
   return async function writeup(input) {
-    const result = await opts.runOnAccountWithCredit(
-      `meeting write-up ${input.chatId}`,
-      async (accessToken) => {
-        const abortController = new AbortController();
-        const timer = setTimeout(() => abortController.abort(), WRITEUP_TIMEOUT_MS);
-        try {
-          let finalText = '';
-          let deltaText = '';
-          for await (const env of opts.sdkBackend.run({
-            prompt: buildWriteupPrompt(input),
-            inferenceProfile: 'classifier',
-            cwd: opts.cwd,
-            resumeSessionId: undefined,
-            abortController,
-            oauthAccessToken: accessToken,
-            model: opts.model(),
-            permissionMode: 'bypassPermissions',
-          })) {
-            if (env.type === 'assistant' && env.content) finalText += env.content;
-            else if (env.type === 'assistant_delta' && env.content) deltaText += env.content;
-            else if (env.type === 'error')
-              throw new Error(env.errorMessage ?? 'meeting: SDK error envelope');
-          }
-          return finalText !== '' ? finalText : deltaText;
-        } finally {
-          clearTimeout(timer);
-        }
-      },
+    const raw = await runStructured(
+      opts,
+      'meeting write-up',
+      buildWriteupPrompt(input),
+      WRITEUP_SCHEMA,
+      'classifier',
+      WRITEUP_TIMEOUT_MS,
     );
-    if (result === null || result === undefined)
-      throw new Error('no account could run the meeting write-up');
-    return parseWriteup(result);
+    return parseWriteup(raw);
   };
 }

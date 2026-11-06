@@ -19,6 +19,7 @@ import {
   type MeetingDeps,
   type MeetingPrompts,
 } from '../src/meeting.js';
+import { TestMeetings } from './meetingDevice.js';
 import {
   buildMeetingPrompt,
   makeMeetingAnalyser,
@@ -68,8 +69,8 @@ describe('MeetingManager', () => {
   let ticks: (() => void)[];
   let n: number;
 
-  const make = (extra: Partial<MeetingDeps> = {}): MeetingManager =>
-    new MeetingManager({
+  const make = (extra: Partial<MeetingDeps> = {}): TestMeetings =>
+    new TestMeetings({
       ...extra,
       dir,
       transcribe,
@@ -109,39 +110,6 @@ describe('MeetingManager', () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-  it('keeps transcribing clips while a slow analysis pass is still running', async () => {
-    const m = make();
-    m.start('c1');
-    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
-    let release!: () => void;
-    analyse.mockImplementationOnce(
-      () => new Promise<MeetingAnalysis>((r) => (release = () => r(analysis()))),
-    );
-    const tick = m.tick('c1');
-    await Promise.resolve();
-    transcribe.mockResolvedValueOnce('said during the slow pass');
-    await m.ingestAudio('c1', 'mic', Buffer.from('b'));
-    expect(m.get('c1')!.transcript.map((l) => l.text)).toContain('said during the slow pass');
-    release();
-    await tick;
-  });
-
-  it('does not hold the mic channel behind a stalled system clip', async () => {
-    diarise = true;
-    const m = make();
-    m.start('c1');
-    let release!: () => void;
-    transcribeVoices.mockImplementationOnce(
-      () => new Promise((r) => (release = () => r([{ text: 'late system words', voice: 1 }]))),
-    );
-    const stalled = m.ingestAudio('c1', 'system', Buffer.from('s'));
-    transcribe.mockResolvedValueOnce('prompt mic words');
-    await m.ingestAudio('c1', 'mic', Buffer.from('m'));
-    expect(m.get('c1')!.transcript.map((l) => l.text)).toEqual(['prompt mic words']);
-    release();
-    await stalled;
-  });
-
   it('drops a system line that is the mic speech returning, in either clip order', async () => {
     const m = make();
     m.start('c1');
@@ -176,58 +144,6 @@ describe('MeetingManager', () => {
     transcribe.mockResolvedValueOnce('so the ledger split needs to land before black friday');
     await m.ingestAudio('c1', 'system', Buffer.from('d'));
     expect(m.get('c1')!.transcript.map((l) => l.speaker)).toEqual(['you', 'them', 'them', 'them']);
-  });
-
-  it("splits a Them clip into numbered voices and merges a voice's consecutive stretches", async () => {
-    diarise = true;
-    const m = make();
-    m.start('c1');
-    transcribeVoices.mockResolvedValueOnce([
-      { text: 'Shall we start?', voice: 1 },
-      { text: 'Yes please.', voice: 1 },
-      { text: 'I have the numbers.', voice: 2 },
-    ]);
-    await m.ingestAudio('c1', 'system', Buffer.from('a'));
-    expect(m.get('c1')?.transcript.map((l) => [l.speaker, l.voice, l.text])).toEqual([
-      ['them', 1, 'Shall we start? Yes please.'],
-      ['them', 2, 'I have the numbers.'],
-    ]);
-    expect(transcribeVoices).toHaveBeenCalledWith('c1:1000000', expect.any(Buffer));
-    expect(transcribe).not.toHaveBeenCalled();
-  });
-
-  it('with a voice print, the mic is diarised: voice 0 is you, others are Them', async () => {
-    diarise = true;
-    const m = make({ hasVoiceprint: () => true });
-    m.start('c1');
-    transcribeVoices.mockResolvedValueOnce([
-      { text: 'Right, my update.', voice: 0 },
-      { text: 'Go on then.', voice: 1 },
-    ]);
-    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
-    expect(m.get('c1')?.transcript.map((l) => [l.speaker, l.voice, l.text])).toEqual([
-      ['you', undefined, 'Right, my update.'],
-      ['them', 1, 'Go on then.'],
-    ]);
-    expect(transcribe).not.toHaveBeenCalled();
-  });
-
-  it('with a voice print, your voice on the system channel is still you', async () => {
-    diarise = true;
-    const m = make({ hasVoiceprint: () => true });
-    m.start('c1');
-    transcribeVoices.mockResolvedValueOnce([{ text: 'Me in the room', voice: 0 }]);
-    await m.ingestAudio('c1', 'system', Buffer.from('a'));
-    expect(m.get('c1')?.transcript[0]?.speaker).toBe('you');
-  });
-
-  it('never diarises the mic without a voice print, and keeps one Them label without a diariser', async () => {
-    diarise = true;
-    const m = make();
-    m.start('c1');
-    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
-    expect(transcribeVoices).not.toHaveBeenCalled();
-    expect(m.get('c1')?.transcript[0]).toEqual({ at: 0, speaker: 'you', text: 'hello there' });
   });
 
   it('labels voices in the analysis input, and a name replaces the number', async () => {
@@ -276,16 +192,6 @@ describe('MeetingManager', () => {
     const m = make();
     m.start('c1');
     expect(() => m.nameVoice('c1', 3, 'X')).toThrow(MeetingError);
-  });
-
-  it('a failed diarised transcription lands on state.error', async () => {
-    diarise = true;
-    const m = make();
-    m.start('c1');
-    transcribeVoices.mockRejectedValueOnce(new Error('DIARISE_MODEL_PATH is not set'));
-    await m.ingestAudio('c1', 'system', Buffer.from('a'));
-    expect(m.get('c1')?.error).toContain('DIARISE_MODEL_PATH');
-    expect(m.get('c1')?.transcript).toEqual([]);
   });
 
   it('stamps a Them line with the speaker the call app lit up, and never a You line', async () => {
@@ -364,7 +270,7 @@ describe('MeetingManager', () => {
 
   it('settings default, are tunable mid-meeting, and set the analysis interval', () => {
     const intervals: number[] = [];
-    const m = new MeetingManager({
+    const m = new TestMeetings({
       prompts: () => PROMPTS,
       dir,
       transcribe,
@@ -410,13 +316,18 @@ describe('MeetingManager', () => {
     ]);
   });
 
-  it('transcribes with no vocabulary prompt, even once names are known', async () => {
-    // A prompt made from earlier text gets parroted back over unclear audio.
+  it('places a device line at the time it was said and keeps the two sources in time order', () => {
     const m = make();
     m.start('c1');
-    await m.ingestAudio('c1', 'system', Buffer.from('a'), 'Priya Shah');
-    await m.ingestAudio('c1', 'mic', Buffer.from('b'));
-    for (const call of transcribe.mock.calls) expect(call).toHaveLength(1);
+    clock += 20_000;
+    m.ingestLines('c1', 'mic', [{ text: 'said at fifteen', spokenAt: 1_000_000 + 15_000 }]);
+    m.ingestLines('c1', 'system', [{ text: 'said at twelve', spokenAt: 1_000_000 + 12_000 }]);
+    m.ingestLines('c1', 'system', [{ text: 'from before the start', spokenAt: 900_000 }]);
+    expect(m.get('c1')!.transcript.map((l) => [l.at, l.speaker, l.text])).toEqual([
+      [0, 'them', 'from before the start'],
+      [12_000, 'them', 'said at twelve'],
+      [15_000, 'you', 'said at fifteen'],
+    ]);
   });
 
   it('drops silent clips instead of adding empty lines', async () => {
@@ -448,16 +359,6 @@ describe('MeetingManager', () => {
       ['Mid', 400_000],
       ['Late', 610_000],
     ]);
-  });
-
-  it('puts a transcription failure on state.error and clears it on the next success', async () => {
-    const m = make();
-    m.start('c1');
-    transcribe.mockRejectedValueOnce(new Error('sidecar down'));
-    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
-    expect(m.get('c1')?.error).toContain('sidecar down');
-    await m.ingestAudio('c1', 'mic', Buffer.from('a'));
-    expect(m.get('c1')?.error).toBeNull();
   });
 
   it('tick analyses only new lines and merges topics and actions once', async () => {
@@ -516,11 +417,11 @@ describe('MeetingManager', () => {
     expect(m.get('c1')!.actions).toHaveLength(5);
   });
 
-  it('records the device the audio came from', async () => {
+  it('records the device the lines came from', () => {
     const m = make();
     m.start('c1');
-    await m.ingestAudio('c1', 'mic', Buffer.from('a'), undefined, 'Chrome on a Mac');
-    expect(m.get('c1')!.listeningOn).toBe('Chrome on a Mac');
+    m.ingestLines('c1', 'mic', [{ text: 'hi', spokenAt: clock }], 'Patch on a Mac');
+    expect(m.get('c1')!.listeningOn).toBe('Patch on a Mac');
   });
 
   it('stores My notes with the meeting, broadcasts it, reloads it and leaves it alone through analysis', async () => {
@@ -958,8 +859,8 @@ describe('MeetingManager', () => {
     expect(p).toContain('[00:01 Priya] ship it');
     expect(p).toContain('ask budget');
     expect(p).toContain('"mine": true');
-    expect(parseWriteup('```json\n{"title":"T","sections":[]}\n```').title).toBe('T');
-    expect(() => parseWriteup('nope')).toThrow(/no JSON/);
+    expect(parseWriteup({ title: 'T', sections: [] }).title).toBe('T');
+    expect(() => parseWriteup({ title: 'T' })).toThrow();
   });
 
   it('end runs a final pass that writes the summary and then rejects audio', async () => {
@@ -976,7 +877,7 @@ describe('MeetingManager', () => {
     expect(s.summary?.headline).toBe('Split in November');
     expect(s.elapsedBaseMs).toBe(52 * 60_000);
     expect(analyse.mock.calls[0]![0].final).toBe(true);
-    expect(() => m.ingestAudio('c1', 'mic', Buffer.from('a'))).toThrow(/ended/);
+    expect(() => m.ingestLines('c1', 'mic', [{ text: 'late', spokenAt: clock }])).toThrow(/ended/);
     expect(() => m.start('c1')).not.toThrow(); // a new meeting may follow
   });
 
@@ -1281,35 +1182,45 @@ describe('MeetingManager', () => {
 });
 
 describe('meetingGen', () => {
-  it('parses JSON wrapped in prose or fences', () => {
-    const body = JSON.stringify(analysis());
-    expect(parseMeetingAnalysis('Here you go:\n```json\n' + body + '\n```').now.headline).toBe(
-      'Ledger split timing',
-    );
+  it('takes the structured answer as it is', () => {
+    expect(parseMeetingAnalysis(analysis()).analysis.now.headline).toBe('Ledger split timing');
   });
 
-  it('rejects a reply with no JSON or the wrong shape', () => {
-    expect(() => parseMeetingAnalysis('sorry')).toThrow(/no JSON/);
-    expect(() => parseMeetingAnalysis('{"now":1}')).toThrow();
+  it('drops one bad action or topic and keeps the rest of the pass', () => {
+    const { analysis: a, dropped } = parseMeetingAnalysis({
+      ...analysis(),
+      actions: [
+        { kind: 'other', owner: null, title: 'Chase the invoice', why: 'Sam said so' },
+        { kind: 'mine', owner: null, title: 'Send the deck', why: 'Tom offered' },
+      ],
+      topics: [{ id: null, title: 'Budget', points: ['ok'], decided: false }, { title: 7 }],
+    });
+    expect(a.actions.map((x) => x.title)).toEqual(['Send the deck']);
+    expect(a.topics.map((t) => t.title)).toEqual(['Budget']);
+    expect(dropped).toEqual([
+      expect.stringMatching(/^topics\[1\]/),
+      expect.stringMatching(/^actions\[0\]: .*owner/),
+    ]);
+  });
+
+  it('rejects a wrong top level', () => {
+    expect(() => parseMeetingAnalysis('sorry')).toThrow(/not an object/);
+    expect(() => parseMeetingAnalysis({ now: 1, topics: [], actions: [] })).toThrow();
   });
   it('drops only the invalid items and treats null as absent', () => {
-    const dropped: string[] = [];
-    const a = parseMeetingAnalysis(
-      JSON.stringify({
-        now: { headline: 'h', bullets: [], who: 'w' },
-        topics: [{ title: 't', points: [] }, { title: 5 }],
-        actions: [
-          { kind: 'other', owner: null, title: 'a', why: 'y' },
-          { kind: 'mine', title: 'b' },
-          { kind: 'mine', owner: null, title: 'c', why: 'ok' },
-        ],
-        summary: 'a string',
-      }),
-      (m) => dropped.push(m),
-    );
+    const { analysis: a, dropped } = parseMeetingAnalysis({
+      now: { headline: 'h', bullets: [], who: 'w' },
+      topics: [{ title: 't', points: [] }, { title: 5 }],
+      actions: [
+        { kind: 'other', owner: null, title: 'a', why: 'y' },
+        { kind: 'mine', title: 'b' },
+        { kind: 'mine', owner: null, title: 'c', why: 'ok' },
+      ],
+      summary: 'a string',
+    });
     expect(a.topics).toHaveLength(1);
     expect(a.actions.map((x) => x.title)).toEqual(['c']);
-    expect(a.summary).toBeUndefined();
+    expect(a.summary).toBeNull();
     expect(dropped).toHaveLength(4);
   });
 
@@ -1383,14 +1294,14 @@ describe('editable meeting prompts', () => {
     expect(p).toContain('NOTES-RULES');
     expect(p).toContain('ACTION-RULES');
     expect(p).not.toContain(DEFAULT_MEETING_NOTES_PROMPT);
-    expect(p).toContain('Reply with ONE JSON object');
+    expect(p).toContain('Answer in the given structure');
   });
 
   it('the manager reads the prompts fresh on every pass', async () => {
     const dir2 = mkdtempSync(join(tmpdir(), 'meeting-p-'));
     let current = PROMPTS;
     const seen: MeetingPrompts[] = [];
-    const m = new MeetingManager({
+    const m = new TestMeetings({
       dir: dir2,
       transcribe: async () => 'hello',
       analyse: async (i) => {
@@ -1446,11 +1357,11 @@ describe('makeMeetingAnalyser', () => {
     prompts: PROMPTS,
   };
 
-  it('runs the cheap model with the transcript and parses the reply', async () => {
+  it('asks for the notes in a fixed structure and takes the structured answer', async () => {
     const sdk = createMockSdkBackend();
     sdk.enqueue([
-      { type: 'assistant', content: JSON.stringify(analysis()) },
-      { type: 'result', sessionId: 's' },
+      { type: 'assistant', content: 'Done.' },
+      { type: 'result', sessionId: 's', structured: analysis() },
     ]);
     const gen = makeMeetingAnalyser({
       sdkBackend: sdk,
@@ -1464,15 +1375,17 @@ describe('makeMeetingAnalyser', () => {
     expect(opts?.model).toBe(MEETING_MODEL);
     expect(opts?.oauthAccessToken).toBe('tok');
     expect(opts?.prompt).toContain('ship monday');
+    expect(opts?.inferenceProfile).toBe('classifier');
+    expect(opts?.outputSchema).toMatchObject({
+      type: 'object',
+      required: expect.arrayContaining(['now', 'topics', 'actions']),
+    });
   });
 
   it('reads the model fresh on every pass', async () => {
     const sdk = createMockSdkBackend();
     for (let i = 0; i < 2; i++)
-      sdk.enqueue([
-        { type: 'assistant', content: JSON.stringify(analysis()) },
-        { type: 'result', sessionId: 's' },
-      ]);
+      sdk.enqueue([{ type: 'result', sessionId: 's', structured: analysis() }]);
     let model = 'claude-haiku-4-5-20251001';
     const gen = makeMeetingAnalyser({
       sdkBackend: sdk,
@@ -1497,7 +1410,7 @@ describe('makeMeetingAnalyser', () => {
     await expect(gen(input)).rejects.toThrow(/no account/);
   });
 
-  it('throws on a model reply that is not the notes JSON', async () => {
+  it('throws when the run ends without a structured answer', async () => {
     const sdk = createMockSdkBackend();
     sdk.enqueue([
       { type: 'assistant', content: 'I cannot do that' },
@@ -1509,15 +1422,15 @@ describe('makeMeetingAnalyser', () => {
       cwd: '/home/x',
       model: () => MEETING_MODEL,
     });
-    await expect(gen(input)).rejects.toThrow(/no JSON/);
+    await expect(gen(input)).rejects.toThrow(/without a structured answer/);
   });
 });
 
 describe('meeting events on the host link', () => {
-  it('routes control, audio, action and get events to the manager', async () => {
+  it('routes control, lines, action and get events to the manager', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'meeting-ev-'));
     const sent: WireEvent[] = [];
-    const m = new MeetingManager({
+    const m = new TestMeetings({
       prompts: () => PROMPTS,
       dir,
       transcribe: async () => 'hi',
@@ -1530,10 +1443,10 @@ describe('meeting events on the host link', () => {
       handleServerEvent(e, {} as never, (x) => sent.push(x), logger, { meetings: m } as never);
     await send({ type: 'meeting.control_request', chatId: 'c', action: 'start' });
     await send({
-      type: 'meeting.audio',
+      type: 'meeting.lines',
       chatId: 'c',
       source: 'mic',
-      audioBase64: Buffer.from('x').toString('base64'),
+      lines: [{ text: 'hi', spokenAt: Date.now() }],
     });
     expect(m.get('c')?.transcript).toHaveLength(1);
     await m.tick('c');
@@ -1565,9 +1478,25 @@ describe('meeting events on the host link', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it('refuses meeting audio: meetings are transcribed on the device', async () => {
+    const errors: WireEvent[] = [];
+    const daemon = { allocErrorSeq: () => 0 } as never;
+    await handleServerEvent(
+      { type: 'meeting.audio', chatId: 'c', source: 'mic', audioBase64: 'AA==' },
+      daemon,
+      (x) => errors.push(x),
+      logger,
+      { meetings: {} } as never,
+    );
+    expect(errors[0]).toMatchObject({
+      type: 'chat.error',
+      error: { message: expect.stringMatching(/transcribed on your device/) },
+    });
+  });
+
   it('routes the action edits to the manager', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'meeting-ev-'));
-    const m = new MeetingManager({
+    const m = new TestMeetings({
       prompts: () => PROMPTS,
       dir,
       transcribe: async () => 'hi',
@@ -1651,9 +1580,9 @@ describe('transcript correction pass', () => {
     analyse: (i: AnalyseInput) => Promise<MeetingAnalysis>,
     texts: string[],
     glossary: string[] = ['WECA: Leca, Weka, WEPA'],
-  ): MeetingManager => {
+  ): TestMeetings => {
     const q = [...texts];
-    return new MeetingManager({
+    return new TestMeetings({
       prompts: () => PROMPTS,
       dir,
       transcribe: async () => q.shift() as string,
@@ -1756,17 +1685,16 @@ describe('meeting corrector (small model)', () => {
     expect(p).toContain('Do not rephrase');
   });
 
-  it('parses fenced arrays and rejects a wrong count or non-array', () => {
-    expect(parseCorrections('```json\n["a","b"]\n```', 2)).toEqual(['a', 'b']);
-    expect(() => parseCorrections('["a"]', 2)).toThrow(/expected 2/);
-    expect(() => parseCorrections('nope', 1)).toThrow(/no JSON array/);
+  it('takes the structured lines and rejects a wrong count or shape', () => {
+    expect(parseCorrections({ lines: ['a', 'b'] }, 2)).toEqual(['a', 'b']);
+    expect(() => parseCorrections({ lines: ['a'] }, 2)).toThrow(/expected 2/);
+    expect(() => parseCorrections(['a'], 1)).toThrow();
   });
 
   it('runs on the cheap model and returns the corrected lines', async () => {
     const sdkBackend = createMockSdkBackend();
     sdkBackend.enqueue([
-      { type: 'assistant', content: '["WECA and South Glos"]' },
-      { type: 'result', sessionId: 's' },
+      { type: 'result', sessionId: 's', structured: { lines: ['WECA and South Glos'] } },
     ]);
     const correct = makeMeetingCorrector({
       sdkBackend,

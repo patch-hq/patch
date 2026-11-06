@@ -1870,13 +1870,13 @@ describe('resampleTtsTo48k — int16 clamp branch coverage', () => {
   });
 });
 
-// spec/07 § Call cost — `local` counts what it sent to a paid STT backend.
+// spec/07 § Call cost — `local` counts what it sent to a speech-to-text backend.
 describe('VoiceSession — engine costing', () => {
-  test('counts each Groq request and bills at least 10s per request', async () => {
+  test('counts each speech-to-text request and the audio it carried', async () => {
     const vad = new ScriptedVad(['utterance_start', null, 'utterance_end']);
     const whisper: WhisperBackend = {
       ...mockWhisper('hello world'),
-      costModel: 'whisper-large-v3-turbo',
+      costModel: 'paid-stt',
     } as WhisperBackend;
     const session = new VoiceSession(
       initBase,
@@ -1896,10 +1896,10 @@ describe('VoiceSession — engine costing', () => {
     await session.waitForSpeakDone();
     const c = session.engineCosting();
     expect(c.backend).toBe('local');
-    expect(c.model).toBe('whisper-large-v3-turbo');
+    expect(c.model).toBe('paid-stt');
     expect(c.tokens).toBeNull();
     expect(c.stt?.requests).toBe(1);
-    expect(c.stt?.billedSeconds).toBe(10);
+    expect(c.stt?.billedSeconds).toBe(c.stt?.audioSeconds);
     expect(c.stt?.audioSeconds).toBeGreaterThan(0);
   });
 

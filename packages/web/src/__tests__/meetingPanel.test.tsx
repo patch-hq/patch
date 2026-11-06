@@ -14,6 +14,10 @@ import {
   feedTopics,
   justSaid,
   topicSpanLabel,
+  topicAge,
+  bulletsShown,
+  listeningState,
+  MeetingPanel,
 } from '../components/MeetingPanel.js';
 
 const topic = (id: string, at: number): MeetingTopic =>
@@ -202,5 +206,133 @@ describe('action source', () => {
     expect(screen.getByTestId('meeting-action-excerpt').textContent).toContain('top up the credit');
     fireEvent.click(screen.getByTestId('meeting-action-toggle'));
     expect(screen.queryByTestId('meeting-action-source')).toBeNull();
+  });
+});
+
+describe('topics fade with age instead of folding', () => {
+  it('puts the newest at full size and older ones in smaller tiers', () => {
+    expect([0, 1, 2, 3, 5, 6, 20].map(topicAge)).toEqual([0, 1, 1, 2, 2, 3, 3]);
+  });
+
+  it('shows fewer bullets the older a topic is, and at most two for a short one', () => {
+    const long = [0, 10 * 60_000] as const;
+    expect(bulletsShown(0, ...long)).toBe(Infinity);
+    expect(bulletsShown(1, ...long)).toBe(3);
+    expect(bulletsShown(3, ...long)).toBe(1);
+    expect(bulletsShown(0, 0, 60_000)).toBe(2);
+  });
+});
+
+describe('listeningState', () => {
+  const at = 1_000_000;
+  const m = (o: Partial<MeetingState>): MeetingState =>
+    ({
+      status: 'live',
+      elapsedBaseMs: 0,
+      resumedAt: at - 200_000,
+      transcript: [],
+      live: null,
+      ...o,
+    }) as unknown as MeetingState;
+
+  it('is here when this device is capturing', () => {
+    expect(listeningState(m({}), true, at)).toBe('here');
+  });
+
+  it('is elsewhere while lines are still arriving from another device', () => {
+    const transcript = [{ at: 190_000, speaker: 'them', text: 'hi' }] as MeetingState['transcript'];
+    expect(listeningState(m({ transcript }), false, at)).toBe('elsewhere');
+  });
+
+  it('is nobody once no line has arrived for a while', () => {
+    const transcript = [{ at: 10_000, speaker: 'them', text: 'hi' }] as MeetingState['transcript'];
+    expect(listeningState(m({ transcript }), false, at)).toBe('nobody');
+  });
+
+  it('says nothing about listening while paused', () => {
+    expect(listeningState(m({ status: 'paused' }), false, at)).toBe('paused');
+  });
+});
+
+describe('MeetingPanel notes', () => {
+  afterEach(cleanup);
+  const full = (o: Partial<MeetingState> = {}): MeetingState =>
+    ({
+      status: 'live',
+      startedAt: 0,
+      elapsedBaseMs: 0,
+      resumedAt: Date.now() - 20 * 60_000,
+      now: { headline: 'Agreeing who chases the design', bullets: [], who: 'Tom' },
+      summary: null,
+      topics: [
+        {
+          id: 'old',
+          at: 0,
+          title: 'Agreed to merge migrations early',
+          points: ['a', 'b', 'c', 'd'],
+          decided: false,
+        },
+        { id: 'mid', at: 5 * 60_000, title: 'Design due Monday', points: ['x'], decided: false },
+        {
+          id: 'new',
+          at: 10 * 60_000,
+          title: 'Access',
+          points: ['p', 'q', 'r', 's'],
+          decided: false,
+        },
+      ],
+      cards: [
+        {
+          id: 'k',
+          at: 6 * 60_000,
+          kind: 'explained',
+          key: 'mvp',
+          title: 'MVP',
+          bullets: ['The smallest version that works'],
+        },
+      ],
+      actions: [],
+      transcript: [],
+      error: null,
+      ...o,
+    }) as unknown as MeetingState;
+  const show = (m: MeetingState) =>
+    render(
+      <MemoryRouter>
+        <MeetingPanel chatId="c1" meeting={m} />
+      </MemoryRouter>,
+    );
+
+  it('shows every topic, newest largest, older ones trimmed rather than folded', () => {
+    show(full());
+    const topics = screen.getAllByTestId('meeting-topic');
+    expect(topics.map((t) => t.getAttribute('data-age'))).toEqual(['1', '1', '0']);
+    expect(screen.queryByTestId('meeting-topic-toggle')).toBeNull();
+    // The newest shows all four bullets; the oldest shows three and offers the rest.
+    expect(topics[2]!.querySelectorAll('li')).toHaveLength(4);
+    expect(topics[0]!.querySelectorAll('li')).toHaveLength(3);
+    fireEvent.click(screen.getByTestId('meeting-point-more'));
+    expect(screen.getAllByTestId('meeting-topic')[0]!.querySelectorAll('li')).toHaveLength(4);
+  });
+
+  it('shows an explanation open, with nothing to click', () => {
+    show(full());
+    expect(screen.getByTestId('meeting-card-body').textContent).toContain(
+      'The smallest version that works',
+    );
+  });
+
+  it('keeps what the meeting is on now at the top while live', () => {
+    show(full());
+    expect(screen.getByTestId('meeting-now-headline').textContent).toBe(
+      'Agreeing who chases the design',
+    );
+  });
+
+  it('puts Add action in the Actions header', () => {
+    show(full());
+    const header = screen.getByTestId('meeting-actions').firstElementChild!;
+    expect(header.textContent).toContain('Actions');
+    expect(header.querySelector('[data-testid=meeting-action-add]')).not.toBeNull();
   });
 });

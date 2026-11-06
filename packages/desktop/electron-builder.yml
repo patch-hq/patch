@@ -12,6 +12,10 @@ files:
   # every launch (no menubar icon). NO FALLBACK: the asset must ship.
   - build/trayIconTemplate.png
   - build/trayIconTemplate@2x.png
+# Meeting transcription runs on this Mac (src/meeting-transcriber.ts): sherpa-onnx's
+# native addon and its dylibs must sit outside the asar to be loaded and signed.
+asarUnpack:
+  - '**/node_modules/sherpa-onnx-*/**'
 # What "On this Mac" runs with nothing installed: the Patch server release and the
 # host build for this Mac (scripts/stage-resources.cjs puts them in build/staged).
 extraResources:

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   HostInfoEvent,
   HostProviderKey,
+  HostProviderKeys,
   PROVIDER_KEYS,
   ProviderKeyId,
   providerKeyEnvOnlyNote,
@@ -15,7 +16,19 @@ describe('provider key catalogue', () => {
     expect(providerKeyInfo('gemini').envVar).toBe('GEMINI_API_KEY');
     // Deliberately not OPENAI_API_KEY: agent processes would pick that one up.
     expect(providerKeyInfo('openai').envVar).toBe('OPENAI_REALTIME_API_KEY');
-    expect(providerKeyInfo('groq').envVar).toBe('GROQ_API_KEY');
+    expect(providerKeyInfo('deepgram').envVar).toBe('DEEPGRAM_API_KEY');
+    expect(ProviderKeyId.safeParse('groq').success).toBe(false);
+  });
+});
+
+describe('HostProviderKeys', () => {
+  it('drops the retired Groq key an older host still reports, so the rest of its state parses', () => {
+    expect(
+      HostProviderKeys.parse([
+        { id: 'groq', source: 'env', last4: 'abcd', envSet: true },
+        { id: 'gemini', source: 'ui', last4: 'wxyz', envSet: false },
+      ]).map((k) => k.id),
+    ).toEqual(['gemini']);
   });
 });
 
@@ -33,7 +46,7 @@ describe('HostProviderKey', () => {
 
   it('refuses a last4 longer than four characters', () => {
     expect(
-      HostProviderKey.safeParse({ id: 'groq', source: 'env', last4: 'abcde', envSet: true })
+      HostProviderKey.safeParse({ id: 'deepgram', source: 'env', last4: 'abcde', envSet: true })
         .success,
     ).toBe(false);
   });
@@ -69,17 +82,17 @@ describe('status text', () => {
     expect(providerKeyStatusText({ id: 'gemini', source: 'ui', last4: 'wxyz', envSet: true })).toBe(
       'Set from UI · ends wxyz (overrides environment)',
     );
-    expect(providerKeyStatusText({ id: 'groq', source: 'env', last4: '1234', envSet: true })).toBe(
-      'Set from environment · ends 1234',
-    );
+    expect(
+      providerKeyStatusText({ id: 'deepgram', source: 'env', last4: '1234', envSet: true }),
+    ).toBe('Set from environment · ends 1234');
     expect(providerKeyStatusText({ id: 'openai', source: 'none', envSet: false })).toBe('Not set');
   });
 
   it('says why an env-only key has no Revoke', () => {
     expect(
-      providerKeyEnvOnlyNote({ id: 'groq', source: 'env', last4: '1234', envSet: true }),
-    ).not.toContain('GROQ_API_KEY');
-    expect(providerKeyEnvOnlyNote({ id: 'groq', source: 'ui', last4: '1', envSet: true })).toBe(
+      providerKeyEnvOnlyNote({ id: 'deepgram', source: 'env', last4: '1234', envSet: true }),
+    ).not.toContain('DEEPGRAM_API_KEY');
+    expect(providerKeyEnvOnlyNote({ id: 'deepgram', source: 'ui', last4: '1', envSet: true })).toBe(
       null,
     );
   });

@@ -53,6 +53,9 @@ interface MeetingStoreState {
   /** Per chat: which tab of the meeting panel is open. Absent is Notes. */
   view: Record<string, MeetingView>;
   setView(chatId: string, view: MeetingView): void;
+  /** Bumped to bring a meeting's notes back to where the meeting is. */
+  feedJump: Record<string, number>;
+  jumpFeed(chatId: string): void;
   /** Per chat: the ended meeting is folded into one line and the chat has the room. */
   folded: Record<string, true>;
   setFolded(chatId: string, folded: boolean): void;
@@ -63,6 +66,16 @@ interface MeetingStoreState {
   openPromptEditor(key: MeetingPromptKey | null): void;
   apply(chatId: string, meeting: MeetingState | null): void;
   setCapturing(chatId: string | null): void;
+  /**
+   * What this device is hearing right now and has not finished transcribing,
+   * per source; shown greyed after the transcript's last line. Only the
+   * capturing surface has it.
+   */
+  hearing: { mic?: string; system?: string };
+  setHearing(source: 'mic' | 'system', text: string | null): void;
+  /** The speech model download on first use, 0..1, or null when not downloading. */
+  modelProgress: number | null;
+  setModelProgress(p: number | null): void;
   /** A call's toast was clicked: the new-chat screen starts a meeting in a fresh chat. */
   newChatMeetingRequested: boolean;
   requestNewChatMeeting(requested: boolean): void;
@@ -77,6 +90,9 @@ export const useMeetingStore = create<MeetingStoreState>((set) => ({
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   view: {},
   setView: (chatId, view) => set((s) => ({ view: { ...s.view, [chatId]: view } })),
+  feedJump: {},
+  jumpFeed: (chatId) =>
+    set((s) => ({ feedJump: { ...s.feedJump, [chatId]: (s.feedJump[chatId] ?? 0) + 1 } })),
   folded: readFolded(),
   setFolded: (chatId, folded) =>
     set((s) => {
@@ -95,17 +111,30 @@ export const useMeetingStore = create<MeetingStoreState>((set) => ({
   openPromptEditor: (promptEditor) =>
     set(promptEditor ? { promptEditor, settingsOpen: true } : { promptEditor }),
   apply: (chatId, meeting) => set((s) => ({ byChat: { ...s.byChat, [chatId]: meeting } })),
-  setCapturing: (capturingChatId) => set({ capturingChatId }),
+  setCapturing: (capturingChatId) => set({ capturingChatId, hearing: {} }),
+  hearing: {},
+  setHearing: (source, text) =>
+    set((s) => {
+      const hearing = { ...s.hearing };
+      if (text) hearing[source] = text;
+      else delete hearing[source];
+      return { hearing };
+    }),
+  modelProgress: null,
+  setModelProgress: (modelProgress) => set({ modelProgress }),
   newChatMeetingRequested: false,
   requestNewChatMeeting: (newChatMeetingRequested) => set({ newChatMeetingRequested }),
   reset: () =>
     set({
       byChat: {},
       capturingChatId: null,
+      hearing: {},
+      modelProgress: null,
       newChatMeetingRequested: false,
       promptEditor: null,
       settingsOpen: false,
       view: {},
+      feedJump: {},
     }),
 }));
 

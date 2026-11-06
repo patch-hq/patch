@@ -1,35 +1,29 @@
-// Whisper STT backend (group 13).
+// Speech-to-text backend (group 13).
 //
 // Pluggable per `WHISPER_BACKEND` env var:
-//   - 'groq'  (default): direct REST POST to Groq's transcribe endpoint.
+//   - 'parakeet': NVIDIA Parakeet TDT v3 on this machine's CPU via sherpa-onnx
+//              (parakeet.ts) — no network, no quota, no per-minute cost. Also
+//              chosen by installing the Parakeet component.
 //   - 'local': spawn faster-whisper as a long-running Python sidecar
 //              (`uv run` → WS in/transcript out).
-//   - 'parakeet': NVIDIA Parakeet TDT v3 on this host's CPU via sherpa-onnx
-//              (parakeet.ts) — no network, no quota, no per-minute cost.
 //   - 'mock' : test-stack stub that echoes a synthetic transcript per
 //              utterance — keeps docker-compose.test.yml viable without
 //              shipping API keys.
 //
-// NO FALLBACK: if WHISPER_BACKEND=groq and GROQ_API_KEY is missing the host
-// ABORTS at startup (see validateWhisperCredentials below, wired from
-// index.ts). The deployment contract (spec/11-deployment.md § Env, group H1)
-// requires the credential to be validated "before any attempt to serve
-// requests" — a green audio WSS that 500s the first real utterance is exactly
-// the degraded mode the contract forbids. The per-call guards in the backends
-// below are a belt-and-braces second line, not the primary check.
+// NO FALLBACK: a backend named without what it needs ABORTS the host at
+// startup (validateWhisperCredentials below, wired from index.ts), per the
+// deployment contract (spec/11-deployment.md § Env, group H1).
 
 import type { Logger } from 'pino';
 import type { ChildProcess } from 'node:child_process';
 import { existsSync as existsSyncFs } from 'node:fs';
 import { PersistentWsClient } from './persistent-ws.js';
 import { pcmFromWav } from './smartTurn.js';
-import { readKey, type KeySource } from './keySource.js';
 import { ParakeetWhisperBackend } from './parakeet.js';
 
 /** Subset of the host's audio config the credential check needs. */
 export interface WhisperCredentialConfig {
   whisperBackend: WhisperBackendKind;
-  groqApiKey?: string | undefined;
   elevenlabsApiKey?: string | undefined;
   whisperLocalSidecarUrl?: string | undefined;
   whisperModelPath?: string | undefined;
@@ -52,15 +46,6 @@ export function validateWhisperCredentials(config: WhisperCredentialConfig): voi
     // backend and omitting its credential still aborts — that is the case the
     // NO SILENT FALLBACK rule is about.
     case 'off':
-      return;
-    case 'groq':
-      if (!config.groqApiKey || config.groqApiKey.length === 0) {
-        throw new Error(
-          'Speech-to-text is set to groq (the default) but no Groq key is set. ' +
-            'Add it in Settings → Providers, or switch to local speech-to-text. ' +
-            'Refusing to start in a degraded mode (NO SILENT FALLBACK).',
-        );
-      }
       return;
     case 'elevenlabs':
       if (!config.elevenlabsApiKey || config.elevenlabsApiKey.length === 0) {
@@ -143,16 +128,10 @@ export interface WhisperBackend {
   ): LiveTranscriptStream;
   /**
    * Whether interim transcripts of an utterance still in progress are worth
-   * attempting on this backend. NOT a claim that the backend streams — none of
-   * them do. Groq answers a fresh request for the growing prefix fast enough,
-   * and cheaply enough against a reserved slice of its per-minute quota, that
-   * re-asking about once a second is worth the live text; a model running on
-   * this host's own CPU is not.
-   *
-   * The two costs of doing it are paid elsewhere, not by reporting false here:
-   * the quota reserve keeps the final's request slots (`admit`), and the
-   * partial-side hallucination filter drops the stock phrases Whisper answers a
-   * near-silent prefix with (`partial-filter.ts`).
+   * attempting on this backend: re-reading the growing prefix is cheap enough
+   * on Parakeet; a slower model on this host's CPU leaves it off. The
+   * partial-side hallucination filter drops the stock phrases a model answers
+   * a near-silent prefix with (`partial-filter.ts`).
    */
   readonly supportsLivePartials: boolean;
   /**
@@ -174,10 +153,7 @@ export interface WhisperBackend {
   useModel?(model: string): void;
   /**
    * Synchronous-style: takes a complete utterance buffer (PCM16 mono
-   * 16kHz) and returns the final transcript. Streaming partials are
-   * out-of-scope here — Groq's REST endpoint isn't streaming, and the
-   * UX cost is small (a partial-transcript ticker is tracked separately
-   * in the orchestrator's local state).
+   * 16kHz) and returns the final transcript.
    */
   transcribe(pcm: Int16Array, opts?: TranscribeOptions): Promise<string>;
   /**
@@ -186,8 +162,7 @@ export interface WhisperBackend {
    * which takes raw PCM16 from the streaming audio WSS, this takes a compressed
    * container (m4a/wav) uploaded as one file to `POST /api/voice/note`.
    *
-   * The Groq REST backend accepts compressed audio directly, so it sends the
-   * clip straight through (no PCM→WAV step). The `local` faster-whisper sidecar
+   * Parakeet decodes a compressed clip with ffmpeg first. The `local` faster-whisper sidecar
    * speaks PCM only and CANNOT decode m4a — it throws `UnsupportedClipFormatError`
    * rather than fake a transcript (NO FALLBACK); documented in spec/07.
    */
@@ -208,17 +183,14 @@ export class UnsupportedClipFormatError extends Error {
   }
 }
 
-export type WhisperBackendKind = 'off' | 'groq' | 'elevenlabs' | 'local' | 'parakeet' | 'mock';
+export type WhisperBackendKind = 'off' | 'elevenlabs' | 'local' | 'parakeet' | 'mock';
 
 export interface CreateWhisperOptions {
   /** `elevenlabs` is built by index.ts (elevenlabs-stt.ts imports this file). */
   backend: Exclude<WhisperBackendKind, 'elevenlabs'>;
   logger: Logger;
-  /**
-   * GROQ_API_KEY (only required when backend === 'groq'). Read per request, so
-   * a key changed in Settings → Hosts → Keys applies to the next one.
-   */
-  groqApiKey?: KeySource;
+  /** With `off`: why there is no speech-to-text, said whenever one is asked for. */
+  offReason?: string;
   /**
    * faster-whisper sidecar URL (e.g. ws://localhost:5018). If omitted on the
    * `local` backend, the host spawns `patch_whisper_sidecar` itself and
@@ -231,14 +203,6 @@ export interface CreateWhisperOptions {
   localSidecarCwd?: string;
   /** PARAKEET_MODEL_DIR (backend === 'parakeet'). */
   parakeetModelDir?: string;
-  /** Test hook: substitute fetch (used by groq-backend tests). */
-  fetchImpl?: typeof fetch;
-  /** Test hook: injectable clock for the request-quota window. */
-  nowMs?: () => number;
-  /** Override the per-request timeout (tests). */
-  requestTimeoutMs?: number;
-  /** Override the total clip budget across all attempts (tests). */
-  clipDeadlineMs?: number;
 }
 
 /** Default loopback port the spawned faster-whisper sidecar listens on. */
@@ -247,9 +211,7 @@ const DEFAULT_WHISPER_PORT = 5018;
 export function createWhisper(opts: CreateWhisperOptions): WhisperBackend {
   switch (opts.backend) {
     case 'off':
-      return new UnconfiguredWhisperBackend();
-    case 'groq':
-      return new GroqWhisperBackend(opts);
+      return new UnconfiguredWhisperBackend(opts.offReason);
     case 'local':
       return new LocalWhisperBackend(opts);
     case 'parakeet':
@@ -268,10 +230,13 @@ export function createWhisper(opts: CreateWhisperOptions): WhisperBackend {
 class UnconfiguredWhisperBackend implements WhisperBackend {
   /** Nothing is configured, so there is nothing to ask for a partial either. */
   readonly supportsLivePartials = false;
+  constructor(private readonly reason?: string) {}
   private refuse(): never {
     throw new Error(
-      'Speech-to-text is not configured on this host. Voice is an optional component: ' +
-        'install it from Settings → Hosts and choose a speech-to-text engine. Refusing to return a fabricated transcript.',
+      (this.reason ??
+        'Speech-to-text is not configured on this host. Voice is an optional component: ' +
+          'install Parakeet from Settings → Hosts.') +
+        ' Refusing to return a fabricated transcript.',
     );
   }
   async transcribe(): Promise<string> {
@@ -299,231 +264,6 @@ class MockWhisperBackend implements WhisperBackend {
     // Deterministic: encode the byte length + format so the test stack
     // (docker-compose.test.yml) can exercise the upload path without a real key.
     return `[mock-clip ${format} ${audio.byteLength}b]`;
-  }
-  async close(): Promise<void> {}
-}
-
-/**
- * Groq REST. Builds a WAV (PCM16 mono 16kHz) in-memory and posts as
- * multipart/form-data. Streaming-from-Groq isn't a thing; we send once
- * per utterance after VAD-end.
- */
-/**
- * Groq's on-demand tier allows 20 transcription requests a minute, shared by
- * every voice session on this host.
- */
-const GROQ_RPM_LIMIT = 20;
-/**
- * How much of that minute is held back for finals. Partials re-transcribe the
- * growing utterance about once a second, so a long sentence spends the entire
- * allowance on the live overlay and then the final — the user's actual words —
- * is the request that gets refused. Reserving headroom makes the expendable
- * half give way instead.
- */
-const GROQ_PARTIAL_BUDGET = 12;
-/** How many times a final retries a 429 before giving up. */
-const FINAL_RETRIES = 3;
-/**
- * Ceiling on one transcription request. Groq answers a short utterance in well
- * under a second; anything approaching this is a stalled connection, and
- * waiting on it forever is worse than failing, because the session sits mute
- * with nothing to show for it.
- */
-const GROQ_REQUEST_TIMEOUT_MS = 20_000;
-/**
- * Ceiling on an uploaded clip. A voice note can be minutes long, so uploading
- * and transcribing it takes far longer than a streamed utterance.
- */
-const GROQ_CLIP_REQUEST_TIMEOUT_MS = 120_000;
-/**
- * Total budget across every attempt at one clip, retries and waits included.
- * The server gives up on the host's transcript at 150s
- * (packages/server/src/voice/note.ts), so the host must fail first: work that
- * outlives the server's wait is discarded and its Groq quota wasted.
- */
-const GROQ_CLIP_DEADLINE_MS = 140_000;
-
-/** Seconds Groq asks us to wait, from its "Please try again in 3s" message. */
-export function parseRetryAfterMs(body: string, header: string | null): number | null {
-  const fromHeader = header === null ? NaN : Number(header);
-  if (Number.isFinite(fromHeader) && fromHeader >= 0) return fromHeader * 1000;
-  const m = /try again in ([0-9.]+)\s*(ms|s)\b/i.exec(body);
-  if (!m) return null;
-  const value = Number(m[1]);
-  if (!Number.isFinite(value)) return null;
-  return m[2]?.toLowerCase() === 'ms' ? value : value * 1000;
-}
-
-export class GroqWhisperBackend implements WhisperBackend {
-  /**
-   * Groq's endpoint is request/response, not streaming — the live transcript is
-   * produced by re-asking it for the growing prefix. It answers a short clip in
-   * well under a second and `GROQ_PARTIAL_BUDGET` keeps that off the final's
-   * quota, which is what makes it affordable to do.
-   */
-  readonly supportsLivePartials = true;
-  readonly costModel = 'whisper-large-v3-turbo';
-  private model = 'whisper-large-v3-turbo';
-  useModel(model: string): void {
-    this.model = model === '' ? 'whisper-large-v3-turbo' : model;
-  }
-  private readonly opts: CreateWhisperOptions;
-  /** ms timestamps of requests sent in the last minute, for the quota gate. */
-  private recent: number[] = [];
-  constructor(opts: CreateWhisperOptions) {
-    this.opts = opts;
-  }
-
-  private now(): number {
-    return this.opts.nowMs ? this.opts.nowMs() : Date.now();
-  }
-
-  /**
-   * Record this request against the rolling minute, refusing a partial that
-   * would eat into the reserve finals depend on.
-   */
-  private admit(priority: 'final' | 'partial'): void {
-    const cutoff = this.now() - 60_000;
-    this.recent = this.recent.filter((t) => t > cutoff);
-    if (priority === 'partial' && this.recent.length >= GROQ_PARTIAL_BUDGET) {
-      throw new PartialBudgetExhaustedError(
-        `partial skipped: ${this.recent.length}/${GROQ_RPM_LIMIT} groq requests used this minute`,
-      );
-    }
-    this.recent.push(this.now());
-  }
-
-  async transcribe(pcm: Int16Array, opts?: TranscribeOptions): Promise<string> {
-    const apiKey = readKey(this.opts.groqApiKey);
-    if (apiKey === undefined) {
-      throw new Error('No Groq key is set — add it in Settings → Providers (NO FALLBACKS).');
-    }
-    const priority = opts?.priority ?? 'final';
-    const fetchFn = this.opts.fetchImpl ?? fetch;
-    // Snapshot the audio SYNCHRONOUSLY, before any await. `pcm` is a zero-copy
-    // view into the session's reusable utterance ring, which the mic keeps
-    // writing into; the caller's contract is that a backend consumes it before
-    // yielding. Building the body inside the retry loop broke that — a retry
-    // would have uploaded whatever the ring held by then, not what was said.
-    const body = Buffer.from(pcm16ToWav(pcm, 16000));
-    const buildForm = (): FormData => {
-      const form = new FormData();
-      form.set('file', new Blob([body], { type: 'audio/wav' }), 'utterance.wav');
-      form.set('model', this.model);
-      form.set('response_format', 'json');
-      // Pin English. Without a language hint Whisper auto-detects per-utterance,
-      // which misfires on short/noisy clips and tanks accuracy. (Make this an env
-      // if multi-language is ever needed.)
-      form.set('language', 'en');
-      form.set('temperature', '0');
-      if (opts?.prompt) form.set('prompt', opts.prompt);
-      return form;
-    };
-
-    // A final is the user's actual words: a 429 is a documented transient with
-    // a stated wait, so waiting it out is the correct handling, not a fallback.
-    // Dropping it loses the turn, which is what "I spoke and nothing happened"
-    // actually is. A partial has no such claim — it gives up immediately.
-    const attempts = priority === 'final' ? FINAL_RETRIES : 1;
-    let lastError = '';
-    for (let attempt = 0; attempt < attempts; attempt++) {
-      this.admit(priority);
-      // A transcription that never returns wedges the whole session: the turn
-      // never runs, no error reaches the surface, and the call just sits there
-      // silent — indistinguishable from "voice is broken". There was no timeout
-      // at all, so a stalled connection did exactly that, forever. Bound it and
-      // let the failure surface (NO FALLBACK: it becomes a real error, not an
-      // empty transcript).
-      const res = await fetchFn('https://api.groq.com/openai/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: { authorization: `Bearer ${apiKey}` },
-        body: buildForm(),
-        signal: AbortSignal.timeout(this.opts.requestTimeoutMs ?? GROQ_REQUEST_TIMEOUT_MS),
-      });
-      if (res.ok) {
-        const body = (await res.json()) as { text?: string };
-        if (typeof body.text !== 'string') {
-          throw new Error('groq whisper: response missing .text');
-        }
-        return body.text.trim();
-      }
-      const text = await res.text();
-      lastError = `groq whisper ${res.status}: ${text}`;
-      const isLast = attempt === attempts - 1;
-      if (res.status !== 429 || isLast) throw new Error(lastError);
-      const waitMs = parseRetryAfterMs(text, res.headers.get('retry-after')) ?? 2_000;
-      await new Promise((r) => setTimeout(r, Math.min(waitMs, 10_000)));
-    }
-    /* v8 ignore next -- the loop either returns or throws on its last attempt. */
-    throw new Error(lastError);
-  }
-  /**
-   * Upload path (spec/07): the Groq transcribe endpoint accepts compressed
-   * audio (m4a/wav) directly, so we post the clip bytes as-is — no PCM→WAV
-   * re-encode. Same model + pinned params as the streaming `transcribe`.
-   */
-  async transcribeClip(audio: Buffer, format: 'm4a' | 'wav', opts?: ClipOptions): Promise<string> {
-    const apiKey = readKey(this.opts.groqApiKey);
-    if (apiKey === undefined) {
-      throw new Error('No Groq key is set — add it in Settings → Providers (NO FALLBACKS).');
-    }
-    const fetchFn = this.opts.fetchImpl ?? fetch;
-    const mime = format === 'm4a' ? 'audio/mp4' : 'audio/wav';
-    const form = new FormData();
-    form.set('file', new Blob([audio], { type: mime }), `clip.${format}`);
-    form.set('model', this.model);
-    form.set('response_format', 'json');
-    form.set('language', 'en');
-    form.set('temperature', '0');
-    if (opts?.prompt) form.set('prompt', opts.prompt);
-    // A clip is audio that cannot be re-recorded (a meeting's minutes): a 429
-    // carries a stated wait, so wait it out like a final does rather than
-    // dropping the clip. Persistent 429s still throw.
-    const budgetMs = this.opts.clipDeadlineMs ?? GROQ_CLIP_DEADLINE_MS;
-    const deadline = Date.now() + budgetMs;
-    const deadlineError = () =>
-      new Error(`groq whisper: clip transcription exceeded its ${budgetMs}ms budget`);
-    let lastError = '';
-    let res: Response | undefined;
-    for (let attempt = 0; attempt < FINAL_RETRIES; attempt++) {
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) throw deadlineError();
-      this.admit('final');
-      let r: Response;
-      try {
-        r = await fetchFn('https://api.groq.com/openai/v1/audio/transcriptions', {
-          method: 'POST',
-          headers: { authorization: `Bearer ${apiKey}` },
-          body: form,
-          signal: AbortSignal.timeout(
-            Math.min(remaining, this.opts.requestTimeoutMs ?? GROQ_CLIP_REQUEST_TIMEOUT_MS),
-          ),
-        });
-      } catch (err) {
-        if (Date.now() >= deadline) throw deadlineError();
-        throw err;
-      }
-      if (r.ok) {
-        res = r;
-        break;
-      }
-      const text = await r.text();
-      lastError = `groq whisper ${r.status}: ${text}`;
-      if (r.status !== 429 || attempt === FINAL_RETRIES - 1) throw new Error(lastError);
-      const waitMs = Math.min(
-        parseRetryAfterMs(text, r.headers.get('retry-after')) ?? 2_000,
-        10_000,
-      );
-      // A wait that cannot leave time for another attempt is not worth taking.
-      if (waitMs >= deadline - Date.now()) throw new Error(lastError);
-      await new Promise((resolve) => setTimeout(resolve, waitMs));
-    }
-    if (!res) throw new Error(lastError);
-    const body = (await res.json()) as { text?: string };
-    if (typeof body.text !== 'string') {
-      throw new Error('groq whisper: response missing .text');
-    }
-    return body.text.trim();
   }
   async close(): Promise<void> {}
 }
@@ -716,7 +456,7 @@ export class LocalWhisperBackend implements WhisperBackend {
    * faster-whisper sidecar takes raw PCM16 only and the host bundles no
    * AAC/m4a decoder, so an m4a upload is refused with a typed error rather
    * than faked or dropped. The mobile voice-note upload path therefore
-   * requires `WHISPER_BACKEND=groq` (the production default). NO FALLBACK.
+   * needs Parakeet, which decodes it with ffmpeg. NO FALLBACK.
    */
   async transcribeClip(audio: Buffer, format: 'm4a' | 'wav', opts?: ClipOptions): Promise<string> {
     if (format === 'wav') {
@@ -725,7 +465,7 @@ export class LocalWhisperBackend implements WhisperBackend {
     throw new UnsupportedClipFormatError(
       `WHISPER_BACKEND=local (faster-whisper) cannot transcribe an uploaded ${format} clip: ` +
         'the sidecar accepts PCM16 samples only and the host bundles no AAC/m4a decoder. ' +
-        'Use WHISPER_BACKEND=groq (the production default) for the mobile voice-note upload path.',
+        'Use Parakeet (WHISPER_BACKEND=parakeet) for the mobile voice-note upload path.',
     );
   }
   async close(): Promise<void> {

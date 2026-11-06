@@ -184,24 +184,6 @@ export function MeetingModelRows(): JSX.Element {
         </select>
         <span className="set-unit">looks things up on the web for the agent feed</span>
       </Row>
-      <Row title="Transcription model">
-        <input
-          type="text"
-          aria-label="Meeting transcription model"
-          key={p.meetingTranscriptionModel}
-          defaultValue={p.meetingTranscriptionModel}
-          placeholder="Host default"
-          disabled={!loaded}
-          data-testid="meeting-transcription-model"
-          onBlur={(e) => {
-            const next = e.target.value.trim();
-            if (next !== p.meetingTranscriptionModel) write({ meetingTranscriptionModel: next });
-          }}
-        />
-        <span className="set-unit">
-          model directory (local) or Groq model name; empty is the host's
-        </span>
-      </Row>
       <Row title="Analyse every">
         <PositiveNumberInput
           integer

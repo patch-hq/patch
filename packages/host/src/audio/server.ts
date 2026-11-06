@@ -7,7 +7,7 @@
 // interleaves JSON control envelopes (encoded via `@patch/wire/audio`)
 // with binary PCM16 frames.
 //
-// Concurrency cap (per spec/07): 4 on Groq, 3 on local Whisper. The 5th
+// Concurrency cap (per spec/07): 3 on this machine's CPU, 4 on a hosted engine. The 5th
 // session is closed with an `audio.error { code: 'concurrency_cap' }`.
 
 import { createServer, type Server } from 'node:http';
@@ -222,7 +222,7 @@ export interface AudioServerOptions {
   chatExists: (chatId: string) => boolean;
   /**
    * Concurrency cap. Host picks based on the active Whisper backend.
-   * Default 4 (matches Groq budget per spec).
+   * Default 3 on this machine's CPU, 4 on a hosted engine.
    */
   maxConcurrentSessions?: number;
   /**

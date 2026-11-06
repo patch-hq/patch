@@ -17,6 +17,16 @@ export type NotificationSendPayload = {
     | { kind: 'ignore' };
 };
 
+/** One utterance the desktop transcribed: final once the speaker paused, partial while they talk. */
+export interface MeetingDeviceText {
+  source: 'mic' | 'system';
+  text: string;
+  /** Wall-clock ms the utterance began and (for a partial) the latest audio read. */
+  startedAt: number;
+  endedAt: number;
+  final: boolean;
+}
+
 export interface PatchDesktopBridge {
   /**
    * spec/05 § Desktop packaging → Window chrome: true when the shell drew this
@@ -76,6 +86,22 @@ export interface PatchDesktopBridge {
   /** Ask macOS for one; rejects with the helper's message when call audio is refused. */
   requestMeetingPermission?(kind: MeetingPermissionKind): Promise<MeetingPermissionState>;
   stopSystemAudio?(): void;
+  /**
+   * Meeting transcription on this device (spec/07 § Meeting transcription):
+   * `startMeetingTranscription` downloads the speech model on first use and
+   * rejects if it cannot; audio is pushed per source and text comes back.
+   * `flushMeetingTranscription` resolves once every utterance in progress has
+   * come back as final. Absent on a shell that predates it.
+   */
+  startMeetingTranscription?(): Promise<void>;
+  pushMeetingAudio?(source: 'mic' | 'system', pcm: Int16Array, at: number): void;
+  flushMeetingTranscription?(): Promise<void>;
+  stopMeetingTranscription?(): Promise<void>;
+  onMeetingText?(cb: (t: MeetingDeviceText) => void): () => void;
+  onMeetingTranscribeProgress?(
+    cb: (p: { received: number; total: number | null; phase: 'downloading' | 'unpacking' }) => void,
+  ): () => void;
+  onMeetingTranscribeError?(cb: (e: { message: string }) => void): () => void;
   onSystemAudio?(cb: (pcm: Uint8Array) => void): () => void;
   /** The tap stopped without being asked to. */
   onSystemAudioFailed?(cb: (e: { message: string }) => void): () => void;

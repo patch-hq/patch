@@ -135,12 +135,15 @@ export interface HostConfig {
     host: string;
     /** `host.host.audioRelayHost` — see `loadConfig`'s comment above. */
     relayHost: string | undefined;
-    whisperBackend: 'off' | 'groq' | 'elevenlabs' | 'local' | 'parakeet' | 'mock';
+    whisperBackend: 'off' | 'elevenlabs' | 'local' | 'parakeet' | 'mock';
     /**
-     * GROQ_API_KEY from the environment (required for whisperBackend='groq'
-     * unless one is set from Settings → Hosts → Keys, which wins).
+     * Set when WHISPER_BACKEND names an engine Patch no longer has (`groq`). The
+     * host still starts, with no speech-to-text, and says this whenever asked
+     * for a transcript, so an update never leaves a machine unable to boot.
      */
-    groqApiKey: string | undefined;
+    whisperBackendRetired: string | undefined;
+    /** WHISPER_BACKEND was set explicitly (an installed Parakeet does not override it). */
+    whisperBackendExplicit: boolean;
     /** ELEVEN_LABS_API_KEY — ElevenLabs Scribe: the elevenlabs dictation engine, or WHISPER_BACKEND=elevenlabs. */
     elevenlabsApiKey: string | undefined;
     /** DEEPGRAM_API_KEY — needed only while dictation is on the deepgram engine. */
@@ -185,7 +188,7 @@ export interface HostConfig {
      * none: a turn check is then answered `model_unavailable`.
      */
     turnModelPath: string | undefined;
-    /** Hard cap on concurrent voice sessions. Default 4 (Groq) / 3 (local). */
+    /** Hard cap on concurrent voice sessions. Default 3 on this machine's CPU, 4 on a hosted engine. */
     maxConcurrentSessions: number;
     /**
      * GEMINI_API_KEY — required only when the account's per-surface
@@ -310,21 +313,25 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
   // Voice is an OPTIONAL COMPONENT (spec/02 § Optional components), and the
   // artifact ships no STT credential and no TTS weights. Defaulting these to a
   // real backend made a freshly installed host abort at boot on a missing
-  // GROQ_API_KEY / KOKORO_MODEL_PATH, contradicting spec/11's "installs and
+  // speech-to-text key / KOKORO_MODEL_PATH, contradicting spec/11's "installs and
   // runs on a host carrying only an OS". Unset therefore means 'off' — the
   // component is not installed — NOT a quiet downgrade to a stub. Naming a
   // backend without its credential still aborts loudly below.
-  const whisperBackendRaw = env['WHISPER_BACKEND'] ?? 'off';
+  const whisperBackendSet = env['WHISPER_BACKEND'];
+  const whisperBackendRetired = whisperBackendSet === 'groq' ? 'groq' : undefined;
+  const whisperBackendRaw =
+    whisperBackendSet === undefined || whisperBackendRetired !== undefined
+      ? 'off'
+      : whisperBackendSet;
   if (
     whisperBackendRaw !== 'off' &&
-    whisperBackendRaw !== 'groq' &&
     whisperBackendRaw !== 'elevenlabs' &&
     whisperBackendRaw !== 'local' &&
     whisperBackendRaw !== 'parakeet' &&
     whisperBackendRaw !== 'mock'
   ) {
     throw new Error(
-      `Invalid WHISPER_BACKEND: ${whisperBackendRaw} (expected 'off' | 'groq' | 'elevenlabs' | 'local' | 'parakeet' | 'mock')`,
+      `Invalid WHISPER_BACKEND: ${whisperBackendRaw} (expected 'off' | 'elevenlabs' | 'local' | 'parakeet' | 'mock')`,
     );
   }
   const kokoroBackendRaw = env['KOKORO_BACKEND'] ?? 'off';
@@ -340,7 +347,7 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
   if (vadBackendRaw !== 'silero' && vadBackendRaw !== 'mock') {
     throw new Error(`Invalid VAD_BACKEND: ${vadBackendRaw} (expected 'silero' | 'mock')`);
   }
-  const defaultCap = whisperBackendRaw === 'local' || whisperBackendRaw === 'parakeet' ? 3 : 4;
+  const defaultCap = whisperBackendRaw === 'elevenlabs' || whisperBackendRaw === 'mock' ? 4 : 3;
   const maxConcurrentSessions = intRequired(
     'PATCH_VOICE_MAX_SESSIONS',
     env['PATCH_VOICE_MAX_SESSIONS'],
@@ -374,7 +381,9 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
       host: audioHost,
       relayHost: audioRelayHost,
       whisperBackend: whisperBackendRaw,
-      groqApiKey: env['GROQ_API_KEY'],
+      whisperBackendRetired,
+      whisperBackendExplicit:
+        whisperBackendSet !== undefined && whisperBackendRetired === undefined,
       deepgramApiKey: env['DEEPGRAM_API_KEY'],
       elevenlabsApiKey: env['ELEVEN_LABS_API_KEY'],
       whisperLocalSidecarUrl: env['WHISPER_LOCAL_SIDECAR_URL'],

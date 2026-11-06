@@ -6,7 +6,7 @@ import { NO_SECRETS, reportHost, settingsUrl, stubSettingsApi } from './settings
 // whether a key is set and its last four characters — never the value — and a
 // key only a host's environment supplies names that host and can be adopted.
 // The REST writes are answered by the harness's fake server; the dev harness
-// seeds host `d1` ("dev-host") with Groq in its environment.
+// seeds host `d1` ("dev-host") with OpenAI Realtime in its environment.
 const FAKE_KEY = 'fake-deepgram-key-for-e2e-0000-LAST';
 
 const DEEPGRAM_ON_DICTATION = {
@@ -25,11 +25,11 @@ test.describe('Settings — Providers', () => {
     await stubSettingsApi(page, { preferences: DEEPGRAM_ON_DICTATION });
     await page.goto(settingsUrl('providers'));
     await expect(page.getByTestId('provider-key-gemini-status')).toHaveText('Not set');
-    await expect(page.getByTestId('provider-key-groq-status')).toHaveText(
+    await expect(page.getByTestId('provider-key-openai-status')).toHaveText(
       'From the environment on dev-host',
     );
-    await expect(page.getByTestId('provider-key-groq-revoke')).toHaveCount(0);
-    await expect(page.getByTestId('provider-key-groq-adopt')).toBeVisible();
+    await expect(page.getByTestId('provider-key-openai-revoke')).toHaveCount(0);
+    await expect(page.getByTestId('provider-key-openai-adopt')).toBeVisible();
   });
 
   test('adding a key sends it once, masked, and the answer settles Providers; the host’s report settles Voice', async ({
@@ -68,8 +68,7 @@ test.describe('Settings — Providers', () => {
       voiceKeys: { gemini: false, openai: false, deepgram: true },
       providerKeys: [
         { id: 'gemini', source: 'none', envSet: false },
-        { id: 'openai', source: 'none', envSet: false },
-        { id: 'groq', source: 'env', last4: 'q9Zk', envSet: true },
+        { id: 'openai', source: 'env', last4: 'q9Zk', envSet: true },
         { id: 'deepgram', source: 'ui', last4: 'LAST', envSet: false },
         { id: 'elevenlabs', source: 'none', envSet: false },
       ],
@@ -102,11 +101,11 @@ test.describe('Settings — Providers', () => {
   test('adopting a host’s environment key sends that host to the server', async ({ page }) => {
     const server = await stubSettingsApi(page);
     await page.goto(settingsUrl('providers'));
-    await page.getByTestId('provider-key-groq-adopt').click();
+    await page.getByTestId('provider-key-openai-adopt').click();
     await expect
       .poll(() => server.writes)
       .toEqual([
-        { method: 'POST', path: '/api/providers/keys/groq/adopt', body: { hostId: 'd1' } },
+        { method: 'POST', path: '/api/providers/keys/openai/adopt', body: { hostId: 'd1' } },
       ]);
   });
 

@@ -14,12 +14,12 @@ import {
   meetingCardProblem,
 } from '@patch/wire';
 import {
-  MeetingManager,
   MeetingResearchResult,
   type AnalyseInput,
   type MeetingAnalysis,
   type ResearchInput,
 } from '../src/meeting.js';
+import { TestMeetings } from './meetingDevice.js';
 import { buildResearchPrompt, makeMeetingResearcher, parseResearch } from '../src/meetingGen.js';
 import { createMockSdkBackend } from '../src/sdkBackend.js';
 import { Daemon } from '../src/chatRunner.js';
@@ -56,7 +56,7 @@ describe('research cards', () => {
   let research: ReturnType<typeof vi.fn<(i: ResearchInput) => Promise<MeetingResearchResult>>>;
   let transcribe: ReturnType<typeof vi.fn<(b: Buffer) => Promise<string>>>;
   let gap: number;
-  let m: MeetingManager;
+  let m: TestMeetings;
 
   const say = async (text: string): Promise<void> => {
     transcribe.mockResolvedValueOnce(text);
@@ -74,7 +74,7 @@ describe('research cards', () => {
     gap = 60;
     research = vi.fn(async () => ({ cards: [] }));
     transcribe = vi.fn(async () => 'x');
-    m = new MeetingManager({
+    m = new TestMeetings({
       dir,
       transcribe,
       analyse: vi.fn(async (_i: AnalyseInput) => analysis()),
@@ -205,7 +205,7 @@ describe('research cards', () => {
     await say('the levy');
     research.mockResolvedValueOnce({ cards: [card('Harbour levy')] });
     await pass();
-    const again = new MeetingManager({
+    const again = new TestMeetings({
       dir,
       transcribe,
       analyse: vi.fn(async () => analysis()),
@@ -237,12 +237,12 @@ describe('research cards', () => {
 
 describe('the chat agent changing the notes', () => {
   let dir: string;
-  let m: MeetingManager;
+  let m: TestMeetings;
   let n = 0;
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'meeting-agent-'));
     n = 0;
-    m = new MeetingManager({
+    m = new TestMeetings({
       dir,
       transcribe: async () => 'Sam wants an hourly ferry',
       analyse: async () => analysis(),
@@ -348,26 +348,25 @@ describe('the researcher', () => {
 
   it('rejects a verdict outside correct, off, unclear rather than papering over it', () => {
     expect(() =>
-      parseResearch(
-        '{"cards":[{"kind":"fact","title":"x","bullets":["y"],"verdict":"explained"}]}',
-      ),
+      parseResearch({
+        cards: [{ kind: 'fact', title: 'x', bullets: ['y'], verdict: 'explained' }],
+      }),
     ).toThrow(/verdict/);
   });
 
-  it('parses fenced JSON and rejects a malformed reply', () => {
-    expect(parseResearch('```json\n{"cards":[]}\n```')).toEqual({ cards: [] });
-    expect(() => parseResearch('nothing')).toThrow(/no JSON/);
+  it('takes the structured answer and rejects a malformed one', () => {
+    expect(parseResearch({ cards: [] })).toEqual({ cards: [] });
+    expect(() => parseResearch('nothing')).toThrow();
     expect(() =>
-      parseResearch('{"cards":[{"kind":"gossip","title":"x","bullets":["y"]}]}'),
+      parseResearch({ cards: [{ kind: 'gossip', title: 'x', bullets: ['y'] }] }),
     ).toThrow();
   });
 
-  it('runs the research profile on the chosen model and reads the last message as the answer', async () => {
+  it('runs the research profile on the chosen model and takes the structured answer', async () => {
     const sdkBackend = createMockSdkBackend();
     sdkBackend.enqueue([
       { type: 'assistant', content: 'Let me search for that.' },
-      { type: 'assistant', content: '{"cards":[]}' },
-      { type: 'result', sessionId: 's' },
+      { type: 'result', sessionId: 's', structured: { cards: [] } },
     ]);
     const run = makeMeetingResearcher({
       sdkBackend,
@@ -379,6 +378,7 @@ describe('the researcher', () => {
       cards: [],
     });
     expect(sdkBackend.lastOptions()?.inferenceProfile).toBe('research');
+    expect(sdkBackend.lastOptions()?.outputSchema).toMatchObject({ type: 'object' });
     expect(sdkBackend.lastOptions()?.model).toBe('claude-sonnet-5');
   });
 

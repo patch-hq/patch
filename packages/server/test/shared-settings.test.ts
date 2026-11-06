@@ -34,7 +34,7 @@ import { InProcessHostLink } from '../src/host-link.js';
 
 const TOKEN_A = 'sk-ant-oat01-fake-token-aaaaaaaaaaaa';
 const TOKEN_B = 'sk-ant-oat01-fake-token-bbbbbbbbbbbb';
-const GROQ = 'gsk_fake_groq_key_for_tests_1234';
+const OPENAI = 'sk_fake_openai_key_for_tests_1234';
 
 /** Every file under `dir`, recursively, as one string. */
 function everythingOnDisk(dir: string): string {
@@ -147,6 +147,35 @@ describe('SharedSettingsService', () => {
     expect('stalledThresholdMinutes' in loaded).toBe(false);
   });
 
+  it('moves a meeting model still on the retired default to the current one, and keeps a chosen one', () => {
+    writeFileSync(
+      join(dir, 'settings.json'),
+      JSON.stringify({
+        meetingAnalysisModel: 'claude-haiku-4-5-20251001',
+        meetingCleanupModel: 'claude-haiku-4-5-20251001',
+        meetingResearchModel: 'claude-opus-5-5',
+      }),
+    );
+    const loaded = make().current();
+    expect(loaded.meetingAnalysisModel).toBe('claude-sonnet-5-5');
+    expect(loaded.meetingCleanupModel).toBe('claude-sonnet-5-5');
+    expect(loaded.meetingResearchModel).toBe('claude-opus-5-5');
+  });
+
+  it('drops a stored Groq key when it loads, so it is never sent to a host again', () => {
+    service.setProviderKey('openai', OPENAI);
+    const raw = (service as unknown as { secrets: { providerKeys: Record<string, string> } })
+      .secrets;
+    raw.providerKeys['groq'] = 'gsk_retired_fake_key_000000000';
+    (service as unknown as { persist(o: { secrets: boolean }): void }).persist({ secrets: true });
+    const reloaded = make();
+    expect(reloaded.secretsSummary().providerKeys.map((k) => k.id)).toEqual(['gemini', 'openai']);
+    expect(
+      (reloaded as unknown as { secrets: { providerKeys: Record<string, string> } }).secrets
+        .providerKeys['groq'],
+    ).toBeUndefined();
+  });
+
   it('gives every deployment a stable public name from its generated identity key', () => {
     const first = service.current().agentIdentity.name;
     expect(make().current().agentIdentity.name).toBe(first);
@@ -248,7 +277,7 @@ describe('SharedSettingsService', () => {
           },
         ],
         codex: [],
-        providerKeys: { groq: GROQ },
+        providerKeys: { openai: OPENAI },
       },
     });
     service.mergeImport('d2', {
@@ -269,22 +298,24 @@ describe('SharedSettingsService', () => {
           { id: 'gone', label: 'Old', credential: null },
         ],
         codex: [],
-        providerKeys: { groq: 'gsk_should_not_replace_the_first_one' },
+        providerKeys: { openai: 'sk_should_not_replace_the_first_one' },
       },
     });
     const claude = service.secretsSummary().claude;
     expect(claude.map((a) => a.organizationId)).toEqual(['org-a', 'org-b']);
     // A label that would read twice is told apart by the host it came from.
     expect(claude.map((a) => a.label)).toEqual(['Default', 'Default (mac)']);
-    expect(service.secretsSummary().providerKeys.find((k) => k.id === 'groq')?.last4).toBe('1234');
+    expect(service.secretsSummary().providerKeys.find((k) => k.id === 'openai')?.last4).toBe(
+      '1234',
+    );
   });
 
   it('never writes a secret in plaintext, and reads it back with the key', async () => {
     await service.addClaude(TOKEN_A, 'Work');
-    service.setProviderKey('groq', GROQ);
+    service.setProviderKey('openai', OPENAI);
     const disk = everythingOnDisk(dir);
     expect(disk).not.toContain(TOKEN_A);
-    expect(disk).not.toContain(GROQ);
+    expect(disk).not.toContain(OPENAI);
     expect(disk).not.toContain(service.webBotAuthKey());
     expect(
       make()
@@ -320,7 +351,7 @@ describe('SharedSettingsService', () => {
       status: 503,
       code: 'secrets_unreadable',
     });
-    expect(() => service.setProviderKey('groq', GROQ)).toThrow(/secrets\.key is missing/);
+    expect(() => service.setProviderKey('openai', OPENAI)).toThrow(/secrets\.key is missing/);
   });
 
   it('keeps the job default model apart from the new-chat default model', () => {
@@ -357,10 +388,10 @@ describe('SharedSettingsService', () => {
 
   it('never puts a secret value on the surface frame', async () => {
     await service.addClaude(TOKEN_A);
-    service.setProviderKey('groq', GROQ);
+    service.setProviderKey('openai', OPENAI);
     const surfaceText = JSON.stringify(broadcasts);
     expect(surfaceText).not.toContain(TOKEN_A);
-    expect(surfaceText).not.toContain(GROQ);
+    expect(surfaceText).not.toContain(OPENAI);
   });
 
   it('validates a pasted Claude token and refuses a second copy of an account', async () => {
@@ -457,16 +488,16 @@ describe('SharedSettingsService', () => {
             requestId: event.requestId,
             hostId,
             ok: true,
-            result: { kind: 'provider-key', id: 'groq', value: GROQ },
+            result: { kind: 'provider-key', id: 'openai', value: OPENAI },
           }),
         );
       },
       onlineHostIds: () => online,
       broadcast: () => undefined,
     });
-    await svc.adoptInto('d1', 'provider-key', 'groq');
-    expect(svc.secretsSummary().providerKeys.find((k) => k.id === 'groq')).toEqual({
-      id: 'groq',
+    await svc.adoptInto('d1', 'provider-key', 'openai');
+    expect(svc.secretsSummary().providerKeys.find((k) => k.id === 'openai')).toEqual({
+      id: 'openai',
       set: true,
       last4: '1234',
     });
@@ -530,8 +561,8 @@ describe('shared settings routes', () => {
     try {
       const res = await built.app.inject({
         method: 'PUT',
-        url: '/api/providers/keys/groq',
-        payload: { value: GROQ },
+        url: '/api/providers/keys/openai',
+        payload: { value: OPENAI },
       });
       expect(res.statusCode).toBe(401);
     } finally {
@@ -544,20 +575,20 @@ describe('shared settings routes', () => {
     try {
       const res = await built.app.inject({
         method: 'PUT',
-        url: '/api/providers/keys/groq',
+        url: '/api/providers/keys/openai',
         headers: auth,
-        payload: { value: GROQ },
+        payload: { value: OPENAI },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.body).not.toContain(GROQ);
+      expect(res.body).not.toContain(OPENAI);
       expect(res.json().secrets.providerKeys).toContainEqual({
-        id: 'groq',
+        id: 'openai',
         set: true,
         last4: '1234',
       });
       const bad = await built.app.inject({
         method: 'PUT',
-        url: '/api/providers/keys/groq',
+        url: '/api/providers/keys/openai',
         headers: auth,
         payload: { value: 'short' },
       });
@@ -567,7 +598,7 @@ describe('shared settings routes', () => {
         method: 'PUT',
         url: '/api/providers/keys/anthropic',
         headers: auth,
-        payload: { value: GROQ },
+        payload: { value: OPENAI },
       });
       expect(unknown.statusCode).toBe(404);
     } finally {
@@ -685,11 +716,11 @@ describe('shared settings routes', () => {
         built.app.inject({ method: 'PATCH', url: '/api/settings', headers: auth, payload });
       const before = await built.app.inject({ method: 'GET', url: '/api/settings', headers: auth });
       expect(before.json().preferences).toMatchObject({
-        meetingAnalysisModel: 'claude-haiku-4-5-20251001',
-        meetingCleanupModel: 'claude-haiku-4-5-20251001',
+        meetingAnalysisModel: 'claude-sonnet-5-5',
+        meetingCleanupModel: 'claude-sonnet-5-5',
         meetingTranscriptionModel: '',
         meetingAnalyseSeconds: 45,
-        meetingResearchModel: 'claude-haiku-4-5-20251001',
+        meetingResearchModel: 'claude-sonnet-5-5',
         meetingResearchSeconds: 60,
       });
       const res = await patch({

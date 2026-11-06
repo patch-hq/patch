@@ -52,7 +52,7 @@ vi.mock('../src/api/rest', () => {
 const KEYS = [
   { id: 'gemini' as const, set: true, last4: 'WXYZ' },
   { id: 'openai' as const, set: false },
-  { id: 'groq' as const, set: false },
+  { id: 'deepgram' as const, set: false },
 ];
 
 /** The committed shared state a write answers with. */
@@ -115,21 +115,23 @@ describe('mobile Settings → Providers → provider keys (shared, spec/01 § Se
   it('names the hosts whose environment has a key the account has not set, and adopts it', async () => {
     reportHost('h1', {
       hostName: 'laptop',
-      providerKeys: [{ id: 'groq', source: 'env', last4: '1234', envSet: true }],
+      providerKeys: [{ id: 'deepgram', source: 'env', last4: '1234', envSet: true }],
     });
     vi.mocked(api.adoptProviderKey).mockResolvedValue(
-      state([KEYS[0]!, KEYS[1]!, { id: 'groq', set: true, last4: '1234' }]),
+      state([KEYS[0]!, KEYS[1]!, { id: 'deepgram', set: true, last4: '1234' }]),
     );
     const r = await openKeys();
-    expect(textOf(findHost(r.root, byTestId('provider-key-groq-status')))).toBe(
+    expect(textOf(findHost(r.root, byTestId('provider-key-deepgram-status')))).toBe(
       'From the environment on laptop',
     );
     await actAsync(async () => {
-      findHost(r.root, byTestId('provider-key-groq-adopt')).props.onPress();
+      findHost(r.root, byTestId('provider-key-deepgram-adopt')).props.onPress();
       await flush();
     });
-    expect(api.adoptProviderKey).toHaveBeenCalledWith('groq', 'h1');
-    expect(textOf(findHost(r.root, byTestId('provider-key-groq-status')))).toBe('Set · ends 1234');
+    expect(api.adoptProviderKey).toHaveBeenCalledWith('deepgram', 'h1');
+    expect(textOf(findHost(r.root, byTestId('provider-key-deepgram-status')))).toBe(
+      'Set · ends 1234',
+    );
   });
 
   it('Add sends the trimmed value from a secure field and settles on the answer', async () => {

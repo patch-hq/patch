@@ -38,7 +38,7 @@ import {
   DEFAULT_WATCH_CHECK_IN_MINUTES,
   DEFAULT_WATCH_CHECK_IN_PROMPT,
 } from './watch-check-in-prompt.js';
-import { HostProviderKey, ProviderKeyId } from './provider-keys.js';
+import { HostProviderKeys, ProviderKeyId } from './provider-keys.js';
 import { BACKEND_IDS, PROVIDERS, providerForModel, type ProviderId } from './providers.js';
 import {
   HookDecision,
@@ -2176,7 +2176,7 @@ export const SharedSettings = z
     meetingAnalysisModel: z.string().min(1),
     /** The model that repairs mis-heard names in transcript lines before analysis. */
     meetingCleanupModel: z.string().min(1),
-    /** The speech-to-text model for meetings: a faster-whisper model directory (local) or a Groq model name. Empty is the host's own configured model. */
+    /** Retired: meetings are transcribed on the listening device. Kept so older clients and stored files still parse; nothing reads it. */
     meetingTranscriptionModel: z.string(),
     /** Seconds between analysis passes at the Normal meeting speed. */
     meetingAnalyseSeconds: z.number().int().min(5).max(300),
@@ -2423,6 +2423,7 @@ export const SharedSecrets = z
         gemini: z.string().min(1).optional(),
         openai: z.string().min(1).optional(),
         elevenlabs: z.string().min(1).optional(),
+        /** Retired: Groq transcription is gone. Still read so a stored or older host's copy parses; never used. */
         groq: z.string().min(1).optional(),
         deepgram: z.string().min(1).optional(),
       })
@@ -2775,7 +2776,7 @@ export const HostInfoEvent = z
      * the value. Settings → Hosts → Keys renders it. Absent = a host
      * older than the key store, which gets no Keys block at all.
      */
-    providerKeys: z.array(HostProviderKey).optional(),
+    providerKeys: HostProviderKeys.optional(),
     /**
      * How many user messages between auto-regen of the chat name. `0` means
      * regen is disabled (name only from first message). Absent means the
@@ -3993,6 +3994,36 @@ export const MeetingAudioEvent = z
   })
   .strict();
 export type MeetingAudioEvent = z.infer<typeof MeetingAudioEvent>;
+
+/**
+ * Surface → host: lines the surface transcribed on its own device (spec/07
+ * § Meeting transcription). Only text leaves the machine. `spokenAt` is the
+ * wall-clock ms the utterance began, so a line is placed when it was said, not
+ * when it arrived. Replaces `meeting.audio`, which a host now refuses.
+ */
+export const MeetingLinesEvent = z
+  .object({
+    type: z.literal('meeting.lines'),
+    chatId: z.string().min(1),
+    source: z.enum(['mic', 'system']),
+    lines: z
+      .array(
+        z
+          .object({
+            text: z.string().trim().min(1).max(4000),
+            spokenAt: z.number().int().nonnegative(),
+            /** Who the call app showed as speaking at the time, when the shell could tell. */
+            speakerName: z.string().min(1).optional(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(50),
+    /** Which device is listening, e.g. "Chrome on a Mac"; other surfaces name it as where the meeting is listening. */
+    device: z.string().min(1).optional(),
+  })
+  .strict();
+export type MeetingLinesEvent = z.infer<typeof MeetingLinesEvent>;
 
 /**
  * Surface → host: act on an action row. `do` runs an agent action in a linked
@@ -9294,6 +9325,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   MeetingControlRequestEvent,
   MeetingGetRequestEvent,
   MeetingAudioEvent,
+  MeetingLinesEvent,
   MeetingActionRequestEvent,
   MeetingNotesRequestEvent,
   MeetingMyNotesRequestEvent,
@@ -9603,6 +9635,7 @@ export const EVENT_SCHEMAS = {
   'meeting.control_request': MeetingControlRequestEvent,
   'meeting.get_request': MeetingGetRequestEvent,
   'meeting.audio': MeetingAudioEvent,
+  'meeting.lines': MeetingLinesEvent,
   'meeting.action_request': MeetingActionRequestEvent,
   'meeting.notes_request': MeetingNotesRequestEvent,
   'meeting.my_notes_request': MeetingMyNotesRequestEvent,
