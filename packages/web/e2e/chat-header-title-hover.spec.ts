@@ -1,15 +1,17 @@
 import { test, expect } from '@playwright/test';
 
 // Real-browser e2e (dev harness, real ChatHeader + real CSS, no backend) for
-// spec/14 § Chat panel header: the bar is a single line. Folder · host is the
+// spec/14 § Chat panel header: the bar is a single line. Folder · host · model is the
 // chat title's hover tooltip, and the usage bar is not drawn up there.
 
 test.describe('chat header title hover', () => {
-  test('folder · host is the title tooltip, with nothing under the title', async ({ page }) => {
+  test('folder · host · model is the title tooltip, with nothing under the title', async ({
+    page,
+  }) => {
     await page.goto('/app/dev-harness.html?chat=chat_bus');
     const title = page.getByTestId('chat-title');
     await expect(title).toBeVisible();
-    await expect(title).toHaveAttribute('title', 'bus · dev-host');
+    await expect(title).toHaveAttribute('title', 'bus · dev-host · Sonnet 4.6');
     await expect(page.getByTestId('chat-host')).toHaveCount(0);
     await expect(page.getByTestId('folder-path')).toHaveCount(0);
     await expect(page.getByTestId('chat-head-crumb')).toHaveCount(0);
