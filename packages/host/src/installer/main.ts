@@ -283,29 +283,26 @@ export function hostAppExecutable(runtimeDir: string): string {
   return join(runtimeDir, 'Patch Host.app', 'Contents', 'MacOS', 'patch-host');
 }
 
-/** The Info.plist that makes the runtime a bundle, so TCC remembers one decision for it. */
-export function hostAppInfoPlist(version: string): string {
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleIdentifier</key>
-  <string>${HOST_APP_BUNDLE_ID}</string>
-  <key>CFBundleName</key>
-  <string>Patch Host</string>
-  <key>CFBundleExecutable</key>
-  <string>patch-host</string>
-  <key>CFBundlePackageType</key>
-  <string>APPL</string>
-  <key>CFBundleVersion</key>
-  <string>${version}</string>
-  <key>CFBundleShortVersionString</key>
-  <string>${version}</string>
-  <key>LSUIElement</key>
-  <true/>
-</dict>
-</plist>
-`;
+/**
+ * Install the artifact's signed `Patch Host.app` over the runtime one, whole.
+ * The bundle is signed with its Info.plist sealed in (build-host); writing or
+ * patching anything inside it here would break that seal, and macOS would save
+ * every Allow and then never match it. Replaced only when the code hash
+ * differs, which covers the binary, entitlements, identifier and Info.plist.
+ */
+export function installHostApp(bundled: string, installed: string): void {
+  const exe = (app: string) => join(app, 'Contents', 'MacOS', 'patch-host');
+  if (!existsSync(exe(bundled))) {
+    throw new Error(`the macOS artifact carries no signed host app at ${bundled}`);
+  }
+  if (existsSync(exe(installed)) && sameRuntimeBinary(exe(installed), exe(bundled))) return;
+  const tmp = `${installed}.new-${process.pid}`;
+  const old = `${installed}.old-${process.pid}`;
+  rmSync(tmp, { recursive: true, force: true });
+  cpSync(bundled, tmp, { recursive: true });
+  if (existsSync(installed)) renameSync(installed, old);
+  renameSync(tmp, installed);
+  rmSync(old, { recursive: true, force: true });
 }
 
 /** Which service manager this machine has. Anything else is not a target. */
@@ -527,14 +524,11 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
   const runtimeDir = join(patchHome, 'runtime');
   const stableNode =
     ctx.platform === 'darwin' ? hostAppExecutable(runtimeDir) : join(runtimeDir, 'patch-host');
-  mkdirSync(dirname(stableNode), { recursive: true });
-  if (ctx.platform === 'darwin') {
-    writeFileSync(join(dirname(stableNode), '..', 'Info.plist'), hostAppInfoPlist(build.version), {
-      encoding: 'utf8',
-    });
-  }
+  mkdirSync(runtimeDir, { recursive: true });
   const bundledNode = join(installDir, 'node');
-  if (existsSync(bundledNode)) {
+  if (ctx.platform === 'darwin') {
+    installHostApp(join(installDir, 'Patch Host.app'), join(runtimeDir, 'Patch Host.app'));
+  } else if (existsSync(bundledNode)) {
     const same = existsSync(stableNode) && sameRuntimeBinary(stableNode, bundledNode);
     if (!same) {
       const tmp = `${stableNode}.new-${process.pid}`;

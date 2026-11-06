@@ -34,6 +34,7 @@ import {
   copyFileSync,
   cpSync,
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -56,6 +57,64 @@ ed.etc.sha512Sync = (...m) => sha512(ed.etc.concatBytes(...m));
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DAEMON = join(REPO_ROOT, 'packages', 'host');
+
+/**
+ * macOS: the runtime ships as a signed `Patch Host.app`, sealed whole. TCC
+ * stores Allow against the bundle id and checks it against the bundle's
+ * signature, so the Info.plist has to be inside that signature: an Info.plist
+ * dropped next to a separately signed binary leaves a bundle that fails
+ * `codesign --verify`, and every Allow is saved and then never matches.
+ * The plist carries no version, so the bundle only changes when node does.
+ */
+const HOST_APP_NAME = 'Patch Host.app';
+
+function hostAppInfoPlist() {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>${HOST_APP_BUNDLE_ID}</string>
+  <key>CFBundleName</key>
+  <string>Patch Host</string>
+  <key>CFBundleExecutable</key>
+  <string>patch-host</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>LSUIElement</key>
+  <true/>
+</dict>
+</plist>
+`;
+}
+
+function signHostApp(outDir, identity) {
+  const app = join(outDir, HOST_APP_NAME);
+  const exe = join(app, 'Contents', 'MacOS', 'patch-host');
+  rmSync(app, { recursive: true, force: true });
+  mkdirSync(dirname(exe), { recursive: true });
+  writeFileSync(join(app, 'Contents', 'Info.plist'), hostAppInfoPlist());
+  copyFileSync(join(outDir, 'node'), exe);
+  chmodSync(exe, 0o755);
+  sh('codesign', [
+    '--force',
+    '--timestamp=none',
+    '--identifier',
+    HOST_APP_BUNDLE_ID,
+    '--options',
+    'runtime',
+    '--entitlements',
+    process.env.PATCH_CODESIGN_ENTITLEMENTS ?? join(DAEMON, 'installer', 'host-entitlements.plist'),
+    '--sign',
+    identity,
+    app,
+  ]);
+  sh('codesign', ['--verify', '--strict', '--deep', '--verbose=2', app]);
+  // `node` becomes a hard link to the bundle's executable, so the tarball
+  // carries the binary once.
+  rmSync(join(outDir, 'node'));
+  linkSync(exe, join(outDir, 'node'));
+}
 
 /** The three shipping targets. */
 export const TARGETS = [
@@ -389,8 +448,6 @@ function copySherpaOnnx(outDir, t) {
  * `allow-jit` the signed Node dies at startup with "Failed to reserve virtual
  * memory for CodeRange" while still passing `codesign --verify`.
  */
-const HOST_CODESIGN_IDENTIFIER = 'dev.patch.host';
-
 function codesignMacArtifact(outDir, machos) {
   const identity = process.env.PATCH_CODESIGN_IDENTITY ?? process.env.CSC_NAME;
   if (!identity) {
@@ -411,22 +468,19 @@ function codesignMacArtifact(outDir, machos) {
     );
   }
   for (const file of machos) {
-    // The runtime's signing identifier is the host app's bundle id, not "node":
-    // the installer wraps it in a .app with that id, and TCC keys its
-    // Allow/Don't Allow on the pair. Keep in step with HOST_APP_BUNDLE_ID.
-    const identifier = file === join(outDir, 'node') ? ['--identifier', HOST_APP_BUNDLE_ID] : [];
+    // The runtime's signing identifier must be the host app's bundle id: the
+    // installer wraps it in a .app with that id, and TCC stores Allow against
+    // the bundle id but checks it against the signing identifier. If the two
+    // differ, every Allow is recorded and then never matches, so macOS
+    // re-prompts on every child process. Exactly one --identifier: codesign
+    // takes the last, which is how an earlier stray one silently won.
     sh('codesign', [
       '--force',
-      ...identifier,
       '--timestamp=none',
       '--identifier',
-      basename(file) === 'node' ? 'patch-host' : basename(file),
+      basename(file) === 'node' ? HOST_APP_BUNDLE_ID : basename(file),
       '--options',
       'runtime',
-      // A stable identifier of our own: the copied Node binary otherwise signs
-      // as `node`, and macOS keys a privacy decision on it, so one Don't Allow
-      // would not stick across updates (and would collide with any other node).
-      ...(basename(file) === 'node' ? ['--identifier', HOST_CODESIGN_IDENTIFIER] : []),
       '--entitlements',
       entitlements,
       '--sign',
@@ -555,6 +609,7 @@ async function buildTarget(t, ctx) {
         .filter((f) => existsSync(f)),
       join(outDir, 'node'),
     ]);
+    signHostApp(outDir, codesignIdentity);
   }
 
   // 9. the tarball + its detached project signature
