@@ -22,7 +22,7 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 import { useWebUpdateStore } from '../stores/webUpdateStore.js';
 import { reloadNow } from '../lib/liveUpdate.js';
 import { updateUrgency, waitedWords } from './DesktopUpdateBanner.js';
-import { useDesktopUpdaterState } from '../lib/desktopBridge.js';
+import { useDesktopUpdaterState, useLogUpdateBanner } from '../lib/desktopBridge.js';
 
 const RELOAD_GRACE_MS = 8_000;
 
@@ -61,11 +61,14 @@ export function WebUpdateBanner(): JSX.Element | null {
     return () => window.clearInterval(id);
   }, []);
 
-  if (staleSince === null) return null;
-  if (desktopState?.downloaded && desktopState.availableVersion) return null;
-  const urgency = updateUrgency(staleSince, now);
-  if (urgency === 'none') return null;
-  const waited = waitedWords(staleSince, now);
+  const deferred = !!(desktopState?.downloaded && desktopState.availableVersion);
+  const urgency = staleSince === null || deferred ? 'none' : updateUrgency(staleSince, now);
+  const waited = staleSince === null ? null : waitedWords(staleSince, now);
+  useLogUpdateBanner(
+    'web',
+    urgency === 'none' ? null : `Patch has updated${waited === null ? '' : `, waiting ${waited}`}.`,
+  );
+  if (staleSince === null || deferred || urgency === 'none') return null;
 
   return (
     <div

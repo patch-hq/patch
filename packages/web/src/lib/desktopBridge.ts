@@ -157,6 +157,8 @@ export interface PatchDesktopBridge {
   openPath?(path: string, mode: 'file' | 'folder'): Promise<void>;
   /** Run a check now and resolve with the resulting state. */
   checkForUpdates?(): Promise<DesktopUpdaterState>;
+  /** Report what an update banner showed (or that it cleared) to the shell's updater log. */
+  logUpdateBanner?(shown: boolean, text: string): void;
   /** Subscribe to state pushes from main (download progress, errors). */
   onUpdaterState?(cb: (state: DesktopUpdaterState) => void): () => void;
   /**
@@ -285,3 +287,15 @@ export function useDesktopUpdaterState(): DesktopUpdaterState | null {
 export type MeetingPermissionKind = 'microphone' | 'callAudio' | 'accessibility';
 export type MeetingPermissionState = 'granted' | 'missing' | 'unknown';
 export type MeetingPermissions = Record<MeetingPermissionKind, MeetingPermissionState>;
+
+/**
+ * Record in the shell's updater log whether an update prompt is on screen and
+ * what it says. No bridge (a browser) → nothing to record into, not an error.
+ */
+export function useLogUpdateBanner(source: 'desktop' | 'web', text: string | null): void {
+  useEffect(() => {
+    const bridge = getDesktopBridge();
+    if (!bridge?.logUpdateBanner) return;
+    bridge.logUpdateBanner(text !== null, `${source}: ${text ?? 'cleared'}`);
+  }, [source, text]);
+}
