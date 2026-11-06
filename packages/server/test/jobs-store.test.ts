@@ -12,7 +12,7 @@ import type { Job, JobCreateBody } from '../src/jobs/types.js';
  *
  * These are POLLS that exit the moment the watcher fires, so a generous
  * ceiling costs nothing when the box is idle — it only decides how starved
- * the machine may get before a real watcher looks like a broken one. 8s was
+ * the host may get before a real watcher looks like a broken one. 8s was
  * not enough: vitest runs this package's files in parallel, and on a loaded
  * box the watcher simply does not get scheduled in time. It failed a deploy
  * that way (deploy-2026-10-06T10-46-48) while passing alone every time.
@@ -152,7 +152,7 @@ describe('JobStore', () => {
         // a fixed deadline. chokidar's latency is at the mercy of the OS watcher
         // and of whatever else is on the CPU — the suite runs every package's
         // tests in parallel — so a fixed deadline was really asserting "the
-        // machine was not busy", and it duly timed out on a loaded box. Waiting
+        // host was not busy", and it duly timed out on a loaded box. Waiting
         // on the event itself means the only way to fail is the reload never
         // happening, which is the thing this test actually claims.
         let seen!: () => void;
@@ -271,7 +271,7 @@ describe('JobStore', () => {
 
   // Drives the store's own event handler with a fake clock instead of waiting
   // for a real file watcher: this test used to depend on inotify delivery and
-  // timed out (30s) whenever the machine was loaded, though it passed alone
+  // timed out (30s) whenever the host was loaded, though it passed alone
   // every time. The logic under test is the deadline check, not chokidar.
   it('a self-write whose coalescing window has already expired is treated as an external change', () => {
     let clock = 1_000_000;

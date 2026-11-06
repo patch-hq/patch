@@ -1,12 +1,12 @@
-// OutOfUsageBanner — shown in EVERY chat on a machine with no credit left
+// OutOfUsageBanner — shown in EVERY chat on a host with no credit left
 // anywhere.
 //
 // The limit bubble under a message speaks for one parked turn: it is the reply
 // that is not coming, in the conversation where you were waiting for it. This
 // answers a different question, and one nobody was being told the answer to —
-// is there any credit left on this machine AT ALL?
+// is there any credit left on this host AT ALL?
 //
-// When there is not, nothing on that machine can run. Not this chat, not the
+// When there is not, nothing on that host can run. Not this chat, not the
 // twenty others, not the cron jobs that will fire into them and park. A person
 // who does not know that keeps typing into chats that will never answer, which
 // is exactly what happened on 2026-09-11: every account spent, every chat
@@ -14,8 +14,8 @@
 // have open.
 //
 // So it is chrome, not a message, and it is per HOST — the same rule as
-// `ClaudeDisconnectedBanner`, because credit is a property of the machine's
-// accounts and says nothing about a chat running on a different machine.
+// `ClaudeDisconnectedBanner`, because credit is a property of the host's
+// accounts and says nothing about a chat running on a different host.
 //
 // It is a warning colour rather than an error one on purpose: nothing is
 // broken, and it comes back on its own at a time this says.
@@ -86,7 +86,7 @@ export function OutOfUsageBanner({
     if (chatId === undefined) return;
     const target = getModelCatalog().models.find((m) => harnessForModel(m.id) === providerId);
     if (!target) {
-      pushError(`No ${providerId} model is available on this machine to switch to`);
+      pushError(`No ${providerId} model is available on this host to switch to`);
       return;
     }
     getActiveWs()?.send({ type: 'chat.model_request', chatId, model: target.id, retry: true });
@@ -99,7 +99,7 @@ export function OutOfUsageBanner({
   }, [soonestAt]);
 
   if (!outage) return null;
-  // A machine that is not signed in at all is the disconnected banner's story;
+  // A host that is not signed in at all is the disconnected banner's story;
   // `hostOutage` already refuses that case, and this is the belt to its braces.
   if (account !== null && !account.connected) return null;
 

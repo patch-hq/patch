@@ -48,7 +48,7 @@ describe('classifyDrop', () => {
     c.sleep(960_000);
     const drop = classifyDrop(1006, d, c.wallNow());
     expect(drop).toMatchObject({ cause: 'sleep', sleptSeconds: 960, code: 1006 });
-    expect(describeDrop(drop)).toBe('machine slept for 960s');
+    expect(describeDrop(drop)).toBe('host slept for 960s');
   });
   it('leaves a drop with no sleep unexplained', () => {
     const c = clocks();

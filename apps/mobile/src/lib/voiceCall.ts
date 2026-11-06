@@ -139,8 +139,8 @@ export function startVoiceCall(chatId: string, mode: AudioSessionMode = 'call'):
     if (gen !== _callGen || st.callPhase !== 'connecting' || st.callError !== null) return;
     const secs = Math.round(CALL_CONNECT_TIMEOUT_MS / 1000);
     console.log(`[patch-voice] call connect TIMED OUT after ${secs}s`);
-    st.setError(`Could not connect — no answer from the machine after ${secs}s`);
-    useUiStore.getState().pushError(`voice call: no answer from the machine after ${secs}s`);
+    st.setError(`Could not connect — no answer from the host after ${secs}s`);
+    useUiStore.getState().pushError(`voice call: no answer from the host after ${secs}s`);
     // The setup may still be waiting on the token or the mic permission: end
     // this attempt, so it stops where it is instead of waking up later and
     // opening a live call under a bar that says it failed.

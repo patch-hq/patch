@@ -3,7 +3,7 @@
 // A turn's `claude` process used to be a child of the host, talking over pipes
 // the host held. When the host went — a self-update, `launchctl kickstart`, a
 // systemd restart — those pipes closed and the turn died with it, which is why
-// an update had to wait for a moment when nothing on the machine was mid-turn.
+// an update had to wait for a moment when nothing on the host was mid-turn.
 //
 // This process sits between the two. The host starts it detached (its own
 // session, so neither launchd's process-group kill nor the host's own exit

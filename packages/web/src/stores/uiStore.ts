@@ -829,9 +829,9 @@ interface UiState {
   toolsPanelWidth: number;
   /** Double-click on the Tools divider: back to the default width. */
   resetToolsPanelWidth(): void;
-  /** The dictate shortcut on this machine (lib/dictateChord.ts). */
+  /** The dictate shortcut on this host (lib/dictateChord.ts). */
   dictateChord: DictateChord;
-  /** Per-machine shortcut overrides (lib/keymap.ts); absent = the default. */
+  /** Per-host shortcut overrides (lib/keymap.ts); absent = the default. */
   shortcutOverrides: Overrides;
   /** Rebind one action; `null` puts it back to its default. */
   setShortcutChord: (id: ActionId, chord: Chord | null) => void;
@@ -962,7 +962,7 @@ interface UiState {
   resetSidebarWidth(): void;
   setThreadsPanelWidth(w: number): void;
   setToolsPanelWidth(w: number): void;
-  /** Rebind the dictate shortcut (persisted per machine). */
+  /** Rebind the dictate shortcut (persisted per host). */
   setDictateChord(chord: DictateChord): void;
   /** F1: set the browse-tree width (clamped + persisted). */
   setBrowseTreeWidth(w: number): void;

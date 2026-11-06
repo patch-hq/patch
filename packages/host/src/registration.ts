@@ -672,7 +672,7 @@ export interface RegistrationResult {
 
 export interface RegisterHostOptions {
   serverUrl: string;
-  /** `~/.patch` — where this machine's identity keypair lives. */
+  /** `~/.patch` — where this host's identity keypair lives. */
   patchHome: string;
   logger: Logger;
   /** Test hooks. */
@@ -791,9 +791,9 @@ async function registerAwait(
  */
 export async function registerHost(opts: RegisterHostOptions): Promise<RegistrationResult> {
   const fetchImpl = opts.fetchImpl ?? fetch;
-  // This machine's own identity (spec/10 § Host registration): its stable
+  // This host's own identity (spec/10 § Host registration): its stable
   // hostId and the public key it registers with. Minted once, under the
-  // host user's own ~/.patch, so a re-run is the SAME machine.
+  // host user's own ~/.patch, so a re-run is the SAME host.
   const identity = loadOrCreateHostIdentity(opts.patchHome);
   const hostId = opts.hostId ?? identity.hostId;
   const label = opts.label ?? hostname();

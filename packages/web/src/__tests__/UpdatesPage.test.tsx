@@ -4,7 +4,7 @@
 // and silent about the UI, which is how prod served an 8-day-old SPA for a week
 // with nothing in the product able to say so. So these tests are mostly about the
 // page refusing to look healthy when it isn't: drift is shown with a remedy, a
-// machine with a newer host waiting is listed with an Update button, a shell
+// host with a newer host waiting is listed with an Update button, a shell
 // that cannot self-update says why, and a failed check never reads as fine.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';

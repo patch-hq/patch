@@ -19,7 +19,7 @@ export interface HostFolders {
 
 interface FolderState {
   /**
-   * Keyed BY HOST. The picker is one list grouped by host, so two machines
+   * Keyed BY HOST. The picker is one list grouped by host, so two hosts
    * that both have a `~/projects/patch` stay two entries — collapsing them
    * would offer a folder that does not exist on the host about to be spawned
    * on.

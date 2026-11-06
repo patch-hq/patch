@@ -3,8 +3,8 @@ import { reportHost, settingsUrl, stubSettingsApi, wsSent } from './settingsHarn
 
 // Real-browser e2e for the DEFAULT permission mode in Settings → Agent (spec/02
 // § Permission mode): a shared setting (spec/01 § Settings), written to the
-// server, which sends it to every host. How many of a machine's chats are on a
-// mode of their own is that machine's, shown on its Hosts page.
+// server, which sends it to every host. How many of a host's chats are on a
+// mode of their own is that host's, shown on its Hosts page.
 const AGENT = settingsUrl('agent');
 
 test.describe('Settings → Agent → Permission mode', () => {

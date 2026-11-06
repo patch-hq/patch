@@ -26,7 +26,7 @@ import { usePresenceStore } from '../src/stores/presenceStore';
 import { deviceTimeZone } from '../src/lib/jobEditor';
 import { lightColors } from '../src/lib/theme';
 
-/** The one registered machine these screens address (spec/03 § Host events). */
+/** The one registered host these screens address (spec/03 § Host events). */
 const HOST = 'd1';
 
 vi.mock('../src/api/rest', () => ({
@@ -53,7 +53,7 @@ beforeEach(() => {
   __setLocalSearchParams({});
   useChatStore.getState()._reset();
   useFolderStore.getState()._reset();
-  // Every folder list and every browse is scoped to ONE machine (spec/04
+  // Every folder list and every browse is scoped to ONE host (spec/04
   // § Folders / § Browsing), so the roster carries the single registered host
   // these screens address. Without it `defaultHostId` is null and the screen
   // correctly refuses to guess — which is a different test.

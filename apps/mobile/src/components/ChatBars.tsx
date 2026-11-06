@@ -51,7 +51,7 @@ export function ChatBars({
       {row ? <ArchivedBar row={row} /> : null}
       {row ? <HiddenBar row={row} /> : null}
       <SnoozedBanner row={row} />
-      {/* Credentials are per host: this speaks only for the machine THIS chat
+      {/* Credentials are per host: this speaks only for the host THIS chat
           runs on. */}
       {row ? <ClaudeDisconnectedBar model={row.model} /> : null}
     </>

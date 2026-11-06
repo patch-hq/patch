@@ -120,11 +120,11 @@ describe('validateKokoroModel (startup gate, spec/07 § sidecar lifecycle)', () 
   });
 
   test('the host-local component simply not downloaded yet does NOT abort boot', () => {
-    // spec/02 § Optional components: Kokoro is a ~340 MB per-machine download.
-    // A freshly installed machine has not got it, which is the designed state —
+    // spec/02 § Optional components: Kokoro is a ~340 MB per-host download.
+    // A freshly installed host has not got it, which is the designed state —
     // the component reports `not installed` and voice is disabled until it is
-    // there. Aborting here would mean no host can start on a new machine at
-    // all (spec/11: "installs and runs on a machine carrying only an OS").
+    // there. Aborting here would mean no host can start on a new host at
+    // all (spec/11: "installs and runs on a host carrying only an OS").
     expect(() =>
       validateKokoroModel(
         {
@@ -641,7 +641,7 @@ describe('RealKokoroBackend (spawned sidecar — host-owned process)', () => {
     // resolvedUrl()'s no-sidecarUrl branch, on a port nothing else can hold:
     // pinned to DEFAULT_KOKORO_PORT this bound 5019, which the real host's own
     // sidecar owns on every Patch host — EADDRINUSE, and a 15s timeout, on the
-    // machines that matter. That the default IS 5019 is asserted above, where the
+    // hosts that matter. That the default IS 5019 is asserted above, where the
     // spawn env is checked.
     const k = createKokoro({
       backend: 'real',

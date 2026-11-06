@@ -7,7 +7,7 @@
 // takeover — so it must leave the Patch UI a usable column to its left.
 //
 // Imports the LAYOUT module, not in-app-browser: that one imports electron,
-// which throws at module load on any machine without an Electron binary, so this
+// which throws at module load on any host without an Electron binary, so this
 // whole file failed there — for reasons having nothing to do with the geometry.
 
 import { test } from 'node:test';

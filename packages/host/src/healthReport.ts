@@ -1,4 +1,4 @@
-// How this machine is coping, sampled for the host's heartbeat to the server
+// How this host is coping, sampled for the host's heartbeat to the server
 // (spec/03 § Host health). Memory and swap come from /proc/meminfo, so they are
 // only reported on Linux: a platform that cannot measure a thing leaves it out
 // rather than guessing, and the server judges only what it was told.

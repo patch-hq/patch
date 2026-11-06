@@ -33,7 +33,7 @@ describe('HostHealthTracker', () => {
       expect(tracker.offlineReason('h1')).toBe('battery');
     });
 
-    it('says it went to sleep when its machine reported sleeping after the last heartbeat', () => {
+    it('says it went to sleep when its host reported sleeping after the last heartbeat', () => {
       const { tracker, advance } = setup();
       tracker.observe(report());
       advance(5_000);
@@ -43,7 +43,7 @@ describe('HostHealthTracker', () => {
       expect(tracker.offlineReason('h1')).toBe('asleep');
     });
 
-    it('does not blame sleep once the machine has woken, or for an old report', () => {
+    it('does not blame sleep once the host has woken, or for an old report', () => {
       const { tracker, advance } = setup();
       tracker.noteAsleep('h1', true);
       advance(120_000);

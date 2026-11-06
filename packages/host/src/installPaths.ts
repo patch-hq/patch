@@ -71,7 +71,7 @@ export function bundledVadModelPath(dir: string = programDir): string | undefine
  * A voice sidecar's Python SOURCE, carried by the artifact (`sidecars/<id>/`).
  *
  * The source is a few KB and ships; its ~2 GB of wheels do not, and are built
- * per machine when the user installs the component (spec/02 § Optional
+ * per host when the user installs the component (spec/02 § Optional
  * components). Running from a source checkout there is no artifact, so the
  * monorepo's own `packages/<id>-sidecar` is the answer instead — the same
  * program, in the place this checkout keeps it.
@@ -86,15 +86,15 @@ export function bundledSidecarDir(sidecar: string, dir: string = programDir): st
 export const AGENT_SDK_PACKAGE = '@anthropic-ai/claude-agent-sdk';
 
 /**
- * The backend version a machine is provisioned with. Kept equal to the host's
+ * The backend version a host is provisioned with. Kept equal to the host's
  * own dependency on it (packages/host/package.json) — a test asserts that, so
- * the version the host is TYPED against and the version its machines RUN can
+ * the version the host is TYPED against and the version its hosts RUN can
  * never drift apart silently.
  */
 export const AGENT_SDK_VERSION = '0.2.126';
 
 /**
- * Where the machine's agent backend is provisioned (spec/02 § Agent backends —
+ * Where the host's agent backend is provisioned (spec/02 § Agent backends —
  * "the host provisions a backend the host lacks rather than reporting it as
  * missing").
  *
@@ -102,17 +102,17 @@ export const AGENT_SDK_VERSION = '0.2.126';
  * build into its own `versions/<v>/`, so a backend provisioned there would have
  * to be re-provisioned on every update — and an update that silently lost the
  * backend is exactly the failure this path exists to end. One provision per
- * machine, shared by every version that machine runs.
+ * host, shared by every version that host runs.
  */
 export function agentSdkBackendDir(patchHome: string): string {
   return join(patchHome, 'backends', 'claude');
 }
 
 /**
- * The provisioned backend's entry file, or `undefined` when this machine has
+ * The provisioned backend's entry file, or `undefined` when this host has
  * none. The host imports it BY PATH: an artifact has no `node_modules` on any
  * parent of `host.mjs`, so a bare specifier cannot reach a package installed
- * anywhere else on the machine — which is why every turn on an installed host
+ * anywhere else on the host — which is why every turn on an installed host
  * failed with "Cannot find package '@anthropic-ai/claude-agent-sdk'".
  *
  * A package directory with no readable entry point counts as ABSENT, not as

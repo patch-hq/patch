@@ -1,8 +1,8 @@
 // Parakeet STT backend (WHISPER_BACKEND=parakeet): NVIDIA Parakeet TDT v3 run
-// on this machine's CPU through sherpa-onnx (spec/07 § Dictation engines).
+// on this host's CPU through sherpa-onnx (spec/07 § Dictation engines).
 //
 // It replaces the rationed Groq re-read as the default words engine: nothing
-// leaves the machine, nothing is billed, there is no per-minute quota, and the
+// leaves the host, nothing is billed, there is no per-minute quota, and the
 // model punctuates and capitalises itself. The model is offline (not
 // streaming), so the live preview re-reads the growing utterance — the same
 // shape the Groq path had, but unmetered, so it can run about twice a second.

@@ -8,7 +8,7 @@ import type { WireEvent } from '@patch/wire';
 // grown too crowded, to sit beside the approval mode — the other setting that
 // applies to the next turn.
 
-// The catalogue is fetched per machine when the picker opens (spec/02 § Model
+// The catalogue is fetched per host when the picker opens (spec/02 § Model
 // catalogue), and the harness has no backend behind `/api/models`. Answering it
 // here is what makes the pop-up show its real list rather than its (equally
 // real, but not what these tests are about) error state.

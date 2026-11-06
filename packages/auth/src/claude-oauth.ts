@@ -23,7 +23,7 @@
 //      an operator runs `claude setup-token`). If set, it IS the access token.
 //   2. `~/.claude/.credentials.json` → `claudeAiOauth.accessToken` — the file
 //      Claude Code writes on Linux (the production host) and on any
-//      machine where Keychain isn't available. Path overridable for tests via
+//      host where Keychain isn't available. Path overridable for tests via
 //      the `path` option / `CLAUDE_CREDENTIALS_PATH` env.
 //   3. macOS Keychain generic password, service `Claude Code-credentials` →
 //      `claudeAiOauth.accessToken` — the default on a developer Mac.
@@ -570,7 +570,7 @@ export function addPatchStoreAccount(
  * credential stored before that existed has none — including, on the host where
  * this was found, the two that were the same account. Without backfilling them
  * the duplicate guard and the shared-pool failover would both stay blind on
- * exactly the machine that needed them, until someone re-pasted both tokens by
+ * exactly the host that needed them, until someone re-pasted both tokens by
  * hand.
  *
  * A no-op when the account is gone, has no credential, or already records this
@@ -668,7 +668,7 @@ export function loadClaudeOAuth(opts: LoadClaudeOAuthOptions = {}): ClaudeOAuthC
       // `~/.claude.json`'s `oauthAccount.emailAddress` here, and it made the
       // reported account name a lie: a token pasted into Settings carries no
       // email (see `validateClaudeOAuthToken` — Anthropic will not tell us whose
-      // it is), so every pasted credential displayed the machine's ambient
+      // it is), so every pasted credential displayed the host's ambient
       // Claude Code login instead — usually the account being switched AWAY
       // from. A seeded store keeps its email because `seedPatchStore` copies the
       // legacy one in, where the credential really IS that login.

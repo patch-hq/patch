@@ -53,7 +53,7 @@ async function setup() {
       url: `/api/activity?since=${since}&until=${until}&includeSessions=true`,
       headers: { authorization: `Bearer ${surfaceJwt}` },
     });
-    // Every online machine is asked for its messages; none has any.
+    // Every online host is asked for its messages; none has any.
     const answered = new Set<string>();
     for (let i = 0; i < 100; i++) {
       for (const s of hostLink.sent) {

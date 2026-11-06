@@ -1,7 +1,7 @@
 // Moving a chat to another host (spec/04 § Moving a chat to another host) —
 // the one piece of choosing where it goes that every surface shares.
 //
-// The same work usually lives at a different path on each machine
+// The same work usually lives at a different path on each host
 // (`/Users/tom/wpp/Unite` on the Mac, `/home/tom/Unite` on the box), so the
 // folder offered first on the target is the one with the same name. If the
 // target has none, the first folder it offers is selected so the user never has

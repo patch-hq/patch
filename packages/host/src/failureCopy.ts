@@ -4,12 +4,12 @@
 // chatRunner matches on; this only decides what the bubble and the job's run
 // row show. Two shapes a person could not read: Claude Code's own crash
 // report, "[session_crash] error_name=AbortError api_error_status=none
-// cause_name=none", and a turn that died because the machine slept under it,
-// which is not a failure of the turn at all and is re-sent once the machine
+// cause_name=none", and a turn that died because the host slept under it,
+// which is not a failure of the turn at all and is re-sent once the host
 // is properly awake.
 
 export const SLEPT_THROUGH_MESSAGE =
-  "Machine went to sleep mid-turn. Runs again once it's been awake a few minutes.";
+  "Host went to sleep mid-turn. Runs again once it's been awake a few minutes.";
 
 const SESSION_CRASH = /\[session_crash\]\s*error_name=([A-Za-z_]+)/;
 

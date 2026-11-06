@@ -102,13 +102,12 @@ const queryClient = new QueryClient({
 const openingJobTriggerFixture =
   new URLSearchParams(window.location.search).get('chat') === 'chat_job_trigger';
 
-// `?recency=machine` gives the new-chat screen's recently used models
+// `?recency=host` gives the new-chat screen's recently used models
 // something to ignore: a job-spawned chat and the Manager thread, both NEWER
 // than the one chat a person started (`chat_bus`), each on a model of its own
 // (spec/14 § Sidebar §8). Scoped to the param for the same reason as
 // `openingJobTriggerFixture` — a `jobId` fills the Automations group.
-const machineRecencyFixture =
-  new URLSearchParams(window.location.search).get('recency') === 'machine';
+const hostRecencyFixture = new URLSearchParams(window.location.search).get('recency') === 'host';
 
 // Hydrate the real chat store with the three special threads plus a regular
 // chat, exactly as the host would emit them.
@@ -124,10 +123,10 @@ useChatStore.getState().hydrate([
     pinned: true,
     pinnedAt: 50,
     disabled: false,
-    lastUpdated: machineRecencyFixture ? 90 : 3,
-    ...(machineRecencyFixture ? { model: 'claude-haiku-4-5' } : {}),
+    lastUpdated: hostRecencyFixture ? 90 : 3,
+    ...(hostRecencyFixture ? { model: 'claude-haiku-4-5' } : {}),
   },
-  ...(machineRecencyFixture
+  ...(hostRecencyFixture
     ? [
         {
           chatId: 'jobchat-nightly',
@@ -2922,7 +2921,7 @@ if (verbosityParam === 'off' || verbosityParam === 'summary' || verbosityParam =
 usePresenceStore.getState().setConnection('connected');
 // The `auth.ok` greeting, as the server replays it: one registered host, online,
 // with its own credential and its own last-used model. The last-used model lives
-// on the MACHINE (spec/04 § Spawn), so without a host here the new-chat picker
+// on the HOST (spec/04 § Spawn), so without a host here the new-chat picker
 // has nothing to preselect and no host to spawn on — exactly as in the real app.
 usePresenceStore.getState().setHosts([
   {
@@ -2971,9 +2970,9 @@ usePresenceStore.getState().setHosts([
   },
 ]);
 
-// `?hosts=two` adds a second machine, so the new-chat screen has a choice of
+// `?hosts=two` adds a second host, so the new-chat screen has a choice of
 // where to run (spec/14 §8). It publishes its own folder registry, as a real
-// host does, so choosing it offers that machine's folders and nobody else's.
+// host does, so choosing it offers that host's folders and nobody else's.
 if (new URLSearchParams(window.location.search).get('hosts') === 'two') {
   const home = usePresenceStore.getState().hosts['d1'];
   usePresenceStore.getState().setHosts([

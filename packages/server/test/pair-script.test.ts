@@ -87,7 +87,7 @@ describe('pairNewSurface', () => {
     expect(parsePairingUri(again.uri).nonce).toBeTruthy();
   });
 
-  it('says plainly when the server already has an owner this machine is not', async () => {
+  it('says plainly when the server already has an owner this host is not', async () => {
     await pairNewSurface({ baseUrl: base, dataDir: dir, publicUrl: 'https://patch.example.com' });
     rmSync(join(dir, 'admin.credential'));
     await expect(

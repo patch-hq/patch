@@ -36,7 +36,7 @@
 // 10:30:46, both inside the window the user answered in. The desktop app loads its
 // bundle from that server, so a deploy drops the link and reloads the
 // renderer; the pending map went with it, and the answer was gone with no
-// trace on any machine, no retry possible, and nothing to warn about because
+// trace on any host, no retry possible, and nothing to warn about because
 // the code that would warn had been torn down too. A surface is therefore the
 // source of truth for an unacked answer ACROSS RELOADS, not merely across
 // socket blips: entries are written to localStorage and re-armed on startup.

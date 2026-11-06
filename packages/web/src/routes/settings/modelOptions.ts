@@ -2,8 +2,8 @@
 // Manager → Model) offer.
 //
 // The catalogue is per host, so it is read from the account's default
-// machine (`defaultHostId`, the rule every other account-wide default uses).
-// With no unambiguous machine there is nothing to read a list FROM, so the control says that
+// host (`defaultHostId`, the rule every other account-wide default uses).
+// With no unambiguous host there is nothing to read a list FROM, so the control says that
 // rather than offering a guessed list — and the saved value is always kept as
 // an option, so an unrelated visit to the page can never unpin it.
 
@@ -31,7 +31,7 @@ export function useModelOptions(value: string): {
     options: [...extra, ...catalogue.models],
     problem:
       catalogueHost === null
-        ? { kind: 'no-host', text: 'No single machine to read the model list from.' }
+        ? { kind: 'no-host', text: 'No single host to read the model list from.' }
         : catalogue.status === 'error'
           ? {
               kind: 'error',

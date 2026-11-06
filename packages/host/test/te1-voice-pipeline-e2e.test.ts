@@ -589,7 +589,7 @@ describe('TE1 voice host pipeline e2e', () => {
     );
     // Kokoro real with an OPERATOR-named model file that is not there. (An
     // un-downloaded host-local component is a different case — see
-    // audio-kokoro.test.ts — because that is the ordinary state of a machine
+    // audio-kokoro.test.ts — because that is the ordinary state of a host
     // the host has only just been installed on.)
     expect(() =>
       validateKokoroModel({

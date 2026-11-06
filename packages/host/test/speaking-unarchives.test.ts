@@ -159,7 +159,7 @@ describe('a chat that reaches for the user leaves Archived', () => {
       expect(res.statusCode).toBe(200);
       expect(daemon.chatState.get(chatId)?.status).toBe('active');
       const notify = events.find((e) => e.type === 'notify');
-      expect(notify, 'blocked on a human must leave the machine').toBeDefined();
+      expect(notify, 'blocked on a human must leave the host').toBeDefined();
       expect(notify).toMatchObject({ channel: 'push', kind: 'ask', priority: 'normal' });
       expect((notify as { message: string }).message).toContain(
         'grant Screen Recording to Foreman Observer',

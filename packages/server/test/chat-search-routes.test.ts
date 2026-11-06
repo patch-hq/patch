@@ -22,7 +22,7 @@ type Req = Extract<WireEvent, { type: 'patch.chat_search.request' }>;
 type Res = Extract<WireEvent, { type: 'patch.chat_search.response' }>;
 type Answer = Omit<Res, 'type' | 'requestId' | 'hostId'> | null;
 
-/** A host link whose machines answer search requests with `respond`. */
+/** A host link whose hosts answer search requests with `respond`. */
 class FakeSearchHosts extends InProcessHostLink {
   readonly asked: Array<{ hostId: string; event: Req }> = [];
   constructor(
@@ -76,7 +76,7 @@ describe('chat search route', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  /** Three registered machines: d1 (home) and mac online, pi offline. */
+  /** Three registered hosts: d1 (home) and mac online, pi offline. */
   async function boot(link: InProcessHostLink) {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(44));
     const registry = Registry.load(dir);
@@ -368,7 +368,7 @@ describe('chat search route', () => {
     }
   });
 
-  it('ignores an answer from a machine that was not asked', async () => {
+  it('ignores an answer from a host that was not asked', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const link = new FakeSearchHosts(() => ({ ok: true, hits: [hit('x', 'pi')], total: 1 }), 'pi');
     const { built, auth } = await boot(link);

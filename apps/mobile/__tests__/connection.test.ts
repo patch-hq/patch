@@ -98,7 +98,7 @@ describe('daemon-dependent controls disable with an attributed reason', () => {
   it('names the host as the reason when the WS is up but the host is down', () => {
     const reason = hostControlDisabledReason('connected', 'offline');
     expect(reason).not.toBeNull();
-    expect(reason!.toLowerCase()).toContain('machine');
+    expect(reason!.toLowerCase()).toContain('host');
   });
 
   it('names the connection as the reason when the WS itself is down', () => {
@@ -115,7 +115,7 @@ describe('daemon-dependent controls disable with an attributed reason', () => {
   });
 
   it('names the host as "connecting" when the WS is up but host presence is not yet known', () => {
-    expect(hostControlDisabledReason('connected', 'unknown')).toBe('Connecting to machine…');
+    expect(hostControlDisabledReason('connected', 'unknown')).toBe('Connecting to host…');
   });
 
   it('names the refused credential when the link is unauthenticated, whatever the host says', () => {

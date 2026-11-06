@@ -38,7 +38,7 @@ let storePath: string;
 const opts = (): { storePath: string; env: NodeJS.ProcessEnv; platform: NodeJS.Platform } => ({
   storePath,
   // Isolate from the real ~/.claude.json — otherwise loadAccountEmail() leaks
-  // whatever account is actually logged in on this machine into assertions.
+  // whatever account is actually logged in on this host into assertions.
   env: { CLAUDE_CONFIG_PATH: join(dir, 'no-such-claude.json') },
   platform: 'linux' as NodeJS.Platform,
 });

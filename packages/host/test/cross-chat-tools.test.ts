@@ -454,8 +454,8 @@ describe('UDS internal endpoints — patch_stop', () => {
   });
 });
 
-describe('UDS internal endpoints — patch_stop on a chat owned by another machine', () => {
-  it('relays to the owning machine instead of 404ing', async () => {
+describe('UDS internal endpoints — patch_stop on a chat owned by another host', () => {
+  it('relays to the owning host instead of 404ing', async () => {
     const { daemon, jobs } = setup();
     const stopRemoteChat = vi.fn(async () => undefined);
     const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs, stopRemoteChat });

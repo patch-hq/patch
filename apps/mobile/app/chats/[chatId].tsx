@@ -307,7 +307,7 @@ function ChatDetailBody(): React.ReactElement {
     });
     return () => sub.remove();
   }, []);
-  // Which machine the chat runs on, for the header crumb (spec/15 § Chat detail).
+  // Which host the chat runs on, for the header crumb (spec/15 § Chat detail).
   const hostLabel = usePresenceStore((s) =>
     row?.hostId ? (s.hosts[row.hostId]?.host?.hostName ?? row.hostId).trim() : '',
   );
@@ -2876,7 +2876,7 @@ const TimelineItem = React.memo(function TimelineItem({
               )}
             </View>
             <Text testID="delivery-pending" style={{ color: colors.ink3, fontSize: textMin }}>
-              {hostOnline ? 'Sending…' : 'Machine offline — will send when it reconnects'}
+              {hostOnline ? 'Sending…' : 'Host offline — will send when it reconnects'}
             </Text>
           </View>
         ) : null}

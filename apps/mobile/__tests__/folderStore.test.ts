@@ -1,7 +1,7 @@
 // Mobile folderStore (spec/04 § Folders): holds each host's published folder
 // registry, which populates the new-chat + job-editor pickers.
 //
-// Keyed BY HOST. Two machines can publish the same path string meaning two
+// Keyed BY HOST. Two hosts can publish the same path string meaning two
 // different directories, so a flat list would collapse them into one picker
 // entry and the chat spawned from it would land on a folder the chosen host
 // does not have. `folders.list` and `folders.updated` each replace ONE host's

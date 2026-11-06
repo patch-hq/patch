@@ -26,7 +26,7 @@ describe('which backends offer a live transcript', () => {
     );
   });
 
-  test('a model on this machine does — one pass in flight at a time, so the final waits behind at most one', () => {
+  test('a model on this host does — one pass in flight at a time, so the final waits behind at most one', () => {
     expect(
       createWhisper({ backend: 'local', logger, localSidecarUrl: 'ws://127.0.0.1:1' })
         .supportsLivePartials,

@@ -67,7 +67,7 @@ export class BrowserNotInstalledError extends Error {
 export class AppBrowserUnavailableError extends Error {
   readonly code = 'app_browser_unavailable' as const;
   constructor(detail: string) {
-    super(`the agent's browser is in the Patch app on this machine, and ${detail}`);
+    super(`the agent's browser is in the Patch app on this host, and ${detail}`);
     this.name = 'AppBrowserUnavailableError';
   }
 }
@@ -373,7 +373,7 @@ export interface BrowserManagerOptions {
   /** Called when a chat's browser activity changes (an action starts or ends, a tab opens or closes). */
   onActivity?: (chatId: string) => void;
   /**
-   * spec/02 § Browser — In the Patch app: the Patch app on this machine hosts
+   * spec/02 § Browser — In the Patch app: the Patch app on this host hosts
    * the browser. Both profiles are its: the signed-in one is the app's own, a
    * throwaway one is an in-memory context there. No Chromium or Xvfb of this
    * host's own is started.
@@ -383,7 +383,7 @@ export interface BrowserManagerOptions {
 
 /** Where the Patch app's browser is, starting the app when it is not running. */
 export interface AppBrowserLink {
-  /** Whether the app has ever run on this machine (its endpoint file exists). */
+  /** Whether the app has ever run on this host (its endpoint file exists). */
   present(): boolean;
   endpoint(): Promise<string>;
 }
@@ -628,7 +628,7 @@ export class BrowserManager {
     }
   }
 
-  /** Settings → Computer use: is Patch driving this machine right now? */
+  /** Settings → Computer use: is Patch driving this host right now? */
   status(): ComputerUseStatus {
     this.pruneClosedTabs();
     const runs = [...this.running.values()];

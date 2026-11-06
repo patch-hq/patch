@@ -66,10 +66,10 @@ export interface CreateKokoroOptions {
   sidecarUrl?: string;
   /**
    * The loopback port for a sidecar this backend spawns itself. Defaults to
-   * DEFAULT_KOKORO_PORT. A machine-wide fixed port with no override meant the
+   * DEFAULT_KOKORO_PORT. A host-wide fixed port with no override meant the
    * spawn-and-connect path could only be exercised by binding 5019 — which the
    * real host on any Patch host already holds, so that test failed with
-   * EADDRINUSE on exactly the machines that run the thing.
+   * EADDRINUSE on exactly the hosts that run the thing.
    */
   sidecarPort?: number;
   /** Path to the kokoro model dir on disk (real backend only). */
@@ -78,13 +78,13 @@ export interface CreateKokoroOptions {
   sidecarCwd?: string;
   /**
    * Extra env for the spawned sidecar. Carries `UV_PROJECT_ENVIRONMENT` — the
-   * venv the component install built for this machine (spec/02 § Optional
+   * venv the component install built for this host (spec/02 § Optional
    * components) — so `uv run --no-sync` uses that environment rather than
    * resolving a fresh one inside the artifact.
    */
   sidecarEnv?: Record<string, string>;
   /**
-   * The `uv` to spawn. A machine that had none got one during the component
+   * The `uv` to spawn. A host that had none got one during the component
    * install, in the patch home rather than on PATH (spec/02 § Optional
    * components), so a bare `uv` would not be found. Defaults to `uv`.
    */
@@ -101,7 +101,7 @@ export function createKokoro(opts: CreateKokoroOptions): KokoroBackend {
 }
 
 /**
- * TTS is not installed on this machine. The ~340 MB Kokoro weights are an
+ * TTS is not installed on this host. The ~340 MB Kokoro weights are an
  * optional component the artifact deliberately omits, so a fresh install has
  * no voice — that must not stop the host booting, and must not silently
  * produce silence when something asks it to speak.
@@ -109,7 +109,7 @@ export function createKokoro(opts: CreateKokoroOptions): KokoroBackend {
 class UnconfiguredKokoroBackend implements KokoroBackend {
   async synthesize(): Promise<KokoroSynthesis> {
     throw new Error(
-      'Text-to-speech is not configured on this machine. Voice is an optional component: ' +
+      'Text-to-speech is not configured on this host. Voice is an optional component: ' +
         'install it from Settings → Hosts, or set KOKORO_BACKEND=real with KOKORO_MODEL_PATH. ' +
         'Refusing to return empty audio.',
     );
@@ -157,14 +157,14 @@ export function validateKokoroModel(
         'A missing model file must abort at startup, not 500 the first voice turn (NO SILENT FALLBACK).',
     );
   }
-  // Nobody named a path: the weights are this machine's Kokoro optional
+  // Nobody named a path: the weights are this host's Kokoro optional
   // component (~340 MB), downloaded on demand (spec/02 § Optional components).
-  // A machine that has only just been installed does not have it yet, and that
+  // A host that has only just been installed does not have it yet, and that
   // is the designed state — the host advertises the component as `not
   // installed`, surfaces disable TTS and name what is needed, and a synthesis
   // attempt fails loudly. Aborting boot here instead would mean no host can
-  // ever start on a fresh machine, which is the opposite of spec/11's "installs
-  // and runs on a machine carrying only an OS".
+  // ever start on a fresh host, which is the opposite of spec/11's "installs
+  // and runs on a host carrying only an OS".
 }
 
 /**

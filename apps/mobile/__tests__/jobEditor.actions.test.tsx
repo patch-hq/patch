@@ -28,7 +28,7 @@ import { useFolderStore } from '../src/stores/folderStore';
 import { usePresenceStore } from '../src/stores/presenceStore';
 import { lightColors } from '../src/lib/theme';
 
-/** The one registered machine these screens address (spec/03 § Host events). */
+/** The one registered host these screens address (spec/03 § Host events). */
 const HOST = 'd1';
 
 function setKey(r: ReturnType<typeof renderRN>, v: string) {
@@ -59,7 +59,7 @@ beforeEach(() => {
   __setLocalSearchParams({});
   useChatStore.getState()._reset();
   useFolderStore.getState()._reset();
-  // Every folder list and every browse is scoped to ONE machine (spec/04
+  // Every folder list and every browse is scoped to ONE host (spec/04
   // § Folders / § Browsing), so the roster carries the single registered host
   // these screens address. Without it `defaultHostId` is null and the screen
   // correctly refuses to guess — which is a different test.
@@ -303,7 +303,7 @@ describe('JobEditor — Skill Edit link', () => {
     await flush();
     pickOption(r, 'job-skill', 'life-coach');
     expect(queryHost(r.root, byTestId('job-skill-edit'))).toBeNull();
-    expect(hasText(r.root, 'machine does not report skill files')).toBe(true);
+    expect(hasText(r.root, 'host does not report skill files')).toBe(true);
   });
 
   it("for a message action, links through the RECIPIENT chat's host, not the spawn host", async () => {
@@ -392,7 +392,7 @@ describe('JobEditor — Model picker', () => {
     const r = renderRN(<JobEditor />);
     await flush();
     expect(api.models).toHaveBeenCalledWith(HOST);
-    expect(pickerLabel(r, 'job-spawn-model')).toBe('Machine default'); // a new job pins nothing
+    expect(pickerLabel(r, 'job-spawn-model')).toBe('Host default'); // a new job pins nothing
     openPicker(r, 'job-spawn-model');
     expect(findAllHost(r.root, byTestId('job-spawn-model-option-claude-opus-5')).length).toBe(1);
   });
@@ -407,7 +407,7 @@ describe('JobEditor — Model picker', () => {
     pickOption(r, 'job-spawn-model', 'claude-opus-5');
     expect(pickerLabel(r, 'job-spawn-model')).toBe('Opus 5');
     pickOption(r, 'job-spawn-model', '');
-    expect(pickerLabel(r, 'job-spawn-model')).toBe('Machine default');
+    expect(pickerLabel(r, 'job-spawn-model')).toBe('Host default');
   });
 
   it('offers a Codex model only the permission modes Codex can run, resetting `auto`', async () => {
@@ -580,7 +580,7 @@ describe('JobEditor — the gate', () => {
     findHost(r.root, byTestId('job-gate-on')).props.onPress();
     await flush();
     expect(findHost(r.root, byTestId('job-gate-command'))).toBeDefined();
-    // Seeded from the action: the work's machine and folder is where the
+    // Seeded from the action: the work's host and folder is where the
     // question almost always belongs too.
     expect(findHost(r.root, byTestId('job-gate-folder')).props.value).toBe('/home/tom/a');
     expect(findHost(r.root, byTestId('job-gate-daemon')).props.value).toBe(HOST);

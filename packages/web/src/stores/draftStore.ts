@@ -42,11 +42,11 @@ export function isKeptDraft(d: { id: string; text: string }): boolean {
 
 export interface Draft {
   id: string;
-  /** Absolute folder on `hostId`'s machine, or '' until chosen. */
+  /** Absolute folder on `hostId`'s host, or '' until chosen. */
   folder: string;
   /**
-   * The machine the chat will run on. A path means nothing without its host,
-   * so a restored draft must come back on the machine it was typed against.
+   * The host the chat will run on. A path means nothing without its host,
+   * so a restored draft must come back on the host it was typed against.
    * Absent on drafts saved before this existed, which take the default.
    */
   hostId?: string;

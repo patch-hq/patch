@@ -1,7 +1,7 @@
 // Server-side host-link bridge for `patch.events.*`: `patch logs` on a host
-// machine tails the account's event stream through the host's link rather than
+// host tails the account's event stream through the host's link rather than
 // a separately paired credential. The host subscribes on the CLI's behalf and
-// each matching event is sent back to that machine until it unsubscribes or its
+// each matching event is sent back to that host until it unsubscribes or its
 // link drops.
 //
 // NO FALLBACK: a subscription that cannot be honoured is not silently ignored —
@@ -44,7 +44,7 @@ export function attachEventsRpcBridge(opts: AttachEventsBridgeOptions): () => vo
       return;
     }
     if (fromHostId === null) {
-      logger.error('events-rpc-bridge: no originating machine; dropping');
+      logger.error('events-rpc-bridge: no originating host; dropping');
       return;
     }
     if (event.type === 'patch.events.subscribe') {
@@ -65,7 +65,7 @@ export function attachEventsRpcBridge(opts: AttachEventsBridgeOptions): () => vo
   const detachTap = opts.onBroadcast((event) => {
     if (subs.size === 0 || !RELAYED_EVENT_TYPES.has(event.type)) return;
     for (const [hostId, ids] of subs) {
-      // Never buffer for an offline machine: a stream replayed late is wrong.
+      // Never buffer for an offline host: a stream replayed late is wrong.
       if (!link.isOnline(hostId)) continue;
       for (const subscriptionId of ids) {
         link.sendTo(hostId, BRIDGE_SURFACE_ID, {

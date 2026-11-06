@@ -217,16 +217,16 @@ function LinkDeviceQr({ onClose }: { onClose: () => void }): React.ReactElement 
 /**
  * Voice devices (spec/16) — the account's voice satellites. A voice device has
  * no screen, camera or keyboard, so there is no code or QR to offer here; it is
- * adopted by a machine during its adoption window, opened on that machine with
+ * adopted by a host during its adoption window, opened on that host with
  * `patch hosts pair-device`.
  */
 export function VoiceDevicesSection(): React.ReactElement {
   const hosts = usePresenceStore((s) => s.hosts);
-  const machines = Object.values(hosts).filter((h) => h.host !== null);
+  const withHost = Object.values(hosts).filter((h) => h.host !== null);
   return (
     <SettingsSection title="Voice devices" testID="settings-voice-devices">
-      {machines.length === 0 ? (
-        <NoticeRow testID="voice-devices-no-machines" text="Add a machine first" />
+      {withHost.length === 0 ? (
+        <NoticeRow testID="voice-devices-no-hosts" text="Add a host first" />
       ) : (
         <Row
           testID="voice-devices-empty"

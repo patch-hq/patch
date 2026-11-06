@@ -77,7 +77,7 @@ describe('chat completion — real server, real desktop socket', () => {
       label: "Tom's Mac (desktop)",
       issuedAt: Math.floor(now / 1000),
     });
-    // A second desktop surface — e.g. the user's other machine, or a second window —
+    // A second desktop surface — e.g. the user's other host, or a second window —
     // used by the focused-chat suppression tests to prove the toast is withheld
     // from the ONE surface that has the chat open, not every desktop surface.
     registry.upsertSurface({
@@ -145,7 +145,7 @@ describe('chat completion — real server, real desktop socket', () => {
   /** Connect the desktop surface and wait until the server has greeted it. */
   /**
    * Connect the Mac's desktop surface. `idleMs` is the `surface.input` it
-   * reports — how long since the user last touched the machine — or null for a
+   * reports — how long since the user last touched the host — or null for a
    * shell that has reported nothing yet.
    */
   async function connectDesktop(
@@ -250,7 +250,7 @@ describe('chat completion — real server, real desktop socket', () => {
   it('pushes the phone once the computer surface goes quiet, and still toasts', async () => {
     const log = await connectDesktop();
     // The socket is still up, but the last input report is five minutes old —
-    // nobody is at the machine.
+    // nobody is at the host.
     now += 5 * 60_000;
     completeATurn('c2');
 
@@ -275,7 +275,7 @@ describe('chat completion — real server, real desktop socket', () => {
   // outranking the status summary the same frame carries.
   it("carries the turn's own closing text to both channels, over the status summary", async () => {
     const log = await connectDesktop();
-    // Nobody at the machine, so the push fires too and both bodies can be read.
+    // Nobody at the host, so the push fires too and both bodies can be read.
     now += 5 * 60_000;
     completeATurn('c3', { turnSummary: 'Dug over the top bed and sowed rocket.' });
 
@@ -373,7 +373,7 @@ describe('chat completion — real server, real desktop socket', () => {
 
     it('stays silent on both channels when its chat settles', async () => {
       const log = await connectDesktop();
-      // Nobody at the machine, so an unsilenced job would push as well as
+      // Nobody at the host, so an unsilenced job would push as well as
       // toast — both have to stay quiet.
       now += 5 * 60_000;
       const chatId = await fireJob({ ...base, notifyOnComplete: false });

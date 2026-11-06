@@ -47,7 +47,7 @@ test('keys has list (default), set and revoke', () => {
   for (const name of ['list', 'set', 'revoke']) assert.ok(subs.includes(name), `keys ${name}`);
 });
 
-test('none of them takes a machine to change — only adopt and keys set name one to read from', () => {
+test('none of them takes a host to change — only adopt and keys set name one to read from', () => {
   for (const name of ['settings', 'accounts', 'keys']) {
     for (const cmd of group(name).commands) {
       const takesHost = cmd.options.some((o) => o.long === '--host');

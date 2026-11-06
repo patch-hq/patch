@@ -67,7 +67,7 @@ install.sh                              the curl | sh bootstrap
 Two routes, both running the same installer:
 
 ```sh
-# 1. one shell command on any machine with a shell
+# 1. one shell command on any host with a shell
 curl -fsSL https://<server>/api/daemon/install.sh | sh -s -- --code <pairing code> \
     --internal-token <token>
 
@@ -77,7 +77,7 @@ curl -fsSL https://<server>/api/daemon/install.sh | sh -s -- --code <pairing cod
 
 The pairing code comes from an already-linked surface (Settings → Hosts → Add
 host, or `patch hosts add`). The installer only ever redeems it; it mints
-nothing. It states what the host will be able to do on the machine before it
+nothing. It states what the host will be able to do on the host before it
 registers anything, installs under the invoking user's own `~/.patch`, writes
 the `patch-cli` skill into `~/.claude/skills/patch-cli/`, registers the service
 (launchd on macOS, a systemd user unit on Linux, always-restart +
@@ -87,9 +87,9 @@ Exit codes: `64` bad usage, `65` wrong platform / incomplete artifact, `69`
 the service manager refused, `70` no pairing code, `75` the code could not be
 submitted (the service IS registered — re-run with a fresh code), `78` no HOME.
 
-Re-running on a machine that is already registered re-uses the stored
-`daemon.key` and the stored machine settings rather than creating a second
-machine; a machine whose registration was revoked pairs again from scratch with
+Re-running on a host that is already registered re-uses the stored
+`daemon.key` and the stored host settings rather than creating a second
+host; a host whose registration was revoked pairs again from scratch with
 a fresh code.
 
 On macOS the host runs through logout only when it can be installed as a

@@ -22,7 +22,7 @@ function setup() {
 const msg = { type: 'host.online', hostId: 'h' } as unknown as WireEvent;
 
 describe('events rpc bridge', () => {
-  it('relays only to a subscribed machine, only log event types, until unsubscribed', () => {
+  it('relays only to a subscribed host, only log event types, until unsubscribed', () => {
     const { link, publish, relayed } = setup();
     publish(msg);
     expect(relayed()).toHaveLength(0);
@@ -41,7 +41,7 @@ describe('events rpc bridge', () => {
     expect(relayed()).toHaveLength(1);
   });
 
-  it('forgets a machine whose link drops', () => {
+  it('forgets a host whose link drops', () => {
     const { link, publish, relayed } = setup();
     link.emit({ type: 'patch.events.subscribe', subscriptionId: 's1' } as WireEvent, 'host-1');
     link.dropOnlineHost('host-1');

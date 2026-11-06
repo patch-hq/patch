@@ -1,10 +1,10 @@
-// Move page — move a chat to another machine (spec/04 § Moving a chat to
+// Move page — move a chat to another host (spec/04 § Moving a chat to
 // another host, spec/15 § Chat detail → Move to…), reached from the chat's ⋯
-// menu. Pick the machine, then the folder the chat will run in there: that
-// machine's own folders are listed, the one with the same name as the chat's
+// menu. Pick the host, then the folder the chat will run in there: that
+// host's own folders are listed, the one with the same name as the chat's
 // current folder chosen first, and any path can be typed. The chat stays where
 // it is until the server says it has arrived; a refusal stays on this page
-// with the reason. When the chat's own machine is offline the folder starts
+// with the reason. When the chat's own host is offline the folder starts
 // empty and the same-named folder is only suggested.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -55,8 +55,8 @@ export default function ChatMoveScreen(): React.ReactElement {
   const [error, setError] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
 
-  // A new machine offers its own folder — never the path typed for another one.
-  // But a path the user has typed or picked on THIS machine is theirs: the
+  // A new host offers its own folder — never the path typed for another one.
+  // But a path the user has typed or picked on THIS host is theirs: the
   // folder list is re-announced whenever any host publishes, and that must not
   // wipe it (or the refusal being shown for it).
   const chosenRef = useRef(false);
@@ -165,7 +165,7 @@ export default function ChatMoveScreen(): React.ReactElement {
         </View>
         {targets.length === 0 ? (
           <Text testID="move-no-hosts" style={{ ...typography.body, color: colors.ink2 }}>
-            No other machine
+            No other host
           </Text>
         ) : null}
         <TextInput
@@ -173,7 +173,7 @@ export default function ChatMoveScreen(): React.ReactElement {
           value={folder}
           onChangeText={chooseFolder}
           editable={hostId !== null && !moving}
-          placeholder="Folder on that machine"
+          placeholder="Folder on that host"
           placeholderTextColor={colors.inkFaint}
           autoCapitalize="none"
           autoCorrect={false}

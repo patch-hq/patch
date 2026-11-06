@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// pre-push: what leaves this machine is public.
+// pre-push: what leaves this host is public.
 //
 // This repository is published as it is developed, so a push is a publication.
 // It refuses anything that looks like a secret in the files the push changes: a
 // token-shaped string, a private key outside the known fixtures, or a value
-// from the settings files on this machine.
+// from the settings files on this host.
 //
 // git runs it with `<remote> <url>` as arguments and one line per ref on stdin:
 //   <local ref> <local sha> <remote ref> <remote sha>
@@ -42,12 +42,12 @@ export function scanText(rel, text, knownSecrets = []) {
   if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(text) && !KEY_BLOCK_OK.test(rel))
     found.push(`${rel}: private key`);
   for (const secret of knownSecrets)
-    if (text.includes(secret)) found.push(`${rel}: a value from this machine's settings`);
+    if (text.includes(secret)) found.push(`${rel}: a value from this host's settings`);
   return found;
 }
 
 /**
- * Values of 16+ characters, named like secrets, from this machine's settings:
+ * Values of 16+ characters, named like secrets, from this host's settings:
  * the server's own env file, plus any files listed in PATCH_SECRET_SOURCES
  * (colon-separated).
  */

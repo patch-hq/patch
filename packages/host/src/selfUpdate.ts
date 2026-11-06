@@ -1,7 +1,7 @@
 // Host self-update (spec/02 § Installation, spec/11 § Host installation).
 //
-// The server is the single channel a machine gets its host from: the same
-// manifest that feeds a brand-new install feeds every existing machine's
+// The server is the single channel a host gets its host from: the same
+// manifest that feeds a brand-new install feeds every existing host's
 // update, so publishing a build is what makes both see it.
 //
 // What this module will NOT do:
@@ -107,7 +107,7 @@ export function compareVersions(a: string, b: string): number | null {
 }
 
 /**
- * Is a newer build published for THIS machine's os/arch? A machine that is not
+ * Is a newer build published for THIS host's os/arch? A host that is not
  * running from a built artifact has no target to match and no version to
  * compare, so it reports "no update" with that as the stated reason — never a
  * silent false.
@@ -215,7 +215,7 @@ function redactToken(text: string, token: string): string {
   return text.split(token).join('<internal-token>');
 }
 
-/** The version `~/.patch/current` points at — what this machine will run next. */
+/** The version `~/.patch/current` points at — what this host will run next. */
 /**
  * Run the installer in a new process group (see applyUpdate), writing to
  * `fd`, and resolve when it exits. A non-zero exit rejects with its code.
@@ -262,7 +262,7 @@ function installedVersion(patchHome: string): string | undefined {
 export interface ApplyResult {
   applied: boolean;
   message: string;
-  /** The update is real and will apply, but not yet: this machine's artifact is still being built (see `requestUpdate`). */
+  /** The update is real and will apply, but not yet: this host's artifact is still being built (see `requestUpdate`). */
   deferred?: boolean;
 }
 
@@ -271,7 +271,7 @@ export interface ApplyResult {
  * `host.update` frame and `patch hosts update`). Turns do not hold it: they run
  * under their own runners and carry on across the restart (spec/02 § Turns
  * outlive the host). The one thing that defers it is a build whose artifact for
- * this machine is still being built.
+ * this host is still being built.
  */
 export async function requestUpdate(opts: {
   check: () => Promise<UpdateCheck>;
@@ -287,7 +287,7 @@ export async function requestUpdate(opts: {
       return {
         applied: false,
         deferred: true,
-        message: `${early.version ?? 'the published build'} is still being built for this machine — will update as soon as it is published`,
+        message: `${early.version ?? 'the published build'} is still being built for this host — will update as soon as it is published`,
       };
     }
   }
@@ -499,7 +499,7 @@ type FetchedBuild =
   | { ok: true; extracted: string; version: string }
   | { ok: false; message: string };
 
-/** Ask the server what is published for this machine and fetch it into `work`. */
+/** Ask the server what is published for this host and fetch it into `work`. */
 async function fetchPublishedBuild(
   opts: {
     serverUrl: string;
@@ -622,7 +622,7 @@ export async function applyUpdate(opts: {
   internalToken: string;
   currentVersion: string;
   target: string | undefined;
-  /** `~/.patch` — where `current` says which version this machine will run. */
+  /** `~/.patch` — where `current` says which version this host will run. */
   patchHome: string;
   /**
    * Called with the build's version immediately before the installer runs — the point at which an install has genuinely
@@ -708,7 +708,7 @@ export async function applyUpdate(opts: {
     return {
       applied: false,
       message:
-        `self-update did not take: this machine is still on ${installed ?? 'an unknown version'}. ` +
+        `self-update did not take: this host is still on ${installed ?? 'an unknown version'}. ` +
         redactToken(installerOutput, opts.internalToken),
     };
   } catch (err) {

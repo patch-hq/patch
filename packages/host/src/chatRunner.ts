@@ -255,12 +255,12 @@ export interface HostOptions {
   /**
    * This host's id (spec/02 § Host identity). Every frame the host emits is
    * addressed with it — an unaddressed `chat.spawned` would leave the server
-   * unable to say which machine a chat lives on. Required: there is no sane
+   * unable to say which host a chat lives on. Required: there is no sane
    * placeholder, and a wrong one silently binds chats to another host.
    */
   hostId: string;
   /**
-   * The host's DEFAULT permission mode, applying to new chats on this machine
+   * The host's DEFAULT permission mode, applying to new chats on this host
    * (spec/02 § Permission mode). Omitted → `auto`, which is the documented
    * base of the resolution chain, not a fallback for a failed read.
    */
@@ -268,13 +268,13 @@ export interface HostOptions {
   /**
    * The model a spawn that names none runs on — the ACCOUNT's `defaultModel`,
    * mirrored to this host by the server (spec/02 § Agent backends, spec/04
-   * § Spawn). Returning `undefined` means no default has reached this machine,
+   * § Spawn). Returning `undefined` means no default has reached this host,
    * and such a spawn is REFUSED saying exactly that — never quietly handed to
    * the SDK's own default, which would silently run the chat on a model nobody
    * chose.
    *
    * This replaced `lastUsedModel`, which was DERIVED: it took the model of
-   * whatever chat last ran on the machine, so one throwaway cheap-model chat
+   * whatever chat last ran on the host, so one throwaway cheap-model chat
    * silently moved every later model-less spawn — every unattended job included
    * — onto it, and it stayed there until someone happened to pick something
    * else. Nothing writes back to this now; a default is a decision, in one
@@ -325,7 +325,7 @@ export interface HostOptions {
    * (`claudeConfigMcp.ts`), merged into `extraMcpServers` ahead of the host's
    * own Settings → MCP list. Defaults to the real reader; tests inject a stub
    * (usually `() => []`) so a suite's result never depends on the ambient
-   * `~/.claude.json`/`~/.claude/settings.json` of whatever machine runs it.
+   * `~/.claude.json`/`~/.claude/settings.json` of whatever host runs it.
    */
   discoverClaudeMcpServers?: (folder: string) => McpServerConfig[];
   /**
@@ -515,16 +515,16 @@ export interface HostOptions {
   preprocessInput?: (req: SendInputOptions) => string | undefined;
   /** Hook called once the agent has committed a response on a chat (per turn). */
   onTurnCommitted?: (chatId: string) => void;
-  /** Held from the start of a chat's pump until it settles, so the host machine cannot sleep mid-turn. */
+  /** Held from the start of a chat's pump until it settles, so the host cannot sleep mid-turn. */
   sleepGuard?: SleepGuard;
   /**
-   * True while the machine is too short of memory to start more work. A turn
+   * True while the host is too short of memory to start more work. A turn
    * that would start is queued instead and runs when this goes false
    * (`releaseHeldTurns`), rather than being cut off when the kernel kills
    * something.
    */
   holdTurns?: () => boolean;
-  /** Tells a turn that died because the machine slept from one that failed on its own. */
+  /** Tells a turn that died because the host slept from one that failed on its own. */
   sleepWatch?: SleepWatch;
   /**
    * Optional AI title summariser (spec/04 § Name). When set, the host fires
@@ -772,7 +772,7 @@ export interface HostOptions {
   browser?: BrowserManager;
   /** Deployment signing stays on the paired server; the host receives only this RPC facade. */
   webBotAuth?: WebBotAuthConfig;
-  /** spec/02 § Browser — In the Patch app: the app on this machine hosts the agent's browser. */
+  /** spec/02 § Browser — In the Patch app: the app on this host hosts the agent's browser. */
   appBrowser?: AppBrowserLink;
   /**
    * Computer use (`patch_browser_mouse` / `patch_browser_key`) is off by
@@ -904,7 +904,7 @@ export interface SpawnChatOptions {
  */
 const SDK_RETRY_BACKOFF_MS = [10_000, 30_000, 90_000];
 
-/** How often a turn held for a sleeping machine asks whether it has woken. */
+/** How often a turn held for a sleeping host asks whether it has woken. */
 const WAKE_POLL_MS = 15_000;
 
 /** Re-sends for a session the SDK aborted unasked: one resumed, one on a fresh session. */
@@ -986,7 +986,7 @@ export function attachmentFileName(id: string, name: string): string {
 /**
  * Header line that opens the attachment block folded into a user turn's prompt
  * (spec/14 & spec/15 § Composer). Kept human-readable so Claude reads the files
- * by path, but STABLE + machine-parseable (see `parseAttachmentBlock`) so the
+ * by path, but STABLE + host-parseable (see `parseAttachmentBlock`) so the
  * host can lift the refs back out on replay and RE-EMIT them structurally —
  * the block is never shown as literal transcript text (spec/14 § Composer —
  * attachments "render inline in the stream", never as a raw marker).
@@ -1524,7 +1524,7 @@ export function chatInputToSendOptions(event: ChatInputEvent): SendInputOptions 
     // A Pad's delivery is system input too (not typed), but the user's own Send
     // started it, so it still counts as the user's activity.
     ...(event.source?.kind === 'job' || event.source?.kind === 'pad' ? { jobTrigger: true } : {}),
-    // A `machine` origin is an agent's CLI send-to, not a person: it must not
+    // A `host` origin is an agent's CLI send-to, not a person: it must not
     // move the chat up the sidebar (spec/14 § Sidebar ordering).
     ...(event.source?.kind === 'job' || event.origin === 'machine' ? {} : { fromUser: true }),
     ...(event.origin === 'machine' ? { origin: 'machine' as const } : {}),
@@ -1573,7 +1573,7 @@ export interface SendInputOptions {
    * advancing) and an agent's `patch_send_to` have to say anything.
    *
    * It decides whether the turn SETTLING raises a chat-completion notification,
-   * and nothing else: a `machine` turn runs exactly like a `user` one.
+   * and nothing else: a `host` turn runs exactly like a `user` one.
    */
   origin?: TurnOrigin;
   /**
@@ -1749,7 +1749,7 @@ interface QueuedTurn {
 }
 
 /**
- * A spawn named no model on a machine that has never read a model catalogue
+ * A spawn named no model on a host that has never read a model catalogue
  * successfully (spec/04 § Spawn). NO FALLBACK: running it on a hard-coded model
  * id would silently pick a model nobody chose.
  */
@@ -1758,16 +1758,16 @@ export class NoModelCatalogueError extends Error {
   /**
    * `reason` is supplied when the catalogue could not be READ just now (a model
    * change has to check the id against it — spec/04 § Model), as against the
-   * spawn case, where the machine has simply never read one. Both leave the
+   * spawn case, where the host has simply never read one. Both leave the
    * caller with no list to pick from, so they share a code, but the provider's
    * own complaint is worth carrying when there is one.
    */
   constructor(hostId: string, reason?: string) {
     super(
       reason === undefined
-        ? `machine ${hostId} has never read a model catalogue, so it has no last-used model; ` +
-            `name a model on the spawn or connect the backend credential on that machine`
-        : `machine ${hostId} could not read its model catalogue, so the model could not be ` +
+        ? `host ${hostId} has never read a model catalogue, so it has no last-used model; ` +
+            `name a model on the spawn or connect the backend credential on that host`
+        : `host ${hostId} could not read its model catalogue, so the model could not be ` +
             `checked: ${reason}`,
     );
     this.name = 'NoModelCatalogueError';
@@ -1784,7 +1784,7 @@ export class NoModelCatalogueError extends Error {
 export class UnknownModelError extends Error {
   readonly code = 'unknown_model' as const;
   constructor(hostId: string, model: string) {
-    super(`machine ${hostId} offers no model with id: ${model}`);
+    super(`host ${hostId} offers no model with id: ${model}`);
     this.name = 'UnknownModelError';
   }
 }
@@ -2611,7 +2611,7 @@ export class Daemon {
   private readonly snoozeTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /**
    * Wall-clock backstop for snooze expiry. setTimeout counts monotonic time,
-   * which pauses while the host machine sleeps, so a snooze armed over a
+   * which pauses while the host sleeps, so a snooze armed over a
    * weekend fires hours or days late. This sweep compares `now()` instead.
    */
   private snoozeSweep: ReturnType<typeof setInterval> | null = null;
@@ -3148,7 +3148,7 @@ export class Daemon {
   private readonly sessionAbortCount = new Map<string, number>();
   /** Armed generic-error retries, so shutdown can cancel them. */
   private readonly sdkRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  /** Chats whose turn is held until the machine is fully awake, and since when. */
+  /** Chats whose turn is held until the host is fully awake, and since when. */
   private readonly waitingForWakeSince = new Map<string, number>();
   /** Set once the host starts going down; see `beginShutdown`. */
   private stopping = false;
@@ -4299,7 +4299,7 @@ export class Daemon {
     return this.browser.tabs();
   }
 
-  /** Settings → Computer use: is the agent driving this machine right now? */
+  /** Settings → Computer use: is the agent driving this host right now? */
   computerUseStatus(): ComputerUseStatus {
     return this.browser.status();
   }
@@ -4405,11 +4405,11 @@ export class Daemon {
     const archivedAt = null;
     const hidden = req.hidden === true;
     // spec/04 § Spawn — model is optional at every spawn site and resolves ON
-    // THE MACHINE: the model named, else the account default mirrored here. A
-    // machine with neither refuses the spawn saying so.
+    // THE HOST: the model named, else the account default mirrored here. A
+    // host with neither refuses the spawn saying so.
     //
     // Nothing is written BACK from here. The resolved model used to be recorded
-    // as the machine's last-used, which made the next model-less spawn inherit
+    // as the host's last-used, which made the next model-less spawn inherit
     // it — so the default drifted with whatever anyone last ran, and every
     // unattended job drifted with it.
     let model = req.model;
@@ -4851,7 +4851,7 @@ export class Daemon {
     );
   }
 
-  /** Deliver a machine message into `parentChatId`, lazy-hydrating it from
+  /** Deliver a host message into `parentChatId`, lazy-hydrating it from
    *  disk like `deliverWatch`/`deliverWake` do, dropping silently if the
    *  parent chat is gone. */
   private deliverToParent(parentChatId: string, message: string): void {
@@ -6163,7 +6163,7 @@ export class Daemon {
    * replay deliberately did not send (spec/04 § History — blobs).
    *
    * Scoped to a chat this host actually has: the blob store is shared across
-   * every chat on the machine, so without this check any host could be asked
+   * every chat on the host, so without this check any host could be asked
    * to hand back any sha anyone happened to learn. `null` means this host
    * holds no such blob, which is a 404 and not an error.
    */
@@ -6693,7 +6693,7 @@ export class Daemon {
     // already unblocked by the time this turn queues behind it, so the drain
     // that follows is the ordinary one.
     //
-    // Only a PERSON's message is an answer. A machine-started turn (self-wake,
+    // Only a PERSON's message is an answer. A host-started turn (self-wake,
     // `patch_send_to`, todo advance), a job fire, a hook or goal resubmit says
     // nothing about the question: letting it through denied the question the
     // user was in the middle of answering, so their submitted answers hit a
@@ -6753,7 +6753,7 @@ export class Daemon {
       // (`chat.resume_now_request`) is how someone who knows better lifts it.
       return;
     }
-    // The machine is too short of memory to start more work: queue the turn (the
+    // The host is too short of memory to start more work: queue the turn (the
     // surface shows it as waiting) and let `releaseHeldTurns` run it. A chat
     // already holding turns keeps queueing so they run in the order they came.
     if (this.memoryHeld.has(req.chatId) || this.opts.holdTurns?.() === true) {
@@ -7404,8 +7404,8 @@ export class Daemon {
   }
 
   /**
-   * Hold a turn until the machine is in a full wake. Surfaces see
-   * `waitingForWakeSince` for as long as it is held. Returns once the machine
+   * Hold a turn until the host is in a full wake. Surfaces see
+   * `waitingForWakeSince` for as long as it is held. Returns once the host
    * is awake, or the turn is stopped.
    */
   private async holdUntilFullyAwake(
@@ -7417,7 +7417,7 @@ export class Daemon {
     this.emitState(chatId);
     this.opts.logger.info(
       { chatId },
-      'machine is in a dark wake — holding the turn until it is fully awake',
+      'host is in a dark wake — holding the turn until it is fully awake',
     );
     try {
       while (!signal.aborted) {
@@ -9391,8 +9391,8 @@ export class Daemon {
       }
     }
 
-    // A turn never starts while the machine is in a dark wake: it would die when
-    // the machine drops back to sleep. Before the credential is read, so a long
+    // A turn never starts while the host is in a dark wake: it would die when
+    // the host drops back to sleep. Before the credential is read, so a long
     // wait never runs on a stale token; a stop during the wait lands on the
     // aborted check below.
     if (this.opts.sleepWatch?.isFullyAwake() === false) {
@@ -10366,8 +10366,8 @@ export class Daemon {
         }
         const errMsg = (err as Error).message ?? String(err);
         turnError = { code: 'sdk_error', message: errMsg };
-        // A turn that died because the machine slept under it did not fail:
-        // it is owed again once the machine is properly awake, and none of the
+        // A turn that died because the host slept under it did not fail:
+        // it is owed again once the host is properly awake, and none of the
         // retry budgets below are spent on it.
         this.opts.sleepWatch?.check();
         const sleptThrough =
@@ -10375,11 +10375,11 @@ export class Daemon {
         if (sleptThrough) {
           // Not reported as an error: nothing is wrong with the turn. It goes
           // round again at once, the wake gate at the top of the next attempt
-          // holds it (visibly) until the machine is fully awake, and the
+          // holds it (visibly) until the host is fully awake, and the
           // re-send folds onto the turn's own bubble.
           this.opts.logger.warn(
             { chatId, errMsg },
-            'turn died while the machine slept — re-sending it, held until the machine is fully awake',
+            'turn died while the host slept — re-sending it, held until the host is fully awake',
           );
           turnOutcome = 'interrupted';
           turnError = undefined;
@@ -11372,7 +11372,7 @@ export class Daemon {
     const state = this.chatState.get(chatId);
     if (!state || state.goal !== condition) return;
     // The chat was archived or deleted while the judge was thinking: a
-    // continuation turn now would be a machine message, which un-archives it.
+    // continuation turn now would be a host message, which un-archives it.
     if (state.status !== 'active') {
       this.opts.logger.info(
         { chatId, status: state.status },
@@ -11615,7 +11615,7 @@ export class Daemon {
    * The API refused this host's Claude credential (spec/10-auth.md § Backend
    * credentials). Reported exactly like a credential that was missing at the
    * gate: `host.unauthenticated` so Settings and the disconnected banner stop
-   * claiming this machine is signed in, plus a `chat.error` in words so the turn
+   * claiming this host is signed in, plus a `chat.error` in words so the turn
    * doesn't just vanish. The raw API JSON stays in the log — it names no action
    * the person reading the chat can take. Callers settle the chat's activity.
    */
@@ -14254,7 +14254,7 @@ export class Daemon {
       role: 'system',
       content:
         `The host could not stop the processes this chat's last turn started ` +
-        `(${message}). They may still be running on this machine.`,
+        `(${message}). They may still be running on this host.`,
       seq: this.bumpSeq(chatId),
       createdAt: this.opts.now(),
     };
@@ -15456,11 +15456,11 @@ export class Daemon {
   /**
    * The mode the chat's NEXT turn will use: chat override → host default →
    * `auto` (spec/02 § Permission mode). Resolved here, on the
-   * machine that owns both scopes, and carried on `chat.state` so no surface
+   * host that owns both scopes, and carried on `chat.state` so no surface
    * has to re-derive it from a host default it does not have.
    */
   /**
-   * Whether this machine currently holds a usable backend credential — a LIVE
+   * Whether this host currently holds a usable backend credential — a LIVE
    * re-read, not the boot-time snapshot, so a `claude login` since boot counts.
    * Callers use it to refuse a dispatch before creating a chat that could never
    * run a turn: spawning first made the server settle the run as `ok` for work
@@ -15753,7 +15753,7 @@ export class Daemon {
       try {
         known = await this.opts.knownModelIds();
       } catch (err) {
-        // Can't check ⇒ can't honour. Reported as "this machine has no
+        // Can't check ⇒ can't honour. Reported as "this host has no
         // catalogue" because from the caller's side that is exactly the
         // situation: there is no list to pick from right now.
         throw new NoModelCatalogueError(this.opts.hostId, (err as Error).message);

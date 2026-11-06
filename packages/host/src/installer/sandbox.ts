@@ -1,17 +1,17 @@
-// The agent sandbox, provisioned on the machine at install time.
+// The agent sandbox, provisioned on the host at install time.
 //
 // spec/11 § Host installation — "the backend's own install is provisioned on
-// the machine, not carried in the artifact". The sandbox is part of that
+// the host, not carried in the artifact". The sandbox is part of that
 // backend: Claude Code runs every `auto`-mode bash command inside it, and only
 // escalates to the user when a command tries to leave it. Without one, `auto`
 // has nothing to run commands INSIDE, so it falls back to asking about
-// everything — a machine where every unattended job parks on its first
-// command, looking identical to a machine that is merely quiet.
+// everything — a host where every unattended job parks on its first
+// command, looking identical to a host that is merely quiet.
 //
 // That is the whole reason this step exists. The alternative — probe the
 // sandbox at runtime, record whether it works, and behave differently on
-// machines where it does not — is two code paths and a silent second-class
-// mode. One path: a machine that finishes `install` has a working sandbox, so
+// hosts where it does not — is two code paths and a silent second-class
+// mode. One path: a host that finishes `install` has a working sandbox, so
 // `auto` means the same thing on every host patch runs on.
 //
 // macOS needs nothing: the sandbox is `sandbox-exec`, part of the OS. Linux
@@ -23,7 +23,7 @@
 // system service.
 //
 // NO FALLBACK: every failure here stops the install and names the commands
-// that fix it. A host must not be started on a machine whose sandbox does
+// that fix it. A host must not be started on a host whose sandbox does
 // not work.
 
 import { execFile } from 'node:child_process';
@@ -52,8 +52,8 @@ const LINUX_REQUIREMENTS = ['bwrap', 'socat'] as const;
 
 /**
  * Package names per manager, keyed by the manager's own binary. This is a
- * lookup table, not a fallback chain: a machine has exactly one of these, and a
- * machine with none of them is one this step cannot provision and says so.
+ * lookup table, not a fallback chain: a host has exactly one of these, and a
+ * host with none of them is one this step cannot provision and says so.
  */
 const PACKAGES: Record<string, { install: string[]; names: string[] }> = {
   'apt-get': { install: ['install', '-y'], names: ['bubblewrap', 'socat'] },
@@ -66,7 +66,7 @@ const PACKAGES: Record<string, { install: string[]; names: string[] }> = {
  * The profile that grants `userns` to bwrap and nothing else. Ubuntu's
  * `apparmor_restrict_unprivileged_userns` denies user namespaces to every
  * unconfined program; this is the distro's own sanctioned way to exempt one
- * binary, and it leaves every other program on the machine restricted.
+ * binary, and it leaves every other program on the host restricted.
  */
 const APPARMOR_PROFILE_PATH = '/etc/apparmor.d/bwrap';
 const APPARMOR_PROFILE = `abi <abi/4.0>,
@@ -105,7 +105,7 @@ async function canElevate(): Promise<boolean> {
 
 /**
  * Does an unprivileged user namespace actually work? `command -v bwrap` does
- * not answer this: on a machine with AppArmor's userns restriction the binary
+ * not answer this: on a host with AppArmor's userns restriction the binary
  * is present and every invocation fails. The only honest question is whether
  * one runs, so run one.
  *
@@ -125,10 +125,10 @@ async function packageManager(): Promise<string | null> {
 }
 
 /**
- * Make this machine able to run the agent sandbox, or stop the install.
+ * Make this host able to run the agent sandbox, or stop the install.
  *
  * Writes what it did to the installer's own transcript. Throws
- * `SandboxProvisionError` with the exact remedy commands when the machine
+ * `SandboxProvisionError` with the exact remedy commands when the host
  * cannot be provisioned from here.
  */
 export async function provisionSandbox(platform: NodeJS.Platform, io: SandboxIo): Promise<void> {
@@ -154,7 +154,7 @@ export async function provisionSandbox(platform: NodeJS.Platform, io: SandboxIo)
     if (mgr === null) {
       throw new SandboxProvisionError(
         'sandbox packages',
-        [`install bubblewrap and socat with this machine's package manager`],
+        [`install bubblewrap and socat with this host's package manager`],
         `missing ${missing.join(', ')} and no supported package manager ` +
           `(${Object.keys(PACKAGES).join(', ')}) was found`,
       );

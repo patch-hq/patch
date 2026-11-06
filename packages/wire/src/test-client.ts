@@ -40,7 +40,7 @@ export interface WireTestClientOptions {
    * Default FALSE — strict — because that is what a test wants: schema drift
    * should fail the test rather than be tolerated. The `patch` CLI sets it,
    * because it is not a test. It is a real long-lived client installed on a
-   * machine and updated on its own schedule, so it routinely lags the server
+   * host and updated on its own schedule, so it routinely lags the server
    * it talks to; one added field on `chat.state` was enough to end a
    * `patch logs` or TUI session with an uncaught WireDecodeError.
    */

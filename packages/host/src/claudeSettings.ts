@@ -185,7 +185,7 @@ function segmentMatches(real: string, encoded: string): boolean {
 }
 
 /**
- * The folder on this machine that Claude Code's encoded project name stands
+ * The folder on this host that Claude Code's encoded project name stands
  * for, or undefined when no existing directory encodes to it.
  *
  * The encoding is lossy (`/`, `.` and `-` all become `-`), so it is resolved

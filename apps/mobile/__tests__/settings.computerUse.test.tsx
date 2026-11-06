@@ -69,7 +69,7 @@ describe('Settings → Computer use (phone)', () => {
     expect(queryHost(r.root, byTestId('computer-use-active'))).toBeNull();
   });
 
-  it('shows a machine that did not answer as unchecked, not idle', async () => {
+  it('shows a host that did not answer as unchecked, not idle', async () => {
     vi.mocked(api.computerUse)
       .mockReset()
       .mockResolvedValue({ hosts: [{ hostId: 'd1', name: 'Mac', error: 'did not answer' }] });

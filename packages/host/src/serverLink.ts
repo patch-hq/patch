@@ -71,7 +71,7 @@ const noSleepDetector: SleepDetector = {
 export const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
 
 /**
- * Default `heartbeatMissesAllowed`. A busy machine (2026-11-05: load ~40 on 14
+ * Default `heartbeatMissesAllowed`. A busy host (2026-11-05: load ~40 on 14
  * cores) answers a pong late; one missed pong must not drop a healthy link.
  * 3 misses at 15s means ~45-60s of silence before the socket is terminated.
  */
@@ -104,14 +104,14 @@ export interface ServerLinkOptions {
   onFrame?: (event: WireEvent, send: (e: WireEvent) => void) => void;
   /**
    * Called once the server has accepted us (after `auth.ok`). The greeting
-   * carries the account's machine roster with presence, which this machine
-   * needs so a cross-chat call naming another machine can fail inside the turn
-   * when that machine is down (spec/03 § Cross-chat tools).
+   * carries the account's host roster with presence, which this host
+   * needs so a cross-chat call naming another host can fail inside the turn
+   * when that host is down (spec/03 § Cross-chat tools).
    */
   onAuthed?: (send: (event: WireEvent) => void, greeting: AuthOkEvent) => void;
   /** Called when the link drops (close or error). */
   onDisconnected?: (drop: LinkDrop) => void;
-  /** Tells a machine sleep from a real drop. Without it every drop is classified as planned or unexplained only. */
+  /** Tells a host sleep from a real drop. Without it every drop is classified as planned or unexplained only. */
   sleepDetector?: SleepDetector;
   /**
    * Called when the server's going-away notice arrives, with the version it is
@@ -174,7 +174,7 @@ export interface ServerLinkDiagnostics {
   /**
    * Epoch ms the link has been down since: the last time it was lost, or when
    * the host started if it has not yet connected. `null` while online. How a
-   * surface on this machine tells "briefly reconnecting" from "server lost".
+   * surface on this host tells "briefly reconnecting" from "server lost".
    */
   offlineSince: number | null;
 }

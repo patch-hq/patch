@@ -1,5 +1,5 @@
 // Settings → Computer use: status() reports when the agent is driving the
-// machine, stop() closes its windows and cancels what it was doing. Uses
+// host, stop() closes its windows and cancels what it was doing. Uses
 // stub pages injected into the manager — the real-Chromium behaviour is
 // covered by browser.test.ts; this is the bookkeeping around it.
 

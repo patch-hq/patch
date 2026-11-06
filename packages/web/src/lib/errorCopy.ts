@@ -2,9 +2,9 @@
 //
 // The server and the host answer codes (`oauth_unavailable`,
 // `no_model_catalogue`, `folder_not_found`) and sometimes a paragraph written
-// for whoever wrote the host — "machine dev-daemon-1 has never read a model
+// for whoever wrote the host — "host dev-daemon-1 has never read a model
 // catalogue, so it has no last-used model; name a model on the spawn or connect
-// the backend credential on that machine". Neither is something a person can
+// the backend credential on that host". Neither is something a person can
 // act on: one names the fault to a program, the other explains the host's
 // internals to its author.
 //
@@ -40,11 +40,11 @@ interface Copy {
 const CODES: ReadonlyArray<readonly [string, Copy]> = [
   [
     'oauth_unavailable',
-    { sentence: 'That machine isn’t signed in to Claude. Sign in from Settings → Hosts.' },
+    { sentence: 'That host isn’t signed in to Claude. Sign in from Settings → Hosts.' },
   ],
   [
     'unauthenticated',
-    { sentence: 'That machine isn’t signed in to Claude. Sign in from Settings → Hosts.' },
+    { sentence: 'That host isn’t signed in to Claude. Sign in from Settings → Hosts.' },
   ],
   [
     'account_not_found',
@@ -55,24 +55,24 @@ const CODES: ReadonlyArray<readonly [string, Copy]> = [
   [
     'no_model_catalogue',
     {
-      sentence: 'That machine hasn’t read a model list yet.',
+      sentence: 'That host hasn’t read a model list yet.',
       onSpawn: 'Pick a model before starting the chat.',
     },
   ],
-  ['no_machine_chosen', { sentence: 'Choose a machine. The model list comes from it.' }],
+  ['no_machine_chosen', { sentence: 'Choose a host. The model list comes from it.' }],
   [
     'daemon_timeout',
-    { sentence: 'That machine isn’t answering. It may be offline. Try again when it’s back.' },
+    { sentence: 'That host isn’t answering. It may be offline. Try again when it’s back.' },
   ],
-  ['unknown_host', { sentence: 'That machine is no longer registered. Pick another one.' }],
-  ['folder_not_found', { sentence: 'That folder isn’t on that machine. Pick another project.' }],
+  ['unknown_host', { sentence: 'That host is no longer registered. Pick another one.' }],
+  ['folder_not_found', { sentence: 'That folder isn’t on that host. Pick another project.' }],
   ['chat_not_found', { sentence: 'That chat is gone. Start a new one.' }],
 ];
 
 // An unrecognised code is never interpolated into the sentence — it goes in the
 // details alone, so a person always reads English.
 const GENERIC: Record<ErrorSite, string> = {
-  models: 'Couldn’t load the model list for that machine. Try again in a moment.',
+  models: 'Couldn’t load the model list for that host. Try again in a moment.',
   spawn: 'Couldn’t start the chat. Try again in a moment.',
 };
 

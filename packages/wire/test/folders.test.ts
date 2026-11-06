@@ -48,8 +48,8 @@ describe('folder registry wire events', () => {
     expect(parsed.recent).toEqual([]);
   });
 
-  // The registry describes ONE machine's filesystem. Without the host id, two
-  // machines' registries would overwrite each other in every surface's picker
+  // The registry describes ONE host's filesystem. Without the host id, two
+  // hosts' registries would overwrite each other in every surface's picker
   // and a chat would be spawned into a path that host does not have.
   it('rejects a folders.list that names no host', () => {
     const res = FoldersListEvent.safeParse({ type: 'folders.list', roots: [], recent: [] });

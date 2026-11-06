@@ -1,25 +1,25 @@
-// Cross-machine `patch_spawn`: emit the request, wait for THAT machine's
+// Cross-host `patch_spawn`: emit the request, wait for THAT host's
 // answer (spec/03 § Cross-chat tools).
 //
 // "A tool result is part of a turn in progress, so it resolves rather than
 // buffering the way `chat.input` does, and the agent decides what to do."
 //
 // NO FALLBACK. Before this existed the spawn was fire-and-forget: the tool
-// returned `created:'remote'` the moment the frame left, so a target machine
+// returned `created:'remote'` the moment the frame left, so a target host
 // that refused (no model catalogue, unknown folder) created nothing while the
 // calling agent was told it had succeeded — and went on orchestrating a chat
 // that did not exist. Every outcome here, including an expiry, is either the
-// real chatId or a loud error naming the machine.
+// real chatId or a loud error naming the host.
 
 import type { ChatErrorCode, WireEvent } from '@patch/wire';
 import { RemoteSpawnError } from './control.js';
 import { FolderNotFoundError, NoModelCatalogueError } from './chatRunner.js';
 
 /**
- * The wire code for a spawn this machine could not perform, as sent back to the
- * machine that asked. The distinctions matter to the caller's agent: a missing
+ * The wire code for a spawn this host could not perform, as sent back to the
+ * host that asked. The distinctions matter to the caller's agent: a missing
  * folder is fixed by naming a different folder, a missing catalogue by naming a
- * model or connecting the credential on that machine (spec/04 § Spawn). Folding
+ * model or connecting the credential on that host (spec/04 § Spawn). Folding
  * either into `sdk_error` would tell the agent to retry the same doomed call.
  */
 export function describeSpawnFailure(err: unknown): { code: ChatErrorCode; message: string } {
@@ -29,7 +29,7 @@ export function describeSpawnFailure(err: unknown): { code: ChatErrorCode; messa
   return { code: 'sdk_error', message };
 }
 
-/** How long the calling machine waits for the named machine's answer. */
+/** How long the calling host waits for the named host's answer. */
 export const REMOTE_SPAWN_TIMEOUT_MS = 30_000;
 
 export interface RemoteSpawnRequest {
@@ -42,7 +42,7 @@ export interface RemoteSpawnRequest {
 }
 
 export interface RemoteSpawnCoordinator {
-  /** Emit the request and resolve/reject on the target machine's response. */
+  /** Emit the request and resolve/reject on the target host's response. */
   spawn(req: RemoteSpawnRequest): Promise<{ chatId?: string }>;
   /** Feed an inbound `patch.spawn.response` in. Unknown ids are reported, never swallowed. */
   resolve(event: {
@@ -78,7 +78,7 @@ export function createRemoteSpawnCoordinator(deps: {
           reject(
             new RemoteSpawnError(
               'sdk_error',
-              `patch_spawn: machine ${req.host} did not answer within ${Math.round(timeoutMs / 1000)}s; the chat may or may not have been created there`,
+              `patch_spawn: host ${req.host} did not answer within ${Math.round(timeoutMs / 1000)}s; the chat may or may not have been created there`,
             ),
           );
         }, timeoutMs);
@@ -92,7 +92,7 @@ export function createRemoteSpawnCoordinator(deps: {
           reject(
             new RemoteSpawnError(
               outcome.code,
-              `patch_spawn: machine ${req.host} refused: ${outcome.message}`,
+              `patch_spawn: host ${req.host} refused: ${outcome.message}`,
             ),
           );
         });
@@ -125,7 +125,7 @@ export function createRemoteSpawnCoordinator(deps: {
       waiter({
         ok: false,
         code: event.error?.code ?? 'sdk_error',
-        message: event.error?.message ?? 'the target machine refused the spawn without a reason',
+        message: event.error?.message ?? 'the target host refused the spawn without a reason',
       });
     },
   };

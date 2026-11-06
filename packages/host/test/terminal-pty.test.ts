@@ -83,10 +83,10 @@ describe('TerminalSessions — PTY sessions', { timeout: 20_000 }, () => {
     sink = collector();
     sessions = new TerminalSessions({ emit: sink.emit });
     // A plain bash with no profile noise, so assertions read the shell and not
-    // whatever this machine's login scripts print.
+    // whatever this host's login scripts print.
     prevShell = process.env.SHELL;
     process.env.SHELL = '/bin/bash';
-    // The shell is a LOGIN shell, so it reads this machine's profile and
+    // The shell is a LOGIN shell, so it reads this host's profile and
     // bashrc — and Hetzner's bashrc attaches tmux whenever SSH_CONNECTION is
     // set, which a deploy started over ssh from the Mac inherits. `exit` then
     // leaves tmux, not the terminal. An empty HOME keeps the shell plain.
@@ -164,7 +164,7 @@ describe('TerminalSessions — PTY sessions', { timeout: 20_000 }, () => {
     await sink.waitFor((e) => e.type === 'patch.terminal.ready', 'ready');
     // The marker is printed BY the foreground job, just before it becomes
     // `sleep`, so once it shows the job is running. Waiting for the typed
-    // command's echo instead raced the shell: on a slow machine the interrupt
+    // command's echo instead raced the shell: on a slow host the interrupt
     // landed before `sleep` had started, hit the prompt, and `sleep 30` then
     // ran out the test. `$((40+2))` keeps the echo itself from matching.
     sessions.handle({
