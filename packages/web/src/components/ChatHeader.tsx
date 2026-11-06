@@ -396,7 +396,7 @@ export function ChatHeader({
   // so an optimistic row (no host, no folder) gets no tooltip rather than a
   // lone dot. The model the chat runs on is the last part. Special threads have
   // no folder or machine — their label is the whole story.
-  const modelHover = row.model !== null && row.model !== '' ? compactModelLabel(row.model) : null;
+  const modelHover = (row.model ? compactModelLabel(row.model) : '') || null;
   const titleHover =
     [
       isSpecial ? null : folderLabel(row.folder),
