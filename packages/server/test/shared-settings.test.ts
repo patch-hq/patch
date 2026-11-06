@@ -685,11 +685,11 @@ describe('shared settings routes', () => {
         built.app.inject({ method: 'PATCH', url: '/api/settings', headers: auth, payload });
       const before = await built.app.inject({ method: 'GET', url: '/api/settings', headers: auth });
       expect(before.json().preferences).toMatchObject({
-        meetingAnalysisModel: 'claude-haiku-4-5-20251001',
-        meetingCleanupModel: 'claude-haiku-4-5-20251001',
+        meetingAnalysisModel: 'claude-sonnet-5-5',
+        meetingCleanupModel: 'claude-sonnet-5-5',
         meetingTranscriptionModel: '',
         meetingAnalyseSeconds: 45,
-        meetingResearchModel: 'claude-haiku-4-5-20251001',
+        meetingResearchModel: 'claude-sonnet-5-5',
         meetingResearchSeconds: 60,
       });
       const res = await patch({
