@@ -132,6 +132,37 @@ describe('pad editor in a browser', () => {
     await ctx.close();
   });
 
+  it('desktop: double-clicking a group steps into the element under the pointer, without editing the whole group', async () => {
+    const html = `<!doctype html><html><body style="margin:0;font:20px system-ui">
+<div id="g" style="margin:40px;padding:20px;width:400px"><h2 id="gh" style="margin:0 0 20px">Heading</h2><p id="gp" style="margin:0">Inner text</p></div></body></html>`;
+    const manifest = { screens: [{ id: 'grp', name: 'Group', path: 'group.html', width: 800 }] };
+    const frameUrl = await newPad([
+      { path: 'group.html', base64: Buffer.from(html).toString('base64') },
+      { path: 'pad.json', base64: Buffer.from(JSON.stringify(manifest)).toString('base64') },
+    ]);
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await ctx.newPage();
+    await page.goto(frameUrl);
+    const design = page.frameLocator('#frame');
+    await design.locator('#g').waitFor();
+    const box = (await design.locator('#g').boundingBox())!;
+    // Padding of the group: selects the group itself.
+    await page.mouse.click(box.x + 6, box.y + 6);
+    await expect.poll(() => page.locator('.sel-label').textContent()).toContain('div');
+    const inner = (await design.locator('#gp').boundingBox())!;
+    await page.mouse.dblclick(inner.x + 10, inner.y + inner.height / 2);
+    await expect.poll(() => design.locator('#gp').getAttribute('contenteditable')).not.toBeNull();
+    expect(await design.locator('#g').getAttribute('contenteditable')).toBeNull();
+    expect(await design.locator('#gh').getAttribute('contenteditable')).toBeNull();
+    // Double-clicking the group's own padding edits nothing.
+    await page.keyboard.press('Escape');
+    await page.mouse.click(box.x + 6, box.y + 6);
+    await page.mouse.dblclick(box.x + 6, box.y + 6);
+    expect(await design.locator('#g').getAttribute('contenteditable')).toBeNull();
+    expect((await pending(frameUrl)).map((c) => c.kind)).toEqual([]);
+    await ctx.close();
+  });
+
   it('desktop: + adds a blank screen, opens it, and every device sees it', async () => {
     const frameUrl = await newPad();
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
