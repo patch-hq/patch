@@ -394,12 +394,17 @@ export function ChatHeader({
   // header), not on screen: the message already names them and a second line
   // cost the bar its height. Each part is included only where genuinely known,
   // so an optimistic row (no host, no folder) gets no tooltip rather than a
-  // lone dot. Special threads have neither — their label is the whole story.
-  const titleHover = isSpecial
-    ? undefined
-    : [folderLabel(row.folder), hostLabel !== '' ? hostLabel : null]
-        .filter((p): p is string => p !== null)
-        .join(' · ') || undefined;
+  // lone dot. The model the chat runs on is the last part. Special threads have
+  // no folder or machine — their label is the whole story.
+  const modelHover = row.model !== null && row.model !== '' ? compactModelLabel(row.model) : null;
+  const titleHover =
+    [
+      isSpecial ? null : folderLabel(row.folder),
+      !isSpecial && hostLabel !== '' ? hostLabel : null,
+      modelHover,
+    ]
+      .filter((p): p is string => p !== null)
+      .join(' · ') || undefined;
 
   return (
     <>
@@ -465,11 +470,6 @@ export function ChatHeader({
                 aria-label="waiting on you"
               >
                 ! waiting on you
-              </span>
-            ) : null}
-            {row.model !== null && row.model !== '' ? (
-              <span className="chat-head-model" data-testid="chat-head-model">
-                {compactModelLabel(row.model)}
               </span>
             ) : null}
             {/* Open in new window sits beside the title (spec/14 § Chat panel

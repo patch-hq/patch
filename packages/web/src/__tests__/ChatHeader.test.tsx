@@ -160,17 +160,21 @@ describe('ChatHeader', () => {
     expect(screen.getByTestId('chat-head').querySelector('.chat-usage-crumb')).toBeNull();
   });
 
-  // App Updates: "agents in patch top bar should name the model they are
-  // using". Read-only label beside the title (spec/14 § Chat panel header);
-  // changing the model stays in the composer.
-  it('names the model the chat runs on, in compact form', () => {
+  // App Updates: the model the chat runs on lives in the title's hover tooltip,
+  // not beside the title. Changing the model stays in the composer.
+  it('names the model the chat runs on in the title tooltip, in compact form', () => {
     render(<ChatHeader row={row({ model: 'claude-opus-5-5' })} />);
-    expect(screen.getByTestId('chat-head-model')).toHaveTextContent('Opus 5.5');
+    expect(screen.getByTestId('chat-title').getAttribute('title')).toMatch(/Opus 5\.5$/);
   });
 
-  it('draws no model label when the model is not known', () => {
-    render(<ChatHeader row={row({ model: null })} />);
+  it('draws no model label beside the title', () => {
+    render(<ChatHeader row={row({ model: 'claude-opus-5-5' })} />);
     expect(screen.queryByTestId('chat-head-model')).not.toBeInTheDocument();
+  });
+
+  it('leaves the model out of the tooltip when the model is not known', () => {
+    render(<ChatHeader row={row({ model: null })} />);
+    expect(screen.getByTestId('chat-title').getAttribute('title') ?? '').not.toMatch(/Opus|Haiku/);
   });
 
   // G2-d6 / G2-d4: an unnamed chat must NOT show the raw ULID as the header
@@ -772,9 +776,18 @@ describe('ChatHeader', () => {
       expect(hover()).toBeNull();
     });
 
-    it('draws no tooltip from the model alone', () => {
-      render(<ChatHeader row={row({ hostId: '', folder: '', model: 'claude-opus-4' })} />);
-      expect(hover()).toBeNull();
+    it('ends the tooltip with the model, after folder and host', () => {
+      render(
+        <ChatHeader
+          row={row({ hostId: 'dev-host', folder: '~/projects/foo', model: 'claude-opus-5-5' })}
+        />,
+      );
+      expect(hover()).toBe('foo · dev-host · Opus 5.5');
+    });
+
+    it('hovers as the model alone when nothing else is known', () => {
+      render(<ChatHeader row={row({ hostId: '', folder: '', model: 'claude-opus-5-5' })} />);
+      expect(hover()).toBe('Opus 5.5');
     });
   });
 
