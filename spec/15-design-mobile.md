@@ -35,7 +35,7 @@ Bottom tabs (5), in order:
 - Chats — default landing. Chat list (same shape as web sidebar, vertically stacked).
 - Jobs — the job list (§ Jobs screen).
 - New chat — the true centre of the bar (third of five). Opens the new chat flow (§ New chat flow). Raised green button so the affordance is obvious for one-handed use, horizontally centred within its own tab cell (a `flex:1` cell with centre alignment around the fixed-size button).
-- Voice — immediately right of New chat, direct into the Manager thread for tap-to-talk. A regular tab like its neighbours (icon + label), but its button still carries the hold-to-talk gesture: tap-and-hold sends a quick voice note, a plain tap opens the Manager thread.
+- Files — immediately right of New chat, a regular tab (icon + label). Lists every registered host, one row each (presence dot, name, platform and last seen); tapping a row opens that host's Files browser. The host is always the one tapped, never a guess. The Manager thread is reached from the Chats tab's Manager card, which keeps Call, Hands-free and the hold-to-talk voice note.
 - Settings — the same sections as web's Settings page, plus Secrets (§ Settings tab).
 
 Jobs are reached from their own bottom tab, not from a row on the Settings page: a job is a top-level thing you check on, not a preference. Each row on the Jobs tab opens a full editor sub-screen (§ Job editor). The Settings page carries no Jobs row — a second door onto the same screen. Notifications history is the bell on the Chats header (§ Notifications drawer).
@@ -125,7 +125,7 @@ The row-actions menu contains, top to bottom — the tray's three, in the tray's
 - Send voice note — opens the voice-note overlay.
 - Delete chat (red, destructive) — last.
 
-Tap-and-hold on the Voice bottom tab opens a global voice-note overlay targeting Manager (the mobile analogue of the desktop menu-bar global hotkey).
+Tap-and-hold on the Manager card in the Chats tab opens the voice-note overlay targeting Manager.
 
 ## Chat detail
 

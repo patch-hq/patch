@@ -41,9 +41,9 @@ appId: io.github.tomchambers2.patch
 - assertVisible: 'Account'
 - takeScreenshot: 02-settings
 
-# Navigate to the Voice tab → opens the Manager thread directly.
-- tapOn: 'Voice'
-- takeScreenshot: 03-manager
+# Navigate to the Files tab → lists the hosts.
+- tapOn: 'Files'
+- takeScreenshot: 03-files
 
 # New chat: the folder picker must actually render. A blank screen here is the
 # regression this step exists for — it is not a crash, so nothing else notices.
