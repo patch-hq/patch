@@ -99,7 +99,9 @@ test.describe('panes and tabs — opening', () => {
 
     await page.getByTestId('chat-row-chat_bus').click();
     await expect(page.locator('.group-card')).toHaveCount(2); // not duplicated
-    await expect(page.locator('.group-card-focused .group-title')).toHaveText('bus-watch');
+    await expect(page.locator('.group-card-focused [data-testid="chat-title"]')).toHaveText(
+      'bus-watch',
+    );
   });
 
   test('right-click → Open in new window pops a real window at /chats/:id', async ({ page }) => {
@@ -188,7 +190,9 @@ test.describe('panes and tabs — drag and drop', () => {
     await expect(paneTabs(page)).toHaveCount(2);
   });
 
-  test('dragging a tab from a pane with several tabs onto another pane keeps every tab', async ({ page }) => {
+  test('dragging a tab from a pane with several tabs onto another pane keeps every tab', async ({
+    page,
+  }) => {
     await page.goto(HARNESS);
     await addTab(page, 'settings');
     await page.keyboard.press('Meta+Backslash');
