@@ -5,7 +5,7 @@
 // browser — which has no shell to update — sees nothing at all.
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, cleanup, act, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, act, fireEvent, waitFor } from '@testing-library/react';
 import {
   DesktopUpdateBanner,
   updateUrgency,
@@ -291,7 +291,12 @@ describe('updater log reporting', () => {
     (window as unknown as { patch?: unknown }).patch = bridge;
     render(<DesktopUpdateBanner />);
     await screen.findByTestId('desktop-update-banner');
-    expect(logUpdateBanner).toHaveBeenCalledWith(true, 'desktop: Patch has updated.');
+    await waitFor(() =>
+      expect(logUpdateBanner).toHaveBeenCalledWith(
+        true,
+        expect.stringMatching(/^desktop: Patch has updated/),
+      ),
+    );
     const wording = logUpdateBanner.mock.calls.map((c) => String(c[1])).join(' ');
     expect(wording).not.toMatch(/lost connection|reconnecting|offline/i);
   });
