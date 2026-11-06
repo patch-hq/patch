@@ -23,7 +23,11 @@
 // time you quit Patch anyway, so the patient path costs the user nothing.
 
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { getDesktopBridge, useDesktopUpdaterState } from '../lib/desktopBridge.js';
+import {
+  getDesktopBridge,
+  useDesktopUpdaterState,
+  useLogUpdateBanner,
+} from '../lib/desktopBridge.js';
 
 const UPDATE_FAILED = 'Update failed. Try again.';
 
@@ -114,12 +118,19 @@ export function DesktopUpdateBanner(): JSX.Element | null {
   // Nothing staged means nothing to offer. `downloaded` is the honest gate:
   // an update that is merely AVAILABLE cannot be installed by pressing a
   // button, so offering Restart would be a lie until the bytes are on disk.
-  if (!state || !state.downloaded || !state.availableVersion) return null;
-
-  const urgency = updateUrgency(state.staleSince, now);
-  if (urgency === 'none') return null;
-
-  const waited = state.staleSince === null ? null : waitedWords(state.staleSince, now);
+  const offered = state !== null && state.downloaded && !!state.availableVersion;
+  const urgency = state !== null && offered ? updateUrgency(state.staleSince, now) : 'none';
+  const waited =
+    state !== null && offered && state.staleSince !== null
+      ? waitedWords(state.staleSince, now)
+      : null;
+  const shownText =
+    offered && urgency !== 'none'
+      ? `Patch has updated${waited === null ? '' : `, waiting ${waited}`}.`
+      : null;
+  // Evidence for the updater log: when the prompt appears and when it clears.
+  useLogUpdateBanner('desktop', shownText);
+  if (state === null || !offered || urgency === 'none') return null;
   // A failed press replaces the message and turns the banner the error colour.
   // The reason goes to the console; the user only needs to know to try again.
   if (pressed === false && lastError !== null) {

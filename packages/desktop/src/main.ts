@@ -60,6 +60,7 @@ import {
   type UpdaterEvent,
   type UpdaterState,
 } from './updater';
+import { appendUpdateLog, type UpdateLogEvent } from './updateLog';
 import { buildContextMenuTemplate } from './context-menu';
 import { buildAppMenuTemplate } from './app-menu';
 import { InAppBrowser } from './in-app-browser';
@@ -1357,10 +1358,48 @@ function saveUpdaterState(): void {
   }
 }
 
+const UPDATE_LOG_FILE = (): string => join(app.getPath('userData'), 'update-log.jsonl');
+
+/** Append to the persistent updater log (see updateLog.ts). Failure is loud, never fatal. */
+function logUpdate(event: UpdateLogEvent, detail: string): void {
+  try {
+    appendUpdateLog(
+      UPDATE_LOG_FILE(),
+      updaterState?.currentVersion ?? app.getVersion(),
+      event,
+      detail,
+      new Date().toISOString(),
+      {
+        readFile: (p) => (existsSync(p) ? readFileSync(p, 'utf8') : null),
+        writeFile: writeFileSync,
+        rename: renameSync,
+      },
+    );
+  } catch (err) {
+    console.error('[updater] failed to write update log', err);
+  }
+}
+
 /** Apply an event, persist, and push the new state to the panel. */
 function applyUpdaterEvent(event: UpdaterEvent): void {
   if (!updaterState) return;
   updaterState = reduceUpdater(updaterState, event);
+  switch (event.type) {
+    case 'up-to-date':
+      logUpdate('check', 'up to date');
+      break;
+    case 'available':
+      logUpdate('available', event.version);
+      break;
+    case 'downloaded':
+      logUpdate('downloaded', event.version);
+      break;
+    case 'error':
+      logUpdate(event.kind === 'install' ? 'install-error' : 'check', `error: ${event.message}`);
+      break;
+    case 'check-started':
+      break;
+  }
   saveUpdaterState();
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send('patch:updater-state', updaterState);
@@ -1459,6 +1498,16 @@ function setupAutoUpdater(): void {
     feedUrl: feedUrl ?? readFeedUrl(updateConfig),
     disabledReason,
     persisted,
+  });
+
+  logUpdate(
+    'launch',
+    updaterState.availableVersion ? `behind: ${updaterState.availableVersion} waiting` : 'current',
+  );
+  // The renderer reports what the banners said, since only it knows.
+  ipcMain.on('patch:updater:log-banner', (_e, payload: { shown: boolean; text: string }) => {
+    logUpdate(payload.shown ? 'prompt-shown' : 'prompt-cleared', payload.text);
+    if (payload.shown) logUpdate('banner', payload.text);
   });
 
   // The panel reads state and drives checks/installs regardless of whether the
@@ -1594,6 +1643,7 @@ function setupAutoUpdater(): void {
   // an update; everything else waits for an ordinary quit
   // (autoInstallOnAppQuit, left at its default true).
   ipcMain.on('patch:updater:install', () => {
+    logUpdate('install-requested', updaterState?.availableVersion ?? 'latest');
     void installLatest();
   });
 

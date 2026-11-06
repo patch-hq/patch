@@ -278,3 +278,34 @@ describe('DesktopUpdateBanner', () => {
     expect(screen.getByTestId('desktop-update-restart')).not.toBeDisabled();
   });
 });
+
+describe('updater log reporting', () => {
+  it('reports the prompt wording when it shows and that it cleared when it goes', async () => {
+    const logUpdateBanner = vi.fn();
+    const bridge = {
+      getUpdaterState: () => Promise.resolve(state()),
+      onUpdaterState: () => () => {},
+      installUpdate: vi.fn(),
+      logUpdateBanner,
+    };
+    (window as unknown as { patch?: unknown }).patch = bridge;
+    render(<DesktopUpdateBanner />);
+    await screen.findByTestId('desktop-update-banner');
+    expect(logUpdateBanner).toHaveBeenCalledWith(true, 'desktop: Patch has updated.');
+    const wording = logUpdateBanner.mock.calls.map((c) => String(c[1])).join(' ');
+    expect(wording).not.toMatch(/lost connection|reconnecting|offline/i);
+  });
+
+  it('reports cleared, not shown, when nothing is staged', async () => {
+    const logUpdateBanner = vi.fn();
+    (window as unknown as { patch?: unknown }).patch = {
+      getUpdaterState: () => Promise.resolve(state({ downloaded: false })),
+      onUpdaterState: () => () => {},
+      logUpdateBanner,
+    };
+    render(<DesktopUpdateBanner />);
+    await act(async () => {});
+    expect(logUpdateBanner).toHaveBeenCalledWith(false, 'desktop: cleared');
+    expect(logUpdateBanner).not.toHaveBeenCalledWith(true, expect.anything());
+  });
+});

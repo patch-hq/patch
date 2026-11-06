@@ -37,6 +37,7 @@ import {
   setTelemetryEnabled,
   telemetryEnabled,
 } from '../../lib/exitLog';
+import { logUpdater, readUpdaterLog, updaterLogText } from '../../lib/updaterLog';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -145,6 +146,7 @@ export function UpdatesPage(): React.ReactElement {
         testID="restart-to-update"
         label="Restart to update"
         onPress={() => {
+          logUpdater('install-requested', 'Restart to update pressed');
           noteIntentionalRestart();
           void Updates.reloadAsync();
         }}
@@ -283,6 +285,11 @@ function ExitLogSection(): React.ReactElement {
           onPress={() => void Clipboard.setStringAsync(exitLogText(entries))}
         />
       ) : null}
+      <Row
+        title="Copy updater log"
+        testID="updater-log-copy"
+        onPress={() => void Clipboard.setStringAsync(updaterLogText(readUpdaterLog()))}
+      />
     </SettingsSection>
   );
 }
