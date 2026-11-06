@@ -22,6 +22,7 @@ import {
   DEFAULT_SNOOZE_HOURS,
   snoozePresets,
   UNTIL_COMPLETE_PRESET,
+  UNTIL_COMPLETE_DISABLED_TIP,
   distinctPresets,
   parseCustomSnooze,
   type SnoozePreset,
@@ -114,13 +115,10 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): React.ReactElemen
   const running = targets.filter((c) => c.activity === 'running');
   const notRunning = targets.length - running.length;
   const name = isProject ? target.name : deriveChatTitle(targets[0] ?? ({ name: null } as ChatRow));
-  // Offered only when every chat has work to wait for; the host refuses the rest.
+  // Enabled only when every chat has work to wait for; the host refuses the rest.
   const canUntilComplete =
     targets.length > 0 && targets.every((c) => c.activity === 'running' || c.goal !== null);
-  const presets = [
-    ...distinctPresets(allPresets),
-    ...(canUntilComplete ? [UNTIL_COMPLETE_PRESET] : []),
-  ];
+  const presets = [...distinctPresets(allPresets), UNTIL_COMPLETE_PRESET];
   const wake = wakeFor(selected, customValue, allPresets, sliderIndex);
   const wakeText =
     wake === null ? '' : selected === UNTIL_COMPLETE_PRESET.id ? 'complete' : formatWakeAt(wake);
@@ -209,14 +207,18 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): React.ReactElemen
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
               {[...presets, { id: CUSTOM, label: 'Custom…', resolve: () => 0 }].map((p) => {
                 const on = selected === p.id;
+                const disabled = p.id === UNTIL_COMPLETE_PRESET.id && !canUntilComplete;
                 return (
                   <Pressable
                     key={p.id}
                     testID={`snooze-sheet-preset-${p.id}`}
                     accessibilityRole="button"
-                    accessibilityState={{ selected: on }}
+                    accessibilityState={{ selected: on, disabled }}
+                    accessibilityHint={disabled ? UNTIL_COMPLETE_DISABLED_TIP : undefined}
+                    disabled={disabled}
                     onPress={() => setSelected(p.id)}
                     style={{
+                      opacity: disabled ? 0.45 : 1,
                       flexBasis: '48%',
                       flexGrow: 1,
                       flexDirection: 'row',

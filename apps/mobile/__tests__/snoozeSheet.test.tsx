@@ -206,11 +206,13 @@ describe('the Snooze sheet', () => {
     expect(routerMock.push).toHaveBeenCalledWith('/settings/chats');
   });
 
-  it('does not offer Until complete for an idle chat', () => {
+  it('greys out Until complete for an idle chat', () => {
     seedThree();
     const r = renderRN(<SnoozeSheet />);
     actSync(() => showSnoozeSheet({ kind: 'chat', chatId: 'c' }));
-    expect(findAllHost(r.root, byTestId('snooze-sheet-preset-until-complete'))).toHaveLength(0);
+    const uc = findAllHost(r.root, byTestId('snooze-sheet-preset-until-complete'));
+    expect(uc).toHaveLength(1);
+    expect(uc[0]!.props.accessibilityState).toMatchObject({ disabled: true });
   });
 
   it('a chat: title, name, presets with wake times, run box for a running chat, rule, disabled Snooze', () => {

@@ -162,12 +162,17 @@ test.describe('snooze sheet', () => {
     await expect(page.getByText('snoozed until complete')).toBeVisible();
   });
 
-  test('Until complete is not offered when the chat has nothing running', async ({ page }) => {
+  test('Until complete is greyed out, with a tooltip, when the chat has nothing running', async ({
+    page,
+  }) => {
     await seed(page, THREE({ activity: 'idle' }));
     await page.getByTestId('action-more').click();
     await page.getByTestId('action-snooze').click();
     await expect(page.getByTestId('snooze-sheet-preset-1-hour')).toBeVisible();
-    await expect(page.getByTestId('snooze-sheet-preset-until-complete')).toHaveCount(0);
+    const uc = page.getByTestId('snooze-sheet-preset-until-complete');
+    await expect(uc).toBeVisible();
+    await expect(uc).toBeDisabled();
+    await expect(uc).toHaveAttribute('title', /running work/);
   });
 
   test('Esc and the scrim cancel without snoozing', async ({ page }) => {
