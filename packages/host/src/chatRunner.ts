@@ -3329,6 +3329,26 @@ export class Daemon {
     this.watch.loadAll();
     this.resumeInterruptedTurns(owned, lastTurnOutcomeByChatId, lastTurnLocalIdByChatId);
     this.settleUntilCompleteSnoozes(owned);
+    this.resumeDeferredGoalEvaluations(owned);
+  }
+
+  /**
+   * spec/04 § Goals — a goal's evaluation deferred on a running `patch_watch`
+   * is re-checked by an in-memory poll timer (`armGoalWatchPoll`), which a
+   * restart loses. The watch itself re-attaches, but with the turn long since
+   * settled nothing would ever call `maybeEvaluateGoal` again, leaving the goal
+   * "Working" with no checks until a human spoke. Re-arm the poll for every
+   * active-goal chat still waiting on background work. A chat with a turn owed
+   * again needs nothing: that turn settles into `maybeEvaluateGoal` itself.
+   */
+  private resumeDeferredGoalEvaluations(metas: ChatMeta[]): void {
+    for (const m of metas) {
+      const state = this.chatState.get(m.chatId);
+      if (!state || state.goal === null || state.status !== 'active') continue;
+      if (this.owedResend.has(m.chatId) || this.parkedTurns.has(m.chatId)) continue;
+      if (this.watch.count(m.chatId) === 0 && !this.hasRunningDelegates(m.chatId)) continue;
+      this.armGoalWatchPoll(m.chatId);
+    }
   }
 
   /**

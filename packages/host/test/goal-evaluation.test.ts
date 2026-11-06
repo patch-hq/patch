@@ -44,9 +44,9 @@ function textBackend(reply = 'ok'): SdkBackend {
 
 function setup(
   evaluateGoal: EvaluateGoal | undefined,
-  opts: { backend?: SdkBackend; goalWatchPollMs?: number } = {},
+  opts: { backend?: SdkBackend; goalWatchPollMs?: number; home?: string } = {},
 ) {
-  const home = mkdtempSync(join(tmpdir(), 'patch-goaleval-'));
+  const home = opts.home ?? mkdtempSync(join(tmpdir(), 'patch-goaleval-'));
   const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-goaleval-folder-')));
   mkdirSync(folder, { recursive: true });
   const metaStore = createMetaStore(home);
@@ -64,7 +64,7 @@ function setup(
     ...(evaluateGoal ? { evaluateGoal } : {}),
     ...(opts.goalWatchPollMs !== undefined ? { goalWatchPollMs: opts.goalWatchPollMs } : {}),
   });
-  return { daemon, folder, events };
+  return { daemon, folder, events, home };
 }
 
 describe('maybeEvaluateGoal — not_met', () => {
@@ -355,6 +355,37 @@ describe('maybeEvaluateGoal — deferred while patch_watch is running', () => {
     expect(evaluateGoal).toHaveBeenCalled();
     expect(daemon.chatState.get(chatId)?.goal).toBeNull();
   }, 8000);
+});
+
+describe('maybeEvaluateGoal — deferred on a watch across a host restart', () => {
+  it('re-arms the deferral poll on boot so the goal is judged once the watch finishes', async () => {
+    const evaluateGoal = vi.fn(
+      async (): Promise<GoalVerdict> => ({ verdict: 'met', reason: 'done' }),
+    );
+    const first = setup(evaluateGoal, { goalWatchPollMs: 300 });
+    const chatId = await first.daemon.spawnChat({ folder: first.folder });
+    await tick();
+    await first.daemon.setGoal(chatId, 'Do the thing');
+    first.daemon.startWatch(chatId, {
+      command: 'sleep 1.5',
+      description: 'a slow background task',
+      timeoutSec: 600,
+    });
+    await first.daemon.sendInput({ chatId, message: 'go', localId: 'u1' });
+    await tick(30);
+    expect(evaluateGoal).not.toHaveBeenCalled();
+    // Host restart: the in-memory poll timer is gone, the watch record is not.
+    first.daemon.shutdown();
+
+    const second = setup(evaluateGoal, { goalWatchPollMs: 300, home: first.home });
+    second.daemon.hydrate();
+    expect(second.daemon.chatState.get(chatId)?.goal).toBe('Do the thing');
+    expect(second.daemon.chatState.get(chatId)?.goalEvalAwaitingWatches).toBe(true);
+
+    await tick(4500);
+    expect(evaluateGoal).toHaveBeenCalled();
+    second.daemon.shutdown();
+  }, 10000);
 });
 
 describe('maybeEvaluateGoal — background state handed to the judge', () => {
