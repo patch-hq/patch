@@ -67,6 +67,12 @@ function makeArtifact(target = BUILD.target): string {
   writeFileSync(join(dir, 'build-info.json'), JSON.stringify({ ...BUILD, target }));
   writeFileSync(join(dir, 'host.mjs'), '// bundled host\n');
   writeFileSync(join(dir, 'node'), '#!/bin/sh\n');
+  if (target.startsWith('darwin')) {
+    const app = join(dir, 'Patch Host.app', 'Contents');
+    mkdirSync(join(app, 'MacOS'), { recursive: true });
+    writeFileSync(join(app, 'MacOS', 'patch-host'), '#!/bin/sh\n');
+    writeFileSync(join(app, 'Info.plist'), '<string>me.tomchambers.patch-host</string>\n');
+  }
   writeFileSync(join(dir, 'silero_vad.onnx'), 'onnx');
   writeFileSync(join(dir, 'install'), '#!/bin/sh\n');
   mkdirSync(join(dir, 'skill', 'patch-cli'), { recursive: true });
@@ -563,8 +569,8 @@ describe('what the install puts on the machine', () => {
     expect(nodes[0]).toBe(exe);
     expect(readFileSync(exe, 'utf8')).toBe('#!/bin/sh\n');
     const plist = readFileSync(join(runtime, 'Patch Host.app', 'Contents', 'Info.plist'), 'utf8');
-    expect(plist).toContain('<string>me.tomchambers.patch-host</string>');
-    expect(plist).toContain('<string>patch-host</string>');
+    // The signed bundle from the artifact, copied whole, never rewritten here.
+    expect(plist).toBe('<string>me.tomchambers.patch-host</string>\n');
     expect(existsSync(join(runtime, 'patch-host'))).toBe(false);
   });
 
