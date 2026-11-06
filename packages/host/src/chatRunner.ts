@@ -3805,7 +3805,7 @@ export class Daemon {
       message: string;
       notAfter?: string;
     },
-  ): { fireAt: number } {
+  ): { fireAt: number; unchanged?: true; replaced?: WakeRecord } {
     if (!this.chatState.get(chatId) && !this.opts.metaStore.read(chatId)) {
       throw new ChatNotFoundError(chatId);
     }
@@ -3839,6 +3839,21 @@ export class Daemon {
       if (Number.isNaN(na)) throw new Error(`scheduleWake: invalid 'notAfter': ${opts.notAfter}`);
       notAfter = na;
     }
+    const prior = this.wake.peek(chatId);
+    // Re-arming the identical loop (same message, cadence, cutoff; no explicit
+    // first fire) must not push the next fire time forward — an agent that
+    // re-arms to "confirm" would otherwise starve the loop for ever.
+    if (
+      prior &&
+      every !== undefined &&
+      !hasIn &&
+      !hasAt &&
+      prior.every === every &&
+      prior.message === message &&
+      prior.notAfter === notAfter
+    ) {
+      return { fireAt: prior.fireAt, unchanged: true };
+    }
     const rec: WakeRecord = {
       chatId,
       message,
@@ -3853,7 +3868,7 @@ export class Daemon {
     // replaced) wake must reach them immediately — not at the next unrelated
     // state change (spec/02 § Self-wake, "Visible, never invisible").
     this.emitState(chatId);
-    return { fireAt };
+    return prior ? { fireAt, replaced: prior } : { fireAt };
   }
 
   /**

@@ -419,7 +419,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_wake_me',
     {
       description:
-        'Schedule a DURABLE self-wake: the host delivers `message` back into THIS chat as a new turn after a delay, then you decide what to do (re-arm for a loop, or stop). You do NOT wait — call this and END your turn; the host owns the timer and survives restarts. Use for a self-rescheduling reminder/check loop (e.g. nag every 10 min until done). Provide exactly one of `in` (relative: "10m", "1h30m", "90s", or seconds) or `at` (absolute ISO 8601 — compute the user\'s local time yourself). Optional `notAfter` (ISO) voids the wake if it would fire past it. Re-calling REPLACES the pending wake (one per chat). This is NOT a job (jobs fire an external schedule into a new chat) — a job is for a different or new chat, this is for re-invoking THIS one.',
+        'Schedule a DURABLE self-wake: the host delivers `message` back into THIS chat as a new turn after a delay, then you decide what to do (re-arm for a loop, or stop). You do NOT wait — call this and END your turn; the host owns the timer and survives restarts. Use for a self-rescheduling reminder/check loop (e.g. nag every 10 min until done). Provide exactly one of `in` (relative: "10m", "1h30m", "90s", or seconds) or `at` (absolute ISO 8601 — compute the user\'s local time yourself). Optional `notAfter` (ISO) voids the wake if it would fire past it. Re-calling REPLACES the pending wake (one per chat); the result says what was replaced. Check with `patch_wake_status` instead of re-arming. This is NOT a job (jobs fire an external schedule into a new chat) — a job is for a different or new chat, this is for re-invoking THIS one.',
       inputSchema: {
         message: z.string().min(1),
         in: z.union([z.string(), z.number()]).optional(),
@@ -442,7 +442,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_loop',
     {
       description:
-        'Arm a DURABLE recurring self-wake: the host delivers `message` back into THIS chat as a new turn every `every`, forever — no need to re-arm it yourself each time (that is `patch_wake_me`; this is for the fixed-cadence case where the interval never changes). Same underlying timer as `patch_wake_me` — one pending wake per chat, arming a loop REPLACES any pending wake_me/loop and vice versa. `every` is a duration ("10m", "1h30m", "90s", or seconds) — the first fire is one `every` from now, then every `every` thereafter. Optional `notAfter` (ISO 8601) stops the loop once a fire would land past it. Stop the loop with `patch_cancel_wake` — there is no separate stop tool.',
+        'Arm a DURABLE recurring self-wake: the host delivers `message` back into THIS chat as a new turn every `every`, forever — no need to re-arm it yourself each time (that is `patch_wake_me`; this is for the fixed-cadence case where the interval never changes). Same underlying timer as `patch_wake_me` — one pending wake per chat, arming a loop REPLACES any pending wake_me/loop and vice versa. `every` is a duration ("10m", "1h30m", "90s", or seconds) — the first fire is one `every` from now, then every `every` thereafter. Optional `notAfter` (ISO 8601) stops the loop once a fire would land past it. Re-arming an identical loop (same message and cadence) keeps the existing schedule; a different one replaces it and the result reports what was replaced. Use `patch_wake_status` to check what is pending. Stop the loop with `patch_cancel_wake` — there is no separate stop tool.',
       inputSchema: {
         message: z.string().min(1),
         every: z.union([z.string(), z.number()]),
@@ -453,6 +453,24 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
       const body: Record<string, unknown> = { chatId: callerChatId, message, every };
       if (notAfter !== undefined) body['notAfter'] = notAfter;
       const res = await uds<unknown>({ method: 'POST', path: '/internal/wake', body });
+      return toolResult(res);
+    },
+  );
+
+  // ---- patch_wake_status --------------------------------------------------
+  server.registerTool(
+    'patch_wake_status',
+    {
+      description:
+        "Read this chat's pending self-wake or loop (next fire time, cadence, cutoff) without changing it. `pending` is null if none. Use this to confirm a loop is armed instead of re-calling patch_loop.",
+      inputSchema: {},
+    },
+    async () => {
+      const res = await uds<unknown>({
+        method: 'POST',
+        path: '/internal/wake/status',
+        body: { chatId: callerChatId },
+      });
       return toolResult(res);
     },
   );

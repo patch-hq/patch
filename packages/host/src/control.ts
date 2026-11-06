@@ -489,6 +489,21 @@ const DocExportBody = z
   })
   .strict();
 
+function wakeSummary(rec: {
+  fireAt: number;
+  every?: number | undefined;
+  notAfter?: number | undefined;
+  message: string;
+}) {
+  return {
+    fireAt: rec.fireAt,
+    fireAtIso: new Date(rec.fireAt).toISOString(),
+    ...(rec.every !== undefined ? { everyMs: rec.every } : {}),
+    ...(rec.notAfter !== undefined ? { notAfterIso: new Date(rec.notAfter).toISOString() } : {}),
+    message: rec.message,
+  };
+}
+
 // spec/02 § Self-wake. The MCP child bakes `chatId` from PATCH_CHAT_ID, so a
 // wake always self-targets the calling chat. `patch_loop` posts here too —
 // same primitive, `every` is the one extra field that turns it into a loop
@@ -2374,7 +2389,27 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         durationMs: Date.now() - start,
         ok: true,
       });
-      return { ok: true, fireAt: res.fireAt, fireAtIso: new Date(res.fireAt).toISOString() };
+      const fireAtIso = new Date(res.fireAt).toISOString();
+      if (res.unchanged) {
+        return {
+          ok: true,
+          fireAt: res.fireAt,
+          fireAtIso,
+          unchanged: true,
+          note: `An identical loop was already pending; kept its schedule (next fire ${fireAtIso}). Re-arming is unnecessary.`,
+        };
+      }
+      return {
+        ok: true,
+        fireAt: res.fireAt,
+        fireAtIso,
+        ...(res.replaced
+          ? {
+              replaced: wakeSummary(res.replaced),
+              note: `Replaced a pending ${res.replaced.every !== undefined ? 'loop' : 'wake'} that was due ${new Date(res.replaced.fireAt).toISOString()}; next fire is now ${fireAtIso}.`,
+            }
+          : {}),
+      };
     } catch (err) {
       const code = err instanceof ChatNotFoundError ? 'chat_not_found' : 'invalid_input';
       toolLog({
@@ -2388,6 +2423,17 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         .code(code === 'chat_not_found' ? 404 : 400)
         .send({ error: code, message: err instanceof Error ? err.message : String(err) });
     }
+  });
+
+  // patch_wake_status — read the chat's pending self-wake without re-arming.
+  app.post('/internal/wake/status', async (req, reply) => {
+    if (require503(reply)) return;
+    const parsed = WakeCancelBody.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
+    }
+    const rec = opts.daemon!.peekWake(parsed.data.chatId);
+    return { ok: true, pending: rec ? wakeSummary(rec) : null };
   });
 
   // patch_cancel_wake — cancel the chat's pending self-wake (stop the loop).

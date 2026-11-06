@@ -103,6 +103,7 @@ const EXPECTED_PATCH_TOOLS = [
   'patch_spawn',
   'patch_wake_me',
   'patch_cancel_wake',
+  'patch_wake_status',
   'patch_loop',
   'patch_doc_suggest',
   'patch_doc_comment',
