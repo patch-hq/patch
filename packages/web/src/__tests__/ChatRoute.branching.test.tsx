@@ -238,6 +238,50 @@ describe('editing a user turn forks a track', () => {
     expect(contents).toContain('new answer');
   });
 
+  it('an edit keeps the new turn below the turns before it — no wipe and replay of the transcript', async () => {
+    const requestReplay = vi.fn();
+    const ws = {
+      send: vi.fn(),
+      requestReplay,
+    } as unknown as Parameters<typeof ChatRoute>[0]['ws'];
+    seedChat('c-fork', [
+      { seq: 0, kind: 'message', role: 'user', content: 'first ask', at: 0 },
+      { seq: 1, kind: 'message', role: 'assistant', content: 'first answer', at: 0 },
+      { seq: 4, kind: 'message', role: 'user', content: 'ask one', at: 0 },
+      { seq: 5, kind: 'message', role: 'assistant', content: 'answer one', at: 0 },
+    ]);
+    act(() =>
+      useChatStore.getState().applyEvents([
+        {
+          ...TWO_TRACKS,
+          activeBranchId: 'b0',
+          branches: [TWO_TRACKS.branches[0]!],
+        },
+      ]),
+    );
+    renderChat('c-fork', ws);
+    const edits = screen.getAllByTestId('msg-edit');
+    fireEvent.click(edits[edits.length - 1]!);
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'ask again' } });
+    fireEvent.click(screen.getByTestId('send-btn'));
+    await waitFor(() =>
+      expect(ws!.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'chat.fork_request' })),
+    );
+    act(() =>
+      useChatStore
+        .getState()
+        .applyEvents([
+          TWO_TRACKS,
+          { type: 'chat.message', chatId: 'c-fork', role: 'user', content: 'ask again', seq: 6 },
+        ]),
+    );
+    await waitFor(() => expect(screen.getByText('ask again')).toBeTruthy());
+    // (opening the chat asks once, without force; the stale-cache refetch is the forced one)
+    expect(requestReplay).not.toHaveBeenCalledWith('c-fork', { force: true });
+    const contents = (useChatStore.getState().timelines['c-fork'] ?? []).map((e) => e.content);
+    expect(contents).toEqual(['first ask', 'first answer', 'ask again']);
+  });
+
   it('an attachments-only edit sends an empty message and keeps the turns until acknowledged', async () => {
     const ws = WS();
     vi.stubGlobal(
