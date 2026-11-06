@@ -88,8 +88,8 @@ test.describe('settings — usage history', () => {
     const before = seen.length;
     await page.getByTestId('usage-from').fill('2026-10-01');
     await page.getByTestId('usage-to').fill('2026-10-05');
+    await expect.poll(() => seen.length).toBeGreaterThan(before);
     await expect(page.getByTestId('usage-burndown')).toBeVisible();
-    expect(seen.length).toBeGreaterThan(before);
     const last = new URL(seen[seen.length - 1]!);
     expect(last.searchParams.get('period')).toBeNull();
     expect(Number(last.searchParams.get('since'))).toBeGreaterThan(0);
