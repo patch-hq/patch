@@ -21,6 +21,7 @@ import { routerMock } from './stubs/expo-router';
 const apiMocks = vi.hoisted(() => ({
   watchList: vi.fn(async () => ({ tasks: [] as WatchTaskRow[] })),
   watchStop: vi.fn(async () => ({ stopped: true })),
+  watchOutput: vi.fn(async () => ({ output: '' })),
 }));
 vi.mock('../src/api/rest', () => ({ api: apiMocks }));
 
@@ -71,6 +72,8 @@ describe('BackgroundTaskBar', () => {
     apiMocks.watchList.mockResolvedValue({ tasks: [] });
     apiMocks.watchStop.mockReset();
     apiMocks.watchStop.mockResolvedValue({ stopped: true });
+    apiMocks.watchOutput.mockReset();
+    apiMocks.watchOutput.mockResolvedValue({ output: '' });
     seed();
   });
   afterEach(() => {
@@ -328,5 +331,31 @@ describe('BackgroundTaskBar', () => {
       )();
     });
     expect(apiMocks.watchStop).toHaveBeenCalledWith('c1', 't1');
+  });
+
+  it('the modal shows the task log, and says so when it cannot load', async () => {
+    apiMocks.watchList.mockResolvedValue({ tasks: [task()] });
+    apiMocks.watchOutput.mockResolvedValue({ output: 'compiling\nlinking' });
+    vi.useFakeTimers();
+    setLiveCount(1);
+    const r = renderRN(<BackgroundTaskBar chatId="c1" />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      (findAllHost(r.root, byTestId('background-task-bar-open'))[0].props.onPress as () => void)();
+    });
+    expect(apiMocks.watchOutput).toHaveBeenCalledWith('c1', 't1');
+    expect(textOf(findAllHost(r.root, byTestId('background-task-modal-log-text'))[0])).toBe(
+      'compiling\nlinking',
+    );
+    apiMocks.watchOutput.mockRejectedValue(new Error('daemon_timeout'));
+    await act(async () => {
+      vi.advanceTimersByTime(3_000);
+      await Promise.resolve();
+    });
+    expect(textOf(findAllHost(r.root, byTestId('background-task-modal-log-error'))[0])).toContain(
+      'daemon_timeout',
+    );
   });
 });

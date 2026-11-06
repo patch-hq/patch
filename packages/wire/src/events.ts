@@ -6531,6 +6531,36 @@ export const PatchWatchCheckInResponseEvent = z
   .strict();
 export type PatchWatchCheckInResponseEvent = z.infer<typeof PatchWatchCheckInResponseEvent>;
 
+// Read the tail of a task's combined stdout+stderr (the bar's log view).
+export const PatchWatchOutputRequestEvent = z
+  .object({
+    type: z.literal('patch.watch_output.request'),
+    requestId: z.string().min(1),
+    chatId: z.string().min(1),
+    taskId: z.string().min(1),
+    /** Last N lines wanted. */
+    tail: z.number().int().positive(),
+  })
+  .strict();
+export type PatchWatchOutputRequestEvent = z.infer<typeof PatchWatchOutputRequestEvent>;
+
+export const PatchWatchOutputResponseEvent = z
+  .object({
+    type: z.literal('patch.watch_output.response'),
+    requestId: z.string().min(1),
+    ok: z.boolean(),
+    output: z.string().optional(),
+    error: z
+      .object({
+        code: z.enum(['chat_not_found', 'task_not_found', 'internal']),
+        message: z.string(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type PatchWatchOutputResponseEvent = z.infer<typeof PatchWatchOutputResponseEvent>;
+
 // ---------------------------------------------------------------------------
 // Chat history REST RPC (server → host → server).
 //
@@ -9388,6 +9418,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchWatchStopResponseEvent,
   PatchWatchCheckInRequestEvent,
   PatchWatchCheckInResponseEvent,
+  PatchWatchOutputRequestEvent,
+  PatchWatchOutputResponseEvent,
   ServerQueueModeEvent,
   PatchLogSyncRequestEvent,
   PatchLogSyncBatchEvent,
@@ -9696,6 +9728,8 @@ export const EVENT_SCHEMAS = {
   'patch.watch_stop.response': PatchWatchStopResponseEvent,
   'patch.watch_checkin.request': PatchWatchCheckInRequestEvent,
   'patch.watch_checkin.response': PatchWatchCheckInResponseEvent,
+  'patch.watch_output.request': PatchWatchOutputRequestEvent,
+  'patch.watch_output.response': PatchWatchOutputResponseEvent,
   'server.queue_mode': ServerQueueModeEvent,
   'patch.log_sync.request': PatchLogSyncRequestEvent,
   'patch.log_sync.batch': PatchLogSyncBatchEvent,
