@@ -40,20 +40,34 @@ test('tabs are Chrome-shaped: rounded top, accent on the active tab of the focus
   await page.goto(HARNESS);
   await page.getByTestId('group-tool-terminal').click();
   await page.getByTestId('group-tool-browser').click();
+  // Files joins the Browser's pane, leaving the Browser tab inactive beside it.
+  await page.getByTestId('group-tool-files').click();
   const tabs = page.locator('.pane-tab');
-  await expect(tabs).toHaveCount(3);
-  const active = page.locator('.pane-tab.active');
+  await expect(tabs).toHaveCount(4);
+  // Terminal and Browser open in their own panes: one active tab per pane,
+  // the accent one being in the focused pane (the Files', beside the inactive Browser).
+  const active = page.locator('.pane-focused .pane-tab.active');
+  await expect(active).toHaveCount(1);
   const radius = await active.evaluate((el) => getComputedStyle(el).borderTopLeftRadius);
   expect(parseFloat(radius)).toBeGreaterThan(0);
   const shadow = await active.evaluate((el) => getComputedStyle(el).boxShadow);
   expect(shadow).not.toBe('none');
   // A close button on each, and the + after the last tab.
-  await expect(page.locator('.pane-tab .pane-tab-close')).toHaveCount(3);
+  await expect(page.locator('.pane-tab .pane-tab-close')).toHaveCount(4);
   const last = (await tabs.last().boundingBox())!;
-  const plus = (await page.locator('.pane-tab-new').boundingBox())!;
+  const plus = (await page.locator('.pane-focused .pane-tab-new').boundingBox())!;
   expect(plus.x).toBeGreaterThan(last.x + last.width - 1);
-  // Inactive tab separator: a faint line drawn before it.
-  const sep = await tabs.nth(1).evaluate((el) => getComputedStyle(el, '::before').width);
+  // Inactive tab separator: a faint line drawn before an inactive tab that
+  // follows another inactive one. Chat, Pads, Jobs in the first pane: Pads.
+  const firstPane = page.locator('.pane').first();
+  for (const id of ['pads', 'jobs']) {
+    await firstPane.locator('.pane-tab-new').click();
+    await page.locator(`[data-testid$="-new-${id}"]`).click();
+  }
+  const sep = await firstPane
+    .locator('.pane-tab')
+    .nth(1)
+    .evaluate((el) => getComputedStyle(el, '::before').width);
   expect(sep).toBe('1px');
 });
 

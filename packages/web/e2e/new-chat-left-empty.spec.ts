@@ -39,7 +39,7 @@ async function openEditorOnNewChat(page: Page): Promise<void> {
 // The chat's group has no chat tab once Editor replaced it: the + menu's Chat
 // item brings it back (a chat tab already open is focused, not duplicated).
 async function openChatTab(page: Page): Promise<void> {
-  await page.locator('.pane-tab-new').click();
+  await page.locator('.pane-tab-new').first().click();
   await page.locator('[data-testid$="-new-chat"]').click();
 }
 
