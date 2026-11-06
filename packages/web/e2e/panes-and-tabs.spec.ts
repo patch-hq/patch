@@ -188,7 +188,7 @@ test.describe('panes and tabs — drag and drop', () => {
     await expect(paneTabs(page)).toHaveCount(2);
   });
 
-  test('dragging a tab onto another pane moves it there', async ({ page }) => {
+  test('dragging a tab from a pane with several tabs onto another pane keeps every tab', async ({ page }) => {
     await page.goto(HARNESS);
     await addTab(page, 'settings');
     await page.keyboard.press('Meta+Backslash');
