@@ -17591,8 +17591,9 @@ select.permission-mode.is-pending {
     display: none;
   }
 }
-.status-grow[data-quiet='true'] {
-  color: var(--amber);
+.status-killed {
+  color: var(--danger);
+  font-weight: 600;
 }
 
 /* Folded Artifacts row: the links after the pill, clipped at the row's edge. */
