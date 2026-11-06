@@ -2727,7 +2727,9 @@ a.ch-row:hover {
 button.nav-row {
   background: none;
   border: none;
-  font: inherit;
+  /* Family only: the `font` shorthand would reset the size to the inherited
+     one and make Files larger than the Link rows beside it. */
+  font-family: inherit;
   cursor: pointer;
 }
 .nav-row:hover {
