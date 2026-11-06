@@ -9809,7 +9809,8 @@ button.set-row-open:focus-visible {
 .settings-route select {
   max-width: 260px;
 }
-.set-num {
+.set-num,
+.set-row-ctrl input[type='number'] {
   width: 88px;
 }
 .set-word {

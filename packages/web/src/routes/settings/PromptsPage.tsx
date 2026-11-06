@@ -119,90 +119,84 @@ function PromptRow({
   );
 }
 
-/** The meeting's models and timing, shared by this page and the in-meeting cog. */
-export function MeetingModelRows(): JSX.Element {
+/** A model picker row for one of the meeting's passes. */
+function MeetingModelRow({
+  title,
+  field,
+  testid,
+  showProblem = false,
+}: {
+  title: string;
+  /** The model list is one fetch: only one row says when it failed. */
+  showProblem?: boolean;
+  field: 'meetingAnalysisModel' | 'meetingCleanupModel' | 'meetingResearchModel';
+  testid: string;
+}): JSX.Element {
   const p = usePreferencesStore((s) => s.preferences);
   const loaded = usePreferencesStore((s) => s.loaded);
-  const analysisModel = useModelOptions(p.meetingAnalysisModel);
-  const cleanupModel = useModelOptions(p.meetingCleanupModel);
-  const researchModel = useModelOptions(p.meetingResearchModel);
+  const models = useModelOptions(p[field]);
+  return (
+    <Row
+      title={title}
+      sub={
+        showProblem && models.problem ? (
+          <span className="set-sub-error" role="alert" data-testid="meeting-model-problem">
+            {models.problem.text}
+          </span>
+        ) : undefined
+      }
+    >
+      <select
+        aria-label={`Meeting ${title.toLowerCase()} model`}
+        value={p[field]}
+        disabled={!loaded}
+        data-testid={testid}
+        onChange={(e) => void patchShared('meeting settings', { [field]: e.target.value })}
+      >
+        {models.options.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.label}
+          </option>
+        ))}
+      </select>
+    </Row>
+  );
+}
+
+/** The meeting's models, shared by this page and the in-meeting cog. */
+export function MeetingModelRows(): JSX.Element {
+  return (
+    <>
+      <MeetingModelRow
+        title="Analysis"
+        field="meetingAnalysisModel"
+        testid="meeting-analysis-model"
+        showProblem
+      />
+      <MeetingModelRow
+        title="Clean-up"
+        field="meetingCleanupModel"
+        testid="meeting-cleanup-model"
+      />
+      <MeetingModelRow
+        title="Research"
+        field="meetingResearchModel"
+        testid="meeting-research-model"
+      />
+    </>
+  );
+}
+
+/** How often the meeting's passes run, shared by this page and the in-meeting cog. */
+export function MeetingTimingRows(): JSX.Element {
+  const p = usePreferencesStore((s) => s.preferences);
+  const loaded = usePreferencesStore((s) => s.loaded);
   const write = (patch: Partial<AccountPreferences>): void => {
     void patchShared('meeting settings', patch);
   };
   return (
     <>
-      <Row title="Analysis model">
-        <select
-          aria-label="Meeting analysis model"
-          value={p.meetingAnalysisModel}
-          disabled={!loaded}
-          data-testid="meeting-analysis-model"
-          onChange={(e) => write({ meetingAnalysisModel: e.target.value })}
-        >
-          {analysisModel.options.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
-          ))}
-        </select>
-        <span className="set-unit">writes the live notes</span>
-      </Row>
-      {analysisModel.problem && (
-        <p className="set-sub" role="alert" data-testid="meeting-model-problem">
-          {analysisModel.problem.text}
-        </p>
-      )}
-      <Row title="Clean-up model">
-        <select
-          aria-label="Meeting clean-up model"
-          value={p.meetingCleanupModel}
-          disabled={!loaded}
-          data-testid="meeting-cleanup-model"
-          onChange={(e) => write({ meetingCleanupModel: e.target.value })}
-        >
-          {cleanupModel.options.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
-          ))}
-        </select>
-        <span className="set-unit">repairs mis-heard names before the notes</span>
-      </Row>
-      <Row title="Research model">
-        <select
-          aria-label="Meeting research model"
-          value={p.meetingResearchModel}
-          disabled={!loaded}
-          data-testid="meeting-research-model"
-          onChange={(e) => write({ meetingResearchModel: e.target.value })}
-        >
-          {researchModel.options.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
-          ))}
-        </select>
-        <span className="set-unit">looks things up on the web for the agent feed</span>
-      </Row>
-      <Row title="Transcription model">
-        <input
-          type="text"
-          aria-label="Meeting transcription model"
-          key={p.meetingTranscriptionModel}
-          defaultValue={p.meetingTranscriptionModel}
-          placeholder="Host default"
-          disabled={!loaded}
-          data-testid="meeting-transcription-model"
-          onBlur={(e) => {
-            const next = e.target.value.trim();
-            if (next !== p.meetingTranscriptionModel) write({ meetingTranscriptionModel: next });
-          }}
-        />
-        <span className="set-unit">
-          model directory (local) or Groq model name; empty is the host's
-        </span>
-      </Row>
-      <Row title="Analyse every">
+      <Row title="Update notes every">
         <PositiveNumberInput
           integer
           ariaLabel="Seconds between meeting analysis passes at Normal speed"
@@ -213,7 +207,7 @@ export function MeetingModelRows(): JSX.Element {
             if (next >= 5 && next <= 300) write({ meetingAnalyseSeconds: next });
           }}
         />
-        <span className="set-unit">seconds, at Normal speed (5–300)</span>
+        <span className="set-unit">seconds</span>
       </Row>
       <Row title="Research at most every">
         <PositiveNumberInput
@@ -226,7 +220,7 @@ export function MeetingModelRows(): JSX.Element {
             if (next >= 15 && next <= 900) write({ meetingResearchSeconds: next });
           }}
         />
-        <span className="set-unit">seconds: each pass is a model plus web search (15–900)</span>
+        <span className="set-unit">seconds</span>
       </Row>
     </>
   );
@@ -342,8 +336,13 @@ export function PromptsPage(): JSX.Element {
           onDefault={() => patchShared('system prompt', { harnessSystemPrompt: '' })}
         />
       </Group>
-      <Group label="Meetings" testid="settings-prompts-meetings">
+      <Group label="Meeting models" testid="settings-prompts-meeting-models">
         <MeetingModelRows />
+      </Group>
+      <Group label="Meeting timing" testid="settings-prompts-meeting-timing">
+        <MeetingTimingRows />
+      </Group>
+      <Group label="Meeting prompts" testid="settings-prompts-meetings">
         <PromptRow
           id="meeting-now"
           title="Meeting: Now"

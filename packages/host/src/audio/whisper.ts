@@ -229,6 +229,14 @@ export interface CreateWhisperOptions {
   localModelPath?: string;
   /** Working directory for the spawned `uv run` (the whisper-sidecar pkg). */
   localSidecarCwd?: string;
+  /**
+   * Extra env for the spawned sidecar — the installed component's venv
+   * (`UV_PROJECT_ENVIRONMENT`) and this host version's sidecar source
+   * (`PYTHONPATH`), exactly as kokoro.ts gets them.
+   */
+  localSidecarEnv?: Record<string, string>;
+  /** The `uv` to run the sidecar with; a component install may have put it outside PATH. */
+  uvPath?: string;
   /** PARAKEET_MODEL_DIR (backend === 'parakeet'). */
   parakeetModelDir?: string;
   /** Test hook: substitute fetch (used by groq-backend tests). */
@@ -265,13 +273,13 @@ export function createWhisper(opts: CreateWhisperOptions): WhisperBackend {
  * and say how to fix it, never return a plausible empty string. That is the
  * difference between an unconfigured feature and a silent fallback.
  */
-class UnconfiguredWhisperBackend implements WhisperBackend {
+export class UnconfiguredWhisperBackend implements WhisperBackend {
   /** Nothing is configured, so there is nothing to ask for a partial either. */
   readonly supportsLivePartials = false;
   private refuse(): never {
     throw new Error(
-      'Speech-to-text is not configured on this host. Voice is an optional component: ' +
-        'install it from Settings → Hosts and choose a speech-to-text engine. Refusing to return a fabricated transcript.',
+      'Speech-to-text is turned off on this host (WHISPER_BACKEND=off, or no speech model installed). ' +
+        'Refusing to return a fabricated transcript.',
     );
   }
   async transcribe(): Promise<string> {
@@ -591,16 +599,21 @@ export class LocalWhisperBackend implements WhisperBackend {
     const { spawn } = await import('node:child_process');
     // `--no-sync`: use the image-baked venv as-is (see kokoro.ts) — plain
     // `uv run` re-syncs to the CUDA-torch lockfile and bloats the disk.
-    const proc = spawn('uv', ['run', '--no-sync', 'python', '-m', 'patch_whisper_sidecar'], {
-      env: {
-        ...process.env,
-        WHISPER_MODEL_PATH: modelPath,
-        WHISPER_SIDECAR_HOST: '127.0.0.1',
-        WHISPER_SIDECAR_PORT: String(this.port),
+    const proc = spawn(
+      this.opts.uvPath ?? 'uv',
+      ['run', '--no-sync', 'python', '-m', 'patch_whisper_sidecar'],
+      {
+        env: {
+          ...process.env,
+          ...this.opts.localSidecarEnv,
+          WHISPER_MODEL_PATH: modelPath,
+          WHISPER_SIDECAR_HOST: '127.0.0.1',
+          WHISPER_SIDECAR_PORT: String(this.port),
+        },
+        ...(this.opts.localSidecarCwd !== undefined ? { cwd: this.opts.localSidecarCwd } : {}),
+        stdio: ['ignore', 'pipe', 'pipe'],
       },
-      ...(this.opts.localSidecarCwd !== undefined ? { cwd: this.opts.localSidecarCwd } : {}),
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    );
     proc.on('exit', (code) => {
       this.opts.logger.warn(
         { code },
