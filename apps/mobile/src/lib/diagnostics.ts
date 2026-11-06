@@ -101,7 +101,7 @@ async function checkServer(): Promise<DiagnosticCheck> {
 }
 
 async function checkAgent(): Promise<DiagnosticCheck> {
-  const base = { id: 'agent' as const, label: 'Agent (machine) link' };
+  const base = { id: 'agent' as const, label: 'Agent (host) link' };
   const cred = loadCredential();
   if (cred === null) {
     // The probe is authed; without a credential it can only 401, which would
@@ -151,7 +151,7 @@ function fixFor(c: DiagnosticCheck): string | undefined {
         : c.detail.startsWith('not checked')
           ? 'Pair this phone again.'
           : c.detail.includes('no agent')
-            ? 'Wake the machine that runs the agent and make sure Patch is running there.'
+            ? 'Wake the host that runs the agent and make sure Patch is running there.'
             : 'Check the server is running and reachable, then retry.';
     case 'websocket':
       return 'Tap Retry now. If it keeps failing while the server check passes, a proxy, VPN or firewall is blocking live connections.';

@@ -8,7 +8,7 @@ import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import type { Logger } from 'pino';
 
 export interface SleepGuard {
-  /** Hold the machine awake. Returns a release function; calling it twice is a no-op. */
+  /** Hold the host awake. Returns a release function; calling it twice is a no-op. */
   acquire(): () => void;
 }
 

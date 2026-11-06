@@ -88,13 +88,13 @@ describe('new-chat drafts in the sidebar', () => {
     const id = draftIds()[0]!;
     act(() => {
       useDraftStore.getState().markFailed(id, 'a message that must not be lost', {
-        sentence: 'That machine has no models yet.',
+        sentence: 'That host has no models yet.',
       });
     });
     const row = screen.getByTestId(`draft-row-${id}`);
     expect(row).toHaveTextContent('a message that must not be lost');
     expect(screen.getByTestId(`draft-failed-${id}`)).toHaveTextContent(
-      'Failed · That machine has no models yet.',
+      'Failed · That host has no models yet.',
     );
   });
 

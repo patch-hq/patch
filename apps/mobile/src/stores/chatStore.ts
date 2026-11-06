@@ -801,7 +801,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const unseen = chats[event.chatId] === undefined;
           const row = ensureRow(event.chatId, event.folder);
           // Keep the host: a chat row with no hostId cannot answer "is this
-          // machine's Claude connected?" or "whose disk is this folder on?".
+          // host's Claude connected?" or "whose disk is this folder on?".
           chats[event.chatId] = {
             ...row,
             ...(unseen ? { awaitingState: true } : {}),

@@ -1,8 +1,8 @@
 // Cross-chat tool-call log, account-wide (Settings → Activity — "things
 // agents did"). Mirrors activity.ts exactly: there is no central store, each
-// machine keeps its own bounded `tool-calls.jsonl` (packages/host/src/
-// toolLog.ts), and this is a read-through that asks every online machine for
-// its entries in the window and merges the answers. NO FALLBACK: a machine
+// host keeps its own bounded `tool-calls.jsonl` (packages/host/src/
+// toolLog.ts), and this is a read-through that asks every online host for
+// its entries in the window and merges the answers. NO FALLBACK: a host
 // that is offline or does not answer fails the call, because an answer
 // missing one host's entries would look complete.
 
@@ -13,7 +13,7 @@ import type { HostLink } from './host-link.js';
 export const TOOL_LOG_MAX_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 export const TOOL_LOG_DEFAULT_PAGE_SIZE = 200;
 export const TOOL_LOG_MAX_PAGE_SIZE = 500;
-/** How long one machine has to scan its log before the whole call fails. */
+/** How long one host has to scan its log before the whole call fails. */
 export const TOOL_LOG_READ_TIMEOUT_MS = 30_000;
 
 const READ_SURFACE_ID = 'tool-log-read';
@@ -71,7 +71,7 @@ export function createToolLogReader(deps: {
         waiting.delete(requestId);
         reject(
           new Error(
-            `tool log: machine ${hostId} did not answer within ${TOOL_LOG_READ_TIMEOUT_MS / 1000}s`,
+            `tool log: host ${hostId} did not answer within ${TOOL_LOG_READ_TIMEOUT_MS / 1000}s`,
           ),
         );
       }, TOOL_LOG_READ_TIMEOUT_MS);
@@ -109,8 +109,8 @@ export function createToolLogReader(deps: {
       const from = q.cursor !== undefined ? Math.max(q.cursor, since) : since;
 
       const hosts = hostLink.onlineHostIds();
-      // Each machine returns its oldest `limit + 1` — enough to tell whether
-      // the merged page is truncated without any machine sending its whole log.
+      // Each host returns its oldest `limit + 1` — enough to tell whether
+      // the merged page is truncated without any host sending its whole log.
       const answers = await Promise.all(hosts.map((h) => readHost(h, from, until, limit + 1)));
       const all = answers
         .flatMap((a) => a.entries.map((e) => ({ ...e, hostId: a.hostId })))

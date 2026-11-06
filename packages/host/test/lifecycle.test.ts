@@ -424,7 +424,7 @@ describe('Host lifecycle (group 7)', () => {
     daemon.replayChat(chatId, 0, (e) => captured.push(e));
     expect(captured.length).toBeGreaterThan(0);
     // spec/03 § Host events — the replay leads with the chat's identity frame,
-    // which names the MACHINE the chat is pinned to. A surface replaying a chat
+    // which names the HOST the chat is pinned to. A surface replaying a chat
     // it never saw spawned would otherwise have to infer that from whichever
     // link it happens to be talking to. It carries no `seq` (spec/03 § Goals),
     // so it does not disturb the sequenced stream that follows.

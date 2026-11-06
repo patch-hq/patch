@@ -69,7 +69,7 @@ test('a prefix nothing matches says so rather than 404ing on the prefix', async 
   await assert.rejects(resolveChatId(fake('uds', [C]), '01M3N32N'), /no chat on this account/);
 });
 
-test('a chat is found by its exact name, on any machine', async () => {
+test('a chat is found by its exact name, on any host', async () => {
   const t = fake('uds', [A, C], { [C]: 'Deploy watcher' });
   assert.equal(await resolveChatId(t, 'deploy watcher'), C);
 });

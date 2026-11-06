@@ -1,7 +1,7 @@
 // Connection diagnostics (spec/12 § Connection diagnostics screen).
 //
 // "Can't reach the agent" is the most common way patch looks broken, and the
-// four causes are indistinguishable from a banner: the machine is offline, the
+// four causes are indistinguishable from a banner: the host is offline, the
 // server is down, the HOST is down while the server is fine, or this
 // surface's credential is being rejected. These checks separate them by
 // actually probing — never by restating cached UI state.
@@ -89,7 +89,7 @@ async function checkServer(): Promise<DiagnosticCheck> {
 }
 
 async function checkAgent(): Promise<DiagnosticCheck> {
-  const base = { id: 'agent' as const, label: 'Agent (machine) link' };
+  const base = { id: 'agent' as const, label: 'Agent (host) link' };
   const cred = loadCredential();
   if (cred === null) {
     // The probe is authed; without a credential it can only 401, which would
@@ -113,7 +113,7 @@ async function checkAgent(): Promise<DiagnosticCheck> {
         ...base,
         status: 'fail',
         detail: 'server is up, but no agent (host) is connected to it',
-        fix: 'Wake the machine that runs the agent and make sure Patch is running there.',
+        fix: 'Wake the host that runs the agent and make sure Patch is running there.',
       };
     }
     if (res.status === 401) {

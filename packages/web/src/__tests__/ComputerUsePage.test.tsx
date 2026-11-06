@@ -67,7 +67,7 @@ describe('Settings → Computer use', () => {
     expect(screen.queryByTestId('computer-use-active')).toBeNull();
   });
 
-  it('a machine that does not answer is shown as unchecked, never as idle', async () => {
+  it('a host that does not answer is shown as unchecked, never as idle', async () => {
     vi.stubGlobal(
       'fetch',
       makeFetch({}, (u) =>

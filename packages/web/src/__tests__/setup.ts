@@ -6,7 +6,7 @@ import { useUiStore } from '../stores/uiStore.js';
 import { useComposerAttachmentStore } from '../stores/composerAttachmentStore.js';
 
 // Testing Library gives `waitFor` one second by default, which is a statement
-// about how fast the machine is rather than about the behaviour under test. On
+// about how fast the host is rather than about the behaviour under test. On
 // a shared box running a queue of agents the render this suite is waiting on
 // routinely takes longer than that, and the assertion fails having never been
 // wrong. `retry: 2` (vitest.config.ts) was the first answer to this and is not

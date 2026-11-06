@@ -24,7 +24,7 @@ describe('assertVersionReport', () => {
     expect(assertVersionReport(VALID)).toBe(VALID);
   });
 
-  it('rejects a report with no host roster — absent must not read as "no machines"', () => {
+  it('rejects a report with no host roster — absent must not read as "no hosts"', () => {
     const { hosts: _omitted, ...withoutHosts } = VALID;
     void _omitted;
     expect(() => assertVersionReport(withoutHosts)).toThrow(/missing hosts/);

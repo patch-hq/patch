@@ -201,7 +201,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
           .min(1)
           .optional()
           .describe(
-            "Arm a goal on the RECIPIENT chat (replaces any it has), judged by Patch's evaluator after each of its turns. Recipient must be on this machine; otherwise the call is refused and nothing is sent.",
+            "Arm a goal on the RECIPIENT chat (replaces any it has), judged by Patch's evaluator after each of its turns. Recipient must be on this host; otherwise the call is refused and nothing is sent.",
           ),
       },
     },
@@ -352,7 +352,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_spawn',
     {
       description:
-        "Create a brand-new persistent chat in a folder, optionally on ANOTHER machine. Returns the new chatId and the machine it was created on; a spawn the target machine refuses (unknown folder, no model catalogue there) fails with that machine's own reason, so a result you get back is a chat that really exists. Use when the user wants a new long-lived, user-visible chat as an artifact — not for work that should finish inside this turn. `host` is the hostId of the machine to create it on (see patch_list_chats for which machines chats live on); omitted means this machine. `model` is optional — the target machine picks its own last-used model. `account` is optional — the id or label of the stored Claude/ChatGPT account the chat starts on (see patch_list_accounts); omitted, the chat runs on whichever account is first in the shared order. An account the machine does not hold is refused, never ignored.",
+        "Create a brand-new persistent chat in a folder, optionally on ANOTHER host. Returns the new chatId and the host it was created on; a spawn the target host refuses (unknown folder, no model catalogue there) fails with that host's own reason, so a result you get back is a chat that really exists. Use when the user wants a new long-lived, user-visible chat as an artifact — not for work that should finish inside this turn. `host` is the hostId of the host to create it on (see patch_list_chats for which hosts chats live on); omitted means this host. `model` is optional — the target host picks its own last-used model. `account` is optional — the id or label of the stored Claude/ChatGPT account the chat starts on (see patch_list_accounts); omitted, the chat runs on whichever account is first in the shared order. An account the host does not hold is refused, never ignored.",
       inputSchema: {
         folder: z.string().min(1),
         host: z.string().min(1).optional(),
@@ -365,7 +365,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
           .min(1)
           .optional()
           .describe(
-            "Arm a goal on the NEW chat, judged by Patch's evaluator after each of its turns. Not allowed together with `host` naming another machine.",
+            "Arm a goal on the NEW chat, judged by Patch's evaluator after each of its turns. Not allowed together with `host` naming another host.",
           ),
       },
     },
@@ -377,9 +377,9 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
       if (model !== undefined) body['model'] = model;
       if (name !== undefined) body['name'] = name;
       if (prompt !== undefined) body['prompt'] = prompt;
-      // A cross-machine spawn blocks here until the NAMED machine answers with
+      // A cross-host spawn blocks here until the NAMED host answers with
       // its own outcome. NO FALLBACK: a refusal (or an unanswered call) is a
-      // tool ERROR naming the machine, never a `created:'remote'` for a chat
+      // tool ERROR naming the host, never a `created:'remote'` for a chat
       // that was never created — an agent orchestrating work on a chat that
       // does not exist is the worst possible failure mode.
       try {
@@ -393,7 +393,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
         const message = err instanceof Error ? err.message : String(err);
         throw new Error(
           host !== undefined
-            ? `patch_spawn on machine ${host} failed, no chat was created: ${message}`
+            ? `patch_spawn on host ${host} failed, no chat was created: ${message}`
             : `patch_spawn failed, no chat was created: ${message}`,
         );
       }
@@ -405,7 +405,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_list_accounts',
     {
       description:
-        "List the shared Claude and ChatGPT accounts every machine draws from, in the order a chat with no account of its own tries them, with each backend's routing strategy. Each account has an `id` and a `label` — either is accepted as `account` on patch_spawn. Reordering is a CLI job (`patch accounts order`).",
+        "List the shared Claude and ChatGPT accounts every host draws from, in the order a chat with no account of its own tries them, with each backend's routing strategy. Each account has an `id` and a `label` — either is accepted as `account` on patch_spawn. Reordering is a CLI job (`patch accounts order`).",
       inputSchema: {},
     },
     async () => {
@@ -1231,7 +1231,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_list_chats',
     {
       description:
-        "List all chats the user has, ACROSS every machine on the account, identically whichever machine a chat lives on. Each entry has chatId, hostId, name, folder, status, activity, pinned, lastUpdated and a one-line preview/statusSummary. Read a chat with patch_peek/patch_history; find one by content with patch_search_chats. Default omits archived. Pass archived='only' for archived only, archived='include' for active+archived. Sorted: pinned first, then most-recent.",
+        "List all chats the user has, ACROSS every host on the account, identically whichever host a chat lives on. Each entry has chatId, hostId, name, folder, status, activity, pinned, lastUpdated and a one-line preview/statusSummary. Read a chat with patch_peek/patch_history; find one by content with patch_search_chats. Default omits archived. Pass archived='only' for archived only, archived='include' for active+archived. Sorted: pinned first, then most-recent.",
       inputSchema: { archived: z.enum(['only', 'include']).optional() },
     },
     async ({ archived }) => {
@@ -1252,7 +1252,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_search_chats',
     {
       description:
-        'Search every chat on the account, on ANY machine, through the Patch server. Case-insensitive substring match on chat name, folder, status summary and message text. Returns { results, truncated, chatsWithoutLog }: results are best first (name matches outrank body matches, then most recent), each with chatId, hostId, name, folder, status, matchedIn and up to three message excerpts (seq, role, text). chatsWithoutLog counts chats the server holds no message log for — those were matched on metadata only, so a miss is not proof a chat never said it. Follow up with patch_history for the full chat. Read-only.',
+        'Search every chat on the account, on ANY host, through the Patch server. Case-insensitive substring match on chat name, folder, status summary and message text. Returns { results, truncated, chatsWithoutLog }: results are best first (name matches outrank body matches, then most recent), each with chatId, hostId, name, folder, status, matchedIn and up to three message excerpts (seq, role, text). chatsWithoutLog counts chats the server holds no message log for — those were matched on metadata only, so a miss is not proof a chat never said it. Follow up with patch_history for the full chat. Read-only.',
       inputSchema: {
         query: z
           .string()

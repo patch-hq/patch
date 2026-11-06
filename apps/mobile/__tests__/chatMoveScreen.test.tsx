@@ -1,5 +1,5 @@
 // Move page (spec/04 § Moving a chat to another host, spec/15 § Chat detail →
-// Move to…): the other machines, the same-named folder offered, and a refusal
+// Move to…): the other hosts, the same-named folder offered, and a refusal
 // kept on screen with the server's reason.
 
 import React from 'react';
@@ -65,7 +65,7 @@ describe('Chat Move screen', () => {
     __setLocalSearchParams({ chatId: 'c1' });
   });
 
-  it('offers the other machine with its same-named folder filled in', () => {
+  it('offers the other host with its same-named folder filled in', () => {
     const r = renderRN(<ChatMove />);
     expect(hasText(findHost(r.root, byTestId('move-from')), 'Mac · /Users/tom/wpp/Unite')).toBe(
       true,
@@ -128,7 +128,7 @@ describe('Chat Move screen', () => {
     expect(findHost(r.root, byTestId('move-folder')).props.value).toBe('/home/tom/projects');
   });
 
-  it('with no same-named folder, the first folder the machine offers is selected', () => {
+  it('with no same-named folder, the first folder the host offers is selected', () => {
     useFolderStore.getState().setAllFolders([
       { hostId: 'mac', roots: ['/Users/tom/wpp/Unite'], recent: [] },
       { hostId: 'box', roots: [], recent: ['/home/tom/projects', '/home/tom/other'] },

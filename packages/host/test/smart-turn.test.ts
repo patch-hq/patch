@@ -156,7 +156,7 @@ describe('handleTurnCheck', () => {
   });
 });
 
-// The real model, when this machine has it (TURN_MODEL_PATH). CI's host build
+// The real model, when this host has it (TURN_MODEL_PATH). CI's host build
 // proves the file ships; this proves the session loads and runs.
 const MODEL = process.env['TURN_MODEL_PATH'];
 describe.skipIf(!MODEL)('Smart Turn on the real model', () => {

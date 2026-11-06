@@ -15,14 +15,14 @@ import {
 } from '../src/lib/jobEditor';
 import { parseNaturalSchedule, describeCron } from '../src/lib/naturalCron';
 
-// A spawn/ensure action names the machine the chat runs on (spec/08 § Action):
+// A spawn/ensure action names the host the chat runs on (spec/08 § Action):
 // a job fires unattended, so a body without a host would dispatch nowhere. The
 // base form therefore carries one, and the cases that assert the missing-host
 // refusal clear it explicitly.
 const HOST = 'd1';
 
 // `DEFAULT_FORM.cronTimezone` is the DEVICE's zone, so leaving it alone would
-// make every body assertion below depend on where the test machine happens to
+// make every body assertion below depend on where the test host happens to
 // be. Pin it to UTC (which `formToBody` omits) so the shapes are stable; the
 // zone's own behaviour is covered in jobEditor.timezone.test.ts.
 function form(overrides: Partial<FormState>): FormState {
@@ -103,7 +103,7 @@ describe('validateForm', () => {
           spawnPrompt: 'go',
         }),
       ),
-    ).toMatch(/which machine/i);
+    ).toMatch(/which host/i);
   });
 
   it('requires a host for an ensure action', () => {
@@ -117,7 +117,7 @@ describe('validateForm', () => {
           spawnPrompt: 'go',
         }),
       ),
-    ).toMatch(/which machine/i);
+    ).toMatch(/which host/i);
   });
 
   it('requires a folder for a spawn action', () => {
@@ -839,12 +839,12 @@ describe('resolveSkillEditTarget', () => {
 
   it('gives a reason when the host answers with no paths at all (an older host)', () => {
     expect(resolveSkillEditTarget({ skill: 'life-coach', paths: undefined, hostId: 'd1' })).toEqual(
-      { reason: 'machine does not report skill files' },
+      { reason: 'host does not report skill files' },
     );
   });
 
   // Todoist 6hfrrmrhG6GM3V36 — distinct from "no paths at all" above: the host
-  // DID answer (plant resolves), this one skill (e.g. a machine-level one
+  // DID answer (plant resolves), this one skill (e.g. a host-level one
   // like chrome-cdp) just isn't on it. Conflating the two read as the host
   // being incapable even when it answered fine for every other skill.
   it('gives a DIFFERENT reason when the host answered but this skill is missing from it', () => {

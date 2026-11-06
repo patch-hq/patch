@@ -1,6 +1,6 @@
 // Settings → Hosts → Pair a voice device (spec/16 § Pairing).
 //
-// The documented flow was: SSH to the machine, run `patch hosts pair-device`,
+// The documented flow was: SSH to the host, run `patch hosts pair-device`,
 // then physically restart the device inside a five-minute window. That is a lot
 // to ask, and it did not work anyway — the host's adoption window has no
 // consumer (`DeviceAdoption.announce()` has no callers, and nothing ever calls

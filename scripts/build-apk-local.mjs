@@ -192,7 +192,7 @@ function build(info, { box }) {
   const run = (cmd, args, opts = {}) =>
     execFileSync(cmd, args, { stdio: 'inherit', cwd: repo, ...opts });
   // @patch/relay too: the app's relay transport imports it, and a clean checkout
-  // has no dist for Metro to resolve (a machine that had built it once never saw this).
+  // has no dist for Metro to resolve (a host that had built it once never saw this).
   console.log('==> rebuilding @patch/wire + @patch/auth + @patch/relay (Metro bundles their dist)');
   run('corepack', [
     'pnpm',

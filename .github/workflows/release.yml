@@ -7,7 +7,7 @@
 #
 # Servers follow a channel (`patch-server channel dev|stable`), mirror its
 # newest release and update themselves; hosts, the desktop app and the phone
-# update from their server. Nothing here depends on anyone's machine being
+# update from their server. Nothing here depends on anyone's host being
 # awake.
 #
 # Runs only in the project's public repository (every job is guarded below):

@@ -14,7 +14,7 @@ import { test, expect, type Locator, type Page } from '@playwright/test';
 // it is: the real Composer, the real recorder, the real audioSession decoder
 // and the real CSS all run.
 //
-//   - The mic, because this machine has no audio device (Chromium cannot
+//   - The mic, because this host has no audio device (Chromium cannot
 //     enumerate even its own fake one), so `getUserMedia` returns a real but
 //     silent Web Audio MediaStream.
 //   - The WebSocket, because there is no host behind the dev harness. The

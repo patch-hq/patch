@@ -1184,7 +1184,7 @@ test('doctor --json: folderAccess is unknown over REST (only the host can answer
   );
 });
 
-test('chats send-to over the host socket sends the calling chat so the host can relay to another machine', async () => {
+test('chats send-to over the host socket sends the calling chat so the host can relay to another host', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'patch-cli-sendto-'));
   writeFileSync(join(dir, 'machine.json'), JSON.stringify({ serverUrl: 'http://127.0.0.1:1' }));
   const sock = join(dir, 'host.sock');

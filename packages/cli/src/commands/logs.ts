@@ -20,7 +20,7 @@ export function registerLogsCommands(program: Command): void {
     .option('--json', 'JSON output')
     .option('--limit <n>', 'exit after N events')
     .option('--server <url>', 'override server URL')
-    .option('--host <h>', "print that machine's daemon.log instead (name or hostId prefix)")
+    .option('--host <h>', "print that host's daemon.log instead (name or hostId prefix)")
     .option('--lines <n>', 'with --host: last N lines (default 200)')
     .action(
       async (
@@ -53,7 +53,7 @@ export function registerLogsCommands(program: Command): void {
             fail(
               opts,
               new Error(
-                'not authenticated: no host on this machine and no credential — run `patch auth login`',
+                'not authenticated: no host on this host and no credential — run `patch auth login`',
               ),
             );
           }
@@ -98,7 +98,7 @@ export function registerLogsCommands(program: Command): void {
     );
 }
 
-/** Tail the account's events through this machine's host (`/server-events`). */
+/** Tail the account's events through this host (`/server-events`). */
 async function tailThroughHost(
   opts: CommonOpts,
   socketPath: string,
@@ -128,7 +128,7 @@ async function tailThroughHost(
   if (failure !== null) throw new Error(`event stream through the host failed: ${failure}`);
 }
 
-/** Read another machine's daemon.log through the server's host-files route. */
+/** Read another host's daemon.log through the server's host-files route. */
 async function printRemoteDaemonLog(
   opts: CommonOpts,
   host: string,

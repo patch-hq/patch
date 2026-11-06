@@ -295,7 +295,7 @@ describe('api.* methods — URL/method/body contracts', () => {
     });
   });
 
-  // The host is ALWAYS on the query — browsing is addressed to one machine and
+  // The host is ALWAYS on the query — browsing is addressed to one host and
   // is never the surface's own filesystem (spec/04 § Browsing). `dir` is the
   // only optional part; omitted, the host answers with its browsable roots.
   it('browseFolders always names the host, and adds dir only when given', async () => {
@@ -605,7 +605,7 @@ describe('checkHooks timeout', () => {
   });
 });
 
-describe('moveChat — continues from the server copy when the old machine refuses', () => {
+describe('moveChat — continues from the server copy when the old host refuses', () => {
   const ok = { ok: true, chatId: 'c1', hostId: 'box', folder: '/f' };
   const bodies = (): unknown[] =>
     fetchMock.mock.calls.map((c) => JSON.parse((c as [string, RequestInit])[1].body as string));

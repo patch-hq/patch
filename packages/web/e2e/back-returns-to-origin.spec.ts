@@ -11,7 +11,7 @@ import { PIXEL_7, stubSettingsApi } from './settingsHarness.js';
 
 const CHAT = '/app/dev-harness.html?chat=chat_md';
 
-/** A machine whose only account is spent, so the chat carries the Usage link. */
+/** A host whose only account is spent, so the chat carries the Usage link. */
 async function spendEveryAccount(page: Page): Promise<void> {
   await page.evaluate(() => {
     const w = window as unknown as {

@@ -2,7 +2,7 @@
 
 Implementation notes for the Electron shell, kept out of `spec/` because they name
 code, scripts and tool output. The spec states the behaviour; this states how it is
-achieved on this machine.
+achieved on this host.
 
 ## Code signing
 
@@ -42,7 +42,7 @@ different Team IDs`. Fixed by `com.apple.security.cs.disable-library-validation`
 `build/entitlements.mac.plist`, which is a real if modest reduction in hardening.
 A Developer ID would supply the Team ID and let that entitlement be removed.
 
-Setup (machine-specific; the identity lives in the developer's login keychain):
+Setup (host-specific; the identity lives in the developer's login keychain):
 
 1. Create a self-signed Code Signing certificate (Keychain Access → Certificate
    Assistant), or generate one with openssl. If exporting a `.p12` with OpenSSL 3.x

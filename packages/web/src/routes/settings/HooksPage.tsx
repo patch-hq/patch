@@ -244,7 +244,7 @@ function HookEditor({
   const chats = useChatStore((st) => st.chats);
   const { data: folderData } = useQuery({ queryKey: ['folders'], queryFn: () => api.folders() });
   const modelCatalog = useModelCatalog();
-  // The model catalogue is per machine: ask the first host the hook is gated
+  // The model catalogue is per host: ask the first host the hook is gated
   // to, else the account default. No host to ask means no list — said, not guessed.
   const modelHostId = draft.hosts[0] ?? defaultHostId(hosts);
   useEffect(() => {

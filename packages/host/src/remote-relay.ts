@@ -1,6 +1,6 @@
-// The calling machine's half of a cross-host `patch_peek` / `patch_history` /
+// The calling host's half of a cross-host `patch_peek` / `patch_history` /
 // `patch_send_to` (spec/03 § Cross-chat tools). Generalises the wait-for-the-
-// named-machine's-answer shape `remote-spawn.ts` already established for
+// named-host's-answer shape `remote-spawn.ts` already established for
 // `patch_spawn` — emit a request carrying a fresh requestId, resolve or
 // reject on that requestId's `.response`.
 //
@@ -8,16 +8,16 @@
 // buffering the way `chat.input` does, and the agent decides what to do."
 //
 // NO FALLBACK. Before this existed, `patch_peek`/`patch_history`/`patch_send_to`
-// only ever asked the CALLING machine's own local chat state, so a chatId that
+// only ever asked the CALLING host's own local chat state, so a chatId that
 // lived on another registered host — one `patch_list_chats` had just named —
 // 404'd as `chat_not_found`, indistinguishable from a chat that never existed.
 
 import type { WireEvent } from '@patch/wire';
 
-/** How long the calling machine waits for the owning machine's answer. */
+/** How long the calling host waits for the owning host's answer. */
 export const REMOTE_RELAY_TIMEOUT_MS = 15_000;
 
-/** A cross-host relay the owning machine refused, or never answered. */
+/** A cross-host relay the owning host refused, or never answered. */
 export class RemoteRelayError extends Error {
   constructor(
     readonly code: string,
@@ -99,7 +99,7 @@ export function createRemoteRelayCoordinator<TResult = unknown>(deps: {
       waiter({
         ok: false,
         code: event.error?.code ?? 'sdk_error',
-        message: event.error?.message ?? 'the owning machine refused the call without a reason',
+        message: event.error?.message ?? 'the owning host refused the call without a reason',
       });
       return true;
     },

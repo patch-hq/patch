@@ -1,6 +1,6 @@
 // The keymap (spec/14 ## Keyboard shortcuts → Customising): every chord the
 // app dispatches itself is a named action with a default and an optional
-// per-machine override. Settings → Shortcuts edits the overrides; the shortcut
+// per-host override. Settings → Shortcuts edits the overrides; the shortcut
 // hook and the nav-history controls read through `matchesAction`, and every
 // label the UI draws comes from `actionGlyphs`, so a chord is only ever defined
 // here.
@@ -10,7 +10,7 @@
 // shifted character on most layouts). `mod` is ⌘ on a Mac and Ctrl elsewhere
 // (either satisfies it); `ctrl` is the literal Ctrl key.
 //
-// Like the dictate chord (lib/dictateChord.ts) overrides are kept per machine
+// Like the dictate chord (lib/dictateChord.ts) overrides are kept per host
 // in localStorage: a chord belongs to the keyboard it is pressed on.
 
 import { chordKeyGlyph, MODIFIER_CODES } from './dictateChord.js';

@@ -5,7 +5,7 @@
 // graceful shutdown hangs (a socket that never closes, a request the HTTP
 // server is still draining), the installer stalls on that bootout, hits its
 // own timeout and is killed before it bootstraps the new job — leaving the
-// machine with no service loaded at all (2026-10-17: host 1.1.39 → 1.1.52
+// host with no service loaded at all (2026-10-17: host 1.1.39 → 1.1.52
 // logged "shutting down", kept running, and the Mac sat offline until a
 // manual `launchctl bootstrap`). So shutdown gets a fixed budget, after which
 // the process exits regardless.

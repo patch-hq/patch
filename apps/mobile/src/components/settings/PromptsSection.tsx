@@ -133,13 +133,13 @@ function MeetingControls({ preferences }: { preferences: AccountPreferences }): 
       />
       <Row
         title="Transcription model"
-        subtitle="Model directory (local) or Groq model name; empty is the machine's"
+        subtitle="Model directory (local) or Groq model name; empty is the host's"
         right={
           <Field
             testID="meeting-transcription-model"
             accessibilityLabel="Meeting transcription model"
             value={stt}
-            placeholder="Machine default"
+            placeholder="Host default"
             onChangeText={setStt}
             style={{ width: 160 }}
             onBlur={() => {

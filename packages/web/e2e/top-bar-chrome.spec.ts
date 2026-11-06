@@ -116,8 +116,8 @@ test.describe('the sidebar brand row', () => {
 
 test.describe('the chat panel header', () => {
   test("names the model beside the title, on the title's line", async ({ page }) => {
-    // `recency=machine` seeds the open chat with a model (claude-haiku-4-5).
-    await page.goto(`${HARNESS}&recency=machine`);
+    // `recency=host` seeds the open chat with a model (claude-haiku-4-5).
+    await page.goto(`${HARNESS}&recency=host`);
     const model = page.getByTestId('chat-head-model');
     await expect(model).toBeVisible();
     await expect(model).toHaveText('Haiku 4.5');

@@ -5,7 +5,7 @@ import { test, expect, type Locator } from '@playwright/test';
 // with `/api/voice/transcribe` stubbed — no host needed.
 //
 // The mic itself is the one thing stubbed, at the hardware boundary only: this
-// machine has no audio device, so Chromium can't enumerate even its own fake
+// host has no audio device, so Chromium can't enumerate even its own fake
 // one (getUserMedia → NotFoundError). `getUserMedia` is therefore replaced with
 // a REAL MediaStream produced by Web Audio, left unconnected so it carries
 // genuine silence. Everything the test is actually about — the component, its
@@ -33,7 +33,7 @@ const LONG_PAUSE_MS = 13_000;
  * mousedown and mouseup drifted past 220ms, the composer correctly read a hold,
  * committed the session, and the test failed claiming silence had ended it.
  * Dispatching both events in one page-side call makes the held time ~0ms, so
- * the gesture is unambiguously the one this test means, whatever the machine
+ * the gesture is unambiguously the one this test means, whatever the host
  * is doing.
  */
 async function quickTap(mic: Locator): Promise<void> {

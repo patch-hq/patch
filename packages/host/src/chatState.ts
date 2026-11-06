@@ -344,7 +344,7 @@ export interface ChatState {
   /**
    * Running out of the active list (spec/04 § Hidden). Mirrored to meta.json.
    * Orthogonal to `status` like `snoozedUntil`; it survives archiving so a
-   * machine message starting the chat again puts it back where it was.
+   * host message starting the chat again puts it back where it was.
    */
   hidden: boolean;
   /** Hidden only until the running work completes (spec/04 § Hidden). */

@@ -12,12 +12,12 @@ This doc covers shared surface concerns: presence, editor, QR linking, lifecycle
 
 ## Terminal (`patch` CLI)
 
-Portable Node binary. Runs on any machine the user has — it talks over WebSocket to the server, which routes to the host that owns the chat. Run on a host itself, it also reaches that host over the local socket (`17-cli.md` § Hosts and the CLI).
+Portable Node binary. Runs on any host the user has — it talks over WebSocket to the server, which routes to the host that owns the chat. Run on a host itself, it also reaches that host over the local socket (`17-cli.md` § Hosts and the CLI).
 
 The commands are listed once, in `17-cli.md` § Commands: chats, hosts, jobs,
 hooks, threads, surfaces, auth, the local host service, logs and diagnostics.
-Host management works from any machine, with each `hosts` subcommand defaulting
-to the machine the CLI is running on.
+Host management works from any host, with each `hosts` subcommand defaulting
+to the host the CLI is running on.
 
 The TUI renders the wire event stream inline — messages, tool calls, tool results, permission prompts. Same UX feel as `claude` native; we just render events from a remote source.
 
@@ -144,7 +144,7 @@ Packaging invariants that must hold:
 
 No server address is built into the app. A launch with no remembered connection asks one question, in a window of its own: "On this Mac" or "On my server". The answer is remembered (`connection.json` in the app's data directory, 0600, with the app's credential on that server) and the question is not asked again; App menu → Switch Server… forgets it and asks on the next launch. Closing the question unanswered quits.
 
-- On this Mac. The app runs a Patch server of its own and a host beside it, and nothing has to be installed. The server is the release the app carries, started with the app's own Node, listening on a loopback port chosen once and kept; its data lives in the app's data directory. The app makes the account, and sets this Mac up as a host with the host build the app carries, served from that server's own download channel like any other (`11-deployment.md` § Host installation). The server holds a relay channel (`10-auth.md` § Relay) so a phone can join it by QR from anywhere. Quitting the app stops the server. Choosing this again after Switch Server… picks the same account up. This app takes no updates from a server it runs itself; a newer app is installed over it.
+- On this Mac. The app runs a Patch server of its own and a host beside it, and nothing has to be installed. The server is the release the app carries, started with the app's own Node, listening on a loopback port chosen once and kept; its data lives in the app's data directory. The app makes the account, and sets this Mac up as a machine with the host build the app carries, served from that server's own download channel like any other (`11-deployment.md` § Host installation). The server holds a relay channel (`10-auth.md` § Relay) so a phone can join it by QR from anywhere. Quitting the app stops the server. Choosing this again after Switch Server… picks the same account up. This app takes no updates from a server it runs itself; a newer app is installed over it.
 - On my server. The user pastes the pairing code their server printed (`patch-server pair`, `11-deployment.md` § Server installation). A code naming the server's address pairs with it directly and loads its web app. A code naming a relay pairs through the relay and loads the web app from a loopback listener on this Mac that carries every request and WebSocket through the encrypted session (`10-auth.md` § Relay), so the page cannot tell. The app's updates come from the feed the connected server publishes.
 
 A step that fails says why, on the question's own window, and the question is asked again. The page the shell loads receives the credential in the URL fragment (`/app/#credential=…`), which is never sent anywhere and is taken only inside the shell.

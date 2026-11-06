@@ -1,5 +1,5 @@
 /**
- * Runs agent work in its own systemd slice when the machine asks for it.
+ * Runs agent work in its own systemd slice when the host asks for it.
  *
  * Everything a chat starts (tests, builds, browsers) would otherwise share the
  * host's cgroup, and a resource limit cannot favour the host over work inside

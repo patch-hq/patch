@@ -117,8 +117,8 @@ describe('I-native Codex inject (live ChatGPT login)', () => {
         onChange: () => {},
       });
       try {
-        // This machine's own Codex login, as the server would send it back (spec/01 § Settings).
-        await accounts.applyShared([await accounts.exportMachineLogin()]);
+        // This host's own Codex login, as the server would send it back (spec/01 § Settings).
+        await accounts.applyShared([await accounts.exportHostLogin()]);
         const models = await accounts.models();
         const model = models.find((m) => /mini|luna/.test(m.id)) ?? models[0]!;
         const backend = new CodexBackend(accounts, new CodexHistory(join(root, 'history')));

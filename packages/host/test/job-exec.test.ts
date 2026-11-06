@@ -118,7 +118,7 @@ describe('handleJobExec', () => {
   // time a gate printed a verdict and its run still came back `dispatch-error`.
   //
   // The host's own dotfiles are NOT the fixture: these supply a hostile
-  // `~/.bash_logout` of their own so the case is reproduced on any machine,
+  // `~/.bash_logout` of their own so the case is reproduced on any host,
   // including ones whose real logout file is harmless or absent. Two conditions
   // are needed and both are set here — the logout file must exist, and the shell
   // must compute `SHLVL=1`, which is true of a systemd service and false of

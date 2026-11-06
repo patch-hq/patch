@@ -503,7 +503,7 @@ describe('makeResolveOAuth — remaining branches', () => {
   });
 
   /**
-   * The loader options that describe THIS fixture's machine and nothing else.
+   * The loader options that describe THIS fixture's host and nothing else.
    *
    * `env: {}` and `platform: 'linux'` shut out the env token and the Keychain,
    * but patch's OWN store outranks both and every legacy source — and its
@@ -513,7 +513,7 @@ describe('makeResolveOAuth — remaining branches', () => {
    * their fixture: "a missing credential refuses" got `ok: true`, and the cases
    * pinning an access token got a real `sk-ant-oat01-…` back. Pointing storePath
    * at a path inside the temp home makes the store absent, which is what these
-   * cases mean by a machine with only a credentials file.
+   * cases mean by a host with only a credentials file.
    */
   const loadOptions = (extra: { path?: string } = {}) => ({
     env: {},

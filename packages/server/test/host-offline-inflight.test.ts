@@ -89,7 +89,7 @@ describe('host offline resolves in-flight chats to errored', () => {
       publicKey: user.publicKey,
       issuedAt: Math.floor(Date.now() / 1000),
     });
-    // A second registered machine — spec/12 § Hosts fail independently: one
+    // A second registered host — spec/12 § Hosts fail independently: one
     // host going down must not resolve another host's turns.
     registry.setDaemonKey({
       hostId: 'daemon-2',
@@ -212,7 +212,7 @@ describe('host offline resolves in-flight chats to errored', () => {
   it('resolves ONLY the dropped host’s turns — another host keeps running', async () => {
     // spec/12 § Hosts fail independently: "Chats on reachable hosts stay usable
     // while another host is down." Resolving every in-flight chat on any drop
-    // would kill live turns on machines that never went away.
+    // would kill live turns on hosts that never went away.
     const surfaceJwt = await mintSurfaceCredential({
       userPrivateKey: user.privateKey,
       surfaceId: 'srf-1',
@@ -243,7 +243,7 @@ describe('host offline resolves in-flight chats to errored', () => {
     const d2 = await connectHost('daemon-2');
     await surfaceLog.waitForCount('host.online', 2);
 
-    // A chat mid-turn on EACH machine.
+    // A chat mid-turn on EACH host.
     for (const [ws, hostId, chatId] of [
       [d1, 'daemon-1', 'chat-on-1'],
       [d2, 'daemon-2', 'chat-on-2'],
@@ -261,7 +261,7 @@ describe('host offline resolves in-flight chats to errored', () => {
     }
     await surfaceLog.waitForCount('chat.state', 2);
 
-    // Only machine 1 goes away.
+    // Only host 1 goes away.
     d1.close();
     await surfaceLog.waitForCount('chat.error', 1);
 
@@ -270,7 +270,7 @@ describe('host offline resolves in-flight chats to errored', () => {
       | undefined;
     expect(errored?.error.code).toBe('daemon_unavailable');
 
-    // Give the hub a beat to prove it does NOT also error the other machine.
+    // Give the hub a beat to prove it does NOT also error the other host.
     await new Promise((r) => setTimeout(r, 150));
     expect(surfaceLog.find('chat.error', (f) => f.chatId === 'chat-on-2')).toBeUndefined();
     expect(

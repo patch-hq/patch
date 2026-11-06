@@ -111,7 +111,7 @@ describe('cross-host bridge: listing and search', () => {
     });
   });
 
-  it('answers a search request to the asking machine', () => {
+  it('answers a search request to the asking host', () => {
     const b = bridge();
     b.feed(
       { type: 'patch.search_chats.request', sourceChatId: 'x', query: 'greenhouse' } as WireEvent,

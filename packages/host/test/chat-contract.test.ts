@@ -41,7 +41,7 @@ function setup(opts: { signedIn?: boolean } = {}) {
     hostId: 'd1',
     metaStore: createMetaStore(home),
     sdkBackend: createMockSdkBackend(),
-    // The gate under test: a machine whose credential does not resolve.
+    // The gate under test: a host whose credential does not resolve.
     resolveOAuth: () =>
       opts.signedIn === false
         ? { ok: false as const, reason: 'Refresh token expired' }
@@ -98,7 +98,7 @@ describe('a turn that cannot run says so IN THE CHAT', () => {
   // THE SILENT-FAILURE BUG. Settings learned via `host.unauthenticated` and
   // the composer unlocked when activity went idle — but the chat showed nothing,
   // which reads as the app being broken rather than a credential to renew.
-  it('emits a chat.error naming the machine when the credential will not resolve', async () => {
+  it('emits a chat.error naming the host when the credential will not resolve', async () => {
     const { daemon, events, folder } = setup({ signedIn: false });
     const chatId = await daemon.spawnChat({ folder });
     events.length = 0;

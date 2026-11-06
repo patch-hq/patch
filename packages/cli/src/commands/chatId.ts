@@ -14,7 +14,7 @@ const ULID_PREFIX = /^[0-9A-HJKMNP-TV-Z]+$/;
 const SPECIAL_THREAD = /^thread_[a-z]+$/;
 
 /**
- * Resolves against every machine's chats: no caller ever names a host. Over the
+ * Resolves against every host's chats: no caller ever names a host. Over the
  * host socket that is the account-wide `/internal/chats`, which needs the
  * calling chat's id (PATCH_CHAT_ID); over REST the listing is account-wide
  * already. `id` is a full id, a unique id prefix, or a chat's exact name.

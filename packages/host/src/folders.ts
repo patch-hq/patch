@@ -262,16 +262,16 @@ export class FolderRegistry {
           entries: shortcuts.map((r) => ({ name: basename(r) || r, path: r })),
         });
       }
-      // Nothing opened yet on a fresh machine. Start in the host user's home
+      // Nothing opened yet on a fresh host. Start in the host user's home
       // rather than showing an empty list with no way forward — browsing has to
       // be possible before anything has been opened, or the picker is useless
       // exactly when it is most needed.
       return await this.browse(homedir());
     }
 
-    // NOT confined to the project roots. The host runs as this machine's user
+    // NOT confined to the project roots. The host runs as this host's user
     // with that user's whole authority — its own install notice says it can
-    // "read, change and delete any file you can, anywhere on this machine", and
+    // "read, change and delete any file you can, anywhere on this host", and
     // a chat can `cd` anywhere the moment it starts. Restricting the PICKER to
     // registered roots therefore protected nothing; it only stopped a person
     // opening a chat in a folder they had not thought to register first, and

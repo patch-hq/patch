@@ -1,6 +1,6 @@
 // Which host the per-host Settings pages are about.
 //
-// Most settings live on a machine, not on the account, so Usage, Agent, MCP,
+// Most settings live on a host, not on the account, so Usage, Agent, MCP,
 // Memories, Voice and Providers each show ONE host at a time, chosen in the page
 // header. The choice is shared across pages — switching to the Mac on Usage and
 // then opening Agent should still be looking at the Mac.

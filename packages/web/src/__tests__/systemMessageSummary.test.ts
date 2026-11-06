@@ -25,7 +25,7 @@ describe('systemMessageSummary', () => {
       '[Pad] Tom sent 2 changes',
     );
   });
-  it('labels a job fire and any other machine message with a clipped first line', () => {
+  it('labels a job fire and any other host message with a clipped first line', () => {
     expect(systemMessageSummary('run the report', 'job')).toBe('Job fired — run the report');
     const long = 'x'.repeat(200);
     const s = systemMessageSummary(long, 'machine');

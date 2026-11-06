@@ -453,7 +453,7 @@ describe('Composer', () => {
   });
 
   it('ignores any host being logged out: the accounts are shared, not per host', () => {
-    // A host reporting itself signed out (a stale snapshot, a machine that has
+    // A host reporting itself signed out (a stale snapshot, a host that has
     // not picked the account up yet) must not block a chat while the user has
     // a connected account (spec/10).
     setSharedAccounts({ claude: [{ connected: true }] });
@@ -1828,7 +1828,7 @@ describe('Composer', () => {
       usePresenceStore.getState().setHostOnline('d1', true);
     });
 
-    it('greys out the mic with the reason when dictation needs a key this chat\u2019s machine lacks', () => {
+    it('greys out the mic with the reason when dictation needs a key this chat\u2019s host lacks', () => {
       const prefs = usePreferencesStore.getState().preferences;
       const prevHosts = usePresenceStore.getState().hosts;
       usePreferencesStore.setState({

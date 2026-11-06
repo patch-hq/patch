@@ -119,7 +119,7 @@ export function registerManageCommands(program: Command): void {
           const qs = from !== undefined ? `?${fromParam}=${from}` : '';
           const path = pickPath(
             t,
-            // callerChatId lets the host relay a chat owned by another machine.
+            // callerChatId lets the host relay a chat owned by another host.
             `/internal/history/${encodeURIComponent(id)}${qs}${qs ? '&' : '?'}callerChatId=cli`,
             `/api/chats/${encodeURIComponent(id)}/history${qs}`,
           );

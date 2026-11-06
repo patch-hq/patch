@@ -119,8 +119,8 @@ afterEach(() => {
 
 describe('Agent page: frame', () => {
   // Every row is a shared setting (spec/01 § Settings): nothing here is about
-  // one machine, so there is no switcher and no host to be missing.
-  it('draws every control with no machine registered, and no switcher', async () => {
+  // one host, so there is no switcher and no host to be missing.
+  it('draws every control with no host registered, and no switcher', async () => {
     resetHosts();
     const r = await renderAgent();
     expect(get(r, 'default-model')).toBeTruthy();
@@ -138,7 +138,7 @@ describe('Agent page: frame', () => {
 });
 
 describe('Agent page: Model for new chats', () => {
-  it('offers the default machine’s catalogue and saves the choice', async () => {
+  it('offers the default host’s catalogue and saves the choice', async () => {
     const r = await renderAgent();
     expect(api.models).toHaveBeenCalledWith('d1');
     expect(textOf(get(r, 'default-model'))).toBe('Opus 5');
@@ -155,14 +155,14 @@ describe('Agent page: Model for new chats', () => {
     expect(get(r, 'default-model-option-old-model')).toBeTruthy();
   });
 
-  it('with no single machine says where the list would come from', async () => {
+  it('with no single host says where the list would come from', async () => {
     resetHosts();
     reportHost('a');
     reportHost('b');
     const r = await renderAgent();
     expect(api.models).not.toHaveBeenCalled();
     expect(textOf(get(r, 'default-model-no-host'))).toBe(
-      'No single machine to read the model list from',
+      'No single host to read the model list from',
     );
   });
 

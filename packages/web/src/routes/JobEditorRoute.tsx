@@ -191,7 +191,7 @@ function describeApiError(e: unknown): string {
     if (issue) return body?.error ? `${body.error}: ${issue}` : issue;
     // `{ error, message }` — the server's own human-readable reason (e.g.
     // POST /api/jobs/recurrence/translate's `translation_failed`), preferred
-    // over the bare machine code so the toast says WHY, not just a slug.
+    // over the bare host code so the toast says WHY, not just a slug.
     if (body?.message) return body.message;
     if (body?.error) return body.error;
   }
@@ -216,7 +216,7 @@ export function buildGroupOptions(jobs: readonly { group?: string }[]): string[]
   return [...distinct].sort((a, b) => a.localeCompare(b));
 }
 
-/** One machine's folders in the picker. */
+/** One host's folders in the picker. */
 interface FolderGroup {
   hostId: string;
   /** What the user reads: the host's name, disambiguated by its id. */
@@ -227,7 +227,7 @@ interface FolderGroup {
 /**
  * Encode a (host, folder) choice into one `<option value>`. The pair is the
  * unit the action stores (spec/08 § Action), so the option has to carry both —
- * a bare path cannot say which machine it is on.
+ * a bare path cannot say which host it is on.
  */
 export function folderChoiceValue(hostId: string, folder: string): string {
   return JSON.stringify([hostId, folder]);
@@ -248,10 +248,10 @@ export function parseFolderChoice(value: string): { hostId: string; folder: stri
 }
 
 /**
- * The picker's host-grouped options: per machine, that machine's own published
+ * The picker's host-grouped options: per host, that host's own published
  * folder registry (its configured roots first, then folders it has recently
- * been used in), then folders seen in existing chats ON THAT MACHINE
- * (spec/14 § Jobs view). Nothing is merged across machines — the same
+ * been used in), then folders seen in existing chats ON THAT HOST
+ * (spec/14 § Jobs view). Nothing is merged across hosts — the same
  * path on two hosts is two different directories.
  *
  * Everything except a host's configured ROOTS goes through the recent-folder
@@ -262,7 +262,7 @@ export function parseFolderChoice(value: string): { hostId: string; folder: stri
  * so a root deliberately placed in scratch still shows.
  *
  * A host whose every folder is filtered out KEEPS its (now empty) group — the
- * group's `Custom path…` option is the only way to aim a job at a machine patch
+ * group's `Custom path…` option is the only way to aim a job at a host patch
  * has no project history on.
  */
 export function buildFolderGroups(input: {
@@ -284,8 +284,8 @@ export function buildFolderGroups(input: {
     for (const f of host.recent) if (!isJunkFolder(f)) add(host.hostId, f);
   }
   for (const c of input.chats) {
-    // The host is registered either way — a machine you only ever ran a
-    // special thread on is still a machine you can aim a job at, via its
+    // The host is registered either way — a host you only ever ran a
+    // special thread on is still a host you can aim a job at, via its
     // Custom path… option. Only the FOLDER is withheld.
     const offerable = !isReservedSpecialThread(c.chatId) && !isJunkFolder(c.folder);
     add(c.hostId, offerable ? c.folder : undefined);
@@ -340,7 +340,7 @@ export function mostRecentPair(
  * So a skill is reachable only through a chat sitting on the same (host,
  * folder) as the action, and only when the skill's file lives under it. Both
  * conditions genuinely fail sometimes: a job that has never run has no chat,
- * and a machine-wide skill in `~/.claude/skills` is outside every project
+ * and a host-wide skill in `~/.claude/skills` is outside every project
  * folder. NO FALLBACK — a path is never guessed and a link that would 404 is
  * never rendered; the caller shows `reason` instead.
  */
@@ -365,11 +365,11 @@ export function resolveSkillLink(input: {
   // An older host answers without paths at all (the field is optional
   // precisely so it can) — say so rather than construct a path from the name.
   // That is a DIFFERENT case from `paths` being present but missing just this
-  // skill's key, which is the normal result for a machine-level skill (e.g.
+  // skill's key, which is the normal result for a host-level skill (e.g.
   // chrome-cdp lives only in `~/.claude/skills` on the host with Chrome) asked
   // about from a folder/host that genuinely doesn't have it — conflating the
   // two made a real "not on this host" read as "this host can't tell me".
-  if (input.paths === undefined) return { reason: 'machine does not report skill files' };
+  if (input.paths === undefined) return { reason: 'host does not report skill files' };
   const file = input.paths[input.skill];
   if (file === undefined) return { reason: 'skill not found on this host' };
   const chat = input.chats.find((c) => c.hostId === input.hostId && c.folder === input.folder);
@@ -639,7 +639,7 @@ interface FormState {
   /**
    * The host the spawned/ensured chat runs on. A job action is dispatched to
    * the host it names (spec/08 § Action), and a folder without a host is
-   * ambiguous once there is more than one machine.
+   * ambiguous once there is more than one host.
    */
   spawnHostId: string;
   spawnFolder: string;
@@ -681,7 +681,7 @@ interface FormState {
   /**
    * `spawn` only — the permission mode each fire's chat runs under. Always a
    * real mode: a job has no "host default" row, because a job that followed
-   * the host would change behaviour when someone at that machine changed
+   * the host would change behaviour when someone at that host changed
    * theirs (spec/08 § Action).
    */
   spawnPermissionMode: PermissionMode;
@@ -756,7 +756,7 @@ const DEFAULT_FORM: FormState = {
   spawnHostId: '',
   // Seeded together with the host, from the most-recently-used (host, folder)
   // pair (see the effect below). Empty until then so the picker shows a
-  // "Select a host and folder…" prompt rather than a path with no machine.
+  // "Select a host and folder…" prompt rather than a path with no host.
   spawnFolder: '',
   spawnPrompt: '',
   spawnGoal: '',
@@ -858,7 +858,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
   // what let the editor save a host-a folder against host-b: the pair is the
   // unit, so the option the user picks carries its host and the save stores
   // that host (spec/08 § Action — "a folder path means nothing without the
-  // machine it is on").
+  // host it is on").
   const { data: folderData } = useQuery({ queryKey: ['folders'], queryFn: () => api.folders() });
   const folderGroups = buildFolderGroups({
     registry: folderData?.hosts ?? [],
@@ -871,11 +871,11 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
       Object.entries(hosts).map(([id, h]) => [id, h.host?.hostName ?? id]),
     ),
     // Always keep the job's own host as a group, even if it is offline and
-    // publishes nothing right now — an edited job must still show its machine.
+    // publishes nothing right now — an edited job must still show its host.
     includeHostId: form.spawnHostId,
   });
   // Folders offered for the CHOSEN host — the ad-hoc test is per host, since
-  // the same path can be a listed folder on one machine and ad-hoc on another.
+  // the same path can be a listed folder on one host and ad-hoc on another.
   const foldersOnChosenHost =
     folderGroups.find((g) => g.hostId === form.spawnHostId)?.folders ?? [];
   // When the spawn folder isn't one of the chosen host's options it's an ad-hoc
@@ -887,13 +887,13 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
   const folderIsAdHoc =
     folderCustom ||
     (!folderBrowse && form.spawnFolder !== '' && !foldersOnChosenHost.includes(form.spawnFolder));
-  // A path on a machine patch has no history on: complete it from that host's
+  // A path on a host patch has no history on: complete it from that host's
   // own filesystem (the directory typed so far) so a never-used folder is
   // reachable without knowing its exact spelling. A browse error just offers
   // no suggestions; the typed path is still what is saved.
   // Browse mode: the folder picker's "Browse…" option opens a directory tree on
   // the chosen host (the same listing the new-chat browser uses), so any folder
-  // under that machine's browsable roots is reachable, not just the listed ones.
+  // under that host's browsable roots is reachable, not just the listed ones.
   const {
     data: browseListing,
     isLoading: browseLoading,
@@ -934,8 +934,8 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
   const messageChat = chatList.find((c) => c.chatId === form.messageChatId);
   const messageChatFolder = messageChat?.folder ?? '';
   const skillFolder = form.actionType === 'message' ? messageChatFolder : form.spawnFolder;
-  // The host that folder is on — a path alone can't say which machine, and the
-  // Edit link has to open the file through a chat on the SAME machine.
+  // The host that folder is on — a path alone can't say which host, and the
+  // Edit link has to open the file through a chat on the SAME host.
   const skillHostId =
     form.actionType === 'message' ? (messageChat?.hostId ?? '') : form.spawnHostId;
   const { data: skillsData } = useQuery({
@@ -945,7 +945,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
   });
   const availableSkills = skillsData?.skills ?? [];
 
-  // Model picker source (spec/14 § Jobs view). The catalogue is per MACHINE and
+  // Model picker source (spec/14 § Jobs view). The catalogue is per HOST and
   // live, so it loads once a host is chosen and RELOADS when the folder picker
   // moves the job to a different one — offering host-a's models for a job that
   // will fire on host-b is how an unrunnable model id gets stored. Only
@@ -1008,9 +1008,9 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
 
   // Seed a new job to the most-recently-used (host, folder) PAIR — the same
   // seed the new-chat picker uses (spec/14 § Jobs view / §8). The pair is
-  // seeded together or not at all: seeding a folder from one machine next to a
+  // seeded together or not at all: seeding a folder from one host next to a
   // host defaulted from another is precisely how a job ends up dispatched to
-  // the wrong machine. With no chat to learn a pair from, both stay empty and
+  // the wrong host. With no chat to learn a pair from, both stay empty and
   // save refuses (spec/08 § Action), which is better than a silent wrong host.
   const mruPair = mostRecentPair(chatList);
   useEffect(() => {
@@ -1126,7 +1126,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
     if (!phrase) return;
     const hostId = form.spawnHostId || defaultHostId(hosts);
     if (!hostId) {
-      setRecurrenceNlError('No machine is available to run the translation on yet.');
+      setRecurrenceNlError('No host is available to run the translation on yet.');
       return;
     }
     setRecurrenceNlTranslating(true);
@@ -1225,7 +1225,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
     // that would dispatch nowhere. Refuse at save time, where there is someone
     // to tell (spec/08 § Action).
     if (usesSpawnFields && !form.spawnHostId.trim()) {
-      pushError('Choose which machine the chat runs on.');
+      pushError('Choose which host the chat runs on.');
       return;
     }
     // A gate with no host or folder would dispatch nowhere, and the server's own
@@ -1233,7 +1233,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
     // than as a 400 about a field name (spec/08 § Gate).
     if (form.gateOn && form.gateCommand.trim().length > 0) {
       if (!form.gateHostId.trim()) {
-        pushError('Choose which machine the gate command runs on.');
+        pushError('Choose which host the gate command runs on.');
         return;
       }
       if (!form.gateFolder.trim()) {
@@ -1285,7 +1285,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
   // make and come back to.
   //
   // It used to read `Host default`, and meant the host's `lastUsedModel`: the
-  // model the last chat on that machine happened to run on. That made every
+  // model the last chat on that host happened to run on. That made every
   // job's model a side effect of the last human choice at that keyboard, and it
   // drifted — silently putting deploys and purchases on whatever cheap model
   // someone had picked for one throwaway chat.
@@ -1367,7 +1367,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
           ))}
         </select>
         {modelHostId === null ? (
-          <p className="field-hint">Pick a folder first. Models are per machine.</p>
+          <p className="field-hint">Pick a folder first. Models are per host.</p>
         ) : modelCatalog.status === 'error' ? (
           <p className="field-hint" data-testid="job-spawn-model-error">
             Couldn’t load this host’s models: {modelCatalog.error ?? 'unknown error'}
@@ -2242,12 +2242,12 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
             ) : form.actionType === 'spawn' || form.actionType === 'continue' ? (
               <>
                 <label>
-                  Machine
+                  Host
                   <select
                     value={form.spawnHostId}
                     onChange={(e) => {
-                      // Choosing a machine clears the folder: a path means
-                      // nothing without the machine it is on (spec/08 § Action).
+                      // Choosing a host clears the folder: a path means
+                      // nothing without the host it is on (spec/08 § Action).
                       setFolderCustom(false);
                       setFolderBrowse(false);
                       setBrowseDir(null);
@@ -2256,7 +2256,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                     data-testid="job-spawn-host-select"
                   >
                     <option value="" disabled>
-                      {folderGroups.length === 0 ? 'No machines connected' : 'Select a machine…'}
+                      {folderGroups.length === 0 ? 'No hosts connected' : 'Select a host…'}
                     </option>
                     {folderGroups.map((g) => (
                       <option key={g.hostId} value={g.hostId}>
@@ -2308,7 +2308,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                     {form.spawnHostId === '' ||
                     (form.spawnFolder === '' && !folderCustom && !folderBrowse) ? (
                       <option value="" disabled>
-                        {form.spawnHostId === '' ? 'Select a machine first' : 'Select a folder…'}
+                        {form.spawnHostId === '' ? 'Select a host first' : 'Select a folder…'}
                       </option>
                     ) : null}
                     {folderGroups
@@ -2332,7 +2332,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   <p className="field-hint" data-testid="job-spawn-host">
                     {form.spawnHostId
                       ? `Runs on ${folderGroups.find((g) => g.hostId === form.spawnHostId)?.label ?? form.spawnHostId}`
-                      : 'No machine chosen. Pick the machine the folder lives on.'}
+                      : 'No host chosen. Pick the host the folder lives on.'}
                   </p>
                   {folderBrowse ? (
                     <div className="folder-browser" data-testid="job-folder-browser">

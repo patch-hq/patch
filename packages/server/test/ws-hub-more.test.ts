@@ -101,7 +101,7 @@ describe('WS hub — plain-forward event types (pin/archive/stop/etc.)', () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(70));
     const registry = Registry.load(dir);
     registry.bootstrapAccount({ keypair: user });
-    // `patch.spawn` below names a machine, and the hub refuses one that is not
+    // `patch.spawn` below names a host, and the hub refuses one that is not
     // registered (spec/03 § Host events), so register it.
     registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     const h = await startServer({ registry });

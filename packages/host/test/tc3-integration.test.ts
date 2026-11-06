@@ -419,7 +419,7 @@ describe('TC3 [test-runner] broadcast sidecar injection + flush over real host t
       localKey: LOCAL_KEY,
       method: 'POST',
       path: '/internal/notify',
-      body: { channel: 'speakers', message: 'washing machine done', callerChatId: chatId },
+      body: { channel: 'speakers', message: 'washing host done', callerChatId: chatId },
     });
     try {
       expect(readPendingBroadcasts(s.cwd, 'thread_speakers')).toHaveLength(1);
@@ -431,7 +431,7 @@ describe('TC3 [test-runner] broadcast sidecar injection + flush over real host t
       });
       const prompt = s.capturedPrompts[s.capturedPrompts.length - 1] ?? '';
       expect(prompt).toContain('<system-reminder>');
-      expect(prompt).toContain('washing machine done');
+      expect(prompt).toContain('washing host done');
       expect(prompt).toContain('snooze 10 min');
       // Flushed after the agent committed a response.
       expect(readPendingBroadcasts(s.cwd, 'thread_speakers')).toHaveLength(0);

@@ -4,7 +4,7 @@
 //   - 'groq'  (default): direct REST POST to Groq's transcribe endpoint.
 //   - 'local': spawn faster-whisper as a long-running Python sidecar
 //              (`uv run` → WS in/transcript out).
-//   - 'parakeet': NVIDIA Parakeet TDT v3 on this machine's CPU via sherpa-onnx
+//   - 'parakeet': NVIDIA Parakeet TDT v3 on this host's CPU via sherpa-onnx
 //              (parakeet.ts) — no network, no quota, no per-minute cost.
 //   - 'mock' : test-stack stub that echoes a synthetic transcript per
 //              utterance — keeps docker-compose.test.yml viable without
@@ -44,7 +44,7 @@ export interface WhisperCredentialConfig {
 export function validateWhisperCredentials(config: WhisperCredentialConfig): void {
   switch (config.whisperBackend) {
     // 'off' is NOT a degraded fallback — it is the absence of an optional
-    // component. A machine carrying only an OS has no voice weights and no
+    // component. A host carrying only an OS has no voice weights and no
     // STT credential (the artifact deliberately ships neither), and spec/11
     // requires the host to install and run there. Voice stays unconfigured
     // until it is installed as an optional component, at which point a backend
@@ -147,7 +147,7 @@ export interface WhisperBackend {
    * them do. Groq answers a fresh request for the growing prefix fast enough,
    * and cheaply enough against a reserved slice of its per-minute quota, that
    * re-asking about once a second is worth the live text; a model running on
-   * this machine's own CPU is not.
+   * this host's own CPU is not.
    *
    * The two costs of doing it are paid elsewhere, not by reporting false here:
    * the quota reserve keeps the final's request slots (`admit`), and the
@@ -158,7 +158,7 @@ export interface WhisperBackend {
   /**
    * New audio (16 kHz samples) between two live passes, when the backend can
    * afford to look more often than the session's default second. Unmetered
-   * on-machine backends set it; a rationed one leaves it out.
+   * on-host backends set it; a rationed one leaves it out.
    */
   readonly livePartialStepSamples?: number;
   /**
@@ -260,7 +260,7 @@ export function createWhisper(opts: CreateWhisperOptions): WhisperBackend {
 }
 
 /**
- * Voice is not installed on this machine. Booting is fine — voice is an
+ * Voice is not installed on this host. Booting is fine — voice is an
  * optional component — but ACTUALLY ASKING for a transcript must fail loudly
  * and say how to fix it, never return a plausible empty string. That is the
  * difference between an unconfigured feature and a silent fallback.
@@ -270,7 +270,7 @@ class UnconfiguredWhisperBackend implements WhisperBackend {
   readonly supportsLivePartials = false;
   private refuse(): never {
     throw new Error(
-      'Speech-to-text is not configured on this machine. Voice is an optional component: ' +
+      'Speech-to-text is not configured on this host. Voice is an optional component: ' +
         'install it from Settings → Hosts and choose a speech-to-text engine. Refusing to return a fabricated transcript.',
     );
   }
@@ -539,7 +539,7 @@ export class GroqWhisperBackend implements WhisperBackend {
 export class LocalWhisperBackend implements WhisperBackend {
   /**
    * The sidecar answers one request at a time and runs the model on this
-   * machine, so re-transcribing the growing prefix costs more as the utterance
+   * host, so re-transcribing the growing prefix costs more as the utterance
    * lengthens. The session keeps ONE partial pass in flight and spaces them by
    * a second of new audio, so the final queues behind at most one pass. That
    * bound is what makes the live text affordable here; without it dictation on

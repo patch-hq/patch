@@ -22,7 +22,7 @@ import { getActiveWs } from '../api/ws.js';
  * How long the control waits for the host to confirm a model change before it
  * says the switch did not happen (spec/14 § Model selector). The confirmation
  * is a `chat.state` the host emits the moment it applies the change, so this is
- * a network round trip, not a turn — but a host running a host too old to
+ * a network round trip, not a turn — but a machine running a host too old to
  * know `chat.model_request` will never answer at all, and leaving the pill
  * reading a model the chat is not on is exactly the silent failure the app
  * forbids.
@@ -171,7 +171,7 @@ export function ModelControl({
   const modelPopupRef = useRef<HTMLDivElement | null>(null);
   const modelPlacement = usePopupPlacement(modelAnchorRef, modelOpen);
   useDismissOnClickOff(modelOpen, [modelAnchorRef, modelPopupRef], () => setModelOpen(false));
-  // The catalogue is per MACHINE — offering this surface's last-loaded list for
+  // The catalogue is per HOST — offering this surface's last-loaded list for
   // a chat on another host would show models that host cannot run. Loaded on
   // mount, not on open, because the pill itself reads the catalogue's name.
   // With no model reported there is no name to read, so the catalogue waits

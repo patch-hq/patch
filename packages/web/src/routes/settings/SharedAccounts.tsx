@@ -5,7 +5,7 @@
 // server write and settles on its answer. A host is only ever the READER of an
 // account — it takes the usage reading — and the freshest reading from any
 // host is what is shown; which host took it is not something this page says,
-// because an account belongs to nobody's machine.
+// because an account belongs to nobody's host.
 
 import type { JSX, ReactNode } from 'react';
 import { useEffect, useState } from 'react';
@@ -193,7 +193,7 @@ function AccountEntry({
               void (async () => {
                 const ok = await useUiStore.getState().confirm({
                   title: `Sign out of ${row.label}`,
-                  message: `Sign out of ${row.label}? Every machine stops using it until it is signed in again.`,
+                  message: `Sign out of ${row.label}? Every host stops using it until it is signed in again.`,
                   confirmLabel: 'Sign out',
                   danger: true,
                 });
@@ -212,7 +212,7 @@ function AccountEntry({
         void (async () => {
           const ok = await useUiStore.getState().confirm({
             title: `Remove ${row.label}`,
-            message: `Remove ${row.label} from every machine? Its row goes too.`,
+            message: `Remove ${row.label} from every host? Its row goes too.`,
             confirmLabel: 'Remove',
             danger: true,
           });
@@ -291,7 +291,7 @@ export function AddClaudeAccount(): JSX.Element {
 }
 
 /**
- * Add a ChatGPT account. A ChatGPT sign-in has to run on a machine — Codex
+ * Add a ChatGPT account. A ChatGPT sign-in has to run on a host — Codex
  * does the device flow — so one online host runs it and sends the login to
  * the server; which host is not the user's concern. An API key is added
  * straight to the server.
@@ -359,7 +359,7 @@ export function AddChatGPTAccount(): JSX.Element {
           Add API key
         </button>
       </div>
-      {host === null ? <Note testid="chatgpt-no-host">Connect a machine to sign in</Note> : null}
+      {host === null ? <Note testid="chatgpt-no-host">Connect a host to sign in</Note> : null}
       {pending && login ? (
         <div className="set-inline" role="status" data-testid="chatgpt-login-pending">
           <span className="set-row-title">Waiting for sign-in…</span>

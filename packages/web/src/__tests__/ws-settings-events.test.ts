@@ -1,5 +1,5 @@
 // PatchWs dispatch for the frames the reorganised Settings depends on:
-//   - `host.removed` — the server dropped a machine from the account (Settings
+//   - `host.removed` — the server dropped a host from the account (Settings
 //     → Hosts → Remove on ANY surface); every surface forgets it.
 //   - a `chat.error` with code `claude_settings_invalid` — a host refused a
 //     settings.json / memory edit. It is out-of-band, with no real chat behind

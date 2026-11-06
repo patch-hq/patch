@@ -92,8 +92,8 @@ import { buildPeekResult, stripBinaryPayloads } from './peek.js';
 import { probeFolderAccess } from './folderAccess.js';
 
 /**
- * A cross-machine `patch_spawn` the NAMED machine refused (or never answered).
- * Carries that machine's own error code so the tool call fails with the real
+ * A cross-host `patch_spawn` the NAMED host refused (or never answered).
+ * Carries that host's own error code so the tool call fails with the real
  * reason instead of reporting a chat that was never created.
  */
 export class RemoteSpawnError extends Error {
@@ -159,19 +159,19 @@ export interface BuildOptions {
   /** Optional upstream emit hook — used to surface cross-chat tool events for audit. */
   emitWire?: (event: WireEvent) => void;
   /**
-   * Is another machine linked right now (spec/03 § Cross-chat tools: "A call
+   * Is another host linked right now (spec/03 § Cross-chat tools: "A call
    * naming an offline host returns an error to the calling agent, naming the
    * host, within the turn")? Production wires the roster the server pushes;
-   * when unset, cross-machine calls are refused as unsupported rather than
-   * silently landing on this machine.
+   * when unset, cross-host calls are refused as unsupported rather than
+   * silently landing on this host.
    */
   isHostOnline?: (hostId: string) => boolean;
   /**
-   * Spawn a chat on ANOTHER machine: emits the `patch.spawn` frame and resolves
-   * with that machine's own `patch.spawn.response` (spec/03 § Cross-chat
+   * Spawn a chat on ANOTHER host: emits the `patch.spawn` frame and resolves
+   * with that host's own `patch.spawn.response` (spec/03 § Cross-chat
    * tools). Rejects with a `RemoteSpawnError` when the target refused or never
    * answered — the tool call is part of a turn in progress, so it must resolve
-   * to a real outcome. When unset the endpoint 503s: a cross-machine spawn with
+   * to a real outcome. When unset the endpoint 503s: a cross-host spawn with
    * nothing to carry the answer back would be a silent success.
    */
   spawnOnRemoteHost?: (req: {
@@ -185,27 +185,27 @@ export interface BuildOptions {
   /**
    * The shared accounts, over the server link: list, and change order or
    * strategy. Backs `patch_list_accounts` and the CLI's `accounts` commands on
-   * this machine. Unset, those endpoints 503.
+   * this host. Unset, those endpoints 503.
    */
   accountsRpc?: AccountsRpc;
   /**
-   * One REST call to the server over the link, for the machine's own CLI
+   * One REST call to the server over the link, for the host's own CLI
    * (`/server-api`). Unset, that endpoint 503s.
    */
   serverApi?: ServerApiRpc;
   /**
-   * The account's event stream over the link, for the machine's own CLI
+   * The account's event stream over the link, for the host's own CLI
    * (`/server-events`, newline-delimited JSON). Unset, that endpoint 503s.
    */
   serverEvents?: Pick<ServerEventsClient, 'subscribe'>;
   /**
-   * The accounts this machine holds for the backend a model runs on (Claude
+   * The accounts this host holds for the backend a model runs on (Claude
    * when no model is named), so `account` on a spawn can be a label.
    */
   heldAccounts?: (model: string | undefined) => Array<{ id: string; label: string }>;
   /**
-   * The account-wide chat list, each entry naming the machine it lives on
-   * (spec/03 § Cross-chat tools). Only the server sees every machine's chats,
+   * The account-wide chat list, each entry naming the host it lives on
+   * (spec/03 § Cross-chat tools). Only the server sees every host's chats,
    * so production wires an RPC to it.
    */
   listAccountChats?: (
@@ -227,7 +227,7 @@ export interface BuildOptions {
   }>;
   /**
    * `patch_activity` (spec/06 § Cross-chat toolset): the user's own messages
-   * for `[since, until]`, gathered server-side from every machine's chat logs
+   * for `[since, until]`, gathered server-side from every host's chat logs
    * — there is no per-chat host to resolve (unlike peek/history/send_to).
    */
   getActivity?: (
@@ -249,12 +249,12 @@ export interface BuildOptions {
   }>;
   /**
    * Read another chat's live state cross-host (spec/03 § Cross-chat tools):
-   * emits `patch.peek.request` and resolves with the OWNING machine's own
-   * `{ chat_state, events, truncated }`. Only called once this machine's own
+   * emits `patch.peek.request` and resolves with the OWNING host's own
+   * `{ chat_state, events, truncated }`. Only called once this host's own
    * `chatState` has already come back empty for the id — `patch_peek` never
    * says which host a chat lives on, so the local miss IS the signal to ask
-   * the server to relay. Rejects with a `RemoteRelayError` when no machine
-   * has ever reported that chat, or the machine that owns it is offline. When
+   * the server to relay. Rejects with a `RemoteRelayError` when no host
+   * has ever reported that chat, or the host that owns it is offline. When
    * unset, a chat not found locally 404s exactly as before this existed.
    */
   peekRemoteChat?: (req: {
@@ -270,9 +270,9 @@ export interface BuildOptions {
     limit?: number;
   }) => Promise<{ events: WireEvent[]; nextFromSeq?: number }>;
   /**
-   * `patch_send_to`'s cross-host sibling. Resolves once the OWNING machine has
+   * `patch_send_to`'s cross-host sibling. Resolves once the OWNING host has
    * acknowledged the message was queued into its chat — same NO FALLBACK
-   * contract as the other two: a machine that no longer has the chat, or
+   * contract as the other two: a host that no longer has the chat, or
    * never did, answers with a real error rather than a queued-nowhere ok.
    */
   sendToRemoteChat?: (req: {
@@ -284,7 +284,7 @@ export interface BuildOptions {
     revealTarget: boolean;
   }) => Promise<void>;
   /**
-   * `patch_stop`'s cross-host sibling: resolves once the OWNING machine has
+   * `patch_stop`'s cross-host sibling: resolves once the OWNING host has
    * stopped the chat, rejects with its real error otherwise.
    */
   stopRemoteChat?: (req: { sourceChatId: string; targetChatId: string }) => Promise<void>;
@@ -331,7 +331,7 @@ export interface BuildOptions {
   onShutdown?: () => void;
   /**
    * The host-scoped controls this host owns (spec/02 § Control IPC). The CLI's
-   * default host is the machine it runs on, so every host control must work
+   * default host is the host it runs on, so every host control must work
    * over this socket without a round trip through the server — the same
    * operations the `host.*` wire frames drive, reachable locally. Unwired →
    * those routes 503 rather than pretending the control does not exist.
@@ -341,7 +341,7 @@ export interface BuildOptions {
    * runs on the host itself.
    */
   host?: {
-    /** Same content as this machine's `host.host` report. */
+    /** Same content as this host's `host.host` report. */
     describe: () => HostInfoEvent;
     folders: {
       snapshot: () => { roots: string[]; recent: string[] };
@@ -862,14 +862,14 @@ const SpawnBody = z
   .object({
     folder: z.string().min(1),
     /**
-     * The machine to create the chat on (spec/03 § Cross-chat tools). Omitted
-     * means THIS machine. Naming another machine relays the spawn to it through
+     * The host to create the chat on (spec/03 § Cross-chat tools). Omitted
+     * means THIS host. Naming another host relays the spawn to it through
      * the server.
      */
     host: z.string().min(1).optional(),
     name: z.string().min(1).optional(),
     prompt: z.string().min(1).optional(),
-    /** Goal to arm on the new chat (spec/04 § Goals). Same-machine spawns only. */
+    /** Goal to arm on the new chat (spec/04 § Goals). Same-host spawns only. */
     goal: z.string().min(1).optional(),
     callerChatId: z.string().min(1).optional(),
     /** The stored account the chat starts on: its id or its label. Refused if not held. */
@@ -1067,7 +1067,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
   // divergent shape from our zod/rate-limit/not-found 400s.
   app.setErrorHandler((err: FastifyError, _req, reply) => {
     const statusCode = err.statusCode ?? 500;
-    // Map fastify's machine code to our snake_case `error` slug; fall back to a
+    // Map fastify's host code to our snake_case `error` slug; fall back to a
     // generic slug derived from the status class.
     let slug: string;
     if (
@@ -1243,7 +1243,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!opts.daemon) return reply.code(503).send({ error: 'host not initialised' });
     const state = opts.daemon.chatState.resolve(req.params.id);
     if (!state) {
-      // Not on THIS host — `patch chats get` on a chat another machine owns.
+      // Not on THIS host — `patch chats get` on a chat another host owns.
       // Same relay as patch_peek (one event, only the chat_state is kept).
       if (opts.peekRemoteChat) {
         try {
@@ -1272,7 +1272,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!opts.daemon) return reply.code(503).send({ error: 'host not initialised' });
     const state = opts.daemon.chatState.resolve(req.params.id);
     if (!state) {
-      // Not on this machine: the owning one may be elsewhere. A full id only —
+      // Not on this host: the owning one may be elsewhere. A full id only —
       // a prefix cannot be resolved without the owner's chat list.
       if (opts.stopRemoteChat) {
         try {
@@ -1469,7 +1469,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       if (err instanceof FolderNotFoundError) {
         return reply.code(400).send({ error: 'folder_not_found', message: err.message });
       }
-      // spec/04 § Spawn — this machine has never read a model catalogue, so a
+      // spec/04 § Spawn — this host has never read a model catalogue, so a
       // spawn naming no model has nothing to take. Said out loud with the code
       // the wire contract names; NEVER a 500, and never a guessed model id.
       if (err instanceof NoModelCatalogueError) {
@@ -1514,13 +1514,13 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
 
   // --- Host-scoped controls (spec/02 § Control IPC) -------------------------
   // One endpoint per host-scoped wire frame this host owns, so `patch` run on
-  // the machine itself drives them without a round trip through the server.
+  // the host itself drives them without a round trip through the server.
 
   /** Shared gate: authed, and the host controls actually wired. */
-  /** An `account` as typed (id or label) → the stored account id on this machine. */
+  /** An `account` as typed (id or label) → the stored account id on this host. */
   const resolveSpawnAccount = (account: string, model: string | undefined): string => {
     if (!opts.heldAccounts) {
-      throw new AccountRefError('this machine has no account store, so it cannot pick an account');
+      throw new AccountRefError('this host has no account store, so it cannot pick an account');
     }
     return resolveAccountRef(account, opts.heldAccounts(model));
   };
@@ -1541,7 +1541,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     return opts.host;
   };
 
-  // GET /host — this machine's self-description.
+  // GET /host — this host's self-description.
   app.get('/folder-access', async () => probeFolderAccess());
 
   app.get('/host', async (req, reply) => {
@@ -1571,7 +1571,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     try {
       host.folders.add(parsed.data.path);
     } catch (err) {
-      // A root that is not a directory on THIS machine would publish a picker
+      // A root that is not a directory on THIS host would publish a picker
       // entry whose every spawn fails. Refused with the offending value named.
       return reply.code(400).send({ error: 'folder_invalid', message: (err as Error).message });
     }
@@ -1647,7 +1647,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
   });
 
   // ---- shared accounts (over the server link) ----------------------------
-  // `/accounts*` is the machine's own CLI (local key); `/internal/accounts` is
+  // `/accounts*` is the host's own CLI (local key); `/internal/accounts` is
   // the MCP child (`patch_list_accounts`). All go to the server, which owns the
   // order and strategy, so none needs a separate login.
   const accountsCall = async (
@@ -1670,7 +1670,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       });
     }
   };
-  // The CLI's way to the server from this machine: relayed over the link, so
+  // The CLI's way to the server from this host: relayed over the link, so
   // it needs no credential of its own. The server decides what is relayable.
   app.post('/server-api', async (req, reply) => {
     const auth = checkAuth(req);
@@ -1695,7 +1695,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         .send({ error: code, message: err instanceof Error ? err.message : String(err) });
     }
   });
-  // `patch logs` on this machine: the account's events, relayed over the link.
+  // `patch logs` on this host: the account's events, relayed over the link.
   app.get('/server-events', async (req, reply) => {
     const auth = checkAuth(req);
     if (!auth.ok) return reply.code(401).send({ error: auth.reason });
@@ -1836,13 +1836,13 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     return { ok: true, components: host.describe().components };
   });
 
-  // POST /update — apply an available host update. A machine that knows of no
+  // POST /update — apply an available host update. A host that knows of no
   // newer build says so rather than reporting a no-op as an applied update.
   app.post('/update', async (req, reply) => {
     const host = hostGate(req, reply);
     if (!host) return;
     const result = await host.update();
-    // Accepted, but held until this machine's running turns finish.
+    // Accepted, but held until this host's running turns finish.
     if (result.deferred)
       return reply.code(202).send({ ok: true, deferred: true, message: result.message });
     if (!result.applied) {
@@ -2052,7 +2052,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     }
     const { chatId, message, voicePrefix, callerChatId, goal } = parsed.data;
     // A hidden automation often delegates work and receives the result through
-    // patch_send_to. Treating that machine-to-machine return as though a visible
+    // patch_send_to. Treating that host-to-host return as though a visible
     // agent had deliberately surfaced the recipient leaked every hidden job into
     // the main sidebar. Only a caller the user can already see reveals its target.
     // callerChatId is always present (required above); an unknown/stale id
@@ -2127,7 +2127,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         });
         return reply.code(400).send({
           error: 'goal_remote_unsupported',
-          message: `patch_send_to: chat ${chatId} is not on this machine, and a goal can only be set on a chat here. Nothing was sent.`,
+          message: `patch_send_to: chat ${chatId} is not on this host, and a goal can only be set on a chat here. Nothing was sent.`,
         });
       }
       if (code === 'chat_not_found' && opts.sendToRemoteChat) {
@@ -3004,30 +3004,30 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       }
     }
     // spec/03 § Cross-chat tools — a call whose target is on the calling chat's
-    // own machine is short-circuited in-process; one naming another machine
-    // goes over the wire, relayed by the server to that machine's host.
+    // own host is short-circuited in-process; one naming another host
+    // goes over the wire, relayed by the server to that host.
     if (host !== undefined && host !== selfHostId) {
       if (goal !== undefined) {
         return reply.code(400).send({
           error: 'goal_remote_unsupported',
-          message: `patch_spawn: a goal can only be set on a chat created on this machine, not on ${host}. No chat was created.`,
+          message: `patch_spawn: a goal can only be set on a chat created on this host, not on ${host}. No chat was created.`,
         });
       }
       if (!callerChatId) {
         return reply
           .code(400)
-          .send({ error: 'invalid_input', message: 'a cross-machine spawn needs a calling chat' });
+          .send({ error: 'invalid_input', message: 'a cross-host spawn needs a calling chat' });
       }
       if (!opts.spawnOnRemoteHost || !opts.isHostOnline) {
         return reply.code(503).send({
           error: 'link_offline',
-          message: `patch_spawn: this machine has no server link, so it cannot spawn on ${host}`,
+          message: `patch_spawn: this host has no server link, so it cannot spawn on ${host}`,
         });
       }
       if (!opts.isHostOnline(host)) {
         // Resolved INSIDE the turn rather than buffered: a tool result is part
         // of a turn in progress, and the agent decides what to do about the
-        // machine being down.
+        // host being down.
         toolLog({
           tool: 'patch_spawn',
           callerChatId,
@@ -3037,12 +3037,12 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         });
         return reply.code(409).send({
           error: 'host_offline',
-          message: `patch_spawn: machine ${host} is not online`,
+          message: `patch_spawn: host ${host} is not online`,
         });
       }
-      // The named machine answers with its OWN outcome (spec/03 § Cross-chat
+      // The named host answers with its OWN outcome (spec/03 § Cross-chat
       // tools). NO FALLBACK: this used to return `created:'remote'` the instant
-      // the frame left, so a machine that refused the spawn — no model
+      // the frame left, so a host that refused the spawn — no model
       // catalogue, unknown folder — reported success to an agent that then
       // orchestrated a chat which did not exist.
       try {
@@ -3120,7 +3120,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
           type: 'patch.spawn',
           sourceChatId: callerChatId,
           // A local `patch_spawn` creates the chat on THIS host. The frame is
-          // the audit record of that, so it names the machine explicitly
+          // the audit record of that, so it names the host explicitly
           // rather than leaving a reader to assume the caller's.
           hostId: opts.daemon!.hostId,
           folder,
@@ -3135,11 +3135,11 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         durationMs: Date.now() - start,
         ok: true,
       });
-      // Names the machine, so the agent can address the new chat afterwards
+      // Names the host, so the agent can address the new chat afterwards
       // without assuming it landed on its own.
       return { chatId, host: selfHostId };
     } catch (err) {
-      // A machine with no model catalogue is its own answer to the agent
+      // A host with no model catalogue is its own answer to the agent
       // (spec/04 § Spawn): it names a model or connects the credential there.
       // Folding it into `sdk_error` would tell the agent to retry the same
       // model-less spawn forever.
@@ -3276,10 +3276,10 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
           },
         ]),
     );
-    // spec/03 § Cross-chat tools — every listed chat names the machine it lives
-    // on, and the list spans the account: only the server sees every machine's
-    // chats, so it is asked. NO FALLBACK to this machine's own chats — a list
-    // that silently omits another machine's chats reads as "there are none".
+    // spec/03 § Cross-chat tools — every listed chat names the host it lives
+    // on, and the list spans the account: only the server sees every host's
+    // chats, so it is asked. NO FALLBACK to this host's own chats — a list
+    // that silently omits another host's chats reads as "there are none".
     if (opts.listAccountChats && q.data.callerChatId !== undefined) {
       const account = await opts.listAccountChats(
         q.data.callerChatId,
@@ -3328,7 +3328,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     }
   });
 
-  // patch_activity — gathered server-side from every machine's chat logs
+  // patch_activity — gathered server-side from every host's chat logs
   // (spec/06 § Cross-chat toolset): no local fallback exists, unlike
   // patch_list_chats's own-host partial view.
   app.get('/internal/activity', async (req, reply) => {
@@ -3415,7 +3415,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       // stopChat is already idempotent (no-op if already idle).
       // We still prefer to surface chat-not-found so callers learn typos.
       if (!opts.daemon!.chatState.has(params.data.id)) {
-        // Not on this machine: relay to whichever machine owns it. NO
+        // Not on this host: relay to whichever host owns it. NO
         // FALLBACK — the owner's refusal (or silence) comes back as the error.
         if (!opts.stopRemoteChat || !callerChatId) throw new ChatNotFoundError(params.data.id);
         await opts.stopRemoteChat({

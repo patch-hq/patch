@@ -1,6 +1,6 @@
 // Works out why a host dropped off (spec/03 § Host health). A host sends a
 // `host.health` report with every heartbeat; the last one, with whether the
-// machine said it was going to sleep, is what explains a `host.offline`.
+// host said it was going to sleep, is what explains a `host.offline`.
 // Nothing here warns anyone that a host is merely busy.
 
 import { BATTERY_FLAT_PERCENT, type HostHealthEvent, type WireEvent } from '@patch/wire';
@@ -19,7 +19,7 @@ interface HostRecord {
 
 export class HostHealthTracker {
   private readonly hosts = new Map<string, HostRecord>();
-  /** When each machine's own desktop app said it was going to sleep; gone again once it wakes. */
+  /** When each host's own desktop app said it was going to sleep; gone again once it wakes. */
   private readonly asleepAt = new Map<string, number>();
   /** Why each host that is down went down, as far as we could tell. */
   private readonly offlineReasons = new Map<string, string>();
@@ -43,7 +43,7 @@ export class HostHealthTracker {
     this.hosts.set(event.hostId, { lastReportAt: this.now(), report: event });
   }
 
-  /** The machine's own desktop app reported going to sleep, or being awake again. */
+  /** The host's own desktop app reported going to sleep, or being awake again. */
   noteAsleep(hostId: string, asleep: boolean): void {
     if (asleep) {
       if (!this.asleepAt.has(hostId)) this.asleepAt.set(hostId, this.now());
@@ -52,7 +52,7 @@ export class HostHealthTracker {
     }
   }
 
-  /** Why a host that is down went down: its last heartbeat, and whether its machine said it slept. */
+  /** Why a host that is down went down: its last heartbeat, and whether its host said it slept. */
   offlineReason(hostId: string): string | undefined {
     return this.offlineReasons.get(hostId);
   }

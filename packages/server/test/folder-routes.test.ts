@@ -42,7 +42,7 @@ describe('folder routes + relay', () => {
       surfaceKind: 'web',
       label: 'browser',
     });
-    // `d1` must be a REGISTERED machine: every host-addressed route refuses an
+    // `d1` must be a REGISTERED host: every host-addressed route refuses an
     // id that is not (spec/04 § Spawn), so a fixture that skipped this would be
     // testing the refusal path instead of the route.
     registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
@@ -139,7 +139,7 @@ describe('folder routes + relay', () => {
         recent: [],
       });
       const ev = await received;
-      // The push names the machine whose filesystem it describes, so a surface
+      // The push names the host whose filesystem it describes, so a surface
       // updates that host's picker group and leaves every other host's alone.
       expect(ev).toMatchObject({ hostId: 'd1', roots: ['/proj/live'], recent: [] });
     } finally {
@@ -216,8 +216,8 @@ describe('GET /api/folders/browse', () => {
       surfaceKind: 'web',
       label: 'browser',
     });
-    // Browsing is host-addressed and refuses an unregistered machine, so the
-    // fixture registers the machine the tests browse (spec/03 § Host events).
+    // Browsing is host-addressed and refuses an unregistered host, so the
+    // fixture registers the host the tests browse (spec/03 § Host events).
     registry.setDaemonKey({ hostId: 'd1', publicKey: user.publicKey, issuedAt: 1 });
     return { registry, jwt };
   }

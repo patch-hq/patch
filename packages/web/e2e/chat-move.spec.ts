@@ -2,11 +2,11 @@ import { test, expect } from '@playwright/test';
 
 // Real-browser e2e (dev harness, real ChatHeader + MoveChatModal + real CSS)
 // for spec/04 § Moving a chat to another host: ⋯ → Move to… opens the dialog,
-// the other machine is chosen with its same-named folder filled in, and Move
+// the other host is chosen with its same-named folder filled in, and Move
 // posts exactly that. The server is stubbed with page.route.
 
 test.describe('move a chat to another host', () => {
-  test('moves chat_md to the other machine, into its folder of the same name', async ({ page }) => {
+  test('moves chat_md to the other host, into its folder of the same name', async ({ page }) => {
     let posted: unknown = null;
     await page.route('**/api/chats/chat_md/move', async (route) => {
       posted = route.request().postDataJSON();

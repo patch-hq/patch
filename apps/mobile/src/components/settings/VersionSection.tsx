@@ -52,7 +52,7 @@ export function formatWhen(iso: string): string {
 
 /**
  * Whether anything is behind — an update downloaded and waiting for a restart,
- * a newer APK than this phone runs, or a host with a host update. Drives the
+ * a newer APK than this phone runs, or a machine with a host update. Drives the
  * pip on the Settings list's Updates row.
  */
 export function useUpdatesBehind(): boolean {

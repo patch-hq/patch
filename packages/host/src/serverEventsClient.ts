@@ -1,4 +1,4 @@
-// The host half of `patch.events.*`: the machine's own CLI tails the account's
+// The host half of `patch.events.*`: the host's own CLI tails the account's
 // event stream through this host's link, so `patch logs` needs no credential of
 // its own. One subscription per CLI stream; the server sends matching events
 // back as `patch.events.event` until it is unsubscribed or the link drops.
@@ -47,7 +47,7 @@ export class ServerEventsClient {
     return true;
   }
 
-  /** The link dropped: the server forgets this machine's subscriptions, so end them all. */
+  /** The link dropped: the server forgets this host's subscriptions, so end them all. */
   endAll(reason: string): void {
     const all = [...this.subs.values()];
     this.subs.clear();

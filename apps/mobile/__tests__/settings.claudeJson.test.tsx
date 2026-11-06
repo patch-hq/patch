@@ -1,5 +1,5 @@
 // Settings → Providers → Claude Code settings.json (spec/02 § Claude Code
-// settings): the picked host's own file. The row says whether the machine has
+// settings): the picked host's own file. The row says whether the host has
 // one; Edit opens it full screen; Save sends `host.claude_settings_set` to that
 // host and the screen closes when the host's fresh snapshot shows the file
 // changed — or shows the host's refusal, in its own words.
@@ -52,7 +52,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('Machine page — settings.json row', () => {
+describe('Host page — settings.json row', () => {
   it('names the host and whether it has a file, and Edit opens the editor for that host', async () => {
     report('{"model":"opus"}');
     const r = render(<HostDetail hostId="d1" />);

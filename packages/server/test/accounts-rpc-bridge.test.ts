@@ -1,5 +1,5 @@
 // A host lists and reorders the shared accounts over the link it already holds
-// (`patch.accounts.request`), and the answer goes back to the asking machine.
+// (`patch.accounts.request`), and the answer goes back to the asking host.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -63,7 +63,7 @@ describe('accounts rpc bridge', () => {
           (s) => s.event.type === 'patch.accounts.response' && s.event.requestId === requestId,
         );
         if (hit) {
-          expect(hit.hostId).toBe('host-1'); // back to the machine that asked
+          expect(hit.hostId).toBe('host-1'); // back to the host that asked
           return hit.event as Res;
         }
         await new Promise((r) => setTimeout(r, 10));

@@ -97,7 +97,7 @@ test('accounts list, order and strategy go over the host socket with no credenti
   });
 });
 
-test('a server call from a host machine is relayed over the host socket, no credential', async () => {
+test('a server call from a host is relayed over the host socket, no credential', async () => {
   await withHostSocket(async ({ seen }) => {
     const { buildTransport } = await import('../src/transport/index.js');
     const { loadConfig } = await import('../src/config.js');

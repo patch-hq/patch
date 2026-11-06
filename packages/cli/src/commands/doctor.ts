@@ -171,9 +171,9 @@ export function registerDoctorCommand(program: Command): void {
         }
         checks['hostOnline'] = hostOnline;
 
-        // --- per-host status (every machine on the account) ---
+        // --- per-host status (every host on the account) ---
         // spec/17: doctor reports per-host status. The probe above only covers
-        // the machine the CLI talks to; the registry lists every host.
+        // the host the CLI talks to; the registry lists every host.
         try {
           const t = buildTransport(config, { forceRest: true });
           const res = await t.get<{
@@ -257,7 +257,7 @@ export function registerDoctorCommand(program: Command): void {
         // --- authentication ---
         // On a machine with a host the CLI is the host's: calls go over its
         // socket and link, so there is no separate credential to expire. Only a
-        // machine with no host needs (and checks) its own credential.
+        // host with no host needs (and checks) its own credential.
         try {
           if (config.hostSocket !== null && config.daemonLocalKey !== null) {
             const t = buildTransport(config, { forceRest: true });

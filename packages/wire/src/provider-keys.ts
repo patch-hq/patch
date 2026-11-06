@@ -3,7 +3,7 @@
 // The paid services the HOST itself calls — hosted voice (Gemini Live, OpenAI
 // Realtime) and Groq's Whisper — each need an API key on the host. They used to
 // come only from the host's environment, so adding one meant editing a file
-// and restarting the machine. Now each host also keeps its own store of them,
+// and restarting the host. Now each host also keeps its own store of them,
 // shared by every host: Settings → Keys is one page for the whole account, and
 // a set/revoke there reaches every host that is online right now, and a key
 // set that way wins over the environment's.

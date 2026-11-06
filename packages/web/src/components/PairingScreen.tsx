@@ -5,7 +5,7 @@
 // redeemed for a credential — like signing in to an Apple device.
 //
 // The very first sign-in has no other device to ask, so a credential token (a
-// JWT from `patch auth bootstrap`, or `patch pair` on a linked machine) can
+// JWT from `patch auth bootstrap`, or `patch pair` on a linked host) can
 // still be pasted. It is validated for shape (isWellFormedCredential) and
 // persisted to localStorage.
 //
@@ -201,7 +201,7 @@ export function PairingScreen({
         <summary>Use a credential token instead</summary>
         <p>
           Run <code>patch auth bootstrap</code> (very first sign-in) or <code>patch pair</code> on a
-          linked machine. It prints a long <strong>credential token</strong>, a JWT starting with{' '}
+          linked host. It prints a long <strong>credential token</strong>, a JWT starting with{' '}
           <code>eyJ…</code>. Paste it below. (Not the short <em>pairing code</em>, which authorises
           a host, not a sign-in.)
         </p>

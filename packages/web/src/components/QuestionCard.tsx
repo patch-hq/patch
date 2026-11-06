@@ -285,7 +285,7 @@ function Footer({
            way out had to be guessed.
 
            The chord is read from the BROWSER, never from a host's `platform`:
-           the machine the agent runs on is routinely not the machine being
+           the host the agent runs on is routinely not the host being
            typed on, and `⌘` names a key a Windows keyboard does not have.
 
            Glyphs are decoration here, `aria-hidden` like `OptionIndicator`, and

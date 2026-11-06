@@ -1,9 +1,9 @@
 // Server-side host-link bridge for `patch.accounts.request` events.
 //
 // A host's own CLI and agents list and reorder the shared accounts through the
-// link the host already holds, so a machine needs no separate login to manage
+// link the host already holds, so a host needs no separate login to manage
 // them. Order and strategy are the server's to change (spec/03 § Settings); the
-// answer goes back to the machine that asked.
+// answer goes back to the host that asked.
 //
 // NO FALLBACK: a refused change is an error reply carrying the service's own
 // code and message, never an empty success.
@@ -42,7 +42,7 @@ export function attachAccountsRpcBridge(opts: AttachAccountsBridgeOptions): () =
     if (fromHostId === null) {
       logger.error(
         { requestId: event.requestId },
-        'accounts-rpc-bridge: request with no originating machine; dropping (cannot route a reply)',
+        'accounts-rpc-bridge: request with no originating host; dropping (cannot route a reply)',
       );
       return;
     }

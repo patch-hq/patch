@@ -2,7 +2,7 @@
 // components).
 //
 // The artifact carries the sidecar SOURCE and nothing that can run it. Pressing
-// Install on Kokoro must therefore end with a machine that can actually speak —
+// Install on Kokoro must therefore end with a host that can actually speak —
 // or with a stated reason it cannot. Never with a component recorded installed
 // on a runtime that will fail at the first voice call.
 
@@ -95,7 +95,7 @@ describe('provisioning a sidecar runtime', () => {
     ]);
   });
 
-  it('runs nothing when the machine already has a FINISHED runtime', async () => {
+  it('runs nothing when the host already has a FINISHED runtime', async () => {
     const run = fakeUv();
     await provisionSidecarRuntime({ sourceDir, venvDir, run, resolveUv: resolveUvTo });
     expect(sidecarRuntimeReady(venvDir)).toBe(true);
@@ -187,7 +187,7 @@ describe('provisioning a sidecar runtime', () => {
 describe('finding uv', () => {
   const installDir = '/patch-home/tools';
 
-  it('uses the machine’s own uv when it has one', async () => {
+  it('uses the host’s own uv when it has one', async () => {
     const run = vi.fn(async () => ({ code: 0, stdout: '', stderr: '' }));
     const found = await resolveUv({
       candidates: ['/nope/uv', '/home/me/.local/bin/uv'],
@@ -199,7 +199,7 @@ describe('finding uv', () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it('installs uv into the patch home when the machine has none', async () => {
+  it('installs uv into the patch home when the host has none', async () => {
     // Pressing Install must not end in "first, go and install uv yourself".
     const present = new Set<string>();
     const run = vi.fn(async () => {

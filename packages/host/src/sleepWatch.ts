@@ -1,4 +1,4 @@
-// Knows whether the machine is properly awake. The sleep guard keeps a Mac
+// Knows whether the host is properly awake. The sleep guard keeps a Mac
 // awake while it can, but a closed lid on battery sleeps regardless, and the
 // Mac then spends the night in short maintenance wakes ("dark wakes") with no
 // display. Work started in one dies when the Mac drops back to sleep, so a
@@ -8,8 +8,8 @@
 // current capabilities, and Graphics is present only in a full wake. That is
 // asked, not guessed — a dark wake that runs long is still a dark wake.
 //
-// Separately, timers do not fire while the machine sleeps, so a tick that lands
-// long after it was due means the machine slept through the gap. A turn that
+// Separately, timers do not fire while the host sleeps, so a tick that lands
+// long after it was due means the host slept through the gap. A turn that
 // failed across such a gap died of the sleep, not of anything it did.
 
 import { execFileSync } from 'node:child_process';
@@ -19,9 +19,9 @@ import type { Logger } from 'pino';
 export interface SleepWatch {
   /** Look at the clock now rather than waiting for the next tick. */
   check(): void;
-  /** Whether the machine has slept at any point after wall-clock `ts`. */
+  /** Whether the host has slept at any point after wall-clock `ts`. */
   sleptSince(ts: number): boolean;
-  /** Whether the machine is in a full wake, not a dark wake. Always true off macOS. */
+  /** Whether the host is in a full wake, not a dark wake. Always true off macOS. */
   isFullyAwake(): boolean;
   dispose(): void;
 }
@@ -73,12 +73,12 @@ export function createSleepWatch(opts: SleepWatchOptions): SleepWatch {
       lastWakeAt = t;
       const sleptMs = t - lastTick;
       if (platform === 'darwin') {
-        opts.logger.info({ sleptMs }, 'sleep watch: machine was asleep');
+        opts.logger.info({ sleptMs }, 'sleep watch: host was asleep');
       } else {
         // A server does not sleep, so a gap here is this process not running:
         // either its event loop was blocked (it used the CPU the whole time) or
         // it was stopped or starved (it used almost none). Say which, with the
-        // machine's load, so the next one is diagnosed from the log rather than
+        // host's load, so the next one is diagnosed from the log rather than
         // guessed at from its symptoms.
         const cpuUsedMs = Math.round(cpu - lastCpu);
         opts.logger.error(

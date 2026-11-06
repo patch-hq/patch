@@ -357,9 +357,7 @@ describe('Voice devices', () => {
     resetHosts();
     const r = renderRN(<VoiceDevicesSection />);
     expect(hasText(r.root, 'Voice devices')).toBe(true);
-    expect(textOf(findHost(r.root, byTestId('voice-devices-no-machines')))).toBe(
-      'Add a machine first',
-    );
+    expect(textOf(findHost(r.root, byTestId('voice-devices-no-hosts')))).toBe('Add a host first');
     expect(queryHost(r.root, byTestId('voice-devices-empty'))).toBeNull();
   });
 
@@ -367,14 +365,14 @@ describe('Voice devices', () => {
     resetHosts();
     usePresenceStore.getState().setHostOnline('silent', true);
     const r = renderRN(<VoiceDevicesSection />);
-    expect(findHost(r.root, byTestId('voice-devices-no-machines'))).toBeTruthy();
+    expect(findHost(r.root, byTestId('voice-devices-no-hosts'))).toBeTruthy();
   });
 
-  it('says how a device is adopted once a machine exists — no code or QR', () => {
+  it('says how a device is adopted once a host exists — no code or QR', () => {
     resetHosts();
     reportHost('d1');
     const r = renderRN(<VoiceDevicesSection />);
-    expect(queryHost(r.root, byTestId('voice-devices-no-machines'))).toBeNull();
+    expect(queryHost(r.root, byTestId('voice-devices-no-hosts'))).toBeNull();
     expect(hasText(findHost(r.root, byTestId('voice-devices-empty')), 'None paired')).toBe(true);
     expect(textOf(findHost(r.root, byTestId('voice-devices-how')))).toBe('patch hosts pair-device');
     expect(queryHost(r.root, byTestId('link-device-qr'))).toBeNull();

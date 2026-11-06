@@ -51,7 +51,7 @@ async function harness() {
   const registry = Registry.load(dir);
   registry.bootstrapAccount({ keypair: ACCOUNT });
   // A phone that has registered for push, and nothing foregrounded on a
-  // computer — the user walked away from the machine, which is the whole case.
+  // computer — the user walked away from the host, which is the whole case.
   registry.registerPushToken({
     surfaceId: 'srf-phone',
     accountId: ACCOUNT.publicKey,
@@ -181,7 +181,7 @@ describe('blocked-on-the-user push, end to end (spec/09 § Waiting on you)', () 
 
   // The inverse of chat completion's rule, and the case the feature is really
   // for: an unattended job stops to ask, and nobody is watching its chat.
-  it('pushes for a machine-started turn — chat completion would not have', async () => {
+  it('pushes for a host-started turn — chat completion would not have', async () => {
     const { app, link, push } = await harness();
     try {
       link.emit(spawned('c1'));
