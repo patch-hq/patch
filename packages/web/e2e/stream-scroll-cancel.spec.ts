@@ -107,6 +107,18 @@ test.describe('scrolling up while a reply streams in', () => {
     // 20 small notches up — ~600px of deliberate scrolling, delivered the way
     // a trackpad delivers it.
     await scrollBy(page, -30, 20);
+    // Wheel scrolling lands asynchronously, so on a loaded machine the view is
+    // still travelling when the last event has been sent. Measure from where
+    // it comes to rest, not from a moment mid-gesture.
+    let previousTop = -1;
+    await expect
+      .poll(async () => {
+        const top = await stream.evaluate((el) => el.scrollTop);
+        const rested = top === previousTop;
+        previousTop = top;
+        return rested;
+      })
+      .toBe(true);
     const afterWheel = await stream.evaluate((el) => el.scrollTop);
     const gapAfterWheel = await stream.evaluate(
       (el) => el.scrollHeight - el.clientHeight - el.scrollTop,
