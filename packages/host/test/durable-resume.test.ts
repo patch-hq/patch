@@ -20,6 +20,7 @@ function host(
   backend: SdkBackend,
   durableTurns: DurableTurnConfig,
   events: unknown[] = [],
+  logger: pino.Logger = silent,
 ) {
   let id = 0;
   const metaStore = createMetaStore(home);
@@ -30,7 +31,7 @@ function host(
     oauthAccessToken: 'fake-token',
     durableTurns,
     emit: (e) => void events.push(e),
-    logger: silent,
+    logger,
     now: () => 1_700_000_000_000,
     generateChatId: () => `chat-${++id}`,
   });
@@ -60,7 +61,11 @@ function leaveTurn(
   return dir;
 }
 
-async function interruptedChat(state: 'live' | 'exited' | 'lost') {
+async function interruptedChat(
+  state: 'live' | 'exited' | 'lost',
+  beforeSecondHost?: (cfg: DurableTurnConfig, chatId: string) => void,
+  logger: pino.Logger = silent,
+) {
   const home = mkdtempSync(join(tmpdir(), 'patch-dres-'));
   const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-dresf-')));
   const cfg: DurableTurnConfig = {
@@ -93,7 +98,8 @@ async function interruptedChat(state: 'live' | 'exited' | 'lost') {
     },
   };
   const secondEvents: unknown[] = [];
-  const second = host(home, secondBackend, cfg, secondEvents);
+  beforeSecondHost?.(cfg, chatId);
+  const second = host(home, secondBackend, cfg, secondEvents, logger);
   second.daemon.hydrate();
   await tick(60);
   return { seen, dir, chatId, cfg, secondEvents };
@@ -211,5 +217,54 @@ describe('resuming a turn that outlived the host', () => {
     await daemon.sendInput({ chatId, message: 'hi', localId: 'L' });
     await tick(30);
     expect(seen[0]?.durableTurn).toBeUndefined();
+  });
+});
+
+describe('a corrupt durable turn file', () => {
+  const capture = () => {
+    const lines: Array<Record<string, unknown>> = [];
+    const logger = pino(
+      { level: 'error' },
+      { write: (l: string) => void lines.push(JSON.parse(l) as Record<string, unknown>) },
+    );
+    return { lines, logger };
+  };
+
+  it('does not stop the healthy resume or the retiring of the other leftovers', async () => {
+    const { lines, logger } = capture();
+    const dead = { pid: 2 ** 22 + 12345, claudePid: null };
+    let bad = '';
+    let good = '';
+    const { seen } = await interruptedChat(
+      'live',
+      (cfg) => {
+        // Sorts before and after: the bad one must not stop the later one.
+        bad = leaveTurn(cfg, 'a-orphan', 'X', 'lost');
+        writeFileSync(join(bad, 'runner.json'), '{"pid": 12');
+        good = leaveTurn(cfg, 'z-orphan', 'Y', 'lost');
+        writeFileSync(join(good, 'runner.json'), JSON.stringify(dead));
+      },
+      logger,
+    );
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.durableTurn?.attach).toBeDefined();
+    expect(existsSync(good)).toBe(false);
+    expect(lines.some((l) => l.chatId === 'a-orphan' && String(l.dir).includes('a-orphan'))).toBe(
+      true,
+    );
+  });
+
+  it("treats that chat's turn as cut off, logging chatId and path", async () => {
+    const { lines, logger } = capture();
+    // 'lost': retiring a 'live' fixture would SIGTERM this test process.
+    const { seen, chatId } = await interruptedChat(
+      'lost',
+      (cfg, id) => writeFileSync(join(cfg.turnsDir, id, 'turn.json'), '{trunc'),
+      logger,
+    );
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.prompt).toBe(interruptedTurnResend(INTERRUPTED_TURN_REMINDER, 'running'));
+    expect(seen[0]?.durableTurn?.attach).toBeUndefined();
+    expect(lines.some((l) => l.chatId === chatId && String(l.dir).includes(chatId))).toBe(true);
   });
 });
