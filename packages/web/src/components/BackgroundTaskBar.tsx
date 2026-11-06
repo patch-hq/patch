@@ -70,26 +70,16 @@ function formatClock(ms: number): string {
   return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
-/** Silence after which a running row is flagged — matches the host's nudge to the agent. */
-const QUIET_AFTER_MS = 60 * 60 * 1000;
-
-/** The task's last output line, or a warning when it has gone quiet for a long time. */
-function ProgressLine({ task, now }: { task: WatchTaskRow; now: number }): JSX.Element | null {
-  const quietMs = now - Math.max(task.startedAt, task.lastOutputAt ?? 0);
-  const quiet = quietMs >= QUIET_AFTER_MS;
-  if (!quiet && task.lastLine === undefined) return null;
-  const text = quiet
-    ? `no output for ${Math.floor(quietMs / QUIET_AFTER_MS)}h${task.lastLine ? ` · ${task.lastLine}` : ''}`
-    : task.lastLine;
-  const shownText = `· ${text}`;
+/** The task's last output line. Quiet is normal for a waiter, so silence is never flagged. */
+function ProgressLine({ task }: { task: WatchTaskRow }): JSX.Element | null {
+  if (task.lastLine === undefined) return null;
   return (
     <span
       className="status-muted status-grow"
       data-testid="background-task-bar-progress"
-      data-quiet={quiet ? 'true' : 'false'}
       title={task.lastLine}
     >
-      {shownText}
+      {`· ${task.lastLine}`}
     </span>
   );
 }
@@ -308,7 +298,12 @@ export function BackgroundTaskBar({ chatId }: { chatId: string }): JSX.Element |
           <span className="status-grow" data-testid="background-task-bar-description">
             {task.description}
           </span>
-          {ended ? null : <ProgressLine task={task} now={now} />}
+          {task.killed ? (
+            <span className="status-killed" data-testid="background-task-bar-killed">
+              killed
+            </span>
+          ) : null}
+          {ended ? null : <ProgressLine task={task} />}
         </StatusRow>
         {editingCheckIn === task.taskId ? (
           <StatusRow nested>

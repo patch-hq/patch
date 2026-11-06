@@ -6432,6 +6432,8 @@ export const WatchTaskRow = z
     /** The limit the host enforces; the bar shows elapsed against it. */
     timeoutSec: z.number().int().positive().optional(),
     timedOut: z.boolean().optional(),
+    /** The process vanished with no exit code (host or machine restart) and was not re-run. */
+    killed: z.boolean().optional(),
     /** The task's last non-empty output line, shown in the bar as its progress. */
     lastLine: z.string().optional(),
     /** Minutes between check-ins to the owning agent, and when the next one is due (running tasks). */

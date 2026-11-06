@@ -21,7 +21,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
-import { MAX_WATCH_RESTARTS, WatchScheduler, readProgress } from '../src/watch.js';
+import { WatchScheduler, readProgress } from '../src/watch.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -223,15 +223,16 @@ describe('WatchScheduler — survives a host restart', () => {
     try {
       schedulerB.loadAll(); // logs only — nothing to arm, per the class comment
       expect(schedulerB.list('c-restart')[0]?.status).toBe('running');
-      // The host restart killed it: no exit sidecar was written, so B re-runs it.
+      // The host restart killed it: no exit sidecar was written. B marks it killed and does NOT re-run it.
       process.kill(-rec.pid, 'SIGKILL');
       await flushUntil(() => depsB.delivered.length > 0);
-      expect(depsB.delivered[0]!.message).toMatch(/^\[watch\].*started again/);
+      expect(depsB.delivered[0]!.message).toMatch(
+        /^\[watch\].*killed because the host restarted.*NOT been re-run/s,
+      );
       const after = schedulerB.list('c-restart')[0];
-      expect(after?.status).toBe('running');
-      expect(after?.restarts).toBe(1);
-      expect(after?.pid).not.toBe(rec.pid);
-      process.kill(-after!.pid, 'SIGKILL');
+      expect(after?.status).toBe('failed');
+      expect(after?.killed).toBe(true);
+      expect(after?.pid).toBe(rec.pid);
     } finally {
       schedulerB.dispose();
     }
@@ -460,41 +461,68 @@ describe('WatchScheduler — timeout, progress and stall nudge', () => {
       const after = schedulerB.list('c-done')[0];
       expect(after?.status).toBe('failed');
       expect(after?.exitCode).toBe(3);
-      expect(after?.restarts).toBeUndefined();
+      expect(after?.killed).toBeUndefined();
     } finally {
       schedulerB.dispose();
     }
   });
 
-  it('gives up after MAX_WATCH_RESTARTS interruptions instead of looping forever', async () => {
+  it('names a reboot as the cause and includes the last output lines', async () => {
     const depsA = makeDeps();
     const schedulerA = mkScheduler(depsA);
     const rec = schedulerA.start({
-      chatId: 'c-cap',
-      command: 'sleep 30',
-      description: 'always interrupted',
+      chatId: 'c-boot',
+      command: 'echo hello-tail; sleep 30',
+      description: 'killed by reboot',
       timeoutSec: 600,
       cwd: depsA.home,
     });
     schedulerA.dispose();
+    await flushUntil(() => readProgress(rec.outputFile).lastLine === 'hello-tail');
     process.kill(-rec.pid, 'SIGKILL');
-    const dir = join(depsA.home, 'c-cap', 'watch');
-    writeFileSync(
-      join(dir, `${rec.taskId}.json`),
-      JSON.stringify({ ...rec, restarts: MAX_WATCH_RESTARTS }),
-    );
     const depsB = makeDeps({
       home: depsA.home,
       dirForChat: depsA.dirForChat,
-      allChatIds: () => ['c-cap'],
+      allChatIds: () => ['c-boot'],
+      bootTime: () => Date.now() + 1000,
     });
     const schedulerB = mkScheduler(depsB);
     try {
       await flushUntil(() => depsB.delivered.length > 0);
-      expect(depsB.delivered[0]!.message).toMatch(/interrupted by host restarts/);
-      expect(schedulerB.list('c-cap')[0]?.status).toBe('failed');
+      const msg = depsB.delivered[0]!.message;
+      expect(msg).toMatch(/rebooted/);
+      expect(msg).toContain('hello-tail');
+      expect(msg).toContain('echo hello-tail; sleep 30');
     } finally {
       schedulerB.dispose();
+    }
+  });
+
+  it('does not wait forever on an unrelated process that inherited the saved pid', async () => {
+    const depsA = makeDeps();
+    const schedulerA = mkScheduler(depsA);
+    const rec = schedulerA.start({
+      chatId: 'c-reuse',
+      command: 'sleep 30',
+      description: 'pid reused',
+      timeoutSec: 600,
+      cwd: depsA.home,
+    });
+    schedulerA.dispose();
+    // The pid is still alive, but its start time is not the one recorded.
+    const depsB = makeDeps({
+      home: depsA.home,
+      dirForChat: depsA.dirForChat,
+      allChatIds: () => ['c-reuse'],
+      processStart: () => 'Thu Jan  1 00:00:00 1970',
+    });
+    const schedulerB = mkScheduler(depsB);
+    try {
+      await flushUntil(() => depsB.delivered.length > 0);
+      expect(schedulerB.list('c-reuse')[0]?.killed).toBe(true);
+    } finally {
+      schedulerB.dispose();
+      process.kill(-rec.pid, 'SIGKILL');
     }
   });
 });
