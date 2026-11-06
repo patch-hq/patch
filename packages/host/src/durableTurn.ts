@@ -37,10 +37,11 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  copyFileSync,
   writeFileSync,
 } from 'node:fs';
 import { connect, type Socket } from 'node:net';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import type { SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
 import { linkUserConfigIntoChatDir } from './claudeSpawn.js';
@@ -171,6 +172,23 @@ export function listTurnDirs(config: DurableTurnConfig): string[] {
   return readdirSync(config.turnsDir, { withFileTypes: true })
     .filter((d) => d.isDirectory())
     .map((d) => d.name);
+}
+
+const KEPT_LOGS = 20;
+
+/**
+ * A turn directory is deleted when its turn ends, and runner.log with it. When
+ * the turn ended abnormally that log is the only record of why, so copy it to
+ * `turn-failures/` beside the turns directory first (newest 20 kept).
+ */
+export function keepRunnerLog(dir: string, reason: string): void {
+  const log = join(dir, RUNNER_LOG);
+  if (!existsSync(log)) return;
+  const dest = join(dirname(dirname(dir)), 'turn-failures');
+  mkdirSync(dest, { recursive: true });
+  copyFileSync(log, join(dest, `${Date.now()}-${basename(dir)}-${reason}.log`));
+  const old = readdirSync(dest).sort().slice(0, -KEPT_LOGS);
+  for (const f of old) rmSync(join(dest, f), { force: true });
 }
 
 /**
@@ -330,6 +348,7 @@ export class DurableTurn {
         { chatId: this.chatId, dir: this.dir },
         'durable turn: a previous turn of this chat was still on disk; ending it',
       );
+      keepRunnerLog(this.dir, 'leftover');
       retireTurn(this.dir);
     }
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
@@ -446,6 +465,7 @@ export class DurableTurn {
     const timer = setTimeout(() => {
       if (!this.ownsDir()) return;
       this.req.log.warn({ chatId: this.chatId }, 'durable turn: runner did not exit; retiring it');
+      keepRunnerLog(this.dir, 'unresponsive');
       retireTurn(this.dir);
     }, 5000);
     timer.unref();
@@ -462,6 +482,7 @@ export class DurableTurn {
   }
 
   private removeDirIfOwned(): void {
+    if (this.ownsDir() && this.proc?.failure) keepRunnerLog(this.dir, 'failed');
     if (this.ownsDir()) rmSync(this.dir, { recursive: true, force: true });
   }
 
@@ -784,9 +805,12 @@ class RunnerProcess extends EventEmitter implements SpawnedProcess {
     setImmediate(() => this.emit('exit', code, signal));
   }
 
+  failure: string | undefined;
+
   fail(err: Error): void {
     if (this.finished) return;
     this.finished = true;
+    this.failure = err.message;
     this.turn.logger.error({ chatId: this.turn.chatId, err: err.message }, 'durable turn failed');
     // The SDK listens for this from the moment it spawns; after it has let go
     // there is no one to tell but the log.

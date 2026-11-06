@@ -3,7 +3,14 @@
 // that comes up after a restart.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
@@ -226,6 +233,31 @@ describe('a durable turn', () => {
     await d2.exited;
     second.release();
     expect(existsSync(second.dir)).toBe(false);
+  }, 30000);
+
+  it('keeps runner.log when the runner dies without reporting claude exit', async () => {
+    const { cfg, cwd } = fresh();
+    const turn = new DurableTurn({ config: cfg, chatId: 'c7', localId: 'L7', log });
+    const proc = turn.spawn({ ...spawnOpts, cwd });
+    proc.on('error', () => undefined);
+    const d = drive(proc);
+    d.send(initialize('r1'));
+    d.send(prompt);
+    await d.until(() => texts(d.lines).includes('a1'), 'a1');
+    const info = JSON.parse(readFileSync(join(turn.dir, 'runner.json'), 'utf8')) as {
+      pid: number;
+      claudePid: number;
+    };
+    writeFileSync(join(turn.dir, 'runner.log'), 'runner stderr marker\n');
+    process.kill(info.pid, 'SIGKILL');
+    await sleep(300);
+    turn.release();
+    await sleep(6000);
+    expect(existsSync(turn.dir)).toBe(false);
+    const kept = join(root, 'turn-failures');
+    const files = readdirSync(kept);
+    expect(files).toHaveLength(1);
+    expect(readFileSync(join(kept, files[0] as string), 'utf8')).toContain('runner stderr marker');
   }, 30000);
 
   it('retireTurn ends a runner and claude and removes the directory', async () => {
