@@ -501,6 +501,9 @@ export function Composer({
   const slashQuery = activeToken?.query ?? null;
   const slashActive = activeToken !== null;
   const trimmedFolder = (folder ?? '').trim();
+  // A new chat has no row yet — its host is the setup's pick (same rule as
+  // `usageHostId`); reading `row?.hostId` alone left the `/` list never loading.
+  const skillsHostId = setup ? setup.hostId : (row?.hostId ?? null);
   React.useEffect(() => {
     // Re-read on EVERY open, not once per folder: the list lives on the host's
     // filesystem and changes there must show up on the next `/`. Typing more of
@@ -508,10 +511,10 @@ export function Composer({
     // last loaded list stays on screen while the new one is in flight. NO
     // FALLBACK: a failed fetch surfaces an error rather than a silently empty
     // list.
-    if (!slashActive || trimmedFolder === '' || !row?.hostId) return;
+    if (!slashActive || trimmedFolder === '' || !skillsHostId) return;
     let live = true;
     void api
-      .skills(trimmedFolder, row.hostId)
+      .skills(trimmedFolder, skillsHostId)
       .then((r) => {
         if (!live) return;
         setSkills(r.skills ?? []);
@@ -525,7 +528,7 @@ export function Composer({
     return () => {
       live = false;
     };
-  }, [slashActive, trimmedFolder, row?.hostId]);
+  }, [slashActive, trimmedFolder, skillsHostId]);
   // spec/15 § Skill autocomplete — chips: a completed `/<skill>` must be
   // recognised (and rendered as a chip, with its preview reachable) even
   // before `/` has ever been opened this session — e.g. reopening a chat
@@ -538,12 +541,12 @@ export function Composer({
   // packages/web/src/components/Composer.tsx's identical guard for why).
   const chipFetchPrimedRef = React.useRef<string | null>(null);
   React.useEffect(() => {
-    if (trimmedFolder === '' || slashActive || !row?.hostId) return;
+    if (trimmedFolder === '' || slashActive || !skillsHostId) return;
     if (chipFetchPrimedRef.current === trimmedFolder) return;
     if (!draft.includes('/')) return;
     let live = true;
     void api
-      .skills(trimmedFolder, row.hostId)
+      .skills(trimmedFolder, skillsHostId)
       .then((r) => {
         if (!live) return;
         chipFetchPrimedRef.current = trimmedFolder;
@@ -556,7 +559,7 @@ export function Composer({
     return () => {
       live = false;
     };
-  }, [trimmedFolder, draft, slashActive, row?.hostId]);
+  }, [trimmedFolder, draft, slashActive, skillsHostId]);
   // The skill last completed in this folder sorts to the top (spec/15 § Skill
   // autocomplete) — ordering only, applied AFTER the typed prefix filter.
   const filteredSkills =
