@@ -1176,7 +1176,12 @@ export class GeminiLiveSession implements VoiceSessionLike {
     this.sendFrame(
       {
         clientContent: {
-          turns: [{ role: 'user', parts: [{ text: liveNote(role, text) }] }],
+          turns: [
+            {
+              role: 'user',
+              parts: [{ text: liveNote(role, text, { handoffRunning: this.isAwaitingHandoff() }) }],
+            },
+          ],
           turnComplete: false,
         },
       },

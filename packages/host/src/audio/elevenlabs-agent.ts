@@ -60,6 +60,8 @@ import {
 import {
   chatBriefing,
   liveNote,
+  isNoiseTranscript,
+  RESULT_GIST_NOTE,
   withBriefing,
   LOOK_BACK_DESCRIPTION,
   LOOK_BACK_RULE,
@@ -576,6 +578,12 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     this.suppressReply = false;
     this.endAudio(false);
     this.replyTextIn = false;
+    if (isNoiseTranscript(text)) {
+      // ElevenLabs transcribes noise as "..." — not a turn, not a bubble, and the voice's
+      // answer to it is dropped (as in gemini-live.ts).
+      this.suppressReply = true;
+      return;
+    }
     const addressed =
       !modeRequiresAddress(this.mode) ||
       text.length === 0 ||
@@ -590,7 +598,6 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
       text,
       ...(addressed ? {} : { addressed: false }),
     });
-    if (text.length === 0) return;
     if (!addressed) {
       // Heard, not for us: never a turn, and the agent's answer to it is dropped.
       this.suppressReply = true;
@@ -605,7 +612,7 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     this.replyTextIn = true;
     this.armQuiet();
     const text = raw.replace(AUDIO_TAG, '').trim();
-    if (this.suppressReply || text === '') return;
+    if (this.suppressReply || isNoiseTranscript(text)) return;
     // What the voice said is written too, apart from the agent's own message in the chat.
     const reply: VoiceReplyWriter = this.deps.timeline.beginReply(this.currentChatId);
     reply.append(text);
@@ -747,7 +754,7 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     }
     if (this.closed || this.fatal) return;
     // The agent speaks the answer once it has this.
-    this.toolResult(callId, result, isError);
+    this.toolResult(callId, isError ? result : `${RESULT_GIST_NOTE}${result}`, isError);
   }
 
   // --- other VoiceSessionLike surface ------------------------------------------
@@ -755,7 +762,10 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
   pushContext(role: 'user' | 'assistant', text: string): void {
     if (this.closed || !this.setupDone) return;
     // `contextual_update` informs the agent without prompting a reply.
-    this.sendJson({ type: 'contextual_update', text: liveNote(role, text) });
+    this.sendJson({
+      type: 'contextual_update',
+      text: liveNote(role, text, { handoffRunning: this.dispatchesInFlight > 0 }),
+    });
   }
 
   /** Not a note engine — this class only backs `role: 'voice-call'` (audio/server.ts). */
