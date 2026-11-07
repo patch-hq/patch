@@ -42,9 +42,18 @@ if [ "$ARTIFACT_TARGET" != "$HOST_TARGET" ]; then
   exit 65
 fi
 
-if [ ! -x "$DIR/node" ]; then
-  echo "patch install: $DIR/node is missing or not executable — the artifact is incomplete" >&2
+# On macOS the runtime must be run from inside its signed Patch Host.app: the
+# bundle's signature seals its Info.plist, so the same binary reached through
+# the top-level `node` hard link fails validation and macOS SIGKILLs it (137).
+if [ "$OS" = darwin ]; then
+  NODE="$DIR/Patch Host.app/Contents/MacOS/patch-host"
+else
+  NODE="$DIR/node"
+fi
+
+if [ ! -x "$NODE" ]; then
+  echo "patch install: $NODE is missing or not executable — the artifact is incomplete" >&2
   exit 65
 fi
 
-exec "$DIR/node" "$DIR/install.mjs" "$@"
+exec "$NODE" "$DIR/install.mjs" "$@"

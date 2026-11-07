@@ -107,7 +107,7 @@ describe('ChatRoute — /remind command + reminder banner', () => {
 
     expect(useChatStore.getState().chats['c1']?.reminder).toBe('Do not touch the prod database');
     await waitFor(() => {
-      expect(api.setReminder).toHaveBeenCalledWith('c1', 'Do not touch the prod database');
+      expect(api.setReminder).toHaveBeenCalledWith('c1', 'Do not touch the prod database', null);
     });
     expect(screen.getByTestId('reminder-banner')).toHaveTextContent(
       'Do not touch the prod database',
@@ -126,9 +126,36 @@ describe('ChatRoute — /remind command + reminder banner', () => {
 
     expect(useChatStore.getState().chats['c1']?.reminder).toBe(null);
     await waitFor(() => {
-      expect(api.setReminder).toHaveBeenCalledWith('c1', null);
+      expect(api.setReminder).toHaveBeenCalledWith('c1', null, null);
     });
     expect(screen.queryByTestId('reminder-banner')).not.toBeInTheDocument();
+  });
+
+  it('`/remind every 10 turns <text>` sets a cadence and the banner shows it', async () => {
+    seed(null);
+    renderChat();
+    typeAndSend('/remind every 10 turns Hold to the principles');
+    await waitFor(() => {
+      expect(api.setReminder).toHaveBeenCalledWith('c1', 'Hold to the principles', {
+        unit: 'turns',
+        n: 10,
+      });
+    });
+    expect(screen.getByTestId('reminder-banner-every')).toHaveTextContent('every 10 turns');
+  });
+
+  it('a plain reminder shows no cadence label', () => {
+    seed('plain');
+    renderChat();
+    expect(screen.queryByTestId('reminder-banner-every')).not.toBeInTheDocument();
+  });
+
+  it('a cadence with no text is refused with a toast and nothing is set', () => {
+    seed(null);
+    renderChat();
+    typeAndSend('/remind every 10 turns');
+    expect(api.setReminder).not.toHaveBeenCalled();
+    expect(useUiStore.getState().errors.length).toBeGreaterThan(0);
   });
 
   it('the banner clear (×) control clears the reminder', async () => {

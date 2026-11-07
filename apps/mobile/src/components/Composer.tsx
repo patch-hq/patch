@@ -161,6 +161,7 @@ import { startDictation, warmDictation, type DictationHandle } from '../lib/dict
 import { dictationEngineFor } from '../lib/dictationEngine';
 import { startDictationMode, type DictationModeHandle } from '../lib/dictationMode';
 import { markDictatedSend } from '../lib/dictatedSends';
+import { useMicLevelStore } from '../stores/micLevelStore';
 import { voiceKeyRefusal } from '../lib/voiceKeys';
 import { usePresenceStore } from '../stores/presenceStore';
 import { accountsOutage } from '../lib/usage';
@@ -1474,8 +1475,9 @@ export function Composer({
       hostId: row?.hostId ?? null,
       goal: row?.goal ?? null,
       reminder: row?.reminder ?? null,
+      reminderEvery: row?.reminderEvery ?? null,
       setGoal: (g) => useChatStore.getState().setGoal(chatId, g),
-      setReminder: (r) => useChatStore.getState().setReminder(chatId, r),
+      setReminder: (r, every) => useChatStore.getState().setReminder(chatId, r, every),
       clearTimeline: () => useChatStore.getState().clearTimeline(chatId),
       chooseModel,
       pushError: (m) => useUiStore.getState().pushError(m),
@@ -1804,6 +1806,8 @@ export function Composer({
           </ScrollView>
         </View>
       ) : null}
+
+      {micState === 'recording' || dictModeOn ? <DictationLevelBar color={colors.red} /> : null}
 
       {/* Listening strip (spec/15 § Composer): with the keyboard away, this is
           what says the mic is live — a pulsing dot, the state named, and how
@@ -2419,6 +2423,35 @@ export function Composer({
         paths={skillPaths}
         hostId={row?.hostId ?? ''}
         onClose={() => setPreviewSkill(null)}
+      />
+    </View>
+  );
+}
+
+/** Thin live meter of the mic level while dictating, so the composer feels live as you speak. */
+function DictationLevelBar({ color }: { color: string }): React.ReactElement {
+  const level = useMicLevelStore((s) => s.level);
+  const colors = useTheme();
+  return (
+    <View
+      testID="dictation-level"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={{
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: colors.divider,
+        overflow: 'hidden',
+        marginHorizontal: space.xs,
+      }}
+    >
+      <View
+        testID="dictation-level-fill"
+        style={{
+          height: 4,
+          width: `${Math.round(level * 100)}%`,
+          backgroundColor: color,
+        }}
       />
     </View>
   );

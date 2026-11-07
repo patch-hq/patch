@@ -8,6 +8,8 @@ import { describe, it, expect } from 'vitest';
 import { usePresenceStore } from '../src/stores/presenceStore';
 import {
   connectionDotColor,
+  hostsDown,
+  hostsDownSummary,
   offlineBannerText,
   hostOfflineBannerText,
   hostControlsDisabled,
@@ -68,6 +70,30 @@ describe('connectionDotColor — WS link only', () => {
   it('red once a connect attempt has failed, or the credential was refused', () => {
     expect(connectionDotColor('offline', colors)).toBe(colors.red);
     expect(connectionDotColor('unauthenticated', colors)).toBe(colors.red);
+  });
+});
+
+describe('connectionDotColor — a known host offline', () => {
+  const h = (hostId: string, online: boolean, lastSeenAt: number | null) => ({
+    hostId,
+    online,
+    lastSeenAt,
+    host: null,
+    accounts: {},
+  });
+  it('amber when connected and a host is down', () => {
+    expect(connectionDotColor('connected', colors, true)).toBe(colors.amber);
+    expect(connectionDotColor('connected', colors, false)).toBe(colors.leaf);
+  });
+  it('does not count a never-connected host as down', () => {
+    expect(hostsDown({ a: h('a', false, null), b: h('b', true, 1) })).toEqual([]);
+    expect(hostsDownSummary({ a: h('a', false, null) })).toBeNull();
+  });
+  it('lists each down host with last seen', () => {
+    const t = new Date(2026, 10, 7, 14, 7).getTime();
+    expect(hostsDownSummary({ a: h('mac', false, t), b: h('box', true, 1) })).toBe(
+      'mac: offline, last seen 14:07',
+    );
   });
 });
 

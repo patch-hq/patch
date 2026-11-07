@@ -235,6 +235,8 @@ Refusing instead — marking the chat `errored` and waiting for the user to re-s
 
 An invalid (unresumable) session id is cleared the same way, rather than hanging on a phantom resume.
 
+A chat whose folder no longer exists is found at host start and flagged `folderMissing` in its own `meta.json`. An archived or deleted chat is flagged quietly: no per-start warning, no status change, nothing returns to the active list. Any other chat is also marked `errored` with `folder_missing`, so the reason input fails is visible before the user types. The flag clears when the folder is back.
+
 ## Moving a chat to another host
 
 A chat can be moved to another host, into a folder on that host — usually
@@ -384,6 +386,14 @@ A per-chat goal: a condition the user states once, which Patch itself then judge
 - **Visibility is the point** (`14-design-web.md` § Goal bar, `15-design-mobile.md`): a bar above the chat while a goal is active (condition, running time, turns evaluated, tokens spent, the evaluator's latest reason, Edit/Clear); a sidebar marker on a chat working toward one; each `not_met` verdict a collapsed transcript row naming the reason (the `goalTrigger` turn itself); a `met`/`impossible` outcome its own quiet row; the chat header keeps `lastGoal` reachable after it finishes.
 - **Jobs** (`08-triggers-and-jobs.md` § Action): a `spawn`/`continue` action's optional `goal` sets the new chat's goal at creation, forwarded on `chat.spawn_request`. Creation-time only, like `startHidden`/`permissionMode` — a later fire into an existing chat never touches its goal.
 - **Tools** (`06-threads-manager-speakers.md` § Tools): `patch_goal_set(condition)`, `patch_goal_get()`, `patch_goal_clear()` — set/read/clear THIS chat's goal from inside a running turn, over the same `/internal/goal` UDS route the composer's request uses.
+
+## Reminders
+
+A chat carries one reminder: free text set from any surface's composer with `/remind <text>` (a bare `/remind` clears it), shown as a banner above the transcript, and persisted in `meta.json` with the rest of the chat's settings. On its own it is only a banner; the agent is never told.
+
+`/remind every <n> <unit> <text>` makes it periodic, where `<unit>` is `turns`, or `m`/`min`/`minutes`, or `h`/`hours` (hours are stored as minutes). The host then re-injects the text into the agent's prompt as a leading `<system-reminder>` block, so a standing principle does not scroll out of its attention: every `n`th agent turn for `turns`, or on the first turn that starts at least `n` minutes after the last injection (or after the reminder was set) for `minutes`. A turn here is any prompt the host assembles for the agent, whoever sent it (a person, a job tick, a wake). The counters are in memory: setting or changing the reminder restarts them, and so does a host restart, but the text and cadence persist. The injection is disclosed in the transcript as system context labelled `Reminder` (`02-host.md` § System-reminder disclosure).
+
+Wire: `chat.reminder_request { chatId, reminder, every? }` with `every: { unit: 'turns' | 'minutes', n }` (n an integer from 1 to 10000), echoed on `chat.state` as `reminder` and `reminderEvery` (`null` for a plain or cleared reminder; a cleared reminder always drops its cadence). A cadence with no text is refused on the surface with an error, not guessed at. The banner shows the cadence ("every 10 turns") beside the text.
 
 ## Branching (edit / fork a message)
 

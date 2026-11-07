@@ -15,6 +15,7 @@ function deps(over: Partial<SlashDeps> = {}) {
     hostId: 'home' as string | null,
     goal: 'old goal' as string | null,
     reminder: 'old reminder' as string | null,
+    reminderEvery: null,
     setGoal: vi.fn(),
     setReminder: vi.fn(),
     clearTimeline: vi.fn(),
@@ -81,14 +82,32 @@ describe('slash commands', () => {
   it('/remind sets, clears, and reverts on failure — never sent as a turn', async () => {
     const d = deps();
     expect(runSlashCommand('/remind call mum', d)).toEqual({ handled: true });
-    expect(d.api.setReminder).toHaveBeenCalledWith('c1', 'call mum');
+    expect(d.api.setReminder).toHaveBeenCalledWith('c1', 'call mum', null);
     runSlashCommand('/remind', d);
-    expect(d.api.setReminder).toHaveBeenLastCalledWith('c1', null);
+    expect(d.api.setReminder).toHaveBeenLastCalledWith('c1', null, null);
     d.api.setReminder.mockRejectedValue(new Error('bad'));
     runSlashCommand('/remind again', d);
     await tick();
-    expect(d.setReminder).toHaveBeenLastCalledWith('old reminder');
+    expect(d.setReminder).toHaveBeenLastCalledWith('old reminder', null);
     expect(d.pushError).toHaveBeenCalledWith('setting reminder failed: bad');
+  });
+
+  it('/remind every <n> turns|min sets a cadence, and a cadence without text is refused', () => {
+    const d = deps();
+    runSlashCommand('/remind every 10 turns stick to the principles', d);
+    expect(d.api.setReminder).toHaveBeenLastCalledWith('c1', 'stick to the principles', {
+      unit: 'turns',
+      n: 10,
+    });
+    runSlashCommand('/remind every 30m check in', d);
+    expect(d.api.setReminder).toHaveBeenLastCalledWith('c1', 'check in', {
+      unit: 'minutes',
+      n: 30,
+    });
+    const calls = d.api.setReminder.mock.calls.length;
+    runSlashCommand('/remind every 5 turns', d);
+    expect(d.api.setReminder.mock.calls.length).toBe(calls);
+    expect(d.pushError).toHaveBeenCalledWith(expect.stringContaining('needs text'));
   });
 
   it('/loop arms, cancels, rejects an incomplete arm, and reports failures', async () => {

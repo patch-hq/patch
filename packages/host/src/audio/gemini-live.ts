@@ -254,6 +254,14 @@ const NO_FALSE_CLAIMS =
   'sentences; the user will ask if they want more. The transcript marks audio with no speech as ' +
   '<noise> or leaves it empty: that is silence, not a request — say nothing and invent nothing.\n\n';
 
+const GENERAL_QUESTION_RULE =
+  'The conversation is not your only source: a general factual question ("when would I use X ' +
+  'rather than Y?") is answered from your own knowledge. If you are not sure of the answer, or ' +
+  `it needs looking up, call ${DISPATCH_TOOL_NAME} at once. Never say you have nothing in the ` +
+  'chat history or a "knowledge base", never ask the user for more context before trying, and ' +
+  'never ask whether they want you to look it up or pass it to the agent — just do one. If a ' +
+  'request is already with the agent, do not offer or ask about handing it off again.\n\n';
+
 const NEVER_GUESS =
   'Never guess. Anything about their files, folders, tasks, calendar, devices or any other ' +
   "real data must come from the agent's result — never make up file names, contents or " +
@@ -319,6 +327,7 @@ export function hostedVoiceInstruction(handoff: VoiceHandoff, asyncResult = fals
     'search. When the user needs something only the agent has — their data, files, a tool, an ' +
     'action, or real work — ' +
     `call ${DISPATCH_TOOL_NAME} with a clear description of what is needed. ` +
+    GENERAL_QUESTION_RULE +
     (asyncResult ? ASYNC_WAIT_RULE : WAIT_RULE) +
     NO_FALSE_CLAIMS +
     NEVER_GUESS

@@ -47,6 +47,7 @@ const MAY_FALL_BACK: Record<string, string> = {
     'set on <html> by AppShell only while the desktop web panel is open; 0px otherwise',
   '--wave-level': 'written per element by Waveform.tsx; the bars need a resting value',
   '--wave-envelope': 'written per element by Waveform.tsx; the bars need a resting value',
+  '--level': 'written per element by LevelBar.tsx; the fill needs a resting value of empty',
 };
 
 /** Every `--x:` declaration, and the selector block it sits in. */

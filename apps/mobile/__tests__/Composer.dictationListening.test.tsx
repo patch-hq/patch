@@ -235,3 +235,21 @@ describe('Composer — dictation shown inside the input', () => {
     expect(queryHost(r.root, byTestId('dictation-preview'))).toBeNull();
   });
 });
+
+describe('Composer — the level bar follows the mic while dictating', () => {
+  it('is absent until dictation starts, then fills with the mic level', async () => {
+    const { useMicLevelStore } = await import('../src/stores/micLevelStore');
+    useMicLevelStore.getState().reset();
+    const { factory } = makeFactory();
+    const r = renderRN(<Composer chatId="c1" dictationFactory={factory} />);
+    expect(queryHost(r.root, byTestId('dictation-level'))).toBeNull();
+    await actAsync(() => mic(r)['onPress']!());
+    const width = (): unknown =>
+      (findHost(r.root, byTestId('dictation-level-fill')).props.style as { width: string }).width;
+    expect(width()).toBe('0%');
+    await actAsync(() => {
+      useMicLevelStore.getState().push(new Int16Array(160).fill(12000));
+    });
+    expect(width()).not.toBe('0%');
+  });
+});

@@ -192,6 +192,14 @@ export function buildGoalSystemReminder(goal: string | null): string {
 }
 
 /**
+ * The recurring `<system-reminder>` carrying the chat's own reminder text
+ * (spec/04 § Reminders), re-injected on the chat's cadence.
+ */
+export function buildPeriodicReminder(text: string): string {
+  return `<system-reminder>\nReminder set on this chat by the user, repeated periodically:\n${text}\n</system-reminder>\n\n`;
+}
+
+/**
  * The `<system-reminder>` that tells the agent its chat was hidden or shown
  * (spec/04 § Hidden), prefixed onto its next turn like a permission-mode
  * change is surfaced: the agent keeps working either way, it just knows

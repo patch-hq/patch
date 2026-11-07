@@ -62,6 +62,20 @@ describe('composer dictation mode', () => {
     expect(onSend).toHaveBeenCalledWith('hello there', undefined, undefined, { dictated: true });
   });
 
+  it('shows a level bar that follows the mic while dictating, and none before', () => {
+    mount();
+    expect(screen.queryByTestId('dictation-level')).toBeNull();
+    keepDictating();
+    expect(screen.getByTestId('dictation-level').getAttribute('data-level')).toBe('0.00');
+    act(() => cb.onLevel?.(1));
+    const loud = Number(screen.getByTestId('dictation-level').getAttribute('data-level'));
+    expect(loud).toBeGreaterThan(0.5);
+    act(() => cb.onLevel?.(0));
+    const after = Number(screen.getByTestId('dictation-level').getAttribute('data-level'));
+    expect(after).toBeLessThan(loud);
+    expect(after).toBeGreaterThan(0);
+  });
+
   it('offers the mode a live-preview opener', () => {
     mount();
     keepDictating();
