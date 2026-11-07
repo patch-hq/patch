@@ -235,6 +235,8 @@ Refusing instead — marking the chat `errored` and waiting for the user to re-s
 
 An invalid (unresumable) session id is cleared the same way, rather than hanging on a phantom resume.
 
+A chat whose folder no longer exists is found at host start and flagged `folderMissing` in its own `meta.json`. An archived or deleted chat is flagged quietly: no per-start warning, no status change, nothing returns to the active list. Any other chat is also marked `errored` with `folder_missing`, so the reason input fails is visible before the user types. The flag clears when the folder is back.
+
 ## Moving a chat to another host
 
 A chat can be moved to another host, into a folder on that host — usually

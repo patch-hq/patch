@@ -3252,6 +3252,41 @@ export class Daemon {
     );
   }
 
+  /**
+   * Record on the chat whether its folder still exists (spec/04 § Resume).
+   * Archived/deleted chats are flagged quietly in their own meta — no log, no
+   * status change, nothing brought back. Any other chat is also marked errored
+   * with `folder_missing` now, so the user sees why input fails before typing.
+   */
+  private reconcileFolder(m: ChatMeta): ChatMeta {
+    const missing = !existsSync(m.folder);
+    if (!missing) {
+      if (!m.folderMissing) return m;
+      return this.opts.metaStore.update(m.chatId, (x) => {
+        const { folderMissing: _drop, ...rest } = x;
+        return rest;
+      });
+    }
+    if (m.status === 'archived' || m.status === 'deleted') {
+      if (m.folderMissing) return m;
+      return this.opts.metaStore.update(m.chatId, (x) => ({ ...x, folderMissing: true }));
+    }
+    this.opts.logger.warn(
+      { chatId: m.chatId, folder: m.folder },
+      'hydrate: folder no longer exists; chat marked errored (folder_missing)',
+    );
+    const message = `chat folder no longer exists: ${m.folder}`;
+    return this.opts.metaStore.update(m.chatId, (x) => ({
+      ...x,
+      folderMissing: true,
+      status: 'errored',
+      lastError:
+        x.status === 'errored' && x.lastError
+          ? x.lastError
+          : { code: 'folder_missing', message, at: this.opts.now() },
+    }));
+  }
+
   /** Hydrate chat_state from disk on startup. */
   hydrate(options: { deferWorkUntilReconciled?: boolean } = {}): void {
     const metas = this.opts.metaStore.list();
@@ -3261,14 +3296,7 @@ export class Daemon {
         'hydrate: meta.json unreadable; chat not loaded (fix or remove the file, then restart the host)',
       );
     }
-    for (const m of metas) {
-      if (!existsSync(m.folder)) {
-        this.opts.logger.warn(
-          { chatId: m.chatId, folder: m.folder },
-          'hydrate: folder no longer exists; chat will be marked errored on next input (folder_missing)',
-        );
-      }
-    }
+    for (let i = 0; i < metas.length; i++) metas[i] = this.reconcileFolder(metas[i]!);
     this.chatState.hydrate(metas);
     // Mark every restored chat as hydrated-from-disk: its next query is a
     // RESUME and must carry a claudeSessionId (F1).
