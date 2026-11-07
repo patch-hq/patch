@@ -229,7 +229,11 @@ export function callSummaryLine(c: CallCosting): string {
   if (c.tokens) {
     const tin = c.tokens.textIn + c.tokens.audioIn + c.tokens.cachedIn;
     const tout = c.tokens.textOut + c.tokens.audioOut;
-    parts.push(`${tin.toLocaleString('en-GB')} tokens in / ${tout.toLocaleString('en-GB')} out`);
+    parts.push(
+      tin + tout === 0
+        ? 'token usage not reported'
+        : `${tin.toLocaleString('en-GB')} tokens in / ${tout.toLocaleString('en-GB')} out`,
+    );
   }
   // Only a fast voice hands anything off; a call that reads 0 here but made requests is the tell.
   if (c.backend !== 'local' && c.handoffs !== undefined) {

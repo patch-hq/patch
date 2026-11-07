@@ -2161,6 +2161,9 @@ export function ChatRoute({
           entry={entry}
           chatId={chatId}
           isJobTrigger={entry.seq === firstUserSeq}
+          {...(entry.kind === 'message' && entry.voiceHandoff
+            ? { handoffPending: voiceHandoffPending(timeline, i) }
+            : {})}
           // spec/04 ## Message queueing — 1-based place within the queued block
           // (which is the timeline tail from `queuedFrom`), so the chip renumbers
           // the moment a promote or remove reorders it.
@@ -2394,10 +2397,25 @@ export function ChatRoute({
 // stable callbacks from ChatRoute a streaming delta (one per token) re-renders
 // exactly the one entry that changed instead of the whole conversation. Without
 // this the chat page gets slower the longer it runs — the user's "Chat page slow".
+/**
+ * spec/07 § The fast voice and the chat's agent — a hand-off is waiting while
+ * nothing from the agent (a reply, or the failure line) follows it.
+ */
+export function voiceHandoffPending(timeline: ChatEventEntry[], at: number): boolean {
+  for (let j = at + 1; j < timeline.length; j++) {
+    const e = timeline[j]!;
+    if (e.kind !== 'message') continue;
+    if (e.role === 'assistant' && e.handoffAnswer) return false;
+    if (e.role === 'system' && (e.content ?? '').startsWith('[call] <- agent:')) return false;
+  }
+  return true;
+}
+
 const TimelineEntry = memo(function TimelineEntry({
   entry,
   chatId,
   isJobTrigger,
+  handoffPending,
   queuePos,
   release,
   hostOnline,
@@ -2426,6 +2444,8 @@ const TimelineEntry = memo(function TimelineEntry({
   chatId: string;
   /** spec/08 § Action — this is the job-spawned chat's trigger turn (see `firstUserSeq` above). */
   isJobTrigger?: boolean;
+  /** spec/07 § The fast voice and the chat's agent — a hand-off the agent has not answered yet. */
+  handoffPending?: boolean;
   /** 1-based place in the queued block; set only on a queued entry. */
   queuePos?: number;
   /** What releases a queued entry: the next tool call or the end of the turn. */
@@ -2496,7 +2516,7 @@ const TimelineEntry = memo(function TimelineEntry({
       if (line.startsWith('<- agent:')) {
         return (
           <div className="call-agent-reply" data-testid="call-agent-reply">
-            <div className="call-summary-line">agent replied</div>
+            <div className="call-summary-line">agent failed</div>
             <div className="call-agent-reply-text">{line.slice('<- agent:'.length).trim()}</div>
           </div>
         );
@@ -2551,9 +2571,9 @@ const TimelineEntry = memo(function TimelineEntry({
   if (entry.kind === 'message' && entry.role === 'user' && entry.voiceHandoff) {
     return (
       <ToolDisclosure
-        testid="voice-handoff"
+        testid={handoffPending ? 'voice-handoff-pending' : 'voice-handoff'}
         variant="trigger"
-        summary={`Asked the agent: ${entry.content ?? ''}`}
+        summary={`${handoffPending ? 'Asking the agent…' : 'Asked the agent:'} ${entry.content ?? ''}`}
         detail={<code>{entry.content ?? ''}</code>}
       />
     );
