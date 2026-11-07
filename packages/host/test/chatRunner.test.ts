@@ -1120,6 +1120,69 @@ describe('Host ChatRunner', () => {
     expect(metaStore.read('gone-folder')?.status).toBe('errored');
   });
 
+  it('hydrate flags an archived chat whose folder is gone on the chat itself, leaving it archived and not errored', () => {
+    const { daemon, metaStore } = setup();
+    metaStore.write({
+      chatId: 'arch-gone',
+      folder: '/no/such/path/archived',
+      name: 'old',
+      nextSeq: 0,
+      claudeSessionId: 'sess-A',
+      status: 'archived',
+      archivedAt: 5,
+      createdAt: 1,
+      updatedAt: 2,
+    });
+    daemon.hydrate();
+
+    const meta = metaStore.read('arch-gone');
+    expect(meta?.folderMissing).toBe(true);
+    expect(meta?.status).toBe('archived');
+    expect(meta?.archivedAt).toBe(5);
+    expect(meta?.lastError ?? null).toBeNull();
+    expect(daemon.chatState.get('arch-gone')?.status).toBe('archived');
+    expect(daemon.chatState.get('arch-gone')?.lastError).toBeNull();
+  });
+
+  it('hydrate marks an active chat whose folder is gone errored with folder_missing, before any input', () => {
+    const { daemon, metaStore, events } = setup();
+    metaStore.write({
+      chatId: 'act-gone',
+      folder: '/no/such/path/active',
+      name: 'live',
+      nextSeq: 0,
+      claudeSessionId: 'sess-B',
+      createdAt: 1,
+      updatedAt: 2,
+    });
+    daemon.hydrate();
+
+    const meta = metaStore.read('act-gone');
+    expect(meta?.folderMissing).toBe(true);
+    expect(meta?.status).toBe('errored');
+    expect(meta?.lastError?.code).toBe('folder_missing');
+    const state = daemon.chatState.get('act-gone');
+    expect(state?.status).toBe('errored');
+    expect(state?.lastError?.code).toBe('folder_missing');
+    expect(events.filter((e) => e.type === 'chat.error')).toHaveLength(0);
+  });
+
+  it('hydrate clears the folder-missing flag once the folder is back', () => {
+    const { daemon, metaStore, folder } = setup();
+    metaStore.write({
+      chatId: 'back',
+      folder,
+      name: 'back',
+      nextSeq: 0,
+      status: 'archived',
+      folderMissing: true,
+      createdAt: 1,
+      updatedAt: 2,
+    });
+    daemon.hydrate();
+    expect(metaStore.read('back')?.folderMissing ?? false).toBe(false);
+  });
+
   it('F4: allocErrorSeq routes through bumpSeq for a known chat (monotonic + persisted), not seq 0', async () => {
     const { daemon, metaStore, folder, home } = setup();
     metaStore.write({
