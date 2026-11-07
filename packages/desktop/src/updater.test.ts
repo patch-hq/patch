@@ -11,7 +11,6 @@ import assert from 'node:assert/strict';
 import {
   diagnoseUpdater,
   createInstaller,
-  createLatestInstaller,
   installDownloaded,
   conciseReason,
   shouldPollFeed,
@@ -321,11 +320,10 @@ test('a refused install is surfaced verbatim, not swallowed', () => {
 // old process just kept running. Nothing reported that as a failure, so
 // "Restart now" looked like a dead button. -----------------------------
 
-test('a stalled install resets the installer and retries instead of blaming the user', () => {
+test("a stalled install is reported once and never retried behind the user's back", () => {
   const app = { isQuitting: false };
   const errors: string[] = [];
   let installs = 0;
-  let recoveries = 0;
   const timers: Array<() => void> = [];
   quitAndInstallNow({
     app,
@@ -334,9 +332,6 @@ test('a stalled install resets the installer and retries instead of blaming the 
         installs++;
       },
     },
-    recoverStall: () => {
-      recoveries++;
-    },
     onError: (err) => errors.push(err.message),
     setTimer: (fn, ms) => {
       assert.equal(ms, INSTALL_WATCHDOG_MS);
@@ -344,39 +339,16 @@ test('a stalled install resets the installer and retries instead of blaming the 
       return {};
     },
   });
-  timers.shift()!(); // first stall
-  assert.equal(recoveries, 1);
-  assert.equal(installs, 2, 'the install is asked for again after the reset');
-  assert.deepEqual(errors, []);
-  assert.equal(app.isQuitting, true);
-  timers.shift()!(); // stalls again
-  assert.equal(recoveries, 1, 'only one reset');
+  timers.shift()!(); // the install stalls
+  assert.equal(
+    installs,
+    1,
+    'a retry would quit the app again minutes after the user went back to work',
+  );
+  assert.equal(timers.length, 0, 'no second watchdog');
   assert.equal(errors.length, 1);
   assert.doesNotMatch(errors[0]!, /by hand|⌘Q/);
   assert.equal(app.isQuitting, false, 'a stalled install must not leave Cmd+W quitting the app');
-});
-
-test('a reset that itself fails is reported, not retried', () => {
-  const errors: string[] = [];
-  let installs = 0;
-  quitAndInstallNow({
-    app: { isQuitting: false },
-    autoUpdater: {
-      quitAndInstall: () => {
-        installs++;
-      },
-    },
-    recoverStall: () => {
-      throw new Error('pkill missing');
-    },
-    onError: (err) => errors.push(err.message),
-    setTimer: (fn) => {
-      fn();
-      return {};
-    },
-  });
-  assert.equal(installs, 1);
-  assert.match(errors[0]!, /couldn't be reset \(pkill missing\)/);
 });
 
 test('a real relaunch never lets the watchdog speak', () => {
@@ -766,7 +738,6 @@ test('savePersisted: a completed write lands at the target and leaves no temp fi
 test('createInstaller: a second Restart while an install is pending does not start a second one', () => {
   const errors: string[] = [];
   let installs = 0;
-  let recoveries = 0;
   const timers: Array<() => void> = [];
   const install = createInstaller({
     app: { isQuitting: false },
@@ -774,9 +745,6 @@ test('createInstaller: a second Restart while an install is pending does not sta
       quitAndInstall: () => {
         installs++;
       },
-    },
-    recoverStall: () => {
-      recoveries++;
     },
     onError: (err) => errors.push(err.message),
     setTimer: (fn) => {
@@ -790,8 +758,7 @@ test('createInstaller: a second Restart while an install is pending does not sta
   assert.equal(installs, 1, 'one quitAndInstall for two presses');
   assert.equal(timers.length, 1, 'one watchdog, not two racing');
   timers.shift()!();
-  timers.shift()!();
-  assert.equal(recoveries, 1);
+  assert.equal(timers.length, 0);
   assert.equal(errors.length, 1, 'one failure report');
 });
 
@@ -900,7 +867,6 @@ test('a Squirrel error during the wait is what the stall reports, not that the i
   const errors: Error[] = [];
   let pending: string | null = null;
   let fire: (() => void) | null = null;
-  let killed = 0;
   quitAndInstallNow({
     app,
     autoUpdater: {
@@ -909,9 +875,6 @@ test('a Squirrel error during the wait is what the stall reports, not that the i
       },
     },
     onError: (e) => errors.push(e),
-    recoverStall: () => {
-      killed += 1;
-    },
     pendingError: () => pending,
     setTimer: (fn) => {
       fire = fn;
@@ -919,81 +882,8 @@ test('a Squirrel error during the wait is what the stall reports, not that the i
     },
   });
   (fire as unknown as () => void)();
-  assert.equal(killed, 0);
   assert.equal(app.isQuitting, false);
   assert.equal(errors[0]?.message, conciseReason(SQUIRREL));
-});
-
-// --- Update Patch goes to the newest build, not the staged one ---------------
-
-test('createLatestInstaller: a newer deploy than the staged build is downloaded before installing', async () => {
-  let current = reduceUpdater(state(), { type: 'downloaded', version: '0.1.318', at: AT });
-  const installed: string[] = [];
-  const errors: string[] = [];
-  const go = createLatestInstaller({
-    // The re-check finds 0.1.319; its download lands a moment later.
-    check: async () => {
-      current = reduceUpdater(current, { type: 'available', version: '0.1.319', at: AT });
-      setTimeout(() => {
-        current = reduceUpdater(current, { type: 'downloaded', version: '0.1.319', at: AT });
-      }, 10);
-    },
-    getState: () => current,
-    install: (s) => installed.push(s.availableVersion ?? ''),
-    onError: (e) => errors.push(e.message),
-    pollMs: 2,
-  });
-  await go();
-  assert.deepEqual(installed, ['0.1.319'], 'installs the newest build, once');
-  assert.deepEqual(errors, []);
-});
-
-test('createLatestInstaller: nothing newer installs what is staged', async () => {
-  let current = reduceUpdater(state(), { type: 'downloaded', version: '0.1.318', at: AT });
-  const installed: string[] = [];
-  await createLatestInstaller({
-    check: async () => {
-      current = reduceUpdater(current, { type: 'downloaded', version: '0.1.318', at: AT });
-    },
-    getState: () => current,
-    install: (s) => installed.push(s.availableVersion ?? ''),
-    onError: () => assert.fail('no error expected'),
-  })();
-  assert.deepEqual(installed, ['0.1.318']);
-});
-
-test('createLatestInstaller: a download that never lands is reported, not installed over', async () => {
-  let current = reduceUpdater(state(), { type: 'available', version: '0.1.319', at: AT });
-  const errors: string[] = [];
-  await createLatestInstaller({
-    check: async () => {},
-    getState: () => current,
-    install: () => assert.fail('must not install'),
-    onError: (e) => errors.push(e.message),
-    waitMs: 20,
-    pollMs: 2,
-  })();
-  assert.equal(errors.length, 1);
-  void current;
-});
-
-test('createLatestInstaller: a failed check is reported and nothing installs', async () => {
-  let current = reduceUpdater(state(), { type: 'downloaded', version: '0.1.318', at: AT });
-  const errors: string[] = [];
-  await createLatestInstaller({
-    check: async () => {
-      current = reduceUpdater(current, {
-        type: 'error',
-        kind: 'check',
-        message: 'feed down',
-        at: AT,
-      });
-    },
-    getState: () => current,
-    install: () => assert.fail('must not install'),
-    onError: (e) => errors.push(e.message),
-  })();
-  assert.deepEqual(errors, ['feed down']);
 });
 
 // Regression: "the update restarts twice". A slow-but-healthy install (~75s bundle
@@ -1002,19 +892,14 @@ test('the stall watchdog outlasts a slow healthy install, so it cannot cause a s
   const SLOWEST_HEALTHY_INSTALL_MS = 75_000;
   assert.ok(INSTALL_WATCHDOG_MS > SLOWEST_HEALTHY_INSTALL_MS);
   const delays: number[] = [];
-  let resets = 0;
   quitAndInstallNow({
     app: { isQuitting: false },
     autoUpdater: { quitAndInstall: () => {} },
     onError: () => {},
-    recoverStall: () => {
-      resets++;
-    },
     setTimer: (_fn, ms) => {
       delays.push(ms);
       return {};
     },
   });
   assert.deepEqual(delays, [INSTALL_WATCHDOG_MS]);
-  assert.equal(resets, 0, 'nothing is reset until the watchdog actually fires');
 });

@@ -14,6 +14,7 @@ import type {
   GoalProgress,
   PendingWake,
   PermissionMode,
+  ReminderEvery,
   SnoozeRecord,
   StatusKind,
   TodoItem,
@@ -87,6 +88,8 @@ export interface ChatRow {
    * no reminder is set.
    */
   reminder: string | null;
+  /** How often the reminder is re-injected into the agent; `null` = banner only. */
+  reminderEvery?: ReminderEvery | null;
   /**
    * The chat's pending self-wake (spec/02 § Self-wake) — the message the host
    * will deliver back into this chat, and when. Drives the wake bar above the

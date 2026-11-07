@@ -7,7 +7,7 @@
 
 import React from 'react';
 import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
 import {
   AlarmClock,
   Bell,
@@ -62,7 +62,7 @@ import {
   searchHitRoute,
 } from '../../src/lib/chatSearch';
 import { ChatSearchHitRow, SearchMatchLine } from '../../src/components/ChatSearchHitRow';
-import { connectionDotColor } from '../../src/lib/connection';
+import { connectionDotColor, hostsDown, hostsDownSummary } from '../../src/lib/connection';
 import { usePresenceStore } from '../../src/stores/presenceStore';
 import { fonts, radii, space, textMin, typography, useTheme } from '../../src/lib/theme';
 import { startVoiceNote, releaseVoiceNoteIfHeld } from '../../src/lib/voiceNote';
@@ -296,7 +296,9 @@ function ChatsHeader({
   // host being down is its own app-level banner, never this dot.
   const conn = usePresenceStore((s) => s.connection);
   const unread = useNotificationsStore((s) => s.unread);
-  const dotColor = connectionDotColor(conn, colors);
+  const hosts = usePresenceStore((s) => s.hosts);
+  const hostDown = conn === 'connected' && hostsDown(hosts).length > 0;
+  const dotColor = connectionDotColor(conn, colors, hostDown);
   // spec/14 § New chat drafts, spec/15 § New chat flow — the full Drafts list,
   // same as desktop's sidebar section. A draft only counts here while it has
   // text (`hasDraftText`), same rule as the sidebar's own list.
@@ -355,9 +357,14 @@ function ChatsHeader({
           {/* Rides the wordmark's ascender, as on web (spec/14 § Sidebar §1).
               No dot at all before the first connect lands. */}
           {dotColor === null ? null : (
-            <View
-              accessibilityLabel="connection state"
-              testID={`connection-dot-${conn}`}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                hostDown ? `hosts down:\n${hostsDownSummary(hosts)}` : 'connection state'
+              }
+              testID={hostDown ? 'connection-dot-host-down' : `connection-dot-${conn}`}
+              onPress={() => router.push('/settings/hosts' as Href)}
+              hitSlop={12}
               style={{
                 width: 8,
                 height: 8,

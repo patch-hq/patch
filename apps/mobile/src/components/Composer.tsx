@@ -158,6 +158,7 @@ import {
   dictationMaxHeight,
 } from '../lib/composerHeight';
 import { startDictation, warmDictation, type DictationHandle } from '../lib/dictation';
+import { insertDictation } from '../lib/dictationInsert';
 import { dictationEngineFor } from '../lib/dictationEngine';
 import { startDictationMode, type DictationModeHandle } from '../lib/dictationMode';
 import { markDictatedSend } from '../lib/dictatedSends';
@@ -844,6 +845,18 @@ export function Composer({
   const mirrorStickRef = React.useRef(true);
   // Mic recording, or dictation mode with words being spoken: the input is painted over by the mirror.
   const livePreviewOn = micState !== 'idle' || livePartial !== '';
+  // The interim words are drawn where the final ones will land: at the caret.
+  const liveSplit = React.useMemo(() => {
+    const pos = Math.min(cursorPos, body.length);
+    const before = body.slice(0, pos);
+    const after = body.slice(pos);
+    return {
+      before,
+      after,
+      lead: before.length > 0 && !/\s$/.test(before) ? ' ' : '',
+      trail: after.length > 0 && !/^\s/.test(after) ? ' ' : '',
+    };
+  }, [body, cursorPos]);
   // The keyboard is away while dictating, so the field may take far more of
   // the screen than its typing cap before the words start scrolling.
   const { height: windowHeight } = useWindowDimensions();
@@ -978,7 +991,13 @@ export function Composer({
           // The keyboard stays down: the words are ready to send as they
           // are, and a tap on the input brings it back to edit them.
           const t = outcome.text;
-          updateDraft((cur) => (cur.trim().length > 0 ? `${cur.trimEnd()} ${t}` : t));
+          // At the caret, which then sits just after the words.
+          updateDraft((cur) => {
+            const split = splitQuotes(cur);
+            const landed = insertDictation(split.body, cursorPos, t);
+            pendingCursorRef.current = landed.caret;
+            return joinQuotes(split.quotes, landed.text);
+          });
           break;
         }
         case 'no-audio':
@@ -1475,8 +1494,9 @@ export function Composer({
       hostId: row?.hostId ?? null,
       goal: row?.goal ?? null,
       reminder: row?.reminder ?? null,
+      reminderEvery: row?.reminderEvery ?? null,
       setGoal: (g) => useChatStore.getState().setGoal(chatId, g),
-      setReminder: (r) => useChatStore.getState().setReminder(chatId, r),
+      setReminder: (r, every) => useChatStore.getState().setReminder(chatId, r, every),
       clearTimeline: () => useChatStore.getState().clearTimeline(chatId),
       chooseModel,
       pushError: (m) => useUiStore.getState().pushError(m),
@@ -1974,14 +1994,16 @@ export function Composer({
                   fontSize: 16,
                 }}
               >
-                <Text style={{ color: colors.ink }}>{body}</Text>
-                {body.trim().length > 0 ? ' ' : ''}
+                <Text style={{ color: colors.ink }}>{liveSplit.before}</Text>
+                {liveSplit.lead}
                 <Text
                   testID="dictation-live-words"
                   style={{ color: colors.ink3, fontStyle: 'italic' }}
                 >
                   {livePartial}
                 </Text>
+                {liveSplit.trail}
+                <Text style={{ color: colors.ink }}>{liveSplit.after}</Text>
               </Text>
             </View>
           </ScrollView>

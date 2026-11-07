@@ -2046,6 +2046,29 @@ describe('Composer', () => {
       expect(onSend).not.toHaveBeenCalled();
     });
 
+    it('lands the transcript at the caret and leaves the caret after it', async () => {
+      const rec = makeRec();
+      render(
+        <Composer
+          chatId="c1"
+          hostId="d1"
+          onSend={vi.fn()}
+          previewFactory={preview.factory}
+          recorderFactory={vi.fn(async () => rec as unknown as VoiceRecording)}
+          transcribeClip={async () => ({ transcript: 'XX' })}
+        />,
+      );
+      fireEvent.change(input(), { target: { value: 'ab cd' } });
+      input().setSelectionRange(2, 2);
+      const mic = screen.getByTestId('voice-note-btn');
+      fireEvent.mouseDown(mic);
+      fireEvent.mouseUp(mic);
+      await waitFor(() => expect(rec.stop).not.toHaveBeenCalled());
+      fireEvent.mouseDown(mic);
+      await waitFor(() => expect(input().value).toBe('ab XX cd'));
+      expect(input().selectionStart).toBe(5);
+    });
+
     describe('on a streaming engine (Deepgram)', () => {
       const setEngine = (computer: 'deepgram' | 'elevenlabs' | 'whisper'): void =>
         usePreferencesStore.setState({

@@ -7257,7 +7257,7 @@ export async function handleServerEvent(
         return;
       }
       case 'chat.reminder_request': {
-        await daemon.setReminder(event.chatId, event.reminder);
+        await daemon.setReminder(event.chatId, event.reminder, event.every ?? null);
         return;
       }
       case 'chat.loop_request': {

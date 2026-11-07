@@ -244,6 +244,11 @@ jobs:
   # The macOS host and the desktop app, signed with the Developer ID
   # certificate; the app is notarised. One job, because the app carries this
   # very host build inside it.
+  #
+  # The host is built every time. The app is built only when something inside
+  # it changed since the last app build (scripts/desktop-scope.mjs); otherwise
+  # this release carries the last build forward unchanged, so every running
+  # copy is not asked to restart for a release that changed nothing in it.
   mac:
     if: github.repository == 'patch-hq/patch'
     runs-on: macos-15
@@ -260,6 +265,32 @@ jobs:
           node-version-file: .nvmrc
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
+      - name: Does this release change anything inside the Mac app?
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The release this run follows (runs are serialised: see `concurrency`).
+          PREV=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 --json tagName,isDraft,createdAt \
+            --jq '[.[] | select(.isDraft | not)] | sort_by(.createdAt) | last | .tagName // ""')
+          BASE=""
+          # Read first, test after: a failed read must fail this step, not read as "no app".
+          ASSETS=""
+          if [ -n "$PREV" ]; then
+            ASSETS=$(gh release view "$PREV" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          fi
+          if grep -qx 'desktop-latest.json' <<<"$ASSETS"; then
+            mkdir -p "$RUNNER_TEMP/prev"
+            gh release download "$PREV" --repo "$GITHUB_REPOSITORY" --pattern desktop-latest.json --dir "$RUNNER_TEMP/prev"
+            # The commit the app in that release was BUILT from: a carried-forward
+            # app keeps its original commit, so this is the last real build.
+            BASE=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).gitSha)' "$RUNNER_TEMP/prev/desktop-latest.json")
+          fi
+          DECISION=$(node scripts/desktop-scope.mjs "$BASE")
+          echo "Mac app: $DECISION (previous release ${PREV:-none}, last app build ${BASE:-none})"
+          echo "build=$([ "$DECISION" = build ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "prev=$PREV" >> "$GITHUB_OUTPUT"
       - name: Signing keychain and notarisation key
         env:
           P12_B64: ${{ secrets.PATCH_MAC_CERT_P12_B64 }}
@@ -315,6 +346,7 @@ jobs:
           cp dist/host/*.tar.gz dist/host/*.tar.gz.sig "$RUNNER_TEMP/out/"
           cp dist/host/host-latest.json "$RUNNER_TEMP/out/host-latest-darwin-arm64.json"
       - name: Build, sign and notarise the desktop app
+        if: steps.scope.outputs.build == 'true'
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
@@ -326,6 +358,7 @@ jobs:
           pnpm turbo build --filter=@patch/desktop... --output-logs=errors-only
           pnpm --filter @patch/desktop dist
       - name: Check the app is what it claims to be
+        if: steps.scope.outputs.build == 'true'
         run: |
           set -euo pipefail
           APP=packages/desktop/release/mac-arm64/Patch.app
@@ -338,6 +371,7 @@ jobs:
           PATCH_REAL_DESKTOP=1 PATCH_TEST_DESKTOP_BINARY="$PWD/$APP/Contents/MacOS/Patch" \
             node --test packages/desktop/scripts/single-instance.test.cjs
       - name: Collect the desktop release
+        if: steps.scope.outputs.build == 'true'
         run: |
           set -euo pipefail
           read -r VERSION SHA BUILT < <(node scripts/version.mjs --json | node -e 'const v=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(v.version,v.gitSha,v.builtAt)')
@@ -348,6 +382,22 @@ jobs:
           # electron-builder's yml has a version but no git sha; this traces the binary to a commit.
           printf '{"version":"%s","gitSha":"%s","builtAt":"%s","file":"%s"}\n' "$VERSION" "$SHA" "$BUILT" "$ZIP" > "$RUNNER_TEMP/out/desktop-latest.json"
           rm -f "$RUNNER_TEMP/AuthKey.p8"
+      - name: Carry the last Mac app build forward unchanged
+        if: steps.scope.outputs.build != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREV: ${{ steps.scope.outputs.prev }}
+        run: |
+          set -euo pipefail
+          rm -f "$RUNNER_TEMP/AuthKey.p8"
+          cp "$RUNNER_TEMP/prev/desktop-latest.json" "$RUNNER_TEMP/out/"
+          ZIP=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).file)' "$RUNNER_TEMP/out/desktop-latest.json")
+          gh release download "$PREV" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/out" \
+            --pattern latest-mac.yml --pattern "$ZIP" --pattern "$ZIP.blockmap"
+          # NO FALLBACK: the feed and the zip it names must both be there.
+          test -f "$RUNNER_TEMP/out/latest-mac.yml"
+          test -f "$RUNNER_TEMP/out/$ZIP"
+          grep -q "$ZIP" "$RUNNER_TEMP/out/latest-mac.yml"
       - uses: actions/upload-artifact@v4
         with:
           name: mac

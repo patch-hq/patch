@@ -4,27 +4,53 @@
 // without a React Native renderer; the components read from here so the two
 // failure modes (WS-down vs daemon-down) never silently collapse into one.
 
-import type { ConnectionState, DaemonPresence } from '../stores/presenceStore';
+import type { ConnectionState, DaemonPresence, HostPresence } from '../stores/presenceStore';
 import type { ThemeColors } from './theme';
 
 // The Chats-tab header's connection dot (spec/15 ## Chats tab § Header)
-// reflects the WS link ONLY: green connected, amber reconnecting (was
+// reflects the WS link, plus amber when connected but a known host is offline: green connected, amber reconnecting (was
 // connected, dropped), red offline (a connect attempt failed, or the
 // credential was refused). `null` — no dot at all — while the first connect is
 // still in flight: never an offline treatment before we have ever connected.
 // Takes the ACTIVE palette so the dot tracks light/dark.
-export function connectionDotColor(conn: ConnectionState, colors: ThemeColors): string | null {
+export function connectionDotColor(
+  conn: ConnectionState,
+  colors: ThemeColors,
+  hostDown = false,
+): string | null {
   switch (conn) {
     case 'connecting':
       return null;
     case 'connected':
-      return colors.leaf;
+      // Link up, but a host that has connected before is offline: amber.
+      return hostDown ? colors.amber : colors.leaf;
     case 'reconnecting':
       return colors.amber;
     case 'offline':
     case 'unauthenticated':
       return colors.red;
   }
+}
+
+/** Hosts that connected before and are offline now; a never-connected host is not "down". */
+export function hostsDown(hosts: Record<string, HostPresence>): HostPresence[] {
+  return Object.values(hosts).filter((h) => !h.online && h.lastSeenAt !== null);
+}
+
+/** "Mac: offline, last seen 14:07" per down host, one per line; null when none. */
+export function hostsDownSummary(hosts: Record<string, HostPresence>): string | null {
+  const down = hostsDown(hosts);
+  if (down.length === 0) return null;
+  return down
+    .map((h) => {
+      const name =
+        h.host?.hostName ?? (h as { registeredName?: string | null }).registeredName ?? h.hostId;
+      const d = new Date(h.lastSeenAt as number);
+      const hhmm = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      return `${name}: offline, last seen ${hhmm}`;
+    })
+    .sort()
+    .join('\n');
 }
 
 // The amber WS banner. Shown for `reconnecting` (was connected, dropped) and

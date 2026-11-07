@@ -273,6 +273,17 @@ describe('Reminder bar', () => {
   });
 });
 
+describe('Reminder bar cadence', () => {
+  it('shows the cadence only for a periodic reminder', () => {
+    seed({ reminder: 'Principles', reminderEvery: { unit: 'turns', n: 10 } });
+    const r = renderRN(<Harness />);
+    expect(hasText(findHost(r.root, byTestId('reminder-bar-every')), 'every 10 turns')).toBe(true);
+    seed({ reminder: 'Principles', reminderEvery: null });
+    const plain = renderRN(<Harness />);
+    expect(queryHost(plain.root, byTestId('reminder-bar-every'))).toBeNull();
+  });
+});
+
 describe('Archived bar', () => {
   it('names the state and Unarchive restores it through the row-tools toggle', async () => {
     seed({ status: 'archived' });

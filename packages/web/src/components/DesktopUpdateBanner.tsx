@@ -1,7 +1,6 @@
 // DesktopUpdateBanner — the shell has a newer build staged, and is waiting to
-// be asked. Worded identically to WebUpdateBanner ("Patch has updated" /
-// "Update Patch") so the user sees one prompt, not two kinds; only the action
-// differs (restart into the new shell vs reload the bundle).
+// be asked. "Restart Patch" restarts into exactly that build; the web banner
+// (a page reload) never shows inside the shell, so this is the only prompt.
 //
 // This replaces the shell restarting itself the instant a download finished.
 // That behaviour was defensible on paper — Patch ships ~20 times a day, so a
@@ -44,7 +43,7 @@ const URGENCY_OVERDUE_MS = 3 * 24 * 60 * 60 * 1000;
  * How long a press may go unanswered. The shell's own install watchdog needs
  * two 20s stalls before it reports an error; this sits above that. An older
  * shell, a dropped IPC message or a stalled installer reports nothing at all,
- * and without this the button stayed on "Updating…" and disabled for good.
+ * and without this the button stayed on "Restarting…" and disabled for good.
  */
 const INSTALL_GRACE_MS = 5 * 60_000;
 
@@ -93,7 +92,7 @@ export function DesktopUpdateBanner(): JSX.Element | null {
     state?.lastResult === 'error' && state.lastErrorKind === 'install' ? state.lastError : null;
   // Keyed on when the error was recorded, not its text: a second failure reads
   // identically to the first, and keying on the text left the button stuck on
-  // "Updating…" with the error hidden — a press that looked like it did nothing.
+  // "Restarting…" with the error hidden — a press that looked like it did nothing.
   const errorAt = lastError !== null ? (state?.lastCheckedAt ?? null) : null;
   const [bridgeError, setBridgeError] = useState<string | null>(null);
   useEffect(() => {
@@ -177,7 +176,7 @@ export function DesktopUpdateBanner(): JSX.Element | null {
           bridge.installUpdate();
         }}
       >
-        {pressed ? 'Updating…' : 'Update Patch'}
+        {pressed ? 'Restarting…' : 'Restart Patch'}
       </button>
     </div>
   );

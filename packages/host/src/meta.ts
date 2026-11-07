@@ -24,6 +24,7 @@ import {
   EffortLevel,
   HarnessId,
   PermissionMode,
+  ReminderEvery,
   SnoozeRecord,
   TodoItem,
   TurnOrigin,
@@ -74,6 +75,8 @@ export const ChatMeta = z
      * files written before this field existed.
      */
     reminder: z.string().nullable().optional(),
+    /** How often the reminder is re-injected into the agent (spec/04 § Reminders). */
+    reminderEvery: ReminderEvery.nullable().optional(),
     /**
      * The chat's task list. Persisted so a host restart does not empty it —
      * otherwise a surface that adds one item to the (now empty) list sends back
@@ -393,6 +396,12 @@ export const ChatMeta = z
       .strict()
       .nullable()
       .optional(),
+    /**
+     * The chat's working folder was found missing at host start (spec/04 §
+     * Resume). Recorded on the chat itself so an archived chat carries the
+     * fact quietly; absent/false when the folder exists.
+     */
+    folderMissing: z.boolean().optional(),
     /** ms epoch when the chat was archived; cleared on un-archive. */
     archivedAt: z.number().int().nullable().optional(),
     /**

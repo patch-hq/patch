@@ -18,6 +18,7 @@ import type {
   MessageCompaction,
   PendingWake,
   PermissionMode,
+  ReminderEvery,
   StatusKind,
   SystemContextItem,
   TodoItem,
@@ -200,6 +201,7 @@ interface ChatState {
         | 'goalProgress'
         | 'lastGoal'
         | 'reminder'
+        | 'reminderEvery'
         | 'pendingWake'
         | 'todos'
         | 'statusSummary'
@@ -221,6 +223,7 @@ interface ChatState {
         goalProgress?: GoalProgress | null;
         lastGoal?: FinishedGoal | null;
         reminder?: string | null;
+        reminderEvery?: ReminderEvery | null;
         pendingWake?: PendingWake | null;
         todos?: TodoItem[];
         snoozedUntil?: number | null;
@@ -281,6 +284,7 @@ interface ChatState {
         | 'goalProgress'
         | 'lastGoal'
         | 'reminder'
+        | 'reminderEvery'
         | 'pendingWake'
         | 'todos'
         | 'statusSummary'
@@ -302,6 +306,7 @@ interface ChatState {
         goalProgress?: GoalProgress | null;
         lastGoal?: FinishedGoal | null;
         reminder?: string | null;
+        reminderEvery?: ReminderEvery | null;
         pendingWake?: PendingWake | null;
         todos?: TodoItem[];
         snoozedUntil?: number | null;
@@ -487,7 +492,7 @@ interface ChatState {
   /** Local optimistic update for the chat's goal (patch/todo.md — `/goal`). */
   setGoal(chatId: string, goal: string | null): void;
   /** Local optimistic update for the chat's reminder (patch/todo.md — Reminders). */
-  setReminder(chatId: string, reminder: string | null): void;
+  setReminder(chatId: string, reminder: string | null, every?: ReminderEvery | null): void;
   /**
    * Local optimistic update for the chat's task list (spec/02 § Task list).
    * Replaces the whole list, matching what the surface POSTs.
@@ -957,6 +962,7 @@ function emptyRow(chatId: string, folder: string): ChatRow {
     goalProgress: null,
     lastGoal: null,
     reminder: null,
+    reminderEvery: null,
     pendingWake: null,
     todos: [],
     statusSummary: null,
@@ -1102,6 +1108,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Reminder CAN be cleared (null is meaningful) — only fall back to the
       // known reminder when the incoming row omits the field entirely (undefined).
       const reminder = r.reminder !== undefined ? r.reminder : (existing?.reminder ?? null);
+      const reminderEvery =
+        r.reminderEvery !== undefined ? r.reminderEvery : (existing?.reminderEvery ?? null);
       // A pending wake CAN clear (fired / cancelled) — `null` is meaningful, so
       // only fall back to the known wake when the field is omitted entirely.
       const pendingWake =
@@ -1176,6 +1184,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           goalProgress,
           lastGoal,
           reminder,
+          reminderEvery,
           pendingWake,
           todos,
           snoozedUntil,
@@ -1207,6 +1216,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           goalProgress,
           lastGoal,
           reminder,
+          reminderEvery,
           pendingWake,
           todos,
           snoozedUntil,
@@ -1265,6 +1275,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         r.goalProgress !== undefined ? r.goalProgress : (existing?.goalProgress ?? null);
       const lastGoal = r.lastGoal !== undefined ? r.lastGoal : (existing?.lastGoal ?? null);
       const reminder = r.reminder !== undefined ? r.reminder : (existing?.reminder ?? null);
+      const reminderEvery =
+        r.reminderEvery !== undefined ? r.reminderEvery : (existing?.reminderEvery ?? null);
       // A pending wake CAN clear (fired / cancelled) — `null` is meaningful, so
       // only fall back to the known wake when the field is omitted entirely.
       const pendingWake =
@@ -1321,6 +1333,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           goalProgress,
           lastGoal,
           reminder,
+          reminderEvery,
           pendingWake,
           todos,
           snoozedUntil,
@@ -1352,6 +1365,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           goalProgress,
           lastGoal,
           reminder,
+          reminderEvery,
           pendingWake,
           todos,
           snoozedUntil,
@@ -1738,6 +1752,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // Reminder CAN be cleared (null is meaningful) — only keep the existing
             // reminder when the event omits the field (undefined), not when it's null.
             reminder: event.reminder !== undefined ? event.reminder : row.reminder,
+            reminderEvery:
+              event.reminderEvery !== undefined ? event.reminderEvery : row.reminderEvery,
             // Pending self-wake (spec/02 § Self-wake) — drives the wake bar above
             // the chat. Clears to null when the wake fires or is cancelled, so
             // only keep the existing value when the field is OMITTED.
@@ -3268,13 +3284,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
   },
 
-  setReminder(chatId, reminder) {
+  setReminder(chatId, reminder, every = null) {
     const row = get().chats[chatId];
     if (!row) return;
     set({
       chats: {
         ...get().chats,
-        [chatId]: { ...row, reminder },
+        [chatId]: { ...row, reminder, reminderEvery: reminder === null ? null : every },
       },
     });
   },

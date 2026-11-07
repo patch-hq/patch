@@ -764,13 +764,17 @@ describe('Settings → Voice', () => {
 
   describe('Engine', () => {
     it('shows each conversation surface as one engine choice, with no layer axis', async () => {
-      vi.stubGlobal('fetch', makeFetch());
+      const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
+      vi.stubGlobal('fetch', makeFetch({}, server.handler));
       renderSettings('/settings/voice');
       await waitFor(() => expect(screen.getByTestId('voice-call')).toBeInTheDocument());
       expect(screen.getByTestId('voice-call-engine-local')).toHaveAttribute('aria-pressed', 'true');
       expect(screen.queryByTestId('voice-call-layer')).toBeNull();
-      expect(screen.getByTestId('voice-call-engine-gemini-thinking')).toHaveTextContent(
-        'Gemini Thinking',
+      expect(screen.queryByTestId('voice-call-variant')).toBeNull();
+      expect(screen.getByTestId('voice-call-engine-gemini')).toHaveTextContent('Gemini');
+      fireEvent.click(screen.getByTestId('voice-call-engine-gemini'));
+      expect(await screen.findByTestId('voice-call-variant-heavy')).toHaveTextContent(
+        'Thinking · ~$0.02/min',
       );
     });
 
@@ -778,13 +782,13 @@ describe('Settings → Voice', () => {
       const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
       vi.stubGlobal('fetch', makeFetch({}, server.handler));
       renderSettings('/settings/voice');
-      fireEvent.click(await screen.findByTestId('voice-call-engine-openai-mini'));
+      fireEvent.click(await screen.findByTestId('voice-call-engine-openai'));
       await waitFor(() => expect(server.writes).toHaveLength(1));
       const cfg = server.writes[0]!.voiceConfig as Record<string, unknown>;
       expect(cfg.call).toEqual({ backend: 'openai', layer: 'light', handoff: 'auto' });
       expect(cfg.dictation).toEqual({ phone: 'device', computer: 'whisper', tidy: false });
       await waitFor(() =>
-        expect(screen.getByTestId('voice-call-engine-openai-mini')).toHaveAttribute(
+        expect(screen.getByTestId('voice-call-variant-light')).toHaveAttribute(
           'aria-pressed',
           'true',
         ),
@@ -827,9 +831,10 @@ describe('Settings → Voice', () => {
       vi.stubGlobal('fetch', makeFetch({}, server.handler));
       renderSettings('/settings/voice');
       fireEvent.click(await screen.findByTestId('voice-handsFree-engine-local'));
-      fireEvent.click(screen.getByTestId('voice-handsFree-engine-gemini-thinking'));
-      await waitFor(() => expect(server.writes).toHaveLength(1));
-      expect((server.writes[0]!.voiceConfig as Record<string, unknown>).handsFree).toEqual({
+      fireEvent.click(screen.getByTestId('voice-handsFree-engine-gemini'));
+      fireEvent.click(await screen.findByTestId('voice-handsFree-variant-heavy'));
+      await waitFor(() => expect(server.writes).toHaveLength(2));
+      expect((server.writes[1]!.voiceConfig as Record<string, unknown>).handsFree).toEqual({
         backend: 'gemini',
         layer: 'heavy',
         handoff: 'auto',
@@ -842,7 +847,7 @@ describe('Settings → Voice', () => {
       renderSettings('/settings/voice');
       await screen.findByTestId('voice-call-engine-local');
       expect(screen.queryByTestId('voice-call-handoff')).toBeNull();
-      fireEvent.click(screen.getByTestId('voice-call-engine-gemini-flash'));
+      fireEvent.click(screen.getByTestId('voice-call-engine-gemini'));
       fireEvent.click(await screen.findByTestId('voice-call-handoff-always'));
       await waitFor(() => expect(server.writes).toHaveLength(2));
       expect((server.writes[1]!.voiceConfig as Record<string, unknown>).call).toEqual({
@@ -856,7 +861,7 @@ describe('Settings → Voice', () => {
       const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
       vi.stubGlobal('fetch', makeFetch({}, server.handler));
       renderSettings('/settings/voice');
-      fireEvent.click(await screen.findByTestId('voice-call-engine-gemini-flash'));
+      fireEvent.click(await screen.findByTestId('voice-call-engine-gemini'));
       fireEvent.click(await screen.findByTestId('voice-call-handoff-never'));
       await waitFor(() =>
         expect(screen.getByTestId('voice-call-handoff-never')).toHaveAttribute(
@@ -864,7 +869,7 @@ describe('Settings → Voice', () => {
           'true',
         ),
       );
-      fireEvent.click(screen.getByTestId('voice-call-engine-gemini-thinking'));
+      fireEvent.click(screen.getByTestId('voice-call-variant-heavy'));
       await waitFor(() => expect(server.writes).toHaveLength(3));
       expect((server.writes[2]!.voiceConfig as Record<string, unknown>).call).toEqual({
         backend: 'gemini',
@@ -906,7 +911,7 @@ describe('Settings → Voice', () => {
         ),
       );
       renderSettings('/settings/voice');
-      fireEvent.click(await screen.findByTestId('voice-call-engine-gemini-flash'));
+      fireEvent.click(await screen.findByTestId('voice-call-engine-gemini'));
       await waitFor(() => expect(errors()).toContain('Settings failed. Try again.'));
     });
   });

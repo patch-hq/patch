@@ -64,7 +64,7 @@ import { useSelectionStore } from '../stores/selectionStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { isKeptDraft, useDraftStore } from '../stores/draftStore.js';
 import { useComposerAttachmentStore } from '../stores/composerAttachmentStore.js';
-import { connectionSummary } from '../lib/connectionSummary.js';
+import { connectionSummary, hostsDown } from '../lib/connectionSummary.js';
 import { api, ApiError } from '../api/rest.js';
 import type { ChatRow, DisplayBadge, SectionCounts } from '../stores/types.js';
 import { formatWakeTime } from './SnoozeMenu.js';
@@ -193,6 +193,9 @@ function SidebarInner({ standalone = false }: { standalone?: boolean } = {}): JS
   const hostOnline = usePresenceStore((s) => s.hostOnline);
   const hostStates = usePresenceStore((s) => s.hosts);
   const connectedAndOnline = connection === 'connected' && hostOnline;
+  // Yellow when the server link is up but a host that has connected before is
+  // offline — even if another host is still online (`hostOnline` is "any").
+  const anyHostDown = connection === 'connected' && hostsDown(hostStates).length > 0;
   const setSidebarCollapsed = useUiStore((s) => s.setSidebarCollapsed);
   const channelsOpen = useUiStore((s) => s.channelsOpen);
   const setChannelsOpen = useUiStore((s) => s.setChannelsOpen);
@@ -357,7 +360,13 @@ function SidebarInner({ standalone = false }: { standalone?: boolean } = {}): JS
           <span className="brand-lockup">
             <span className="brand-mark">patch</span>
             <span
-              className={`conn-dot ${connectedAndOnline ? '' : 'offline'}`}
+              className={`conn-dot ${connectedAndOnline ? '' : 'offline'}${anyHostDown ? ' host-down' : ''}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => navigate('/settings/hosts')}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') navigate('/settings/hosts');
+              }}
               aria-label={`connection: ${connection === 'connected' ? (hostOnline ? 'connected' : 'host-offline') : connection}`}
               title={connectionSummary(connection, hostStates)}
               data-tooltip-full
