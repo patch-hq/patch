@@ -9520,6 +9520,13 @@ button.view-file-download {
   align-items: stretch;
   gap: 10px;
 }
+/* Choice rows: the label owns its own line, the chips sit under it. */
+.set-row.set-row-choices > .set-row-ctrl {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 6px;
+}
 .set-row.selected {
   background: var(--bg-soft);
 }
