@@ -87,33 +87,11 @@ describe('WebUpdateBanner', () => {
     expect(buttons[0]).toHaveAttribute('data-testid', 'web-update-reload');
   });
 
-  // Regression: on the desktop shell, one deploy used to stage BOTH this
-  // banner and the shell's own download — so once the shell finished
-  // downloading, "Patch has updated — Reload" and "Patch x.y.z is ready —
-  // Restart now" sat stacked in the same slot for the same event.
-  it('steps aside once the desktop shell has its own restart ready — Restart supersedes Reload', async () => {
-    installBridge({
-      currentVersion: '0.1.900',
-      gitSha: 'abc1234',
-      builtAt: '2026-09-10T09:00:00Z',
-      feedUrl: 'https://patch.example/api/desktop/latest-mac.yml',
-      disabledReason: null,
-      lastCheckedAt: '2026-09-17T09:00:00Z',
-      lastResult: 'downloaded',
-      lastError: null,
-      lastErrorKind: null,
-      availableVersion: '0.1.971',
-      downloaded: true,
-      checking: false,
-      staleSince: new Date(Date.now() - HOUR).toISOString(),
-    });
-    useWebUpdateStore.getState().setAvailable('assets/index-BBBB.js');
-    render(<WebUpdateBanner />);
-    await act(async () => {});
-    expect(screen.queryByTestId('web-update-banner')).toBeNull();
-  });
-
-  it('still shows while the desktop shell is only checking or downloading, not yet ready to restart', async () => {
+  // Regression: inside the Mac app, one deploy showed this banner first (the
+  // server updates in seconds) and then the shell's identically-worded one
+  // ~10 minutes later. The shell's restart covers the page too, so this one
+  // never shows there — not even while the shell is still downloading.
+  it('never shows inside a desktop shell that can update itself', async () => {
     installBridge({
       currentVersion: '0.1.900',
       gitSha: 'abc1234',
@@ -132,14 +110,36 @@ describe('WebUpdateBanner', () => {
     useWebUpdateStore.getState().setAvailable('assets/index-BBBB.js');
     render(<WebUpdateBanner />);
     await act(async () => {});
+    expect(screen.queryByTestId('web-update-banner')).toBeNull();
+  });
+
+  it('still shows in a desktop shell that cannot update itself, where Reload is the only way', async () => {
+    installBridge({
+      currentVersion: '0.1.900',
+      gitSha: 'abc1234',
+      builtAt: '2026-09-10T09:00:00Z',
+      feedUrl: 'https://patch.example/api/desktop/latest-mac.yml',
+      disabledReason: 'this app runs its own server on this Mac',
+      lastCheckedAt: '2026-09-17T09:00:00Z',
+      lastResult: 'update-available',
+      lastError: null,
+      lastErrorKind: null,
+      availableVersion: '0.1.971',
+      downloaded: false,
+      checking: false,
+      staleSince: new Date(Date.now() - HOUR).toISOString(),
+    });
+    useWebUpdateStore.getState().setAvailable('assets/index-BBBB.js');
+    render(<WebUpdateBanner />);
+    await act(async () => {});
     expect(screen.queryByTestId('web-update-banner')).not.toBeNull();
   });
 
-  it('uses the same wording as the desktop restart prompt — one prompt, not two kinds', () => {
+  it('says what pressing it does: Reload', () => {
     useWebUpdateStore.getState().setAvailable('assets/index-BBBB.js');
     render(<WebUpdateBanner />);
     expect(screen.getByTestId('web-update-banner')).toHaveTextContent('Patch has updated');
-    expect(screen.getByTestId('web-update-reload')).toHaveTextContent('Update Patch');
+    expect(screen.getByTestId('web-update-reload')).toHaveTextContent('Reload');
   });
 
   it('acknowledges the press, and says so if the page is still here afterwards', async () => {
@@ -148,7 +148,7 @@ describe('WebUpdateBanner', () => {
     useWebUpdateStore.getState().setAvailable('assets/index-BBBB.js');
     render(<WebUpdateBanner />);
     fireEvent.click(screen.getByTestId('web-update-reload'));
-    expect(screen.getByTestId('web-update-reload')).toHaveTextContent('Updating');
+    expect(screen.getByTestId('web-update-reload')).toHaveTextContent('Reloading');
     expect(screen.getByTestId('web-update-reload')).toBeDisabled();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
