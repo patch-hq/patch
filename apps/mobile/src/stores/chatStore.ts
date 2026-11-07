@@ -335,6 +335,14 @@ interface ChatState {
   resolveSideThreadPermission(chatId: string, branchId: string, requestId: string): void;
   setActiveChat(chatId: string | null): void;
   markRead(chatId: string): void;
+  /**
+   * A background fetch brought this chat's transcript onto the phone without
+   * showing it (spec/12 § Offline reading), so the live stream never told the
+   * list row about it. Move the row's head — preview and `lastSeq`, hence the
+   * unread dot — to what was fetched. Only for a chat this phone has opened
+   * before: for any other the whole history would read as unread.
+   */
+  noteTranscriptHead(chatId: string, events: readonly unknown[]): void;
   setArchived(chatId: string, archived: boolean): void;
   /** `pinnedAt` puts back the time a refused unpin took away; omitted, a pin is stamped now. */
   setPinned(chatId: string, pinned: boolean, pinnedAt?: number | null): void;
@@ -1624,6 +1632,46 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setActiveChat(chatId) {
     set({ activeChatId: chatId });
     if (chatId !== null) get().markRead(chatId);
+  },
+
+  noteTranscriptHead(chatId, events) {
+    const row = get().chats[chatId];
+    if (!row || row.lastReadSeq < 0) return;
+    let lastSeq = row.lastSeq;
+    let preview = row.preview;
+    let previewSeq = -1;
+    for (const raw of events) {
+      const e = raw as {
+        type?: string;
+        seq?: unknown;
+        role?: string;
+        content?: unknown;
+        error?: unknown;
+        synthetic?: unknown;
+        sessionChange?: unknown;
+        handoffLink?: unknown;
+        permissionModeChange?: unknown;
+        accountSwitch?: unknown;
+      };
+      if (typeof e.seq !== 'number') continue;
+      if (e.seq > lastSeq) lastSeq = e.seq;
+      const spoken =
+        e.type === 'chat.message' &&
+        (e.role === 'user' || e.role === 'assistant') &&
+        typeof e.content === 'string' &&
+        !e.error &&
+        !e.synthetic &&
+        e.permissionModeChange === undefined &&
+        e.accountSwitch === undefined;
+      if (spoken && e.seq >= previewSeq) {
+        previewSeq = e.seq;
+        const text =
+          e.role === 'user' ? stripVoicePrefix(e.content as string).text : (e.content as string);
+        preview = headCodePoints(text, 140);
+      }
+    }
+    if (lastSeq === row.lastSeq && preview === row.preview) return;
+    set({ chats: { ...get().chats, [chatId]: { ...row, lastSeq, preview } } });
   },
 
   markRead(chatId) {

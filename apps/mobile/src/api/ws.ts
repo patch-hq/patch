@@ -977,7 +977,10 @@ export class PatchWs {
       if (list) list.push(e);
       else byChat.set(chatId, [e]);
     }
-    for (const [chatId, list] of byChat) saveEvents(chatId, list);
+    for (const [chatId, list] of byChat) {
+      saveEvents(chatId, list);
+      useChatStore.getState().noteTranscriptHead(chatId, list);
+    }
     for (const e of events) {
       if (e.type !== 'chat.permission_response' || e.chatId === undefined) continue;
       saveResolution(
