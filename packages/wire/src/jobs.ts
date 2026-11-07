@@ -51,7 +51,14 @@ export const CronTrigger = z
   .strict();
 export type CronTrigger = z.infer<typeof CronTrigger>;
 
-export const WebhookScheme = z.enum(['none', 'hmac-sha256', 'github', 'stripe', 'todoist']);
+export const WebhookScheme = z.enum([
+  'none',
+  'bearer',
+  'hmac-sha256',
+  'github',
+  'stripe',
+  'todoist',
+]);
 export type WebhookScheme = z.infer<typeof WebhookScheme>;
 
 export const WebhookTrigger = z
@@ -219,6 +226,23 @@ const jobActionStartHiddenField = { startHidden: z.boolean().optional() };
 const jobActionGoalField = { goal: z.string().min(1).optional() };
 
 /**
+ * Arm a recurring loop on the chat the moment this fire creates it (spec/02 §
+ * Self-wake, spec/08 ## Action) — the same `every` + `message` the composer's
+ * `/loop <every> <message>` takes. `message` is the user's own loop prompt,
+ * written separately from the action's `prompt` because the two differ (a first
+ * briefing versus a recurring nudge) and the agent must not invent its own.
+ *
+ * Creation-time only, same back-compat shape as `goal`: an untouched job never
+ * writes this key. `every` is a duration string ("10m", "1h30m").
+ */
+const jobActionLoopField = {
+  loop: z
+    .object({ every: z.string().min(1), message: z.string().min(1) })
+    .strict()
+    .optional(),
+};
+
+/**
  * Ring the completion doorbell when this job's chat settles (spec/09 § Chat
  * completion, spec/08 ## Action). A fire's turn is a `user` turn — the job
  * dispatched it on the user's behalf, not the host for itself — so a job's
@@ -279,6 +303,7 @@ export const SpawnAction = z
     ...jobActionNotifyOnCompleteField,
     ...jobActionIncludePayloadField,
     ...jobActionGoalField,
+    ...jobActionLoopField,
     /**
      * The permission mode this fire's chat runs under, applied as that chat's
      * per-chat override (spec/08 § Action, spec/02 § Permission mode).
@@ -353,6 +378,7 @@ export const ContinueAction = z
     // Same creation-time rule as `startHidden`/`permissionMode` — set once,
     // when a KEYED `continue` creates a new subject's chat.
     ...jobActionGoalField,
+    ...jobActionLoopField,
     /**
      * Mustache template naming the SUBJECT this fire is about, turning the
      * job's one durable chat into one durable chat PER SUBJECT (spec/08 ##

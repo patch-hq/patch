@@ -134,7 +134,7 @@ export interface WebhookLogEntry {
    * so the firehose log distinguishes the source.
    * Spec/08 line 154: webhooks.jsonl logs every webhook/todoist hit.
    */
-  scheme: 'none' | 'hmac-sha256' | 'github' | 'stripe' | 'todoist';
+  scheme: 'none' | 'bearer' | 'hmac-sha256' | 'github' | 'stripe' | 'todoist';
   filter: 'pass' | 'reject' | 'error' | 'n/a';
   status: number;
   error?: string;

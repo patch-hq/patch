@@ -222,11 +222,11 @@ sessions, host restarts, and arbitrary time. Spec source-of-truth:
 
 ### Trigger types
 
-| Type      | Wire-up                                                                                       |
-| --------- | --------------------------------------------------------------------------------------------- |
-| `cron`    | UTC, 5-field. Registered with `node-cron` on boot + on store change.                          |
-| `webhook` | `POST /api/webhooks/:jobId`. Schemes: `none`, `hmac-sha256`, `github`, `stripe`. Timing-safe. |
-| `todoist` | `POST /api/webhooks/todoist/:jobId`. Verifies `X-Todoist-Hmac-SHA256` (base64).               |
+| Type      | Wire-up                                                                                                 |
+| --------- | ------------------------------------------------------------------------------------------------------- |
+| `cron`    | UTC, 5-field. Registered with `node-cron` on boot + on store change.                                    |
+| `webhook` | `POST /api/webhooks/:jobId`. Schemes: `none`, `bearer`, `hmac-sha256`, `github`, `stripe`. Timing-safe. |
+| `todoist` | `POST /api/webhooks/todoist/:jobId`. Verifies `X-Todoist-Hmac-SHA256` (base64).                         |
 
 ### Filter
 

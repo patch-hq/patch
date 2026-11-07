@@ -30,6 +30,7 @@
 
 import { DateTimeField } from './DateTimeField.js';
 import { LONG_PASTE_CHARS, pastedTextName } from '../lib/pastedText';
+import { insertDictation } from '../lib/dictationInsert.js';
 import type { JSX, ReactNode, Ref } from 'react';
 import {
   forwardRef,
@@ -629,13 +630,10 @@ export const Composer = forwardRef(function Composer(
   // already there, and replaced by the authoritative transcript when that lands
   // — never part of `value`, so a cancelled dictation leaves the draft intact.
   const [livePartial, setLivePartial] = useState('');
-  const shownBody =
-    livePartial === ''
-      ? body
-      : body.trim().length > 0
-        ? `${body.trimEnd()} ${livePartial}`
-        : livePartial;
+  const [cursorPos, setCursorPos] = useState(0);
+  const shownBody = livePartial === '' ? body : insertDictation(body, cursorPos, livePartial).text;
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const heldCaretRef = useRef(false);
   const actionsRef = useRef<HTMLDivElement>(null);
   const compactActions = useCompactActions(actionsRef);
   // Where the caret sits, kept in sync so the `/` menu (and chip rendering)
@@ -645,7 +643,6 @@ export const Composer = forwardRef(function Composer(
   // simpler than trying to infer it from `value` alone (`value` alone can't
   // tell "/plant" typed at the end from "/plant" typed at the start of a
   // longer message).
-  const [cursorPos, setCursorPos] = useState(0);
   function syncCursor(el: HTMLTextAreaElement): void {
     setCursorPos(el.selectionStart ?? 0);
   }
@@ -661,13 +658,28 @@ export const Composer = forwardRef(function Composer(
   // differs, so typing never touches the value and the undo stack survives.
   useLayoutEffect(() => {
     const el = inputRef.current;
-    if (el && el.value !== shownBody) el.value = shownBody;
+    if (el && el.value !== shownBody) {
+      // Assigning `value` throws the caret to the end. While dictation words
+      // are being drawn in (and on the render that removes them) the caret
+      // stays where the words go.
+      const held = livePartial !== '' || heldCaretRef.current;
+      const start = el.selectionStart;
+      const end = el.selectionEnd;
+      el.value = shownBody;
+      if (held)
+        el.setSelectionRange(Math.min(start, shownBody.length), Math.min(end, shownBody.length));
+    }
+    heldCaretRef.current = livePartial !== '';
   }, [shownBody]);
   useLayoutEffect(() => {
     const pos = pendingCursorRef.current;
     if (pos === null) return;
     pendingCursorRef.current = null;
-    inputRef.current?.setSelectionRange(pos, pos);
+    const el = inputRef.current;
+    el?.setSelectionRange(pos, pos);
+    // Keep the caret in view: a caret at the very end is the common case for
+    // long dictation, and the browser does not always scroll to it.
+    if (el && pos >= el.value.length) el.scrollTop = el.scrollHeight;
     setCursorPos(pos);
   }, [value]);
   // Persist the draft as the user types. Fire ONLY when `value` changes — the
@@ -1334,6 +1346,11 @@ export const Composer = forwardRef(function Composer(
       cursor = chip.end;
     });
     if (cursor < body.length) nodes.push(<span key="text-tail">{body.slice(cursor)}</span>);
+    // A textarea gives a trailing newline its own (empty) last line; `pre-wrap`
+    // text does not, so the mirror came out one line shorter and every line sat
+    // a row away from the caret once the field scrolled. A zero-width space
+    // gives that last line its height back.
+    if (body.endsWith('\n')) nodes.push(<span key="text-nl">{'\u200b'}</span>);
     return nodes;
   }
   // While voice is running, the input is being painted over: the live-dictation
@@ -1514,7 +1531,9 @@ export const Composer = forwardRef(function Composer(
       }
       const t = transcript.trim();
       const cur = valueRef.current;
-      const next = t && cur.trim().length > 0 ? `${cur.trimEnd()} ${t}` : t || cur;
+      const el = inputRef.current;
+      const landed = insertDictation(cur, el?.selectionStart ?? cur.length, t);
+      const next = landed.text;
       const send = sendAfterDictationRef.current;
       sendAfterDictationRef.current = false;
       if (send) {
@@ -1526,7 +1545,10 @@ export const Composer = forwardRef(function Composer(
         }
       } else {
         // Mic tapped again: append into the composer, editable before send.
-        if (t) setValue(next);
+        if (t) {
+          pendingCursorRef.current = landed.caret;
+          setValue(next);
+        }
         inputRef.current?.focus();
       }
     } catch (e) {

@@ -906,6 +906,7 @@ export default function JobEditor(): React.ReactElement {
                     { value: 'hmac-sha256', label: 'hmac-sha256' },
                     { value: 'github', label: 'github' },
                     { value: 'stripe', label: 'stripe' },
+                    { value: 'bearer', label: 'bearer' },
                   ]}
                 />
               </Field>

@@ -3,6 +3,7 @@
 // React Query's error path) can show a red banner.
 
 import type {
+  ReminderEvery,
   SnoozeRecord,
   AccountStrategy,
   AttachmentRef,
@@ -761,10 +762,10 @@ export const api = {
       body: { todos },
     }),
   // patch/todo.md — Reminders: set (or clear, with null) the chat's reminder.
-  setReminder: (chatId: string, reminder: string | null) =>
+  setReminder: (chatId: string, reminder: string | null, every: ReminderEvery | null = null) =>
     request<unknown>(`/api/chats/${chatId}/reminder`, {
       method: 'POST',
-      body: { reminder },
+      body: { reminder, every },
     }),
   // spec/14 § Side threads panel — pulls a side thread's own track (a side
   // branch's content is not broadcast live, spec/04 § Parallel branches).

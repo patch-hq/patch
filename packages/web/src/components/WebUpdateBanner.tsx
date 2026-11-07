@@ -10,13 +10,14 @@
 // parallel set: the two banners share the exact same top-of-shell slot and
 // must look and behave like one family, not two.
 //
-// On the desktop shell, one deploy fans out into BOTH stores: liveUpdate.ts's
-// `onServerVersion` stages this banner AND asks the shell to download its own
-// new build. Once that download lands, DesktopUpdateBanner's "Restart now"
-// relaunches the shell against the already-current server, which picks up the
-// new bundle too — so it fully supersedes this banner's "Reload". Defer to it
-// once it is actually ready to offer that, rather than stacking both prompts
-// for the one event.
+// Inside the Mac app this banner never shows. The app is a thin shell over
+// this same web page, and every release ships a new shell alongside the new
+// page, so the shell's own "Restart Patch" banner covers both. Showing this one
+// too meant two identically-worded prompts for one deploy: this one first
+// (the server updates in seconds, the Mac build takes ~10 minutes), then the
+// shell's. It only stays on when the shell cannot update itself
+// (`disabledReason`, e.g. a Mac running its own local server), because then a
+// reload is the only way to get the new page.
 
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { useWebUpdateStore } from '../stores/webUpdateStore.js';
@@ -61,7 +62,7 @@ export function WebUpdateBanner(): JSX.Element | null {
     return () => window.clearInterval(id);
   }, []);
 
-  const deferred = !!(desktopState?.downloaded && desktopState.availableVersion);
+  const deferred = desktopState != null && desktopState.disabledReason === null;
   const urgency = staleSince === null || deferred ? 'none' : updateUrgency(staleSince, now);
   const waited = staleSince === null ? null : waitedWords(staleSince, now);
   useLogUpdateBanner(
@@ -95,7 +96,7 @@ export function WebUpdateBanner(): JSX.Element | null {
         disabled={pressed}
         onClick={press}
       >
-        {pressed ? 'Updating…' : 'Update Patch'}
+        {pressed ? 'Reloading…' : 'Reload'}
       </button>
     </div>
   );

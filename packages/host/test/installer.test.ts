@@ -6,7 +6,7 @@
 // regress: the platform refusal, the authority notice, the unit contents, the
 // named pairing failures, and the host identity.
 
-import { readdirSync, utimesSync } from 'node:fs';
+import { readFileSync, readdirSync, utimesSync } from 'node:fs';
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import {
   lstatSync,
@@ -880,5 +880,13 @@ describe("a Mac's service PATH", () => {
     expect(res.code).toBe(69);
     expect(ops.registered).toBe(0);
     expect(streams(ctx).err).toContain("login shell's PATH");
+  });
+});
+
+describe('installer entry script on macOS', () => {
+  it('runs the bundled runtime from inside the signed Patch Host.app, not the top-level node', () => {
+    const script = readFileSync(new URL('../installer/install', import.meta.url), 'utf8');
+    expect(script).toContain('NODE="$DIR/Patch Host.app/Contents/MacOS/patch-host"');
+    expect(script).toContain('exec "$NODE" "$DIR/install.mjs"');
   });
 });

@@ -30,6 +30,7 @@ import {
   isReadOnlyMirrorThread,
   isReservedSpecialThread,
   pickAvailableModel,
+  ReminderEvery,
   TodoItem,
 } from '@patch/wire';
 import type { ChatErrorCode, ChatSpawnRequestEvent, ReportedBackend, WireEvent } from '@patch/wire';
@@ -2499,7 +2500,9 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
   // patch/todo.md — Reminders: set (or clear, with null) the chat's reminder.
   // Forwards chat.reminder_request to the host, which persists it + echoes
   // chat.state so every surface shows the reminder banner at the top of the chat.
-  const ReminderBody = z.object({ reminder: z.string().nullable() }).strict();
+  const ReminderBody = z
+    .object({ reminder: z.string().nullable(), every: ReminderEvery.nullable().optional() })
+    .strict();
   app.post<{ Params: { id: string } }>('/api/chats/:id/reminder', async (req, reply) => {
     let auth;
     try {
@@ -2520,6 +2523,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       type: 'chat.reminder_request',
       chatId: req.params.id,
       reminder: parsed.data.reminder,
+      ...(parsed.data.every ? { every: parsed.data.every } : {}),
     });
     return reply.code(200).send({ ok: true });
   });

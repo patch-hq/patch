@@ -16,6 +16,7 @@ import type {
   ChatSearchResponse,
   PendingWake,
   PermissionMode,
+  ReminderEvery,
   VersionReport,
   StatusKind,
   TodoItem,
@@ -202,6 +203,7 @@ export interface ChatListEntry {
   goal?: string | null;
   /** The chat's reminder (`/remind`), or `null`. Optional, as `goal`. */
   reminder?: string | null;
+  reminderEvery?: ReminderEvery | null;
   /** The agent's task list (spec/02 § Task list). Optional, as `goal`. */
   todos?: TodoItem[];
   /** A special thread turned off (spec/06 § Disabled). Optional, as `goal`. */
@@ -559,8 +561,11 @@ export const api = {
     loop: { message: string; every: string | number; notAfter?: string } | null,
   ) => request<unknown>(`/api/chats/${chatId}/loop`, { method: 'POST', body: { loop } }),
   // `/remind` — set (or clear, with null) the chat's reminder.
-  setReminder: (chatId: string, reminder: string | null) =>
-    request<unknown>(`/api/chats/${chatId}/reminder`, { method: 'POST', body: { reminder } }),
+  setReminder: (chatId: string, reminder: string | null, every: ReminderEvery | null = null) =>
+    request<unknown>(`/api/chats/${chatId}/reminder`, {
+      method: 'POST',
+      body: { reminder, every },
+    }),
   // spec/15 § Side threads screen — pulls a side thread's own track (a side
   // branch's content is not broadcast live, spec/04 § Parallel branches).
   getChatHistory: (chatId: string, opts: { branchId: string }) =>

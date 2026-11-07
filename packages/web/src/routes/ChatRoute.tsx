@@ -1742,10 +1742,15 @@ export function ChatRoute({
     // optimistic set, reverting + surfacing a toast on failure (NO FALLBACK).
     const parsedReminder = parseReminderCommand(message);
     if (parsedReminder.isReminder) {
+      if (parsedReminder.error !== undefined) {
+        pushError(failed('setting reminder'), undefined, parsedReminder.error);
+        return;
+      }
       const prev = row?.reminder ?? null;
-      setReminder(chatId, parsedReminder.reminder);
-      void api.setReminder(chatId, parsedReminder.reminder).catch((err) => {
-        setReminder(chatId, prev);
+      const prevEvery = row?.reminderEvery ?? null;
+      setReminder(chatId, parsedReminder.reminder, parsedReminder.every);
+      void api.setReminder(chatId, parsedReminder.reminder, parsedReminder.every).catch((err) => {
+        setReminder(chatId, prev, prevEvery);
         pushError(failed('setting reminder'), undefined, (err as Error).message);
       });
       return;

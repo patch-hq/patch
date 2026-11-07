@@ -1231,6 +1231,13 @@ body {
 .conn-dot.offline {
   background: var(--waiting);
 }
+.conn-dot.host-down {
+  background: var(--amber);
+  box-shadow: 0 0 0 3px var(--amber-tint);
+}
+.conn-dot[role='button'] {
+  cursor: pointer;
+}
 .brand-lockup .conn-dot {
   flex-shrink: 0;
   /* The wordmark's line box carries half-leading above the glyphs (24px type on
@@ -9513,6 +9520,13 @@ button.view-file-download {
   align-items: stretch;
   gap: 10px;
 }
+/* Choice rows: the label owns its own line, the chips sit under it. */
+.set-row.set-row-choices > .set-row-ctrl {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 6px;
+}
 .set-row.selected {
   background: var(--bg-soft);
 }
@@ -11096,6 +11110,12 @@ main.empty-state p {
 .reminder-banner-text {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reminder-banner-every {
+  flex: none;
+  margin-left: auto;
+  color: var(--ink-3);
   white-space: nowrap;
 }
 .reminder-clear-btn {
