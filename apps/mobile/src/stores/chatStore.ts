@@ -588,6 +588,10 @@ function rowsToRecord(
     // A roster snapshot older than the last `chat.state` is a race, not news
     // (the same rule `chat.state` applies to itself): keep the live state.
     const live = prior !== undefined && prior.lastUpdated > r.lastUpdated;
+    const answered =
+      prior !== undefined &&
+      r.lastUpdated > prior.lastUpdated &&
+      r.activity !== 'awaiting-permission';
     next[r.chatId] = mergeListRow(
       prior
         ? {
@@ -614,9 +618,12 @@ function rowsToRecord(
             // that still reads the chat settled must not flip it back to idle
             // (every foreground refreshes the roster).
             optimisticSend: prior.optimisticSend,
-            pendingPermissions: prior.pendingPermissions,
+            // A newer roster that no longer says awaiting-permission means the
+            // request was answered (maybe elsewhere): holding the old flag
+            // leaves "waiting on you" up on a running turn.
+            pendingPermissions: answered ? [] : prior.pendingPermissions,
             lastSeq: prior.lastSeq,
-            awaitingPermission: prior.awaitingPermission,
+            awaitingPermission: answered ? false : prior.awaitingPermission,
           }
         : undefined,
       live

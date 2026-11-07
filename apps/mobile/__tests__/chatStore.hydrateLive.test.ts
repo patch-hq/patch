@@ -72,6 +72,23 @@ describe('hydrate after live frames', () => {
     expect(chat().lastUpdated).toBe(20);
   });
 
+  it('drops "waiting on you" when a newer roster says the turn is running', () => {
+    const s = useChatStore.getState();
+    s.applyEvent({
+      type: 'chat.permission_request',
+      chatId: 'c1',
+      seq: 10,
+      requestId: 'r1',
+      request: { tool: 'Bash', description: 'ls', args: { command: 'ls' } },
+    });
+    expect(chat().awaitingPermission).toBe(true);
+
+    s.hydrate([toChatListRow({ ...ENTRY, activity: 'running', lastUpdated: 40 })]);
+
+    expect(chat().activity).toBe('running');
+    expect(chat().awaitingPermission).toBe(false);
+  });
+
   it('still lets a NEWER roster answer win over the stored state', () => {
     useChatStore
       .getState()
