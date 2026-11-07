@@ -2047,7 +2047,7 @@ describe('Composer', () => {
     });
 
     describe('on a streaming engine (Deepgram)', () => {
-      const setEngine = (computer: 'deepgram' | 'whisper'): void =>
+      const setEngine = (computer: 'deepgram' | 'elevenlabs' | 'whisper'): void =>
         usePreferencesStore.setState({
           preferences: {
             ...DEFAULT_PREFERENCES,
@@ -2088,6 +2088,36 @@ describe('Composer', () => {
         await waitFor(() => expect(input().value).toBe('Buy oat milk.'));
         expect(finish).toHaveBeenCalledOnce();
         expect(stop).toHaveBeenCalled();
+        expect(transcribeClip).not.toHaveBeenCalled();
+      });
+
+      it("ElevenLabs streams like Deepgram: stopping lands the live stream's transcript and uploads nothing", async () => {
+        setEngine('elevenlabs');
+        const rec = makeRec();
+        const finish = vi.fn(async () => 'Buy oat milk.');
+        const factory: typeof startDictationPreview = () => ({
+          push: () => {},
+          finish,
+          stop: () => {},
+        });
+        const transcribeClip = vi.fn(async () => ({ transcript: 'by oat milk' }));
+        render(
+          <Composer
+            chatId="c1"
+            hostId="d1"
+            onSend={() => {}}
+            previewFactory={factory}
+            recorderFactory={async () => rec as unknown as VoiceRecording}
+            transcribeClip={transcribeClip}
+          />,
+        );
+        const mic = screen.getByTestId('voice-note-btn');
+        fireEvent.mouseDown(mic);
+        fireEvent.mouseUp(mic);
+        await waitFor(() => expect(rec.stop).not.toHaveBeenCalled());
+        fireEvent.mouseDown(mic);
+        await waitFor(() => expect(input().value).toBe('Buy oat milk.'));
+        expect(finish).toHaveBeenCalledOnce();
         expect(transcribeClip).not.toHaveBeenCalled();
       });
 
