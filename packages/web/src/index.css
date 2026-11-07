@@ -17727,3 +17727,33 @@ select.permission-mode.is-pending {
     display: none;
   }
 }
+
+.remote-call {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #1f1c17;
+  color: #f4f0e4;
+  font-size: var(--text-min);
+  border-bottom: 1px solid #3a342a;
+}
+.remote-call .rc-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.remote-call .rc-switch {
+  flex: 0 0 auto;
+  background: #a9d391;
+  color: #1f1c17;
+  border: 0;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}

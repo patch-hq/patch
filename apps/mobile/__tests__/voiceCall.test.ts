@@ -137,6 +137,52 @@ describe('startVoiceCall — happy path', () => {
     expect(startMicCaptureMock).toHaveBeenCalled();
   });
 
+  it('takeOver goes on session_start only when the call is a switch from another device', async () => {
+    const { startVoiceCall } = await import('../src/lib/voiceCall');
+    startVoiceCall('c1', 'call', { takeOver: true });
+    await flush();
+    const sock = FakeWebSocket.last();
+    sock.emitOpen();
+    await flush();
+    expect(JSON.parse(sock.sent[0] as string).takeOver).toBe(true);
+  });
+
+  it('a close with reason "transferred" ends the call quietly instead of reporting it dropped', async () => {
+    const { startVoiceCall } = await import('../src/lib/voiceCall');
+    startVoiceCall('c1');
+    await flush();
+    const sock = FakeWebSocket.last();
+    sock.emitOpen();
+    await flush();
+    (sock as unknown as { onclose: (e: { reason: string }) => void }).onclose({
+      reason: 'transferred',
+    });
+    await flush();
+    expect(useVoiceStore.getState().activeSession).toBeNull();
+    expect(useVoiceStore.getState().callError).toBeNull();
+  });
+
+  it('a close with no reason is still reported as a dropped call', async () => {
+    const { startVoiceCall } = await import('../src/lib/voiceCall');
+    startVoiceCall('c1');
+    await flush();
+    const sock = FakeWebSocket.last();
+    sock.emitOpen();
+    await flush();
+    (sock as unknown as { onclose: (e: { reason: string }) => void }).onclose({ reason: '' });
+    expect(useVoiceStore.getState().callError).toMatch(/Call dropped/);
+  });
+
+  it('a plain call carries no takeOver', async () => {
+    const { startVoiceCall } = await import('../src/lib/voiceCall');
+    startVoiceCall('c1');
+    await flush();
+    const sock = FakeWebSocket.last();
+    sock.emitOpen();
+    await flush();
+    expect('takeOver' in JSON.parse(sock.sent[0] as string)).toBe(false);
+  });
+
   it('forwards a captured mic frame as a pcm16 header + binary frame', async () => {
     const { startVoiceCall } = await import('../src/lib/voiceCall');
     startVoiceCall('c1');

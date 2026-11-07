@@ -1067,6 +1067,24 @@ describe('message dispatch', () => {
     expect(useVoiceStore.getState().incomingCall).toMatchObject({ callId: 'call1', chatId: 'c1' });
   });
 
+  it("voice.call tracks another surface's call, drops it on end, and ignores this phone's own", () => {
+    const sock = open();
+    usePresenceStore.getState().setIdentity('acc', 'phone-1');
+    useVoiceStore.setState({ remoteCalls: {} });
+    const base = { type: 'voice.call', surfaceKind: 'web', chatId: 'c1', startedAt: 5 };
+    sock.emitMessage(
+      JSON.stringify({ ...base, sessionId: 's1', surfaceId: 'web-1', active: true }),
+    );
+    sock.emitMessage(
+      JSON.stringify({ ...base, sessionId: 's2', surfaceId: 'phone-1', active: true }),
+    );
+    expect(Object.keys(useVoiceStore.getState().remoteCalls)).toEqual(['s1']);
+    sock.emitMessage(
+      JSON.stringify({ ...base, sessionId: 's1', surfaceId: 'web-1', active: false }),
+    );
+    expect(useVoiceStore.getState().remoteCalls).toEqual({});
+  });
+
   it('chat.call_winner clears a matching incoming call', () => {
     const sock = open();
     useVoiceStore
