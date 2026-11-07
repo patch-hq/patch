@@ -212,7 +212,7 @@ describe('Composer — dictation mic (tap-toggle)', () => {
     );
   });
 
-  it('clips the live transcript to the input box instead of overflowing it', async () => {
+  it('scrolls the live transcript within the input cap, following the newest words', async () => {
     const { factory, sessions } = makeDictationFactory();
     const r = renderRN(<Composer chatId="c1" folder="work" dictationFactory={factory} />);
     await actAsync(() => {
@@ -221,17 +221,14 @@ describe('Composer — dictation mic (tap-toggle)', () => {
     await actAsync(() => {
       sessions[0]!.onPartial('a very long interim transcript '.repeat(40));
     });
-    const preview = r.root.findAllByProps({ testID: 'dictation-preview' })[0]!;
-    const box = preview.parent!.parent!;
-    // Same cap as the field under it, and anchored to the bottom so the
-    // newest words are the ones in view.
+    const scroll = r.root.findAllByProps({ testID: 'dictation-mirror-scroll' })[0]!;
     const inputMax = (findHost(r.root, byType('TextInput')).props['style'] as { maxHeight: number })
       .maxHeight;
-    expect(box.props['style']).toMatchObject({
-      overflow: 'hidden',
-      maxHeight: inputMax,
-      justifyContent: 'flex-end',
-    });
+    // Same cap as the field under it; scrollable, not clipped.
+    expect(scroll.props['style']).toMatchObject({ maxHeight: inputMax });
+    expect(scroll.props['pointerEvents']).not.toBe('none');
+    expect(typeof scroll.props['onContentSizeChange']).toBe('function');
+    expect(typeof scroll.props['onScroll']).toBe('function');
   });
 
   it('shows the live/interim transcript in grey inside the input while recording', async () => {
