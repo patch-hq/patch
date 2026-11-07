@@ -1706,6 +1706,17 @@ body {
   font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
+/* The status group's own badge sits at the right edge, away from the per-chat
+   status marks in the rows below. After the count it follows it directly. */
+.folder-head-badge {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+}
+.folder-head-count + .folder-head-badge {
+  margin-left: 0;
+  padding-left: 8px;
+}
 .folder-head-count + .folder-head-actions {
   margin-left: 0;
 }
