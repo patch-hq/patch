@@ -41,6 +41,7 @@ import { useBatchWatcher } from './lib/batchNotifier.js';
 import { useBatchStore } from './stores/batchStore.js';
 import { useDesktopNavigation } from './lib/desktopNavigation.js';
 import { VoiceBar } from './components/VoiceBar.js';
+import { RemoteCallBanner } from './components/RemoteCallBanner.js';
 import { VoiceNoteOverlay } from './components/VoiceNoteOverlay.js';
 import { startVoiceNote, cancelVoiceNote } from './lib/voiceController.js';
 import { DesktopUpdateBanner } from './components/DesktopUpdateBanner.js';
@@ -3631,12 +3632,30 @@ if (params.get('meeting') === 'demo') {
 // FLOW above the columns, which is the one thing jsdom cannot show. `?voiceLine`
 // seeds what the line last heard-and-dropped, for the heard-not-sent state.
 const voiceParam = params.get('voice');
-const shellParam = params.get('shell') !== null || voiceParam !== null;
+const shellParam =
+  params.get('shell') !== null || voiceParam !== null || params.get('remoteCall') !== null;
 if (voiceParam === 'call' || voiceParam === 'hands-free') {
   useVoiceStore.getState().startCall(chatId, voiceParam);
   useVoiceStore.getState().setCallPhase('listening');
   const dropped = params.get('voiceLine');
   if (dropped !== null) useVoiceStore.getState().setCallUnaddressed(dropped);
+}
+
+// `?remoteCall=mobile|web|desktop` seeds a call live on ANOTHER surface, so the
+// call-in-progress banner (spec/07 § A call can move between devices) can be
+// measured in the real shell.
+const remoteCallParam = params.get('remoteCall');
+if (remoteCallParam !== null) {
+  useVoiceStore.getState().setRemoteCall(
+    {
+      sessionId: 'remote-1',
+      surfaceId: 'other-surface',
+      surfaceKind: remoteCallParam,
+      chatId,
+      startedAt: Date.now(),
+    },
+    true,
+  );
 }
 
 // `?meeting=live|paused|ended` seeds the chat with a meeting (meeting mode), and
@@ -4118,6 +4137,7 @@ function Harness(): JSX.Element {
   return (
     <div className="app-shell" data-testid="app-shell" style={{ height: '100vh' }}>
       <VoiceBar />
+      <RemoteCallBanner />
       {withChrome}
     </div>
   );

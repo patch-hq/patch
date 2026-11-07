@@ -5486,6 +5486,10 @@ async function startHost(
       const name = record?.name ?? deviceId;
       emit({ type: 'device.session', deviceId, name, active });
     },
+    // spec/07 § A call can move between devices — account-scoped, so every
+    // surface learns a call is live on this chat and can offer to take it.
+    onCallSession: (info) =>
+      emit({ type: 'voice.call', ...info, surfaceKind: String(info.surfaceKind) }),
     // F2: when a phone Manager call ends, release any device events the
     // concurrency arbiter queued behind it (spec/16 §Concurrency).
     onSessionClosed: ({ wasPhoneCall }) => {
