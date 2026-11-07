@@ -21,6 +21,7 @@ import { execFile } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
+import { installerLog } from './runLog.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -189,10 +190,21 @@ async function run(
   args: string[],
   opts: { env?: NodeJS.ProcessEnv } = {},
 ): Promise<{ stdout: string; stderr: string }> {
-  return execFileAsync(file, args, {
-    encoding: 'utf8',
-    ...(opts.env ? { env: opts.env } : {}),
-  });
+  // Every service-manager step is logged with its result, so a job left
+  // unloaded is visible afterwards: which step ran last, and what it said.
+  const cmd = `${file} ${args.join(' ')}`;
+  try {
+    const res = await execFileAsync(file, args, {
+      encoding: 'utf8',
+      ...(opts.env ? { env: opts.env } : {}),
+    });
+    installerLog(`ok: ${cmd}`);
+    return res;
+  } catch (err) {
+    const e = err as { code?: unknown; stderr?: string };
+    installerLog(`FAILED (${String(e.code)}): ${cmd} — ${(e.stderr ?? '').trim() || detail(err)}`);
+    throw err;
+  }
 }
 
 function detail(err: unknown): string {
@@ -342,6 +354,7 @@ export const launchdOps: ServiceOps = {
       const staged = join(def.home, '.patch', `${SERVICE_LABEL}.plist`);
       writeFileSync(staged, launchdPlist(def, true), { encoding: 'utf8', mode: 0o600 });
       chmodSync(staged, 0o600);
+      installerLog(`ok: staged plist for ${SYSTEM_PLIST_PATH}`);
       try {
         await run('sudo', ['-n', 'cp', staged, SYSTEM_PLIST_PATH]);
         await run('sudo', ['-n', 'chown', 'root:wheel', SYSTEM_PLIST_PATH]);
@@ -359,6 +372,7 @@ export const launchdOps: ServiceOps = {
       mkdirSync(dirname(agentPath), { recursive: true });
       writeFileSync(agentPath, launchdPlist(def, false), { encoding: 'utf8', mode: 0o600 });
       chmodSync(agentPath, 0o600);
+      installerLog(`ok: wrote plist ${agentPath}`);
       if (existsSync(SYSTEM_PLIST_PATH)) {
         otherDomainNotes.push(
           `WARNING: a system job is also installed at ${SYSTEM_PLIST_PATH}. Two jobs under one ` +
