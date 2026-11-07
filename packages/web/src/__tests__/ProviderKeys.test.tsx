@@ -145,6 +145,55 @@ describe('Settings → Providers → Provider keys', () => {
     expect(usePreferencesStore.getState().shared?.version).toBe(2);
   });
 
+  it('shows what a checked key can power, and flags a key the provider refused', () => {
+    loadShared({
+      secrets: {
+        providerKeys: [
+          {
+            id: 'gemini',
+            set: true,
+            last4: 'WXYZ',
+            check: { status: 'ok', features: ['Gemini voice'], checkedAt: '2026-11-07T10:00:00Z' },
+          },
+          {
+            id: 'elevenlabs',
+            set: true,
+            last4: '1111',
+            check: {
+              status: 'limited',
+              features: ['Voice and speech'],
+              missing: ['Account details'],
+              checkedAt: '2026-11-07T10:00:00Z',
+            },
+          },
+          {
+            id: 'groq',
+            set: true,
+            last4: '2222',
+            check: {
+              status: 'rejected',
+              features: [],
+              message: 'The provider refused this key (HTTP 401)',
+              checkedAt: '2026-11-07T10:00:00Z',
+            },
+          },
+          { id: 'openai', set: true, last4: '3333' },
+        ],
+      },
+    });
+    renderSection();
+    expect(screen.getByTestId('provider-key-gemini-check')).toHaveTextContent(
+      'Working · Gemini voice',
+    );
+    expect(screen.getByTestId('provider-key-elevenlabs-check')).toHaveTextContent(
+      'Works for Voice and speech; not Account details',
+    );
+    const refused = screen.getByTestId('provider-key-groq-check');
+    expect(refused).toHaveTextContent('refused this key');
+    expect(refused).toHaveClass('set-sub-error');
+    expect(screen.queryByTestId('provider-key-openai-check')).toBeNull();
+  });
+
   it('Cancel closes the field without sending anything', () => {
     loadShared({ secrets: KEYS });
     const set = vi.spyOn(api, 'setProviderKey');

@@ -38,7 +38,7 @@ import {
   DEFAULT_WATCH_CHECK_IN_MINUTES,
   DEFAULT_WATCH_CHECK_IN_PROMPT,
 } from './watch-check-in-prompt.js';
-import { HostProviderKey, ProviderKeyId } from './provider-keys.js';
+import { HostProviderKey, ProviderKeyCheck, ProviderKeyId } from './provider-keys.js';
 import { BACKEND_IDS, PROVIDERS, providerForModel, type ProviderId } from './providers.js';
 import {
   HookDecision,
@@ -2463,6 +2463,8 @@ export const SharedSecretsSummary = z
           id: ProviderKeyId,
           set: z.boolean(),
           last4: z.string().min(1).max(4).optional(),
+          /** Latest live check of the saved key; absent until one has run. */
+          check: ProviderKeyCheck.optional(),
         })
         .strict(),
     ),
