@@ -34,12 +34,9 @@ test.describe('Settings — Voice engines', () => {
     }
     await expect(page.getByTestId('voice-call-engine').locator('button')).toHaveText([
       'Local',
-      'Gemini Flash',
-      'Gemini Thinking',
-      'OpenAI mini',
+      'Gemini',
       'OpenAI',
-      'ElevenLabs Haiku',
-      'ElevenLabs Sonnet',
+      'ElevenLabs',
     ]);
     // Dictation: the phone has its own recogniser; a computer does not.
     await expect(page.getByTestId('dictation-phone-engine').locator('button')).toHaveText([
@@ -71,22 +68,37 @@ test.describe('Settings — Voice engines', () => {
   });
 
   test('picking an engine writes the backend and layer it stands for', async ({ page }) => {
-    await page.getByTestId('voice-call-engine-gemini-thinking').click();
-    await expectChosen(page, 'voice-call-engine', 'Gemini Thinking');
-    await page.getByTestId('voice-call-engine-openai-mini').click();
-    await expectChosen(page, 'voice-call-engine', 'OpenAI mini');
+    await page.getByTestId('voice-call-engine-gemini').click();
+    await page.getByTestId('voice-call-variant-heavy').click();
+    await expectChosen(page, 'voice-call-variant', 'Thinking · ~$0.02/min');
+    await page.getByTestId('voice-call-engine-openai').click();
+    await expectChosen(page, 'voice-call-engine', 'OpenAI');
+    await expectChosen(page, 'voice-call-variant', 'full · ~$0.09/min');
     await expect(page.getByTestId('voice-call-status')).toHaveCount(0);
+  });
+
+  test('row labels stay readable at phone width — chips sit under the label', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 800 });
+    await page.getByTestId('voice-call-engine-elevenlabs').click();
+    const title = page.getByTestId('voice-call').locator('.set-row-title');
+    const box = await title.boundingBox();
+    expect(box!.width).toBeGreaterThan(40);
+    expect(box!.height).toBeLessThan(30);
+    const handoff = page.getByTestId('voice-call-handoff-row');
+    await expect(handoff).toContainText('pass to the chat’s agent');
+    await expect(handoff.locator('.set-row-title')).toBeVisible();
+    expect((await handoff.locator('.set-row-title').boundingBox())!.height).toBeLessThan(60);
   });
 
   test('picking an unimplemented cell shows the honest status, not a silent success', async ({
     page,
   }) => {
-    await page.getByTestId('voice-device-engine-gemini-flash').click();
+    await page.getByTestId('voice-device-engine-gemini').click();
     await expect(page.getByTestId('voice-device-status')).toContainText('Not implemented yet');
   });
 
   test('Gemini on hands-free shows no warning: the address word is enforced', async ({ page }) => {
-    await page.getByTestId('voice-handsFree-engine-gemini-flash').click();
+    await page.getByTestId('voice-handsFree-engine-gemini').click();
     await expect(page.getByTestId('voice-handsFree-status')).toHaveCount(0);
   });
 

@@ -25,56 +25,53 @@ import { Group, Note, Pills, Row, SettingsPage } from './ui.js';
 import { failed } from '../../lib/errorCopy.js';
 
 /**
- * spec/07 § Voice is a config matrix — each cell is presented as ONE choice of
- * engine; the backend and layer it stands for are not shown.
+ * spec/07 § Voice is a config matrix — each cell is presented as a provider
+ * and, for a hosted one, the variant of it; the backend and layer they stand
+ * for are not shown.
  */
-type ConversationEngine =
-  | 'local'
-  | 'gemini-flash'
-  | 'gemini-thinking'
-  | 'openai-mini'
-  | 'openai'
-  | 'elevenlabs-haiku'
-  | 'elevenlabs-sonnet';
-const CONVERSATION_ENGINES: readonly ConversationEngine[] = [
-  'local',
-  'gemini-flash',
-  'gemini-thinking',
-  'openai-mini',
-  'openai',
-  'elevenlabs-haiku',
-  'elevenlabs-sonnet',
-];
-const ENGINE_LABELS: Record<ConversationEngine, string> = {
+const PROVIDERS: readonly VoiceBackend[] = ['local', 'gemini', 'openai', 'elevenlabs'];
+const PROVIDER_LABELS: Record<VoiceBackend, string> = {
   local: 'Local',
-  'gemini-flash': 'Gemini Flash',
-  'gemini-thinking': 'Gemini Thinking',
-  'openai-mini': 'OpenAI mini',
+  gemini: 'Gemini',
   openai: 'OpenAI',
-  'elevenlabs-haiku': 'ElevenLabs Haiku',
-  'elevenlabs-sonnet': 'ElevenLabs Sonnet',
+  elevenlabs: 'ElevenLabs',
 };
-const ENGINE_CELL: Record<ConversationEngine, { backend: VoiceBackend; layer: VoiceLayer }> = {
-  local: { backend: 'local', layer: 'direct' },
-  'gemini-flash': { backend: 'gemini', layer: 'light' },
-  'gemini-thinking': { backend: 'gemini', layer: 'heavy' },
-  'openai-mini': { backend: 'openai', layer: 'light' },
-  openai: { backend: 'openai', layer: 'heavy' },
-  'elevenlabs-haiku': { backend: 'elevenlabs', layer: 'light' },
-  'elevenlabs-sonnet': { backend: 'elevenlabs', layer: 'heavy' },
+const VARIANTS: readonly Exclude<VoiceLayer, 'direct'>[] = ['light', 'heavy'];
+const VARIANT_NAMES: Record<VoiceBackend, Record<Exclude<VoiceLayer, 'direct'>, string>> = {
+  local: { light: '', heavy: '' },
+  gemini: { light: 'Flash', heavy: 'Thinking' },
+  openai: { light: 'mini', heavy: 'full' },
+  elevenlabs: { light: 'Haiku', heavy: 'Sonnet' },
 };
-/** The engine a stored cell runs. A hosted `direct` runs as `light`. */
-function engineOf(backend: VoiceBackend, layer: VoiceLayer): ConversationEngine {
-  if (backend === 'local') return 'local';
-  if (backend === 'gemini') return layer === 'heavy' ? 'gemini-thinking' : 'gemini-flash';
-  if (backend === 'elevenlabs') return layer === 'heavy' ? 'elevenlabs-sonnet' : 'elevenlabs-haiku';
-  return layer === 'heavy' ? 'openai' : 'openai-mini';
-}
+/**
+ * Rough dollars per minute of call, voice only (the chat's own agent turns ride
+ * on the subscription). Gemini/OpenAI are estimated from token prices
+ * (host/src/audio/voiceCost.ts) and Gemini Flash's measured $0.012 per 52s;
+ * ElevenLabs is $0.08/min plus the LLM — Haiku measured at $0.086/min.
+ */
+const VARIANT_COST: Record<VoiceBackend, Record<Exclude<VoiceLayer, 'direct'>, string>> = {
+  local: { light: 'free', heavy: 'free' },
+  gemini: { light: '~$0.01/min', heavy: '~$0.02/min' },
+  openai: { light: '~$0.03/min', heavy: '~$0.09/min' },
+  elevenlabs: { light: '~$0.09/min', heavy: '~$0.10+/min' },
+};
+const variantOf = (layer: VoiceLayer): Exclude<VoiceLayer, 'direct'> =>
+  layer === 'heavy' ? 'heavy' : 'light';
+/** A hosted `direct` runs as `light`. */
+const variantLabels = (backend: VoiceBackend): Record<Exclude<VoiceLayer, 'direct'>, string> => ({
+  light: `${VARIANT_NAMES[backend].light} · ${VARIANT_COST[backend].light}`,
+  heavy: `${VARIANT_NAMES[backend].heavy} · ${VARIANT_COST[backend].heavy}`,
+});
 const HANDOFFS: readonly VoiceHandoff[] = ['auto', 'always', 'never'];
 const HANDOFF_LABELS: Record<VoiceHandoff, string> = {
-  auto: 'When needed',
+  auto: 'Voice decides',
   always: 'Always',
   never: 'Never',
+};
+const HANDOFF_SUBS: Record<VoiceHandoff, string> = {
+  auto: 'The voice answers simple questions itself and passes the rest to the chat’s agent.',
+  always: 'Everything you say goes to the chat’s agent; the voice only reads out its reply.',
+  never: 'The voice answers everything itself and never uses the chat’s agent.',
 };
 /** spec/07 § Dictation engines — a computer has no recogniser of its own. */
 const PHONE_DICTATION: readonly PhoneDictationEngine[] = [
@@ -351,26 +348,59 @@ function EngineGroup(): JSX.Element {
           ) : undefined;
         return (
           <Fragment key={surface}>
-            <Row title={label} sub={sub} testid={`voice-${surface}`}>
+            <Row
+              title={label}
+              sub={sub}
+              testid={`voice-${surface}`}
+              className="stack set-row-choices"
+            >
               <Pills
-                label={`${label} engine`}
-                options={CONVERSATION_ENGINES}
-                labels={ENGINE_LABELS}
-                value={engineOf(backend, layer)}
+                label={`${label} provider`}
+                options={PROVIDERS}
+                labels={PROVIDER_LABELS}
+                value={backend}
                 disabled={!loaded}
                 testid={`voice-${surface}-engine`}
                 onChange={(next) =>
                   write({
                     voiceConfig: {
                       ...voiceConfig,
-                      [surface]: { ...ENGINE_CELL[next], handoff },
+                      [surface]: {
+                        backend: next,
+                        layer: next === 'local' ? 'direct' : variantOf(layer),
+                        handoff,
+                      },
                     },
                   })
                 }
               />
+              {backend !== 'local' ? (
+                <Pills
+                  label={`${label} variant`}
+                  options={VARIANTS}
+                  labels={variantLabels(backend)}
+                  value={variantOf(layer)}
+                  disabled={!loaded}
+                  testid={`voice-${surface}-variant`}
+                  onChange={(next) =>
+                    write({
+                      voiceConfig: { ...voiceConfig, [surface]: { ...cell, layer: next } },
+                    })
+                  }
+                />
+              ) : (
+                <span className="set-sub" data-testid={`voice-${surface}-cost`}>
+                  Free
+                </span>
+              )}
             </Row>
             {backend !== 'local' ? (
-              <Row title={`${label} hand-off`} testid={`voice-${surface}-handoff-row`}>
+              <Row
+                title={`${label}: pass to the chat’s agent`}
+                sub={HANDOFF_SUBS[handoff]}
+                testid={`voice-${surface}-handoff-row`}
+                className="stack set-row-choices"
+              >
                 <Pills
                   label={`${label} hand-off`}
                   options={HANDOFFS}
