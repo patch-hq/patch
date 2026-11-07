@@ -62,6 +62,26 @@ describe('read state', () => {
     expect(second.deriveBadge(second.useChatStore.getState().chats['c1']!)).toBe('done');
   });
 
+  it('a chat that finished while the phone was away shows done once its chat.state arrives', async () => {
+    const first = await freshStore();
+    first.useChatStore.getState().hydrate([first.toChatListRow(ENTRY)]);
+    first.useChatStore.getState().setActiveChat('c1');
+
+    const second = await freshStore();
+    second.useChatStore.getState().hydrate([second.toChatListRow(ENTRY)]);
+    expect(second.deriveBadge(second.useChatStore.getState().chats['c1']!)).toBe('read');
+    second.useChatStore.getState().applyEvent({
+      type: 'chat.state',
+      chatId: 'c1',
+      folder: '/f',
+      activity: 'idle',
+      permissionMode: 'auto',
+      lastUpdated: 2000,
+      lastSeq: 9,
+    } as never);
+    expect(second.deriveBadge(second.useChatStore.getState().chats['c1']!)).toBe('done');
+  });
+
   it('a deleted chat leaves no read mark to be inherited by nothing', async () => {
     const first = await freshStore();
     first.useChatStore.getState().hydrate([first.toChatListRow(ENTRY)]);
