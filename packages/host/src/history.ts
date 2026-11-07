@@ -462,6 +462,7 @@ function labelSystemReminder(text: string): string {
   if (text.includes("this chat's task list")) {
     return text.includes('fired from') ? 'Todo item fired' : 'Todo list updated';
   }
+  if (text.includes('Reminder set on this chat by the user')) return 'Reminder';
   if (text.includes('goal has been set on this chat')) return 'Goal set';
   if (text.includes("chat's goal has been cleared")) return 'Goal cleared';
   if (text.includes('Recent broadcasts delivered on this thread')) return 'Broadcast digest';

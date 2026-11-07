@@ -59,6 +59,7 @@ import {
   openSnoozeRecord,
   providerDescriptor,
   ChatErrorCode,
+  type ReminderEvery,
 } from '@patch/wire';
 import type {
   SnoozeRecord,
@@ -153,6 +154,7 @@ import {
 } from './pendingDecisions.js';
 import {
   buildGoalSystemReminder,
+  buildPeriodicReminder,
   buildHiddenSystemReminder,
   buildTodoEditSystemReminder,
   buildTodoFireSystemReminder,
@@ -1072,6 +1074,10 @@ const ORIGINAL_OPEN = '<original-prompt>\n';
 const ORIGINAL_CLOSE = '\n</original-prompt>';
 const REMINDER_CLOSE = '</system-reminder>';
 const REMINDER_CLOSE_ESCAPED = '</system-reminder-escaped>';
+
+function sameEvery(a: ReminderEvery | null, b: ReminderEvery | null): boolean {
+  return a === b || (a !== null && b !== null && a.unit === b.unit && a.n === b.n);
+}
 
 /**
  * Appends the interrupted turn's own prompt to a restart reminder, inside the
@@ -4480,6 +4486,9 @@ export class Daemon {
       goalRefusalStreak: 0,
       goalEvalAwaitingWatches: false,
       reminder: meta.reminder ?? null,
+      reminderEvery: null,
+      reminderTurnsSince: 0,
+      reminderLastAt: this.opts.now(),
       declaredStatus: null,
       statusSummary: null,
       statusKind: null,
@@ -5064,17 +5073,31 @@ export class Daemon {
    * Persists to meta.json + emits chat.state so every surface shows the reminder
    * at the top of the chat. Idempotent re-emit when unchanged (surfaces converge).
    */
-  async setReminder(chatId: string, reminder: string | null): Promise<void> {
+  async setReminder(
+    chatId: string,
+    reminder: string | null,
+    every: ReminderEvery | null = null,
+  ): Promise<void> {
     const state = this.chatState.get(chatId);
     if (!state) throw new ChatNotFoundError(chatId);
-    if (state.reminder === reminder) {
+    // A cleared reminder has no cadence; a cadence with no text is a caller bug.
+    const cadence = reminder === null ? null : every;
+    if (state.reminder === reminder && sameEvery(state.reminderEvery, cadence)) {
       this.emitState(chatId);
       return;
     }
     const now = this.opts.now();
     state.reminder = reminder;
+    state.reminderEvery = cadence;
+    state.reminderTurnsSince = 0;
+    state.reminderLastAt = now;
     state.lastUpdated = now;
-    this.opts.metaStore.update(chatId, (m) => ({ ...m, reminder, updatedAt: now }));
+    this.opts.metaStore.update(chatId, (m) => ({
+      ...m,
+      reminder,
+      reminderEvery: cadence,
+      updatedAt: now,
+    }));
     this.emitState(chatId);
   }
 
@@ -6692,6 +6715,25 @@ export class Daemon {
       state.goalNotice = null;
       if (head !== null) head = reminder + head;
       else rewrittenWhole = reminder + rewrittenWhole;
+    }
+
+    // spec/04 § Reminders — a chat reminder with a cadence is re-injected
+    // every N agent turns or N minutes, so a standing principle does not
+    // scroll out of the agent's attention.
+    if (state.reminder !== null && state.reminderEvery !== null) {
+      state.reminderTurnsSince += 1;
+      const nowMs = this.opts.now();
+      const due =
+        state.reminderEvery.unit === 'turns'
+          ? state.reminderTurnsSince >= state.reminderEvery.n
+          : nowMs - state.reminderLastAt >= state.reminderEvery.n * 60_000;
+      if (due) {
+        state.reminderTurnsSince = 0;
+        state.reminderLastAt = nowMs;
+        const reminder = buildPeriodicReminder(state.reminder);
+        if (head !== null) head = reminder + head;
+        else rewrittenWhole = reminder + rewrittenWhole;
+      }
     }
 
     // spec/04 § Send back — a side branch's conclusion owed to this turn
@@ -16086,6 +16128,7 @@ export class Daemon {
       goalProgress: s.goalProgress,
       lastGoal: s.lastGoal,
       reminder: s.reminder,
+      reminderEvery: s.reminderEvery,
       statusSummary: s.statusSummary,
       statusKind: s.statusKind,
       statusDeclared: s.declaredStatus !== null,

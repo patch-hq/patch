@@ -8,6 +8,7 @@
 
 import type { JSX } from 'react';
 import { Bell } from 'lucide-react';
+import { describeReminderEvery } from '@patch/wire';
 import { CloseIcon } from './icons.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -24,11 +25,12 @@ export function ReminderBanner({ row }: { row: ChatRow }): JSX.Element | null {
 
   async function clearReminder(): Promise<void> {
     const prev = reminder;
+    const prevEvery = row.reminderEvery ?? null;
     setReminder(row.chatId, null);
     try {
       await api.setReminder(row.chatId, null);
     } catch (err) {
-      setReminder(row.chatId, prev);
+      setReminder(row.chatId, prev, prevEvery);
       pushError(failed('clearing reminder'), undefined, (err as Error).message);
     }
   }
@@ -41,6 +43,11 @@ export function ReminderBanner({ row }: { row: ChatRow }): JSX.Element | null {
           {reminder}
         </span>
       </span>
+      {row.reminderEvery != null && (
+        <span className="reminder-banner-every" data-testid="reminder-banner-every">
+          {describeReminderEvery(row.reminderEvery)}
+        </span>
+      )}
       <button
         type="button"
         className="reminder-clear-btn"

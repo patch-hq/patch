@@ -10,6 +10,7 @@ import type {
   EffortLevel,
   PendingWake,
   PermissionMode,
+  ReminderEvery,
   SnoozeRecord,
   StatusKind,
   TodoItem,
@@ -159,6 +160,8 @@ export interface ChatRow {
   goal: string | null;
   /** The chat's reminder (`/remind`), or `null`. Drives the reminder bar. */
   reminder: string | null;
+  /** How often the reminder is re-injected into the agent; `null` = banner only. */
+  reminderEvery?: ReminderEvery | null;
   /**
    * The agent's task list (spec/02 § Task list); empty until it writes one.
    * Editable from the task bar — every edit sends the WHOLE list.
@@ -208,6 +211,7 @@ export type ChatListRow = Omit<
   | 'statusDeclared'
   | 'goal'
   | 'reminder'
+  | 'reminderEvery'
   | 'todos'
   | 'disabled'
 > & {
@@ -223,6 +227,7 @@ export type ChatListRow = Omit<
   statusDeclared?: boolean | null;
   goal?: string | null;
   reminder?: string | null;
+  reminderEvery?: ReminderEvery | null;
   todos?: TodoItem[];
   disabled?: boolean;
 };

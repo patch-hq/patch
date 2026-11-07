@@ -7,6 +7,7 @@
 import React, { useState, type ReactElement } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { Bell, X } from 'lucide-react-native';
+import { describeReminderEvery } from '@patch/wire';
 import type { ChatRow } from '../../stores/types';
 import { writeReminder } from '../../lib/chatMeta';
 import { space, textMin, useTheme } from '../../lib/theme';
@@ -38,6 +39,11 @@ export function ReminderBar({ row }: { row: ChatRow }): ReactElement | null {
             {reminder}
           </Text>
         </Pressable>
+        {row.reminderEvery != null && (
+          <Text testID="reminder-bar-every" style={{ color: colors.ink3, fontSize: textMin }}>
+            {describeReminderEvery(row.reminderEvery)}
+          </Text>
+        )}
         <Pressable
           testID="reminder-clear-btn"
           accessibilityRole="button"
