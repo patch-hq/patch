@@ -456,6 +456,7 @@ describe('chat-detail — kebab menu', () => {
     findHost(r.root, byLabel('More')).props.onPress();
     expect(menuLabels(r.root)).toEqual([
       'New chat',
+      'Read everything aloud',
       'Call',
       'Tools',
       'Documents',
@@ -575,6 +576,7 @@ describe('chat-detail — kebab menu', () => {
     findHost(r.root, byLabel('More')).props.onPress();
     expect(menuLabels(r.root)).toEqual([
       'New chat',
+      'Read everything aloud',
       'Call',
       'Tools',
       'Documents',
@@ -598,6 +600,7 @@ describe('chat-detail — kebab menu', () => {
     findHost(r.root, byLabel('More')).props.onPress();
     expect(menuLabels(r.root)).toEqual([
       'New chat',
+      'Read everything aloud',
       'Call',
       'Tools',
       'Documents',

@@ -117,6 +117,7 @@ import { findMessageSeqs, stepIndex } from '../../src/lib/chatFind';
 import { ContextDisclosure } from '../../src/components/ContextDisclosure';
 import { openArtifactTarget } from '../../src/lib/pads';
 import { ChatActionsMenu } from '../../src/components/ChatActionsMenu';
+import { useReadEverything } from '../../src/lib/readEverything';
 import { EmptyState } from '../../src/components/EmptyState';
 import { CHAT_LOADING_TITLE, EMPTY_STATES } from '../../src/lib/emptyStates';
 import { deriveChatTitle } from '../../src/lib/labels';
@@ -312,6 +313,7 @@ function ChatDetailBody(): React.ReactElement {
     row?.hostId ? (s.hosts[row.hostId]?.host?.hostName ?? row.hostId).trim() : '',
   );
   const timeline = useChatStore((s) => s.timelines[chatId]) ?? NO_TIMELINE;
+  useReadEverything(chatId, timeline);
   // What the list actually draws: the timeline with each consecutive run of
   // tool calls folded into one row (spec/15 § Chat detail). Everything else on
   // this screen still reasons about `timeline` itself — the fold is a
@@ -2691,6 +2693,10 @@ const TimelineItem = React.memo(function TimelineItem({
             onQueuedDraft &&
             queuedDraft === undefined
               ? { onPress: () => onQueuedDraft(entry.localId!, entry.content ?? '') }
+              : {})}
+            // Read aloud: a settled assistant reply with text.
+            {...(!isUser && entry.localId === undefined && hasText
+              ? { readKey: `${chatId}:${entry.seq}` }
               : {})}
             testID={isUser ? 'message-body-user' : 'message-body-assistant'}
             style={{

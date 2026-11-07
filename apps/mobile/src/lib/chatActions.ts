@@ -33,10 +33,12 @@ export interface ChatMenuState {
   disabled: boolean;
   /** The chat has no task list, so there is no task bar and "Add tasks" starts one. */
   noTasks?: boolean;
+  /** Read-everything mode is on for this device. */
+  readAll?: boolean;
 }
 
 export function chatKebabItems(chatId: string, state: ChatMenuState): string[] {
-  const items = ['New chat'];
+  const items = ['New chat', state.readAll ? 'Stop reading everything' : 'Read everything aloud'];
   if (!isReadOnlyMirrorThread(chatId)) items.push('Call', 'Tools', 'Documents');
   if (state.noTasks) items.push('Add tasks');
   if (isReservedSpecialThread(chatId)) {

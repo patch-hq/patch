@@ -19,6 +19,7 @@ describe('chatKebabItems', () => {
     const items = chatKebabItems('01HXREGULARCHATID', PLAIN);
     expect(items).toEqual([
       'New chat',
+      'Read everything aloud',
       'Call',
       'Tools',
       'Documents',
@@ -41,6 +42,7 @@ describe('chatKebabItems', () => {
       }),
     ).toEqual([
       'New chat',
+      'Read everything aloud',
       'Call',
       'Tools',
       'Documents',
@@ -55,6 +57,7 @@ describe('chatKebabItems', () => {
   it('a hidden chat offers Show ahead of the lifecycle toggles (spec/04 § Hidden)', () => {
     expect(chatKebabItems('01HXREGULARCHATID', { ...PLAIN, hidden: true })).toEqual([
       'New chat',
+      'Read everything aloud',
       'Call',
       'Tools',
       'Documents',
@@ -70,6 +73,7 @@ describe('chatKebabItems', () => {
   it('Manager: New chat, Call, Tools, Documents, Disable, Clear context — never Pin/Snooze/Archive/Delete', () => {
     expect(chatKebabItems(SPECIAL_THREAD_IDS.manager, { ...PLAIN, pinned: true })).toEqual([
       'New chat',
+      'Read everything aloud',
       'Call',
       'Tools',
       'Documents',
@@ -81,6 +85,7 @@ describe('chatKebabItems', () => {
   it('a disabled special thread offers Enable instead', () => {
     expect(chatKebabItems(SPECIAL_THREAD_IDS.manager, { ...PLAIN, disabled: true })).toEqual([
       'New chat',
+      'Read everything aloud',
       'Call',
       'Tools',
       'Documents',
@@ -91,7 +96,12 @@ describe('chatKebabItems', () => {
 
   it('read-only mirror (Speakers) drops Call, Tools and Documents too', () => {
     for (const id of [SPECIAL_THREAD_IDS.speakers]) {
-      expect(chatKebabItems(id, PLAIN)).toEqual(['New chat', 'Disable', 'Clear context']);
+      expect(chatKebabItems(id, PLAIN)).toEqual([
+        'New chat',
+        'Read everything aloud',
+        'Disable',
+        'Clear context',
+      ]);
     }
   });
 

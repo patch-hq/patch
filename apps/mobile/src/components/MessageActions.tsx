@@ -41,10 +41,20 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
 import { standardBase64 } from '../lib/servedFile';
 import { useRouter } from 'expo-router';
-import { Copy, GitFork, Pencil, RotateCcw, TextSelect, X } from 'lucide-react-native';
+import {
+  Copy,
+  GitFork,
+  Pencil,
+  RotateCcw,
+  Square,
+  TextSelect,
+  Volume2,
+  X,
+} from 'lucide-react-native';
 import { create } from 'zustand';
 import { useUiStore } from '../stores/uiStore';
 import { openSideThreadDraft } from '../lib/sideThreadActions';
+import { speakOrToast, useReadAloud } from '../lib/readAloud';
 import { fonts, radii, space, typography, useTheme } from '../lib/theme';
 
 /** How long the "Copied" confirmation stays up. */
@@ -70,6 +80,8 @@ interface MessageActionState {
   retry: (() => void) | undefined;
   /** Present on a settled text-only user row: saves an edited text as a fork. */
   edit: ((text: string) => void) | undefined;
+  /** Present on a settled assistant row: the sheet offers Read aloud under this key. */
+  readKey: string | undefined;
   view: 'sheet' | 'select' | 'edit';
   /** The brief confirmation line, or null. */
   toast: string | null;
@@ -81,6 +93,7 @@ interface MessageActionState {
     sideThread?: SideThreadOrigin,
     retry?: () => void,
     edit?: (text: string) => void,
+    readKey?: string,
   ): void;
   select(): void;
   startEdit(): void;
@@ -94,14 +107,15 @@ const useMessageActionStore = create<MessageActionState>((set) => ({
   sideThread: undefined,
   retry: undefined,
   edit: undefined,
+  readKey: undefined,
   view: 'sheet',
   toast: null,
   toastId: 0,
-  show(text, messageAt, sideThread, retry, edit) {
+  show(text, messageAt, sideThread, retry, edit, readKey) {
     // Clear any toast still lingering from a previous row's long-press —
     // this one hasn't earned a toast yet (MessageLongPress sets it right
     // after, for a row with a messageAt).
-    set({ text, messageAt, sideThread, retry, edit, view: 'sheet', toast: null });
+    set({ text, messageAt, sideThread, retry, edit, readKey, view: 'sheet', toast: null });
   },
   select() {
     set({ view: 'select' });
@@ -116,6 +130,7 @@ const useMessageActionStore = create<MessageActionState>((set) => ({
       sideThread: undefined,
       retry: undefined,
       edit: undefined,
+      readKey: undefined,
       view: 'sheet',
     });
   },
@@ -132,8 +147,9 @@ export function showMessageActions(
   sideThread?: SideThreadOrigin,
   retry?: () => void,
   edit?: (text: string) => void,
+  readKey?: string,
 ): void {
-  useMessageActionStore.getState().show(text, messageAt, sideThread, retry, edit);
+  useMessageActionStore.getState().show(text, messageAt, sideThread, retry, edit, readKey);
 }
 
 /** Test seam: back to closed, no toast. */
@@ -201,6 +217,7 @@ export function MessageLongPress({
   sideThread,
   retry,
   edit,
+  readKey,
   onPress,
   style,
   testID,
@@ -217,6 +234,8 @@ export function MessageLongPress({
   retry?: () => void;
   /** A settled text-only user row: the sheet offers Edit, forking with the new text. */
   edit?: (text: string) => void;
+  /** A settled assistant row: the sheet offers Read aloud / Stop reading. */
+  readKey?: string;
   style?: StyleProp<ViewStyle>;
   testID?: string;
   children: React.ReactNode;
@@ -234,7 +253,7 @@ export function MessageLongPress({
       style={style}
       onPress={onPress}
       onLongPress={() => {
-        showMessageActions(text, messageAt, sideThread, retry, edit);
+        showMessageActions(text, messageAt, sideThread, retry, edit, readKey);
         // The time toasts the instant the long-press fires, not after a
         // further tap inside the sheet it just opened (that was the whole
         // complaint: a message row's time cost a long-press AND a button).
@@ -299,6 +318,8 @@ export function MessageActionsHost(): React.ReactElement {
   const toast = useMessageActionStore((s) => s.toast);
   const toastId = useMessageActionStore((s) => s.toastId);
   const close = useMessageActionStore((s) => s.close);
+  const readKey = useMessageActionStore((s) => s.readKey);
+  const reading = useReadAloud((s) => readKey !== undefined && s.speaking === readKey);
 
   React.useEffect(() => {
     if (toast === null) return;
@@ -348,6 +369,25 @@ export function MessageActionsHost(): React.ReactElement {
               label="Select text"
               onPress={() => useMessageActionStore.getState().select()}
             />
+            {readKey !== undefined ? (
+              <SheetItem
+                testID="message-action-read"
+                icon={
+                  reading ? (
+                    <Square size={18} color={colors.ink2} />
+                  ) : (
+                    <Volume2 size={18} color={colors.ink2} />
+                  )
+                }
+                label={reading ? 'Stop reading' : 'Read aloud'}
+                onPress={() => {
+                  const t = text;
+                  close();
+                  if (reading) useReadAloud.getState().stop();
+                  else if (t !== null) speakOrToast(readKey, t);
+                }}
+              />
+            ) : null}
             {edit !== undefined ? (
               <SheetItem
                 testID="message-action-edit"
