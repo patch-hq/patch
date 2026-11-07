@@ -202,8 +202,8 @@ describe('ElevenLabsAgentSession — provisioning', () => {
     expect(ws.closed).toBe(true);
     expect(rest.filter((r) => r.method === 'DELETE').map((r) => r.path)).toEqual([
       '/v1/convai/agents/agent-1',
-      '/v1/convai/tools/tool-1',
-      '/v1/convai/tools/tool-2',
+      '/v1/convai/tools/tool-1?force=true',
+      '/v1/convai/tools/tool-2?force=true',
     ]);
   });
 
@@ -276,6 +276,65 @@ describe('ElevenLabsAgentSession — conversation', () => {
       sessionId: 'sess-1',
       text: 'what time is it',
     });
+  });
+
+  test('with no final marker, a reply ends once its text is in and the audio goes quiet', async () => {
+    const { deps, events, last } = makeDeps({ replyQuietMs: 20 });
+    const session = new ElevenLabsAgentSession(makeInit(), deps);
+    const ws = await open(session, last);
+    ws.serverSend(transcript('say banana'));
+    ws.serverSend(audioChunk(480));
+    // Audio alone, however quiet, is not the end: the text has not arrived.
+    await new Promise((r) => setTimeout(r, 60));
+    expect(events.filter((e) => e.type === 'audio.tts_end')).toHaveLength(0);
+    expect(session.getState()).toBe('speaking');
+    ws.serverSend(audioChunk(480));
+    ws.serverSend(response('Banana!'));
+    await vi.waitFor(() =>
+      expect(events.filter((e) => e.type === 'audio.tts_end')).toEqual([
+        { type: 'audio.tts_end', sessionId: 'sess-1' },
+      ]),
+    );
+    expect(session.getState()).toBe('listening');
+  });
+
+  test('audio still arriving after the text holds the reply open', async () => {
+    const { deps, events, last } = makeDeps({ replyQuietMs: 40 });
+    const session = new ElevenLabsAgentSession(makeInit(), deps);
+    const ws = await open(session, last);
+    ws.serverSend(transcript('tell me a story'));
+    ws.serverSend(response('Once upon a time.'));
+    for (let i = 0; i < 4; i++) {
+      ws.serverSend(audioChunk(480));
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(events.filter((e) => e.type === 'audio.tts_end')).toHaveLength(0);
+    await vi.waitFor(() =>
+      expect(events.filter((e) => e.type === 'audio.tts_end')).toHaveLength(1),
+    );
+  });
+
+  test('agent_response_complete ends the reply at once', async () => {
+    const { deps, events, last } = makeDeps();
+    const session = new ElevenLabsAgentSession(makeInit(), deps);
+    const ws = await open(session, last);
+    ws.serverSend(transcript('hi'));
+    ws.serverSend(audioChunk(480));
+    ws.serverSend({
+      type: 'agent_response_complete',
+      agent_response_complete_event: { event_id: 1 },
+    });
+    expect(events.filter((e) => e.type === 'audio.tts_end')).toHaveLength(1);
+    expect(session.getState()).toBe('listening');
+  });
+
+  test('expressive audio tags are kept out of the chat', async () => {
+    const { deps, timeline, last } = makeDeps();
+    const session = new ElevenLabsAgentSession(makeInit(), deps);
+    const ws = await open(session, last);
+    ws.serverSend(transcript('say banana'));
+    ws.serverSend(response('[happy] Banana! [laughs]'));
+    expect(timeline.log).toContain('reply:chat-1:Banana!');
   });
 
   test('a ping is answered with a pong carrying its event id', async () => {

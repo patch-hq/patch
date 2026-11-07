@@ -85,6 +85,19 @@ export const ELEVENLABS_API_BASE = 'https://api.elevenlabs.io';
 const INPUT_FORMAT = 'pcm_16000';
 const OUTPUT_FORMAT = 'pcm_24000';
 
+/**
+ * How long a reply's audio must be quiet, once its full text has arrived, before
+ * the reply counts as finished. ElevenLabs never marks the last audio chunk
+ * (`is_final` stays false and `agent_response_complete` is not sent — observed
+ * 2026-11-07), so the end of a reply is: its `agent_response` text is in, and
+ * the audio stream has stopped. Audio streams far faster than real time, so a
+ * gap this long after the text is in is the end, not a pause.
+ */
+export const REPLY_QUIET_MS = 600;
+
+/** Expressive audio tags the voice model writes into its text (`[happy] Banana!`). */
+const AUDIO_TAG = /\[[a-z][a-z ]*\]\s*/gi;
+
 /** The LLM a hosted layer runs. `direct` has no hosted meaning and runs as `light`. */
 export function elevenLabsAgentLlmFor(
   layer: VoiceLayer,
@@ -118,6 +131,7 @@ export interface ElevenLabsAgentDeps {
   /** The conversation is gone for good; the audio server ends the surface session. */
   onFatal?: (message: string) => void;
   /** Test seams. */
+  replyQuietMs?: number;
   wsCtor?: ElevenLabsWsCtor;
   fetchImpl?: ElevenLabsFetch;
   apiBase?: string;
@@ -162,6 +176,9 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
   /** Hands-free: the agent's reply to a heard-but-not-addressed transcript is dropped. */
   private suppressReply = false;
   private audioOpen = false;
+  /** The current reply's full text has arrived (`agent_response`). */
+  private replyTextIn = false;
+  private quietTimer?: ReturnType<typeof setTimeout>;
   private dispatchesInFlight = 0;
   private briefing = '';
   private micFrames = 0;
@@ -363,7 +380,9 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     this.cleanedUp = true;
     const targets = [
       ...(this.agentId ? [`/v1/convai/agents/${this.agentId}`] : []),
-      ...this.toolIds.map((id) => `/v1/convai/tools/${id}`),
+      // A deleted agent's stored versions still reference its tools, so a plain
+      // DELETE is refused (409 "still in use by: Unknown / Main"); only force works.
+      ...this.toolIds.map((id) => `/v1/convai/tools/${id}?force=true`),
     ];
     for (const path of targets) {
       try {
@@ -512,6 +531,9 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
       case 'audio':
         this.onAudio(ev.audio_event ?? {});
         return;
+      case 'agent_response_complete':
+        this.endAudio(false);
+        return;
       case 'interruption':
         this.onInterruption();
         return;
@@ -550,6 +572,7 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     // A new turn begins: whatever the last one suppressed is over.
     this.suppressReply = false;
     this.endAudio(false);
+    this.replyTextIn = false;
     const addressed =
       !modeRequiresAddress(this.mode) ||
       text.length === 0 ||
@@ -575,12 +598,26 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     this.setState('thinking');
   }
 
-  private onAgentResponse(text: string): void {
-    if (this.suppressReply || text.trim() === '') return;
+  private onAgentResponse(raw: string): void {
+    this.replyTextIn = true;
+    this.armQuiet();
+    const text = raw.replace(AUDIO_TAG, '').trim();
+    if (this.suppressReply || text === '') return;
     // What the voice said is written too, apart from the agent's own message in the chat.
     const reply: VoiceReplyWriter = this.deps.timeline.beginReply(this.currentChatId);
     reply.append(text);
     reply.finish();
+  }
+
+  /** (Re)start the end-of-reply clock: the text is in and the audio has gone quiet. */
+  private armQuiet(): void {
+    if (this.quietTimer) clearTimeout(this.quietTimer);
+    this.quietTimer = undefined;
+    if (!this.replyTextIn || !this.audioOpen) return;
+    this.quietTimer = setTimeout(() => {
+      this.quietTimer = undefined;
+      this.endAudio(false);
+    }, this.deps.replyQuietMs ?? REPLY_QUIET_MS);
   }
 
   private onAudio(a: NonNullable<AgentEvent['audio_event']>): void {
@@ -598,6 +635,7 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
           samples: pcm.length,
         });
         this.deps.sendBinary(pcm);
+        this.armQuiet();
       }
     }
     if (a.is_final === true) this.endAudio(false);
@@ -605,8 +643,11 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
 
   /** Close the surface's playback of the current reply, if one is open. */
   private endAudio(bargedIn: boolean): void {
+    if (this.quietTimer) clearTimeout(this.quietTimer);
+    this.quietTimer = undefined;
     if (!this.audioOpen) return;
     this.audioOpen = false;
+    this.replyTextIn = false;
     this.deps.sendAudio({
       type: 'audio.tts_end',
       sessionId: this.init.sessionId,
@@ -746,6 +787,8 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     if (this.closed) return;
     this.closed = true;
     this.closedAt = Date.now();
+    if (this.quietTimer) clearTimeout(this.quietTimer);
+    this.quietTimer = undefined;
     const w = this.setupWaiter;
     this.setupWaiter = undefined;
     w?.reject(new Error('session closed'));
