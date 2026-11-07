@@ -4825,13 +4825,18 @@ button.nav-row {
   }
   .content.md table {
     display: table;
-    width: 100%;
+    width: max-content;
+    min-width: 100%;
+    max-width: none;
     font-size: var(--text-min);
   }
+  /* A column never gets narrower than this: a wide table scrolls sideways
+     (as in the native app) instead of squashing into unreadable slivers. */
   .content.md th,
   .content.md td {
-    padding: 3px 4px;
-    overflow-wrap: anywhere;
+    padding: 3px 6px;
+    min-width: 104px;
+    overflow-wrap: normal;
   }
 }
 .tool-call,
