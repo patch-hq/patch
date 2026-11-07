@@ -204,7 +204,7 @@ class PatchSpeechModule(private val ctx: ReactApplicationContext) :
 
       override fun onError(error: Int) {
         Log.e(TAG, "phone recogniser: error $error")
-        emit("error", errorText(error))
+        emit("error", "${errorText(error)} (Android code $error)")
         main.post { teardown() }
       }
     }
@@ -223,7 +223,7 @@ class PatchSpeechModule(private val ctx: ReactApplicationContext) :
       SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED -> "language not supported"
       SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> "language not downloaded"
       SpeechRecognizer.ERROR_TOO_MANY_REQUESTS -> "too many requests"
-      else -> "error $code"
+      else -> "error"
     }
 
   override fun invalidate() {

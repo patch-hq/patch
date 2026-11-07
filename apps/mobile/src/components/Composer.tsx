@@ -991,6 +991,17 @@ export function Composer({
         case 'no-speech':
           useUiStore.getState().pushError('voice: no speech recognised');
           break;
+        case 'partial': {
+          // The recogniser died at the end: keep what it heard, editable, and
+          // never auto-send a possibly truncated message.
+          const t = outcome.text;
+          updateDraft((cur) => (cur.trim().length > 0 ? `${cur.trimEnd()} ${t}` : t));
+          sendAfterDictationRef.current = false;
+          useUiStore
+            .getState()
+            .pushError(`voice: ${outcome.reason} — kept what was heard; edit it or dictate again`);
+          break;
+        }
         // Only reachable if the session had already been finished elsewhere:
         // nothing to land and nothing to report.
         case 'discarded':
