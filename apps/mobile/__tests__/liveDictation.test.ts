@@ -246,6 +246,29 @@ describe('phone engine', () => {
     expect(speechCancel).toHaveBeenCalled();
   });
 
+  it('a recogniser error while finishing keeps the words heard and says why', async () => {
+    const { handle } = await start(false);
+    speak(400);
+    speechOnEvent!({ type: 'partial', text: 'reply to Ruth' });
+    speechStop.mockImplementationOnce(async () =>
+      speechOnEvent!({ type: 'error', message: 'server error (Android code 4)' }),
+    );
+    expect(await handle.finish(true)).toEqual({
+      kind: 'partial',
+      text: 'reply to Ruth',
+      reason: "the phone's recogniser failed: server error (Android code 4)",
+    });
+  });
+
+  it('a recogniser error while finishing with nothing heard throws the real reason', async () => {
+    const { handle } = await start(false);
+    speak(400);
+    speechStop.mockImplementationOnce(async () =>
+      speechOnEvent!({ type: 'error', message: 'audio error (Android code 3)' }),
+    );
+    await expect(handle.finish(true)).rejects.toThrow('audio error (Android code 3)');
+  });
+
   it('a recogniser that cannot start (older Android) fails before the mic opens', async () => {
     startPhoneSpeechMock.mockRejectedValueOnce(
       new Error("The phone's own recogniser needs Android 13 or newer"),

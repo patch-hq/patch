@@ -80,7 +80,13 @@ export type DictationOutcome =
   /** Audio arrived but under `MIN_UTTERANCE_MS`; not uploaded. */
   | { kind: 'too-short'; ms: number }
   /** Uploaded, and the transcript came back empty. */
-  | { kind: 'no-speech' };
+  | { kind: 'no-speech' }
+  /**
+   * The recogniser failed while finishing, but these words were heard before it
+   * did. Kept so the message isn't lost: the composer puts them in the draft
+   * (editable, retry by dictating again) and says why it failed.
+   */
+  | { kind: 'partial'; text: string; reason: string };
 
 /**
  * Shortest clip worth uploading. Native frames are 40ms, so a stab at the mic
@@ -660,6 +666,7 @@ function startPhoneDictation(
   let closed = false;
   let finished = false;
   let failed = false;
+  let failReason = '';
   let micStarted = false;
   let speech: PhoneSpeechSession | null = null;
   const pcmAll: Int16Array[] = [];
@@ -681,6 +688,7 @@ function startPhoneDictation(
   async function fail(message: string): Promise<void> {
     if (failed) return;
     failed = true;
+    failReason = message;
     closed = true;
     onEnd?.();
     void speech?.cancel().catch(() => undefined);
@@ -801,7 +809,12 @@ function startPhoneDictation(
           "the phone's recogniser",
         );
       }
-      if (failed) throw new Error("the phone's recogniser failed while finishing");
+      if (failed) {
+        // Keep what was heard (and say why it stopped) instead of dropping it.
+        const heard = text().trim();
+        if (heard.length > 0) return { kind: 'partial', text: heard, reason: failReason };
+        throw new Error(failReason);
+      }
       if (current.length > 0) {
         segments.push({ raw: current.trim() });
         current = '';
