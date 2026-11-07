@@ -58,10 +58,6 @@ export function createChatVoice(deps: {
   const { daemon, logger } = deps;
   // Hand-offs made so far, per call session; read and cleared when the call is costed.
   const handoffCounts = new Map<string, number>();
-  const oneLine = (text: string, max: number): string => {
-    const flat = text.replace(/\s+/g, ' ').trim();
-    return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
-  };
   const note = (chatId: string, line: string): void => {
     try {
       daemon.recordCallNote(chatId, line);
@@ -115,14 +111,15 @@ export function createChatVoice(deps: {
   }
 
   return {
-    handoffSent({ sessionId, chatId, request }) {
+    handoffSent({ sessionId }) {
       handoffCounts.set(sessionId, (handoffCounts.get(sessionId) ?? 0) + 1);
-      note(chatId, `-> sent to agent: ${oneLine(request, 300)}`);
+      // No line of its own: the request is already in the chat as the hand-off turn.
     },
 
     handoffAnswered({ chatId, reply }) {
-      // The whole answer: it is what the user reads in the transcript, so no cut-off.
-      note(chatId, `<- agent: ${reply.trim()}`);
+      // A good answer is already in the chat as the agent's own reply. Only a
+      // failure has no reply to show, so it is the one thing written here.
+      if (reply.startsWith('failed:')) note(chatId, `<- agent: ${reply.trim()}`);
     },
 
     makeTimeline(init) {
@@ -144,6 +141,8 @@ export function createChatVoice(deps: {
       };
       return {
         userSaid(chatId, text) {
+          // Silence and noise transcribe as '' or '…': not something the user said.
+          if (!/[\p{L}\p{N}]/u.test(text)) return;
           guard('the spoken words', chatId, () =>
             asVoice(() =>
               daemon.recordVoiceMessage({ chatId, role: 'user', content: `${tag}${text}` }),

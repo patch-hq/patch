@@ -104,6 +104,15 @@ test.describe('a call is the chat, spoken', () => {
       seq: 9001,
       createdAt: Date.now(),
     });
+    await expect(page.getByTestId('voice-handoff-pending')).toContainText('Asking the agent…');
+    await emit(page, {
+      type: 'chat.message',
+      chatId: CHAT,
+      role: 'assistant',
+      content: 'Added milk.',
+      seq: 9003,
+      createdAt: Date.now(),
+    });
     await emit(page, {
       type: 'chat.message',
       chatId: CHAT,
