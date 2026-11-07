@@ -117,6 +117,8 @@ import {
 } from '../lib/dictationPreview.js';
 import { registerComposerMic } from '../lib/composerMic.js';
 import { startDictationMode, type DictationMode } from '../lib/dictationMode.js';
+import { smoothLevel } from '../lib/smoothLevel.js';
+import { LevelBar } from './LevelBar.js';
 import type { OutgoingFile } from '../lib/sendQueue.js';
 import { ContextMenu, useContextMenu, type ContextMenuItem } from './ContextMenu.js';
 import { getLastUsedSkill, setLastUsedSkill, orderSkillsByLastUsed } from '../lib/lastUsedSkill.js';
@@ -1454,6 +1456,7 @@ export const Composer = forwardRef(function Composer(
         }
         recordingRef.current = rec;
         rec.onSilent((reason) => pushError(`voice: ${reason}. Check the mic and try again.`));
+        rec.onLevel(feedMicLevel);
         startLivePreview(rec, gen, previewChatId);
       } catch (e) {
         if (gen !== recGenRef.current) return;
@@ -1552,6 +1555,13 @@ export const Composer = forwardRef(function Composer(
   // said is sent as its own message, and it keeps listening. Clicking the mic
   // or Esc ends it. Not a call: nothing speaks back.
   const [dictModeOn, setDictModeOn] = useState(false);
+  // Smoothed live mic level (0..1) for the dictation level bar.
+  const [micLevel, setMicLevel] = useState(0);
+  const micLevelRef = useRef(0);
+  function feedMicLevel(raw: number): void {
+    micLevelRef.current = smoothLevel(micLevelRef.current, raw);
+    setMicLevel(micLevelRef.current);
+  }
   const [dictPending, setDictPending] = useState(0);
   const dictModeRef = useRef<DictationMode | null>(null);
   function stopDictationMode(): void {
@@ -1596,6 +1606,7 @@ export const Composer = forwardRef(function Composer(
           }
         },
         onBusy: (n: number) => setDictPending(n),
+        onLevel: feedMicLevel,
         onError: (message: string) => pushError(message),
       },
     );
@@ -2331,6 +2342,7 @@ export const Composer = forwardRef(function Composer(
           e.target.value = '';
         }}
       />
+      {micState === 'recording' || dictModeOn ? <LevelBar level={micLevel} /> : null}
       {dictModeOn ? (
         <div
           className="dictation-status"
