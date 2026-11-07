@@ -8,7 +8,6 @@ import {
   callSummaryLine,
   costCall,
   engineCostUsd,
-  elevenLabsCostUsd,
   formatUsd,
   ZERO_TOKENS,
   type EngineCosting,
@@ -139,29 +138,45 @@ describe('formatUsd — amounts too small for plain digits', () => {
 });
 
 describe('ElevenLabs Agents', () => {
-  it('prices a call by the minute: platform rate plus the LLM rate', () => {
-    expect(elevenLabsCostUsd('claude-haiku-4-5', 600)).toBeCloseTo(10 * (0.08 + 0.0082), 6);
-  });
+  const engine: EngineCosting = {
+    backend: 'elevenlabs',
+    model: 'claude-haiku-4-5',
+    tokens: ZERO_TOKENS,
+    stt: null,
+    agentSeconds: 52,
+    conversationId: 'conv_1',
+  };
 
-  it('an LLM with no published rate is price unknown, never guessed', () => {
-    expect(elevenLabsCostUsd('claude-sonnet-4-5', 600)).toBeNull();
-  });
-
-  it('is costed from the call length, named, and kept in the ledger', () => {
-    const engine: EngineCosting = {
-      backend: 'elevenlabs',
-      model: 'claude-haiku-4-5',
-      tokens: ZERO_TOKENS,
-      stt: null,
-      agentSeconds: 52,
-    };
+  it('has no written-down dollar rate: the price comes from ElevenLabs', () => {
     const c = costCall({ ...base, engine, handoffs: 1 });
-    expect(c.engineUsd).toBeCloseTo((52 / 60) * 0.0882, 6);
-    expect(c.agentSeconds).toBe(52);
-    expect(callSummaryLine(c)).toContain('ElevenLabs Haiku');
+    expect(c.engineUsd).toBeNull();
+    expect(c.conversationId).toBe('conv_1');
+    expect(callSummaryLine(c)).toContain('cost not checked');
+  });
+
+  it('shows credits and credits left, and no dollars on a plan', () => {
+    const c = costCall({ ...base, engine, handoffs: 1 });
+    c.real = { credits: 1616, usd: null, creditsLeft: 82000 };
+    const line = callSummaryLine(c);
+    expect(line).toContain('ElevenLabs Haiku · 1,616 credits · 82,000 left this month');
+    expect(line).not.toContain('$');
+  });
+
+  it('shows dollars only when paid by usage, and counts them in the ledger', () => {
+    const c = costCall({ ...base, engine, handoffs: 1 });
+    c.real = { credits: 1616, usd: 0.29, creditsLeft: 0 };
+    expect(callSummaryLine(c)).toContain('$0.29');
     const dir = mkdtempSync(join(tmpdir(), 'ledger-'));
     const ledger = createVoiceLedger(join(dir, 'u.jsonl'));
     ledger.record(c);
-    expect(createVoiceLedger(join(dir, 'u.jsonl')).totals(base.endedAt).allCalls).toBe(1);
+    expect(createVoiceLedger(join(dir, 'u.jsonl')).totals(base.endedAt).allUsd).toBeCloseTo(0.29);
+  });
+
+  it('says so when credits left or the charge could not be read', () => {
+    const c = costCall({ ...base, engine, handoffs: 0 });
+    c.real = { credits: 100, usd: null, creditsLeft: null };
+    expect(callSummaryLine(c)).toContain('credits left unknown');
+    c.real = { error: 'HTTP 401' };
+    expect(callSummaryLine(c)).toContain('cost unavailable');
   });
 });

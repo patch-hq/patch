@@ -9,7 +9,7 @@ import type { Logger } from 'pino';
 import type { WireEvent } from '@patch/wire';
 import type { SessionInit } from './session.js';
 import type { VoiceSessionLike, VoiceTimeline } from './voice-session-like.js';
-import { callSummaryLine, costCall, type EngineCosting } from './voiceCost.js';
+import { callSummaryLine, costCall, type EngineCosting, type RealCharge } from './voiceCost.js';
 import type { VoiceLedger } from './voiceLedger.js';
 
 /** What the glue needs from the chat host. */
@@ -54,6 +54,8 @@ export function createChatVoice(deps: {
   logger: Logger;
   /** A call was costed: the host's totals changed. */
   onCosted: () => void;
+  /** What ElevenLabs charged for a conversation; absent when the host has no ElevenLabs key. */
+  lookupRealCharge?: (conversationId: string) => Promise<RealCharge>;
 }): ChatVoice {
   const { daemon, logger } = deps;
   // Hand-offs made so far, per call session; read and cleared when the call is costed.
@@ -85,7 +87,7 @@ export function createChatVoice(deps: {
    * costed: the agent turns a hand-off runs are the chat's own and are not a
    * call's expense, so there is nothing to wait for and the line lands at hang-up.
    */
-  function cost(info: Parameters<ChatVoice['callEnded']>[0]): void {
+  async function cost(info: Parameters<ChatVoice['callEnded']>[0]): Promise<void> {
     const { init, chatId, startedAt, endedAt, engine } = info;
     const costing = costCall({
       sessionId: init.sessionId,
@@ -97,6 +99,23 @@ export function createChatVoice(deps: {
       handoffs: handoffCounts.get(init.sessionId) ?? 0,
     });
     handoffCounts.delete(init.sessionId);
+    if (engine.backend === 'elevenlabs') {
+      if (engine.conversationId === undefined || !deps.lookupRealCharge) {
+        const error = 'no conversation id or ElevenLabs key to look the charge up with';
+        logger.error({ sessionId: init.sessionId }, `voice: ${error}`);
+        costing.real = { error };
+      } else {
+        try {
+          costing.real = await deps.lookupRealCharge(engine.conversationId);
+        } catch (err) {
+          logger.error(
+            { sessionId: init.sessionId, err: (err as Error).message },
+            'voice: could not get the real call charge from ElevenLabs',
+          );
+          costing.real = { error: (err as Error).message };
+        }
+      }
+    }
     deps.ledger.record(costing);
     logger.info({ costing }, 'voice: call costed');
     try {
@@ -193,7 +212,9 @@ export function createChatVoice(deps: {
     },
 
     callEnded(info) {
-      cost(info);
+      void cost(info).catch((err: Error) =>
+        logger.error({ err: err.message }, 'voice: costing the call failed'),
+      );
     },
   };
 }

@@ -1,4 +1,5 @@
 // spec/07 § Call cost — what one sustained voice session used and what it cost.
+// ElevenLabs agent calls are not priced here: their real charge is read from ElevenLabs.
 //
 // Prices are a fixed table per model, in US dollars per million tokens, as
 // published by each provider (checked 2026-10-04). A model that is not in the
@@ -68,26 +69,6 @@ const TOKEN_PRICES: Record<string, TokenPrices> = {
   },
 };
 
-/**
- * ElevenLabs Agents bill by call minute, not by token: $0.08 a minute on every
- * plan (elevenlabs.io/pricing/agents, checked 2026-10-29; $0.16 in burst), plus
- * the front LLM's own per-minute charge, which is taken from credits. An LLM
- * that is not in this table makes the call `null` — price unknown.
- * Claude Haiku 4.5's figure is the one third-party-quoted rate; Sonnet's is not
- * published as a per-minute number, so it stays unknown until it is.
- */
-export const ELEVENLABS_AGENT_USD_PER_MINUTE = 0.08;
-const ELEVENLABS_LLM_USD_PER_MINUTE: Record<string, number> = {
-  'claude-haiku-4-5': 0.0082,
-};
-
-/** Dollar cost of `seconds` of an ElevenLabs agent call on `llm`, or `null` when the LLM's rate is unknown. */
-export function elevenLabsCostUsd(llm: string, seconds: number): number | null {
-  const llmRate = ELEVENLABS_LLM_USD_PER_MINUTE[llm];
-  if (llmRate === undefined) return null;
-  return (seconds / 60) * (ELEVENLABS_AGENT_USD_PER_MINUTE + llmRate);
-}
-
 /** Groq `whisper-large-v3-turbo`: $0.04 per hour, each request billed for at least 10s. */
 export const GROQ_WHISPER_USD_PER_SECOND = 0.04 / 3600;
 export const GROQ_MIN_BILLED_SECONDS = 10;
@@ -133,7 +114,21 @@ export interface EngineCosting {
   stt: SttUsage | null;
   /** ElevenLabs only: seconds the agent conversation was open (what it bills by). */
   agentSeconds?: number;
+  /** ElevenLabs only: the conversation id, to ask ElevenLabs what it charged. */
+  conversationId?: string;
 }
+
+/** What ElevenLabs reported for a call and the plan after it. A failed lookup is `error`, never a guess. */
+export type RealCharge =
+  | {
+      credits: number;
+      /** Dollars, set only when the plan is paying by usage. */
+      usd: number | null;
+      creditsLeft: number | null;
+      /** Why `creditsLeft` is missing. */
+      leftError?: string;
+    }
+  | { error: string };
 
 /** One costed session, as stored on disk and summarised into the chat. */
 export interface CallCosting {
@@ -147,8 +142,11 @@ export interface CallCosting {
   tokens: EngineTokens | null;
   stt: SttUsage | null;
   agentSeconds?: number;
+  conversationId?: string;
   /** `null` = the engine's price is unknown. */
   engineUsd: number | null;
+  /** ElevenLabs: what the call really cost, from ElevenLabs. */
+  real?: RealCharge;
   /** Requests the fast voice handed to the chat's agent; absent on records from before this was counted. */
   handoffs?: number;
 }
@@ -167,7 +165,8 @@ export function costCall(args: {
   if (engine.backend === 'local') {
     engineUsd = engine.stt ? sttCostUsd(engine.stt, engine.model) : 0;
   } else if (engine.backend === 'elevenlabs') {
-    engineUsd = elevenLabsCostUsd(engine.model, engine.agentSeconds ?? 0);
+    // Billed in plan credits: the real figure comes from ElevenLabs after the call.
+    engineUsd = null;
   } else {
     engineUsd = engine.tokens ? engineCostUsd(engine.model, engine.tokens) : 0;
   }
@@ -182,6 +181,7 @@ export function costCall(args: {
     tokens: engine.tokens,
     stt: engine.stt,
     ...(engine.agentSeconds !== undefined ? { agentSeconds: engine.agentSeconds } : {}),
+    ...(engine.conversationId !== undefined ? { conversationId: engine.conversationId } : {}),
     engineUsd,
     handoffs: args.handoffs,
   };
@@ -219,13 +219,27 @@ function formatDuration(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
+function realChargeParts(real: RealCharge | undefined): string[] {
+  if (real === undefined) return ['cost not checked'];
+  if ('error' in real) return ['cost unavailable'];
+  const out = [`${Math.round(real.credits).toLocaleString('en-GB')} credits`];
+  if (real.usd !== null) out.push(formatUsd(real.usd));
+  out.push(
+    real.creditsLeft === null
+      ? 'credits left unknown'
+      : `${Math.round(real.creditsLeft).toLocaleString('en-GB')} left this month`,
+  );
+  return out;
+}
+
 /** The one quiet line a session leaves in its chat. */
 export function callSummaryLine(c: CallCosting): string {
-  const parts = [
-    `Call ${formatDuration(c.endedAt - c.startedAt)}`,
-    engineName(c),
-    c.engineUsd === null ? 'price unknown' : formatUsd(c.engineUsd),
-  ];
+  const parts = [`Call ${formatDuration(c.endedAt - c.startedAt)}`, engineName(c)];
+  if (c.backend === 'elevenlabs') {
+    parts.push(...realChargeParts(c.real));
+  } else {
+    parts.push(c.engineUsd === null ? 'price unknown' : formatUsd(c.engineUsd));
+  }
   if (c.tokens) {
     const tin = c.tokens.textIn + c.tokens.audioIn + c.tokens.cachedIn;
     const tout = c.tokens.textOut + c.tokens.audioOut;
@@ -244,6 +258,7 @@ export function callSummaryLine(c: CallCosting): string {
 
 /** Total spend of one costed session; an unknown engine price counts as nothing. */
 export function callTotalUsd(c: CallCosting): number {
+  if (c.real && 'usd' in c.real && c.real.usd !== null) return c.real.usd;
   return c.engineUsd ?? 0;
 }
 
