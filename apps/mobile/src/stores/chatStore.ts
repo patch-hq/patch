@@ -577,6 +577,10 @@ function rowsToRecord(
     // A roster snapshot older than the last `chat.state` is a race, not news
     // (the same rule `chat.state` applies to itself): keep the live state.
     const live = prior !== undefined && prior.lastUpdated > r.lastUpdated;
+    const answered =
+      prior !== undefined &&
+      r.lastUpdated > prior.lastUpdated &&
+      r.activity !== 'awaiting-permission';
     next[r.chatId] = mergeListRow(
       prior
         ? {
@@ -598,9 +602,12 @@ function rowsToRecord(
               !live && (r.activity === 'idle' || r.activity === 'errored')
                 ? 0
                 : prior.openToolCalls,
-            pendingPermissions: prior.pendingPermissions,
+            // A newer roster that no longer says awaiting-permission means the
+            // request was answered (maybe elsewhere): holding the old flag
+            // leaves "waiting on you" up on a running turn.
+            pendingPermissions: answered ? [] : prior.pendingPermissions,
             lastSeq: prior.lastSeq,
-            awaitingPermission: prior.awaitingPermission,
+            awaitingPermission: answered ? false : prior.awaitingPermission,
           }
         : undefined,
       live
@@ -663,6 +670,15 @@ export function accountSwitchLine(sw: { from: string; to: string; until?: number
 
 /** `${chatId}::${localId}` of turns whose persisted echo has landed, so a late `chat.queued` is ignored. */
 const settledLocalIds = new Set<string>();
+
+/**
+ * True once a turn's persisted echo has landed. The optimistic entry loses its
+ * `localId` when that happens, so a lookup by `localId` cannot tell "sent" from
+ * "removed" — this can.
+ */
+export function isLocalIdSettled(chatId: string, localId: string): boolean {
+  return settledLocalIds.has(`${chatId}::${localId}`);
+}
 
 export const useChatStore = create<ChatState>((set, get) => ({
   // Painted from the on-device cache SYNCHRONOUSLY, at store construction —
