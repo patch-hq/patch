@@ -1480,7 +1480,8 @@ export const Composer = forwardRef(function Composer(
     // open until the host has answered the finish below.
     const computerEngine =
       usePreferencesStore.getState().preferences.voiceConfig.dictation.computer;
-    const streaming = computerEngine === 'deepgram' || computerEngine === 'host';
+    const streaming =
+      computerEngine === 'deepgram' || computerEngine === 'elevenlabs' || computerEngine === 'host';
     const livePreview = streaming ? previewRef.current : null;
     if (livePreview) previewRef.current = null;
     else stopPreview();
