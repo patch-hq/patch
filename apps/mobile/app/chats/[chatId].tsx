@@ -1136,6 +1136,20 @@ function ChatDetailBody(): React.ReactElement {
                   .join(' · ') || '—'}
               </Text>
             )}
+            {row?.model ? (
+              <Text
+                testID="chat-model"
+                style={{
+                  ...typography.meta,
+                  color: colors.ink3,
+                  marginLeft: space.sm,
+                  flexShrink: 0,
+                }}
+                numberOfLines={1}
+              >
+                {compactModelLabel(row.model)}
+              </Text>
+            ) : null}
             {runningWorkers > 0 ? (
               <View
                 testID="header-workers"
@@ -1178,15 +1192,6 @@ function ChatDetailBody(): React.ReactElement {
             {title}
           </Text>
         </Pressable>
-        {row?.model ? (
-          <Text
-            testID="chat-model"
-            style={{ ...typography.meta, color: colors.ink3 }}
-            numberOfLines={1}
-          >
-            {compactModelLabel(row.model)}
-          </Text>
-        ) : null}
         {/* Call button — the ONLY place a sustained voice CALL is started on
             mobile (spec/15 § Chat detail). Read-only mirror threads have no
             voice call, so it is hidden there. A long press starts hands-free
