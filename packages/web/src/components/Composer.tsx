@@ -1334,6 +1334,11 @@ export const Composer = forwardRef(function Composer(
       cursor = chip.end;
     });
     if (cursor < body.length) nodes.push(<span key="text-tail">{body.slice(cursor)}</span>);
+    // A textarea gives a trailing newline its own (empty) last line; `pre-wrap`
+    // text does not, so the mirror came out one line shorter and every line sat
+    // a row away from the caret once the field scrolled. A zero-width space
+    // gives that last line its height back.
+    if (body.endsWith('\n')) nodes.push(<span key="text-nl">{'\u200b'}</span>);
     return nodes;
   }
   // While voice is running, the input is being painted over: the live-dictation
