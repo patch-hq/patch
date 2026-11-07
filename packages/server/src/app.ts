@@ -1036,7 +1036,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // Versioned filename in the path (patch-<sha>.apk) so each build is a NEW URL
   // AND a new download filename — otherwise the phone's browser sees the same
   // `patch.apk` and refuses to re-download / install over the cached file.
-  // `patch.apk` (unversioned) is still accepted for the latest. Whitelisted to
+  // `patch.apk` (unversioned) is an alias for the latest, via android-latest.json. Whitelisted to
   // `patch*.apk` so `:name` can't traverse out of the downloads dir.
   //
   // `android-latest.json` (the APK sidecar, {version,gitSha,builtAt,file}) is
@@ -1057,7 +1057,27 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       if (!isApk && !isSidecar) {
         return reply.code(404).send({ error: 'not found' });
       }
-      const artifact = join(downloadsDir, name);
+      // The generic `patch.apk` is an alias for the latest release, resolved via
+      // the sidecar — never a file on disk (a stray one went stale at 0.1.3).
+      let fileName = name;
+      if (name === 'patch.apk') {
+        try {
+          const sidecar = JSON.parse(
+            readFileSync(join(downloadsDir, 'android-latest.json'), 'utf8'),
+          ) as { file?: unknown };
+          if (
+            typeof sidecar.file !== 'string' ||
+            !/^patch[A-Za-z0-9._-]*\.apk$/.test(sidecar.file)
+          ) {
+            throw new Error('android-latest.json has no valid "file"');
+          }
+          fileName = sidecar.file;
+        } catch (err) {
+          req.log.warn({ err }, 'patch.apk alias: cannot resolve latest release');
+          return reply.code(404).send({ error: 'no such APK published' });
+        }
+      }
+      const artifact = join(downloadsDir, fileName);
       if (!existsSync(artifact)) {
         return reply
           .code(404)
@@ -1069,7 +1089,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       }
       return reply200
         .header('content-type', 'application/vnd.android.package-archive')
-        .header('content-disposition', `attachment; filename="${name}"`)
+        .header('content-disposition', `attachment; filename="${fileName}"`)
         .send(createReadStream(artifact));
     },
   );
