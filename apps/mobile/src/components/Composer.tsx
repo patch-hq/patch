@@ -838,11 +838,17 @@ export function Composer({
   const [inputScrollY, setInputScrollY] = React.useState(0);
   // Rendered height of the dictation mirror, so the input can grow to fit it.
   const [mirrorHeight, setMirrorHeight] = React.useState(0);
+  const mirrorScrollRef = React.useRef<ScrollView>(null);
+  // Follow the newest words unless the user has scrolled up.
+  const mirrorStickRef = React.useRef(true);
   // Mic recording, or dictation mode with words being spoken: the input is painted over by the mirror.
   const livePreviewOn = micState !== 'idle' || livePartial !== '';
   // The keyboard is away while dictating, so the field may take far more of
   // the screen than its typing cap before the words start scrolling.
   const { height: windowHeight } = useWindowDimensions();
+  React.useEffect(() => {
+    if (!livePreviewOn) mirrorStickRef.current = true;
+  }, [livePreviewOn]);
   const inputMaxHeight = livePreviewOn ? dictationMaxHeight(windowHeight) : COMPOSER_MAX_HEIGHT;
   // spec/15 § Skill autocomplete — chips: the mirror only needs to exist
   // while there's a chip to draw, and only when dictation isn't already using
@@ -1917,47 +1923,54 @@ export function Composer({
               focusable/editable throughout"). Only mounted while there's
               something to preview, so idle typing is unaffected. */}
         {livePreviewOn ? (
-          <View
-            pointerEvents="none"
-            onLayout={(e) => setMirrorHeight(e.nativeEvent.layout.height)}
+          // A scroll view, not a clipped box: past the cap the view follows the
+          // newest words to the bottom, and the user can scroll up through the
+          // rest. Scrolling up stops the follow; reaching the bottom resumes it.
+          <ScrollView
+            testID="dictation-mirror-scroll"
+            ref={mirrorScrollRef}
             style={{
               position: 'absolute',
               left: 0,
               right: 0,
               top: 0,
-              // Mirrors the input's own bounds exactly — a preview that clipped
-              // at a different line from the field under it shows the user text
-              // the field is still holding.
-              minHeight: COMPOSER_MIN_HEIGHT,
               maxHeight: inputMaxHeight,
-              overflow: 'hidden',
-              // Past the cap the TOP is clipped, not the bottom: the newest
-              // words are the ones being spoken, so they stay in view and the
-              // live text never runs off the end of the box.
-              justifyContent: 'flex-end',
+            }}
+            nestedScrollEnabled
+            onScroll={(e) => {
+              const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+              mirrorStickRef.current =
+                contentOffset.y + layoutMeasurement.height >= contentSize.height - 24;
+            }}
+            scrollEventThrottle={32}
+            onContentSizeChange={() => {
+              if (mirrorStickRef.current) mirrorScrollRef.current?.scrollToEnd({ animated: false });
             }}
           >
-            <Text
-              testID="dictation-preview"
-              style={{
-                paddingLeft: (edit ? space.md : FIELD_PAD_LEFT) + 1,
-                paddingRight: FIELD_PAD_RIGHT + 1,
-                paddingVertical: space.sm + 1,
-                fontSize: 16,
-              }}
+            <View
+              onLayout={(e) => setMirrorHeight(e.nativeEvent.layout.height)}
+              style={{ minHeight: COMPOSER_MIN_HEIGHT, justifyContent: 'flex-end' }}
             >
-              <Text style={{ color: colors.ink }}>{body}</Text>
-              {body.trim().length > 0 ? ' ' : ''}
-              {/* Grey: in progress — rewritten as the user talks and replaced
-                  outright by the committed transcript. */}
               <Text
-                testID="dictation-live-words"
-                style={{ color: colors.ink3, fontStyle: 'italic' }}
+                testID="dictation-preview"
+                style={{
+                  paddingLeft: (edit ? space.md : FIELD_PAD_LEFT) + 1,
+                  paddingRight: FIELD_PAD_RIGHT + 1,
+                  paddingVertical: space.sm + 1,
+                  fontSize: 16,
+                }}
               >
-                {livePartial}
+                <Text style={{ color: colors.ink }}>{body}</Text>
+                {body.trim().length > 0 ? ' ' : ''}
+                <Text
+                  testID="dictation-live-words"
+                  style={{ color: colors.ink3, fontStyle: 'italic' }}
+                >
+                  {livePartial}
+                </Text>
               </Text>
-            </Text>
-          </View>
+            </View>
+          </ScrollView>
         ) : showChipMirror ? (
           // spec/15 § Skill autocomplete — chips: the same text-transparent-
           // TextInput trick as the dictation preview above, generalised: the
