@@ -851,6 +851,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             name: event.name ?? row.name,
             folder: event.folder ?? row.folder,
             lastUpdated: event.lastUpdated,
+            // The host's high-water seq for the chat. A chat that finished while
+            // this phone was away is only knowable as unread from here: the roster
+            // carries no seq, and a chat not open gets no replay. Without it
+            // `lastSeq` stays 0 and a visited chat reads as grey instead of `done`.
+            lastSeq: Math.max(row.lastSeq, event.lastSeq ?? 0),
             // spec/14 § Sidebar ordering — an older host never sends the
             // field, so keep what is known rather than losing the sort key.
             lastUserActivity: event.lastUserActivity ?? row.lastUserActivity,
