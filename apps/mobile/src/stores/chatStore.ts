@@ -602,6 +602,10 @@ function rowsToRecord(
               !live && (r.activity === 'idle' || r.activity === 'errored')
                 ? 0
                 : prior.openToolCalls,
+            // A send the host has not yet answered with a state frame: a roster
+            // that still reads the chat settled must not flip it back to idle
+            // (every foreground refreshes the roster).
+            optimisticSend: prior.optimisticSend,
             pendingPermissions: prior.pendingPermissions,
             lastSeq: prior.lastSeq,
             awaitingPermission: prior.awaitingPermission,
