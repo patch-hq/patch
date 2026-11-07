@@ -1116,17 +1116,59 @@ function ChatDetailBody(): React.ReactElement {
           */}
           {/* No crumb for a special thread: its fixed label IS the title, and
               its folder is the same word again ("Manager" over "Manager"). */}
-          {isReservedSpecialThread(chatId) ? null : (
-            <Text
-              testID="chat-folder"
-              style={{ ...typography.meta, color: colors.ink3 }}
-              numberOfLines={1}
-            >
-              {[row?.folder ? folderName(row.folder) : null, hostLabel !== '' ? hostLabel : null]
-                .filter((p): p is string => p !== null)
-                .join(' · ') || '—'}
-            </Text>
-          )}
+          {/* Status chips ride the folder line, not the title row: beside the
+              title they took its width and crushed it to a letter or two. The
+              title keeps the full width; the folder crumb shrinks first. */}
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            {isReservedSpecialThread(chatId) ? null : (
+              <Text
+                testID="chat-folder"
+                style={{ ...typography.meta, color: colors.ink3, flexShrink: 1 }}
+                numberOfLines={1}
+              >
+                {[row?.folder ? folderName(row.folder) : null, hostLabel !== '' ? hostLabel : null]
+                  .filter((p): p is string => p !== null)
+                  .join(' · ') || '—'}
+              </Text>
+            )}
+            {runningWorkers > 0 ? (
+              <View
+                testID="header-workers"
+                style={{
+                  backgroundColor: colors.lineSoft,
+                  paddingHorizontal: space.sm,
+                  paddingVertical: 2,
+                  borderRadius: radii.pill,
+                  marginLeft: space.sm,
+                  flexShrink: 0,
+                }}
+              >
+                <Text
+                  style={{ ...typography.meta, fontFamily: fonts.bodyMedium, color: colors.ink2 }}
+                >
+                  {runningWorkers} {runningWorkers === 1 ? 'worker' : 'workers'}
+                </Text>
+              </View>
+            ) : null}
+            {row?.awaitingPermission ? (
+              <View
+                style={{
+                  backgroundColor: colors.waitingTint,
+                  paddingHorizontal: space.sm,
+                  paddingVertical: 2,
+                  borderRadius: radii.pill,
+                  marginLeft: space.sm,
+                  flexShrink: 0,
+                }}
+              >
+                <Text
+                  style={{ ...typography.meta, fontFamily: fonts.bodyMedium, color: colors.ink }}
+                >
+                  waiting on you
+                </Text>
+              </View>
+            ) : null}
+          </View>
           <Text style={{ ...typography.title, color: colors.ink }} numberOfLines={1}>
             {title}
           </Text>
@@ -1139,37 +1181,6 @@ function ChatDetailBody(): React.ReactElement {
           >
             {compactModelLabel(row.model)}
           </Text>
-        ) : null}
-        {runningWorkers > 0 ? (
-          <View
-            testID="header-workers"
-            style={{
-              backgroundColor: colors.lineSoft,
-              paddingHorizontal: space.sm,
-              paddingVertical: 2,
-              borderRadius: radii.pill,
-              marginRight: space.sm,
-            }}
-          >
-            <Text style={{ ...typography.meta, fontFamily: fonts.bodyMedium, color: colors.ink2 }}>
-              {runningWorkers} {runningWorkers === 1 ? 'worker' : 'workers'}
-            </Text>
-          </View>
-        ) : null}
-        {row?.awaitingPermission ? (
-          <View
-            style={{
-              backgroundColor: colors.waitingTint,
-              paddingHorizontal: space.sm,
-              paddingVertical: 2,
-              borderRadius: radii.pill,
-              marginRight: space.sm,
-            }}
-          >
-            <Text style={{ ...typography.meta, fontFamily: fonts.bodyMedium, color: colors.ink }}>
-              waiting on you
-            </Text>
-          </View>
         ) : null}
         {/* Call button — the ONLY place a sustained voice CALL is started on
             mobile (spec/15 § Chat detail). Read-only mirror threads have no
