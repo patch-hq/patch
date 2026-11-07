@@ -1,0 +1,99 @@
+{
+ "screens": [
+  {
+   "id": "phone-call",
+   "name": "Phone \u00b7 call, agent working",
+   "path": "phone-call.html"
+  },
+  {
+   "id": "phone-call-open",
+   "name": "Phone \u00b7 agent working, opened",
+   "path": "phone-call-open.html"
+  },
+  {
+   "id": "phone-done",
+   "name": "Phone \u00b7 agent answered",
+   "path": "phone-done.html"
+  },
+  {
+   "id": "phone-ended",
+   "name": "Phone \u00b7 call ended",
+   "path": "phone-ended.html"
+  },
+  {
+   "id": "phone-call-menu",
+   "name": "Phone \u00b7 long-press the call button",
+   "path": "phone-call-menu.html"
+  },
+  {
+   "id": "phone-elsewhere",
+   "name": "Phone \u00b7 call strip on other screens",
+   "path": "phone-elsewhere.html"
+  },
+  {
+   "id": "phone-dictation",
+   "name": "Phone \u00b7 dictation, quarter height",
+   "path": "phone-dictation.html"
+  },
+  {
+   "id": "phone-settings",
+   "name": "Phone \u00b7 settings, real-time",
+   "path": "phone-settings.html"
+  },
+  {
+   "id": "phone-settings-el",
+   "name": "Phone \u00b7 settings, ElevenLabs",
+   "path": "phone-settings-el.html"
+  },
+  {
+   "id": "phone-settings-tb",
+   "name": "Phone \u00b7 settings, turn-based",
+   "path": "phone-settings-tb.html"
+  },
+  {
+   "id": "index",
+   "name": "Desktop \u00b7 Call \u2013 agent working",
+   "path": "index.html"
+  },
+  {
+   "id": "working-open",
+   "name": "Desktop \u00b7 Call \u2013 agent working, opened",
+   "path": "working-open.html"
+  },
+  {
+   "id": "done",
+   "name": "Desktop \u00b7 Call \u2013 agent answered",
+   "path": "done.html"
+  },
+  {
+   "id": "ended",
+   "name": "Desktop \u00b7 Call ended",
+   "path": "ended.html"
+  },
+  {
+   "id": "call-menu",
+   "name": "Desktop \u00b7 Call button \u2013 long press / right click",
+   "path": "call-menu.html"
+  },
+  {
+   "id": "dictation",
+   "name": "Desktop \u00b7 Dictation \u2013 quarter height, drag to resize",
+   "path": "dictation.html"
+  },
+  {
+   "id": "settings",
+   "name": "Desktop \u00b7 Settings \u2013 real-time call",
+   "path": "settings.html"
+  },
+  {
+   "id": "settings-el",
+   "name": "Desktop \u00b7 Settings \u2013 real-time, ElevenLabs",
+   "path": "settings-el.html"
+  },
+  {
+   "id": "settings-host",
+   "name": "Desktop \u00b7 Settings \u2013 turn-based call",
+   "path": "settings-host.html"
+  }
+ ]
+}
