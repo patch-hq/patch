@@ -51,7 +51,14 @@ export const CronTrigger = z
   .strict();
 export type CronTrigger = z.infer<typeof CronTrigger>;
 
-export const WebhookScheme = z.enum(['none', 'hmac-sha256', 'github', 'stripe', 'todoist']);
+export const WebhookScheme = z.enum([
+  'none',
+  'bearer',
+  'hmac-sha256',
+  'github',
+  'stripe',
+  'todoist',
+]);
 export type WebhookScheme = z.infer<typeof WebhookScheme>;
 
 export const WebhookTrigger = z

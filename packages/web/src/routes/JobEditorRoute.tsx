@@ -793,6 +793,82 @@ const DEFAULT_FORM: FormState = {
   scriptTimeoutMs: '',
 };
 
+function randomSecret(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Bearer-scheme helpers: generate a secret, copy it, and show paste-ready
+ *  curl / Home Assistant examples. */
+function BearerHelper({
+  secret,
+  jobId,
+  onGenerate,
+}: {
+  secret: string;
+  jobId: string | undefined;
+  onGenerate: (v: string) => void;
+}): JSX.Element {
+  const [copied, setCopied] = useState<string | null>(null);
+  const url = `${window.location.origin}/api/webhooks/${jobId ?? '<job id, shown once saved>'}`;
+  const token = secret || '<secret>';
+  const curl = `curl -X POST ${url} \\\n  -H "Authorization: Bearer ${token}" \\\n  -H "Content-Type: application/json" \\\n  -d '{}'`;
+  const ha = `rest_command:\n  patch_job:\n    url: "${url}"\n    method: POST\n    headers:\n      Authorization: "Bearer ${token}"\n    content_type: "application/json"\n    payload: '{}'`;
+  const copy = (key: string, text: string): void => {
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(key);
+      setTimeout(() => setCopied(null), 1500);
+    });
+  };
+  return (
+    <div data-testid="job-bearer-helper">
+      <div>
+        <button
+          type="button"
+          className="link-btn"
+          data-testid="job-bearer-generate"
+          onClick={() => onGenerate(randomSecret())}
+        >
+          Generate secret
+        </button>{' '}
+        <button
+          type="button"
+          className="link-btn"
+          data-testid="job-bearer-copy-secret"
+          disabled={!secret}
+          onClick={() => copy('secret', secret)}
+        >
+          {copied === 'secret' ? 'Copied' : 'Copy secret'}
+        </button>
+      </div>
+      <div>
+        curl{' '}
+        <button
+          type="button"
+          className="link-btn"
+          data-testid="job-bearer-copy-curl"
+          onClick={() => copy('curl', curl)}
+        >
+          {copied === 'curl' ? 'Copied' : 'Copy'}
+        </button>
+        <pre data-testid="job-bearer-curl">{curl}</pre>
+      </div>
+      <div>
+        Home Assistant{' '}
+        <button
+          type="button"
+          className="link-btn"
+          data-testid="job-bearer-copy-ha"
+          onClick={() => copy('ha', ha)}
+        >
+          {copied === 'ha' ? 'Copied' : 'Copy'}
+        </button>
+        <pre data-testid="job-bearer-ha">{ha}</pre>
+      </div>
+    </div>
+  );
+}
+
 export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element {
   // `jobId` (from the pane tab's own descriptor, via `JobPaneRoute`) wins
   // over the URL param: this component stays mounted as a tab's content
@@ -1914,6 +1990,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   }}
                 >
                   <option value="none">none</option>
+                  <option value="bearer">bearer</option>
                   <option value="hmac-sha256">hmac-sha256</option>
                   <option value="github">github</option>
                   <option value="stripe">stripe</option>
@@ -1931,6 +2008,13 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   }}
                 />
               </label>
+              {form.webhookScheme === 'bearer' ? (
+                <BearerHelper
+                  secret={form.webhookSecret}
+                  jobId={isNew ? undefined : id}
+                  onGenerate={(v) => setForm((f) => ({ ...f, webhookSecret: v }))}
+                />
+              ) : null}
             </>
           ) : null}
         </section>

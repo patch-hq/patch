@@ -100,6 +100,7 @@ Server exposes `POST /api/webhooks/<unguessable-jobId>`. The server-issued jobId
 `scheme` is one of:
 
 - `none` — URL secrecy only. Accept anything to that URL.
+- `bearer` — for plain HTTP clients that cannot compute a signature (Home Assistant `rest_command`, curl). Server expects `Authorization: Bearer <secret>` and compares it to the job's `secret` in constant time.
 - `hmac-sha256` — generic HMAC. Server expects header `X-Patch-Signature: hex(hmac_sha256(secret, body))`.
 - `github` — GitHub's `X-Hub-Signature-256: sha256=<hex>` scheme.
 - `stripe` — Stripe's signed-event scheme.

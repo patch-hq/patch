@@ -129,7 +129,7 @@ export function registerJobsCommands(program: Command): void {
     .option('--webhook', 'Flag-mode shortcut: build a webhook-trigger job (instead of --cron)')
     .option(
       '--scheme <scheme>',
-      "Webhook signature scheme: 'none' (default), 'hmac-sha256', 'github', 'stripe' or 'todoist'",
+      "Webhook signature scheme: 'none' (default), 'bearer', 'hmac-sha256', 'github', 'stripe' or 'todoist'",
     )
     .option(
       '--secret <secret>',
@@ -234,7 +234,7 @@ export function registerJobsCommands(program: Command): void {
               // Webhook trigger (H1-d7). scheme defaults to 'none'; any other
               // scheme requires a --secret (matches WebhookTrigger schema).
               const scheme = opts.scheme ?? 'none';
-              const validSchemes = ['none', 'hmac-sha256', 'github', 'stripe', 'todoist'];
+              const validSchemes = ['none', 'bearer', 'hmac-sha256', 'github', 'stripe', 'todoist'];
               if (!validSchemes.includes(scheme)) {
                 throw new Error(
                   `invalid --scheme '${scheme}' (expected one of: ${validSchemes.join(', ')})`,
