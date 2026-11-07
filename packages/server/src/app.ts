@@ -21,6 +21,7 @@ import {
   type HealthzResponse,
   type WireEvent,
   CLOSE_SERVER_RESTARTING,
+  restartingReason,
 } from '@patch/wire';
 import { verifySurfaceCredential, verifyDaemonKey } from '@patch/auth';
 import { GIT_SHA, SERVER_SHA, VERSION } from './version.js';
@@ -148,6 +149,12 @@ export interface BuildOptions {
   registry?: Registry;
   /** Inject the host link (tests). Production uses InboundHostLink. */
   hostLink?: HostLink;
+  /**
+   * The version this server is about to restart into, read when it shuts down
+   * and sent to every host and surface in the going-away notice. Null when it
+   * is not known (a plain restart).
+   */
+  restartTarget?: () => string | null;
   /**
    * Shared HMAC secret for voice session tokens (spec/13). Surfaces present
    * the minted token to the host's audio WSS where the same secret verifies.
@@ -349,8 +356,8 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         websocketServer?: { clients: Set<{ close(c: number, r: string): void }> };
       }
     ).websocketServer;
-    for (const client of server?.clients ?? [])
-      client.close(CLOSE_SERVER_RESTARTING, 'server restarting');
+    const reason = restartingReason(opts.restartTarget?.() ?? null);
+    for (const client of server?.clients ?? []) client.close(CLOSE_SERVER_RESTARTING, reason);
     done();
   });
   await app.register(websocketPlugin, {
@@ -1006,7 +1013,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
 
   // Tear everything down on Fastify close so port-0 tests don't leak handles.
   app.addHook('onClose', async () => {
-    wsHub.shutdown();
+    wsHub.shutdown(opts.restartTarget?.() ?? null);
     await hostLink.close();
   });
 
@@ -1032,7 +1039,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // Versioned filename in the path (patch-<sha>.apk) so each build is a NEW URL
   // AND a new download filename — otherwise the phone's browser sees the same
   // `patch.apk` and refuses to re-download / install over the cached file.
-  // `patch.apk` (unversioned) is still accepted for the latest. Whitelisted to
+  // `patch.apk` (unversioned) is an alias for the latest, via android-latest.json. Whitelisted to
   // `patch*.apk` so `:name` can't traverse out of the downloads dir.
   //
   // `android-latest.json` (the APK sidecar, {version,gitSha,builtAt,file}) is
@@ -1053,7 +1060,27 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       if (!isApk && !isSidecar) {
         return reply.code(404).send({ error: 'not found' });
       }
-      const artifact = join(downloadsDir, name);
+      // The generic `patch.apk` is an alias for the latest release, resolved via
+      // the sidecar — never a file on disk (a stray one went stale at 0.1.3).
+      let fileName = name;
+      if (name === 'patch.apk') {
+        try {
+          const sidecar = JSON.parse(
+            readFileSync(join(downloadsDir, 'android-latest.json'), 'utf8'),
+          ) as { file?: unknown };
+          if (
+            typeof sidecar.file !== 'string' ||
+            !/^patch[A-Za-z0-9._-]*\.apk$/.test(sidecar.file)
+          ) {
+            throw new Error('android-latest.json has no valid "file"');
+          }
+          fileName = sidecar.file;
+        } catch (err) {
+          req.log.warn({ err }, 'patch.apk alias: cannot resolve latest release');
+          return reply.code(404).send({ error: 'no such APK published' });
+        }
+      }
+      const artifact = join(downloadsDir, fileName);
       if (!existsSync(artifact)) {
         return reply
           .code(404)
@@ -1065,7 +1092,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       }
       return reply200
         .header('content-type', 'application/vnd.android.package-archive')
-        .header('content-disposition', `attachment; filename="${name}"`)
+        .header('content-disposition', `attachment; filename="${fileName}"`)
         .send(createReadStream(artifact));
     },
   );
