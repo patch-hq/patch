@@ -104,6 +104,7 @@ function PromptRow({
               type="button"
               className="set-btn primary"
               data-testid={`prompt-${id}-save`}
+              disabled={draft.trim() === '' || draft === current}
               onClick={save}
             >
               Save

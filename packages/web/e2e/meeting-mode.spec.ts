@@ -945,7 +945,12 @@ test.describe('meeting mode — editing prompts mid-call', () => {
     await page.getByTestId('meeting-prompt-open-now').click();
     const box = page.getByTestId('meeting-prompt-text');
     await expect(box).toHaveValue(/headline/);
+    // A blank or unchanged draft cannot be saved: the server would refuse it.
+    await expect(page.getByTestId('meeting-prompt-save')).toBeDisabled();
+    await box.fill('   ');
+    await expect(page.getByTestId('meeting-prompt-save')).toBeDisabled();
     await box.fill('Only a headline.');
+    await expect(page.getByTestId('meeting-prompt-save')).toBeEnabled();
     await page.getByTestId('meeting-prompt-save').click();
     await expect.poll(() => writes.length).toBe(1);
     expect(writes).toEqual([{ meetingNowPrompt: 'Only a headline.' }]);
