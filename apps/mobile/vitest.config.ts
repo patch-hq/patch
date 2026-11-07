@@ -77,6 +77,7 @@ export default defineConfig({
       'expo-constants': path.resolve(__dirname, '__tests__/stubs/expo-constants.ts'),
       'expo-crypto': path.resolve(__dirname, '__tests__/stubs/expo-crypto.ts'),
       'expo-clipboard': path.resolve(__dirname, '__tests__/stubs/expo-clipboard.ts'),
+      'expo-speech': path.resolve(__dirname, '__tests__/stubs/expo-speech.ts'),
       'expo-image-picker': path.resolve(__dirname, '__tests__/stubs/expo-image-picker.ts'),
       'expo-document-picker': path.resolve(__dirname, '__tests__/stubs/expo-document-picker.ts'),
       'expo-image-manipulator': path.resolve(

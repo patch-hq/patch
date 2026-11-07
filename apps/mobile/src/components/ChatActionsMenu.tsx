@@ -36,6 +36,7 @@ import { chatKebabItems } from '../lib/chatActions';
 import { docsRoute } from '../lib/docEditor';
 import { clearContext, toggleDisabled } from '../lib/chatMeta';
 import { startVoiceCall } from '../lib/voiceCall';
+import { useReadAloud } from '../lib/readAloud';
 import { api } from '../api/rest';
 import { useChatStore } from '../stores/chatStore';
 import { useUiStore } from '../stores/uiStore';
@@ -58,6 +59,7 @@ export function ChatActionsMenu({
   const colors = useTheme();
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const readAll = useReadAloud((s) => s.readAll);
 
   const items = chatKebabItems(chatId, {
     pinned: row?.pinned ?? false,
@@ -66,6 +68,7 @@ export function ChatActionsMenu({
     hidden: row !== undefined && isHidden(row),
     disabled: row?.disabled ?? false,
     noTasks: row !== undefined && row.todos.length === 0,
+    readAll,
   }).map((label) => ({ id: label, label, destructive: label === 'Delete chat' }));
 
   const newChatHere = (): void => {
@@ -90,6 +93,10 @@ export function ChatActionsMenu({
     switch (id) {
       case 'New chat':
         newChatHere();
+        return;
+      case 'Read everything aloud':
+      case 'Stop reading everything':
+        useReadAloud.getState().setReadAll(!readAll);
         return;
       case 'Call':
         startVoiceCall(chatId);

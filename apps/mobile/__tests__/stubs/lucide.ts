@@ -72,6 +72,7 @@ export const Lock = icon('Lock');
 export const LockOpen = icon('LockOpen');
 export const Sparkles = icon('Sparkles');
 export const Square = icon('Square');
+export const Volume2 = icon('Volume2');
 export const Target = icon('Target');
 export const Terminal = icon('Terminal');
 export const TriangleAlert = icon('TriangleAlert');
