@@ -127,14 +127,12 @@ export function ClaudeSettingsEditor({ host }: { host: HostPresence }): JSX.Elem
 
 /**
  * The account's provider keys — Gemini, OpenAI Realtime, Groq (spec/02 §
- * Provider keys) — shared settings held on the server and sent to every host.
- * Add / Replace takes a value in a write-only field; Revoke deletes it. A key
- * that only some hosts' environments supply names those hosts and offers to
- * adopt it as the shared value. The value is never shown back.
+ * Provider keys) — held once for the account and used everywhere. Add / Replace
+ * takes a value in a write-only field; Revoke deletes it. The value is never
+ * shown back.
  */
 function ProviderKeys(): JSX.Element {
   const connection = usePresenceStore((s) => s.connection);
-  const hosts = usePresenceStore((s) => s.hosts);
   const shared = usePreferencesStore((s) => s.shared);
   const [editing, setEditing] = useState<ProviderKeyId | null>(null);
   const [draft, setDraft] = useState('');
@@ -147,12 +145,6 @@ function ProviderKeys(): JSX.Element {
     );
   }
   const reachable = connection === 'connected';
-  // Which online hosts have each key in their own environment.
-  const envHosts = (id: ProviderKeyId): HostPresence[] =>
-    Object.values(hosts).filter(
-      (h) => h.online && h.host?.providerKeys?.some((k) => k.id === id && k.envSet),
-    );
-
   const run = async (what: string, call: () => Promise<SharedState>): Promise<boolean> => {
     setBusy(true);
     try {
@@ -188,23 +180,18 @@ function ProviderKeys(): JSX.Element {
       {shared.secrets.providerKeys.map((k) => {
         const { label } = providerKeyInfo(k.id);
         const row = `provider-key-${k.id}`;
-        const env = envHosts(k.id);
-        const status = k.set
-          ? `Set${k.last4 ? ` · ends ${k.last4}` : ''}`
-          : env.length > 0
-            ? `From the environment on ${env.map(hostLabel).join(', ')}`
-            : 'Not set';
+        const status = k.set ? `Set${k.last4 ? ` · ends ${k.last4}` : ''}` : 'Not set';
         return (
           <div
             key={k.id}
             className={`set-row${editing === k.id ? ' stack' : ''}`}
             data-testid={row}
-            data-source={k.set ? 'ui' : env.length > 0 ? 'env' : 'none'}
+            data-source={k.set ? 'ui' : 'none'}
           >
             <div className="set-row-head">
               <div className="set-row-text">
                 <span className="set-row-title">
-                  <span className={`set-dot${k.set || env.length > 0 ? '' : ' off'}`} aria-hidden />
+                  <span className={`set-dot${k.set ? '' : ' off'}`} aria-hidden />
                   {label}
                 </span>
                 <span className="set-sub" data-testid={`${row}-status`}>
@@ -213,22 +200,9 @@ function ProviderKeys(): JSX.Element {
               </div>
               {editing === k.id ? null : (
                 <div className="set-row-ctrl">
-                  {!k.set && env[0] ? (
-                    <button
-                      type="button"
-                      className="set-btn"
-                      data-testid={`${row}-adopt`}
-                      disabled={!reachable || busy}
-                      onClick={() =>
-                        void run(`${label} key`, () => api.adoptProviderKey(k.id, env[0]!.hostId))
-                      }
-                    >
-                      Use for all
-                    </button>
-                  ) : null}
                   <button
                     type="button"
-                    className={`set-btn${k.set || env.length > 0 ? '' : ' primary'}`}
+                    className={`set-btn${k.set ? '' : ' primary'}`}
                     data-testid={`${row}-edit`}
                     disabled={!reachable || busy}
                     onClick={() => {
