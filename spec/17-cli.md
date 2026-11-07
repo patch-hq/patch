@@ -81,6 +81,7 @@ patch jobs get <id>
 patch jobs create <file.json>             # job definition from JSON
 patch jobs create --cron <expr> --action script \
   --daemon-id <id> --folder <path> --command <cmd>   # a tick with no chat
+patch jobs create --cron <expr> --script <cmd>       # same, one-liner: folder = cwd, host = this machine
 patch jobs update <id> <file.json>
 patch jobs delete <id>
 patch jobs enable <id> | disable <id>
