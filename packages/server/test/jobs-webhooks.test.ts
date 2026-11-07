@@ -25,6 +25,33 @@ describe('verifySignature (direct unit coverage of every scheme/branch)', () => 
     });
   });
 
+  describe('bearer', () => {
+    const body = Buffer.from('{}');
+    it('accepts the matching Authorization: Bearer secret', () => {
+      expect(
+        verifySignature('bearer', body, { authorization: 'Bearer s3cret' }, 's3cret', opts),
+      ).toEqual({ ok: true });
+    });
+    it('rejects missing, malformed and wrong tokens', () => {
+      expect(verifySignature('bearer', body, {}, 's3cret', opts).ok).toBe(false);
+      expect(verifySignature('bearer', body, { authorization: 's3cret' }, 's3cret', opts).ok).toBe(
+        false,
+      );
+      expect(
+        verifySignature('bearer', body, { authorization: 'Bearer nope' }, 's3cret', opts),
+      ).toEqual({ ok: false, reason: 'mismatch' });
+      expect(
+        verifySignature('bearer', body, { authorization: 'Bearer s3cret-longer' }, 's3cret', opts)
+          .ok,
+      ).toBe(false);
+    });
+    it('fails closed without a job secret', () => {
+      expect(
+        verifySignature('bearer', body, { authorization: 'Bearer x' }, undefined, opts).reason,
+      ).toBe('job missing secret');
+    });
+  });
+
   describe('hmac-sha256', () => {
     const secret = 'topsecret';
     const body = Buffer.from('{"a":1}');
