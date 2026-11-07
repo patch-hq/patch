@@ -6836,6 +6836,18 @@ export async function handleServerEvent(
             logger.warn({ op, chatId: spawnedChatId, err }, 'chat.spawn_request: setGoal failed');
           });
         }
+        // spec/02 § Self-wake, spec/08 ## Action — a job's own loop prompt,
+        // armed once at creation on the same scheduler `/loop` reaches.
+        if (event.loop !== undefined) {
+          try {
+            daemon.scheduleWake(spawnedChatId, {
+              message: event.loop.message,
+              every: event.loop.every,
+            });
+          } catch (err) {
+            logger.error({ op, chatId: spawnedChatId, err }, 'chat.spawn_request: loop failed');
+          }
+        }
         return;
       }
       case 'chat.input': {

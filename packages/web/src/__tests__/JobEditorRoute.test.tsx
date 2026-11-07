@@ -473,6 +473,41 @@ describe('JobEditorRoute (single-page form)', () => {
     vi.unstubAllGlobals();
   });
 
+  it('spawn: a loop interval + prompt posts action.loop; half a loop is refused', async () => {
+    const calls: Array<{ body: unknown }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (String(url).includes('/api/jobs') && (init?.method ?? 'GET').toUpperCase() === 'POST') {
+          calls.push({ body: JSON.parse(String(init?.body)) });
+          return new Response(JSON.stringify({ id: 'j_new' }), {
+            status: 201,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return defaultRoute(String(url));
+      }),
+    );
+    renderNew();
+    fireEvent.change(screen.getByTestId('job-name'), { target: { value: 'loop job' } });
+    await choosePickerFolder('d1', '/Users/tom/projects/portfolio');
+    fireEvent.change(screen.getByTestId('job-spawn-prompt'), { target: { value: 'go' } });
+    fireEvent.change(screen.getByTestId('job-spawn-loop-every'), { target: { value: '10m' } });
+    fireEvent.click(screen.getByTestId('job-save'));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(calls.length).toBe(0);
+    fireEvent.change(screen.getByTestId('job-spawn-loop-message'), {
+      target: { value: 'check the build' },
+    });
+    fireEvent.click(screen.getByTestId('job-save'));
+    await waitFor(() => expect(calls.length).toBe(1));
+    expect((calls[0]?.body as { action: Record<string, unknown> }).action.loop).toEqual({
+      every: '10m',
+      message: 'check the build',
+    });
+    vi.unstubAllGlobals();
+  });
+
   it('spawn: ticking Hide chat posts action.startHidden = true', async () => {
     const calls: Array<{ body: unknown }> = [];
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {

@@ -2250,6 +2250,7 @@ export class JobDispatcher {
           : {}),
         // spec/04 § Goals, spec/08 ## Action — set once, at creation.
         ...(action.goal !== undefined ? { goal: action.goal } : {}),
+        ...(action.loop !== undefined ? { loop: action.loop } : {}),
       };
     } else if (action.type === 'continue') {
       // Upsert: one durable chat per job, or — with `key` — one per SUBJECT
@@ -2356,6 +2357,7 @@ export class JobDispatcher {
           // spec/04 § Goals, spec/08 ## Action — set once, when this fire
           // creates the durable chat.
           ...(action.goal !== undefined ? { goal: action.goal } : {}),
+          ...(action.loop !== undefined ? { loop: action.loop } : {}),
         };
       }
     } else {
