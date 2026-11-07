@@ -12,7 +12,7 @@ import {
   type ElevenLabsWsCtor,
 } from '../src/audio/elevenlabs-agent.js';
 import { DISPATCH_TOOL_NAME } from '../src/audio/gemini-live.js';
-import { LOOK_BACK_TOOL_NAME } from '../src/audio/chatBriefing.js';
+import { LOOK_BACK_TOOL_NAME, RESULT_GIST_NOTE } from '../src/audio/chatBriefing.js';
 import type { SessionInit } from '../src/audio/session.js';
 import type { AudioEvent, AudioSessionMode } from '@patch/wire/audio';
 import { FakeTimeline } from './gemini-live-session.test.js';
@@ -372,7 +372,7 @@ describe('ElevenLabsAgentSession — conversation', () => {
     expect(ws.ofType('client_tool_result')[0]).toEqual({
       type: 'client_tool_result',
       tool_call_id: 'call-1',
-      result: 'next train is 14:05',
+      result: `${RESULT_GIST_NOTE}next train is 14:05`,
       is_error: false,
     });
     expect(session.isAwaitingHandoff()).toBe(false);
@@ -412,6 +412,33 @@ describe('ElevenLabsAgentSession — conversation', () => {
     ws.serverSend(toolCall('mystery', {}));
     expect(ws.ofType('client_tool_result')[0]).toMatchObject({ is_error: true });
     expect(events.some((e) => e.type === 'audio.error')).toBe(true);
+  });
+
+  test('noise ("...") is not a turn, a bubble, or answered', async () => {
+    const { deps, events, last } = makeDeps();
+    const timeline = deps.timeline as unknown as FakeTimeline;
+    const session = new ElevenLabsAgentSession(makeInit(), deps);
+    const ws = await open(session, last);
+    ws.serverSend(transcript('...'));
+    ws.serverSend(response("I'm still here..."));
+    ws.serverSend(audioChunk(240));
+    expect(session.stats().turns).toBe(0);
+    expect(timeline.log).toEqual([]);
+    expect(events.some((e) => e.type === 'audio.transcript_final')).toBe(false);
+    expect(events.some((e) => e.type === 'audio.tts_chunk')).toBe(false);
+    ws.serverSend(transcript('hello there'));
+    expect(session.stats().turns).toBe(1);
+  });
+
+  test('a typed message tells the voice not to reply, and notes a running hand-off', async () => {
+    const { deps, last } = makeDeps();
+    const session = new ElevenLabsAgentSession(makeInit(), deps);
+    const ws = await open(session, last);
+    ws.serverSend(toolCall(DISPATCH_TOOL_NAME, { request: 'x' }));
+    session.pushContext('user', 'what is the capital of Peru');
+    const text = String(ws.ofType('contextual_update')[0]!['text']);
+    expect(text).toMatch(/typed this to the agent, which is handling it/);
+    expect(text).toMatch(/hand-off is already running/);
   });
 
   test('chat messages from elsewhere go in as a contextual_update', async () => {
