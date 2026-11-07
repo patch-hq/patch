@@ -507,6 +507,7 @@ async function fetchPublishedBuild(
     currentVersion: string;
     target: string | undefined;
     fetchImpl?: typeof fetch;
+    logger?: Logger;
   },
   stepMs: number,
   base: string,
@@ -523,8 +524,16 @@ async function fetchPublishedBuild(
   // check's own failure message carries whatever the fetch layer said, and that
   // has been seen to include the token.
   if (!check.available) {
+    opts.logger?.info(
+      { from: opts.currentVersion, reason: redactToken(check.reason, opts.internalToken) },
+      'self-update: check — nothing to apply',
+    );
     return { ok: false, message: redactToken(check.reason, opts.internalToken) };
   }
+  opts.logger?.info(
+    { from: opts.currentVersion, target: opts.target },
+    'self-update: check — a newer build is published',
+  );
   const f = opts.fetchImpl ?? fetch;
   let manifest: HostManifest;
   try {
@@ -683,6 +692,19 @@ export async function applyUpdate(opts: {
     const started = existsSync(logPath) ? statSync(logPath).size : 0;
     const out = openSync(logPath, 'a');
     let installerOutput = '';
+    const installStartedAt = Date.now();
+    opts.logger.info(
+      {
+        installer: join(extracted, 'install'),
+        from: opts.currentVersion,
+        to: version,
+        installedBefore: installedVersion(opts.patchHome),
+        installerLog: logPath,
+        pid: process.pid,
+      },
+      'self-update: installer start',
+    );
+    let installerFailure: string | undefined;
     try {
       await (opts.runInstaller ?? runDetached)(
         join(extracted, 'install'),
@@ -691,13 +713,25 @@ export async function applyUpdate(opts: {
         ...(opts.timeoutMs ? [opts.timeoutMs] : []),
       );
     } catch (err) {
-      installerOutput = redactToken((err as Error).message, opts.internalToken);
+      installerFailure = redactToken((err as Error).message, opts.internalToken);
+      installerOutput = installerFailure;
     } finally {
       closeSync(out);
     }
     installerOutput = `${readFileSync(logPath, 'utf8').slice(started)}\n${installerOutput}`.trim();
 
     const installed = installedVersion(opts.patchHome);
+    opts.logger.info(
+      {
+        exit: installerFailure ?? 'exited 0',
+        durationMs: Date.now() - installStartedAt,
+        installedBefore: opts.currentVersion,
+        installedAfter: installed,
+        wanted: version,
+        output: redactToken(installerOutput, opts.internalToken),
+      },
+      'self-update: installer finished',
+    );
     if (installed === version) {
       opts.logger.info(
         { installed, output: installerOutput },
@@ -705,6 +739,10 @@ export async function applyUpdate(opts: {
       );
       return { applied: true, message: `updated ${opts.currentVersion} → ${version}` };
     }
+    opts.logger.warn(
+      { installedAfter: installed, wanted: version },
+      'self-update: did not take — this machine is not on the wanted version',
+    );
     return {
       applied: false,
       message:
@@ -712,6 +750,10 @@ export async function applyUpdate(opts: {
         redactToken(installerOutput, opts.internalToken),
     };
   } catch (err) {
+    opts.logger.error(
+      { err: redactToken((err as Error).message, opts.internalToken) },
+      'self-update: failed before or around the installer',
+    );
     return {
       applied: false,
       message: `self-update failed: ${redactToken((err as Error).message, opts.internalToken)}`,
