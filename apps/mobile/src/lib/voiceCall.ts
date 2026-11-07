@@ -118,7 +118,11 @@ async function releaseAudio(): Promise<void> {
  * on silence, and only an addressed utterance is a turn. Both are the SAME
  * session; `setCallMode` flips between them without tearing anything down.
  */
-export function startVoiceCall(chatId: string, mode: AudioSessionMode = 'call'): void {
+export function startVoiceCall(
+  chatId: string,
+  mode: AudioSessionMode = 'call',
+  opts: { takeOver?: boolean } = {},
+): void {
   // 1) Mount the call bar synchronously — CONNECTING state, empty session.
   const gen = ++_callGen;
   useVoiceStore.getState().setActive({
@@ -377,6 +381,7 @@ export function startVoiceCall(chatId: string, mode: AudioSessionMode = 'call'):
           surfaceHasAec: true,
           mode: useVoiceStore.getState().callMode,
           ...(addressWord !== null ? { addressWord } : {}),
+          ...(opts.takeOver === true ? { takeOver: true } : {}),
         };
         try {
           ws.send(JSON.stringify(start));
@@ -444,7 +449,7 @@ export function startVoiceCall(chatId: string, mode: AudioSessionMode = 'call'):
       };
       // If the host (or network) drops the session, stop the mic AND the TTS
       // sink so we don't keep capturing into — or playing from — a dead socket.
-      ws.onclose = (): void => {
+      ws.onclose = (ev?: { reason?: string }): void => {
         void stopMicCapture().catch(() => undefined);
         void stopTtsPlayback().catch(() => undefined);
         // A close the user did not ask for (endVoiceCall bumps the generation
@@ -452,6 +457,13 @@ export function startVoiceCall(chatId: string, mode: AudioSessionMode = 'call'):
         // still reads "Listening" over a dead socket.
         if (gen !== _callGen) return;
         clearConnectTimer();
+        // spec/07 § A call can move between devices — the host closed this
+        // session because the call was taken over elsewhere. That is not a
+        // failure: end the call here and let the remote-call pill say where it is.
+        if (ev?.reason === 'transferred') {
+          void endVoiceCall();
+          return;
+        }
         const st = useVoiceStore.getState();
         if (st.activeSession && st.callError === null) {
           st.setError('Call dropped — the audio connection closed');

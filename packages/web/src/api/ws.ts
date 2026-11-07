@@ -16,7 +16,7 @@ import {
   restartingVersion,
   type WireEvent,
 } from '@patch/wire';
-import { loadCredential } from '../lib/credential.js';
+import { loadCredential, decodeSurfaceClaims } from '../lib/credential.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { saveEvents } from '../lib/transcriptCache.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
@@ -1028,6 +1028,14 @@ export class PatchWs {
     // drives the "🎙 <name>" pill on the Speakers row.
     if (event.type === 'device.session') {
       useVoiceStore.getState().setDeviceSession(event.deviceId, event.name, event.active);
+      return;
+    }
+    // spec/07 § A call can move between devices — a call live on another
+    // surface is offered for switching here. This surface's own call is not.
+    if (event.type === 'voice.call') {
+      if (event.surfaceId === decodeSurfaceClaims()?.surfaceId) return;
+      const { type: _type, active, ...call } = event;
+      useVoiceStore.getState().setRemoteCall(call, active);
       return;
     }
     if (event.type === 'chat.call_request') {
