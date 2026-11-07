@@ -365,17 +365,13 @@ export function initialUpdaterState(args: {
  */
 /**
  * How long to give a successful-looking `quitAndInstall()` call before
- * concluding it silently stalled. electron-updater relaunches within a few
- * seconds on a healthy install, but a slow one (the bundle swap has been seen
- * taking ~75s) is still a healthy install. Firing early reads that as a stall,
- * kills ShipIt and asks again, and the shell restarts a second time — so the
- * bound must sit well above the slowest healthy install.
+ * concluding it stalled. electron-updater relaunches within a few seconds on a
+ * healthy install, but a slow one (the bundle swap has been seen taking ~75s)
+ * is still a healthy install, so the bound sits well above that.
  *
- * Found live: Squirrel.Mac's ShipIt helper can take the install request and
- * then wedge — a FileCoordination claim granted and never released, no error
- * event, no relaunch — leaving the old process running indefinitely. Nothing
- * upstream of this ever reported that as a failure, so pressing "Restart now"
- * looked like it did nothing at all.
+ * A stall is reported and nothing else happens: no reset, no second attempt.
+ * Retrying behind the user's back meant the app could quit again minutes after
+ * they had gone back to work.
  */
 export const INSTALL_WATCHDOG_MS = 120_000;
 
@@ -398,12 +394,6 @@ export function quitAndInstallNow(deps: {
   autoUpdater: { quitAndInstall(isSilent: boolean, isForceRunAfter: boolean): void };
   onError: (err: Error) => void;
   /**
-   * Clears whatever wedged the install (kills the stuck ShipIt helper) so the
-   * install can be asked for again. Called once, on the first stall: a wedged
-   * helper is the app's fault to repair, not the user's to quit around.
-   */
-  recoverStall?: () => void;
-  /**
    * The updater's error since this update finished downloading, if any.
    * electron-updater says "downloaded" before Squirrel.Mac has staged the
    * update; when Squirrel then fails, that error is why no install will come,
@@ -414,42 +404,23 @@ export function quitAndInstallNow(deps: {
   setTimer?: (fn: () => void, ms: number) => { unref?: () => void };
 }): void {
   const schedule = deps.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
-  const attempt = (retriesLeft: number): void => {
-    deps.app.isQuitting = true;
-    try {
-      deps.autoUpdater.quitAndInstall(false, true);
-    } catch (err) {
-      deps.app.isQuitting = false;
-      deps.onError(err as Error);
-      return;
-    }
-    // A call that returns without throwing is not proof the install is
-    // happening. If it genuinely is, this process exits before the timer below
-    // ever fires, so firing at all IS the evidence of a stall, not a guess.
-    const watchdog = schedule(() => {
-      deps.app.isQuitting = false;
-      const reason = deps.pendingError?.();
-      if (reason) {
-        deps.onError(new Error(conciseReason(reason)));
-        return;
-      }
-      if (retriesLeft > 0 && deps.recoverStall) {
-        try {
-          deps.recoverStall();
-        } catch (err) {
-          deps.onError(
-            new Error(`the installer stalled and couldn't be reset (${(err as Error).message})`),
-          );
-          return;
-        }
-        attempt(retriesLeft - 1);
-        return;
-      }
-      deps.onError(new Error("the installer didn't respond"));
-    }, INSTALL_WATCHDOG_MS);
-    watchdog.unref?.();
-  };
-  attempt(1);
+  deps.app.isQuitting = true;
+  try {
+    deps.autoUpdater.quitAndInstall(false, true);
+  } catch (err) {
+    deps.app.isQuitting = false;
+    deps.onError(err as Error);
+    return;
+  }
+  // A call that returns without throwing is not proof the install is
+  // happening. If it genuinely is, this process exits before the timer below
+  // ever fires, so firing at all IS the evidence of a stall, not a guess.
+  const watchdog = schedule(() => {
+    deps.app.isQuitting = false;
+    const reason = deps.pendingError?.();
+    deps.onError(new Error(reason ? conciseReason(reason) : "the installer didn't respond"));
+  }, INSTALL_WATCHDOG_MS);
+  watchdog.unref?.();
 }
 
 /**
@@ -613,59 +584,5 @@ export function createInstaller(
         deps.onError(err);
       },
     });
-  };
-}
-
-/** How long "Update Patch" waits for a newer build to finish downloading. */
-export const LATEST_DOWNLOAD_WAIT_MS = 4 * 60_000;
-
-/**
- * "Update Patch" always lands on the newest published build. Patch ships ~20
- * times a day, so the build staged on disk when the button is pressed is often
- * already one or more deploys old; installing it relaunches into a build that
- * the next check immediately flags as behind, and the banner comes straight
- * back — "multiple updates queued". So the press first asks the feed again,
- * waits for anything newer to finish downloading, and only then installs.
- *
- * Single-flight: pressing again while this is in progress joins it. Failures
- * (check error, download never finishing) go to `onError`, never swallowed.
- */
-export function createLatestInstaller(deps: {
-  check: () => Promise<void>;
-  getState: () => UpdaterState;
-  install: (state: UpdaterState) => void;
-  onError: (err: Error) => void;
-  waitMs?: number;
-  pollMs?: number;
-}): () => Promise<void> {
-  const waitMs = deps.waitMs ?? LATEST_DOWNLOAD_WAIT_MS;
-  const pollMs = deps.pollMs ?? 250;
-  let inFlight: Promise<void> | null = null;
-  const run = async (): Promise<void> => {
-    await deps.check();
-    const checked = deps.getState();
-    if (checked.lastResult === 'error' && checked.lastErrorKind === 'check') {
-      deps.onError(new Error(conciseReason(checked.lastError ?? 'the update check failed')));
-      return;
-    }
-    const deadline = Date.now() + waitMs;
-    // A newer build is "available" with downloaded=false until its own
-    // download lands (the reducer drops `downloaded` for a different version).
-    while (!deps.getState().downloaded) {
-      if (deps.getState().lastResult === 'up-to-date' || Date.now() >= deadline) {
-        deps.onError(new Error("the latest build hasn't finished downloading"));
-        return;
-      }
-      await new Promise((r) => setTimeout(r, pollMs));
-    }
-    deps.install(deps.getState());
-  };
-  return () => {
-    inFlight ??= run()
-      .catch((err) => deps.onError(err as Error))
-      .finally(() => {
-        inFlight = null;
-      });
-    return inFlight;
   };
 }

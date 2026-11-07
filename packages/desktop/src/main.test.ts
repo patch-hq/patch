@@ -834,13 +834,13 @@ test('every install path goes through quitAndInstallNow, not a bare quitAndInsta
   );
 });
 
-test('the install IPC re-checks for the newest build before installing', () => {
+test('the install IPC installs what is already downloaded — no re-check, no wait for a newer build', () => {
   const src = readFileSync(join(here, 'main.ts'), 'utf8');
   assert.match(
     src,
-    /ipcMain\.on\('patch:updater:install', \(\) => \{\s*logUpdate\('install-requested'[^\n]*\n\s*void installLatest\(\);/,
+    /ipcMain\.on\('patch:updater:install', \(\) => \{\s*logUpdate\('install-requested'[^\n]*\n(\s*\/\/[^\n]*\n)*\s*installUpdate\(updaterState as UpdaterState\);/,
   );
-  assert.match(src, /createLatestInstaller\(/);
+  assert.doesNotMatch(src, /createLatestInstaller|installLatest/);
 });
 
 test('the updater log records launch, install press and banner reports', () => {
@@ -876,7 +876,7 @@ test('a finished download does NOT install itself', () => {
   );
   assert.match(
     src,
-    /ipcMain\.on\('patch:updater:install', \(\) => \{\s*logUpdate\('install-requested'[^\n]*\n\s*void installLatest\(\);/,
+    /ipcMain\.on\('patch:updater:install', \(\) => \{\s*logUpdate\('install-requested'[^\n]*\n(\s*\/\/[^\n]*\n)*\s*installUpdate\(updaterState as UpdaterState\);/,
     'the only install path is the one the user presses',
   );
 });

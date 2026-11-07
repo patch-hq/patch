@@ -20,7 +20,7 @@
 
 import { notificationClickPath } from './notificationTarget';
 import { parseOpenChat, writeFrontChat } from './front-chat';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { ensureSpotlightIndexed } from './spotlight';
 import {
   app,
@@ -49,7 +49,6 @@ import {
   diagnoseUpdater,
   emptyPersisted,
   createInstaller,
-  createLatestInstaller,
   initialUpdaterState,
   parsePersisted,
   persistedOf,
@@ -1426,25 +1425,7 @@ let errorSinceDownload: string | null = null;
 const installUpdate = createInstaller({
   app: app as unknown as { isQuitting: boolean },
   autoUpdater,
-  // Squirrel.Mac's ShipIt helper can wedge holding the install request; kill
-  // it so the retry starts a fresh one instead of asking the user to quit.
-  recoverStall: () => {
-    spawnSync('pkill', ['-x', 'ShipIt']);
-  },
   pendingError: () => errorSinceDownload,
-  onError: (err) =>
-    applyUpdaterEvent({
-      type: 'error',
-      kind: 'install',
-      message: err.message,
-      at: new Date().toISOString(),
-    }),
-});
-
-const installLatest = createLatestInstaller({
-  check: () => checkForUpdates(),
-  getState: () => updaterState as UpdaterState,
-  install: installUpdate,
   onError: (err) =>
     applyUpdaterEvent({
       type: 'error',
@@ -1643,8 +1624,10 @@ function setupAutoUpdater(): void {
   // an update; everything else waits for an ordinary quit
   // (autoInstallOnAppQuit, left at its default true).
   ipcMain.on('patch:updater:install', () => {
-    logUpdate('install-requested', updaterState?.availableVersion ?? 'latest');
-    void installLatest();
+    logUpdate('install-requested', updaterState?.availableVersion ?? 'none staged');
+    // Installs exactly what is already downloaded — no fresh check, no waiting
+    // for a newer build — so pressing it restarts now, never minutes later.
+    installUpdate(updaterState as UpdaterState);
   });
 
   // An unusable updater is wired for reporting but never asked to check — calling
