@@ -6,6 +6,7 @@ import { presentFailure } from '../../src/lib/usage';
 import React from 'react';
 import { formatElapsed as formatToolElapsed } from '../../src/lib/backgroundTasks';
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
   Easing,
@@ -1454,6 +1455,55 @@ function ChatDetailBody(): React.ReactElement {
 // the row expands its args + (for Edit/Write/MultiEdit) an inline unified
 // diff (spec/15 ## Chat detail). NO side-by-side — the unified renderer is
 // the only diff view on mobile.
+/**
+ * The outcome line of an answered permission card. An approved call that has
+ * not returned yet says it is running (spinner), so "Approved" never reads as
+ * a finished, static card while the command is still going.
+ */
+function PermissionOutcome({
+  chatId,
+  entry,
+  resolved,
+}: {
+  chatId: string;
+  entry: ChatEventEntry;
+  resolved: 'approve' | 'deny';
+}): React.ReactElement {
+  const colors = useTheme();
+  const running = useChatStore((s) => {
+    if (resolved !== 'approve' || entry.permissionCancelled) return false;
+    if (s.chats[chatId]?.activity !== 'running') return false;
+    const tl = s.timelines[chatId] ?? NO_TIMELINE;
+    const idx = tl.findIndex((e) => e.kind === 'permission' && e.requestId === entry.requestId);
+    return idx >= 0 && !tl.slice(idx + 1).some((e) => e.kind === 'tool_result');
+  });
+  const label =
+    resolved === 'approve'
+      ? entry.permissionCancelled
+        ? 'Approved, cancelled by interrupt'
+        : running
+          ? 'Approved, running'
+          : 'Approved'
+      : 'Denied';
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: space.sm }}>
+      {running ? (
+        <ActivityIndicator testID="permission-running" size="small" color={colors.ink3} />
+      ) : null}
+      <Text
+        testID="permission-outcome"
+        style={{
+          ...typography.meta,
+          color: colors.ink3,
+          marginLeft: running ? space.sm : 0,
+        }}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+}
+
 /** A running call's elapsed time, from the host's start stamp. Display only. */
 function ToolElapsed({ since }: { since: number }): React.ReactElement {
   const colors = useTheme();
@@ -3096,16 +3146,7 @@ const TimelineItem = React.memo(function TimelineItem({
           </Text>
         ) : null}
         {resolved ? (
-          <Text
-            testID="permission-outcome"
-            style={{ ...typography.meta, color: colors.ink3, marginTop: space.sm }}
-          >
-            {resolved === 'approve'
-              ? entry.permissionCancelled
-                ? 'Approved, cancelled by interrupt'
-                : 'Approved'
-              : 'Denied'}
-          </Text>
+          <PermissionOutcome chatId={chatId} entry={entry} resolved={resolved} />
         ) : (
           <View style={{ flexDirection: 'column', marginTop: space.sm }}>
             {(
