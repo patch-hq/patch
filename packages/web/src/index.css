@@ -17742,6 +17742,7 @@ select.permission-mode.is-pending {
   border-radius: 2px;
   background: var(--voice);
   transform-origin: left center;
+  /* --level is written per element by LevelBar.tsx; 0 (empty) is its resting value. */
   transform: scaleX(var(--level, 0));
   transition: transform 60ms linear;
 }
