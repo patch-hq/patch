@@ -8,6 +8,7 @@ import type {
   ChatBranch,
   ChatDelegateUpdateEvent,
   PermissionMode,
+  ReminderEvery,
   SystemContextItem,
   TodoItem,
   WireEvent,
@@ -346,7 +347,7 @@ interface ChatState {
   /** Optimistic goal write (goal bar); reverted by the caller on failure. */
   setGoal(chatId: string, goal: string | null): void;
   /** Optimistic reminder write (reminder bar). */
-  setReminder(chatId: string, reminder: string | null): void;
+  setReminder(chatId: string, reminder: string | null, every?: ReminderEvery | null): void;
   /** Optimistic task-list write (task bar) — always the WHOLE list. */
   setTodos(chatId: string, todos: TodoItem[]): void;
   /** Optimistic disable/enable of a special thread (spec/06 § Disabled). */
@@ -511,6 +512,7 @@ function emptyRow(chatId: string, folder: string): ChatRow {
     statusDeclared: null,
     goal: null,
     reminder: null,
+    reminderEvery: null,
     todos: [],
     disabled: false,
   };
@@ -535,6 +537,7 @@ function mergeListRow(prior: ChatRow | undefined, r: ChatListRow): ChatRow {
     statusDeclared: r.statusDeclared !== undefined ? r.statusDeclared : base.statusDeclared,
     goal: r.goal !== undefined ? r.goal : base.goal,
     reminder: r.reminder !== undefined ? r.reminder : base.reminder,
+    reminderEvery: r.reminderEvery !== undefined ? r.reminderEvery : base.reminderEvery,
     todos: r.todos !== undefined ? r.todos : base.todos,
     disabled: r.disabled !== undefined ? r.disabled : base.disabled,
     pendingWake: r.pendingWake !== undefined ? r.pendingWake : base.pendingWake,
@@ -589,6 +592,7 @@ function rowsToRecord(
             statusDeclared: prior.statusDeclared,
             goal: prior.goal,
             reminder: prior.reminder,
+            reminderEvery: prior.reminderEvery,
             todos: prior.todos,
             disabled: prior.disabled,
             preview: prior.preview,
@@ -650,6 +654,7 @@ function toListRow(row: ChatRow): ChatListRow {
     statusDeclared: row.statusDeclared,
     goal: row.goal,
     reminder: row.reminder,
+    reminderEvery: row.reminderEvery,
     todos: row.todos,
     disabled: row.disabled,
   };
@@ -902,6 +907,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // field is a `chat.state` about something else. Mirrors web.
             goal: event.goal !== undefined ? event.goal : row.goal,
             reminder: event.reminder !== undefined ? event.reminder : row.reminder,
+            reminderEvery:
+              event.reminderEvery !== undefined ? event.reminderEvery : row.reminderEvery,
             todos: event.todos !== undefined ? event.todos : row.todos,
             disabled: event.disabled !== undefined ? event.disabled : row.disabled,
           };
@@ -1693,10 +1700,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ chats: { ...get().chats, [chatId]: { ...row, goal } } });
   },
 
-  setReminder(chatId, reminder) {
+  setReminder(chatId, reminder, every = null) {
     const row = get().chats[chatId];
     if (!row) return;
-    set({ chats: { ...get().chats, [chatId]: { ...row, reminder } } });
+    set({
+      chats: {
+        ...get().chats,
+        [chatId]: { ...row, reminder, reminderEvery: reminder === null ? null : every },
+      },
+    });
   },
 
   setTodos(chatId, todos) {

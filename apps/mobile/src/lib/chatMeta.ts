@@ -44,12 +44,13 @@ export async function writeGoal(chatId: string, next: string | null): Promise<vo
 /** Set (text) or clear (`null`) the chat's reminder. */
 export async function writeReminder(chatId: string, next: string | null): Promise<void> {
   const prev = row(chatId).reminder;
+  const prevEvery = row(chatId).reminderEvery;
   useChatStore.getState().setReminder(chatId, next);
   try {
     await api.setReminder(chatId, next);
   } catch (e) {
     if (stillOurs(useChatStore.getState().chats[chatId]?.reminder, next))
-      useChatStore.getState().setReminder(chatId, prev);
+      useChatStore.getState().setReminder(chatId, prev, prevEvery);
     fail(next === null ? 'clearing reminder' : 'updating reminder', e);
   }
 }

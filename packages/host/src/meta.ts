@@ -24,6 +24,7 @@ import {
   EffortLevel,
   HarnessId,
   PermissionMode,
+  ReminderEvery,
   SnoozeRecord,
   TodoItem,
   TurnOrigin,
@@ -74,6 +75,8 @@ export const ChatMeta = z
      * files written before this field existed.
      */
     reminder: z.string().nullable().optional(),
+    /** How often the reminder is re-injected into the agent (spec/04 § Reminders). */
+    reminderEvery: ReminderEvery.nullable().optional(),
     /**
      * The chat's task list. Persisted so a host restart does not empty it —
      * otherwise a surface that adds one item to the (now empty) list sends back

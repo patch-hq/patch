@@ -35,6 +35,7 @@ export function toChatListRow(c: ChatListEntry): ChatListRow {
     statusDeclared: c.statusDeclared,
     goal: c.goal,
     reminder: c.reminder,
+    reminderEvery: c.reminderEvery,
     todos: c.todos,
     disabled: c.disabled,
   };
