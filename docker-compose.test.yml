@@ -129,6 +129,7 @@ services:
       PATCH_DAEMON_AUDIO_PORT: '3003'
       # mock-check:allow link-only stack; a real turn needs credentials this image has not got
       SDK_BACKEND: mock
+      PATCH_BUILT_AT: 2026-01-01T00:00:00Z
       PATCH_INTERNAL_TOKEN: test-internal-token-not-for-prod-aaaa
       PATCH_DAEMON_LOCAL_KEY: test-local-key-not-for-prod-aaaa
       # Read the seeded daemon.key from the shared /data volume instead of
