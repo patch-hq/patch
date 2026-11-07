@@ -98,18 +98,12 @@ function seedChat(
 }
 
 describe('chat-detail header', () => {
-  it('names the model the chat runs on, in compact form', () => {
+  it('draws no model name in the header (it lives in the composer)', () => {
     seedChat('c1', { model: 'claude-opus-5-5' });
     __setLocalSearchParams({ chatId: 'c1' });
     const r = renderRN(<ChatDetailScreen />);
-    expect(textOf(findHost(r.root, byTestId('chat-model')))).toBe('Opus 5.5');
-  });
-
-  it('draws no model line when the model is not known', () => {
-    seedChat('c1');
-    __setLocalSearchParams({ chatId: 'c1' });
-    const r = renderRN(<ChatDetailScreen />);
     expect(queryHost(r.root, byTestId('chat-model'))).toBeNull();
+    expect(hasText(r.root, 'Opus 5.5')).toBe(false);
   });
 
   it('shows the folder + derived title', () => {

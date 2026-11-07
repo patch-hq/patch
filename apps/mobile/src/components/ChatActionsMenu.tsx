@@ -147,7 +147,19 @@ export function ChatActionsMenu({
       case 'New chat':
         newChatHere();
         return;
-        import { useReadAloud } from '../lib/readAloud';
+      case 'Read everything aloud':
+      case 'Stop reading everything':
+        useReadAloud.getState().setReadAll(!readAll);
+        return;
+      case 'Find in chat':
+        onFind();
+        return;
+      case 'Terminal':
+        if (!row || row.hostId === '' || row.folder === '') {
+          useUiStore.getState().pushError("terminal failed: this host isn't known yet");
+          return;
+        }
+        router.push(terminalRoute(row.hostId, row.folder));
         return;
       case 'Tools':
         router.push(chatToolsRoute(chatId));
