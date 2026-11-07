@@ -387,6 +387,32 @@ describe('JobDispatcher', () => {
     disp.close();
   });
 
+  it('spawn with action.loop forwards it on the chat.spawn_request; without it none is sent (spec/08 ## Action)', () => {
+    const link = new InProcessHostLink();
+    const disp = new TrackedJobDispatcher({
+      dataDir: dir,
+      logs: new JobLogs(dir),
+      hostLink: link,
+      logger: silentLogger,
+      idGenerator: () => 'fixed1',
+    });
+    const action = {
+      type: 'spawn',
+      hostId: 'd1',
+      folder: '/work',
+      prompt: 'go',
+      loop: { every: '10m', message: 'check the build' },
+    };
+    disp.dispatch(makeJob({ action }), { firedAt: '2026-01-01' }, 'cron');
+    const sent = link.sent.find((s) => s.event.type === 'chat.spawn_request');
+    if (sent && sent.event.type === 'chat.spawn_request') {
+      expect(sent.event.loop).toEqual({ every: '10m', message: 'check the build' });
+    } else {
+      throw new Error('no spawn_request sent');
+    }
+    disp.close();
+  });
+
   it('spawn with no action.goal sends no goal field at all', () => {
     const link = new InProcessHostLink();
     const disp = new TrackedJobDispatcher({
