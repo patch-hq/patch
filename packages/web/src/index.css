@@ -1231,6 +1231,13 @@ body {
 .conn-dot.offline {
   background: var(--waiting);
 }
+.conn-dot.host-down {
+  background: var(--amber);
+  box-shadow: 0 0 0 3px var(--amber-tint);
+}
+.conn-dot[role='button'] {
+  cursor: pointer;
+}
 .brand-lockup .conn-dot {
   flex-shrink: 0;
   /* The wordmark's line box carries half-leading above the glyphs (24px type on
