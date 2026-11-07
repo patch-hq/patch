@@ -5,7 +5,7 @@
 import type { JSX } from 'react';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { providerKeyInfo, type ProviderKeyId } from '@patch/wire';
+import { providerKeyCheckText, providerKeyInfo, type ProviderKeyId } from '@patch/wire';
 import { isSubmitChord } from '../../lib/submitChord.js';
 import { shortcutLabel } from '../../lib/shortcuts.js';
 import { sendToHost } from './hostWrite.js';
@@ -210,6 +210,15 @@ function ProviderKeys(): JSX.Element {
                 <span className="set-sub" data-testid={`${row}-status`}>
                   {status}
                 </span>
+                {k.set && k.check ? (
+                  <span
+                    className={`set-sub${k.check.status === 'ok' ? '' : ' set-sub-error'}`}
+                    data-testid={`${row}-check`}
+                    data-check={k.check.status}
+                  >
+                    {providerKeyCheckText(k.check)}
+                  </span>
+                ) : null}
               </div>
               {editing === k.id ? null : (
                 <div className="set-row-ctrl">

@@ -206,6 +206,8 @@ export interface BuildOptions {
   validateClaudeToken?: (token: string) => Promise<import('@patch/auth').ClaudeTokenValidation>;
   /** Inject the OpenAI key check (tests). */
   validateOpenAIKey?: import('./shared-settings.js').ValidateOpenAIKey;
+  /** Inject the HTTP client for provider-key checks (tests). */
+  keyCheckFetch?: import('./provider-key-check.js').FetchLike;
 }
 
 export interface BuiltApp {
@@ -660,6 +662,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         hostName: (hostId) => registry.hostName(hostId),
         ...(opts.validateClaudeToken ? { validateClaude: opts.validateClaudeToken } : {}),
         ...(opts.validateOpenAIKey ? { validateOpenAIKey: opts.validateOpenAIKey } : {}),
+        ...(opts.keyCheckFetch ? { keyCheckFetch: opts.keyCheckFetch } : {}),
         logger: log.child({ component: 'shared-settings' }),
       })
     : undefined;

@@ -190,7 +190,12 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: SettingsRoute
 
   app.put(
     '/api/providers/keys/:keyId',
-    handle(KeyBody, (req, body) => shared.setProviderKey(keyOf(req), body.value)),
+    handle(KeyBody, async (req, body) => {
+      const id = keyOf(req);
+      shared.setProviderKey(id, body.value);
+      // Saved either way; the answer says at once whether the provider accepts it.
+      await shared.checkProviderKey(id);
+    }),
   );
 
   app.delete(
