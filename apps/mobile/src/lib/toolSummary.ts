@@ -217,7 +217,14 @@ function isViewFileCall(entry: ChatEventEntry): boolean {
 
 /** A transcript row: either one timeline entry, or a folded run of tool entries. */
 export type TimelineRow =
-  | { kind: 'entry'; key: string; entry: ChatEventEntry; result?: ChatEventEntry }
+  | {
+      kind: 'entry';
+      key: string;
+      entry: ChatEventEntry;
+      result?: ChatEventEntry;
+      /** A voice hand-off the agent has not answered yet. */
+      handoffPending?: boolean;
+    }
   | { kind: 'group'; key: string; entries: ChatEventEntry[] }
   /** Where a snooze began (spec/04 § Snooze → Back): a permanent divider, not a message. */
   | { kind: 'snooze'; key: string; record: SnoozeRecord };
@@ -351,8 +358,30 @@ export function groupToolRuns(timeline: ChatEventEntry[]): TimelineRow[] {
       i++;
       continue;
     }
-    rows.push({ kind: 'entry', key: `${entry.seq}-${i}`, entry });
+    rows.push({
+      kind: 'entry',
+      key: `${entry.seq}-${i}`,
+      entry,
+      ...(entry.kind === 'message' && entry.voiceHandoff
+        ? { handoffPending: voiceHandoffPending(timeline, i) }
+        : {}),
+    });
     i++;
   }
   return rows;
+}
+
+/**
+ * spec/07 § The fast voice and the chat's agent — a hand-off is waiting while
+ * nothing from the agent follows it: an assistant message that is not the
+ * voice's own spoken words, or the call's failure line.
+ */
+export function voiceHandoffPending(timeline: ChatEventEntry[], at: number): boolean {
+  for (let j = at + 1; j < timeline.length; j++) {
+    const e = timeline[j]!;
+    if (e.kind !== 'message') continue;
+    if (e.role === 'assistant' && !e.voice) return false;
+    if (e.role === 'system' && (e.content ?? '').startsWith('[call] <- agent:')) return false;
+  }
+  return true;
 }

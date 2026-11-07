@@ -939,7 +939,12 @@ function ChatDetailBody(): React.ReactElement {
         item.kind === 'group' ? (
           <ToolGroupItem entries={item.entries} chatId={chatId} />
         ) : (
-          <TimelineItem entry={item.entry} chatId={chatId} result={item.result} />
+          <TimelineItem
+            entry={item.entry}
+            chatId={chatId}
+            result={item.result}
+            handoffPending={item.handoffPending === true}
+          />
         );
       if (item.key !== highlightKey) return cell;
       return (
@@ -1481,6 +1486,8 @@ function ToolCallItem({
   entry: ChatEventEntry;
   /** This call's own tool_result, folded into the same row (spec/15). */
   result?: ChatEventEntry;
+  /** spec/07 — a voice hand-off the agent has not answered yet. */
+  handoffPending?: boolean;
 }): React.ReactElement {
   // spec/15 § Chat detail — Delegate tool row: a `patch_delegate` call is the
   // one tool row that does not collapse like the rest, on web's rules
@@ -2535,6 +2542,7 @@ const TimelineItem = React.memo(function TimelineItem({
   entry,
   chatId,
   result,
+  handoffPending,
   queuePos,
   release,
   queuedDraft,
@@ -2545,6 +2553,8 @@ const TimelineItem = React.memo(function TimelineItem({
   chatId: string;
   /** This call's own tool_result, folded into the same row (spec/15). */
   result?: ChatEventEntry;
+  /** spec/07 — a voice hand-off the agent has not answered yet. */
+  handoffPending?: boolean;
   /** 1-based place in the queued block; set only on a queued entry. */
   queuePos?: number;
   /** What releases a queued entry: the next tool call or the end of the turn. */
@@ -2589,11 +2599,25 @@ const TimelineItem = React.memo(function TimelineItem({
   if (entry.kind === 'message' && entry.voiceHandoff) {
     return (
       <Text
-        testID="voice-handoff"
+        testID={handoffPending ? 'voice-handoff-pending' : 'voice-handoff'}
         style={{ fontSize: textMin, color: colors.ink3, marginBottom: space.sm }}
       >
-        {`Asked the agent: ${entry.content ?? ''}`}
+        {`${handoffPending ? 'Asking the agent…' : 'Asked the agent:'} ${entry.content ?? ''}`}
       </Text>
+    );
+  }
+  if (
+    entry.kind === 'message' &&
+    entry.role === 'system' &&
+    (entry.content ?? '').startsWith('[call] <- agent:')
+  ) {
+    return (
+      <View testID="call-agent-reply" style={{ marginBottom: space.sm }}>
+        <Text style={{ fontSize: textMin, color: colors.ink3 }}>agent failed</Text>
+        <Text style={{ color: colors.ink }}>
+          {(entry.content ?? '').slice('[call] <- agent:'.length).trim()}
+        </Text>
+      </View>
     );
   }
   if (
