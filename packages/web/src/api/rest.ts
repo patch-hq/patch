@@ -976,11 +976,6 @@ export const api = {
     request<SharedState>(`/api/providers/keys/${encodeURIComponent(keyId)}`, {
       method: 'DELETE',
     }),
-  adoptProviderKey: (keyId: ProviderKeyId, hostId: string) =>
-    request<SharedState>(`/api/providers/keys/${encodeURIComponent(keyId)}/adopt`, {
-      method: 'POST',
-      body: { hostId },
-    }),
   addAccount: (
     backendId: SharedBackendId,
     body: { token?: string; apiKey?: string; label?: string },
