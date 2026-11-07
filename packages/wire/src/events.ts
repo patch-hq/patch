@@ -1295,6 +1295,15 @@ export const FinishedGoal = z
 export type FinishedGoal = z.infer<typeof FinishedGoal>;
 
 /**
+ * How often a chat's reminder is re-injected into the agent's prompt: every `n`
+ * of the agent's turns, or every `n` minutes (checked as a turn starts).
+ */
+export const ReminderEvery = z
+  .object({ unit: z.enum(['turns', 'minutes']), n: z.number().int().min(1).max(10000) })
+  .strict();
+export type ReminderEvery = z.infer<typeof ReminderEvery>;
+
+/**
  * How a backend picks which of the shared accounts a turn starts on (spec/10 §
  * Backend credentials — account strategy). Whatever the strategy, a key known
  * to be out of credit is skipped, and a chat's preferred account only changes
@@ -1514,6 +1523,11 @@ export const ChatStateEvent = z
      * predating the feature.
      */
     reminder: z.string().nullable().optional(),
+    /**
+     * How often the reminder is re-injected into the agent's turn (spec/04
+     * § Reminders). `null`/absent = banner only, never injected.
+     */
+    reminderEvery: ReminderEvery.nullable().optional(),
     /**
      * Auto-generated one-line "current status" summary of the thread and any
      * action it needs from the user (patch/todo.md § Features to add — "Current
@@ -4319,6 +4333,8 @@ export const ChatReminderRequestEvent = z
     type: z.literal('chat.reminder_request'),
     chatId: z.string().min(1),
     reminder: z.string().nullable(),
+    /** How often to re-inject it into the agent; `null`/absent = banner only. */
+    every: ReminderEvery.nullable().optional(),
   })
   .strict();
 export type ChatReminderRequestEvent = z.infer<typeof ChatReminderRequestEvent>;

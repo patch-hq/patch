@@ -11098,6 +11098,12 @@ main.empty-state p {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.reminder-banner-every {
+  flex: none;
+  margin-left: auto;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
 .reminder-clear-btn {
   display: inline-flex;
   align-items: center;

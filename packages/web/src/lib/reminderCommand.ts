@@ -11,9 +11,15 @@ export interface ReminderCommand {
   isReminder: boolean;
   /** The reminder to set — `null` clears it. Only meaningful when `isReminder`. */
   reminder: string | null;
+  /** How often to re-inject it into the agent (`/remind every 10 turns …`); `null` = banner only. */
+  every: ReminderEvery | null;
+  /** Set when the command was malformed (e.g. a cadence with no text). */
+  error?: string;
 }
 
-const NOT_REMINDER: ReminderCommand = { isReminder: false, reminder: null };
+import { parseReminderArg, type ReminderEvery } from '@patch/wire';
+
+const NOT_REMINDER: ReminderCommand = { isReminder: false, reminder: null, every: null };
 
 /**
  * Parse a composer message. Returns `{ isReminder: true, reminder }` when the
@@ -24,6 +30,10 @@ const NOT_REMINDER: ReminderCommand = { isReminder: false, reminder: null };
 export function parseReminderCommand(message: string): ReminderCommand {
   const m = /^\/remind(?:\s+([\s\S]*))?$/i.exec(message.trim());
   if (!m) return NOT_REMINDER;
-  const rest = (m[1] ?? '').trim();
-  return { isReminder: true, reminder: rest.length > 0 ? rest : null };
+  try {
+    const { reminder, every } = parseReminderArg(m[1] ?? null);
+    return { isReminder: true, reminder, every };
+  } catch (e) {
+    return { isReminder: true, reminder: null, every: null, error: (e as Error).message };
+  }
 }

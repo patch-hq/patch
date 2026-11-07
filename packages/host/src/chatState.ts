@@ -13,6 +13,7 @@ import type {
   ChatErrorCode,
   ChatStatus,
   EffortLevel,
+  ReminderEvery,
   StatusKind,
   TodoItem,
   TurnOrigin,
@@ -135,6 +136,12 @@ export interface ChatState {
    * no reminder is set. Mirrored to meta.json so it survives a restart.
    */
   reminder: string | null;
+  /** Re-injection cadence for `reminder` (spec/04 § Reminders); `null` = banner only. */
+  reminderEvery: ReminderEvery | null;
+  /** Agent turns since the reminder was last injected (in-memory, reset on set/restart). */
+  reminderTurnsSince: number;
+  /** When the reminder was last injected or set (ms; in-memory, reset on set/restart). */
+  reminderLastAt: number;
   /**
    * Auto-generated one-line "current status" summary (patch/todo.md § Features
    * to add — "Current status"), regenerated after each turn settles and CLEARED
@@ -407,6 +414,9 @@ export function chatStateFromMeta(meta: ChatMeta): ChatState {
     goalRefusalStreak: 0,
     goalEvalAwaitingWatches: false,
     reminder: meta.reminder ?? null,
+    reminderEvery: meta.reminderEvery ?? null,
+    reminderTurnsSince: 0,
+    reminderLastAt: Date.now(),
     // Status summary is in-memory only (regenerated per turn), so a rehydrated
     // chat starts with none until its next turn settles.
     // A DECLARED status is persisted, so a rehydrated chat keeps it — that is

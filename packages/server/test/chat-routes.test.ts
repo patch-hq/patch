@@ -1938,6 +1938,33 @@ describe('chat REST routes', () => {
     }
   });
 
+  it('POST /api/chats/:id/reminder forwards the cadence and rejects a bad one', async () => {
+    const { registry, jwt } = await bootstrap();
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
+    try {
+      hostLink.emit({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '/x' });
+      const ok = await built.app.inject({
+        method: 'POST',
+        url: '/api/chats/c1/reminder',
+        headers: { authorization: `Bearer ${jwt}` },
+        payload: { reminder: 'principles', every: { unit: 'turns', n: 10 } },
+      });
+      expect(ok.statusCode).toBe(200);
+      const sent = hostLink.sent.find((s) => s.event.type === 'chat.reminder_request');
+      expect(sent?.event).toMatchObject({ every: { unit: 'turns', n: 10 } });
+      const bad = await built.app.inject({
+        method: 'POST',
+        url: '/api/chats/c1/reminder',
+        headers: { authorization: `Bearer ${jwt}` },
+        payload: { reminder: 'x', every: { unit: 'turns', n: 0 } },
+      });
+      expect(bad.statusCode).toBe(400);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('POST /api/chats/:id/reminder accepts a null reminder (clear)', async () => {
     const { registry, jwt } = await bootstrap();
     const hostLink = new InProcessHostLink();
