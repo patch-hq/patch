@@ -12750,7 +12750,14 @@ export class Daemon {
     // e.g. `permissionModeMismatch` below not catching a resumed session).
     if (tool === 'Bash') {
       this.opts.logger.warn(
-        { chatId, tool, mode: modeAtRequest },
+        {
+          chatId,
+          tool,
+          mode: modeAtRequest,
+          decisionReason,
+          description,
+          command: args['command'],
+        },
         'Bash escalated to a human permission ask',
       );
     }
@@ -12772,6 +12779,10 @@ export class Daemon {
       );
       return Promise.resolve({ approve: false, denyMessage: QUESTION_SUPERSEDED_MESSAGE });
     }
+    // The SDK's own reason for escalating (a safety check, not the mode) is the
+    // only explanation for a card nobody expected, e.g. under `bypassPermissions`;
+    // show it rather than a bare "Permission needed: Bash".
+    if (description === undefined && decisionReason) description = decisionReason;
     const requestId = randomUUID();
     // Register the gate BEFORE announcing the request, not after.
     //
