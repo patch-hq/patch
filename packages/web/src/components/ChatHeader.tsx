@@ -45,6 +45,7 @@ import {
   Globe,
   SquareTerminal,
   X,
+  Volume2,
 } from 'lucide-react';
 import { StatusBadge } from './StatusBadge.js';
 import { useChatBadge } from './ChatStatusBadge.js';
@@ -63,6 +64,7 @@ import { MoveChatModal } from './MoveChatModal.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import { shortcutTitle, useActionGlyphs } from '../lib/shortcuts.js';
 import { failed } from '../lib/errorCopy.js';
+import { useReadAloud } from '../lib/readAloud.js';
 import { isPlainEnter } from '../lib/submitChord.js';
 
 // Manager / Speakers occupy fixed slots and cannot be pinned or
@@ -404,6 +406,9 @@ export function ChatHeader({
       .filter((p): p is string => p !== null)
       .join(' · ') || undefined;
 
+  const readAll = useReadAloud((st) => st.readAll);
+  const setReadAll = useReadAloud((st) => st.setReadAll);
+
   return (
     <>
       <header className={`chat-head${group ? ' chat-head-group' : ''}`} data-testid="chat-head">
@@ -506,6 +511,17 @@ export function ChatHeader({
                 <Edit3 size={ICON} aria-hidden />
               </button>
             )}
+            <button
+              type="button"
+              className={`head-action${readAll ? ' is-on' : ''}`}
+              data-testid="action-read-all"
+              aria-label="Read everything aloud"
+              aria-pressed={readAll}
+              title={readAll ? 'Reading everything aloud — click to stop' : 'Read everything aloud'}
+              onClick={() => setReadAll(!readAll)}
+            >
+              <Volume2 size={ICON} aria-hidden />
+            </button>
             {/* spec/14 § Side threads panel — "A Threads icon in the chat
               header opens the panel with all this chat's side threads."
               Absent until the chat actually has one. */}

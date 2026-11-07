@@ -3475,6 +3475,10 @@ button.nav-row {
   background: var(--bg-soft);
   color: var(--ink);
 }
+.head-action.is-on {
+  color: var(--ink);
+  background: var(--bg-soft);
+}
 .head-action.is-pinned {
   color: var(--accent-strong);
 }
@@ -3777,6 +3781,9 @@ button.nav-row {
    per-message meta strip (`.msg-meta`), in line with the time, so they reveal
    with it (hover/focus, always visible under `hover: none`) and need no gutter
    or hover bridge of their own. */
+.msg-read[data-state='playing'] {
+  color: var(--ink);
+}
 .msg-tools {
   display: inline-flex;
   align-items: center;
@@ -3784,6 +3791,7 @@ button.nav-row {
 }
 .msg-side-thread,
 .msg-copy,
+.msg-read,
 .msg-retry {
   display: inline-flex;
   align-items: center;
@@ -3799,12 +3807,14 @@ button.nav-row {
 }
 .msg-side-thread svg,
 .msg-copy svg,
+.msg-read svg,
 .msg-retry svg {
   width: 12px;
   height: 12px;
 }
 .msg-side-thread:hover,
 .msg-copy:hover,
+.msg-read:hover,
 .msg-retry:hover {
   background: var(--bg-soft);
   color: var(--ink);

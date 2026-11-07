@@ -163,11 +163,14 @@ import {
   Clock,
   CloudOff,
   Check,
+  Volume2,
+  Square,
 } from 'lucide-react';
 import { CloseIcon } from '../components/icons.js';
 import { ImageLightbox, imageDownloadName } from '../components/ImageLightbox.js';
 import { thumbUrl } from '../lib/thumbUrl.js';
 import { failed } from '../lib/errorCopy.js';
+import { useReadAloud } from '../lib/readAloud.js';
 import { isStoppable } from '../stores/types.js';
 
 // How many unresolved, sweepable permission requests this chat has right now.
@@ -460,6 +463,39 @@ export function ChatRoute({
   const resolvePermission = useChatStore((s) => s.resolvePermission);
   const timeline = useChatStore((s) => s.timelines[chatId] ?? EMPTY_TIMELINE);
   const pushError = useUiStore((s) => s.pushError);
+  // Read everything: speak each assistant reply that settles while this chat is
+  // open. A reply counts as new only if it is past the seq we saw on arrival AND
+  // the host stamped it within the last minute, so a replay never reads history.
+  const readAll = useReadAloud((s) => s.readAll);
+  const readBaseline = useRef<number | null>(null);
+  useEffect(() => {
+    readBaseline.current = null;
+  }, [chatId]);
+  useEffect(() => {
+    let latest = -1;
+    let fresh: ChatEventEntry | undefined;
+    for (const e of timeline) {
+      if (e.kind !== 'message' || e.role !== 'assistant' || e.streaming) continue;
+      if (e.seq > latest) latest = e.seq;
+      if (
+        readBaseline.current !== null &&
+        e.seq > readBaseline.current &&
+        e.messageAt !== undefined &&
+        Date.now() - e.messageAt < 60_000
+      ) {
+        fresh = e;
+      }
+    }
+    const prev = readBaseline.current;
+    if (timeline.length > 0) readBaseline.current = Math.max(prev ?? -1, latest);
+    if (!readAll || !fresh) return;
+    try {
+      useReadAloud.getState().speak(`${chatId}:${fresh.seq}`, fresh.content ?? '');
+    } catch (err) {
+      console.error('Read aloud failed', err);
+      pushError(failed('read aloud'), undefined, err instanceof Error ? err.message : String(err));
+    }
+  }, [timeline, readAll, chatId, pushError]);
   // Delivery-pending user turns render "sending…" when the host is online and
   // "queued — will send when the agent reconnects" when it is offline (spec/12).
   // Per HOST, not "any host": a chat on a down host must say so while another is up.
@@ -2949,6 +2985,8 @@ function MessageEntry({
   // retry it has no persisted-seq requirement, so a streaming reply can be copied.
   const canCopy =
     (entry.role === 'user' || entry.role === 'assistant') && !entry.transcribing && text.length > 0;
+  const canRead = entry.role === 'assistant' && !entry.streaming && text.length > 0;
+  const readKey = `${chatId}:${entry.seq}`;
   return (
     <div
       className={`msg msg-${entry.role}${entry.streaming ? ' streaming' : ''}${entry.queued ? ' queued' : ''}${entry.deliveryPending || entry.upload ? ' sending' : ''}${entry.deliveryFailed || entry.turnFailed ? ' delivery-failed' : ''}${entry.transcribing ? ' transcribing' : ''}${entry.voice ? ' voice' : ''}${isLongUserMessage ? ' collapsible' : ''}${collapsed ? ' collapsed' : ''}${editable && draft === null ? ' has-edit' : ''}${editAnchor ? ' msg-edit-anchor' : ''}`}
@@ -3326,13 +3364,14 @@ function MessageEntry({
           chat's current ones, which says nothing about a message Tom typed. */}
       {canSideThread ||
       canCopy ||
+      canRead ||
       canRetry ||
       entry.messageAt !== undefined ||
       attemptCount > 1 ||
       entry.midTurn === true ||
       entry.sentNow === true ? (
         <div className="msg-meta" data-testid="msg-meta">
-          {canSideThread || canCopy || canRetry ? (
+          {canSideThread || canCopy || canRead || canRetry ? (
             <span className="msg-tools" data-testid="msg-tools">
               {canSideThread ? (
                 <button
@@ -3347,6 +3386,7 @@ function MessageEntry({
                 </button>
               ) : null}
               {canCopy ? <MessageCopyButton text={text} /> : null}
+              {canRead ? <MessageReadButton readKey={readKey} text={text} /> : null}
               {canRetry ? (
                 <button
                   type="button"
@@ -3451,6 +3491,38 @@ function MessageEntry({
         <HookAdviseNote advise={entry.hookAdvise} />
       ) : null}
     </div>
+  );
+}
+
+/** Hover-strip button: read this message aloud, or stop it while it plays. */
+function MessageReadButton({ readKey, text }: { readKey: string; text: string }): JSX.Element {
+  const playing = useReadAloud((st) => st.speaking === readKey);
+  const pushError = useUiStore((st) => st.pushError);
+  const label = playing ? 'Stop reading' : 'Read aloud';
+  return (
+    <button
+      type="button"
+      className="msg-read"
+      data-testid="msg-read-trigger"
+      data-state={playing ? 'playing' : 'idle'}
+      aria-label={label}
+      title={label}
+      onClick={() => {
+        try {
+          if (playing) useReadAloud.getState().stop();
+          else useReadAloud.getState().speak(readKey, text);
+        } catch (err) {
+          console.error('Read aloud failed', err);
+          pushError(
+            failed('read aloud'),
+            undefined,
+            err instanceof Error ? err.message : String(err),
+          );
+        }
+      }}
+    >
+      {playing ? <Square size={14} aria-hidden="true" /> : <Volume2 size={14} aria-hidden="true" />}
+    </button>
   );
 }
 
