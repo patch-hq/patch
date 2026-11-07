@@ -14,10 +14,18 @@ beforeEach(() => {
     diagnosticsBlockingClosed: false,
     attentionOnly: false,
     stateFilter: 'all',
+    grouping: 'project',
   });
 });
 
 describe('uiStore', () => {
+  it('setGrouping persists the standing choice and updates state', async () => {
+    useUiStore.getState().setGrouping('status');
+    expect(useUiStore.getState().grouping).toBe('status');
+    const { store } = await import('../src/lib/credential');
+    expect(store().getString('patch.sidebar.grouping')).toBe('status');
+  });
+
   it('pushError appends a new error with an id + timestamp', () => {
     useUiStore.getState().pushError('boom');
     const errors = useUiStore.getState().errors;
