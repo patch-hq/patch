@@ -167,6 +167,12 @@ Latency:
 
 A call or hands-free session is aimed at the chat it was started on and stays there, whatever the surface goes on to look at. Every surface still emits `chat.focus_change {chatId}` on every navigation (`03-wire-protocol.md`; read by `09-notifications.md` § Chat completion), but the host does not use it to re-target a voice session: navigating to chat B mid-call leaves the call on chat A, and starting a call from another chat while one is live does nothing. To talk to another chat, end the call and start one there. The call bar names the chat the call is on.
 
+## A call can move between devices
+
+A `call` session is on one device at a time. When an app surface (phone, web, desktop) opens or closes one, the host announces it to every surface as `voice.call {sessionId, surfaceId, surfaceKind, chatId, active, startedAt}` (`03-wire-protocol.md` § Audio session). A surface that is not on a call itself and sees one live elsewhere shows a call-in-progress strip naming the device and the chat — web and desktop as a strip in flow under the voice bar's slot at the top of the shell, mobile as a pill on the tab layout and above a chat's composer — with a **Switch here** button. A surface never shows its own call, and the strip goes the moment the host reports the call ended. Hands-free sessions are not announced: hands-free is a mode left on, not a call.
+
+Switch here opens a normal call on that chat with `takeOver: true` on `audio.session_start`. Once the new session is established, the host closes every other `call` session on the same chat with the close reason `transferred` and announces them ended before announcing the new one. A session that is refused (missing key, unreachable host) never takes anything over. The surface that was closed with `transferred` ends its call quietly — no "call dropped" error — and its strip then shows where the call went. Sessions on other chats are untouched, and a session opened without `takeOver` never closes another.
+
 ## Turn semantics
 
 | Event                 | Direction            | Handling                                                                                            |

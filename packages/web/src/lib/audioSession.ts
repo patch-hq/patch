@@ -66,6 +66,8 @@ export interface OpenAudioSessionOpts {
   mode?: AudioSessionMode;
   /** The account's address word, which an address-gated session uses. */
   addressWord?: string;
+  /** Move the chat's call from another surface to this one (spec/07 § A call can move between devices). */
+  takeOver?: boolean;
   /**
    * Whether to capture the microphone. False opens a session that only plays —
    * the `auto-notify` interrupt of spec/07 § Speaking with no session open,
@@ -294,6 +296,7 @@ export async function openAudioSession(opts: OpenAudioSessionOpts): Promise<Audi
         surfaceHasAec: true,
         ...(opts.mode !== undefined ? { mode: opts.mode } : {}),
         ...(opts.addressWord !== undefined ? { addressWord: opts.addressWord } : {}),
+        ...(opts.takeOver === true ? { takeOver: true } : {}),
       };
       ws.send(JSON.stringify(start));
       settled = true;
