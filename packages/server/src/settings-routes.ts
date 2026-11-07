@@ -202,11 +202,4 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: SettingsRoute
     '/api/providers/keys/:keyId',
     handle(undefined, (req) => shared.revokeProviderKey(keyOf(req))),
   );
-
-  app.post(
-    '/api/providers/keys/:keyId/adopt',
-    handle(AdoptBody, async (req, body) => {
-      await shared.adoptInto(body.hostId, 'provider-key', keyOf(req));
-    }),
-  );
 }
