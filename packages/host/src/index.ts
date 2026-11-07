@@ -246,6 +246,11 @@ import { startAudioServer, type AudioServerHandle } from './audio/server.js';
 import { createVoiceReplyBridge } from './audio/replyBridge.js';
 import { createSmartTurnDetector, pcmFromWav, type TurnDetector } from './audio/smartTurn.js';
 import { createChatVoice } from './audio/chatVoice.js';
+import {
+  fetchConversationCharge,
+  fetchPlanCredits,
+  type PlanCredits,
+} from './audio/elevenlabs-usage.js';
 import { createVoiceLedger } from './audio/voiceLedger.js';
 import {
   createWhisper,
@@ -3559,6 +3564,25 @@ async function startHost(
     ledger: voiceLedger,
     logger,
     onCosted: () => publishHost(),
+    lookupRealCharge: async (conversationId) => {
+      const apiKey = providerKeys.get('elevenlabs');
+      if (!apiKey) throw new Error('no ElevenLabs key on this host');
+      const charge = await fetchConversationCharge({ apiKey }, conversationId);
+      let plan: PlanCredits | undefined;
+      let leftError: string | undefined;
+      try {
+        plan = await fetchPlanCredits({ apiKey });
+      } catch (err) {
+        leftError = (err as Error).message;
+        logger.error({ err: leftError }, 'voice: could not read ElevenLabs credits left');
+      }
+      return {
+        credits: charge.credits,
+        usd: plan?.usageBilled ? charge.usd : null,
+        creditsLeft: plan ? plan.left : null,
+        ...(leftError ? { leftError } : {}),
+      };
+    },
   });
   let artifactAutoRepublisher: ArtifactAutoRepublisher | undefined;
   function emit(event: import('@patch/wire').WireEvent): void {
