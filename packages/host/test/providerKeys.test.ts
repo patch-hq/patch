@@ -186,10 +186,10 @@ describe('ProviderKeyStore — from the shared settings (spec/01 § Settings)', 
     expect(s.get('groq')).toBe('env-groq-fake-value-000000-ENV2');
   });
 
-  it('hands up the Settings-set keys for the import, and the environment’s for adopting', () => {
+  it('hands up every key it holds for the import, Settings-set ahead of the environment’s', () => {
     const s = store({ gemini: ENV_GEMINI });
     s.set('groq', UI_GROQ);
-    expect(s.settingsKeys()).toEqual({ groq: UI_GROQ });
+    expect(s.settingsKeys()).toEqual({ gemini: ENV_GEMINI, groq: UI_GROQ });
     expect(s.envValue('gemini')).toBe(ENV_GEMINI);
     expect(s.envValue('openai')).toBeUndefined();
   });

@@ -210,9 +210,12 @@ export class ProviderKeyStore {
     if (!same) this.persist({ ...next });
   }
 
-  /** The keys set from Settings, for this host's one import into the server. */
+  /**
+   * Every key this host holds, Settings-set or from its environment (the
+   * Settings one wins), for its import into the account's store.
+   */
   settingsKeys(): Partial<Record<ProviderKeyId, string>> {
-    return { ...this.stored };
+    return { ...this.env, ...this.stored };
   }
 
   /** The key in the host's own environment, for adopting it as the shared one. */

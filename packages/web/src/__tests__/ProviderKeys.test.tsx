@@ -2,8 +2,7 @@
 //
 // The keys are shared settings: held on the server, sent to every host. A row
 // states whether a key is set, with its last four characters — never the value
-// — and a key only some hosts' environments supply names those hosts and can
-// be adopted as the shared one. Every change is a server write and settles on
+// — a host's own environment never shows. Every change is a server write and settles on
 // its answer.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -93,29 +92,16 @@ describe('Settings → Providers → Provider keys', () => {
     expect(screen.getByTestId('provider-key-gemini-edit').className).not.toContain('primary');
   });
 
-  it('names the hosts whose environment supplies a key the account has not set, and adopts it', async () => {
+  it('never names a host or an environment, and offers no adopt', () => {
     loadShared({ secrets: KEYS });
     reportHost('host-a', {
       hostName: 'hetzner',
       providerKeys: [{ id: 'groq', source: 'env', last4: '1234', envSet: true }],
     });
     usePresenceStore.getState().setHostOnline('host-a', true);
-    const adopted = sharedState({
-      version: 2,
-      secrets: {
-        providerKeys: [...KEYS.providerKeys.slice(0, 2), { id: 'groq', set: true, last4: '1234' }],
-      },
-    });
-    const adopt = vi.spyOn(api, 'adoptProviderKey').mockResolvedValue(adopted);
     renderSection();
-    expect(screen.getByTestId('provider-key-groq-status')).toHaveTextContent(
-      'From the environment on hetzner',
-    );
-    fireEvent.click(screen.getByTestId('provider-key-groq-adopt'));
-    await waitFor(() => expect(adopt).toHaveBeenCalledWith('groq', 'host-a'));
-    await waitFor(() =>
-      expect(screen.getByTestId('provider-key-groq-status')).toHaveTextContent('Set · ends 1234'),
-    );
+    expect(screen.getByTestId('provider-key-groq-status')).toHaveTextContent('Not set');
+    expect(screen.queryByTestId('provider-key-groq-adopt')).toBeNull();
   });
 
   it('Add sends the value in a password field and settles on the server’s answer', async () => {
