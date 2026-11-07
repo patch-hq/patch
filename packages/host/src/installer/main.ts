@@ -45,6 +45,7 @@ import {
   readdirSync,
   statSync,
 } from 'node:fs';
+import { installerLog, openInstallerLog } from './runLog.js';
 import { createInterface } from 'node:readline/promises';
 import { hostname, userInfo } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -853,9 +854,22 @@ export async function installerMain(): Promise<number> {
   const tty = process.stdin.isTTY === true ? undefined : controllingTerminal();
   const input = process.stdin.isTTY === true ? process.stdin : tty;
   const rl = input ? createInterface({ input, output: process.stdout }) : undefined;
+  // The installer keeps its own record so a run that is killed partway, or
+  // whose output goes nowhere, still leaves a trace (runLog.ts).
+  const home = process.env['HOME'];
+  const log = home ? openInstallerLog(home, process.argv.slice(2)) : undefined;
+  const teeOut = (tag: string, line: string): void => {
+    if (log && !log.stdioIsLog) installerLog(`${tag}${line}`);
+  };
   const io: InstallerIo = {
-    out: (line) => process.stdout.write(`${line}\n`),
-    err: (line) => process.stderr.write(`${line}\n`),
+    out: (line) => {
+      process.stdout.write(`${line}\n`);
+      teeOut('', line);
+    },
+    err: (line) => {
+      process.stderr.write(`${line}\n`);
+      teeOut('ERROR: ', line);
+    },
     ...(rl ? { ask: (q: string): Promise<string> => rl.question(q) } : {}),
   };
   try {
@@ -868,7 +882,11 @@ export async function installerMain(): Promise<number> {
       arch: process.arch,
       uid: process.getuid?.() ?? 0,
     });
+    installerLog(`exit code ${result.code}`);
     return result.code;
+  } catch (err) {
+    installerLog(`failed: ${(err as Error).stack ?? String(err)}`);
+    throw err;
   } finally {
     rl?.close();
     // An open /dev/tty would hold the process open after the install is done.
