@@ -10898,7 +10898,7 @@ main.empty-state p {
 /* ---------- Goal row (status list; patch/todo.md — /goal) ---------- */
 
 .goal-icon-working {
-  color: var(--accent);
+  color: var(--goal-working);
 }
 .goal-icon-met {
   color: var(--goal-met);
