@@ -228,7 +228,23 @@ export class AccountUsageTracker {
   ): void {
     if (!window) return;
     const prior = this.entries.get(accountId);
-    const windows = { ...(prior?.reading.windows ?? {}), [scope]: window };
+    // Field by field: a turn's window usually carries a reset time but no
+    // utilisation, and replacing the whole window would drop the probe's
+    // percentage and leave the bar blank. The prior figure is not carried
+    // across once its own window has ended, since it then describes the last one.
+    const before = prior?.reading.windows[scope];
+    const carried =
+      before !== undefined && (before.resetsAt === undefined || before.resetsAt > this.now)
+        ? before
+        : undefined;
+    const merged: NonNullable<typeof window> = {
+      ...carried,
+      status: window.status,
+      ...(window.utilization !== undefined ? { utilization: window.utilization } : {}),
+      ...(window.resetsAt !== undefined ? { resetsAt: window.resetsAt } : {}),
+      ...(window.disabledReason !== undefined ? { disabledReason: window.disabledReason } : {}),
+    };
+    const windows = { ...(prior?.reading.windows ?? {}), [scope]: merged };
     this.entries.set(accountId, {
       source: prior?.source === 'probe' ? 'probe' : 'turn',
       reading: {

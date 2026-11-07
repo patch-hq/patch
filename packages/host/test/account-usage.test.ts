@@ -134,6 +134,28 @@ describe('AccountUsageTracker', () => {
     expect(windows.overage).toBeDefined();
   });
 
+  it('a turn window with a reset but no utilisation keeps the probe percentage', async () => {
+    const { tracker } = make({ probe: async () => ok(), now: () => 5 });
+    await tracker.refresh('a', true);
+    tracker.observeFromTurn('a', 'session', { status: 'allowed', resetsAt: 9_000 });
+    const session = tracker.get('a')!.reading.windows.session;
+    expect(session?.utilization).toBe(0.5);
+    expect(session?.resetsAt).toBe(9_000);
+  });
+
+  it('does not carry a percentage across once its window has ended', async () => {
+    const probe = async (): Promise<ClaudeUsageResult> => {
+      const r = ok();
+      if (r.kind === 'ok')
+        r.reading.windows.session = { status: 'allowed', utilization: 0.5, resetsAt: 4 };
+      return r;
+    };
+    const { tracker } = make({ probe, now: () => 5 });
+    await tracker.refresh('a', true);
+    tracker.observeFromTurn('a', 'session', { status: 'allowed', resetsAt: 9_000 });
+    expect(tracker.get('a')!.reading.windows.session?.utilization).toBeUndefined();
+  });
+
   it('stamps every reading with when it was taken, so a stale figure cannot pass for live', async () => {
     const { tracker } = make({ probe: async () => ok(), now: () => 1_234 });
     tracker.observeFromTurn('a', 'session', { status: 'allowed', utilization: 0.1 });
