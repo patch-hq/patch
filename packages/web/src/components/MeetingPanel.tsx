@@ -156,7 +156,7 @@ const FIXED_PROMPTS: Array<{ id: string; title: string; when: string; text: stri
 ];
 
 /** One editable meeting prompt, folded to its name until opened; applies from the next pass. */
-function PromptBlock({ k }: { k: PromptKey }) {
+export function PromptBlock({ k }: { k: PromptKey }) {
   const { title, when, field, fallback } = PROMPT_FIELDS[k];
   const saved = usePreferencesStore((s) => String(s.preferences[field]));
   const [open, setOpen] = useState(false);
@@ -204,6 +204,7 @@ function PromptBlock({ k }: { k: PromptKey }) {
               type="button"
               className="mm-do"
               data-testid="meeting-prompt-save"
+              disabled={draft.trim() === '' || draft === saved}
               onClick={() => save(draft)}
             >
               Save

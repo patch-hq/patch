@@ -11,6 +11,7 @@ import {
   ActionsList,
   actionSource,
   MeetingSwitches,
+  PromptBlock,
   feedTopics,
   justSaid,
   topicSpanLabel,
@@ -202,5 +203,20 @@ describe('action source', () => {
     expect(screen.getByTestId('meeting-action-excerpt').textContent).toContain('top up the credit');
     fireEvent.click(screen.getByTestId('meeting-action-toggle'));
     expect(screen.queryByTestId('meeting-action-source')).toBeNull();
+  });
+});
+
+describe('PromptBlock', () => {
+  afterEach(cleanup);
+  it('disables Save for a blank or unchanged draft', () => {
+    render(<PromptBlock k="now" />);
+    fireEvent.click(screen.getByTestId('meeting-prompt-open-now'));
+    const save = screen.getByTestId('meeting-prompt-save') as HTMLButtonElement;
+    const box = screen.getByTestId('meeting-prompt-text');
+    expect(save.disabled).toBe(true);
+    fireEvent.change(box, { target: { value: '   ' } });
+    expect(save.disabled).toBe(true);
+    fireEvent.change(box, { target: { value: 'Only a headline.' } });
+    expect(save.disabled).toBe(false);
   });
 });

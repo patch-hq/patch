@@ -129,6 +129,21 @@ describe('Settings → Prompts', () => {
     await waitFor(() => expect(server.writes).toEqual([{ meetingNotesPrompt: 'Terse.' }]));
   });
 
+  it('disables Save for a blank or unchanged prompt draft', async () => {
+    const server = serve();
+    renderSettings('/settings/prompts');
+    fireEvent.click(await screen.findByTestId('prompt-meeting-notes-mode-custom'));
+    const save = screen.getByTestId('prompt-meeting-notes-save') as HTMLButtonElement;
+    const box = screen.getByTestId('prompt-meeting-notes-text');
+    expect(save.disabled).toBe(true);
+    fireEvent.change(box, { target: { value: '  ' } });
+    expect(save.disabled).toBe(true);
+    fireEvent.click(save);
+    fireEvent.change(box, { target: { value: 'Terse.' } });
+    expect(save.disabled).toBe(false);
+    expect(server.writes).toEqual([]);
+  });
+
   it('shows the meeting models and interval, with no transcription model field, and writes the interval', async () => {
     const server = serve();
     renderSettings('/settings/prompts');
