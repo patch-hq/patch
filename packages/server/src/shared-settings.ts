@@ -50,7 +50,6 @@ import {
   type SharedSecretsSummary,
   type WireEvent,
   accountsKeyForBackend,
-  PROVIDER_KEYS,
   type ProviderBackendId,
 } from '@patch/wire';
 import { generateWebBotAuthKey, parseWebBotAuthKey } from '@patch/wire/web-bot-auth';
