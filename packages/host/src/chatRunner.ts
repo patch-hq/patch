@@ -6174,6 +6174,83 @@ export class Daemon {
     return this.chatLog.readBlobBytes(sha);
   }
 
+  /** Chats whose harness transcript has been checked against their log this process. */
+  private readonly legacyImportChecked = new Set<string>();
+
+  /**
+   * Bring transcript the chat's own log never held into the log (spec/04 §
+   * History). Replay reads only the log, so turns emitted before the log
+   * existed (`log.start` `legacyUpTo`), or whose seq was only reserved, would
+   * otherwise never show: the app drew the last few turns while the agent
+   * still had the whole conversation. Each transcript event whose canonical
+   * seq has no event record is appended under that seq, then an `import`
+   * record says it is done. Single-branch chats only: a forked chat's
+   * transcript copies its parent's prefix, so it cannot be attributed to one
+   * track here. A failure is logged and retried next replay; it never blocks
+   * the replay itself.
+   */
+  private importLegacyTranscript(chatId: string): void {
+    if (this.legacyImportChecked.has(chatId)) return;
+    const state = this.chatState.get(chatId);
+    const meta = this.opts.metaStore.read(chatId);
+    const sessionId = state?.claudeSessionId;
+    if (!state || !meta || !sessionId) return;
+    if ((meta.branches?.length ?? 1) > 1) {
+      this.legacyImportChecked.add(chatId);
+      return;
+    }
+    try {
+      const records = this.chatLog.read(chatId);
+      if (records.some((r) => r.rec.k === 'import' && r.rec.sessionId === sessionId)) {
+        this.legacyImportChecked.add(chatId);
+        return;
+      }
+      if (!this.historyReader.hasSession({ folder: state.folder, sessionId })) {
+        this.legacyImportChecked.add(chatId);
+        return;
+      }
+      const branchId = meta.branches?.[0]?.branchId ?? this.branchIdFor(chatId);
+      const logged = new Set<number>();
+      for (const r of records) if (r.rec.k === 'event') logged.add(r.seq);
+      const transcript = this.historyReader.read({
+        chatId,
+        folder: state.folder,
+        sessionId,
+        fromSeq: -1,
+        seqIndex: this.canonicalSeqIndex(chatId),
+      });
+      let imported = 0;
+      for (const ev of transcript) {
+        const seq = (ev as { seq: number }).seq;
+        if (logged.has(seq) || !LOGGED_EVENT_TYPES.has(ev.type as never)) continue;
+        this.chatLog.append(chatId, { k: 'event', event: ev as never }, { branchId, seq });
+        imported += 1;
+      }
+      this.chatLog.append(
+        chatId,
+        {
+          k: 'import',
+          harness: sessionId.startsWith('codex-') ? 'codex' : 'claude',
+          sessionId,
+          records: imported,
+        },
+        { branchId, sync: true },
+      );
+      this.legacyImportChecked.add(chatId);
+      if (imported > 0) {
+        this.opts.logger.info(
+          { chatId, imported },
+          'history: imported transcript missing from the chat log',
+        );
+      }
+    } catch (err) {
+      this.opts.logger.error(
+        { chatId, err: (err as Error).message },
+        'history: importing the harness transcript into the chat log failed',
+      );
+    }
+  }
+
   /**
    * Replay a chat straight from its own log (spec/04 § History) — the active
    * track's records, blobs already rehydrated, no ring/transcript merge: the
@@ -6199,6 +6276,7 @@ export class Daemon {
     });
     const activeBranchId = meta.activeBranchId ?? this.branchIdFor(chatId);
     const targetBranchId = branchId ?? activeBranchId;
+    this.importLegacyTranscript(chatId);
     const records = readTrackRecords(this.chatLog, chatId, meta, targetBranchId, fromSeq);
     // A question that ran out unanswered, or that the user ANSWERED, is replayed
     // as a request plus its resolution, so a reload draws the card the live
@@ -6329,6 +6407,7 @@ export class Daemon {
     const meta = this.opts.metaStore.read(req.chatId);
     if (!meta) throw new ChatNotFoundError(req.chatId);
     const targetBranchId = req.branchId ?? meta.activeBranchId ?? this.branchIdFor(req.chatId);
+    this.importLegacyTranscript(req.chatId);
     const all = readTrack(
       this.chatLog,
       req.chatId,
