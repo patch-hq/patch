@@ -2226,6 +2226,26 @@ const ChatRowView = memo(function ChatRowView({
     });
   }
 
+  // Set / edit / clear the chat goal — the same REST mutation as `/goal` and the
+  // chat header's "Set goal". The input is seeded with the current goal; empty
+  // clears it. Optimistic, reverting + toasting on failure (NO FALLBACK).
+  async function applySetGoal(): Promise<void> {
+    const value = await useUiStore.getState().prompt({
+      title: 'Set goal',
+      initialValue: row.goal ?? '',
+      confirmLabel: 'Set goal',
+    });
+    if (value === null) return;
+    const next = value.trim() === '' ? null : value.trim();
+    const previous = row.goal ?? null;
+    if (next === previous) return;
+    useChatStore.getState().setGoal(row.chatId, next);
+    void api.setGoal(row.chatId, next).catch((err) => {
+      useChatStore.getState().setGoal(row.chatId, previous);
+      useUiStore.getState().pushError(failed('setting goal'), undefined, (err as Error).message);
+    });
+  }
+
   // Recoverable soft-delete (spec/04 § Lifecycle) behind the same confirm the
   // chat header asks for — the chat moves to Deleted and can be restored.
   async function applyDelete(): Promise<void> {
@@ -2304,6 +2324,12 @@ const ChatRowView = memo(function ChatRowView({
         label: row.pinned ? 'Unpin' : 'Pin',
         icon: <Pin size={14} aria-hidden />,
         run: applyPin,
+      },
+      {
+        id: 'set-goal',
+        label: row.goal ? 'Edit goal' : 'Set goal',
+        icon: <Target size={14} aria-hidden />,
+        run: () => void applySetGoal(),
       },
       ...(snoozed
         ? []

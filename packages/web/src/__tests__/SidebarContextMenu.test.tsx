@@ -112,6 +112,7 @@ describe('sidebar row context menu', () => {
       'Open in new window',
       'Rename',
       'Pin',
+      'Set goal',
       'Snooze',
       'Hide',
       'Archive',
@@ -143,6 +144,20 @@ describe('sidebar row context menu', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(spy).toHaveBeenCalledWith('c1', 'new name'));
     expect(useChatStore.getState().chats['c1']?.name ?? null).toBe('new name');
+  });
+
+  it('Set goal prompts seeded with the current goal and sets it optimistically', async () => {
+    useChatStore.getState().hydrate([rowFixture({ goal: 'old goal' })]);
+    const spy = vi.spyOn(api, 'setGoal').mockResolvedValue(undefined as never);
+    renderSidebar();
+    rightClick(screen.getByTestId('chat-row-c1'));
+    fireEvent.click(screen.getByText('Edit goal'));
+    const input = (await screen.findByTestId('prompt-input')) as HTMLInputElement;
+    expect(input.value).toBe('old goal');
+    fireEvent.change(input, { target: { value: ' new goal ' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(spy).toHaveBeenCalledWith('c1', 'new goal'));
+    expect(useChatStore.getState().chats['c1']?.goal).toBe('new goal');
   });
 
   it('archives through the SAME path as the hover tool, and closes', async () => {

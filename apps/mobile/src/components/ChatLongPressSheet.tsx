@@ -1,5 +1,6 @@
 // Bottom-sheet row-actions menu for a chat row. Spec/15 § Row tools:
 //   - Show (a hidden chat only)
+//   - Set / edit goal
 //   - Pin / unpin
 //   - Snooze / Unsnooze
 //   - Archive / Unarchive
@@ -29,6 +30,7 @@ import {
   PackageOpen,
   Pencil,
   Pin,
+  Target,
   Trash2,
 } from 'lucide-react-native';
 import { create } from 'zustand';
@@ -49,7 +51,7 @@ interface SheetState {
    * expanding beneath them — a phone sheet that grew to eleven rows would push
    * its own bottom off the screen.
    */
-  page: 'actions' | 'rename';
+  page: 'actions' | 'rename' | 'goal';
   show(row: ChatRowT, page?: SheetState['page']): void;
   close(): void;
   setPage(page: SheetState['page']): void;
@@ -92,6 +94,43 @@ export function renameChatRow(chatId: string, raw: string): void {
     useChatStore.getState().setName(chatId, previous);
     useUiStore.getState().pushError(`rename failed: ${e.message}`);
   });
+}
+
+/** Optimistic goal set/clear (the same mechanism as `/goal`), with an honest revert. Empty clears. */
+export function setChatGoal(chatId: string, raw: string): void {
+  const previous = useChatStore.getState().chats[chatId]?.goal ?? null;
+  const next = raw.trim() === '' ? null : raw.trim();
+  if (next === previous) return;
+  useChatStore.getState().setGoal(chatId, next);
+  void api.setGoal(chatId, next).catch((e: Error) => {
+    useChatStore.getState().setGoal(chatId, previous);
+    useUiStore.getState().pushError(`setting goal failed: ${e.message}`);
+  });
+}
+
+function GoalPage({ row, onDone }: { row: ChatRowT; onDone: () => void }): React.ReactElement {
+  const colors = useTheme();
+  const [value, setValue] = React.useState(row.goal ?? '');
+  const commit = (): void => {
+    onDone();
+    setChatGoal(row.chatId, value);
+  };
+  return (
+    <View style={{ paddingHorizontal: space.lg }}>
+      <TextInput
+        testID="goal-input"
+        accessibilityLabel="Goal"
+        value={value}
+        onChangeText={setValue}
+        onSubmitEditing={commit}
+        autoFocus
+        selectTextOnFocus
+        returnKeyType="done"
+        style={{ ...typography.body, color: colors.ink, paddingVertical: space.sm }}
+      />
+      <Item icon={<Target size={18} color={colors.ink2} />} label="Save goal" onPress={commit} />
+    </View>
+  );
 }
 
 function RenamePage({ row, onDone }: { row: ChatRowT; onDone: () => void }): React.ReactElement {
@@ -270,6 +309,8 @@ export function ChatLongPressSheet(): React.ReactElement {
           </View>
           {page === 'rename' ? (
             <RenamePage row={row} onDone={close} />
+          ) : page === 'goal' ? (
+            <GoalPage row={row} onDone={close} />
           ) : (
             <>
               {isHidden(row) && (
@@ -287,6 +328,13 @@ export function ChatLongPressSheet(): React.ReactElement {
                   icon={<Pencil size={18} color={colors.ink2} />}
                   label="Rename chat"
                   onPress={() => setPage('rename')}
+                />
+              )}
+              {!isReservedSpecialThread(row.chatId) && (
+                <Item
+                  icon={<Target size={18} color={colors.ink2} />}
+                  label={row.goal ? 'Edit goal' : 'Set goal'}
+                  onPress={() => setPage('goal')}
                 />
               )}
               <Item
