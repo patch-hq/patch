@@ -3502,6 +3502,16 @@ export const ChatSpawnRequestEvent = z
      * Optional; a user-initiated spawn never sets it.
      */
     goal: z.string().min(1).optional(),
+    /**
+     * Arm a recurring loop on the chat the moment it is created — a job's
+     * `spawn`/`continue` action's own `loop` field (spec/08 ## Action). Same
+     * `every`/`message` as `chat.loop_request`. Optional; a user-initiated
+     * spawn never sets it.
+     */
+    loop: z
+      .object({ every: z.string().min(1), message: z.string().min(1) })
+      .strict()
+      .optional(),
   })
   .strict();
 export type ChatSpawnRequestEvent = z.infer<typeof ChatSpawnRequestEvent>;

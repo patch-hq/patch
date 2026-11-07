@@ -645,6 +645,8 @@ interface FormState {
   spawnFolder: string;
   spawnPrompt: string;
   spawnGoal: string;
+  spawnLoopEvery: string;
+  spawnLoopMessage: string;
   spawnSkill: string;
   /**
    * The model each fire's chat runs on, from `spawnHostId`'s catalogue.
@@ -760,6 +762,8 @@ const DEFAULT_FORM: FormState = {
   spawnFolder: '',
   spawnPrompt: '',
   spawnGoal: '',
+  spawnLoopEvery: '',
+  spawnLoopMessage: '',
   spawnSkill: '',
   // A new job starts on the account default (spec/14 § Jobs view) — it tracks
   // one setting instead of freezing a model id at the moment the job was
@@ -1290,6 +1294,12 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
         pushError('Add a Skill or a Prompt (or both). The action needs something to run.');
         return;
       }
+    }
+    // A loop is an interval AND its own prompt; half of one would either arm
+    // nothing silently or make the agent invent the other half.
+    if (usesSpawnFields && !!form.spawnLoopEvery.trim() !== !!form.spawnLoopMessage.trim()) {
+      pushError('A loop needs both an interval and a loop prompt.');
+      return;
     }
     // spawn + ensure need a folder (the picker no longer carries a native
     // `required`, since it's a select with a Custom-path escape hatch).
@@ -2532,6 +2542,30 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   />
                 </label>
                 <label>
+                  Loop every
+                  <input
+                    value={form.spawnLoopEvery}
+                    placeholder="10m"
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setForm((f) => ({ ...f, spawnLoopEvery: next }));
+                    }}
+                    data-testid="job-spawn-loop-every"
+                  />
+                </label>
+                <label>
+                  Loop prompt
+                  <textarea
+                    rows={2}
+                    value={form.spawnLoopMessage}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setForm((f) => ({ ...f, spawnLoopMessage: next }));
+                    }}
+                    data-testid="job-spawn-loop-message"
+                  />
+                </label>
+                <label>
                   Deduplication key
                   <input
                     value={form.ensureKey}
@@ -3084,6 +3118,8 @@ function jobToForm(job: Job): FormState {
     f.spawnFolder = job.action.folder;
     f.spawnPrompt = job.action.prompt ?? '';
     f.spawnGoal = job.action.goal ?? '';
+    f.spawnLoopEvery = job.action.loop?.every ?? '';
+    f.spawnLoopMessage = job.action.loop?.message ?? '';
     f.spawnSkill = job.action.skill ?? '';
     // No stored model → the `Account default` row, which is what re-saving must
     // write back (i.e. still no model), not the host's current last-used id.
@@ -3170,6 +3206,11 @@ function formToBody(form: FormState): Omit<JobCreateBody, 'concurrency' | 'timeo
       ...(form.spawnPrompt ? { prompt: form.spawnPrompt } : {}),
       // Creation-time chat goal (spec/08 ## Action); absent when empty.
       ...(form.spawnGoal.trim() ? { goal: form.spawnGoal.trim() } : {}),
+      // Creation-time recurring loop prompt (spec/08 ## Action); both halves
+      // or neither — validated before this point.
+      ...(form.spawnLoopEvery.trim() && form.spawnLoopMessage.trim()
+        ? { loop: { every: form.spawnLoopEvery.trim(), message: form.spawnLoopMessage.trim() } }
+        : {}),
       ...(form.spawnSkill ? { skill: form.spawnSkill } : {}),
       // `Account default` is the empty string, and it must persist as an ABSENT
       // field: omitting `model` is what makes each fire take the host's
