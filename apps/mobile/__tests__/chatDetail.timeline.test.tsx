@@ -1168,6 +1168,34 @@ describe('answered permission request (spec/15 § Chat detail)', () => {
     expect(optionsOn(r.root)).toBe(0);
   });
 
+  it('an approved call still running shows a spinner; it goes once the result lands', () => {
+    request('r1');
+    useChatStore.setState((st) => ({
+      chats: { ...st.chats, c1: { ...st.chats['c1']!, activity: 'running' } },
+    }));
+    const r = renderRN(<ChatDetailScreen />);
+    const approve = findAllHost(r.root, (i) => i.type === 'Pressable').find((p) =>
+      hasText(p, '1. Yes'),
+    )!;
+    actSync(() => approve.props.onPress());
+    expect(hasText(r.root, 'Approved, running')).toBe(true);
+    expect(findAllHost(r.root, byTestId('permission-running'))).toHaveLength(1);
+
+    actSync(() => {
+      useChatStore.setState((st) => ({
+        timelines: {
+          ...st.timelines,
+          c1: [
+            ...(st.timelines['c1'] ?? []),
+            { seq: 9, kind: 'tool_result', callId: 'x', at: 0 } as never,
+          ],
+        },
+      }));
+    });
+    expect(findAllHost(r.root, byTestId('permission-running'))).toHaveLength(0);
+    expect(hasText(r.root, 'Approved')).toBe(true);
+  });
+
   it('denying reads Denied', () => {
     request('r1');
     const r = renderRN(<ChatDetailScreen />);
