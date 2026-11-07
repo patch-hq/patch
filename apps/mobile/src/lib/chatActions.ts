@@ -1,6 +1,6 @@
 // Pure derivation of the chat-detail ⋯ menu (spec/15 § Chat detail), in
 // parity with desktop's header actions (packages/web/src/components/
-// ChatHeader.tsx): New chat, Call, Tools, Show (a hidden chat), Pin, Snooze,
+// ChatHeader.tsx): New chat, Find in chat, Tools, Files, Terminal, Show (a hidden chat), Pin, Snooze,
 // Archive, Disable, and Delete last. Each item appears only where it applies:
 //
 // - Manager / Speakers occupy fixed slots, so they cannot be pinned,
@@ -8,7 +8,8 @@
 //   § Disabled) or have their session rotated (Clear context, spec/06 §
 //   Session rotation), and still start a new chat.
 // - The read-only mirror (Speakers) has no call and nothing a tool
-//   switch could gate, so it drops Call and Tools too.
+//   switch could gate, so it drops Tools, Files and Terminal too. (Call is the
+//   header's phone button, not a menu item.)
 //
 // The raw wire event log is NOT reachable from the chat view — it is a
 // developer surface available via the CLI (`patch history` / `patch doctor`).
@@ -38,8 +39,12 @@ export interface ChatMenuState {
 }
 
 export function chatKebabItems(chatId: string, state: ChatMenuState): string[] {
-  const items = ['New chat', state.readAll ? 'Stop reading everything' : 'Read everything aloud'];
-  if (!isReadOnlyMirrorThread(chatId)) items.push('Call', 'Tools', 'Documents');
+  const items = [
+    'New chat',
+    state.readAll ? 'Stop reading everything' : 'Read everything aloud',
+    'Find in chat',
+  ];
+  if (!isReadOnlyMirrorThread(chatId)) items.push('Tools', 'Files', 'Terminal');
   if (state.noTasks) items.push('Add tasks');
   if (isReservedSpecialThread(chatId)) {
     items.push(state.disabled ? 'Enable' : 'Disable', 'Clear context');

@@ -449,7 +449,7 @@ describe('chat-detail — kebab menu', () => {
       .props.onPress();
   }
 
-  it('orders the items New chat, Call, Tools, Documents, Pin, Snooze, Archive, then Delete last', () => {
+  it('orders the items New chat, Find in chat, Tools, Files, Terminal, Pin, Snooze, Archive, then Delete last', () => {
     seedChat('c1');
     __setLocalSearchParams({ chatId: 'c1' });
     const r = renderRN(<ChatDetailScreen />);
@@ -457,9 +457,10 @@ describe('chat-detail — kebab menu', () => {
     expect(menuLabels(r.root)).toEqual([
       'New chat',
       'Read everything aloud',
-      'Call',
+      'Find in chat',
       'Tools',
-      'Documents',
+      'Files',
+      'Terminal',
       'Add tasks',
       'Pin chat',
       'Snooze chat',
@@ -507,15 +508,6 @@ describe('chat-detail — kebab menu', () => {
     expect(useUiStore.getState().errors.at(-1)?.message).toMatch(/host isn't known/);
   });
 
-  it('Call in the menu starts the same voice call as the header button', () => {
-    seedChat('c1');
-    __setLocalSearchParams({ chatId: 'c1' });
-    const r = renderRN(<ChatDetailScreen />);
-    findHost(r.root, byLabel('More')).props.onPress();
-    tapItem(r.root, 'Call');
-    expect(startVoiceCallMock).toHaveBeenCalledWith('c1');
-  });
-
   it('Archive chat archives through the same API the list uses and navigates back', async () => {
     seedChat('c1');
     __setLocalSearchParams({ chatId: 'c1' });
@@ -557,16 +549,27 @@ describe('chat-detail — kebab menu', () => {
     expect(routerMock.back).toHaveBeenCalledTimes(1);
   });
 
-  it('Documents opens the chat-folder document browser', () => {
+  it('Files opens the chat-folder document browser', () => {
     seedChat('c1');
     __setLocalSearchParams({ chatId: 'c1' });
     const r = renderRN(<ChatDetailScreen />);
     findHost(r.root, byLabel('More')).props.onPress();
-    tapItem(r.root, 'Documents');
+    tapItem(r.root, 'Files');
     expect(routerMock.push).toHaveBeenCalledWith({
       pathname: '/chats/[chatId]/docs',
       params: { chatId: 'c1' },
     });
+  });
+
+  it('Terminal opens the host terminal in the chat folder', () => {
+    seedChat('c1', { hostId: 'h1' });
+    __setLocalSearchParams({ chatId: 'c1' });
+    const r = renderRN(<ChatDetailScreen />);
+    findHost(r.root, byLabel('More')).props.onPress();
+    tapItem(r.root, 'Terminal');
+    expect(routerMock.push).toHaveBeenCalledWith(
+      expect.objectContaining({ pathname: '/hosts/[hostId]/terminal' }),
+    );
   });
 
   it('an archived chat offers Unarchive chat, which restores it and stays put', async () => {
@@ -577,9 +580,10 @@ describe('chat-detail — kebab menu', () => {
     expect(menuLabels(r.root)).toEqual([
       'New chat',
       'Read everything aloud',
-      'Call',
+      'Find in chat',
       'Tools',
-      'Documents',
+      'Files',
+      'Terminal',
       'Add tasks',
       'Pin chat',
       'Snooze chat',
@@ -593,7 +597,7 @@ describe('chat-detail — kebab menu', () => {
     expect(routerMock.back).not.toHaveBeenCalled();
   });
 
-  it('Manager shows the menu with what applies: New chat, Call, Tools, Documents, Disable, Clear context', () => {
+  it('Manager shows the menu with what applies: New chat, Find in chat, Tools, Files, Terminal, Disable, Clear context', () => {
     seedChat(SPECIAL_THREAD_IDS.manager);
     __setLocalSearchParams({ chatId: SPECIAL_THREAD_IDS.manager });
     const r = renderRN(<ChatDetailScreen />);
@@ -601,9 +605,10 @@ describe('chat-detail — kebab menu', () => {
     expect(menuLabels(r.root)).toEqual([
       'New chat',
       'Read everything aloud',
-      'Call',
+      'Find in chat',
       'Tools',
-      'Documents',
+      'Files',
+      'Terminal',
       'Add tasks',
       'Disable',
       'Clear context',

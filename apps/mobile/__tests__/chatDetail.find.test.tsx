@@ -18,6 +18,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   renderRN,
   findHost,
+  findAllHost,
+  byLabel,
+  hasText,
   queryHost,
   byTestId,
   textOf,
@@ -106,6 +109,15 @@ function jumps(): Array<{ index: number; viewPosition?: number; animated?: boole
     .map((c) => c.args[0] as { index: number; viewPosition?: number; animated?: boolean });
 }
 
+function openFind(root: Parameters<typeof findHost>[0]): void {
+  actSync(() => findHost(root, byLabel('More')).props.onPress());
+  actSync(() =>
+    findAllHost(root, (i) => i.props.accessibilityRole === 'menuitem')
+      .find((i) => hasText(i, 'Find in chat'))!
+      .props.onPress(),
+  );
+}
+
 describe('find in chat', () => {
   it('opens from the header, counts matches, and steps to each by jumping', async () => {
     seedChat('find-1');
@@ -115,9 +127,7 @@ describe('find in chat', () => {
     await flushMicro();
     expect(queryHost(r.root, byTestId('chat-find-bar'))).toBeNull();
 
-    await actAsync(async () => {
-      findHost(r.root, byTestId('chat-find-toggle')).props.onPress();
-    });
+    openFind(r.root);
     __resetFlatListCalls();
     await actAsync(async () => {
       findHost(r.root, byTestId('chat-find-input')).props.onChangeText('MSG');
@@ -160,9 +170,7 @@ describe('find in chat', () => {
     __setLocalSearchParams({ chatId: 'find-2' });
     const r = render(<ChatDetailScreen />);
     await flushMicro();
-    await actAsync(async () => {
-      findHost(r.root, byTestId('chat-find-toggle')).props.onPress();
-    });
+    openFind(r.root);
     await actAsync(async () => {
       findHost(r.root, byTestId('chat-find-input')).props.onChangeText('msg 2');
     });
@@ -185,9 +193,7 @@ describe('find in chat', () => {
     __setLocalSearchParams({ chatId: 'find-3' });
     const r = render(<ChatDetailScreen />);
     await flushMicro();
-    await actAsync(async () => {
-      findHost(r.root, byTestId('chat-find-toggle')).props.onPress();
-    });
+    openFind(r.root);
     await actAsync(async () => {
       findHost(r.root, byTestId('chat-find-input')).props.onChangeText('msg 1');
     });
@@ -209,9 +215,7 @@ describe('find in chat', () => {
     __setLocalSearchParams({ chatId: 'find-4' });
     const r = render(<ChatDetailScreen />);
     await flushMicro();
-    await actAsync(async () => {
-      findHost(r.root, byTestId('chat-find-toggle')).props.onPress();
-    });
+    openFind(r.root);
     await actAsync(async () => {
       findHost(r.root, byTestId('chat-find-input')).props.onChangeText('msg');
     });

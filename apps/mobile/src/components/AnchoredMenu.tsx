@@ -10,12 +10,14 @@
 import React from 'react';
 import { BackHandler, Modal, Pressable, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Check } from 'lucide-react-native';
+import { Check, type LucideIcon } from 'lucide-react-native';
 import { fixed, fonts, radii, space, textMin, useTheme } from '../lib/theme';
 
 export interface AnchoredMenuItem {
   id: string;
   label: string;
+  /** Leading icon (a lucide component). */
+  icon?: LucideIcon;
   /** One line under the label saying what the action does. */
   detail?: string;
   destructive?: boolean;
@@ -120,6 +122,12 @@ export function AnchoredMenu({
             selected: item.selected === true,
           }}
         >
+          {item.icon ? (
+            <item.icon
+              size={18}
+              color={item.disabled ? colors.inkFaint : item.destructive ? colors.red : colors.ink2}
+            />
+          ) : null}
           <View style={{ flex: 1 }}>
             <Text
               style={{

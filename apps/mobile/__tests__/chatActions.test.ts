@@ -1,5 +1,5 @@
 // The chat-detail ⋯ menu (spec/15 ## Chat detail) — desktop parity: New chat,
-// Call, Tools, Documents, Pin, Snooze, Archive, Disable, Clear context, Delete last, each
+// Find in chat, Tools, Files, Terminal, Pin, Snooze, Archive, Disable, Clear context, Delete last, each
 // only where it applies. The raw wire event log is NOT reachable from the
 // chat view.
 
@@ -15,14 +15,15 @@ describe('chatKebabItems', () => {
     expect(chatKebabItems('01HXREGULARCHATID', PLAIN)).not.toContain('Add tasks');
   });
 
-  it('a regular chat: New chat, Call, Tools, Documents, Pin, Snooze, Archive, Delete — Delete last', () => {
+  it('a regular chat: New chat, Find in chat, Tools, Files, Terminal, Pin, Snooze, Archive, Delete — Delete last', () => {
     const items = chatKebabItems('01HXREGULARCHATID', PLAIN);
     expect(items).toEqual([
       'New chat',
       'Read everything aloud',
-      'Call',
+      'Find in chat',
       'Tools',
-      'Documents',
+      'Files',
+      'Terminal',
       'Pin chat',
       'Snooze chat',
       'Archive chat',
@@ -43,9 +44,10 @@ describe('chatKebabItems', () => {
     ).toEqual([
       'New chat',
       'Read everything aloud',
-      'Call',
+      'Find in chat',
       'Tools',
-      'Documents',
+      'Files',
+      'Terminal',
       'Unpin chat',
       'Unsnooze chat',
       'Unarchive chat',
@@ -58,9 +60,10 @@ describe('chatKebabItems', () => {
     expect(chatKebabItems('01HXREGULARCHATID', { ...PLAIN, hidden: true })).toEqual([
       'New chat',
       'Read everything aloud',
-      'Call',
+      'Find in chat',
       'Tools',
-      'Documents',
+      'Files',
+      'Terminal',
       'Show chat',
       'Pin chat',
       'Snooze chat',
@@ -70,13 +73,14 @@ describe('chatKebabItems', () => {
     ]);
   });
 
-  it('Manager: New chat, Call, Tools, Documents, Disable, Clear context — never Pin/Snooze/Archive/Delete', () => {
+  it('Manager: New chat, Find in chat, Tools, Files, Terminal, Disable, Clear context — never Pin/Snooze/Archive/Delete', () => {
     expect(chatKebabItems(SPECIAL_THREAD_IDS.manager, { ...PLAIN, pinned: true })).toEqual([
       'New chat',
       'Read everything aloud',
-      'Call',
+      'Find in chat',
       'Tools',
-      'Documents',
+      'Files',
+      'Terminal',
       'Disable',
       'Clear context',
     ]);
@@ -86,19 +90,21 @@ describe('chatKebabItems', () => {
     expect(chatKebabItems(SPECIAL_THREAD_IDS.manager, { ...PLAIN, disabled: true })).toEqual([
       'New chat',
       'Read everything aloud',
-      'Call',
+      'Find in chat',
       'Tools',
-      'Documents',
+      'Files',
+      'Terminal',
       'Enable',
       'Clear context',
     ]);
   });
 
-  it('read-only mirror (Speakers) drops Call, Tools and Documents too', () => {
+  it('read-only mirror (Speakers) drops Tools, Files and Terminal too', () => {
     for (const id of [SPECIAL_THREAD_IDS.speakers]) {
       expect(chatKebabItems(id, PLAIN)).toEqual([
         'New chat',
         'Read everything aloud',
+        'Find in chat',
         'Disable',
         'Clear context',
       ]);

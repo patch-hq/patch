@@ -7,9 +7,10 @@
 //   here". Nothing is created until the first send (spec/15 § New chat flow).
 //   A special thread's folder is its own private working dir, not a project,
 //   so from one the screen opens on its usual default.
-// - Call starts the same sustained voice call as the header's phone button.
+// - Find in chat opens the header's find bar (the `onFind` prop).
+// - Terminal opens the host terminal in this chat's folder.
 // - Tools pushes the full-screen per-chat tools page (app/chats/[chatId]/tools).
-// - Documents pushes the chat-folder document browser (app/chats/[chatId]/docs).
+// - Files pushes the chat-folder document browser (app/chats/[chatId]/docs).
 // - Add tasks (only while the chat has no list) summons the task bar, open.
 // - Move to… pushes the Move page (app/chats/[chatId]/move): another host,
 //   and the folder the chat will run in there.
@@ -23,7 +24,29 @@
 import React, { useState, type ReactElement } from 'react';
 import { Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
-import { MoreHorizontal } from 'lucide-react-native';
+import {
+  Archive,
+  ArchiveRestore,
+  BellOff,
+  BellRing,
+  Eraser,
+  Eye,
+  FolderInput,
+  Folder,
+  ListPlus,
+  MessageSquarePlus,
+  MoreHorizontal,
+  Pin,
+  PinOff,
+  Power,
+  Search,
+  SlidersHorizontal,
+  SquareTerminal,
+  Trash2,
+  Volume2,
+  VolumeX,
+  type LucideIcon,
+} from 'lucide-react-native';
 import { isReservedSpecialThread } from '@patch/wire';
 import { AnchoredMenu } from './AnchoredMenu';
 import {
@@ -34,8 +57,8 @@ import {
 } from './ChatLongPressSheet';
 import { chatKebabItems } from '../lib/chatActions';
 import { docsRoute } from '../lib/docEditor';
+import { terminalRoute } from '../lib/hostFiles';
 import { clearContext, toggleDisabled } from '../lib/chatMeta';
-import { startVoiceCall } from '../lib/voiceCall';
 import { useReadAloud } from '../lib/readAloud';
 import { api } from '../api/rest';
 import { useChatStore } from '../stores/chatStore';
@@ -49,12 +72,37 @@ export function chatToolsRoute(chatId: string): `/chats/${string}/tools` {
   return `/chats/${chatId}/tools`;
 }
 
+const MENU_ICONS: Record<string, LucideIcon> = {
+  'New chat': MessageSquarePlus,
+  'Find in chat': Search,
+  'Read everything aloud': Volume2,
+  'Stop reading everything': VolumeX,
+  Tools: SlidersHorizontal,
+  Files: Folder,
+  Terminal: SquareTerminal,
+  'Add tasks': ListPlus,
+  Enable: Power,
+  Disable: Power,
+  'Clear context': Eraser,
+  'Show chat': Eye,
+  'Pin chat': Pin,
+  'Unpin chat': PinOff,
+  'Snooze chat': BellOff,
+  'Unsnooze chat': BellRing,
+  'Archive chat': Archive,
+  'Unarchive chat': ArchiveRestore,
+  'Move to…': FolderInput,
+  'Delete chat': Trash2,
+};
+
 export function ChatActionsMenu({
   chatId,
   row,
+  onFind,
 }: {
   chatId: string;
   row: ChatRow | undefined;
+  onFind: () => void;
 }): ReactElement {
   const colors = useTheme();
   const router = useRouter();
@@ -69,7 +117,12 @@ export function ChatActionsMenu({
     disabled: row?.disabled ?? false,
     noTasks: row !== undefined && row.todos.length === 0,
     readAll,
-  }).map((label) => ({ id: label, label, destructive: label === 'Delete chat' }));
+  }).map((label) => ({
+    id: label,
+    label,
+    icon: MENU_ICONS[label],
+    destructive: label === 'Delete chat',
+  }));
 
   const newChatHere = (): void => {
     if (isReservedSpecialThread(chatId)) {
@@ -94,17 +147,12 @@ export function ChatActionsMenu({
       case 'New chat':
         newChatHere();
         return;
-      case 'Read everything aloud':
-      case 'Stop reading everything':
-        useReadAloud.getState().setReadAll(!readAll);
-        return;
-      case 'Call':
-        startVoiceCall(chatId);
+        import { useReadAloud } from '../lib/readAloud';
         return;
       case 'Tools':
         router.push(chatToolsRoute(chatId));
         return;
-      case 'Documents':
+      case 'Files':
         router.push(docsRoute(chatId));
         return;
       case 'Add tasks':

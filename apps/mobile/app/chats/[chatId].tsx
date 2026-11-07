@@ -35,7 +35,6 @@ import { useMarkChatNotificationsRead } from '../../src/stores/notificationsStor
 import { Redirect, useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import {
   ChevronLeft,
-  Search,
   Phone,
   MessageSquare,
   Mic,
@@ -52,7 +51,6 @@ import {
   folderName,
   hasTaskNotification,
   isReservedSpecialThread,
-  compactModelLabel,
   taskNotificationSummary,
   labelForRun,
   parseAskHuman,
@@ -1136,20 +1134,6 @@ function ChatDetailBody(): React.ReactElement {
                   .join(' · ') || '—'}
               </Text>
             )}
-            {row?.model ? (
-              <Text
-                testID="chat-model"
-                style={{
-                  ...typography.meta,
-                  color: colors.ink3,
-                  marginLeft: space.sm,
-                  flexShrink: 0,
-                }}
-                numberOfLines={1}
-              >
-                {compactModelLabel(row.model)}
-              </Text>
-            ) : null}
             {runningWorkers > 0 ? (
               <View
                 testID="header-workers"
@@ -1209,19 +1193,13 @@ function ChatDetailBody(): React.ReactElement {
             <Phone size={20} color={colors.ink} />
           </Pressable>
         ) : null}
-        {/* Find in this chat (spec/15 § Find in chat). */}
-        <Pressable
-          testID="chat-find-toggle"
-          onPress={() => (findOpen ? closeFind() : setFindOpen(true))}
-          style={{ padding: space.sm }}
-          accessibilityRole="button"
-          accessibilityLabel="Find in chat"
-        >
-          <Search size={20} color={colors.ink} />
-        </Pressable>
-        {/* ⋯ — New chat, Call, Tools, Pin, Snooze, Archive, Disable, Delete:
+        {/* ⋯ — New chat, Find, Tools, Files, Terminal, Pin, Snooze, Archive, Disable, Delete:
             whichever apply to this chat (spec/15 § Chat detail). */}
-        <ChatActionsMenu chatId={chatId} row={row} />
+        <ChatActionsMenu
+          chatId={chatId}
+          row={row}
+          onFind={() => (findOpen ? closeFind() : setFindOpen(true))}
+        />
       </View>
       {findOpen ? (
         <ChatFindBar
