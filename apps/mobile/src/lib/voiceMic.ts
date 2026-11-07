@@ -11,6 +11,7 @@
 // carry no audio. On non-Android (tests, dev web) we no-op.
 
 import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
+import { useMicLevelStore } from '../stores/micLevelStore';
 
 interface PatchVoiceMicModule {
   start: () => Promise<void>;
@@ -104,6 +105,7 @@ export async function startMicCapture(
     // `bytes` is a fresh 0-offset buffer, so this Int16Array view is 2-byte
     // aligned and spans the whole buffer — safe to forward as `.buffer`.
     const pcm = new Int16Array(bytes.buffer, 0, bytes.byteLength >>> 1);
+    useMicLevelStore.getState().push(pcm);
     onFrame(pcm);
   });
   _sub = mine;
@@ -122,6 +124,7 @@ export async function startMicCapture(
 export async function stopMicCapture(): Promise<void> {
   _sub?.remove();
   _sub = null;
+  useMicLevelStore.getState().reset();
   const m = getModule();
   if (!m) return;
   await m.stop();
