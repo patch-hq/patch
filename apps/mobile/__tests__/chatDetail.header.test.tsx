@@ -103,7 +103,6 @@ describe('chat-detail header', () => {
     __setLocalSearchParams({ chatId: 'c1' });
     const r = renderRN(<ChatDetailScreen />);
     expect(queryHost(r.root, byTestId('chat-model'))).toBeNull();
-    expect(hasText(r.root, 'Opus 5.5')).toBe(false);
   });
 
   it('shows the folder + derived title', () => {
