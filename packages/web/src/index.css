@@ -11231,7 +11231,7 @@ main.empty-state p {
 }
 .job-tick-bar {
   position: relative;
-  color: var(--ink-1, var(--ink-2));
+  color: var(--ink-2);
   font-variant-numeric: tabular-nums;
 }
 .job-tick-name {
