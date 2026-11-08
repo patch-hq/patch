@@ -725,6 +725,8 @@ export interface ChatEventEntry {
    * line naming what was asked.
    */
   voiceHandoff?: boolean;
+  /** The agent's own answer to a hand-off (as opposed to the fast voice's spoken words). */
+  handoffAnswer?: boolean;
   /**
    * Words said in a call, transcribed: the user's own, or the fast voice's reply.
    * Drawn in italics with a call icon on the message's own side.
@@ -1963,7 +1965,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               role: 'assistant',
               content: event.delta,
               streaming: true,
-              ...(answersHandoff(list) ? { voice: true } : {}),
+              ...(answersHandoff(list) ? { voice: true, handoffAnswer: true } : {}),
               at: Date.now(),
             });
             // Preview is left untouched here too — see the note above.
@@ -2076,6 +2078,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 seq: event.seq,
                 streaming: false,
                 ...(spoken || answersHandoff(existing) ? { voice: true } : {}),
+                ...(!spoken && answersHandoff(existing) ? { handoffAnswer: true } : {}),
                 ...(event.createdAt !== undefined ? { messageAt: event.createdAt } : {}),
               };
               timelines[event.chatId] = updated;
@@ -2280,6 +2283,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
               : {}),
             ...(spoken || (event.role === 'assistant' && answersHandoff(timelines[event.chatId]))
               ? { voice: true }
+              : {}),
+            ...(!spoken && event.role === 'assistant' && answersHandoff(timelines[event.chatId])
+              ? { handoffAnswer: true }
               : {}),
             at: Date.now(),
           });

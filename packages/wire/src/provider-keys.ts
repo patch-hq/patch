@@ -117,3 +117,36 @@ export function providerKeyEnvOnlyNote(key: HostProviderKey): string | null {
   if (key.source !== 'env') return null;
   return `From this host's environment; can't be revoked here.`;
 }
+
+/**
+ * What a live check of a saved key found (spec/01 § Settings). `ok`: every
+ * probe passed. `limited`: the key works but is scoped away from some of what
+ * Patch uses it for (`missing`). `rejected`: the provider refused it — wrong,
+ * revoked or expired. `unreachable`: the provider could not be asked, which
+ * says nothing about the key.
+ */
+export const ProviderKeyCheck = z
+  .object({
+    status: z.enum(['ok', 'limited', 'rejected', 'unreachable']),
+    /** What the key was shown to power. */
+    features: z.array(z.string().min(1)),
+    /** What a working key could not do. */
+    missing: z.array(z.string().min(1)).optional(),
+    message: z.string().min(1).optional(),
+    checkedAt: z.string().min(1),
+  })
+  .strict();
+export type ProviderKeyCheck = z.infer<typeof ProviderKeyCheck>;
+
+/** The one line Settings shows for a check. One copy for web and mobile. */
+export function providerKeyCheckText(check: ProviderKeyCheck): string {
+  switch (check.status) {
+    case 'ok':
+      return `Working · ${check.features.join(', ')}`;
+    case 'limited':
+      return `Works for ${check.features.join(', ')}; not ${(check.missing ?? []).join(', ')}`;
+    case 'rejected':
+    case 'unreachable':
+      return check.message ?? check.status;
+  }
+}

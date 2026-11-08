@@ -38,7 +38,7 @@ import {
   DEFAULT_WATCH_CHECK_IN_MINUTES,
   DEFAULT_WATCH_CHECK_IN_PROMPT,
 } from './watch-check-in-prompt.js';
-import { HostProviderKey, ProviderKeyId } from './provider-keys.js';
+import { HostProviderKey, ProviderKeyCheck, ProviderKeyId } from './provider-keys.js';
 import { BACKEND_IDS, PROVIDERS, providerForModel, type ProviderId } from './providers.js';
 import {
   HookDecision,
@@ -2477,6 +2477,8 @@ export const SharedSecretsSummary = z
           id: ProviderKeyId,
           set: z.boolean(),
           last4: z.string().min(1).max(4).optional(),
+          /** Latest live check of the saved key; absent until one has run. */
+          check: ProviderKeyCheck.optional(),
         })
         .strict(),
     ),
@@ -3104,6 +3106,32 @@ export const DeviceSessionEvent = z
   })
   .strict();
 export type DeviceSessionEvent = z.infer<typeof DeviceSessionEvent>;
+
+/**
+ * A voice call is live on a surface (host → server → surfaces).
+ *
+ * Emitted when an app surface (web / desktop / mobile) opens (`active: true`)
+ * or closes (`active: false`) a `call`-mode audio session on the host. Every
+ * OTHER surface uses it to show "call in progress on <device>" on that chat and
+ * offer to switch the call to itself (`07-voice-app.md` § A call can move
+ * between devices). Account-scoped (no `chatId` envelope field) so the hub fans
+ * it out to every connected surface; the chat is in the payload.
+ *
+ * `surfaceId` is the surface holding the call, so a surface can tell its own
+ * call from someone else's.
+ */
+export const VoiceCallEvent = z
+  .object({
+    type: z.literal('voice.call'),
+    sessionId: z.string().min(1),
+    surfaceId: z.string().min(1),
+    surfaceKind: z.string().min(1),
+    chatId: z.string().min(1),
+    active: z.boolean(),
+    startedAt: z.number().int().nonnegative(),
+  })
+  .strict();
+export type VoiceCallEvent = z.infer<typeof VoiceCallEvent>;
 
 /**
  * Host-owned folder registry snapshot (host → server → surfaces).
@@ -9280,6 +9308,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   HostInfoEvent,
   HostAccountEvent,
   DeviceSessionEvent,
+  VoiceCallEvent,
   FoldersListEvent,
   FoldersUpdatedEvent,
   ClaudeSettingsListEvent,
@@ -9594,6 +9623,7 @@ export const EVENT_SCHEMAS = {
   'host.host': HostInfoEvent,
   'host.account': HostAccountEvent,
   'device.session': DeviceSessionEvent,
+  'voice.call': VoiceCallEvent,
   'folders.list': FoldersListEvent,
   'folders.updated': FoldersUpdatedEvent,
   'claude_settings.list': ClaudeSettingsListEvent,

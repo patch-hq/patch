@@ -64,6 +64,13 @@ describe('costing a call', () => {
     );
   });
 
+  it('says usage was not reported rather than printing 0 tokens', () => {
+    const c = costCall({ ...base, engine: { ...gemini, tokens: { ...ZERO_TOKENS } }, handoffs: 0 });
+    const line = callSummaryLine(c);
+    expect(line).not.toContain('0 tokens in');
+    expect(line).toContain('token usage not reported');
+  });
+
   it('says price unknown for an unpriced model', () => {
     const c = costCall({
       ...base,

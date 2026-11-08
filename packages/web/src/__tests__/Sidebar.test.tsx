@@ -2745,5 +2745,20 @@ describe('Sidebar', () => {
       fireEvent.click(screen.getByTestId('sidebar-grouping-project'));
       expect(screen.getByTestId('folder-collapse-/p/alpha')).toBeInTheDocument();
     });
+
+    it("keeps a group's status badge out of the toggle, at the right of the heading", () => {
+      useChatStore
+        .getState()
+        .hydrate([
+          rowFixture({ chatId: 'g-work', name: 'Busy', folder: '/p/alpha', activity: 'running' }),
+        ]);
+      renderInRouter();
+      fireEvent.click(screen.getByTestId('sidebar-grouping-status'));
+      const badge = screen.getByTestId('status-badge-status:working');
+      const toggle = screen.getByTestId('status-collapse-status:working');
+      expect(toggle.contains(badge)).toBe(false);
+      expect(badge.parentElement).toBe(toggle.parentElement);
+      expect(toggle.compareDocumentPosition(badge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
   });
 });
