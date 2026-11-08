@@ -1339,6 +1339,15 @@ export const ChatStateEvent = z
      */
     lastSeq: z.number().int().nonnegative().optional(),
     /**
+     * One-line snippet of the chat's most recent user or assistant message.
+     * Lets a surface that is not subscribed to the chat (the phone's chat list)
+     * show what was said last, and how far `lastSeq` reaches, without a live
+     * stream. Distinct from `preview`, which is the FIRST prompt and names the
+     * row. `null` when the chat has no message yet; optional: an older host
+     * never sends it.
+     */
+    lastMessagePreview: z.string().nullable().optional(),
+    /**
      * The host this chat is pinned to (spec/03 § Host events). `chat.spawned`
      * establishes it for the chat's life; carrying it here too means a surface
      * that groups its sidebar by host never has to hold a chatId → host
