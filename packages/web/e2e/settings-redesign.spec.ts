@@ -166,6 +166,7 @@ test.describe('Settings — desktop', () => {
       'Devices',
       'Shortcuts',
       'Updates',
+      'Bug reports',
       'Account',
     ]);
   });
