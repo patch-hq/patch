@@ -22,7 +22,7 @@ import {
 import { join } from 'node:path';
 import { z } from 'zod';
 import { McpServerList, PermissionMode } from '@patch/wire';
-import { DictationSetting } from '@patch/wire/audio';
+import { DictationSetting, SpeechToTextEngine } from '@patch/wire/audio';
 import type { Logger } from 'pino';
 
 const HostStateFile = z
@@ -71,6 +71,7 @@ const HostStateFile = z
      */
     voiceConfig: z
       .object({
+        speechToText: SpeechToTextEngine.default('groq'),
         dictation: DictationSetting,
         device: z
           .object({

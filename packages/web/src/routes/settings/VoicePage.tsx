@@ -5,6 +5,8 @@
 import type { JSX } from 'react';
 import { Fragment, useEffect, useState } from 'react';
 import {
+  SPEECH_TO_TEXT_LABEL,
+  SpeechToTextEngine,
   voiceKeyHostStatus,
   type ComputerDictationEngine,
   type DictationConfig,
@@ -135,6 +137,7 @@ export function voiceCellStatus(
 export function VoicePage(): JSX.Element {
   return (
     <SettingsPage title="Voice" testid="settings-voice">
+      <SpeechToTextGroup />
       <DictationEnginesGroup />
       <EngineGroup />
       <DictationGroup />
@@ -234,6 +237,32 @@ function ShortcutGroup(): JSX.Element {
  * for the phone app, one for web and desktop, and whether Whisper tidies up a
  * live engine's words as dictation goes on.
  */
+function SpeechToTextGroup(): JSX.Element {
+  const voiceConfig = usePreferencesStore((s) => s.preferences.voiceConfig);
+  const loaded = usePreferencesStore((s) => s.loaded);
+  const update = usePreferencesStore((s) => s.update);
+  const pushError = useUiStore((s) => s.pushError);
+  return (
+    <Group label="Speech to text" testid="settings-voice-stt">
+      <Row title="Reads speech with" testid="stt-row">
+        <Pills
+          label="Speech to text"
+          options={SpeechToTextEngine.options}
+          labels={SPEECH_TO_TEXT_LABEL}
+          value={voiceConfig.speechToText}
+          disabled={!loaded}
+          testid="stt-engine"
+          onChange={(speechToText) => {
+            void update({ voiceConfig: { ...voiceConfig, speechToText } }).catch((e: Error) =>
+              pushError(failed('settings'), undefined, e.message),
+            );
+          }}
+        />
+      </Row>
+    </Group>
+  );
+}
+
 function DictationEnginesGroup(): JSX.Element {
   const dictation = usePreferencesStore((s) => s.preferences.voiceConfig.dictation);
   const voiceConfig = usePreferencesStore((s) => s.preferences.voiceConfig);
@@ -290,7 +319,10 @@ function DictationEnginesGroup(): JSX.Element {
           onChange={(computer) => write({ computer })}
         />
       </Row>
-      <Row title="Tidy up with Whisper" testid="dictation-tidy-row">
+      <Row
+        title={`Tidy up each phrase with ${SPEECH_TO_TEXT_LABEL[voiceConfig.speechToText]}`}
+        testid="dictation-tidy-row"
+      >
         <Toggle
           checked={dictation.tidy}
           disabled={!loaded}
