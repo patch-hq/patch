@@ -89,4 +89,22 @@ describe('/api/issue-reporting and /api/issue-reports', () => {
     const status = built.issueFiler.status();
     expect(status.pending).toBe(1);
   });
+
+  it('files a phone crash once, as an app crash, not also as a server error', async () => {
+    const { built, app, auth } = await boot({ level: 'error' });
+    await app.inject({
+      method: 'PUT',
+      url: '/api/issue-reporting',
+      headers: auth,
+      payload: { enabled: true },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/client-crashes',
+      headers: auth,
+      payload: { message: 'TypeError: x is undefined', occurredAt: 1, source: 'global' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(built.issueFiler.status().pending).toBe(1);
+  });
 });
