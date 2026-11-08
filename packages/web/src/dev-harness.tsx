@@ -195,7 +195,7 @@ useChatStore.getState().hydrate([
     hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'Resume Cadence Delivery Automation',
-    folder: '/home/tom/projects/cadence',
+    folder: '/home/tom/projects/patch',
     activity: 'idle',
     status: 'active',
     pinned: false,
