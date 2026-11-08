@@ -89,6 +89,7 @@ import {
   TextInput,
   View,
   useWindowDimensions,
+  PanResponder,
 } from 'react-native';
 import {
   Mic,
@@ -105,6 +106,9 @@ import {
   Plus,
   CircleGauge,
   CircleUserRound,
+  Camera,
+  Image as ImageIcon,
+  Paperclip,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -842,10 +846,15 @@ export function Composer({
   // with it — otherwise a message past the height cap shows its top forever.
   const [inputScrollY, setInputScrollY] = React.useState(0);
   // Rendered height of the dictation mirror, so the input can grow to fit it.
-  const [mirrorHeight, setMirrorHeight] = React.useState(0);
   const mirrorScrollRef = React.useRef<ScrollView>(null);
   // Follow the newest words unless the user has scrolled up.
   const mirrorStickRef = React.useRef(true);
+  // (No measured height any more: the mirror is laid out in normal flow while
+  // dictating and the input fills it, so the box is sized in the same layout
+  // pass as the text — no onLayout → setState → second render per line.)
+  // A height the user dragged the grip to, null for the default quarter cap.
+  const [dictCap, setDictCap] = React.useState<number | null>(null);
+  const dictCapStartRef = React.useRef(0);
   // Mic recording, or dictation mode with words being spoken: the input is painted over by the mirror.
   const livePreviewOn = micState !== 'idle' || livePartial !== '';
   // The interim words are drawn where the final ones will land: at the caret.
@@ -866,7 +875,35 @@ export function Composer({
   React.useEffect(() => {
     if (!livePreviewOn) mirrorStickRef.current = true;
   }, [livePreviewOn]);
-  const inputMaxHeight = livePreviewOn ? dictationMaxHeight(windowHeight) : COMPOSER_MAX_HEIGHT;
+  const inputMaxHeight = livePreviewOn
+    ? (dictCap ?? dictationMaxHeight(windowHeight))
+    : COMPOSER_MAX_HEIGHT;
+  React.useEffect(() => {
+    if (!livePreviewOn) setDictCap(null);
+  }, [livePreviewOn]);
+  const gripResponder = React.useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onPanResponderGrant: () => {
+          dictCapStartRef.current = dictCapNowRef.current;
+        },
+        onPanResponderMove: (_e, g) => {
+          const h = dictCapStartRef.current - g.dy;
+          setDictCap(
+            Math.max(
+              COMPOSER_MIN_HEIGHT,
+              Math.min(Math.round(windowHeightRef.current * 0.6), Math.round(h)),
+            ),
+          );
+        },
+      }),
+    [],
+  );
+  const dictCapNowRef = React.useRef(inputMaxHeight);
+  dictCapNowRef.current = inputMaxHeight;
+  const windowHeightRef = React.useRef(windowHeight);
+  windowHeightRef.current = windowHeight;
   // spec/15 § Skill autocomplete — chips: the mirror only needs to exist
   // while there's a chip to draw, and only when dictation isn't already using
   // the transparent-input trick for its own mirror — the two never overlap.
@@ -1860,6 +1897,18 @@ export function Composer({
           five-button trio beside it left barely half the width for the text.
           `position: 'relative'` is explicit because the live-dictation mirror
           below is absolutely positioned against this box. */}
+      {livePreviewOn && !edit ? (
+        <View
+          testID="dictation-grip"
+          accessibilityLabel="Resize dictation box"
+          {...gripResponder.panHandlers}
+          style={{ height: 20, alignItems: 'center', justifyContent: 'center' }}
+        >
+          <View
+            style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: colors.lineSoft }}
+          />
+        </View>
+      ) : null}
       <View testID="composer-input-row" style={{ position: 'relative' }}>
         <TextInput
           ref={inputRef}
@@ -1933,10 +1982,11 @@ export function Composer({
             // (spec/15 § Composer). Past the cap it scrolls internally.
             // While dictating, the words are drawn by the mirror, not held by
             // the input, so grow to the mirror's height like typing would.
-            minHeight: livePreviewOn
-              ? Math.min(Math.max(COMPOSER_MIN_HEIGHT, mirrorHeight), inputMaxHeight)
-              : COMPOSER_MIN_HEIGHT,
-            maxHeight: inputMaxHeight,
+            // While dictating the input fills the in-flow mirror instead
+            // (absolute), so its height is the mirror's, in the same pass.
+            ...(livePreviewOn
+              ? { position: 'absolute' as const, left: 0, right: 0, top: 0, bottom: 0 }
+              : { minHeight: COMPOSER_MIN_HEIGHT, maxHeight: inputMaxHeight }),
             paddingLeft: edit ? space.md : FIELD_PAD_LEFT,
             paddingRight: FIELD_PAD_RIGHT,
             paddingVertical: space.sm,
@@ -1963,14 +2013,12 @@ export function Composer({
           // A scroll view, not a clipped box: past the cap the view follows the
           // newest words to the bottom, and the user can scroll up through the
           // rest. Scrolling up stops the follow; reaching the bottom resumes it.
+          // In flow: this sets the box's height, the input sits over it.
           <ScrollView
             testID="dictation-mirror-scroll"
             ref={mirrorScrollRef}
             style={{
-              position: 'absolute',
-              left: 0,
-              right: 0,
-              top: 0,
+              minHeight: COMPOSER_MIN_HEIGHT,
               maxHeight: inputMaxHeight,
             }}
             nestedScrollEnabled
@@ -1985,7 +2033,6 @@ export function Composer({
             }}
           >
             <View
-              onLayout={(e) => setMirrorHeight(e.nativeEvent.layout.height)}
               style={{ minHeight: COMPOSER_MIN_HEIGHT, justifyContent: 'flex-end' }}
             >
               <Text
@@ -2177,7 +2224,79 @@ export function Composer({
         {/* Settings (spec/15 § Composer): the standing settings for the next
             turn, as icons so the row stays one line — approval mode, model
             by its short name, account, effort. Same order as web. */}
-        {!edit ? (
+        {/* While dictating the model switch steps aside so camera, photo and
+            file stay one tap away. */}
+        {!edit && livePreviewOn ? (
+          <View
+            testID="composer-dictating-attach"
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 2, flexShrink: 0 }}
+          >
+            <Pressable
+              testID="dictating-camera"
+              onPress={() => void takePhoto()}
+              disabled={disabled || resolving}
+              style={({ pressed }) => ({
+                width: ACTION_SIZE,
+                height: ACTION_HEIGHT,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: radii.md,
+                backgroundColor: pressed ? colors.divider : 'transparent',
+              })}
+              accessibilityRole="button"
+              accessibilityLabel="Take photo"
+            >
+              <Camera
+                size={ICON_SIZE}
+                strokeWidth={ICON_STROKE}
+                color={disabled ? colors.inkFaint : colors.ink3}
+              />
+            </Pressable>
+            <Pressable
+              testID="dictating-photo"
+              onPress={() => void pickImage()}
+              disabled={disabled || resolving}
+              style={({ pressed }) => ({
+                width: ACTION_SIZE,
+                height: ACTION_HEIGHT,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: radii.md,
+                backgroundColor: pressed ? colors.divider : 'transparent',
+              })}
+              accessibilityRole="button"
+              accessibilityLabel="Photo or image"
+            >
+              <ImageIcon
+                size={ICON_SIZE}
+                strokeWidth={ICON_STROKE}
+                color={disabled ? colors.inkFaint : colors.ink3}
+              />
+            </Pressable>
+            <Pressable
+              testID="dictating-file"
+              onPress={() => void pickDocument()}
+              disabled={disabled || resolving}
+              style={({ pressed }) => ({
+                width: ACTION_SIZE,
+                height: ACTION_HEIGHT,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: radii.md,
+                backgroundColor: pressed ? colors.divider : 'transparent',
+              })}
+              accessibilityRole="button"
+              accessibilityLabel="Any file"
+            >
+              <Paperclip
+                size={ICON_SIZE}
+                strokeWidth={ICON_STROKE}
+                color={disabled ? colors.inkFaint : colors.ink3}
+              />
+            </Pressable>
+          </View>
+        ) : null}
+        {!edit && !livePreviewOn ? (
           <View
             testID="composer-settings-row"
             style={{ flexDirection: 'row', alignItems: 'center', gap: 2, flexShrink: 0 }}

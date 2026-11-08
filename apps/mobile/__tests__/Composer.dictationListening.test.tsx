@@ -177,18 +177,28 @@ describe('Composer — dictation shown inside the input', () => {
     expect((live.props['style'] as { fontStyle: string }).fontStyle).toBe('italic');
   });
 
-  it('lets the field grow to near half the screen while dictating, back to the typing cap after', async () => {
+  it('caps the dictation box at a quarter of the screen, back to the typing cap after', async () => {
     __setWindowDimensions({ height: 800 });
-    const { factory, finish } = makeFactory();
+    const { factory, finish, partial } = makeFactory();
     const r = renderRN(<Composer chatId="c1" dictationFactory={factory} />);
-    const maxH = (): number =>
+    const inputMax = (): number =>
       (findHost(r.root, byType('TextInput')).props['style'] as { maxHeight: number }).maxHeight;
-    expect(maxH()).toBe(200);
+    const boxMax = (): number =>
+      (
+        findHost(r.root, byTestId('dictation-preview')).parent!.parent!.props['style'] as {
+          maxHeight: number;
+        }
+      ).maxHeight;
+    expect(inputMax()).toBe(200);
     await actAsync(() => mic(r)['onPress']!());
-    expect(maxH()).toBe(360);
+    await actAsync(() => partial('words'));
+    expect(boxMax()).toBe(200);
+    __setWindowDimensions({ height: 1200 });
+    await actAsync(() => partial('more words'));
+    expect(boxMax()).toBe(300);
     finish.mockResolvedValueOnce({ kind: 'text', text: 'words' });
     await actAsync(() => mic(r)['onPress']!());
-    expect(maxH()).toBe(200);
+    expect(inputMax()).toBe(200);
     __setWindowDimensions({ height: 800 });
   });
 
@@ -214,17 +224,27 @@ describe('Composer — dictation shown inside the input', () => {
     expect(dismissSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('grows the input to the height of the dictated words', async () => {
+  it('sizes the box from the in-flow mirror, with no measured height state', async () => {
     const { factory, partial } = makeFactory();
     const r = renderRN(<Composer chatId="c1" dictationFactory={factory} />);
     await actAsync(() => mic(r)['onPress']!());
     await actAsync(() => partial('a long run of words that wraps over several lines'));
     const preview = findHost(r.root, byTestId('dictation-preview'));
-    let node = preview.parent;
-    while (node && typeof node.props['onLayout'] !== 'function') node = node.parent;
-    await actAsync(() => node!.props['onLayout']({ nativeEvent: { layout: { height: 120 } } }));
-    const style = findHost(r.root, byType('TextInput')).props['style'] as { minHeight: number };
-    expect(style.minHeight).toBe(120);
+    const box = preview.parent!.parent!.props['style'] as { position?: string };
+    expect(box.position).toBeUndefined();
+    const input = findHost(r.root, byType('TextInput')).props['style'] as { position: string };
+    expect(input.position).toBe('absolute');
+  });
+
+  it('keeps camera, photo and file reachable while dictating, with the model switch away', async () => {
+    const { factory } = makeFactory();
+    const r = renderRN(<Composer chatId="c1" dictationFactory={factory} />);
+    await actAsync(() => mic(r)['onPress']!());
+    expect(findHost(r.root, byTestId('dictating-camera'))).toBeTruthy();
+    expect(findHost(r.root, byTestId('dictating-photo'))).toBeTruthy();
+    expect(findHost(r.root, byTestId('dictating-file'))).toBeTruthy();
+    expect(queryHost(r.root, byTestId('composer-model-pill'))).toBeNull();
+    expect(findHost(r.root, byTestId('dictation-grip'))).toBeTruthy();
   });
 
   it('goes the moment the dictation is cleared', async () => {
