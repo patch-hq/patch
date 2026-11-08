@@ -276,6 +276,7 @@ export interface ManualIssueReport {
   route: string;
   build: string;
   platform: string;
+  model: string;
   recentErrors: string[];
 }
 
