@@ -79,4 +79,21 @@ describe('hydrate after live frames', () => {
     expect(chat().activity).toBe('running');
     expect(chat().lastUpdated).toBe(30);
   });
+
+  it('keeps a just-sent chat working when a roster still reads it settled', () => {
+    const s = useChatStore.getState();
+    s.appendLocalUserMessage('c1', 'go', 'l1');
+    expect(deriveBadge(chat())).toBe('working');
+    s.hydrate([toChatListRow(ENTRY)]);
+    expect(deriveBadge(chat())).toBe('working');
+    s.applyEvent({
+      type: 'chat.state',
+      chatId: 'c1',
+      folder: '/f',
+      activity: 'idle',
+      permissionMode: 'auto',
+      lastUpdated: 20,
+    } as never);
+    expect(deriveBadge(chat())).not.toBe('working');
+  });
 });

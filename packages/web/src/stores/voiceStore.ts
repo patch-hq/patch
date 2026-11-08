@@ -95,6 +95,15 @@ export interface VoicePermission {
   summary: string;
 }
 
+/** A call live on ANOTHER surface (`voice.call` wire event), keyed by session id. */
+export interface RemoteCall {
+  sessionId: string;
+  surfaceId: string;
+  surfaceKind: string;
+  chatId: string;
+  startedAt: number;
+}
+
 interface VoiceState {
   incomingCall: IncomingCall | null;
   note: VoiceNoteState | null;
@@ -122,6 +131,8 @@ interface VoiceState {
    * events (`16-voice-device.md`). Backs the Speakers-row pill in the sidebar.
    */
   activeDevices: Record<string, string>;
+  /** Calls live on other surfaces, offered for switching here (spec/07 § A call can move between devices). */
+  remoteCalls: Record<string, RemoteCall>;
 
   setIncoming(call: IncomingCall | null): void;
   setSession(session: AudioSession | null): void;
@@ -158,6 +169,9 @@ interface VoiceState {
 
   /** Apply a `device.session` event: add on active, remove on end. */
   setDeviceSession(deviceId: string, name: string, active: boolean): void;
+
+  /** Apply a `voice.call` event: add on active, remove on end. */
+  setRemoteCall(call: RemoteCall, active: boolean): void;
 }
 
 export const useVoiceStore = create<VoiceState>((set) => ({
@@ -168,6 +182,7 @@ export const useVoiceStore = create<VoiceState>((set) => ({
   permission: null,
   session: null,
   activeDevices: {},
+  remoteCalls: {},
 
   setIncoming(call) {
     set({ incomingCall: call });
@@ -257,6 +272,15 @@ export const useVoiceStore = create<VoiceState>((set) => ({
 
   setPermission(p) {
     set({ permission: p });
+  },
+
+  setRemoteCall(call, active) {
+    set((state) => {
+      const next = { ...state.remoteCalls };
+      if (active) next[call.sessionId] = call;
+      else delete next[call.sessionId];
+      return { remoteCalls: next };
+    });
   },
 
   setDeviceSession(deviceId, name, active) {

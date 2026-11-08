@@ -316,6 +316,7 @@ export async function startVoiceCall(
   chatId: string,
   mode: AudioSessionMode = 'call',
   deps?: AudioSessionDeps,
+  opts: { takeOver?: boolean } = {},
 ): Promise<void> {
   // Voice happens on a HOST (plan H1): the chat's own. Refuse before opening
   // an audio session that would fail at the moment of speaking, and name both
@@ -348,6 +349,7 @@ export async function startVoiceCall(
       role: 'voice-call',
       mode,
       ...(addressWord !== null ? { addressWord } : {}),
+      ...(opts.takeOver === true ? { takeOver: true } : {}),
       deps: deps ?? {},
       callbacks: {
         onTranscriptPartial: (t) => {
@@ -436,6 +438,14 @@ export async function startVoiceCall(
     useUiStore.getState().pushError(failed('voice call'), undefined, (err as Error).message);
     useVoiceStore.getState().endCall();
   }
+}
+
+/**
+ * Take over the call another surface holds on `chatId`: the host ends it there
+ * and this surface opens its own (spec/07 § A call can move between devices).
+ */
+export function switchCallHere(chatId: string, deps?: AudioSessionDeps): Promise<void> {
+  return startVoiceCall(chatId, 'call', deps, { takeOver: true });
 }
 
 /**

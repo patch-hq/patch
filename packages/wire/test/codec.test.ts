@@ -354,6 +354,15 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     text: '{"model":"opus"}',
   },
   'device.session': { type: 'device.session', deviceId: 'dev-1', name: 'kitchen', active: true },
+  'voice.call': {
+    type: 'voice.call',
+    sessionId: 'sess-1',
+    surfaceId: 'surf-1',
+    surfaceKind: 'mobile',
+    chatId: 'c1',
+    active: true,
+    startedAt: 1,
+  },
   'folders.list': {
     type: 'folders.list',
     hostId: 'host-a',

@@ -31,6 +31,8 @@ import {
   DEFAULT_SHARED_SETTINGS,
   EMPTY_SHARED_SECRETS,
   PROVIDER_KEY_MIN_LENGTH,
+  PROVIDER_KEYS,
+  type ProviderKeyCheck,
   SharedSecrets,
   SharedSettings,
   SharedSettingsPatch,
@@ -51,6 +53,7 @@ import {
   type ProviderBackendId,
 } from '@patch/wire';
 import { generateWebBotAuthKey, parseWebBotAuthKey } from '@patch/wire/web-bot-auth';
+import { checkProviderKey, type FetchLike } from './provider-key-check.js';
 import { validateClaudeOAuthToken, type ClaudeTokenValidation } from '@patch/auth';
 
 /** Settings keys a host held before they were shared — taken from the FIRST host imported. */
@@ -161,6 +164,8 @@ export interface SharedSettingsOptions {
   hostName?: (hostId: string) => string | undefined;
   validateClaude?: (token: string) => Promise<ClaudeTokenValidation>;
   validateOpenAIKey?: ValidateOpenAIKey;
+  /** The HTTP client the provider-key checks use (tests inject one). */
+  keyCheckFetch?: FetchLike;
   adoptTimeoutMs?: number;
   refreshOpenAI?: typeof refreshOpenAI;
   refreshClaude?: typeof refreshClaude;
@@ -174,6 +179,9 @@ interface PendingAdopt {
   reject: (err: Error) => void;
   timer: ReturnType<typeof setTimeout>;
 }
+
+/** How often saved provider keys are checked again. */
+const KEY_RECHECK_MS = 60 * 60_000;
 
 export class SharedSettingsService {
   private settings: SharedSettings;
@@ -374,9 +382,11 @@ export class SharedSettingsService {
         connected: a.authJson !== null,
         ...(a.email ? { email: a.email } : {}),
       })),
-      providerKeys: (['gemini', 'openai', 'groq'] as const).map((id) => {
+      providerKeys: PROVIDER_KEYS.map(({ id }) => {
         const value = this.secrets.providerKeys[id];
-        return value ? { id, set: true, last4: value.slice(-4) } : { id, set: false };
+        if (!value) return { id, set: false };
+        const check = this.keyChecks.get(id);
+        return { id, set: true, last4: value.slice(-4), ...(check ? { check } : {}) };
       }),
     };
   }
@@ -419,13 +429,53 @@ export class SharedSettingsService {
   private renewalTimer: ReturnType<typeof setInterval> | undefined;
   private readonly renewalErrors = new Map<string, string>();
 
+  /** Latest live check of each saved key, in memory: rerun at start and hourly. */
+  private readonly keyChecks = new Map<ProviderKeyId, ProviderKeyCheck>();
+  private keyCheckTimer: ReturnType<typeof setInterval> | undefined;
+
   startCredentialRefresh(): void {
     void this.refreshCredentials();
     this.renewalTimer = setInterval(() => void this.refreshCredentials(), 60_000);
     this.renewalTimer.unref();
+    void this.recheckProviderKeys();
+    this.keyCheckTimer = setInterval(() => void this.recheckProviderKeys(), KEY_RECHECK_MS);
+    this.keyCheckTimer.unref();
   }
   close(): void {
     if (this.renewalTimer) clearInterval(this.renewalTimer);
+    if (this.keyCheckTimer) clearInterval(this.keyCheckTimer);
+  }
+
+  /**
+   * Ask the provider whether the saved `id` key works and what it can power,
+   * keep the answer and tell every surface. Returns null when no key is saved.
+   * An unreachable provider says nothing about the key, so it never replaces a
+   * previous verdict on it; the first check of a key records it either way.
+   */
+  async checkProviderKey(id: ProviderKeyId): Promise<ProviderKeyCheck | null> {
+    const value = this.secrets.providerKeys[id];
+    if (!value) return null;
+    const check = await checkProviderKey(id, value, this.opts.keyCheckFetch);
+    // Replaced or revoked while the request was out: the answer is for a key that is gone.
+    if (this.secrets.providerKeys[id] !== value) return null;
+    const before = this.keyChecks.get(id);
+    if (check.status === 'unreachable' && before && before.status !== 'unreachable') {
+      this.opts.logger?.warn({ id }, 'Provider key check could not reach the provider');
+      return before;
+    }
+    this.keyChecks.set(id, check);
+    if (before?.status !== check.status || before?.message !== check.message) {
+      if (check.status === 'rejected' || check.status === 'limited') {
+        this.opts.logger?.warn({ id, status: check.status }, 'Provider key check failed');
+      }
+    }
+    this.opts.broadcast(this.changedEvent());
+    return check;
+  }
+
+  /** Recheck every saved key, so a revoked or expired one is flagged. */
+  async recheckProviderKeys(): Promise<void> {
+    for (const { id } of PROVIDER_KEYS) await this.checkProviderKey(id);
   }
 
   refreshCredentials(): Promise<void> {
@@ -710,6 +760,7 @@ export class SharedSettingsService {
         return;
       case 'provider-key':
         this.setProviderKey(result.id, result.value);
+        await this.checkProviderKey(result.id);
         return;
       default:
         throw new Error(`unexpected adopt result ${(result as { kind: string }).kind}`);
@@ -909,6 +960,7 @@ export class SharedSettingsService {
       );
     }
     this.secrets.providerKeys[id] = trimmed;
+    this.keyChecks.delete(id);
     this.commit({ secrets: true });
   }
 
@@ -918,6 +970,7 @@ export class SharedSettingsService {
       throw new SettingsError(404, 'not_set', `No ${id} key is set from Settings`);
     }
     delete this.secrets.providerKeys[id];
+    this.keyChecks.delete(id);
     this.commit({ secrets: true });
   }
 }
