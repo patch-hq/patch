@@ -150,11 +150,11 @@ const ICON_SIZE = 18;
 const SETTING_ICON_SIZE = ICON_SIZE;
 
 /** Height cap for the auto-growing composer input, as a fraction of the window
- *  height — MUST match the CSS `max-height` (30vh) on `.composer-input`. Under
+ *  height — MUST match the CSS `max-height` (25vh) on `.composer-input`. Under
  *  this the field expands/contracts to fit with NO scrollbar; only once content
  *  exceeds the cap does it scroll internally, so a long paste can't push the
  *  chat off-screen (spec/14 § Composer). */
-const MAX_INPUT_HEIGHT_FRACTION = 0.3;
+const MAX_INPUT_HEIGHT_FRACTION = 0.25;
 const maxInputHeight = (): number => Math.round(window.innerHeight * MAX_INPUT_HEIGHT_FRACTION);
 
 /**
@@ -1215,6 +1215,29 @@ export const Composer = forwardRef(function Composer(
   // 'transcribing' until the authoritative transcript replaces it, rather than
   // vanishing mid-wait. It replaces the old status line above the input.
   const showLivePreview = micState !== 'idle' || livePartial !== '';
+  // A height the user has dragged the dictation box to with its grip; null means
+  // the default quarter-of-window cap. Dropped when the dictation ends.
+  const [dictCap, setDictCap] = useState<number | null>(null);
+  useEffect(() => {
+    if (micState === 'idle') setDictCap(null);
+  }, [micState]);
+  function dragGrip(e: React.PointerEvent<HTMLDivElement>): void {
+    const el = inputRef.current;
+    if (!el) return;
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = el.offsetHeight;
+    const move = (ev: PointerEvent): void => {
+      const h = startH + (startY - ev.clientY);
+      setDictCap(Math.max(40, Math.min(Math.round(window.innerHeight * 0.6), Math.round(h))));
+    };
+    const up = (): void => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
 
   // Auto-grow the textarea to fit its content. `field-sizing: content` (CSS) is
   // unreliable in the desktop shell, so size it here: reset to `auto` (allows
@@ -1223,7 +1246,10 @@ export const Composer = forwardRef(function Composer(
   // expands/contracts, no scrollbar (spec/14 § Composer). Only once the content
   // genuinely exceeds the cap do we reveal an internal scrollbar so a long paste
   // can't push the chat off-screen.
-  useEffect(() => {
+  // useLayoutEffect, not useEffect: the reset-to-auto below and the final height
+  // land before the browser paints, so the box never shows the collapsed state
+  // and the chat above does not jump on every new dictated line.
+  useLayoutEffect(() => {
     const el = inputRef.current;
     if (!el) return;
     // Resetting the height to `auto` shrinks the box and the browser clamps
@@ -1246,12 +1272,12 @@ export const Composer = forwardRef(function Composer(
       '.composer-live-preview, .composer-chip-mirror',
     );
     const contentHeight = Math.max(el.scrollHeight, mirror?.scrollHeight ?? 0) + border;
-    const cap = maxInputHeight();
+    const cap = dictCap ?? maxInputHeight();
     el.style.height = `${Math.min(contentHeight, cap)}px`;
     el.style.overflowY = contentHeight > cap ? 'auto' : 'hidden';
     el.scrollTop = scrollTop;
     syncMirrors(el);
-  }, [value, shownBody, showLivePreview]);
+  }, [value, shownBody, showLivePreview, livePartial, dictCap]);
   // spec/14 § Composer — chips: the mirror only needs to exist while there is
   // at least one chip to draw, and only when dictation isn't already using
   // the transparent-textarea trick for its own mirror (the two never overlap
@@ -2455,6 +2481,15 @@ export const Composer = forwardRef(function Composer(
               />
             ),
           )}
+          {micState === 'recording' ? (
+            <div
+              className="composer-dict-grip"
+              data-testid="composer-dict-grip"
+              role="separator"
+              aria-label="Resize dictation box"
+              onPointerDown={dragGrip}
+            />
+          ) : null}
           <div
             className={`composer-input-wrap${leading ? ' has-leading' : ''}${edit ? '' : ' has-add'}`}
           >
@@ -2699,6 +2734,18 @@ export const Composer = forwardRef(function Composer(
                 a file or image, or a sketch — sit in the field with it, at
                 its bottom-left. Call and meeting stay on the row below: they
                 start something rather than add to the message. */}
+            {micState === 'recording' ? (
+              <button
+                type="button"
+                className="composer-dict-cancel"
+                data-testid="composer-dict-cancel"
+                aria-label="Cancel dictation"
+                title="Cancel dictation"
+                onClick={cancelRecording}
+              >
+                <CloseIcon size={ICON_SIZE} />
+              </button>
+            ) : null}
             {edit ? null : (
               <button
                 type="button"
@@ -2853,7 +2900,7 @@ export const Composer = forwardRef(function Composer(
                   ]}
                 />
               )}
-              <ChatModelControl chatId={chatId} />
+              {micState === 'idle' ? <ChatModelControl chatId={chatId} /> : null}
               <EffortControl chatId={chatId} />
             </div>
           )}
