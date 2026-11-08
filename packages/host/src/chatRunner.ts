@@ -5,7 +5,6 @@ import {
   harnessModesInclude,
 } from './harnesses.js';
 import {
-  hasDurableTurn,
   inspectTurnDir,
   listTurnDirs,
   retireTurn,
@@ -984,8 +983,49 @@ export function attachmentFileName(id: string, name: string): string {
  */
 const ATTACHMENT_BLOCK_HEADER = '[Attachments]';
 
+/**
+ * Replay of a chat written before restarts stopped folding: the host's re-send
+ * after a restart carried `retryOfSeq`, which surfaces fold into the original
+ * bubble behind a pager. A re-send that follows the restart marker is drawn as
+ * its own message instead, and the marker's legacy text is rewritten, so an
+ * old chat shows the same history a new one does.
+ */
+export function restartResendAsOwnMessage<E extends { type: string }>(
+  ev: E,
+  state: { afterMarker: boolean },
+): E {
+  if (ev.type !== 'chat.message') return ev;
+  const msg = ev as unknown as {
+    role: string;
+    content: string;
+    retryOfSeq?: number;
+  };
+  if (msg.role === 'system') {
+    if (msg.content === LEGACY_RESTART_INTERRUPTION_MARKER) {
+      state.afterMarker = true;
+      return { ...ev, content: RESTART_INTERRUPTION_MARKER } as E;
+    }
+    if (msg.content === RESTART_INTERRUPTION_MARKER) state.afterMarker = true;
+    return ev;
+  }
+  if (msg.role !== 'user' || !state.afterMarker) return ev;
+  state.afterMarker = false;
+  if (msg.retryOfSeq === undefined) return ev;
+  const { retryOfSeq: _folded, ...own } = msg;
+  return own as unknown as E;
+}
+
 /** Total attempts `maybeGenerateTitle` makes before leaving a chat unnamed. */
 const TITLE_GEN_ATTEMPTS = 5;
+
+/**
+ * The inline line a restart-interrupted turn leaves in the history, before the
+ * host's automated re-send. Hosts before 2026-11-05 wrote the legacy text,
+ * which replay recognises so those chats show the same way.
+ */
+const RESTART_INTERRUPTION_MARKER = 'Turn interrupted by restart';
+const LEGACY_RESTART_INTERRUPTION_MARKER =
+  'Host restarted — the running turn was cut off and has been re-sent';
 
 /** Delay before the first retry in `maybeGenerateTitle`; doubles each attempt, so a host that is briefly saturated (a deploy restart) gets time to recover. */
 const TITLE_GEN_RETRY_DELAY_MS = 3_000;
@@ -3587,7 +3627,7 @@ export class Daemon {
         const head = pending[0];
         if (disk && disk.state !== 'lost' && disk.localId === head?.localId) {
           unclaimed.delete(m.chatId);
-          this.durableAttach.set(m.chatId, disk.consumed);
+          this.durableAttach.set(m.chatId, { consumed: disk.consumed, localId: head?.localId });
           if (disk.accountId !== undefined) this.durableAccount.set(m.chatId, disk.accountId);
           reattach = true;
           this.opts.logger.info(
@@ -3625,6 +3665,18 @@ export class Daemon {
         // pass: `sendInput` sets the chat's `pumping` guard before its first
         // await, so the second and later turns here see a live pump and queue
         // behind the first in their original order — exactly where they were.
+        if (i === 0 && headIsInterrupted) {
+          // Said in the chat history, not only the log: the model sees a bare
+          // 'Carry on', so a reader needs to know why the turn started over.
+          this.emit({
+            type: 'chat.message',
+            chatId: m.chatId,
+            role: 'system',
+            content: RESTART_INTERRUPTION_MARKER,
+            seq: this.bumpSeq(m.chatId),
+            createdAt: this.opts.now(),
+          });
+        }
         this.owedResend.add(m.chatId);
         this.interruptedResend.add(m.chatId);
         if (i === 0) {
@@ -3649,7 +3701,13 @@ export class Daemon {
           // the re-send NAMES it rather than asking for a second one. Absent
           // only on a turn interrupted before its `chat.message` ever landed
           // (nothing was drawn, so there is nothing to fold into).
-          ...(turn.retryOfSeq !== undefined ? { retryOfSeq: turn.retryOfSeq } : {}),
+          // EXCEPT a turn the restart cut off: retry-in-place is for a person
+          // choosing to re-run a turn. Folding a restart's re-send into the
+          // original bubble hid everything between attempts behind the pager
+          // (spec/12 § Restart interruptions), so it draws as its own message.
+          ...(turn.retryOfSeq !== undefined && !(i === 0 && headIsInterrupted)
+            ? { retryOfSeq: turn.retryOfSeq }
+            : {}),
           // spec/14 § Job trigger turn — resumed as what it was, same as `origin`.
           ...(turn.jobTrigger ? { jobTrigger: turn.jobTrigger } : {}),
         }).catch((err: unknown) => {
@@ -6097,6 +6155,7 @@ export class Daemon {
         }
       }
     }
+    const restartState = { afterMarker: false };
     for (const record of records) {
       if (
         record.rec.k === 'permission.request' &&
@@ -6133,7 +6192,9 @@ export class Daemon {
         // long chat's bytes — one measured chat shipped 23 MB to draw 150 KB
         // of conversation — and every one of those rows arrives collapsed, so
         // the surface fetches a body only when the reader opens that row.
-        emitToSurface(this.chatLog.externalizeForReplay(chatId, ev));
+        emitToSurface(
+          this.chatLog.externalizeForReplay(chatId, restartResendAsOwnMessage(ev, restartState)),
+        );
       } else if (record.rec.k === 'turn.end' && record.rec.outcome === 'failed') {
         emitToSurface({
           type: 'chat.message',
@@ -6724,11 +6785,14 @@ export class Daemon {
    * process would cut off. Self-update holds its installer until this is empty.
    * A chat parked on a permission card is excluded: nothing is executing, and
    * a card nobody answers would otherwise hold the install forever.
+   *
+   * A turn running under a durable runner is held for too: it is meant to
+   * reattach after the restart, but 2026-11-05 a job-fired turn on the Mac was
+   * cut off by eight overnight self-updates and lost its work, so an install
+   * does not rely on that.
    */
   runningChatIds(): string[] {
-    return [...this.pumping].filter(
-      (chatId) => !this.isParkedOnPermission(chatId) && !hasDurableTurn(chatId),
-    );
+    return [...this.pumping].filter((chatId) => !this.isParkedOnPermission(chatId));
   }
 
   /**
@@ -6736,7 +6800,34 @@ export class Daemon {
    * how far that host got through the turn's output. The next turn this chat
    * starts is that same turn, reattached (`durableTurn.ts`), not a new claude.
    */
-  private readonly durableAttach = new Map<string, Consumed | null>();
+  private readonly durableAttach = new Map<
+    string,
+    { consumed: Consumed | null; localId: string | undefined }
+  >();
+
+  /**
+   * The surviving turn this run carries on, or undefined. The marker belongs to
+   * one turn (its localId); any other turn of the chat is a new claude. A
+   * marker that outlives its turn is dropped loudly, never handed to a later
+   * message, which would reattach to a turn that is no longer on disk.
+   */
+  private takeDurableAttach(
+    chatId: string,
+    localId: string | undefined,
+  ): Consumed | null | undefined {
+    const marker = this.durableAttach.get(chatId);
+    if (marker === undefined) return undefined;
+    if (marker.localId !== localId) {
+      this.opts.logger.error(
+        { chatId, markerLocalId: marker.localId, localId },
+        'durable turn: a turn other than the one marked for reattach started; the marker was stale and is dropped',
+      );
+      this.durableAttach.delete(chatId);
+      this.durableAccount.delete(chatId);
+      return undefined;
+    }
+    return marker.consumed;
+  }
 
   /** The account a surviving turn was started on, by chat — it outlives the host's own memory. */
   private readonly durableAccount = new Map<string, string>();
@@ -6748,7 +6839,7 @@ export class Daemon {
   ): Pick<SdkRunOptions, 'durableTurn'> {
     const config = this.opts.durableTurns;
     if (!config || harness !== 'claude') return {};
-    const attach = this.durableAttach.get(chatId);
+    const attach = this.takeDurableAttach(chatId, localId);
     this.durableAttach.delete(chatId);
     return {
       durableTurn: {
@@ -7009,7 +7100,10 @@ export class Daemon {
         reason: 'running',
         delivered: true,
       });
-      if (item.origin !== 'machine') this.drainHadUserTurn.add(chatId);
+      if (item.origin !== 'machine') {
+        this.drainHadUserTurn.add(chatId);
+        this.unattendedTurns.delete(chatId);
+      }
     }
     if (delivered.length === 0) return undefined;
     this.persistPendingTurns(chatId);
@@ -9134,6 +9228,26 @@ export class Daemon {
       return false;
     }
 
+    // The track this turn writes to must be the track meta calls active.
+    // A fork flips `activeBranchId` the moment it is CALLED, so a turn that
+    // keeps running on the old track while its fork never gets to run (a host
+    // restart cut it off) writes every event to an inactive branch and the
+    // surfaces' replay of the active one stops dead. A queued fork is the one
+    // legitimate reason for the two to differ. NO FALLBACK: say so, loudly.
+    if (!fork) {
+      const activeBranch = this.opts.metaStore.read(chatId)?.activeBranchId;
+      const writingTo = this.branchIdFor(chatId);
+      const forkQueued = (this.turnQueues.get(chatId) ?? []).some((q) => q.fork !== undefined);
+      if (activeBranch !== undefined && activeBranch !== writingTo && !forkQueued) {
+        this.failPreflight(
+          chatId,
+          'sdk_error',
+          `history would be written to track ${writingTo} but the chat's active track is ${activeBranch}; refusing to write to an inactive track`,
+        );
+        return false;
+      }
+    }
+
     // F1 — a RESUME with no claudeSessionId would silently start a brand-new
     // contextless session. Distinguish the legitimate first query of a
     // freshly-spawned chat (resume undefined is correct) from a resume of a
@@ -9299,9 +9413,10 @@ export class Daemon {
         previous !== undefined && oauth.accountId !== undefined && previous !== oauth.accountId;
       // A reattached turn is still running on the account it was started on,
       // whatever the host resolves to now: a refusal has to be blamed there.
-      const carriedOn = this.durableAttach.has(chatId)
-        ? this.durableAccount.get(chatId)
-        : undefined;
+      const carriedOn =
+        this.durableAttach.get(chatId)?.localId === localId && this.durableAttach.has(chatId)
+          ? this.durableAccount.get(chatId)
+          : undefined;
       this.durableAccount.delete(chatId);
       if (carriedOn !== undefined) this.runningOnAccount.set(chatId, carriedOn);
       else if (oauth.accountId === undefined) this.runningOnAccount.delete(chatId);
@@ -9413,6 +9528,12 @@ export class Daemon {
     // about to start the next one.
     state.turnOrigin = origin ?? 'user';
     if (state.turnOrigin === 'user') this.drainHadUserTurn.add(chatId);
+    // A job/hook/goal-fired turn has no one at the other end even though its
+    // origin is `user`; requestPermission denies auto-mode Bash escalations on
+    // it instead of parking the turn on a card. Cleared if a person's message
+    // is delivered into the turn (see below).
+    if (jobTrigger || hookTrigger || goalTrigger) this.unattendedTurns.add(chatId);
+    else this.unattendedTurns.delete(chatId);
     // spec/09 § A turn the user stopped. A stop belongs to the turn it killed,
     // so the flag is cleared here rather than when the stop settles: a chat
     // that is stopped and then given a fresh turn announces that turn's real
@@ -9550,8 +9671,15 @@ export class Daemon {
     let userMessageSeq: number | undefined;
     // spec/04 § Handoff budget — a retried provider switch delivers the message
     // already in the log; it does not append a second copy of it.
+    // spec/02 § Turns outlive the host — a reattached turn is the SAME turn
+    // still running, so its prompt already has a bubble: nothing is re-recorded.
+    const reattachesDrawnTurn =
+      retryOfSeq !== undefined &&
+      this.durableAttach.has(chatId) &&
+      this.durableAttach.get(chatId)?.localId === localId;
     const reusesLoggedMessage =
-      retryOfSeq !== undefined && this.reuseLoggedUserMessage.get(chatId) === retryOfSeq;
+      retryOfSeq !== undefined &&
+      (reattachesDrawnTurn || this.reuseLoggedUserMessage.get(chatId) === retryOfSeq);
     if (reusesLoggedMessage) {
       this.reuseLoggedUserMessage.delete(chatId);
       userMessageSeq = retryOfSeq;
@@ -12377,6 +12505,9 @@ export class Daemon {
     }
   }
 
+  /** Chats whose running turn was fired by a job/hook/goal and has had no person's message since. */
+  private readonly unattendedTurns = new Set<string>();
+
   /**
    * Bridges the SDK backend's `onPermissionRequest` (sdkBackend.ts
    * `SdkRunOptions`) — which the real SDK's `canUseTool` and the mock's
@@ -12420,7 +12551,8 @@ export class Daemon {
     // it is what made advance approvals ("yes, delete those") get ignored. Only
     // machine-origin turns (jobs, triggers, self-wakes) are denied outright.
     const modeAtRequest = this.chatPermissionMode(chatId);
-    const attended = this.chatState.get(chatId)?.turnOrigin !== 'machine';
+    const attended =
+      this.chatState.get(chatId)?.turnOrigin !== 'machine' && !this.unattendedTurns.has(chatId);
     if (tool === 'Bash' && modeAtRequest === 'auto' && !attended) {
       this.opts.logger.warn({ chatId, tool }, 'auto mode escalated Bash; denied without asking');
       return Promise.resolve({
@@ -12435,7 +12567,14 @@ export class Daemon {
     // e.g. `permissionModeMismatch` below not catching a resumed session).
     if (tool === 'Bash') {
       this.opts.logger.warn(
-        { chatId, tool, mode: modeAtRequest },
+        {
+          chatId,
+          tool,
+          mode: modeAtRequest,
+          decisionReason,
+          description,
+          command: args['command'],
+        },
         'Bash escalated to a human permission ask',
       );
     }
@@ -12457,6 +12596,10 @@ export class Daemon {
       );
       return Promise.resolve({ approve: false, denyMessage: QUESTION_SUPERSEDED_MESSAGE });
     }
+    // The SDK's own reason for escalating (a safety check, not the mode) is the
+    // only explanation the person gets for a card they did not expect, e.g. under
+    // `bypassPermissions`; show it rather than a bare "Permission needed: Bash".
+    if (description === undefined && decisionReason) description = decisionReason;
     const requestId = randomUUID();
     // Register the gate BEFORE announcing the request, not after.
     //
