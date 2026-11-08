@@ -176,16 +176,19 @@ describe('syncTranscripts', () => {
     expect(useChatStore.getState().timelines['c1']?.length).toBe(1);
   });
 
-  it('reports a host that never answers instead of waiting for ever', () => {
+  it('retries a host that never answers without showing a banner', () => {
     useChatStore.getState().hydrate([row('c1', 1)]);
-    open();
+    const sock = open();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     getWs().syncTranscripts();
+    const replays = () => sock.sent.filter((m) => m.includes('chat.replay')).length;
     vi.advanceTimersByTime(31_000);
-    expect(
-      useUiStore
-        .getState()
-        .errors.map((e) => e.message)
-        .join(' '),
-    ).toMatch(/offline copy of chat c1 timed out/);
+    expect(useUiStore.getState().errors).toHaveLength(0);
+    expect(warn).toHaveBeenCalled();
+    expect(replays()).toBe(2);
+    vi.advanceTimersByTime(100_000);
+    expect(replays()).toBe(3);
+    expect(useUiStore.getState().errors).toHaveLength(0);
+    warn.mockRestore();
   });
 });

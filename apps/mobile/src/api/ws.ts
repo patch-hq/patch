@@ -70,6 +70,7 @@ export const HEARTBEAT_INTERVAL_MS = 10_000;
  * lands within the same frame it arrived in.
  */
 const PREFETCH_TIMEOUT_MS = 30_000;
+const PREFETCH_MAX_TRIES = 3;
 export const STORE_BATCH_MS = 16;
 /**
  * How long the link must be down, with the app in the FOREGROUND, before the
@@ -122,6 +123,7 @@ export class PatchWs {
   private prefetchQueue: Array<{ chatId: string; lastUpdated: number }> = [];
   private prefetching: { chatId: string; lastUpdated: number } | null = null;
   private prefetchTimer: TimerHandle | null = null;
+  private prefetchTries = new Map<string, number>();
 
   constructor(url: string) {
     this.url = url;
@@ -288,13 +290,20 @@ export class PatchWs {
         batch: true,
       }),
     );
-    // A host that never answers must be heard about, not waited on for ever.
+    // A host that never answers is retried quietly (a background copy is not
+    // worth a banner) and logged so it stays debuggable. It gives up after a
+    // few tries; the next roster refresh picks the chat up again.
     this.prefetchTimer = setTimeout(() => {
       const stuck = this.prefetching;
       this.endPrefetch(false);
-      useUiStore
-        .getState()
-        .pushError(`offline copy of chat ${stuck?.chatId ?? ''} timed out — will retry`);
+      if (stuck === null) return;
+      const tries = (this.prefetchTries.get(stuck.chatId) ?? 0) + 1;
+      this.prefetchTries.set(stuck.chatId, tries);
+      console.warn(`[ws] offline copy of ${stuck.chatId} timed out (try ${tries})`);
+      if (tries < PREFETCH_MAX_TRIES) {
+        this.prefetchQueue.push(stuck);
+        this.pumpPrefetch();
+      }
     }, PREFETCH_TIMEOUT_MS);
   }
 
@@ -303,7 +312,10 @@ export class PatchWs {
     this.prefetching = null;
     if (this.prefetchTimer !== null) clearTimeout(this.prefetchTimer);
     this.prefetchTimer = null;
-    if (done && finished) markSynced(finished.chatId, finished.lastUpdated);
+    if (done && finished) {
+      this.prefetchTries.delete(finished.chatId);
+      markSynced(finished.chatId, finished.lastUpdated);
+    }
     this.pumpPrefetch();
   }
 
