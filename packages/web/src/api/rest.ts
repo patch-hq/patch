@@ -531,6 +531,11 @@ export const api = {
     }>('/api/chats/counts'),
   listJobs: () => request<{ jobs: unknown[] }>('/api/jobs'),
   getJob: (id: string) => request<unknown>(`/api/jobs/${id}`),
+  // The enabled scheduled jobs that re-prompt a chat, with their next fire.
+  chatJobTicks: (chatId: string) =>
+    request<{ jobs: import('@patch/wire/jobs').ChatJobTick[] }>(
+      `/api/chats/${encodeURIComponent(chatId)}/jobs`,
+    ),
   createJob: (body: unknown) => request<unknown>('/api/jobs', { method: 'POST', body }),
   patchJob: (id: string, body: unknown) =>
     request<unknown>(`/api/jobs/${id}`, { method: 'PATCH', body }),

@@ -64,6 +64,7 @@ import { FinishedGoalBanner, GoalBanner } from '../components/GoalBanner.js';
 import { TaskBar } from '../components/TaskBar.js';
 import { ReminderBanner } from '../components/ReminderBanner.js';
 import { WakeBar } from '../components/WakeBar.js';
+import { JobTickBar } from '../components/JobTickBar.js';
 import { api } from '../api/rest.js';
 import { SkillRefChatContext, useSkillTarget } from '../components/SkillRef.js';
 import { linkSkillTokens } from '../lib/skillToken.js';
@@ -2230,6 +2231,7 @@ export function ChatRoute({
         contentVersion={timeline.length}
         onOpen={() => expandTo(0, false)}
       />
+      <JobTickBar chatId={row.chatId} />
       {row.jobId ? (
         <JobBar chatId={row.chatId} jobId={row.jobId} at={row.lastUserActivity} />
       ) : null}

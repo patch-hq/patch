@@ -31,6 +31,7 @@ vi.mock('../api/rest.js', async (importOriginal) => {
   return {
     ApiError: actual.ApiError,
     api: {
+      chatJobTicks: vi.fn(async () => ({ jobs: [] })),
       getNotifications: vi.fn(async () => ({ items: [], unread: 0 })),
       markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
       getFileContent: vi.fn(async (_chatId: string, _path: string) => ({
