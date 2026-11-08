@@ -48,6 +48,7 @@ import {
   Volume2,
 } from 'lucide-react';
 import { StatusBadge } from './StatusBadge.js';
+import { JobTickChip } from './JobTickBar.js';
 import { useChatBadge } from './ChatStatusBadge.js';
 import { groupColourClass } from './PaneArea.js';
 import { findTabByKey, tabKey, type TabDescriptor } from '../stores/layoutStore.js';
@@ -475,6 +476,7 @@ export function ChatHeader({
                 ! waiting on you
               </span>
             ) : null}
+            <JobTickChip chatId={row.chatId} />
             {/* Open in new window sits beside the title (spec/14 § Chat panel
               header) — shown for every chat including special threads. */}
             <button

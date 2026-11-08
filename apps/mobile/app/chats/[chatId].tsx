@@ -112,6 +112,7 @@ import {
 } from '../../src/components/ManagerChats';
 import { BrowserLiveCard } from '../../src/components/browser/BrowserLiveCard';
 import { ChatBars } from '../../src/components/ChatBars';
+import { JobTickChip } from '../../src/components/chatBars/JobTickBar';
 import { ChatFindBar } from '../../src/components/ChatFindBar';
 import { findMessageSeqs, stepIndex } from '../../src/lib/chatFind';
 import { ContextDisclosure } from '../../src/components/ContextDisclosure';
@@ -1171,6 +1172,7 @@ function ChatDetailBody(): React.ReactElement {
                 </Text>
               </View>
             ) : null}
+            <JobTickChip chatId={chatId} />
             {row?.awaitingPermission ? (
               <View
                 style={{

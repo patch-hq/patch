@@ -11222,6 +11222,56 @@ main.empty-state p {
   background: var(--bg-elevated);
 }
 
+/* ---------- Job tick bar (spec/14 § Main chat panel — Job tick bar) ---------- */
+/* Stacks with the wake bar and reuses its look; the name truncates so the
+   cadence and countdown stay visible on a narrow screen. */
+.job-tick-bars {
+  display: flex;
+  flex-direction: column;
+}
+.job-tick-bar {
+  position: relative;
+  color: var(--ink-1, var(--ink-2));
+  font-variant-numeric: tabular-nums;
+}
+.job-tick-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.job-tick-schedule {
+  flex: none;
+  color: var(--ink-3);
+}
+.job-tick-countdown {
+  flex: none;
+}
+.job-tick-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--line-soft);
+}
+.job-tick-progress i {
+  display: block;
+  height: 100%;
+  background: var(--ink-3);
+}
+.job-tick-chip {
+  flex: none;
+  font-size: var(--text-min);
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* ---------- Artifact bar ---------- */
 /* spec/14 § Artifacts — Artifact bar. Drawn through the shared StatusRow: the
    artifacts are plain text links, 16px apart, each ellipsised past ~260px. */

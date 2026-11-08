@@ -12,6 +12,7 @@ function icon(name: string): (props: Record<string, unknown>) => React.ReactElem
 
 export const AlarmClock = icon('AlarmClock');
 export const AlarmClockOff = icon('AlarmClockOff');
+export const CalendarClock = icon('CalendarClock');
 export const Zap = icon('Zap');
 export const Archive = icon('Archive');
 export const Bot = icon('Bot');

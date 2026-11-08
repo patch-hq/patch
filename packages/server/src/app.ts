@@ -96,7 +96,8 @@ import { JobLogs } from './jobs/logs.js';
 import { JobAlerts, describeFailure } from './jobs/alerts.js';
 import { CronScheduler } from './jobs/cron.js';
 import { HostWaker } from './jobs/host-wake.js';
-import { RecurrenceScheduler } from './jobs/recurrence.js';
+import { RecurrenceScheduler, nextOccurrence } from './jobs/recurrence.js';
+import { Cron } from 'croner';
 import { registerWebhookRoutes } from './jobs/webhooks.js';
 import { registerTodoistRoutes } from './jobs/todoist.js';
 import { registerJobRoutes } from './jobs/routes.js';
@@ -2277,6 +2278,23 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     jobLogs,
     jobAlerts,
     jobCounts: (jobId) => jobDispatcher.counts(jobId),
+    nextFires: (job) => {
+      const t = job.trigger;
+      if (t.type === 'cron') {
+        const next = cronScheduler.nextRun(job.id);
+        if (!next) return [null, null];
+        const after = new Cron(t.expression, {
+          timezone: t.timezone ?? 'UTC',
+          domAndDow: true,
+        }).nextRuns(1, next)[0];
+        return [next, after ?? null];
+      }
+      if (t.type === 'recurrence') {
+        const next = nextOccurrence(t.rrule, t.timezone, new Date());
+        return [next, next ? nextOccurrence(t.rrule, t.timezone, next) : null];
+      }
+      return [null, null];
+    },
     dispatcher: jobDispatcher,
     hostLink,
     idGenerator,

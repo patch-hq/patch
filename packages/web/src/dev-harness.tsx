@@ -187,6 +187,26 @@ useChatStore.getState().hydrate([
   // was absorbed rather than queued (`pendingWake.waiting`). The bar reads
   // "waiting for current turn" instead of a countdown to the stale `fireAt`
   // (`wake-bar.spec.ts`).
+  // A chat a cron job re-prompts every 5 minutes, with a pending self-wake too,
+  // so the job tick bar can be checked stacked with the wake bar
+  // (`job-tick-bar.spec.ts`). The jobs list is served by the fetch stub below.
+  {
+    chatId: 'chat_job_ticks',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'Resume Cadence Delivery Automation',
+    folder: '/home/tom/projects/cadence',
+    activity: 'idle',
+    status: 'active',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 5,
+    pendingWake: {
+      message: 'look at the board again',
+      fireAt: Date.now() + 9 * 60_000,
+    },
+  },
   {
     chatId: 'chat_loop_waiting',
     hostId: 'd1',
@@ -3092,6 +3112,38 @@ const fileStubParam = params.get('fileStub');
 // `?archive=N` — answer the paged archived listing with N synthetic chats, so
 // the windowed Archived view can be exercised at scale in a real browser.
 const archiveSize = Number(new URLSearchParams(window.location.search).get('archive') ?? 0);
+// Scheduled-job ticks for the job tick bar (`job-tick-bar.spec.ts`): only
+// `chat_job_ticks` has a job; every other chat has none.
+{
+  const prevFetch = window.fetch.bind(window);
+  window.fetch = ((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    const ticks = /\/api\/chats\/([^/?]+)\/jobs(?:\?|$)/.exec(url);
+    if (ticks) {
+      const jobs =
+        ticks[1] === 'chat_job_ticks'
+          ? [
+              {
+                jobId: 'j_harness',
+                name: 'Resume Cadence Delivery',
+                trigger: 'cron',
+                schedule: '*/5 * * * *',
+                nextFireAt: Date.now() + 134_000,
+                periodMs: 300_000,
+              },
+            ]
+          : [];
+      return Promise.resolve(
+        new Response(JSON.stringify({ jobs }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    }
+    return prevFetch(input, init);
+  }) as typeof window.fetch;
+}
+
 if (archiveSize > 0) {
   const prevFetch = window.fetch.bind(window);
   window.fetch = ((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
