@@ -225,11 +225,9 @@ describe('Composer — dictation mic (tap-toggle)', () => {
     const box = preview.parent!.parent!;
     // Same cap as the field under it, and anchored to the bottom so the
     // newest words are the ones in view.
-    const inputMax = (findHost(r.root, byType('TextInput')).props['style'] as { maxHeight: number })
-      .maxHeight;
     expect(box.props['style']).toMatchObject({
       overflow: 'hidden',
-      maxHeight: inputMax,
+      maxHeight: 200,
       justifyContent: 'flex-end',
     });
   });

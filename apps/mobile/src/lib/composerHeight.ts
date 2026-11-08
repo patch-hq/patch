@@ -36,11 +36,12 @@ export const COMPOSER_MIN_HEIGHT = 40;
 export const COMPOSER_MAX_HEIGHT = 200;
 
 /**
- * Cap while dictating. Starting a dictation puts the keyboard away, so the
- * window height is stable for its whole length and the field can take close
- * to half the screen before the oldest words scroll off the top. Never below
- * the typing cap.
+ * Cap while dictating: a quarter of the window, so the transcript above stays
+ * readable. Starting a dictation puts the keyboard away, so the window height is
+ * stable for its whole length. Longer text scrolls inside the box; the user can
+ * drag the grip to make it taller or shorter.
  */
+export const DICTATION_HEIGHT_FRACTION = 0.25;
 export function dictationMaxHeight(windowHeight: number): number {
-  return Math.max(COMPOSER_MAX_HEIGHT, Math.round(windowHeight * 0.45));
+  return Math.max(COMPOSER_MIN_HEIGHT, Math.round(windowHeight * DICTATION_HEIGHT_FRACTION));
 }

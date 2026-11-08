@@ -99,10 +99,10 @@ describe('Composer', () => {
   it('caps the height and reveals an internal scrollbar once content exceeds the cap', () => {
     render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
     const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
-    stubLayout(input, 500); // 500 + 2 = 502px, far over the 30%-window cap
+    stubLayout(input, 500); // 500 + 2 = 502px, far over the 25%-window cap
     fireEvent.change(input, { target: { value: 'lots\nand\nlots\nof\nlines' } });
     expect(input.style.overflowY).toBe('auto');
-    expect(input.style.height).toBe(`${Math.round(window.innerHeight * 0.3)}px`);
+    expect(input.style.height).toBe(`${Math.round(window.innerHeight * 0.25)}px`);
   });
 
   it('sends on form submit and clears the input', () => {

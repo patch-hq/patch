@@ -6209,7 +6209,7 @@ button.view-file-download {
      auto-grow effect flips this to `auto` only once content exceeds the cap
      (spec/14 § Composer — the input never shows a scrollbar under the cap). */
   overflow-y: hidden;
-  max-height: 30vh;
+  max-height: 25vh;
   /* Was bg-elevated (#fdfaf2) — nearly identical to the cream page, so the
      field vanished. Pure white + a defined border reads unambiguously as an
      input against the warm panel. */
@@ -17355,4 +17355,46 @@ select.permission-mode.is-pending {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Dictation: cancel (×) sits left of the mic; the grip above the box drags its
+   height. Both only render while recording. */
+.composer-dict-cancel {
+  position: absolute;
+  right: 40px;
+  bottom: 4px;
+  z-index: 1;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.composer-dict-cancel:hover {
+  background: var(--bg-soft);
+  color: var(--ink-2);
+}
+.composer-dict-grip {
+  height: 10px;
+  margin: 0 auto 2px;
+  width: 40px;
+  cursor: ns-resize;
+  touch-action: none;
+  position: relative;
+}
+.composer-dict-grip::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
 }
