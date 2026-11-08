@@ -208,6 +208,9 @@ export interface ChatListEntry {
   todos?: TodoItem[];
   /** A special thread turned off (spec/06 § Disabled). Optional, as `goal`. */
   disabled?: boolean;
+  /** Latest user/assistant message snippet and the chat's high-water seq. Optional: an older server omits them. */
+  lastMessagePreview?: string | null;
+  lastSeq?: number;
 }
 
 /**

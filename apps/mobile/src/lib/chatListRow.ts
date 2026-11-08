@@ -38,5 +38,7 @@ export function toChatListRow(c: ChatListEntry): ChatListRow {
     reminderEvery: c.reminderEvery,
     todos: c.todos,
     disabled: c.disabled,
+    ...(c.lastMessagePreview !== undefined ? { lastMessagePreview: c.lastMessagePreview } : {}),
+    ...(c.lastSeq !== undefined ? { lastSeq: c.lastSeq } : {}),
   };
 }

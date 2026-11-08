@@ -47,6 +47,14 @@ export interface ChatSummary {
    */
   preview: string | null;
   /**
+   * One-line snippet of the chat's latest user/assistant message and the host's
+   * high-water seq, mirrored from `chat.state`. They let the roster (REST) carry
+   * what the phone otherwise learns only from a live subscription. Optional: a
+   * row from before the fields, or from an older host, has neither.
+   */
+  lastMessagePreview?: string | null;
+  lastSeq?: number;
+  /**
    * The chat's goal (patch/todo.md — `/goal`), mirrored from the host's
    * `chat.state`. `null` when unset. Lets REST surfaces show the goal at the top
    * of the chat on cold-start without waiting for a live WS.
@@ -403,6 +411,13 @@ export class ChatRegistry {
         // Preview is captured once and never cleared: prefer the incoming value
         // but never let an absent/undefined event field wipe a known preview.
         preview: event.preview ?? existing?.preview ?? null,
+        // The latest message CAN be absent, so only an ABSENT field (older host)
+        // keeps the known value; the seq only ever moves forward.
+        lastMessagePreview:
+          event.lastMessagePreview !== undefined
+            ? event.lastMessagePreview
+            : (existing?.lastMessagePreview ?? null),
+        lastSeq: Math.max(existing?.lastSeq ?? 0, event.lastSeq ?? 0),
         // Goal CAN be cleared (set to null), so `null` is a meaningful value —
         // only fall back to the existing goal when the field is absent (undefined).
         goal: event.goal !== undefined ? event.goal : (existing?.goal ?? null),
@@ -604,6 +619,10 @@ export class ChatRegistry {
       lastUpdated: next.lastUpdated,
       name: next.name,
       preview: next.preview,
+      ...(next.lastMessagePreview !== undefined
+        ? { lastMessagePreview: next.lastMessagePreview }
+        : {}),
+      ...((next.lastSeq ?? 0) > 0 ? { lastSeq: next.lastSeq } : {}),
       // `folder` on the wire is min(1); a spawned chat always has one, but guard
       // against an empty mirror value so `decode()` never rejects the frame.
       ...(next.folder ? { folder: next.folder } : {}),

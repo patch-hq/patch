@@ -16099,6 +16099,12 @@ export class Daemon {
     this.emit(ev);
   }
 
+  /** One-line snippet of the chat's latest user/assistant message, or null. */
+  private lastMessagePreview(chatId: string): string | null {
+    const head = this.chatLog.lastMessage(chatId);
+    return head === null ? null : makePreviewSnippet(head);
+  }
+
   /**
    * Build the current `chat.state` frame without emitting it — the pure half
    * of `emitState`, reused by `replayFromLog` so a reconnecting surface always
@@ -16126,6 +16132,9 @@ export class Daemon {
       // How far this host's own log of the chat reaches; the server compares it
       // with what it has committed (spec/01 § Message log).
       ...(lastSeq >= 0 ? { lastSeq } : {}),
+      // What was said last (not the first prompt, which is `preview`), so a
+      // surface not subscribed to the chat can show it and mark it unread.
+      lastMessagePreview: this.lastMessagePreview(chatId),
       // spec/04 § Branching — "Status in the sidebar reflects the chat as a
       // whole": the active branch's own activity, raised by any OTHER branch
       // currently running or awaiting permission (`aggregateActivity`).

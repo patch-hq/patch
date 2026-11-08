@@ -532,11 +532,20 @@ function emptyRow(chatId: string, folder: string): ChatRow {
  * keeps the known value rather than being wiped — the same "omitted is
  * unchanged" rule `chat.state` follows.
  */
-function mergeListRow(prior: ChatRow | undefined, r: ChatListRow): ChatRow {
+function mergeListRow(prior: ChatRow | undefined, rosterRow: ChatListRow): ChatRow {
+  const { lastMessagePreview, lastSeq: rosterSeq, ...r } = rosterRow;
   const base = prior ?? emptyRow(r.chatId, r.folder);
   return {
     ...base,
     ...r,
+    // The roster knows the latest message, which the live stream tells only for
+    // chats this phone has subscribed to. Take it unless the row already holds
+    // something newer (a message that beat this answer).
+    lastSeq: Math.max(base.lastSeq, rosterSeq ?? 0),
+    preview:
+      lastMessagePreview != null && (rosterSeq ?? 0) >= base.lastSeq
+        ? lastMessagePreview
+        : base.preview,
     awaitingState: false,
     model: r.model !== undefined ? r.model : (prior?.model ?? null),
     jobId: r.jobId !== undefined ? r.jobId : base.jobId,
@@ -868,6 +877,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // carries no seq, and a chat not open gets no replay. Without it
             // `lastSeq` stays 0 and a visited chat reads as grey instead of `done`.
             lastSeq: Math.max(row.lastSeq, event.lastSeq ?? 0),
+            // What was said last. Only when this frame reaches at least as far
+            // as the row already does: a live message that landed first is newer.
+            preview:
+              event.lastMessagePreview != null && (event.lastSeq ?? 0) >= row.lastSeq
+                ? event.lastMessagePreview
+                : row.preview,
             // spec/14 § Sidebar ordering — an older host never sends the
             // field, so keep what is known rather than losing the sort key.
             lastUserActivity: event.lastUserActivity ?? row.lastUserActivity,

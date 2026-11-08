@@ -1084,3 +1084,31 @@ describe('ChatRegistry background-task count', () => {
     expect(reg.get('c1')?.backgroundTasks).toBe(0);
   });
 });
+
+describe('latest message mirror', () => {
+  it('follows chat.state, keeps the known value when a frame omits it, and never lowers the seq', () => {
+    const reg = new ChatRegistry({ logger: silentLogger() });
+    reg.observe({ type: 'chat.spawned', hostId: 'd1', chatId: 'm', folder: '/proj' });
+    const state = (extra: Record<string, unknown>) =>
+      reg.observe({
+        type: 'chat.state',
+        permissionMode: 'auto',
+        chatId: 'm',
+        activity: 'idle',
+        lastUpdated: 1,
+        status: 'active',
+        folder: '/proj',
+        preview: 'first prompt',
+        ...extra,
+      } as never);
+    state({ lastMessagePreview: 'first answer', lastSeq: 4 });
+    expect(reg.get('m')?.lastMessagePreview).toBe('first answer');
+    expect(reg.get('m')?.preview).toBe('first prompt');
+    state({ lastMessagePreview: 'second answer', lastSeq: 6 });
+    state({});
+    expect(reg.get('m')?.lastMessagePreview).toBe('second answer');
+    expect(reg.get('m')?.lastSeq).toBe(6);
+    state({ lastSeq: 2 });
+    expect(reg.get('m')?.lastSeq).toBe(6);
+  });
+});
