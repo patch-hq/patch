@@ -645,6 +645,8 @@ interface FormState {
   spawnFolder: string;
   spawnPrompt: string;
   spawnGoal: string;
+  spawnLoopEvery: string;
+  spawnLoopMessage: string;
   spawnSkill: string;
   /**
    * The model each fire's chat runs on, from `spawnHostId`'s catalogue.
@@ -760,6 +762,8 @@ const DEFAULT_FORM: FormState = {
   spawnFolder: '',
   spawnPrompt: '',
   spawnGoal: '',
+  spawnLoopEvery: '',
+  spawnLoopMessage: '',
   spawnSkill: '',
   // A new job starts on the account default (spec/14 § Jobs view) — it tracks
   // one setting instead of freezing a model id at the moment the job was
@@ -792,6 +796,82 @@ const DEFAULT_FORM: FormState = {
   scriptCommand: '',
   scriptTimeoutMs: '',
 };
+
+function randomSecret(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Bearer-scheme helpers: generate a secret, copy it, and show paste-ready
+ *  curl / Home Assistant examples. */
+function BearerHelper({
+  secret,
+  jobId,
+  onGenerate,
+}: {
+  secret: string;
+  jobId: string | undefined;
+  onGenerate: (v: string) => void;
+}): JSX.Element {
+  const [copied, setCopied] = useState<string | null>(null);
+  const url = `${window.location.origin}/api/webhooks/${jobId ?? '<job id, shown once saved>'}`;
+  const token = secret || '<secret>';
+  const curl = `curl -X POST ${url} \\\n  -H "Authorization: Bearer ${token}" \\\n  -H "Content-Type: application/json" \\\n  -d '{}'`;
+  const ha = `rest_command:\n  patch_job:\n    url: "${url}"\n    method: POST\n    headers:\n      Authorization: "Bearer ${token}"\n    content_type: "application/json"\n    payload: '{}'`;
+  const copy = (key: string, text: string): void => {
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(key);
+      setTimeout(() => setCopied(null), 1500);
+    });
+  };
+  return (
+    <div data-testid="job-bearer-helper">
+      <div>
+        <button
+          type="button"
+          className="link-btn"
+          data-testid="job-bearer-generate"
+          onClick={() => onGenerate(randomSecret())}
+        >
+          Generate secret
+        </button>{' '}
+        <button
+          type="button"
+          className="link-btn"
+          data-testid="job-bearer-copy-secret"
+          disabled={!secret}
+          onClick={() => copy('secret', secret)}
+        >
+          {copied === 'secret' ? 'Copied' : 'Copy secret'}
+        </button>
+      </div>
+      <div>
+        curl{' '}
+        <button
+          type="button"
+          className="link-btn"
+          data-testid="job-bearer-copy-curl"
+          onClick={() => copy('curl', curl)}
+        >
+          {copied === 'curl' ? 'Copied' : 'Copy'}
+        </button>
+        <pre data-testid="job-bearer-curl">{curl}</pre>
+      </div>
+      <div>
+        Home Assistant{' '}
+        <button
+          type="button"
+          className="link-btn"
+          data-testid="job-bearer-copy-ha"
+          onClick={() => copy('ha', ha)}
+        >
+          {copied === 'ha' ? 'Copied' : 'Copy'}
+        </button>
+        <pre data-testid="job-bearer-ha">{ha}</pre>
+      </div>
+    </div>
+  );
+}
 
 export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element {
   // `jobId` (from the pane tab's own descriptor, via `JobPaneRoute`) wins
@@ -1214,6 +1294,12 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
         pushError('Add a Skill or a Prompt (or both). The action needs something to run.');
         return;
       }
+    }
+    // A loop is an interval AND its own prompt; half of one would either arm
+    // nothing silently or make the agent invent the other half.
+    if (usesSpawnFields && !!form.spawnLoopEvery.trim() !== !!form.spawnLoopMessage.trim()) {
+      pushError('A loop needs both an interval and a loop prompt.');
+      return;
     }
     // spawn + ensure need a folder (the picker no longer carries a native
     // `required`, since it's a select with a Custom-path escape hatch).
@@ -1914,6 +2000,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   }}
                 >
                   <option value="none">none</option>
+                  <option value="bearer">bearer</option>
                   <option value="hmac-sha256">hmac-sha256</option>
                   <option value="github">github</option>
                   <option value="stripe">stripe</option>
@@ -1931,6 +2018,13 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                   }}
                 />
               </label>
+              {form.webhookScheme === 'bearer' ? (
+                <BearerHelper
+                  secret={form.webhookSecret}
+                  jobId={isNew ? undefined : id}
+                  onGenerate={(v) => setForm((f) => ({ ...f, webhookSecret: v }))}
+                />
+              ) : null}
             </>
           ) : null}
         </section>
@@ -2445,6 +2539,30 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
                       setForm((f) => ({ ...f, spawnGoal: next }));
                     }}
                     data-testid="job-spawn-goal"
+                  />
+                </label>
+                <label>
+                  Loop every
+                  <input
+                    value={form.spawnLoopEvery}
+                    placeholder="10m"
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setForm((f) => ({ ...f, spawnLoopEvery: next }));
+                    }}
+                    data-testid="job-spawn-loop-every"
+                  />
+                </label>
+                <label>
+                  Loop prompt
+                  <textarea
+                    rows={2}
+                    value={form.spawnLoopMessage}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setForm((f) => ({ ...f, spawnLoopMessage: next }));
+                    }}
+                    data-testid="job-spawn-loop-message"
                   />
                 </label>
                 <label>
@@ -3000,6 +3118,8 @@ function jobToForm(job: Job): FormState {
     f.spawnFolder = job.action.folder;
     f.spawnPrompt = job.action.prompt ?? '';
     f.spawnGoal = job.action.goal ?? '';
+    f.spawnLoopEvery = job.action.loop?.every ?? '';
+    f.spawnLoopMessage = job.action.loop?.message ?? '';
     f.spawnSkill = job.action.skill ?? '';
     // No stored model → the `Account default` row, which is what re-saving must
     // write back (i.e. still no model), not the host's current last-used id.
@@ -3086,6 +3206,11 @@ function formToBody(form: FormState): Omit<JobCreateBody, 'concurrency' | 'timeo
       ...(form.spawnPrompt ? { prompt: form.spawnPrompt } : {}),
       // Creation-time chat goal (spec/08 ## Action); absent when empty.
       ...(form.spawnGoal.trim() ? { goal: form.spawnGoal.trim() } : {}),
+      // Creation-time recurring loop prompt (spec/08 ## Action); both halves
+      // or neither — validated before this point.
+      ...(form.spawnLoopEvery.trim() && form.spawnLoopMessage.trim()
+        ? { loop: { every: form.spawnLoopEvery.trim(), message: form.spawnLoopMessage.trim() } }
+        : {}),
       ...(form.spawnSkill ? { skill: form.spawnSkill } : {}),
       // `Account default` is the empty string, and it must persist as an ABSENT
       // field: omitting `model` is what makes each fire take the host's

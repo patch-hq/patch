@@ -5,12 +5,16 @@
 // to the agent as a chat turn. Each runs INSTEAD of sending a turn, except
 // `/goal <text>`, which sets the goal and then sends the text as the turn.
 
+import { parseReminderArg, type ReminderEvery } from '@patch/wire';
 import type { ModelOption } from './models';
 
 export const SLASH_COMMANDS = [
   { name: 'clear', description: 'Clear the visible chat transcript' },
   { name: 'goal', description: 'Set the chat goal; bare /goal clears it' },
-  { name: 'remind', description: 'Set the chat reminder; bare /remind clears it' },
+  {
+    name: 'remind',
+    description: 'Set the chat reminder: /remind [every 10 turns|30m] <text>; bare clears it',
+  },
   { name: 'loop', description: 'Re-send a message on an interval; bare /loop stops it' },
   { name: 'model', description: 'Change the chat model: /model <name>' },
 ] as const;
@@ -48,14 +52,19 @@ export interface SlashDeps {
   hostId: string | null;
   goal: string | null;
   reminder: string | null;
+  reminderEvery: ReminderEvery | null;
   setGoal(goal: string | null): void;
-  setReminder(reminder: string | null): void;
+  setReminder(reminder: string | null, every?: ReminderEvery | null): void;
   clearTimeline(): void;
   chooseModel(modelId: string): void;
   pushError(message: string): void;
   api: {
     setGoal(chatId: string, goal: string | null): Promise<unknown>;
-    setReminder(chatId: string, reminder: string | null): Promise<unknown>;
+    setReminder(
+      chatId: string,
+      reminder: string | null,
+      every?: ReminderEvery | null,
+    ): Promise<unknown>;
     setLoop(chatId: string, loop: { message: string; every: string } | null): Promise<unknown>;
     models(hostId: string): Promise<{ models: ModelOption[] }>;
   };
@@ -80,12 +89,21 @@ export function runSlashCommand(text: string, d: SlashDeps): SlashResult {
     return goal === null ? { handled: true } : { handled: false, text: goal };
   }
 
-  const reminder = argOf('remind', text);
-  if (reminder !== undefined) {
+  const reminderArg = argOf('remind', text);
+  if (reminderArg !== undefined) {
+    let parsed;
+    try {
+      parsed = parseReminderArg(reminderArg);
+    } catch (e) {
+      d.pushError(`setting reminder failed: ${(e as Error).message}`);
+      return { handled: true };
+    }
+    const { reminder, every } = parsed;
     const prev = d.reminder;
-    d.setReminder(reminder);
-    void d.api.setReminder(d.chatId, reminder).catch((e: Error) => {
-      d.setReminder(prev);
+    const prevEvery = d.reminderEvery;
+    d.setReminder(reminder, every);
+    void d.api.setReminder(d.chatId, reminder, every).catch((e: Error) => {
+      d.setReminder(prev, prevEvery);
       d.pushError(`setting reminder failed: ${e.message}`);
     });
     return { handled: true };

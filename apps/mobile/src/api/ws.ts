@@ -884,6 +884,14 @@ export class PatchWs {
       useBrowserHandoffStore.getState().applyForm(event);
       return;
     }
+    // spec/07 § A call can move between devices — a call live on another
+    // surface is offered for switching here. This surface's own call is not.
+    if (event.type === 'voice.call') {
+      if (event.surfaceId === usePresenceStore.getState().surfaceId) return;
+      const { type: _type, active, ...call } = event;
+      useVoiceStore.getState().setRemoteCall(call, active);
+      return;
+    }
     if (event.type === 'chat.call_request') {
       useVoiceStore.getState().setIncoming({
         callId: event.callId,
@@ -977,7 +985,10 @@ export class PatchWs {
       if (list) list.push(e);
       else byChat.set(chatId, [e]);
     }
-    for (const [chatId, list] of byChat) saveEvents(chatId, list);
+    for (const [chatId, list] of byChat) {
+      saveEvents(chatId, list);
+      useChatStore.getState().noteTranscriptHead(chatId, list);
+    }
     for (const e of events) {
       if (e.type !== 'chat.permission_response' || e.chatId === undefined) continue;
       saveResolution(

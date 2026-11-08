@@ -158,9 +158,11 @@ import {
   dictationMaxHeight,
 } from '../lib/composerHeight';
 import { startDictation, warmDictation, type DictationHandle } from '../lib/dictation';
+import { insertDictation } from '../lib/dictationInsert';
 import { dictationEngineFor } from '../lib/dictationEngine';
 import { startDictationMode, type DictationModeHandle } from '../lib/dictationMode';
 import { markDictatedSend } from '../lib/dictatedSends';
+import { useMicLevelStore } from '../stores/micLevelStore';
 import { voiceKeyRefusal } from '../lib/voiceKeys';
 import { usePresenceStore } from '../stores/presenceStore';
 import { accountsOutage } from '../lib/usage';
@@ -500,6 +502,9 @@ export function Composer({
   const slashQuery = activeToken?.query ?? null;
   const slashActive = activeToken !== null;
   const trimmedFolder = (folder ?? '').trim();
+  // A new chat has no row yet — its host is the setup's pick (same rule as
+  // `usageHostId`); reading `row?.hostId` alone left the `/` list never loading.
+  const skillsHostId = setup ? setup.hostId : (row?.hostId ?? null);
   React.useEffect(() => {
     // Re-read on EVERY open, not once per folder: the list lives on the host's
     // filesystem and changes there must show up on the next `/`. Typing more of
@@ -507,10 +512,10 @@ export function Composer({
     // last loaded list stays on screen while the new one is in flight. NO
     // FALLBACK: a failed fetch surfaces an error rather than a silently empty
     // list.
-    if (!slashActive || trimmedFolder === '' || !row?.hostId) return;
+    if (!slashActive || trimmedFolder === '' || !skillsHostId) return;
     let live = true;
     void api
-      .skills(trimmedFolder, row.hostId)
+      .skills(trimmedFolder, skillsHostId)
       .then((r) => {
         if (!live) return;
         setSkills(r.skills ?? []);
@@ -524,7 +529,7 @@ export function Composer({
     return () => {
       live = false;
     };
-  }, [slashActive, trimmedFolder, row?.hostId]);
+  }, [slashActive, trimmedFolder, skillsHostId]);
   // spec/15 § Skill autocomplete — chips: a completed `/<skill>` must be
   // recognised (and rendered as a chip, with its preview reachable) even
   // before `/` has ever been opened this session — e.g. reopening a chat
@@ -537,12 +542,12 @@ export function Composer({
   // packages/web/src/components/Composer.tsx's identical guard for why).
   const chipFetchPrimedRef = React.useRef<string | null>(null);
   React.useEffect(() => {
-    if (trimmedFolder === '' || slashActive || !row?.hostId) return;
+    if (trimmedFolder === '' || slashActive || !skillsHostId) return;
     if (chipFetchPrimedRef.current === trimmedFolder) return;
     if (!draft.includes('/')) return;
     let live = true;
     void api
-      .skills(trimmedFolder, row.hostId)
+      .skills(trimmedFolder, skillsHostId)
       .then((r) => {
         if (!live) return;
         chipFetchPrimedRef.current = trimmedFolder;
@@ -555,7 +560,7 @@ export function Composer({
     return () => {
       live = false;
     };
-  }, [trimmedFolder, draft, slashActive, row?.hostId]);
+  }, [trimmedFolder, draft, slashActive, skillsHostId]);
   // The skill last completed in this folder sorts to the top (spec/15 § Skill
   // autocomplete) — ordering only, applied AFTER the typed prefix filter.
   const filteredSkills =
@@ -843,6 +848,18 @@ export function Composer({
   const mirrorStickRef = React.useRef(true);
   // Mic recording, or dictation mode with words being spoken: the input is painted over by the mirror.
   const livePreviewOn = micState !== 'idle' || livePartial !== '';
+  // The interim words are drawn where the final ones will land: at the caret.
+  const liveSplit = React.useMemo(() => {
+    const pos = Math.min(cursorPos, body.length);
+    const before = body.slice(0, pos);
+    const after = body.slice(pos);
+    return {
+      before,
+      after,
+      lead: before.length > 0 && !/\s$/.test(before) ? ' ' : '',
+      trail: after.length > 0 && !/^\s/.test(after) ? ' ' : '',
+    };
+  }, [body, cursorPos]);
   // The keyboard is away while dictating, so the field may take far more of
   // the screen than its typing cap before the words start scrolling.
   const { height: windowHeight } = useWindowDimensions();
@@ -977,7 +994,13 @@ export function Composer({
           // The keyboard stays down: the words are ready to send as they
           // are, and a tap on the input brings it back to edit them.
           const t = outcome.text;
-          updateDraft((cur) => (cur.trim().length > 0 ? `${cur.trimEnd()} ${t}` : t));
+          // At the caret, which then sits just after the words.
+          updateDraft((cur) => {
+            const split = splitQuotes(cur);
+            const landed = insertDictation(split.body, cursorPos, t);
+            pendingCursorRef.current = landed.caret;
+            return joinQuotes(split.quotes, landed.text);
+          });
           break;
         }
         case 'no-audio':
@@ -1474,8 +1497,9 @@ export function Composer({
       hostId: row?.hostId ?? null,
       goal: row?.goal ?? null,
       reminder: row?.reminder ?? null,
+      reminderEvery: row?.reminderEvery ?? null,
       setGoal: (g) => useChatStore.getState().setGoal(chatId, g),
-      setReminder: (r) => useChatStore.getState().setReminder(chatId, r),
+      setReminder: (r, every) => useChatStore.getState().setReminder(chatId, r, every),
       clearTimeline: () => useChatStore.getState().clearTimeline(chatId),
       chooseModel,
       pushError: (m) => useUiStore.getState().pushError(m),
@@ -1805,6 +1829,8 @@ export function Composer({
         </View>
       ) : null}
 
+      {micState === 'recording' || dictModeOn ? <DictationLevelBar color={colors.red} /> : null}
+
       {/* Listening strip (spec/15 § Composer): with the keyboard away, this is
           what says the mic is live — a pulsing dot, the state named, and how
           long it has been listening. */}
@@ -1971,14 +1997,16 @@ export function Composer({
                   fontSize: 16,
                 }}
               >
-                <Text style={{ color: colors.ink }}>{body}</Text>
-                {body.trim().length > 0 ? ' ' : ''}
+                <Text style={{ color: colors.ink }}>{liveSplit.before}</Text>
+                {liveSplit.lead}
                 <Text
                   testID="dictation-live-words"
                   style={{ color: colors.ink3, fontStyle: 'italic' }}
                 >
                   {livePartial}
                 </Text>
+                {liveSplit.trail}
+                <Text style={{ color: colors.ink }}>{liveSplit.after}</Text>
               </Text>
             </View>
           </ScrollView>
@@ -2419,6 +2447,35 @@ export function Composer({
         paths={skillPaths}
         hostId={row?.hostId ?? ''}
         onClose={() => setPreviewSkill(null)}
+      />
+    </View>
+  );
+}
+
+/** Thin live meter of the mic level while dictating, so the composer feels live as you speak. */
+function DictationLevelBar({ color }: { color: string }): React.ReactElement {
+  const level = useMicLevelStore((s) => s.level);
+  const colors = useTheme();
+  return (
+    <View
+      testID="dictation-level"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={{
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: colors.divider,
+        overflow: 'hidden',
+        marginHorizontal: space.xs,
+      }}
+    >
+      <View
+        testID="dictation-level-fill"
+        style={{
+          height: 4,
+          width: `${Math.round(level * 100)}%`,
+          backgroundColor: color,
+        }}
       />
     </View>
   );

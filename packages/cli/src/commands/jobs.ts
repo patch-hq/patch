@@ -49,6 +49,10 @@ action (one of; all but script need a prompt, a skill, or both):
 filter: JSONata evaluated against the trigger payload; a fire proceeds only if truthy.
 update replaces the trigger wholesale: re-send timezone with expression.
 hostId comes from \`patch chats list\`.
+
+Scheduled or recurring work belongs here, not in cron, launchd or systemd timers.
+One-liner for a scheduled command on this machine, from the folder it should run in:
+  patch jobs create --name "Nightly sync" --cron "0 3 * * *" --script "./sync.sh"
 `;
 
 export function registerJobsCommands(program: Command): void {
@@ -120,7 +124,15 @@ export function registerJobsCommands(program: Command): void {
     .option('--folder <path>', 'Spawn folder when --action spawn (or --action script)')
     .option('--chat-id <id>', 'Target chat when --action message')
     .option('--command <cmd>', 'Shell command to run when --action script')
-    .option('--daemon-id <id>', 'Host the command runs on when --action script')
+    .option(
+      '--daemon-id <id>',
+      'Host the command runs on when --action script (default: this machine)',
+    )
+    .option(
+      '--script <cmd>',
+      'Shortcut for --action script --command <cmd>: run a shell command on a schedule, no chat. ' +
+        'Folder defaults to the current directory and host to this machine. e.g. --script "./sync.sh" --cron "0 3 * * *"',
+    )
     .option('--timeout-ms <ms>', 'Kill a --action script command after this long (default 60000)')
     .option('--prompt <prompt>', 'First-turn prompt (exactly one of --prompt | --skill required)')
     .option('--skill <name>', 'First-turn skill (exactly one of --prompt | --skill required)')
@@ -129,7 +141,7 @@ export function registerJobsCommands(program: Command): void {
     .option('--webhook', 'Flag-mode shortcut: build a webhook-trigger job (instead of --cron)')
     .option(
       '--scheme <scheme>',
-      "Webhook signature scheme: 'none' (default), 'hmac-sha256', 'github', 'stripe' or 'todoist'",
+      "Webhook signature scheme: 'none' (default), 'bearer', 'hmac-sha256', 'github', 'stripe' or 'todoist'",
     )
     .option(
       '--secret <secret>',
@@ -147,7 +159,8 @@ export function registerJobsCommands(program: Command): void {
           folder?: string;
           chatId?: string;
           command?: string;
-          hostId?: string;
+          daemonId?: string;
+          script?: string;
           timeoutMs?: string;
           prompt?: string;
           skill?: string;
@@ -165,7 +178,38 @@ export function registerJobsCommands(program: Command): void {
           // TUI default action), so it can shadow our subcommand option.
           // Fall back to the root opts when present.
           const rootOpts = cmd.parent?.parent?.opts() as { folder?: string } | undefined;
-          const folder = opts.folder ?? rootOpts?.folder;
+          let folder = opts.folder ?? rootOpts?.folder;
+          if (opts.script !== undefined) {
+            // --script is the one-liner for a scheduled command: it stands in for
+            // --action script --command, and defaults folder to the cwd and the
+            // host to this machine. Mixing it with the long form is ambiguous.
+            if (file !== undefined) throw new Error('--script cannot be combined with a job file');
+            if (opts.script.length === 0) throw new Error('--script must not be empty');
+            if (
+              opts.command !== undefined ||
+              (opts.action !== undefined && opts.action !== 'script')
+            ) {
+              throw new Error('--script replaces --action/--command; do not pass them with it');
+            }
+            if (opts.cron === undefined && !opts.webhook) {
+              throw new Error('--script needs a trigger: pass --cron <expr> (or --webhook)');
+            }
+            opts.action = 'script';
+            opts.command = opts.script;
+            folder = folder ?? process.cwd();
+            if (opts.daemonId === undefined) {
+              const t = getTransport(opts);
+              if (t.kind !== 'uds') {
+                throw new Error(
+                  '--script cannot tell which machine this is without the local host; pass --daemon-id <hostId>',
+                );
+              }
+              const me = await t.get<{ hostId?: string }>('/host');
+              if (!me.hostId)
+                throw new Error('local host reported no hostId; pass --daemon-id <hostId>');
+              opts.daemonId = me.hostId;
+            }
+          }
           if (file !== undefined) {
             body = readJsonFile(file);
           } else if (opts.action !== undefined && (opts.cron !== undefined || opts.webhook)) {
@@ -184,13 +228,13 @@ export function registerJobsCommands(program: Command): void {
             if (opts.action === 'script') {
               if (!opts.command) throw new Error('--command is required when --action script');
               if (!folder) throw new Error('--folder is required when --action script');
-              if (!opts.hostId) throw new Error('--daemon-id is required when --action script');
+              if (!opts.daemonId) throw new Error('--daemon-id is required when --action script');
               if (opts.prompt !== undefined || opts.skill !== undefined) {
                 throw new Error('--action script takes --command, not --prompt / --skill');
               }
               action['command'] = opts.command;
               action['folder'] = folder;
-              action['hostId'] = opts.hostId;
+              action['hostId'] = opts.daemonId;
               if (opts.timeoutMs !== undefined) {
                 const ms = Number(opts.timeoutMs);
                 if (!Number.isInteger(ms)) throw new Error('--timeout-ms must be a whole number');
@@ -234,7 +278,7 @@ export function registerJobsCommands(program: Command): void {
               // Webhook trigger (H1-d7). scheme defaults to 'none'; any other
               // scheme requires a --secret (matches WebhookTrigger schema).
               const scheme = opts.scheme ?? 'none';
-              const validSchemes = ['none', 'hmac-sha256', 'github', 'stripe', 'todoist'];
+              const validSchemes = ['none', 'bearer', 'hmac-sha256', 'github', 'stripe', 'todoist'];
               if (!validSchemes.includes(scheme)) {
                 throw new Error(
                   `invalid --scheme '${scheme}' (expected one of: ${validSchemes.join(', ')})`,

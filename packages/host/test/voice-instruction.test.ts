@@ -23,6 +23,17 @@ describe('HOSTED_VOICE_INSTRUCTION', () => {
     expect(text).toMatch(/never guess/i);
   });
 
+  test('auto: general questions are answered or dispatched, never bounced back for context', () => {
+    for (const async of [false, true]) {
+      const text = hostedVoiceInstruction('auto', async);
+      expect(text).toMatch(/general factual question/i);
+      expect(text).toMatch(/own knowledge/i);
+      expect(text).toMatch(/never ask the user for more context/i);
+      expect(text).toMatch(/never ask whether/i);
+      expect(text).toMatch(/already with the agent/i);
+    }
+  });
+
   test.each(['auto', 'always'] as const)(
     '%s: no claiming an action without its tool result',
     (mode) => {
@@ -33,4 +44,12 @@ describe('HOSTED_VOICE_INSTRUCTION', () => {
       }
     },
   );
+
+  test('unknown facts go to the agent, in-flight hand-offs are remembered, answers stay short', () => {
+    const text = hostedVoiceInstruction('auto', true);
+    expect(text).toMatch(/never say you do not know/i);
+    expect(text).toMatch(/general factual/i);
+    expect(text).toMatch(/stays in progress/i);
+    expect(text).toMatch(/one or two short sentences/i);
+  });
 });

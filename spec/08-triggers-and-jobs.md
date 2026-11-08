@@ -100,6 +100,7 @@ Server exposes `POST /api/webhooks/<unguessable-jobId>`. The server-issued jobId
 `scheme` is one of:
 
 - `none` — URL secrecy only. Accept anything to that URL.
+- `bearer` — for plain HTTP clients that cannot compute a signature (Home Assistant `rest_command`, curl). Server expects `Authorization: Bearer <secret>` and compares it to the job's `secret` in constant time.
 - `hmac-sha256` — generic HMAC. Server expects header `X-Patch-Signature: hex(hmac_sha256(secret, body))`.
 - `github` — GitHub's `X-Hub-Signature-256: sha256=<hex>` scheme.
 - `stripe` — Stripe's signed-event scheme.
@@ -397,6 +398,8 @@ A run started hidden that turns out to need the user does not stay there: the mo
 Either way, every job-created chat — `spawn` or `continue` — also appears in the sidebar's `▸ Automations` group (`14-design-web.md` § Sidebar) for as long as it exists, regardless of its state, carrying the standard status badge — this is how the user watches a run go `working` → `done`. A chat that needs attention can additionally call `patch_notify`, and the user surfaces it from the notification (push/desktop/voice). There is no auto-archive, on inactivity or on finishing — a hidden job chat stays in Hidden when its run ends (`04-chats-and-folders.md` § Hidden) — so any chat (automated or not) stays wherever it is until it is manually archived (see `04-chats-and-folders.md` § Lifecycle).
 
 An action's optional `goal` sets the chat's goal (`04-chats-and-folders.md` § Goals) at creation — the same condition text `/goal <condition>` would set. Available on `spawn` and on `continue`, creation-time only like `startHidden`: on `continue` it applies to each fire that CREATES a chat, and a later edit reaches the next chat the job creates, never one it already owns. Unlike the composer's `/goal`, it does NOT also send `goal` as the chat's first turn — the action's own `prompt`/`skill` already supplies one, and the two need not say the same thing: a job can brief the agent on what to do and separately hold it to a stopping condition worded for a judge rather than a worker. `message` has no `goal`, having no chat of its own to place one on.
+
+An action's optional `loop` (`{ every, message }`) arms a recurring loop on the chat at creation — the same `every` and `message` `/loop <every> <message>` takes (`02-host.md` § Self-wake). `message` is the user's own loop prompt, written separately from the action's `prompt` because the two differ and the agent must not invent its own. Available on `spawn` and `continue`, creation-time only like `goal`. The editor requires both halves or neither. `message` has no `loop`.
 
 A fire's turn is a `user` turn — the job dispatched it on the user's behalf, not the host for itself (`09-notifications.md` § Whose turn it was) — so a job's chat settling rings the completion doorbell like any other chat's. The action's `notifyOnComplete` flag turns that off, for a job whose every fire would otherwise push. It is available on `spawn` and on `continue`, the two actions that create a chat, and it defaults to notifying: an action that omits it notifies, and only an explicit `false` is stored. `message` has no `notifyOnComplete`, delivering into a chat the user already owns and already hears from.
 

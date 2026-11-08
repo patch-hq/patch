@@ -15,7 +15,9 @@ export const NO_SECRETS: SharedSecretsSummary = {
   providerKeys: [
     { id: 'gemini', set: false },
     { id: 'openai', set: false },
+    { id: 'elevenlabs', set: false },
     { id: 'groq', set: false },
+    { id: 'deepgram', set: false },
   ],
 };
 

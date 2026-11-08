@@ -9,6 +9,7 @@ import { Redirect, Tabs, useRouter } from 'expo-router';
 import { Clock, Folder, MessageCircle, Plus, Settings as SettingsIcon } from 'lucide-react-native';
 import { fixed, fonts, radii, space, textMin, useTheme } from '../../src/lib/theme';
 import { CallPill } from '../../src/components/CallPill';
+import { RemoteCallPill } from '../../src/components/RemoteCallPill';
 import { getRoute } from '../../src/config';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
 
@@ -143,6 +144,7 @@ export default function TabLayout(): React.ReactElement {
         }}
       >
         <CallPill />
+        <RemoteCallPill />
       </View>
     </View>
   );

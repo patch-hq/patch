@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, act, waitFor, cleanup, within } from '@testing-library/react';
-import { MemoryRouter, useLocation } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { Sidebar } from '../components/Sidebar.js';
 import { SnoozeSheet } from '../components/SnoozeSheet.js';
 import { ConfirmModal } from '../components/ConfirmModal.js';
@@ -236,6 +236,72 @@ describe('Sidebar', () => {
     expect(dot.getAttribute('title')).toBe(
       'This surface (web): connected\nServer: reachable\nHost d-box: offline\nHost d-mac: online',
     );
+  });
+
+  describe('host-down dot', () => {
+    const mk = (hostId: string, online: boolean, lastSeenAt: number | null) => ({
+      hostId,
+      online,
+      lastSeenAt,
+      host: null,
+      accounts: {},
+      claudeSettings: null,
+      folders: null,
+    });
+
+    it('turns yellow with last-seen in the tooltip when one host is offline and another is online', () => {
+      usePresenceStore.setState({
+        connection: 'connected',
+        hostOnline: true,
+        hosts: { a: mk('a', true, 1), b: mk('b', false, new Date(2026, 10, 7, 14, 7).getTime()) },
+      });
+      renderInRouter();
+      const dot = screen.getByTestId('conn-dot');
+      expect(dot.className).toContain('host-down');
+      expect(dot.getAttribute('title')).toContain('Host b: offline, last seen');
+      expect(dot.getAttribute('title')).toContain('14:07');
+    });
+
+    it('stays normal when every host is online', () => {
+      usePresenceStore.setState({
+        connection: 'connected',
+        hostOnline: true,
+        hosts: { a: mk('a', true, 1) },
+      });
+      renderInRouter();
+      expect(screen.getByTestId('conn-dot').className).not.toContain('host-down');
+    });
+
+    it('does not count a host that has never connected as down', () => {
+      usePresenceStore.setState({
+        connection: 'connected',
+        hostOnline: true,
+        hosts: { a: mk('a', true, 1), b: mk('b', false, null) },
+      });
+      renderInRouter();
+      const dot = screen.getByTestId('conn-dot');
+      expect(dot.className).not.toContain('host-down');
+      expect(dot.getAttribute('title')).toContain('Host b: offline');
+    });
+
+    it('opens the Hosts settings page when clicked', () => {
+      usePresenceStore.setState({
+        connection: 'connected',
+        hostOnline: true,
+        hosts: { a: mk('a', false, 5) },
+      });
+      render(
+        <MemoryRouter initialEntries={['/']}>
+          <Sidebar />
+          <Routes>
+            <Route path="/settings/hosts" element={<div data-testid="hosts-page" />} />
+            <Route path="*" element={null} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      fireEvent.click(screen.getByTestId('conn-dot'));
+      expect(screen.getByTestId('hosts-page')).toBeInTheDocument();
+    });
   });
 
   it('shows the empty manager slot when none exists', () => {
@@ -2678,6 +2744,21 @@ describe('Sidebar', () => {
       expect(screen.getByTestId('status-count-status:working')).toHaveTextContent('1');
       fireEvent.click(screen.getByTestId('sidebar-grouping-project'));
       expect(screen.getByTestId('folder-collapse-/p/alpha')).toBeInTheDocument();
+    });
+
+    it("keeps a group's status badge out of the toggle, at the right of the heading", () => {
+      useChatStore
+        .getState()
+        .hydrate([
+          rowFixture({ chatId: 'g-work', name: 'Busy', folder: '/p/alpha', activity: 'running' }),
+        ]);
+      renderInRouter();
+      fireEvent.click(screen.getByTestId('sidebar-grouping-status'));
+      const badge = screen.getByTestId('status-badge-status:working');
+      const toggle = screen.getByTestId('status-collapse-status:working');
+      expect(toggle.contains(badge)).toBe(false);
+      expect(badge.parentElement).toBe(toggle.parentElement);
+      expect(toggle.compareDocumentPosition(badge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
   });
 });

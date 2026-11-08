@@ -59,6 +59,7 @@ import {
   openSnoozeRecord,
   providerDescriptor,
   ChatErrorCode,
+  type ReminderEvery,
 } from '@patch/wire';
 import type {
   SnoozeRecord,
@@ -153,6 +154,7 @@ import {
 } from './pendingDecisions.js';
 import {
   buildGoalSystemReminder,
+  buildPeriodicReminder,
   buildHiddenSystemReminder,
   buildTodoEditSystemReminder,
   buildTodoFireSystemReminder,
@@ -1072,6 +1074,10 @@ const ORIGINAL_OPEN = '<original-prompt>\n';
 const ORIGINAL_CLOSE = '\n</original-prompt>';
 const REMINDER_CLOSE = '</system-reminder>';
 const REMINDER_CLOSE_ESCAPED = '</system-reminder-escaped>';
+
+function sameEvery(a: ReminderEvery | null, b: ReminderEvery | null): boolean {
+  return a === b || (a !== null && b !== null && a.unit === b.unit && a.n === b.n);
+}
 
 /**
  * Appends the interrupted turn's own prompt to a restart reminder, inside the
@@ -3252,6 +3258,41 @@ export class Daemon {
     );
   }
 
+  /**
+   * Record on the chat whether its folder still exists (spec/04 § Resume).
+   * Archived/deleted chats are flagged quietly in their own meta — no log, no
+   * status change, nothing brought back. Any other chat is also marked errored
+   * with `folder_missing` now, so the user sees why input fails before typing.
+   */
+  private reconcileFolder(m: ChatMeta): ChatMeta {
+    const missing = !existsSync(m.folder);
+    if (!missing) {
+      if (!m.folderMissing) return m;
+      return this.opts.metaStore.update(m.chatId, (x) => {
+        const { folderMissing: _drop, ...rest } = x;
+        return rest;
+      });
+    }
+    if (m.status === 'archived' || m.status === 'deleted') {
+      if (m.folderMissing) return m;
+      return this.opts.metaStore.update(m.chatId, (x) => ({ ...x, folderMissing: true }));
+    }
+    this.opts.logger.warn(
+      { chatId: m.chatId, folder: m.folder },
+      'hydrate: folder no longer exists; chat marked errored (folder_missing)',
+    );
+    const message = `chat folder no longer exists: ${m.folder}`;
+    return this.opts.metaStore.update(m.chatId, (x) => ({
+      ...x,
+      folderMissing: true,
+      status: 'errored',
+      lastError:
+        x.status === 'errored' && x.lastError
+          ? x.lastError
+          : { code: 'folder_missing', message, at: this.opts.now() },
+    }));
+  }
+
   /** Hydrate chat_state from disk on startup. */
   hydrate(options: { deferWorkUntilReconciled?: boolean } = {}): void {
     const metas = this.opts.metaStore.list();
@@ -3261,14 +3302,7 @@ export class Daemon {
         'hydrate: meta.json unreadable; chat not loaded (fix or remove the file, then restart the host)',
       );
     }
-    for (const m of metas) {
-      if (!existsSync(m.folder)) {
-        this.opts.logger.warn(
-          { chatId: m.chatId, folder: m.folder },
-          'hydrate: folder no longer exists; chat will be marked errored on next input (folder_missing)',
-        );
-      }
-    }
+    for (let i = 0; i < metas.length; i++) metas[i] = this.reconcileFolder(metas[i]!);
     this.chatState.hydrate(metas);
     // Mark every restored chat as hydrated-from-disk: its next query is a
     // RESUME and must carry a claudeSessionId (F1).
@@ -4480,6 +4514,9 @@ export class Daemon {
       goalRefusalStreak: 0,
       goalEvalAwaitingWatches: false,
       reminder: meta.reminder ?? null,
+      reminderEvery: null,
+      reminderTurnsSince: 0,
+      reminderLastAt: this.opts.now(),
       declaredStatus: null,
       statusSummary: null,
       statusKind: null,
@@ -5064,17 +5101,31 @@ export class Daemon {
    * Persists to meta.json + emits chat.state so every surface shows the reminder
    * at the top of the chat. Idempotent re-emit when unchanged (surfaces converge).
    */
-  async setReminder(chatId: string, reminder: string | null): Promise<void> {
+  async setReminder(
+    chatId: string,
+    reminder: string | null,
+    every: ReminderEvery | null = null,
+  ): Promise<void> {
     const state = this.chatState.get(chatId);
     if (!state) throw new ChatNotFoundError(chatId);
-    if (state.reminder === reminder) {
+    // A cleared reminder has no cadence; a cadence with no text is a caller bug.
+    const cadence = reminder === null ? null : every;
+    if (state.reminder === reminder && sameEvery(state.reminderEvery, cadence)) {
       this.emitState(chatId);
       return;
     }
     const now = this.opts.now();
     state.reminder = reminder;
+    state.reminderEvery = cadence;
+    state.reminderTurnsSince = 0;
+    state.reminderLastAt = now;
     state.lastUpdated = now;
-    this.opts.metaStore.update(chatId, (m) => ({ ...m, reminder, updatedAt: now }));
+    this.opts.metaStore.update(chatId, (m) => ({
+      ...m,
+      reminder,
+      reminderEvery: cadence,
+      updatedAt: now,
+    }));
     this.emitState(chatId);
   }
 
@@ -6692,6 +6743,25 @@ export class Daemon {
       state.goalNotice = null;
       if (head !== null) head = reminder + head;
       else rewrittenWhole = reminder + rewrittenWhole;
+    }
+
+    // spec/04 § Reminders — a chat reminder with a cadence is re-injected
+    // every N agent turns or N minutes, so a standing principle does not
+    // scroll out of the agent's attention.
+    if (state.reminder !== null && state.reminderEvery !== null) {
+      state.reminderTurnsSince += 1;
+      const nowMs = this.opts.now();
+      const due =
+        state.reminderEvery.unit === 'turns'
+          ? state.reminderTurnsSince >= state.reminderEvery.n
+          : nowMs - state.reminderLastAt >= state.reminderEvery.n * 60_000;
+      if (due) {
+        state.reminderTurnsSince = 0;
+        state.reminderLastAt = nowMs;
+        const reminder = buildPeriodicReminder(state.reminder);
+        if (head !== null) head = reminder + head;
+        else rewrittenWhole = reminder + rewrittenWhole;
+      }
     }
 
     // spec/04 § Send back — a side branch's conclusion owed to this turn
@@ -12680,7 +12750,14 @@ export class Daemon {
     // e.g. `permissionModeMismatch` below not catching a resumed session).
     if (tool === 'Bash') {
       this.opts.logger.warn(
-        { chatId, tool, mode: modeAtRequest },
+        {
+          chatId,
+          tool,
+          mode: modeAtRequest,
+          decisionReason,
+          description,
+          command: args['command'],
+        },
         'Bash escalated to a human permission ask',
       );
     }
@@ -12702,6 +12779,10 @@ export class Daemon {
       );
       return Promise.resolve({ approve: false, denyMessage: QUESTION_SUPERSEDED_MESSAGE });
     }
+    // The SDK's own reason for escalating (a safety check, not the mode) is the
+    // only explanation for a card nobody expected, e.g. under `bypassPermissions`;
+    // show it rather than a bare "Permission needed: Bash".
+    if (description === undefined && decisionReason) description = decisionReason;
     const requestId = randomUUID();
     // Register the gate BEFORE announcing the request, not after.
     //
@@ -16086,6 +16167,7 @@ export class Daemon {
       goalProgress: s.goalProgress,
       lastGoal: s.lastGoal,
       reminder: s.reminder,
+      reminderEvery: s.reminderEvery,
       statusSummary: s.statusSummary,
       statusKind: s.statusKind,
       statusDeclared: s.declaredStatus !== null,

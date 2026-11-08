@@ -8,6 +8,7 @@ import type {
   ChatBranch,
   ChatDelegateUpdateEvent,
   PermissionMode,
+  ReminderEvery,
   SystemContextItem,
   TodoItem,
   WireEvent,
@@ -334,6 +335,14 @@ interface ChatState {
   resolveSideThreadPermission(chatId: string, branchId: string, requestId: string): void;
   setActiveChat(chatId: string | null): void;
   markRead(chatId: string): void;
+  /**
+   * A background fetch brought this chat's transcript onto the phone without
+   * showing it (spec/12 § Offline reading), so the live stream never told the
+   * list row about it. Move the row's head — preview and `lastSeq`, hence the
+   * unread dot — to what was fetched. Only for a chat this phone has opened
+   * before: for any other the whole history would read as unread.
+   */
+  noteTranscriptHead(chatId: string, events: readonly unknown[]): void;
   setArchived(chatId: string, archived: boolean): void;
   /** `pinnedAt` puts back the time a refused unpin took away; omitted, a pin is stamped now. */
   setPinned(chatId: string, pinned: boolean, pinnedAt?: number | null): void;
@@ -346,7 +355,7 @@ interface ChatState {
   /** Optimistic goal write (goal bar); reverted by the caller on failure. */
   setGoal(chatId: string, goal: string | null): void;
   /** Optimistic reminder write (reminder bar). */
-  setReminder(chatId: string, reminder: string | null): void;
+  setReminder(chatId: string, reminder: string | null, every?: ReminderEvery | null): void;
   /** Optimistic task-list write (task bar) — always the WHOLE list. */
   setTodos(chatId: string, todos: TodoItem[]): void;
   /** Optimistic disable/enable of a special thread (spec/06 § Disabled). */
@@ -511,6 +520,7 @@ function emptyRow(chatId: string, folder: string): ChatRow {
     statusDeclared: null,
     goal: null,
     reminder: null,
+    reminderEvery: null,
     todos: [],
     disabled: false,
   };
@@ -535,6 +545,7 @@ function mergeListRow(prior: ChatRow | undefined, r: ChatListRow): ChatRow {
     statusDeclared: r.statusDeclared !== undefined ? r.statusDeclared : base.statusDeclared,
     goal: r.goal !== undefined ? r.goal : base.goal,
     reminder: r.reminder !== undefined ? r.reminder : base.reminder,
+    reminderEvery: r.reminderEvery !== undefined ? r.reminderEvery : base.reminderEvery,
     todos: r.todos !== undefined ? r.todos : base.todos,
     disabled: r.disabled !== undefined ? r.disabled : base.disabled,
     pendingWake: r.pendingWake !== undefined ? r.pendingWake : base.pendingWake,
@@ -589,6 +600,7 @@ function rowsToRecord(
             statusDeclared: prior.statusDeclared,
             goal: prior.goal,
             reminder: prior.reminder,
+            reminderEvery: prior.reminderEvery,
             todos: prior.todos,
             disabled: prior.disabled,
             preview: prior.preview,
@@ -598,6 +610,10 @@ function rowsToRecord(
               !live && (r.activity === 'idle' || r.activity === 'errored')
                 ? 0
                 : prior.openToolCalls,
+            // A send the host has not yet answered with a state frame: a roster
+            // that still reads the chat settled must not flip it back to idle
+            // (every foreground refreshes the roster).
+            optimisticSend: prior.optimisticSend,
             pendingPermissions: prior.pendingPermissions,
             lastSeq: prior.lastSeq,
             awaitingPermission: prior.awaitingPermission,
@@ -650,6 +666,7 @@ function toListRow(row: ChatRow): ChatListRow {
     statusDeclared: row.statusDeclared,
     goal: row.goal,
     reminder: row.reminder,
+    reminderEvery: row.reminderEvery,
     todos: row.todos,
     disabled: row.disabled,
   };
@@ -846,6 +863,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             name: event.name ?? row.name,
             folder: event.folder ?? row.folder,
             lastUpdated: event.lastUpdated,
+            // The host's high-water seq for the chat. A chat that finished while
+            // this phone was away is only knowable as unread from here: the roster
+            // carries no seq, and a chat not open gets no replay. Without it
+            // `lastSeq` stays 0 and a visited chat reads as grey instead of `done`.
+            lastSeq: Math.max(row.lastSeq, event.lastSeq ?? 0),
             // spec/14 § Sidebar ordering — an older host never sends the
             // field, so keep what is known rather than losing the sort key.
             lastUserActivity: event.lastUserActivity ?? row.lastUserActivity,
@@ -902,6 +924,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // field is a `chat.state` about something else. Mirrors web.
             goal: event.goal !== undefined ? event.goal : row.goal,
             reminder: event.reminder !== undefined ? event.reminder : row.reminder,
+            reminderEvery:
+              event.reminderEvery !== undefined ? event.reminderEvery : row.reminderEvery,
             todos: event.todos !== undefined ? event.todos : row.todos,
             disabled: event.disabled !== undefined ? event.disabled : row.disabled,
           };
@@ -1619,6 +1643,46 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (chatId !== null) get().markRead(chatId);
   },
 
+  noteTranscriptHead(chatId, events) {
+    const row = get().chats[chatId];
+    if (!row || row.lastReadSeq < 0) return;
+    let lastSeq = row.lastSeq;
+    let preview = row.preview;
+    let previewSeq = -1;
+    for (const raw of events) {
+      const e = raw as {
+        type?: string;
+        seq?: unknown;
+        role?: string;
+        content?: unknown;
+        error?: unknown;
+        synthetic?: unknown;
+        sessionChange?: unknown;
+        handoffLink?: unknown;
+        permissionModeChange?: unknown;
+        accountSwitch?: unknown;
+      };
+      if (typeof e.seq !== 'number') continue;
+      if (e.seq > lastSeq) lastSeq = e.seq;
+      const spoken =
+        e.type === 'chat.message' &&
+        (e.role === 'user' || e.role === 'assistant') &&
+        typeof e.content === 'string' &&
+        !e.error &&
+        !e.synthetic &&
+        e.permissionModeChange === undefined &&
+        e.accountSwitch === undefined;
+      if (spoken && e.seq >= previewSeq) {
+        previewSeq = e.seq;
+        const text =
+          e.role === 'user' ? stripVoicePrefix(e.content as string).text : (e.content as string);
+        preview = headCodePoints(text, 140);
+      }
+    }
+    if (lastSeq === row.lastSeq && preview === row.preview) return;
+    set({ chats: { ...get().chats, [chatId]: { ...row, lastSeq, preview } } });
+  },
+
   markRead(chatId) {
     const row = get().chats[chatId];
     if (!row) return;
@@ -1693,10 +1757,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ chats: { ...get().chats, [chatId]: { ...row, goal } } });
   },
 
-  setReminder(chatId, reminder) {
+  setReminder(chatId, reminder, every = null) {
     const row = get().chats[chatId];
     if (!row) return;
-    set({ chats: { ...get().chats, [chatId]: { ...row, reminder } } });
+    set({
+      chats: {
+        ...get().chats,
+        [chatId]: { ...row, reminder, reminderEvery: reminder === null ? null : every },
+      },
+    });
   },
 
   setTodos(chatId, todos) {

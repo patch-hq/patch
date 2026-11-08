@@ -20,6 +20,15 @@ export interface IncomingCall {
   receivedAt: number;
 }
 
+/** A call live on ANOTHER surface (`voice.call` wire event), keyed by session id. */
+export interface RemoteCall {
+  sessionId: string;
+  surfaceId: string;
+  surfaceKind: string;
+  chatId: string;
+  startedAt: number;
+}
+
 export interface ActiveVoiceSession {
   sessionId: string;
   chatId: string;
@@ -45,6 +54,8 @@ export type VoiceNoteMode = 'hold' | 'tap';
 interface VoiceState {
   incomingCall: IncomingCall | null;
   activeSession: ActiveVoiceSession | null;
+  /** Calls live on other surfaces, offered for switching here (spec/07 § A call can move between devices). */
+  remoteCalls: Record<string, RemoteCall>;
   voiceNoteChatId: string | null;
   voiceNoteState: VoiceNoteState;
   voiceNoteMode: VoiceNoteMode;
@@ -88,6 +99,8 @@ interface VoiceState {
   callEngine: string | null;
 
   setIncoming(call: IncomingCall | null): void;
+  /** Apply a `voice.call` event: add on active, remove on end. */
+  setRemoteCall(call: RemoteCall, active: boolean): void;
   setActive(session: ActiveVoiceSession | null): void;
   /**
    * The open session got its real id and audio URL: swap them in WITHOUT
@@ -111,6 +124,7 @@ interface VoiceState {
 export const useVoiceStore = create<VoiceState>((set) => ({
   incomingCall: null,
   activeSession: null,
+  remoteCalls: {},
   voiceNoteChatId: null,
   voiceNoteState: 'idle',
   voiceNoteMode: 'tap',
@@ -127,6 +141,14 @@ export const useVoiceStore = create<VoiceState>((set) => ({
   callEngine: null,
   setIncoming(call) {
     set({ incomingCall: call });
+  },
+  setRemoteCall(call, active) {
+    set((st) => {
+      const next = { ...st.remoteCalls };
+      if (active) next[call.sessionId] = call;
+      else delete next[call.sessionId];
+      return { remoteCalls: next };
+    });
   },
   setActive(session) {
     set({

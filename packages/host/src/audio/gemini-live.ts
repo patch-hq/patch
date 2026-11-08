@@ -241,14 +241,26 @@ const ASYNC_WAIT_RULE =
   'Say once, in a few words, that you have passed it on, then carry on the conversation normally — ' +
   'answer anything else the user says. Never say "still working on it", "waiting" or anything ' +
   'like it unless the user asks how it is going. When the agent finishes, its result arrives as a ' +
-  'message from the agent: tell the user it then, naturally, in your own words. Several ' +
-  'requests can be running at once.\n\n';
+  'message from the agent: tell the user the answer in one or two short sentences, never the ' +
+  'whole text, and let them ask for more. Several ' +
+  'requests can be running at once. A hand-off you have made stays in progress until its result ' +
+  'arrives: if the user asks about it, or an empty or unclear turn comes in, do not ask whether ' +
+  'they want it looked up or passed on — it already has been; say briefly that it is on its way.\n\n';
 
 const NO_FALSE_CLAIMS =
   `Never say you have added, passed on, checked, sent, booked or done anything unless you called ` +
   `${DISPATCH_TOOL_NAME} in this turn and it returned. You have no other way to act: if you did not ` +
-  'call it, say plainly that you have not done it. The transcript marks audio with no speech as ' +
+  'call it, say plainly that you have not done it. Keep every spoken answer to one or two short ' +
+  'sentences; the user will ask if they want more. The transcript marks audio with no speech as ' +
   '<noise> or leaves it empty: that is silence, not a request — say nothing and invent nothing.\n\n';
+
+const GENERAL_QUESTION_RULE =
+  'The conversation is not your only source: a general factual question ("when would I use X ' +
+  'rather than Y?") is answered from your own knowledge. If you are not sure of the answer, or ' +
+  `it needs looking up, call ${DISPATCH_TOOL_NAME} at once. Never say you have nothing in the ` +
+  'chat history or a "knowledge base", never ask the user for more context before trying, and ' +
+  'never ask whether they want you to look it up or pass it to the agent — just do one. If a ' +
+  'request is already with the agent, do not offer or ask about handing it off again.\n\n';
 
 const NEVER_GUESS =
   'Never guess. Anything about their files, folders, tasks, calendar, devices or any other ' +
@@ -309,9 +321,13 @@ export function hostedVoiceInstruction(handoff: VoiceHandoff, asyncResult = fals
   return (
     VOICE_PREAMBLE +
     agent +
-    'Answer yourself from the conversation and your own knowledge when you can. When the user ' +
-    'needs something only the agent has — their data, files, a tool, an action, or real work — ' +
+    'Answer yourself from the conversation when you can. Never say you do not know or ask the ' +
+    'user for a manual or document: anything you are not sure of, including general factual ' +
+    'questions, product details and anything that needs looking up, goes to the agent, which can ' +
+    'search. When the user needs something only the agent has — their data, files, a tool, an ' +
+    'action, or real work — ' +
     `call ${DISPATCH_TOOL_NAME} with a clear description of what is needed. ` +
+    GENERAL_QUESTION_RULE +
     (asyncResult ? ASYNC_WAIT_RULE : WAIT_RULE) +
     NO_FALSE_CLAIMS +
     NEVER_GUESS

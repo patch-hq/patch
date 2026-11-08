@@ -939,7 +939,12 @@ function ChatDetailBody(): React.ReactElement {
         item.kind === 'group' ? (
           <ToolGroupItem entries={item.entries} chatId={chatId} />
         ) : (
-          <TimelineItem entry={item.entry} chatId={chatId} result={item.result} />
+          <TimelineItem
+            entry={item.entry}
+            chatId={chatId}
+            result={item.result}
+            handoffPending={item.handoffPending === true}
+          />
         );
       if (item.key !== highlightKey) return cell;
       return (
@@ -1116,61 +1121,77 @@ function ChatDetailBody(): React.ReactElement {
           */}
           {/* No crumb for a special thread: its fixed label IS the title, and
               its folder is the same word again ("Manager" over "Manager"). */}
-          {isReservedSpecialThread(chatId) ? null : (
-            <Text
-              testID="chat-folder"
-              style={{ ...typography.meta, color: colors.ink3 }}
-              numberOfLines={1}
-            >
-              {[row?.folder ? folderName(row.folder) : null, hostLabel !== '' ? hostLabel : null]
-                .filter((p): p is string => p !== null)
-                .join(' · ') || '—'}
-            </Text>
-          )}
+          {/* Status chips ride the folder line, not the title row: beside the
+              title they took its width and crushed it to a letter or two. The
+              title keeps the full width; the folder crumb shrinks first. */}
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            {isReservedSpecialThread(chatId) ? null : (
+              <Text
+                testID="chat-folder"
+                style={{ ...typography.meta, color: colors.ink3, flexShrink: 1 }}
+                numberOfLines={1}
+              >
+                {[row?.folder ? folderName(row.folder) : null, hostLabel !== '' ? hostLabel : null]
+                  .filter((p): p is string => p !== null)
+                  .join(' · ') || '—'}
+              </Text>
+            )}
+            {row?.model ? (
+              <Text
+                testID="chat-model"
+                style={{
+                  ...typography.meta,
+                  color: colors.ink3,
+                  marginLeft: space.sm,
+                  flexShrink: 0,
+                }}
+                numberOfLines={1}
+              >
+                {compactModelLabel(row.model)}
+              </Text>
+            ) : null}
+            {runningWorkers > 0 ? (
+              <View
+                testID="header-workers"
+                style={{
+                  backgroundColor: colors.lineSoft,
+                  paddingHorizontal: space.sm,
+                  paddingVertical: 2,
+                  borderRadius: radii.pill,
+                  marginLeft: space.sm,
+                  flexShrink: 0,
+                }}
+              >
+                <Text
+                  style={{ ...typography.meta, fontFamily: fonts.bodyMedium, color: colors.ink2 }}
+                >
+                  {runningWorkers} {runningWorkers === 1 ? 'worker' : 'workers'}
+                </Text>
+              </View>
+            ) : null}
+            {row?.awaitingPermission ? (
+              <View
+                style={{
+                  backgroundColor: colors.waitingTint,
+                  paddingHorizontal: space.sm,
+                  paddingVertical: 2,
+                  borderRadius: radii.pill,
+                  marginLeft: space.sm,
+                  flexShrink: 0,
+                }}
+              >
+                <Text
+                  style={{ ...typography.meta, fontFamily: fonts.bodyMedium, color: colors.ink }}
+                >
+                  waiting on you
+                </Text>
+              </View>
+            ) : null}
+          </View>
           <Text style={{ ...typography.title, color: colors.ink }} numberOfLines={1}>
             {title}
           </Text>
         </Pressable>
-        {row?.model ? (
-          <Text
-            testID="chat-model"
-            style={{ ...typography.meta, color: colors.ink3 }}
-            numberOfLines={1}
-          >
-            {compactModelLabel(row.model)}
-          </Text>
-        ) : null}
-        {runningWorkers > 0 ? (
-          <View
-            testID="header-workers"
-            style={{
-              backgroundColor: colors.lineSoft,
-              paddingHorizontal: space.sm,
-              paddingVertical: 2,
-              borderRadius: radii.pill,
-              marginRight: space.sm,
-            }}
-          >
-            <Text style={{ ...typography.meta, fontFamily: fonts.bodyMedium, color: colors.ink2 }}>
-              {runningWorkers} {runningWorkers === 1 ? 'worker' : 'workers'}
-            </Text>
-          </View>
-        ) : null}
-        {row?.awaitingPermission ? (
-          <View
-            style={{
-              backgroundColor: colors.waitingTint,
-              paddingHorizontal: space.sm,
-              paddingVertical: 2,
-              borderRadius: radii.pill,
-              marginRight: space.sm,
-            }}
-          >
-            <Text style={{ ...typography.meta, fontFamily: fonts.bodyMedium, color: colors.ink }}>
-              waiting on you
-            </Text>
-          </View>
-        ) : null}
         {/* Call button — the ONLY place a sustained voice CALL is started on
             mobile (spec/15 § Chat detail). Read-only mirror threads have no
             voice call, so it is hidden there. A long press starts hands-free
@@ -1233,6 +1254,12 @@ function ChatDetailBody(): React.ReactElement {
           ref={listRef}
           style={{ flex: 1, opacity: settled ? 1 : 0 }}
           pointerEvents={settled ? 'auto' : 'none'}
+          // Default ('never') makes the first tap on any row while the keyboard
+          // is up only dismiss the keyboard — so option, Send answer and Cancel
+          // taps on a question card did nothing after the composer or an
+          // `Other` input had focus. 'handled' lets the card's own Pressables
+          // take the tap and still dismisses the keyboard on empty space.
+          keyboardShouldPersistTaps="handled"
           // See the block comment above `chatScrollMemory`: data goes in
           // newest-first, `inverted` renders it back in normal reading order.
           data={invertedRows}
@@ -1481,6 +1508,8 @@ function ToolCallItem({
   entry: ChatEventEntry;
   /** This call's own tool_result, folded into the same row (spec/15). */
   result?: ChatEventEntry;
+  /** spec/07 — a voice hand-off the agent has not answered yet. */
+  handoffPending?: boolean;
 }): React.ReactElement {
   // spec/15 § Chat detail — Delegate tool row: a `patch_delegate` call is the
   // one tool row that does not collapse like the rest, on web's rules
@@ -2535,6 +2564,7 @@ const TimelineItem = React.memo(function TimelineItem({
   entry,
   chatId,
   result,
+  handoffPending,
   queuePos,
   release,
   queuedDraft,
@@ -2545,6 +2575,8 @@ const TimelineItem = React.memo(function TimelineItem({
   chatId: string;
   /** This call's own tool_result, folded into the same row (spec/15). */
   result?: ChatEventEntry;
+  /** spec/07 — a voice hand-off the agent has not answered yet. */
+  handoffPending?: boolean;
   /** 1-based place in the queued block; set only on a queued entry. */
   queuePos?: number;
   /** What releases a queued entry: the next tool call or the end of the turn. */
@@ -2589,11 +2621,25 @@ const TimelineItem = React.memo(function TimelineItem({
   if (entry.kind === 'message' && entry.voiceHandoff) {
     return (
       <Text
-        testID="voice-handoff"
+        testID={handoffPending ? 'voice-handoff-pending' : 'voice-handoff'}
         style={{ fontSize: textMin, color: colors.ink3, marginBottom: space.sm }}
       >
-        {`Asked the agent: ${entry.content ?? ''}`}
+        {`${handoffPending ? 'Asking the agent…' : 'Asked the agent:'} ${entry.content ?? ''}`}
       </Text>
+    );
+  }
+  if (
+    entry.kind === 'message' &&
+    entry.role === 'system' &&
+    (entry.content ?? '').startsWith('[call] <- agent:')
+  ) {
+    return (
+      <View testID="call-agent-reply" style={{ marginBottom: space.sm }}>
+        <Text style={{ fontSize: textMin, color: colors.ink3 }}>agent failed</Text>
+        <Text style={{ color: colors.ink }}>
+          {(entry.content ?? '').slice('[call] <- agent:'.length).trim()}
+        </Text>
+      </View>
     );
   }
   if (
@@ -3146,6 +3192,7 @@ const TimelineItem = React.memo(function TimelineItem({
                     if (!entry.requestId) return;
                     permissionDeliveryTracker.send({
                       type: 'chat.permission_response',
+                      chatId,
                       requestId: entry.requestId,
                       approve: opt.approve,
                       decision: opt.decision,

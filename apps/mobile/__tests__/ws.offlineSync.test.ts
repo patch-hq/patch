@@ -6,6 +6,7 @@ import { getWs, resetWs } from '../src/api/ws';
 import { saveCredential } from '../src/lib/credential';
 import { usePresenceStore } from '../src/stores/presenceStore';
 import { useChatStore } from '../src/stores/chatStore';
+import { deriveBadge } from '../src/stores/types';
 import { useUiStore } from '../src/stores/uiStore';
 import { installFakeWebSocket, restoreWebSocket, FakeWebSocket } from './testUtils/fakeWebSocket';
 import { __clearAllMmkv } from './stubs/mmkv';
@@ -86,6 +87,42 @@ describe('syncTranscripts', () => {
     expect(heldCursor('c1')).toBe(1);
     expect(useChatStore.getState().timelines['c1'] ?? []).toEqual([]);
     expect(replays(sock).map((r) => r.chatId)).toEqual(['c1', 'c2']);
+  });
+
+  it('a background fetch moves the list row of a chat already read: preview and unread', () => {
+    useChatStore.getState().hydrate([row('c1', 1), row('c2', 1)]);
+    // c1 has been opened on this phone before; c2 never has.
+    useChatStore.getState().markRead('c1');
+    const sock = open();
+    getWs().syncTranscripts();
+    sock.emitMessage(
+      JSON.stringify({
+        type: 'chat.replay_batch',
+        chatId: 'c1',
+        events: [ev('c1', 0), ev('c1', 1), ev('c1', 2)],
+        done: true,
+      }),
+    );
+    vi.advanceTimersByTime(1000);
+    const c1 = useChatStore.getState().chats['c1']!;
+    expect(c1.preview).toBe('m2');
+    expect(c1.lastSeq).toBe(2);
+    expect(deriveBadge(c1)).toBe('done');
+    expect(useChatStore.getState().timelines['c1'] ?? []).toEqual([]);
+
+    sock.emitMessage(
+      JSON.stringify({
+        type: 'chat.replay_batch',
+        chatId: 'c2',
+        events: [ev('c2', 0), ev('c2', 1)],
+        done: true,
+      }),
+    );
+    vi.advanceTimersByTime(1000);
+    const c2 = useChatStore.getState().chats['c2']!;
+    // Never opened here: its history would all light up as unread, so the row stays as the roster gave it.
+    expect(c2.preview).toBeNull();
+    expect(c2.lastSeq).toBe(0);
   });
 
   it('asks only for what is newer than the held copy, and not at all once level', () => {

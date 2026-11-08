@@ -38,7 +38,7 @@ import {
   DEFAULT_WATCH_CHECK_IN_MINUTES,
   DEFAULT_WATCH_CHECK_IN_PROMPT,
 } from './watch-check-in-prompt.js';
-import { HostProviderKey, ProviderKeyId } from './provider-keys.js';
+import { HostProviderKey, ProviderKeyCheck, ProviderKeyId } from './provider-keys.js';
 import { BACKEND_IDS, PROVIDERS, providerForModel, type ProviderId } from './providers.js';
 import {
   HookDecision,
@@ -1295,6 +1295,15 @@ export const FinishedGoal = z
 export type FinishedGoal = z.infer<typeof FinishedGoal>;
 
 /**
+ * How often a chat's reminder is re-injected into the agent's prompt: every `n`
+ * of the agent's turns, or every `n` minutes (checked as a turn starts).
+ */
+export const ReminderEvery = z
+  .object({ unit: z.enum(['turns', 'minutes']), n: z.number().int().min(1).max(10000) })
+  .strict();
+export type ReminderEvery = z.infer<typeof ReminderEvery>;
+
+/**
  * How a backend picks which of the shared accounts a turn starts on (spec/10 §
  * Backend credentials — account strategy). Whatever the strategy, a key known
  * to be out of credit is skipped, and a chat's preferred account only changes
@@ -1514,6 +1523,11 @@ export const ChatStateEvent = z
      * predating the feature.
      */
     reminder: z.string().nullable().optional(),
+    /**
+     * How often the reminder is re-injected into the agent's turn (spec/04
+     * § Reminders). `null`/absent = banner only, never injected.
+     */
+    reminderEvery: ReminderEvery.nullable().optional(),
     /**
      * Auto-generated one-line "current status" summary of the thread and any
      * action it needs from the user (patch/todo.md § Features to add — "Current
@@ -2463,6 +2477,8 @@ export const SharedSecretsSummary = z
           id: ProviderKeyId,
           set: z.boolean(),
           last4: z.string().min(1).max(4).optional(),
+          /** Latest live check of the saved key; absent until one has run. */
+          check: ProviderKeyCheck.optional(),
         })
         .strict(),
     ),
@@ -3092,6 +3108,32 @@ export const DeviceSessionEvent = z
 export type DeviceSessionEvent = z.infer<typeof DeviceSessionEvent>;
 
 /**
+ * A voice call is live on a surface (host → server → surfaces).
+ *
+ * Emitted when an app surface (web / desktop / mobile) opens (`active: true`)
+ * or closes (`active: false`) a `call`-mode audio session on the host. Every
+ * OTHER surface uses it to show "call in progress on <device>" on that chat and
+ * offer to switch the call to itself (`07-voice-app.md` § A call can move
+ * between devices). Account-scoped (no `chatId` envelope field) so the hub fans
+ * it out to every connected surface; the chat is in the payload.
+ *
+ * `surfaceId` is the surface holding the call, so a surface can tell its own
+ * call from someone else's.
+ */
+export const VoiceCallEvent = z
+  .object({
+    type: z.literal('voice.call'),
+    sessionId: z.string().min(1),
+    surfaceId: z.string().min(1),
+    surfaceKind: z.string().min(1),
+    chatId: z.string().min(1),
+    active: z.boolean(),
+    startedAt: z.number().int().nonnegative(),
+  })
+  .strict();
+export type VoiceCallEvent = z.infer<typeof VoiceCallEvent>;
+
+/**
  * Host-owned folder registry snapshot (host → server → surfaces).
  *
  * spec/04-chats-and-folders.md § Folders: folders are DEFINED ON THE HOST —
@@ -3488,6 +3530,16 @@ export const ChatSpawnRequestEvent = z
      * Optional; a user-initiated spawn never sets it.
      */
     goal: z.string().min(1).optional(),
+    /**
+     * Arm a recurring loop on the chat the moment it is created — a job's
+     * `spawn`/`continue` action's own `loop` field (spec/08 ## Action). Same
+     * `every`/`message` as `chat.loop_request`. Optional; a user-initiated
+     * spawn never sets it.
+     */
+    loop: z
+      .object({ every: z.string().min(1), message: z.string().min(1) })
+      .strict()
+      .optional(),
   })
   .strict();
 export type ChatSpawnRequestEvent = z.infer<typeof ChatSpawnRequestEvent>;
@@ -4319,6 +4371,8 @@ export const ChatReminderRequestEvent = z
     type: z.literal('chat.reminder_request'),
     chatId: z.string().min(1),
     reminder: z.string().nullable(),
+    /** How often to re-inject it into the agent; `null`/absent = banner only. */
+    every: ReminderEvery.nullable().optional(),
   })
   .strict();
 export type ChatReminderRequestEvent = z.infer<typeof ChatReminderRequestEvent>;
@@ -9254,6 +9308,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   HostInfoEvent,
   HostAccountEvent,
   DeviceSessionEvent,
+  VoiceCallEvent,
   FoldersListEvent,
   FoldersUpdatedEvent,
   ClaudeSettingsListEvent,
@@ -9568,6 +9623,7 @@ export const EVENT_SCHEMAS = {
   'host.host': HostInfoEvent,
   'host.account': HostAccountEvent,
   'device.session': DeviceSessionEvent,
+  'voice.call': VoiceCallEvent,
   'folders.list': FoldersListEvent,
   'folders.updated': FoldersUpdatedEvent,
   'claude_settings.list': ClaudeSettingsListEvent,

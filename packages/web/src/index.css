@@ -1231,6 +1231,13 @@ body {
 .conn-dot.offline {
   background: var(--waiting);
 }
+.conn-dot.host-down {
+  background: var(--amber);
+  box-shadow: 0 0 0 3px var(--amber-tint);
+}
+.conn-dot[role='button'] {
+  cursor: pointer;
+}
 .brand-lockup .conn-dot {
   flex-shrink: 0;
   /* The wordmark's line box carries half-leading above the glyphs (24px type on
@@ -1705,6 +1712,17 @@ body {
   font-size: var(--text-min);
   font-weight: 400;
   font-variant-numeric: tabular-nums;
+}
+/* The status group's own badge sits at the right edge, away from the per-chat
+   status marks in the rows below. After the count it follows it directly. */
+.folder-head-badge {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+}
+.folder-head-count + .folder-head-badge {
+  margin-left: 0;
+  padding-left: 8px;
 }
 .folder-head-count + .folder-head-actions {
   margin-left: 0;
@@ -9513,6 +9531,13 @@ button.view-file-download {
   align-items: stretch;
   gap: 10px;
 }
+/* Choice rows: the label owns its own line, the chips sit under it. */
+.set-row.set-row-choices > .set-row-ctrl {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 6px;
+}
 .set-row.selected {
   background: var(--bg-soft);
 }
@@ -10898,7 +10923,7 @@ main.empty-state p {
 /* ---------- Goal row (status list; patch/todo.md — /goal) ---------- */
 
 .goal-icon-working {
-  color: var(--accent);
+  color: var(--goal-working);
 }
 .goal-icon-met {
   color: var(--goal-met);
@@ -11096,6 +11121,12 @@ main.empty-state p {
 .reminder-banner-text {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reminder-banner-every {
+  flex: none;
+  margin-left: auto;
+  color: var(--ink-3);
   white-space: nowrap;
 }
 .reminder-clear-btn {
@@ -17726,4 +17757,58 @@ select.permission-mode.is-pending {
   .group-tool-label {
     display: none;
   }
+}
+
+/* ---------- Dictation level bar ---------- */
+.level-bar {
+  height: 4px;
+  margin: 0 0 6px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+.level-bar-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: 2px;
+  background: var(--voice);
+  transform-origin: left center;
+  /* --level is written per element by LevelBar.tsx; 0 (empty) is its resting value. */
+  transform: scaleX(var(--level, 0));
+  transition: transform 60ms linear;
+}
+@media (prefers-reduced-motion: reduce) {
+  .level-bar-fill {
+    transition: none;
+  }
+}
+
+.remote-call {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #1f1c17;
+  color: #f4f0e4;
+  font-size: var(--text-min);
+  border-bottom: 1px solid #3a342a;
+}
+.remote-call .rc-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.remote-call .rc-switch {
+  flex: 0 0 auto;
+  background: #a9d391;
+  color: #1f1c17;
+  border: 0;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
 }

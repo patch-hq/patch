@@ -50,6 +50,8 @@ export interface DictationModeCallbacks {
   onBusy(pending: number): void;
   /** Interim words of the utterance being spoken; '' once it ends. */
   onPartial?(text: string): void;
+  /** Smoothing-free mic level 0..1, once per audio buffer. */
+  onLevel?(level: number): void;
   onError(message: string): void;
 }
 
@@ -153,6 +155,9 @@ export function startDictationMode(
     }
     rec = r;
     r.onSilent((reason) => cb.onError(`voice: ${reason}. Check the mic and try again.`));
+    r.onLevel((level) => {
+      if (!stopped) cb.onLevel?.(level);
+    });
     r.onPcm((pcm) => {
       if (stopped) return;
       const utterance = segmenter.push(pcm);

@@ -6,6 +6,7 @@
 //
 // Schemes:
 //   - none           accept anything (URL secrecy only — Home Assistant pattern)
+//   - bearer         `Authorization: Bearer <secret>`, constant-time compare to the job secret
 //   - hmac-sha256    `X-Patch-Signature: <hex>` (bare hex of hmac_sha256(secret, body)), key = job secret
 //   - github         `X-Hub-Signature-256: sha256=<hex>` over raw body, key = job secret
 //   - todoist        `X-Todoist-Hmac-SHA256: <base64>` over raw body, key = job secret
@@ -74,6 +75,19 @@ export function verifySignature(
 ): VerifyResult {
   if (scheme === 'none') return { ok: true };
   if (!secret) return { ok: false, reason: 'job missing secret' };
+  if (scheme === 'bearer') {
+    const raw = headers['authorization'];
+    const header = Array.isArray(raw) ? raw[0] : raw;
+    if (!header) return { ok: false, reason: 'missing authorization' };
+    const m = /^Bearer +(\S+)$/i.exec(header.trim());
+    if (!m) return { ok: false, reason: 'malformed authorization' };
+    // Compare digests so the check is constant-time regardless of length.
+    const a = createHmac('sha256', 'patch-bearer')
+      .update(m[1] ?? '')
+      .digest();
+    const b = createHmac('sha256', 'patch-bearer').update(secret).digest();
+    return timingSafeEqual(a, b) ? { ok: true } : { ok: false, reason: 'mismatch' };
+  }
   if (scheme === 'hmac-sha256') {
     // Spec/08: generic HMAC expects a BARE hex digest in `X-Patch-Signature`
     // (`hex(hmac_sha256(secret, body))`) — no `sha256=` prefix. That prefixed

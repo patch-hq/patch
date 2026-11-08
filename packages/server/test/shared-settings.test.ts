@@ -36,6 +36,9 @@ const TOKEN_A = 'sk-ant-oat01-fake-token-aaaaaaaaaaaa';
 const TOKEN_B = 'sk-ant-oat01-fake-token-bbbbbbbbbbbb';
 const GROQ = 'gsk_fake_groq_key_for_tests_1234';
 
+/** A provider that accepts every key, or refuses it. */
+const providerAnswers = (status: number) => async () => new Response('{}', { status });
+
 /** Every file under `dir`, recursively, as one string. */
 function everythingOnDisk(dir: string): string {
   let out = '';
@@ -463,12 +466,14 @@ describe('SharedSettingsService', () => {
       },
       onlineHostIds: () => online,
       broadcast: () => undefined,
+      keyCheckFetch: providerAnswers(200),
     });
     await svc.adoptInto('d1', 'provider-key', 'groq');
-    expect(svc.secretsSummary().providerKeys.find((k) => k.id === 'groq')).toEqual({
+    expect(svc.secretsSummary().providerKeys.find((k) => k.id === 'groq')).toMatchObject({
       id: 'groq',
       set: true,
       last4: '1234',
+      check: { status: 'ok' },
     });
   });
 
@@ -519,6 +524,7 @@ describe('shared settings routes', () => {
       dataDir: data,
       hostLink: link,
       validateClaudeToken: validateClaude,
+      keyCheckFetch: providerAnswers(401),
       jobsWatch: false,
       gcalSubscriptions: false,
     });
@@ -550,10 +556,12 @@ describe('shared settings routes', () => {
       });
       expect(res.statusCode).toBe(200);
       expect(res.body).not.toContain(GROQ);
+      // The save answers with the provider's verdict (the test provider refuses every key).
       expect(res.json().secrets.providerKeys).toContainEqual({
         id: 'groq',
         set: true,
         last4: '1234',
+        check: expect.objectContaining({ status: 'rejected', features: [] }),
       });
       const bad = await built.app.inject({
         method: 'PUT',
@@ -789,6 +797,57 @@ describe('shared settings routes', () => {
       expect(bad.statusCode).toBe(400);
     } finally {
       await built.app.close();
+    }
+  });
+});
+
+describe('provider key rechecks', () => {
+  it('flags a saved key the provider has since revoked, and keeps the last verdict when it cannot be asked', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'patch-keycheck-'));
+    try {
+      let status = 200;
+      let down = false;
+      const broadcasts: string[] = [];
+      const svc = new SharedSettingsService({
+        dataDir: dir,
+        sendToHost: () => undefined,
+        onlineHostIds: () => [],
+        broadcast: (e) =>
+          broadcasts.push(
+            e.secrets.providerKeys.find((k) => k.id === 'groq')?.check?.status ?? 'none',
+          ),
+        keyCheckFetch: async () => {
+          if (down) throw new Error('offline');
+          return new Response('{}', { status });
+        },
+      });
+      svc.setProviderKey('groq', GROQ);
+      expect(svc.secretsSummary().providerKeys.find((k) => k.id === 'groq')).not.toHaveProperty(
+        'check',
+      );
+      await svc.checkProviderKey('groq');
+      expect(svc.secretsSummary().providerKeys.find((k) => k.id === 'groq')?.check?.status).toBe(
+        'ok',
+      );
+
+      down = true;
+      await svc.recheckProviderKeys();
+      expect(svc.secretsSummary().providerKeys.find((k) => k.id === 'groq')?.check?.status).toBe(
+        'ok',
+      );
+
+      down = false;
+      status = 401;
+      await svc.recheckProviderKeys();
+      expect(svc.secretsSummary().providerKeys.find((k) => k.id === 'groq')?.check?.status).toBe(
+        'rejected',
+      );
+      expect(broadcasts.at(-1)).toBe('rejected');
+
+      svc.revokeProviderKey('groq');
+      expect(await svc.checkProviderKey('groq')).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

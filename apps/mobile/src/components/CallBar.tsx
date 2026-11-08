@@ -23,6 +23,7 @@ import { endVoiceCall, retryVoiceCall, setCallMode, setCallMuted } from '../lib/
 import { callModeLabel, callPhaseLabel, formatElapsed, handsFreeHint } from '../lib/callStatus';
 import { fonts, radii, space, textMin, type ThemeColors, useTheme } from '../lib/theme';
 import { CallPill } from './CallPill';
+import { RemoteCallPill } from './RemoteCallPill';
 import { ConnectingLabel, StatusDot, callDotColor, useNow } from './CallParts';
 
 function ModeSegment({
@@ -262,7 +263,7 @@ export function CallBar(): React.ReactElement | null {
  */
 export function CallDock({ chatId }: { chatId: string }): React.ReactElement | null {
   const callChatId = useVoiceStore((s) => s.activeSession?.chatId ?? null);
-  if (callChatId === null) return null;
+  if (callChatId === null) return <RemoteCallPill />;
   if (callChatId === chatId) return <CallBar />;
   return (
     <View style={{ paddingHorizontal: space.md, paddingVertical: space.xs }}>

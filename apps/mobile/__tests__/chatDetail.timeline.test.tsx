@@ -1007,6 +1007,7 @@ describe('permission request', () => {
     expect(sendMock).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'chat.permission_response',
+        chatId: 'c1',
         requestId: 'r1',
         approve: true,
         decision: 'approve',
@@ -1030,6 +1031,7 @@ describe('permission request', () => {
     expect(sendMock).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'chat.permission_response',
+        chatId: 'c1',
         requestId: 'r1',
         approve: false,
         decision: 'deny',
@@ -1086,6 +1088,7 @@ describe('permission request', () => {
     expect(sendMock).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'chat.permission_response',
+        chatId: 'c1',
         requestId: 'r1',
         approve: true,
         decision: 'approve_with_session_allow',
@@ -1378,9 +1381,40 @@ describe('voice call lines', () => {
       content: '[voice hand-off • mobile] Add milk to the shopping list',
     });
     const r = renderRN(<ChatDetailScreen />);
-    expect(findAllHost(r.root, byTestId('voice-handoff'))).toHaveLength(1);
-    expect(hasText(r.root, 'Asked the agent: Add milk to the shopping list')).toBe(true);
+    // Unanswered: the row says the agent is being asked.
+    expect(findAllHost(r.root, byTestId('voice-handoff-pending'))).toHaveLength(1);
+    expect(hasText(r.root, 'Asking the agent… Add milk to the shopping list')).toBe(true);
     expect(findAllHost(r.root, byTestId('message-user'))).toHaveLength(0);
+  });
+
+  it('a hand-off reads as asked once the agent has answered', () => {
+    const { applyEvent } = useChatStore.getState();
+    applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      seq: 1,
+      role: 'user',
+      content: '[voice hand-off • mobile] Add milk to the shopping list',
+    });
+    applyEvent({ type: 'chat.message', chatId: 'c1', seq: 2, role: 'assistant', content: 'Done' });
+    const r = renderRN(<ChatDetailScreen />);
+    expect(findAllHost(r.root, byTestId('voice-handoff'))).toHaveLength(1);
+    expect(findAllHost(r.root, byTestId('voice-handoff-pending'))).toHaveLength(0);
+    expect(hasText(r.root, 'Asked the agent: Add milk to the shopping list')).toBe(true);
+  });
+
+  it('a failed hand-off shows under an agent failed label', () => {
+    useChatStore.getState().applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      seq: 1,
+      role: 'system',
+      content: '[call] <- agent: failed: boom',
+    });
+    const r = renderRN(<ChatDetailScreen />);
+    expect(findAllHost(r.root, byTestId('call-agent-reply'))).toHaveLength(1);
+    expect(hasText(r.root, 'agent failed')).toBe(true);
+    expect(hasText(r.root, 'failed: boom')).toBe(true);
   });
 
   it("a finished call's cost is a muted line, not the agent's reply", () => {

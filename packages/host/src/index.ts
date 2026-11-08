@@ -157,6 +157,7 @@ import {
   type SpecialThreadId,
 } from './specialThreads.js';
 import { BUILD_TARGET, BUILT_AT, GIT_SHA, VERSION } from './version.js';
+import { countUpdateAttempt, recordShutdown, recordStart, signalContext } from './runDiag.js';
 import {
   applyUpdate,
   checkForUpdate,
@@ -514,7 +515,44 @@ async function startHost(
       'patch-daemon: host launch path changed — anything that allow-lists the old path (process killers, firewalls, permissions) must be updated or it will act on this host',
     );
   }
+  // Why this start happened, and why the previous run stopped (runDiag.ts). The
+  // record is re-derivable, so a failure here is logged loudly and never stops
+  // the host.
+  const noteShutdown = (via: string, caller: string, extra: Record<string, unknown> = {}): void => {
+    logger.warn({ via, caller, ...extra }, 'patch-daemon: shutdown requested');
+    try {
+      recordShutdown(config.patchHome, { via, caller });
+    } catch (err) {
+      logger.error({ err }, 'patch-daemon: could not record the shutdown reason');
+    }
+  };
+  process.on('uncaughtException', (err) => {
+    const e = err as NodeJS.ErrnoException;
+    if (e?.code === 'EPIPE' && e.syscall === 'write') return;
+    noteShutdown('uncaughtException', `crash: ${(err as Error)?.message ?? String(err)}`);
+  });
   installCrashGuard(logger);
+  try {
+    const { reason, storm } = recordStart(config.patchHome, VERSION);
+    logger.info(
+      {
+        startKind: reason.kind,
+        version: VERSION,
+        pid: process.pid,
+        ppid: process.ppid,
+        previousExit: reason.previousExit,
+      },
+      `patch-daemon: start — ${reason.kind}`,
+    );
+    if (storm) {
+      logger.warn(
+        { ...storm, startKind: reason.kind },
+        `patch-daemon: restart storm — ${storm.count} starts in ${storm.windowMs / 1000}s`,
+      );
+    }
+  } catch (err) {
+    logger.error({ err }, 'patch-daemon: could not read or write the run record');
+  }
 
   // 0. TCP /healthz — bound FIRST, before anything touches shared state. This
   //    port is the single-instance lock: a second host (launchd respawning
@@ -947,7 +985,17 @@ async function startHost(
       patchHome: config.patchHome,
       // Recorded only once the installer is about to run, so a deferred
       // or artifact-pending apply leaves the version free to retry.
-      onInstallStart: (version) => hostStateStore.update({ lastAutoUpdateAttempt: version }),
+      onInstallStart: (version) => {
+        hostStateStore.update({ lastAutoUpdateAttempt: version });
+        try {
+          logger.info(
+            { version, attempt: countUpdateAttempt(config.patchHome, version) },
+            'self-update: install attempt',
+          );
+        } catch (err) {
+          logger.error({ err }, 'self-update: could not count the install attempt');
+        }
+      },
       logger,
     });
 
@@ -5438,6 +5486,10 @@ async function startHost(
       const name = record?.name ?? deviceId;
       emit({ type: 'device.session', deviceId, name, active });
     },
+    // spec/07 § A call can move between devices — account-scoped, so every
+    // surface learns a call is live on this chat and can offer to take it.
+    onCallSession: (info) =>
+      emit({ type: 'voice.call', ...info, surfaceKind: String(info.surfaceKind) }),
     // F2: when a phone Manager call ends, release any device events the
     // concurrency arbiter queued behind it (spec/16 §Concurrency).
     onSessionClosed: ({ wasPhoneCall }) => {
@@ -5636,9 +5688,16 @@ async function startHost(
           'patch-daemon: graceful shutdown overran its deadline — exiting anyway',
         ),
     });
-  shutdownHook = stop;
-  process.once('SIGINT', stop);
-  process.once('SIGTERM', stop);
+  shutdownHook = () => {
+    noteShutdown('control-stop', 'POST /stop on the control socket (patch CLI or a host surface)');
+    stop();
+  };
+  const onSignal = (sig: NodeJS.Signals): void => {
+    noteShutdown(sig, 'signal received', signalContext());
+    stop();
+  };
+  process.once('SIGINT', () => onSignal('SIGINT'));
+  process.once('SIGTERM', () => onSignal('SIGTERM'));
   testHooks?.onReady?.({
     shutdown,
     daemon,
@@ -6981,6 +7040,18 @@ export async function handleServerEvent(
             logger.warn({ op, chatId: spawnedChatId, err }, 'chat.spawn_request: setGoal failed');
           });
         }
+        // spec/02 § Self-wake, spec/08 ## Action — a job's own loop prompt,
+        // armed once at creation on the same scheduler `/loop` reaches.
+        if (event.loop !== undefined) {
+          try {
+            daemon.scheduleWake(spawnedChatId, {
+              message: event.loop.message,
+              every: event.loop.every,
+            });
+          } catch (err) {
+            logger.error({ op, chatId: spawnedChatId, err }, 'chat.spawn_request: loop failed');
+          }
+        }
         return;
       }
       case 'chat.input': {
@@ -7245,7 +7316,7 @@ export async function handleServerEvent(
         return;
       }
       case 'chat.reminder_request': {
-        await daemon.setReminder(event.chatId, event.reminder);
+        await daemon.setReminder(event.chatId, event.reminder, event.every ?? null);
         return;
       }
       case 'chat.loop_request': {
