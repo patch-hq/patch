@@ -1,7 +1,7 @@
 {
   "name": "Fix auto-filed issues",
   "trigger": { "type": "webhook", "scheme": "github", "secret": "CHANGE-ME" },
-  "filter": "$.action = 'opened' and $count($.issue.labels[name = 'auto-filed']) > 0",
+  "filter": "payload.action = 'opened' and 'auto-filed' in payload.issue.labels.name",
   "action": {
     "type": "spawn",
     "hostId": "CHANGE-ME",
