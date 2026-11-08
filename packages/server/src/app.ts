@@ -1937,13 +1937,9 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     const msg = args.find((a): a is string => typeof a === 'string');
     const message = err instanceof Error ? err.message : (msg ?? '');
     if (message === '') return;
-    // The filer's own failures are logged at warn; anything it logs is skipped regardless.
-    if (
-      typeof first === 'object' &&
-      (first as { component?: unknown })?.component === 'issue-filer'
-    ) {
-      return;
-    }
+    // A phone crash is filed by its route as a `client-crash` report with its own
+    // message and stack; its error log line would otherwise file a second issue.
+    if (typeof first === 'object' && first !== null && 'clientCrash' in first) return;
     issueFiler.reportAuto({
       kind: 'server-error',
       message: msg && err instanceof Error ? `${msg}: ${err.message}` : message,
