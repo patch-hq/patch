@@ -3192,6 +3192,7 @@ const TimelineItem = React.memo(function TimelineItem({
                     if (!entry.requestId) return;
                     permissionDeliveryTracker.send({
                       type: 'chat.permission_response',
+                      chatId,
                       requestId: entry.requestId,
                       approve: opt.approve,
                       decision: opt.decision,
