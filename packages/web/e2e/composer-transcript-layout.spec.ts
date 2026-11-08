@@ -95,11 +95,14 @@ test.describe('composer + transcript layout', () => {
     const input = page.locator('.composer-input');
     await input.click();
     await input.fill(Array.from({ length: 5 }, (_, i) => `line ${i}`).join('\n'));
-    await page.waitForTimeout(50);
-    const m = await input.evaluate((el) => {
-      const t = el as HTMLTextAreaElement;
-      return { overflowY: getComputedStyle(t).overflowY, h: t.clientHeight, sh: t.scrollHeight };
-    });
+    const measure = () =>
+      input.evaluate((el) => {
+        const t = el as HTMLTextAreaElement;
+        return { overflowY: getComputedStyle(t).overflowY, h: t.clientHeight, sh: t.scrollHeight };
+      });
+    // Wait for the auto-grow to settle (it can land late on a loaded runner).
+    await expect.poll(async () => (await measure()).overflowY).toBe('hidden');
+    const m = await measure();
     // 5 lines (~140px) fit under the 25% cap (200px at 800px); it must show whole, unscrolled.
     expect(m.h).toBeGreaterThan(120);
     expect(m.overflowY).toBe('hidden');

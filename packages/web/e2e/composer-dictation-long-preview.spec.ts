@@ -139,21 +139,31 @@ test('composer grows with a long live dictation', async ({ page }) => {
   await input.click();
   await tapMic(page.getByTestId('voice-note-btn'));
   await expect(input).toHaveValue(/word39/);
-  const m = await page.evaluate(() => {
-    const i = document.querySelector<HTMLTextAreaElement>('[data-testid="composer-input"]')!;
-    const row = i.closest('.composer-row')!;
-    const toolbar = row.querySelector('.composer-actions, .composer-toolbar') as HTMLElement | null;
-    return {
-      inputH: i.offsetHeight,
-      cap: Math.round(window.innerHeight * 0.25),
-      scroll: i.scrollHeight,
-      client: i.clientHeight,
-      inputBottom: i.getBoundingClientRect().bottom,
-      toolbarTop: toolbar ? toolbar.getBoundingClientRect().top : null,
-    };
-  });
-  // Fits entirely, or is at the cap and scrolls inside itself.
-  expect(m.inputH >= m.cap - 1 || m.scroll <= m.client).toBe(true);
+  const measure = () =>
+    page.evaluate(() => {
+      const i = document.querySelector<HTMLTextAreaElement>('[data-testid="composer-input"]')!;
+      const row = i.closest('.composer-row')!;
+      const toolbar = row.querySelector(
+        '.composer-actions, .composer-toolbar',
+      ) as HTMLElement | null;
+      return {
+        inputH: i.offsetHeight,
+        cap: Math.round(window.innerHeight * 0.25),
+        scroll: i.scrollHeight,
+        client: i.clientHeight,
+        inputBottom: i.getBoundingClientRect().bottom,
+        toolbarTop: toolbar ? toolbar.getBoundingClientRect().top : null,
+      };
+    });
+  // Fits entirely, or is at the cap and scrolls inside itself. Poll: the box
+  // grows in a layout effect that can land late on a loaded runner.
+  await expect
+    .poll(async () => {
+      const r = await measure();
+      return r.inputH >= r.cap - 1 || r.scroll <= r.client;
+    })
+    .toBe(true);
+  const m = await measure();
   expect(m.inputH).toBeGreaterThan(60);
   if (m.toolbarTop !== null) expect(m.inputBottom).toBeLessThanOrEqual(m.toolbarTop + 1);
 });
