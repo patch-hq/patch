@@ -1007,6 +1007,7 @@ describe('permission request', () => {
     expect(sendMock).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'chat.permission_response',
+        chatId: 'c1',
         requestId: 'r1',
         approve: true,
         decision: 'approve',
@@ -1030,6 +1031,7 @@ describe('permission request', () => {
     expect(sendMock).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'chat.permission_response',
+        chatId: 'c1',
         requestId: 'r1',
         approve: false,
         decision: 'deny',
@@ -1086,6 +1088,7 @@ describe('permission request', () => {
     expect(sendMock).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'chat.permission_response',
+        chatId: 'c1',
         requestId: 'r1',
         approve: true,
         decision: 'approve_with_session_allow',
