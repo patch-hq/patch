@@ -431,6 +431,12 @@ export function Composer({
     : { kind: 'chat', chatId };
   const storedAttachments = useComposerAttachmentStore((s) => s.byKey[chatId] ?? NO_ATTACHMENTS);
   const attachments = edit ? NO_ATTACHMENTS : storedAttachments;
+  // Keys handed to a send that hasn't settled. The sent message is already in
+  // the chat (its files uploading) while the hook check runs, so the draft
+  // must not show them too. They stay in the store until the send is accepted;
+  // a blocked send brings the chips straight back.
+  const [sendingKeys, setSendingKeys] = React.useState<ReadonlySet<string>>(() => new Set());
+  const visibleAttachments = attachments.filter((a) => !sendingKeys.has(a.key));
   // This chat's row — the mode, model, host and activity the controls on the
   // right of the action row read, and the host the skill list below is fetched
   // from. Undefined until the roster or the stream has named the chat; the
@@ -1374,6 +1380,12 @@ export function Composer({
     // the echo back out and puts the draft back.
     check?: Promise<HookCheckResponse>,
   ): void => {
+    const sentKeys = pending.map((a) => a.key);
+    const unhide = (): void => {
+      if (sentKeys.length === 0) return;
+      setSendingKeys((cur) => new Set([...cur].filter((k) => !sentKeys.includes(k))));
+    };
+    if (sentKeys.length > 0) setSendingKeys((cur) => new Set([...cur, ...sentKeys]));
     const localId = sendMessage(target, text, files, check ? { hold: true } : {});
     if (dictatedSendRef.current) markDictatedSend(localId);
     // First message is when a reply you might not be watching for becomes
@@ -1410,6 +1422,7 @@ export function Composer({
               .pushError(`couldn’t release the draft’s attachments: ${err.message}`);
           });
         }
+        unhide();
       }
     };
     if (!check) {
@@ -1420,6 +1433,7 @@ export function Composer({
       setHookChecking(false);
       if (res.decision === 'block') {
         cancelHeld(target, localId);
+        unhide();
         // The draft goes back as it was, with whatever was typed since after it.
         const typed = draftRef.current;
         updateDraft(typed.length === 0 ? text : `${text}\n${typed}`);
@@ -1726,14 +1740,14 @@ export function Composer({
         </View>
       ) : null}
       {/* Removable thumbnails/chips above the input (spec/15 § Composer). */}
-      {attachments.length > 0 ? (
+      {visibleAttachments.length > 0 ? (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ gap: space.xs, paddingBottom: space.xs }}
           style={{ opacity: resolving ? 0.6 : 1 }}
         >
-          {attachments.map((a) => (
+          {visibleAttachments.map((a) => (
             <View
               key={a.key}
               testID="composer-attachment"
@@ -2032,9 +2046,7 @@ export function Composer({
               if (mirrorStickRef.current) mirrorScrollRef.current?.scrollToEnd({ animated: false });
             }}
           >
-            <View
-              style={{ minHeight: COMPOSER_MIN_HEIGHT, justifyContent: 'flex-end' }}
-            >
+            <View style={{ minHeight: COMPOSER_MIN_HEIGHT, justifyContent: 'flex-end' }}>
               <Text
                 testID="dictation-preview"
                 style={{

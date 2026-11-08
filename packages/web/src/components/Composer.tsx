@@ -796,6 +796,12 @@ export const Composer = forwardRef(function Composer(
   const attachments = useComposerAttachmentStore(
     (s) => s.byKey[attachmentDraftKey] ?? NO_ATTACHMENTS,
   );
+  // Keys handed to a send that hasn't settled yet. The sent message is already
+  // in the chat (showing these files uploading) while the hook check runs, so
+  // the draft must not show them as well. They stay in the store until the
+  // send is accepted (a refused send brings the chips straight back).
+  const [sendingKeys, setSendingKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const visibleAttachments = attachments.filter((a) => !sendingKeys.has(a.key));
   const attachAction = useComposerAttachmentStore((s) => s.attach);
   const removeAttachmentAction = useComposerAttachmentStore((s) => s.remove);
   const retryAttachmentAction = useComposerAttachmentStore((s) => s.retry);
@@ -2172,11 +2178,19 @@ export const Composer = forwardRef(function Composer(
             ? [trimmed, files, resolvedChatId]
             : [trimmed];
     if (!running && onStop) setPendingSend(true);
+    const sentKeys = pending.map((a) => a.key);
+    const unhide = (): void => {
+      if (sentKeys.length === 0) return;
+      setSendingKeys((cur) => new Set([...cur].filter((k) => !sentKeys.includes(k))));
+    };
+    if (sentKeys.length > 0) setSendingKeys((cur) => new Set([...cur, ...sentKeys]));
     const onAccepted = (): void => {
       if (pending.length === 0) return;
       releaseSent(pending);
+      unhide();
     };
     const restore = (): void => {
+      unhide();
       setPendingSend(false);
       setValue((cur) => (cur.length === 0 ? trimmed : cur));
     };
@@ -2185,6 +2199,7 @@ export const Composer = forwardRef(function Composer(
       result = onSend(...args);
     } catch (err) {
       sendInFlightRef.current = false;
+      unhide();
       throw err;
     }
     if (result instanceof Promise) {
@@ -2192,6 +2207,10 @@ export const Composer = forwardRef(function Composer(
         .then((ok) => {
           if (ok === false) restore();
           else onAccepted();
+        })
+        .catch((err) => {
+          unhide();
+          throw err;
         })
         .finally(() => {
           sendInFlightRef.current = false;
@@ -2310,9 +2329,9 @@ export const Composer = forwardRef(function Composer(
           Step 3 of 3: each chip tracks its OWN upload independently — a
           failed one reads "Not uploaded" with Retry (same pattern as a sent
           message's failed upload), never blocking the others. */}
-      {attachments.length > 0 ? (
+      {visibleAttachments.length > 0 ? (
         <div className="composer-attachments" data-testid="composer-attachments">
-          {attachments.map((a) => (
+          {visibleAttachments.map((a) => (
             <div
               key={a.key}
               className={`composer-attachment${resolving || a.status === 'uploading' ? ' uploading' : ''}${a.status === 'failed' ? ' failed' : ''}`}
