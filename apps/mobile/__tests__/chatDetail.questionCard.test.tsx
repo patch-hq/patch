@@ -196,3 +196,12 @@ describe('AskUserQuestion — question card, not a permission prompt', () => {
     expect(hasText(r.root, 'AskUserQuestion')).toBe(false);
   });
 });
+
+describe('AskUserQuestion — taps while the keyboard is open', () => {
+  it('the transcript list passes taps through to the card instead of swallowing the first one', () => {
+    askQuestion();
+    const r = renderRN(<ChatDetailScreen />);
+    const list = findHost(r.root, (i) => i.type === 'FlatList');
+    expect(list.props.keyboardShouldPersistTaps).toBe('handled');
+  });
+});
