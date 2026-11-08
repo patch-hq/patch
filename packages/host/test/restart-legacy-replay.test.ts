@@ -34,4 +34,21 @@ describe('replay of a chat written when restarts folded as retries', () => {
     const later = { type: 'chat.message', role: 'user', content: 'b', seq: 8, retryOfSeq: 5 };
     expect(restartResendAsOwnMessage(later, state)).toBe(later);
   });
+
+  it('keeps a genuine retry folded when another message sits between the marker and it', () => {
+    const state = { afterMarker: false };
+    const marker = {
+      type: 'chat.message',
+      role: 'system',
+      content: 'Turn interrupted by restart',
+      seq: 3,
+    };
+    restartResendAsOwnMessage(marker, state);
+    restartResendAsOwnMessage(
+      { type: 'chat.message', role: 'assistant', content: 'hi', seq: 4 },
+      state,
+    );
+    const retry = { type: 'chat.message', role: 'user', content: 'x', seq: 5, retryOfSeq: 2 };
+    expect(restartResendAsOwnMessage(retry, state)).toBe(retry);
+  });
 });
