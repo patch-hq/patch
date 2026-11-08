@@ -5311,7 +5311,7 @@ async function startHost(
     build: (engine) => {
       // WHISPER_BACKEND=mock is the test host: its one canned reader stands in
       // for whichever engine the account picked, so no engine needs a key or model.
-      if (config.audio.whisperBackend === 'mock') return { whisper };
+      if (config.audio.whisperBackend === 'mock' && whisper !== undefined) return { whisper };
       if (engine === 'groq') {
         if (providerKeys.get('groq') === undefined) {
           return {
