@@ -291,30 +291,3 @@ test.describe('wide tables on a phone', () => {
     expect(m.thWidth).toBeGreaterThanOrEqual(100);
   });
 });
-
-// A phone-width window: the table is `display: table` there, so the wrapper has
-// to be the thing that scrolls if a cell ever refuses to wrap. Long cells wrap.
-test.describe('wide tables on a phone', () => {
-  const PHONE = { width: 390, height: 800 };
-
-  test('a table with long cells fits the screen, nothing clipped', async ({ page }) => {
-    await page.setViewportSize(PHONE);
-    await page.goto('/app/dev-harness.html?chat=chat_longcell');
-    const wrap = page.locator('.msg-assistant .md-table-wrap');
-    await expect(wrap).toBeVisible();
-    const { scrollWidth, clientWidth } = await wrap.evaluate((el) => ({
-      scrollWidth: el.scrollWidth,
-      clientWidth: el.clientWidth,
-    }));
-    expect(scrollWidth).toBeLessThanOrEqual(clientWidth + 1);
-  });
-
-  test('the wrapper scrolls, so anything that cannot wrap is not clipped', async ({ page }) => {
-    await page.setViewportSize(PHONE);
-    await page.goto('/app/dev-harness.html?chat=chat_longcell');
-    const wrap = page.locator('.msg-assistant .md-table-wrap');
-    await expect(wrap).toBeVisible();
-    const overflowX = await wrap.evaluate((el) => getComputedStyle(el).overflowX);
-    expect(overflowX).toBe('auto');
-  });
-});
