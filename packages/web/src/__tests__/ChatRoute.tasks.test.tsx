@@ -71,10 +71,6 @@ function renderChat(): ReturnType<typeof render> {
   );
 }
 
-function expand(): void {
-  fireEvent.click(screen.getByTestId('task-bar-summary'));
-}
-
 /** The list the component last sent to the API. */
 function lastSent(): TodoItem[] {
   const calls = vi.mocked(api.setTodos).mock.calls;
@@ -112,8 +108,8 @@ describe('ChatRoute — task bar (spec/02 § Task list)', () => {
     expect(screen.getByTestId('task-bar-head')).toHaveTextContent('Add tasks');
     expect(screen.getByTestId('task-add-input')).toBeInTheDocument();
     expect(screen.queryByTestId('task-bar-count')).not.toBeInTheDocument();
-    // Collapsing the empty bar puts it away again.
-    expand();
+    // Closing the empty card puts it away again.
+    fireEvent.click(screen.getByTestId('task-bar-close'));
     expect(screen.queryByTestId('task-bar')).not.toBeInTheDocument();
   });
 
@@ -169,7 +165,6 @@ describe('ChatRoute — task bar (spec/02 § Task list)', () => {
   it('removes a queued task before release, and Done includes text still in the field', async () => {
     seed(LIST);
     renderChat();
-    expand();
     const input = screen.getByTestId('task-add-input');
     fireEvent.change(input, { target: { value: 'a' } });
     fireEvent.keyDown(input, { key: 'Enter' });
@@ -186,35 +181,17 @@ describe('ChatRoute — task bar (spec/02 § Task list)', () => {
     ]);
   });
 
-  it('collapsed, names the in-progress task and the progress count', () => {
+  it('is open by default, titled Tasks with the progress count', () => {
     seed(LIST);
     renderChat();
-    expect(screen.getByTestId('task-bar-head')).toHaveTextContent('rebuild the index');
+    expect(screen.getByTestId('task-bar-head')).toHaveTextContent('Tasks');
     expect(screen.getByTestId('task-bar-count')).toHaveTextContent('1/3');
-    // Collapsed means collapsed: the rows aren't in the DOM yet.
-    expect(screen.queryByTestId('task-bar-list')).not.toBeInTheDocument();
-  });
-
-  it('falls back to the next pending task when nothing is in progress', () => {
-    seed([
-      { text: 'read the current indexer', status: 'completed' },
-      { text: 'rebuild the index', status: 'pending' },
-    ]);
-    renderChat();
-    expect(screen.getByTestId('task-bar-head')).toHaveTextContent('rebuild the index');
-  });
-
-  it('says all tasks are done when every item is completed', () => {
-    seed([{ text: 'read the current indexer', status: 'completed' }]);
-    renderChat();
-    expect(screen.getByTestId('task-bar-head')).toHaveTextContent('All tasks done');
-    expect(screen.getByTestId('task-bar-count')).toHaveTextContent('1/1');
+    expect(screen.getByTestId('task-bar-list')).toBeInTheDocument();
   });
 
   it('expands to one row per task', () => {
     seed(LIST);
     renderChat();
-    expand();
     const rows = screen.getAllByTestId('task-row');
     expect(rows).toHaveLength(3);
     expect(rows[1]).toHaveTextContent('rebuild the index');
@@ -223,7 +200,6 @@ describe('ChatRoute — task bar (spec/02 § Task list)', () => {
   it('cycles a task status and sends the whole list', async () => {
     seed(LIST);
     renderChat();
-    expand();
     // Row 2 is in_progress → clicking marks it completed.
     fireEvent.click(screen.getAllByTestId('task-status-btn')[1] as HTMLElement);
 
@@ -239,7 +215,6 @@ describe('ChatRoute — task bar (spec/02 § Task list)', () => {
   it('renames a task in place on Enter', async () => {
     seed(LIST);
     renderChat();
-    expand();
     fireEvent.click(screen.getAllByTestId('task-text')[2] as HTMLElement);
     const input = screen.getByTestId('task-text-input');
     fireEvent.change(input, { target: { value: 'schedule it hourly' } });
@@ -252,7 +227,6 @@ describe('ChatRoute — task bar (spec/02 § Task list)', () => {
   it('reverts an in-place rename on Escape without calling the API', () => {
     seed(LIST);
     renderChat();
-    expand();
     fireEvent.click(screen.getAllByTestId('task-text')[2] as HTMLElement);
     const input = screen.getByTestId('task-text-input');
     fireEvent.change(input, { target: { value: 'nonsense' } });
@@ -266,7 +240,6 @@ describe('ChatRoute — task bar (spec/02 § Task list)', () => {
   it('deletes a task', async () => {
     seed(LIST);
     renderChat();
-    expand();
     fireEvent.click(screen.getAllByTestId('task-delete-btn')[0] as HTMLElement);
 
     await waitFor(() => expect(api.setTodos).toHaveBeenCalled());
@@ -279,7 +252,6 @@ describe('ChatRoute — task bar (spec/02 § Task list)', () => {
   it('adds a queued task at the end as pending on Done', async () => {
     seed(LIST);
     renderChat();
-    expand();
     const input = screen.getByTestId('task-add-input');
     fireEvent.change(input, { target: { value: 'benchmark it' } });
     fireEvent.keyDown(input, { key: 'Enter' });
@@ -295,7 +267,6 @@ describe('ChatRoute — task bar (spec/02 § Task list)', () => {
     vi.mocked(api.setTodos).mockRejectedValueOnce(new Error('network down'));
     seed(LIST);
     renderChat();
-    expand();
     fireEvent.click(screen.getAllByTestId('task-delete-btn')[0] as HTMLElement);
 
     // Optimistic first…
