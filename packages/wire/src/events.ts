@@ -260,6 +260,9 @@ export const ChatErrorCode = z.enum([
   // spec/10 § Backend credentials — a credential operation named a backend that
   // host does not have.
   'backend_not_found',
+  // spec/02 § Speech set-up — a meeting was started on a host with no speech
+  // route chosen. The message names both routes; the surface offers them.
+  'speech_not_set_up',
   // spec/04 § Folders — a folder-registry edit named a path that is empty or
   // does not exist on that host.
   'folder_invalid',

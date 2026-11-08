@@ -35,6 +35,7 @@ import { VoicePermissionBanner } from './components/VoicePermissionBanner.js';
 import { ShortcutCheatSheet } from './components/ShortcutCheatSheet.js';
 import { ErrorToasts } from './components/ErrorToasts.js';
 import { ConfirmModal } from './components/ConfirmModal.js';
+import { SpeechSetupModal } from './components/SpeechSetupModal.js';
 import { PromptModal } from './components/PromptModal.js';
 import { TooltipHost } from './components/TooltipHost.js';
 import { ChatPaneRoute } from './routes/ChatPaneRoute.js';
@@ -759,6 +760,7 @@ export function AppShell(): JSX.Element {
       <ErrorToasts />
       <SnoozeSheet />
       <ConfirmModal />
+      <SpeechSetupModal />
       <PromptModal />
       <TooltipHost />
     </div>
