@@ -45,7 +45,13 @@ import {
   LayoutTemplate,
   Clock,
   CloudOff,
+  Loader2,
 } from 'lucide-react-native';
+import {
+  formatHandoffElapsed,
+  parseCallMarker,
+  type CallMarker,
+} from '../../src/lib/handoffMarkers';
 import { ArrowUp, Check, ChevronDown, ChevronRight, Copy, Hand } from 'lucide-react-native';
 import {
   SPECIAL_THREAD_IDS,
@@ -2478,6 +2484,92 @@ function SideThreadMarkerRows({
   );
 }
 
+function CallRule({
+  text,
+  testID,
+  danger,
+}: {
+  text: string;
+  testID: string;
+  danger?: boolean;
+}): React.ReactElement {
+  const colors = useTheme();
+  const line = { flex: 1, height: 1, backgroundColor: colors.divider };
+  return (
+    <View
+      testID={testID}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, marginBottom: space.sm }}
+    >
+      <View style={line} />
+      <Text style={{ fontSize: textMin, color: danger ? colors.red : colors.ink3 }}>{text}</Text>
+      <View style={line} />
+    </View>
+  );
+}
+
+/** One quiet line for a hand-off: working with a timer, then a thin rule once answered. */
+function HandoffLine({
+  chatId,
+  marker,
+}: {
+  chatId: string;
+  marker: Extract<CallMarker, { kind: 'working' }>;
+}): React.ReactElement {
+  const colors = useTheme();
+  const [open, setOpen] = React.useState(false);
+  const [now, setNow] = React.useState(() => Date.now());
+  // A primitive, so the selector stays referentially stable.
+  const outcome = useChatStore((s) => {
+    for (const e of s.timelines[chatId] ?? []) {
+      const m = e.kind === 'message' ? parseCallMarker(e.content ?? '') : null;
+      if (m?.kind === 'answered' && m.startedAt === marker.startedAt) return `ok:${m.ms}`;
+      if (m?.kind === 'failed' && m.startedAt === marker.startedAt) return `err:${m.reason}`;
+    }
+    return '';
+  });
+  React.useEffect(() => {
+    if (outcome) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [outcome]);
+  if (outcome.startsWith('ok:')) {
+    return (
+      <CallRule
+        testID="handoff-answered"
+        text={`Agent answered in ${formatHandoffElapsed(Number(outcome.slice(3)))}`}
+      />
+    );
+  }
+  if (outcome.startsWith('err:')) {
+    return <CallRule testID="handoff-failed" danger text={`Agent failed: ${outcome.slice(4)}`} />;
+  }
+  return (
+    <View testID="handoff-working" style={{ marginBottom: space.sm }}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        onPress={() => setOpen((v) => !v)}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: space.xs }}
+      >
+        <ChevronRight
+          size={14}
+          color={colors.ink3}
+          style={{ transform: [{ rotate: open ? '90deg' : '0deg' }] }}
+        />
+        <Loader2 size={14} color={colors.ink3} />
+        <Text style={{ fontSize: textMin, color: colors.ink3 }}>
+          {`Agent is working ${formatHandoffElapsed(now - marker.startedAt)}`}
+        </Text>
+      </Pressable>
+      {open ? (
+        <Text style={{ fontSize: textMin, color: colors.ink2, paddingLeft: 20 }}>
+          {marker.request}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 function AgentReturnItem({ agentReturn }: { agentReturn: AgentReturn }): React.ReactElement {
   const colors = useTheme();
   const [open, setOpen] = React.useState(false);
@@ -2586,21 +2678,17 @@ const TimelineItem = React.memo(function TimelineItem({
     const agentReturn = parseAgentReturn(entry.content ?? '');
     if (agentReturn) return <AgentReturnItem agentReturn={agentReturn} />;
   }
-  if (entry.kind === 'message' && entry.voiceHandoff) {
-    return (
-      <Text
-        testID="voice-handoff"
-        style={{ fontSize: textMin, color: colors.ink3, marginBottom: space.sm }}
-      >
-        {`Asked the agent: ${entry.content ?? ''}`}
-      </Text>
-    );
-  }
+  // Drawn by the hand-off's own working line, so the request is not repeated here.
+  if (entry.kind === 'message' && entry.voiceHandoff) return null;
   if (
     entry.kind === 'message' &&
     entry.role === 'system' &&
     (entry.content ?? '').startsWith('[call] ')
   ) {
+    const marker = parseCallMarker(entry.content ?? '');
+    if (marker?.kind === 'working') return <HandoffLine chatId={chatId} marker={marker} />;
+    if (marker?.kind === 'answered' || marker?.kind === 'failed') return null;
+    if (marker?.kind === 'voice') return <CallRule testID="call-voice-rule" text="Voice" />;
     return (
       <Text
         testID="call-summary"

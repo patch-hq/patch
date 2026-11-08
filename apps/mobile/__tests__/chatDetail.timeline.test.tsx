@@ -1369,7 +1369,7 @@ describe('account switch line', () => {
 });
 
 describe('voice call lines', () => {
-  it("a hand-off reads as what the voice asked the agent, not the user's bubble", () => {
+  it('a hand-off is a working line, not the voice request or the user bubble', () => {
     useChatStore.getState().applyEvent({
       type: 'chat.message',
       chatId: 'c1',
@@ -1377,10 +1377,31 @@ describe('voice call lines', () => {
       role: 'user',
       content: '[voice hand-off • mobile] Add milk to the shopping list',
     });
+    useChatStore.getState().applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      seq: 2,
+      role: 'system',
+      content: '[call] agent-working 1000 Add milk to the shopping list',
+    });
     const r = renderRN(<ChatDetailScreen />);
-    expect(findAllHost(r.root, byTestId('voice-handoff'))).toHaveLength(1);
-    expect(hasText(r.root, 'Asked the agent: Add milk to the shopping list')).toBe(true);
+    expect(findAllHost(r.root, byTestId('handoff-working'))).toHaveLength(1);
+    expect(hasText(r.root, 'Asked the agent')).toBe(false);
     expect(findAllHost(r.root, byTestId('message-user'))).toHaveLength(0);
+  });
+
+  it('settles into an answered rule once the agent has answered', () => {
+    for (const [seq, content] of [
+      [1, '[call] agent-working 1000 x'],
+      [2, '[call] agent-answered 1000 74000'],
+    ] as const) {
+      useChatStore
+        .getState()
+        .applyEvent({ type: 'chat.message', chatId: 'c1', seq, role: 'system', content });
+    }
+    const r = renderRN(<ChatDetailScreen />);
+    expect(findAllHost(r.root, byTestId('handoff-working'))).toHaveLength(0);
+    expect(hasText(r.root, 'Agent answered in 1:14')).toBe(true);
   });
 
   it("a finished call's cost is a muted line, not the agent's reply", () => {

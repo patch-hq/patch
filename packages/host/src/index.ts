@@ -5635,6 +5635,12 @@ async function startHost(
     // A call's `look_back`: the chat's messages that match a few words, searched on the host.
     lookBack: (chatId, query) => daemon.searchChat(chatId, query),
     makeTimeline: (init) => chatVoice.makeTimeline(init),
+    onCallStarted: (info) =>
+      chatVoice.callStarted({
+        chatId: info.init.chatId,
+        startedAt: info.startedAt,
+        engine: info.engine,
+      }),
     onCallEnded: (info) => chatVoice.callEnded(info),
   });
 

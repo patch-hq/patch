@@ -24,6 +24,21 @@ const base = {
 };
 
 describe('engine pricing', () => {
+  it('leaves the token part out for a per-minute engine', () => {
+    const c = costCall({
+      ...base,
+      engine: {
+        backend: 'elevenlabs',
+        model: 'claude-haiku-4-5',
+        agentSeconds: 60,
+        stt: null,
+        tokens: { textIn: 0, audioIn: 0, cachedIn: 0, textOut: 0, audioOut: 0 },
+      },
+      handoffs: 0,
+    });
+    expect(callSummaryLine(c)).not.toContain('tokens');
+  });
+
   it('prices Gemini Flash audio and text tokens per million', () => {
     const usd = engineCostUsd('models/gemini-2.5-flash-native-audio-preview-12-2025', {
       ...ZERO_TOKENS,
@@ -61,7 +76,7 @@ describe('costing a call', () => {
     const c = costCall({ ...base, engine: gemini, handoffs: 0 });
     expect(c.engineUsd).toBeCloseTo((3000 * 3 + 2000 * 0.5 + 600 * 12) / 1e6, 9);
     expect(callSummaryLine(c)).toBe(
-      'Call 0:52 · Gemini Flash · $0.017 · 5,000 tokens in / 600 out · 0 hand-offs',
+      'Call 0:52 · Gemini Flash · 2¢ · 5,000 tokens in / 600 out · 0 hand-offs',
     );
   });
 

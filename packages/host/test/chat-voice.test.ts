@@ -194,10 +194,7 @@ describe('chat voice glue', () => {
       },
     });
     expect(messages(events).map((m) => [m.role, m.content])).toEqual([
-      [
-        'system',
-        '[call] Call 0:52 · Gemini Flash · $0.017 · 5,000 tokens in / 600 out · 0 hand-offs',
-      ],
+      ['system', '[call] Call 0:52 · Gemini Flash · 2¢ · 5,000 tokens in / 600 out · 0 hand-offs'],
     ]);
     const t = ledger.totals(Date.UTC(2026, 9, 10));
     expect(t.monthCalls).toBe(1);
@@ -228,18 +225,51 @@ describe('chat voice glue', () => {
         .filter((m) => m.role === 'system')
         .map((m) => m.content),
     ).toEqual([
-      '[call] -> sent to agent: Add milk to the list',
-      '[call] <- agent: Done.',
+      expect.stringMatching(/^\[call\] agent-working \d+ Add milk to the list$/),
+      expect.stringMatching(/^\[call\] agent-answered \d+ \d+$/),
+      '[call] voice',
       '[call] Call 0:52 · Gemini Flash · $0 · 1 hand-off',
     ]);
   });
 
-  it('records a long hand-off answer whole', async () => {
+  it('does not repeat the agent reply or note a failed hand-off as an answer', async () => {
     const { daemon, events, folder, glue } = setup();
     const chatId = await daemon.spawnChat({ folder });
-    const reply = `${'word '.repeat(200)}end\nsecond line`;
-    glue.handoffAnswered({ chatId, reply });
-    expect(messages(events).map((m) => m.content)).toEqual([`[call] <- agent: ${reply}`]);
+    glue.handoffSent({ sessionId: init(chatId).sessionId, chatId, request: 'x' });
+    glue.handoffAnswered({ chatId, reply: 'failed: boom' });
+    expect(messages(events).map((m) => m.content)).toEqual([
+      expect.stringMatching(/^\[call\] agent-working \d+ x$/),
+      expect.stringMatching(/^\[call\] agent-failed \d+ boom$/),
+      '[call] voice',
+    ]);
+  });
+
+  it('never writes an empty or ellipsis utterance as a message', async () => {
+    const { daemon, events, folder, glue } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    const tl = glue.makeTimeline(init(chatId));
+    tl.userSaid(chatId, '…');
+    tl.userSaid(chatId, '  ');
+    const reply = tl.beginReply(chatId);
+    reply.append('...');
+    reply.finish();
+    expect(messages(events)).toEqual([]);
+  });
+
+  it('opens a call with its engine and clock time', async () => {
+    const { daemon, events, folder, glue } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    glue.callStarted({
+      chatId,
+      startedAt: Date.UTC(2026, 9, 4, 12, 36),
+      engine: {
+        backend: 'gemini',
+        model: 'models/gemini-2.5-flash-native-audio-preview-12-2025',
+        tokens: null,
+        stt: null,
+      },
+    });
+    expect(messages(events).map((m) => m.content)).toEqual(['[call] Call · Gemini Flash · 13:36']);
   });
 
   it('puts the line in the chat the moment the call ends, whatever the agent is doing', async () => {

@@ -27,6 +27,7 @@ export const ChevronRight = icon('ChevronRight');
 export const ChevronUp = icon('ChevronUp');
 export const Clock = icon('Clock');
 export const CloudOff = icon('CloudOff');
+export const Loader2 = icon('Loader2');
 export const CornerLeftUp = icon('CornerLeftUp');
 export const Ear = icon('Ear');
 export const ExternalLink = icon('ExternalLink');

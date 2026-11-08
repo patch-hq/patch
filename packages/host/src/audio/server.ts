@@ -262,7 +262,7 @@ export interface AudioServerOptions {
    */
   makeTimeline?: (init: SessionInit) => VoiceTimeline;
   /** spec/07 § Call cost — a call or hands-free session started. */
-  onCallStarted?: (init: SessionInit) => void;
+  onCallStarted?: (info: { init: SessionInit; startedAt: number; engine: EngineCosting }) => void;
   /**
    * spec/07 § Call cost — a call or hands-free session ended. Fired once per
    * session, after `onSessionClosed`, with what it used.
@@ -941,12 +941,13 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           });
         }
         isAppCall = voiceSurface === 'call' || voiceSurface === 'hands-free';
+        const callStartedAt = Date.now();
         session.onSessionStart();
         sessions.set(start.sessionId, {
           session,
           socket: ws,
           lastActivityAt: Date.now(),
-          ...(isAppCall ? { call: { init: sessionInit, startedAt: Date.now() } } : {}),
+          ...(isAppCall ? { call: { init: sessionInit, startedAt: callStartedAt } } : {}),
           surfaceId: start.surfaceId,
           accountId: start.accountId,
           surfaceKind: start.surfaceKind,
@@ -973,7 +974,13 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           }
           announceCall(sessions.get(start.sessionId) as ActiveSession, true);
         }
-        if (isAppCall) opts.onCallStarted?.(sessionInit);
+        if (isAppCall) {
+          opts.onCallStarted?.({
+            init: sessionInit,
+            startedAt: callStartedAt,
+            engine: session.engineCosting(),
+          });
+        }
         // spec/07 § Voice call — say something the moment the line is open so
         // the user is not left in silence. Local only: hosted engines have no
         // free fixed-text voice, and a greeting there would be a paid response.

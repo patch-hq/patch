@@ -108,15 +108,22 @@ test.describe('a call is the chat, spoken', () => {
       type: 'chat.message',
       chatId: CHAT,
       role: 'system',
+      content: '[call] agent-working 1000 Add milk to the shopping list',
+      seq: 9003,
+      createdAt: Date.now(),
+    });
+    await emit(page, {
+      type: 'chat.message',
+      chatId: CHAT,
+      role: 'system',
       content: '[call] Call 0:52 · Gemini Flash · $0.017',
       seq: 9002,
       createdAt: Date.now(),
     });
-    const handoff = page.getByTestId('voice-handoff');
+    const handoff = page.getByTestId('handoff-working');
     await expect(handoff).toBeVisible();
-    await expect(handoff).toContainText('Asked the agent');
-    await expect(handoff).toContainText('Add milk to the shopping list');
-    await expect(handoff).not.toHaveClass(/msg-user/);
+    await expect(handoff).toContainText('Agent is working');
+    await expect(page.getByTestId('voice-handoff')).toHaveCount(0);
     const summary = page.getByTestId('call-summary');
     await expect(summary).toHaveText('Call 0:52 · Gemini Flash · $0.017');
   });

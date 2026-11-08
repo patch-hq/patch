@@ -3592,23 +3592,43 @@ describe('ChatRoute regression', () => {
       );
     });
 
-    it('shows a call hand-off answer in full as readable text, not a truncated quiet line', () => {
-      const reply = `${'A long answer. '.repeat(40)}\nSecond paragraph.`;
-      seedChat('c-call-reply', [
+    it('shows a hand-off as a working line that settles into a rule once answered', () => {
+      seedChat('c-handoff-live', [
         {
           seq: 0,
           kind: 'message',
           role: 'system',
-          content: '[call] -> sent to agent: add milk',
+          content: '[call] agent-working 1000 add milk',
           at: 0,
         },
-        { seq: 1, kind: 'message', role: 'system', content: `[call] <- agent: ${reply}`, at: 1 },
       ]);
-      renderChat('c-call-reply');
-      const el = screen.getByTestId('call-agent-reply');
-      expect(el.textContent).toContain('Second paragraph.');
-      expect(el.textContent).not.toContain('<- agent');
-      expect(el.textContent).not.toContain('…');
+      renderChat('c-handoff-live');
+      expect(screen.getByTestId('handoff-working').textContent).toContain('Agent is working');
+      expect(screen.queryByText(/sent to agent/)).toBeNull();
+    });
+
+    it('turns the working line into an answered rule, with no chevron, and a Voice rule after', () => {
+      seedChat('c-handoff-done', [
+        {
+          seq: 0,
+          kind: 'message',
+          role: 'system',
+          content: '[call] agent-working 1000 add milk',
+          at: 0,
+        },
+        {
+          seq: 1,
+          kind: 'message',
+          role: 'system',
+          content: '[call] agent-answered 1000 74000',
+          at: 1,
+        },
+        { seq: 2, kind: 'message', role: 'system', content: '[call] voice', at: 2 },
+      ]);
+      renderChat('c-handoff-done');
+      expect(screen.queryByTestId('handoff-working')).toBeNull();
+      expect(screen.getByTestId('handoff-answered').textContent).toBe('Agent answered in 1:14');
+      expect(screen.getByTestId('call-voice-rule').textContent).toBe('Voice');
     });
 
     it('renders an impossible outcome labelled distinctly from met', () => {

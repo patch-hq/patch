@@ -9,7 +9,7 @@ import type { Logger } from 'pino';
 import type { WireEvent } from '@patch/wire';
 import type { SessionInit } from './session.js';
 import type { VoiceSessionLike, VoiceTimeline } from './voice-session-like.js';
-import { callSummaryLine, costCall, type EngineCosting } from './voiceCost.js';
+import { callStartLine, callSummaryLine, costCall, type EngineCosting } from './voiceCost.js';
 import type { VoiceLedger } from './voiceLedger.js';
 
 /** What the glue needs from the chat host. */
@@ -29,9 +29,11 @@ export interface ChatVoiceHost {
 
 export interface ChatVoice {
   makeTimeline(init: SessionInit): VoiceTimeline;
+  /** A call opened: leave its opening line in the chat. */
+  callStarted(info: { chatId: string; startedAt: number; engine: EngineCosting }): void;
   /** The fast voice is passing `request` to the chat's agent: mark it in the chat and count it. */
   handoffSent(info: { sessionId: string; chatId: string; request: string }): void;
-  /** The agent's answer to a hand-off is back (or it failed). */
+  /** The agent's answer to a hand-off is back (or it failed). Its text is already in the chat as the agent's own message. */
   handoffAnswered(info: { chatId: string; reply: string }): void;
   /** Feed every outbound wire event through here. */
   observe(event: WireEvent): void;
@@ -43,6 +45,9 @@ export interface ChatVoice {
     engine: EngineCosting;
   }): void;
 }
+
+/** Nothing said, or only an ellipsis: never worth a message of its own. */
+const isBlankUtterance = (text: string): boolean => text.replace(/[\s.…]/g, '') === '';
 
 const stripTag = (text: string): string => text.replace(/^\[voice[^\]]*\]\s*/, '');
 
@@ -58,6 +63,8 @@ export function createChatVoice(deps: {
   const { daemon, logger } = deps;
   // Hand-offs made so far, per call session; read and cleared when the call is costed.
   const handoffCounts = new Map<string, number>();
+  // When the hand-off in flight on each chat went out; the working line and its answer are matched on it.
+  const handoffStarts = new Map<string, number>();
   const oneLine = (text: string, max: number): string => {
     const flat = text.replace(/\s+/g, ' ').trim();
     return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
@@ -115,14 +122,33 @@ export function createChatVoice(deps: {
   }
 
   return {
+    callStarted({ chatId, startedAt, engine }) {
+      note(chatId, callStartLine(engine, startedAt));
+    },
+
+    // The transcript shows a hand-off as one line that works, then settles into a
+    // rule: `agent-working` carries the request, `agent-answered`/`agent-failed`
+    // closes the same start time, and `voice` marks where the voice picks up.
     handoffSent({ sessionId, chatId, request }) {
       handoffCounts.set(sessionId, (handoffCounts.get(sessionId) ?? 0) + 1);
-      note(chatId, `-> sent to agent: ${oneLine(request, 300)}`);
+      const startedAt = Date.now();
+      handoffStarts.set(chatId, startedAt);
+      note(chatId, `agent-working ${startedAt} ${oneLine(request, 300)}`);
     },
 
     handoffAnswered({ chatId, reply }) {
-      // The whole answer: it is what the user reads in the transcript, so no cut-off.
-      note(chatId, `<- agent: ${reply.trim()}`);
+      const startedAt = handoffStarts.get(chatId);
+      handoffStarts.delete(chatId);
+      if (startedAt === undefined) {
+        logger.error({ chatId }, 'voice: a hand-off was answered that was never sent');
+        return;
+      }
+      if (reply.startsWith('failed:')) {
+        note(chatId, `agent-failed ${startedAt} ${reply.slice('failed:'.length).trim()}`);
+      } else {
+        note(chatId, `agent-answered ${startedAt} ${Date.now() - startedAt}`);
+      }
+      note(chatId, 'voice');
     },
 
     makeTimeline(init) {
@@ -144,6 +170,7 @@ export function createChatVoice(deps: {
       };
       return {
         userSaid(chatId, text) {
+          if (isBlankUtterance(text)) return;
           guard('the spoken words', chatId, () =>
             asVoice(() =>
               daemon.recordVoiceMessage({ chatId, role: 'user', content: `${tag}${text}` }),
@@ -162,7 +189,7 @@ export function createChatVoice(deps: {
               });
             },
             finish() {
-              if (seq === undefined || text.trim() === '') return;
+              if (seq === undefined || isBlankUtterance(text)) return;
               const at = seq;
               guard('the spoken reply', chatId, () =>
                 asVoice(() =>

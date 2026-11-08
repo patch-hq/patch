@@ -197,7 +197,7 @@ const ENGINE_NAMES: Record<string, string> = {
   'claude-sonnet-4-5': 'ElevenLabs Sonnet',
 };
 
-function engineName(c: CallCosting): string {
+function engineName(c: Pick<CallCosting, 'backend' | 'model'>): string {
   if (c.backend === 'local') return c.model === 'scribe_v2' ? 'ElevenLabs Scribe' : 'Local';
   return ENGINE_NAMES[modelKey(c.model)] ?? modelKey(c.model);
 }
@@ -214,7 +214,26 @@ export function formatUsd(usd: number): string {
   return `$${usd.toFixed(2)}`;
 }
 
-function formatDuration(ms: number): string {
+/** A call's cost: whole cents from 1¢ up to a dollar, otherwise the exact dollar figure. */
+function formatCallUsd(usd: number): string {
+  if (usd >= 0.01 && usd < 1) return `${Math.round(usd * 100)}¢`;
+  return formatUsd(usd);
+}
+
+function formatClock(ms: number): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Europe/London',
+  }).format(ms);
+}
+
+/** The line a call opens with, once its engine is known. */
+export function callStartLine(engine: EngineCosting, startedAt: number): string {
+  return `Call · ${engineName(engine)} · ${formatClock(startedAt)}`;
+}
+
+export function formatDuration(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
@@ -224,12 +243,14 @@ export function callSummaryLine(c: CallCosting): string {
   const parts = [
     `Call ${formatDuration(c.endedAt - c.startedAt)}`,
     engineName(c),
-    c.engineUsd === null ? 'price unknown' : formatUsd(c.engineUsd),
+    c.engineUsd === null ? 'price unknown' : formatCallUsd(c.engineUsd),
   ];
   if (c.tokens) {
     const tin = c.tokens.textIn + c.tokens.audioIn + c.tokens.cachedIn;
     const tout = c.tokens.textOut + c.tokens.audioOut;
-    parts.push(`${tin.toLocaleString('en-GB')} tokens in / ${tout.toLocaleString('en-GB')} out`);
+    // A per-minute engine (ElevenLabs) reports no tokens: leave the part out rather than print zeros.
+    if (tin + tout > 0)
+      parts.push(`${tin.toLocaleString('en-GB')} tokens in / ${tout.toLocaleString('en-GB')} out`);
   }
   // Only a fast voice hands anything off; a call that reads 0 here but made requests is the tell.
   if (c.backend !== 'local' && c.handoffs !== undefined) {

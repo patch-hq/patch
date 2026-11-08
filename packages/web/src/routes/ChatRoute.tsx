@@ -109,6 +109,12 @@ import { BackgroundTaskBar } from '../components/BackgroundTaskBar.js';
 import { StatusPill, StatusRow } from '../components/StatusRow.js';
 import { BrowserHandoffPanel } from '../components/BrowserHandoffPanel.js';
 import { ArtifactBar } from '../components/ArtifactBar.js';
+import {
+  formatHandoffElapsed,
+  handoffOutcomes,
+  parseCallMarker,
+  type CallMarker,
+} from '../lib/handoffMarkers.js';
 import type { ChatEventEntry, DelegateUpdateInfo, LocalAttachment } from '../stores/chatStore.js';
 import { Markdown, useStreamingMarkdownText } from '../components/Markdown.js';
 import { ContextMenu, useContextMenu } from '../components/ContextMenu.js';
@@ -143,6 +149,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Loader2,
   Bell,
   Download,
   ExternalLink,
@@ -2050,6 +2057,7 @@ export function ChatRoute({
   const paging = attemptPaging(timeline, attemptSel);
   const renderEntries = (from: number, to: number): JSX.Element[] => {
     const out: JSX.Element[] = [];
+    const outcomes = handoffOutcomes(timeline);
     // Each `view_file` call paired with its own result, and the indices of the
     // results those pairs use up. Resolved before rendering because a batch puts
     // a call and its result several entries apart, so neither the row that draws
@@ -2165,6 +2173,13 @@ export function ChatRoute({
           }
           entry={entry}
           chatId={chatId}
+          {...(entry.kind === 'message' && entry.role === 'system'
+            ? (() => {
+                const m = parseCallMarker(entry.content ?? '');
+                const o = m?.kind === 'working' ? outcomes.get(m.startedAt) : undefined;
+                return o ? { handoffOutcome: o } : {};
+              })()
+            : {})}
           isJobTrigger={entry.seq === firstUserSeq}
           // spec/04 ## Message queueing — 1-based place within the queued block
           // (which is the timeline tail from `queuedFrom`), so the chip renumbers
@@ -2402,6 +2417,7 @@ export function ChatRoute({
 const TimelineEntry = memo(function TimelineEntry({
   entry,
   chatId,
+  handoffOutcome,
   isJobTrigger,
   queuePos,
   release,
@@ -2429,6 +2445,8 @@ const TimelineEntry = memo(function TimelineEntry({
 }: {
   entry: ChatEventEntry;
   chatId: string;
+  /** For a hand-off's working line: how it ended, once it has. */
+  handoffOutcome?: CallMarker;
   /** spec/08 § Action — this is the job-spawned chat's trigger turn (see `firstUserSeq` above). */
   isJobTrigger?: boolean;
   /** 1-based place in the queued block; set only on a queued entry. */
@@ -2496,13 +2514,16 @@ const TimelineEntry = memo(function TimelineEntry({
     // spec/07 § Call cost — the one quiet line a finished call leaves.
     if ((entry.content ?? '').startsWith('[call] ')) {
       const line = (entry.content ?? '').slice('[call] '.length);
-      // The agent's answer to a hand-off is the point of the exchange: full
-      // size, whole text. Only the plumbing around it stays quiet.
-      if (line.startsWith('<- agent:')) {
+      const marker = parseCallMarker(entry.content ?? '');
+      if (marker?.kind === 'working') {
+        return <HandoffLine marker={marker} outcome={handoffOutcome} />;
+      }
+      // The outcome is drawn on the working line itself.
+      if (marker?.kind === 'answered' || marker?.kind === 'failed') return <></>;
+      if (marker?.kind === 'voice') {
         return (
-          <div className="call-agent-reply" data-testid="call-agent-reply">
-            <div className="call-summary-line">agent replied</div>
-            <div className="call-agent-reply-text">{line.slice('<- agent:'.length).trim()}</div>
+          <div className="call-rule" data-testid="call-voice-rule">
+            <span>Voice</span>
           </div>
         );
       }
@@ -2553,16 +2574,8 @@ const TimelineEntry = memo(function TimelineEntry({
   // only difference from an ordinary turn.
   // spec/07 § The fast voice and the chat's agent — what the call's fast voice
   // asked the agent. Not the user's words (those are their own bubble above).
-  if (entry.kind === 'message' && entry.role === 'user' && entry.voiceHandoff) {
-    return (
-      <ToolDisclosure
-        testid="voice-handoff"
-        variant="trigger"
-        summary={`Asked the agent: ${entry.content ?? ''}`}
-        detail={<code>{entry.content ?? ''}</code>}
-      />
-    );
-  }
+  // Drawn by the hand-off's own working line, so the request is not repeated here.
+  if (entry.kind === 'message' && entry.role === 'user' && entry.voiceHandoff) return <></>;
   // A background `patch_agent` finishing: the host delivers its reply as a
   // machine turn, but nobody typed it, so it is a quiet system row (queued or
   // not) — never a user bubble.
@@ -2686,6 +2699,52 @@ const TimelineEntry = memo(function TimelineEntry({
  * rather than from the conversation — without it the line reads as something
  * Patch itself said.
  */
+/** One quiet line for a hand-off: working with a timer, then a thin rule once answered. */
+function HandoffLine({
+  marker,
+  outcome,
+}: {
+  marker: Extract<CallMarker, { kind: 'working' }>;
+  outcome: CallMarker | undefined;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (outcome) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [outcome]);
+  if (outcome?.kind === 'answered') {
+    return (
+      <div className="call-rule" data-testid="handoff-answered">
+        <span>Agent answered in {formatHandoffElapsed(outcome.ms)}</span>
+      </div>
+    );
+  }
+  if (outcome?.kind === 'failed') {
+    return (
+      <div className="call-rule call-rule-failed" data-testid="handoff-failed">
+        <span>Agent failed: {outcome.reason}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="handoff-working" data-testid="handoff-working">
+      <button
+        type="button"
+        className="handoff-working-btn"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <ChevronRight size={14} aria-hidden="true" className={open ? 'open' : ''} />
+        <Loader2 size={14} aria-hidden="true" className="handoff-spinner" />
+        <span>Agent is working {formatHandoffElapsed(now - marker.startedAt)}</span>
+      </button>
+      {open ? <div className="handoff-request">{marker.request}</div> : null}
+    </div>
+  );
+}
+
 function BackgroundTaskEntry({ notice }: { notice: BackgroundTaskNotice }): JSX.Element {
   const meta = [
     notice.kind,
