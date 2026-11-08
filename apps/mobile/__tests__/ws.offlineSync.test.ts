@@ -88,6 +88,46 @@ describe('syncTranscripts', () => {
     expect(replays(sock).map((r) => r.chatId)).toEqual(['c1', 'c2']);
   });
 
+  it('a background fetch brings the row preview and unread state up to the newest message', () => {
+    useChatStore.getState().hydrate([row('c1', 1)]);
+    // The phone last saw the user's own turn; the reply landed while the chat was not live here.
+    useChatStore.getState().applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      seq: 0,
+      role: 'user',
+      content: 'my question',
+    } as never);
+    expect(useChatStore.getState().chats['c1']!.preview).toBe('my question');
+    const sock = open();
+    getWs().syncTranscripts();
+    sock.emitMessage(
+      JSON.stringify({
+        type: 'chat.replay_batch',
+        chatId: 'c1',
+        events: [
+          { type: 'chat.message', chatId: 'c1', seq: 0, role: 'user', content: 'my question' },
+          ev('c1', 1),
+          {
+            type: 'chat.message',
+            chatId: 'c1',
+            seq: 2,
+            role: 'assistant',
+            content: 'the answer',
+            synthetic: true,
+          },
+        ],
+        done: true,
+      }),
+    );
+    vi.advanceTimersByTime(1000);
+    const after = useChatStore.getState().chats['c1']!;
+    expect(after.preview).toBe('m1');
+    expect(after.lastSeq).toBeGreaterThanOrEqual(1);
+    expect(after.lastSeq).toBeGreaterThan(after.lastReadSeq);
+    expect(useChatStore.getState().timelines['c1']?.length ?? 0).toBe(1);
+  });
+
   it('asks only for what is newer than the held copy, and not at all once level', () => {
     saveEvents('c1', [ev('c1', 0), ev('c1', 1), ev('c1', 2)]);
     vi.advanceTimersByTime(1000);

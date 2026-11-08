@@ -335,6 +335,13 @@ interface ChatState {
   resolveSideThreadPermission(chatId: string, branchId: string, requestId: string): void;
   setActiveChat(chatId: string | null): void;
   markRead(chatId: string): void;
+  /**
+   * The newest message of a chat this phone fetched in the background (straight
+   * to the offline cache, never the timeline). Lifts the row's preview and
+   * `lastSeq` so the list shows the reply and the chat reads as unread, exactly
+   * as if the message had arrived live.
+   */
+  noteLatestMessage(chatId: string, message: { seq: number; role: string; content: string }): void;
   setArchived(chatId: string, archived: boolean): void;
   /** `pinnedAt` puts back the time a refused unpin took away; omitted, a pin is stamped now. */
   setPinned(chatId: string, pinned: boolean, pinnedAt?: number | null): void;
@@ -1647,6 +1654,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({
       chats: { ...get().chats, [chatId]: { ...row, lastReadSeq: nextRead } },
     });
+  },
+
+  noteLatestMessage(chatId, message) {
+    const row = get().chats[chatId];
+    if (!row) return;
+    const text = message.role === 'user' ? stripVoicePrefix(message.content).text : message.content;
+    const preview = headCodePoints(text, 140);
+    const lastSeq = Math.max(row.lastSeq, message.seq);
+    if (preview === row.preview && lastSeq === row.lastSeq) return;
+    set({ chats: { ...get().chats, [chatId]: { ...row, preview, lastSeq } } });
   },
 
   setArchived(chatId, archived) {

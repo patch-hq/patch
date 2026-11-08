@@ -978,6 +978,23 @@ export class PatchWs {
       else byChat.set(chatId, [e]);
     }
     for (const [chatId, list] of byChat) saveEvents(chatId, list);
+    // The cache is not what the chat list paints from: carry the newest message
+    // onto the row, or a reply fetched here never replaces the user's own text
+    // as the preview and the chat never reads as unread.
+    for (const [chatId, list] of byChat) {
+      let latest: { seq: number; role: string; content: string } | null = null;
+      for (const e of list as WireEvent[]) {
+        if (e.type !== 'chat.message') continue;
+        // Furniture and Claude Code's own lines are never a chat's preview
+        // (same rule as the live path in chatStore).
+        if (e.synthetic || e.permissionModeChange !== undefined) continue;
+        if (e.role === 'system') continue;
+        if (latest === null || e.seq > latest.seq) {
+          latest = { seq: e.seq, role: e.role, content: e.content };
+        }
+      }
+      if (latest !== null) useChatStore.getState().noteLatestMessage(chatId, latest);
+    }
     for (const e of events) {
       if (e.type !== 'chat.permission_response' || e.chatId === undefined) continue;
       saveResolution(
