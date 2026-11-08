@@ -1043,6 +1043,15 @@ export function restartResendAsOwnMessage<E extends { type: string }>(
 /** Total attempts `maybeGenerateTitle` makes before leaving a chat unnamed. */
 const TITLE_GEN_ATTEMPTS = 5;
 
+/**
+ * The inline line a restart-interrupted turn leaves in the history, before the
+ * host's automated re-send. Hosts before 2026-11-05 wrote the legacy text,
+ * which replay recognises so those chats show the same way.
+ */
+const RESTART_INTERRUPTION_MARKER = 'Turn interrupted by restart';
+const LEGACY_RESTART_INTERRUPTION_MARKER =
+  'Host restarted — the running turn was cut off and has been re-sent';
+
 /** Delay before the first retry in `maybeGenerateTitle`; doubles each attempt, so a host that is briefly saturated (a deploy restart) gets time to recover. */
 const TITLE_GEN_RETRY_DELAY_MS = 3_000;
 
