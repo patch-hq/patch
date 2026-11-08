@@ -3466,7 +3466,11 @@ export class Daemon {
     for (const m of metas) {
       const state = this.chatState.get(m.chatId);
       if (!state || state.snoozedUntil !== SNOOZE_UNTIL_COMPLETE) continue;
-      const resumed = this.owedResend.has(m.chatId) || this.parkedTurns.has(m.chatId);
+      const wake = this.wake.peek(m.chatId);
+      const resumed =
+        this.owedResend.has(m.chatId) ||
+        this.parkedTurns.has(m.chatId) ||
+        (wake !== null && wake.every === undefined);
       if (resumed || this.aggregateActivity(m.chatId) === 'running') continue;
       this.wakeFromSnooze(m.chatId);
     }
@@ -5937,10 +5941,19 @@ export class Daemon {
     state.lastUpdated = Math.max(this.opts.now(), state.lastUpdated + 1);
   }
 
-  /** Running, or idle between turns with a goal still to be judged. */
+  /**
+   * Running, idle between turns with a goal still to be judged, or idle with a
+   * one-shot self-wake armed (the chat is about to wake itself). A loop never
+   * completes, so it is not work to wait for.
+   */
   private hasWorkToComplete(chatId: string): boolean {
     const state = this.chatState.get(chatId);
-    return this.aggregateActivity(chatId) === 'running' || (state?.goal ?? null) !== null;
+    const wake = this.wake.peek(chatId);
+    return (
+      this.aggregateActivity(chatId) === 'running' ||
+      (state?.goal ?? null) !== null ||
+      (wake !== null && wake.every === undefined)
+    );
   }
 
   /**

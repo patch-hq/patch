@@ -175,6 +175,21 @@ test.describe('snooze sheet', () => {
     await expect(uc).toHaveAttribute('title', /running work/);
   });
 
+  test('Until complete is enabled for an idle chat with a one-shot wake pending', async ({
+    page,
+  }) => {
+    await seed(
+      page,
+      THREE({
+        activity: 'idle',
+        pendingWake: { message: 'check', fireAt: Date.now() + 3_600_000 },
+      }),
+    );
+    await page.getByTestId('action-more').click();
+    await page.getByTestId('action-snooze').click();
+    await expect(page.getByTestId('snooze-sheet-preset-until-complete')).toBeEnabled();
+  });
+
   test('Esc and the scrim cancel without snoozing', async ({ page }) => {
     const calls = await stubSnooze(page);
     await seed(page, THREE());

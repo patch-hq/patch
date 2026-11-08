@@ -86,6 +86,27 @@ describe('Snooze until complete', () => {
     daemon.shutdown();
   });
 
+  it('stays snoozed through a one-shot wake and wakes when the wake is cancelled', async () => {
+    const { backend } = gated();
+    const { daemon, folder } = setup(backend);
+    const id = await daemon.spawnChat({ folder });
+    daemon.scheduleWake(id, { in: '1h', message: 'check again' });
+    await daemon.setSnoozed(id, SNOOZE_UNTIL_COMPLETE);
+    expect(daemon.chatState.get(id)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
+    daemon.cancelWake(id);
+    expect(daemon.chatState.get(id)?.snoozedUntil).toBe(null);
+    daemon.shutdown();
+  });
+
+  it('refuses a chat whose only wake is a loop', async () => {
+    const { backend } = gated();
+    const { daemon, folder } = setup(backend);
+    const id = await daemon.spawnChat({ folder });
+    daemon.scheduleWake(id, { in: '1h', every: '1h', message: 'tick' });
+    await expect(daemon.setSnoozed(id, SNOOZE_UNTIL_COMPLETE)).rejects.toThrow(/no running work/);
+    daemon.shutdown();
+  });
+
   it('refuses a chat with nothing running and no goal', async () => {
     const { backend } = gated();
     const { daemon, folder } = setup(backend);
