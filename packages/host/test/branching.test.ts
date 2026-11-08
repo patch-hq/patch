@@ -353,3 +353,46 @@ describe('spec/04 § Side threads — a side message extends the graph SIDEWAYS'
     expect(metaStore.read(chatId)!.branches ?? []).toHaveLength(1);
   });
 });
+
+describe('spec/04 § Branching — active track and written track never disagree', () => {
+  it('a turn that would write to an inactive track fails loudly instead of writing there', async () => {
+    const { daemon, events, folder, metaStore } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
+
+    // The phantom track a cut-off fork leaves behind: active, but no session
+    // and no turn that will ever run on it.
+    metaStore.update(chatId, (m) => ({
+      ...m,
+      branches: [
+        {
+          branchId: `${chatId}-b0`,
+          parentBranchId: null,
+          forkFromSeq: null,
+          label: 'main',
+          createdAt: m.updatedAt,
+          sessionId: m.claudeSessionId,
+        },
+        {
+          branchId: `${chatId}-b1`,
+          parentBranchId: `${chatId}-b0`,
+          forkFromSeq: 0,
+          label: 'edit 1',
+          createdAt: m.updatedAt,
+        },
+      ],
+      activeBranchId: `${chatId}-b1`,
+    }));
+
+    events.length = 0;
+    await daemon.sendInput({ chatId, message: 'second question', localId: 'l2' });
+
+    const err = events.find((e) => e.type === 'chat.error') as
+      | { error: { message: string } }
+      | undefined;
+    expect(err?.error.message).toContain('inactive track');
+    expect(userMessages(replay(daemon, chatId)).map((m) => m.content)).not.toContain(
+      'second question',
+    );
+  });
+});
