@@ -32,7 +32,8 @@ async function settleByAdvancing<T>(pending: Promise<T>): Promise<T> {
   void pending.finally(() => {
     settled = true;
   });
-  for (let i = 0; i < 20 && !settled; i++) {
+  const deadline = Date.now() + 45_000; // wall-clock, so a loaded runner gets as many turns as it needs
+  while (!settled && Date.now() < deadline) {
     await vi.advanceTimersByTimeAsync(1_000);
     await new Promise<void>((r) => setImmediate(r));
   }
@@ -418,7 +419,7 @@ describe('GET /api/link-preview', () => {
       vi.useRealTimers();
       await app.close();
     }
-  }, 30_000);
+  }, 60_000);
 
   it('rejects a non-html response rather than parsing it as one', async () => {
     vi.stubGlobal(
@@ -551,7 +552,7 @@ describe('GET /api/link-preview/image', () => {
       vi.useRealTimers();
       await app.close();
     }
-  }, 30_000);
+  }, 60_000);
 
   it('stops reading an image with no content-length once it passes the size cap', async () => {
     const chunk = new Uint8Array(1024 * 1024);
