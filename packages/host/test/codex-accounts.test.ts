@@ -70,6 +70,21 @@ describe('OpenAI credit selection', () => {
       at: 123,
     });
   });
+  it('drops a near-empty reset that moved since the last reading, keeps one that held still', () => {
+    const result = (resetsAt: number) => ({
+      rateLimits: { primary: { usedPercent: 1, resetsAt, windowDurationMins: 10080 } },
+    });
+    const prev = { week: { usedPercent: 1, resetsAt: 100_000 } };
+    expect(codexUsage(result(200), 123, prev)?.week).toEqual({
+      status: 'allowed',
+      utilization: 0.01,
+    });
+    expect(codexUsage(result(100), 123, prev)?.week).toEqual({
+      status: 'allowed',
+      utilization: 0.01,
+      resetsAt: 100_000,
+    });
+  });
   it('drops resetsAt at 0% used — OpenAI reports it as now + full window, which is not a real reset instant', () => {
     expect(
       codexUsage(
