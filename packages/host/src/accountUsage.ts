@@ -73,6 +73,9 @@ export interface AccountUsageEntry {
   source: 'probe' | 'turn';
 }
 
+/** Stated resets this close are the same window (the stamp can jitter). */
+const SAME_RESET_MS = 60_000;
+
 type TokenFor = (accountId: string) => Promise<string | undefined>;
 
 /**
@@ -228,7 +231,26 @@ export class AccountUsageTracker {
   ): void {
     if (!window) return;
     const prior = this.entries.get(accountId);
-    const windows = { ...(prior?.reading.windows ?? {}), [scope]: window };
+    // A turn event can state a status with no figure (a healthy account far
+    // from its limit). Replacing a probed figure with that blanks the meter to
+    // "no figure" until the next probe. Keep the figure already held for the
+    // SAME window (same stated reset, not yet passed); otherwise ask for a
+    // fresh probe, which is the only thing that can supply one.
+    let folded = window;
+    if (window.utilization === undefined) {
+      const held = prior?.reading.windows[scope];
+      const sameWindow =
+        (held?.resetsAt === undefined || held.resetsAt > this.now) &&
+        (window.resetsAt === undefined ||
+          held?.resetsAt === undefined ||
+          Math.abs(window.resetsAt - held.resetsAt) <= SAME_RESET_MS);
+      if (held?.utilization !== undefined && sameWindow) {
+        folded = { ...window, utilization: held.utilization };
+      } else {
+        void this.refresh(accountId).catch(() => undefined);
+      }
+    }
+    const windows = { ...(prior?.reading.windows ?? {}), [scope]: folded };
     this.entries.set(accountId, {
       source: prior?.source === 'probe' ? 'probe' : 'turn',
       reading: {
