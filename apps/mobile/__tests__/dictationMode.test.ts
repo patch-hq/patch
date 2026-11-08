@@ -104,6 +104,38 @@ describe('mobile dictation mode', () => {
     await h.stop();
   });
 
+  it('a live preview that dies mid-speech is dropped, said, and replaced by a fresh one next utterance', async () => {
+    const errors: string[] = [];
+    const onErrors: Array<(m: string) => void> = [];
+    const stops: Array<ReturnType<typeof vi.fn>> = [];
+    const previewFactory = vi.fn((_chat: string, _p: unknown, e: (m: string) => void) => {
+      onErrors.push(e);
+      const stop = vi.fn();
+      stops.push(stop);
+      return { push: vi.fn(), stop };
+    });
+    const { startDictationMode } = await import('../src/lib/dictationMode');
+    const h = startDictationMode(
+      { onText: () => {}, onError: (m) => errors.push(m), onBusy: () => {} },
+      { chatId: 'c1', previewFactory: previewFactory as never },
+    );
+    await flush();
+    feed(speech, 400);
+    expect(previewFactory).toHaveBeenCalledOnce();
+    onErrors[0]!('the audio connection closed');
+    expect(errors).toHaveLength(1);
+    expect(stops[0]).toHaveBeenCalledOnce();
+    // Still the same utterance: no reconnect storm.
+    feed(speech, 400);
+    expect(previewFactory).toHaveBeenCalledOnce();
+    // Next utterance gets a new preview.
+    feed(quiet, 3200);
+    await flush();
+    feed(speech, 400);
+    expect(previewFactory).toHaveBeenCalledTimes(2);
+    await h.stop();
+  });
+
   it('opens the mic once and sends each utterance separately', async () => {
     const { texts, errors } = await start();
     expect(startMicCaptureMock).toHaveBeenCalledOnce();
