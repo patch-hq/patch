@@ -185,7 +185,7 @@ describe('Composer — dictation shown inside the input', () => {
       (findHost(r.root, byType('TextInput')).props['style'] as { maxHeight: number }).maxHeight;
     const boxMax = (): number =>
       (
-        findHost(r.root, byTestId('dictation-preview')).parent!.parent!.props['style'] as {
+        findHost(r.root, byTestId('dictation-mirror-scroll')).props['style'] as {
           maxHeight: number;
         }
       ).maxHeight;
