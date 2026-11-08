@@ -6222,6 +6222,20 @@ export async function handleVoiceNoteTranscribe(
   // reads the clip. Deepgram with no key on this host is refused, not quietly
   // transcribed by Whisper instead (NO SILENT FALLBACK). A tidy-up pass asks
   // for Whisper by name: that IS the engine it chose.
+  if ((event.engine ?? engine) === 'local') {
+    // Parakeet on this computer is run by the desktop app, never by a host.
+    sender({
+      type: 'patch.voice_note.transcribe_response',
+      requestId: event.requestId,
+      ok: false,
+      error: {
+        code: 'transcription_failed',
+        message:
+          'Dictation is set to Parakeet on this computer, which only runs in the desktop app. Switch Dictation to another engine in Settings → Voice.',
+      },
+    });
+    return;
+  }
   const picked = pickDictationTranscriber(event.engine ?? engine, transcribers);
   if (!picked.ok) {
     sender({

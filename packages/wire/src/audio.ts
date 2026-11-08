@@ -67,14 +67,22 @@ export type VoiceBackend = z.infer<typeof VoiceBackend>;
  * as it is spoken; `host` — streamed to a streaming speech model on the host,
  * each finished phrase then read once by the host's accurate transcriber;
  * `whisper` — the host's Whisper, which re-reads the recording so far for the
- * live words and the whole clip once it ends.
+ * live words and the whole clip once it ends. A computer (web/desktop) can
+ * also pick `local` — Parakeet run in the desktop app on that computer, never
+ * on the host; the host refuses a session that asks for it.
  */
 export const PhoneDictationEngine = z.enum(['device', 'deepgram', 'elevenlabs', 'host', 'whisper']);
 export type PhoneDictationEngine = z.infer<typeof PhoneDictationEngine>;
-/** A computer has no recogniser of its own. */
-export const ComputerDictationEngine = z.enum(['deepgram', 'elevenlabs', 'host', 'whisper']);
+/** A computer has no recogniser of its own, only the one the desktop app carries (`local`). */
+export const ComputerDictationEngine = z.enum([
+  'deepgram',
+  'elevenlabs',
+  'host',
+  'whisper',
+  'local',
+]);
 export type ComputerDictationEngine = z.infer<typeof ComputerDictationEngine>;
-export type DictationEngine = PhoneDictationEngine;
+export type DictationEngine = PhoneDictationEngine | ComputerDictationEngine;
 
 /**
  * The dictation setting: an engine for the phone app, an engine for web and

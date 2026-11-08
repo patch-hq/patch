@@ -143,6 +143,23 @@ export interface PatchDesktopBridge {
     install(code: string): Promise<{ ok: boolean; exitCode: number | null; output: string }>;
   };
   /**
+   * spec/07 § Dictation engines (`local`) — Parakeet run by the desktop app on
+   * this computer, from its own downloaded copy of the models. `start` rejects,
+   * naming what is missing, when they are not downloaded. Absent in a browser
+   * and on shells that predate it.
+   */
+  localStt?: {
+    status(): Promise<{ installed: boolean; missing: string[]; downloadBytes: number }>;
+    download(onProgress: (p: { received: number; total: number }) => void): Promise<void>;
+    /** Resolves with the unsubscribe for the events once the dictation is running. */
+    start(
+      onEvent: (ev: { type: 'partial'; text: string } | { type: 'error'; message: string }) => void,
+    ): Promise<() => void>;
+    push(pcm: Int16Array): void;
+    finish(): Promise<string>;
+    cancel(): void;
+  };
+  /**
    * Put PNG bytes on the system clipboard as an image, via the shell's native
    * clipboard. Chromium's async clipboard rejects an image write in the packaged
    * app, so the desktop shell does it in the main process. Absent in a browser

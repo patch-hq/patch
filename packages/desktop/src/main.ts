@@ -74,6 +74,9 @@ import { configurePermissions } from './permissions';
 import { loadRetryDelay, shouldRetryLoad } from './load-retry';
 import { readHostLink, serverLostText, watchServerLink } from './server-watch';
 import { installLocalHost, localHostStatus, serverOrigin } from './local-host';
+import { LocalSttController } from './local-stt-controller';
+import { modelDir } from './local-stt-models';
+import { SherpaAccurateEngine, SherpaLiveEngine } from './local-stt-workers';
 import { SystemPresence } from './system-presence';
 import { loadFirstRun, type SetupChoice } from './first-run-api';
 import { toastSound, type NotifyPriority } from './toastSound';
@@ -1600,6 +1603,49 @@ function setupAutoUpdater(): void {
   ipcMain.on('patch:meeting-speakers:stop', endSpeakers);
   // spec/02 § Desktop app and the local host — whether this Mac runs a
   // host, and installing one with a pairing code the SPA just minted.
+  // "Parakeet on this computer" dictation (spec/07 § Dictation engines, `local`).
+  // The models are this app's own copy under userData; the recogniser runs in
+  // worker threads here, so no audio leaves this machine.
+  const localStt = new LocalSttController({
+    modelsDir: join(app.getPath('userData'), 'models'),
+    engines: () => {
+      const modelsDir = join(app.getPath('userData'), 'models');
+      const sherpa = app.isPackaged
+        ? join(
+            process.resourcesPath,
+            'app.asar.unpacked',
+            'node_modules',
+            'sherpa-onnx-node',
+            'sherpa-onnx.js',
+          )
+        : require.resolve('sherpa-onnx-node');
+      const o = {
+        sherpa,
+        liveDir: modelDir(modelsDir, 'live'),
+        accurateDir: modelDir(modelsDir, 'accurate'),
+      };
+      localSttAccurate ??= new SherpaAccurateEngine(o);
+      return { live: new SherpaLiveEngine(o), accurate: localSttAccurate };
+    },
+  });
+  let localSttAccurate: SherpaAccurateEngine | undefined;
+  ipcMain.handle('patch:local-stt:status', () => localStt.status());
+  ipcMain.handle('patch:local-stt:download', (e) =>
+    localStt.download((p) => {
+      if (!e.sender.isDestroyed()) e.sender.send('patch:local-stt:progress', p);
+    }),
+  );
+  ipcMain.handle('patch:local-stt:start', (e) => {
+    const sender = e.sender;
+    localStt.start((ev) => {
+      if (!sender.isDestroyed()) sender.send('patch:local-stt:event', ev);
+    });
+  });
+  ipcMain.on('patch:local-stt:pcm', (_e, pcm: unknown) => {
+    if (pcm instanceof Int16Array) localStt.push(pcm);
+  });
+  ipcMain.handle('patch:local-stt:finish', () => localStt.finish());
+  ipcMain.on('patch:local-stt:cancel', () => localStt.cancel());
   ipcMain.handle('patch:local-host:status', () => localHostStatus(app.getPath('home')));
   ipcMain.handle('patch:local-host:install', (_e, payload: { code?: unknown }) =>
     installLocalHost({

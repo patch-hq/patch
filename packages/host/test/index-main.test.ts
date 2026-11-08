@@ -4205,6 +4205,29 @@ describe('handleVoiceNoteTranscribe', () => {
     expect(sent[0]).toMatchObject({ ok: false, error: { code: 'internal' } });
   });
 
+  it('the local engine runs in the desktop app: a host refuses it, never reads the clip itself', async () => {
+    const { sender, sent } = captureSender();
+    const transcribe = vi.fn();
+    await handleVoiceNoteTranscribe(
+      {
+        type: 'patch.voice_note.transcribe_request',
+        requestId: 'v-local',
+        surfaceKind: 'web',
+        format: 'wav',
+        audioBase64: Buffer.from('x').toString('base64'),
+      },
+      { local: { ...fakeWhisper(), transcribeClip: transcribe } },
+      'local',
+      sender,
+      silent,
+    );
+    expect(transcribe).not.toHaveBeenCalled();
+    expect(sent[0]).toMatchObject({
+      ok: false,
+      error: { code: 'transcription_failed', message: expect.stringContaining('desktop app') },
+    });
+  });
+
   it('empty audio clip -> transcription_failed', async () => {
     const { sender, sent } = captureSender();
     await handleVoiceNoteTranscribe(

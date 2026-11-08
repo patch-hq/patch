@@ -13,6 +13,7 @@
 //   - patch.copyImagePng(png)                 → native clipboard image write
 //   - patch.getDesktopEvents()                → test/inspection hook
 //   - patch.localHost.status()/install()    → the host on this Mac
+//   - patch.localStt.*                      → Parakeet dictation run in this app
 //   - patch.overlayTitleBar                   → this platform's windows have no
 //                                               native title bar (spec/05
 //                                               § Window chrome)
@@ -279,6 +280,54 @@ contextBridge.exposeInMainWorld('patch', {
         exitCode: number | null;
         output: string;
       }>;
+    },
+  },
+  // spec/07 § Dictation engines (`local`): Parakeet run in this app, on this
+  // computer. The models are this app's own copy, downloaded on demand.
+  localStt: {
+    status(): Promise<{ installed: boolean; missing: string[]; downloadBytes: number }> {
+      return ipcRenderer.invoke('patch:local-stt:status') as Promise<{
+        installed: boolean;
+        missing: string[];
+        downloadBytes: number;
+      }>;
+    },
+    download(onProgress: (p: { received: number; total: number }) => void): Promise<void> {
+      const handler = (_e: unknown, p: { received: number; total: number }): void => onProgress(p);
+      ipcRenderer.on('patch:local-stt:progress', handler);
+      return (ipcRenderer.invoke('patch:local-stt:download') as Promise<void>).finally(() =>
+        ipcRenderer.removeListener('patch:local-stt:progress', handler),
+      );
+    },
+    // Rejects, naming what is missing, when the models are not downloaded.
+    start(
+      onEvent: (ev: { type: 'partial'; text: string } | { type: 'error'; message: string }) => void,
+    ): Promise<() => void> {
+      const handler = (
+        _e: unknown,
+        ev: { type: 'partial'; text: string } | { type: 'error'; message: string },
+      ): void => onEvent(ev);
+      // Listening before the start is asked, so no early event is missed.
+      ipcRenderer.on('patch:local-stt:event', handler);
+      const stop = (): void => {
+        ipcRenderer.removeListener('patch:local-stt:event', handler);
+      };
+      return (ipcRenderer.invoke('patch:local-stt:start') as Promise<void>).then(
+        () => stop,
+        (err: unknown) => {
+          stop();
+          throw err;
+        },
+      );
+    },
+    push(pcm: Int16Array): void {
+      ipcRenderer.send('patch:local-stt:pcm', pcm);
+    },
+    finish(): Promise<string> {
+      return ipcRenderer.invoke('patch:local-stt:finish') as Promise<string>;
+    },
+    cancel(): void {
+      ipcRenderer.send('patch:local-stt:cancel');
     },
   },
   async getUpdaterState(): Promise<unknown> {

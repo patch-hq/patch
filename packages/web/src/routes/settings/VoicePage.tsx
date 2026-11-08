@@ -8,6 +8,7 @@ import {
   voiceKeyHostStatus,
   type ComputerDictationEngine,
   type DictationConfig,
+  type DictationEngine,
   type PhoneDictationEngine,
 } from '@patch/wire/audio';
 import { DICTATION_PAUSE_CHOICES } from '@patch/wire';
@@ -16,6 +17,7 @@ import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { chordFromEvent, chordGlyphs } from '../../lib/dictateChord.js';
+import { getDesktopBridge } from '../../lib/desktopBridge.js';
 import { shortcutLabel } from '../../lib/shortcuts.js';
 import { PairVoiceDevice } from '../../components/PairVoiceDevice.js';
 import { Toggle } from '../../components/Toggle.js';
@@ -85,9 +87,11 @@ const COMPUTER_DICTATION: readonly ComputerDictationEngine[] = [
   'deepgram',
   'elevenlabs',
   'host',
+  'local',
   'whisper',
 ];
-const DICTATION_LABELS: Record<PhoneDictationEngine, string> = {
+const DICTATION_LABELS: Record<DictationEngine, string> = {
+  local: 'Parakeet on this computer',
   device: 'Built-in',
   deepgram: 'Deepgram',
   elevenlabs: 'ElevenLabs',
@@ -230,6 +234,64 @@ function ShortcutGroup(): JSX.Element {
 }
 
 /**
+ * "Parakeet on this computer": whether the desktop app has its own copy of the
+ * models, and the download when it has not. In a browser there is nothing to
+ * download into, and the line says so.
+ */
+function LocalSttStatus(): JSX.Element {
+  const stt = getDesktopBridge()?.localStt;
+  const [status, setStatus] = useState<{ installed: boolean; downloadBytes: number } | null>(null);
+  const [progress, setProgress] = useState<{ received: number; total: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!stt) return;
+    stt.status().then(setStatus, (e: Error) => setError(e.message));
+  }, [stt]);
+  if (!stt) {
+    return (
+      <span className="set-sub-line set-sub-error" data-testid="dictation-local-status">
+        Only runs in the desktop app. Sessions from a browser are refused.
+      </span>
+    );
+  }
+  const download = (): void => {
+    setError(null);
+    setProgress({ received: 0, total: status?.downloadBytes ?? 0 });
+    stt
+      .download(setProgress)
+      .then(() => stt.status())
+      .then(setStatus)
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setProgress(null));
+  };
+  const mb = (n: number): string => `${Math.round(n / 1_000_000)} MB`;
+  return (
+    <span className="set-sub-line" data-testid="dictation-local-status">
+      {error !== null ? <span className="set-sub-error">{error} </span> : null}
+      {progress !== null ? (
+        `Downloading ${mb(progress.received)} of ${mb(progress.total)}`
+      ) : status === null ? (
+        'Checking this computer…'
+      ) : status.installed ? (
+        'Downloaded on this computer'
+      ) : (
+        <>
+          Not downloaded ({mb(status.downloadBytes)}).{' '}
+          <button
+            type="button"
+            className="set-btn"
+            data-testid="dictation-local-download"
+            onClick={download}
+          >
+            Download
+          </button>
+        </>
+      )}
+    </span>
+  );
+}
+
+/**
  * Where dictation's words come from (spec/07 § Dictation engines): one engine
  * for the phone app, one for web and desktop, and whether Whisper tidies up a
  * live engine's words as dictation goes on.
@@ -250,7 +312,7 @@ function DictationEnginesGroup(): JSX.Element {
     );
   };
   // A Deepgram choice names each host that holds no key for it.
-  const keys = (engine: PhoneDictationEngine, testid: string): JSX.Element | undefined => {
+  const keys = (engine: DictationEngine, testid: string): JSX.Element | undefined => {
     const status = voiceKeyHostStatus(engine, hostReports);
     return status ? (
       <span className="set-sub-line set-sub-error" data-testid={testid}>
@@ -277,7 +339,13 @@ function DictationEnginesGroup(): JSX.Element {
       </Row>
       <Row
         title="Computer"
-        sub={keys(dictation.computer, 'dictation-computer-keys')}
+        sub={
+          dictation.computer === 'local' ? (
+            <LocalSttStatus />
+          ) : (
+            keys(dictation.computer, 'dictation-computer-keys')
+          )
+        }
         testid="dictation-computer"
       >
         <Pills

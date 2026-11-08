@@ -839,6 +839,16 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             ...(opts.elevenLabsFetch ? { fetchImpl: opts.elevenLabsFetch } : {}),
             ...(opts.elevenLabsApiBase ? { apiBase: opts.elevenLabsApiBase } : {}),
           });
+        } else if (dictationEngine === 'local') {
+          // Parakeet on this computer runs in the desktop app and never opens a
+          // session here. One that arrives is a surface that cannot run it (a
+          // browser) — refused, not answered by this host's engine instead.
+          rejectConn(
+            ws,
+            'whisper_unavailable',
+            'Dictation is set to Parakeet on this computer, which only runs in the desktop app. Switch Dictation to another engine in Settings → Voice.',
+          );
+          return;
         } else if (dictationEngine === 'host') {
           // Streaming dictation on this host (spec/07 § Dictation engines): a
           // streaming model for the live words, the accurate transcriber once

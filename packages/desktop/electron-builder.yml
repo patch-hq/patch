@@ -1,6 +1,11 @@
 appId: io.github.tomchambers2.patch
 productName: Patch
 copyright: © Tom Chambers
+# sherpa-onnx-node is a native addon (Parakeet dictation on this computer): a
+# worker thread loads it with require(), which cannot read a .node out of the asar.
+asarUnpack:
+  - node_modules/sherpa-onnx-node/**
+  - node_modules/sherpa-onnx-*/**
 directories:
   output: release
   buildResources: build
