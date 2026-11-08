@@ -17,7 +17,7 @@ import { useVoiceStore } from '../stores/voiceStore';
 import { useMicLevelStore } from '../stores/micLevelStore';
 import { endVoiceCall, retryVoiceCall, setCallMuted } from '../lib/voiceCall';
 import { callModeLabel, formatElapsed, handsFreeHint } from '../lib/callStatus';
-import { fonts, radii, space, textMin, useTheme } from '../lib/theme';
+import { fixed, fonts, radii, space, textMin, useTheme } from '../lib/theme';
 import { ConnectingLabel, useNow } from './CallParts';
 
 const BARS = 40;
@@ -103,7 +103,7 @@ export function CallStrip(): React.ReactElement | null {
         paddingHorizontal: space.md,
         paddingVertical: space.sm,
         gap: space.xs,
-        backgroundColor: failed ? colors.red : '#1f1c17',
+        backgroundColor: failed ? colors.red : fixed.stripGround,
       }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
@@ -116,28 +116,28 @@ export function CallStrip(): React.ReactElement | null {
         >
           <Text
             testID="call-phase"
-            style={{ color: '#a9d391', fontFamily: fonts.bodyMedium, fontSize: 14 }}
+            style={{ color: fixed.stripAccent, fontFamily: fonts.bodyMedium, fontSize: 14 }}
           >
             {headLabel}
           </Text>
           {connectedAt !== null && !failed ? (
             <Text
               testID="call-timer"
-              style={{ color: '#cfc8b8', fontSize: 14, fontVariant: ['tabular-nums'] }}
+              style={{ color: fixed.stripText, fontSize: 14, fontVariant: ['tabular-nums'] }}
             >
               {formatElapsed(now - connectedAt)}
             </Text>
           ) : null}
           {connecting && !failed ? (
-            <ConnectingLabel color="#cfc8b8" />
+            <ConnectingLabel color={fixed.stripText} />
           ) : phase === 'thinking' && !failed ? (
-            <Text testID="call-working" style={{ color: '#cfc8b8', fontSize: 14 }}>
+            <Text testID="call-working" style={{ color: fixed.stripText, fontSize: 14 }}>
               Agent working
             </Text>
           ) : failed ? (
             <View style={{ flex: 1 }} />
           ) : (
-            <Waveform active={!muted} color="#a9d391" />
+            <Waveform active={!muted} color={fixed.stripAccent} />
           )}
         </Pressable>
         {failed ? (
@@ -151,10 +151,10 @@ export function CallStrip(): React.ReactElement | null {
               paddingHorizontal: space.md,
               paddingVertical: space.xs + 2,
               borderRadius: radii.md,
-              backgroundColor: '#f4f0e4',
+              backgroundColor: fixed.stripOn,
             }}
           >
-            <Text style={{ color: '#1f1c17', fontFamily: fonts.bodyMedium, fontSize: 14 }}>
+            <Text style={{ color: fixed.stripGround, fontFamily: fonts.bodyMedium, fontSize: 14 }}>
               Retry
             </Text>
           </Pressable>
@@ -172,10 +172,10 @@ export function CallStrip(): React.ReactElement | null {
               borderRadius: 16,
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: muted ? '#555049' : '#2c2820',
+              backgroundColor: muted ? fixed.stripButtonMuted : fixed.stripButton,
             }}
           >
-            <MicOff size={16} color="#f4f0e4" />
+            <MicOff size={16} color={fixed.stripOn} />
           </Pressable>
         )}
         <Pressable
@@ -191,15 +191,15 @@ export function CallStrip(): React.ReactElement | null {
             borderRadius: 16,
             alignItems: 'center',
             justifyContent: 'center',
-            backgroundColor: failed ? '#2c2820' : colors.red,
+            backgroundColor: failed ? fixed.stripButton : colors.red,
             opacity: pressed ? 0.7 : 1,
           })}
         >
-          <PhoneOff size={16} color="#f4f0e4" />
+          <PhoneOff size={16} color={fixed.stripOn} />
         </Pressable>
       </View>
       {failed ? (
-        <Text testID="call-error" style={{ color: '#f4f0e4', fontSize: textMin }}>
+        <Text testID="call-error" style={{ color: fixed.stripOn, fontSize: textMin }}>
           {error}
         </Text>
       ) : null}
@@ -212,7 +212,7 @@ export function CallStrip(): React.ReactElement | null {
                 ? 'call-unaddressed'
                 : 'call-hint'
           }
-          style={{ color: '#cfc8b8', fontSize: textMin }}
+          style={{ color: fixed.stripText, fontSize: textMin }}
         >
           {note}
         </Text>
