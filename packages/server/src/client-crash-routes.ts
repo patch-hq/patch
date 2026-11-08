@@ -19,6 +19,7 @@ import { z } from 'zod';
 import { verifySurfaceCredential } from '@patch/auth';
 import { CLIENT_CRASH_LIMITS as LIMIT } from '@patch/wire';
 import type { Registry } from './registry.js';
+import type { IssueFiler } from './issue-filer.js';
 
 const ClientCrashBody = z
   .object({
@@ -48,6 +49,8 @@ export interface ClientCrashRoutesDeps {
   registry: Registry;
   /** Where `client-crashes.jsonl` lives. */
   dataDir: string;
+  /** Files each report as a GitHub issue while "Share bug reports" is on. */
+  issueFiler?: IssueFiler;
 }
 
 function unauthenticated(): Error & { statusCode?: number } {
@@ -56,7 +59,7 @@ function unauthenticated(): Error & { statusCode?: number } {
   return e;
 }
 
-async function requireSurface(req: FastifyRequest, registry: Registry): Promise<string> {
+export async function requireSurface(req: FastifyRequest, registry: Registry): Promise<string> {
   const account = registry.getAccount();
   const authHeader = req.headers.authorization;
   if (!account || !authHeader || !authHeader.startsWith('Bearer ')) throw unauthenticated();
@@ -84,6 +87,14 @@ export function registerClientCrashRoutes(app: FastifyInstance, deps: ClientCras
     mkdirSync(dirname(file), { recursive: true });
     appendFileSync(file, `${JSON.stringify(stored)}\n`);
     deps.logger.error({ clientCrash: stored }, 'client crash reported');
+    deps.issueFiler?.reportAuto({
+      kind: 'client-crash',
+      message: stored.message,
+      stack: stored.stack,
+      surface: 'mobile',
+      route: stored.route,
+      build: stored.build,
+    });
     return { ok: true };
   });
 

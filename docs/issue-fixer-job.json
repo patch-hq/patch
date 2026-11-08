@@ -1,0 +1,12 @@
+{
+  "name": "Fix auto-filed issues",
+  "trigger": { "type": "webhook", "scheme": "github", "secret": "CHANGE-ME" },
+  "filter": "$.action = 'opened' and $count($.issue.labels[name = 'auto-filed']) > 0",
+  "action": {
+    "type": "spawn",
+    "hostId": "CHANGE-ME",
+    "folder": "/path/to/patch/checkout",
+    "includePayload": true,
+    "prompt": "A bug was filed automatically by Patch (payload below). Reproduce it from the message and stack, fix the cause in a branch, add a test that fails without the fix, and open a pull request that says `Fixes #<issue number>`. If it cannot be reproduced or is not a Patch bug, comment on the issue saying why and stop. Do not deploy."
+  }
+}
