@@ -5,9 +5,9 @@ Patch can file its own errors as GitHub issues, and a job can pick each one up a
 ## What is filed
 
 - Automatic (Settings → Bug reports → File errors automatically, **off by default**): every error-level server log line, every uncaught server exception, and every phone crash report.
-- Manual (Settings → Bug reports → Report a bug): one issue from what you type, plus build, surface and the last few error messages shown. It works even with automatic filing off, because pressing it is the consent.
+- Manual (Settings → Bug reports → Report a bug button): opens a preview of the whole report, filled in with the model in use, app version, platform, surface, screen and the last few error messages shown. You type the title and details, can edit or delete any field or error line, and nothing is sent until you press Send. What is sent is exactly what the preview shows; a field you clear stays out of the issue. It works even with automatic filing off, because confirming is the consent.
 
-Only an allowlist leaves the install: kind, build version, platform, an error message, a stack, and for manual reports the typed text and a screen name. Prompts, chat content, ids, hostnames, paths, emails, addresses and credentials are not inputs, and the free text that is sent is scrubbed of them (`packages/server/src/issue-scrub.ts`).
+Only an allowlist leaves the install: kind, build version, platform, an error message, a stack, and for manual reports the typed text, a screen name and the model name. Prompts, chat content, ids, hostnames, paths, emails, addresses and credentials are not inputs, and the free text that is sent is scrubbed of them (`packages/server/src/issue-scrub.ts`).
 
 One bug is one issue: a fingerprint of the message and top stack frame is kept locally and searched for in the repo before filing. New issues are capped at 10 an hour. A report that cannot be filed stays queued and the reason shows on the Settings page.
 

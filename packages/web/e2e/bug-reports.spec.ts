@@ -43,6 +43,8 @@ test('bug reports: off by default, switch on, and file a manual report', async (
   await expect(toggle).toBeChecked();
   expect(enabled).toBe(true);
 
+  await page.getByTestId('bug-open').click();
+  await page.getByTestId('bug-platform').fill('');
   await page.getByTestId('bug-title').fill('Send button does nothing');
   await page.getByTestId('bug-description').fill('Tapping send on a new chat does nothing.');
   if (process.env['PATCH_SHOT']) {
@@ -50,7 +52,7 @@ test('bug reports: off by default, switch on, and file a manual report', async (
   }
   await page.getByTestId('bug-send').click();
   await expect(page.getByTestId('bug-filed')).toContainText('issues/42');
-  expect(report).toMatchObject({ title: 'Send button does nothing', surface: 'web' });
+  expect(report).toMatchObject({ title: 'Send button does nothing', surface: 'web', platform: '' });
   if (process.env['PATCH_SHOT']) {
     await page.screenshot({ path: `${process.env['PATCH_SHOT']}/bug-reports-filed.png` });
   }

@@ -42,6 +42,8 @@ export interface IssueReport {
   route?: string | undefined;
   build?: string | undefined;
   platform?: string | undefined;
+  /** Manual only: the model in use, as the person confirmed in the preview. */
+  model?: string | undefined;
 }
 
 interface StoredReport extends IssueReport {
@@ -174,8 +176,11 @@ export class IssueFiler {
         : {}),
       surface: field(report.surface),
       route: field(report.route),
-      build: field(report.build) ?? this.opts.version,
-      platform: field(report.platform) ?? `${process.platform}`,
+      // A manual report is exactly what the person confirmed: a field they deleted stays gone.
+      build: field(report.build) ?? (report.kind === 'manual' ? undefined : this.opts.version),
+      platform:
+        field(report.platform) ?? (report.kind === 'manual' ? undefined : `${process.platform}`),
+      model: field(report.model),
       fingerprint,
       at: this.now(),
     };
@@ -337,21 +342,24 @@ function titleFor(r: StoredReport): string {
 function bodyFor(r: StoredReport): string {
   const lines: string[] = [];
   if (r.description) lines.push(r.description, '');
-  lines.push(
-    '| | |',
-    '|---|---|',
-    `| Build | ${r.build ?? ''} |`,
-    `| Platform | ${r.platform ?? ''} |`,
-  );
-  if (r.surface) lines.push(`| Surface | ${r.surface} |`);
-  if (r.route) lines.push(`| Screen | ${r.route} |`);
+  const rows: [string, string | undefined][] = [
+    ['Build', r.build],
+    ['Platform', r.platform],
+    ['Surface', r.surface],
+    ['Screen', r.route],
+    ['Model', r.model],
+  ];
+  const shown = rows.filter(([, v]) => v);
+  if (shown.length > 0) {
+    lines.push('| | |', '|---|---|', ...shown.map(([k, v]) => `| ${k} | ${v} |`));
+  }
   lines.push('', '```', r.message, '```');
   if (r.stack)
     lines.push('', '<details><summary>Stack</summary>', '', '```', r.stack, '```', '</details>');
   lines.push(
     '',
     r.kind === 'manual'
-      ? '_Filed from the Report a bug button. Contains only what is shown above._'
+      ? '_Filed from the Report a bug button. Sent after the person reviewed and confirmed exactly this content._'
       : '_Filed automatically by Patch. Contains no prompts, chat content or identifying data._',
     `<!-- ${marker(r.fingerprint)} -->`,
   );

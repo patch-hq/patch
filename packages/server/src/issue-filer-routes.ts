@@ -20,6 +20,7 @@ const Manual = z
     route: z.string().max(200).optional(),
     build: z.string().max(100).optional(),
     platform: z.string().max(100).optional(),
+    model: z.string().max(100).optional(),
     /** Messages of the last errors the surface showed, so the report has context. */
     recentErrors: z.array(z.string().max(500)).max(10).default([]),
   })
@@ -63,6 +64,7 @@ export function registerIssueFilerRoutes(
         route: b.route,
         build: b.build,
         platform: b.platform,
+        model: b.model,
       });
       return { ok: true, url };
     } catch (err) {

@@ -1,4 +1,4 @@
-// Settings → Bug reports: the automatic-filing switch and the Report a bug form.
+// Settings → Bug reports: the automatic-filing switch and the Report a bug button and its preview.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
@@ -62,8 +62,8 @@ describe('Settings → Bug reports', () => {
     expect(await screen.findByTestId('issue-reporting-no-token')).toBeInTheDocument();
   });
 
-  it('files a manual report and links the issue', async () => {
-    let sent: Record<string, unknown> = {};
+  it('previews the full payload, lets it be edited, and files only what is confirmed', async () => {
+    let sent: Record<string, unknown> | null = null;
     vi.stubGlobal(
       'fetch',
       fetchWith((u, init) => {
@@ -75,19 +75,40 @@ describe('Settings → Bug reports', () => {
       }),
     );
     renderSettings('/settings/bugs');
-    const send = await screen.findByTestId('bug-send');
-    expect(send).toBeDisabled();
+    expect(screen.queryByTestId('bug-form')).toBeNull();
+    fireEvent.click(await screen.findByTestId('bug-open'));
+    expect(screen.getByTestId('bug-form')).toBeInTheDocument();
+    expect(screen.getByTestId('bug-surface')).toHaveValue('web');
+    expect(screen.getByTestId('bug-send')).toBeDisabled();
+    expect(sent).toBeNull();
     fireEvent.change(screen.getByTestId('bug-title'), { target: { value: 'Send is dead' } });
     fireEvent.change(screen.getByTestId('bug-description'), {
       target: { value: 'nothing happens' },
     });
-    fireEvent.click(send);
+    fireEvent.change(screen.getByTestId('bug-platform'), { target: { value: '' } });
+    fireEvent.click(screen.getByTestId('bug-send'));
     expect(await screen.findByTestId('bug-filed')).toHaveTextContent('issues/5');
+    expect(screen.queryByTestId('bug-form')).toBeNull();
     expect(sent).toMatchObject({
       title: 'Send is dead',
       surface: 'web',
       description: 'nothing happens',
+      platform: '',
     });
+  });
+
+  it('cancelling the preview sends nothing', async () => {
+    const f = fetchWith(() => respond(STATUS));
+    vi.stubGlobal('fetch', f);
+    renderSettings('/settings/bugs');
+    fireEvent.click(await screen.findByTestId('bug-open'));
+    fireEvent.click(screen.getByTestId('bug-cancel'));
+    expect(screen.queryByTestId('bug-form')).toBeNull();
+    expect(
+      f.mock.calls.some(
+        ([u, i]) => String(u).endsWith('/api/issue-reports') && i?.method === 'POST',
+      ),
+    ).toBe(false);
   });
 
   it('shows the reason when filing fails', async () => {
@@ -98,7 +119,8 @@ describe('Settings → Bug reports', () => {
       ),
     );
     renderSettings('/settings/bugs');
-    fireEvent.change(await screen.findByTestId('bug-title'), { target: { value: 'x' } });
+    fireEvent.click(await screen.findByTestId('bug-open'));
+    fireEvent.change(screen.getByTestId('bug-title'), { target: { value: 'x' } });
     fireEvent.click(screen.getByTestId('bug-send'));
     expect(await screen.findByTestId('bug-error')).toHaveTextContent('GitHub 403');
   });
