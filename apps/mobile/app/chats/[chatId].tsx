@@ -1233,6 +1233,12 @@ function ChatDetailBody(): React.ReactElement {
           ref={listRef}
           style={{ flex: 1, opacity: settled ? 1 : 0 }}
           pointerEvents={settled ? 'auto' : 'none'}
+          // Default ('never') makes the first tap on any row while the keyboard
+          // is up only dismiss the keyboard — so option, Send answer and Cancel
+          // taps on a question card did nothing after the composer or an
+          // `Other` input had focus. 'handled' lets the card's own Pressables
+          // take the tap and still dismisses the keyboard on empty space.
+          keyboardShouldPersistTaps="handled"
           // See the block comment above `chatScrollMemory`: data goes in
           // newest-first, `inverted` renders it back in normal reading order.
           data={invertedRows}
