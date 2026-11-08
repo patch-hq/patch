@@ -3955,7 +3955,7 @@ button.nav-row {
   border-top: 1px solid var(--line-soft);
 }
 .call-rule-failed {
-  color: var(--danger, var(--ink-3));
+  color: var(--danger);
 }
 .handoff-working {
   padding: 4px 0;
