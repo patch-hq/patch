@@ -13543,6 +13543,23 @@ input.browse-filter {
 .overlay-titlebar .voice-bar button {
   -webkit-app-region: no-drag;
 }
+.vb-wave {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2px;
+}
+.vb-wave i {
+  flex: 1 1 0;
+  max-width: 3px;
+  min-height: 2px;
+  border-radius: 1px;
+  background: #a9d391;
+  opacity: 0.85;
+}
 .vb-timer {
   font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
   color: #cfc8b8;
