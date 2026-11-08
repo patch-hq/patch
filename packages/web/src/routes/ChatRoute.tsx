@@ -2513,7 +2513,6 @@ const TimelineEntry = memo(function TimelineEntry({
     }
     // spec/07 § Call cost — the one quiet line a finished call leaves.
     if ((entry.content ?? '').startsWith('[call] ')) {
-      const line = (entry.content ?? '').slice('[call] '.length);
       const marker = parseCallMarker(entry.content ?? '');
       if (marker?.kind === 'working') {
         return <HandoffLine marker={marker} outcome={handoffOutcome} />;
