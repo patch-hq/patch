@@ -9409,6 +9409,26 @@ export class Daemon {
       return false;
     }
 
+    // The track this turn writes to must be the track meta calls active.
+    // A fork flips `activeBranchId` the moment it is CALLED, so a turn that
+    // keeps running on the old track while its fork never gets to run (a host
+    // restart cut it off) writes every event to an inactive branch and the
+    // surfaces' replay of the active one stops dead. A queued fork is the one
+    // legitimate reason for the two to differ. NO FALLBACK: say so, loudly.
+    if (!fork) {
+      const activeBranch = this.opts.metaStore.read(chatId)?.activeBranchId;
+      const writingTo = this.branchIdFor(chatId);
+      const forkQueued = (this.turnQueues.get(chatId) ?? []).some((q) => q.fork !== undefined);
+      if (activeBranch !== undefined && activeBranch !== writingTo && !forkQueued) {
+        this.failPreflight(
+          chatId,
+          'sdk_error',
+          `history would be written to track ${writingTo} but the chat's active track is ${activeBranch}; refusing to write to an inactive track`,
+        );
+        return false;
+      }
+    }
+
     // F1 — a RESUME with no claudeSessionId would silently start a brand-new
     // contextless session. Distinguish the legitimate first query of a
     // freshly-spawned chat (resume undefined is correct) from a resume of a
