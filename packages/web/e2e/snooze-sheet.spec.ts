@@ -121,6 +121,10 @@ test.describe('snooze sheet', () => {
   });
 
   test('the duration slider snoozes for the chosen number of hours', async ({ page }) => {
+    // Pin a midweek morning: on a weekend morning the 1 day preset coincides with
+    // another and is hidden, so the click below would wait forever.
+    const pinned = new Date('2026-10-21T10:00:00Z');
+    await page.clock.setFixedTime(pinned);
     const calls = await stubSnooze(page);
     await seed(page, THREE());
     await page.getByTestId('action-more').click();
@@ -141,7 +145,7 @@ test.describe('snooze sheet', () => {
     await slider.focus();
     await page.keyboard.press('ArrowLeft');
     await expect(page.getByTestId('snooze-sheet-slider-value')).toHaveText('3 hours');
-    const before = Date.now();
+    const before = pinned.getTime();
     await page.getByTestId('snooze-sheet-confirm').click();
     await expect.poll(() => calls.length).toBe(1);
     const until = calls[0]!.body['snoozedUntil'] as number;
