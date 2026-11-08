@@ -333,6 +333,13 @@ export class PatchWs {
       // events may have been throttled: re-read the roster on every return.
       void refreshRoster();
       this.safeSend({ type: 'surface.foregrounded' });
+      // Live events for the open chat may have been throttled or lost while
+      // backgrounded with the socket still OPEN. The roster refresh does not
+      // touch the transcript, so ask again from our cursor — forced, because
+      // an unchanged cursor is exactly what the per-connection guard swallows.
+      // A reply that never arrived would otherwise stay missing until reopen.
+      const { activeChatId } = useChatStore.getState();
+      if (activeChatId !== null) this.requestReplay(activeChatId, { force: true });
       this.startHeartbeat();
     } else if (next !== 'active' && prev === 'active') {
       this.safeSend({ type: 'surface.backgrounded' });
