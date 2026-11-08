@@ -3032,6 +3032,28 @@ describe('Composer', () => {
       await waitFor(() => expect(startVoiceCall).toHaveBeenCalledWith('c1'));
     });
 
+    it('right-click opens a menu: Call, Hands-free, Voice settings', async () => {
+      const { startVoiceCall } = await import('../lib/voiceController.js');
+      const onOpenVoiceSettings = vi.fn();
+      render(
+        <Composer
+          chatId="c1"
+          hostId="d1"
+          onSend={() => {}}
+          onStartVoiceNote={() => {}}
+          onOpenVoiceSettings={onOpenVoiceSettings}
+        />,
+      );
+      fireEvent.contextMenu(screen.getByTestId('call-btn'));
+      const menu = screen.getByTestId('call-menu');
+      expect(menu.textContent).toMatch(/Call.*Hands-free.*Voice settings/);
+      fireEvent.click(screen.getByText('Hands-free'));
+      await waitFor(() => expect(startVoiceCall).toHaveBeenCalledWith('c1', 'hands-free'));
+      fireEvent.contextMenu(screen.getByTestId('call-btn'));
+      fireEvent.click(screen.getByText('Voice settings'));
+      expect(onOpenVoiceSettings).toHaveBeenCalled();
+    });
+
     // A not-yet-spawned chat has no real id to call — `resolveChatId` (the
     // same create-then-act path attachments use) creates it first.
     it('on a new chat, creates the chat first and calls the resolved id', async () => {

@@ -48,6 +48,7 @@ import { ApprovalIcon, approvalDescription, approvalWord } from '../lib/approval
 import { ChatModelControl } from './ChatModelControl.js';
 import {
   Mic,
+  Ear,
   Settings,
   ListPlus,
   Send,
@@ -74,6 +75,7 @@ import { ImageAnnotator } from './ImageAnnotator.js';
 import { ImageLightbox } from './ImageLightbox.js';
 import { SkillPreviewPanel } from './SkillPreviewPanel.js';
 import type { AttachmentRef, PermissionMode } from '@patch/wire';
+import type { AudioSessionMode } from '@patch/wire/audio';
 import {
   backendIdForModel,
   permissionModesFor,
@@ -1697,22 +1699,25 @@ export const Composer = forwardRef(function Composer(
   // On a not-yet-spawned chat (`resolveChatId` provided), the chat is created
   // first, same create-then-act shape as an attachment upload above; a chat
   // that already exists just calls straight through.
-  async function handleCall(): Promise<void> {
+  async function handleCall(mode: AudioSessionMode = 'call'): Promise<void> {
     // spec/07 § 2. Voice call — the control shows the call is on, and ends it.
     if (onCall) {
       endVoiceCall();
       return;
     }
-    if (onStartCall) {
+    // `onStartCall` hands over to a caller that opens a plain call itself; a
+    // hands-free start from the menu always goes straight to the session.
+    if (onStartCall && mode === 'call') {
       onStartCall();
       return;
     }
     if (resolveChatId) {
       const target = await resolveChatId();
-      if (target !== null) void startVoiceCall(target);
+      if (target !== null)
+        void (mode === 'call' ? startVoiceCall(target) : startVoiceCall(target, mode));
       return;
     }
-    void startVoiceCall(chatId);
+    void (mode === 'call' ? startVoiceCall(chatId) : startVoiceCall(chatId, mode));
   }
 
   // ⌘⇧D drives this mic (lib/composerMic.ts) in transcribe mode. Read through a
@@ -1790,6 +1795,32 @@ export const Composer = forwardRef(function Composer(
       label: 'Keep dictating',
       icon: <Mic size={14} aria-hidden />,
       run: () => startDictMode(),
+    },
+    ...(onOpenVoiceSettings
+      ? [
+          {
+            id: 'voice-settings',
+            label: 'Voice settings',
+            icon: <Settings size={14} aria-hidden />,
+            run: onOpenVoiceSettings,
+          },
+        ]
+      : []),
+  ];
+  // Right-click the call button: how to start the call, and its settings.
+  const callMenu = useContextMenu();
+  const callMenuItems: ContextMenuItem[] = [
+    {
+      id: 'call',
+      label: 'Call',
+      icon: <Phone size={14} aria-hidden />,
+      run: () => void handleCall('call'),
+    },
+    {
+      id: 'hands-free',
+      label: 'Hands-free',
+      icon: <Ear size={14} aria-hidden />,
+      run: () => void handleCall('hands-free'),
     },
     ...(onOpenVoiceSettings
       ? [
@@ -2723,6 +2754,15 @@ export const Composer = forwardRef(function Composer(
                       : 'Call'
                 }
                 onClick={() => void handleCall()}
+                onContextMenu={(e) => {
+                  // Mid-call the button only ends the call: no menu to offer.
+                  if (onCall || voiceDisabled) {
+                    e.preventDefault();
+                    return;
+                  }
+                  callMenu.openAt(e);
+                }}
+                aria-haspopup="menu"
                 disabled={voiceDisabled && !onCall}
               >
                 <Phone size={ICON_SIZE} aria-hidden />
@@ -2904,6 +2944,13 @@ export const Composer = forwardRef(function Composer(
         onClose={addMenu.close}
         label="Add to message"
         testId="add-menu"
+      />
+      <ContextMenu
+        anchor={callMenu.anchor}
+        items={callMenuItems}
+        onClose={callMenu.close}
+        label="Call"
+        testId="call-menu"
       />
       <ContextMenu
         anchor={micMenu.anchor}
