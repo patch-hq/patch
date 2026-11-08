@@ -38,7 +38,10 @@ export function refreshJobTicks(chatId: string): void {
   // Via a promise so a call that throws synchronously is a load error, not a crash.
   Promise.resolve()
     .then(() => api.chatJobTicks(chatId))
-    .then((r) => publish(e, { jobs: r.jobs, error: null, loaded: true }))
+    .then((r) => {
+      if (!Array.isArray(r?.jobs)) throw new Error('scheduled jobs response has no jobs list');
+      publish(e, { jobs: r.jobs, error: null, loaded: true });
+    })
     .catch((err: Error) => publish(e, { jobs: [], error: err.message, loaded: true }));
 }
 
