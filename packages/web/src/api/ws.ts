@@ -24,6 +24,7 @@ import { useVoiceStore } from '../stores/voiceStore.js';
 import { speakInterrupt } from '../lib/speakInterrupt.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useMeetingStore } from '../stores/meetingStore.js';
+import { useSpeechSetupStore } from '../stores/speechSetupStore.js';
 import { useBrowserHandoffStore } from '../stores/browserHandoffStore.js';
 import { useTerminalStore } from '../stores/terminalStore.js';
 import { useHostSearchStore } from '../stores/hostSearchStore.js';
@@ -886,6 +887,13 @@ export class PatchWs {
     // entry it does not have). The host says so as an out-of-band chat.error
     // with no real chat behind it, so say it where the edit was made — as an
     // error — rather than filing it under a phantom chat nobody opens.
+    // A meeting was refused because the host has no speech set up: not a failed
+    // turn, so no transcript entry. Offer the two routes instead.
+    if (event.type === 'chat.error' && event.error.code === 'speech_not_set_up') {
+      const hostId = useChatStore.getState().chats[event.chatId]?.hostId ?? '';
+      useSpeechSetupStore.getState().open({ chatId: event.chatId, hostId });
+      return;
+    }
     if (event.type === 'chat.error' && event.error.code === 'claude_settings_invalid') {
       useUiStore.getState().pushError(event.error.message);
       return;

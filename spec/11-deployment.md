@@ -186,7 +186,10 @@ download, so the target cannot be built. Requirements on the result:
   Hosts and the host's self-update against the server's manifest.
 
 The agent backend, the large voice weights (Kokoro TTS, local Whisper) and Python
-stay outside the artifact and are provisioned on the host (`02-host.md`).
+stay outside the artifact and are provisioned on the host (`02-host.md`). Voice
+is optional at install, but the first meeting on a host with no speech set up
+prompts the user to add a speech API key or download these models
+(`02-host.md` § Speech set-up).
 Carrying them would put CPU-torch, a spaCy model and a multi-GB weights set into
 every install on every host, ahead of any use of voice. Those two components
 install into a host-local components directory, with a Python environment the

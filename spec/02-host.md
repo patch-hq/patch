@@ -382,7 +382,8 @@ and ships in the artifact (§ Installation). Two entry points:
 - Settings → Hosts → components lists each optional component with its size and
   state (`not installed`, `downloading`, `installed`, `failed`) and install and
   remove controls.
-- Pressing the mic on a host whose voice components are missing asks once —
+- Starting a meeting on a host with no speech set up asks which route to take
+  (§ Speech set-up). Pressing the mic on a host whose voice components are missing asks once —
   "Voice needs a 340 MB download on <host>. Download?" — and on accept starts
   that same download with progress in place. Declining cancels the action.
 
@@ -395,6 +396,27 @@ resumes, and a component counts as installed once its size and digest verify.
 
 Remote backends install nothing: with `WHISPER_BACKEND=groq`, STT is a cloud
 call.
+
+### Speech set-up
+
+Voice stays optional at install: a fresh host has no speech engine, and nothing
+is downloaded or bought for it. The first time a surface starts a meeting on a
+host with no speech set up, the host refuses the start with `chat.error`
+`speech_not_set_up` (message naming both routes) and the surface asks the user
+to choose:
+
+- **Add a cloud speech API key** (Groq). The key is saved as a provider key
+  (§ Provider keys) and the host transcribes with it from then on.
+- **Download the local voice models** onto that host (Whisper and Kokoro, about
+  1.9 GB per host, § Optional components), with progress in the prompt.
+
+Either way the refused meeting starts again by itself once the route works: on
+the key being saved, or on the Whisper component verifying as installed. The
+host switches engine in place when a key or component arrives, with no restart.
+An installed local model wins over a key, because it costs nothing. A host whose
+environment names a backend (`WHISPER_BACKEND`, `MEETING_STT`) already counts as
+set up. There is no fallback: with no route chosen, transcription refuses rather
+than returning a stub, and no key is spent unless the user added it.
 
 ## Browser
 

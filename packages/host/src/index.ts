@@ -1380,6 +1380,7 @@ async function startHost(
     logVoiceKeysMissing(logger, voiceConfig, voiceKeys());
     publishHost();
     refreshElevenLabsVoices();
+    onSpeechKeysChanged();
   });
   if (providerKeys.has('elevenlabs')) refreshElevenLabsVoices();
 
@@ -1389,6 +1390,8 @@ async function startHost(
    */
   /** Set once the audio stack exists (step 8): re-picks the STT engine when a component settles. */
   let onComponentsSettled = (): void => {};
+  // Re-picks the speech engine when a speech key is added or removed.
+  let onSpeechKeysChanged = (): void => {};
   const components = new ComponentManager({
     root: join(config.patchHome, 'components'),
     hostId: selfHostId,
@@ -3578,6 +3581,9 @@ async function startHost(
             ? (codexAccounts.report().accounts?.map((a) => a.id) ?? [])
             : (readPatchStore(oauthOpts)?.accounts.map((a) => a.id) ?? []),
         meetings,
+        speechSetUp: () =>
+          process.env['MEETING_STT'] === 'elevenlabs' ||
+          (whisper !== undefined && !(whisper instanceof UnconfiguredWhisperBackend)),
       });
     },
     onDisconnected: () => {
@@ -5252,7 +5258,24 @@ async function startHost(
   const whisperFromComponent = (): boolean =>
     process.env['WHISPER_BACKEND'] === undefined &&
     components.describe().find((c) => c.id === 'whisper')?.state === 'installed';
+  // spec/02 § Speech set-up: a Groq key the user added in Settings → Providers is
+  // the cloud route, chosen by adding it. With no env var and no installed
+  // component it makes this host transcribe with Groq; an installed local model
+  // wins because it costs nothing.
+  const whisperFromKey = (): boolean =>
+    process.env['WHISPER_BACKEND'] === undefined &&
+    config.audio.whisperBackend === 'off' &&
+    !whisperFromComponent() &&
+    providerKeys.has('groq');
   const buildWhisper = (): WhisperBackend => {
+    if (whisperFromKey()) {
+      logger.info({ component: 'whisper' }, 'STT enabled: a Groq key is set');
+      return createWhisper({
+        backend: 'groq',
+        logger: whisperLog,
+        groqApiKey: () => providerKeys.get('groq'),
+      });
+    }
     if (config.audio.whisperBackend === 'elevenlabs') {
       return new ElevenLabsScribeBackend({
         logger: whisperLog,
@@ -5328,16 +5351,23 @@ async function startHost(
   }
   // Installing or removing the Whisper component takes effect at once, not at
   // the next restart: the engine follows the component.
-  onComponentsSettled = () => {
+  const repickWhisper = (): void => {
     const current = whisper;
     if (current === undefined) return;
-    const wantLocal = whisperFromComponent();
-    const isOff = current instanceof UnconfiguredWhisperBackend;
     if (process.env['WHISPER_BACKEND'] !== undefined) return;
-    if (wantLocal === !isOff) return;
+    const want = whisperFromComponent() ? 'local' : whisperFromKey() ? 'groq' : 'off';
+    const have =
+      current instanceof UnconfiguredWhisperBackend
+        ? 'off'
+        : current instanceof LocalWhisperBackend
+          ? 'local'
+          : 'groq';
+    if (want === have) return;
     installWhisper(buildWhisper());
     void current.close().catch(() => undefined);
   };
+  onComponentsSettled = repickWhisper;
+  onSpeechKeysChanged = repickWhisper;
   // spec/02 § Optional components: voice is a component the user installs on a
   // host, and installing it is what turns it ON. A host that has installed
   // Kokoro — weights verified AND its Python runtime built — can speak, whether
@@ -6938,6 +6968,8 @@ export interface AccountReportHelpers {
   heldAccounts: (model: string | undefined) => string[];
   /** Meeting mode; absent in tests that do not exercise it. */
   meetings?: MeetingManager | undefined;
+  /** True once a speech route is set up on this host (spec/02 § Speech set-up). */
+  speechSetUp?: (() => boolean) | undefined;
 }
 
 /**
@@ -6946,6 +6978,19 @@ export interface AccountReportHelpers {
  * route the streamed events back through it (per-surface) rather than the
  * fan-out `emit`.
  */
+/**
+ * A meeting needs speech-to-text and this host has none set up. Never answered
+ * with a stub: the surface offers the two routes (a cloud speech key, or the
+ * local voice models) and the user picks.
+ */
+class SpeechNotSetUpError extends Error {
+  constructor() {
+    super(
+      'Meetings need speech-to-text and none is set up on this host. Add a speech API key in Settings → Providers, or download the local voice models in Settings → Hosts.',
+    );
+  }
+}
+
 function requireMeetings(accounts: AccountReportHelpers | undefined): MeetingManager {
   if (!accounts?.meetings) throw new Error('meeting mode is not available on this host');
   return accounts.meetings;
@@ -7185,8 +7230,10 @@ export async function handleServerEvent(
       }
       case 'meeting.control_request': {
         const m = requireMeetings(accounts);
-        if (event.action === 'start') m.start(event.chatId, event.settings);
-        else if (event.action === 'tune') {
+        if (event.action === 'start') {
+          if (accounts?.speechSetUp && !accounts.speechSetUp()) throw new SpeechNotSetUpError();
+          m.start(event.chatId, event.settings);
+        } else if (event.action === 'tune') {
           if (!event.settings) throw new Error('meeting tune needs settings');
           m.tune(event.chatId, event.settings);
         } else if (event.action === 'name_voice') {
@@ -7472,6 +7519,8 @@ export async function handleServerEvent(
       code = 'no_model_catalogue';
     } else if (err instanceof ChatNotFoundError) {
       code = 'chat_not_found';
+    } else if (err instanceof SpeechNotSetUpError) {
+      code = 'speech_not_set_up';
     } else {
       code = 'sdk_error';
     }
