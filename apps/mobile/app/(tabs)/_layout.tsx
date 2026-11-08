@@ -7,7 +7,7 @@ import React from 'react';
 import { Pressable, View } from 'react-native';
 import { Redirect, Tabs, useRouter } from 'expo-router';
 import { Clock, Folder, MessageCircle, Plus, Settings as SettingsIcon } from 'lucide-react-native';
-import { fixed, fonts, radii, space, textMin, useTheme } from '../../src/lib/theme';
+import { fixed, fonts, radii, textMin, useTheme } from '../../src/lib/theme';
 import { getRoute } from '../../src/config';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
 
