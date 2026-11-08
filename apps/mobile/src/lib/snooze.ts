@@ -115,7 +115,7 @@ export const UNTIL_COMPLETE_PRESET: SnoozePreset = {
 
 /** Why "Until complete" is greyed out: shown as the tooltip / accessibility hint. */
 export const UNTIL_COMPLETE_DISABLED_TIP =
-  'Needs running work to wait for: this chat has no running turn or open goal.';
+  'Needs running work to wait for: this chat has no running turn, open goal or pending wake.';
 
 /** Parses a typed local `YYYY-MM-DD HH:mm`; throws on malformed or past input (no fallback). */
 export function parseCustomSnooze(text: string, now: number = Date.now()): number {

@@ -117,7 +117,13 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): React.ReactElemen
   const name = isProject ? target.name : deriveChatTitle(targets[0] ?? ({ name: null } as ChatRow));
   // Enabled only when every chat has work to wait for; the host refuses the rest.
   const canUntilComplete =
-    targets.length > 0 && targets.every((c) => c.activity === 'running' || c.goal !== null);
+    targets.length > 0 &&
+    targets.every(
+      (c) =>
+        c.activity === 'running' ||
+        c.goal !== null ||
+        (c.pendingWake != null && c.pendingWake.every === undefined),
+    );
   const presets = [...distinctPresets(allPresets), UNTIL_COMPLETE_PRESET];
   const wake = wakeFor(selected, customValue, allPresets, sliderIndex);
   const wakeText =
