@@ -170,6 +170,7 @@ import { ImageLightbox, imageDownloadName } from '../components/ImageLightbox.js
 import { thumbUrl } from '../lib/thumbUrl.js';
 import { failed } from '../lib/errorCopy.js';
 import { isStoppable } from '../stores/types.js';
+import { splitQuoteLines } from '../lib/quoteLines.js';
 
 // How many unresolved, sweepable permission requests this chat has right now.
 // A question card is not one: approve-all deliberately steps past it (spec/14
@@ -3581,6 +3582,22 @@ function SideThreadMarker({ chatId, branch }: { chatId: string; branch: ChatBran
  * Usually one item; a turn can carry more than one (e.g. a todo-edit reminder
  * and a broadcast digest together), so each gets its own row.
  */
+function SystemContextText({ text }: { text: string }): JSX.Element {
+  return (
+    <div className="system-context-text">
+      {splitQuoteLines(text).map((run, i) =>
+        run.quote ? (
+          <blockquote key={i} className="system-context-quote">
+            {run.text}
+          </blockquote>
+        ) : (
+          <span key={i}>{run.text}</span>
+        ),
+      )}
+    </div>
+  );
+}
+
 function SystemContextDisclosures({ items }: { items: SystemContextItem[] }): JSX.Element {
   return (
     <div className="system-context-group" data-testid="system-context-group">
@@ -3590,7 +3607,7 @@ function SystemContextDisclosures({ items }: { items: SystemContextItem[] }): JS
           testid="system-context"
           variant="system-context"
           summary={item.label}
-          detail={<pre className="system-context-text">{item.text}</pre>}
+          detail={<SystemContextText text={item.text} />}
         />
       ))}
     </div>
@@ -3627,7 +3644,7 @@ function ProviderContextPanel({
           testid="provider-context"
           variant="system-context"
           summary={entry.count > 1 ? `${entry.label} ×${entry.count}` : entry.label}
-          detail={<pre className="system-context-text">{entry.text}</pre>}
+          detail={<SystemContextText text={entry.text} />}
           defaultOpen={verbosity === 'full'}
         />
       ))}

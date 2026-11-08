@@ -5154,6 +5154,14 @@ button.view-file-download {
   font-size: var(--text-min);
   color: var(--ink-2);
 }
+/* Lines starting with ">" in system messages: the chat markdown blockquote
+   look (.md blockquote) — indented, italic, muted, no edge bar. */
+.system-context-text .system-context-quote {
+  margin: 8px 0;
+  padding-left: 10px;
+  font-style: italic;
+  color: var(--ink-2);
+}
 /* spec/02 § Provider-level context — Claude Code's OWN provider-level context
    (environment, model, token counts, ...), chat-scoped rather than per-turn.
    Sits with the chat's other standing banners (reminder/goal), so it gets
