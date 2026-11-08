@@ -1022,11 +1022,14 @@ export function restartResendAsOwnMessage<E extends { type: string }>(
       state.afterMarker = true;
       return { ...ev, content: RESTART_INTERRUPTION_MARKER } as E;
     }
-    if (msg.content === RESTART_INTERRUPTION_MARKER) state.afterMarker = true;
+    // Any other message between the marker and a user message means the
+    // automated re-send never landed, so a later retry is a genuine one.
+    state.afterMarker = msg.content === RESTART_INTERRUPTION_MARKER;
     return ev;
   }
-  if (msg.role !== 'user' || !state.afterMarker) return ev;
+  const directlyAfterMarker = state.afterMarker;
   state.afterMarker = false;
+  if (msg.role !== 'user' || !directlyAfterMarker) return ev;
   if (msg.retryOfSeq === undefined) return ev;
   const { retryOfSeq: _folded, ...own } = msg;
   return own as unknown as E;
