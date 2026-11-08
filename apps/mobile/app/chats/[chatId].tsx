@@ -104,7 +104,6 @@ import { SnoozeDivider } from '../../src/components/SnoozeDivider';
 import { editQueuedMessage, promoteMessage, unqueueMessage } from '../../src/lib/queuedActions';
 import { getComposerDraft, setComposerDraft } from '../../src/lib/composerDraft';
 import { useUiStore } from '../../src/stores/uiStore';
-import { CallDock } from '../../src/components/CallBar';
 import {
   ManagerChatsList,
   ManagerSegments,
@@ -116,6 +115,7 @@ import { ChatFindBar } from '../../src/components/ChatFindBar';
 import { findMessageSeqs, stepIndex } from '../../src/lib/chatFind';
 import { ContextDisclosure } from '../../src/components/ContextDisclosure';
 import { openArtifactTarget } from '../../src/lib/pads';
+import { AnchoredMenu } from '../../src/components/AnchoredMenu';
 import { ChatActionsMenu } from '../../src/components/ChatActionsMenu';
 import { useReadEverything } from '../../src/lib/readEverything';
 import { EmptyState } from '../../src/components/EmptyState';
@@ -795,6 +795,7 @@ function ChatDetailBody(): React.ReactElement {
   // Find in chat (spec/15 § Find in chat): the matches are messages, and each
   // step jumps to one through the same path a search hit uses.
   const [findOpen, setFindOpen] = React.useState(false);
+  const [callMenuOpen, setCallMenuOpen] = React.useState(false);
   const [findQuery, setFindQuery] = React.useState('');
   const [findIndex, setFindIndex] = React.useState(-1);
   const findSeqs = React.useMemo(
@@ -1179,15 +1180,31 @@ function ChatDetailBody(): React.ReactElement {
         {!readOnlyMirror ? (
           <Pressable
             onPress={() => startVoiceCall(chatId)}
-            onLongPress={() => startVoiceCall(chatId, 'hands-free')}
+            onLongPress={() => setCallMenuOpen(true)}
             style={{ padding: space.sm }}
             accessibilityRole="button"
             accessibilityLabel="Start voice call"
-            accessibilityHint="Long press to start hands-free"
+            accessibilityHint="Long press for call options"
           >
             <Phone size={20} color={colors.ink} />
           </Pressable>
         ) : null}
+        {/* Long-press the call button: Call, Hands-free, Voice settings. */}
+        <AnchoredMenu
+          visible={callMenuOpen}
+          onDismiss={() => setCallMenuOpen(false)}
+          items={[
+            { id: 'call', label: 'Call', testID: 'call-menu-call' },
+            { id: 'hands-free', label: 'Hands-free', testID: 'call-menu-hands-free' },
+            { id: 'voice-settings', label: 'Voice settings', testID: 'call-menu-settings' },
+          ]}
+          onSelect={(id) => {
+            setCallMenuOpen(false);
+            if (id === 'call') startVoiceCall(chatId);
+            else if (id === 'hands-free') startVoiceCall(chatId, 'hands-free');
+            else router.push('/settings/voice' as Href);
+          }}
+        />
         {/* Find in this chat (spec/15 § Find in chat). */}
         <Pressable
           testID="chat-find-toggle"
@@ -1376,9 +1393,6 @@ function ChatDetailBody(): React.ReactElement {
             <ChevronDown size={20} color={colors.ink} />
           </Pressable>
         ) : null}
-        {/* A call on this chat docks its control bar here; a call on another
-            chat shows as the on-call pill (spec/15 § Voice states). */}
-        <CallDock chatId={chatId} />
         {readOnlyMirror ? (
           <View
             testID="composer-readonly"

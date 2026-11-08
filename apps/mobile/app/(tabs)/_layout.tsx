@@ -8,8 +8,6 @@ import { Pressable, View } from 'react-native';
 import { Redirect, Tabs, useRouter } from 'expo-router';
 import { Clock, Folder, MessageCircle, Plus, Settings as SettingsIcon } from 'lucide-react-native';
 import { fixed, fonts, radii, space, textMin, useTheme } from '../../src/lib/theme';
-import { CallPill } from '../../src/components/CallPill';
-import { RemoteCallPill } from '../../src/components/RemoteCallPill';
 import { getRoute } from '../../src/config';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
 
@@ -130,22 +128,6 @@ export default function TabLayout(): React.ReactElement {
           }}
         />
       </Tabs>
-      {/* On-call pill (spec/15 § Voice states): while a call is open and the
-          user is on a tab rather than in the call's chat, a small persistent
-          pill floats just above the tab bar — tap to return, or end it. It
-          renders nothing when there is no call. */}
-      <View
-        pointerEvents="box-none"
-        style={{
-          position: 'absolute',
-          left: space.md,
-          right: space.md,
-          bottom: TAB_BAR_HEIGHT + space.sm,
-        }}
-      >
-        <CallPill />
-        <RemoteCallPill />
-      </View>
     </View>
   );
 }

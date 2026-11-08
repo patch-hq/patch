@@ -20,6 +20,7 @@ import {
   byTestId,
   hasText,
   actAsync,
+  actSync,
   textOf,
 } from './testUtils/render';
 import { useChatStore } from '../src/stores/chatStore';
@@ -326,13 +327,26 @@ describe('chat-detail header', () => {
     expect(startVoiceCallMock).toHaveBeenCalledWith('c1');
   });
 
-  it('long-pressing the call button starts a hands-free session for a regular (new) chat', () => {
+  it('long-pressing the call button opens a menu: Call, Hands-free, Voice settings', () => {
     seedChat('c1');
     __setLocalSearchParams({ chatId: 'c1' });
     const r = renderRN(<ChatDetailScreen />);
-    expect(() => findHost(r.root, byLabel('Start hands-free'))).toThrow();
-    findHost(r.root, byLabel('Start voice call')).props.onLongPress();
+    expect(() => findHost(r.root, byTestId('call-menu-hands-free'))).toThrow();
+    actSync(() => findHost(r.root, byLabel('Start voice call')).props.onLongPress());
+    expect(startVoiceCallMock).not.toHaveBeenCalled();
+    expect(hasText(r.root, 'Call')).toBe(true);
+    expect(hasText(r.root, 'Voice settings')).toBe(true);
+    actSync(() => findHost(r.root, byTestId('call-menu-hands-free')).props.onPress());
     expect(startVoiceCallMock).toHaveBeenCalledWith('c1', 'hands-free');
+  });
+
+  it("the menu's Voice settings opens the voice settings page", () => {
+    seedChat('c1');
+    __setLocalSearchParams({ chatId: 'c1' });
+    const r = renderRN(<ChatDetailScreen />);
+    actSync(() => findHost(r.root, byLabel('Start voice call')).props.onLongPress());
+    actSync(() => findHost(r.root, byTestId('call-menu-settings')).props.onPress());
+    expect(routerMock.push).toHaveBeenCalledWith('/settings/voice');
   });
 
   it('the call button is hidden on a read-only mirror thread (Speakers)', () => {

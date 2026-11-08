@@ -1,7 +1,7 @@
 // Voice-call session: calls POST /api/voice/token, opens the audio WSS
 // session, starts the Android VoiceAudioService foreground notification,
-// and updates the voice store so the in-chat call bar (CallBar) and the
-// on-call pill (CallPill) render.
+// and updates the voice store so the in-chat call bar (CallStrip) and the
+// on-call pill (CallStrip) render.
 //
 // IMPORTANT: the call bar MUST appear the instant the call control is
 // tapped. Minting a token (api.me + api.voiceToken), requesting the mic
