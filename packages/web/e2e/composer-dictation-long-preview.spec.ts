@@ -145,7 +145,7 @@ test('composer grows with a long live dictation', async ({ page }) => {
     const toolbar = row.querySelector('.composer-actions, .composer-toolbar') as HTMLElement | null;
     return {
       inputH: i.offsetHeight,
-      cap: Math.round(window.innerHeight * 0.3),
+      cap: Math.round(window.innerHeight * 0.25),
       scroll: i.scrollHeight,
       client: i.clientHeight,
       inputBottom: i.getBoundingClientRect().bottom,
