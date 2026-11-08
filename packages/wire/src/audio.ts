@@ -127,6 +127,23 @@ export function dictationEngineFor(
   return surfaceKind === 'mobile' ? dictation.phone : dictation.computer;
 }
 
+/**
+ * What reads speech on a turn-based call (backend `local`), and tidies each
+ * dictation phrase (spec/07 § Speech to text): `groq` — Groq Whisper over the
+ * network; `whisper` — Whisper on the host; `parakeet` — Parakeet on the host;
+ * `elevenlabs` — ElevenLabs Scribe. An account setting, not host config. A host
+ * that cannot run the chosen one refuses the call and says which.
+ */
+export const SpeechToTextEngine = z.enum(['groq', 'whisper', 'parakeet', 'elevenlabs']);
+export type SpeechToTextEngine = z.infer<typeof SpeechToTextEngine>;
+export const DEFAULT_SPEECH_TO_TEXT: SpeechToTextEngine = 'groq';
+export const SPEECH_TO_TEXT_LABEL: Record<SpeechToTextEngine, string> = {
+  groq: 'Groq Whisper',
+  whisper: 'Whisper on host',
+  parakeet: 'Parakeet on host',
+  elevenlabs: 'ElevenLabs Scribe',
+};
+
 export const VoiceLayer = z.enum(['direct', 'light', 'heavy']);
 export type VoiceLayer = z.infer<typeof VoiceLayer>;
 
@@ -156,6 +173,7 @@ export interface VoiceSurfaceConfig {
 }
 
 export interface VoiceConfig {
+  speechToText: SpeechToTextEngine;
   dictation: DictationConfig;
   meeting: MeetingEngine;
   device: VoiceSurfaceConfig;
@@ -164,6 +182,7 @@ export interface VoiceConfig {
 }
 
 export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
+  speechToText: DEFAULT_SPEECH_TO_TEXT,
   dictation: { phone: 'device', computer: 'whisper', tidy: false },
   meeting: 'local',
   device: { backend: 'local', layer: 'direct', handoff: 'auto' },
