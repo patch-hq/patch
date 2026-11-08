@@ -209,6 +209,35 @@ describe('a durable turn', () => {
     second.release();
   }, 30000);
 
+  it('reattaching to a finished turn leaves the SDK nothing it would throw on when it writes the prompt', async () => {
+    // Lived failure (8 Nov 2026): the SDK writes the user prompt right after
+    // `initialize`. Its transport throws "Cannot write to terminated process"
+    // when `process.exitCode !== null` and stdin is still open — and replaying
+    // a finished turn sets exitCode at once. The turn then died with a banner.
+    const { cfg, cwd } = fresh();
+    const first = new DurableTurn({ config: cfg, chatId: 'c3w', localId: 'L3w', log });
+    const d1 = drive(first.spawn({ ...spawnOpts, cwd }));
+    d1.send(initialize('r1'));
+    d1.send(prompt);
+    await d1.until(() => texts(d1.lines).includes('a1'), 'a1');
+    detachDurableTurns();
+    resetDurableTurnsForTest();
+    writeFileSync(join(cwd, 'go'), '');
+    for (let i = 0; i < 200 && inspectTurn(cfg, 'c3w')?.state !== 'exited'; i++) await sleep(25);
+
+    const second = new DurableTurn({ config: cfg, chatId: 'c3w', attach: { consumed: null }, log });
+    const proc = second.spawn({ ...spawnOpts, cwd });
+    const d2 = drive(proc);
+    d2.send(initialize('NEW'));
+    const sdkWouldThrow = (): boolean =>
+      !proc.stdin.writableEnded && (proc.killed || proc.exitCode !== null);
+    expect(sdkWouldThrow()).toBe(false);
+    d2.send(prompt);
+    await d2.exited;
+    expect(sdkWouldThrow()).toBe(false);
+    second.release();
+  }, 30000);
+
   it('a replaced turn releasing leaves the newer turn of the same chat running', async () => {
     const { cfg, cwd } = fresh();
     const first = new DurableTurn({ config: cfg, chatId: 'c5', localId: 'L5a', log });
