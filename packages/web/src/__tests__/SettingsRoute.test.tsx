@@ -56,6 +56,7 @@ const PAGE_TESTID: Record<string, string> = {
   shortcuts: 'settings-shortcuts',
   updates: 'settings-version',
   account: 'settings-account',
+  bugs: 'settings-bugs',
 };
 
 const errors = (): string[] => useUiStore.getState().errors.map((e) => e.message);
@@ -102,6 +103,7 @@ describe('Settings shell — one pane tab, pages as internal state', () => {
       'Devices',
       'Shortcuts',
       'Updates',
+      'Bug reports',
       'Account',
     ]);
     expect(
