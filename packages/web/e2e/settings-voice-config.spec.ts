@@ -50,6 +50,7 @@ test.describe('Settings — Voice engines', () => {
       'Deepgram',
       'ElevenLabs',
       'On this host',
+      'Parakeet on this computer',
       'Whisper',
     ]);
     await expect(page.getByText(/\b(direct|light|heavy)\b/)).toHaveCount(0);
