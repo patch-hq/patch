@@ -14,11 +14,12 @@ import {
   DEFAULT_VOICE_CONFIG,
   DictationSetting,
   dictationEngineFor,
+  SpeechToTextEngine,
   type AudioEvent,
   type AudioEventType,
   type AudioSessionStartEvent,
 } from '../src/audio.js';
-import { decode, encode, type WireEvent } from '../src/index.js';
+import { decode, encode, VoiceConfigSetting, type WireEvent } from '../src/index.js';
 
 const FIXTURES: { [K in AudioEventType]: Extract<AudioEvent, { type: K }> } = {
   'audio.session_start': {
@@ -289,6 +290,20 @@ describe('voiceCellFor / modesShareVoiceEngine (spec/07 § Voice — a config ma
   test('a different hand-off mode on the same engine cannot switch in place', () => {
     const c = { ...config, handsFree: { ...config.call, handoff: 'always' as const } };
     expect(modesShareVoiceEngine(c, 'hands-free', 'call')).toBe(false);
+  });
+});
+
+describe('speech to text setting', () => {
+  test('defaults to Groq Whisper, and an older saved voice config reads as Groq', () => {
+    expect(DEFAULT_VOICE_CONFIG.speechToText).toBe('groq');
+    const { speechToText: _omitted, ...old } = DEFAULT_VOICE_CONFIG;
+    expect(VoiceConfigSetting.parse(old).speechToText).toBe('groq');
+  });
+  test('offers exactly the four engines and rejects any other', () => {
+    expect(SpeechToTextEngine.options).toEqual(['groq', 'whisper', 'parakeet', 'elevenlabs']);
+    expect(() =>
+      VoiceConfigSetting.parse({ ...DEFAULT_VOICE_CONFIG, speechToText: 'deepgram' }),
+    ).toThrow();
   });
 });
 

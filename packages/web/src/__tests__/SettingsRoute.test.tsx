@@ -737,6 +737,7 @@ describe('Settings → Voice', () => {
         preferences: {
           ...usePreferencesStore.getState().preferences,
           voiceConfig: {
+            speechToText: 'groq',
             dictation: { phone: 'deepgram', computer: 'whisper', tidy: false },
             meeting: 'local',
             device: { backend: 'openai', layer: 'light', handoff: 'auto' },
@@ -778,6 +779,7 @@ describe('Settings → Voice', () => {
         preferences: {
           ...usePreferencesStore.getState().preferences,
           voiceConfig: {
+            speechToText: 'groq',
             dictation: { phone: 'whisper', computer: 'deepgram', tidy: false },
             meeting: 'local',
             device: { backend: 'local', layer: 'direct', handoff: 'auto' },
@@ -879,7 +881,27 @@ describe('Settings → Voice', () => {
       );
     });
 
-    it('tidy-up with Whisper is one switch for both', async () => {
+    it('speech to text: choosing an engine writes it and the tidy-up row names it', async () => {
+      const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
+      vi.stubGlobal('fetch', makeFetch({}, server.handler));
+      renderSettings('/settings/voice');
+      expect(await screen.findByTestId('stt-engine-groq')).toHaveTextContent('Groq Whisper');
+      expect(screen.getByTestId('dictation-tidy-row')).toHaveTextContent(
+        'Tidy up each phrase with Groq Whisper',
+      );
+      fireEvent.click(screen.getByTestId('stt-engine-parakeet'));
+      await waitFor(() => expect(server.writes).toHaveLength(1));
+      expect((server.writes[0]!.voiceConfig as Record<string, unknown>).speechToText).toBe(
+        'parakeet',
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId('dictation-tidy-row')).toHaveTextContent(
+          'Tidy up each phrase with Parakeet on host',
+        ),
+      );
+    });
+
+    it('tidy-up is one switch for both', async () => {
       const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
       vi.stubGlobal('fetch', makeFetch({}, server.handler));
       renderSettings('/settings/voice');
@@ -950,6 +972,7 @@ describe('Settings → Voice', () => {
         preferences: {
           ...usePreferencesStore.getState().preferences,
           voiceConfig: {
+            speechToText: 'groq',
             dictation: { phone: 'device', computer: 'whisper', tidy: false },
             meeting: 'local',
             device: { backend: 'local', layer: 'light', handoff: 'auto' },
