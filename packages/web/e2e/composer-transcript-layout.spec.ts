@@ -82,8 +82,8 @@ test.describe('composer + transcript layout', () => {
         scrollHeight: t.scrollHeight,
       };
     });
-    // Height is clamped at the cap: 30% of the window (allow a small delta).
-    const cap = await page.evaluate(() => window.innerHeight * 0.3);
+    // Height is clamped at the cap: 25% of the window (allow a small delta).
+    const cap = await page.evaluate(() => window.innerHeight * 0.25);
     expect(over.height).toBeLessThanOrEqual(cap + 2);
     // Past the cap the content genuinely overflows, so a scrollbar is allowed.
     expect(over.overflowY).toBe('auto');
@@ -94,13 +94,13 @@ test.describe('composer + transcript layout', () => {
     await page.goto(HARNESS);
     const input = page.locator('.composer-input');
     await input.click();
-    await input.fill(Array.from({ length: 7 }, (_, i) => `line ${i}`).join('\n'));
+    await input.fill(Array.from({ length: 5 }, (_, i) => `line ${i}`).join('\n'));
     await page.waitForTimeout(50);
     const m = await input.evaluate((el) => {
       const t = el as HTMLTextAreaElement;
       return { overflowY: getComputedStyle(t).overflowY, h: t.clientHeight, sh: t.scrollHeight };
     });
-    // 7 lines (~195px) fit under the 30% cap (240px at 800px); it must show whole, unscrolled.
+    // 5 lines (~140px) fit under the 25% cap (200px at 800px); it must show whole, unscrolled.
     expect(m.h).toBeGreaterThan(120);
     expect(m.overflowY).toBe('hidden');
     expect(m.sh).toBeLessThanOrEqual(m.h + 1);
