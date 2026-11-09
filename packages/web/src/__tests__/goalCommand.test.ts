@@ -23,6 +23,25 @@ describe('parseGoalCommand (patch/todo.md — /goal)', () => {
     expect(parseGoalCommand('/goal   ')).toEqual({ isGoal: true, goal: null, message: '' });
   });
 
+  it('treats `/goal clear` and its synonyms as a clear, never as a goal named "clear"', () => {
+    for (const w of ['clear', 'CLEAR', 'off', 'none', 'cancel', 'remove', 'stop']) {
+      expect(parseGoalCommand(`/goal ${w}`)).toEqual({ isGoal: true, goal: null, message: '' });
+    }
+    expect(parseGoalCommand('please stop /goal clear')).toEqual({
+      isGoal: true,
+      goal: null,
+      message: 'please stop',
+    });
+  });
+
+  it('still sets a goal when the clear word is only part of longer text', () => {
+    expect(parseGoalCommand('/goal clear the backlog')).toEqual({
+      isGoal: true,
+      goal: 'clear the backlog',
+      message: 'clear the backlog',
+    });
+  });
+
   it('tolerates leading/trailing whitespace around the whole message', () => {
     expect(parseGoalCommand('  /goal  finish the docs  ')).toEqual({
       isGoal: true,
