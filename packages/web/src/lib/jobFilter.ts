@@ -8,9 +8,19 @@
 export type JobStatusFilter = 'all' | 'enabled' | 'disabled';
 export type JobTriggerFilter = 'all' | 'cron' | 'recurrence' | 'follows' | 'webhook' | 'todoist';
 
+/**
+ * 'all', a model id, or `UNSET_MODEL` — the jobs whose action stores no model
+ * and so takes the host's last-used one at each fire. Jobs whose action has no
+ * model at all (command, message) match only 'all'.
+ */
+export type JobModelFilter = string;
+export const ALL_MODELS = 'all';
+export const UNSET_MODEL = '__unset__';
+
 export interface JobFilter {
   status: JobStatusFilter;
   trigger: JobTriggerFilter;
+  model: JobModelFilter;
 }
 
 /** The status control's options, in the order it offers them. */
@@ -31,23 +41,44 @@ export const JOB_TRIGGER_FILTERS: ReadonlyArray<{ value: JobTriggerFilter; label
 ];
 
 /** Narrows nothing. */
-export const NO_JOB_FILTER: JobFilter = { status: 'all', trigger: 'all' };
+export const NO_JOB_FILTER: JobFilter = { status: 'all', trigger: 'all', model: ALL_MODELS };
 
 /** The only fields the filter looks at — anything Job-shaped will do. */
 export interface FilterableJob {
   enabled: boolean;
   trigger: { type: string };
+  action?: { type: string; model?: string | undefined };
+}
+
+/** Action types whose chat runs on a model (spec/08 § Action). */
+function carriesModel(job: FilterableJob): boolean {
+  return job.action?.type === 'spawn' || job.action?.type === 'ensure';
+}
+
+/** The distinct models the given jobs pin, sorted, for the model control. */
+export function jobModels(jobs: readonly FilterableJob[]): string[] {
+  const ids = new Set<string>();
+  for (const j of jobs) if (carriesModel(j) && j.action?.model) ids.add(j.action.model);
+  return [...ids].sort();
+}
+
+/** True when some job runs a model-carrying action with no model stored. */
+export function hasUnsetModelJob(jobs: readonly FilterableJob[]): boolean {
+  return jobs.some((j) => carriesModel(j) && !j.action?.model);
 }
 
 /** True when the filter is narrowing on at least one axis. */
 export function isJobFilterActive(filter: JobFilter): boolean {
-  return filter.status !== 'all' || filter.trigger !== 'all';
+  return filter.status !== 'all' || filter.trigger !== 'all' || filter.model !== ALL_MODELS;
 }
 
 /** Keep the jobs that satisfy every axis of the filter. */
 export function filterJobs<T extends FilterableJob>(jobs: readonly T[], filter: JobFilter): T[] {
   return jobs.filter(
-    (job) => matchesStatus(job, filter.status) && matchesTrigger(job, filter.trigger),
+    (job) =>
+      matchesStatus(job, filter.status) &&
+      matchesTrigger(job, filter.trigger) &&
+      matchesModel(job, filter.model),
   );
 }
 
@@ -59,4 +90,11 @@ function matchesStatus(job: FilterableJob, status: JobStatusFilter): boolean {
 function matchesTrigger(job: FilterableJob, trigger: JobTriggerFilter): boolean {
   if (trigger === 'all') return true;
   return job.trigger.type === trigger;
+}
+
+function matchesModel(job: FilterableJob, model: JobModelFilter): boolean {
+  if (model === ALL_MODELS) return true;
+  if (!carriesModel(job)) return false;
+  if (model === UNSET_MODEL) return !job.action?.model;
+  return job.action?.model === model;
 }
