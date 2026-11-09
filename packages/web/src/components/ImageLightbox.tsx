@@ -37,6 +37,8 @@ export function ImageLightbox({
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const drag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+  // A drag that ends over the image fires a click; that click must not toggle zoom.
+  const dragged = useRef(false);
 
   const scaleRef = useRef(1);
   scaleRef.current = scale;
@@ -168,6 +170,10 @@ export function ImageLightbox({
         }}
         onClick={(e) => {
           e.stopPropagation();
+          if (dragged.current) {
+            dragged.current = false;
+            return;
+          }
           // Click toggles between fit and 2.5× zoom.
           if (scale > 1) reset();
           else setScale(2.5);
@@ -176,10 +182,13 @@ export function ImageLightbox({
           if (scale <= 1) return;
           e.stopPropagation();
           (e.target as HTMLElement).setPointerCapture(e.pointerId);
+          dragged.current = false;
           drag.current = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y };
         }}
         onPointerMove={(e) => {
           if (!drag.current) return;
+          if (Math.hypot(e.clientX - drag.current.x, e.clientY - drag.current.y) > 3)
+            dragged.current = true;
           setOffset({
             x: drag.current.ox + (e.clientX - drag.current.x),
             y: drag.current.oy + (e.clientY - drag.current.y),
