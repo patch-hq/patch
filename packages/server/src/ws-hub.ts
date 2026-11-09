@@ -1922,11 +1922,13 @@ export class WsHub {
       void _strip;
       const sent = this.sendToConns(targetId, rest as WireEvent);
       if (sent === 0) {
-        // An addressed event with nowhere to go. `chat.input_ack` is one of
-        // these, so a drop here is exactly what leaves a surface stuck on
-        // "Sending…" — log it at ERROR with the surfaces we DO hold, never as
-        // routine noise.
-        this.deps.logger.error(
+        // An addressed event with nowhere to go. A surface that disconnects
+        // while its request is in flight (phone backgrounded, tab closed) is
+        // routine, and it resyncs on reconnect — that is a warning. The one
+        // exception is `chat.input_ack`: a drop there leaves a surface stuck
+        // on "Sending…", so it stays at ERROR with the surfaces we DO hold.
+        const level = event.type === 'chat.input_ack' ? 'error' : 'warn';
+        this.deps.logger[level](
           {
             type: event.type,
             targetId,
