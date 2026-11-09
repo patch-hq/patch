@@ -24,6 +24,7 @@ import {
   flushPendingCrashes,
   installGlobalCrashHandler,
   collectNativeCrash,
+  startCrashCapture,
   setCrashContext,
 } from '../src/lib/crashReport';
 import { NativeModules, Platform } from 'react-native';
@@ -144,6 +145,27 @@ describe('collectNativeCrash', () => {
     expect(reportCrash).not.toHaveBeenCalled();
     delete (NativeModules as Record<string, unknown>)['PatchCrash'];
     await expect(collectNativeCrash()).rejects.toThrow('PatchCrash native module missing');
+  });
+});
+
+describe('startCrashCapture', () => {
+  it('files a native crash once, not also as an unexplained exit', async () => {
+    reportCrash.mockResolvedValue({ ok: true });
+    Platform.OS = 'android';
+    (NativeModules as Record<string, unknown>)['PatchCrash'] = {
+      takeLastCrash: async () => ({ message: 'NPE', stack: 'at Foo', occurredAt: 5 }),
+    };
+    // previous run left an open session marker
+    const { beginSession } = await import('../src/lib/exitLog');
+    beginSession(1_000);
+    startCrashCapture();
+    await vi.waitFor(() => expect(reportCrash).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(reportCrash).toHaveBeenCalledTimes(1);
+    expect(reportCrash.mock.calls[0]?.[0].message).toBe('NPE');
+    expect(readExitLog().map((e) => e.kind)).toEqual(['crash']);
+    // and the new session is not marked as crashed
+    expect(JSON.parse(store().getString('patch.exitSession.v1') ?? '{}').endedBy).toBeUndefined();
   });
 });
 

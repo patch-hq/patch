@@ -128,8 +128,10 @@ export interface LaunchFinding {
 /**
  * Compare the previous run's marker with this launch, log what it shows, and
  * start the marker for this run. Call once, first thing at startup.
+ * `previousCrashedNatively`: a native crash of the previous run was found, so
+ * its stopping is explained.
  */
-export function beginSession(now = Date.now()): LaunchFinding {
+export function beginSession(now = Date.now(), previousCrashedNatively = false): LaunchFinding {
   const previous = readSession();
   const build = currentBuild();
   const updateId = Updates.updateId ?? null;
@@ -143,7 +145,7 @@ export function beginSession(now = Date.now()): LaunchFinding {
         unexplained: false,
       };
     }
-    if (!previous.endedBy && previous.state === 'active') {
+    if (!previous.endedBy && !previousCrashedNatively && previous.state === 'active') {
       const since = Math.round((now - previous.lastSeenAt) / 1000);
       const during = changed ? ' (an update was applied between runs)' : '';
       finding = {

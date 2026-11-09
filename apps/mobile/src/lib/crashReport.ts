@@ -25,7 +25,6 @@ import { api, ApiError, type CrashReport } from '../api/rest';
 import { store } from './credential';
 import { mobileBuildInfo } from './buildInfo';
 import { useUiStore } from '../stores/uiStore';
-import { logUpdater } from './updaterLog';
 import { beginSession, logExit, noteCrashed, telemetryEnabled, trackSession } from './exitLog';
 
 const PENDING_KEY = 'patch.crash.pending';
@@ -98,7 +97,8 @@ export function recordCrash(
     occurredAt: partial.occurredAt ?? Date.now(),
     build: `${info.version}${info.gitSha ? `+${info.gitSha}` : ''}`,
   };
-  noteCrashed();
+  // A native crash is the previous run's: it must not mark this session as crashed.
+  if (report.source !== 'native') noteCrashed();
   logExit('crash', `${report.source}: ${report.message}`.slice(0, 300), report.occurredAt);
   if (!telemetryEnabled()) return Promise.resolve();
   writePending([...readPending(), report]);
@@ -131,8 +131,14 @@ export function installGlobalCrashHandler(): void {
   });
 }
 
+interface NativeCrash {
+  message: string;
+  stack: string;
+  occurredAt: number;
+}
+
 interface PatchCrashModule {
-  takeLastCrash: () => Promise<{ message: string; stack: string; occurredAt: number } | null>;
+  takeLastCrash: () => Promise<NativeCrash | null>;
 }
 
 /**
@@ -140,8 +146,8 @@ interface PatchCrashModule {
  * PatchCrash module wrote it to disk as the process died; reading it hands it
  * over and clears it. Android only — there is nothing native to read elsewhere.
  */
-export async function collectNativeCrash(): Promise<void> {
-  if (Platform.OS !== 'android') return;
+export async function takeNativeCrash(): Promise<NativeCrash | null> {
+  if (Platform.OS !== 'android') return null;
   const mod = (NativeModules as Record<string, unknown>)['PatchCrash'] as
     | PatchCrashModule
     | undefined;
@@ -150,8 +156,10 @@ export async function collectNativeCrash(): Promise<void> {
       'PatchCrash native module missing — is PatchCrashPackage registered and the prebuild current?',
     );
   }
-  const crash = await mod.takeLastCrash();
-  if (!crash) return;
+  return mod.takeLastCrash();
+}
+
+async function reportNativeCrash(crash: NativeCrash): Promise<void> {
   await recordCrash({
     source: 'native',
     message: crash.message,
@@ -161,19 +169,32 @@ export async function collectNativeCrash(): Promise<void> {
   });
 }
 
+/** Report the previous run's native crash, if any. Resolves true when there was one. */
+export async function collectNativeCrash(): Promise<boolean> {
+  const crash = await takeNativeCrash();
+  if (!crash) return false;
+  await reportNativeCrash(crash);
+  return true;
+}
+
 /** Everything the app does at startup for crash capture. */
 export function startCrashCapture(): void {
-  const launch = beginSession();
-  logUpdater('launch', 'app started');
-  trackSession();
-  if (launch.unexplained && launch.entry) {
-    void recordExit(launch.entry.detail, launch.entry.at);
-  }
   installGlobalCrashHandler();
   void flushPendingCrashes();
-  collectNativeCrash().catch((err) =>
-    useUiStore.getState().pushError(`native crash check failed: ${String(err)}`),
-  );
+  void (async () => {
+    // The native crash must be read BEFORE the session check: otherwise a run
+    // that died natively is also filed as "stopped while open, no crash recorded".
+    let crash: NativeCrash | null = null;
+    try {
+      crash = await takeNativeCrash();
+    } catch (err) {
+      useUiStore.getState().pushError(`native crash check failed: ${String(err)}`);
+    }
+    const launch = beginSession(Date.now(), crash !== null);
+    trackSession();
+    if (crash) await reportNativeCrash(crash);
+    if (launch.unexplained && launch.entry) await recordExit(launch.entry.detail, launch.entry.at);
+  })();
 }
 
 /** An exit we only found on relaunch: shared like a crash when sharing is on. */
