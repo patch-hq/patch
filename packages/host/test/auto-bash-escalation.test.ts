@@ -44,7 +44,10 @@ async function setup(mode: 'auto' | 'default') {
     state.get(chatId)!.turnOrigin = o;
   };
   setOrigin('machine');
-  return { chatId, events, gate, setOrigin };
+  const unattended = (daemon as unknown as { unattendedTurns: Set<string> }).unattendedTurns;
+  const goalTurns = (daemon as unknown as { goalTurns: Set<string> }).goalTurns;
+  const chatStates = state as unknown as Map<string, { hidden?: boolean }>;
+  return { chatId, events, gate, setOrigin, unattended, goalTurns, chatStates };
 }
 
 describe('auto-mode Bash escalation', () => {
@@ -74,6 +77,31 @@ describe('auto-mode Bash escalation', () => {
     setOrigin('user');
     void gate(chatId, 'Bash', { command: 'rm -rf old' }, 'delete');
     expect(events.some((e) => e.type === 'chat.permission_request')).toBe(true);
+  });
+
+  it('denies on a job-fired turn even though its origin is user', async () => {
+    const { chatId, events, gate, setOrigin, unattended } = await setup('auto');
+    setOrigin('user');
+    unattended.add(chatId);
+    const res = await gate(chatId, 'Bash', { command: 'curl x' }, 'fetch');
+    expect(res.approve).toBe(false);
+    expect(events.some((e) => e.type === 'chat.permission_request')).toBe(false);
+  });
+
+  it('asks on a goal-fired turn in a visible chat, though its origin is machine', async () => {
+    const { chatId, events, gate, goalTurns } = await setup('auto');
+    goalTurns.add(chatId);
+    void gate(chatId, 'Bash', { command: 'pnpm build' }, 'build');
+    expect(events.some((e) => e.type === 'chat.permission_request')).toBe(true);
+  });
+
+  it('denies on a goal-fired turn when the chat is hidden', async () => {
+    const { chatId, events, gate, goalTurns, chatStates } = await setup('auto');
+    goalTurns.add(chatId);
+    chatStates.get(chatId)!.hidden = true;
+    const res = await gate(chatId, 'Bash', { command: 'pnpm build' }, 'build');
+    expect(res.approve).toBe(false);
+    expect(events.some((e) => e.type === 'chat.permission_request')).toBe(false);
   });
 
   it('still asks for a non-Bash safety check under auto', async () => {

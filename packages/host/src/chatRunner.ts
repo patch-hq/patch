@@ -7103,6 +7103,7 @@ export class Daemon {
       if (item.origin !== 'machine') {
         this.drainHadUserTurn.add(chatId);
         this.unattendedTurns.delete(chatId);
+        this.goalTurns.delete(chatId);
       }
     }
     if (delivered.length === 0) return undefined;
@@ -9528,12 +9529,16 @@ export class Daemon {
     // about to start the next one.
     state.turnOrigin = origin ?? 'user';
     if (state.turnOrigin === 'user') this.drainHadUserTurn.add(chatId);
-    // A job/hook/goal-fired turn has no one at the other end even though its
+    // A job/hook-fired turn has no one at the other end even though its
     // origin is `user`; requestPermission denies auto-mode Bash escalations on
     // it instead of parking the turn on a card. Cleared if a person's message
-    // is delivered into the turn (see below).
-    if (jobTrigger || hookTrigger || goalTrigger) this.unattendedTurns.add(chatId);
+    // is delivered into the turn (see below). A goal-fired turn is NOT here: a
+    // goal is set by a person in a chat they are usually watching, so it is
+    // tracked apart and only denied when the chat is hidden.
+    if (jobTrigger || hookTrigger) this.unattendedTurns.add(chatId);
     else this.unattendedTurns.delete(chatId);
+    if (goalTrigger) this.goalTurns.add(chatId);
+    else this.goalTurns.delete(chatId);
     // spec/09 § A turn the user stopped. A stop belongs to the turn it killed,
     // so the flag is cleared here rather than when the stop settles: a chat
     // that is stopped and then given a fresh turn announces that turn's real
@@ -12508,6 +12513,9 @@ export class Daemon {
   /** Chats whose running turn was fired by a job/hook/goal and has had no person's message since. */
   private readonly unattendedTurns = new Set<string>();
 
+  /** Chats whose running turn is the host's goal follow-up (machine origin, but a person's chat). */
+  private readonly goalTurns = new Set<string>();
+
   /**
    * Bridges the SDK backend's `onPermissionRequest` (sdkBackend.ts
    * `SdkRunOptions`) — which the real SDK's `canUseTool` and the mock's
@@ -12551,8 +12559,10 @@ export class Daemon {
     // it is what made advance approvals ("yes, delete those") get ignored. Only
     // machine-origin turns (jobs, triggers, self-wakes) are denied outright.
     const modeAtRequest = this.chatPermissionMode(chatId);
+    const cs = this.chatState.get(chatId);
+    const goalWatched = this.goalTurns.has(chatId) && cs?.hidden !== true;
     const attended =
-      this.chatState.get(chatId)?.turnOrigin !== 'machine' && !this.unattendedTurns.has(chatId);
+      (cs?.turnOrigin !== 'machine' || goalWatched) && !this.unattendedTurns.has(chatId);
     if (tool === 'Bash' && modeAtRequest === 'auto' && !attended) {
       this.opts.logger.warn({ chatId, tool }, 'auto mode escalated Bash; denied without asking');
       return Promise.resolve({
