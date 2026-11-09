@@ -83,7 +83,7 @@ import { registerLinkSummaryRoutes } from './link-summary-routes.js';
 import { RELEASE_REPO } from './release-channel.js';
 import { MobileUpdateNotifier, registerMobileUpdateRoutes } from './mobile-updates.js';
 import { registerClientCrashRoutes } from './client-crash-routes.js';
-import { IssueFiler } from './issue-filer.js';
+import { IssueFiler, hostTurnFailureReport } from './issue-filer.js';
 import { registerIssueFilerRoutes } from './issue-filer-routes.js';
 import { RELEASE_REPO as ISSUE_REPO_DEFAULT } from './release-channel.js';
 import { SecretsRegistry } from './secrets-registry.js';
@@ -1947,6 +1947,12 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       surface: 'server',
     });
   };
+  // A turn that fails on the host is logged on the host, not here, so file it
+  // from the event the host sends the surfaces.
+  hostLink.onEvent((event, from) => {
+    const report = hostTurnFailureReport(event, from);
+    if (report) issueFiler.reportAuto(report);
+  });
   app.addHook('onReady', async () => {
     // Anything queued when the last process died (an uncaught exception) files now.
     void issueFiler.flush().catch(() => undefined);

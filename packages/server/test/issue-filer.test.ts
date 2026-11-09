@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
-import { IssueFiler } from '../src/issue-filer.js';
+import type { WireEvent } from '@patch/wire';
+import { IssueFiler, hostTurnFailureReport } from '../src/issue-filer.js';
 import { scrub } from '../src/issue-scrub.js';
 
 describe('scrub', () => {
@@ -144,5 +145,29 @@ describe('IssueFiler', () => {
     expect(body.labels).toContain('user-reported');
     expect(body.body).toContain('Send button dead'.slice(0, 4));
     expect(body.body).not.toContain('a@b.co');
+  });
+});
+
+describe('hostTurnFailureReport', () => {
+  const err = (code: string, message: string) =>
+    ({ type: 'chat.error', chatId: 'c', seq: 1, error: { code, message } }) as unknown as WireEvent;
+  it('files a host turn failure', () => {
+    expect(
+      hostTurnFailureReport(
+        err('sdk_error', 'The Claude Code process ended mid-turn without finishing'),
+        'host-1',
+      ),
+    ).toMatchObject({ kind: 'server-error', surface: 'host' });
+  });
+  it('ignores server-generated, non-sdk and limit errors', () => {
+    expect(hostTurnFailureReport(err('sdk_error', 'boom'), null)).toBeNull();
+    expect(hostTurnFailureReport(err('daemon_unavailable', 'lost'), 'host-1')).toBeNull();
+    expect(hostTurnFailureReport(err('sdk_error', 'Usage limit reached'), 'host-1')).toBeNull();
+    expect(
+      hostTurnFailureReport(
+        { type: 'chat.stopped', chatId: 'c' } as unknown as WireEvent,
+        'host-1',
+      ),
+    ).toBeNull();
   });
 });
