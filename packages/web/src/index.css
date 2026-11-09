@@ -18058,6 +18058,9 @@ a.drop-target {
     padding-left: 8px;
     padding-right: 8px;
   }
+  .composer .composer-actions.is-compact .composer-tools {
+    margin-left: 0;
+  }
   .composer .composer-actions,
   .composer .composer-actions .composer-tools,
   .composer .composer-actions .composer-settings,
