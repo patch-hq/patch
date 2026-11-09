@@ -61,7 +61,7 @@ function response(events: WireEvent[]): { decision: string } | undefined {
 }
 
 describe('a question timer resets on chat.focus_change', () => {
-  it('gaining focus on the chat gives the countdown a fresh window', async () => {
+  it('gaining focus holds the countdown at a full window: it never runs down while focused', async () => {
     vi.useFakeTimers();
     try {
       const { daemon, events, folder } = setup();
@@ -78,15 +78,40 @@ describe('a question timer resets on chat.focus_change', () => {
 
       const updates = expiryUpdates(events);
       expect(updates).toHaveLength(1);
-      expect(updates[0]).toMatchObject({ chatId, requestId, expiry: { windowMs: WINDOW_MS } });
+      expect(updates[0]).toMatchObject({
+        chatId,
+        requestId,
+        expiry: { windowMs: WINDOW_MS, paused: true },
+      });
 
-      // Well past where the ORIGINAL deadline would have fired, but well
-      // inside the fresh window the reset just granted.
-      await vi.advanceTimersByTimeAsync(WINDOW_MS - 10_000);
+      // Far longer than any window: still pending, the user is looking at it.
+      await vi.advanceTimersByTimeAsync(WINDOW_MS * 5);
       expect(response(events)).toBeUndefined();
       expect(daemon.chatState.get(chatId)?.activity).toBe('awaiting-permission');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
-      // Now the reset window itself runs out.
+  it('losing focus restarts a full running window', async () => {
+    vi.useFakeTimers();
+    try {
+      const { daemon, events, folder } = setup();
+      const chatId = await daemon.spawnChat({ folder, prompt: '[[ask-user-question]]' });
+      await vi.advanceTimersByTimeAsync(50);
+
+      daemon.noteChatFocus('surface-1', chatId); // gained: paused
+      await vi.advanceTimersByTimeAsync(WINDOW_MS * 2);
+      expect(response(events)).toBeUndefined();
+
+      daemon.noteChatFocus('surface-1', null); // lost: runs again
+      const updates = expiryUpdates(events);
+      expect(updates).toHaveLength(2);
+      expect(updates[1]!.expiry.paused).toBeUndefined();
+
+      await vi.advanceTimersByTimeAsync(WINDOW_MS - 10_000);
+      expect(response(events)).toBeUndefined();
+
       await vi.advanceTimersByTimeAsync(20_000);
       expect(response(events)?.decision).toBe('deny');
     } finally {
@@ -94,25 +119,39 @@ describe('a question timer resets on chat.focus_change', () => {
     }
   });
 
-  it('losing focus on the chat also gives it a fresh window', async () => {
+  it('stays paused while a second surface still has the chat open', async () => {
     vi.useFakeTimers();
     try {
       const { daemon, events, folder } = setup();
       const chatId = await daemon.spawnChat({ folder, prompt: '[[ask-user-question]]' });
       await vi.advanceTimersByTimeAsync(50);
 
-      daemon.noteChatFocus('surface-1', chatId); // gained
-      await vi.advanceTimersByTimeAsync(WINDOW_MS - 10_000);
+      daemon.noteChatFocus('surface-1', chatId);
+      daemon.noteChatFocus('surface-2', chatId);
+      daemon.noteChatFocus('surface-1', null);
+      await vi.advanceTimersByTimeAsync(WINDOW_MS * 2);
       expect(response(events)).toBeUndefined();
 
-      daemon.noteChatFocus('surface-1', null); // lost
-      expect(expiryUpdates(events)).toHaveLength(2);
-
-      await vi.advanceTimersByTimeAsync(WINDOW_MS - 10_000);
-      expect(response(events)).toBeUndefined();
-
-      await vi.advanceTimersByTimeAsync(20_000);
+      daemon.noteChatFocus('surface-2', null);
+      await vi.advanceTimersByTimeAsync(WINDOW_MS + 1_000);
       expect(response(events)?.decision).toBe('deny');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a question asked while the chat is already focused starts paused', async () => {
+    vi.useFakeTimers();
+    try {
+      const { daemon, events, folder } = setup();
+      daemon.noteChatFocus('surface-1', 'chat-1'); // the user is already in the chat
+      const chatId = await daemon.spawnChat({ folder, prompt: '[[ask-user-question]]' });
+      expect(chatId).toBe('chat-1');
+      await vi.advanceTimersByTimeAsync(50);
+      request(events);
+      expect(expiryUpdates(events).at(-1)?.expiry.paused).toBe(true);
+      await vi.advanceTimersByTimeAsync(WINDOW_MS * 2);
+      expect(response(events)).toBeUndefined();
     } finally {
       vi.useRealTimers();
     }
