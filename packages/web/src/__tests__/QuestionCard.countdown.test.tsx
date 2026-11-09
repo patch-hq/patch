@@ -169,3 +169,17 @@ describe('the question card counts down to the host deadline', () => {
     expect(document.activeElement).toBe(screen.getAllByTestId('question-option')[0]);
   });
 });
+
+describe('a paused countdown (the user is in the chat)', () => {
+  it('stays a full ring however long it sits there, and says it is paused', () => {
+    renderCard({ permissionExpiry: { at: NOW + WINDOW_MS, windowMs: WINDOW_MS, paused: true } });
+    expect(remainingFraction()).toBeCloseTo(1, 5);
+    act(() => {
+      vi.advanceTimersByTime(WINDOW_MS * 3);
+    });
+    expect(remainingFraction()).toBeCloseTo(1, 5);
+    const timer = screen.getByTestId('question-countdown');
+    expect(timer.getAttribute('data-paused')).toBe('true');
+    expect(timer.getAttribute('aria-label')).toContain('paused');
+  });
+});

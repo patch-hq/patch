@@ -8703,7 +8703,11 @@ button.view-file-download {
 .jobs-search {
   margin-left: auto;
   margin-right: 8px;
-  width: 240px;
+  /* Small basis, grows to 240px: wrapping is decided on the basis, so a wide
+     one pushes New job onto a second line once the four selects are in. */
+  flex: 1 1 100px;
+  max-width: 240px;
+  min-width: 100px;
   padding: 7px 10px;
   font: inherit;
   font-size: 15px;
@@ -8733,6 +8737,7 @@ button.view-file-download {
   background: var(--bg-elevated);
   color: var(--ink);
   cursor: pointer;
+  max-width: 170px;
 }
 .jobs-control:focus {
   outline: none;
@@ -17342,12 +17347,18 @@ select.permission-mode.is-pending {
     margin: 0;
     width: auto;
     min-width: 0;
+    max-width: none;
   }
   .jobs-control {
-    grid-row: 3;
+    grid-row: auto;
+    max-width: none;
     margin: 0;
     min-width: 0;
     width: 100%;
+  }
+  /* Four selects don't split into thirds: the model one takes its own row. */
+  .jobs-control[data-testid='jobs-filter-model'] {
+    grid-column: 1 / -1;
   }
   .job-row .job-action {
     display: none;

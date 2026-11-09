@@ -39,7 +39,12 @@ describe('live notes', () => {
     expect(note).toContain('the agent wrote in the chat');
     expect(note).toMatch(/not for you to answer/);
     expect(note.length).toBeLessThan(520);
-    expect(liveNote('user', 'try  again')).toContain('the user typed in the chat: "try again"');
+    const typed = liveNote('user', 'try  again');
+    expect(typed).toContain('"try again"');
+    expect(typed).toMatch(/typed this to the agent, which is handling it/);
+    expect(typed).toMatch(/Do not reply/);
+    expect(typed).not.toMatch(/already running/);
+    expect(liveNote('user', 'x', { handoffRunning: true })).toMatch(/hand-off is already running/);
   });
 });
 

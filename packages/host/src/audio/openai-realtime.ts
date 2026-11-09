@@ -631,7 +631,12 @@ export class OpenAIRealtimeSession implements VoiceSessionLike {
       item: {
         type: 'message',
         role: 'user',
-        content: [{ type: 'input_text', text: liveNote(role, text) }],
+        content: [
+          {
+            type: 'input_text',
+            text: liveNote(role, text, { handoffRunning: this.isAwaitingHandoff() }),
+          },
+        ],
       },
     });
   }

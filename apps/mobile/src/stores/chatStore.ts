@@ -206,7 +206,7 @@ export interface ChatEventEntry {
    * time actually left and a ring already partly gone. Absent means the
    * request does not expire and no countdown is drawn.
    */
-  permissionExpiry?: { at: number; windowMs: number };
+  permissionExpiry?: { at: number; windowMs: number; paused?: boolean };
   at: number;
   /**
    * ms epoch this turn was actually written (`ChatMessageEvent.createdAt`) —

@@ -50,13 +50,18 @@ function QuestionCountdown({
   expiry,
   now,
 }: {
-  expiry: { at: number; windowMs: number };
+  expiry: { at: number; windowMs: number; paused?: boolean };
   now(): number;
 }): React.JSX.Element {
   const colors = useTheme();
   const [remainingMs, setRemainingMs] = useState(() => Math.max(0, expiry.at - now()));
 
   useEffect(() => {
+    // Paused: the user is in the chat, so the clock is held at a full window.
+    if (expiry.paused) {
+      setRemainingMs(expiry.windowMs);
+      return;
+    }
     setRemainingMs(Math.max(0, expiry.at - now()));
     if (expiry.at - now() <= 0) return;
     const id = setInterval(() => {
@@ -65,7 +70,7 @@ function QuestionCountdown({
       if (left === 0) clearInterval(id);
     }, COUNTDOWN_TICK_MS);
     return () => clearInterval(id);
-  }, [expiry.at, expiry.windowMs, now]);
+  }, [expiry.at, expiry.windowMs, expiry.paused, now]);
 
   // A window of zero (a malformed deadline) would be 0/0 — NaN in the dash offset.
   const fraction =
@@ -79,9 +84,11 @@ function QuestionCountdown({
     <View
       testID="question-countdown"
       accessibilityLabel={
-        expired
-          ? 'question expired'
-          : `${secondsLeft} ${secondsLeft === 1 ? 'second' : 'seconds'} left to answer`
+        expiry.paused
+          ? `timer paused while you are in this chat, ${Math.round(expiry.windowMs / 1000)} seconds to answer once you leave`
+          : expired
+            ? 'question expired'
+            : `${secondsLeft} ${secondsLeft === 1 ? 'second' : 'seconds'} left to answer`
       }
       style={{
         position: 'absolute',

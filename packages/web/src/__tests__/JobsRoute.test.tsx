@@ -868,12 +868,12 @@ describe('JobsRoute sort and filter', () => {
     // Session state on the store, so it must start from the default in every
     // test rather than inheriting the previous one's choice.
     useUiStore.getState().setJobsSort('last-fired');
-    useUiStore.getState().setJobsFilter({ status: 'all', trigger: 'all' });
+    useUiStore.getState().setJobsFilter({ status: 'all', trigger: 'all', model: 'all' });
     stubJobs(SORTABLE);
   });
   afterEach(() => {
     useUiStore.getState().setJobsSort('last-fired');
-    useUiStore.getState().setJobsFilter({ status: 'all', trigger: 'all' });
+    useUiStore.getState().setJobsFilter({ status: 'all', trigger: 'all', model: 'all' });
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -889,7 +889,13 @@ describe('JobsRoute sort and filter', () => {
     expect(screen.getByTestId('jobs-filter-trigger')).toBeInTheDocument();
     // All three sit in the page head, alongside the search field.
     const head = screen.getByTestId('jobs-route').querySelector('.route-head')!;
-    for (const id of ['jobs-search', 'jobs-sort', 'jobs-filter-status', 'jobs-filter-trigger']) {
+    for (const id of [
+      'jobs-search',
+      'jobs-sort',
+      'jobs-filter-status',
+      'jobs-filter-trigger',
+      'jobs-filter-model',
+    ]) {
       expect(head.contains(screen.getByTestId(id))).toBe(true);
     }
     // Each names itself through its options; nothing else is written beside it.

@@ -662,7 +662,7 @@ export interface ChatEventEntry {
    * time actually left and a ring already partly gone. Absent means the
    * request does not expire and no countdown is drawn.
    */
-  permissionExpiry?: { at: number; windowMs: number };
+  permissionExpiry?: { at: number; windowMs: number; paused?: boolean };
   /**
    * spec/14 § Artifacts — a page the agent published with `patch_artifact`.
    * `artifactId` is stable per source file, so a republish updates THIS entry
