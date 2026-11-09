@@ -9,7 +9,7 @@ import { useBatchStore, type BatchSchedule } from '../stores/batchStore.js';
 
 const SCHEDULES: { value: BatchSchedule; label: string }[] = [
   { value: 'every-30', label: 'Every 30 min' },
-  { value: 'half-hour', label: 'On the hour and half hour' },
+  { value: 'half-hour', label: 'On the :00 / :30' },
 ];
 
 function formatTime(ms: number): string {
@@ -34,19 +34,26 @@ export function BatchBar(): JSX.Element {
         ) : null}
       </div>
       {enabled ? (
-        <select
-          className="batch-bar-schedule"
-          data-testid="batch-schedule"
+        <div
+          className="batch-seg"
+          role="radiogroup"
           aria-label="Batch timer"
-          value={schedule}
-          onChange={(e) => setSchedule(e.target.value as BatchSchedule)}
+          data-testid="batch-schedule"
         >
-          {SCHEDULES.map((s) => (
-            <option key={s.value} value={s.value}>
-              {s.label}
-            </option>
+          {SCHEDULES.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              role="radio"
+              aria-checked={schedule === o.value}
+              className="batch-seg-opt"
+              data-testid={`batch-schedule-${o.value}`}
+              onClick={() => setSchedule(o.value)}
+            >
+              {o.label}
+            </button>
           ))}
-        </select>
+        </div>
       ) : null}
     </div>
   );

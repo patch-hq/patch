@@ -2352,7 +2352,7 @@ a.ch-row:hover {
   font: inherit;
   text-transform: none;
   letter-spacing: normal;
-  color: var(--ink-1, inherit);
+  color: var(--ink);
   background: transparent;
   border: 1px solid var(--line, rgba(128, 128, 128, 0.3));
   border-radius: 6px;
@@ -18085,8 +18085,8 @@ a.drop-target {
 .batch-bar {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin: 6px var(--sb-inset-right) 2px var(--sb-inset);
+  gap: 8px;
+  margin: 8px var(--sb-inset-right) 4px var(--sb-inset);
   padding: 0 8px;
 }
 .batch-bar-row {
@@ -18095,14 +18095,29 @@ a.drop-target {
   justify-content: space-between;
   gap: 8px;
 }
-.batch-bar-schedule {
-  width: 100%;
-  padding: 3px 6px;
+.batch-seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-soft);
+  border-radius: var(--radius-pill);
+}
+.batch-seg-opt {
+  padding: 5px 8px;
   font-size: var(--text-min);
   color: var(--ink-2);
   background: transparent;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--radius-pill);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.batch-seg-opt[aria-checked='true'] {
+  color: var(--ink);
+  font-weight: 600;
+  background: var(--bg-elevated);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
 }
 .batch-bar-next {
   flex: 0 0 auto;
@@ -18122,6 +18137,9 @@ a.drop-target {
   font-size: var(--text-min);
   font-weight: 600;
   color: var(--ink-2);
+}
+.batch-held .batch-checkin-now-btn {
+  margin: 6px 0 0;
 }
 .batch-held-sub {
   font-size: var(--text-min);
