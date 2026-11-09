@@ -4,7 +4,8 @@
 // reads the visible transcript so far against the goal's condition and
 // returns a verdict: `not_met` (another turn follows, guided by the reason),
 // `refused` (the agent declined; another turn follows, until it has declined
-// too often), `met` (the goal clears, the normal done notification rings), or
+// too often), `blocked` (the agent says it cannot go on without the user; it
+// shares the refused streak, so the goal stops pushing after the same limit), `met` (the goal clears, the normal done notification rings), or
 // `impossible` (the goal clears, the chat needs the user). Modelled on
 // `statusGen.ts`/`titleGen.ts`'s one-shot shape. One model judges every chat,
 // whichever provider the chat itself runs on: the judge reads a transcript, so
@@ -30,7 +31,7 @@ const GOAL_EVAL_TIMEOUT_MS = 20_000;
 /** Hard cap on the returned reason — a safety bound only; the chat shows the whole reason. */
 const MAX_REASON_LEN = 2000;
 
-export type GoalVerdict = 'met' | 'not_met' | 'refused' | 'impossible';
+export type GoalVerdict = 'met' | 'not_met' | 'refused' | 'blocked' | 'impossible';
 
 export interface GoalEvalResult {
   verdict: GoalVerdict;
@@ -46,6 +47,10 @@ export interface GoalEvalInput {
   folder: string;
   /** Host-verified state of this chat's background tasks/monitors (never the agent's own claim). */
   background: string;
+  /** Everything the user has asked for in this chat, so the scope survives the transcript being cut. */
+  userScope: string;
+  /** The agent's latest message, verbatim: where it states what is done and what blocks it. */
+  agentStatement: string;
 }
 
 export interface GoalJudgeSettings {
@@ -86,6 +91,7 @@ export function parseGoalVerdict(raw: string): GoalEvalResult | null {
     verdict !== 'met' &&
     verdict !== 'not_met' &&
     verdict !== 'refused' &&
+    verdict !== 'blocked' &&
     verdict !== 'impossible'
   )
     return null;
@@ -110,11 +116,23 @@ function buildPrompt(input: GoalEvalInput, instructions: string): string {
       'when a task above is running. If none is, the wait is invalid: judge not_met and tell ' +
       "the agent to check the finished task's output and carry on.",
     '',
+    'WHAT THE USER ASKED FOR (this, and only this, is the scope of the work; it is complete even if the conversation below is cut short):',
+    input.userScope,
+    '',
+    "THE AGENT'S LATEST MESSAGE (any blockers it states are given here):",
+    input.agentStatement,
+    '',
+    'Judge the goal against the scope above. Work the user did not ask for is not unmet: ' +
+      'if the agent reports a problem that lies outside that scope (for example a design bug a ' +
+      'test turned up) and says it is leaving it, that does not make the goal not_met. ' +
+      'If it names a blocker that stops the in-scope work and only the user can clear it, ' +
+      'judge impossible with that blocker as the reason, rather than not_met.',
+    '',
     'CONVERSATION SO FAR (oldest first):',
     input.transcript,
     '',
     'Reply with ONLY a JSON object of the shape ' +
-      '{"verdict":"met"|"not_met"|"refused"|"impossible","reason":"..."}. No prose outside the JSON.',
+      '{"verdict":"met"|"not_met"|"refused"|"blocked"|"impossible","reason":"..."}. No prose outside the JSON.',
   ].join('\n');
 }
 
@@ -180,6 +198,29 @@ export function makeGoalEvaluator(
       clearTimeout(timer);
     }
   };
+}
+
+/** The user's own messages, oldest first, bounded from the front so the latest always survive. */
+export function renderUserScope(
+  messages: ReadonlyArray<{ role: 'user' | 'assistant' | 'system'; content: string }>,
+  maxChars = 3000,
+): string {
+  const text = messages
+    .filter((m) => m.role === 'user')
+    .map((m) => m.content)
+    .join('\n\n');
+  if (text === '') return '(no user messages)';
+  return text.length > maxChars ? `…\n${tailCodePoints(text, maxChars)}` : text;
+}
+
+/** The agent's most recent message, bounded. */
+export function renderAgentStatement(
+  messages: ReadonlyArray<{ role: 'user' | 'assistant' | 'system'; content: string }>,
+  maxChars = 2000,
+): string {
+  const last = [...messages].reverse().find((m) => m.role === 'assistant')?.content;
+  if (last === undefined || last === '') return '(the agent has not replied yet)';
+  return last.length > maxChars ? `…\n${tailCodePoints(last, maxChars)}` : last;
 }
 
 /** Render a bounded `role: content` transcript for the evaluator prompt. */

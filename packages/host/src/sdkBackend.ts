@@ -1198,6 +1198,30 @@ export const DISALLOWED_NATIVE_TOOLS = [
 const RUN_IN_BACKGROUND_TOOLS = new Set(['Bash']);
 
 /**
+ * A Bash command that signals intent to outlive the agent turn: `nohup`,
+ * `setsid` or `disown`. The per-turn claude process runs under
+ * `systemd-run --scope` in the work slice (workSlice.ts), and that scope is torn
+ * down when the TURN ends — a cgroup kill, so detaching from the process group
+ * does not help. Background processes survive across tool calls inside one turn
+ * (so a plain `&` is left alone) but die at turn end, and `pgrep -f` can match
+ * the agent's own command line, making a dead process look alive.
+ */
+export function detachesFromBashCall(command: unknown): boolean {
+  if (typeof command !== 'string') return false;
+  return /(^|[\s;&|(])(nohup|setsid|disown)(\s|$)/.test(command);
+}
+
+function detachDenyMessage(): string {
+  return (
+    'nohup/setsid/disown will not make this outlive the turn: the turn runs in a systemd scope that ' +
+    'is torn down when the turn ends (a cgroup kill), taking every process in it. Use ' +
+    'patch_watch(command, description, timeoutSec) instead — the host owns the process, it survives ' +
+    'the turn, and patch_watch_output shows what it has printed so far (e.g. an `aws sso login ' +
+    '--use-device-code` URL and code). A plain `&` that only needs to live within this turn is fine.'
+  );
+}
+
+/**
  * The message shown to the AGENT (not the user) when it reaches for native
  * backgrounding. Doubles as the "point the agent at patch_watch" guidance this
  * codebase would otherwise need a system prompt for (principles.md § No
@@ -1397,6 +1421,9 @@ function buildCanUseTool(
   return async (toolName, input, sdkCtx) => {
     if (RUN_IN_BACKGROUND_TOOLS.has(toolName) && input['run_in_background'] === true) {
       return { behavior: 'deny', message: backgroundToolDenyMessage(toolName) };
+    }
+    if (toolName === 'Bash' && detachesFromBashCall(input['command'])) {
+      return { behavior: 'deny', message: detachDenyMessage() };
     }
     const docDenial = denyForDocMode(toolName, input, cwd);
     if (docDenial !== null) return docDenial;

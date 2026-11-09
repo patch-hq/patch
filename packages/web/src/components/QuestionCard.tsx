@@ -80,12 +80,17 @@ function QuestionCountdown({
   expiry,
   now,
 }: {
-  expiry: { at: number; windowMs: number };
+  expiry: { at: number; windowMs: number; paused?: boolean };
   now(): number;
 }): JSX.Element {
   const [remainingMs, setRemainingMs] = useState(() => Math.max(0, expiry.at - now()));
 
   useEffect(() => {
+    // Paused: the user is in the chat, so the clock is held at a full window.
+    if (expiry.paused) {
+      setRemainingMs(expiry.windowMs);
+      return;
+    }
     setRemainingMs(Math.max(0, expiry.at - now()));
     // An elapsed countdown has nothing left to animate; leaving an interval
     // running on it would redraw the same empty ring forever.
@@ -96,7 +101,7 @@ function QuestionCountdown({
       if (left === 0) clearInterval(id);
     }, COUNTDOWN_TICK_MS);
     return () => clearInterval(id);
-  }, [expiry.at, expiry.windowMs, now]);
+  }, [expiry.at, expiry.windowMs, expiry.paused, now]);
 
   const fraction = Math.min(1, Math.max(0, remainingMs / expiry.windowMs));
   // Rounded UP, so the last whole second on screen is a second the user still
@@ -110,11 +115,14 @@ function QuestionCountdown({
       data-testid="question-countdown"
       data-seconds-left={secondsLeft}
       data-expired={remainingMs === 0 ? 'true' : 'false'}
+      data-paused={expiry.paused ? 'true' : 'false'}
       role="timer"
       aria-label={
-        remainingMs === 0
-          ? 'question expired'
-          : `${secondsLeft} ${secondsLeft === 1 ? 'second' : 'seconds'} left to answer`
+        expiry.paused
+          ? `timer paused while you are in this chat, ${Math.round(expiry.windowMs / 1000)} seconds to answer once you leave`
+          : remainingMs === 0
+            ? 'question expired'
+            : `${secondsLeft} ${secondsLeft === 1 ? 'second' : 'seconds'} left to answer`
       }
     >
       <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">

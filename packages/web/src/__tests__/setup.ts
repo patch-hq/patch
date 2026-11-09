@@ -1,4 +1,5 @@
 // Vitest setup — jsdom + jest-dom matchers.
+import { useJobDraftStore } from '../stores/jobDraftStore.js';
 import '@testing-library/jest-dom/vitest';
 import { afterEach } from 'vitest';
 import { cleanup, configure } from '@testing-library/react';
@@ -48,4 +49,6 @@ afterEach(() => {
   // that wants it asserts it by setting it.
   useUiStore.setState({ browseByChat: {} });
   localStorage.removeItem('patch.browse.byChat.v1');
+  // Unsaved job-form drafts persist per job; none may carry into the next test.
+  useJobDraftStore.getState()._reset();
 });

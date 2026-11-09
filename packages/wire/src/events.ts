@@ -1207,6 +1207,8 @@ export const ChatPermissionRequestEvent = z
       .object({
         at: z.number().int().positive(),
         windowMs: z.number().int().positive(),
+        /** The user is in the chat: the clock is held at a full window, `at` is not a deadline. */
+        paused: z.boolean().optional(),
       })
       .strict()
       .optional(),
@@ -1240,6 +1242,8 @@ export const ChatPermissionExpiryUpdateEvent = z
       .object({
         at: z.number().int().positive(),
         windowMs: z.number().int().positive(),
+        /** The user is in the chat: the clock is held at a full window, `at` is not a deadline. */
+        paused: z.boolean().optional(),
       })
       .strict(),
     seq: z.number().int().nonnegative(),

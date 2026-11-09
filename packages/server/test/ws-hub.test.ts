@@ -646,6 +646,50 @@ describe('WS hub relay', () => {
     }
   });
 
+  it('logs an addressed event for a gone surface at warn, but a dropped chat.input_ack at error (#386)', async () => {
+    const user = generateUserKeypair(() => new Uint8Array(32).fill(78));
+    const registry = Registry.load(dir);
+    registry.bootstrapAccount({ keypair: user });
+    const lines: Array<{ level: number; obj: Record<string, unknown> }> = [];
+    const h = await startServer({
+      registry,
+      logger: {
+        level: 'warn',
+        hooks: {
+          logMethod(args: unknown[], method: (...a: unknown[]) => void, level: number) {
+            if (typeof args[0] === 'object' && args[0] !== null) {
+              lines.push({ level, obj: args[0] as Record<string, unknown> });
+            }
+            method.apply(this, args as never);
+          },
+        },
+      },
+    });
+    try {
+      h.hostLink.emit({
+        type: 'chat.message',
+        chatId: 'chat-1',
+        role: 'assistant',
+        content: 'x',
+        seq: 1,
+        forSurfaceId: 'srf-gone',
+      } as never);
+      h.hostLink.emit({
+        type: 'chat.input_ack',
+        chatId: 'chat-1',
+        forSurfaceId: 'srf-gone',
+      } as never);
+      await new Promise((r) => setTimeout(r, 30));
+      const dropped = lines.filter((l) => l.obj['targetId'] === 'srf-gone');
+      expect(dropped.map((l) => [l.obj['type'], l.level])).toEqual([
+        ['chat.message', 40],
+        ['chat.input_ack', 50],
+      ]);
+    } finally {
+      await h.close();
+    }
+  });
+
   it('relays chat.spawned enriched with jobId for a job-spawned chat (spec/14 § Sidebar — Automations)', async () => {
     // The Automations sidebar group must go `working` the instant a job's
     // spawn round-trips — that means the LIVE `chat.spawned` frame, not just
