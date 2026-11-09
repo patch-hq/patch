@@ -28,6 +28,8 @@ type EvaluateGoal = (input: {
   condition: string;
   transcript: string;
   background: string;
+  userScope: string;
+  agentStatement: string;
   turnsEvaluated: number;
   folder: string;
 }) => Promise<GoalVerdict | null>;
