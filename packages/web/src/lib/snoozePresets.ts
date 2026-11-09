@@ -110,7 +110,7 @@ export const UNTIL_COMPLETE_PRESET: SnoozePreset = {
 
 /** Why "Until complete" is greyed out: shown as the tooltip / accessibility hint. */
 export const UNTIL_COMPLETE_DISABLED_TIP =
-  'Needs running work to wait for: this chat has no running turn or open goal.';
+  'Needs running work to wait for: this chat has no running turn, open goal or pending wake.';
 
 /**
  * A wake time wherever a surface names one outside the sheet — the sidebar's

@@ -21,8 +21,8 @@
 // Same bar, same controls, one mode switch between them.
 
 import type { JSX } from 'react';
-import { useEffect, useState } from 'react';
-import { Ear, Mic, MicOff, MessageSquare, Phone, PhoneOff } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Ear, MicOff, MessageSquare, Phone, PhoneOff } from 'lucide-react';
 import type { AudioSessionMode } from '@patch/wire/audio';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { useChatStore } from '../stores/chatStore.js';
@@ -33,8 +33,8 @@ import { toggleCallMute, endVoiceCall, setCallMode } from '../lib/voiceControlle
 export const HEARD_LINGER_MS = 8_000;
 
 const MODE_HEAD: Record<AudioSessionMode, string> = {
-  call: 'ON CALL',
-  'hands-free': 'HANDS-FREE',
+  call: 'On call',
+  'hands-free': 'Hands-free',
 };
 const NEXT_MODE: Record<AudioSessionMode, AudioSessionMode> = {
   call: 'hands-free',
@@ -96,15 +96,21 @@ export function VoiceBar(): JSX.Element | null {
         )}
         {MODE_HEAD[call.mode]}
       </span>
+      <span className="vb-timer" data-testid="voice-bar-timer">
+        {formatElapsed(Math.max(0, now - call.startedAt))}
+      </span>
       <span className="vb-chat" data-testid="voice-bar-chat">
         {name}
       </span>
       <span className="vb-line" data-testid="voice-bar-line">
-        {tag === null ? null : <span className="vb-tag">{tag}</span>}
-        <span className="vb-text">{text}</span>
-      </span>
-      <span className="vb-timer" data-testid="voice-bar-timer">
-        {formatElapsed(Math.max(0, now - call.startedAt))}
+        {state === 'listening' ? (
+          <Waveform level={call.muted ? 0 : call.level} />
+        ) : (
+          <>
+            {tag === null ? null : <span className="vb-tag">{tag}</span>}
+            <span className="vb-text">{text}</span>
+          </>
+        )}
       </span>
       <button
         type="button"
@@ -113,7 +119,7 @@ export function VoiceBar(): JSX.Element | null {
         aria-label={call.muted ? 'unmute' : 'mute'}
         onClick={toggleCallMute}
       >
-        {call.muted ? <MicOff size={16} aria-hidden /> : <Mic size={16} aria-hidden />}
+        <MicOff size={16} aria-hidden />
       </button>
       {/* One control switches the two modes without tearing the session down. */}
       <button
@@ -147,12 +153,40 @@ export function VoiceBar(): JSX.Element | null {
   );
 }
 
+/** Bars across the strip; the newest level enters on the right and scrolls left. */
+const WAVE_BARS = 64;
+const WAVE_TICK_MS = 80;
+
+/**
+ * Live input waveform: thin vertical bars filling the width. Heights are a
+ * rolling window of the smoothed mic level, sampled on a timer (the level
+ * itself updates per audio frame, far too often to render each one).
+ */
+function Waveform({ level }: { level: number }): JSX.Element {
+  const [bars, setBars] = useState<number[]>(() => new Array<number>(WAVE_BARS).fill(0));
+  const levelRef = useRef(level);
+  levelRef.current = level;
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setBars((prev) => [...prev.slice(1), levelRef.current]);
+    }, WAVE_TICK_MS);
+    return () => window.clearInterval(id);
+  }, []);
+  return (
+    <span className="vb-wave" data-testid="voice-bar-wave" aria-label="Listening" role="img">
+      {bars.map((v, i) => (
+        <i key={i} style={{ height: `${Math.round(8 + Math.min(1, Math.max(0, v)) * 92)}%` }} />
+      ))}
+    </span>
+  );
+}
+
 interface Line {
   /** Short left-hand label, or null when the text speaks for itself. */
   tag: string | null;
   text: string;
   /** Drives the bar's styling, and what a test asserts on. */
-  state: 'connecting' | 'waiting' | 'hearing' | 'heard' | 'thinking' | 'speaking';
+  state: 'connecting' | 'listening' | 'waiting' | 'hearing' | 'heard' | 'thinking' | 'speaking';
 }
 
 interface LineInput {
@@ -189,7 +223,7 @@ export function describeLine(call: LineInput, _chatName: string, addressWord: st
   if (call.mode === 'hands-free') {
     return { tag: null, text: `Waiting for you to say “${addressWord}”`, state: 'waiting' };
   }
-  return { tag: null, text: 'Listening', state: 'waiting' };
+  return { tag: null, text: 'Listening', state: 'listening' };
 }
 
 function formatElapsed(ms: number): string {

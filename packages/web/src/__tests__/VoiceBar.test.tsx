@@ -68,11 +68,11 @@ describe('voice bar', () => {
   it('names the mode and the chat, in both modes', () => {
     open('call');
     const { rerender } = render(<VoiceBar />);
-    expect(screen.getByTestId('voice-bar-head').textContent).toContain('ON CALL');
+    expect(screen.getByTestId('voice-bar-head').textContent).toContain('On call');
     expect(screen.getByTestId('voice-bar-chat').textContent).toBe('Manager');
     open('hands-free');
     rerender(<VoiceBar />);
-    expect(screen.getByTestId('voice-bar-head').textContent).toContain('HANDS-FREE');
+    expect(screen.getByTestId('voice-bar-head').textContent).toContain('Hands-free');
   });
 
   it('hands-free says what it is waiting for, naming the account address word', () => {
@@ -86,10 +86,46 @@ describe('voice bar', () => {
     expect(state()).toBe('waiting');
   });
 
-  it('a call at rest says the line is open — it never asks for an address word', () => {
+  it('a call at rest shows a live waveform, not the word Listening, and never asks for an address word', () => {
     open('call');
     render(<VoiceBar />);
-    expect(line()).toBe('Listening');
+    expect(state()).toBe('listening');
+    expect(screen.getByTestId('voice-bar-wave')).toBeTruthy();
+    expect(line()).not.toContain('Listening');
+    expect(line()).not.toContain('say');
+  });
+
+  it('the waveform follows the input level and flattens when muted', () => {
+    vi.useFakeTimers();
+    open('call', { level: 1 });
+    render(<VoiceBar />);
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    const bars = screen.getByTestId('voice-bar-wave').querySelectorAll('i');
+    expect(bars.length).toBeGreaterThan(30);
+    expect((bars[bars.length - 1] as HTMLElement).style.height).toBe('100%');
+    act(() => {
+      useVoiceStore.setState({ call: { ...base('call'), level: 1, muted: true } });
+    });
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    const after = screen.getByTestId('voice-bar-wave').querySelectorAll('i');
+    expect((after[after.length - 1] as HTMLElement).style.height).toBe('8%');
+  });
+
+  it('the call length sits right after the mode head', () => {
+    open('call');
+    render(<VoiceBar />);
+    const head = screen.getByTestId('voice-bar-head');
+    expect(head.nextElementSibling).toBe(screen.getByTestId('voice-bar-timer'));
+  });
+
+  it('mute is always a struck-through mic', () => {
+    open('call');
+    render(<VoiceBar />);
+    expect(screen.getByTestId('voice-bar-mute').querySelector('svg.lucide-mic-off')).not.toBeNull();
   });
 
   it('says it is hearing the user, leaving the words themselves to the chat', () => {

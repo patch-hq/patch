@@ -46,13 +46,23 @@ export async function startServer(
   const relay = config.relayUrl
     ? new RelayService({ dataDir: config.dataDir, url: config.relayUrl })
     : undefined;
-  const { app } = await buildAll({
+  const { app, issueFiler } = await buildAll({
     logger,
     dataDir: config.dataDir,
     internalToken: config.internalToken,
     restartTarget: () =>
       readRestartTarget(process.env.PATCH_SERVER_HOME, process.env.PATCH_VERSION),
     ...(relay ? { relay } : {}),
+  });
+  // The process is about to die, so the report is queued synchronously and files
+  // on the next start. This only observes: Node still exits as it would have.
+  process.on('uncaughtExceptionMonitor', (err) => {
+    issueFiler.reportAuto({
+      kind: 'uncaught',
+      message: err.message,
+      stack: err.stack,
+      surface: 'server',
+    });
   });
   // Registered before listening: Fastify refuses hooks on a running instance.
   if (relay) app.addHook('onClose', async () => relay.stop());

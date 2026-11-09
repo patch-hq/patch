@@ -49,6 +49,7 @@ import { DevicesPage } from './settings/DevicesPage.js';
 import { NotificationsPage } from './settings/NotificationsPage.js';
 import { UpdatesPage } from './settings/UpdatesPage.js';
 import { AccountPage } from './settings/AccountPage.js';
+import { BugReportsPage } from './settings/BugReportsPage.js';
 
 const PAGE_COMPONENTS: Record<SettingsPageId, () => JSX.Element> = {
   usage: UsagePage,
@@ -70,6 +71,7 @@ const PAGE_COMPONENTS: Record<SettingsPageId, () => JSX.Element> = {
   notifications: NotificationsPage,
   devices: DevicesPage,
   updates: UpdatesPage,
+  bugs: BugReportsPage,
   account: AccountPage,
 };
 

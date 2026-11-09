@@ -1132,3 +1132,35 @@ export type JobsChangeEvent =
   | { type: 'created'; job: Job }
   | { type: 'updated'; job: Job }
   | { type: 'deleted'; id: string };
+
+/**
+ * One scheduled job that re-prompts a chat (`GET /api/chats/:chatId/jobs`), as
+ * the chat's job bar shows it. A chat a recurring job keeps re-prompting is
+ * effectively a loop, so the bar is persistent: `nextFireAt` drives a live
+ * countdown and `periodMs` (the gap to the fire after that) the progress line.
+ * Either is null when the schedule has no further occurrence to report.
+ */
+export interface ChatJobTick {
+  jobId: string;
+  name: string;
+  trigger: 'cron' | 'recurrence';
+  /** The cron expression or RRULE, as authored. */
+  schedule: string;
+  nextFireAt: number | null;
+  periodMs: number | null;
+}
+
+/**
+ * Whether `job`'s action delivers into `chatId`: a `message` to that chat, or a
+ * `continue` into a chat it owns (unkeyed, keyed, or a later append generation —
+ * all share the `jobchat-<jobId>` prefix; job ids carry no `-`).
+ */
+export function jobTargetsChat(job: Pick<Job, 'id' | 'action'>, chatId: string): boolean {
+  const a = job.action;
+  if (a.type === 'message') return a.chatId === chatId;
+  if (a.type === 'continue') {
+    const own = ensureChatId(job.id);
+    return chatId === own || chatId.startsWith(`${own}-`);
+  }
+  return false;
+}

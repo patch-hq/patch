@@ -246,6 +246,33 @@ describe('items memo — folder grouping', () => {
   });
 });
 
+describe('items memo — group by status (desktop parity)', () => {
+  it('replaces project headers with status headers in desktop order, pinned kept apart', async () => {
+    const { useUiStore } = await import('../src/stores/uiStore');
+    useUiStore.setState({ grouping: 'status' });
+    useChatStore
+      .getState()
+      .hydrate([
+        row({ chatId: 'w', name: 'Busy one', folder: 'alpha', activity: 'running' }),
+        row({ chatId: 'f', name: 'Broke one', folder: 'beta', status: 'errored' }),
+        row({ chatId: 'p', name: 'Pinned one', folder: 'alpha', pinned: true, pinnedAt: 1 }),
+      ]);
+    const r = renderRN(<ChatsScreen />);
+    const texts = findAllHost(r.root, byType('Text')).map((t) =>
+      typeof t.children[0] === 'string' ? t.children[0] : '',
+    );
+    expect(texts).not.toContain('alpha');
+    expect(texts).not.toContain('beta');
+    const at = (l: string): number => texts.indexOf(l);
+    expect(at('Pinned')).toBeGreaterThanOrEqual(0);
+    expect(at('Failed')).toBeGreaterThan(at('Pinned'));
+    expect(at('Working')).toBeGreaterThan(at('Failed'));
+    expect(at('Broke one')).toBeGreaterThan(at('Failed'));
+    expect(at('Busy one')).toBeGreaterThan(at('Working'));
+    useUiStore.setState({ grouping: 'project' });
+  });
+});
+
 describe('items memo — Archived: chronological order', () => {
   it('shows archived rows sorted by lastUpdated descending once Archived is open', () => {
     useChatStore

@@ -202,6 +202,16 @@ describe('audioSession', () => {
     });
   });
 
+  it('takeOver goes on the session_start frame when asked for', async () => {
+    const { ws } = await open(noopCallbacks(), { takeOver: true });
+    expect(JSON.parse(ws.sent[0] as string).takeOver).toBe(true);
+  });
+
+  it('a session_start frame carries no takeOver unless asked for', async () => {
+    const { ws } = await open(noopCallbacks());
+    expect('takeOver' in JSON.parse(ws.sent[0] as string)).toBe(false);
+  });
+
   it('a normal session opens the default output, for the speech it plays', async () => {
     await open(noopCallbacks());
     const ctx = FakeAudioContext.instances[FakeAudioContext.instances.length - 1]!;

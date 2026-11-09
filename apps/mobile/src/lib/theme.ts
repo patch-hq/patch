@@ -117,6 +117,13 @@ export const fixed = {
   control: '#222222',
   controlPressed: '#444444',
   controlOn: '#888888',
+  // The call strip is a dark band in both schemes.
+  stripGround: '#1f1c17',
+  stripButton: '#2c2820',
+  stripButtonMuted: '#555049',
+  stripText: '#cfc8b8',
+  stripAccent: '#a9d391',
+  stripOn: '#f4f0e4',
 } as const;
 
 // Pure scheme → palette resolver (unit-testable without a renderer). A null /

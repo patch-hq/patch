@@ -1,7 +1,5 @@
-// app/chats/[chatId].tsx — the call lives INSIDE the chat (spec/15 § Voice
-// states — Voice call). With a call on this chat the screen docks the call
-// bar above its composer (the stream above is the transcript); with a call on
-// another chat it shows the on-call pill instead; with no call, neither.
+// app/chats/[chatId].tsx — the call strip is pinned at the app shell
+// (CallStrip), so the chat itself carries no call panel or pill.
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -72,24 +70,14 @@ function callOn(chatId: string): void {
   });
 }
 
-describe('chat detail — call dock', () => {
-  it('no call: no bar, no pill, the composer as usual', () => {
-    const r = open();
-    expect(queryHost(r.root, byTestId('call-bar'))).toBeNull();
-    expect(queryHost(r.root, byTestId('call-pill'))).toBeNull();
-  });
-
-  it('a call on this chat docks the call bar — and there is no full-screen overlay', () => {
-    callOn('c1');
-    const r = open();
-    expect(queryHost(r.root, byTestId('call-bar'))).not.toBeNull();
-    expect(queryHost(r.root, byTestId('call-pill'))).toBeNull();
-  });
-
-  it('a call on another chat shows the on-call pill instead', () => {
-    callOn('thread_manager');
-    const r = open();
-    expect(queryHost(r.root, byTestId('call-bar'))).toBeNull();
-    expect(queryHost(r.root, byTestId('call-pill'))).not.toBeNull();
-  });
+describe('chat detail — no docked call panel', () => {
+  it.each([['c1'], ['thread_manager']])(
+    'a call on %s leaves no bar or pill in the chat: the strip is the app shell’s',
+    (chatId) => {
+      callOn(chatId);
+      const r = open();
+      expect(queryHost(r.root, byTestId('call-bar'))).toBeNull();
+      expect(queryHost(r.root, byTestId('call-pill'))).toBeNull();
+    },
+  );
 });

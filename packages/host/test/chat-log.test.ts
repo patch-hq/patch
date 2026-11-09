@@ -73,6 +73,22 @@ function appendEvent(
 }
 
 describe('ChatLog', () => {
+  it('knows the latest user/assistant message, live and after a restart', () => {
+    const home = tmp('chatlog-last-');
+    const log = makeLog(home);
+    expect(log.lastMessage('c1')).toBeNull();
+    const s0 = log.allocate('c1', 0, 'c1-b0');
+    appendEvent(log, 'c1', msg('c1', s0, 'question', 'user'), { sync: true });
+    expect(log.lastMessage('c1')).toBe('question');
+    const s1 = log.allocate('c1', 0, 'c1-b0');
+    appendEvent(log, 'c1', msg('c1', s1, 'the answer', 'assistant'), { sync: true });
+    const s2 = log.allocate('c1', 0, 'c1-b0');
+    appendEvent(log, 'c1', msg('c1', s2, 'a note', 'system'), { sync: true });
+    expect(log.lastMessage('c1')).toBe('the answer');
+    log.append('c1', { k: 'turn.end', outcome: 'completed' }, { branchId: 'c1-b0', sync: true });
+    expect(makeLog(home).lastMessage('c1')).toBe('the answer');
+  });
+
   it('appends records and reads them back, starting with log.start', () => {
     const home = tmp('chatlog-rt-');
     const log = makeLog(home);

@@ -213,7 +213,7 @@ describe('Artifact bar', () => {
     useChatStore.getState().applyEvent(artifactEvent('a1', 'Meeting mode', 1));
     const r = renderRN(<ChatDetailScreen />);
     const bar = findHost(r.root, byTestId('artifact-bar'));
-    expect(bar.props.style).toMatchObject({ flexGrow: 0 });
+    expect(bar.props.style).toMatchObject({ flexGrow: 0, flexShrink: 0 });
     expect(bar.props.contentContainerStyle).toMatchObject({ alignItems: 'flex-start' });
   });
 
@@ -232,6 +232,7 @@ describe('Artifact bar', () => {
     const r = renderRN(<ChatDetailScreen />);
     const bar = findHost(r.root, byTestId('artifact-bar'));
     expect(bar.props.contentContainerStyle.paddingTop).toBeUndefined();
+    expect(bar.props.contentContainerStyle.paddingBottom).toBeGreaterThan(0);
     const chip = findHost(r.root, byTestId('artifact-bar-chip'));
     expect(chip.props.style.paddingVertical).toBeLessThanOrEqual(3);
   });

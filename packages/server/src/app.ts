@@ -83,6 +83,9 @@ import { registerLinkSummaryRoutes } from './link-summary-routes.js';
 import { RELEASE_REPO } from './release-channel.js';
 import { MobileUpdateNotifier, registerMobileUpdateRoutes } from './mobile-updates.js';
 import { registerClientCrashRoutes } from './client-crash-routes.js';
+import { IssueFiler } from './issue-filer.js';
+import { registerIssueFilerRoutes } from './issue-filer-routes.js';
+import { RELEASE_REPO as ISSUE_REPO_DEFAULT } from './release-channel.js';
 import { SecretsRegistry } from './secrets-registry.js';
 import { registerSecretsRoutes } from './secrets-routes.js';
 import { registerWebBotAuthRoutes } from './web-bot-auth-routes.js';
@@ -96,7 +99,8 @@ import { JobLogs } from './jobs/logs.js';
 import { JobAlerts, describeFailure } from './jobs/alerts.js';
 import { CronScheduler } from './jobs/cron.js';
 import { HostWaker } from './jobs/host-wake.js';
-import { RecurrenceScheduler } from './jobs/recurrence.js';
+import { RecurrenceScheduler, nextOccurrence } from './jobs/recurrence.js';
+import { Cron } from 'croner';
 import { registerWebhookRoutes } from './jobs/webhooks.js';
 import { registerTodoistRoutes } from './jobs/todoist.js';
 import { registerJobRoutes } from './jobs/routes.js';
@@ -239,6 +243,7 @@ export interface BuiltApp {
   sweepRuns: SweepRunStore;
   /** The server's log of each chat's transcript. */
   chatLogStore: ChatLogStore;
+  issueFiler: IssueFiler;
 }
 
 export async function build(opts: BuildOptions = {}): Promise<FastifyInstance> {
@@ -275,11 +280,37 @@ export const PINO_REDACT_PATHS = [
 export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // Default logger config — when caller passes a boolean true or omits, attach
   // pino redaction so credentials don't escape into log lines.
-  const loggerOption: BuildOptions['logger'] | { redact: { paths: string[]; remove: boolean } } =
+  // Every error-level line is handed to the issue filer (issue-filer.ts), which
+  // keeps only the error's message and stack and does nothing while off. The
+  // filer is built after the logger, so the hook reaches it through this slot.
+  const errorSink: { current: ((args: unknown[]) => void) | null } = { current: null };
+  const issueHooks = {
+    logMethod(this: unknown, args: unknown[], method: (...a: unknown[]) => void, level: number) {
+      if (level >= 50) errorSink.current?.(args);
+      method.apply(this, args);
+    },
+  };
+  const loggerBase = { redact: { paths: PINO_REDACT_PATHS, remove: true }, hooks: issueHooks };
+  // A caller's own logMethod hook (tests read log lines this way) still runs.
+  const callerHook = (
+    opts.logger as { hooks?: { logMethod?: typeof issueHooks.logMethod } } | undefined
+  )?.hooks?.logMethod;
+  const chainedHooks = {
+    logMethod(this: unknown, args: unknown[], method: (...a: unknown[]) => void, level: number) {
+      if (!callerHook) return issueHooks.logMethod.call(this, args, method, level);
+      return callerHook.call(
+        this,
+        args,
+        (...a: unknown[]) => issueHooks.logMethod.call(this, a, method, level),
+        level,
+      );
+    },
+  };
+  const loggerOption: BuildOptions['logger'] | typeof loggerBase =
     typeof opts.logger === 'object' && opts.logger !== null
-      ? { ...(opts.logger as object), redact: { paths: PINO_REDACT_PATHS, remove: true } }
+      ? { ...(opts.logger as object), ...loggerBase, hooks: chainedHooks }
       : opts.logger === true
-        ? { redact: { paths: PINO_REDACT_PATHS, remove: true } }
+        ? loggerBase
         : (opts.logger ?? false);
   const app = Fastify({ logger: loggerOption, trustProxy: true });
 
@@ -1036,7 +1067,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   // Versioned filename in the path (patch-<sha>.apk) so each build is a NEW URL
   // AND a new download filename — otherwise the phone's browser sees the same
   // `patch.apk` and refuses to re-download / install over the cached file.
-  // `patch.apk` (unversioned) is still accepted for the latest. Whitelisted to
+  // `patch.apk` (unversioned) is an alias for the latest, via android-latest.json. Whitelisted to
   // `patch*.apk` so `:name` can't traverse out of the downloads dir.
   //
   // `android-latest.json` (the APK sidecar, {version,gitSha,builtAt,file}) is
@@ -1057,7 +1088,27 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       if (!isApk && !isSidecar) {
         return reply.code(404).send({ error: 'not found' });
       }
-      const artifact = join(downloadsDir, name);
+      // The generic `patch.apk` is an alias for the latest release, resolved via
+      // the sidecar — never a file on disk (a stray one went stale at 0.1.3).
+      let fileName = name;
+      if (name === 'patch.apk') {
+        try {
+          const sidecar = JSON.parse(
+            readFileSync(join(downloadsDir, 'android-latest.json'), 'utf8'),
+          ) as { file?: unknown };
+          if (
+            typeof sidecar.file !== 'string' ||
+            !/^patch[A-Za-z0-9._-]*\.apk$/.test(sidecar.file)
+          ) {
+            throw new Error('android-latest.json has no valid "file"');
+          }
+          fileName = sidecar.file;
+        } catch (err) {
+          req.log.warn({ err }, 'patch.apk alias: cannot resolve latest release');
+          return reply.code(404).send({ error: 'no such APK published' });
+        }
+      }
+      const artifact = join(downloadsDir, fileName);
       if (!existsSync(artifact)) {
         return reply
           .code(404)
@@ -1069,7 +1120,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       }
       return reply200
         .header('content-type', 'application/vnd.android.package-archive')
-        .header('content-disposition', `attachment; filename="${name}"`)
+        .header('content-disposition', `attachment; filename="${fileName}"`)
         .send(createReadStream(artifact));
     },
   );
@@ -1868,10 +1919,44 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   });
 
   // ---- client crash reports (phone error boundary / native crash) ----
+  const issueFiler = new IssueFiler({
+    dataDir: opts.dataDir ?? registry.dataDir,
+    logger: log.child({ component: 'issue-filer' }),
+    repo: process.env.PATCH_ISSUE_REPO ?? ISSUE_REPO_DEFAULT,
+    token: process.env.PATCH_ISSUE_GITHUB_TOKEN,
+    version: VERSION,
+  });
+  errorSink.current = (args) => {
+    const first = args[0];
+    const err =
+      first instanceof Error
+        ? first
+        : typeof first === 'object' && first !== null
+          ? ((first as { err?: unknown }).err ?? (first as { error?: unknown }).error)
+          : undefined;
+    const msg = args.find((a): a is string => typeof a === 'string');
+    const message = err instanceof Error ? err.message : (msg ?? '');
+    if (message === '') return;
+    // A phone crash is filed by its route as a `client-crash` report with its own
+    // message and stack; its error log line would otherwise file a second issue.
+    if (typeof first === 'object' && first !== null && 'clientCrash' in first) return;
+    issueFiler.reportAuto({
+      kind: 'server-error',
+      message: msg && err instanceof Error ? `${msg}: ${err.message}` : message,
+      stack: err instanceof Error ? err.stack : undefined,
+      surface: 'server',
+    });
+  };
+  app.addHook('onReady', async () => {
+    // Anything queued when the last process died (an uncaught exception) files now.
+    void issueFiler.flush().catch(() => undefined);
+  });
+  registerIssueFilerRoutes(app, { filer: issueFiler, registry });
   registerClientCrashRoutes(app, {
     logger: log.child({ component: 'client-crash-routes' }),
     registry,
     dataDir: opts.dataDir ?? registry.dataDir,
+    issueFiler,
   });
 
   // ---- secrets REST routes (spec/15 § Secrets) ----
@@ -2257,6 +2342,23 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     jobLogs,
     jobAlerts,
     jobCounts: (jobId) => jobDispatcher.counts(jobId),
+    nextFires: (job) => {
+      const t = job.trigger;
+      if (t.type === 'cron') {
+        const next = cronScheduler.nextRun(job.id);
+        if (!next) return [null, null];
+        const after = new Cron(t.expression, {
+          timezone: t.timezone ?? 'UTC',
+          domAndDow: true,
+        }).nextRuns(1, next)[0];
+        return [next, after ?? null];
+      }
+      if (t.type === 'recurrence') {
+        const next = nextOccurrence(t.rrule, t.timezone, new Date());
+        return [next, next ? nextOccurrence(t.rrule, t.timezone, next) : null];
+      }
+      return [null, null];
+    },
     dispatcher: jobDispatcher,
     hostLink,
     idGenerator,
@@ -2495,5 +2597,6 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     managerSweeper,
     sweepRuns,
     chatLogStore,
+    issueFiler,
   };
 }

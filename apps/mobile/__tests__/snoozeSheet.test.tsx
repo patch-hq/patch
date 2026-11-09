@@ -215,6 +215,22 @@ describe('the Snooze sheet', () => {
     expect(uc[0]!.props.accessibilityState).toMatchObject({ disabled: true });
   });
 
+  it('enables Until complete for an idle chat with a one-shot wake, not for a loop', () => {
+    seedThree();
+    const wake = { message: 'check', fireAt: NOW + 3_600_000 };
+    useChatStore.getState().hydrate([row('c', { name: 'Timesheet', pendingWake: wake })]);
+    const r = renderRN(<SnoozeSheet />);
+    actSync(() => showSnoozeSheet({ kind: 'chat', chatId: 'c' }));
+    const uc = () => findAllHost(r.root, byTestId('snooze-sheet-preset-until-complete'))[0]!;
+    expect(uc().props.accessibilityState).toMatchObject({ disabled: false });
+    actSync(() =>
+      useChatStore
+        .getState()
+        .hydrate([row('c', { name: 'Timesheet', pendingWake: { ...wake, every: 60_000 } })]),
+    );
+    expect(uc().props.accessibilityState).toMatchObject({ disabled: true });
+  });
+
   it('a chat: title, name, presets with wake times, run box for a running chat, rule, disabled Snooze', () => {
     seedThree();
     const r = renderRN(<SnoozeSheet />);

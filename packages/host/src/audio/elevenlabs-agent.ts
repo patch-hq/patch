@@ -172,6 +172,7 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
   private toolIds: string[] = [];
   private cleanedUp = false;
   private openedAt?: number;
+  private conversationId?: string;
   private closedAt?: number;
   /** Hands-free: the agent's reply to a heard-but-not-addressed transcript is dropped. */
   private suppressReply = false;
@@ -242,6 +243,7 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
       tokens: ZERO_TOKENS,
       stt: null,
       agentSeconds: this.openedAt === undefined ? 0 : Math.max(0, (end - this.openedAt) / 1000),
+      ...(this.conversationId !== undefined ? { conversationId: this.conversationId } : {}),
     };
   }
 
@@ -502,6 +504,7 @@ export class ElevenLabsAgentSession implements VoiceSessionLike {
     switch (ev.type) {
       case 'conversation_initiation_metadata': {
         const m = ev.conversation_initiation_metadata_event ?? {};
+        if (m.conversation_id) this.conversationId = m.conversation_id;
         const w = this.setupWaiter;
         this.setupWaiter = undefined;
         if (

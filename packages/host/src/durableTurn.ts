@@ -727,6 +727,14 @@ class RunnerProcess extends EventEmitter implements SpawnedProcess {
       start = i + 1;
     }
     const exit = readJson<RunnerExit>(join(this.turn.dir, RUNNER_EXIT));
+    // The SDK writes the prompt right after `initialize`, and its transport
+    // throws "Cannot write to terminated process" for any write to a process
+    // with an exit code unless stdin is already ended (then it drops the write
+    // quietly). Everything is replayed already, so close stdin before exiting.
+    // (The SDK itself drops writes to an ended stdin; an error listener makes
+    // any other late writer do the same instead of raising 'write after end'.)
+    this.stdin.on('error', () => undefined);
+    this.stdin.end();
     this.finish(exit?.code ?? null, exit?.signal ?? null);
   }
 

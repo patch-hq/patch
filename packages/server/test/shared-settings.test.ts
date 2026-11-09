@@ -1,7 +1,7 @@
 // Shared settings (spec/01 § Settings): the server is the source of truth, and
 // every host runs from the snapshot it was last sent.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   existsSync,
   mkdtempSync,
@@ -448,19 +448,31 @@ describe('SharedSettingsService', () => {
     expect(() => reloaded.update({ claudeSettings: {} } as never)).toThrow();
   });
 
-  it('adopts a provider key from a host’s environment', async () => {
+  it('brings an already-imported host’s environment keys in once, keeping the account’s own', async () => {
     online = ['d1'];
-    const svc = new SharedSettingsService({
+    const requests: string[] = [];
+    const svc: SharedSettingsService = new SharedSettingsService({
       dataDir: dir,
       sendToHost: (hostId, event) => {
         if (event.type !== 'settings.adopt.request') return;
+        requests.push(event.kind);
         queueMicrotask(() =>
           svc.handleHostEvent({
             type: 'settings.adopt.response',
             requestId: event.requestId,
             hostId,
             ok: true,
-            result: { kind: 'provider-key', id: 'groq', value: GROQ },
+            result: {
+              kind: 'import',
+              import: {
+                settings: {},
+                secrets: {
+                  claude: [],
+                  codex: [],
+                  providerKeys: { elevenlabs: GROQ, groq: 'other-groq-value-0000000000' },
+                },
+              },
+            },
           }),
         );
       },
@@ -468,13 +480,48 @@ describe('SharedSettingsService', () => {
       broadcast: () => undefined,
       keyCheckFetch: providerAnswers(200),
     });
-    await svc.adoptInto('d1', 'provider-key', 'groq');
-    expect(svc.secretsSummary().providerKeys.find((k) => k.id === 'groq')).toMatchObject({
-      id: 'groq',
-      set: true,
-      last4: '1234',
-      check: { status: 'ok' },
+    svc.setProviderKey('groq', GROQ);
+    writeFileSync(
+      join(dir, 'settings-state.json'),
+      JSON.stringify({ version: 1, importedHosts: ['d1'] }),
+    );
+    const reloaded: SharedSettingsService = new SharedSettingsService({
+      dataDir: dir,
+      sendToHost: (hostId, event) => {
+        if (event.type !== 'settings.adopt.request') return;
+        requests.push(event.kind);
+        queueMicrotask(() =>
+          reloaded.handleHostEvent({
+            type: 'settings.adopt.response',
+            requestId: event.requestId,
+            hostId,
+            ok: true,
+            result: {
+              kind: 'import',
+              import: {
+                settings: {},
+                secrets: {
+                  claude: [],
+                  codex: [],
+                  providerKeys: { elevenlabs: GROQ, groq: 'other-groq-value-0000000000' },
+                },
+              },
+            },
+          }),
+        );
+      },
+      onlineHostIds: () => online,
+      broadcast: () => undefined,
     });
+    reloaded.hostOnline('d1');
+    await vi.waitFor(() =>
+      expect(reloaded.secretsSummary().providerKeys.find((k) => k.id === 'elevenlabs')?.set).toBe(
+        true,
+      ),
+    );
+    expect(reloaded.secretsSummary().providerKeys.find((k) => k.id === 'groq')?.last4).toBe('1234');
+    reloaded.hostOnline('d1');
+    expect(requests).toEqual(['import']);
   });
 
   it('refuses to adopt from an offline host, and times out a silent one', async () => {

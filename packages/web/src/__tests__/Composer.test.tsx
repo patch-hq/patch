@@ -99,10 +99,10 @@ describe('Composer', () => {
   it('caps the height and reveals an internal scrollbar once content exceeds the cap', () => {
     render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
     const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
-    stubLayout(input, 500); // 500 + 2 = 502px, far over the 30%-window cap
+    stubLayout(input, 500); // 500 + 2 = 502px, far over the 25%-window cap
     fireEvent.change(input, { target: { value: 'lots\nand\nlots\nof\nlines' } });
     expect(input.style.overflowY).toBe('auto');
-    expect(input.style.height).toBe(`${Math.round(window.innerHeight * 0.3)}px`);
+    expect(input.style.height).toBe(`${Math.round(window.innerHeight * 0.25)}px`);
   });
 
   it('sends on form submit and clears the input', () => {
@@ -3030,6 +3030,28 @@ describe('Composer', () => {
       render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
       fireEvent.click(screen.getByTestId('call-btn'));
       await waitFor(() => expect(startVoiceCall).toHaveBeenCalledWith('c1'));
+    });
+
+    it('right-click opens a menu: Call, Hands-free, Voice settings', async () => {
+      const { startVoiceCall } = await import('../lib/voiceController.js');
+      const onOpenVoiceSettings = vi.fn();
+      render(
+        <Composer
+          chatId="c1"
+          hostId="d1"
+          onSend={() => {}}
+          onStartVoiceNote={() => {}}
+          onOpenVoiceSettings={onOpenVoiceSettings}
+        />,
+      );
+      fireEvent.contextMenu(screen.getByTestId('call-btn'));
+      const menu = screen.getByTestId('call-menu');
+      expect(menu.textContent).toMatch(/Call.*Hands-free.*Voice settings/);
+      fireEvent.click(screen.getByText('Hands-free'));
+      await waitFor(() => expect(startVoiceCall).toHaveBeenCalledWith('c1', 'hands-free'));
+      fireEvent.contextMenu(screen.getByTestId('call-btn'));
+      fireEvent.click(screen.getByText('Voice settings'));
+      expect(onOpenVoiceSettings).toHaveBeenCalled();
     });
 
     // A not-yet-spawned chat has no real id to call — `resolveChatId` (the

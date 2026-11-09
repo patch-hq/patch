@@ -1250,6 +1250,21 @@ describe('PatchWs dispatch — host presence', () => {
     fake.receive({ type: 'device.session', deviceId: 'dev-1', name: 'kitchen', active: true });
     expect(useVoiceStore.getState().activeDevices).toEqual({ 'dev-1': 'kitchen' });
   });
+
+  it("voice.call tracks another surface's call, drops it on end, and ignores this surface's own", async () => {
+    const b64url = (o: unknown) =>
+      btoa(JSON.stringify(o)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    saveCredential(`${b64url({ alg: 'EdDSA' })}.${b64url({ surface_id: 'web-1' })}.sig`);
+    useVoiceStore.setState({ remoteCalls: {} });
+    const { fake } = await connectAndOpen();
+    const base = { type: 'voice.call', surfaceKind: 'mobile', chatId: 'c1', startedAt: 5 };
+    fake.receive({ ...base, sessionId: 's1', surfaceId: 'phone', active: true });
+    fake.receive({ ...base, sessionId: 's2', surfaceId: 'web-1', active: true });
+    expect(Object.keys(useVoiceStore.getState().remoteCalls)).toEqual(['s1']);
+    fake.receive({ ...base, sessionId: 's1', surfaceId: 'phone', active: false });
+    expect(useVoiceStore.getState().remoteCalls).toEqual({});
+    clearCredential();
+  });
 });
 
 describe('PatchWs dispatch — incoming call + chime', () => {

@@ -6,6 +6,7 @@ import { getWs, resetWs } from '../src/api/ws';
 import { saveCredential } from '../src/lib/credential';
 import { usePresenceStore } from '../src/stores/presenceStore';
 import { useChatStore } from '../src/stores/chatStore';
+import { deriveBadge } from '../src/stores/types';
 import { useUiStore } from '../src/stores/uiStore';
 import { installFakeWebSocket, restoreWebSocket, FakeWebSocket } from './testUtils/fakeWebSocket';
 import { __clearAllMmkv } from './stubs/mmkv';
@@ -88,6 +89,42 @@ describe('syncTranscripts', () => {
     expect(replays(sock).map((r) => r.chatId)).toEqual(['c1', 'c2']);
   });
 
+  it('a background fetch moves the list row of a chat already read: preview and unread', () => {
+    useChatStore.getState().hydrate([row('c1', 1), row('c2', 1)]);
+    // c1 has been opened on this phone before; c2 never has.
+    useChatStore.getState().markRead('c1');
+    const sock = open();
+    getWs().syncTranscripts();
+    sock.emitMessage(
+      JSON.stringify({
+        type: 'chat.replay_batch',
+        chatId: 'c1',
+        events: [ev('c1', 0), ev('c1', 1), ev('c1', 2)],
+        done: true,
+      }),
+    );
+    vi.advanceTimersByTime(1000);
+    const c1 = useChatStore.getState().chats['c1']!;
+    expect(c1.preview).toBe('m2');
+    expect(c1.lastSeq).toBe(2);
+    expect(deriveBadge(c1)).toBe('done');
+    expect(useChatStore.getState().timelines['c1'] ?? []).toEqual([]);
+
+    sock.emitMessage(
+      JSON.stringify({
+        type: 'chat.replay_batch',
+        chatId: 'c2',
+        events: [ev('c2', 0), ev('c2', 1)],
+        done: true,
+      }),
+    );
+    vi.advanceTimersByTime(1000);
+    const c2 = useChatStore.getState().chats['c2']!;
+    // Never opened here: its history would all light up as unread, so the row stays as the roster gave it.
+    expect(c2.preview).toBeNull();
+    expect(c2.lastSeq).toBe(0);
+  });
+
   it('asks only for what is newer than the held copy, and not at all once level', () => {
     saveEvents('c1', [ev('c1', 0), ev('c1', 1), ev('c1', 2)]);
     vi.advanceTimersByTime(1000);
@@ -139,16 +176,19 @@ describe('syncTranscripts', () => {
     expect(useChatStore.getState().timelines['c1']?.length).toBe(1);
   });
 
-  it('reports a host that never answers instead of waiting for ever', () => {
+  it('retries a host that never answers without showing a banner', () => {
     useChatStore.getState().hydrate([row('c1', 1)]);
-    open();
+    const sock = open();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     getWs().syncTranscripts();
+    const replays = () => sock.sent.filter((m) => m.includes('chat.replay')).length;
     vi.advanceTimersByTime(31_000);
-    expect(
-      useUiStore
-        .getState()
-        .errors.map((e) => e.message)
-        .join(' '),
-    ).toMatch(/offline copy of chat c1 timed out/);
+    expect(useUiStore.getState().errors).toHaveLength(0);
+    expect(warn).toHaveBeenCalled();
+    expect(replays()).toBe(2);
+    vi.advanceTimersByTime(100_000);
+    expect(replays()).toBe(3);
+    expect(useUiStore.getState().errors).toHaveLength(0);
+    warn.mockRestore();
   });
 });

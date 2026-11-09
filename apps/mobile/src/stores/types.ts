@@ -215,6 +215,13 @@ export type ChatListRow = Omit<
   | 'todos'
   | 'disabled'
 > & {
+  /**
+   * What the server mirror knows of the chat's latest user/assistant message and
+   * seq. Optional: an older server does not send them. Folded into the row's
+   * `preview` / `lastSeq`, never stored as fields of their own.
+   */
+  lastMessagePreview?: string | null;
+  lastSeq?: number;
   pendingWake?: PendingWake | null;
   snoozedUntil?: number | null;
   hidden?: boolean;

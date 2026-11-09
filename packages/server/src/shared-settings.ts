@@ -188,6 +188,8 @@ export class SharedSettingsService {
   private secrets: StoredSecrets = structuredClone(EMPTY_SHARED_SECRETS);
   private version = 0;
   private importedHosts = new Set<string>();
+  /** Hosts whose provider keys (settings and environment) are in the account's store. */
+  private keysImportedHosts = new Set<string>();
   private readonly applied = new Map<string, { version?: number; error?: string }>();
   private readonly pending = new Map<string, PendingAdopt>();
   /** Hosts whose import is in flight, so a reconnect burst asks once. */
@@ -210,9 +212,11 @@ export class SharedSettingsService {
       const state = JSON.parse(readFileSync(this.statePath, 'utf8')) as {
         version?: number;
         importedHosts?: string[];
+        keysImportedHosts?: string[];
       };
       this.version = state.version ?? 0;
       this.importedHosts = new Set(state.importedHosts ?? []);
+      this.keysImportedHosts = new Set(state.keysImportedHosts ?? []);
     }
     this.loadSecrets();
     this.provisionWebBotIdentity();
@@ -346,7 +350,15 @@ export class SharedSettingsService {
     writeAtomic(this.settingsPath, JSON.stringify(this.settings, null, 2));
     writeAtomic(
       this.statePath,
-      JSON.stringify({ version: this.version, importedHosts: [...this.importedHosts] }, null, 2),
+      JSON.stringify(
+        {
+          version: this.version,
+          importedHosts: [...this.importedHosts],
+          keysImportedHosts: [...this.keysImportedHosts],
+        },
+        null,
+        2,
+      ),
     );
     if (opts.secrets) {
       if (this.problem !== undefined || !this.key) {
@@ -545,16 +557,19 @@ export class SharedSettingsService {
    */
   hostOnline(hostId: string): void {
     if (!this.syncing) return;
-    if (this.importedHosts.has(hostId)) {
+    if (this.importedHosts.has(hostId) && this.keysImportedHosts.has(hostId)) {
       this.opts.sendToHost(hostId, this.snapshotFor(hostId));
       return;
     }
     if (this.importing.has(hostId)) return;
     this.importing.add(hostId);
+    // A host imported before environment keys counted comes back once for them.
+    const keysOnly = this.importedHosts.has(hostId);
     void this.adopt(hostId, 'import')
       .then((result) => {
         if (result.kind !== 'import') throw new Error(`import answered with ${result.kind}`);
-        this.mergeImport(hostId, result.import);
+        if (keysOnly) this.mergeKeysOnly(hostId, result.import);
+        else this.mergeImport(hostId, result.import);
       })
       .catch((err: Error) => {
         // Not marked imported, so the next connect asks again rather than the
@@ -625,18 +640,35 @@ export class SharedSettingsService {
       this.secrets.codex.push({ ...account, ...(idTaken ? { id: randomUUID() } : {}) });
       added.push(`OpenAI ${account.label}`);
     }
-    for (const id of ['gemini', 'openai', 'groq'] as const) {
+    added.push(...this.takeProviderKeys(imported));
+    this.importedHosts.add(hostId);
+    this.keysImportedHosts.add(hostId);
+    this.opts.logger?.info(
+      { hostId, host, first, added, skipped },
+      'shared settings: imported a host',
+    );
+    this.commit({ secrets: true });
+  }
+
+  /** Provider keys the account does not have yet; one it already has is kept. */
+  private takeProviderKeys(imported: SettingsImport): string[] {
+    const added: string[] = [];
+    for (const { id } of PROVIDER_KEYS) {
       const value = imported.secrets.providerKeys[id];
       if (value && !this.secrets.providerKeys[id]) {
         this.secrets.providerKeys[id] = value;
         added.push(`${id} key`);
       }
     }
-    this.importedHosts.add(hostId);
-    this.opts.logger?.info(
-      { hostId, host, first, added, skipped },
-      'shared settings: imported a host',
-    );
+    return added;
+  }
+
+  /** A host already imported brings only its provider keys, so its accounts and settings are not re-merged. */
+  private mergeKeysOnly(hostId: string, imported: SettingsImport): void {
+    this.requireSecrets();
+    const added = this.takeProviderKeys(imported);
+    this.keysImportedHosts.add(hostId);
+    this.opts.logger?.info({ hostId, added }, 'shared settings: imported a host’s provider keys');
     this.commit({ secrets: true });
   }
 
@@ -746,7 +778,7 @@ export class SharedSettingsService {
   /** Adopt a value from a host and store it as the shared one. */
   async adoptInto(
     hostId: string,
-    kind: Exclude<SettingsAdoptKind, 'import' | 'codex-signin'>,
+    kind: Exclude<SettingsAdoptKind, 'import' | 'codex-signin' | 'provider-key'>,
     id?: string,
   ): Promise<void> {
     const result = await this.adopt(hostId, kind, id);
@@ -757,10 +789,6 @@ export class SharedSettingsService {
       case 'codex-login':
       case 'codex-signin':
         this.addCodexAccount(result.account, 'adopted');
-        return;
-      case 'provider-key':
-        this.setProviderKey(result.id, result.value);
-        await this.checkProviderKey(result.id);
         return;
       default:
         throw new Error(`unexpected adopt result ${(result as { kind: string }).kind}`);

@@ -260,6 +260,9 @@ export const ChatErrorCode = z.enum([
   // spec/10 § Backend credentials — a credential operation named a backend that
   // host does not have.
   'backend_not_found',
+  // spec/02 § Speech set-up — a meeting was started on a host with no speech
+  // route chosen. The message names both routes; the surface offers them.
+  'speech_not_set_up',
   // spec/04 § Folders — a folder-registry edit named a path that is empty or
   // does not exist on that host.
   'folder_invalid',
@@ -1338,6 +1341,15 @@ export const ChatStateEvent = z
      * lost (`patch.log_restore`). Optional: an older host never says.
      */
     lastSeq: z.number().int().nonnegative().optional(),
+    /**
+     * One-line snippet of the chat's most recent user or assistant message.
+     * Lets a surface that is not subscribed to the chat (the phone's chat list)
+     * show what was said last, and how far `lastSeq` reaches, without a live
+     * stream. Distinct from `preview`, which is the FIRST prompt and names the
+     * row. `null` when the chat has no message yet; optional: an older host
+     * never sends it.
+     */
+    lastMessagePreview: z.string().nullable().optional(),
     /**
      * The host this chat is pinned to (spec/03 § Host events). `chat.spawned`
      * establishes it for the chat's life; carrying it here too means a surface
@@ -3106,6 +3118,32 @@ export const DeviceSessionEvent = z
   })
   .strict();
 export type DeviceSessionEvent = z.infer<typeof DeviceSessionEvent>;
+
+/**
+ * A voice call is live on a surface (host → server → surfaces).
+ *
+ * Emitted when an app surface (web / desktop / mobile) opens (`active: true`)
+ * or closes (`active: false`) a `call`-mode audio session on the host. Every
+ * OTHER surface uses it to show "call in progress on <device>" on that chat and
+ * offer to switch the call to itself (`07-voice-app.md` § A call can move
+ * between devices). Account-scoped (no `chatId` envelope field) so the hub fans
+ * it out to every connected surface; the chat is in the payload.
+ *
+ * `surfaceId` is the surface holding the call, so a surface can tell its own
+ * call from someone else's.
+ */
+export const VoiceCallEvent = z
+  .object({
+    type: z.literal('voice.call'),
+    sessionId: z.string().min(1),
+    surfaceId: z.string().min(1),
+    surfaceKind: z.string().min(1),
+    chatId: z.string().min(1),
+    active: z.boolean(),
+    startedAt: z.number().int().nonnegative(),
+  })
+  .strict();
+export type VoiceCallEvent = z.infer<typeof VoiceCallEvent>;
 
 /**
  * Host-owned folder registry snapshot (host → server → surfaces).
@@ -9282,6 +9320,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   HostInfoEvent,
   HostAccountEvent,
   DeviceSessionEvent,
+  VoiceCallEvent,
   FoldersListEvent,
   FoldersUpdatedEvent,
   ClaudeSettingsListEvent,
@@ -9596,6 +9635,7 @@ export const EVENT_SCHEMAS = {
   'host.host': HostInfoEvent,
   'host.account': HostAccountEvent,
   'device.session': DeviceSessionEvent,
+  'voice.call': VoiceCallEvent,
   'folders.list': FoldersListEvent,
   'folders.updated': FoldersUpdatedEvent,
   'claude_settings.list': ClaudeSettingsListEvent,

@@ -23,6 +23,7 @@ RUN corepack enable && corepack prepare pnpm@10.29.3 --activate
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json tsconfig.base.json tsconfig.json ./
 COPY packages/wire/package.json packages/wire/
 COPY packages/auth/package.json packages/auth/
+COPY packages/relay/package.json packages/relay/
 COPY packages/server/package.json packages/server/
 COPY packages/host/package.json packages/host/
 COPY packages/cli/package.json packages/cli/
@@ -53,7 +54,7 @@ ENV PATCH_SERVER_SHA=${PATCH_SERVER_SHA}
 
 # Build wire, server, and the web SPA. Daemon/cli/desktop/mobile aren't
 # needed in this image.
-RUN pnpm --filter @patch/wire --filter @patch/auth --filter @patch/server --filter @patch/web build
+RUN pnpm --filter @patch/wire --filter @patch/auth --filter @patch/relay --filter @patch/server --filter @patch/web build
 
 # Trim node_modules to production-only for the runtime stage.
 RUN pnpm --filter @patch/server deploy --prod --legacy /out/server

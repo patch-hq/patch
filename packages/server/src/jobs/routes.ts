@@ -16,12 +16,13 @@ import { z } from 'zod';
 import rrulePkg from 'rrule';
 import { verifySurfaceCredential } from '@patch/auth';
 import { describeRecurrence } from '@patch/wire';
+import { jobTargetsChat, type ChatJobTick } from '@patch/wire/jobs';
 import type { WireEvent } from '@patch/wire';
 import type { Registry } from '../registry.js';
 import type { ChatRegistry } from '../chat-registry.js';
 import type { HostLink } from '../host-link.js';
 import { checkRegisteredHost, UNKNOWN_HOST_STATUS } from '../host-addressing.js';
-import { JobCreateBody, JobPatchBody, type JobsInterface } from './types.js';
+import { JobCreateBody, JobPatchBody, jobFires, type JobsInterface } from './types.js';
 import { JobLogs } from './logs.js';
 import { JOB_ID_REGEX, JOB_LOG_MAX_LIMIT } from './logs.js';
 import type { JobAlerts } from './alerts.js';
@@ -74,6 +75,12 @@ export interface JobRoutesDeps {
    * silently no-op'ing.
    */
   dispatcher?: JobDispatcher;
+  /**
+   * The next two fire instants of a job's schedule (the second gives the
+   * period), from the live scheduler. Powers `GET /api/chats/:chatId/jobs`.
+   * Absent in wiring with no scheduler — the route then reports 503.
+   */
+  nextFires?: (job: import('./types.js').Job) => [Date | null, Date | null];
   /** Clock override for the manual-run payload timestamp (tests). */
   nowMs?: () => number;
   /**
@@ -203,6 +210,37 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobRoutesDeps): vo
       return { ok: true };
     });
   }
+
+  // The enabled scheduled jobs that re-prompt a chat, for its persistent job
+  // bar. Only cron and recurrence triggers have a "next fire"; webhook, todoist
+  // and follows jobs fire on events, so there is nothing to count down to.
+  app.get<{ Params: { chatId: string } }>('/api/chats/:chatId/jobs', async (req, reply) => {
+    try {
+      await requireAuth(req, deps.registry);
+    } catch (e) {
+      /* v8 ignore next 4 */
+      return reply
+        .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+        .send({ error: (e as Error).message });
+    }
+    if (!deps.nextFires) return reply.code(503).send({ error: 'no scheduler wired' });
+    const jobs: ChatJobTick[] = [];
+    for (const job of deps.jobs.list()) {
+      if (!jobFires(job) || !jobTargetsChat(job, req.params.chatId)) continue;
+      const t = job.trigger;
+      if (t.type !== 'cron' && t.type !== 'recurrence') continue;
+      const [next, after] = deps.nextFires(job);
+      jobs.push({
+        jobId: job.id,
+        name: job.name,
+        trigger: t.type,
+        schedule: t.type === 'cron' ? t.expression : t.rrule,
+        nextFireAt: next ? next.getTime() : null,
+        periodMs: next && after ? after.getTime() - next.getTime() : null,
+      });
+    }
+    return reply.code(200).send({ jobs });
+  });
 
   app.get('/api/jobs', async (req, reply) => {
     try {

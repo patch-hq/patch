@@ -1713,6 +1713,17 @@ body {
   font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
+/* The status group's own badge sits at the right edge, away from the per-chat
+   status marks in the rows below. After the count it follows it directly. */
+.folder-head-badge {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+}
+.folder-head-count + .folder-head-badge {
+  margin-left: 0;
+  padding-left: 8px;
+}
 .folder-head-count + .folder-head-actions {
   margin-left: 0;
 }
@@ -5280,6 +5291,14 @@ button.view-file-download {
   font-size: var(--text-min);
   color: var(--ink-2);
 }
+/* Lines starting with ">" in system messages: the chat markdown blockquote
+   look (.md blockquote) — indented, italic, muted, no edge bar. */
+.system-context-text .system-context-quote {
+  margin: 8px 0;
+  padding-left: 10px;
+  font-style: italic;
+  color: var(--ink-2);
+}
 /* spec/02 § Provider-level context — Claude Code's OWN provider-level context
    (environment, model, token counts, ...), chat-scoped rather than per-turn.
    Sits with the chat's other standing banners (reminder/goal), so it gets
@@ -6335,7 +6354,7 @@ button.view-file-download {
      auto-grow effect flips this to `auto` only once content exceeds the cap
      (spec/14 § Composer — the input never shows a scrollbar under the cap). */
   overflow-y: hidden;
-  max-height: 30vh;
+  max-height: 25vh;
   /* Was bg-elevated (#fdfaf2) — nearly identical to the cream page, so the
      field vanished. Pure white + a defined border reads unambiguously as an
      input against the warm panel. */
@@ -11203,6 +11222,56 @@ main.empty-state p {
   background: var(--bg-elevated);
 }
 
+/* ---------- Job tick bar (spec/14 § Main chat panel — Job tick bar) ---------- */
+/* Stacks with the wake bar and reuses its look; the name truncates so the
+   cadence and countdown stay visible on a narrow screen. */
+.job-tick-bars {
+  display: flex;
+  flex-direction: column;
+}
+.job-tick-bar {
+  position: relative;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.job-tick-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.job-tick-schedule {
+  flex: none;
+  color: var(--ink-3);
+}
+.job-tick-countdown {
+  flex: none;
+}
+.job-tick-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--line-soft);
+}
+.job-tick-progress i {
+  display: block;
+  height: 100%;
+  background: var(--ink-3);
+}
+.job-tick-chip {
+  flex: none;
+  font-size: var(--text-min);
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* ---------- Artifact bar ---------- */
 /* spec/14 § Artifacts — Artifact bar. Drawn through the shared StatusRow: the
    artifacts are plain text links, 16px apart, each ellipsised past ~260px. */
@@ -13531,6 +13600,23 @@ input.browse-filter {
 }
 .overlay-titlebar .voice-bar button {
   -webkit-app-region: no-drag;
+}
+.vb-wave {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2px;
+}
+.vb-wave i {
+  flex: 1 1 0;
+  max-width: 3px;
+  min-height: 2px;
+  border-radius: 1px;
+  background: #a9d391;
+  opacity: 0.85;
 }
 .vb-timer {
   font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
@@ -17770,4 +17856,76 @@ select.permission-mode.is-pending {
   .level-bar-fill {
     transition: none;
   }
+}
+
+.remote-call {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #1f1c17;
+  color: #f4f0e4;
+  font-size: var(--text-min);
+  border-bottom: 1px solid #3a342a;
+}
+.remote-call .rc-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.remote-call .rc-switch {
+  flex: 0 0 auto;
+  background: #a9d391;
+  color: #1f1c17;
+  border: 0;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Dictation: cancel (×) sits left of the mic; the grip above the box drags its
+   height. Both only render while recording. */
+.composer-dict-cancel {
+  position: absolute;
+  right: 40px;
+  bottom: 4px;
+  z-index: 1;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.composer-dict-cancel:hover {
+  background: var(--bg-soft);
+  color: var(--ink-2);
+}
+.composer-dict-grip {
+  height: 10px;
+  margin: 0 auto 2px;
+  width: 40px;
+  cursor: ns-resize;
+  touch-action: none;
+  position: relative;
+}
+.composer-dict-grip::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
 }

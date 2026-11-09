@@ -18,6 +18,7 @@ import { getDesktopBridge, type PatchDesktopBridge } from './desktopBridge.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { useMeetingStore } from '../stores/meetingStore.js';
 import { useUiStore } from '../stores/uiStore.js';
+import { useSpeechSetupStore } from '../stores/speechSetupStore.js';
 import {
   startMeetingCapture,
   type MeetingCapture,
@@ -29,6 +30,12 @@ import {
 import { deviceLabel } from './deviceLabel.js';
 
 let capture: MeetingCapture | null = null;
+
+// The host refused the start for want of speech: capture was opened ahead of the
+// request, so close it. The prompt starts the meeting again once a route works.
+useSpeechSetupStore.subscribe((s, prev) => {
+  if (s.request !== null && prev.request === null) stopCapture();
+});
 
 const SETTINGS_KEY = 'patch.meeting.liveness';
 const RECORD_KEY = 'patch.meeting.record-raw';

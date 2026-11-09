@@ -9,6 +9,7 @@
 import React, { useState, type ReactElement } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { ChevronDown, ChevronRight } from 'lucide-react-native';
+import { splitQuoteLines } from '../lib/quoteLines';
 import { space, typography, useTheme } from '../lib/theme';
 
 export function ContextDisclosure({
@@ -54,7 +55,16 @@ export function ContextDisclosure({
           selectable
           style={{ ...typography.meta, color: colors.ink2, marginTop: 2, marginBottom: space.xs }}
         >
-          {text}
+          {splitQuoteLines(text).map((run, i, all) => (
+            <Text
+              key={i}
+              testID={run.quote ? `${testID}-quote` : undefined}
+              style={run.quote ? { fontStyle: 'italic' } : undefined}
+            >
+              {run.text}
+              {i < all.length - 1 ? '\n' : ''}
+            </Text>
+          ))}
         </Text>
       ) : null}
     </View>

@@ -48,6 +48,7 @@ import { ApprovalIcon, approvalDescription, approvalWord } from '../lib/approval
 import { ChatModelControl } from './ChatModelControl.js';
 import {
   Mic,
+  Ear,
   Settings,
   ListPlus,
   Send,
@@ -74,6 +75,7 @@ import { ImageAnnotator } from './ImageAnnotator.js';
 import { ImageLightbox } from './ImageLightbox.js';
 import { SkillPreviewPanel } from './SkillPreviewPanel.js';
 import type { AttachmentRef, PermissionMode } from '@patch/wire';
+import type { AudioSessionMode } from '@patch/wire/audio';
 import {
   backendIdForModel,
   permissionModesFor,
@@ -153,11 +155,11 @@ const ICON_SIZE = 18;
 const SETTING_ICON_SIZE = ICON_SIZE;
 
 /** Height cap for the auto-growing composer input, as a fraction of the window
- *  height — MUST match the CSS `max-height` (30vh) on `.composer-input`. Under
+ *  height — MUST match the CSS `max-height` (25vh) on `.composer-input`. Under
  *  this the field expands/contracts to fit with NO scrollbar; only once content
  *  exceeds the cap does it scroll internally, so a long paste can't push the
  *  chat off-screen (spec/14 § Composer). */
-const MAX_INPUT_HEIGHT_FRACTION = 0.3;
+const MAX_INPUT_HEIGHT_FRACTION = 0.25;
 const maxInputHeight = (): number => Math.round(window.innerHeight * MAX_INPUT_HEIGHT_FRACTION);
 
 /**
@@ -807,6 +809,12 @@ export const Composer = forwardRef(function Composer(
   const attachments = useComposerAttachmentStore(
     (s) => s.byKey[attachmentDraftKey] ?? NO_ATTACHMENTS,
   );
+  // Keys handed to a send that hasn't settled yet. The sent message is already
+  // in the chat (showing these files uploading) while the hook check runs, so
+  // the draft must not show them as well. They stay in the store until the
+  // send is accepted (a refused send brings the chips straight back).
+  const [sendingKeys, setSendingKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const visibleAttachments = attachments.filter((a) => !sendingKeys.has(a.key));
   const attachAction = useComposerAttachmentStore((s) => s.attach);
   const removeAttachmentAction = useComposerAttachmentStore((s) => s.remove);
   const retryAttachmentAction = useComposerAttachmentStore((s) => s.retry);
@@ -1226,6 +1234,29 @@ export const Composer = forwardRef(function Composer(
   // 'transcribing' until the authoritative transcript replaces it, rather than
   // vanishing mid-wait. It replaces the old status line above the input.
   const showLivePreview = micState !== 'idle' || livePartial !== '';
+  // A height the user has dragged the dictation box to with its grip; null means
+  // the default quarter-of-window cap. Dropped when the dictation ends.
+  const [dictCap, setDictCap] = useState<number | null>(null);
+  useEffect(() => {
+    if (micState === 'idle') setDictCap(null);
+  }, [micState]);
+  function dragGrip(e: React.PointerEvent<HTMLDivElement>): void {
+    const el = inputRef.current;
+    if (!el) return;
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = el.offsetHeight;
+    const move = (ev: PointerEvent): void => {
+      const h = startH + (startY - ev.clientY);
+      setDictCap(Math.max(40, Math.min(Math.round(window.innerHeight * 0.6), Math.round(h))));
+    };
+    const up = (): void => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
 
   // Auto-grow the textarea to fit its content. `field-sizing: content` (CSS) is
   // unreliable in the desktop shell, so size it here: reset to `auto` (allows
@@ -1234,7 +1265,10 @@ export const Composer = forwardRef(function Composer(
   // expands/contracts, no scrollbar (spec/14 § Composer). Only once the content
   // genuinely exceeds the cap do we reveal an internal scrollbar so a long paste
   // can't push the chat off-screen.
-  useEffect(() => {
+  // useLayoutEffect, not useEffect: the reset-to-auto below and the final height
+  // land before the browser paints, so the box never shows the collapsed state
+  // and the chat above does not jump on every new dictated line.
+  useLayoutEffect(() => {
     const el = inputRef.current;
     if (!el) return;
     // Resetting the height to `auto` shrinks the box and the browser clamps
@@ -1257,12 +1291,12 @@ export const Composer = forwardRef(function Composer(
       '.composer-live-preview, .composer-chip-mirror',
     );
     const contentHeight = Math.max(el.scrollHeight, mirror?.scrollHeight ?? 0) + border;
-    const cap = maxInputHeight();
+    const cap = dictCap ?? maxInputHeight();
     el.style.height = `${Math.min(contentHeight, cap)}px`;
     el.style.overflowY = contentHeight > cap ? 'auto' : 'hidden';
     el.scrollTop = scrollTop;
     syncMirrors(el);
-  }, [value, shownBody, showLivePreview]);
+  }, [value, shownBody, showLivePreview, livePartial, dictCap]);
   // spec/14 § Composer — chips: the mirror only needs to exist while there is
   // at least one chip to draw, and only when dictation isn't already using
   // the transparent-textarea trick for its own mirror (the two never overlap
@@ -1723,22 +1757,25 @@ export const Composer = forwardRef(function Composer(
   // On a not-yet-spawned chat (`resolveChatId` provided), the chat is created
   // first, same create-then-act shape as an attachment upload above; a chat
   // that already exists just calls straight through.
-  async function handleCall(): Promise<void> {
+  async function handleCall(mode: AudioSessionMode = 'call'): Promise<void> {
     // spec/07 § 2. Voice call — the control shows the call is on, and ends it.
     if (onCall) {
       endVoiceCall();
       return;
     }
-    if (onStartCall) {
+    // `onStartCall` hands over to a caller that opens a plain call itself; a
+    // hands-free start from the menu always goes straight to the session.
+    if (onStartCall && mode === 'call') {
       onStartCall();
       return;
     }
     if (resolveChatId) {
       const target = await resolveChatId();
-      if (target !== null) void startVoiceCall(target);
+      if (target !== null)
+        void (mode === 'call' ? startVoiceCall(target) : startVoiceCall(target, mode));
       return;
     }
-    void startVoiceCall(chatId);
+    void (mode === 'call' ? startVoiceCall(chatId) : startVoiceCall(chatId, mode));
   }
 
   // ⌘⇧D drives this mic (lib/composerMic.ts) in transcribe mode. Read through a
@@ -1816,6 +1853,32 @@ export const Composer = forwardRef(function Composer(
       label: 'Keep dictating',
       icon: <Mic size={14} aria-hidden />,
       run: () => startDictMode(),
+    },
+    ...(onOpenVoiceSettings
+      ? [
+          {
+            id: 'voice-settings',
+            label: 'Voice settings',
+            icon: <Settings size={14} aria-hidden />,
+            run: onOpenVoiceSettings,
+          },
+        ]
+      : []),
+  ];
+  // Right-click the call button: how to start the call, and its settings.
+  const callMenu = useContextMenu();
+  const callMenuItems: ContextMenuItem[] = [
+    {
+      id: 'call',
+      label: 'Call',
+      icon: <Phone size={14} aria-hidden />,
+      run: () => void handleCall('call'),
+    },
+    {
+      id: 'hands-free',
+      label: 'Hands-free',
+      icon: <Ear size={14} aria-hidden />,
+      run: () => void handleCall('hands-free'),
     },
     ...(onOpenVoiceSettings
       ? [
@@ -2141,11 +2204,19 @@ export const Composer = forwardRef(function Composer(
             ? [trimmed, files, resolvedChatId]
             : [trimmed];
     if (!running && onStop) setPendingSend(true);
+    const sentKeys = pending.map((a) => a.key);
+    const unhide = (): void => {
+      if (sentKeys.length === 0) return;
+      setSendingKeys((cur) => new Set([...cur].filter((k) => !sentKeys.includes(k))));
+    };
+    if (sentKeys.length > 0) setSendingKeys((cur) => new Set([...cur, ...sentKeys]));
     const onAccepted = (): void => {
       if (pending.length === 0) return;
       releaseSent(pending);
+      unhide();
     };
     const restore = (): void => {
+      unhide();
       setPendingSend(false);
       setValue((cur) => (cur.length === 0 ? trimmed : cur));
     };
@@ -2154,6 +2225,7 @@ export const Composer = forwardRef(function Composer(
       result = onSend(...args);
     } catch (err) {
       sendInFlightRef.current = false;
+      unhide();
       throw err;
     }
     if (result instanceof Promise) {
@@ -2161,6 +2233,10 @@ export const Composer = forwardRef(function Composer(
         .then((ok) => {
           if (ok === false) restore();
           else onAccepted();
+        })
+        .catch((err) => {
+          unhide();
+          throw err;
         })
         .finally(() => {
           sendInFlightRef.current = false;
@@ -2279,9 +2355,9 @@ export const Composer = forwardRef(function Composer(
           Step 3 of 3: each chip tracks its OWN upload independently — a
           failed one reads "Not uploaded" with Retry (same pattern as a sent
           message's failed upload), never blocking the others. */}
-      {attachments.length > 0 ? (
+      {visibleAttachments.length > 0 ? (
         <div className="composer-attachments" data-testid="composer-attachments">
-          {attachments.map((a) => (
+          {visibleAttachments.map((a) => (
             <div
               key={a.key}
               className={`composer-attachment${resolving || a.status === 'uploading' ? ' uploading' : ''}${a.status === 'failed' ? ' failed' : ''}`}
@@ -2450,6 +2526,15 @@ export const Composer = forwardRef(function Composer(
               />
             ),
           )}
+          {micState === 'recording' ? (
+            <div
+              className="composer-dict-grip"
+              data-testid="composer-dict-grip"
+              role="separator"
+              aria-label="Resize dictation box"
+              onPointerDown={dragGrip}
+            />
+          ) : null}
           <div
             className={`composer-input-wrap${leading ? ' has-leading' : ''}${edit ? '' : ' has-add'}`}
           >
@@ -2694,6 +2779,18 @@ export const Composer = forwardRef(function Composer(
                 a file or image, or a sketch — sit in the field with it, at
                 its bottom-left. Call and meeting stay on the row below: they
                 start something rather than add to the message. */}
+            {micState === 'recording' ? (
+              <button
+                type="button"
+                className="composer-dict-cancel"
+                data-testid="composer-dict-cancel"
+                aria-label="Cancel dictation"
+                title="Cancel dictation"
+                onClick={cancelRecording}
+              >
+                <CloseIcon size={ICON_SIZE} />
+              </button>
+            ) : null}
             {edit ? null : (
               <button
                 type="button"
@@ -2749,6 +2846,15 @@ export const Composer = forwardRef(function Composer(
                       : 'Call'
                 }
                 onClick={() => void handleCall()}
+                onContextMenu={(e) => {
+                  // Mid-call the button only ends the call: no menu to offer.
+                  if (onCall || voiceDisabled) {
+                    e.preventDefault();
+                    return;
+                  }
+                  callMenu.openAt(e);
+                }}
+                aria-haspopup="menu"
                 disabled={voiceDisabled && !onCall}
               >
                 <Phone size={ICON_SIZE} aria-hidden />
@@ -2839,7 +2945,7 @@ export const Composer = forwardRef(function Composer(
                   ]}
                 />
               )}
-              <ChatModelControl chatId={chatId} />
+              {micState === 'idle' ? <ChatModelControl chatId={chatId} /> : null}
               <EffortControl chatId={chatId} />
             </div>
           )}
@@ -2930,6 +3036,13 @@ export const Composer = forwardRef(function Composer(
         onClose={addMenu.close}
         label="Add to message"
         testId="add-menu"
+      />
+      <ContextMenu
+        anchor={callMenu.anchor}
+        items={callMenuItems}
+        onClose={callMenu.close}
+        label="Call"
+        testId="call-menu"
       />
       <ContextMenu
         anchor={micMenu.anchor}

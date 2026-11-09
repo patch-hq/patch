@@ -44,4 +44,12 @@ describe('HOSTED_VOICE_INSTRUCTION', () => {
       }
     },
   );
+
+  test('unknown facts go to the agent, in-flight hand-offs are remembered, answers stay short', () => {
+    const text = hostedVoiceInstruction('auto', true);
+    expect(text).toMatch(/never say you do not know/i);
+    expect(text).toMatch(/general factual/i);
+    expect(text).toMatch(/stays in progress/i);
+    expect(text).toMatch(/one or two short sentences/i);
+  });
 });

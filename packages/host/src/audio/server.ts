@@ -234,6 +234,21 @@ export interface AudioServerOptions {
    */
   onDeviceSession?: (deviceId: string, active: boolean) => void;
   /**
+   * Fired when a `call`-mode session on an app surface opens (`active: true`)
+   * or closes (`active: false`), exactly once each. The host wires this to a
+   * `voice.call` wire event so every other surface can show the call in
+   * progress and offer to take it over (spec/07 § A call can move between
+   * devices).
+   */
+  onCallSession?: (info: {
+    sessionId: string;
+    surfaceId: string;
+    surfaceKind: string;
+    chatId: string;
+    active: boolean;
+    startedAt: number;
+  }) => void;
+  /**
    * Fired when ANY voice session closes. The device control plane (F2) uses
    * this to drain its queue when a phone Manager call ends — a queued device
    * ring/wake can then proceed (spec/16 §Concurrency). `wasPhoneCall` is true
@@ -345,6 +360,8 @@ interface ActiveSession {
   lastActivityAt: number;
   /** spec/07 § Call cost — set for call / hands-free sessions only. */
   call?: { init: SessionInit; startedAt: number };
+  /** True while this session's `onCallSession(active: true)` is outstanding. */
+  callAnnounced?: boolean;
   surfaceId: string;
   accountId: string;
   surfaceKind: AudioSurfaceKind;
@@ -394,6 +411,20 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
   const sessions = new Map<string, ActiveSession>();
   // surfaceId → sessionId, for focus-follow routing.
   const surfaceIndex = new Map<string, string>();
+  // spec/07 § A call can move between devices — announce a call session's
+  // opening and closing exactly once each, whichever path ends it.
+  const announceCall = (entry: ActiveSession, active: boolean): void => {
+    if (!entry.call || entry.callAnnounced === active) return;
+    entry.callAnnounced = active;
+    opts.onCallSession?.({
+      sessionId: entry.call.init.sessionId,
+      surfaceId: entry.surfaceId,
+      surfaceKind: entry.surfaceKind,
+      chatId: entry.call.init.chatId,
+      active,
+      startedAt: entry.call.startedAt,
+    });
+  };
 
   // Forward-declared so the HTTP request handler (defined before the handle's
   // closures) can reach the speak-canned routing. Assigned right after the
@@ -935,6 +966,23 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             : {}),
         });
         surfaceIndex.set(start.surfaceId, start.sessionId);
+        if (voiceSurface === 'call') {
+          // spec/07 § A call can move between devices — a takeover ends this
+          // chat's call on every other surface first, so the announcements
+          // read "ended there, started here" and never two calls at once.
+          if (start.takeOver === true) {
+            for (const other of sessions.values()) {
+              if (other.callAnnounced !== true || other.call === undefined) continue;
+              if (other.call.init.chatId !== start.chatId) continue;
+              if (other.surfaceId === start.surfaceId) continue;
+              announceCall(other, false);
+              if (other.socket.readyState === other.socket.OPEN) {
+                other.socket.close(CLOSE_BAD_FRAME, 'transferred');
+              }
+            }
+          }
+          announceCall(sessions.get(start.sessionId) as ActiveSession, true);
+        }
         if (isAppCall) opts.onCallStarted?.(sessionInit);
         // spec/07 § Voice call — say something the moment the line is open so
         // the user is not left in silence. Local only: hosted engines have no
@@ -1086,6 +1134,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         const active = sessions.get(id);
         if (active) {
           surfaceIndex.delete(active.surfaceId);
+          announceCall(active, false);
           void active.session.close().catch(() => undefined);
           if (active.deviceId !== undefined) {
             opts.onDeviceSession?.(active.deviceId, false);

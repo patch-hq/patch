@@ -4,6 +4,11 @@
 import { create } from 'zustand';
 import { store } from '../lib/credential';
 import type { ChatStateFilter } from '../lib/stateFilter';
+import {
+  DEFAULT_SIDEBAR_GROUPING,
+  SIDEBAR_GROUPINGS,
+  type SidebarGrouping,
+} from '../lib/statusGroups';
 
 // The Chats tab's view dropdown (spec/15 § Chats tab) drives both of these.
 // Persisted in MMKV — the same store `batchStore`'s own `mode` already uses
@@ -12,6 +17,16 @@ import type { ChatStateFilter } from '../lib/stateFilter';
 const ATTENTION_ONLY_KEY = 'patch.sidebar.attentionOnly';
 const STATE_FILTER_KEY = 'patch.sidebar.stateFilter';
 const STATE_FILTERS: readonly ChatStateFilter[] = ['all', 'failed', 'working', 'waiting', 'done'];
+
+const GROUPING_KEY = 'patch.sidebar.grouping';
+
+function loadGrouping(): SidebarGrouping {
+  const raw = store().getString(GROUPING_KEY);
+  // Missing or garbled is a first run, not a swallowed error.
+  return SIDEBAR_GROUPINGS.some((o) => o.value === raw)
+    ? (raw as SidebarGrouping)
+    : DEFAULT_SIDEBAR_GROUPING;
+}
 
 function loadAttentionOnly(): boolean {
   return store().getBoolean(ATTENTION_ONLY_KEY) ?? false;
@@ -82,6 +97,9 @@ interface UiState {
   closeDiagnosticsBlocking(): void;
   setAttentionOnly(v: boolean): void;
   setStateFilter(v: ChatStateFilter): void;
+  /** How the Chats tab groups its active chats: by project or by status (mirrors web's `uiStore.grouping`). */
+  grouping: SidebarGrouping;
+  setGrouping(v: SidebarGrouping): void;
 }
 
 let _id = 0;
@@ -97,6 +115,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   attentionOnly: loadAttentionOnly(),
   stateFilter: loadStateFilter(),
+  grouping: loadGrouping(),
   setCodexSignInHost(hostId) {
     set({ codexSignInHost: hostId });
   },
@@ -107,6 +126,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   setStateFilter(v) {
     store().set(STATE_FILTER_KEY, v);
     set({ stateFilter: v });
+  },
+  setGrouping(v) {
+    store().set(GROUPING_KEY, v);
+    set({ grouping: v });
   },
   pushError(msg) {
     // The same message again (a flapping reconnect) is one toast, not a stack

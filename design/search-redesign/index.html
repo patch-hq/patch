@@ -1,43 +1,18 @@
-<!doctype html><meta charset="utf-8">
-<link rel="stylesheet" href="../hi-fi-tokens.css">
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-body{margin:0;background:var(--bg-app);font:14px Inter,system-ui,sans-serif;color:var(--ink);display:flex;gap:40px;padding:32px;align-items:flex-start}
-h2{font:600 12px Inter;color:var(--ink-3);margin:0 0 10px;letter-spacing:.06em;text-transform:uppercase}
-.sb{width:300px;height:560px;background:var(--bg-panel);border:1px solid var(--line);border-radius:var(--radius);display:flex;flex-direction:column;overflow:hidden;position:relative}
-.top{padding:12px 12px 8px;display:flex;flex-direction:column;gap:8px;background:var(--bg-panel)}
-.search{display:flex;align-items:center;gap:8px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:var(--radius-pill);padding:8px 12px;color:var(--ink-3)}
-.search kbd{margin-left:auto;font:11px 'JetBrains Mono',monospace;color:var(--ink-faint)}
-.chips{display:flex;gap:6px}
-.chip{padding:4px 10px;border-radius:var(--radius-pill);border:1px solid var(--line);font-size:12px;color:var(--ink-2);background:var(--bg-elevated)}
-.chip.on{background:var(--accent-tint);border-color:var(--accent-soft);color:var(--accent-strong);font-weight:600}
-.chips .sp{flex:1}
-.ib{width:28px;height:26px;border-radius:var(--radius-sm);border:1px solid var(--line);background:var(--bg-elevated);display:grid;place-items:center;font-size:12px;color:var(--ink-2)}
-.edge{height:1px;background:var(--line);box-shadow:0 1px 0 var(--line-soft)}
-.list{flex:1;overflow:hidden;padding:6px 8px;display:flex;flex-direction:column;gap:2px}
-.row{padding:8px 10px;border-radius:var(--radius);color:var(--ink-2)}
-.row.act{background:var(--accent-tint);color:var(--ink);font-weight:600}
-.row small{display:block;color:var(--ink-3);font-weight:400;font-size:12px;margin-top:2px}
-.nav{border-top:1px solid var(--line-soft);padding:6px 8px;display:flex;gap:4px}
-.nav span{flex:1;text-align:center;padding:7px 0;border-radius:var(--radius-sm);font-size:12px;color:var(--ink-2)}
-.nav span.s{flex:0 0 auto;padding:7px 10px}
-.grip{position:absolute;right:-1px;top:0;bottom:0;width:6px;cursor:col-resize;background:linear-gradient(var(--line),var(--line)) center/1px 100% no-repeat}
-.grip::after{content:'';position:absolute;top:50%;left:1px;width:4px;height:36px;margin-top:-18px;border-radius:2px;background:var(--accent-soft)}
-/* before */
-.bad .top{padding:10px 12px}.bad .chips{margin-top:2px}
-.bad .list{margin-top:-14px;padding-top:0}
-.bad .nav{flex-direction:column}.bad .nav span{text-align:left;font-size:15px;padding:12px 14px}
-.note{max-width:300px;color:var(--ink-2);font-size:13px;line-height:1.5;margin-top:10px}
+body{margin:0;padding:24px;font:14px Inter,system-ui,sans-serif;background:#f4f1ea;color:#1c1b17}
+.row{display:flex;gap:24px;flex-wrap:wrap}
+figure{margin:0;flex:1 1 480px}
+h2{font:600 12px Inter,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#6b675c;margin:0 0 8px}
+img{width:100%;display:block;border:1px solid #d9d4c6;border-radius:8px}
+ol{max-width:720px;line-height:1.5;margin:20px 0 0;padding-left:20px}
 </style>
-<div><h2>Now</h2>
-<div class="sb bad"><div class="top"><div class="search">Search chats…</div>
-<div class="chips"><span class="ib">▾</span><span class="ib">⇅</span><span class="ib">✓</span></div></div>
-<div class="list"><div class="row">Patch search layout</div><div class="row">Forage podcast</div><div class="row">Meetpoint maps<small>…</small></div><div class="row">Deploy queue</div><div class="row">Larder</div></div>
-<div class="nav"><span>▢ Files</span><span>Pads</span><span>Jobs</span></div></div>
-<div class="note">Icon row sits on the list with no edge; Files is a large full-width row; divider is a faint hairline.</div></div>
-<div><h2>Proposed</h2>
-<div class="sb"><div class="top"><div class="search">⌕ Search chats… <kbd>⌘K</kbd></div>
-<div class="chips"><span class="chip on">All</span><span class="chip">Unread</span><span class="chip">Running</span><span class="sp"></span><span class="ib">⇅</span></div></div>
-<div class="edge"></div>
-<div class="list"><div class="row act">Patch search layout<small>Running · 2m</small></div><div class="row">Forage podcast<small>Read · 1h</small></div><div class="row">Meetpoint maps<small>Waiting · 3h</small></div><div class="row">Deploy queue<small>Read · 1d</small></div><div class="row">Larder<small>Read · 2d</small></div></div>
-<div class="nav"><span class="s">Files</span><span>Pads</span><span>Jobs</span><span>Settings</span></div><div class="grip"></div></div>
-<div class="note">Search field and filter chips form one fixed header with a hard bottom edge — rows scroll beneath it, never through it. Files shrinks to a compact nav tab alongside the others. A visible grab handle on the divider; drag to widen up to 600px, double-click resets.</div></div>
+<div class="row">
+<figure><h2>Now</h2><img src="shots/before.png"></figure>
+<figure><h2>Proposed</h2><img src="shots/after.png"></figure>
+</div>
+<ol>
+<li>Search field and filter chips sit in one fixed header with a hard bottom edge; the list scrolls beneath it.</li>
+<li>Files becomes a compact tab beside Pads, Jobs and Settings.</li>
+<li>The sidebar divider gets a visible grab handle (drag to widen, double-click to reset).</li>
+</ol>

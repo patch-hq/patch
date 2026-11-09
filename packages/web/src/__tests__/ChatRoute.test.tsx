@@ -31,6 +31,7 @@ vi.mock('../api/rest.js', async (importOriginal) => {
   return {
     ApiError: actual.ApiError,
     api: {
+      chatJobTicks: vi.fn(async () => ({ jobs: [] })),
       getNotifications: vi.fn(async () => ({ items: [], unread: 0 })),
       markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
       getFileContent: vi.fn(async (_chatId: string, _path: string) => ({
@@ -3592,23 +3593,59 @@ describe('ChatRoute regression', () => {
       );
     });
 
-    it('shows a call hand-off answer in full as readable text, not a truncated quiet line', () => {
-      const reply = `${'A long answer. '.repeat(40)}\nSecond paragraph.`;
-      seedChat('c-call-reply', [
+    it('shows a failed call hand-off as readable text under an "agent failed" label', () => {
+      seedChat('c-call-fail', [
         {
           seq: 0,
           kind: 'message',
           role: 'system',
-          content: '[call] -> sent to agent: add milk',
+          content: '[call] <- agent: failed: boom',
           at: 0,
         },
-        { seq: 1, kind: 'message', role: 'system', content: `[call] <- agent: ${reply}`, at: 1 },
       ]);
-      renderChat('c-call-reply');
+      renderChat('c-call-fail');
       const el = screen.getByTestId('call-agent-reply');
-      expect(el.textContent).toContain('Second paragraph.');
+      expect(el.textContent).toContain('agent failed');
+      expect(el.textContent).toContain('failed: boom');
       expect(el.textContent).not.toContain('<- agent');
-      expect(el.textContent).not.toContain('…');
+    });
+
+    it('marks a hand-off as asking until the agent answers, then as asked', () => {
+      const handoff = {
+        seq: 0,
+        kind: 'message' as const,
+        role: 'user' as const,
+        content: 'add milk',
+        voiceHandoff: true,
+        at: 0,
+      };
+      seedChat('c-handoff-wait', [
+        handoff,
+        // The voice's own acknowledgement is not the agent's answer.
+        { seq: 1, kind: 'message', role: 'assistant', content: 'On it', voice: true, at: 1 },
+      ]);
+      renderChat('c-handoff-wait');
+      expect(screen.getByTestId('voice-handoff-pending').textContent).toContain(
+        'Asking the agent…',
+      );
+      cleanup();
+      seedChat('c-handoff-done', [
+        handoff,
+        {
+          seq: 1,
+          kind: 'message',
+          role: 'assistant',
+          content: 'Done',
+          voice: true,
+          handoffAnswer: true,
+          at: 1,
+        },
+      ]);
+      renderChat('c-handoff-done');
+      expect(screen.queryByTestId('voice-handoff-pending')).toBeNull();
+      expect(screen.getByTestId('voice-handoff').textContent).toContain(
+        'Asked the agent: add milk',
+      );
     });
 
     it('renders an impossible outcome labelled distinctly from met', () => {

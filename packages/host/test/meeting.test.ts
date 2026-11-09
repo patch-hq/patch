@@ -1799,3 +1799,49 @@ describe('meetingTimeoutMs', () => {
     expect(meetingTimeoutMs(1000)).toBe(240_000);
   });
 });
+
+describe('first meeting on a host with no speech set up', () => {
+  const setup = (speechSetUp: () => boolean) => {
+    const dir = mkdtempSync(join(tmpdir(), 'meeting-speech-'));
+    const sent: WireEvent[] = [];
+    const m = new MeetingManager({
+      prompts: () => PROMPTS,
+      dir,
+      transcribe: async () => 'hi',
+      analyse: async () => analysis({ summary: { headline: 'h', bullets: [] } }),
+      startChat: async () => 'child',
+      logger,
+      emit: (e) => sent.push(e),
+    });
+    const send = (): Promise<void> =>
+      handleServerEvent(
+        { type: 'meeting.control_request', chatId: 'c', action: 'start' },
+        {
+          chatState: { get: () => undefined },
+          allocErrorSeq: () => 7,
+        } as never,
+        (x) => sent.push(x),
+        logger,
+        { meetings: m, speechSetUp } as never,
+      );
+    return { m, sent, send };
+  };
+
+  it('refuses the start with a typed error naming both routes, and starts nothing', async () => {
+    const { m, sent, send } = setup(() => false);
+    await send();
+    expect(m.get('c')).toBeNull();
+    const err = sent.find((e) => e.type === 'chat.error') as
+      | { error: { code: string; message: string } }
+      | undefined;
+    expect(err?.error.code).toBe('speech_not_set_up');
+    expect(err?.error.message).toMatch(/speech API key/);
+    expect(err?.error.message).toMatch(/local voice models/);
+  });
+
+  it('starts once speech is set up', async () => {
+    const { m, send } = setup(() => true);
+    await send();
+    expect(m.get('c')?.status).toBe('live');
+  });
+});
