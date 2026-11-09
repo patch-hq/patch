@@ -182,7 +182,7 @@ describe('TC3 [test-runner] push channel — suppression / urgent override (runn
     }
   });
 
-  it('B3 urgent is suppressed like normal while that chat is open — it differs only in its sound', async () => {
+  it('B3 urgent is NOT suppressed while that chat is open', async () => {
     const h = await startServer({ dir });
     h.registry.registerPushToken({
       surfaceId: 'phone',
@@ -200,8 +200,7 @@ describe('TC3 [test-runner] push channel — suppression / urgent override (runn
         message: 'LEAVE NOW',
         priority: 'urgent',
       });
-      await sleep(150);
-      expect(h.push.sent).toHaveLength(0);
+      await waitUntil(() => h.push.sent.length === 1);
     } finally {
       await h.close();
     }
