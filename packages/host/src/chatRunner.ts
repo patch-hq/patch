@@ -12891,6 +12891,9 @@ export class Daemon {
       branchId,
     );
     if (plan) this.armAnswerExpiry(chatId, requestId, tool, plan);
+    // Asked while the user is already in the chat: hold the clock at full.
+    if (plan && tool === ASK_USER_QUESTION && this.isChatFocused(chatId))
+      this.resetQuestionExpiry(chatId);
     return gated;
   }
 
@@ -13003,30 +13006,37 @@ export class Daemon {
     if (!gate) return;
     if (gate.expiry) clearTimeout(gate.expiry);
     const windowMs = ev.expiry.windowMs;
-    const expiry = { at: this.opts.now() + windowMs, windowMs };
+    // While any surface has this chat open the clock is held at a full window
+    // (no timer armed); it starts running again once the last one leaves.
+    const paused = this.isChatFocused(chatId);
+    const expiry = paused
+      ? { at: this.opts.now() + windowMs, windowMs, paused: true }
+      : { at: this.opts.now() + windowMs, windowMs };
     const denyMessage = questionExpiredMessage(windowMs / 1000, this.questionExpiry.expiredPrompt);
     // Replayed verbatim to a surface that reconnects after the reset
     // (`replayChat`), so it must carry the SAME deadline the live update
     // below announces, not the stale one from when the question was asked.
     this.pendingPermissionEvents.set(key, { ...ev, expiry });
-    gate.expiry = setTimeout(() => {
-      // Still pending? `submitPermissionResponse` clears the timer when the
-      // surface answers, so reaching here means nobody did.
-      if (!this.permissionGates.has(key)) return;
-      this.opts.logger.warn(
-        { chatId, requestId: ev.requestId, tool: ASK_USER_QUESTION },
-        'permission request expired unanswered',
-      );
-      this.submitPermissionResponse({
-        requestId: ev.requestId,
-        decision: 'deny',
-        denyMessage,
-        by: 'expiry',
-      });
-      this.rehideIfExpiredUnseen(chatId);
-    }, windowMs);
+    gate.expiry = undefined;
+    if (!paused)
+      gate.expiry = setTimeout(() => {
+        // Still pending? `submitPermissionResponse` clears the timer when the
+        // surface answers, so reaching here means nobody did.
+        if (!this.permissionGates.has(key)) return;
+        this.opts.logger.warn(
+          { chatId, requestId: ev.requestId, tool: ASK_USER_QUESTION },
+          'permission request expired unanswered',
+        );
+        this.submitPermissionResponse({
+          requestId: ev.requestId,
+          decision: 'deny',
+          denyMessage,
+          by: 'expiry',
+        });
+        this.rehideIfExpiredUnseen(chatId);
+      }, windowMs);
     // A pending request must never hold the process open on its own.
-    gate.expiry.unref?.();
+    gate.expiry?.unref?.();
     this.emit({
       type: 'chat.permission_expiry_update',
       chatId,
@@ -13041,6 +13051,11 @@ export class Daemon {
    * (`chat.question_activity`). Gives the pending question a fresh window so a
    * long free-text answer cannot outlast the countdown mid-typing.
    */
+  private isChatFocused(chatId: string): boolean {
+    for (const focused of this.surfaceFocusChat.values()) if (focused === chatId) return true;
+    return false;
+  }
+
   noteQuestionActivity(chatId: string): void {
     this.resetQuestionExpiry(chatId);
   }
