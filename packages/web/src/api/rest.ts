@@ -260,6 +260,26 @@ export type AccountPreferences = SharedSettings;
 /** What a settings write answers with: the committed shared state. */
 export type SharedState = Omit<SettingsChangedEvent, 'type'>;
 
+export interface IssueReportingStatus {
+  enabled: boolean;
+  repo: string;
+  tokenConfigured: boolean;
+  pending: number;
+  filed: number;
+  lastError: string | null;
+}
+
+export interface ManualIssueReport {
+  title: string;
+  description: string;
+  surface: string;
+  route: string;
+  build: string;
+  platform: string;
+  model: string;
+  recentErrors: string[];
+}
+
 export interface WebBotAuthStatus {
   ready: boolean;
   issue: string | null;
@@ -342,6 +362,11 @@ export type ComputerUseHost = {
 };
 
 export const api = {
+  issueReporting: () => request<IssueReportingStatus>('/api/issue-reporting'),
+  setIssueReporting: (enabled: boolean) =>
+    request<IssueReportingStatus>('/api/issue-reporting', { method: 'PUT', body: { enabled } }),
+  reportBug: (report: ManualIssueReport) =>
+    request<{ ok: true; url: string }>('/api/issue-reports', { method: 'POST', body: report }),
   webBotAuthStatus: () => request<WebBotAuthStatus>('/api/web-bot-auth'),
   listPads: () => request<{ pads: PadView[] }>('/api/pads'),
   padLibrary: () =>
@@ -506,6 +531,11 @@ export const api = {
     }>('/api/chats/counts'),
   listJobs: () => request<{ jobs: unknown[] }>('/api/jobs'),
   getJob: (id: string) => request<unknown>(`/api/jobs/${id}`),
+  // The enabled scheduled jobs that re-prompt a chat, with their next fire.
+  chatJobTicks: (chatId: string) =>
+    request<{ jobs: import('@patch/wire/jobs').ChatJobTick[] }>(
+      `/api/chats/${encodeURIComponent(chatId)}/jobs`,
+    ),
   createJob: (body: unknown) => request<unknown>('/api/jobs', { method: 'POST', body }),
   patchJob: (id: string, body: unknown) =>
     request<unknown>(`/api/jobs/${id}`, { method: 'PATCH', body }),
@@ -975,11 +1005,6 @@ export const api = {
   revokeProviderKey: (keyId: ProviderKeyId) =>
     request<SharedState>(`/api/providers/keys/${encodeURIComponent(keyId)}`, {
       method: 'DELETE',
-    }),
-  adoptProviderKey: (keyId: ProviderKeyId, hostId: string) =>
-    request<SharedState>(`/api/providers/keys/${encodeURIComponent(keyId)}/adopt`, {
-      method: 'POST',
-      body: { hostId },
     }),
   addAccount: (
     backendId: SharedBackendId,

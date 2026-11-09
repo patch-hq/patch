@@ -1007,6 +1007,7 @@ describe('permission request', () => {
     expect(sendMock).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'chat.permission_response',
+        chatId: 'c1',
         requestId: 'r1',
         approve: true,
         decision: 'approve',
@@ -1030,6 +1031,7 @@ describe('permission request', () => {
     expect(sendMock).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'chat.permission_response',
+        chatId: 'c1',
         requestId: 'r1',
         approve: false,
         decision: 'deny',
@@ -1086,6 +1088,7 @@ describe('permission request', () => {
     expect(sendMock).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'chat.permission_response',
+        chatId: 'c1',
         requestId: 'r1',
         approve: true,
         decision: 'approve_with_session_allow',
@@ -1163,6 +1166,34 @@ describe('answered permission request (spec/15 § Chat detail)', () => {
     // The request itself still reads as what was asked.
     expect(hasText(r.root, 'Permission needed: Edit')).toBe(true);
     expect(optionsOn(r.root)).toBe(0);
+  });
+
+  it('an approved call still running shows a spinner; it goes once the result lands', () => {
+    request('r1');
+    useChatStore.setState((st) => ({
+      chats: { ...st.chats, c1: { ...st.chats['c1']!, activity: 'running' } },
+    }));
+    const r = renderRN(<ChatDetailScreen />);
+    const approve = findAllHost(r.root, (i) => i.type === 'Pressable').find((p) =>
+      hasText(p, '1. Yes'),
+    )!;
+    actSync(() => approve.props.onPress());
+    expect(hasText(r.root, 'Approved, running')).toBe(true);
+    expect(findAllHost(r.root, byTestId('permission-running'))).toHaveLength(1);
+
+    actSync(() => {
+      useChatStore.setState((st) => ({
+        timelines: {
+          ...st.timelines,
+          c1: [
+            ...(st.timelines['c1'] ?? []),
+            { seq: 9, kind: 'tool_result', callId: 'x', at: 0 } as never,
+          ],
+        },
+      }));
+    });
+    expect(findAllHost(r.root, byTestId('permission-running'))).toHaveLength(0);
+    expect(hasText(r.root, 'Approved')).toBe(true);
   });
 
   it('denying reads Denied', () => {
@@ -1378,9 +1409,40 @@ describe('voice call lines', () => {
       content: '[voice hand-off • mobile] Add milk to the shopping list',
     });
     const r = renderRN(<ChatDetailScreen />);
-    expect(findAllHost(r.root, byTestId('voice-handoff'))).toHaveLength(1);
-    expect(hasText(r.root, 'Asked the agent: Add milk to the shopping list')).toBe(true);
+    // Unanswered: the row says the agent is being asked.
+    expect(findAllHost(r.root, byTestId('voice-handoff-pending'))).toHaveLength(1);
+    expect(hasText(r.root, 'Asking the agent… Add milk to the shopping list')).toBe(true);
     expect(findAllHost(r.root, byTestId('message-user'))).toHaveLength(0);
+  });
+
+  it('a hand-off reads as asked once the agent has answered', () => {
+    const { applyEvent } = useChatStore.getState();
+    applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      seq: 1,
+      role: 'user',
+      content: '[voice hand-off • mobile] Add milk to the shopping list',
+    });
+    applyEvent({ type: 'chat.message', chatId: 'c1', seq: 2, role: 'assistant', content: 'Done' });
+    const r = renderRN(<ChatDetailScreen />);
+    expect(findAllHost(r.root, byTestId('voice-handoff'))).toHaveLength(1);
+    expect(findAllHost(r.root, byTestId('voice-handoff-pending'))).toHaveLength(0);
+    expect(hasText(r.root, 'Asked the agent: Add milk to the shopping list')).toBe(true);
+  });
+
+  it('a failed hand-off shows under an agent failed label', () => {
+    useChatStore.getState().applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      seq: 1,
+      role: 'system',
+      content: '[call] <- agent: failed: boom',
+    });
+    const r = renderRN(<ChatDetailScreen />);
+    expect(findAllHost(r.root, byTestId('call-agent-reply'))).toHaveLength(1);
+    expect(hasText(r.root, 'agent failed')).toBe(true);
+    expect(hasText(r.root, 'failed: boom')).toBe(true);
   });
 
   it("a finished call's cost is a muted line, not the agent's reply", () => {

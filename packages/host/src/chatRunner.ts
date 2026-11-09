@@ -1022,11 +1022,14 @@ export function restartResendAsOwnMessage<E extends { type: string }>(
       state.afterMarker = true;
       return { ...ev, content: RESTART_INTERRUPTION_MARKER } as E;
     }
-    if (msg.content === RESTART_INTERRUPTION_MARKER) state.afterMarker = true;
+    // Any other message between the marker and a user message means the
+    // automated re-send never landed, so a later retry is a genuine one.
+    state.afterMarker = msg.content === RESTART_INTERRUPTION_MARKER;
     return ev;
   }
-  if (msg.role !== 'user' || !state.afterMarker) return ev;
+  const directlyAfterMarker = state.afterMarker;
   state.afterMarker = false;
+  if (msg.role !== 'user' || !directlyAfterMarker) return ev;
   if (msg.retryOfSeq === undefined) return ev;
   const { retryOfSeq: _folded, ...own } = msg;
   return own as unknown as E;
@@ -3463,7 +3466,11 @@ export class Daemon {
     for (const m of metas) {
       const state = this.chatState.get(m.chatId);
       if (!state || state.snoozedUntil !== SNOOZE_UNTIL_COMPLETE) continue;
-      const resumed = this.owedResend.has(m.chatId) || this.parkedTurns.has(m.chatId);
+      const wake = this.wake.peek(m.chatId);
+      const resumed =
+        this.owedResend.has(m.chatId) ||
+        this.parkedTurns.has(m.chatId) ||
+        (wake !== null && wake.every === undefined);
       if (resumed || this.aggregateActivity(m.chatId) === 'running') continue;
       this.wakeFromSnooze(m.chatId);
     }
@@ -5934,10 +5941,19 @@ export class Daemon {
     state.lastUpdated = Math.max(this.opts.now(), state.lastUpdated + 1);
   }
 
-  /** Running, or idle between turns with a goal still to be judged. */
+  /**
+   * Running, idle between turns with a goal still to be judged, or idle with a
+   * one-shot self-wake armed (the chat is about to wake itself). A loop never
+   * completes, so it is not work to wait for.
+   */
   private hasWorkToComplete(chatId: string): boolean {
     const state = this.chatState.get(chatId);
-    return this.aggregateActivity(chatId) === 'running' || (state?.goal ?? null) !== null;
+    const wake = this.wake.peek(chatId);
+    return (
+      this.aggregateActivity(chatId) === 'running' ||
+      (state?.goal ?? null) !== null ||
+      (wake !== null && wake.every === undefined)
+    );
   }
 
   /**
@@ -9409,6 +9425,26 @@ export class Daemon {
       return false;
     }
 
+    // The track this turn writes to must be the track meta calls active.
+    // A fork flips `activeBranchId` the moment it is CALLED, so a turn that
+    // keeps running on the old track while its fork never gets to run (a host
+    // restart cut it off) writes every event to an inactive branch and the
+    // surfaces' replay of the active one stops dead. A queued fork is the one
+    // legitimate reason for the two to differ. NO FALLBACK: say so, loudly.
+    if (!fork) {
+      const activeBranch = this.opts.metaStore.read(chatId)?.activeBranchId;
+      const writingTo = this.branchIdFor(chatId);
+      const forkQueued = (this.turnQueues.get(chatId) ?? []).some((q) => q.fork !== undefined);
+      if (activeBranch !== undefined && activeBranch !== writingTo && !forkQueued) {
+        this.failPreflight(
+          chatId,
+          'sdk_error',
+          `history would be written to track ${writingTo} but the chat's active track is ${activeBranch}; refusing to write to an inactive track`,
+        );
+        return false;
+      }
+    }
+
     // F1 — a RESUME with no claudeSessionId would silently start a brand-new
     // contextless session. Distinguish the legitimate first query of a
     // freshly-spawned chat (resume undefined is correct) from a resume of a
@@ -12750,7 +12786,14 @@ export class Daemon {
     // e.g. `permissionModeMismatch` below not catching a resumed session).
     if (tool === 'Bash') {
       this.opts.logger.warn(
-        { chatId, tool, mode: modeAtRequest },
+        {
+          chatId,
+          tool,
+          mode: modeAtRequest,
+          decisionReason,
+          description,
+          command: args['command'],
+        },
         'Bash escalated to a human permission ask',
       );
     }
@@ -12772,6 +12815,10 @@ export class Daemon {
       );
       return Promise.resolve({ approve: false, denyMessage: QUESTION_SUPERSEDED_MESSAGE });
     }
+    // The SDK's own reason for escalating (a safety check, not the mode) is the
+    // only explanation for a card nobody expected, e.g. under `bypassPermissions`;
+    // show it rather than a bare "Permission needed: Bash".
+    if (description === undefined && decisionReason) description = decisionReason;
     const requestId = randomUUID();
     // Register the gate BEFORE announcing the request, not after.
     //
@@ -16088,6 +16135,12 @@ export class Daemon {
     this.emit(ev);
   }
 
+  /** One-line snippet of the chat's latest user/assistant message, or null. */
+  private lastMessagePreview(chatId: string): string | null {
+    const head = this.chatLog.lastMessage(chatId);
+    return head === null ? null : makePreviewSnippet(head);
+  }
+
   /**
    * Build the current `chat.state` frame without emitting it — the pure half
    * of `emitState`, reused by `replayFromLog` so a reconnecting surface always
@@ -16115,6 +16168,9 @@ export class Daemon {
       // How far this host's own log of the chat reaches; the server compares it
       // with what it has committed (spec/01 § Message log).
       ...(lastSeq >= 0 ? { lastSeq } : {}),
+      // What was said last (not the first prompt, which is `preview`), so a
+      // surface not subscribed to the chat can show it and mark it unread.
+      lastMessagePreview: this.lastMessagePreview(chatId),
       // spec/04 § Branching — "Status in the sidebar reflects the chat as a
       // whole": the active branch's own activity, raised by any OTHER branch
       // currently running or awaiting permission (`aggregateActivity`).

@@ -431,6 +431,19 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // most-recently-used default and counts as a user-chosen folder.
   // A restored draft's folder wins; then a `?folder=` shortcut; then MRU.
   const [folder, setFolder] = useState(draftFolder || folderParam || mruFolder);
+  // The host the folder above belongs to. A folder is a path on ONE host's
+  // disk, so it is only ever sent to that host. The selected host can move
+  // out from under it (the remembered host went offline and the choice fell
+  // to the live default), and then the folder is another machine's: it is
+  // dropped rather than sent to a host where it does not exist.
+  const [folderHostId, setFolderHostId] = useState<string | null>(chosenHostId);
+  // `null` = no host recorded for it (a bare `?folder=` naming no known host),
+  // which belongs to whichever host is selected.
+  const folderOnOtherHost =
+    folder !== '' &&
+    pickerHostId !== null &&
+    folderHostId !== null &&
+    folderHostId !== pickerHostId;
 
   // The field at the top of the pop-up doubles as a search box: while its text
   // is not itself one of the options, only the recents containing it are listed.
@@ -622,6 +635,13 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   const userEditedFolder = useRef(
     (folderParam !== null && folderParam !== '') || draftFolder !== '',
   );
+  // The folder belongs to a host other than the one selected: clear it. Marked
+  // as the user's own so the MRU seeding below does not put it straight back.
+  useEffect(() => {
+    if (!folderOnOtherHost) return;
+    userEditedFolder.current = true;
+    setFolder('');
+  }, [folderOnOtherHost]);
   // A SECOND `?folder=` navigation on this same mount (the sidebar's Recent
   // folders rows `navigate()` to `/chats/new?folder=<path>` with no `?draft=`,
   // so clicking a different row re-renders this screen rather than remounting
@@ -641,6 +661,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     userEditedFolder.current = true;
     setFolder(folderParam);
     const hostId = recentFolderHosts.get(folderParam);
+    setFolderHostId(hostId ?? pickerHostId);
     if (hostId) setChosenHostId(hostId);
   }, [folderParam, recentFolderHosts]);
   // The chatId once the chat has been created for THIS new-chat session. Caches
@@ -659,6 +680,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   useEffect(() => {
     if (!userEditedFolder.current && !folder && mruPair) {
       setFolder(mruPair.folder);
+      setFolderHostId(mruPair.hostId);
       setChosenHostId(mruPair.hostId);
     }
   }, [mruPair, folder]);
@@ -686,6 +708,10 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     const trimmed = folder.trim();
     if (!trimmed) {
       pushError('Folder is required before starting a chat.');
+      return null;
+    }
+    if (folderOnOtherHost) {
+      pushError('That folder is on another host — choose a folder on this host.');
       return null;
     }
     if (submitting) return null;
@@ -934,6 +960,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   function chooseFolder(f: string): void {
     userEditedFolder.current = true;
     setFolder(f);
+    setFolderHostId(pickerHostId);
     setChosenHostId(pickerHostId);
     setPickerOpen(false);
   }
@@ -945,6 +972,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     if (hostId === pickerHostId) return;
     userEditedFolder.current = true;
     setChosenHostId(hostId);
+    setFolderHostId(hostId);
     setBrowseDir(null);
     // Land on the first folder in this host's list, never on an empty pick.
     setFolder(optionsForHost(hostId)[0] ?? '');
@@ -975,6 +1003,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
     if (next === undefined) return;
     userEditedFolder.current = true;
     setFolder(next);
+    setFolderHostId(pickerHostId);
     setChosenHostId(pickerHostId);
     quickFolderRefs.current.get(next)?.focus();
   }
@@ -1119,6 +1148,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                   onChange={(e) => {
                     userEditedFolder.current = true;
                     setFolder(e.target.value);
+                    setFolderHostId(pickerHostId);
                   }}
                   onKeyDown={(e) => {
                     if (isPlainEnter(e)) {
@@ -1276,6 +1306,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                         setFolder(browse.dir as string);
                         // The tree just browsed belongs to `pickerHostId`; keep
                         // the chosen path bound to the host it came from.
+                        setFolderHostId(pickerHostId);
                         setChosenHostId(pickerHostId);
                         setPickerOpen(false);
                       }}

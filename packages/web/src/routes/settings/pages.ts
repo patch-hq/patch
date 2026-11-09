@@ -21,6 +21,7 @@ export type SettingsPageId =
   | 'devices'
   | 'shortcuts'
   | 'updates'
+  | 'bugs'
   | 'account';
 
 export const SETTINGS_PAGES: { id: SettingsPageId; title: string; group: string }[] = [
@@ -43,6 +44,7 @@ export const SETTINGS_PAGES: { id: SettingsPageId; title: string; group: string 
   { id: 'devices', title: 'Devices', group: 'Setup' },
   { id: 'shortcuts', title: 'Shortcuts', group: 'Setup' },
   { id: 'updates', title: 'Updates', group: 'System' },
+  { id: 'bugs', title: 'Bug reports', group: 'System' },
   { id: 'account', title: 'Account', group: 'System' },
 ];
 

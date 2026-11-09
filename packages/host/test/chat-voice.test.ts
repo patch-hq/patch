@@ -205,7 +205,15 @@ describe('chat voice glue', () => {
     expect(onCosted).toHaveBeenCalledTimes(1);
   });
 
-  it('marks a hand-off going out and coming back, and counts it in the call line', async () => {
+  it('does not write an empty or punctuation-only utterance as the user speaking', async () => {
+    const { daemon, events, folder, glue } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    const tl = glue.makeTimeline(init(chatId));
+    for (const blank of ['', '   ', '…', '...', ' . ', '?']) tl.userSaid(chatId, blank);
+    expect(messages(events)).toEqual([]);
+  });
+
+  it('counts a hand-off in the call line without writing it twice (the chat already holds the request and the answer)', async () => {
     const { daemon, events, folder, glue } = setup();
     const chatId = await daemon.spawnChat({ folder });
     const sessionId = init(chatId).sessionId;
@@ -227,19 +235,14 @@ describe('chat voice glue', () => {
       messages(events)
         .filter((m) => m.role === 'system')
         .map((m) => m.content),
-    ).toEqual([
-      '[call] -> sent to agent: Add milk to the list',
-      '[call] <- agent: Done.',
-      '[call] Call 0:52 · Gemini Flash · $0 · 1 hand-off',
-    ]);
+    ).toEqual(['[call] Call 0:52 · Gemini Flash · $0 · 1 hand-off']);
   });
 
-  it('records a long hand-off answer whole', async () => {
+  it('writes a failed hand-off into the chat, so a pending one never hangs', async () => {
     const { daemon, events, folder, glue } = setup();
     const chatId = await daemon.spawnChat({ folder });
-    const reply = `${'word '.repeat(200)}end\nsecond line`;
-    glue.handoffAnswered({ chatId, reply });
-    expect(messages(events).map((m) => m.content)).toEqual([`[call] <- agent: ${reply}`]);
+    glue.handoffAnswered({ chatId, reply: 'failed: boom' });
+    expect(messages(events).map((m) => m.content)).toEqual(['[call] <- agent: failed: boom']);
   });
 
   it('puts the line in the chat the moment the call ends, whatever the agent is doing', async () => {

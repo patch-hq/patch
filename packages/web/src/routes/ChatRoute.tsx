@@ -64,6 +64,7 @@ import { FinishedGoalBanner, GoalBanner } from '../components/GoalBanner.js';
 import { TaskBar } from '../components/TaskBar.js';
 import { ReminderBanner } from '../components/ReminderBanner.js';
 import { WakeBar } from '../components/WakeBar.js';
+import { JobTickBar } from '../components/JobTickBar.js';
 import { api } from '../api/rest.js';
 import { SkillRefChatContext, useSkillTarget } from '../components/SkillRef.js';
 import { linkSkillTokens } from '../lib/skillToken.js';
@@ -172,6 +173,7 @@ import { thumbUrl } from '../lib/thumbUrl.js';
 import { failed } from '../lib/errorCopy.js';
 import { useReadAloud } from '../lib/readAloud.js';
 import { isStoppable } from '../stores/types.js';
+import { splitQuoteLines } from '../lib/quoteLines.js';
 
 // How many unresolved, sweepable permission requests this chat has right now.
 // A question card is not one: approve-all deliberately steps past it (spec/14
@@ -2166,6 +2168,9 @@ export function ChatRoute({
           entry={entry}
           chatId={chatId}
           isJobTrigger={entry.seq === firstUserSeq}
+          {...(entry.kind === 'message' && entry.voiceHandoff
+            ? { handoffPending: voiceHandoffPending(timeline, i) }
+            : {})}
           // spec/04 ## Message queueing — 1-based place within the queued block
           // (which is the timeline tail from `queuedFrom`), so the chip renumbers
           // the moment a promote or remove reorders it.
@@ -2226,6 +2231,7 @@ export function ChatRoute({
         contentVersion={timeline.length}
         onOpen={() => expandTo(0, false)}
       />
+      <JobTickBar chatId={row.chatId} />
       {row.jobId ? (
         <JobBar chatId={row.chatId} jobId={row.jobId} at={row.lastUserActivity} />
       ) : null}
@@ -2399,10 +2405,25 @@ export function ChatRoute({
 // stable callbacks from ChatRoute a streaming delta (one per token) re-renders
 // exactly the one entry that changed instead of the whole conversation. Without
 // this the chat page gets slower the longer it runs — the user's "Chat page slow".
+/**
+ * spec/07 § The fast voice and the chat's agent — a hand-off is waiting while
+ * nothing from the agent (a reply, or the failure line) follows it.
+ */
+export function voiceHandoffPending(timeline: ChatEventEntry[], at: number): boolean {
+  for (let j = at + 1; j < timeline.length; j++) {
+    const e = timeline[j]!;
+    if (e.kind !== 'message') continue;
+    if (e.role === 'assistant' && e.handoffAnswer) return false;
+    if (e.role === 'system' && (e.content ?? '').startsWith('[call] <- agent:')) return false;
+  }
+  return true;
+}
+
 const TimelineEntry = memo(function TimelineEntry({
   entry,
   chatId,
   isJobTrigger,
+  handoffPending,
   queuePos,
   release,
   hostOnline,
@@ -2431,6 +2452,8 @@ const TimelineEntry = memo(function TimelineEntry({
   chatId: string;
   /** spec/08 § Action — this is the job-spawned chat's trigger turn (see `firstUserSeq` above). */
   isJobTrigger?: boolean;
+  /** spec/07 § The fast voice and the chat's agent — a hand-off the agent has not answered yet. */
+  handoffPending?: boolean;
   /** 1-based place in the queued block; set only on a queued entry. */
   queuePos?: number;
   /** What releases a queued entry: the next tool call or the end of the turn. */
@@ -2501,7 +2524,7 @@ const TimelineEntry = memo(function TimelineEntry({
       if (line.startsWith('<- agent:')) {
         return (
           <div className="call-agent-reply" data-testid="call-agent-reply">
-            <div className="call-summary-line">agent replied</div>
+            <div className="call-summary-line">agent failed</div>
             <div className="call-agent-reply-text">{line.slice('<- agent:'.length).trim()}</div>
           </div>
         );
@@ -2556,9 +2579,9 @@ const TimelineEntry = memo(function TimelineEntry({
   if (entry.kind === 'message' && entry.role === 'user' && entry.voiceHandoff) {
     return (
       <ToolDisclosure
-        testid="voice-handoff"
+        testid={handoffPending ? 'voice-handoff-pending' : 'voice-handoff'}
         variant="trigger"
-        summary={`Asked the agent: ${entry.content ?? ''}`}
+        summary={`${handoffPending ? 'Asking the agent…' : 'Asked the agent:'} ${entry.content ?? ''}`}
         detail={<code>{entry.content ?? ''}</code>}
       />
     );
@@ -3648,6 +3671,22 @@ function SideThreadMarker({ chatId, branch }: { chatId: string; branch: ChatBran
  * Usually one item; a turn can carry more than one (e.g. a todo-edit reminder
  * and a broadcast digest together), so each gets its own row.
  */
+function SystemContextText({ text }: { text: string }): JSX.Element {
+  return (
+    <div className="system-context-text">
+      {splitQuoteLines(text).map((run, i) =>
+        run.quote ? (
+          <blockquote key={i} className="system-context-quote">
+            {run.text}
+          </blockquote>
+        ) : (
+          <span key={i}>{run.text}</span>
+        ),
+      )}
+    </div>
+  );
+}
+
 function SystemContextDisclosures({ items }: { items: SystemContextItem[] }): JSX.Element {
   return (
     <div className="system-context-group" data-testid="system-context-group">
@@ -3657,7 +3696,7 @@ function SystemContextDisclosures({ items }: { items: SystemContextItem[] }): JS
           testid="system-context"
           variant="system-context"
           summary={item.label}
-          detail={<pre className="system-context-text">{item.text}</pre>}
+          detail={<SystemContextText text={item.text} />}
         />
       ))}
     </div>
@@ -3694,7 +3733,7 @@ function ProviderContextPanel({
           testid="provider-context"
           variant="system-context"
           summary={entry.count > 1 ? `${entry.label} ×${entry.count}` : entry.label}
-          detail={<pre className="system-context-text">{entry.text}</pre>}
+          detail={<SystemContextText text={entry.text} />}
           defaultOpen={verbosity === 'full'}
         />
       ))}

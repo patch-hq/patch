@@ -6,6 +6,7 @@ import { presentFailure } from '../../src/lib/usage';
 import React from 'react';
 import { formatElapsed as formatToolElapsed } from '../../src/lib/backgroundTasks';
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
   Easing,
@@ -104,7 +105,6 @@ import { SnoozeDivider } from '../../src/components/SnoozeDivider';
 import { editQueuedMessage, promoteMessage, unqueueMessage } from '../../src/lib/queuedActions';
 import { getComposerDraft, setComposerDraft } from '../../src/lib/composerDraft';
 import { useUiStore } from '../../src/stores/uiStore';
-import { CallDock } from '../../src/components/CallBar';
 import {
   ManagerChatsList,
   ManagerSegments,
@@ -112,10 +112,12 @@ import {
 } from '../../src/components/ManagerChats';
 import { BrowserLiveCard } from '../../src/components/browser/BrowserLiveCard';
 import { ChatBars } from '../../src/components/ChatBars';
+import { JobTickChip } from '../../src/components/chatBars/JobTickBar';
 import { ChatFindBar } from '../../src/components/ChatFindBar';
 import { findMessageSeqs, stepIndex } from '../../src/lib/chatFind';
 import { ContextDisclosure } from '../../src/components/ContextDisclosure';
 import { openArtifactTarget } from '../../src/lib/pads';
+import { AnchoredMenu } from '../../src/components/AnchoredMenu';
 import { ChatActionsMenu } from '../../src/components/ChatActionsMenu';
 import { useReadEverything } from '../../src/lib/readEverything';
 import { EmptyState } from '../../src/components/EmptyState';
@@ -795,6 +797,7 @@ function ChatDetailBody(): React.ReactElement {
   // Find in chat (spec/15 § Find in chat): the matches are messages, and each
   // step jumps to one through the same path a search hit uses.
   const [findOpen, setFindOpen] = React.useState(false);
+  const [callMenuOpen, setCallMenuOpen] = React.useState(false);
   const [findQuery, setFindQuery] = React.useState('');
   const [findIndex, setFindIndex] = React.useState(-1);
   const findSeqs = React.useMemo(
@@ -939,7 +942,12 @@ function ChatDetailBody(): React.ReactElement {
         item.kind === 'group' ? (
           <ToolGroupItem entries={item.entries} chatId={chatId} />
         ) : (
-          <TimelineItem entry={item.entry} chatId={chatId} result={item.result} />
+          <TimelineItem
+            entry={item.entry}
+            chatId={chatId}
+            result={item.result}
+            handoffPending={item.handoffPending === true}
+          />
         );
       if (item.key !== highlightKey) return cell;
       return (
@@ -1116,61 +1124,78 @@ function ChatDetailBody(): React.ReactElement {
           */}
           {/* No crumb for a special thread: its fixed label IS the title, and
               its folder is the same word again ("Manager" over "Manager"). */}
-          {isReservedSpecialThread(chatId) ? null : (
-            <Text
-              testID="chat-folder"
-              style={{ ...typography.meta, color: colors.ink3 }}
-              numberOfLines={1}
-            >
-              {[row?.folder ? folderName(row.folder) : null, hostLabel !== '' ? hostLabel : null]
-                .filter((p): p is string => p !== null)
-                .join(' · ') || '—'}
-            </Text>
-          )}
+          {/* Status chips ride the folder line, not the title row: beside the
+              title they took its width and crushed it to a letter or two. The
+              title keeps the full width; the folder crumb shrinks first. */}
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            {isReservedSpecialThread(chatId) ? null : (
+              <Text
+                testID="chat-folder"
+                style={{ ...typography.meta, color: colors.ink3, flexShrink: 1 }}
+                numberOfLines={1}
+              >
+                {[row?.folder ? folderName(row.folder) : null, hostLabel !== '' ? hostLabel : null]
+                  .filter((p): p is string => p !== null)
+                  .join(' · ') || '—'}
+              </Text>
+            )}
+            {row?.model ? (
+              <Text
+                testID="chat-model"
+                style={{
+                  ...typography.meta,
+                  color: colors.ink3,
+                  marginLeft: space.sm,
+                  flexShrink: 0,
+                }}
+                numberOfLines={1}
+              >
+                {compactModelLabel(row.model)}
+              </Text>
+            ) : null}
+            {runningWorkers > 0 ? (
+              <View
+                testID="header-workers"
+                style={{
+                  backgroundColor: colors.lineSoft,
+                  paddingHorizontal: space.sm,
+                  paddingVertical: 2,
+                  borderRadius: radii.pill,
+                  marginLeft: space.sm,
+                  flexShrink: 0,
+                }}
+              >
+                <Text
+                  style={{ ...typography.meta, fontFamily: fonts.bodyMedium, color: colors.ink2 }}
+                >
+                  {runningWorkers} {runningWorkers === 1 ? 'worker' : 'workers'}
+                </Text>
+              </View>
+            ) : null}
+            <JobTickChip chatId={chatId} />
+            {row?.awaitingPermission ? (
+              <View
+                style={{
+                  backgroundColor: colors.waitingTint,
+                  paddingHorizontal: space.sm,
+                  paddingVertical: 2,
+                  borderRadius: radii.pill,
+                  marginLeft: space.sm,
+                  flexShrink: 0,
+                }}
+              >
+                <Text
+                  style={{ ...typography.meta, fontFamily: fonts.bodyMedium, color: colors.ink }}
+                >
+                  waiting on you
+                </Text>
+              </View>
+            ) : null}
+          </View>
           <Text style={{ ...typography.title, color: colors.ink }} numberOfLines={1}>
             {title}
           </Text>
         </Pressable>
-        {row?.model ? (
-          <Text
-            testID="chat-model"
-            style={{ ...typography.meta, color: colors.ink3 }}
-            numberOfLines={1}
-          >
-            {compactModelLabel(row.model)}
-          </Text>
-        ) : null}
-        {runningWorkers > 0 ? (
-          <View
-            testID="header-workers"
-            style={{
-              backgroundColor: colors.lineSoft,
-              paddingHorizontal: space.sm,
-              paddingVertical: 2,
-              borderRadius: radii.pill,
-              marginRight: space.sm,
-            }}
-          >
-            <Text style={{ ...typography.meta, fontFamily: fonts.bodyMedium, color: colors.ink2 }}>
-              {runningWorkers} {runningWorkers === 1 ? 'worker' : 'workers'}
-            </Text>
-          </View>
-        ) : null}
-        {row?.awaitingPermission ? (
-          <View
-            style={{
-              backgroundColor: colors.waitingTint,
-              paddingHorizontal: space.sm,
-              paddingVertical: 2,
-              borderRadius: radii.pill,
-              marginRight: space.sm,
-            }}
-          >
-            <Text style={{ ...typography.meta, fontFamily: fonts.bodyMedium, color: colors.ink }}>
-              waiting on you
-            </Text>
-          </View>
-        ) : null}
         {/* Call button — the ONLY place a sustained voice CALL is started on
             mobile (spec/15 § Chat detail). Read-only mirror threads have no
             voice call, so it is hidden there. A long press starts hands-free
@@ -1179,15 +1204,31 @@ function ChatDetailBody(): React.ReactElement {
         {!readOnlyMirror ? (
           <Pressable
             onPress={() => startVoiceCall(chatId)}
-            onLongPress={() => startVoiceCall(chatId, 'hands-free')}
+            onLongPress={() => setCallMenuOpen(true)}
             style={{ padding: space.sm }}
             accessibilityRole="button"
             accessibilityLabel="Start voice call"
-            accessibilityHint="Long press to start hands-free"
+            accessibilityHint="Long press for call options"
           >
             <Phone size={20} color={colors.ink} />
           </Pressable>
         ) : null}
+        {/* Long-press the call button: Call, Hands-free, Voice settings. */}
+        <AnchoredMenu
+          visible={callMenuOpen}
+          onDismiss={() => setCallMenuOpen(false)}
+          items={[
+            { id: 'call', label: 'Call', testID: 'call-menu-call' },
+            { id: 'hands-free', label: 'Hands-free', testID: 'call-menu-hands-free' },
+            { id: 'voice-settings', label: 'Voice settings', testID: 'call-menu-settings' },
+          ]}
+          onSelect={(id) => {
+            setCallMenuOpen(false);
+            if (id === 'call') startVoiceCall(chatId);
+            else if (id === 'hands-free') startVoiceCall(chatId, 'hands-free');
+            else router.push('/settings/voice' as Href);
+          }}
+        />
         {/* Find in this chat (spec/15 § Find in chat). */}
         <Pressable
           testID="chat-find-toggle"
@@ -1233,6 +1274,12 @@ function ChatDetailBody(): React.ReactElement {
           ref={listRef}
           style={{ flex: 1, opacity: settled ? 1 : 0 }}
           pointerEvents={settled ? 'auto' : 'none'}
+          // Default ('never') makes the first tap on any row while the keyboard
+          // is up only dismiss the keyboard — so option, Send answer and Cancel
+          // taps on a question card did nothing after the composer or an
+          // `Other` input had focus. 'handled' lets the card's own Pressables
+          // take the tap and still dismisses the keyboard on empty space.
+          keyboardShouldPersistTaps="handled"
           // See the block comment above `chatScrollMemory`: data goes in
           // newest-first, `inverted` renders it back in normal reading order.
           data={invertedRows}
@@ -1376,9 +1423,6 @@ function ChatDetailBody(): React.ReactElement {
             <ChevronDown size={20} color={colors.ink} />
           </Pressable>
         ) : null}
-        {/* A call on this chat docks its control bar here; a call on another
-            chat shows as the on-call pill (spec/15 § Voice states). */}
-        <CallDock chatId={chatId} />
         {readOnlyMirror ? (
           <View
             testID="composer-readonly"
@@ -1454,6 +1498,55 @@ function ChatDetailBody(): React.ReactElement {
 // the row expands its args + (for Edit/Write/MultiEdit) an inline unified
 // diff (spec/15 ## Chat detail). NO side-by-side — the unified renderer is
 // the only diff view on mobile.
+/**
+ * The outcome line of an answered permission card. An approved call that has
+ * not returned yet says it is running (spinner), so "Approved" never reads as
+ * a finished, static card while the command is still going.
+ */
+function PermissionOutcome({
+  chatId,
+  entry,
+  resolved,
+}: {
+  chatId: string;
+  entry: ChatEventEntry;
+  resolved: 'approve' | 'deny';
+}): React.ReactElement {
+  const colors = useTheme();
+  const running = useChatStore((s) => {
+    if (resolved !== 'approve' || entry.permissionCancelled) return false;
+    if (s.chats[chatId]?.activity !== 'running') return false;
+    const tl = s.timelines[chatId] ?? NO_TIMELINE;
+    const idx = tl.findIndex((e) => e.kind === 'permission' && e.requestId === entry.requestId);
+    return idx >= 0 && !tl.slice(idx + 1).some((e) => e.kind === 'tool_result');
+  });
+  const label =
+    resolved === 'approve'
+      ? entry.permissionCancelled
+        ? 'Approved, cancelled by interrupt'
+        : running
+          ? 'Approved, running'
+          : 'Approved'
+      : 'Denied';
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: space.sm }}>
+      {running ? (
+        <ActivityIndicator testID="permission-running" size="small" color={colors.ink3} />
+      ) : null}
+      <Text
+        testID="permission-outcome"
+        style={{
+          ...typography.meta,
+          color: colors.ink3,
+          marginLeft: running ? space.sm : 0,
+        }}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+}
+
 /** A running call's elapsed time, from the host's start stamp. Display only. */
 function ToolElapsed({ since }: { since: number }): React.ReactElement {
   const colors = useTheme();
@@ -1481,6 +1574,8 @@ function ToolCallItem({
   entry: ChatEventEntry;
   /** This call's own tool_result, folded into the same row (spec/15). */
   result?: ChatEventEntry;
+  /** spec/07 — a voice hand-off the agent has not answered yet. */
+  handoffPending?: boolean;
 }): React.ReactElement {
   // spec/15 § Chat detail — Delegate tool row: a `patch_delegate` call is the
   // one tool row that does not collapse like the rest, on web's rules
@@ -2535,6 +2630,7 @@ const TimelineItem = React.memo(function TimelineItem({
   entry,
   chatId,
   result,
+  handoffPending,
   queuePos,
   release,
   queuedDraft,
@@ -2545,6 +2641,8 @@ const TimelineItem = React.memo(function TimelineItem({
   chatId: string;
   /** This call's own tool_result, folded into the same row (spec/15). */
   result?: ChatEventEntry;
+  /** spec/07 — a voice hand-off the agent has not answered yet. */
+  handoffPending?: boolean;
   /** 1-based place in the queued block; set only on a queued entry. */
   queuePos?: number;
   /** What releases a queued entry: the next tool call or the end of the turn. */
@@ -2589,11 +2687,25 @@ const TimelineItem = React.memo(function TimelineItem({
   if (entry.kind === 'message' && entry.voiceHandoff) {
     return (
       <Text
-        testID="voice-handoff"
+        testID={handoffPending ? 'voice-handoff-pending' : 'voice-handoff'}
         style={{ fontSize: textMin, color: colors.ink3, marginBottom: space.sm }}
       >
-        {`Asked the agent: ${entry.content ?? ''}`}
+        {`${handoffPending ? 'Asking the agent…' : 'Asked the agent:'} ${entry.content ?? ''}`}
       </Text>
+    );
+  }
+  if (
+    entry.kind === 'message' &&
+    entry.role === 'system' &&
+    (entry.content ?? '').startsWith('[call] <- agent:')
+  ) {
+    return (
+      <View testID="call-agent-reply" style={{ marginBottom: space.sm }}>
+        <Text style={{ fontSize: textMin, color: colors.ink3 }}>agent failed</Text>
+        <Text style={{ color: colors.ink }}>
+          {(entry.content ?? '').slice('[call] <- agent:'.length).trim()}
+        </Text>
+      </View>
     );
   }
   if (
@@ -3096,16 +3208,7 @@ const TimelineItem = React.memo(function TimelineItem({
           </Text>
         ) : null}
         {resolved ? (
-          <Text
-            testID="permission-outcome"
-            style={{ ...typography.meta, color: colors.ink3, marginTop: space.sm }}
-          >
-            {resolved === 'approve'
-              ? entry.permissionCancelled
-                ? 'Approved, cancelled by interrupt'
-                : 'Approved'
-              : 'Denied'}
-          </Text>
+          <PermissionOutcome chatId={chatId} entry={entry} resolved={resolved} />
         ) : (
           <View style={{ flexDirection: 'column', marginTop: space.sm }}>
             {(
@@ -3146,6 +3249,7 @@ const TimelineItem = React.memo(function TimelineItem({
                     if (!entry.requestId) return;
                     permissionDeliveryTracker.send({
                       type: 'chat.permission_response',
+                      chatId,
                       requestId: entry.requestId,
                       approve: opt.approve,
                       decision: opt.decision,

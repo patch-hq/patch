@@ -16,7 +16,7 @@ import {
   restartingVersion,
   type WireEvent,
 } from '@patch/wire';
-import { loadCredential } from '../lib/credential.js';
+import { loadCredential, decodeSurfaceClaims } from '../lib/credential.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { saveEvents } from '../lib/transcriptCache.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
@@ -24,6 +24,7 @@ import { useVoiceStore } from '../stores/voiceStore.js';
 import { speakInterrupt } from '../lib/speakInterrupt.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useMeetingStore } from '../stores/meetingStore.js';
+import { useSpeechSetupStore } from '../stores/speechSetupStore.js';
 import { useBrowserHandoffStore } from '../stores/browserHandoffStore.js';
 import { useTerminalStore } from '../stores/terminalStore.js';
 import { useHostSearchStore } from '../stores/hostSearchStore.js';
@@ -886,6 +887,13 @@ export class PatchWs {
     // entry it does not have). The host says so as an out-of-band chat.error
     // with no real chat behind it, so say it where the edit was made — as an
     // error — rather than filing it under a phantom chat nobody opens.
+    // A meeting was refused because the host has no speech set up: not a failed
+    // turn, so no transcript entry. Offer the two routes instead.
+    if (event.type === 'chat.error' && event.error.code === 'speech_not_set_up') {
+      const hostId = useChatStore.getState().chats[event.chatId]?.hostId ?? '';
+      useSpeechSetupStore.getState().open({ chatId: event.chatId, hostId });
+      return;
+    }
     if (event.type === 'chat.error' && event.error.code === 'claude_settings_invalid') {
       useUiStore.getState().pushError(event.error.message);
       return;
@@ -1028,6 +1036,14 @@ export class PatchWs {
     // drives the "🎙 <name>" pill on the Speakers row.
     if (event.type === 'device.session') {
       useVoiceStore.getState().setDeviceSession(event.deviceId, event.name, event.active);
+      return;
+    }
+    // spec/07 § A call can move between devices — a call live on another
+    // surface is offered for switching here. This surface's own call is not.
+    if (event.type === 'voice.call') {
+      if (event.surfaceId === decodeSurfaceClaims()?.surfaceId) return;
+      const { type: _type, active, ...call } = event;
+      useVoiceStore.getState().setRemoteCall(call, active);
       return;
     }
     if (event.type === 'chat.call_request') {

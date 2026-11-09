@@ -127,16 +127,10 @@ describe('TabLayout — NewChatTabButton (raised plus)', () => {
   });
 });
 
-// spec/15 § Voice states — while a call is open, the on-call pill floats just
-// above the tab bar on every tab; with no call there is nothing there.
-describe('TabLayout — on-call pill', () => {
-  it('shows no pill with no call', () => {
-    useVoiceStore.setState({ activeSession: null });
-    const r = renderRN(<TabLayout />);
-    expect(r.root.findAll((i) => i.props['testID'] === 'call-pill')).toHaveLength(0);
-  });
-
-  it('floats the pill above the tab bar while a call is open', () => {
+// spec/15 § Voice states — the call strip is pinned by the app shell, so the
+// tab layout carries no on-call pill of its own.
+describe('TabLayout — no on-call pill', () => {
+  it('floats nothing while a call is open', () => {
     useVoiceStore.setState({
       activeSession: { sessionId: 's', chatId: 'thread_manager', audioUrl: '/a', startedAt: 0 },
       callPhase: 'listening',
@@ -145,16 +139,7 @@ describe('TabLayout — on-call pill', () => {
       callConnectedAt: null,
     });
     const r = renderRN(<TabLayout />);
-    const pill = findAllHost(r.root, (i) => i.props['testID'] === 'call-pill');
-    expect(pill).toHaveLength(1);
-    // Its holder floats over the screens, just clear of the 64px tab bar.
-    const holder = findAllHost(
-      r.root,
-      (i) =>
-        i.type === 'View' && (i.props['style'] as { position?: string })?.position === 'absolute',
-    ).find((v) => v.findAll((i) => i.props['testID'] === 'call-pill').length > 0);
-    expect(holder?.props['style']).toMatchObject({ position: 'absolute', bottom: 64 + 8 });
-    expect(holder?.props['pointerEvents']).toBe('box-none');
+    expect(r.root.findAll((i) => i.props['testID'] === 'call-pill')).toHaveLength(0);
     actSync(() => r.unmount());
     useVoiceStore.setState({ activeSession: null });
   });

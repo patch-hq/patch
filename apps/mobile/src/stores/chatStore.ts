@@ -335,6 +335,14 @@ interface ChatState {
   resolveSideThreadPermission(chatId: string, branchId: string, requestId: string): void;
   setActiveChat(chatId: string | null): void;
   markRead(chatId: string): void;
+  /**
+   * A background fetch brought this chat's transcript onto the phone without
+   * showing it (spec/12 § Offline reading), so the live stream never told the
+   * list row about it. Move the row's head — preview and `lastSeq`, hence the
+   * unread dot — to what was fetched. Only for a chat this phone has opened
+   * before: for any other the whole history would read as unread.
+   */
+  noteTranscriptHead(chatId: string, events: readonly unknown[]): void;
   setArchived(chatId: string, archived: boolean): void;
   /** `pinnedAt` puts back the time a refused unpin took away; omitted, a pin is stamped now. */
   setPinned(chatId: string, pinned: boolean, pinnedAt?: number | null): void;
@@ -524,11 +532,20 @@ function emptyRow(chatId: string, folder: string): ChatRow {
  * keeps the known value rather than being wiped — the same "omitted is
  * unchanged" rule `chat.state` follows.
  */
-function mergeListRow(prior: ChatRow | undefined, r: ChatListRow): ChatRow {
+function mergeListRow(prior: ChatRow | undefined, rosterRow: ChatListRow): ChatRow {
+  const { lastMessagePreview, lastSeq: rosterSeq, ...r } = rosterRow;
   const base = prior ?? emptyRow(r.chatId, r.folder);
   return {
     ...base,
     ...r,
+    // The roster knows the latest message, which the live stream tells only for
+    // chats this phone has subscribed to. Take it unless the row already holds
+    // something newer (a message that beat this answer).
+    lastSeq: Math.max(base.lastSeq, rosterSeq ?? 0),
+    preview:
+      lastMessagePreview != null && (rosterSeq ?? 0) >= base.lastSeq
+        ? lastMessagePreview
+        : base.preview,
     awaitingState: false,
     model: r.model !== undefined ? r.model : (prior?.model ?? null),
     jobId: r.jobId !== undefined ? r.jobId : base.jobId,
@@ -580,6 +597,10 @@ function rowsToRecord(
     // A roster snapshot older than the last `chat.state` is a race, not news
     // (the same rule `chat.state` applies to itself): keep the live state.
     const live = prior !== undefined && prior.lastUpdated > r.lastUpdated;
+    const answered =
+      prior !== undefined &&
+      r.lastUpdated > prior.lastUpdated &&
+      r.activity !== 'awaiting-permission';
     next[r.chatId] = mergeListRow(
       prior
         ? {
@@ -606,9 +627,12 @@ function rowsToRecord(
             // that still reads the chat settled must not flip it back to idle
             // (every foreground refreshes the roster).
             optimisticSend: prior.optimisticSend,
-            pendingPermissions: prior.pendingPermissions,
+            // A newer roster that no longer says awaiting-permission means the
+            // request was answered (maybe elsewhere): holding the old flag
+            // leaves "waiting on you" up on a running turn.
+            pendingPermissions: answered ? [] : prior.pendingPermissions,
             lastSeq: prior.lastSeq,
-            awaitingPermission: prior.awaitingPermission,
+            awaitingPermission: answered ? false : prior.awaitingPermission,
           }
         : undefined,
       live
@@ -860,6 +884,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // carries no seq, and a chat not open gets no replay. Without it
             // `lastSeq` stays 0 and a visited chat reads as grey instead of `done`.
             lastSeq: Math.max(row.lastSeq, event.lastSeq ?? 0),
+            // What was said last. Only when this frame reaches at least as far
+            // as the row already does: a live message that landed first is newer.
+            preview:
+              event.lastMessagePreview != null && (event.lastSeq ?? 0) >= row.lastSeq
+                ? event.lastMessagePreview
+                : row.preview,
             // spec/14 § Sidebar ordering — an older host never sends the
             // field, so keep what is known rather than losing the sort key.
             lastUserActivity: event.lastUserActivity ?? row.lastUserActivity,
@@ -1633,6 +1663,46 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setActiveChat(chatId) {
     set({ activeChatId: chatId });
     if (chatId !== null) get().markRead(chatId);
+  },
+
+  noteTranscriptHead(chatId, events) {
+    const row = get().chats[chatId];
+    if (!row || row.lastReadSeq < 0) return;
+    let lastSeq = row.lastSeq;
+    let preview = row.preview;
+    let previewSeq = -1;
+    for (const raw of events) {
+      const e = raw as {
+        type?: string;
+        seq?: unknown;
+        role?: string;
+        content?: unknown;
+        error?: unknown;
+        synthetic?: unknown;
+        sessionChange?: unknown;
+        handoffLink?: unknown;
+        permissionModeChange?: unknown;
+        accountSwitch?: unknown;
+      };
+      if (typeof e.seq !== 'number') continue;
+      if (e.seq > lastSeq) lastSeq = e.seq;
+      const spoken =
+        e.type === 'chat.message' &&
+        (e.role === 'user' || e.role === 'assistant') &&
+        typeof e.content === 'string' &&
+        !e.error &&
+        !e.synthetic &&
+        e.permissionModeChange === undefined &&
+        e.accountSwitch === undefined;
+      if (spoken && e.seq >= previewSeq) {
+        previewSeq = e.seq;
+        const text =
+          e.role === 'user' ? stripVoicePrefix(e.content as string).text : (e.content as string);
+        preview = headCodePoints(text, 140);
+      }
+    }
+    if (lastSeq === row.lastSeq && preview === row.preview) return;
+    set({ chats: { ...get().chats, [chatId]: { ...row, lastSeq, preview } } });
   },
 
   markRead(chatId) {

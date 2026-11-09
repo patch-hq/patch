@@ -46,7 +46,8 @@ test.describe('removing a batch member', () => {
 
     await page.getByTestId('batch-remove-chat_bus').click();
 
-    expect(removed).toBe(true);
+    // The route handler runs asynchronously after the click; poll rather than read once.
+    await expect.poll(() => removed).toBe(true);
     await expect(page.getByTestId('batch-row-chat_bus')).toHaveCount(0);
     await expect(page.getByTestId('batch-empty')).toBeVisible();
 

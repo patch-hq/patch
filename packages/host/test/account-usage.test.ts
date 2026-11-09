@@ -134,6 +134,48 @@ describe('AccountUsageTracker', () => {
     expect(windows.overage).toBeDefined();
   });
 
+  it('a turn window with no figure keeps the probed figure for the same window', async () => {
+    const reset = 10_000_000;
+    const probe = vi.fn(
+      async (): Promise<ClaudeUsageResult> => ({
+        kind: 'ok',
+        reading: {
+          windows: { week: { status: 'allowed', utilization: 0.3, resetsAt: reset } },
+          blocked: false,
+          at: 1,
+        },
+      }),
+    );
+    const { tracker } = make({ probe, now: () => 5 });
+    await tracker.refresh('a', true);
+    tracker.observeFromTurn('a', 'week', { status: 'allowed', resetsAt: reset });
+    expect(tracker.get('a')!.reading.windows.week?.utilization).toBe(0.3);
+  });
+
+  it('a turn window with no figure does not inherit a figure from a window that has reset', async () => {
+    const probe = vi.fn(
+      async (): Promise<ClaudeUsageResult> => ({
+        kind: 'ok',
+        reading: {
+          windows: { week: { status: 'allowed', utilization: 0.9, resetsAt: 1_000 } },
+          blocked: false,
+          at: 1,
+        },
+      }),
+    );
+    const { tracker } = make({ probe, now: () => 5_000 });
+    await tracker.refresh('a', true);
+    tracker.observeFromTurn('a', 'week', { status: 'allowed', resetsAt: 9_000_000 });
+    expect(tracker.get('a')!.reading.windows.week?.utilization).toBeUndefined();
+  });
+
+  it('a turn window with no figure and nothing held asks for a probe', async () => {
+    const probe = vi.fn(async () => ok());
+    const { tracker } = make({ probe, now: () => 5 });
+    tracker.observeFromTurn('a', 'week', { status: 'allowed' });
+    await vi.waitFor(() => expect(probe).toHaveBeenCalledTimes(1));
+  });
+
   it('stamps every reading with when it was taken, so a stale figure cannot pass for live', async () => {
     const { tracker } = make({ probe: async () => ok(), now: () => 1_234 });
     tracker.observeFromTurn('a', 'session', { status: 'allowed', utilization: 0.1 });

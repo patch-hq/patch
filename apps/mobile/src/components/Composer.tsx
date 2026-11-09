@@ -89,6 +89,7 @@ import {
   TextInput,
   View,
   useWindowDimensions,
+  PanResponder,
 } from 'react-native';
 import {
   Mic,
@@ -105,6 +106,9 @@ import {
   Plus,
   CircleGauge,
   CircleUserRound,
+  Camera,
+  Image as ImageIcon,
+  Paperclip,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -427,6 +431,12 @@ export function Composer({
     : { kind: 'chat', chatId };
   const storedAttachments = useComposerAttachmentStore((s) => s.byKey[chatId] ?? NO_ATTACHMENTS);
   const attachments = edit ? NO_ATTACHMENTS : storedAttachments;
+  // Keys handed to a send that hasn't settled. The sent message is already in
+  // the chat (its files uploading) while the hook check runs, so the draft
+  // must not show them too. They stay in the store until the send is accepted;
+  // a blocked send brings the chips straight back.
+  const [sendingKeys, setSendingKeys] = React.useState<ReadonlySet<string>>(() => new Set());
+  const visibleAttachments = attachments.filter((a) => !sendingKeys.has(a.key));
   // This chat's row — the mode, model, host and activity the controls on the
   // right of the action row read, and the host the skill list below is fetched
   // from. Undefined until the roster or the stream has named the chat; the
@@ -502,6 +512,9 @@ export function Composer({
   const slashQuery = activeToken?.query ?? null;
   const slashActive = activeToken !== null;
   const trimmedFolder = (folder ?? '').trim();
+  // A new chat has no row yet — its host is the setup's pick (same rule as
+  // `usageHostId`); reading `row?.hostId` alone left the `/` list never loading.
+  const skillsHostId = setup ? setup.hostId : (row?.hostId ?? null);
   React.useEffect(() => {
     // Re-read on EVERY open, not once per folder: the list lives on the host's
     // filesystem and changes there must show up on the next `/`. Typing more of
@@ -509,10 +522,10 @@ export function Composer({
     // last loaded list stays on screen while the new one is in flight. NO
     // FALLBACK: a failed fetch surfaces an error rather than a silently empty
     // list.
-    if (!slashActive || trimmedFolder === '' || !row?.hostId) return;
+    if (!slashActive || trimmedFolder === '' || !skillsHostId) return;
     let live = true;
     void api
-      .skills(trimmedFolder, row.hostId)
+      .skills(trimmedFolder, skillsHostId)
       .then((r) => {
         if (!live) return;
         setSkills(r.skills ?? []);
@@ -526,7 +539,7 @@ export function Composer({
     return () => {
       live = false;
     };
-  }, [slashActive, trimmedFolder, row?.hostId]);
+  }, [slashActive, trimmedFolder, skillsHostId]);
   // spec/15 § Skill autocomplete — chips: a completed `/<skill>` must be
   // recognised (and rendered as a chip, with its preview reachable) even
   // before `/` has ever been opened this session — e.g. reopening a chat
@@ -539,12 +552,12 @@ export function Composer({
   // packages/web/src/components/Composer.tsx's identical guard for why).
   const chipFetchPrimedRef = React.useRef<string | null>(null);
   React.useEffect(() => {
-    if (trimmedFolder === '' || slashActive || !row?.hostId) return;
+    if (trimmedFolder === '' || slashActive || !skillsHostId) return;
     if (chipFetchPrimedRef.current === trimmedFolder) return;
     if (!draft.includes('/')) return;
     let live = true;
     void api
-      .skills(trimmedFolder, row.hostId)
+      .skills(trimmedFolder, skillsHostId)
       .then((r) => {
         if (!live) return;
         chipFetchPrimedRef.current = trimmedFolder;
@@ -557,7 +570,7 @@ export function Composer({
     return () => {
       live = false;
     };
-  }, [trimmedFolder, draft, slashActive, row?.hostId]);
+  }, [trimmedFolder, draft, slashActive, skillsHostId]);
   // The skill last completed in this folder sorts to the top (spec/15 § Skill
   // autocomplete) — ordering only, applied AFTER the typed prefix filter.
   const filteredSkills =
@@ -839,10 +852,15 @@ export function Composer({
   // with it — otherwise a message past the height cap shows its top forever.
   const [inputScrollY, setInputScrollY] = React.useState(0);
   // Rendered height of the dictation mirror, so the input can grow to fit it.
-  const [mirrorHeight, setMirrorHeight] = React.useState(0);
   const mirrorScrollRef = React.useRef<ScrollView>(null);
   // Follow the newest words unless the user has scrolled up.
   const mirrorStickRef = React.useRef(true);
+  // (No measured height any more: the mirror is laid out in normal flow while
+  // dictating and the input fills it, so the box is sized in the same layout
+  // pass as the text — no onLayout → setState → second render per line.)
+  // A height the user dragged the grip to, null for the default quarter cap.
+  const [dictCap, setDictCap] = React.useState<number | null>(null);
+  const dictCapStartRef = React.useRef(0);
   // Mic recording, or dictation mode with words being spoken: the input is painted over by the mirror.
   const livePreviewOn = micState !== 'idle' || livePartial !== '';
   // The interim words are drawn where the final ones will land: at the caret.
@@ -863,7 +881,35 @@ export function Composer({
   React.useEffect(() => {
     if (!livePreviewOn) mirrorStickRef.current = true;
   }, [livePreviewOn]);
-  const inputMaxHeight = livePreviewOn ? dictationMaxHeight(windowHeight) : COMPOSER_MAX_HEIGHT;
+  const inputMaxHeight = livePreviewOn
+    ? (dictCap ?? dictationMaxHeight(windowHeight))
+    : COMPOSER_MAX_HEIGHT;
+  React.useEffect(() => {
+    if (!livePreviewOn) setDictCap(null);
+  }, [livePreviewOn]);
+  const gripResponder = React.useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onPanResponderGrant: () => {
+          dictCapStartRef.current = dictCapNowRef.current;
+        },
+        onPanResponderMove: (_e, g) => {
+          const h = dictCapStartRef.current - g.dy;
+          setDictCap(
+            Math.max(
+              COMPOSER_MIN_HEIGHT,
+              Math.min(Math.round(windowHeightRef.current * 0.6), Math.round(h)),
+            ),
+          );
+        },
+      }),
+    [],
+  );
+  const dictCapNowRef = React.useRef(inputMaxHeight);
+  dictCapNowRef.current = inputMaxHeight;
+  const windowHeightRef = React.useRef(windowHeight);
+  windowHeightRef.current = windowHeight;
   // spec/15 § Skill autocomplete — chips: the mirror only needs to exist
   // while there's a chip to draw, and only when dictation isn't already using
   // the transparent-input trick for its own mirror — the two never overlap.
@@ -1334,6 +1380,12 @@ export function Composer({
     // the echo back out and puts the draft back.
     check?: Promise<HookCheckResponse>,
   ): void => {
+    const sentKeys = pending.map((a) => a.key);
+    const unhide = (): void => {
+      if (sentKeys.length === 0) return;
+      setSendingKeys((cur) => new Set([...cur].filter((k) => !sentKeys.includes(k))));
+    };
+    if (sentKeys.length > 0) setSendingKeys((cur) => new Set([...cur, ...sentKeys]));
     const localId = sendMessage(target, text, files, check ? { hold: true } : {});
     if (dictatedSendRef.current) markDictatedSend(localId);
     // First message is when a reply you might not be watching for becomes
@@ -1370,6 +1422,7 @@ export function Composer({
               .pushError(`couldn’t release the draft’s attachments: ${err.message}`);
           });
         }
+        unhide();
       }
     };
     if (!check) {
@@ -1380,6 +1433,7 @@ export function Composer({
       setHookChecking(false);
       if (res.decision === 'block') {
         cancelHeld(target, localId);
+        unhide();
         // The draft goes back as it was, with whatever was typed since after it.
         const typed = draftRef.current;
         updateDraft(typed.length === 0 ? text : `${text}\n${typed}`);
@@ -1686,14 +1740,14 @@ export function Composer({
         </View>
       ) : null}
       {/* Removable thumbnails/chips above the input (spec/15 § Composer). */}
-      {attachments.length > 0 ? (
+      {visibleAttachments.length > 0 ? (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ gap: space.xs, paddingBottom: space.xs }}
           style={{ opacity: resolving ? 0.6 : 1 }}
         >
-          {attachments.map((a) => (
+          {visibleAttachments.map((a) => (
             <View
               key={a.key}
               testID="composer-attachment"
@@ -1857,6 +1911,18 @@ export function Composer({
           five-button trio beside it left barely half the width for the text.
           `position: 'relative'` is explicit because the live-dictation mirror
           below is absolutely positioned against this box. */}
+      {livePreviewOn && !edit ? (
+        <View
+          testID="dictation-grip"
+          accessibilityLabel="Resize dictation box"
+          {...gripResponder.panHandlers}
+          style={{ height: 20, alignItems: 'center', justifyContent: 'center' }}
+        >
+          <View
+            style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: colors.lineSoft }}
+          />
+        </View>
+      ) : null}
       <View testID="composer-input-row" style={{ position: 'relative' }}>
         <TextInput
           ref={inputRef}
@@ -1930,10 +1996,11 @@ export function Composer({
             // (spec/15 § Composer). Past the cap it scrolls internally.
             // While dictating, the words are drawn by the mirror, not held by
             // the input, so grow to the mirror's height like typing would.
-            minHeight: livePreviewOn
-              ? Math.min(Math.max(COMPOSER_MIN_HEIGHT, mirrorHeight), inputMaxHeight)
-              : COMPOSER_MIN_HEIGHT,
-            maxHeight: inputMaxHeight,
+            // While dictating the input fills the in-flow mirror instead
+            // (absolute), so its height is the mirror's, in the same pass.
+            ...(livePreviewOn
+              ? { position: 'absolute' as const, left: 0, right: 0, top: 0, bottom: 0 }
+              : { minHeight: COMPOSER_MIN_HEIGHT, maxHeight: inputMaxHeight }),
             paddingLeft: edit ? space.md : FIELD_PAD_LEFT,
             paddingRight: FIELD_PAD_RIGHT,
             paddingVertical: space.sm,
@@ -1960,14 +2027,12 @@ export function Composer({
           // A scroll view, not a clipped box: past the cap the view follows the
           // newest words to the bottom, and the user can scroll up through the
           // rest. Scrolling up stops the follow; reaching the bottom resumes it.
+          // In flow: this sets the box's height, the input sits over it.
           <ScrollView
             testID="dictation-mirror-scroll"
             ref={mirrorScrollRef}
             style={{
-              position: 'absolute',
-              left: 0,
-              right: 0,
-              top: 0,
+              minHeight: COMPOSER_MIN_HEIGHT,
               maxHeight: inputMaxHeight,
             }}
             nestedScrollEnabled
@@ -1981,10 +2046,7 @@ export function Composer({
               if (mirrorStickRef.current) mirrorScrollRef.current?.scrollToEnd({ animated: false });
             }}
           >
-            <View
-              onLayout={(e) => setMirrorHeight(e.nativeEvent.layout.height)}
-              style={{ minHeight: COMPOSER_MIN_HEIGHT, justifyContent: 'flex-end' }}
-            >
+            <View style={{ minHeight: COMPOSER_MIN_HEIGHT, justifyContent: 'flex-end' }}>
               <Text
                 testID="dictation-preview"
                 style={{
@@ -2174,7 +2236,79 @@ export function Composer({
         {/* Settings (spec/15 § Composer): the standing settings for the next
             turn, as icons so the row stays one line — approval mode, model
             by its short name, account, effort. Same order as web. */}
-        {!edit ? (
+        {/* While dictating the model switch steps aside so camera, photo and
+            file stay one tap away. */}
+        {!edit && livePreviewOn ? (
+          <View
+            testID="composer-dictating-attach"
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 2, flexShrink: 0 }}
+          >
+            <Pressable
+              testID="dictating-camera"
+              onPress={() => void takePhoto()}
+              disabled={disabled || resolving}
+              style={({ pressed }) => ({
+                width: ACTION_SIZE,
+                height: ACTION_HEIGHT,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: radii.md,
+                backgroundColor: pressed ? colors.divider : 'transparent',
+              })}
+              accessibilityRole="button"
+              accessibilityLabel="Take photo"
+            >
+              <Camera
+                size={ICON_SIZE}
+                strokeWidth={ICON_STROKE}
+                color={disabled ? colors.inkFaint : colors.ink3}
+              />
+            </Pressable>
+            <Pressable
+              testID="dictating-photo"
+              onPress={() => void pickImage()}
+              disabled={disabled || resolving}
+              style={({ pressed }) => ({
+                width: ACTION_SIZE,
+                height: ACTION_HEIGHT,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: radii.md,
+                backgroundColor: pressed ? colors.divider : 'transparent',
+              })}
+              accessibilityRole="button"
+              accessibilityLabel="Photo or image"
+            >
+              <ImageIcon
+                size={ICON_SIZE}
+                strokeWidth={ICON_STROKE}
+                color={disabled ? colors.inkFaint : colors.ink3}
+              />
+            </Pressable>
+            <Pressable
+              testID="dictating-file"
+              onPress={() => void pickDocument()}
+              disabled={disabled || resolving}
+              style={({ pressed }) => ({
+                width: ACTION_SIZE,
+                height: ACTION_HEIGHT,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: radii.md,
+                backgroundColor: pressed ? colors.divider : 'transparent',
+              })}
+              accessibilityRole="button"
+              accessibilityLabel="Any file"
+            >
+              <Paperclip
+                size={ICON_SIZE}
+                strokeWidth={ICON_STROKE}
+                color={disabled ? colors.inkFaint : colors.ink3}
+              />
+            </Pressable>
+          </View>
+        ) : null}
+        {!edit && !livePreviewOn ? (
           <View
             testID="composer-settings-row"
             style={{ flexDirection: 'row', alignItems: 'center', gap: 2, flexShrink: 0 }}

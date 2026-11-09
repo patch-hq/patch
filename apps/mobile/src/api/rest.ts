@@ -208,6 +208,9 @@ export interface ChatListEntry {
   todos?: TodoItem[];
   /** A special thread turned off (spec/06 § Disabled). Optional, as `goal`. */
   disabled?: boolean;
+  /** Latest user/assistant message snippet and the chat's high-water seq. Optional: an older server omits them. */
+  lastMessagePreview?: string | null;
+  lastSeq?: number;
 }
 
 /**
@@ -825,6 +828,11 @@ export const api = {
     request<{ ok: true }>(`/api/secrets/${encodeURIComponent(key)}`, { method: 'DELETE' }),
   listJobs: () => request<{ jobs: unknown[] }>('/api/jobs'),
   getJob: (id: string) => request<unknown>(`/api/jobs/${id}`),
+  // The enabled scheduled jobs that re-prompt a chat, with their next fire.
+  chatJobTicks: (chatId: string) =>
+    request<{ jobs: import('@patch/wire/jobs').ChatJobTick[] }>(
+      `/api/chats/${encodeURIComponent(chatId)}/jobs`,
+    ),
   // Create / update / delete jobs. Bodies are shaped by src/lib/jobEditor
   // (JobCreateBody / JobPatchBody from @patch/wire/jobs) — mirrors the web
   // editor's api.createJob / api.patchJob / api.deleteJob.

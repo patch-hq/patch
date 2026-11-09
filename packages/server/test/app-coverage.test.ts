@@ -405,6 +405,37 @@ describe('app.ts — /api/download/:name (APK download)', () => {
     }
   });
 
+  it('patch.apk serves the release named in android-latest.json, ignoring a stale patch.apk on disk', async () => {
+    writeFileSync(join(downloadsDir, 'patch.apk'), 'stale');
+    writeFileSync(join(downloadsDir, 'patch-1.2.3.apk'), 'latest bytes');
+    writeFileSync(
+      join(downloadsDir, 'android-latest.json'),
+      JSON.stringify({ file: 'patch-1.2.3.apk' }),
+    );
+    const registry = Registry.load(dir);
+    const app = await build({ logger: false, registry, hostLink: new InProcessHostLink() });
+    try {
+      const res = await app.inject({ method: 'GET', url: '/api/download/patch.apk' });
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toBe('latest bytes');
+      expect(res.headers['content-disposition']).toContain('patch-1.2.3.apk');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('patch.apk 404s without a sidecar even if a stale patch.apk exists', async () => {
+    writeFileSync(join(downloadsDir, 'patch.apk'), 'stale');
+    const registry = Registry.load(dir);
+    const app = await build({ logger: false, registry, hostLink: new InProcessHostLink() });
+    try {
+      const res = await app.inject({ method: 'GET', url: '/api/download/patch.apk' });
+      expect(res.statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('200s + streams the APK with the right headers when published', async () => {
     writeFileSync(join(downloadsDir, 'patch-abc123.apk'), 'fake apk bytes');
     const registry = Registry.load(dir);

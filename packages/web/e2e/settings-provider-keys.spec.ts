@@ -19,17 +19,13 @@ const DEEPGRAM_ON_DICTATION = {
 };
 
 test.describe('Settings — Providers', () => {
-  test('shows whether each key is set, and names the host whose environment supplies one', async ({
-    page,
-  }) => {
+  test('shows whether each key is set, never naming a host', async ({ page }) => {
     await stubSettingsApi(page, { preferences: DEEPGRAM_ON_DICTATION });
     await page.goto(settingsUrl('providers'));
     await expect(page.getByTestId('provider-key-gemini-status')).toHaveText('Not set');
-    await expect(page.getByTestId('provider-key-groq-status')).toHaveText(
-      'From the environment on dev-host',
-    );
+    await expect(page.getByTestId('provider-key-groq-status')).toHaveText('Not set');
     await expect(page.getByTestId('provider-key-groq-revoke')).toHaveCount(0);
-    await expect(page.getByTestId('provider-key-groq-adopt')).toBeVisible();
+    await expect(page.getByTestId('provider-key-groq-adopt')).toHaveCount(0);
   });
 
   test('adding a key sends it once, masked, and the answer settles Providers; the host’s report settles Voice', async ({
@@ -97,17 +93,6 @@ test.describe('Settings — Providers', () => {
     await expect
       .poll(() => server.writes.map((w) => `${w.method} ${w.path}`))
       .toEqual(['DELETE /api/providers/keys/gemini']);
-  });
-
-  test('adopting a host’s environment key sends that host to the server', async ({ page }) => {
-    const server = await stubSettingsApi(page);
-    await page.goto(settingsUrl('providers'));
-    await page.getByTestId('provider-key-groq-adopt').click();
-    await expect
-      .poll(() => server.writes)
-      .toEqual([
-        { method: 'POST', path: '/api/providers/keys/groq/adopt', body: { hostId: 'd1' } },
-      ]);
   });
 
   test('a refusal shows the server’s sentence', async ({ page }) => {

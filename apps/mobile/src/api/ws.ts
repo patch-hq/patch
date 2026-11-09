@@ -70,6 +70,7 @@ export const HEARTBEAT_INTERVAL_MS = 10_000;
  * lands within the same frame it arrived in.
  */
 const PREFETCH_TIMEOUT_MS = 30_000;
+const PREFETCH_MAX_TRIES = 3;
 export const STORE_BATCH_MS = 16;
 /**
  * How long the link must be down, with the app in the FOREGROUND, before the
@@ -122,6 +123,7 @@ export class PatchWs {
   private prefetchQueue: Array<{ chatId: string; lastUpdated: number }> = [];
   private prefetching: { chatId: string; lastUpdated: number } | null = null;
   private prefetchTimer: TimerHandle | null = null;
+  private prefetchTries = new Map<string, number>();
 
   constructor(url: string) {
     this.url = url;
@@ -288,13 +290,20 @@ export class PatchWs {
         batch: true,
       }),
     );
-    // A host that never answers must be heard about, not waited on for ever.
+    // A host that never answers is retried quietly (a background copy is not
+    // worth a banner) and logged so it stays debuggable. It gives up after a
+    // few tries; the next roster refresh picks the chat up again.
     this.prefetchTimer = setTimeout(() => {
       const stuck = this.prefetching;
       this.endPrefetch(false);
-      useUiStore
-        .getState()
-        .pushError(`offline copy of chat ${stuck?.chatId ?? ''} timed out — will retry`);
+      if (stuck === null) return;
+      const tries = (this.prefetchTries.get(stuck.chatId) ?? 0) + 1;
+      this.prefetchTries.set(stuck.chatId, tries);
+      console.warn(`[ws] offline copy of ${stuck.chatId} timed out (try ${tries})`);
+      if (tries < PREFETCH_MAX_TRIES) {
+        this.prefetchQueue.push(stuck);
+        this.pumpPrefetch();
+      }
     }, PREFETCH_TIMEOUT_MS);
   }
 
@@ -303,7 +312,10 @@ export class PatchWs {
     this.prefetching = null;
     if (this.prefetchTimer !== null) clearTimeout(this.prefetchTimer);
     this.prefetchTimer = null;
-    if (done && finished) markSynced(finished.chatId, finished.lastUpdated);
+    if (done && finished) {
+      this.prefetchTries.delete(finished.chatId);
+      markSynced(finished.chatId, finished.lastUpdated);
+    }
     this.pumpPrefetch();
   }
 
@@ -333,6 +345,13 @@ export class PatchWs {
       // events may have been throttled: re-read the roster on every return.
       void refreshRoster();
       this.safeSend({ type: 'surface.foregrounded' });
+      // Live events for the open chat may have been throttled or lost while
+      // backgrounded with the socket still OPEN. The roster refresh does not
+      // touch the transcript, so ask again from our cursor — forced, because
+      // an unchanged cursor is exactly what the per-connection guard swallows.
+      // A reply that never arrived would otherwise stay missing until reopen.
+      const { activeChatId } = useChatStore.getState();
+      if (activeChatId !== null) this.requestReplay(activeChatId, { force: true });
       this.startHeartbeat();
     } else if (next !== 'active' && prev === 'active') {
       this.safeSend({ type: 'surface.backgrounded' });
@@ -884,6 +903,14 @@ export class PatchWs {
       useBrowserHandoffStore.getState().applyForm(event);
       return;
     }
+    // spec/07 § A call can move between devices — a call live on another
+    // surface is offered for switching here. This surface's own call is not.
+    if (event.type === 'voice.call') {
+      if (event.surfaceId === usePresenceStore.getState().surfaceId) return;
+      const { type: _type, active, ...call } = event;
+      useVoiceStore.getState().setRemoteCall(call, active);
+      return;
+    }
     if (event.type === 'chat.call_request') {
       useVoiceStore.getState().setIncoming({
         callId: event.callId,
@@ -977,7 +1004,10 @@ export class PatchWs {
       if (list) list.push(e);
       else byChat.set(chatId, [e]);
     }
-    for (const [chatId, list] of byChat) saveEvents(chatId, list);
+    for (const [chatId, list] of byChat) {
+      saveEvents(chatId, list);
+      useChatStore.getState().noteTranscriptHead(chatId, list);
+    }
     for (const e of events) {
       if (e.type !== 'chat.permission_response' || e.chatId === undefined) continue;
       saveResolution(

@@ -53,6 +53,7 @@ import {
   chatSearchFailed,
 } from '../../src/lib/labels';
 import { filterChats } from '../../src/lib/chatFilter';
+import { groupByStatus, SIDEBAR_GROUPINGS, type SidebarGrouping } from '../../src/lib/statusGroups';
 import {
   hostMarkerText,
   localSearchHits,
@@ -447,10 +448,21 @@ function SidebarViewMenu(): React.ReactElement {
   const stateFilter = useUiStore((s) => s.stateFilter);
   const setStateFilter = useUiStore((s) => s.setStateFilter);
 
+  const grouping = useUiStore((s) => s.grouping);
+  const setGrouping = useUiStore((s) => s.setGrouping);
+
   const view = sidebarViewFrom(mode === 'batch', attentionOnly, stateFilter);
 
   return (
-    <View style={{ paddingHorizontal: space.lg, marginBottom: space.sm, alignItems: 'flex-start' }}>
+    <View
+      style={{
+        paddingHorizontal: space.lg,
+        marginBottom: space.sm,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: space.md,
+      }}
+    >
       <OptionPicker
         testID="chats-view-menu"
         selectedId={view}
@@ -467,6 +479,14 @@ function SidebarViewMenu(): React.ReactElement {
             setStateFilter,
           })
         }
+      />
+      <OptionPicker
+        testID="chats-grouping-menu"
+        selectedId={grouping}
+        selectedLabel={SIDEBAR_GROUPINGS.find((o) => o.value === grouping)?.label ?? grouping}
+        emptyText="No groupings"
+        options={SIDEBAR_GROUPINGS.map((o) => ({ id: o.value, label: o.label }))}
+        onSelect={(id) => setGrouping(id as SidebarGrouping)}
       />
     </View>
   );
@@ -546,6 +566,7 @@ function buildSections(
   query: string,
   attentionMatches: ((row: ChatRow) => boolean) | null,
   stateFilter: ChatStateFilter,
+  grouping: SidebarGrouping = 'project',
 ): Section[] {
   const searching = query.trim() !== '';
   const match = (rows: ChatRow[]): ChatRow[] => (searching ? filterChats(rows, query) : rows);
@@ -637,21 +658,36 @@ function buildSections(
   }
   let folderRows = 0;
   const folderEntries: Array<[string, ChatRow[]]> = [...folders.entries()];
-  for (const [folder, rows] of folderEntries.sort(byFolderPath)) {
-    // spec/14 § Sidebar ordering — sorts by the user's own last activity
-    // (when they last sent a message, or chat creation), never `lastUpdated`:
-    // an agent reply, a status change, a job tick or a finished turn must
-    // not move a row.
-    const shown = matchPinnedOrFolder([...rows].sort(byRecentActivity));
-    if (shown.length === 0) continue;
-    folderRows += shown.length;
-    out.push({
-      kind: 'header',
-      label: folder || '(no folder)',
-      ...(folder ? { folder } : {}),
-      pill: folderBackPill(shown),
-    });
-    for (const r of shown) out.push({ kind: 'folder-row', row: r });
+  // Each folder's rows, in spec/14 § Sidebar ordering — sorted by the user's
+  // own last activity (when they last sent a message, or chat creation), never
+  // `lastUpdated`: an agent reply, a status change, a job tick or a finished
+  // turn must not move a row.
+  const folderShown: Array<[string, ChatRow[]]> = folderEntries
+    .sort(byFolderPath)
+    .map(([folder, rows]): [string, ChatRow[]] => [
+      folder,
+      matchPinnedOrFolder([...rows].sort(byRecentActivity)),
+    ])
+    .filter(([, shown]) => shown.length > 0);
+  if (grouping === 'status') {
+    // Desktop's "Group by status": the same rows, re-bucketed under a status
+    // heading each (pinned stay in their own section above).
+    for (const g of groupByStatus(folderShown.flatMap(([, shown]) => shown))) {
+      folderRows += g.rows.length;
+      out.push({ kind: 'header', label: g.label });
+      for (const r of g.rows) out.push({ kind: 'folder-row', row: r });
+    }
+  } else {
+    for (const [folder, shown] of folderShown) {
+      folderRows += shown.length;
+      out.push({
+        kind: 'header',
+        label: folder || '(no folder)',
+        ...(folder ? { folder } : {}),
+        pill: folderBackPill(shown),
+      });
+      for (const r of shown) out.push({ kind: 'folder-row', row: r });
+    }
   }
   // The section headers below always draw, so the list is never empty and the
   // FlatList's own empty component never shows: say it here (spec/15 § Empty
@@ -951,9 +987,10 @@ export default function ChatsScreen(): React.ReactElement {
   );
 
   const serverQuery = searching ? searchableQuery(query) : null;
+  const grouping = useUiStore((s) => s.grouping);
   const items = React.useMemo(
-    () => buildSections(chats, open, counts, query, attentionMatches, stateFilter),
-    [chats, open, counts, query, attentionMatches, stateFilter],
+    () => buildSections(chats, open, counts, query, attentionMatches, stateFilter, grouping),
+    [chats, open, counts, query, attentionMatches, stateFilter, grouping],
   );
 
   const toggle = (section: ChatsTabSection): void => {

@@ -43,12 +43,16 @@ export function ArtifactBar({ chatId }: { chatId: string }): ReactElement | null
       showsHorizontalScrollIndicator={false}
       // A horizontal ScrollView is flexGrow: 1 by default: in the chat column it
       // took the whole height and stretched the chip into a tall capsule.
-      style={{ flexGrow: 0 }}
+      // flexShrink 0 as well: the transcript below is flex: 1, and a shrinkable
+      // bar was squeezed under its chip's height so the chip painted over the
+      // transcript's first line.
+      style={{ flexGrow: 0, flexShrink: 0 }}
       contentContainerStyle={{
         flexDirection: 'row',
         alignItems: 'flex-start',
         gap: space.xs,
         paddingHorizontal: space.sm,
+        paddingBottom: space.xs,
       }}
     >
       {artifacts.map((artifact) => (

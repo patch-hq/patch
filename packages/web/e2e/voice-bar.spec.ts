@@ -28,7 +28,7 @@ test.describe('voice bar', () => {
 
   test('hands-free says the word that wakes it, and names the chat', async ({ page }) => {
     await page.goto(HANDS_FREE);
-    await expect(page.getByTestId('voice-bar-head')).toContainText('HANDS-FREE');
+    await expect(page.getByTestId('voice-bar-head')).toContainText('Hands-free');
     await expect(page.getByTestId('voice-bar-chat')).toContainText(/manager/i);
     await expect(page.getByTestId('voice-bar-line')).toContainText('Waiting for you to say');
     await expect(page.getByTestId('voice-bar-line')).toContainText('patch');
@@ -47,8 +47,9 @@ test.describe('voice bar', () => {
 
   test('a call gets the same bar, and never asks for an address word', async ({ page }) => {
     await page.goto(CALL);
-    await expect(page.getByTestId('voice-bar-head')).toContainText('ON CALL');
-    await expect(page.getByTestId('voice-bar-line')).toHaveText('Listening');
+    await expect(page.getByTestId('voice-bar-head')).toContainText('On call');
+    await expect(page.getByTestId('voice-bar-wave')).toBeVisible();
+    await expect(page.getByTestId('voice-bar-line')).not.toContainText('Listening');
     // Controls are reachable — the capsule's one advantage was that it was
     // clickable, and the bar must not lose it.
     await expect(page.getByTestId('voice-bar-mute')).toBeVisible();

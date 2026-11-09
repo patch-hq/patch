@@ -393,6 +393,12 @@ export const AudioSessionStartEvent = z
      * its default.
      */
     addressWord: z.string().min(1).optional(),
+    /**
+     * Move a call here: the host closes every other `call` session on the same
+     * chat (reason `transferred`) before this one opens, so the call is on one
+     * device at a time (`07-voice-app.md` § A call can move between devices).
+     */
+    takeOver: z.boolean().optional(),
   })
   .strict();
 export type AudioSessionStartEvent = z.infer<typeof AudioSessionStartEvent>;

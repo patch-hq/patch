@@ -1,5 +1,7 @@
 // Root layout: bootstraps services, mounts persistent overlays.
 
+import { CallStrip } from '../src/components/CallStrip';
+import { RemoteCallPill } from '../src/components/RemoteCallPill';
 import React from 'react';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRootNavigationState, useRouter } from 'expo-router';
@@ -337,6 +339,9 @@ export default function RootLayout(): React.ReactElement | null {
             fixed light-mode value) would stay wrong for the rest of a
             dark-mode session instead of just the first frame. */}
           <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} backgroundColor={colors.paper} />
+          {/* Pinned above every screen while a call runs (spec/15 § Voice states). */}
+          <CallStrip />
+          <RemoteCallPill />
           <Stack screenOptions={{ headerShown: false }}>
             {/* New-chat is an INLINE flow — no slide-up-from-the-bottom animation
               and no dimmed/black overlay. It appears instantly, matching the

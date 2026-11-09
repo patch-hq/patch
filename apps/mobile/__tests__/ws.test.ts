@@ -432,6 +432,43 @@ describe('connect() / openOnce()', () => {
   });
 });
 
+describe('foreground catch-up of the open chat', () => {
+  it('re-asks for the open chat from its cursor when the app returns to the foreground on a live socket', () => {
+    // Live events can be throttled or lost while the app is backgrounded, with
+    // the socket still reporting OPEN. The per-connection cursor guard would
+    // swallow a plain re-ask (same cursor), so the replies that went missing
+    // stayed missing until the chat was reopened.
+    useChatStore.getState().setActiveChat('c_fg');
+    useChatStore
+      .getState()
+      .applyEvents([
+        { type: 'chat.message', chatId: 'c_fg', seq: 4, role: 'user', content: 'hi' },
+      ] as never[]);
+    const ws = connectAndOpen();
+    const sock = FakeWebSocket.last();
+    ws.requestReplay('c_fg');
+    __emitAppStateChange('background');
+    sock.sent.length = 0;
+    __emitAppStateChange('active');
+    const replays = sock.sent
+      .map((s) => JSON.parse(s as string))
+      .filter((m) => m.type === 'chat.replay');
+    expect(replays).toEqual([{ type: 'chat.replay', chatId: 'c_fg', fromSeq: 4, batch: true }]);
+  });
+
+  it('asks for nothing on foreground when no chat is open', () => {
+    const ws = connectAndOpen();
+    const sock = FakeWebSocket.last();
+    ws.requestReplay('c_none');
+    __emitAppStateChange('background');
+    sock.sent.length = 0;
+    __emitAppStateChange('active');
+    expect(
+      sock.sent.map((s) => JSON.parse(s as string)).some((m) => m.type === 'chat.replay'),
+    ).toBe(false);
+  });
+});
+
 describe('AppState-driven heartbeat', () => {
   it('foregrounding sends surface.foregrounded and starts the heartbeat', () => {
     AppState.currentState = 'background';
@@ -1065,6 +1102,24 @@ describe('message dispatch', () => {
       JSON.stringify({ type: 'chat.call_request', callId: 'call1', chatId: 'c1', message: 'hey' }),
     );
     expect(useVoiceStore.getState().incomingCall).toMatchObject({ callId: 'call1', chatId: 'c1' });
+  });
+
+  it("voice.call tracks another surface's call, drops it on end, and ignores this phone's own", () => {
+    const sock = open();
+    usePresenceStore.getState().setIdentity('acc', 'phone-1');
+    useVoiceStore.setState({ remoteCalls: {} });
+    const base = { type: 'voice.call', surfaceKind: 'web', chatId: 'c1', startedAt: 5 };
+    sock.emitMessage(
+      JSON.stringify({ ...base, sessionId: 's1', surfaceId: 'web-1', active: true }),
+    );
+    sock.emitMessage(
+      JSON.stringify({ ...base, sessionId: 's2', surfaceId: 'phone-1', active: true }),
+    );
+    expect(Object.keys(useVoiceStore.getState().remoteCalls)).toEqual(['s1']);
+    sock.emitMessage(
+      JSON.stringify({ ...base, sessionId: 's1', surfaceId: 'web-1', active: false }),
+    );
+    expect(useVoiceStore.getState().remoteCalls).toEqual({});
   });
 
   it('chat.call_winner clears a matching incoming call', () => {

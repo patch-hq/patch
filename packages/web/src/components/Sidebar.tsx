@@ -840,7 +840,6 @@ function RegularSidebar({
                         ) : (
                           <ChevronDown size={13} aria-hidden className="folder-head-chev" />
                         )}
-                        <StatusBadge badge={g.icon} pendingWake={null} failureReason={null} />
                         <span className="folder-head-label">{g.label}</span>
                       </button>
                       {collapsed ? (
@@ -848,6 +847,9 @@ function RegularSidebar({
                           {g.rows.length}
                         </span>
                       ) : null}
+                      <span className="folder-head-badge" data-testid={`status-badge-${g.key}`}>
+                        <StatusBadge badge={g.icon} pendingWake={null} failureReason={null} />
+                      </span>
                     </div>
                     {collapsed
                       ? null

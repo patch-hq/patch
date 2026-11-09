@@ -85,6 +85,8 @@ export function startDictationMode(
   let pending = 0;
   let chain: Promise<void> = Promise.resolve();
   let preview: DictationPreview | null = null;
+  // The preview for the utterance being spoken died; wait for the next one.
+  let previewDead = false;
 
   function closePreview(): void {
     if (!preview) return;
@@ -147,16 +149,32 @@ export function startDictationMode(
           if (stopped) return;
           const utterance = segmenter.push(pcm);
           if (options.chatId !== undefined) {
-            if (!preview && segmenter.speaking) {
-              preview = (options.previewFactory ?? startDictationPreview)(
+            if (!preview && !previewDead && segmenter.speaking) {
+              const mine: DictationPreview = (options.previewFactory ?? startDictationPreview)(
                 options.chatId,
                 (text) => {
-                  if (!stopped && preview) cb.onPartial?.(text);
+                  if (!stopped && preview === mine) cb.onPartial?.(text);
                 },
-                (m) => cb.onError(`live transcript unavailable (still recording): ${m}`),
+                (m) => {
+                  // The connection dropped (a server restart does this). The
+                  // dead session must not stay in the slot, or no live
+                  // transcript would ever open again for the rest of the
+                  // dictation. It is not reopened mid-utterance either — that
+                  // would hammer a server that is still coming back — but the
+                  // next utterance gets a fresh one.
+                  if (preview === mine) {
+                    preview = null;
+                    previewDead = true;
+                    mine.stop();
+                    cb.onPartial?.('');
+                  }
+                  cb.onError(`live transcript unavailable (still recording): ${m}`);
+                },
               );
+              preview = mine;
             }
             preview?.push(pcm);
+            if (utterance || !segmenter.speaking) previewDead = false;
           }
           if (utterance) {
             closePreview();

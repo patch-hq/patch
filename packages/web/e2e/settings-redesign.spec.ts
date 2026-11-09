@@ -166,6 +166,7 @@ test.describe('Settings — desktop', () => {
       'Devices',
       'Shortcuts',
       'Updates',
+      'Bug reports',
       'Account',
     ]);
   });
@@ -250,8 +251,13 @@ test.describe('Settings — phone', () => {
 
       const back = page.getByTestId(p.testid).getByTestId('settings-back');
       await expect(back).toBeVisible();
-      await back.tap();
-      await expect(page.getByTestId('settings-route')).toHaveAttribute('data-page', 'index');
+      // A touch that lands while the page is still settling (a CPU-starved CI
+      // runner) can miss the arrow; re-tap until the list is back, never past it.
+      const route = page.getByTestId('settings-route');
+      await expect(async () => {
+        if ((await route.getAttribute('data-page')) !== 'index') await back.tap({ timeout: 2_000 });
+        await expect(route).toHaveAttribute('data-page', 'index', { timeout: 2_000 });
+      }).toPass({ timeout: 15_000 });
       await expect(page.getByTestId('settings-nav')).toBeVisible();
       await expect(page.getByTestId('settings-main')).toBeHidden();
     }
