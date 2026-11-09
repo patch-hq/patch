@@ -1198,6 +1198,31 @@ export const DISALLOWED_NATIVE_TOOLS = [
 const RUN_IN_BACKGROUND_TOOLS = new Set(['Bash']);
 
 /**
+ * A foreground Bash command that tries to leave a process running after the
+ * call returns: `nohup`, `setsid`, `disown`, or a trailing `&`. Each Bash call
+ * runs in its own transient systemd scope that is stopped (cgroup kill) when
+ * the call ends, so none of these survive — the process dies seconds later and
+ * `pgrep -f` can still match the agent's own command line, making it look
+ * alive. Deliberately narrow: a mid-command `a & b; wait` is left alone.
+ */
+export function detachesFromBashCall(command: unknown): boolean {
+  if (typeof command !== 'string') return false;
+  if (/(^|[\s;&|(])(nohup|setsid|disown)(\s|$)/.test(command)) return true;
+  return /(^|[^&>])&\s*$/.test(command.trim());
+}
+
+function detachDenyMessage(): string {
+  return (
+    'This Bash call tries to leave a process running after it returns (nohup/setsid/disown/&). ' +
+    'It will be killed: each Bash call runs in its own systemd scope that is stopped when the call ' +
+    'ends, and that is a cgroup kill, so detaching from the process group does not help. Use ' +
+    'patch_watch(command, description, timeoutSec) instead — the host owns the process, it outlives ' +
+    'the call, and patch_watch_output shows what it has printed so far (e.g. an `aws sso login ' +
+    '--use-device-code` URL and code).'
+  );
+}
+
+/**
  * The message shown to the AGENT (not the user) when it reaches for native
  * backgrounding. Doubles as the "point the agent at patch_watch" guidance this
  * codebase would otherwise need a system prompt for (principles.md § No
@@ -1397,6 +1422,9 @@ function buildCanUseTool(
   return async (toolName, input, sdkCtx) => {
     if (RUN_IN_BACKGROUND_TOOLS.has(toolName) && input['run_in_background'] === true) {
       return { behavior: 'deny', message: backgroundToolDenyMessage(toolName) };
+    }
+    if (toolName === 'Bash' && detachesFromBashCall(input['command'])) {
+      return { behavior: 'deny', message: detachDenyMessage() };
     }
     const docDenial = denyForDocMode(toolName, input, cwd);
     if (docDenial !== null) return docDenial;
