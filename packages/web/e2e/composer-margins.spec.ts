@@ -9,7 +9,9 @@ for (const [name, width] of [
   ['phone', 360],
   ['desktop', 1280],
 ] as const) {
-  test(`${name}: composer margins are 20 / 14 and field-to-row gap is 8`, async ({ page }) => {
+  test(`${name}: composer margins (20 desktop / 8 phone sides, 14 bottom) and field-to-row gap is 8`, async ({
+    page,
+  }) => {
     await page.setViewportSize({ width, height: 800 });
     await page.goto(CHAT);
     const composer = (await page.locator('.composer').boundingBox())!;
@@ -27,10 +29,12 @@ for (const [name, width] of [
       const s = getComputedStyle(el);
       return { l: s.paddingLeft, r: s.paddingRight, b: s.paddingBottom };
     });
-    expect(pad).toEqual({ l: '20px', r: '20px', b: '14px' });
+    // Phone gutters are 8px: the 44px touch targets spend the width budget.
+    const side = width < 640 ? 8 : 20;
+    expect(pad).toEqual({ l: `${side}px`, r: `${side}px`, b: '14px' });
     if (width < 780 + 40) {
-      expect(field.x - composer.x).toBe(20);
-      expect(composer.x + composer.width - (field.x + field.width)).toBe(20);
+      expect(field.x - composer.x).toBe(side);
+      expect(composer.x + composer.width - (field.x + field.width)).toBe(side);
     }
     expect(composer.y + composer.height - (actions.y + actions.height)).toBe(14);
     const fieldBottom = (await page.locator('.composer-input-wrap').boundingBox())!;
