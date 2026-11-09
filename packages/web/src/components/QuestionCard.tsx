@@ -108,10 +108,17 @@ function QuestionCountdown({
   // has: a `floor` would show "0 seconds left" for the final 999ms of a window
   // that has not run out.
   const secondsLeft = Math.ceil(remainingMs / 1000);
+  const totalSeconds = Math.round(expiry.windowMs / 1000);
+  // Hover tooltip: how long is left out of the whole window.
+  const tooltip =
+    remainingMs === 0
+      ? `Expired (${totalSeconds}s window)`
+      : `${secondsLeft}s remaining of ${totalSeconds}s`;
 
   return (
     <span
       className="question-countdown"
+      title={tooltip}
       data-testid="question-countdown"
       data-seconds-left={secondsLeft}
       data-expired={remainingMs === 0 ? 'true' : 'false'}

@@ -168,6 +168,13 @@ describe('the question card counts down to the host deadline', () => {
     // The cursor still lands on the first option, not on the ring.
     expect(document.activeElement).toBe(screen.getAllByTestId('question-option')[0]);
   });
+
+  it('shows remaining and total time as a hover tooltip', () => {
+    renderCard();
+    expect(screen.getByTestId('question-countdown').getAttribute('title')).toBe(
+      '60s remaining of 60s',
+    );
+  });
 });
 
 describe('a paused countdown (the user is in the chat)', () => {
