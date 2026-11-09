@@ -12,7 +12,12 @@ import { create } from 'zustand';
 import { api, type BatchCheckInChoice, type BatchRecord } from '../api/rest.js';
 
 export type BatchMode = 'regular' | 'batch';
-export type BatchSchedule = 'every-30' | 'half-hour';
+/** Either a repeating interval or a list of clock times (HH:MM, 24h). */
+export type BatchSchedule =
+  | { kind: 'interval'; minutes: number }
+  | { kind: 'times'; times: string[] };
+
+export const DEFAULT_SCHEDULE: BatchSchedule = { kind: 'interval', minutes: 30 };
 
 const MODE_KEY = 'patch.batch.mode';
 
@@ -29,12 +34,16 @@ function persistMode(m: BatchMode): void {
   localStorage.setItem(MODE_KEY, m);
 }
 
-function nextRelease(s: BatchSchedule, now = Date.now()): number {
-  if (s === 'every-30') return now + 30 * 60_000;
-  const d = new Date(now);
-  d.setSeconds(0, 0);
-  d.setMinutes(d.getMinutes() < 30 ? 30 : 60);
-  return d.getTime();
+export function nextRelease(s: BatchSchedule, now = Date.now()): number | null {
+  if (s.kind === 'interval') return now + s.minutes * 60_000;
+  const candidates = s.times.map((t) => {
+    const [h, m] = t.split(':').map(Number);
+    const d = new Date(now);
+    d.setHours(h ?? 0, m ?? 0, 0, 0);
+    if (d.getTime() <= now) d.setDate(d.getDate() + 1);
+    return d.getTime();
+  });
+  return candidates.length ? Math.min(...candidates) : null;
 }
 
 interface BatchState {
@@ -74,7 +83,7 @@ export const useBatchStore = create<BatchState>((set, get) => ({
   carryover: [],
   loaded: false,
   enabled: false,
-  schedule: 'every-30',
+  schedule: DEFAULT_SCHEDULE,
   nextReleaseAt: null,
   released: false,
   setEnabled(on) {
@@ -118,6 +127,15 @@ export const useBatchStore = create<BatchState>((set, get) => ({
   },
 
   _reset() {
-    set({ mode: 'regular', batch: null, carryover: [], loaded: false, enabled: false, schedule: 'every-30', nextReleaseAt: null, released: false });
+    set({
+      mode: 'regular',
+      batch: null,
+      carryover: [],
+      loaded: false,
+      enabled: false,
+      schedule: DEFAULT_SCHEDULE,
+      nextReleaseAt: null,
+      released: false,
+    });
   },
 }));

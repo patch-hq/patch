@@ -3,14 +3,15 @@
 // every chat is in the batch and the chat list is held back until the next
 // release time; BatchHeld is the placeholder that takes the list's place.
 
-import type { JSX } from 'react';
+import { useState, type JSX } from 'react';
 import { Toggle } from './Toggle.js';
 import { useBatchStore, type BatchSchedule } from '../stores/batchStore.js';
 
-const SCHEDULES: { value: BatchSchedule; label: string }[] = [
-  { value: 'every-30', label: 'Every 30 min' },
-  { value: 'half-hour', label: 'On the :00 / :30' },
-];
+const PRESETS = [15, 30, 60, 120];
+
+function presetLabel(m: number): string {
+  return m % 60 === 0 ? `${m / 60} h` : `${m} min`;
+}
 
 function formatTime(ms: number): string {
   return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -33,29 +34,129 @@ export function BatchBar(): JSX.Element {
           </span>
         ) : null}
       </div>
-      {enabled ? (
-        <div
-          className="batch-seg"
-          role="radiogroup"
-          aria-label="Batch timer"
-          data-testid="batch-schedule"
+      {enabled ? <ScheduleEditor schedule={schedule} onChange={setSchedule} /> : null}
+    </div>
+  );
+}
+
+function ScheduleEditor({
+  schedule,
+  onChange,
+}: {
+  schedule: BatchSchedule;
+  onChange: (s: BatchSchedule) => void;
+}): JSX.Element {
+  const [draft, setDraft] = useState('');
+  const isInterval = schedule.kind === 'interval';
+
+  const addTime = (): void => {
+    if (schedule.kind !== 'times' || !draft || schedule.times.includes(draft)) return;
+    onChange({ kind: 'times', times: [...schedule.times, draft].sort() });
+    setDraft('');
+  };
+
+  return (
+    <>
+      <div
+        className="batch-seg"
+        role="radiogroup"
+        aria-label="Batch timer"
+        data-testid="batch-schedule"
+      >
+        <button
+          type="button"
+          role="radio"
+          aria-checked={isInterval}
+          className="batch-seg-opt"
+          data-testid="batch-kind-interval"
+          onClick={() => onChange(isInterval ? schedule : { kind: 'interval', minutes: 30 })}
         >
-          {SCHEDULES.map((o) => (
+          Every
+        </button>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={!isInterval}
+          className="batch-seg-opt"
+          data-testid="batch-kind-times"
+          onClick={() =>
+            onChange(isInterval ? { kind: 'times', times: ['09:00', '12:00', '17:00'] } : schedule)
+          }
+        >
+          At times
+        </button>
+      </div>
+      {schedule.kind === 'interval' ? (
+        <div className="batch-chips" data-testid="batch-interval">
+          {PRESETS.map((m) => (
             <button
-              key={o.value}
+              key={m}
               type="button"
-              role="radio"
-              aria-checked={schedule === o.value}
-              className="batch-seg-opt"
-              data-testid={`batch-schedule-${o.value}`}
-              onClick={() => setSchedule(o.value)}
+              className="batch-chip"
+              aria-pressed={schedule.minutes === m}
+              data-testid={`batch-interval-${m}`}
+              onClick={() => onChange({ kind: 'interval', minutes: m })}
             >
-              {o.label}
+              {presetLabel(m)}
             </button>
           ))}
+          <label className="batch-custom">
+            <input
+              type="number"
+              min={1}
+              max={1440}
+              className="batch-custom-input"
+              aria-label="Custom minutes"
+              data-testid="batch-interval-custom"
+              value={PRESETS.includes(schedule.minutes) ? '' : schedule.minutes}
+              placeholder="…"
+              onChange={(e) => {
+                const n = Math.round(Number(e.target.value));
+                if (n >= 1 && n <= 1440) onChange({ kind: 'interval', minutes: n });
+              }}
+            />
+            <span>min</span>
+          </label>
         </div>
-      ) : null}
-    </div>
+      ) : (
+        <div className="batch-chips" data-testid="batch-times">
+          {schedule.times.map((t) => (
+            <span key={t} className="batch-chip batch-chip-time" data-testid={`batch-time-${t}`}>
+              {t}
+              <button
+                type="button"
+                className="batch-chip-x"
+                aria-label={`Remove ${t}`}
+                onClick={() =>
+                  onChange({ kind: 'times', times: schedule.times.filter((x) => x !== t) })
+                }
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          <span className="batch-add">
+            <input
+              type="time"
+              className="batch-custom-input batch-time-input"
+              aria-label="Add a time"
+              data-testid="batch-time-input"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+            />
+            <button
+              type="button"
+              className="batch-chip"
+              data-testid="batch-time-add"
+              disabled={!draft}
+              onClick={addTime}
+            >
+              Add
+            </button>
+          </span>
+        </div>
+      )}
+    </>
   );
 }
 

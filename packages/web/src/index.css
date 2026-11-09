@@ -18145,3 +18145,69 @@ a.drop-target {
   font-size: var(--text-min);
   color: var(--ink-3);
 }
+
+.batch-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.batch-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: var(--text-min);
+  color: var(--ink-2);
+  background: var(--bg-soft);
+  border: 0;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+}
+.batch-chip[aria-pressed='true'] {
+  color: var(--ink);
+  font-weight: 600;
+  background: var(--bg-elevated);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
+}
+.batch-chip:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.batch-chip-time {
+  cursor: default;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.batch-chip-x {
+  padding: 0;
+  font: inherit;
+  line-height: 1;
+  color: var(--ink-3);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.batch-custom,
+.batch-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-min);
+  color: var(--ink-3);
+}
+.batch-custom-input {
+  width: 48px;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: var(--text-min);
+  color: var(--ink);
+  background: var(--bg-soft);
+  border: 0;
+  border-radius: var(--radius-pill);
+  text-align: center;
+}
+.batch-time-input {
+  width: 84px;
+}
