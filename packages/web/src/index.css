@@ -17342,6 +17342,7 @@ select.permission-mode.is-pending {
     margin: 0;
     width: auto;
     min-width: 0;
+    max-width: none;
   }
   .jobs-control {
     grid-row: auto;
