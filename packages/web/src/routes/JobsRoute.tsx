@@ -34,13 +34,18 @@ import { shortcutTitle } from '../lib/shortcuts.js';
 import {
   JOB_STATUS_FILTERS,
   JOB_TRIGGER_FILTERS,
+  ALL_MODELS,
+  UNSET_MODEL,
   filterJobs,
+  hasUnsetModelJob,
   isJobFilterActive,
+  jobModels,
   type JobFilter,
   type JobStatusFilter,
   type JobTriggerFilter,
 } from '../lib/jobFilter.js';
 import { failed } from '../lib/errorCopy.js';
+import { useModelCatalog } from '../lib/models.js';
 
 /**
  * The list route reports each job's live gate counts and its most recent fire
@@ -194,6 +199,8 @@ export function JobsRoute(): JSX.Element {
   // Grouping applies to what the search MATCHED, so a query that hits only
   // expired jobs draws that section alone (spec/14 § Jobs view).
   const groups = useMemo(() => groupJobs(matches), [matches]);
+  const models = useMemo(() => jobModels(jobs), [jobs]);
+  const hasUnset = useMemo(() => hasUnsetModelJob(jobs), [jobs]);
 
   if (error) {
     return (
@@ -226,7 +233,14 @@ export function JobsRoute(): JSX.Element {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
-            <JobsControls sort={sort} setSort={setSort} filter={filter} setFilter={setFilter} />
+            <JobsControls
+              sort={sort}
+              setSort={setSort}
+              filter={filter}
+              setFilter={setFilter}
+              models={models}
+              hasUnset={hasUnset}
+            />
           </>
         ) : null}
         <Link to="/jobs/new" className="primary-btn" data-testid="jobs-new">
@@ -279,12 +293,24 @@ function JobsControls({
   setSort,
   filter,
   setFilter,
+  models,
+  hasUnset,
 }: {
   sort: JobSort;
   setSort: (v: JobSort) => void;
   filter: JobFilter;
   setFilter: (v: JobFilter) => void;
+  models: readonly string[];
+  hasUnset: boolean;
 }): JSX.Element {
+  const catalog = useModelCatalog();
+  const modelLabel = (id: string): string => catalog.models.find((m) => m.id === id)?.label ?? id;
+  // The selected model stays an option even if no job pins it any more, so the
+  // control never shows a value it cannot name.
+  const ids =
+    filter.model === ALL_MODELS || filter.model === UNSET_MODEL || models.includes(filter.model)
+      ? models
+      : [...models, filter.model];
   return (
     <>
       <select
@@ -325,6 +351,23 @@ function JobsControls({
             {o.label}
           </option>
         ))}
+      </select>
+      <select
+        className="jobs-control"
+        data-testid="jobs-filter-model"
+        aria-label="Filter jobs by model"
+        value={filter.model}
+        onChange={(e) => setFilter({ ...filter, model: e.target.value })}
+      >
+        <option value={ALL_MODELS}>Any model</option>
+        {ids.map((id) => (
+          <option key={id} value={id}>
+            {modelLabel(id)}
+          </option>
+        ))}
+        {hasUnset || filter.model === UNSET_MODEL ? (
+          <option value={UNSET_MODEL}>No model set</option>
+        ) : null}
       </select>
     </>
   );
