@@ -226,6 +226,13 @@ describe('TooltipHost', () => {
     });
     expect(screen.getByTestId('app-tooltip').textContent).toBe('Pin');
     expect(nested.getAttribute('title')).toBeNull();
+    // The enclosing row must stay blank while the icon's bubble is up, or the
+    // browser draws the row's native tooltip next to ours.
+    expect(row.getAttribute('title')).toBeNull();
+
+    fireEvent.mouseOut(nested, { relatedTarget: document.body });
+    expect(nested.getAttribute('title')).toBe('Pin');
+    expect(row.getAttribute('title')).toBe('index-rebuild');
   });
 
   it('restores every stashed title on unmount, so a control never loses its name for good', () => {
