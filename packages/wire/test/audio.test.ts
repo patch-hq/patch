@@ -379,6 +379,17 @@ describe('the dictation setting (spec/07 § Dictation engines)', () => {
     expect(dictationEngineFor(d, 'desktop')).toBe('deepgram');
   });
 
+  test('a computer can run Parakeet itself, a phone cannot', () => {
+    expect(DictationSetting.parse({ phone: 'whisper', computer: 'local', tidy: false })).toEqual({
+      phone: 'whisper',
+      computer: 'local',
+      tidy: false,
+    });
+    expect(() =>
+      DictationSetting.parse({ phone: 'local', computer: 'whisper', tidy: false }),
+    ).toThrow();
+  });
+
   test('a computer has no recogniser of its own', () => {
     expect(() =>
       DictationSetting.parse({ phone: 'whisper', computer: 'device', tidy: false }),

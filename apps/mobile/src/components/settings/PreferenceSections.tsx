@@ -22,6 +22,7 @@ import {
   SpeechToTextEngine,
   voiceKeyHostStatus,
   type ComputerDictationEngine,
+  type DictationEngine,
   type DictationConfig,
   type PhoneDictationEngine,
 } from '@patch/wire/audio';
@@ -200,9 +201,11 @@ const COMPUTER_DICTATION: readonly ComputerDictationEngine[] = [
   'deepgram',
   'elevenlabs',
   'host',
+  'local',
   'whisper',
 ];
-const DICTATION_LABELS: Record<PhoneDictationEngine, string> = {
+const DICTATION_LABELS: Record<DictationEngine, string> = {
+  local: 'Parakeet on this computer',
   device: 'Built-in',
   deepgram: 'Deepgram',
   elevenlabs: 'ElevenLabs',
@@ -420,7 +423,7 @@ function DictationEngines(): React.ReactElement {
             .finally(() => setBusy(false));
         };
         // A Deepgram choice names each host that holds no key for it.
-        const keys = (engine: PhoneDictationEngine, testID: string): React.ReactNode => {
+        const keys = (engine: DictationEngine, testID: string): React.ReactNode => {
           const status = voiceKeyHostStatus(engine, hostReports);
           return status ? (
             <Text testID={testID} style={{ ...typography.meta, color: colors.red }}>

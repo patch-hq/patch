@@ -185,7 +185,7 @@ happens to look.
 The SDK's classifier sometimes gives up on a `Bash` call and hands it to the
 host as an approval request anyway. Under `auto`, on a turn the host started itself (job, trigger, self-wake — `origin: machine`), the host treats that as the
 classifier's denial: it refuses the call at once, tells the agent so, and raises
-no approval card — the denial shown in the transcript carries the classifier's own stated reason when the SDK gives one — a card in an unattended job chat only stalls it. On a turn the user started, someone can answer, so the call is put to them as an ordinary approval card — this is how an advance approval is honoured rather than refused. Other
+no approval card — the denial shown in the transcript carries the classifier's own stated reason when the SDK gives one — a card in an unattended job chat only stalls it. A goal follow-up turn is `origin: machine` but belongs to a person's chat, so it asks like a user turn unless the chat is hidden. On a turn the user started, someone can answer, so the call is put to them as an ordinary approval card — this is how an advance approval is honoured rather than refused. Other
 escalations under `auto` (a sensitive-file write, a question) still ask.
 
 `bypassPermissions` never prompts — every tool call runs immediately.

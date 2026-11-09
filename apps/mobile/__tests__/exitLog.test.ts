@@ -50,6 +50,12 @@ describe('beginSession', () => {
     expect(readExitLog().map((e) => e.kind)).toEqual(['restart']);
   });
 
+  it('does not flag a run whose native crash was found', () => {
+    beginSession(1_000);
+    expect(beginSession(61_000, true).unexplained).toBe(false);
+    expect(readExitLog()).toEqual([]);
+  });
+
   it('records that an update was applied between runs', () => {
     beginSession();
     updates.updateId = 'u2';

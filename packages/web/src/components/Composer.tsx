@@ -120,6 +120,11 @@ import {
 } from '../lib/dictationPreview.js';
 import { registerComposerMic } from '../lib/composerMic.js';
 import { startDictationMode, type DictationMode } from '../lib/dictationMode.js';
+import {
+  LOCAL_ENGINE_DESKTOP_ONLY,
+  startLocalDictationPreview,
+} from '../lib/localDictationPreview.js';
+import { getDesktopBridge } from '../lib/desktopBridge.js';
 import { smoothLevel } from '../lib/smoothLevel.js';
 import { LevelBar } from './LevelBar.js';
 import type { OutgoingFile } from '../lib/sendQueue.js';
@@ -551,11 +556,19 @@ export const Composer = forwardRef(function Composer(
     (s) => s.preferences.voiceConfig.dictation.computer,
   );
   const chatHostPresence = usePresenceStore((s) => (hostId ? s.hosts[hostId] : undefined));
-  const dictationBlockedReason = chatHostPresence?.host
-    ? voiceKeyHostStatus(computerDictationEngine, [
-        { hostName: chatHostPresence.host.hostName, voiceKeys: chatHostPresence.host.voiceKeys },
-      ])
-    : null;
+  const dictationBlockedReason =
+    computerDictationEngine === 'local'
+      ? getDesktopBridge()?.localStt
+        ? null
+        : LOCAL_ENGINE_DESKTOP_ONLY
+      : chatHostPresence?.host
+        ? voiceKeyHostStatus(computerDictationEngine, [
+            {
+              hostName: chatHostPresence.host.hostName,
+              voiceKeys: chatHostPresence.host.voiceKeys,
+            },
+          ])
+        : null;
   // A missing Claude credential is NOT like daemon-offline. Daemon-offline queues
   // the text and delivers it on reconnect, so sending stays enabled; with no
   // credential the turn can never run, so accepting the message would be a lie.
@@ -1463,7 +1476,9 @@ export const Composer = forwardRef(function Composer(
    */
   function startLivePreview(rec: VoiceRecording, gen: number, previewChatId: string): void {
     try {
-      const openPreview = previewFactory ?? startDictationPreview;
+      const engine = usePreferencesStore.getState().preferences.voiceConfig.dictation.computer;
+      const openPreview =
+        previewFactory ?? (engine === 'local' ? startLocalDictationPreview : startDictationPreview);
       previewRef.current = openPreview(previewChatId, {
         onPartial: (text: string) => {
           if (gen !== recGenRef.current) return;
@@ -1535,7 +1550,10 @@ export const Composer = forwardRef(function Composer(
     const computerEngine =
       usePreferencesStore.getState().preferences.voiceConfig.dictation.computer;
     const streaming =
-      computerEngine === 'deepgram' || computerEngine === 'elevenlabs' || computerEngine === 'host';
+      computerEngine === 'deepgram' ||
+      computerEngine === 'elevenlabs' ||
+      computerEngine === 'host' ||
+      computerEngine === 'local';
     const livePreview = streaming ? previewRef.current : null;
     if (livePreview) previewRef.current = null;
     else stopPreview();
@@ -1639,6 +1657,14 @@ export const Composer = forwardRef(function Composer(
       return;
     if (dictModeRef.current) {
       stopDictationMode();
+      return;
+    }
+    if (computerDictationEngine === 'local') {
+      // Keep dictating reads each spoken stretch as its own clip on the host,
+      // which does not run this engine. Said, not quietly read by another one.
+      pushError(
+        'voice: Keep dictating is not available with Parakeet on this computer. Switch Dictation to another engine in Settings → Voice.',
+      );
       return;
     }
     const factory = dictationModeFactory ?? startDictationMode;
