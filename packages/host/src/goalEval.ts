@@ -4,7 +4,8 @@
 // reads the visible transcript so far against the goal's condition and
 // returns a verdict: `not_met` (another turn follows, guided by the reason),
 // `refused` (the agent declined; another turn follows, until it has declined
-// too often), `met` (the goal clears, the normal done notification rings), or
+// too often), `blocked` (the agent says it cannot go on without the user; it
+// shares the refused streak, so the goal stops pushing after the same limit), `met` (the goal clears, the normal done notification rings), or
 // `impossible` (the goal clears, the chat needs the user). Modelled on
 // `statusGen.ts`/`titleGen.ts`'s one-shot shape. One model judges every chat,
 // whichever provider the chat itself runs on: the judge reads a transcript, so
@@ -30,7 +31,7 @@ const GOAL_EVAL_TIMEOUT_MS = 20_000;
 /** Hard cap on the returned reason — a safety bound only; the chat shows the whole reason. */
 const MAX_REASON_LEN = 2000;
 
-export type GoalVerdict = 'met' | 'not_met' | 'refused' | 'impossible';
+export type GoalVerdict = 'met' | 'not_met' | 'refused' | 'blocked' | 'impossible';
 
 export interface GoalEvalResult {
   verdict: GoalVerdict;
@@ -86,6 +87,7 @@ export function parseGoalVerdict(raw: string): GoalEvalResult | null {
     verdict !== 'met' &&
     verdict !== 'not_met' &&
     verdict !== 'refused' &&
+    verdict !== 'blocked' &&
     verdict !== 'impossible'
   )
     return null;
@@ -114,7 +116,7 @@ function buildPrompt(input: GoalEvalInput, instructions: string): string {
     input.transcript,
     '',
     'Reply with ONLY a JSON object of the shape ' +
-      '{"verdict":"met"|"not_met"|"refused"|"impossible","reason":"..."}. No prose outside the JSON.',
+      '{"verdict":"met"|"not_met"|"refused"|"blocked"|"impossible","reason":"..."}. No prose outside the JSON.',
   ].join('\n');
 }
 

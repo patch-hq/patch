@@ -65,6 +65,13 @@ describe('parseGoalVerdict', () => {
     expect(parseGoalVerdict(JSON.stringify({ verdict: 'met', reason }))?.reason).toBe(reason);
   });
 
+  it('parses a blocked verdict', () => {
+    expect(parseGoalVerdict('{"verdict":"blocked","reason":"Needs the prod password"}')).toEqual({
+      verdict: 'blocked',
+      reason: 'Needs the prod password',
+    });
+  });
+
   it('parses a refused verdict', () => {
     expect(
       parseGoalVerdict('{"verdict":"refused","reason":"It declined to run the migration"}'),
@@ -160,6 +167,7 @@ describe('makeGoalEvaluator', () => {
     const prompt = sdk.lastOptions()?.prompt ?? '';
     expect(prompt).toContain('asking whether to go ahead');
     expect(prompt).toContain('"refused"');
+    expect(prompt).toContain('"blocked"');
     expect(prompt).toContain('without asking again');
   });
 
