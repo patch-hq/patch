@@ -11,6 +11,7 @@
 
 import { create } from 'zustand';
 import { DEFAULT_SHARED_SETTINGS } from '@patch/wire';
+import { useWebUpdateStore } from './webUpdateStore.js';
 import { api, type AccountPreferences, type SharedState } from '../api/rest.js';
 
 /** What the server uses when the account has never set anything. */
@@ -113,3 +114,8 @@ export function anyProviderConnected(shared: PreferencesState['shared']): boolea
   if (!secrets) return null;
   return [...secrets.claude, ...secrets.codex].some((a) => a.connected);
 }
+
+// Keep the web-update store's copy of "Update automatically" current.
+usePreferencesStore.subscribe((s) =>
+  useWebUpdateStore.setState({ autoUpdate: s.preferences.autoUpdateHosts }),
+);

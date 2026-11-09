@@ -13,6 +13,10 @@ interface WebUpdateState {
   /** When a newer bundle was FIRST seen — survives repeat reports; cleared only
    *  by `clear()` (a reload actually happening). */
   staleSince: string | null;
+  /** Mirror of the account's "Update automatically" preference, kept by
+   *  preferencesStore. Held here so ws.ts can read it without importing the
+   *  preferences store (which reaches api/rest.js and would form an import cycle). */
+  autoUpdate: boolean;
   setAvailable: (bundle: string, at?: string) => void;
   clear: () => void;
 }
@@ -20,6 +24,7 @@ interface WebUpdateState {
 export const useWebUpdateStore = create<WebUpdateState>((set, get) => ({
   bundle: null,
   staleSince: null,
+  autoUpdate: true,
   setAvailable: (bundle, at = new Date().toISOString()) =>
     set({ bundle, staleSince: get().staleSince ?? at }),
   clear: () => set({ bundle: null, staleSince: null }),
