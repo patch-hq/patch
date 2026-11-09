@@ -166,6 +166,29 @@ describe('host denies native run_in_background in favour of patch_watch', () => 
     expect(result.message).toMatch(/patch_watch/);
   });
 
+  it.each([
+    'nohup aws sso login --use-device-code &',
+    'setsid sleep 100',
+    'sleep 100 &',
+    'foo; disown',
+  ])('denies a Bash command that detaches: %s', async (command) => {
+    const canUseTool = await capturedCanUseTool();
+    const result = (await canUseTool('Bash', { command }, {})) as {
+      behavior: string;
+      message: string;
+    };
+    expect(result.behavior).toBe('deny');
+    expect(result.message).toMatch(/patch_watch/);
+  });
+
+  it.each(['echo a && echo b', 'a & b; wait', 'echo "setsidx"', 'cat x >&2'])(
+    'does not flag an ordinary Bash command: %s',
+    async (command) => {
+      const { detachesFromBashCall } = await import('../src/sdkBackend.js');
+      expect(detachesFromBashCall(command)).toBe(false);
+    },
+  );
+
   it('leaves an ordinary Bash call (no run_in_background) to the normal permission gate', async () => {
     const canUseTool = await capturedCanUseTool();
     const result = (await canUseTool('Bash', { command: 'echo hi' }, {})) as {
