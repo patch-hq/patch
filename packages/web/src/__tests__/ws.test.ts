@@ -17,6 +17,8 @@ import { RESTART_WINDOW_MS } from '@patch/wire';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
+import { usePreferencesStore } from '../stores/preferencesStore.js';
+import { useWebUpdateStore } from '../stores/webUpdateStore.js';
 import { useBrowserHandoffStore } from '../stores/browserHandoffStore.js';
 import { useTerminalStore } from '../stores/terminalStore.js';
 import { useHostSearchStore } from '../stores/hostSearchStore.js';
@@ -972,6 +974,20 @@ describe('PatchWs message dispatch — malformed frames', () => {
     expect(() => fake.emit('message', { data: 'not json at all' })).not.toThrow();
     expect(reload).toHaveBeenCalledTimes(1);
     expect(useUiStore.getState().errors).toHaveLength(0);
+  });
+
+  it('with Update automatically off, a bad frame stages the banner and does not reload', async () => {
+    const prefs = usePreferencesStore.getState().preferences;
+    usePreferencesStore.setState({ preferences: { ...prefs, autoUpdateHosts: false } });
+    try {
+      const { fake } = await connectAndOpen();
+      fake.emit('message', { data: 'not json at all' });
+      expect(reload).not.toHaveBeenCalled();
+      expect(useWebUpdateStore.getState().staleSince).not.toBeNull();
+    } finally {
+      usePreferencesStore.setState({ preferences: prefs });
+      useWebUpdateStore.getState().clear();
+    }
   });
 
   it('a non-string message payload is treated as an empty/invalid frame and reloads (no throw)', async () => {
