@@ -176,7 +176,7 @@ import {
   trackForPlan,
   type ModelLimits,
 } from './handoffRun.js';
-import { renderGoalTranscript } from './goalEval.js';
+import { renderAgentStatement, renderGoalTranscript, renderUserScope } from './goalEval.js';
 import {
   isReservedSpecialThread,
   resolvePermissionModeForModel,
@@ -595,6 +595,10 @@ export interface HostOptions {
     folder: string;
     /** Host-verified background-task state, so the judge can test a "waiting" claim. */
     background: string;
+    /** The user's own requests, kept whole when the transcript is cut. */
+    userScope: string;
+    /** The agent's latest message, where it states blockers. */
+    agentStatement: string;
   }) => Promise<{
     verdict: 'met' | 'not_met' | 'refused' | 'blocked' | 'impossible';
     reason: string;
@@ -11501,6 +11505,8 @@ export class Daemon {
 
     const condition = state.goal;
     const transcript = renderGoalTranscript(state.lastMessages);
+    const userScope = renderUserScope(state.lastMessages);
+    const agentStatement = renderAgentStatement(state.lastMessages);
     const turnsEvaluated = (state.goalProgress?.turnsEvaluated ?? 0) + 1;
     const folder = state.folder;
     const background = this.describeBackgroundForGoal(chatId);
@@ -11513,6 +11519,8 @@ export class Daemon {
           turnsEvaluated,
           folder,
           background,
+          userScope,
+          agentStatement,
         });
         this.settleGoalEvaluation(chatId, condition, turnsEvaluated, result);
       } catch (err) {
