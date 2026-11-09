@@ -245,6 +245,24 @@ describe('maybeEvaluateGoal — relentless until met, stopped only by a deadlock
     expect(state?.declaredStatus?.text).toContain('It will not run the migration');
   });
 
+  it('stops when the agent says it is blocked on the user three times running', async () => {
+    const evaluateGoal = vi.fn(
+      async (): Promise<GoalVerdict> => ({ verdict: 'blocked', reason: 'Needs the prod password' }),
+    );
+    const { daemon, folder } = setup(evaluateGoal, { backend: textBackend('I need the password') });
+    const chatId = await daemon.spawnChat({ folder });
+    await tick();
+    await daemon.setGoal(chatId, 'Deploy it');
+    await daemon.sendInput({ chatId, message: 'go', localId: 'u1' });
+    await tick(300);
+
+    expect(evaluateGoal).toHaveBeenCalledTimes(3);
+    const state = daemon.chatState.get(chatId);
+    expect(state?.goal).toBe('Deploy it');
+    expect(state?.declaredStatus?.text).toContain('blocked on you 3 times');
+    expect(state?.declaredStatus?.text).toContain('Needs the prod password');
+  });
+
   it('presses on after the first two refusals, resubmitting the reason as guidance', async () => {
     let n = 0;
     const evaluateGoal: EvaluateGoal = async () => {

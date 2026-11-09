@@ -596,7 +596,7 @@ export interface HostOptions {
     /** Host-verified background-task state, so the judge can test a "waiting" claim. */
     background: string;
   }) => Promise<{
-    verdict: 'met' | 'not_met' | 'refused' | 'impossible';
+    verdict: 'met' | 'not_met' | 'refused' | 'blocked' | 'impossible';
     reason: string;
   } | null>;
   /**
@@ -11568,7 +11568,10 @@ export class Daemon {
     chatId: string,
     condition: string,
     turnsEvaluated: number,
-    result: { verdict: 'met' | 'not_met' | 'refused' | 'impossible'; reason: string } | null,
+    result: {
+      verdict: 'met' | 'not_met' | 'refused' | 'blocked' | 'impossible';
+      reason: string;
+    } | null,
   ): void {
     const state = this.chatState.get(chatId);
     if (!state || state.goal !== condition) return;
@@ -11591,11 +11594,14 @@ export class Daemon {
       startedAt: progress?.startedAt ?? now,
       turnsEvaluated,
       tokensSpent: progress?.tokensSpent ?? 0,
-      lastVerdict: result.verdict === 'not_met' || result.verdict === 'refused' ? 'not_met' : null,
+      lastVerdict:
+        result.verdict === 'not_met' || result.verdict === 'refused' || result.verdict === 'blocked'
+          ? 'not_met'
+          : null,
       lastReason: result.reason,
     };
 
-    if (result.verdict === 'refused') {
+    if (result.verdict === 'refused' || result.verdict === 'blocked') {
       state.goalRefusalStreak += 1;
       if (state.goalRefusalStreak >= this.goalRefusalLimit) {
         // Deadlock: the agent keeps declining. Stop pushing, keep the goal, and
@@ -11605,7 +11611,9 @@ export class Daemon {
         void this.declareStatus(
           chatId,
           'report',
-          `Goal deadlocked: the agent declined ${this.goalRefusalLimit} times running. ${result.reason}`,
+          result.verdict === 'blocked'
+            ? `Goal deadlocked: the agent said it is blocked on you ${this.goalRefusalLimit} times running. ${result.reason}`
+            : `Goal deadlocked: the agent declined ${this.goalRefusalLimit} times running. ${result.reason}`,
         ).catch((err) => {
           this.opts.logger.warn({ chatId, err }, 'goal deadlock guard: declareStatus failed');
         });
@@ -11619,7 +11627,11 @@ export class Daemon {
       state.goalRefusalStreak = 0;
     }
 
-    if (result.verdict === 'not_met' || result.verdict === 'refused') {
+    if (
+      result.verdict === 'not_met' ||
+      result.verdict === 'refused' ||
+      result.verdict === 'blocked'
+    ) {
       this.emitState(chatId);
       // A turn is already running, so the agent is not stopping; the goal is
       // re-evaluated when that turn settles. Nudging now would only queue noise.

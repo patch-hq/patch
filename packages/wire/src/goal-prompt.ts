@@ -6,7 +6,7 @@
 /** The model that judges every chat's goal, whichever provider the chat itself runs on. */
 export const DEFAULT_GOAL_MODEL = 'claude-sonnet-5-5';
 
-/** How many times in a row the agent may decline before the goal stops pushing it. */
+/** How many times in a row the agent may decline or say it is blocked before the goal stops pushing it. */
 export const DEFAULT_GOAL_REFUSAL_LIMIT = 3;
 
 export const DEFAULT_GOAL_EVAL_PROMPT = `You are judging whether a stated GOAL has been met by an ongoing agent chat.
@@ -26,7 +26,11 @@ Decide exactly one of:
 - "refused" — the agent has said it will not do what the goal needs (it
   declines, objects, or sidesteps the work), as opposed to asking or being
   unable. Give a short reason naming what it declined.
+- "blocked" — the agent cannot go any further without something only the user
+  can give or do (a decision, a credential, access, a physical action), and says
+  so. Name exactly what it needs. Not the same as asking permission for work the
+  goal already covers: that is "not_met".
 - "impossible" — the goal cannot be satisfied by anyone; say why. Not the same
   as the agent being unwilling.
 If the goal names its own stopping point (e.g. "or stop after N turns") and
-that point has been reached, judge whichever of the four actually fits.`;
+that point has been reached, judge whichever of the five actually fits.`;
