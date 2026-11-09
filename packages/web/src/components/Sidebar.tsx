@@ -55,6 +55,7 @@ import { ProjectSnoozeMenu } from './ProjectSnoozeMenu.js';
 import { SidebarViewMenu } from './SidebarViewMenu.js';
 import { SidebarSortMenu } from './SidebarSortMenu.js';
 import { BatchPanel } from './BatchPanel.js';
+import { BatchBar, BatchHeld } from './BatchBar.js';
 import { deriveBadge, useChatStore } from '../stores/chatStore.js';
 import { clearComposerDraft } from '../stores/composerDraftStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
@@ -223,6 +224,7 @@ function SidebarInner({ standalone = false }: { standalone?: boolean } = {}): JS
   // a sidebar view — it is a chat, with everything it watches beneath it
   // (spec/14 § Manager view).
   const batchMode = useBatchStore((s) => s.mode) === 'batch';
+  const batchHolding = useBatchStore((s) => s.enabled && !s.released);
   const navigate = useNavigate();
 
   // The folder roster seeds Recent projects with folders whose chats are all
@@ -426,8 +428,17 @@ function SidebarInner({ standalone = false }: { standalone?: boolean } = {}): JS
         onNewWindow={() => openNewChatInNewWindow()}
       />
 
+      <BatchBar />
+
       {/* The sidebar's one view dropdown (spec/14 § Sidebar §1b). */}
-      {batchMode ? (
+      {batchHolding ? (
+        <>
+          <div className="sb-scroll" data-testid="sb-scroll">
+            <BatchHeld count={Object.keys(chats).length} />
+          </div>
+          <BottomNav />
+        </>
+      ) : batchMode ? (
         <>
           <div className="sidebar-controls">
             <SidebarViewMenu />

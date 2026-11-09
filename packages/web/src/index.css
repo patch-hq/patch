@@ -18080,3 +18080,50 @@ a.drop-target {
     height: var(--tap-min);
   }
 }
+
+/* Batch toggle + timer (under New chat) and the held-list placeholder. */
+.batch-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px var(--sb-inset-right) 2px var(--sb-inset);
+  padding: 0 8px;
+}
+.batch-bar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.batch-bar-schedule {
+  width: 100%;
+  padding: 3px 6px;
+  font-size: var(--text-min);
+  color: var(--ink-2);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+}
+.batch-bar-next {
+  flex: 0 0 auto;
+  font-size: var(--text-min);
+  font-weight: 600;
+  color: var(--accent-strong);
+}
+.batch-held {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin: 24px var(--sb-inset-right) 0 var(--sb-inset);
+  padding: 0 8px;
+}
+.batch-held-title {
+  font-size: var(--text-min);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.batch-held-sub {
+  font-size: var(--text-min);
+  color: var(--ink-3);
+}

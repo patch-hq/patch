@@ -12,6 +12,7 @@ import { create } from 'zustand';
 import { api, type BatchCheckInChoice, type BatchRecord } from '../api/rest.js';
 
 export type BatchMode = 'regular' | 'batch';
+export type BatchSchedule = 'every-30' | 'half-hour';
 
 const MODE_KEY = 'patch.batch.mode';
 
@@ -28,6 +29,14 @@ function persistMode(m: BatchMode): void {
   localStorage.setItem(MODE_KEY, m);
 }
 
+function nextRelease(s: BatchSchedule, now = Date.now()): number {
+  if (s === 'every-30') return now + 30 * 60_000;
+  const d = new Date(now);
+  d.setSeconds(0, 0);
+  d.setMinutes(d.getMinutes() < 30 ? 30 : 60);
+  return d.getTime();
+}
+
 interface BatchState {
   mode: BatchMode;
   batch: BatchRecord | null;
@@ -36,6 +45,17 @@ interface BatchState {
    *  running" from "haven't asked the server yet" so the panel doesn't flash
    *  the empty state before the real answer arrives. */
   loaded: boolean;
+
+  // Toggle + timer (design preview — the server takes these over once approved).
+  enabled: boolean;
+  schedule: BatchSchedule;
+  /** Epoch ms of the next release; null when Batch is off. */
+  nextReleaseAt: number | null;
+  /** True once the current window has been released: the list is visible. */
+  released: boolean;
+  setEnabled(on: boolean): void;
+  setSchedule(s: BatchSchedule): void;
+  releaseNow(): void;
 
   setMode(m: BatchMode): void;
   refresh(): Promise<void>;
@@ -48,11 +68,24 @@ interface BatchState {
   _reset(): void;
 }
 
-export const useBatchStore = create<BatchState>((set) => ({
+export const useBatchStore = create<BatchState>((set, get) => ({
   mode: loadMode(),
   batch: null,
   carryover: [],
   loaded: false,
+  enabled: false,
+  schedule: 'every-30',
+  nextReleaseAt: null,
+  released: false,
+  setEnabled(on) {
+    set({ enabled: on, released: false, nextReleaseAt: on ? nextRelease(get().schedule) : null });
+  },
+  setSchedule(s) {
+    set({ schedule: s, nextReleaseAt: get().enabled ? nextRelease(s) : null });
+  },
+  releaseNow() {
+    set({ released: true });
+  },
 
   setMode(m) {
     persistMode(m);
@@ -85,6 +118,6 @@ export const useBatchStore = create<BatchState>((set) => ({
   },
 
   _reset() {
-    set({ mode: 'regular', batch: null, carryover: [], loaded: false });
+    set({ mode: 'regular', batch: null, carryover: [], loaded: false, enabled: false, schedule: 'every-30', nextReleaseAt: null, released: false });
   },
 }));
