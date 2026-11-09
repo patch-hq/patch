@@ -26,7 +26,7 @@ test.describe('composer skill menu — defaults to the last used skill', () => {
     // outrank it.
     await expect(page.locator('.composer-skill-option')).toHaveText([
       '/clearClear the visible chat transcript',
-      '/goalSet the chat goal; bare /goal clears it',
+      '/goalSet the chat goal; "/goal clear" removes it',
       '/jobRun a job now: /job <name>',
       '/plant',
       '/plan-travel',
@@ -46,7 +46,7 @@ test.describe('composer skill menu — defaults to the last used skill', () => {
     await expect(page.locator('.composer-skill-option')).toHaveText([
       '/deploy',
       '/clearClear the visible chat transcript',
-      '/goalSet the chat goal; bare /goal clears it',
+      '/goalSet the chat goal; "/goal clear" removes it',
       '/jobRun a job now: /job <name>',
       '/plant',
       '/plan-travel',
