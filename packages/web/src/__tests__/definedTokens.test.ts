@@ -112,7 +112,7 @@ function references(): { name: string; hasFallback: boolean; line: number; text:
  * taken off this list, so the numbers only ever go down. Never raise an entry.
  */
 const UNDEFINED_BASELINE: Record<string, number> = {
-  '--ink-1': 11,
+  '--ink-1': 10,
   '--text-base': 1,
   '--hover': 1,
   '--font-mono': 3,
@@ -129,7 +129,7 @@ const SHADOWED_BASELINE: Record<string, number> = {
   '--accent-tint': 3,
   '--accent-soft': 16,
   '--danger': 18,
-  '--ink-1': 11,
+  '--ink-1': 10,
   '--line': 1,
   '--text-base': 1,
   '--hover': 1,
