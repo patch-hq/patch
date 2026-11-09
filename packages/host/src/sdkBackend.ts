@@ -1198,27 +1198,26 @@ export const DISALLOWED_NATIVE_TOOLS = [
 const RUN_IN_BACKGROUND_TOOLS = new Set(['Bash']);
 
 /**
- * A foreground Bash command that tries to leave a process running after the
- * call returns: `nohup`, `setsid`, `disown`, or a trailing `&`. Each Bash call
- * runs in its own transient systemd scope that is stopped (cgroup kill) when
- * the call ends, so none of these survive — the process dies seconds later and
- * `pgrep -f` can still match the agent's own command line, making it look
- * alive. Deliberately narrow: a mid-command `a & b; wait` is left alone.
+ * A Bash command that signals intent to outlive the agent turn: `nohup`,
+ * `setsid` or `disown`. The per-turn claude process runs under
+ * `systemd-run --scope` in the work slice (workSlice.ts), and that scope is torn
+ * down when the TURN ends — a cgroup kill, so detaching from the process group
+ * does not help. Background processes survive across tool calls inside one turn
+ * (so a plain `&` is left alone) but die at turn end, and `pgrep -f` can match
+ * the agent's own command line, making a dead process look alive.
  */
 export function detachesFromBashCall(command: unknown): boolean {
   if (typeof command !== 'string') return false;
-  if (/(^|[\s;&|(])(nohup|setsid|disown)(\s|$)/.test(command)) return true;
-  return /(^|[^&>])&\s*$/.test(command.trim());
+  return /(^|[\s;&|(])(nohup|setsid|disown)(\s|$)/.test(command);
 }
 
 function detachDenyMessage(): string {
   return (
-    'This Bash call tries to leave a process running after it returns (nohup/setsid/disown/&). ' +
-    'It will be killed: each Bash call runs in its own systemd scope that is stopped when the call ' +
-    'ends, and that is a cgroup kill, so detaching from the process group does not help. Use ' +
-    'patch_watch(command, description, timeoutSec) instead — the host owns the process, it outlives ' +
-    'the call, and patch_watch_output shows what it has printed so far (e.g. an `aws sso login ' +
-    '--use-device-code` URL and code).'
+    'nohup/setsid/disown will not make this outlive the turn: the turn runs in a systemd scope that ' +
+    'is torn down when the turn ends (a cgroup kill), taking every process in it. Use ' +
+    'patch_watch(command, description, timeoutSec) instead — the host owns the process, it survives ' +
+    'the turn, and patch_watch_output shows what it has printed so far (e.g. an `aws sso login ' +
+    '--use-device-code` URL and code). A plain `&` that only needs to live within this turn is fine.'
   );
 }
 
