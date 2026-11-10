@@ -57,6 +57,7 @@ import { Audio } from 'expo-av';
 import { ensurePermission } from './permissionGate';
 import * as FileSystem from 'expo-file-system';
 import { decodeAudio, type AudioEvent } from '@patch/wire/audio';
+import { CLOSE_SERVER_RESTARTING } from '@patch/wire';
 import { api } from '../api/rest';
 import { audioWsUrl } from '../config';
 import { startMicCapture, stopMicCapture } from './voiceMic';
@@ -228,6 +229,9 @@ export interface DictationOptions {
 
 /** How long a live engine may take to hand over its last words after a stop. */
 export const LIVE_FINISH_TIMEOUT_MS = 15_000;
+/** A server update restart drops the live socket (close 4503); redial for this long, then fail. */
+export const LIVE_RESTART_REDIAL_MS = 30_000;
+export const LIVE_RESTART_REDIAL_INTERVAL_MS = 1_000;
 
 export function startDictation(
   chatId: string,
@@ -541,11 +545,16 @@ function startStreamDictation(
     (e: Error) => void fail(`dictation setup failed: ${e.message}`),
   );
 
-  void (async () => {
+  /**
+   * Dial the audio socket. After a going-away close (4503) it is called again:
+   * a new session replays everything captured so far, so a server update
+   * restart mid-reply loses no words. Anything else closing the socket fails.
+   */
+  async function connect(redialDeadline: number | null): Promise<void> {
     try {
       const me = await api.me();
       const tok = await api.voiceToken(chatId, 'voice-note');
-      if (closed) return;
+      if (closed && !finished) return;
       const socket = new WebSocket(audioWsUrl(tok.audioUrl));
       ws = socket;
       sessionId = tok.sessionId;
@@ -568,12 +577,13 @@ function startStreamDictation(
           }),
         );
         wsOpen = true;
+        opened = true;
         for (const pcm of pending.splice(0)) send(pcm);
         if (finished)
           socket.send(JSON.stringify({ type: 'audio.dictation_finish', sessionId: tok.sessionId }));
       };
       socket.onmessage = (evt: WebSocketMessageEvent): void => {
-        if (typeof evt.data !== 'string') return;
+        if (socket !== ws || typeof evt.data !== 'string') return;
         let frame: AudioEvent;
         try {
           frame = decodeAudio(evt.data);
@@ -588,17 +598,53 @@ function startStreamDictation(
           else void fail(frame.message);
         }
       };
-      socket.onerror = (): void => void fail('the live dictation connection failed');
+      let opened = false;
+      const stillRedialing = (): boolean =>
+        redialDeadline !== null && !opened && Date.now() < redialDeadline;
+      socket.onerror = (): void => {
+        if (socket !== ws) return;
+        if (stillRedialing()) redial(redialDeadline!);
+        else void fail('the live dictation connection failed');
+      };
       socket.onclose = (evt: { code?: number; reason?: string }): void => {
+        if (socket !== ws || failed) return;
+        if (stillRedialing()) {
+          redial(redialDeadline!);
+          return;
+        }
+        if (evt?.code === CLOSE_SERVER_RESTARTING && (!finished || resolveFinal !== null)) {
+          redial(Date.now() + LIVE_RESTART_REDIAL_MS);
+          return;
+        }
         if (finished && resolveFinal === null) return;
         void fail(
           `the live dictation connection closed${evt?.code ? ` (${evt.code}${evt.reason ? `: ${evt.reason}` : ''})` : ''}`,
         );
       };
     } catch (e) {
-      void fail(`live dictation could not start: ${(e as Error).message}`);
+      if (redialDeadline !== null && Date.now() < redialDeadline) {
+        setTimeout(() => {
+          if (!failed) void connect(redialDeadline);
+        }, LIVE_RESTART_REDIAL_INTERVAL_MS);
+        return;
+      }
+      void fail(
+        redialDeadline !== null
+          ? `live dictation could not reconnect after the server restarted: ${(e as Error).message}`
+          : `live dictation could not start: ${(e as Error).message}`,
+      );
     }
-  })();
+  }
+  function redial(deadline: number): void {
+    ws = null;
+    wsOpen = false;
+    pending.length = 0;
+    pending.push(...pcmAll);
+    setTimeout(() => {
+      if (!failed) void connect(deadline);
+    }, LIVE_RESTART_REDIAL_INTERVAL_MS);
+  }
+  void connect(null);
 
   return {
     async finish(send: boolean): Promise<DictationOutcome> {
