@@ -25,9 +25,11 @@
 // LOOKS unchanged).
 import { useEffect } from 'react';
 import type { JSX } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useNavigationType, useParams, useSearchParams } from 'react-router-dom';
 import { PaneArea } from '../components/PaneArea.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
+import { BACK_FORWARD_BLOCKED } from '../lib/navigationOpen.js';
+import { useUiStore } from '../stores/uiStore.js';
 import type { PatchWs } from '../api/ws.js';
 
 export function ChatPaneRoute({ ws }: { ws: PatchWs | null }): JSX.Element {
@@ -35,6 +37,7 @@ export function ChatPaneRoute({ ws }: { ws: PatchWs | null }): JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
   const seqParam = searchParams.get('seq');
   const showChat = useLayoutStore((s) => s.showChat);
+  const isPop = useNavigationType() === 'POP';
 
   useEffect(() => {
     // A group may ALREADY be showing this chat — most often the layout a reload
@@ -47,7 +50,11 @@ export function ChatPaneRoute({ ws }: { ws: PatchWs | null }): JSX.Element {
 
     const seq =
       seqParam !== null && Number.isInteger(Number(seqParam)) ? Number(seqParam) : undefined;
-    showChat(chatId, seq !== undefined ? { seq } : {});
+    const shown = showChat(chatId, {
+      ...(seq !== undefined ? { seq } : {}),
+      ...(isPop ? { replaceOnly: true } : {}),
+    });
+    if (!shown) useUiStore.getState().pushError(BACK_FORWARD_BLOCKED);
     if (seqParam !== null) {
       setSearchParams(
         (prev) => {
@@ -58,7 +65,7 @@ export function ChatPaneRoute({ ws }: { ws: PatchWs | null }): JSX.Element {
         { replace: true },
       );
     }
-  }, [chatId, seqParam, showChat, setSearchParams]);
+  }, [chatId, seqParam, showChat, setSearchParams, isPop]);
 
   return <PaneArea ws={ws} />;
 }

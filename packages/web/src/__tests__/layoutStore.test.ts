@@ -639,3 +639,53 @@ describe('layoutStore — terminal, files, browser and editor tabs', () => {
     expect(loadLayout().groups[0]!.toolHomes).toEqual({ bottom: top });
   });
 });
+
+describe('openTab replaceOnly (back/forward never adds a tab)', () => {
+  it('replaces a clean active tab in place', () => {
+    store().openTab({ kind: 'page', page: 'jobs' });
+    const opened = store().openTab({ kind: 'page', page: 'settings' }, { replaceOnly: true });
+    expect(opened).toBe(true);
+    expect(rootLeaf().tabs).toHaveLength(1);
+  });
+
+  it('refuses rather than adding a tab when the active tab has unsaved edits', () => {
+    store().openTab({ kind: 'page', page: 'jobs' });
+    const active = rootLeaf().tabs[0]!;
+    setTabDirty(active.id, true);
+    const opened = store().openTab({ kind: 'page', page: 'settings' }, { replaceOnly: true });
+    expect(opened).toBe(false);
+    expect(rootLeaf().tabs).toHaveLength(1);
+    expect(rootLeaf().activeTabId).toBe(active.id);
+    setTabDirty(active.id, false);
+  });
+
+  it('still focuses an already-open tab', () => {
+    store().openTab({ kind: 'page', page: 'jobs' });
+    store().openTab({ kind: 'page', page: 'settings' }, { placement: 'tab' });
+    expect(store().openTab({ kind: 'page', page: 'jobs' }, { replaceOnly: true })).toBe(true);
+    expect(rootLeaf().tabs).toHaveLength(2);
+  });
+});
+
+describe('showChat replaceOnly', () => {
+  it('a chat reached by Back replaces the page it follows instead of joining it', () => {
+    store().openTab({ kind: 'page', page: 'settings' });
+    expect(store().showChat('c1', { replaceOnly: true })).toBe(true);
+    expect(rootLeaf().tabs.map((t) => t.descriptor.kind)).toEqual(['chat']);
+  });
+
+  it('a plain chat open still joins the page', () => {
+    store().openTab({ kind: 'page', page: 'settings' });
+    store().showChat('c1');
+    expect(rootLeaf().tabs).toHaveLength(2);
+  });
+
+  it('refuses when the page tab has unsaved edits', () => {
+    store().openTab({ kind: 'page', page: 'settings' });
+    const t = rootLeaf().tabs[0]!;
+    setTabDirty(t.id, true);
+    expect(store().showChat('c1', { replaceOnly: true })).toBe(false);
+    expect(rootLeaf().tabs).toHaveLength(1);
+    setTabDirty(t.id, false);
+  });
+});

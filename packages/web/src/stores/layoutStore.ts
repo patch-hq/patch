@@ -110,6 +110,12 @@ export interface OpenTabOptions {
    * `'tab'` always adds a new tab. `'split'` opens a new pane at `edge`.
    */
   placement?: 'active' | 'tab' | 'split';
+  /**
+   * Back/forward navigation: never add a tab. A clean active tab is replaced as
+   * usual; a dirty one is left alone and `openTab` returns false so the caller
+   * can say why nothing opened.
+   */
+  replaceOnly?: boolean;
   edge?: SplitEdge;
   seq?: number;
 }
@@ -310,7 +316,10 @@ interface LayoutState {
    * switches to it, restoring the layout it last had there. Never adds a tab
    * for another chat. `newGroup` shows it in a group of its own instead.
    */
-  showChat(chatId: string, opts?: { seq?: number; newGroup?: boolean }): void;
+  showChat(
+    chatId: string,
+    opts?: { seq?: number; newGroup?: boolean; replaceOnly?: boolean },
+  ): boolean;
   focusGroup(groupId: string): void;
   /** Add an empty group beside the focused one and focus it. */
   addGroup(): void;
@@ -319,7 +328,7 @@ interface LayoutState {
   /** Drag the divider after group `index`; `delta` and `minFraction` are fractions of the row. */
   resizeGroups(index: number, delta: number, minFraction: number): void;
   /** Open (or focus) a tab per `opts` (spec/14 § Opening things). */
-  openTab(descriptor: TabDescriptor, opts?: OpenTabOptions): void;
+  openTab(descriptor: TabDescriptor, opts?: OpenTabOptions): boolean;
   closeTab(paneId: string, tabId: string): void;
   /** Close a whole pane and every tab in it; the last pane left is emptied, not removed. */
   closePane(paneId: string): void;
@@ -641,8 +650,13 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
         commitGroups(s.groups, showing.id);
         // Bring the chat's own tab forward (or open it when only its pages —
         // Files, say — are left), so a click on its row always lands on the chat.
-        get().openTab({ kind: 'chat', chatId }, opts.seq !== undefined ? { seq: opts.seq } : {});
-        return;
+        return get().openTab(
+          { kind: 'chat', chatId },
+          {
+            ...(opts.seq !== undefined ? { seq: opts.seq } : {}),
+            ...(opts.replaceOnly ? { replaceOnly: true } : {}),
+          },
+        );
       }
       const chatTab = (): Tab => ({
         id: tabKey({ kind: 'chat', chatId }),
@@ -663,7 +677,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
           x.id === g.id ? x : { ...x, size: (x.size * s.groups.length) / (s.groups.length + 1) },
         );
         commitGroups(normaliseSizes(scaled), g.id);
-        return;
+        return true;
       }
       const cur = s.groups.find((g) => g.id === s.focusedGroupId)!;
       const layouts = { ...cur.layouts };
@@ -700,14 +714,23 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
         // A group holding only pages has no chat to leave; the chat joins them.
         const target = resolvePane(cur.root, cur.activePaneId);
         const tab = chatTab();
+        const current = target.tabs.find((t) => t.id === target.activeTabId);
+        // Back/forward onto a chat takes the page's place; it never adds a tab.
+        const replaceAt =
+          opts.replaceOnly && current !== undefined
+            ? target.tabs.findIndex((t) => t.id === current.id)
+            : -1;
+        if (replaceAt !== -1 && isTabDirty(current as Tab)) return false;
         next = {
           activePaneId: target.id,
           root:
-            rebuild(cur.root, target.id, (pane) =>
-              pane.type === 'leaf'
-                ? { ...pane, tabs: [...pane.tabs, tab], activeTabId: tab.id }
-                : pane,
-            ) ?? cur.root,
+            rebuild(cur.root, target.id, (pane) => {
+              if (pane.type !== 'leaf') return pane;
+              const tabs = pane.tabs.slice();
+              if (replaceAt === -1) tabs.push(tab);
+              else tabs[replaceAt] = tab;
+              return { ...pane, tabs, activeTabId: tab.id };
+            }) ?? cur.root,
         };
       } else {
         next = fresh();
@@ -718,6 +741,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
         s.groups.map((g) => (g.id === cur.id ? updated : g)),
         cur.id,
       );
+      return true;
     },
 
     focusGroup(groupId) {
@@ -803,7 +827,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
         });
         const root = withSeq ?? state.root;
         commit({ root, activePaneId: existing.pane.id });
-        return;
+        return true;
       }
 
       const tab: Tab = {
@@ -832,7 +856,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
                 : pane,
             ) ?? state.root;
           commit({ root, activePaneId: sibling.id });
-          return;
+          return true;
         }
         const newLeaf = makeLeaf([tab], tab.id);
         commit({
@@ -844,10 +868,14 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
           ),
           activePaneId: newLeaf.id,
         });
-        return;
+        return true;
       }
 
       const target = resolvePane(state.root, opts.paneId ?? state.activePaneId);
+      if (opts.replaceOnly) {
+        const current = target.tabs.find((t) => t.id === target.activeTabId);
+        if (current !== undefined && isTabDirty(current)) return false;
+      }
 
       if (opts.placement === 'split') {
         const edge = opts.edge ?? 'right';
@@ -866,12 +894,12 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
               return { ...pane, tabs, activeTabId: tab.id };
             }) ?? state.root;
           commit({ root, activePaneId: neighbour.id });
-          return;
+          return true;
         }
         const newLeaf = makeLeaf([tab], tab.id);
         const root = splitTree(state.root, target.id, newLeaf, edge);
         commit({ root, activePaneId: newLeaf.id });
-        return;
+        return true;
       }
 
       const activeTab = target.tabs.find((t) => t.id === target.activeTabId);
@@ -890,6 +918,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
       });
       const finalRoot = root ?? state.root;
       commit({ root: finalRoot, activePaneId: target.id });
+      return true;
     },
 
     closeTab(paneId, tabId) {

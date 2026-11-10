@@ -8,7 +8,7 @@ import type { JSX } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { PaneArea } from '../components/PaneArea.js';
-import { useLayoutStore } from '../stores/layoutStore.js';
+import { useRouteOpenTab } from '../lib/navigationOpen.js';
 import { api } from '../api/rest.js';
 import { openPadBesideChat } from '../lib/openPad.js';
 import type { PatchWs } from '../api/ws.js';
@@ -21,7 +21,7 @@ export function PadsPaneRoute({
   mode: 'list' | 'new' | 'open';
 }): JSX.Element {
   const { id = '' } = useParams<{ id: string }>();
-  const openTab = useLayoutStore((s) => s.openTab);
+  const openTab = useRouteOpenTab();
   const { data: pad } = useQuery({
     queryKey: ['pad', id],
     queryFn: () => api.getPad(id),
