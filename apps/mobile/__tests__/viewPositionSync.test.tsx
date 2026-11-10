@@ -87,7 +87,12 @@ describe('ViewPositionSync', () => {
     __setCurrentRoute('chats/[chatId]', { chatId: 'c1' });
     resetViewPositionSync();
     send.mockClear();
-    vi.mocked(getWs).mockReturnValue({ send } as unknown as ReturnType<typeof getWs>);
+    vi.mocked(getWs).mockReturnValue({
+      safeSend: send,
+      send: () => {
+        throw new Error('PatchWs: not connected');
+      },
+    } as unknown as ReturnType<typeof getWs>);
     useViewPositionStore.setState({ remote: null, handledAt: 0, scroll: null, received: false });
     usePresenceStore.setState({ surfaceId: 'phone' });
     seedSettings();
@@ -197,6 +202,15 @@ describe('ViewPositionSync', () => {
       id: 'c1',
       seq: 33,
     });
+  });
+
+  it('reports through the best-effort send, so an offline socket cannot throw from the timer (#420)', () => {
+    mount();
+    actSync(() => noteUserInput());
+    expect(() =>
+      actSync(() => vi.advanceTimersByTime(VIEW_POSITION_DEBOUNCE_MS + 1)),
+    ).not.toThrow();
+    expect(send).toHaveBeenCalled();
   });
 
   it('reports the open chat on first touch even when nothing else changes', () => {
