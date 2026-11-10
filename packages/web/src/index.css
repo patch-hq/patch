@@ -25,6 +25,7 @@
    localStorage). The `:root[data-theme='dark']` block below is retained only as a
    defensive mirror of the media block and is not set at runtime; keep them in sync. */
 :root {
+  --page-head-height: 79px;
   color-scheme: light;
   /* De-mung pass: the original warm-beige surfaces read muddy. Lifted +
      de-saturated toward a clean warm-paper, white elevated surfaces, so the
@@ -3047,6 +3048,10 @@ button.nav-row {
 }
 .chat-head {
   padding: 22px 28px;
+  /* Every page header (chat, route, job editor, settings) shares this height so
+     the Back / Forward buttons sit at the same x and y on every screen. */
+  min-height: var(--page-head-height);
+  box-sizing: border-box;
   border-bottom: 1px solid var(--line);
   /* Three zones on one centre-line: folder (left) · title (centre) · actions
      (right). Equal 1fr side columns keep the title visually centred regardless
@@ -8634,11 +8639,16 @@ button.view-file-download {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  min-height: var(--page-head-height);
+  box-sizing: border-box;
   /* `space-between` alone leaves NO minimum separation: a long title (e.g.
      "Edit · Patch Updates (Todoist adds + moves…)") grows until it butts
      straight into the back button. The gap is the floor between them. */
   gap: 16px;
-  padding: 22px 28px;
+  /* Fixed-height row with no block padding: a taller control (search box,
+     selects) must not push the centre-line, and with it Back / Forward, down. */
+  padding: 0 28px;
+  height: var(--page-head-height);
   border-bottom: 1px solid var(--line);
 }
 .route-head h1 {
@@ -9161,7 +9171,9 @@ button.view-file-download {
    right than the form fields. Zero its horizontal padding here so the heading
    lines up flush with the form, and tighten the bottom gap below the divider. */
 .job-editor .route-head {
-  padding: 20px 0 14px;
+  height: auto;
+  min-height: var(--page-head-height);
+  padding: 0;
   /* Packed from the start like the Jobs list head, so the title sits beside the
      back controls instead of being spread to the far edge. */
   justify-content: flex-start;
@@ -9431,6 +9443,14 @@ button.view-file-download {
   background: var(--bg-panel);
   overflow-y: auto;
   min-height: 0;
+}
+.set-nav .route-head-title {
+  /* Same box as a page header, so Back / Forward match every other screen. */
+  min-height: var(--page-head-height);
+  box-sizing: border-box;
+  margin: -22px -12px 8px;
+  padding: 0 28px;
+  border-bottom: 1px solid var(--line);
 }
 .set-nav h1 {
   font-size: 20px;
@@ -17348,6 +17368,11 @@ select.permission-mode.is-pending {
    and a card is name + trigger with the buttons beneath and the switch beside
    the name, the action line left to the editor. */
 @media (max-width: 640px) {
+  .route-head {
+    height: auto;
+    min-height: var(--page-head-height);
+    padding-block: 12px;
+  }
   /* Back/Forward pull themselves 12px left (`.nav-history`), so clear the
      button's 36px edge plus that. */
   .three-col.sidebar-collapsed .jobs-route .route-head-title {
@@ -17357,6 +17382,8 @@ select.permission-mode.is-pending {
     padding-left: 44px;
   }
   .jobs-route .route-head {
+    height: auto;
+    padding: 22px 28px;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
@@ -17975,4 +18002,81 @@ select.permission-mode.is-pending {
   height: 3px;
   border-radius: 2px;
   background: var(--line);
+}
+
+/* Manual sort: the row a dragged chat will land above. */
+.sb-chat-row.drop-target,
+a.drop-target {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+/* Phone: every composer control is a --tap-min hit target on both axes
+   (spec/14 § Legibility). Desktop keeps the denser 40px / 32px sizes. The
+   in-field dictate and + stay inset in the field, so the field's minimum
+   height rises with them. */
+@media (max-width: 640px) {
+  .composer .composer-input {
+    min-height: var(--tap-min);
+  }
+  .composer .composer-input-wrap .voice-note-btn {
+    right: 0;
+    bottom: 0;
+  }
+  .composer .composer-input-wrap .composer-add-btn {
+    left: 0;
+    bottom: 0;
+  }
+  .composer .composer-input-wrap.has-add .composer-input,
+  .composer .composer-input-wrap.has-add .composer-live-preview,
+  .composer .composer-input-wrap.has-add .composer-chip-mirror {
+    padding-left: 46px;
+  }
+  .composer .composer-input-wrap .composer-input,
+  .composer .composer-input-wrap .composer-live-preview,
+  .composer .composer-input-wrap .composer-chip-mirror {
+    padding-right: 46px;
+  }
+  .composer .composer-tools .call-btn,
+  .composer .composer-actions.is-compact .composer-tools .call-btn,
+  .composer .composer-input-wrap .voice-note-btn,
+  .composer .composer-input-wrap .composer-add-btn,
+  .composer .composer-actions .stop-btn,
+  .composer .composer-actions .send-btn {
+    width: var(--tap-min);
+    height: var(--tap-min);
+  }
+  .composer .composer-actions .model-picker.as-crumb {
+    display: flex;
+    height: var(--tap-min);
+  }
+  .composer .composer-actions .model-picker.as-crumb .model-pill {
+    align-self: center;
+  }
+  /* One line at 360px is a budget: the wider boxes are paid for by a slimmer
+     composer gutter and tighter gaps, not by dropping a control. */
+  .composer {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .composer .composer-actions.is-compact .composer-tools {
+    margin-left: 0;
+  }
+  .composer .composer-actions,
+  .composer .composer-actions .composer-tools,
+  .composer .composer-actions .composer-settings,
+  .composer .composer-actions .composer-actions-end {
+    gap: 0;
+  }
+  .composer .composer-actions .context-ring {
+    width: 30px;
+  }
+  .composer .composer-actions .model-pill.as-crumb {
+    padding: 0 4px;
+  }
+  .composer .composer-actions .permission-mode,
+  .composer .composer-actions .permission-mode-wrap,
+  .composer .composer-actions .model-pill.as-crumb {
+    min-width: var(--tap-min);
+    height: var(--tap-min);
+  }
 }

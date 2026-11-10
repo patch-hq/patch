@@ -56,13 +56,12 @@ describe('beginSession', () => {
     expect(readExitLog()).toEqual([]);
   });
 
-  it('records that an update was applied between runs', () => {
+  it('records an update applied between runs without calling the exit unexpected', () => {
     beginSession();
     updates.updateId = 'u2';
     const found = beginSession();
-    expect(found.unexplained).toBe(true);
-    expect(readExitLog().map((e) => e.kind)).toEqual(['updated', 'unexpected-exit']);
-    expect(readExitLog()[1]?.detail).toContain('update was applied');
+    expect(found.unexplained).toBe(false);
+    expect(readExitLog().map((e) => e.kind)).toEqual(['updated']);
   });
 });
 

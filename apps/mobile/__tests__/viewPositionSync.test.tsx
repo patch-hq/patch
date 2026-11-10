@@ -87,7 +87,12 @@ describe('ViewPositionSync', () => {
     __setCurrentRoute('chats/[chatId]', { chatId: 'c1' });
     resetViewPositionSync();
     send.mockClear();
-    vi.mocked(getWs).mockReturnValue({ send } as unknown as ReturnType<typeof getWs>);
+    vi.mocked(getWs).mockReturnValue({
+      safeSend: send,
+      send: () => {
+        throw new Error('PatchWs: not connected');
+      },
+    } as unknown as ReturnType<typeof getWs>);
     useViewPositionStore.setState({ remote: null, handledAt: 0, scroll: null, received: false });
     usePresenceStore.setState({ surfaceId: 'phone' });
     seedSettings();
@@ -199,6 +204,15 @@ describe('ViewPositionSync', () => {
     });
   });
 
+  it('reports through the best-effort send, so an offline socket cannot throw from the timer (#420)', () => {
+    mount();
+    actSync(() => noteUserInput());
+    expect(() =>
+      actSync(() => vi.advanceTimersByTime(VIEW_POSITION_DEBOUNCE_MS + 1)),
+    ).not.toThrow();
+    expect(send).toHaveBeenCalled();
+  });
+
   it('reports the open chat on first touch even when nothing else changes', () => {
     mount();
     actSync(() => vi.advanceTimersByTime(VIEW_POSITION_DEBOUNCE_MS + 1));
@@ -206,6 +220,16 @@ describe('ViewPositionSync', () => {
     // Same chat, no navigation, no scroll: the touch alone makes it the live position.
     actSync(() => noteUserInput());
     actSync(() => vi.advanceTimersByTime(VIEW_POSITION_DEBOUNCE_MS + 1));
+    expect(send).toHaveBeenCalledWith({ type: 'view_position.set', page: 'chat', id: 'c1' });
+  });
+
+  it('does not throw from the debounce timer when the socket is down (#421)', () => {
+    mount();
+    actSync(() => noteUserInput());
+    // getWs().send throws "not connected" in this mock; only safeSend may be used.
+    expect(() =>
+      actSync(() => vi.advanceTimersByTime(VIEW_POSITION_DEBOUNCE_MS + 1)),
+    ).not.toThrow();
     expect(send).toHaveBeenCalledWith({ type: 'view_position.set', page: 'chat', id: 'c1' });
   });
 

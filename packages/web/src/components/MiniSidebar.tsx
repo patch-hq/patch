@@ -23,10 +23,11 @@ export function MiniSidebar(): JSX.Element {
   const highlighted = location.pathname.startsWith('/chats/') ? activeChatId : null;
 
   const chatSort = useUiStore((s) => s.chatSort);
+  const manualOrder = useUiStore((s) => s.manualOrder);
   const groupSort = useUiStore((s) => s.groupSort);
   const grouped = useMemo(
-    () => groupChats(Object.values(chats), folderRoster, { chatSort, groupSort }),
-    [chats, folderRoster, chatSort, groupSort],
+    () => groupChats(Object.values(chats), folderRoster, { chatSort, groupSort, manualOrder }),
+    [chats, folderRoster, chatSort, groupSort, manualOrder],
   );
   // Same order as the full sidebar: Manager, pinned, then each project's rows,
   // with a hairline between projects.

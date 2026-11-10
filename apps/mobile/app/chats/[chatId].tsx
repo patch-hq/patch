@@ -63,6 +63,7 @@ import {
 import { apiUrl, getRoute } from '../../src/config';
 import { loadTranscript, dropTranscript, setBranch } from '../../src/lib/transcriptCache';
 import { api } from '../../src/api/rest';
+import { sendQuestionActivity } from '../../src/lib/questionActivity';
 import {
   isLocalIdSettled,
   useChatStore,
@@ -3177,7 +3178,7 @@ const TimelineItem = React.memo(function TimelineItem({
             });
             useChatStore.getState().resolvePermission(chatId, requestId, 'deny');
           }}
-          onActivity={() => getWs().send({ type: 'chat.question_activity', chatId })}
+          onActivity={() => sendQuestionActivity(chatId)}
         />
       );
     }

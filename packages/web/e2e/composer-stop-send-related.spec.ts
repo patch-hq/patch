@@ -29,7 +29,8 @@ for (const [name, size] of [
     const stop = await style(page, 'stop-btn');
     expect(stop.bg).toBe(stop.border);
     expect(stop.bg).not.toBe('rgba(0, 0, 0, 0)');
-    expect(stop.w).toBe('40px');
-    expect(stop.h).toBe('40px');
+    const px = size.width < 640 ? '44px' : '40px';
+    expect(stop.w).toBe(px);
+    expect(stop.h).toBe(px);
   });
 }
