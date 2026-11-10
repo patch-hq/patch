@@ -36,11 +36,13 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  statSync,
   rmSync,
   copyFileSync,
   writeFileSync,
 } from 'node:fs';
 import { connect, type Socket } from 'node:net';
+import { uptime } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import type { SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
@@ -124,6 +126,18 @@ function isAlive(pid: number): boolean {
 /** The runner protocols this host can talk to. */
 export const SUPPORTED_RUNNER_PROTOCOLS: readonly number[] = [RUNNER_PROTOCOL];
 
+/**
+ * Whether `runner.json` was written before the machine last booted. A reboot
+ * kills every runner but leaves its files, and pids restart low, so the old
+ * pid is soon some other process: `isAlive` says yes and the stale socket
+ * file is still there, and the host would attach to a runner that is gone.
+ */
+function writtenBeforeBoot(infoPath: string): boolean {
+  const bootedAt = Date.now() - uptime() * 1000;
+  return statSync(infoPath).mtimeMs < bootedAt - BOOT_SKEW_MS;
+}
+const BOOT_SKEW_MS = 5000;
+
 export interface TurnOnDisk {
   dir: string;
   chatId: string;
@@ -154,7 +168,11 @@ export function inspectTurnDir(dir: string): TurnOnDisk | undefined {
   const info = readJson<{ pid: number; protocol?: number }>(join(dir, RUNNER_INFO));
   const exited = existsSync(join(dir, RUNNER_EXIT));
   const live =
-    !exited && info !== undefined && isAlive(info.pid) && existsSync(join(dir, RUNNER_SOCKET));
+    !exited &&
+    info !== undefined &&
+    isAlive(info.pid) &&
+    existsSync(join(dir, RUNNER_SOCKET)) &&
+    !writtenBeforeBoot(join(dir, RUNNER_INFO));
   return {
     dir,
     chatId: meta.chatId,
