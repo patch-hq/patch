@@ -5404,8 +5404,12 @@ button.view-file-download {
 }
 .link-preview-card {
   display: block;
-  max-width: 480px;
-  margin: 6px 0;
+  position: fixed;
+  z-index: 60;
+  width: max-content;
+  max-width: min(480px, calc(100vw - 16px));
+  overflow-y: auto;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
   padding: 8px 10px;
   background: var(--bg-elevated);
   border: 1px solid var(--accent-soft, #cad9be);
@@ -7976,6 +7980,23 @@ button.view-file-download {
   background: color-mix(in srgb, var(--danger) 38%, var(--bg-app));
   color: var(--danger);
 }
+.meeting-detection-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 6px 16px;
+  font-size: var(--text-min);
+  background: color-mix(in srgb, var(--danger) 38%, var(--bg-app));
+  color: var(--danger);
+}
+.meeting-detection-banner .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
 .desktop-update-banner .dot {
   width: 7px;
   height: 7px;
@@ -8650,6 +8671,14 @@ button.view-file-download {
 .overlay-titlebar .job-editor .route-head {
   padding-left: var(--overlay-titlebar-inset);
   -webkit-app-region: drag;
+}
+/* A window with its sidebar hidden (how every new window boots) floats the
+   expand chevron over the head's top-left, just right of the lights — on these
+   pages that is exactly where Back / Forward sit. Step the head past it, as
+   `.chat-head` does. */
+.overlay-titlebar .three-col.sidebar-collapsed .route-head,
+.overlay-titlebar .three-col.sidebar-collapsed .job-editor .route-head {
+  padding-left: calc(var(--overlay-titlebar-inset) + 36px);
 }
 .overlay-titlebar .route-head button,
 .overlay-titlebar .route-head a,
@@ -14671,7 +14700,9 @@ select.permission-mode.is-pending {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  /* A floor: the composer plus a few messages. The panel (flex-shrink 1) gives way before the
+     chat is squeezed to nothing, however tall it was dragged or short the window. */
+  min-height: 280px;
   min-width: 0;
 }
 .mm-left .chat-stream {
@@ -14681,7 +14712,7 @@ select.permission-mode.is-pending {
 }
 /* Across the top of the chat, full width; its height is Tom's, set by the bar under it. */
 .mm-panel {
-  flex: none;
+  flex: 0 1 auto;
   height: 60%;
   min-width: 0;
   min-height: 120px;

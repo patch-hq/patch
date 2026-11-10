@@ -24,6 +24,7 @@ import { ColumnDivider } from './components/ColumnDivider.js';
 import { OfflineBanner } from './components/OfflineBanner.js';
 import { HostOfflineBanner } from './components/HostOfflineBanner.js';
 import { DesktopUpdateBanner } from './components/DesktopUpdateBanner.js';
+import { MeetingDetectionBanner } from './components/MeetingDetectionBanner.js';
 import { WebUpdateBanner } from './components/WebUpdateBanner.js';
 import { ConnectionDiagnosticsGate } from './components/ConnectionDiagnostics.js';
 import { IncomingCallBanner } from './components/IncomingCallBanner.js';
@@ -646,6 +647,7 @@ export function AppShell(): JSX.Element {
       {/* Standing chrome, not an interruption: the shell has a newer build
           staged and is waiting to be asked. Renders nothing in a browser. */}
       <DesktopUpdateBanner />
+      <MeetingDetectionBanner />
       {/* Same contract, for the SPA bundle itself — a deploy landed while this
           tab was open. Renders nothing until one has (lib/liveUpdate.ts). */}
       <WebUpdateBanner />

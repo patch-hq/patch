@@ -180,6 +180,19 @@ export function defaultHostId(hosts: Record<string, HostPresence>): string | nul
   return online.length === 1 ? (online[0] as HostPresence).hostId : null;
 }
 
+/**
+ * The host to read a catalogue from when nothing else pins one. The model list
+ * is Anthropic's, the same from any attached host, so the user never chooses:
+ * the default host if unambiguous, else the first online host, else the first
+ * known one. Null only when no host has attached at all.
+ */
+export function catalogueHostId(hosts: Record<string, HostPresence>): string | null {
+  const pinned = defaultHostId(hosts);
+  if (pinned !== null) return pinned;
+  const all = Object.values(hosts).sort((a, b) => a.hostId.localeCompare(b.hostId));
+  return (all.find((h) => h.online) ?? all[0])?.hostId ?? null;
+}
+
 /** A host row for a hostId the store has not seen described yet. */
 function blankHost(hostId: string): HostPresence {
   return {

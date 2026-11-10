@@ -8,6 +8,7 @@ import {
   listenHere,
   meetingSpeeds,
   setMeetingSpeed,
+  setMeetingEngine,
   getRecordRaw,
   setRecordRaw,
 } from '../lib/meetingControl.js';
@@ -59,6 +60,19 @@ describe('meeting speeds', () => {
       expect.objectContaining({ action: 'tune', settings: { clipSeconds: 6, analyseSeconds: 45 } }),
     );
     usePreferencesStore.setState({ preferences: prefs });
+  });
+});
+
+describe('meeting engine', () => {
+  it("changes only the engine, keeping the meeting's timing", () => {
+    send.mockReset();
+    setMeetingEngine('c1', { clipSeconds: 3, analyseSeconds: 8 }, 'assemblyai');
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'tune',
+        settings: { clipSeconds: 3, analyseSeconds: 8, engine: 'assemblyai' },
+      }),
+    );
   });
 });
 

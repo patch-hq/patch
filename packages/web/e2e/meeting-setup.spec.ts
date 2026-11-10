@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { settingsUrl, stubSettingsApi } from './settingsHarness.js';
 
 // Meeting permissions (lib/meetingSetup.ts, components/MeetingSetup.tsx) against a
 // stand-in desktop bridge: `window.patch` reports and grants the three macOS
@@ -142,4 +143,45 @@ test('the microphone missing at start: Start waits until it is allowed', async (
   await expect(pop.getByTestId('meeting-setup-start')).toBeEnabled();
   await pop.getByTestId('meeting-setup-start').click();
   await expect.poll(async () => (await sent(page, 'meeting.control_request')).length).toBe(1);
+});
+
+test('starting without names is remembered: the next Meeting press starts without asking', async ({
+  page,
+}) => {
+  await fakeShell(
+    page,
+    { microphone: 'granted', callAudio: 'granted', accessibility: 'missing' },
+    { seen: true },
+  );
+  await page.goto(URL);
+  await page.getByTestId('meeting-btn').click();
+  await page.getByTestId('meeting-start-without-names').click();
+  await expect.poll(async () => (await sent(page, 'meeting.control_request')).length).toBe(1);
+  expect(await page.evaluate(() => localStorage.getItem('patch.meetingNamesDeclined'))).toBe('1');
+  await page.reload();
+  await page.waitForSelector('[data-testid=composer]');
+  await page.getByTestId('meeting-btn').click();
+  await expect.poll(async () => (await sent(page, 'meeting.control_request')).length).toBe(1);
+  await expect(page.getByTestId('meeting-setup')).toHaveCount(0);
+});
+
+test('Settings → Voice toggle: off remembers a decline, on asks for Accessibility again', async ({
+  page,
+}) => {
+  await fakeShell(
+    page,
+    { microphone: 'granted', callAudio: 'granted', accessibility: 'missing' },
+    { seen: true },
+  );
+  await page.addInitScript(() => localStorage.setItem('patch.meetingNamesDeclined', '1'));
+  await stubSettingsApi(page);
+  await page.goto(settingsUrl('voice'));
+  const toggle = page.getByTestId('meeting-names-toggle');
+  await expect(toggle).not.toBeChecked();
+  await page.getByTestId('meeting-names-row').locator('.toggle-track').click();
+  await expect.poll(() => shellCalls(page)).toEqual(['request:accessibility']);
+  await expect(toggle).toBeChecked();
+  expect(await page.evaluate(() => localStorage.getItem('patch.meetingNamesDeclined'))).toBeNull();
+  await page.getByTestId('meeting-names-row').locator('.toggle-track').click();
+  expect(await page.evaluate(() => localStorage.getItem('patch.meetingNamesDeclined'))).toBe('1');
 });

@@ -1,15 +1,14 @@
 // The model list the account-wide model pickers (Agent → Model for new chats,
 // Manager → Model) offer.
 //
-// The catalogue is per host, so it is read from the account's default
-// host (`defaultHostId`, the rule every other account-wide default uses).
-// With no unambiguous host there is nothing to read a list FROM, so the control says that
-// rather than offering a guessed list — and the saved value is always kept as
-// an option, so an unrelated visit to the page can never unpin it.
+// The list is the same from any attached host, so it is resolved across the
+// attached hosts (`catalogueHostId`) — the user never sees host routing. The
+// saved value is always kept as an option, so an unrelated visit to the page
+// can never unpin it.
 
 import { useEffect } from 'react';
 import { loadModels, useModelCatalog } from '../../lib/models.js';
-import { defaultHostId, usePresenceStore } from '../../stores/presenceStore.js';
+import { catalogueHostId, usePresenceStore } from '../../stores/presenceStore.js';
 
 export function useModelOptions(value: string): {
   options: { id: string; label: string }[];
@@ -17,7 +16,7 @@ export function useModelOptions(value: string): {
   problem: { kind: 'no-host' | 'error'; text: string } | null;
 } {
   const hosts = usePresenceStore((s) => s.hosts);
-  const catalogueHost = defaultHostId(hosts);
+  const catalogueHost = catalogueHostId(hosts);
   const catalogue = useModelCatalog();
 
   useEffect(() => {
@@ -31,7 +30,7 @@ export function useModelOptions(value: string): {
     options: [...extra, ...catalogue.models],
     problem:
       catalogueHost === null
-        ? { kind: 'no-host', text: 'No single host to read the model list from.' }
+        ? { kind: 'no-host', text: 'The model list isn’t available yet.' }
         : catalogue.status === 'error'
           ? {
               kind: 'error',

@@ -22,7 +22,7 @@ import {
 import { join } from 'node:path';
 import { z } from 'zod';
 import { McpServerList, PermissionMode } from '@patch/wire';
-import { DictationSetting } from '@patch/wire/audio';
+import { DictationSetting, MeetingEngine } from '@patch/wire/audio';
 import type { Logger } from 'pino';
 
 const HostStateFile = z
@@ -72,6 +72,7 @@ const HostStateFile = z
     voiceConfig: z
       .object({
         dictation: DictationSetting,
+        meeting: MeetingEngine.default('local'),
         device: z
           .object({
             backend: z.enum(['local', 'gemini', 'openai', 'elevenlabs']),

@@ -19,6 +19,12 @@ export function handleUncaught(
     logger.error({ err }, 'uncaught EPIPE writing to a dead child process; host kept alive');
     return;
   }
+  if (e instanceof Error && e.message === 'Cannot write to terminated process') {
+    // The agent SDK's transport throws this when a write races a child that has
+    // already exited. Same dead child as EPIPE, not a dead host.
+    logger.error({ err }, 'uncaught write to a terminated child process; host kept alive');
+    return;
+  }
   logger.fatal({ err }, 'uncaught exception; exiting');
   exit(1);
 }

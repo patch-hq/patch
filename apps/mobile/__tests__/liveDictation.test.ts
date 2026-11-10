@@ -114,6 +114,54 @@ describe('stream engine (Deepgram)', () => {
     expect(sentJson(ws).at(-1)).toMatchObject({ type: 'audio.session_end', reason: 'cancelled' });
   });
 
+  it('a server restart (4503) mid-dictation redials and replays the audio — no error, no lost words', async () => {
+    vi.useFakeTimers();
+    try {
+      const { handle, onError, ws } = await start();
+      ws.emitOpen();
+      speak(200);
+      ws.emitClose(4503, 'server restarting into 1.1.1160');
+      expect(onError).not.toHaveBeenCalled();
+      speak(80); // spoken while the socket is down
+      await vi.advanceTimersByTimeAsync(1_100);
+      const ws2 = FakeWebSocket.instances[1]!;
+      expect(ws2).toBeDefined();
+      ws2.emitOpen();
+      const types = sentJson(ws2).map((m) => m.type);
+      expect(types[0]).toBe('audio.session_start');
+      // 200ms + 80ms of 40ms frames, all replayed
+      expect(types.filter((t) => t === 'audio.pcm16')).toHaveLength(7);
+      const done = handle.finish(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sentJson(ws2).some((m) => m.type === 'audio.dictation_finish')).toBe(true);
+      ws2.emitMessage(
+        encodeAudio({ type: 'audio.transcript_final', sessionId: 'sess-1', text: 'all of it' }),
+      );
+      expect(await done).toEqual({ kind: 'text', text: 'all of it' });
+      expect(onError).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps redialing through a down server, then fails loudly once the window passes', async () => {
+    vi.useFakeTimers();
+    try {
+      const { onError, ws } = await start();
+      ws.emitOpen();
+      speak(80);
+      voiceTokenMock.mockRejectedValue(new Error('HTTP 502'));
+      ws.emitClose(4503, 'server restarting');
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(onError).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(25_000);
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError.mock.calls[0]![0]).toMatch(/could not reconnect after the server restarted/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('a finish before the socket opened is sent as soon as it does', async () => {
     const { handle, ws } = await start();
     speak(200);

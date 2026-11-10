@@ -9,6 +9,7 @@ import {
   type ComputerDictationEngine,
   type DictationConfig,
   type DictationEngine,
+  type MeetingEngine,
   type PhoneDictationEngine,
 } from '@patch/wire/audio';
 import { DICTATION_PAUSE_CHOICES } from '@patch/wire';
@@ -20,6 +21,7 @@ import { chordFromEvent, chordGlyphs } from '../../lib/dictateChord.js';
 import { getDesktopBridge } from '../../lib/desktopBridge.js';
 import { shortcutLabel } from '../../lib/shortcuts.js';
 import { PairVoiceDevice } from '../../components/PairVoiceDevice.js';
+import { reenableSpeakerNames, setNamesDeclined, useMeetingSetup } from '../../lib/meetingSetup.js';
 import { Toggle } from '../../components/Toggle.js';
 import { patchShared } from './sharedWrite.js';
 import { DeviceRow, useDevices } from './DevicesPage.js';
@@ -99,6 +101,14 @@ const DICTATION_LABELS: Record<DictationEngine, string> = {
   whisper: 'Whisper',
 };
 
+const MEETING_ENGINES: readonly MeetingEngine[] = ['local', 'elevenlabs', 'deepgram', 'assemblyai'];
+const MEETING_LABELS: Record<MeetingEngine, string> = {
+  local: 'On this computer',
+  elevenlabs: 'ElevenLabs',
+  deepgram: 'Deepgram',
+  assemblyai: 'AssemblyAI',
+};
+
 /** Dollars, to the penny that matters: two significant figures under 10 cents. */
 function formatUsd(usd: number): string {
   if (usd === 0) return '$0';
@@ -140,12 +150,38 @@ export function VoicePage(): JSX.Element {
   return (
     <SettingsPage title="Voice" testid="settings-voice">
       <DictationEnginesGroup />
+      <MeetingEngineGroup />
       <EngineGroup />
       <DictationGroup />
       <ShortcutGroup />
+      <MeetingNamesGroup />
       <SpeakingGroup />
       <VoiceDevicesGroup />
     </SettingsPage>
+  );
+}
+
+/** Meeting mode: whether Patch asks for Accessibility to name who is speaking. Desktop only. */
+function MeetingNamesGroup(): JSX.Element | null {
+  const declined = useMeetingSetup((s) => s.namesDeclined);
+  if (!getDesktopBridge()?.getMeetingPermissions) return null;
+  return (
+    <Group label="Meetings" testid="settings-voice-meetings">
+      <Row
+        title="Name speakers on calls"
+        sub="Reads Teams, Zoom and Meet through macOS Accessibility. Off, speakers show as Unknown."
+        testid="meeting-names-row"
+      >
+        <Toggle
+          checked={!declined}
+          onChange={(next) => {
+            if (next) void reenableSpeakerNames();
+            else setNamesDeclined(true);
+          }}
+          testid="meeting-names-toggle"
+        />
+      </Row>
+    </Group>
   );
 }
 
@@ -364,6 +400,51 @@ function DictationEnginesGroup(): JSX.Element {
           disabled={!loaded}
           onChange={(tidy) => write({ tidy })}
           testid="dictation-tidy-toggle"
+        />
+      </Row>
+    </Group>
+  );
+}
+
+/**
+ * Who transcribes a meeting. On this computer is free; the others are paid and
+ * chosen deliberately — a meeting is hours of audio.
+ */
+function MeetingEngineGroup(): JSX.Element {
+  const voiceConfig = usePreferencesStore((s) => s.preferences.voiceConfig);
+  const loaded = usePreferencesStore((s) => s.loaded);
+  const update = usePreferencesStore((s) => s.update);
+  const pushError = useUiStore((s) => s.pushError);
+  const hosts = usePresenceStore((s) => s.hosts);
+  const hostReports = Object.values(hosts).flatMap((h) =>
+    h.host ? [{ hostName: h.host.hostName, voiceKeys: h.host.voiceKeys }] : [],
+  );
+  const status = voiceKeyHostStatus(voiceConfig.meeting, hostReports);
+  return (
+    <Group label="Meetings" testid="settings-voice-meeting">
+      <Row
+        title="Transcription"
+        sub={
+          status ? (
+            <span className="set-sub-line set-sub-error" data-testid="meeting-engine-keys">
+              {status}
+            </span>
+          ) : undefined
+        }
+        testid="meeting-engine"
+      >
+        <Pills
+          label="Meeting transcription"
+          options={MEETING_ENGINES}
+          labels={MEETING_LABELS}
+          value={voiceConfig.meeting}
+          disabled={!loaded}
+          testid="meeting-engine-pills"
+          onChange={(meeting) =>
+            void update({ voiceConfig: { ...voiceConfig, meeting } }).catch((e: Error) =>
+              pushError(failed('settings'), undefined, e.message),
+            )
+          }
         />
       </Row>
     </Group>

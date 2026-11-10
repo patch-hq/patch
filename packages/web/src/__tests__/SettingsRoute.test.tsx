@@ -698,6 +698,7 @@ describe('Settings → Voice', () => {
           ...usePreferencesStore.getState().preferences,
           voiceConfig: {
             dictation: { phone: 'deepgram', computer: 'whisper', tidy: false },
+            meeting: 'local',
             device: { backend: 'openai', layer: 'light', handoff: 'auto' },
             handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
             call: { backend: 'local', layer: 'direct', handoff: 'auto' },
@@ -738,6 +739,7 @@ describe('Settings → Voice', () => {
           ...usePreferencesStore.getState().preferences,
           voiceConfig: {
             dictation: { phone: 'whisper', computer: 'deepgram', tidy: false },
+            meeting: 'local',
             device: { backend: 'local', layer: 'direct', handoff: 'auto' },
             handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
             call: { backend: 'local', layer: 'direct', handoff: 'auto' },
@@ -815,6 +817,28 @@ describe('Settings → Voice', () => {
       });
     });
 
+    it('meetings: the transcription engine is chosen, and a missing key is named', async () => {
+      const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
+      vi.stubGlobal('fetch', makeFetch({}, server.handler));
+      reportHost('d1', {
+        hostName: 'hetzner',
+        voiceKeys: { gemini: false, openai: false, assemblyai: false },
+      });
+      renderSettings('/settings/voice');
+      expect(await screen.findByTestId('meeting-engine-pills-local')).toHaveTextContent(
+        'On this computer',
+      );
+      expect(screen.queryByTestId('meeting-engine-keys')).toBeNull();
+      fireEvent.click(screen.getByTestId('meeting-engine-pills-assemblyai'));
+      await waitFor(() => expect(server.writes).toHaveLength(1));
+      expect((server.writes[0]!.voiceConfig as Record<string, unknown>).meeting).toBe('assemblyai');
+      await waitFor(() =>
+        expect(screen.getByTestId('meeting-engine-keys')).toHaveTextContent(
+          'Not configured on hetzner: no AssemblyAI key is set.',
+        ),
+      );
+    });
+
     it('tidy-up with Whisper is one switch for both', async () => {
       const server = preferencesServer(() => ({ ...usePreferencesStore.getState().preferences }));
       vi.stubGlobal('fetch', makeFetch({}, server.handler));
@@ -887,6 +911,7 @@ describe('Settings → Voice', () => {
           ...usePreferencesStore.getState().preferences,
           voiceConfig: {
             dictation: { phone: 'device', computer: 'whisper', tidy: false },
+            meeting: 'local',
             device: { backend: 'gemini', layer: 'light', handoff: 'auto' },
             handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
             call: { backend: 'local', layer: 'direct', handoff: 'auto' },
@@ -1101,12 +1126,14 @@ describe('Settings → Agent', () => {
       await waitFor(() => expect(server.writes).toEqual([{ defaultModel: 'claude-sonnet-5' }]));
     });
 
-    it('says there is no host to read the list from, keeping the saved value', async () => {
+    it('says the list is unavailable with no host attached, keeping the saved value', async () => {
       vi.stubGlobal('fetch', makeFetch());
       clearHosts();
       renderSettings('/settings/agent');
       await waitFor(() =>
-        expect(screen.getByTestId('default-model-no-host')).toHaveTextContent('No single host'),
+        expect(screen.getByTestId('default-model-no-host')).toHaveTextContent(
+          'isn’t available yet',
+        ),
       );
       expect((screen.getByTestId('default-model') as HTMLSelectElement).value).toBe(
         usePreferencesStore.getState().preferences.defaultModel,

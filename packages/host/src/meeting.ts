@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { nameFixes } from './meetingVocab.js';
 import type { Logger } from 'pino';
+import type { MeetingEngine } from '@patch/wire/audio';
 import {
   meetingElapsedMs,
   meetingSpeakerLabel,
@@ -178,11 +179,24 @@ export interface MeetingDeps {
   /** Local Whisper only. */
   transcribe: (wav: Buffer) => Promise<string>;
   /**
+   * Speech gate for the `them` (system audio) lane. A clip it rejects is dropped
+   * without transcribing: engines invent text from silence and room noise.
+   */
+  hasSpeech?: (wav: Buffer) => Promise<boolean>;
+  /**
    * Local diarisation: transcribes a `them` clip and says which distinct voice
    * spoke each stretch. `session` is stable for the whole meeting so voice
    * numbers stay the same across clips. Omitted: `them` stays one speaker.
    */
   transcribeVoices?: (session: string, wav: Buffer) => Promise<{ text: string; voice: number }[]>;
+  /**
+   * Like `transcribeVoices`, but resolved per meeting: given the engine this
+   * meeting chose (undefined = the account default), the diarising function to
+   * use, or undefined for local one-voice transcription. Wins over `transcribeVoices`.
+   */
+  transcribeVoicesFor?: (
+    engine: MeetingEngine | undefined,
+  ) => ((session: string, wav: Buffer) => Promise<{ text: string; voice: number }[]>) | undefined;
   /**
    * True once the owner has a voice print. Then every clip (mic included) is
    * diarised and voice 0 is the owner: those lines are 'you' whichever channel
@@ -419,7 +433,12 @@ export class MeetingManager {
     if (!rt || rt.state.status === 'ended') {
       throw new MeetingError(`chat ${chatId} has no running meeting to tune`);
     }
-    rt.state.settings = MeetingSettings.parse(settings);
+    // A change of speed carries no engine: the meeting keeps the one it has.
+    const engine = settings.engine ?? rt.state.settings?.engine;
+    rt.state.settings = MeetingSettings.parse({
+      ...settings,
+      ...(engine !== undefined ? { engine } : {}),
+    });
     if (rt.state.status === 'live') this.armTimer(chatId, rt);
     this.commit(chatId, rt);
   }
@@ -556,13 +575,29 @@ export class MeetingManager {
     const at = meetingElapsedMs(rt.state, this.now());
     const next = rt.txChain[source].then(async () => {
       const speaker = source === 'mic' ? 'you' : 'them';
-      const printed = !!this.deps.transcribeVoices && !!this.deps.hasVoiceprint?.();
+      if (source === 'system' && this.deps.hasSpeech) {
+        let speech: boolean;
+        try {
+          speech = await this.deps.hasSpeech(wav);
+        } catch (err) {
+          rt.state.error = `speech detection failed: ${(err as Error).message}`;
+          this.deps.logger.error(
+            { chatId, err: (err as Error).message },
+            'meeting: speech detection failed',
+          );
+          this.commit(chatId, rt);
+          return;
+        }
+        if (!speech) return;
+      }
+      const voices = this.deps.transcribeVoicesFor
+        ? this.deps.transcribeVoicesFor(rt.state.settings?.engine)
+        : this.deps.transcribeVoices;
+      const printed = !!voices && !!this.deps.hasVoiceprint?.();
       let pieces: { text: string; voice?: number }[];
       try {
-        if (this.deps.transcribeVoices && (speaker === 'them' || printed)) {
-          pieces = mergeVoiceRuns(
-            await this.deps.transcribeVoices(`${chatId}:${rt.state.startedAt}`, wav),
-          );
+        if (voices && (speaker === 'them' || printed)) {
+          pieces = mergeVoiceRuns(await voices(`${chatId}:${rt.state.startedAt}`, wav));
         } else {
           pieces = [{ text: (await this.deps.transcribe(wav)).trim() }];
         }
