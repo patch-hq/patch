@@ -622,7 +622,7 @@ alone.
 ## Message links
 
 An `http(s)` link in a message carries a small Summarise button beside it.
-Clicking it expands an inline card directly below the message showing a
+Clicking it opens a popover anchored to the button showing a
 model-written summary of the linked page, followed by the page's host. The
 server fetches the page and sends its readable text (scripts, navigation and
 footers removed, capped at 24,000 characters) to the Manager host,
@@ -632,7 +632,7 @@ summary, with Reset to default). The card reads "Summarising…" while it waits;
 a failure — page unfetchable, Manager host offline, no account able to answer —
 shows its reason in the card, never an empty summary. A summary is kept for the
 session per link and prompt, so reopening is free and editing the prompt makes
-the next open summarise afresh. Clicking the button again collapses the card. To
+the next open summarise afresh. Clicking the button again, pressing Escape or clicking outside closes the popover; on mobile it is a centred modal card that closes on a backdrop tap. To
 the right of the Summarise button sits an open in browser icon, which opens the
 link in a new window — on the desktop shell that is the user's real browser (§
 Links and the web panel). The link itself still follows the normal link-click

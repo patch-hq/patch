@@ -4,7 +4,7 @@
 // a mailto: or in-app link has nothing for the server to fetch.
 
 import React from 'react';
-import { Linking, Pressable, Text, View } from 'react-native';
+import { Linking, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { ExternalLink, Sparkles } from 'lucide-react-native';
 import { getLinkSummary, isHttpLink } from '../lib/linkPreview';
 import { fonts, radii, space, textMin, useTheme } from '../lib/theme';
@@ -43,7 +43,7 @@ export function LinkPreview({
       >
         <ExternalLink size={14} color={color} />
       </Pressable>
-      {open ? <LinkSummaryCard url={url} /> : null}
+      {open ? <LinkSummaryCard url={url} onClose={() => setOpen(false)} /> : null}
     </>
   );
 }
@@ -53,7 +53,13 @@ type State =
   | { kind: 'error'; message: string }
   | { kind: 'done'; summary: string };
 
-function LinkSummaryCard({ url }: { url: string }): React.ReactElement {
+function LinkSummaryCard({
+  url,
+  onClose,
+}: {
+  url: string;
+  onClose: () => void;
+}): React.ReactElement {
   const colors = useTheme();
   const prompt = useSettingsStore((s) => s.data?.preferences.linkSummaryPrompt ?? '');
   const [state, setState] = React.useState<State>({ kind: 'loading' });
@@ -71,32 +77,51 @@ function LinkSummaryCard({ url }: { url: string }): React.ReactElement {
 
   const text = { fontFamily: fonts.body, fontSize: textMin };
   return (
-    <View
-      testID="link-summary-card"
-      style={{
-        marginTop: space.xs,
-        padding: space.sm,
-        gap: space.xs,
-        borderRadius: radii.md,
-        borderWidth: 1,
-        borderColor: colors.divider,
-        backgroundColor: colors.paperRaised,
-      }}
-    >
-      {state.kind === 'loading' ? (
-        <Text style={{ ...text, color: colors.ink3 }}>Summarising…</Text>
-      ) : null}
-      {state.kind === 'error' ? (
-        <Text testID="link-summary-error" style={{ ...text, color: colors.red }}>
-          {state.message}
-        </Text>
-      ) : null}
-      {state.kind === 'done' ? (
-        <Text testID="link-summary-text" style={{ ...text, color: colors.ink2, lineHeight: 20 }}>
-          {state.summary}
-        </Text>
-      ) : null}
-      <Text style={{ ...text, color: colors.ink3 }}>{new URL(url).host}</Text>
-    </View>
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable
+        testID="link-summary-backdrop"
+        accessibilityLabel="Close link summary"
+        onPress={onClose}
+        style={{
+          flex: 1,
+          justifyContent: 'center',
+          padding: space.md,
+          backgroundColor: 'rgba(0,0,0,0.35)',
+        }}
+      >
+        <View
+          testID="link-summary-card"
+          style={{
+            maxHeight: '70%',
+            padding: space.md,
+            gap: space.xs,
+            borderRadius: radii.md,
+            borderWidth: 1,
+            borderColor: colors.divider,
+            backgroundColor: colors.paperRaised,
+          }}
+        >
+          <ScrollView>
+            {state.kind === 'loading' ? (
+              <Text style={{ ...text, color: colors.ink3 }}>Summarising…</Text>
+            ) : null}
+            {state.kind === 'error' ? (
+              <Text testID="link-summary-error" style={{ ...text, color: colors.red }}>
+                {state.message}
+              </Text>
+            ) : null}
+            {state.kind === 'done' ? (
+              <Text
+                testID="link-summary-text"
+                style={{ ...text, color: colors.ink2, lineHeight: 20 }}
+              >
+                {state.summary}
+              </Text>
+            ) : null}
+          </ScrollView>
+          <Text style={{ ...text, color: colors.ink3 }}>{new URL(url).host}</Text>
+        </View>
+      </Pressable>
+    </Modal>
   );
 }

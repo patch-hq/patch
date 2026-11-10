@@ -5399,8 +5399,12 @@ button.view-file-download {
 }
 .link-preview-card {
   display: block;
-  max-width: 480px;
-  margin: 6px 0;
+  position: fixed;
+  z-index: 60;
+  width: max-content;
+  max-width: min(480px, calc(100vw - 16px));
+  overflow-y: auto;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
   padding: 8px 10px;
   background: var(--bg-elevated);
   border: 1px solid var(--accent-soft, #cad9be);
