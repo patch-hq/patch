@@ -10,6 +10,7 @@ import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { setActiveWs } from '../api/ws.js';
 import { api } from '../api/rest.js';
+import { useLayoutStore } from '../stores/layoutStore.js';
 
 vi.mock('../api/rest.js', () => ({
   api: {
@@ -73,6 +74,17 @@ describe('ChatRoute — job bar', () => {
     expect(
       await screen.findByText(/Run by "bus check" job · 21 Oct, \d{2}:\d{2}/),
     ).toBeInTheDocument();
+  });
+
+  it('opens the job in a new tab', () => {
+    seed('j_bus');
+    const openTab = vi.spyOn(useLayoutStore.getState(), 'openTab');
+    renderChat();
+    fireEvent.click(screen.getByTestId('job-bar-link'));
+    expect(openTab).toHaveBeenCalledWith(
+      { kind: 'page', page: 'job', jobId: 'j_bus' },
+      { placement: 'tab' },
+    );
   });
 
   it('names the job that ran the chat', async () => {
