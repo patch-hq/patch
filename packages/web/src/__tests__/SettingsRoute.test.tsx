@@ -1101,12 +1101,14 @@ describe('Settings → Agent', () => {
       await waitFor(() => expect(server.writes).toEqual([{ defaultModel: 'claude-sonnet-5' }]));
     });
 
-    it('says there is no host to read the list from, keeping the saved value', async () => {
+    it('says the list is unavailable with no host attached, keeping the saved value', async () => {
       vi.stubGlobal('fetch', makeFetch());
       clearHosts();
       renderSettings('/settings/agent');
       await waitFor(() =>
-        expect(screen.getByTestId('default-model-no-host')).toHaveTextContent('No single host'),
+        expect(screen.getByTestId('default-model-no-host')).toHaveTextContent(
+          'isn’t available yet',
+        ),
       );
       expect((screen.getByTestId('default-model') as HTMLSelectElement).value).toBe(
         usePreferencesStore.getState().preferences.defaultModel,
