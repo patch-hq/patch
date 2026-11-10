@@ -115,6 +115,18 @@ describe('LinkPreview', () => {
   });
 });
 
+describe('LinkPreview popover', () => {
+  it('shows the summary in a modal popover and closes on backdrop tap', async () => {
+    vi.mocked(api.linkSummary).mockResolvedValue({ url: URL_, summary: 'S' });
+    const r = await mount(<LinkPreview url={URL_} color="#000" />);
+    await open(r);
+    const modal = findHost(r.root, (n) => n.type === 'Modal');
+    expect(hasText(findHost(modal, byTestId('link-summary-card')), 'S')).toBe(true);
+    await actAsync(() => findHost(r.root, byTestId('link-summary-backdrop')).props['onPress']());
+    expect(queryHost(r.root, byTestId('link-summary-card'))).toBeNull();
+  });
+});
+
 describe('getLinkSummary', () => {
   it('summarises again once the prompt has changed', async () => {
     vi.mocked(api.linkSummary).mockResolvedValue({ url: URL_, summary: 'S' });
