@@ -11,7 +11,7 @@
 // The + New chat button leads the fixed top band, directly under the brand row
 // (spec/14 § Sidebar §8) — starting a chat is the most-reached-for action.
 
-import type { JSX, MouseEvent as ReactMouseEvent } from 'react';
+import type { DragEvent, JSX, MouseEvent as ReactMouseEvent } from 'react';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -234,11 +234,12 @@ function SidebarInner({ standalone = false }: { standalone?: boolean } = {}): JS
   // no badge; see the group's own comment below.
   const sectionCounts = useChatStore((s) => s.sectionCounts);
   const chatSort = useUiStore((s) => s.chatSort);
+  const manualOrder = useUiStore((s) => s.manualOrder);
   const grouping = useUiStore((s) => s.grouping);
   const groupSort = useUiStore((s) => s.groupSort);
   const fresh = useMemo(
-    () => groupChats(Object.values(chats), folderRoster, { chatSort, groupSort }),
-    [chats, folderRoster, chatSort, groupSort],
+    () => groupChats(Object.values(chats), folderRoster, { chatSort, groupSort, manualOrder }),
+    [chats, folderRoster, chatSort, groupSort, manualOrder],
   );
   // Nothing reorders while the pointer is over the list: the order is captured
   // as the pointer enters and held until it leaves, whatever the sort. Row data
@@ -2438,12 +2439,45 @@ const ChatRowView = memo(function ChatRowView({
   // hovered (the row tools take the slot), so the full title is always carried
   // as the row's tooltip. That is a VALUE, not an explanation, and it is the
   // only tooltip a row gets.
+  const manualSort = useUiStore((s) => s.chatSort === 'manual');
+  const reorderable =
+    manualSort && !special && !pinned && !archived && !deleted && !snoozed && !hidden && !to;
+  const [dropOver, setDropOver] = useState(false);
+  const dragProps = reorderable
+    ? {
+        draggable: true,
+        onDragStart: (e: DragEvent) => {
+          e.dataTransfer.setData('application/x-patch-chat', row.chatId);
+          e.dataTransfer.effectAllowed = 'move';
+        },
+        onDragOver: (e: DragEvent) => {
+          if (!e.dataTransfer.types.includes('application/x-patch-chat')) return;
+          e.preventDefault();
+          setDropOver(true);
+        },
+        onDragLeave: () => setDropOver(false),
+        onDrop: (e: DragEvent) => {
+          e.preventDefault();
+          setDropOver(false);
+          const dragId = e.dataTransfer.getData('application/x-patch-chat');
+          if (dragId === '' || dragId === row.chatId) return;
+          const section = (e.currentTarget as HTMLElement).closest('.sb-folder');
+          if (section === null) throw new Error('manual reorder: row is outside a project section');
+          const siblings = Array.from(section.querySelectorAll('[data-testid^="chat-row-"]')).map(
+            (el) => (el.getAttribute('data-testid') as string).slice('chat-row-'.length),
+          );
+          if (!siblings.includes(dragId)) return; // dragged in from another project
+          useUiStore.getState().moveChatManual(siblings, dragId, row.chatId);
+        },
+      }
+    : {};
   return (
     <>
       <Link
         to={to ?? `/chats/${row.chatId}`}
-        className={cls}
+        className={dropOver ? `${cls} drop-target` : cls}
         data-testid={`chat-row-${row.chatId}`}
+        {...dragProps}
         onClick={handleRowClick}
         onAuxClick={handleRowAuxClick}
         {...(selectable ? { 'aria-selected': isSelected } : {})}

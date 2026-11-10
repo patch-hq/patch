@@ -17947,3 +17947,9 @@ select.permission-mode.is-pending {
   border-radius: 2px;
   background: var(--line);
 }
+
+/* Manual sort: the row a dragged chat will land above. */
+.sb-chat-row.drop-target,
+a.drop-target {
+  box-shadow: inset 0 2px 0 var(--accent, currentColor);
+}

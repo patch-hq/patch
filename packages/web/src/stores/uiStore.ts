@@ -131,6 +131,34 @@ function loadStateFilter(): ChatStateFilter {
 // reopening on a different order read as the list flipping around.
 const CHAT_SORT_KEY = 'patch.sidebar.chatSort';
 const GROUP_SORT_KEY = 'patch.sidebar.groupSort';
+const MANUAL_ORDER_KEY = 'patch.sidebar.manualOrder';
+
+function loadManualOrder(): string[] {
+  /* v8 ignore next -- jsdom always defines localStorage. */
+  if (typeof localStorage === 'undefined') return [];
+  const raw = localStorage.getItem(MANUAL_ORDER_KEY);
+  if (raw === null) return [];
+  const v: unknown = JSON.parse(raw);
+  if (!Array.isArray(v) || !v.every((x) => typeof x === 'string')) {
+    throw new Error(`${MANUAL_ORDER_KEY} is not a string array`);
+  }
+  return v as string[];
+}
+
+/** `dragId` moves to just before `beforeId` among `siblings` (the ids as drawn, top to bottom). */
+export function reorderManual(
+  order: readonly string[],
+  siblings: readonly string[],
+  dragId: string,
+  beforeId: string,
+): string[] {
+  const moved = siblings.filter((id) => id !== dragId);
+  const at = moved.indexOf(beforeId);
+  if (at < 0) throw new Error(`reorderManual: ${beforeId} is not among the siblings`);
+  moved.splice(at, 0, dragId);
+  const placed = new Set(moved);
+  return [...moved, ...order.filter((id) => !placed.has(id))];
+}
 
 function loadChatSort(key: string): ChatSort {
   /* v8 ignore next -- jsdom always defines localStorage; this SSR guard can't be hit under vitest+jsdom. */
@@ -943,6 +971,8 @@ interface UiState {
   setAttentionOnly(v: boolean): void;
   setStateFilter(v: ChatStateFilter): void;
   setChatSort(v: ChatSort): void;
+  manualOrder: string[];
+  moveChatManual(siblings: string[], dragId: string, beforeId: string): void;
   setGrouping(v: SidebarGrouping): void;
   setGroupSort(v: GroupSort): void;
   /** Forget a recent folder — removes it from the Recent folders list. */
@@ -1088,6 +1118,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   attentionOnly: loadBool(ATTENTION_ONLY_KEY),
   stateFilter: loadStateFilter(),
   chatSort: loadChatSort(CHAT_SORT_KEY),
+  manualOrder: loadManualOrder(),
   groupSort: loadGroupSort(),
   grouping: loadGrouping(),
   forgottenFolders: loadForgottenFolders(),
@@ -1171,6 +1202,11 @@ export const useUiStore = create<UiState>((set, get) => ({
   setChatSort(v) {
     persistSort(CHAT_SORT_KEY, v);
     set({ chatSort: v });
+  },
+  moveChatManual(siblings, dragId, beforeId) {
+    const next = reorderManual(get().manualOrder, siblings, dragId, beforeId);
+    localStorage.setItem(MANUAL_ORDER_KEY, JSON.stringify(next));
+    set({ manualOrder: next });
   },
   setGrouping(v) {
     /* v8 ignore next -- jsdom always defines localStorage. */
