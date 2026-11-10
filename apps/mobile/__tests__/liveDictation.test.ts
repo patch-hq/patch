@@ -286,6 +286,25 @@ describe('phone engine', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  it('a recogniser that ends by itself is restarted and the words so far are kept', async () => {
+    const { handle, onPartial, onError } = await start(false);
+    speak(400);
+    speechOnEvent!({ type: 'segment', text: 'first minute' });
+    speechOnEvent!({ type: 'end' });
+    await flush();
+    expect(startPhoneSpeechMock).toHaveBeenCalledTimes(2);
+    expect(onError).not.toHaveBeenCalled();
+    speechOnEvent!({ type: 'partial', text: 'second minute' });
+    expect(onPartial).toHaveBeenLastCalledWith('first minute second minute');
+
+    speechStop.mockImplementationOnce(async () => {
+      speechOnEvent!({ type: 'segment', text: 'second minute' });
+      speechOnEvent!({ type: 'end' });
+    });
+    expect(await handle.finish(true)).toEqual({ kind: 'text', text: 'first minute second minute' });
+    expect(startPhoneSpeechMock).toHaveBeenCalledTimes(2);
+  });
+
   it('a recogniser error fails the dictation loudly', async () => {
     const { onError } = await start(false);
     speechOnEvent!({ type: 'error', message: 'language not downloaded' });

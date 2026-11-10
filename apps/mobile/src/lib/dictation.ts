@@ -786,31 +786,53 @@ function startPhoneDictation(
     tidying.add(tracked);
   }
 
+  // The recogniser ends a session by itself after about a minute. Only a
+  // gesture may end dictation (spec/07 § 4), so an `end` nobody asked for
+  // opens a fresh session on the same mic tap; the words so far are kept.
+  function listen(): Promise<PhoneSpeechSession> {
+    return startPhoneSpeech((ev) => {
+      if (ev.type === 'partial') {
+        current = ev.text ?? '';
+        show();
+      } else if (ev.type === 'segment') {
+        const raw = (ev.text ?? '').trim();
+        current = '';
+        const end = capturedSamples;
+        if (raw.length > 0) {
+          const segment: PhoneSegment = { raw };
+          segments.push(segment);
+          if (tidy && end > segmentStart) tidyUp(segment, cutSegment(segmentStart, end));
+        }
+        segmentStart = end;
+        show();
+      } else if (ev.type === 'end') {
+        if (finished || closed || failed) {
+          ended = true;
+          onEnd?.();
+          return;
+        }
+        if (current.length > 0) {
+          segments.push({ raw: current.trim() });
+          current = '';
+          segmentStart = capturedSamples;
+        }
+        void listen().then(
+          (next) => {
+            if (closed || failed) void next.cancel().catch(() => undefined);
+            else speech = next;
+          },
+          (e: Error) => void fail(`the phone's recogniser could not restart: ${e.message}`),
+        );
+      } else if (ev.type === 'error') {
+        void fail(`the phone's recogniser failed: ${ev.message ?? 'unknown error'}`);
+      }
+    });
+  }
+
   const started = (async (): Promise<void> => {
     try {
       // The recogniser must be listening to the tap before the mic feeds it.
-      speech = await startPhoneSpeech((ev) => {
-        if (ev.type === 'partial') {
-          current = ev.text ?? '';
-          show();
-        } else if (ev.type === 'segment') {
-          const raw = (ev.text ?? '').trim();
-          current = '';
-          const end = capturedSamples;
-          if (raw.length > 0) {
-            const segment: PhoneSegment = { raw };
-            segments.push(segment);
-            if (tidy && end > segmentStart) tidyUp(segment, cutSegment(segmentStart, end));
-          }
-          segmentStart = end;
-          show();
-        } else if (ev.type === 'end') {
-          ended = true;
-          onEnd?.();
-        } else if (ev.type === 'error') {
-          void fail(`the phone's recogniser failed: ${ev.message ?? 'unknown error'}`);
-        }
-      });
+      speech = await listen();
       if (closed) {
         void speech.cancel().catch(() => undefined);
         return;
