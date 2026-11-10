@@ -7,7 +7,7 @@ import React from 'react';
 import { Linking, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { ExternalLink, Sparkles } from 'lucide-react-native';
 import { getLinkSummary, isHttpLink } from '../lib/linkPreview';
-import { fonts, radii, space, textMin, useTheme } from '../lib/theme';
+import { fixed, fonts, radii, space, textMin, useTheme } from '../lib/theme';
 import { useSettingsStore } from '../stores/settingsStore';
 
 export function LinkPreview({
@@ -86,7 +86,7 @@ function LinkSummaryCard({
           flex: 1,
           justifyContent: 'center',
           padding: space.md,
-          backgroundColor: 'rgba(0,0,0,0.35)',
+          backgroundColor: fixed.backdrop,
         }}
       >
         <View
