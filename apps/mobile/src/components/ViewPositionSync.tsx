@@ -121,7 +121,7 @@ export function ViewPositionSync(): null {
         { ...(id !== undefined ? { id } : {}) },
         pathname === chatPath && scroll !== null ? scroll.seq : null,
       );
-      if (pos) getWs().send({ type: 'view_position.set', ...pos });
+      if (pos) getWs().safeSend({ type: 'view_position.set', ...pos });
     }, VIEW_POSITION_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [enabled, pathname, id, scroll, activations]);
