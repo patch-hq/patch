@@ -225,7 +225,8 @@ func runMicWatch() -> Never {
 
 // MARK: - speakers
 
-/// Calling apps whose windows are read. A browser covers Google Meet and the web Teams.
+/// Calling apps whose windows are read, matched by bundle-id prefix, so "com.microsoft.teams"
+/// covers both classic Teams and the new Teams (com.microsoft.teams2). A browser covers Google Meet and the web Teams.
 let speakerApps = [
     "us.zoom.xos", "com.microsoft.teams", "com.google.Chrome", "com.microsoft.edgemac",
     "com.brave.Browser", "company.thebrowser.Browser", "org.mozilla.firefox", "com.apple.Safari",
