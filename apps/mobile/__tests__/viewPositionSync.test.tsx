@@ -204,6 +204,15 @@ describe('ViewPositionSync', () => {
     });
   });
 
+  it('reports through the best-effort send, so an offline socket cannot throw from the timer (#420)', () => {
+    mount();
+    actSync(() => noteUserInput());
+    expect(() =>
+      actSync(() => vi.advanceTimersByTime(VIEW_POSITION_DEBOUNCE_MS + 1)),
+    ).not.toThrow();
+    expect(send).toHaveBeenCalled();
+  });
+
   it('reports the open chat on first touch even when nothing else changes', () => {
     mount();
     actSync(() => vi.advanceTimersByTime(VIEW_POSITION_DEBOUNCE_MS + 1));
