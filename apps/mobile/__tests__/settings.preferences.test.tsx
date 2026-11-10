@@ -454,10 +454,8 @@ describe('Manager page', () => {
     expect(textOf(findHost(r.root, byTestId('special-thread-model')))).toBe('Opus 5');
   });
 
-  it('special threads’ model: no single host, and a catalogue failure, are each said', async () => {
+  it('special threads’ model: no attached host, and a catalogue failure, are each said', async () => {
     resetHosts();
-    reportHost('a');
-    reportHost('b');
     seedSettings();
     const r = renderRN(<ManagerPage />);
     await flush();
