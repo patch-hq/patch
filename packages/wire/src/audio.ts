@@ -140,6 +140,15 @@ export type VoiceLayer = z.infer<typeof VoiceLayer>;
 export const VoiceHandoff = z.enum(['auto', 'always', 'never']);
 export type VoiceHandoff = z.infer<typeof VoiceHandoff>;
 
+/**
+ * Who transcribes a meeting (spec/07): `local` — Parakeet on the computer
+ * running the meeting; `elevenlabs`, `deepgram` (Nova-3) and `assemblyai`
+ * (Universal) — a paid hosted engine, each with its own speaker separation.
+ * Chosen explicitly and never a fallback: a missing key fails the clip.
+ */
+export const MeetingEngine = z.enum(['local', 'elevenlabs', 'deepgram', 'assemblyai']);
+export type MeetingEngine = z.infer<typeof MeetingEngine>;
+
 export interface VoiceSurfaceConfig {
   backend: VoiceBackend;
   layer: VoiceLayer;
@@ -148,6 +157,7 @@ export interface VoiceSurfaceConfig {
 
 export interface VoiceConfig {
   dictation: DictationConfig;
+  meeting: MeetingEngine;
   device: VoiceSurfaceConfig;
   handsFree: VoiceSurfaceConfig;
   call: VoiceSurfaceConfig;
@@ -155,6 +165,7 @@ export interface VoiceConfig {
 
 export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
   dictation: { phone: 'device', computer: 'whisper', tidy: false },
+  meeting: 'local',
   device: { backend: 'local', layer: 'direct', handoff: 'auto' },
   handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
   call: { backend: 'local', layer: 'direct', handoff: 'auto' },
@@ -218,7 +229,11 @@ export function modesShareVoiceEngine(
 }
 
 /** A backend that runs on a provider's API and so needs a key on the host. */
-export type HostedVoiceBackend = Exclude<VoiceBackend, 'local'> | 'deepgram' | 'elevenlabs';
+export type HostedVoiceBackend =
+  | Exclude<VoiceBackend, 'local'>
+  | 'deepgram'
+  | 'elevenlabs'
+  | 'assemblyai';
 
 /** The env var each hosted backend's key may come from on a host. Logs only — never shown to a person. */
 export const VOICE_BACKEND_KEY_ENV: Record<HostedVoiceBackend, string> = {
@@ -226,6 +241,7 @@ export const VOICE_BACKEND_KEY_ENV: Record<HostedVoiceBackend, string> = {
   openai: 'OPENAI_REALTIME_API_KEY',
   elevenlabs: 'ELEVEN_LABS_API_KEY',
   deepgram: 'DEEPGRAM_API_KEY',
+  assemblyai: 'ASSEMBLYAI_API_KEY',
 };
 
 /** How each hosted backend's key is named to a person; never its env var. */
@@ -234,6 +250,7 @@ export const VOICE_BACKEND_KEY_LABEL: Record<HostedVoiceBackend, string> = {
   openai: 'OpenAI key',
   deepgram: 'Deepgram key',
   elevenlabs: 'ElevenLabs key',
+  assemblyai: 'AssemblyAI key',
 };
 
 /** How each surface is named on every screen, Settings → Voice included. */
@@ -257,6 +274,8 @@ export interface VoiceKeys {
   elevenlabs?: boolean;
   /** Absent on a host older than Deepgram dictation, which cannot run it. */
   deepgram?: boolean;
+  /** Absent on a host older than AssemblyAI meetings, which cannot run it. */
+  assemblyai?: boolean;
 }
 
 /**
@@ -264,8 +283,11 @@ export interface VoiceKeys {
  * on this host. One copy, so the host's refusal, its boot log and every
  * surface's error say exactly the same thing.
  */
-export function voiceKeyMissingMessage(surface: VoiceSurface, backend: HostedVoiceBackend): string {
-  const label = VOICE_SURFACE_LABEL[surface];
+export function voiceKeyMissingMessage(
+  surface: VoiceSurface | 'meeting',
+  backend: HostedVoiceBackend,
+): string {
+  const label = surface === 'meeting' ? 'Meetings' : VOICE_SURFACE_LABEL[surface];
   return (
     `${label} is set to ${backend}, but no ${VOICE_BACKEND_KEY_LABEL[backend]} is set on this host. ` +
     `Add it in Settings → Providers, or switch ${label} to another backend in Settings → Voice.`
@@ -279,7 +301,7 @@ export function voiceKeyMissingMessage(surface: VoiceSurface, backend: HostedVoi
  * counted either way.
  */
 export function voiceKeyHostStatus(
-  backend: VoiceBackend | DictationEngine,
+  backend: VoiceBackend | DictationEngine | MeetingEngine,
   hosts: ReadonlyArray<{ hostName: string; voiceKeys?: VoiceKeys | undefined }>,
 ): string | null {
   if (backend === 'local' || backend === 'device' || backend === 'host' || backend === 'whisper') {
@@ -298,8 +320,12 @@ export function voiceKeyHostStatus(
 export function voiceSurfacesMissingKey(
   config: VoiceConfig,
   keys: VoiceKeys,
-): Array<{ surface: VoiceSurface; backend: HostedVoiceBackend; env: string }> {
-  const out: Array<{ surface: VoiceSurface; backend: HostedVoiceBackend; env: string }> = [];
+): Array<{ surface: VoiceSurface | 'meeting'; backend: HostedVoiceBackend; env: string }> {
+  const out: Array<{
+    surface: VoiceSurface | 'meeting';
+    backend: HostedVoiceBackend;
+    env: string;
+  }> = [];
   const { phone, computer } = config.dictation;
   if ((phone === 'deepgram' || computer === 'deepgram') && keys.deepgram !== true) {
     out.push({ surface: 'dictation', backend: 'deepgram', env: VOICE_BACKEND_KEY_ENV.deepgram });
@@ -309,6 +335,13 @@ export function voiceSurfacesMissingKey(
       surface: 'dictation',
       backend: 'elevenlabs',
       env: VOICE_BACKEND_KEY_ENV.elevenlabs,
+    });
+  }
+  if (config.meeting !== 'local' && keys[config.meeting] !== true) {
+    out.push({
+      surface: 'meeting',
+      backend: config.meeting,
+      env: VOICE_BACKEND_KEY_ENV[config.meeting],
     });
   }
   const surfaces: ConversationSurface[] = ['device', 'hands-free', 'call'];
