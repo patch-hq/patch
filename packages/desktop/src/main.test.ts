@@ -933,3 +933,11 @@ test('patch-audio mic-watch survives an audio process exiting between listing an
   );
   assert.match(watch, /case \.value\(let running\) = readUInt32/);
 });
+
+test('meeting detection restarts its watcher, writes events to disk and surfaces a standing error', () => {
+  const src = readFileSync(join(here, 'main.ts'), 'utf8');
+  assert.match(src, /superviseMicWatch\(binary/);
+  assert.match(src, /appendFileSync\(\s*MEETING_DETECTION_LOG\(\)/);
+  const fn = src.slice(src.indexOf('function reportMeetingDetectionOff'));
+  assert.match(fn, /setMeetingDetectionState\(\{ off: true/);
+});
