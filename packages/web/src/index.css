@@ -14651,7 +14651,9 @@ select.permission-mode.is-pending {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  /* A floor: the composer plus a few messages. The panel (flex-shrink 1) gives way before the
+     chat is squeezed to nothing, however tall it was dragged or short the window. */
+  min-height: 280px;
   min-width: 0;
 }
 .mm-left .chat-stream {
@@ -14661,7 +14663,7 @@ select.permission-mode.is-pending {
 }
 /* Across the top of the chat, full width; its height is Tom's, set by the bar under it. */
 .mm-panel {
-  flex: none;
+  flex: 0 1 auto;
   height: 60%;
   min-width: 0;
   min-height: 120px;
