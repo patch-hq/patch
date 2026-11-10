@@ -74,8 +74,10 @@ async function stubJobEditorApis(page: import('@playwright/test').Page): Promise
   );
 }
 
-test.describe('job editor — back', () => {
-  test('opened from a chat, back returns to that chat rather than the jobs list', async ({
+test.describe('job editor — opened from a chat', () => {
+  // "Open job" opens the job in a tab of its own, beside the chat, so there is
+  // no history to step back through: the chat is still open where it was.
+  test('opened from a chat, the job opens in a new tab and the chat stays open', async ({
     page,
   }) => {
     await stubJobEditorApis(page);
@@ -86,17 +88,12 @@ test.describe('job editor — back', () => {
     await expect(page.getByTestId('job-editor')).toBeVisible();
     await expect(page.getByTestId('job-name')).toHaveValue(LINKED_JOB.name);
 
-    await page.getByTestId('nav-back').click();
-    await expect(page.getByText(CHAT_FIXTURE_MESSAGE)).toBeVisible();
+    await expect(page.getByTestId('chat-head')).toHaveCount(1);
     await expect(page.getByTestId('jobs-route')).toHaveCount(0);
   });
 
-  // Saving is the other way off the page, and it follows the same rule: a job
-  // edited from a chat's "Open job" link saves and returns to that chat, not to
-  // a jobs list the user never opened (spec/14 § Jobs view).
-  test('opened from a chat, saving returns to that chat rather than the jobs list', async ({
-    page,
-  }) => {
+  // Saving still writes the job; the chat it was opened from is left alone.
+  test('opened from a chat, saving writes the job and leaves the chat open', async ({ page }) => {
     await stubJobEditorApis(page);
     await page.goto(CHAT_WITH_JOB_LINK);
     await expect(page.getByText(CHAT_FIXTURE_MESSAGE)).toBeVisible();
@@ -111,8 +108,6 @@ test.describe('job editor — back', () => {
     await page.getByTestId('job-save').click();
     await saved;
 
-    await expect(page.getByText(CHAT_FIXTURE_MESSAGE)).toBeVisible();
-    await expect(page.getByTestId('job-editor')).toHaveCount(0);
-    await expect(page.getByTestId('jobs-route')).toHaveCount(0);
+    await expect(page.getByTestId('chat-head')).toHaveCount(1);
   });
 });
