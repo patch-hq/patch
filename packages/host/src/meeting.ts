@@ -178,6 +178,11 @@ export interface MeetingDeps {
   /** Local Whisper only. */
   transcribe: (wav: Buffer) => Promise<string>;
   /**
+   * Speech gate for the `them` (system audio) lane. A clip it rejects is dropped
+   * without transcribing: engines invent text from silence and room noise.
+   */
+  hasSpeech?: (wav: Buffer) => Promise<boolean>;
+  /**
    * Local diarisation: transcribes a `them` clip and says which distinct voice
    * spoke each stretch. `session` is stable for the whole meeting so voice
    * numbers stay the same across clips. Omitted: `them` stays one speaker.
@@ -556,6 +561,21 @@ export class MeetingManager {
     const at = meetingElapsedMs(rt.state, this.now());
     const next = rt.txChain[source].then(async () => {
       const speaker = source === 'mic' ? 'you' : 'them';
+      if (source === 'system' && this.deps.hasSpeech) {
+        let speech: boolean;
+        try {
+          speech = await this.deps.hasSpeech(wav);
+        } catch (err) {
+          rt.state.error = `speech detection failed: ${(err as Error).message}`;
+          this.deps.logger.error(
+            { chatId, err: (err as Error).message },
+            'meeting: speech detection failed',
+          );
+          this.commit(chatId, rt);
+          return;
+        }
+        if (!speech) return;
+      }
       const printed = !!this.deps.transcribeVoices && !!this.deps.hasVoiceprint?.();
       let pieces: { text: string; voice?: number }[];
       try {

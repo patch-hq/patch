@@ -17,6 +17,8 @@ import { RESTART_WINDOW_MS } from '@patch/wire';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
+import { usePreferencesStore } from '../stores/preferencesStore.js';
+import { useWebUpdateStore } from '../stores/webUpdateStore.js';
 import { useBrowserHandoffStore } from '../stores/browserHandoffStore.js';
 import { useTerminalStore } from '../stores/terminalStore.js';
 import { useHostSearchStore } from '../stores/hostSearchStore.js';
@@ -972,6 +974,42 @@ describe('PatchWs message dispatch — malformed frames', () => {
     expect(() => fake.emit('message', { data: 'not json at all' })).not.toThrow();
     expect(reload).toHaveBeenCalledTimes(1);
     expect(useUiStore.getState().errors).toHaveLength(0);
+  });
+
+  it('with Update automatically off, a bad frame stages the banner and does not reload', async () => {
+    const prefs = usePreferencesStore.getState().preferences;
+    usePreferencesStore.setState({ preferences: { ...prefs, autoUpdateHosts: false } });
+    try {
+      const { fake } = await connectAndOpen();
+      fake.emit('message', { data: 'not json at all' });
+      expect(reload).not.toHaveBeenCalled();
+      expect(useWebUpdateStore.getState().staleSince).not.toBeNull();
+    } finally {
+      usePreferencesStore.setState({ preferences: prefs });
+      useWebUpdateStore.getState().clear();
+    }
+  });
+
+  it('with Update automatically off, repeated bad frames log once and stage the banner once', async () => {
+    const prefs = usePreferencesStore.getState().preferences;
+    usePreferencesStore.setState({ preferences: { ...prefs, autoUpdateHosts: false } });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const setAvailable = vi.spyOn(useWebUpdateStore.getState(), 'setAvailable');
+    try {
+      const { fake } = await connectAndOpen();
+      fake.emit('message', { data: 'not json at all' });
+      fake.emit('message', { data: 'still not json' });
+      fake.emit('message', { data: new ArrayBuffer(4) });
+      const wireErrors = errSpy.mock.calls.filter((c) => String(c[0]).includes('[patch] wire:'));
+      expect(wireErrors).toHaveLength(1);
+      expect(setAvailable).toHaveBeenCalledTimes(1);
+      expect(reload).not.toHaveBeenCalled();
+    } finally {
+      errSpy.mockRestore();
+      setAvailable.mockRestore();
+      usePreferencesStore.setState({ preferences: prefs });
+      useWebUpdateStore.getState().clear();
+    }
   });
 
   it('a non-string message payload is treated as an empty/invalid frame and reloads (no throw)', async () => {

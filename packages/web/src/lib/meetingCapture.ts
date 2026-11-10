@@ -133,6 +133,15 @@ export interface MeetingCaptureDeps {
    * the mic as heard, the mic after echo cancellation, and the system tap.
    */
   onRaw?: (lane: 'mic-raw' | 'mic-clean' | 'system', pcm: Int16Array) => void;
+  /**
+   * Opens the mic again on whatever the default input now is. Called when the
+   * input devices change or the mic track ends. Without it a lost mic is only reported.
+   */
+  openMic?: () => Promise<MediaStream>;
+  /** The mic stopped and could not be reopened. Shown loudly: the "you" lane is silent from here. */
+  onMicError?: (err: Error) => void;
+  /** Where `devicechange` fires. Defaults to `navigator.mediaDevices`. */
+  mediaDevices?: Pick<EventTarget, 'addEventListener' | 'removeEventListener'>;
 }
 
 /** Audio that is already 16 kHz mono PCM16, e.g. the desktop shell's system-audio tap. */
@@ -207,7 +216,6 @@ export function startMeetingCapture(
     // A context created after an async getUserMedia may start suspended, and a
     // suspended context never fires onaudioprocess (it records silence).
     void ctx.resume();
-    const src = ctx.createMediaStreamSource(new MediaStream(stream.getAudioTracks()));
     const processor = ctx.createScriptProcessor(4096, 1, 1);
     const sink = ctx.createGain();
     sink.gain.value = 0;
@@ -221,22 +229,78 @@ export function startMeetingCapture(
       deps.onRaw?.('mic-clean', pcm);
       if (!paused) builder.push(pcm);
     };
-    src.connect(processor);
     processor.connect(sink);
     sink.connect(ctx.destination);
+
+    // The mic can change under us (unplugged, or the default input switched).
+    // The context and processor stay; only the stream feeding them is swapped.
+    let current: MediaStream = stream;
+    let src: MediaStreamAudioSourceNode | null = null;
+    let tornDown = false;
+    let reopening = false;
+    const attach = (s: MediaStream): void => {
+      const tracks = s.getAudioTracks();
+      if (tracks.length === 0) throw new Error('Microphone stream has no audio track');
+      current = s;
+      src = ctx.createMediaStreamSource(new MediaStream(tracks));
+      src.connect(processor);
+      for (const t of tracks) t.addEventListener('ended', () => void reopen(s));
+    };
+    const fail = (err: Error): void => {
+      if (!tornDown) deps.onMicError?.(err);
+    };
+    const reopen = async (from?: MediaStream): Promise<void> => {
+      // A stale `ended` from a stream already replaced is not news.
+      if (tornDown || reopening || (from && from !== current)) return;
+      if (!deps.openMic) {
+        if (from) fail(new Error('Microphone stopped. Your side is no longer being heard'));
+        return;
+      }
+      reopening = true;
+      try {
+        const next = await deps.openMic();
+        if (tornDown) {
+          for (const t of next.getTracks()) t.stop();
+          return;
+        }
+        const old = current;
+        try {
+          src?.disconnect();
+        } catch {
+          /* already disconnected */
+        }
+        attach(next);
+        for (const t of old.getTracks()) t.stop();
+      } catch (err) {
+        fail(
+          new Error(
+            `Microphone changed and could not be reopened: ${(err as Error).message}. Your side is no longer being heard`,
+          ),
+        );
+      } finally {
+        reopening = false;
+      }
+    };
+    attach(stream);
+    const devices =
+      deps.mediaDevices ?? (typeof navigator !== 'undefined' ? navigator.mediaDevices : undefined);
+    const onDeviceChange = (): void => void reopen();
+    devices?.addEventListener('devicechange', onDeviceChange);
     lanes.push({
       builder,
       drain: aec ? () => builder.push(aec.flush()) : undefined,
       teardown: () => {
+        tornDown = true;
+        devices?.removeEventListener('devicechange', onDeviceChange);
         processor.onaudioprocess = null;
         try {
           processor.disconnect();
-          src.disconnect();
+          src?.disconnect();
           sink.disconnect();
         } catch {
           /* already disconnected */
         }
-        for (const t of stream.getTracks()) t.stop();
+        for (const t of current.getTracks()) t.stop();
         void ctx.close().catch(() => undefined);
       },
     });

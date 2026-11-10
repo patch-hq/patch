@@ -1230,6 +1230,9 @@ export const Composer = forwardRef(function Composer(
   // a guess, never something the user is left holding and unable to edit.
   const recordingRef = useRef<VoiceRecording | null>(null);
   const previewRef = useRef<DictationPreview | null>(null);
+  // The last interim words heard, kept so a dictation whose final transcript
+  // fails still leaves them in the box.
+  const lastPartialRef = useRef('');
   // The mic marker (and any words heard so far) stays drawn through
   // 'transcribing' until the authoritative transcript replaces it, rather than
   // vanishing mid-wait. It replaces the old status line above the input.
@@ -1482,6 +1485,7 @@ export const Composer = forwardRef(function Composer(
       previewRef.current = openPreview(previewChatId, {
         onPartial: (text: string) => {
           if (gen !== recGenRef.current) return;
+          lastPartialRef.current = text;
           setLivePartial(text);
         },
         onPreviewError: (message: string) => {
@@ -1499,6 +1503,7 @@ export const Composer = forwardRef(function Composer(
     const gen = ++recGenRef.current;
     setMicState('recording');
     setLivePartial('');
+    lastPartialRef.current = '';
     const factory = recorderFactory ?? startRecording;
     recPrepareRef.current = (async () => {
       try {
@@ -1605,8 +1610,18 @@ export const Composer = forwardRef(function Composer(
       }
     } catch (e) {
       sendAfterDictationRef.current = false;
+      // The final transcript never arrived, but the words heard live did: keep
+      // them in the box (editable, never sent) so a failed finish costs the
+      // user nothing. The error is still shown; this is not a second engine.
+      const heard = lastPartialRef.current.trim();
+      if (heard) {
+        const cur = valueRef.current;
+        setValue(cur.trim().length > 0 ? `${cur.trimEnd()} ${heard}` : heard);
+        inputRef.current?.focus();
+      }
       pushError(failed('voice transcription'), undefined, (e as Error).message);
     } finally {
+      lastPartialRef.current = '';
       setLivePartial('');
       setMicState('idle');
     }

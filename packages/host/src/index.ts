@@ -272,7 +272,14 @@ import {
 } from './audio/hosted-stt.js';
 import { ElevenLabsScribeBackend, ScribeVoiceMap } from './audio/elevenlabs-stt.js';
 import { costCall } from './audio/voiceCost.js';
-import { createSileroVadFactory, validateVadModel, MockVad, type Vad } from './audio/vad.js';
+import {
+  createSileroVadFactory,
+  validateVadModel,
+  MockVad,
+  DEFAULT_VAD_CONFIG,
+  type Vad,
+} from './audio/vad.js';
+import { clipHasSpeech } from './meetingSpeechGate.js';
 import { DeviceRegistry } from './devices/registry.js';
 import { PresenceRegistry } from './devices/presence.js';
 import { DeviceControlServer, mountDeviceControlUpgrade } from './devices/control-ws.js';
@@ -4560,8 +4567,14 @@ async function startHost(
     );
   };
   const scribeVoiceMaps = new Map<string, ScribeVoiceMap>();
+  // One Vad for the meeting gate, built lazily from the audio stack's factory
+  // (`makeVad`, defined once the audio server starts). Clips run one at a time.
+  let gateVad: Vad | undefined;
+  const meetingVad = (): Vad => (gateVad ??= makeVad());
   meetings = new MeetingManager({
     dir: join(config.patchHome, 'meetings'),
+    // Drop call clips with no speech before they reach the STT engine.
+    hasSpeech: async (wav) => clipHasSpeech(wav, meetingVad(), DEFAULT_VAD_CONFIG.startTh),
     transcribe: async (wav) => {
       if (!dictationTranscribers)
         throw new Error('host audio stack not ready — whisper unavailable');

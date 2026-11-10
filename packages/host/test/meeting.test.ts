@@ -127,6 +127,30 @@ describe('MeetingManager', () => {
     await tick;
   });
 
+  it('drops a system clip the speech gate rejects without transcribing it', async () => {
+    const hasSpeech = vi.fn(async () => false);
+    const m = make({ hasSpeech });
+    m.start('c1');
+    await m.ingestAudio('c1', 'system', Buffer.from('s'));
+    expect(transcribe).not.toHaveBeenCalled();
+    expect(m.get('c1')!.transcript).toEqual([]);
+    hasSpeech.mockResolvedValueOnce(true);
+    await m.ingestAudio('c1', 'system', Buffer.from('s'));
+    expect(m.get('c1')!.transcript.map((l) => l.text)).toEqual(['hello there']);
+  });
+
+  it('does not gate the mic lane and surfaces a gate failure', async () => {
+    const hasSpeech = vi.fn(async () => false);
+    const m = make({ hasSpeech });
+    m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('m'));
+    expect(hasSpeech).not.toHaveBeenCalled();
+    expect(m.get('c1')!.transcript).toHaveLength(1);
+    hasSpeech.mockRejectedValueOnce(new Error('vad broke'));
+    await m.ingestAudio('c1', 'system', Buffer.from('s'));
+    expect(m.get('c1')!.error).toContain('speech detection failed: vad broke');
+  });
+
   it('does not hold the mic channel behind a stalled system clip', async () => {
     diarise = true;
     const m = make();
