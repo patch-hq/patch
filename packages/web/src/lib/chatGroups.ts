@@ -109,7 +109,7 @@ export function chatsInProject(all: ChatRow[], folder: string, hostId: string): 
  * was made, newest first, and never changes. `name` is case-insensitive A-Z and
  * never changes either.
  */
-export type ChatSort = 'recent' | 'created' | 'name';
+export type ChatSort = 'recent' | 'created' | 'name' | 'manual';
 
 /** Projects normally follow the chat sort; choosing a concrete value decouples them. */
 export type GroupSort = ChatSort | 'same-as-chats';
@@ -119,6 +119,7 @@ export const CHAT_SORTS: ReadonlyArray<{ value: ChatSort; label: string; short: 
   { value: 'recent', label: 'Recent', short: 'Recent' },
   { value: 'created', label: 'Created', short: 'Created' },
   { value: 'name', label: 'Name', short: 'Name' },
+  { value: 'manual', label: 'Manual', short: 'Manual' },
 ];
 
 export const DEFAULT_CHAT_SORT: ChatSort = 'recent';
@@ -127,6 +128,8 @@ export const DEFAULT_CHAT_SORT: ChatSort = 'recent';
 export interface ChatOrdering {
   chatSort: ChatSort;
   groupSort: GroupSort;
+  /** Chat ids in the order the user dragged them into; read only by `manual`. */
+  manualOrder?: readonly string[];
 }
 
 export const DEFAULT_CHAT_ORDERING: ChatOrdering = {
@@ -139,8 +142,26 @@ function chatLabel(c: ChatRow): string {
 }
 
 /** Comparator for two chats under `sort`; ends in the chatId tiebreaker. */
-function cmpChats(sort: ChatSort): (a: ChatRow, b: ChatRow) => number {
+function cmpChats(
+  sort: ChatSort,
+  manualOrder: readonly string[] = [],
+): (a: ChatRow, b: ChatRow) => number {
   switch (sort) {
+    case 'manual': {
+      // Chats the user has never placed (new ones) sit above the placed ones,
+      // newest first, so a new chat is never lost at the bottom of the list.
+      const pos = new Map(manualOrder.map((id, i) => [id, i] as const));
+      return (a, b) => {
+        const pa = pos.get(a.chatId);
+        const pb = pos.get(b.chatId);
+        if (pa === undefined && pb === undefined) {
+          return (b.createdAt ?? 0) - (a.createdAt ?? 0) || cmpId(a, b);
+        }
+        if (pa === undefined) return -1;
+        if (pb === undefined) return 1;
+        return pa - pb;
+      };
+    }
     case 'recent':
       return (a, b) => b.lastUserActivity - a.lastUserActivity || cmpId(a, b);
     case 'created':
@@ -158,6 +179,8 @@ function cmpFolders(sort: ChatSort): (a: FolderGroup, b: FolderGroup) => number 
   const base = (f: string): string => f.split('/').filter(Boolean).pop() ?? f;
   return (a, b) => {
     switch (sort) {
+      // Projects have no manual order: they follow recency.
+      case 'manual':
       case 'recent':
         return (
           newest(b.rows, 'lastUserActivity') - newest(a.rows, 'lastUserActivity') ||
@@ -291,7 +314,7 @@ export function groupChats(
   );
   const folders = Array.from(byFolder.values())
     .map((group) => {
-      group.rows.sort(cmpChats(ordering.chatSort));
+      group.rows.sort(cmpChats(ordering.chatSort, ordering.manualOrder));
       return group;
     })
     .sort(folderCmp);

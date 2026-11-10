@@ -55,7 +55,7 @@ export function ChatsPage(): JSX.Element {
             onChange={(e) => setGroupSort(e.target.value as GroupSort)}
           >
             <option value="same-as-chats">Same as chats</option>
-            {CHAT_SORTS.map((o) => (
+            {CHAT_SORTS.filter((o) => o.value !== 'manual').map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
               </option>
