@@ -103,6 +103,33 @@ describe('spec/04 § Branching — editing a stopped turn Claude never persisted
     ]);
   });
 
+  it('forks from the last persisted event when several stopped turns precede it', async () => {
+    const { daemon, ctl, events, folder } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.sendInput({ chatId, message: 'first question', localId: 'l1' });
+
+    ctl.stall = true;
+    for (const [m, id] of [
+      ['second, stopped', 'l2'],
+      ['third, stopped', 'l3'],
+    ] as const) {
+      const running = daemon.sendInput({ chatId, message: m, localId: id });
+      await new Promise((r) => setTimeout(r, 20));
+      await daemon.stopChat(chatId);
+      await running;
+    }
+    ctl.stall = false;
+
+    const third = userTurns(daemon, chatId).find((t) => t.content === 'third, stopped')!;
+    events.length = 0;
+    ctl.runs.length = 0;
+    await daemon.forkChat({ chatId, seq: third.seq, message: 'third, fixed', localId: 'l4' });
+
+    expect(errors(events)).toEqual([]);
+    expect(branchCount(events)).toBe(2);
+    expect(ctl.runs[0]?.fork?.resumeAtUuid).not.toBeNull();
+  });
+
   it('still refuses a seq that is not a user turn', async () => {
     const { daemon, events, folder } = setup();
     const chatId = await daemon.spawnChat({ folder });
