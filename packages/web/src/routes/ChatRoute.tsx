@@ -20,6 +20,8 @@ import {
 } from 'react';
 import { useMarkChatNotificationsRead } from '../stores/notificationsStore.js';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { OpenableLink } from '../components/OpenableLink.js';
+import { useLayoutStore } from '../stores/layoutStore.js';
 import { classifyTurnFailure } from '../lib/turnFailure.js';
 import { sendToNewChat, selectionWithin } from '../lib/sendToNewChat.js';
 import { quoteSelectionIntoComposer } from '../lib/quoteSelection.js';
@@ -4031,14 +4033,21 @@ function ToolCall({
           ) : null}
         </div>
         {jobRow.jobId ? (
-          <Link
+          <OpenableLink
             className="tool-call-job-link"
             to={`/jobs/${jobRow.jobId}`}
+            opens={{ kind: 'page', page: 'job', jobId: jobRow.jobId }}
+            onClick={(e) => {
+              e.preventDefault();
+              useLayoutStore
+                .getState()
+                .openTab({ kind: 'page', page: 'job', jobId: jobRow.jobId! }, { placement: 'tab' });
+            }}
             data-testid="tool-call-job-link"
           >
             <CalendarClock size={13} aria-hidden />
             Open job
-          </Link>
+          </OpenableLink>
         ) : null}
       </div>
     );

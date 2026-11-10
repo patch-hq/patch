@@ -6,12 +6,12 @@
 
 import type { JSX } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
 import { X, Zap } from 'lucide-react';
 import { useState } from 'react';
 import { OpenableButton } from './OpenableLink.js';
 import type { Job } from '@patch/wire/jobs';
 import { api } from '../api/rest.js';
+import { useLayoutStore } from '../stores/layoutStore.js';
 import { formatDateTime } from '../lib/formatDateTime.js';
 
 // Chats whose bar the user dismissed, for the life of the page.
@@ -26,7 +26,6 @@ export function JobBar({
   jobId: string;
   at: number;
 }): JSX.Element | null {
-  const navigate = useNavigate();
   const [hidden, setHidden] = useState(dismissed.has(chatId));
   const { data, error } = useQuery({
     queryKey: ['job', jobId],
@@ -49,7 +48,11 @@ export function JobBar({
         className="archived-unarchive-btn"
         data-testid="job-bar-link"
         title="Open job"
-        onOpen={() => navigate(`/jobs/${jobId}`)}
+        onOpen={() =>
+          useLayoutStore
+            .getState()
+            .openTab({ kind: 'page', page: 'job', jobId }, { placement: 'tab' })
+        }
       >
         Open job
       </OpenableButton>
