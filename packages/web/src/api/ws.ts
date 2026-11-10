@@ -77,11 +77,17 @@ function noteFirstSight(what: string): void {
  * `window.location.reload()`), same shape as `onServerVersion`.
  */
 let reloadingOnWireMismatch = false;
+/** Banner already staged for a wire mismatch (the auto-update-off path). */
+let wireMismatchBannerStaged = false;
 function reloadOnWireMismatch(detail: string, deps: { reload?: () => void } = {}): void {
   if (reloadingOnWireMismatch) return;
   // "Update automatically" off: nothing reloads without the user pressing the
   // banner's button. Say what was seen and stage the banner instead.
   if (!usePreferencesStore.getState().preferences.autoUpdateHosts) {
+    // Once per staged banner: a stale bundle hits this on every undecodable
+    // frame. Re-stage only if the store was cleared since.
+    if (wireMismatchBannerStaged && useWebUpdateStore.getState().staleSince !== null) return;
+    wireMismatchBannerStaged = true;
     console.error(`[patch] wire: ${detail} — update automatically is off, waiting for Reload`);
     useWebUpdateStore.getState().setAvailable('wire-mismatch');
     return;
@@ -94,6 +100,7 @@ function reloadOnWireMismatch(detail: string, deps: { reload?: () => void } = {}
 /** Test seam: clear reload-guard state between cases. */
 export function __resetWireMismatchReloadForTests(): void {
   reloadingOnWireMismatch = false;
+  wireMismatchBannerStaged = false;
 }
 import { BUILD_INFO } from '../lib/buildInfo.js';
 import {
