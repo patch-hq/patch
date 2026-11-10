@@ -67,7 +67,7 @@ export function kokoroAvailable(): boolean {
 }
 
 /** 24 kHz → 16 kHz by linear interpolation. */
-function resample(pcm: Int16Array, from: number, to: number): Int16Array {
+export function resample(pcm: Int16Array, from: number, to: number): Int16Array {
   const n = Math.floor((pcm.length * to) / from);
   const out = new Int16Array(n);
   for (let i = 0; i < n; i++) {
@@ -81,7 +81,7 @@ function resample(pcm: Int16Array, from: number, to: number): Int16Array {
   return out;
 }
 
-async function synth(
+export async function synth(
   kokoro: ReturnType<typeof createKokoro>,
   text: string,
   voice: string,
