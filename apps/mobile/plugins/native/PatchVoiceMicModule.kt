@@ -1,8 +1,13 @@
 package io.github.tomchambers2.patch
 
+import android.content.Context
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.Build
 import android.util.Base64
 import android.util.Log
 import com.facebook.react.bridge.Arguments
@@ -54,6 +59,61 @@ class PatchVoiceMicModule(private val ctx: ReactApplicationContext) :
   private var record: AudioRecord? = null
   @Volatile private var running = false
   private var thread: Thread? = null
+  private var focusRequest: AudioFocusRequest? = null
+  private var focusGranted = false
+
+  /**
+   * Take transient-exclusive audio focus for as long as the mic is open, so
+   * music or a podcast playing on the phone pauses while the user dictates and
+   * resumes by itself when focus is abandoned. AudioRecord alone never asks
+   * for focus, so without this other audio plays on over the top of the speaker.
+   */
+  private fun requestFocus() {
+    if (focusGranted) return
+    val manager = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    val result: Int
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      val request =
+        AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+          .setAudioAttributes(
+            AudioAttributes.Builder()
+              .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+              .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+              .build(),
+          )
+          .setWillPauseWhenDucked(false)
+          .build()
+      result = manager.requestAudioFocus(request)
+      if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) focusRequest = request
+    } else {
+      @Suppress("DEPRECATION")
+      result =
+        manager.requestAudioFocus(
+          null,
+          AudioManager.STREAM_VOICE_CALL,
+          AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE,
+        )
+    }
+    if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+      Log.w(TAG, "native mic: audio focus not granted (result=$result)")
+      return
+    }
+    focusGranted = true
+  }
+
+  private fun abandonFocus() {
+    if (!focusGranted) return
+    focusGranted = false
+    val manager = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    val request = focusRequest
+    focusRequest = null
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && request != null) {
+      manager.abandonAudioFocusRequest(request)
+    } else {
+      @Suppress("DEPRECATION")
+      manager.abandonAudioFocus(null)
+    }
+  }
 
   override fun getName(): String = "PatchVoiceMic"
 
@@ -103,6 +163,7 @@ class PatchVoiceMicModule(private val ctx: ReactApplicationContext) :
       }
       record = rec
       running = true
+      requestFocus()
       rec.startRecording()
       Log.i(TAG, "native mic: AudioRecord started (16kHz mono PCM16, VOICE_COMMUNICATION)")
       val t = Thread({ readLoop(rec) }, "patch-voice-mic")
@@ -111,6 +172,7 @@ class PatchVoiceMicModule(private val ctx: ReactApplicationContext) :
       promise.resolve(null)
     } catch (e: Throwable) {
       running = false
+      abandonFocus()
       record?.release()
       record = null
       Log.e(TAG, "native mic: start failed: ${e.message}")
@@ -180,6 +242,7 @@ class PatchVoiceMicModule(private val ctx: ReactApplicationContext) :
     }
     record?.release()
     record = null
+    abandonFocus()
     promise.resolve(null)
   }
 
@@ -192,6 +255,7 @@ class PatchVoiceMicModule(private val ctx: ReactApplicationContext) :
     }
     record?.release()
     record = null
+    abandonFocus()
     super.invalidate()
   }
 }
