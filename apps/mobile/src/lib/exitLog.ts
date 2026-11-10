@@ -145,13 +145,14 @@ export function beginSession(now = Date.now(), previousCrashedNatively = false):
         unexplained: false,
       };
     }
-    if (!previous.endedBy && !previousCrashedNatively && previous.state === 'active') {
+    // An applied update (APK install or OTA reload) ends the old process by design,
+    // so a changed build is an explained exit, not an unexpected one.
+    if (!previous.endedBy && !previousCrashedNatively && !changed && previous.state === 'active') {
       const since = Math.round((now - previous.lastSeenAt) / 1000);
-      const during = changed ? ' (an update was applied between runs)' : '';
       finding = {
         entry: logExit(
           'unexpected-exit',
-          `stopped while open, no crash recorded; last seen ${since}s before relaunch${during}`,
+          `stopped while open, no crash recorded; last seen ${since}s before relaunch`,
           now,
         ),
         unexplained: true,
