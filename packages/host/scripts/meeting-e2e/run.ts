@@ -170,7 +170,6 @@ async function bootStack(work: string): Promise<Stack> {
   });
   await waitFor('the server', () => healthy(`http://127.0.0.1:${SERVER_PORT}/api/healthz`), 60_000);
 
-  // mock-check:allow the host's voice stack is irrelevant to a meeting; Whisper (local) and the analysis model are real
   run(join(ROOT, 'node_modules', '.bin', 'tsx'), ['src/index.ts'], {
     cwd: join(ROOT, 'packages', 'host'),
     logFile: join(work, 'host.log'),
@@ -184,7 +183,9 @@ async function bootStack(work: string): Promise<Stack> {
       PATCH_DAEMON_AUDIO_PORT: String(AUDIO_PORT),
       SDK_BACKEND: 'real',
       WHISPER_BACKEND: 'local',
+      // mock-check:allow the host's voice stack is irrelevant to a meeting; Whisper (local) and the analysis model are real
       KOKORO_BACKEND: 'mock',
+      // mock-check:allow as above: no call audio goes through the voice stack
       VAD_BACKEND: 'mock',
     },
   });
