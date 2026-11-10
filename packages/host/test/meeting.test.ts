@@ -203,6 +203,34 @@ describe('MeetingManager', () => {
     expect(m.get('c1')!.transcript.map((l) => l.speaker)).toEqual(['you', 'them', 'them', 'them']);
   });
 
+  it('uses the engine this meeting chose, and a change of speed keeps it', async () => {
+    const seen: Array<string | undefined> = [];
+    const m = make({
+      transcribeVoicesFor: (engine) => {
+        seen.push(engine);
+        return engine === 'deepgram' ? transcribeVoices : undefined;
+      },
+    });
+    m.start('c1');
+    m.tune('c1', { clipSeconds: 6, analyseSeconds: 45, engine: 'deepgram' });
+    transcribeVoices.mockResolvedValueOnce([{ text: 'From Deepgram', voice: 1 }]);
+    await m.ingestAudio('c1', 'system', Buffer.from('a'));
+    expect(m.get('c1')?.transcript.map((l) => l.text)).toEqual(['From Deepgram']);
+    // Changing speed sends no engine: the meeting keeps Deepgram.
+    m.tune('c1', { clipSeconds: 3, analyseSeconds: 8 });
+    expect(m.get('c1')?.settings).toEqual({
+      clipSeconds: 3,
+      analyseSeconds: 8,
+      engine: 'deepgram',
+    });
+    expect(seen).toEqual(['deepgram']);
+    // A meeting on no chosen engine asks for the account default (undefined here) and goes local.
+    m.start('c2');
+    await m.ingestAudio('c2', 'system', Buffer.from('b'));
+    expect(seen).toEqual(['deepgram', undefined]);
+    expect(transcribe).toHaveBeenCalledTimes(1);
+  });
+
   it("splits a Them clip into numbered voices and merges a voice's consecutive stretches", async () => {
     diarise = true;
     const m = make();
