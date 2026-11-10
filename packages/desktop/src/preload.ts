@@ -187,6 +187,15 @@ contextBridge.exposeInMainWorld('patch', {
     ipcRenderer.on('patch:meeting-signal', handler);
     return () => ipcRenderer.removeListener('patch:meeting-signal', handler);
   },
+  async getMeetingDetection(): Promise<{ off: boolean; message: string | null }> {
+    return await ipcRenderer.invoke('patch:meeting-detection:get-state');
+  },
+  onMeetingDetection(cb: (e: { off: boolean; message: string | null }) => void): () => void {
+    const handler = (_: unknown, payload: { off: boolean; message: string | null }): void =>
+      cb(payload);
+    ipcRenderer.on('patch:meeting-detection', handler);
+    return () => ipcRenderer.removeListener('patch:meeting-detection', handler);
+  },
   // spec/14 ## Manager incoming-call UX: ask main to raise the main window to
   // the foreground (renderer window.focus() can't foreground a backgrounded
   // Electron window on macOS).

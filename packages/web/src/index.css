@@ -7971,6 +7971,23 @@ button.view-file-download {
   background: color-mix(in srgb, var(--danger) 38%, var(--bg-app));
   color: var(--danger);
 }
+.meeting-detection-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 6px 16px;
+  font-size: var(--text-min);
+  background: color-mix(in srgb, var(--danger) 38%, var(--bg-app));
+  color: var(--danger);
+}
+.meeting-detection-banner .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
 .desktop-update-banner .dot {
   width: 7px;
   height: 7px;
