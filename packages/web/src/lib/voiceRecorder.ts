@@ -18,11 +18,6 @@
 import { createPcm16Downsampler } from './pcmDownsample.js';
 import { silentAudioContext } from './silentAudioContext.js';
 
-// About -63 dBFS. Sessions where the phone mic delivered nothing peaked at -72;
-// a live room with gain control never sits this low.
-const SILENT_PEAK = 0.0007;
-const SILENT_SECONDS = 3;
-
 /** Test seam: inject a mic-stream factory + an AudioContext implementation. */
 export interface VoiceRecorderDeps {
   getUserMedia?: (constraints: MediaStreamConstraints) => Promise<MediaStream>;
@@ -43,9 +38,8 @@ export interface VoiceRecording {
   onPcm(cb: (pcm: Int16Array) => void): void;
   /**
    * Register a callback for a mic that is delivering nothing: the OS or
-   * browser muted the track, it ended, or the signal has sat at digital
-   * silence for several seconds. Fires once per episode, and again after the
-   * signal returns and drops out again.
+   * browser muted the track, or it ended. Fires once. A quiet stretch is not
+   * a fault and is never reported.
    */
   onSilent(cb: (reason: string) => void): void;
   /** Stop capture and return the recorded clip as a WAV blob. */
@@ -87,7 +81,6 @@ export async function startRecording(deps: VoiceRecorderDeps = {}): Promise<Voic
   let pcmCb: ((pcm: Int16Array) => void) | null = null;
   let silentCb: ((reason: string) => void) | null = null;
   let stopped = false;
-  let silentSamples = 0;
   let silentReported = false;
   function reportSilent(reason: string): void {
     if (stopped || silentReported) return;
@@ -110,18 +103,6 @@ export async function startRecording(deps: VoiceRecorderDeps = {}): Promise<Voic
     for (let i = 0; i < input.length; i++) sumSq += (input[i] ?? 0) ** 2;
     const rms = Math.sqrt(sumSq / input.length);
     levelCb?.(Math.min(1, rms * 4));
-    let peak = 0;
-    /* v8 ignore next -- loop invariant, as above. */
-    for (let i = 0; i < input.length; i++) peak = Math.max(peak, Math.abs(input[i] ?? 0));
-    if (peak >= SILENT_PEAK) {
-      silentSamples = 0;
-      silentReported = false;
-    } else {
-      silentSamples += input.length;
-      if (silentSamples >= SILENT_SECONDS * audioCtx.sampleRate) {
-        reportSilent('the microphone is only returning silence');
-      }
-    }
     // Copy: the ScriptProcessor reuses its input buffer across callbacks.
     chunks.push(new Float32Array(input));
     // The clip above is already safe by this point, so a throwing listener
