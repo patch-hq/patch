@@ -7,13 +7,13 @@ import { useEffect } from 'react';
 import type { JSX } from 'react';
 import { useParams } from 'react-router-dom';
 import { PaneArea } from '../components/PaneArea.js';
-import { useLayoutStore } from '../stores/layoutStore.js';
+import { useRouteOpenTab } from '../lib/navigationOpen.js';
 import type { PatchWs } from '../api/ws.js';
 
 export function JobPaneRoute({ ws }: { ws: PatchWs | null }): JSX.Element {
   const { id } = useParams<{ id?: string }>();
   const jobId = id ?? 'new';
-  const openTab = useLayoutStore((s) => s.openTab);
+  const openTab = useRouteOpenTab();
   useEffect(() => {
     openTab({ kind: 'page', page: 'job', jobId });
   }, [jobId, openTab]);

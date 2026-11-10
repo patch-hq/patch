@@ -11,14 +11,14 @@ import { useEffect } from 'react';
 import type { JSX } from 'react';
 import { useParams } from 'react-router-dom';
 import { PaneArea } from '../components/PaneArea.js';
-import { useLayoutStore } from '../stores/layoutStore.js';
+import { useRouteOpenTab } from '../lib/navigationOpen.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { SETTINGS_PAGES } from './settings/pages.js';
 import type { PatchWs } from '../api/ws.js';
 
 export function SettingsPaneRoute({ ws }: { ws: PatchWs | null }): JSX.Element {
   const { '*': sub } = useParams<{ '*': string }>();
-  const openTab = useLayoutStore((s) => s.openTab);
+  const openTab = useRouteOpenTab();
   const requestSettingsPage = useUiStore((s) => s.requestSettingsPage);
   useEffect(() => {
     openTab({ kind: 'page', page: 'settings' });
