@@ -42,7 +42,14 @@ test.describe('a message link carries an inline Summarise button', () => {
     // The link itself still points at the real target.
     await expect(link).toHaveAttribute('href', 'https://example.com/foraging-guide');
 
-    await toggle.click();
+    // A popover floating over the page: fixed, on screen, below the button.
+    const box = await card.boundingBox();
+    const btn = await toggle.boundingBox();
+    expect(await card.evaluate((el) => getComputedStyle(el).position)).toBe('fixed');
+    // Opens beside the button, never over it (above when the button is near the bottom).
+    expect(box!.y >= btn!.y + btn!.height - 1 || box!.y + box!.height <= btn!.y + 1).toBe(true);
+
+    await page.keyboard.press('Escape');
     await expect(card).toHaveCount(0);
   });
 
@@ -99,7 +106,7 @@ test.describe('a message link carries an inline Summarise button', () => {
   // Todoist: "patch preview doesnt work" — opening a preview threw the link's
   // line out of order: the wrap was an inline-block holding the card, so the
   // link lined up with the card's last line and the icons sat on a line above
-  // it. The icons must stay on the link's line and the card open below it.
+  // it. The icons must stay on the link's line and the card open clear of it.
   test('opening the summary keeps the icons on the link line and the card below', async ({
     page,
   }) => {
@@ -123,6 +130,8 @@ test.describe('a message link carries an inline Summarise button', () => {
     if (!linkBox || !toggleBox || !cardBox) throw new Error('missing box');
     const mid = (b: { y: number; height: number }): number => b.y + b.height / 2;
     expect(Math.abs(mid(toggleBox) - mid(linkBox))).toBeLessThan(linkBox.height);
-    expect(cardBox.y).toBeGreaterThanOrEqual(linkBox.y + linkBox.height - 1);
+    expect(
+      cardBox.y >= linkBox.y + linkBox.height - 1 || cardBox.y + cardBox.height <= linkBox.y + 1,
+    ).toBe(true);
   });
 });
