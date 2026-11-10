@@ -414,7 +414,7 @@ Either way the refused meeting starts again by itself once the route works: on
 the key being saved, or on the Whisper component verifying as installed. The
 host switches engine in place when a key or component arrives, with no restart.
 An installed local model wins over a key, because it costs nothing. A host whose
-environment names a backend (`WHISPER_BACKEND`, `MEETING_STT`) already counts as
+environment names a backend (`WHISPER_BACKEND`) or an account whose meeting engine is a hosted one already counts as
 set up. There is no fallback: with no route chosen, transcription refuses rather
 than returning a stub, and no key is spent unless the user added it.
 

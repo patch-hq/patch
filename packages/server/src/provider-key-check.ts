@@ -43,6 +43,13 @@ export const PROBES: Record<ProviderKeyId, Probe[]> = {
       headers: (key) => ({ Authorization: `Token ${key}` }),
     },
   ],
+  assemblyai: [
+    {
+      feature: 'Meeting transcription',
+      url: 'https://api.assemblyai.com/v2/transcript?limit=1',
+      headers: (key) => ({ Authorization: key }),
+    },
+  ],
   elevenlabs: [
     {
       feature: 'Voice and speech',
