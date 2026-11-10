@@ -12,6 +12,14 @@ describe('handleUncaught', () => {
     expect(exit).not.toHaveBeenCalled();
   });
 
+  it('logs and survives the SDK refusing a write to a terminated child', () => {
+    const logger = { error: vi.fn(), fatal: vi.fn() };
+    const exit = vi.fn();
+    handleUncaught(new Error('Cannot write to terminated process'), logger, exit);
+    expect(logger.error).toHaveBeenCalledOnce();
+    expect(exit).not.toHaveBeenCalled();
+  });
+
   it('logs fatally and exits 1 on anything else', () => {
     const logger = { error: vi.fn(), fatal: vi.fn() };
     const exit = vi.fn();
