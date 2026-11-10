@@ -990,6 +990,28 @@ describe('PatchWs message dispatch — malformed frames', () => {
     }
   });
 
+  it('with Update automatically off, repeated bad frames log once and stage the banner once', async () => {
+    const prefs = usePreferencesStore.getState().preferences;
+    usePreferencesStore.setState({ preferences: { ...prefs, autoUpdateHosts: false } });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const setAvailable = vi.spyOn(useWebUpdateStore.getState(), 'setAvailable');
+    try {
+      const { fake } = await connectAndOpen();
+      fake.emit('message', { data: 'not json at all' });
+      fake.emit('message', { data: 'still not json' });
+      fake.emit('message', { data: new ArrayBuffer(4) });
+      const wireErrors = errSpy.mock.calls.filter((c) => String(c[0]).includes('[patch] wire:'));
+      expect(wireErrors).toHaveLength(1);
+      expect(setAvailable).toHaveBeenCalledTimes(1);
+      expect(reload).not.toHaveBeenCalled();
+    } finally {
+      errSpy.mockRestore();
+      setAvailable.mockRestore();
+      usePreferencesStore.setState({ preferences: prefs });
+      useWebUpdateStore.getState().clear();
+    }
+  });
+
   it('a non-string message payload is treated as an empty/invalid frame and reloads (no throw)', async () => {
     const { fake } = await connectAndOpen();
     expect(() => fake.emit('message', { data: new ArrayBuffer(4) })).not.toThrow();
