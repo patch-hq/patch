@@ -20,6 +20,7 @@ import { chordFromEvent, chordGlyphs } from '../../lib/dictateChord.js';
 import { getDesktopBridge } from '../../lib/desktopBridge.js';
 import { shortcutLabel } from '../../lib/shortcuts.js';
 import { PairVoiceDevice } from '../../components/PairVoiceDevice.js';
+import { reenableSpeakerNames, setNamesDeclined, useMeetingSetup } from '../../lib/meetingSetup.js';
 import { Toggle } from '../../components/Toggle.js';
 import { patchShared } from './sharedWrite.js';
 import { DeviceRow, useDevices } from './DevicesPage.js';
@@ -143,9 +144,34 @@ export function VoicePage(): JSX.Element {
       <EngineGroup />
       <DictationGroup />
       <ShortcutGroup />
+      <MeetingNamesGroup />
       <SpeakingGroup />
       <VoiceDevicesGroup />
     </SettingsPage>
+  );
+}
+
+/** Meeting mode: whether Patch asks for Accessibility to name who is speaking. Desktop only. */
+function MeetingNamesGroup(): JSX.Element | null {
+  const declined = useMeetingSetup((s) => s.namesDeclined);
+  if (!getDesktopBridge()?.getMeetingPermissions) return null;
+  return (
+    <Group label="Meetings" testid="settings-voice-meetings">
+      <Row
+        title="Name speakers on calls"
+        sub="Reads Teams, Zoom and Meet through macOS Accessibility. Off, speakers show as Unknown."
+        testid="meeting-names-row"
+      >
+        <Toggle
+          checked={!declined}
+          onChange={(next) => {
+            if (next) void reenableSpeakerNames();
+            else setNamesDeclined(true);
+          }}
+          testid="meeting-names-toggle"
+        />
+      </Row>
+    </Group>
   );
 }
 
