@@ -23,6 +23,10 @@ describe('classifyFailure', () => {
     ['fetch failed', 'transient'],
     ['socket hang up', 'transient'],
     ['Claude Code process exited with code 143', 'transient'],
+    [
+      'The Claude Code process ended mid-turn without finishing (no result message). The stream was cut, not completed.',
+      'transient',
+    ],
     ['Claude Code process exited with code 137', 'permanent'],
     ['Claude Code process terminated by signal SIGKILL', 'permanent'],
   ])('%s → %s', (msg, kind) => {
