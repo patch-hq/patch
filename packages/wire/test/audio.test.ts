@@ -310,6 +310,7 @@ describe('speech to text setting', () => {
 describe('a voice surface whose backend has no key on the host', () => {
   const config = {
     dictation: { phone: 'deepgram' as const, computer: 'whisper' as const, tidy: false },
+    meeting: 'local' as const,
     device: { backend: 'openai' as const, layer: 'light' as const, handoff: 'auto' as const },
     handsFree: { backend: 'local' as const, layer: 'direct' as const, handoff: 'auto' as const },
     call: { backend: 'local' as const, layer: 'direct' as const, handoff: 'auto' as const },
@@ -416,5 +417,25 @@ describe('the dictation setting (spec/07 § Dictation engines)', () => {
         tidy: false,
       });
     }
+  });
+});
+
+describe('meeting engine', () => {
+  test('is part of the voice config and defaults to local', async () => {
+    const { DEFAULT_VOICE_CONFIG, MeetingEngine, voiceSurfacesMissingKey } =
+      await import('../src/audio.js');
+    expect(DEFAULT_VOICE_CONFIG.meeting).toBe('local');
+    expect(MeetingEngine.options).toEqual(['local', 'elevenlabs', 'deepgram', 'assemblyai']);
+    const keys = { gemini: false, openai: false };
+    expect(voiceSurfacesMissingKey(DEFAULT_VOICE_CONFIG, keys)).toEqual([]);
+    expect(
+      voiceSurfacesMissingKey({ ...DEFAULT_VOICE_CONFIG, meeting: 'assemblyai' }, keys),
+    ).toEqual([{ surface: 'meeting', backend: 'assemblyai', env: 'ASSEMBLYAI_API_KEY' }]);
+    expect(
+      voiceSurfacesMissingKey(
+        { ...DEFAULT_VOICE_CONFIG, meeting: 'assemblyai' },
+        { ...keys, assemblyai: true },
+      ),
+    ).toEqual([]);
   });
 });

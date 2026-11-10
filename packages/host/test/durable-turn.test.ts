@@ -9,9 +9,10 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, uptime } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -334,6 +335,22 @@ describe('a durable turn', () => {
     writeFileSync(join(dir, 'turn.json'), JSON.stringify({ chatId: 'c5', localId: 'L5' }));
     writeFileSync(join(dir, 'runner.json'), JSON.stringify({ pid: 2 ** 22 + 1, claudePid: null }));
     expect(inspectTurn(cfg, 'c5')?.state).toBe('lost');
+  });
+});
+
+describe('a runner record from before a reboot', () => {
+  it('is lost even when its pid now belongs to another process and the socket file remains', () => {
+    const { cfg } = fresh();
+    const dir = join(cfg.turnsDir, 'rb1');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'turn.json'), JSON.stringify({ chatId: 'rb1', localId: 'L' }));
+    const info = join(dir, 'runner.json');
+    writeFileSync(info, JSON.stringify({ pid: process.pid, claudePid: null }));
+    writeFileSync(join(dir, 's'), '');
+    expect(inspectTurn(cfg, 'rb1')?.state).toBe('live');
+    const old = new Date(Date.now() - (uptime() + 3600) * 1000);
+    utimesSync(info, old, old);
+    expect(inspectTurn(cfg, 'rb1')?.state).toBe('lost');
   });
 });
 

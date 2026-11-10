@@ -23,6 +23,7 @@ import {
   voiceKeyHostStatus,
   type ComputerDictationEngine,
   type DictationEngine,
+  type MeetingEngine,
   type DictationConfig,
   type PhoneDictationEngine,
 } from '@patch/wire/audio';
@@ -212,6 +213,13 @@ const DICTATION_LABELS: Record<DictationEngine, string> = {
   host: 'On this host',
   whisper: 'Whisper',
 };
+const MEETING_ENGINES: readonly MeetingEngine[] = ['local', 'elevenlabs', 'deepgram', 'assemblyai'];
+const MEETING_LABELS: Record<MeetingEngine, string> = {
+  local: 'On this computer',
+  elevenlabs: 'ElevenLabs',
+  deepgram: 'Deepgram',
+  assemblyai: 'AssemblyAI',
+};
 const VOICE_LAYERS: readonly VoiceLayer[] = ['direct', 'light', 'heavy'];
 const VOICE_HANDOFFS: readonly VoiceHandoff[] = ['auto', 'always', 'never'];
 type VoiceSurfaceKey = 'device' | 'handsFree' | 'call';
@@ -254,6 +262,9 @@ export function VoicePage(): React.ReactElement {
     <SettingsPage title="Voice" testID="settings-page-voice">
       <SettingsSection title="Dictation" testID="settings-voice-dictation-engines">
         <DictationEngines />
+      </SettingsSection>
+      <SettingsSection title="Meetings" testID="settings-voice-meeting">
+        <MeetingEngineRow />
       </SettingsSection>
       <SettingsSection title="Engine" testID="settings-voice-config">
         <VoiceEngine />
@@ -390,6 +401,58 @@ function VoiceEngine(): React.ReactElement {
             </Row>
           );
         });
+      }}
+    </WithSettings>
+  );
+}
+
+/** Who transcribes a meeting; the paid engines are chosen deliberately. */
+function MeetingEngineRow(): React.ReactElement {
+  const colors = useTheme();
+  const [busy, setBusy] = React.useState(false);
+  const hosts = usePresenceStore((s) => s.hosts);
+  const hostReports = Object.values(hosts).flatMap((h) =>
+    h.host ? [{ hostName: h.host.hostName, voiceKeys: h.host.voiceKeys }] : [],
+  );
+  return (
+    <WithSettings testID="voice-meeting-engine">
+      {(data) => {
+        const voiceConfig = data.preferences.voiceConfig;
+        const status = voiceKeyHostStatus(voiceConfig.meeting, hostReports);
+        return (
+          <Row
+            title="Transcription"
+            testID="meeting-engine"
+            subtitle={
+              status ? (
+                <Text
+                  testID="meeting-engine-keys"
+                  style={{ ...typography.meta, color: colors.red }}
+                >
+                  {status}
+                </Text>
+              ) : undefined
+            }
+            stack
+          >
+            <Chips
+              options={MEETING_ENGINES}
+              selected={voiceConfig.meeting}
+              labelOf={(e) => MEETING_LABELS[e]}
+              disabled={busy}
+              testIDPrefix="meeting-engine"
+              labelPrefix="Meeting transcription"
+              onSelect={(meeting) => {
+                setBusy(true);
+                void useSettingsStore
+                  .getState()
+                  .updatePreferences({ voiceConfig: { ...voiceConfig, meeting } })
+                  .catch((e: Error) => Alert.alert('Settings failed', e.message))
+                  .finally(() => setBusy(false));
+              }}
+            />
+          </Row>
+        );
       }}
     </WithSettings>
   );

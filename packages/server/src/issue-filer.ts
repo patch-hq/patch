@@ -25,6 +25,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Logger } from 'pino';
+import type { WireEvent } from '@patch/wire';
 import { normaliseMessage, scrubTo, topFrame } from './issue-scrub.js';
 
 export type ReportKind = 'server-error' | 'uncaught' | 'client-crash' | 'manual';
@@ -83,6 +84,21 @@ export interface IssueFilerOptions {
   version: string;
   fetch?: typeof fetch;
   now?: () => number;
+}
+
+/**
+ * The report for a turn failure a host sent (`chat.error` / `sdk_error`), or
+ * null when it is not a bug in Patch. Host errors are logged on the host's own
+ * logger, which the server's error hook never sees, so without this a failed
+ * turn ("process ended mid-turn", a crashed session) was never filed. A usage
+ * or rate limit is the account's state, not a defect, so it is left out.
+ */
+export function hostTurnFailureReport(event: WireEvent, from: string | null): IssueReport | null {
+  if (event.type !== 'chat.error' || from === null) return null;
+  const { code, message } = event.error;
+  if (code !== 'sdk_error' || !message) return null;
+  if (/usage limit|rate limit|out of credit/i.test(message)) return null;
+  return { kind: 'server-error', message, surface: 'host' };
 }
 
 export const AUTO_LABELS = ['auto-filed', 'bug'];

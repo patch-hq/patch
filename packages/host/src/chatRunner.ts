@@ -176,7 +176,7 @@ import {
   trackForPlan,
   type ModelLimits,
 } from './handoffRun.js';
-import { renderGoalTranscript } from './goalEval.js';
+import { renderAgentStatement, renderGoalTranscript, renderUserScope } from './goalEval.js';
 import {
   isReservedSpecialThread,
   resolvePermissionModeForModel,
@@ -595,8 +595,12 @@ export interface HostOptions {
     folder: string;
     /** Host-verified background-task state, so the judge can test a "waiting" claim. */
     background: string;
+    /** The user's own requests, kept whole when the transcript is cut. */
+    userScope: string;
+    /** The agent's latest message, where it states blockers. */
+    agentStatement: string;
   }) => Promise<{
-    verdict: 'met' | 'not_met' | 'refused' | 'impossible';
+    verdict: 'met' | 'not_met' | 'refused' | 'blocked' | 'impossible';
     reason: string;
   } | null>;
   /**
@@ -11501,6 +11505,8 @@ export class Daemon {
 
     const condition = state.goal;
     const transcript = renderGoalTranscript(state.lastMessages);
+    const userScope = renderUserScope(state.lastMessages);
+    const agentStatement = renderAgentStatement(state.lastMessages);
     const turnsEvaluated = (state.goalProgress?.turnsEvaluated ?? 0) + 1;
     const folder = state.folder;
     const background = this.describeBackgroundForGoal(chatId);
@@ -11513,6 +11519,8 @@ export class Daemon {
           turnsEvaluated,
           folder,
           background,
+          userScope,
+          agentStatement,
         });
         this.settleGoalEvaluation(chatId, condition, turnsEvaluated, result);
       } catch (err) {
@@ -11568,7 +11576,10 @@ export class Daemon {
     chatId: string,
     condition: string,
     turnsEvaluated: number,
-    result: { verdict: 'met' | 'not_met' | 'refused' | 'impossible'; reason: string } | null,
+    result: {
+      verdict: 'met' | 'not_met' | 'refused' | 'blocked' | 'impossible';
+      reason: string;
+    } | null,
   ): void {
     const state = this.chatState.get(chatId);
     if (!state || state.goal !== condition) return;
@@ -11591,11 +11602,14 @@ export class Daemon {
       startedAt: progress?.startedAt ?? now,
       turnsEvaluated,
       tokensSpent: progress?.tokensSpent ?? 0,
-      lastVerdict: result.verdict === 'not_met' || result.verdict === 'refused' ? 'not_met' : null,
+      lastVerdict:
+        result.verdict === 'not_met' || result.verdict === 'refused' || result.verdict === 'blocked'
+          ? 'not_met'
+          : null,
       lastReason: result.reason,
     };
 
-    if (result.verdict === 'refused') {
+    if (result.verdict === 'refused' || result.verdict === 'blocked') {
       state.goalRefusalStreak += 1;
       if (state.goalRefusalStreak >= this.goalRefusalLimit) {
         // Deadlock: the agent keeps declining. Stop pushing, keep the goal, and
@@ -11605,7 +11619,9 @@ export class Daemon {
         void this.declareStatus(
           chatId,
           'report',
-          `Goal deadlocked: the agent declined ${this.goalRefusalLimit} times running. ${result.reason}`,
+          result.verdict === 'blocked'
+            ? `Goal deadlocked: the agent said it is blocked on you ${this.goalRefusalLimit} times running. ${result.reason}`
+            : `Goal deadlocked: the agent declined ${this.goalRefusalLimit} times running. ${result.reason}`,
         ).catch((err) => {
           this.opts.logger.warn({ chatId, err }, 'goal deadlock guard: declareStatus failed');
         });
@@ -11619,7 +11635,11 @@ export class Daemon {
       state.goalRefusalStreak = 0;
     }
 
-    if (result.verdict === 'not_met' || result.verdict === 'refused') {
+    if (
+      result.verdict === 'not_met' ||
+      result.verdict === 'refused' ||
+      result.verdict === 'blocked'
+    ) {
       this.emitState(chatId);
       // A turn is already running, so the agent is not stopping; the goal is
       // re-evaluated when that turn settles. Nudging now would only queue noise.
@@ -12891,6 +12911,9 @@ export class Daemon {
       branchId,
     );
     if (plan) this.armAnswerExpiry(chatId, requestId, tool, plan);
+    // Asked while the user is already in the chat: hold the clock at full.
+    if (plan && tool === ASK_USER_QUESTION && this.isChatFocused(chatId))
+      this.resetQuestionExpiry(chatId);
     return gated;
   }
 
@@ -13003,30 +13026,37 @@ export class Daemon {
     if (!gate) return;
     if (gate.expiry) clearTimeout(gate.expiry);
     const windowMs = ev.expiry.windowMs;
-    const expiry = { at: this.opts.now() + windowMs, windowMs };
+    // While any surface has this chat open the clock is held at a full window
+    // (no timer armed); it starts running again once the last one leaves.
+    const paused = this.isChatFocused(chatId);
+    const expiry = paused
+      ? { at: this.opts.now() + windowMs, windowMs, paused: true }
+      : { at: this.opts.now() + windowMs, windowMs };
     const denyMessage = questionExpiredMessage(windowMs / 1000, this.questionExpiry.expiredPrompt);
     // Replayed verbatim to a surface that reconnects after the reset
     // (`replayChat`), so it must carry the SAME deadline the live update
     // below announces, not the stale one from when the question was asked.
     this.pendingPermissionEvents.set(key, { ...ev, expiry });
-    gate.expiry = setTimeout(() => {
-      // Still pending? `submitPermissionResponse` clears the timer when the
-      // surface answers, so reaching here means nobody did.
-      if (!this.permissionGates.has(key)) return;
-      this.opts.logger.warn(
-        { chatId, requestId: ev.requestId, tool: ASK_USER_QUESTION },
-        'permission request expired unanswered',
-      );
-      this.submitPermissionResponse({
-        requestId: ev.requestId,
-        decision: 'deny',
-        denyMessage,
-        by: 'expiry',
-      });
-      this.rehideIfExpiredUnseen(chatId);
-    }, windowMs);
+    gate.expiry = undefined;
+    if (!paused)
+      gate.expiry = setTimeout(() => {
+        // Still pending? `submitPermissionResponse` clears the timer when the
+        // surface answers, so reaching here means nobody did.
+        if (!this.permissionGates.has(key)) return;
+        this.opts.logger.warn(
+          { chatId, requestId: ev.requestId, tool: ASK_USER_QUESTION },
+          'permission request expired unanswered',
+        );
+        this.submitPermissionResponse({
+          requestId: ev.requestId,
+          decision: 'deny',
+          denyMessage,
+          by: 'expiry',
+        });
+        this.rehideIfExpiredUnseen(chatId);
+      }, windowMs);
     // A pending request must never hold the process open on its own.
-    gate.expiry.unref?.();
+    gate.expiry?.unref?.();
     this.emit({
       type: 'chat.permission_expiry_update',
       chatId,
@@ -13041,6 +13071,11 @@ export class Daemon {
    * (`chat.question_activity`). Gives the pending question a fresh window so a
    * long free-text answer cannot outlast the countdown mid-typing.
    */
+  private isChatFocused(chatId: string): boolean {
+    for (const focused of this.surfaceFocusChat.values()) if (focused === chatId) return true;
+    return false;
+  }
+
   noteQuestionActivity(chatId: string): void {
     this.resetQuestionExpiry(chatId);
   }

@@ -240,23 +240,6 @@ test.describe('wide transcript tables', () => {
     });
     expect(rects.overlap).toBe(false);
   });
-
-  test('on a phone-width screen the table fits with no horizontal scroll', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 800 });
-    await page.goto(TABLE);
-    const table = page.locator(wideTable);
-    await expect(table).toBeVisible();
-    const m = await table.evaluate((el) => ({
-      scrollWidth: el.scrollWidth,
-      clientWidth: el.clientWidth,
-      right: el.getBoundingClientRect().right,
-      viewport: window.innerWidth,
-    }));
-    // Todoist: "Patch mobile tables get off need to scroll" — on a phone the
-    // table wraps to fit instead of scrolling sideways.
-    expect(m.scrollWidth).toBeLessThanOrEqual(m.clientWidth + 1);
-    expect(m.right).toBeLessThanOrEqual(m.viewport);
-  });
 });
 
 // A phone-width window: the table is `display: table` there, so the wrapper has
@@ -264,7 +247,7 @@ test.describe('wide transcript tables', () => {
 test.describe('wide tables on a phone', () => {
   const PHONE = { width: 390, height: 800 };
 
-  test('a table with long cells fits the screen, nothing clipped', async ({ page }) => {
+  test('a table with long cells scrolls inside its wrapper, not the page', async ({ page }) => {
     await page.setViewportSize(PHONE);
     await page.goto('/app/dev-harness.html?chat=chat_longcell');
     const wrap = page.locator('.msg-assistant .md-table-wrap');
@@ -273,7 +256,10 @@ test.describe('wide tables on a phone', () => {
       scrollWidth: el.scrollWidth,
       clientWidth: el.clientWidth,
     }));
-    expect(scrollWidth).toBeLessThanOrEqual(clientWidth + 1);
+    expect(scrollWidth).toBeGreaterThan(clientWidth);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      390,
+    );
   });
 
   test('the wrapper scrolls, so anything that cannot wrap is not clipped', async ({ page }) => {
@@ -283,5 +269,25 @@ test.describe('wide tables on a phone', () => {
     await expect(wrap).toBeVisible();
     const overflowX = await wrap.evaluate((el) => getComputedStyle(el).overflowX);
     expect(overflowX).toBe('auto');
+  });
+
+  test('on a phone a wide table scrolls sideways instead of squashing', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.goto(TABLE);
+    const table = page.locator(wideTable);
+    await expect(table).toBeVisible();
+    const m = await table.evaluate((el) => {
+      const wrap = el.parentElement!;
+      const th = el.querySelector('th')!;
+      return {
+        wrapScroll: wrap.scrollWidth,
+        wrapClient: wrap.clientWidth,
+        overflowX: getComputedStyle(wrap).overflowX,
+        thWidth: th.getBoundingClientRect().width,
+      };
+    });
+    expect(m.overflowX).toBe('auto');
+    expect(m.wrapScroll).toBeGreaterThan(m.wrapClient);
+    expect(m.thWidth).toBeGreaterThanOrEqual(100);
   });
 });

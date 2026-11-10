@@ -65,12 +65,26 @@ export function TooltipHost(): JSX.Element | null {
       }
     }
 
+    // Titled ancestors of the shown control, blanked while its bubble is up.
+    // The browser shows its native tooltip for the nearest titled ancestor of
+    // the pointer; once the control's own `title` is blanked that is the
+    // enclosing row, so its native bubble would appear beside ours.
+    const suppressed = new Map<HTMLElement, HTMLElement[]>();
+
     function restore(el: HTMLElement): void {
       const original = stash.get(el);
       if (original !== undefined) {
         el.setAttribute('title', original);
         stash.delete(el);
       }
+      for (const anc of suppressed.get(el) ?? []) {
+        const t = stash.get(anc);
+        if (t !== undefined) {
+          anc.setAttribute('title', t);
+          stash.delete(anc);
+        }
+      }
+      suppressed.delete(el);
     }
 
     function hide(el: HTMLElement | null): void {
@@ -105,6 +119,17 @@ export function TooltipHost(): JSX.Element | null {
         }
         stash.set(source, text);
         source.removeAttribute('title');
+        const ancestors: HTMLElement[] = [];
+        for (
+          let anc = source.parentElement?.closest<HTMLElement>('[title]') ?? null;
+          anc;
+          anc = anc.parentElement?.closest<HTMLElement>('[title]') ?? null
+        ) {
+          stash.set(anc, anc.getAttribute('title') ?? '');
+          anc.removeAttribute('title');
+          ancestors.push(anc);
+        }
+        suppressed.set(source, ancestors);
         setShown({ el: source, text, full: source.hasAttribute('data-tooltip-full') });
       }, delay);
     }

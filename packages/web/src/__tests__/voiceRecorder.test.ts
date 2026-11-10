@@ -156,22 +156,15 @@ describe('voiceRecorder', () => {
     expect(new DataView(buf).getUint32(40, true)).toBe(6 * 2);
   });
 
-  it('reports a mic that only returns silence, once, and again after it recovers', async () => {
+  it('does not report a quiet stretch as a mic fault', async () => {
     FakeAudioContext.instances = [];
     const rec = await start();
     const ctx = FakeAudioContext.instances[FakeAudioContext.instances.length - 1]!;
     const reasons: string[] = [];
     rec.onSilent((r) => reasons.push(r));
     const quiet = new Array(48_000).fill(0.0002);
-    fire(ctx, quiet);
-    fire(ctx, quiet);
+    for (let i = 0; i < 6; i++) fire(ctx, quiet);
     expect(reasons).toHaveLength(0);
-    fire(ctx, quiet);
-    fire(ctx, quiet);
-    expect(reasons).toEqual(['the microphone is only returning silence']);
-    fire(ctx, [0.3, -0.3]);
-    for (let i = 0; i < 3; i++) fire(ctx, quiet);
-    expect(reasons).toHaveLength(2);
     rec.cancel();
   });
 

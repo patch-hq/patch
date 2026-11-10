@@ -44,7 +44,14 @@ import {
 import { autoUpdater } from 'electron-updater';
 import { isAbsolute, join } from 'node:path';
 import { hostname } from 'node:os';
-import { realpathSync, existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
+import {
+  realpathSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  renameSync,
+  appendFileSync,
+} from 'node:fs';
 import {
   diagnoseUpdater,
   emptyPersisted,
@@ -86,7 +93,7 @@ import {
   callingAppsIn,
   helperPath,
   probeSystemAudio,
-  watchMicrophone,
+  superviseMicWatch,
 } from './meeting-audio';
 import {
   readMeetingPermissions,
@@ -273,6 +280,8 @@ export interface DesktopEvent {
     | 'window:load-failed'
     | 'window:render-process-gone'
     | 'meeting:detection-off'
+    | 'meeting:detection-restart'
+    | 'meeting:detection-recovered'
     | 'meeting:auto-ended'
     | 'server-watch:error';
   ts: number;
@@ -917,10 +926,17 @@ function startMeetingDetection(): void {
       resourcesPath: process.resourcesPath,
       devDir: __dirname,
     });
-    stopMicWatch = watchMicrophone(binary, {
+    stopMicWatch = superviseMicWatch(binary, {
       onProcesses: (processes) =>
         detector.update(callingAppsIn(processes, OWN_BUNDLE_PREFIX), Date.now()),
-      onFailed: (message) => reportMeetingDetectionOff(message),
+      onRestart: (message, failures, retryInMs) => {
+        logMeetingDetection('meeting:detection-restart', { message, failures, retryInMs });
+        if (failures >= DETECTION_OFF_AFTER_FAILURES) reportMeetingDetectionOff(message);
+      },
+      onRecovered: () => {
+        logMeetingDetection('meeting:detection-recovered', {});
+        setMeetingDetectionState({ off: false, message: null });
+      },
     });
     setInterval(() => detector.tick(Date.now()), 1000).unref();
   } catch (err) {
@@ -928,9 +944,41 @@ function startMeetingDetection(): void {
   }
 }
 
+/** Consecutive watcher failures before detection is declared off in the app. */
+const DETECTION_OFF_AFTER_FAILURES = 3;
+
+const MEETING_DETECTION_LOG = (): string => join(app.getPath('userData'), 'meeting-detection.log');
+
+/** Detection events survive on disk: the in-memory log and console are gone by the time anyone asks. */
+function logMeetingDetection(type: DesktopEvent['type'], payload: Record<string, unknown>): void {
+  logDesktopEvent({ type, payload });
+  try {
+    appendFileSync(
+      MEETING_DETECTION_LOG(),
+      `${JSON.stringify({ at: new Date().toISOString(), type, ...payload })}\n`,
+    );
+  } catch (err) {
+    console.error(`Could not write ${MEETING_DETECTION_LOG()}: ${(err as Error).message}`);
+  }
+}
+
+export interface MeetingDetectionState {
+  off: boolean;
+  message: string | null;
+}
+let meetingDetectionState: MeetingDetectionState = { off: false, message: null };
+
+function setMeetingDetectionState(next: MeetingDetectionState): void {
+  meetingDetectionState = next;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('patch:meeting-detection', next);
+  }
+}
+
 function reportMeetingDetectionOff(message: string): void {
-  logDesktopEvent({ type: 'meeting:detection-off', payload: { message } });
+  logMeetingDetection('meeting:detection-off', { message });
   console.error(`Meeting detection is off: ${message}`);
+  setMeetingDetectionState({ off: true, message });
 }
 
 /**
@@ -1258,6 +1306,7 @@ function registerIpc(): void {
     },
   );
   ipcMain.handle('patch:get-events', () => eventLog);
+  ipcMain.handle('patch:meeting-detection:get-state', () => meetingDetectionState);
   // The lightbox's Copy image: Chromium's async clipboard rejects an image write
   // in the packaged app, so the renderer hands over PNG bytes to write natively.
   ipcMain.handle('patch:copy-image', (_e, png: unknown) => {

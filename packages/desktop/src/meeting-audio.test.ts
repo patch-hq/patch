@@ -7,6 +7,7 @@ import {
   PcmAligner,
   SystemAudio,
   callingAppsIn,
+  superviseMicWatch,
   type MicProcess,
 } from './meeting-audio.js';
 
@@ -124,4 +125,83 @@ test('SystemAudio: a stop is not a failure', async () => {
   await started;
   audio.stop();
   assert.equal(failed, false);
+});
+
+function fakeWatchChild(): ChildProcessWithoutNullStreams & { out: EventEmitter; killed: boolean } {
+  const c = new EventEmitter() as unknown as ChildProcessWithoutNullStreams & {
+    out: EventEmitter;
+    killed: boolean;
+  };
+  const out = new EventEmitter();
+  (c as unknown as { stdout: EventEmitter }).stdout = out;
+  (c as unknown as { stderr: EventEmitter }).stderr = new EventEmitter();
+  c.out = out;
+  c.killed = false;
+  (c as unknown as { kill: () => void }).kill = () => {
+    c.killed = true;
+  };
+  return c;
+}
+
+test('superviseMicWatch restarts the helper with backoff, reports each exit, and recovers', () => {
+  const children: ReturnType<typeof fakeWatchChild>[] = [];
+  const timers: { fn: () => void; ms: number }[] = [];
+  const log: string[] = [];
+  let t = 0;
+  superviseMicWatch(
+    'bin',
+    {
+      onProcesses: (p) => log.push(`procs:${p.length}`),
+      onRestart: (m, f, ms) => log.push(`restart:${m}:${f}:${ms}`),
+      onRecovered: () => log.push('recovered'),
+    },
+    {
+      spawnFn: () => {
+        const c = fakeWatchChild();
+        children.push(c);
+        return c;
+      },
+      setTimeoutFn: (fn, ms) => timers.push({ fn, ms }),
+      clearTimeoutFn: () => {},
+      now: () => t,
+    },
+  );
+  assert.equal(children.length, 1);
+  children[0]!.emit('exit', 1, null);
+  assert.equal(timers.at(-1)?.ms, 1000);
+  timers.at(-1)!.fn();
+  assert.equal(children.length, 2);
+  children[1]!.emit('exit', 1, null);
+  assert.equal(timers.at(-1)?.ms, 2000);
+  timers.at(-1)!.fn();
+  children[2]!.out.emit('data', Buffer.from('{"processes":[]}\n'));
+  assert.deepEqual(log, [
+    'restart:mic-watch exited (1):1:1000',
+    'restart:mic-watch exited (1):2:2000',
+    'recovered',
+    'procs:0',
+  ]);
+});
+
+test('superviseMicWatch kills a helper that printed garbage before replacing it, and stops cleanly', () => {
+  const children: ReturnType<typeof fakeWatchChild>[] = [];
+  const timers: { fn: () => void; ms: number }[] = [];
+  const stop = superviseMicWatch(
+    'bin',
+    { onProcesses: () => {}, onRestart: () => {}, onRecovered: () => {} },
+    {
+      spawnFn: () => {
+        const c = fakeWatchChild();
+        children.push(c);
+        return c;
+      },
+      setTimeoutFn: (fn, ms) => timers.push({ fn, ms }),
+      clearTimeoutFn: () => {},
+    },
+  );
+  children[0]!.out.emit('data', Buffer.from('not json\n'));
+  assert.equal(children[0]!.killed, true);
+  assert.equal(timers.length, 1);
+  stop();
+  assert.equal(children.length, 1);
 });

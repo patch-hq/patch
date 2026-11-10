@@ -83,7 +83,7 @@ import { registerLinkSummaryRoutes } from './link-summary-routes.js';
 import { RELEASE_REPO } from './release-channel.js';
 import { MobileUpdateNotifier, registerMobileUpdateRoutes } from './mobile-updates.js';
 import { registerClientCrashRoutes } from './client-crash-routes.js';
-import { IssueFiler } from './issue-filer.js';
+import { IssueFiler, hostTurnFailureReport } from './issue-filer.js';
 import { registerIssueFilerRoutes } from './issue-filer-routes.js';
 import { RELEASE_REPO as ISSUE_REPO_DEFAULT } from './release-channel.js';
 import { SecretsRegistry } from './secrets-registry.js';
@@ -97,6 +97,7 @@ import { JobDispatcher } from './jobs/dispatcher.js';
 import { JobChatLinks } from './jobs/chat-links.js';
 import { JobLogs } from './jobs/logs.js';
 import { JobAlerts, describeFailure } from './jobs/alerts.js';
+import { lateFireHandler } from './jobs/late-fire.js';
 import { CronScheduler } from './jobs/cron.js';
 import { HostWaker } from './jobs/host-wake.js';
 import { RecurrenceScheduler, nextOccurrence } from './jobs/recurrence.js';
@@ -1947,6 +1948,12 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       surface: 'server',
     });
   };
+  // A turn that fails on the host is logged on the host, not here, so file it
+  // from the event the host sends the surfaces.
+  hostLink.onEvent((event, from) => {
+    const report = hostTurnFailureReport(event, from);
+    if (report) issueFiler.reportAuto(report);
+  });
   app.addHook('onReady', async () => {
     // Anything queued when the last process died (an uncaught exception) files now.
     void issueFiler.flush().catch(() => undefined);
@@ -2188,24 +2195,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     logs: jobLogs,
     // A fire waiting on a host that is down or asleep is announced once it is
     // 10 minutes late, naming the host and how long it has been due.
-    onLate: (info) => {
-      const since = new Intl.DateTimeFormat('en-GB', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hourCycle: 'h23',
-        ...(info.timezone !== undefined ? { timeZone: info.timezone } : {}),
-      }).format(info.dueAt);
-      void notificationRouter
-        .route({
-          type: 'notify',
-          chatId: info.chatId,
-          message: `${info.jobName} has not run: host ${info.hostId ?? 'unknown'} unreachable since ${since}. It will run when the host is back.`,
-          priority: 'normal',
-        })
-        .catch((err: unknown) => {
-          log.warn({ err: (err as Error).message }, 'late-fire notify failed');
-        });
-    },
+    onLate: lateFireHandler(notificationLog),
     // `ensure` (upsert) actions key on whether their persistent chat already
     // exists in the registry mirror to decide spawn-vs-message.
     chatExists: (chatId) => chatRegistry.get(chatId) !== undefined,

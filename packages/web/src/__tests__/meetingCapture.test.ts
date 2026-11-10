@@ -104,7 +104,7 @@ describe('startMeetingCapture', () => {
   }
   const stream = (tracks = 1) =>
     ({
-      getAudioTracks: () => Array.from({ length: tracks }, () => ({})),
+      getAudioTracks: () => Array.from({ length: tracks }, () => ({ addEventListener() {} })),
       getTracks: () => [{ stop: stopSpy }],
     }) as unknown as MediaStream;
   const stopSpy = vi.fn();
@@ -114,6 +114,112 @@ describe('startMeetingCapture', () => {
     expect(() =>
       startMeetingCapture({ mic: stream(0) }, () => {}, { AudioContextImpl: Ctx as never }),
     ).toThrow(/no audio track/);
+  });
+
+  describe('following a mic change', () => {
+    const track = () => {
+      const t = {
+        listeners: {} as Record<string, () => void>,
+        stop: vi.fn(),
+        addEventListener(ev: string, f: () => void) {
+          t.listeners[ev] = f;
+        },
+      };
+      return t;
+    };
+    const liveStream = () => {
+      const t = track();
+      return {
+        t,
+        s: { getAudioTracks: () => [t], getTracks: () => [t] } as unknown as MediaStream,
+      };
+    };
+    const devices = () => {
+      let cb: (() => void) | null = null;
+      return {
+        fire: () => cb!(),
+        target: {
+          addEventListener: (_: string, f: () => void) => (cb = f),
+          removeEventListener: () => (cb = null),
+        },
+      };
+    };
+    const flush = () => new Promise((r) => setTimeout(r, 0));
+
+    it('reopens the mic on devicechange and stops the old stream', async () => {
+      vi.stubGlobal('MediaStream', function () {});
+      const first = liveStream();
+      const second = liveStream();
+      const openMic = vi.fn().mockResolvedValue(second.s);
+      const d = devices();
+      startMeetingCapture({ mic: first.s }, () => {}, {
+        AudioContextImpl: Ctx as never,
+        openMic,
+        mediaDevices: d.target,
+      });
+      d.fire();
+      await flush();
+      expect(openMic).toHaveBeenCalledOnce();
+      expect(first.t.stop).toHaveBeenCalled();
+      expect(second.t.stop).not.toHaveBeenCalled();
+    });
+
+    it('reopens when the track ends', async () => {
+      vi.stubGlobal('MediaStream', function () {});
+      const first = liveStream();
+      const openMic = vi.fn().mockResolvedValue(liveStream().s);
+      startMeetingCapture({ mic: first.s }, () => {}, {
+        AudioContextImpl: Ctx as never,
+        openMic,
+        mediaDevices: devices().target,
+      });
+      first.t.listeners.ended!();
+      await flush();
+      expect(openMic).toHaveBeenCalledOnce();
+    });
+
+    it('shows an error when the mic cannot be reopened', async () => {
+      vi.stubGlobal('MediaStream', function () {});
+      const onMicError = vi.fn();
+      const d = devices();
+      startMeetingCapture({ mic: liveStream().s }, () => {}, {
+        AudioContextImpl: Ctx as never,
+        openMic: () => Promise.reject(new Error('NotFoundError')),
+        onMicError,
+        mediaDevices: d.target,
+      });
+      d.fire();
+      await flush();
+      expect(onMicError).toHaveBeenCalledOnce();
+      expect(onMicError.mock.calls[0]![0].message).toMatch(/NotFoundError/);
+    });
+
+    it('shows an error when the track ends and there is no way to reopen', () => {
+      vi.stubGlobal('MediaStream', function () {});
+      const first = liveStream();
+      const onMicError = vi.fn();
+      startMeetingCapture({ mic: first.s }, () => {}, {
+        AudioContextImpl: Ctx as never,
+        onMicError,
+        mediaDevices: devices().target,
+      });
+      first.t.listeners.ended!();
+      expect(onMicError).toHaveBeenCalledOnce();
+    });
+
+    it('says nothing after stop', async () => {
+      vi.stubGlobal('MediaStream', function () {});
+      const first = liveStream();
+      const onMicError = vi.fn();
+      const capture = startMeetingCapture({ mic: first.s }, () => {}, {
+        AudioContextImpl: Ctx as never,
+        onMicError,
+        mediaDevices: devices().target,
+      });
+      capture.stop();
+      first.t.listeners.ended!();
+      expect(onMicError).not.toHaveBeenCalled();
+    });
   });
 
   it('captures system audio from a PCM feed, with no stream or screen involved', () => {

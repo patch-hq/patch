@@ -11,6 +11,7 @@
 
 import { create } from 'zustand';
 import { DEFAULT_SHARED_SETTINGS } from '@patch/wire';
+import { setAutoUpdateHosts } from '../lib/autoUpdatePref.js';
 import { api, type AccountPreferences, type SharedState } from '../api/rest.js';
 
 /** What the server uses when the account has never set anything. */
@@ -113,3 +114,5 @@ export function anyProviderConnected(shared: PreferencesState['shared']): boolea
   if (!secrets) return null;
   return [...secrets.claude, ...secrets.codex].some((a) => a.connected);
 }
+
+usePreferencesStore.subscribe((s) => setAutoUpdateHosts(s.preferences.autoUpdateHosts));

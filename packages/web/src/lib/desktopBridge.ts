@@ -104,6 +104,9 @@ export interface PatchDesktopBridge {
   onMeetingSpeakers?(cb: (e: { participants: string[]; speaking: string[] }) => void): () => void;
   onMeetingSpeakersFailed?(cb: (e: { message: string }) => void): () => void;
   /** The shell saw a calling app open (`started`) or let go of (`ended`) the mic. */
+  /** Whether the shell's call detection is running; `off` is a standing error. */
+  getMeetingDetection?(): Promise<{ off: boolean; message: string | null }>;
+  onMeetingDetection?(cb: (e: { off: boolean; message: string | null }) => void): () => void;
   onMeetingSignal?(cb: (e: { phase: 'started' | 'ended'; app: string }) => void): () => void;
   /**
    * spec/14 ## Manager incoming-call UX: raise the main window to the

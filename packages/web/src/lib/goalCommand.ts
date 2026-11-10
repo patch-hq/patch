@@ -1,6 +1,6 @@
 // patch/todo.md — `/goal` slash command. Typing `/goal <text>` in the composer
 // sets the chat's goal instead of sending a message; the goal then shows at the
-// top of the chat (GoalBanner). A bare `/goal` (no text) CLEARS the goal.
+// top of the chat (GoalBanner). `/goal clear` (or off/none/cancel/remove/stop), or a bare `/goal`, CLEARS it.
 //
 // This is a pure parse so it's unit-testable in isolation and the composer's
 // send path stays a thin dispatch. `/goal` is matched case-insensitively on the
@@ -18,6 +18,10 @@ export interface GoalCommand {
   message: string;
 }
 
+// A goal that is exactly one of these words is a request to clear, not a goal
+// to set — "/goal clear" must never create a goal whose text is "clear".
+const CLEAR_WORDS = new Set(['clear', 'off', 'none', 'cancel', 'remove', 'stop']);
+
 const NOT_GOAL: GoalCommand = { isGoal: false, goal: null, message: '' };
 
 /**
@@ -32,6 +36,9 @@ export function parseGoalCommand(message: string): GoalCommand {
   if (!m) return NOT_GOAL;
   const before = text.slice(0, m.index + m[1]!.length).trim();
   const rest = text.slice(m.index + m[0].length).trim();
+  if (CLEAR_WORDS.has(rest.toLowerCase())) {
+    return { isGoal: true, goal: null, message: before };
+  }
   return {
     isGoal: true,
     goal: rest.length > 0 ? rest : null,
@@ -41,4 +48,4 @@ export function parseGoalCommand(message: string): GoalCommand {
 
 /** The built-in command entry for the slash-command autocomplete dropdown. */
 export const GOAL_COMMAND_NAME = 'goal';
-export const GOAL_COMMAND_DESCRIPTION = 'Set the chat goal; bare /goal clears it';
+export const GOAL_COMMAND_DESCRIPTION = 'Set the chat goal; "/goal clear" removes it';

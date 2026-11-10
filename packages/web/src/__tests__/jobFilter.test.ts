@@ -4,7 +4,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   filterJobs,
+  hasUnsetModelJob,
   isJobFilterActive,
+  jobModels,
+  UNSET_MODEL,
   JOB_STATUS_FILTERS,
   JOB_TRIGGER_FILTERS,
   NO_JOB_FILTER,
@@ -29,6 +32,37 @@ function filter(partial: Partial<JobFilter>): JobFilter {
   return { ...NO_JOB_FILTER, ...partial };
 }
 
+describe('model filter', () => {
+  const m = (name: string, action: FilterableJob['action']): FilterableJob & { name: string } => ({
+    name,
+    enabled: true,
+    trigger: { type: 'cron' },
+    action,
+  });
+  const MODELS = [
+    m('opus', { type: 'spawn', model: 'claude-opus-5' }),
+    m('sonnet', { type: 'ensure', model: 'claude-sonnet-5' }),
+    m('unset', { type: 'spawn' }),
+    m('cmd', { type: 'command' }),
+    m('msg', { type: 'message' }),
+  ];
+
+  it('narrows to one model', () => {
+    expect(names(filterJobs(MODELS, filter({ model: 'claude-opus-5' })))).toEqual(['opus']);
+  });
+  it('narrows to jobs with no model set, excluding actions that carry none', () => {
+    expect(names(filterJobs(MODELS, filter({ model: UNSET_MODEL })))).toEqual(['unset']);
+  });
+  it('lists distinct pinned models and reports unset ones', () => {
+    expect(jobModels(MODELS)).toEqual(['claude-opus-5', 'claude-sonnet-5']);
+    expect(hasUnsetModelJob(MODELS)).toBe(true);
+    expect(hasUnsetModelJob([MODELS[0]!])).toBe(false);
+  });
+  it('counts as an active filter', () => {
+    expect(isJobFilterActive(filter({ model: 'claude-opus-5' }))).toBe(true);
+  });
+});
+
 describe('filterJobs', () => {
   it('narrows nothing when both axes are "all"', () => {
     expect(names(filterJobs(ALL, NO_JOB_FILTER))).toEqual(names(ALL));
@@ -52,8 +86,10 @@ describe('filterJobs', () => {
   });
 
   it('composes the two axes by AND', () => {
-    expect(names(filterJobs(ALL, { status: 'disabled', trigger: 'cron' }))).toEqual(['cron-off']);
-    expect(filterJobs(ALL, { status: 'enabled', trigger: 'todoist' })).toEqual([]);
+    expect(names(filterJobs(ALL, { status: 'disabled', trigger: 'cron', model: 'all' }))).toEqual([
+      'cron-off',
+    ]);
+    expect(filterJobs(ALL, { status: 'enabled', trigger: 'todoist', model: 'all' })).toEqual([]);
   });
 
   it('composes with a search that has already been applied (AND over both)', () => {
@@ -83,7 +119,7 @@ describe('isJobFilterActive', () => {
     expect(isJobFilterActive(NO_JOB_FILTER)).toBe(false);
     expect(isJobFilterActive(filter({ status: 'enabled' }))).toBe(true);
     expect(isJobFilterActive(filter({ trigger: 'cron' }))).toBe(true);
-    expect(isJobFilterActive({ status: 'disabled', trigger: 'webhook' })).toBe(true);
+    expect(isJobFilterActive({ status: 'disabled', trigger: 'webhook', model: 'all' })).toBe(true);
   });
 });
 

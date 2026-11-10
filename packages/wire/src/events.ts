@@ -8,7 +8,7 @@
 // inputs (`chat.input`) carry `localId` for server-side dedup on (chatId, localId).
 
 import { z } from 'zod';
-import { DictationSetting, SpeechToTextEngine } from './audio.js';
+import { DictationSetting, MeetingEngine, SpeechToTextEngine } from './audio.js';
 import { DEFAULT_SWEEP_PROMPT } from './sweep-prompt.js';
 import { DEFAULT_LINK_SUMMARY_PROMPT } from './link-summary-prompt.js';
 import { DEFAULT_QUESTION_EXPIRED_PROMPT } from './question-expired-prompt.js';
@@ -1207,6 +1207,8 @@ export const ChatPermissionRequestEvent = z
       .object({
         at: z.number().int().positive(),
         windowMs: z.number().int().positive(),
+        /** The user is in the chat: the clock is held at a full window, `at` is not a deadline. */
+        paused: z.boolean().optional(),
       })
       .strict()
       .optional(),
@@ -1240,6 +1242,8 @@ export const ChatPermissionExpiryUpdateEvent = z
       .object({
         at: z.number().int().positive(),
         windowMs: z.number().int().positive(),
+        /** The user is in the chat: the clock is held at a full window, `at` is not a deadline. */
+        paused: z.boolean().optional(),
       })
       .strict(),
     seq: z.number().int().nonnegative(),
@@ -2144,6 +2148,8 @@ export const VoiceConfigSetting = z
     // Absent in settings saved before speech to text became a setting.
     speechToText: SpeechToTextEngine.default('groq'),
     dictation: DictationSetting,
+    // Absent in settings saved before the meeting engine was a setting.
+    meeting: MeetingEngine.default('local'),
     device: VoiceSurfaceSetting,
     handsFree: VoiceSurfaceSetting,
     call: VoiceSurfaceSetting,
@@ -2372,6 +2378,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   voiceConfig: {
     speechToText: 'groq',
     dictation: { phone: 'device', computer: 'whisper', tidy: false },
+    meeting: 'local',
     device: { backend: 'local', layer: 'direct', handoff: 'auto' },
     handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
     call: { backend: 'local', layer: 'direct', handoff: 'auto' },
@@ -2454,6 +2461,7 @@ export const SharedSecrets = z
         elevenlabs: z.string().min(1).optional(),
         groq: z.string().min(1).optional(),
         deepgram: z.string().min(1).optional(),
+        assemblyai: z.string().min(1).optional(),
       })
       .strict(),
   })
@@ -2783,6 +2791,7 @@ export const HostInfoEvent = z
         openai: z.boolean(),
         elevenlabs: z.boolean().optional(),
         deepgram: z.boolean().optional(),
+        assemblyai: z.boolean().optional(),
       })
       .optional(),
     /**

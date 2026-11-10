@@ -98,8 +98,8 @@ describe('the server picks the surface, not the agent', () => {
     ).toHaveLength(0);
   });
 
-  // spec/09 § Reaching the user — urgent is normal with a more urgent sound.
-  it('routes urgent exactly as normal: the desktop when he is at a computer', async () => {
+  // spec/09 § Reaching the user — urgent goes through regardless of presence.
+  it('sends urgent to the phone even when he is at a computer', async () => {
     const h = harness();
     h.presence.online(h.accountId, 'srf-desktop', 'surface-desktop');
     h.presence.heartbeat(h.accountId, 'srf-desktop', Date.now());
@@ -109,7 +109,7 @@ describe('the server picks the surface, not the agent', () => {
       message: 'the train goes in 6 minutes',
       priority: 'urgent',
     });
-    expect(h.sent, 'the toast is in front of him, as it would be for normal').toHaveLength(0);
+    expect(h.sent, 'urgent is never held back for presence').toHaveLength(1);
   });
 
   it('gives an urgent push the urgent sound, and nothing else does', async () => {

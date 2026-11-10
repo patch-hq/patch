@@ -441,6 +441,30 @@ describe('NotificationRouter — push channel', () => {
       expect(push.sent).toHaveLength(0);
     });
 
+    it('urgent still delivers while the phone has that chat open', async () => {
+      const { router, push } = setup('c1');
+      await router.route({ ...ev, priority: 'urgent' }, { suppressOn: 'chat-open' });
+      expect(push.sent).toHaveLength(1);
+    });
+
+    it('urgent desktop toast reaches a surface focused on that chat', async () => {
+      const { dir, registry } = makeRegistryDir();
+      const wsHub = makeFakeWsHub();
+      const router = new NotificationRouter({
+        logger: silent,
+        registry,
+        presence: new PresenceTracker(),
+        wsHub: wsHub as never,
+        dataDir: dir,
+        nowMs: () => 1_700_000_010_000,
+      });
+      await router.route(
+        { type: 'notify', chatId: 'c1', channel: 'desktop', message: 'hi', priority: 'urgent' },
+        { suppressOn: 'chat-open' },
+      );
+      expect(wsHub.delivered[0]?.unlessFocusedChatId).toBeUndefined();
+    });
+
     it('desktop toast skips a surface focused on that chat', async () => {
       const { dir, registry } = makeRegistryDir();
       const wsHub = makeFakeWsHub();
