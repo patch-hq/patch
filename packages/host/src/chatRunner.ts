@@ -7911,8 +7911,9 @@ export class Daemon {
    * just after that event. No such earlier event means an empty prefix.
    *
    * Returns `null` (and the edit is refused) when `seq` is not a user turn in
-   * Patch's own log, or when the event before it cannot be found in the
-   * transcript either — that is a real mismatch, not a stopped turn.
+   * Patch's own log, or when NO earlier event can be found in the transcript —
+   * that is a real mismatch, not a stopped turn. Earlier events that are
+   * themselves unpersisted (consecutive stopped turns) are skipped over.
    */
   private unpersistedForkPoint(
     chatId: string,
@@ -7929,7 +7930,10 @@ export class Daemon {
       meta.activeBranchId ?? this.branchIdFor(chatId),
     );
     let target: WireEvent | undefined;
-    let previousSeq: number | undefined;
+    // Every earlier event that Claude would have persisted, nearest last. The
+    // nearest may itself be unpersisted (a second stopped turn in a row, a
+    // queued message), so the walk below keeps going back until one resolves.
+    const candidates: number[] = [];
     for (const record of records) {
       if (record.rec.k !== 'event') continue;
       const ev = record.rec.event;
@@ -7942,17 +7946,21 @@ export class Daemon {
         (ev.type === 'chat.message' && (ev.role === 'user' || ev.role === 'assistant')) ||
         ev.type === 'chat.tool_call' ||
         ev.type === 'chat.tool_result';
-      if (fromTranscript) previousSeq = record.seq;
+      if (fromTranscript) candidates.push(record.seq);
     }
     if (!(target?.type === 'chat.message' && target.role === 'user')) return null;
-    if (previousSeq === undefined) return { resumeAtUuid: null };
-    return this.historyReader.sidePoint({
-      folder: state.folder,
-      sessionId,
-      seq: previousSeq,
-      seqIndex: this.canonicalSeqIndex(chatId),
-      chatDir: this.chatDirFor(chatId),
-    });
+    if (candidates.length === 0) return { resumeAtUuid: null };
+    for (let i = candidates.length - 1; i >= 0; i -= 1) {
+      const point = this.historyReader.sidePoint({
+        folder: state.folder,
+        sessionId,
+        seq: candidates[i]!,
+        seqIndex: this.canonicalSeqIndex(chatId),
+      });
+      if (point) return point;
+    }
+    // Earlier events exist but none is in the transcript: a real mismatch.
+    return null;
   }
 
   /**
