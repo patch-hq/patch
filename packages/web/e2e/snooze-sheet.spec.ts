@@ -134,8 +134,8 @@ test.describe('snooze sheet', () => {
     await expect(page.getByTestId('snooze-sheet-slider-value')).toHaveText('4 hours');
     await expect(page.getByTestId('snooze-sheet-confirm')).toContainText('Snooze until');
     await page.screenshot({ path: '/tmp/snooze-slider.png' });
-    // Choosing a preset deselects the slider.
-    await page.getByTestId('snooze-sheet-preset-1-day').click();
+    // Choosing a preset deselects the slider. (1 hour: later presets such as 1 day are hidden when they land within 15 minutes of an earlier one, which depends on the time of day.)
+    await page.getByTestId('snooze-sheet-preset-1-hour').click();
     await expect(page.getByTestId('snooze-sheet-slider-value')).toHaveText('');
     await page.getByTestId('snooze-sheet-preset-custom').click();
     await slider.focus();
