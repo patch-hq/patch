@@ -38,7 +38,7 @@ import { deliveryTracker } from '../lib/deliveryTracker.js';
 import { permissionDeliveryTracker } from '../lib/permissionDeliveryTracker.js';
 import { stripMarkdown } from '../lib/stripMarkdown.js';
 import { onServerVersion } from '../lib/liveUpdate.js';
-import { usePreferencesStore } from '../stores/preferencesStore.js';
+import { getAutoUpdateHosts } from '../lib/autoUpdatePref.js';
 import { useWebUpdateStore } from '../stores/webUpdateStore.js';
 
 /**
@@ -84,7 +84,7 @@ function reloadOnWireMismatch(detail: string, deps: { reload?: () => void } = {}
   if (reloadingOnWireMismatch) return;
   // "Update automatically" off: nothing reloads without the user pressing the
   // banner's button. Say what was seen and stage the banner instead.
-  if (!usePreferencesStore.getState().preferences.autoUpdateHosts) {
+  if (!getAutoUpdateHosts()) {
     // Once per staged banner: a stale bundle hits this on every undecodable
     // frame. Re-stage only if the store was cleared since.
     if (wireMismatchBannerStaged && useWebUpdateStore.getState().staleSince !== null) return;
