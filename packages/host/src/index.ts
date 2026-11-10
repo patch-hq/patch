@@ -271,6 +271,11 @@ import {
   type DictationTranscribers,
 } from './audio/hosted-stt.js';
 import { ElevenLabsScribeBackend, ScribeVoiceMap } from './audio/elevenlabs-stt.js';
+import {
+  AssemblyAiMeetingBackend,
+  DeepgramMeetingBackend,
+  type DiarisedClipEngine,
+} from './audio/meeting-stt.js';
 import { costCall } from './audio/voiceCost.js';
 import {
   createSileroVadFactory,
@@ -468,6 +473,7 @@ async function startHost(
       elevenlabs: config.audio.elevenLabsApiKey,
       groq: config.audio.groqApiKey,
       deepgram: config.audio.deepgramApiKey,
+      assemblyai: config.audio.assemblyaiApiKey,
     },
     ...(config.audio.whisperBackend === 'groq'
       ? { requiredToStart: { groq: 'This host transcribes with Groq (WHISPER_BACKEND=groq)' } }
@@ -814,6 +820,7 @@ async function startHost(
     openai: providerKeys.has('openai'),
     elevenlabs: providerKeys.has('elevenlabs'),
     deepgram: providerKeys.has('deepgram'),
+    assemblyai: providerKeys.has('assemblyai'),
   });
   logVoiceKeysMissing(logger, voiceConfig, voiceKeys());
   // spec/07 § Call cost — every costed call, and this host's totals.
@@ -3589,7 +3596,7 @@ async function startHost(
             : (readPatchStore(oauthOpts)?.accounts.map((a) => a.id) ?? []),
         meetings,
         speechSetUp: () =>
-          process.env['MEETING_STT'] === 'elevenlabs' ||
+          voiceConfig.meeting !== 'local' ||
           (whisper !== undefined && !(whisper instanceof UnconfiguredWhisperBackend)),
       });
     },
@@ -4542,9 +4549,9 @@ async function startHost(
     // between spawns is reflected immediately.
   });
   daemon.setWatchCheckIn({ intervalMs: watchCheckInMinutes * 60_000, prompt: watchCheckInPrompt });
-  // Meeting mode (meeting.ts). Local Whisper unless the host opts in with
-  // MEETING_STT=elevenlabs: a meeting is hours of audio, so a paid STT backend is
-  // never picked just because a key exists.
+  // Meeting mode (meeting.ts). Local Whisper unless the account's meeting engine
+  // setting (Settings → Voice) picks a paid one: a meeting is hours of audio, so a
+  // paid STT backend is never picked just because a key exists.
   // Starts (or re-tries, at most once a minute after a failure) the Whisper
   // component download and returns the notice a meeting clip shows meanwhile.
   let lastSpeechModelTry = 0;
@@ -4571,6 +4578,14 @@ async function startHost(
   // (`makeVad`, defined once the audio server starts). Clips run one at a time.
   let gateVad: Vad | undefined;
   const meetingVad = (): Vad => (gateVad ??= makeVad());
+  const deepgramMeeting = new DeepgramMeetingBackend({
+    logger: logger.child({ component: 'meeting-stt' }),
+    apiKey: () => providerKeys.get('deepgram'),
+  });
+  const assemblyaiMeeting = new AssemblyAiMeetingBackend({
+    logger: logger.child({ component: 'meeting-stt' }),
+    apiKey: () => providerKeys.get('assemblyai'),
+  });
   meetings = new MeetingManager({
     dir: join(config.patchHome, 'meetings'),
     // Drop call clips with no speech before they reach the STT engine.
@@ -4589,54 +4604,61 @@ async function startHost(
       }
       return dictationTranscribers.local.transcribeClip(wav, 'wav');
     },
-    // Voice separation needs the local sidecar and its speaker model; without
-    // DIARISE_MODEL_PATH the sidecar refuses rather than merging voices.
-    // MEETING_STT=elevenlabs opts a host into paid Scribe for meetings, with its
-    // own diarisation. Chosen explicitly, never as a fallback: a missing key or a
-    // failed request fails the clip. Usage goes on the voice ledger.
-    ...(process.env['MEETING_STT'] === 'elevenlabs'
-      ? {
-          transcribeVoices: async (session: string, wav: Buffer) => {
-            const scribe = dictationTranscribers?.elevenlabs;
-            if (!(scribe instanceof ElevenLabsScribeBackend)) {
-              throw new Error(
-                'MEETING_STT=elevenlabs but this host has no ElevenLabs key (ELEVEN_LABS_API_KEY)',
-              );
-            }
-            const startedAt = Date.now();
-            const runs = await scribe.transcribeDiarised(wav);
-            const audioSeconds = Math.max(0, wav.length - 44) / 32000;
-            const sep = session.lastIndexOf(':');
-            voiceLedger.record(
-              costCall({
-                sessionId: `meeting-stt-${startedAt}`,
-                chatId: session.slice(0, sep),
-                surfaceKind: 'meeting',
-                startedAt,
-                endedAt: Date.now(),
-                engine: {
-                  backend: 'local',
-                  model: scribe.costModel,
-                  tokens: null,
-                  stt: { requests: 1, audioSeconds, billedSeconds: audioSeconds },
-                },
-                handoffs: 0,
-              }),
-            );
-            let map = scribeVoiceMaps.get(session);
-            if (!map) scribeVoiceMaps.set(session, (map = new ScribeVoiceMap()));
-            return map.assign(runs);
-          },
-        }
-      : process.env['DIARISE_MODEL_PATH']
-        ? {
-            transcribeVoices: async (session: string, wav: Buffer) => {
-              if (!(whisper instanceof LocalWhisperBackend))
-                throw new Error('DIARISE_MODEL_PATH is set but WHISPER_BACKEND is not local');
-              return whisper.transcribeVoices(session, wav);
+    // Who transcribes a meeting is the account's `voiceConfig.meeting` setting,
+    // read per clip. `local` separates voices with the local sidecar's speaker
+    // model when DIARISE_MODEL_PATH is set; a hosted engine (ElevenLabs, Deepgram,
+    // AssemblyAI) does its own diarisation. Chosen explicitly, never as a
+    // fallback: a missing key or a failed request fails the clip. Usage goes on
+    // the voice ledger.
+    transcribeVoicesFor: (chosen) => {
+      const engine = chosen ?? voiceConfig.meeting;
+      if (engine === 'local') {
+        if (!process.env['DIARISE_MODEL_PATH']) return undefined;
+        return async (session: string, wav: Buffer) => {
+          if (!(whisper instanceof LocalWhisperBackend))
+            throw new Error('DIARISE_MODEL_PATH is set but WHISPER_BACKEND is not local');
+          return whisper.transcribeVoices(session, wav);
+        };
+      }
+      return async (session: string, wav: Buffer) => {
+        const hosted: DiarisedClipEngine | undefined =
+          engine === 'elevenlabs'
+            ? dictationTranscribers?.elevenlabs instanceof ElevenLabsScribeBackend
+              ? dictationTranscribers.elevenlabs
+              : undefined
+            : engine === 'deepgram'
+              ? providerKeys.has('deepgram')
+                ? deepgramMeeting
+                : undefined
+              : providerKeys.has('assemblyai')
+                ? assemblyaiMeeting
+                : undefined;
+        if (!hosted) throw new Error(voiceKeyMissingMessage('meeting', engine));
+        const startedAt = Date.now();
+        const runs = await hosted.transcribeDiarised(wav);
+        const audioSeconds = Math.max(0, wav.length - 44) / 32000;
+        const sep = session.lastIndexOf(':');
+        voiceLedger.record(
+          costCall({
+            sessionId: `meeting-stt-${startedAt}`,
+            chatId: session.slice(0, sep),
+            surfaceKind: 'meeting',
+            startedAt,
+            endedAt: Date.now(),
+            engine: {
+              backend: 'local',
+              model: hosted.costModel,
+              tokens: null,
+              stt: { requests: 1, audioSeconds, billedSeconds: audioSeconds },
             },
-          }
-        : {}),
+            handoffs: 0,
+          }),
+        );
+        let map = scribeVoiceMaps.get(session);
+        if (!map) scribeVoiceMaps.set(session, (map = new ScribeVoiceMap()));
+        return map.assign(runs);
+      };
+    },
     ...(process.env['VOICEPRINT_PATH']
       ? { hasVoiceprint: () => existsSync(process.env['VOICEPRINT_PATH'] as string) }
       : {}),

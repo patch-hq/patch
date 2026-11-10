@@ -18,7 +18,14 @@
 import { z } from 'zod';
 
 /** The keys a host can use, by id. */
-export const ProviderKeyId = z.enum(['gemini', 'openai', 'elevenlabs', 'groq', 'deepgram']);
+export const ProviderKeyId = z.enum([
+  'gemini',
+  'openai',
+  'elevenlabs',
+  'groq',
+  'deepgram',
+  'assemblyai',
+]);
 export type ProviderKeyId = z.infer<typeof ProviderKeyId>;
 
 export interface ProviderKeyInfo {
@@ -62,7 +69,13 @@ export const PROVIDER_KEYS: readonly ProviderKeyInfo[] = [
     id: 'deepgram',
     label: 'Deepgram',
     envVar: 'DEEPGRAM_API_KEY',
-    usedFor: 'Live dictation on the deepgram engine',
+    usedFor: 'Live dictation and meetings on the deepgram engine',
+  },
+  {
+    id: 'assemblyai',
+    label: 'AssemblyAI',
+    envVar: 'ASSEMBLYAI_API_KEY',
+    usedFor: 'Meeting transcription on the assemblyai engine',
   },
 ];
 

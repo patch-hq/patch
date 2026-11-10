@@ -3,6 +3,7 @@
 // Times are millisecond offsets from the start of the meeting, not wall-clock.
 
 import { z } from 'zod';
+import { MeetingEngine } from './audio.js';
 
 export const MeetingStatus = z.enum(['live', 'paused', 'ended']);
 export type MeetingStatus = z.infer<typeof MeetingStatus>;
@@ -321,11 +322,14 @@ export type MeetingAction = z.infer<typeof MeetingAction>;
  * How live the notes are. `clipSeconds` is how much audio a surface gathers
  * before sending it to be transcribed; `analyseSeconds` is how often the model
  * folds new transcript into the notes. Shorter is fresher and costs more.
+ * `engine` is who transcribes this meeting; absent means the account's default
+ * (Settings → Voice).
  */
 export const MeetingSettings = z
   .object({
     clipSeconds: z.number().int().min(3).max(60),
     analyseSeconds: z.number().int().min(5).max(300),
+    engine: MeetingEngine.optional(),
   })
   .strict();
 export type MeetingSettings = z.infer<typeof MeetingSettings>;

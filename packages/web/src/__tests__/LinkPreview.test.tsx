@@ -49,6 +49,22 @@ describe('LinkPreviewToggle (Summarise)', () => {
     expect(screen.getByText('example.com')).toBeTruthy();
   });
 
+  it('renders the summary as a popover on the body, closing on Escape or an outside click', async () => {
+    vi.mocked(api.linkSummary).mockResolvedValue({ url: 'https://example.com/', summary: 'S' });
+    const { container } = renderToggle('https://example.com/');
+    fireEvent.click(screen.getByRole('button', { name: /summarise link/i }));
+    const card = await screen.findByRole('dialog', { name: /link summary/i });
+    expect(card.parentElement).toBe(document.body);
+    expect(container.contains(card)).toBe(false);
+    expect(card.style.position).toBe('fixed');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByTestId('link-summary-card')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /summarise link/i }));
+    await screen.findByTestId('link-summary-card');
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByTestId('link-summary-card')).toBeNull();
+  });
+
   it('clicking again collapses the card', async () => {
     vi.mocked(api.linkSummary).mockResolvedValue({ url: 'https://example.com/', summary: 'S' });
     renderToggle('https://example.com/');

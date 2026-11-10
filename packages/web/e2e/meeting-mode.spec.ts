@@ -477,6 +477,18 @@ test.describe('meeting mode — live', () => {
     });
   });
 
+  test('the transcription option tunes the host with the chosen engine', async ({ page }) => {
+    await page.goto(URL_LIVE);
+    await page.getByTestId('meeting-cog').click();
+    await expect(page.getByTestId('meeting-engine-local')).toHaveAttribute('aria-pressed', 'true');
+    await page.getByTestId('meeting-engine-deepgram').click();
+    const reqs = (await sent(page, 'meeting.control_request')) as Array<{
+      action: string;
+      settings?: { engine?: string };
+    }>;
+    expect(reqs.at(-1)).toMatchObject({ action: 'tune', settings: { engine: 'deepgram' } });
+  });
+
   test('the live timer ticks', async ({ page }) => {
     await page.goto(URL_LIVE);
     const a = await page.getByTestId('meeting-pill').innerText();
