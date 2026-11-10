@@ -9,6 +9,15 @@
 //   patch-audio probe      creates a process tap and removes it again: exit 0 when System
 //                          Audio Recording is allowed. The first run asks the user.
 //
+// Test sources (the synthetic meeting test, scripts/meeting-e2e). Each is chosen by an
+// environment variable and replaces the real source for that command only; with none set
+// nothing here runs:
+//   PATCH_AUDIO_TAP_FILE=<wav>        `tap` plays a 16 kHz mono 16-bit WAV in real time, then
+//                                     silence (as a quiet Mac does) instead of using Core Audio
+//   PATCH_AUDIO_MIC_FEED=<file>       `mic-watch` prints each line appended to the file
+//   PATCH_AUDIO_SPEAKERS_FEED=<file>  `speakers` prints each line appended to the file
+// A bad file is a message on stderr and a non-zero exit, like every other failure.
+//
 // `tap` is a Core Audio process tap: audio only, no screen capture, so macOS shows
 // no picker and no screen-sharing indicator. It follows the default output device
 // (headphones in or out mid-call). `mic-watch` is how a meeting is noticed: a call
@@ -130,7 +139,99 @@ final class SystemTap {
     }
 }
 
+// MARK: - test sources
+
+/// The PCM payload of a 16 kHz mono signed 16-bit WAV. Anything else is refused: a test
+/// recording in the wrong format would otherwise play at the wrong speed and pass for a
+/// transcription fault.
+func readWavPcm(_ path: String) -> Data {
+    guard let wav = FileManager.default.contents(atPath: path) else { fail("cannot read \(path)") }
+    func u16(_ o: Int) -> Int { Int(wav[o]) | Int(wav[o + 1]) << 8 }
+    func u32(_ o: Int) -> Int { u16(o) | u16(o + 2) << 16 }
+    guard wav.count > 44, String(decoding: wav[0..<4], as: UTF8.self) == "RIFF",
+          String(decoding: wav[8..<12], as: UTF8.self) == "WAVE" else { fail("\(path) is not a WAV file") }
+    var offset = 12
+    var formatOK = false
+    while offset + 8 <= wav.count {
+        let id = String(decoding: wav[offset..<offset + 4], as: UTF8.self)
+        let size = u32(offset + 4)
+        let body = offset + 8
+        if id == "fmt " {
+            formatOK = u16(body) == 1 && u16(body + 2) == 1 && u32(body + 4) == 16000 && u16(body + 14) == 16
+        } else if id == "data" {
+            if !formatOK { fail("\(path) must be 16 kHz mono signed 16-bit PCM") }
+            return wav.subdata(in: body..<min(body + size, wav.count))
+        }
+        offset = body + size + (size % 2)
+    }
+    fail("\(path) has no audio data")
+}
+
+/// Plays `pcm` on stdout at real speed in 20 ms steps, then silence forever.
+func runTapFile(_ path: String) -> Never {
+    let pcm = readWavPcm(path)
+    let step = 320 * 2 // 20 ms
+    let silence = Data(count: step)
+    let out = FileHandle.standardOutput
+    FileHandle.standardError.write(Data("ready\n".utf8))
+    for sig in [SIGTERM, SIGINT] {
+        signal(sig, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+        source.setEventHandler { exit(0) }
+        source.resume()
+        signalSources.append(source)
+    }
+    let queue = DispatchQueue(label: "patch-audio.tap-file")
+    queue.async {
+        var position = 0
+        let start = DispatchTime.now().uptimeNanoseconds
+        var n: UInt64 = 0
+        while true {
+            if position < pcm.count {
+                let end = min(position + step, pcm.count)
+                var chunk = pcm.subdata(in: position..<end)
+                if chunk.count < step { chunk.append(Data(count: step - chunk.count)) }
+                out.write(chunk)
+                position = end
+            } else {
+                out.write(silence)
+            }
+            n += 1
+            let due = start + n * 20_000_000
+            let now = DispatchTime.now().uptimeNanoseconds
+            if due > now { Thread.sleep(forTimeInterval: Double(due - now) / 1e9) }
+        }
+    }
+    dispatchMain()
+}
+
+/// Prints each line appended to `path`, as the real watchers print each change. Starts from
+/// the beginning of the file, so lines written before the helper started are not lost.
+func runFeed(_ path: String, initial: String) -> Never {
+    FileHandle.standardOutput.write(Data((initial + "\n").utf8))
+    var consumed = 0
+    var pending = Data()
+    while true {
+        if let data = FileManager.default.contents(atPath: path), data.count > consumed {
+            pending.append(data.subdata(in: consumed..<data.count))
+            consumed = data.count
+            while let nl = pending.firstIndex(of: 0x0A) {
+                let line = pending.subdata(in: pending.startIndex..<nl)
+                pending.removeSubrange(pending.startIndex...nl)
+                if !line.isEmpty { FileHandle.standardOutput.write(line + Data("\n".utf8)) }
+            }
+        }
+        Thread.sleep(forTimeInterval: 0.1)
+    }
+}
+
+func testSource(_ name: String) -> String? {
+    guard let v = ProcessInfo.processInfo.environment[name], !v.isEmpty else { return nil }
+    return v
+}
+
 func runTap() -> Never {
+    if let file = testSource("PATCH_AUDIO_TAP_FILE") { runTapFile(file) }
     let tap = SystemTap()
     tap.start()
 
@@ -210,6 +311,7 @@ func processesUsingMic() -> Set<MicProcess> {
 }
 
 func runMicWatch() -> Never {
+    if let feed = testSource("PATCH_AUDIO_MIC_FEED") { runFeed(feed, initial: #"{"processes":[]}"#) }
     var last: Set<MicProcess>?
     while true {
         let now = processesUsingMic()
@@ -272,6 +374,7 @@ func speakerLabels() -> [String] {
 }
 
 func runSpeakers() -> Never {
+    if let feed = testSource("PATCH_AUDIO_SPEAKERS_FEED") { runFeed(feed, initial: #"{"labels":[]}"#) }
     if !AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) {
         fail("Accessibility is not allowed for Patch. Allow it in System Settings > Privacy & Security > Accessibility to name speakers")
     }
@@ -291,6 +394,7 @@ func runSpeakers() -> Never {
 
 /** macOS has no way to ask whether System Audio Recording is allowed without trying. */
 func runProbe() -> Never {
+    if testSource("PATCH_AUDIO_TAP_FILE") != nil { exit(0) }
     let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
     description.uuid = UUID()
     description.name = "Patch probe"

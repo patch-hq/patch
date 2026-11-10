@@ -103,6 +103,7 @@ import {
 } from './meeting-permissions';
 import { watchSpeakers } from './meeting-speakers';
 import { MeetingRecorder } from './meeting-recording';
+import { quietInstanceFromEnv, standInPermissions } from './quiet-instance';
 import {
   buildNotificationExtras,
   decideDesktopIntent,
@@ -125,6 +126,10 @@ let activeLaunch: { stop(): Promise<void> } | null = null;
 // Default `Control+Space` collides with macOS "Select previous input
 // source"; users can pick e.g. `Alt+Space` or `CommandOrControl+Shift+P`
 // without rebuilding.
+/** A second, isolated Patch for the synthetic meeting test; null in every normal run. */
+const QUIET = quietInstanceFromEnv(process.env);
+if (QUIET) app.setPath('userData', QUIET.userDataDir);
+
 const GLOBAL_HOTKEY = process.env['PATCH_GLOBAL_HOTKEY'] ?? 'Control+Space';
 // spec/14 ## Global hotkey: ⌃⇧Space → toggle a voice CALL with Manager
 // (distinct from ⌃Space, which is the press-and-hold voice NOTE). Configurable.
@@ -282,6 +287,7 @@ export interface DesktopEvent {
     | 'meeting:detection-off'
     | 'meeting:detection-restart'
     | 'meeting:detection-recovered'
+    | 'meeting:prompt-shown'
     | 'meeting:auto-ended'
     | 'server-watch:error';
   ts: number;
@@ -506,7 +512,7 @@ export function createMainWindow(): BrowserWindow {
     width: placement.width,
     height: placement.height,
     title: 'Patch',
-    show: true,
+    show: !QUIET,
     // No native title bar — the SPA runs to the window's top edge and the
     // traffic lights float over its top-left (spec/05 § Window chrome; the user,
     // App Updates: "clean at top, no patch top bar"). The renderer reserves
@@ -882,6 +888,8 @@ let stopMicWatch: (() => void) | null = null;
 const meetingToasts = new Set<Notification>();
 
 function showMeetingToast(phase: 'started', appName: string): void {
+  logDesktopEvent({ type: 'meeting:prompt-shown', payload: { phase, app: appName } });
+  if (QUIET) return;
   const n = new Notification({
     title: `Meeting started — ${appName}`,
     body: 'Click to start a Patch meeting',
@@ -906,6 +914,7 @@ function endMeetingForCall(appName: string): void {
   if (!mainWindow || mainWindow.isDestroyed()) mainWindow = createMainWindow();
   sendWhenReady(mainWindow, 'patch:meeting-signal', { phase: 'ended', app: appName });
   logDesktopEvent({ type: 'meeting:auto-ended', payload: { app: appName } });
+  if (QUIET) return;
   new Notification({ title: `Meeting ended — ${appName}`, body: 'Patch ended the meeting' }).show();
 }
 
@@ -1577,10 +1586,20 @@ function setupAutoUpdater(): void {
   // Meeting mode: where the three macOS permissions stand, and asking for one.
   // Null off macOS, where there is nothing to set up.
   const callAudioMark = join(app.getPath('userData'), 'call-audio-allowed');
+  // A quiet test instance has fake sources in place of the mic, the tap and Accessibility;
+  // macOS has nothing to grant for those (quiet-instance.ts).
+  const standIn = QUIET
+    ? standInPermissions(process.env, (name) => app.commandLine.hasSwitch(name))
+    : { microphone: false, callAudio: false, accessibility: false };
   const meetingPermissionDeps: MeetingPermissionDeps = {
-    micStatus: () => systemPreferences.getMediaAccessStatus('microphone'),
-    askMic: () => systemPreferences.askForMediaAccess('microphone'),
-    accessibilityTrusted: (prompt) => systemPreferences.isTrustedAccessibilityClient(prompt),
+    micStatus: () =>
+      standIn.microphone ? 'granted' : systemPreferences.getMediaAccessStatus('microphone'),
+    askMic: () =>
+      standIn.microphone
+        ? Promise.resolve(true)
+        : systemPreferences.askForMediaAccess('microphone'),
+    accessibilityTrusted: (prompt) =>
+      standIn.accessibility || systemPreferences.isTrustedAccessibilityClient(prompt),
     probeCallAudio: () =>
       probeSystemAudio(
         helperPath({
@@ -1589,7 +1608,7 @@ function setupAutoUpdater(): void {
           devDir: __dirname,
         }),
       ),
-    callAudioKnown: () => existsSync(callAudioMark),
+    callAudioKnown: () => standIn.callAudio || existsSync(callAudioMark),
     rememberCallAudio: () => writeFileSync(callAudioMark, ''),
   };
   ipcMain.handle('patch:meeting-permissions', () =>
@@ -1982,7 +2001,8 @@ export function bootstrap(): void {
   });
   app.whenReady().then(async () => {
     if (process.platform === 'darwin') {
-      app.dock?.show();
+      if (QUIET) app.dock?.hide();
+      else app.dock?.show();
     }
     // Auto-updates swap the bundle in place; keep Spotlight pointed at it.
     // Not awaited (startup must not wait on mdimport); failure is logged loudly.
@@ -2046,23 +2066,31 @@ export function bootstrap(): void {
     // packaged app while working in a browser. NO FALLBACK: anything else, and
     // anything from another origin, is refused (permissions.ts).
     configurePermissions(session.defaultSession, SERVER_URL);
-    agentBrowser = new AgentBrowser({
-      endpointFile: agentBrowserEndpointFile(),
-      appPath: appLaunchPath(),
-      version: app.getVersion(),
-      log: (message, extra) => console.warn(`[patch] ${message}`, extra ?? ''),
-      onUserInput: (win, targetId) => {
-        if (!win.isDestroyed()) win.webContents.send('patch:agent-browser:input', { targetId });
-      },
-    });
-    // NO FALLBACK: a browser that cannot listen says so; the host then fails loudly too.
-    await agentBrowser.start().catch((err: unknown) => {
-      console.error('[patch] agent browser: could not start', err);
-      agentBrowser = null;
-    });
+    // The quiet test instance leaves the real app's agent-browser endpoint file
+    // (~/.patch) alone, so it never starts one.
+    if (!QUIET) {
+      agentBrowser = new AgentBrowser({
+        endpointFile: agentBrowserEndpointFile(),
+        appPath: appLaunchPath(),
+        version: app.getVersion(),
+        log: (message, extra) => console.warn(`[patch] ${message}`, extra ?? ''),
+        onUserInput: (win, targetId) => {
+          if (!win.isDestroyed()) win.webContents.send('patch:agent-browser:input', { targetId });
+        },
+      });
+      // NO FALLBACK: a browser that cannot listen says so; the host then fails loudly too.
+      await agentBrowser.start().catch((err: unknown) => {
+        console.error('[patch] agent browser: could not start', err);
+        agentBrowser = null;
+      });
+    }
     mainWindow = createMainWindow();
-    tray = createTray();
-    registerGlobalHotkeys();
+    // A quiet instance takes no tray icon and, above all, no global hotkeys: they
+    // belong to the Patch someone is actually using.
+    if (!QUIET) {
+      tray = createTray();
+      registerGlobalHotkeys();
+    }
     registerIpc();
     startMeetingDetection();
     startServerLostWatch();

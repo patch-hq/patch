@@ -15,7 +15,8 @@
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "lint": "eslint src test",
-    "test": "node scripts/run-tests.mjs"
+    "test": "node scripts/run-tests.mjs",
+    "meeting:e2e": "bash scripts/nightly-meeting-e2e.sh"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
