@@ -8658,6 +8658,14 @@ button.view-file-download {
   padding-left: var(--overlay-titlebar-inset);
   -webkit-app-region: drag;
 }
+/* A window with its sidebar hidden (how every new window boots) floats the
+   expand chevron over the head's top-left, just right of the lights — on these
+   pages that is exactly where Back / Forward sit. Step the head past it, as
+   `.chat-head` does. */
+.overlay-titlebar .three-col.sidebar-collapsed .route-head,
+.overlay-titlebar .three-col.sidebar-collapsed .job-editor .route-head {
+  padding-left: calc(var(--overlay-titlebar-inset) + 36px);
+}
 .overlay-titlebar .route-head button,
 .overlay-titlebar .route-head a,
 .overlay-titlebar .route-head input,
