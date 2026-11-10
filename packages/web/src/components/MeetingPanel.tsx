@@ -56,6 +56,7 @@ import {
   MEETING_SPEEDS,
   meetingSpeeds,
   setMeetingSpeed,
+  setMeetingEngine,
   pauseMeeting,
   requestMeeting,
   resumeMeeting,
@@ -73,6 +74,7 @@ import { Group, Pills, Row } from '../routes/settings/ui.js';
 import { Toggle } from './Toggle.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import type { ReactNode } from 'react';
+import type { MeetingEngine } from '@patch/wire/audio';
 import { Link } from 'react-router-dom';
 import { deriveBadge, useChatStore } from '../stores/chatStore.js';
 import type { DisplayBadge } from '../stores/types.js';
@@ -100,6 +102,19 @@ function speedOf(meeting: MeetingState): string {
     : undefined;
   return hit ? hit[0] : getMeetingSpeed();
 }
+
+const MEETING_ENGINE_OPTIONS: readonly MeetingEngine[] = [
+  'local',
+  'elevenlabs',
+  'deepgram',
+  'assemblyai',
+];
+const MEETING_ENGINE_LABELS: Record<MeetingEngine, string> = {
+  local: 'On this computer',
+  elevenlabs: 'ElevenLabs',
+  deepgram: 'Deepgram',
+  assemblyai: 'AssemblyAI',
+};
 
 type PromptKey = 'now' | 'notes' | 'actions';
 
@@ -612,6 +627,7 @@ export function MeetingSwitches({ chatId, meeting }: { chatId: string; meeting: 
 /** What the settings button opens: this meeting, the models, timing, and every prompt. */
 function MeetingSettingsPane({ chatId, meeting }: { chatId: string; meeting: MeetingState }) {
   const speeds = Object.keys(MEETING_SPEEDS);
+  const defaultEngine = usePreferencesStore((s) => s.preferences.voiceConfig.meeting);
   return (
     <div className="mm-settings" data-testid="meeting-settings">
       <Group label="This meeting">
@@ -627,6 +643,18 @@ function MeetingSettingsPane({ chatId, meeting }: { chatId: string; meeting: Mee
               )}
               value={speedOf(meeting)}
               onChange={(next) => setMeetingSpeed(chatId, next)}
+            />
+          </Row>
+        ) : null}
+        {meeting.status !== 'ended' ? (
+          <Row title="Transcription">
+            <Pills
+              label="Meeting transcription"
+              testid="meeting-engine"
+              options={MEETING_ENGINE_OPTIONS}
+              labels={MEETING_ENGINE_LABELS}
+              value={meeting.settings?.engine ?? defaultEngine}
+              onChange={(next) => setMeetingEngine(chatId, meeting.settings, next)}
             />
           </Row>
         ) : null}

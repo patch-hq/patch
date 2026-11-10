@@ -4610,8 +4610,8 @@ async function startHost(
     // AssemblyAI) does its own diarisation. Chosen explicitly, never as a
     // fallback: a missing key or a failed request fails the clip. Usage goes on
     // the voice ledger.
-    get transcribeVoices() {
-      const engine = voiceConfig.meeting;
+    transcribeVoicesFor: (chosen) => {
+      const engine = chosen ?? voiceConfig.meeting;
       if (engine === 'local') {
         if (!process.env['DIARISE_MODEL_PATH']) return undefined;
         return async (session: string, wav: Buffer) => {
