@@ -223,6 +223,9 @@ async function beginCapture(chatId: string, opts: { names?: boolean } = {}): Pro
         clipSeconds: speedSettings(getMeetingSpeed()).clipSeconds,
         // A long silence from the far end: the call is over.
         onSilence: () => endMeeting(chatId),
+        // Follow the mic when the default input changes; say so if that fails.
+        openMic: () => navigator.mediaDevices.getUserMedia({ audio: true }),
+        onMicError: (err) => useUiStore.getState().pushError(err.message),
         ...rawTap(),
       },
     );
