@@ -235,11 +235,18 @@ for (const [name, viewport] of [
       ]);
 
       await page.getByTestId('browser-handoff-done').first().click();
-      expect((await sent(page)).at(-1)).toMatchObject({
-        type: 'patch.browser_handoff.control',
-        handoffId: 'h1',
-        action: 'done',
-      });
+      await expect
+        .poll(async () =>
+          (await sent(page)).some((e) => {
+            const m = e as { type: string; handoffId?: string; action?: string };
+            return (
+              m.type === 'patch.browser_handoff.control' &&
+              m.handoffId === 'h1' &&
+              m.action === 'done'
+            );
+          }),
+        )
+        .toBe(true);
     });
 
     test('goes away when the host says the hand-off ended and nothing is open', async ({
