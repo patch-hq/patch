@@ -2175,6 +2175,40 @@ describe('Composer', () => {
         expect(input().value).toBe('');
         expect(transcribeClip).not.toHaveBeenCalled();
       });
+
+      it('a finish that times out keeps the words heard live in the box, and still reports the error', async () => {
+        setEngine('deepgram');
+        const rec = makeRec();
+        let cbs: DictationPreviewCallbacks | null = null;
+        const factory: typeof startDictationPreview = (_id, callbacks) => {
+          cbs = callbacks;
+          return {
+            push: () => {},
+            finish: async () => {
+              throw new Error('the live dictation did not finish in time');
+            },
+            stop: () => {},
+          };
+        };
+        const onSend = vi.fn();
+        render(
+          <Composer
+            chatId="c1"
+            hostId="d1"
+            onSend={onSend}
+            previewFactory={factory}
+            recorderFactory={async () => rec as unknown as VoiceRecording}
+          />,
+        );
+        const mic = screen.getByTestId('voice-note-btn');
+        fireEvent.mouseDown(mic);
+        fireEvent.mouseUp(mic);
+        await waitFor(() => expect(cbs).not.toBeNull());
+        act(() => cbs?.onPartial('buy oat milk'));
+        fireEvent.mouseDown(mic);
+        await waitFor(() => expect(input().value).toBe('buy oat milk'));
+        expect(onSend).not.toHaveBeenCalled();
+      });
     });
 
     it('a hands-free toggle dictation keeps listening through a long silence — only a second tap ends it', async () => {
