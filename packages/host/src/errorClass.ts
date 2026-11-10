@@ -109,6 +109,14 @@ const RULES: readonly Rule[] = [
     kind: 'transient',
     test: /\b(ECONNRESET|ECONNREFUSED|ECONNABORTED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EPIPE|ENETUNREACH|EHOSTUNREACH|UND_ERR_[A-Z_]+)\b|socket hang up|fetch failed|network error|connection (error|reset|closed|lost)|stream (terminated|closed|ended)|terminated$|premature close/i,
   },
+  // sdkBackend throws this when Claude's stream closes with no `result`: the
+  // process was killed or the pipe dropped. A rerun can finish, so it is
+  // transient by name, not by falling through as `unclassified`.
+  {
+    reason: 'stream_cut',
+    kind: 'transient',
+    test: /ended mid-turn without finishing/i,
+  },
   {
     reason: 'process_exit',
     kind: 'transient',
