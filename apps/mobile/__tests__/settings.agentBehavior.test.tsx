@@ -155,15 +155,20 @@ describe('Agent page: Model for new chats', () => {
     expect(get(r, 'default-model-option-old-model')).toBeTruthy();
   });
 
-  it('with no single host says where the list would come from', async () => {
+  it('with several hosts reads the list from one of them, no host message', async () => {
     resetHosts();
     reportHost('a');
     reportHost('b');
     const r = await renderAgent();
+    expect(api.models).toHaveBeenCalledTimes(1);
+    expect(query(r, 'default-model-no-host')).toBeNull();
+  });
+
+  it('with no host attached says the list is unavailable, without naming hosts', async () => {
+    resetHosts();
+    const r = await renderAgent();
     expect(api.models).not.toHaveBeenCalled();
-    expect(textOf(get(r, 'default-model-no-host'))).toBe(
-      'No single host to read the model list from',
-    );
+    expect(textOf(get(r, 'default-model-no-host'))).toBe('The model list isn’t available yet');
   });
 
   it('a catalogue failure is shown', async () => {

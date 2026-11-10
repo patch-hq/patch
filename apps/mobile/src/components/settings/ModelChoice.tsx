@@ -2,15 +2,13 @@
 // used by Settings → Agent (Model for new chats, the account's default) and by
 // Settings → Manager (the Manager and Speakers threads' model).
 //
-// The catalogue is per host, so it is read from the account's default host,
-// the same rule every other host-scoped edit uses. With no unambiguous host there
-// is nothing to read a list FROM, and the row says that rather than offering a
-// guessed list. The saved value is always kept as an option, so a catalogue
+// The list is the same from any attached host, so it is resolved across the
+// attached hosts (`catalogueHostId`); the user never sees host routing. The saved value is always kept as an option, so a catalogue
 // that changed can never unpin it.
 
 import React from 'react';
 import { useModelCatalog } from '../../lib/models';
-import { defaultHostId, usePresenceStore } from '../../stores/presenceStore';
+import { catalogueHostId, usePresenceStore } from '../../stores/presenceStore';
 import { OptionPicker } from '../OptionPicker';
 import { ErrorLine, Row } from './ui';
 
@@ -25,7 +23,7 @@ export function ModelChoice({
   testID: string;
   onSelect: (id: string) => void;
 }): React.ReactElement {
-  const catalogueHost = usePresenceStore((s) => defaultHostId(s.hosts));
+  const catalogueHost = usePresenceStore((s) => catalogueHostId(s.hosts));
   const catalogue = useModelCatalog(catalogueHost);
   const ids = catalogue.models.map((m) => m.id);
   const extra = value && !ids.includes(value) ? [{ id: value, label: value }] : [];
@@ -35,7 +33,7 @@ export function ModelChoice({
   return (
     <Row
       title={label}
-      subtitle={catalogueHost === null ? 'No single host to read the model list from' : undefined}
+      subtitle={catalogueHost === null ? 'The model list isn’t available yet' : undefined}
       subtitleTestID={`${testID}-no-host`}
       right={
         <OptionPicker
