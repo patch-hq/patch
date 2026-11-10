@@ -145,6 +145,8 @@ export interface HostConfig {
     elevenlabsApiKey: string | undefined;
     /** DEEPGRAM_API_KEY — needed only while dictation is on the deepgram engine. */
     deepgramApiKey: string | undefined;
+    /** ASSEMBLYAI_API_KEY — needed only while meetings are on the assemblyai engine. */
+    assemblyaiApiKey: string | undefined;
     whisperLocalSidecarUrl: string | undefined;
     /** faster-whisper model dir (medium.en) — used to spawn the local sidecar. */
     whisperModelPath: string | undefined;
@@ -376,6 +378,7 @@ export function loadConfig(opts: LoadConfigOptions = {}): HostConfig {
       whisperBackend: whisperBackendRaw,
       groqApiKey: env['GROQ_API_KEY'],
       deepgramApiKey: env['DEEPGRAM_API_KEY'],
+      assemblyaiApiKey: env['ASSEMBLYAI_API_KEY'],
       elevenlabsApiKey: env['ELEVEN_LABS_API_KEY'],
       whisperLocalSidecarUrl: env['WHISPER_LOCAL_SIDECAR_URL'],
       whisperModelPath: env['WHISPER_MODEL_PATH'],

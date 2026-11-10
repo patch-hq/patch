@@ -127,6 +127,30 @@ describe('MeetingManager', () => {
     await tick;
   });
 
+  it('drops a system clip the speech gate rejects without transcribing it', async () => {
+    const hasSpeech = vi.fn(async () => false);
+    const m = make({ hasSpeech });
+    m.start('c1');
+    await m.ingestAudio('c1', 'system', Buffer.from('s'));
+    expect(transcribe).not.toHaveBeenCalled();
+    expect(m.get('c1')!.transcript).toEqual([]);
+    hasSpeech.mockResolvedValueOnce(true);
+    await m.ingestAudio('c1', 'system', Buffer.from('s'));
+    expect(m.get('c1')!.transcript.map((l) => l.text)).toEqual(['hello there']);
+  });
+
+  it('does not gate the mic lane and surfaces a gate failure', async () => {
+    const hasSpeech = vi.fn(async () => false);
+    const m = make({ hasSpeech });
+    m.start('c1');
+    await m.ingestAudio('c1', 'mic', Buffer.from('m'));
+    expect(hasSpeech).not.toHaveBeenCalled();
+    expect(m.get('c1')!.transcript).toHaveLength(1);
+    hasSpeech.mockRejectedValueOnce(new Error('vad broke'));
+    await m.ingestAudio('c1', 'system', Buffer.from('s'));
+    expect(m.get('c1')!.error).toContain('speech detection failed: vad broke');
+  });
+
   it('does not hold the mic channel behind a stalled system clip', async () => {
     diarise = true;
     const m = make();
@@ -177,6 +201,34 @@ describe('MeetingManager', () => {
     transcribe.mockResolvedValueOnce('so the ledger split needs to land before black friday');
     await m.ingestAudio('c1', 'system', Buffer.from('d'));
     expect(m.get('c1')!.transcript.map((l) => l.speaker)).toEqual(['you', 'them', 'them', 'them']);
+  });
+
+  it('uses the engine this meeting chose, and a change of speed keeps it', async () => {
+    const seen: Array<string | undefined> = [];
+    const m = make({
+      transcribeVoicesFor: (engine) => {
+        seen.push(engine);
+        return engine === 'deepgram' ? transcribeVoices : undefined;
+      },
+    });
+    m.start('c1');
+    m.tune('c1', { clipSeconds: 6, analyseSeconds: 45, engine: 'deepgram' });
+    transcribeVoices.mockResolvedValueOnce([{ text: 'From Deepgram', voice: 1 }]);
+    await m.ingestAudio('c1', 'system', Buffer.from('a'));
+    expect(m.get('c1')?.transcript.map((l) => l.text)).toEqual(['From Deepgram']);
+    // Changing speed sends no engine: the meeting keeps Deepgram.
+    m.tune('c1', { clipSeconds: 3, analyseSeconds: 8 });
+    expect(m.get('c1')?.settings).toEqual({
+      clipSeconds: 3,
+      analyseSeconds: 8,
+      engine: 'deepgram',
+    });
+    expect(seen).toEqual(['deepgram']);
+    // A meeting on no chosen engine asks for the account default (undefined here) and goes local.
+    m.start('c2');
+    await m.ingestAudio('c2', 'system', Buffer.from('b'));
+    expect(seen).toEqual(['deepgram', undefined]);
+    expect(transcribe).toHaveBeenCalledTimes(1);
   });
 
   it("splits a Them clip into numbered voices and merges a voice's consecutive stretches", async () => {

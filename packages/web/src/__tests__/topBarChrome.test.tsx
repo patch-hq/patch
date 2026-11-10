@@ -225,4 +225,10 @@ describe('the top row stylesheet', () => {
     expect(noDrag).not.toBeNull();
     for (const el of ['button', 'a', 'input', 'select']) expect(noDrag![1]).toContain(el);
   });
+
+  it('steps the page head past the expand chevron in a sidebar-hidden window', () => {
+    expect(css).toMatch(
+      /\.overlay-titlebar \.three-col\.sidebar-collapsed \.route-head,[^{]*\{[^}]*padding-left:\s*calc\(var\(--overlay-titlebar-inset\) \+ 36px\);/,
+    );
+  });
 });

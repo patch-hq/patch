@@ -8,7 +8,7 @@
 // inputs (`chat.input`) carry `localId` for server-side dedup on (chatId, localId).
 
 import { z } from 'zod';
-import { DictationSetting } from './audio.js';
+import { DictationSetting, MeetingEngine } from './audio.js';
 import { DEFAULT_SWEEP_PROMPT } from './sweep-prompt.js';
 import { DEFAULT_LINK_SUMMARY_PROMPT } from './link-summary-prompt.js';
 import { DEFAULT_QUESTION_EXPIRED_PROMPT } from './question-expired-prompt.js';
@@ -2146,6 +2146,8 @@ const VoiceSurfaceSetting = z
 export const VoiceConfigSetting = z
   .object({
     dictation: DictationSetting,
+    // Absent in settings saved before the meeting engine was a setting.
+    meeting: MeetingEngine.default('local'),
     device: VoiceSurfaceSetting,
     handsFree: VoiceSurfaceSetting,
     call: VoiceSurfaceSetting,
@@ -2373,6 +2375,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   // Manager; each hosted cell is a deliberate opt-in.
   voiceConfig: {
     dictation: { phone: 'device', computer: 'whisper', tidy: false },
+    meeting: 'local',
     device: { backend: 'local', layer: 'direct', handoff: 'auto' },
     handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
     call: { backend: 'local', layer: 'direct', handoff: 'auto' },
@@ -2455,6 +2458,7 @@ export const SharedSecrets = z
         elevenlabs: z.string().min(1).optional(),
         groq: z.string().min(1).optional(),
         deepgram: z.string().min(1).optional(),
+        assemblyai: z.string().min(1).optional(),
       })
       .strict(),
   })
@@ -2784,6 +2788,7 @@ export const HostInfoEvent = z
         openai: z.boolean(),
         elevenlabs: z.boolean().optional(),
         deepgram: z.boolean().optional(),
+        assemblyai: z.boolean().optional(),
       })
       .optional(),
     /**

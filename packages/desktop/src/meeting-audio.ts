@@ -252,3 +252,94 @@ export function watchMicrophone(
     child.kill('SIGTERM');
   };
 }
+
+export interface MicWatchSupervisorHandlers {
+  onProcesses(processes: MicProcess[]): void;
+  /** One run ended. `retryInMs` is when the next run starts; `failures` counts consecutive bad runs. */
+  onRestart(message: string, failures: number, retryInMs: number): void;
+  /** The watcher is producing output again after `onRestart` was reported. */
+  onRecovered(): void;
+}
+
+export interface MicWatchSupervisorOptions {
+  spawnFn?: Spawn;
+  setTimeoutFn?: (fn: () => void, ms: number) => unknown;
+  clearTimeoutFn?: (handle: unknown) => void;
+  now?: () => number;
+  baseMs?: number;
+  maxMs?: number;
+  /** A run that lived this long counts as healthy even if it printed nothing. */
+  healthyAfterMs?: number;
+}
+
+/**
+ * Keeps `mic-watch` alive. The helper exiting used to end meeting detection
+ * for the rest of the session with nothing visible; now every exit is reported
+ * and the helper is restarted with exponential backoff, forever — the caller
+ * decides when repeated failures become a standing error.
+ */
+export function superviseMicWatch(
+  binary: string,
+  handlers: MicWatchSupervisorHandlers,
+  opts: MicWatchSupervisorOptions = {},
+): () => void {
+  const setT = opts.setTimeoutFn ?? ((fn, ms) => setTimeout(fn, ms));
+  const clearT = opts.clearTimeoutFn ?? ((h) => clearTimeout(h as NodeJS.Timeout));
+  const now = opts.now ?? Date.now;
+  const baseMs = opts.baseMs ?? 1000;
+  const maxMs = opts.maxMs ?? 30_000;
+  const healthyAfterMs = opts.healthyAfterMs ?? 60_000;
+  let failures = 0;
+  let reported = false;
+  let stopped = false;
+  let stopRun: (() => void) | null = null;
+  let timer: unknown = null;
+
+  const markHealthy = (): void => {
+    failures = 0;
+    if (reported) {
+      reported = false;
+      handlers.onRecovered();
+    }
+  };
+
+  const start = (): void => {
+    timer = null;
+    const startedAt = now();
+    let ended = false;
+    const onFailed = (message: string): void => {
+      if (ended || stopped) return;
+      ended = true;
+      // A parse failure leaves the child running: kill it before replacing it.
+      stopRun?.();
+      if (now() - startedAt >= healthyAfterMs) failures = 0;
+      failures += 1;
+      reported = true;
+      const delay = Math.min(maxMs, baseMs * 2 ** (failures - 1));
+      handlers.onRestart(message, failures, delay);
+      timer = setT(start, delay);
+    };
+    try {
+      stopRun = watchMicrophone(
+        binary,
+        {
+          onProcesses: (processes) => {
+            markHealthy();
+            handlers.onProcesses(processes);
+          },
+          onFailed,
+        },
+        opts.spawnFn,
+      );
+    } catch (err) {
+      onFailed((err as Error).message);
+    }
+  };
+
+  start();
+  return () => {
+    stopped = true;
+    if (timer !== null) clearT(timer);
+    stopRun?.();
+  };
+}

@@ -14,6 +14,7 @@ import { startMeeting } from './meetingControl.js';
 import { useUiStore } from '../stores/uiStore.js';
 
 const SEEN_KEY = 'patch.meetingSetupSeen';
+const DECLINED_KEY = 'patch.meetingNamesDeclined';
 
 export type MeetingSetupMode = 'intro' | 'start';
 
@@ -23,6 +24,8 @@ interface MeetingSetupState {
   permissions: MeetingPermissions | null;
   /** The permission being asked for right now. */
   asking: MeetingPermissionKind | null;
+  /** Tom chose to start meetings without speaker names; stop asking for Accessibility. */
+  namesDeclined: boolean;
   close(): void;
 }
 
@@ -30,11 +33,30 @@ export const useMeetingSetup = create<MeetingSetupState>((set) => ({
   open: null,
   permissions: null,
   asking: null,
+  namesDeclined: localStorage.getItem(DECLINED_KEY) === '1',
   close: () => {
     localStorage.setItem(SEEN_KEY, '1');
     set({ open: null });
   },
 }));
+
+/** Remember (or forget) that Tom does not want to be asked about speaker names. */
+export function setNamesDeclined(declined: boolean): void {
+  if (declined) localStorage.setItem(DECLINED_KEY, '1');
+  else localStorage.removeItem(DECLINED_KEY);
+  useMeetingSetup.setState({ namesDeclined: declined });
+}
+
+/**
+ * Settings toggle, turned on: forget the decline and ask for Accessibility
+ * again, the way the first prompt does. Left unanswered it is asked at the
+ * next meeting.
+ */
+export async function reenableSpeakerNames(): Promise<void> {
+  setNamesDeclined(false);
+  const p = await readPermissions();
+  if (p && p.accessibility !== 'granted') await allowPermission('accessibility');
+}
 
 /** What still stands between Tom and a meeting with names. */
 export function missing(p: MeetingPermissions): MeetingPermissionKind[] {
@@ -74,6 +96,15 @@ export async function beginMeeting(chatId: string): Promise<void> {
     useMeetingSetup.setState({ open: null });
     return startMeeting(chatId);
   }
+  const gaps = missing(p);
+  if (
+    useMeetingSetup.getState().namesDeclined &&
+    gaps.length === 1 &&
+    gaps[0] === 'accessibility'
+  ) {
+    useMeetingSetup.setState({ open: null });
+    return startMeeting(chatId, { names: false });
+  }
   useMeetingSetup.setState({ open: { chatId, mode: 'start' } });
 }
 
@@ -88,17 +119,20 @@ export async function allowPermission(kind: MeetingPermissionKind): Promise<void
     useUiStore.getState().pushError(`Not allowed: ${(err as Error).message}`);
   } finally {
     useMeetingSetup.setState({ asking: null });
-    await readPermissions();
+    const p = await readPermissions();
+    if (kind === 'accessibility' && p?.accessibility === 'granted') setNamesDeclined(false);
   }
 }
 
 /** Start from the popover: with names, or without when Accessibility is the only gap. */
 export function startFromSetup(chatId: string, names: boolean): Promise<void> {
   useMeetingSetup.getState().close();
+  if (!names) setNamesDeclined(true);
   return startMeeting(chatId, { names });
 }
 
 /** Test seam. */
 export function __resetMeetingSetupForTests(): void {
-  useMeetingSetup.setState({ open: null, permissions: null, asking: null });
+  localStorage.removeItem(DECLINED_KEY);
+  useMeetingSetup.setState({ open: null, permissions: null, asking: null, namesDeclined: false });
 }

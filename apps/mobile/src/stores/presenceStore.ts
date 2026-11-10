@@ -201,6 +201,19 @@ export function defaultHostId(hosts: Record<string, HostPresence>): string | nul
   return online.length === 1 ? (online[0] as HostPresence).hostId : null;
 }
 
+/**
+ * The host to read a catalogue from when nothing else pins one. The model list
+ * is the same from any attached host, so the user never chooses: the default
+ * host if unambiguous, else the first online host, else the first known one.
+ * Null only when no host has attached at all.
+ */
+export function catalogueHostId(hosts: Record<string, HostPresence>): string | null {
+  const pinned = defaultHostId(hosts);
+  if (pinned !== null) return pinned;
+  const all = Object.values(hosts).sort((a, b) => a.hostId.localeCompare(b.hostId));
+  return (all.find((h) => h.online) ?? all[0])?.hostId ?? null;
+}
+
 export const usePresenceStore = create<PresenceState>((set, get) => ({
   // NO offline flash on load: start `connecting` with `unknown` host
   // presence so the first paint shows a neutral, quiet indicator.

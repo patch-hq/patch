@@ -12,6 +12,7 @@ import {
   type MeetingSettings,
   type MeetingWriteup,
 } from '@patch/wire';
+import type { MeetingEngine } from '@patch/wire/audio';
 import { getActiveWs } from '../api/ws.js';
 import { addMeetingNote, editMeetingNote } from './meetingNotes.js';
 import { getDesktopBridge, type PatchDesktopBridge } from './desktopBridge.js';
@@ -84,6 +85,21 @@ export function setMeetingSpeed(chatId: string, speed: string): void {
   const settings = speedSettings(speed);
   capture?.setClipSeconds(settings.clipSeconds);
   ws().send({ type: 'meeting.control_request', chatId, action: 'tune', settings });
+}
+
+/** Change who transcribes this meeting; its other settings stay as they are. */
+export function setMeetingEngine(
+  chatId: string,
+  current: MeetingSettings | undefined,
+  engine: MeetingEngine,
+): void {
+  const base = current ?? speedSettings(getMeetingSpeed());
+  ws().send({
+    type: 'meeting.control_request',
+    chatId,
+    action: 'tune',
+    settings: { clipSeconds: base.clipSeconds, analyseSeconds: base.analyseSeconds, engine },
+  });
 }
 
 function ws(): NonNullable<ReturnType<typeof getActiveWs>> {
@@ -223,6 +239,9 @@ async function beginCapture(chatId: string, opts: { names?: boolean } = {}): Pro
         clipSeconds: speedSettings(getMeetingSpeed()).clipSeconds,
         // A long silence from the far end: the call is over.
         onSilence: () => endMeeting(chatId),
+        // Follow the mic when the default input changes; say so if that fails.
+        openMic: () => navigator.mediaDevices.getUserMedia({ audio: true }),
+        onMicError: (err) => useUiStore.getState().pushError(err.message),
         ...rawTap(),
       },
     );
