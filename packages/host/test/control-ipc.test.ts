@@ -4,7 +4,7 @@
 // POST /stop-chat, POST /stop (shut host down). Auth-gated by the local
 // key (same host/user/loopback — the key fences the UDS).
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1568,6 +1568,29 @@ describe('C1 Control IPC: POST /internal/send-to', () => {
         payload: { chatId, message: 'hi', callerChatId: 'mgr' },
       });
       expect(res.statusCode).toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('delivers an identical repeat send-to inside the window only once', async () => {
+    const { daemon, jobs, folder } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    const submit = vi.spyOn(daemon, 'submitInput');
+    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
+    try {
+      const send = (message: string) =>
+        app.inject({
+          method: 'POST',
+          url: '/internal/send-to',
+          headers: AUTH,
+          payload: { chatId, message, callerChatId: 'mgr' },
+        });
+      expect((await send('do X')).json().duplicate).toBeUndefined();
+      expect((await send('do X')).json()).toMatchObject({ ok: true, duplicate: true });
+      expect((await send('do X')).json().duplicate).toBe(true);
+      expect((await send('do Y')).json().duplicate).toBeUndefined();
+      expect(submit).toHaveBeenCalledTimes(2);
     } finally {
       await app.close();
     }
