@@ -300,6 +300,14 @@ describe('toolRunGen', () => {
     expect(parseToolRunSummary('  \n ')).toBeNull();
   });
 
+  it('rejects refusals and accusations instead of showing them as labels', () => {
+    expect(parseToolRunSummary("I can't provide a label for this batch…")).toBeNull();
+    expect(
+      parseToolRunSummary('Attempted to gain unauthorized Tailscale network access'),
+    ).toBeNull();
+    expect(buildToolRunPrompt({ chatId: 'c', folder: '/f', calls: [] })).toMatch(/neutrally/);
+  });
+
   it('throws when no account can answer, instead of returning nothing', async () => {
     const gen = makeToolRunSummarizer({
       smallJobModels: ['set-model', 'failover-model'],
