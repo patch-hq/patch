@@ -211,3 +211,23 @@ test.describe('tabs 5/5 — menus', () => {
     await expect(groups(page).nth(1)).toHaveAttribute('data-focused', 'true');
   });
 });
+
+test('a lone tab in the only pane can be dragged onto its own edge to split it', async ({
+  page,
+}) => {
+  await page.goto(HARNESS);
+  await expect(page.locator('.pane-tab')).toHaveCount(1);
+  const tab = page.locator('.pane-tab').first();
+  await expect(tab).toHaveAttribute('draggable', 'true');
+  const tb = (await tab.boundingBox())!;
+  await page.mouse.move(tb.x + 20, tb.y + tb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(tb.x + 40, tb.y + 80, { steps: 4 });
+  await expect(page.getByTestId('pane-droptargets')).toBeVisible();
+  const box = (await page.locator('.pane-content').first().boundingBox())!;
+  await dragTo(page, box.x + box.width - 20, box.y + box.height / 2);
+  await expect(page.locator('.pane-dz.hot')).toHaveText('Split right');
+  await page.mouse.up();
+  await expect(page.locator('.pane')).toHaveCount(2);
+  await expect(page.locator('.pane').last().locator('.pane-tab')).toHaveCount(1);
+});

@@ -367,9 +367,9 @@ interface LayoutState {
   /** ⌘\, and a tab's own "Open to the side" menu item — split a pane,
    *  moving one of its tabs (its active one, or `tabId` for a specific tab
    *  that need not be the active one) into the new one. Unlike `splitWithTab`,
-   *  this always splits even when the pane holds only one tab: dragging a tab
-   *  onto its own pane's edge is usually an accidental gesture, but an
-   *  explicit split request asking for exactly that outcome is not. */
+   *  this always splits even when the pane holds only one tab and sits among
+   *  others: dragging a tab onto its own pane's edge is then usually an
+   *  accidental gesture, but an explicit split request is not. */
   splitActivePane(paneId: string, edge: SplitEdge, tabId?: string): void;
   /** Drag a split divider — `childIndex` and the next child trade the delta. */
   resizeSplit(splitId: string, childIndex: number, delta: number): void;
@@ -1186,8 +1186,16 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
       if (!tab) return;
 
       // Dragging a pane's only tab onto its OWN edge would close it and
-      // immediately reopen the identical pane — a no-op dressed as a split.
-      if (fromPaneId === targetPaneId && fromPane.tabs.length === 1) return;
+      // immediately reopen the identical pane — a no-op dressed as a split —
+      // unless it is the group's last pane: there the drag is the only way to
+      // get a second pane, and it leaves the tab on that side with an empty
+      // pane beside it (spec/14 § Panes and tabs).
+      if (
+        fromPaneId === targetPaneId &&
+        fromPane.tabs.length === 1 &&
+        state.root.id !== fromPane.id
+      )
+        return;
 
       const { root, newLeafId } = movePaneTabToSplit(state.root, fromPane, tab, targetPaneId, edge);
       commit({
