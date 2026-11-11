@@ -16939,6 +16939,26 @@ select.permission-mode.is-pending {
   align-items: center;
   gap: 6px;
 }
+.snooze-divider-details {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--danger, #c0392b);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.snooze-error-detail {
+  margin: 0 0 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink-2, var(--ink-3));
+  font-size: var(--text-min);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
 
 /* Quotes and the replies under them, inside the prompt input (spec/14 §
    Composer — quotes). With a thread the field carries the border and the inner
