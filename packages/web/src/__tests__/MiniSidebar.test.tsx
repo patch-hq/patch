@@ -8,6 +8,8 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { MiniSidebar } from '../components/MiniSidebar.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
+import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
+import { SPECIAL_THREAD_IDS } from '@patch/wire';
 import type { ChatRow } from '../stores/types.js';
 
 function row(chatId: string, over: Partial<ChatRow> = {}): ChatRow {
@@ -66,6 +68,7 @@ function mount(): void {
 describe('MiniSidebar', () => {
   beforeEach(() => {
     useUiStore.setState({ sidebarMini: true });
+    usePreferencesStore.setState({ preferences: DEFAULT_PREFERENCES });
     useChatStore.setState({
       chats: {
         a: row('a', { activity: 'running' }),
@@ -76,6 +79,19 @@ describe('MiniSidebar', () => {
     } as never);
   });
   afterEach(cleanup);
+
+  it('shows a dot for the Manager only while experimental features are on', () => {
+    const manager = row(SPECIAL_THREAD_IDS.manager, { name: 'manager', pinned: true, pinnedAt: 1 });
+    useChatStore.setState({ chats: { a: row('a'), [manager.chatId]: manager } } as never);
+    mount();
+    expect(screen.queryByTestId(`mini-row-${manager.chatId}`)).toBeNull();
+    cleanup();
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    });
+    mount();
+    expect(screen.getByTestId(`mini-row-${manager.chatId}`)).toBeInTheDocument();
+  });
 
   it('draws one status dot per chat, named by the chat as its tooltip', () => {
     mount();

@@ -2173,6 +2173,8 @@ export const DICTATION_PAUSE_CHOICES = ['2', '3', '5', '8', '10', '15'] as const
 
 export const SharedSettings = z
   .object({
+    /** Whether half-finished features (the Manager, Batch) are shown. Off by default; Settings → Experimental features. */
+    experimentalFeatures: z.boolean(),
     // ---- server-acted preferences ----
     /** Public metadata served at `/agent` for this deployment's Web Bot Auth identity. */
     agentIdentity: z
@@ -2328,6 +2330,7 @@ export const SharedSettingsPatch = SharedSettings.partial().strict();
 export type SharedSettingsPatch = z.infer<typeof SharedSettingsPatch>;
 
 export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
+  experimentalFeatures: false,
   agentIdentity: {
     enabled: false,
     name: 'Patch',

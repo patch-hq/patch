@@ -37,6 +37,7 @@ import { EMPTY_STATES } from '../../src/lib/emptyStates';
 import { needsAttention, sortAttentionQueue } from '../../src/lib/attentionQueue';
 import { matchesStateFilter, type ChatStateFilter } from '../../src/lib/stateFilter';
 import { useBatchStore } from '../../src/stores/batchStore';
+import { useExperimentalFeatures } from '../../src/stores/settingsStore';
 import { useUiStore } from '../../src/stores/uiStore';
 import { OptionPicker } from '../../src/components/OptionPicker';
 import {
@@ -439,6 +440,7 @@ function ChatsHeader({
 // Batch option carries the same non-zero member count web's dropdown shows —
 // the server's own membership count, the same the batch view lists.
 function SidebarViewMenu(): React.ReactElement {
+  const experimental = useExperimentalFeatures();
   const mode = useBatchStore((s) => s.mode);
   const setMode = useBatchStore((s) => s.setMode);
   const batchCount = useBatchStore((s) => s.batch?.members.length ?? 0);
@@ -451,7 +453,7 @@ function SidebarViewMenu(): React.ReactElement {
   const grouping = useUiStore((s) => s.grouping);
   const setGrouping = useUiStore((s) => s.setGrouping);
 
-  const view = sidebarViewFrom(mode === 'batch', attentionOnly, stateFilter);
+  const view = sidebarViewFrom(mode === 'batch' && experimental, attentionOnly, stateFilter);
 
   return (
     <View
@@ -468,10 +470,12 @@ function SidebarViewMenu(): React.ReactElement {
         selectedId={view}
         selectedLabel={sidebarViewTriggerLabel(view)}
         emptyText="No views"
-        options={SIDEBAR_VIEW_OPTIONS.map((o) => ({
-          id: o.value,
-          label: o.value === 'batch' && batchCount > 0 ? `${o.label} · ${batchCount}` : o.label,
-        }))}
+        options={SIDEBAR_VIEW_OPTIONS.filter((o) => experimental || o.value !== 'batch').map(
+          (o) => ({
+            id: o.value,
+            label: o.value === 'batch' && batchCount > 0 ? `${o.label} · ${batchCount}` : o.label,
+          }),
+        )}
         onSelect={(id) =>
           applySidebarView(id as SidebarView, {
             setBatchMode: (on) => setMode(on ? 'batch' : 'regular'),
@@ -567,6 +571,7 @@ function buildSections(
   attentionMatches: ((row: ChatRow) => boolean) | null,
   stateFilter: ChatStateFilter,
   grouping: SidebarGrouping = 'project',
+  experimental = false,
 ): Section[] {
   const searching = query.trim() !== '';
   const match = (rows: ChatRow[]): ChatRow[] => (searching ? filterChats(rows, query) : rows);
@@ -622,7 +627,8 @@ function buildSections(
 
   const out: Section[] = [];
   // No section header over Manager: the row is itself named "Manager".
-  if (manager && match([manager]).length > 0) out.push({ kind: 'manager', row: manager });
+  if (experimental && manager && match([manager]).length > 0)
+    out.push({ kind: 'manager', row: manager });
 
   if (attentionMatches && !searching) {
     let anyRows = false;
@@ -943,7 +949,8 @@ export default function ChatsScreen(): React.ReactElement {
   // Batch mode (spec/15 § Batch view): the `Batch` tab swaps the whole column
   // for BatchView, which owns its own scroll region — the Chats tab's own
   // FlatList/search is simply not rendered while it is active.
-  const batchMode = useBatchStore((s) => s.mode) === 'batch';
+  const experimental = useExperimentalFeatures();
+  const batchMode = useBatchStore((s) => s.mode) === 'batch' && experimental;
 
   // Needs-attention mode (spec/15 § Needs attention). Opening a row marks it
   // read, which would ordinarily drop it out of the filter the instant you
@@ -989,8 +996,18 @@ export default function ChatsScreen(): React.ReactElement {
   const serverQuery = searching ? searchableQuery(query) : null;
   const grouping = useUiStore((s) => s.grouping);
   const items = React.useMemo(
-    () => buildSections(chats, open, counts, query, attentionMatches, stateFilter, grouping),
-    [chats, open, counts, query, attentionMatches, stateFilter, grouping],
+    () =>
+      buildSections(
+        chats,
+        open,
+        counts,
+        query,
+        attentionMatches,
+        stateFilter,
+        grouping,
+        experimental,
+      ),
+    [chats, open, counts, query, attentionMatches, stateFilter, grouping, experimental],
   );
 
   const toggle = (section: ChatsTabSection): void => {

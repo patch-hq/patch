@@ -11,6 +11,7 @@ import {
   renderRN,
   update,
   findHost,
+  queryHost,
   findAllHost,
   byType,
   byTestId,
@@ -25,6 +26,9 @@ import { usePresenceStore } from '../src/stores/presenceStore';
 import { __resetRouterMock } from './stubs/expo-router';
 import { __clearAllMmkv } from './stubs/mmkv';
 import type { BatchResponse } from '../src/api/rest';
+import { DEFAULT_SHARED_SETTINGS } from '@patch/wire';
+import { seedSettings } from './testUtils/settingsFixtures';
+import { useSettingsStore } from '../src/stores/settingsStore';
 
 vi.mock('../src/lib/voiceNote', () => ({
   startVoiceNote: vi.fn(),
@@ -113,6 +117,7 @@ function selectView(r: ReturnType<typeof renderRN>, value: string): void {
 
 beforeEach(() => {
   __clearAllMmkv();
+  seedSettings({ preferences: { ...DEFAULT_SHARED_SETTINGS, experimentalFeatures: true } });
   useChatStore.getState()._reset();
   useBatchStore.getState()._reset();
   useUiStore.setState({ attentionOnly: false, stateFilter: 'all' });
@@ -126,6 +131,14 @@ beforeEach(() => {
 });
 
 describe('Chats tab view dropdown', () => {
+  it('has no Batch option while experimental features are off', () => {
+    useSettingsStore.getState()._reset();
+    const r = renderRN(<ChatsScreen />);
+    openViewMenu(r);
+    expect(queryHost(r.root, byTestId('chats-view-menu-option-unread'))).not.toBeNull();
+    expect(queryHost(r.root, byTestId('chats-view-menu-option-batch'))).toBeNull();
+  });
+
   it('never truncates the trigger pill label ("All chats" must not read "All cha…")', () => {
     const r = renderRN(<ChatsScreen />);
     const pill = findHost(r.root, byTestId('chats-view-menu'));

@@ -9,6 +9,7 @@ import { SidebarViewMenu } from '../components/SidebarViewMenu.js';
 import { SidebarSortMenu } from '../components/SidebarSortMenu.js';
 import { BatchPanel } from '../components/BatchPanel.js';
 import { useBatchStore } from '../stores/batchStore.js';
+import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import type { ChatRow } from '../stores/types.js';
@@ -76,6 +77,9 @@ function choose(value: string): void {
 
 describe('SidebarViewMenu', () => {
   beforeEach(() => {
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    });
     localStorage.clear();
     useBatchStore.getState()._reset();
     useChatStore.setState({ chats: {} });
@@ -91,6 +95,14 @@ describe('SidebarViewMenu', () => {
     for (const v of ['all', 'unread', 'working', 'waiting', 'failed', 'batch']) {
       expect(screen.getByTestId(`sidebar-view-option-${v}`)).toBeTruthy();
     }
+  });
+
+  it('has no Batch option while experimental features are off', () => {
+    usePreferencesStore.setState({ preferences: DEFAULT_PREFERENCES });
+    renderMenu();
+    open();
+    expect(screen.getByTestId('sidebar-view-option-unread')).toBeTruthy();
+    expect(screen.queryByTestId('sidebar-view-option-batch')).toBeNull();
   });
 
   it('the old Chats/Batch tabs, state filter and Needs attention toggle are gone', () => {
@@ -254,6 +266,9 @@ describe('SidebarViewMenu', () => {
 
 describe('SidebarSortMenu (outside the view dropdown)', () => {
   beforeEach(() => {
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    });
     localStorage.clear();
     useUiStore.setState({ chatSort: 'recent', groupSort: 'same-as-chats' });
   });
@@ -286,6 +301,9 @@ describe('SidebarSortMenu (outside the view dropdown)', () => {
 
 describe('SidebarSortMenu grouping switch', () => {
   beforeEach(() => {
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    });
     localStorage.clear();
     useUiStore.setState({ grouping: 'project' });
   });

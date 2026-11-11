@@ -32,6 +32,9 @@ import { usePresenceStore } from '../src/stores/presenceStore';
 import { routerMock, __resetRouterMock } from './stubs/expo-router';
 import { __clearAllMmkv } from './stubs/mmkv';
 import { lightColors } from '../src/lib/theme';
+import { DEFAULT_SHARED_SETTINGS } from '@patch/wire';
+import { seedSettings } from './testUtils/settingsFixtures';
+import { useSettingsStore } from '../src/stores/settingsStore';
 
 const { startVoiceNoteSpy, releaseVoiceNoteIfHeldSpy } = vi.hoisted(() => ({
   startVoiceNoteSpy: vi.fn(),
@@ -59,6 +62,7 @@ vi.mock('../src/api/rest', () => ({
 
 beforeEach(() => {
   __clearAllMmkv();
+  seedSettings({ preferences: { ...DEFAULT_SHARED_SETTINGS, experimentalFeatures: true } });
   useChatStore.getState()._reset();
   usePresenceStore.setState({
     connection: 'connecting',
@@ -116,6 +120,26 @@ describe('ChatsScreen — header', () => {
 });
 
 describe('ChatsScreen — ManagerRow', () => {
+  it('has no Manager row while experimental features are off', () => {
+    useSettingsStore.getState()._reset();
+    useChatStore.getState().hydrate([
+      {
+        chatId: 'thread_manager',
+        name: 'My manager',
+        folder: '',
+        activity: 'idle',
+        status: 'active',
+        pinned: false,
+        pinnedAt: null,
+        lastUpdated: 1,
+      },
+    ]);
+    const r = renderRN(<ChatsScreen />);
+    const flatList = r.root.findByType(RNFlatList as unknown as React.ComponentType);
+    expect((flatList.props.data as { kind: string }[]).map((i) => i.kind)).not.toContain('manager');
+    expect(hasText(r.root, 'My manager')).toBe(false);
+  });
+
   it('has no "Manager" section header above it — the row is the list\'s first item', () => {
     useChatStore.getState().hydrate([
       {

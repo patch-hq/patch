@@ -1,6 +1,6 @@
 // The Settings pages, their groups and their order (design/settings-redesign):
 // Agents — Usage, Chats, Agent, MCP, Memories, Manager, Goals, Voice, Hooks, Computer use; Setup — Hosts, Providers,
-// Devices; System — Updates, Account. The Settings tab lists them; each opens
+// Devices; System — Experimental features, Updates, Account. The Settings tab lists them; each opens
 // as its own screen at /settings/<id> (app/settings/[page].tsx).
 
 import React from 'react';
@@ -18,6 +18,7 @@ import { ComputerUsePage } from './ComputerUseSection';
 import { HooksPage } from './HooksSection';
 import { ManagerPage, VoicePage } from './PreferenceSections';
 import { UpdatesPage } from './VersionSection';
+import { ExperimentalPage } from './ExperimentalSection';
 import { AgentIdentityPage } from './AgentIdentitySection';
 
 export type SettingsGroup = 'Agents' | 'Setup' | 'System';
@@ -45,10 +46,18 @@ export const SETTINGS_PAGES: readonly SettingsPageEntry[] = [
   { id: 'identity', title: 'Agent identity', group: 'Setup', Page: AgentIdentityPage },
   { id: 'providers', title: 'Providers', group: 'Setup', Page: ProvidersPage },
   { id: 'devices', title: 'Devices', group: 'Setup', Page: DevicesPage },
+  { id: 'experimental', title: 'Experimental features', group: 'System', Page: ExperimentalPage },
   { id: 'updates', title: 'Updates', group: 'System', Page: UpdatesPage },
   { id: 'account', title: 'Account', group: 'System', Page: AccountPage },
 ];
 
 export function settingsPage(id: string): SettingsPageEntry | null {
   return SETTINGS_PAGES.find((p) => p.id === id) ?? null;
+}
+
+/** Pages that only exist while Settings → Experimental features is on. */
+const EXPERIMENTAL_PAGE_IDS: readonly string[] = ['manager'];
+
+export function visibleSettingsPages(experimental: boolean): readonly SettingsPageEntry[] {
+  return SETTINGS_PAGES.filter((p) => experimental || !EXPERIMENTAL_PAGE_IDS.includes(p.id));
 }
