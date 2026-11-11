@@ -3155,6 +3155,13 @@ export class Daemon {
    * that waits for the reset.
    */
   private readonly failoverTriedAccounts = new Map<string, Set<string>>();
+
+  /**
+   * Chats whose turn is being re-run on another account. The chat sits idle for
+   * a moment between the failed run and the re-run, but its work is not done —
+   * so a snooze "until complete" must not read that gap as completion.
+   */
+  private readonly failoverRerunPending = new Set<string>();
   /**
    * The account each chat's most recent turn resolved onto, as `resolveOAuth`
    * reported it. Set as that turn starts, and left standing after it — a usage
@@ -5279,6 +5286,7 @@ export class Daemon {
     // was bounced would still be marked as tried.
     this.overloadRetryCount.delete(chatId);
     this.failoverTriedAccounts.delete(chatId);
+    this.failoverRerunPending.delete(chatId);
     const goalPoll = this.goalWatchPollTimers.get(chatId);
     if (goalPoll !== undefined) clearTimeout(goalPoll);
     this.goalWatchPollTimers.delete(chatId);
@@ -5980,6 +5988,7 @@ export class Daemon {
     const wake = this.wake.peek(chatId);
     return (
       this.aggregateActivity(chatId) === 'running' ||
+      this.failoverRerunPending.has(chatId) ||
       (state?.goal ?? null) !== null ||
       (wake !== null && wake.every === undefined) ||
       this.hasRunningDelegates(chatId)
@@ -9816,6 +9825,8 @@ export class Daemon {
     // like a fresh one.
     const assistantSeqBeforeTurn = lastAssistantMessage(state)?.seq ?? -1;
 
+    // The re-run (if any) has begun: from here activity itself says it is working.
+    this.failoverRerunPending.delete(chatId);
     this.chatState.setActivity(chatId, 'running');
     // A turn is starting, so a goal held by an earlier stop is live again.
     if (state.goalProgress?.pausedByStop)
@@ -10709,6 +10720,7 @@ export class Daemon {
               'account out of credit — re-running this turn on an account that has some',
             );
             if (prompt !== undefined) {
+              this.failoverRerunPending.add(chatId);
               void this.sendInput({
                 chatId,
                 message: prompt,
@@ -10717,6 +10729,11 @@ export class Daemon {
                 // the message as a new one.
                 ...(userMessageSeq !== undefined ? { retryOfSeq: userMessageSeq } : {}),
                 ...(cur?.turnOrigin === 'machine' ? { origin: 'machine' as const } : {}),
+              }).catch((err: unknown) => {
+                // The re-run never started: nothing is pending, so a snooze may end.
+                this.failoverRerunPending.delete(chatId);
+                this.wakeIfSnoozeComplete(chatId);
+                this.opts.logger.error({ chatId, err }, 'account failover re-run failed to start');
               });
             }
             this.chatState.setActivity(chatId, 'idle');
