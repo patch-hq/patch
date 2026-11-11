@@ -101,6 +101,8 @@ vi.mock('../src/version.js', () => ({
 
 // The control socket is gated as a whole (spec/02 § Control IPC): every
 // route but /healthz needs the host's local key.
+/** Every home main() asked the stand-in Claude Code installer to install into. */
+const claudeInstalls: string[] = [];
 const LOCAL_KEY = 'local-secret';
 const AUTH = { authorization: `Bearer ${LOCAL_KEY}` };
 
@@ -509,6 +511,12 @@ async function bootMain(
     (resolve, reject) => {
       main({
         onReady: (handle) => resolve(handle),
+        // Never the real installer: a boot with a real backend on a machine with
+        // no Claude Code would download and install it here.
+        installClaudeCode: async (home) => {
+          claudeInstalls.push(home);
+          return { ok: false, exitCode: 1, output: 'stand-in installer (test)' };
+        },
         ...(opts.logStream ? { logStream: opts.logStream } : {}),
         autoUpdateSettleMs: 0,
       }).catch(reject);
@@ -1704,7 +1712,13 @@ describe('src/index.ts main() — full host boot', () => {
     // (the OAuth gate would refuse it before reaching the SDK regardless,
     // since no credential is configured, but we don't rely on that: simply
     // never triggering a turn is the safer, more direct guarantee).
-    const boot = await bootMain({ SDK_BACKEND: 'real' });
+    const before = claudeInstalls.length;
+    const boot = await bootMain({ SDK_BACKEND: 'real', CLAUDE_CODE_PATH: undefined });
+    // A real backend on a host with no Claude Code goes to install it (spec/02 §
+    // Agent backends). Whether this machine has one decides which happens.
+    const { resolveClaudeExecutable } = await import('../src/claudeExecutable.js');
+    const has = resolveClaudeExecutable({ home: homedir(), pathEnv: process.env['PATH'] ?? '' });
+    await vi.waitFor(() => expect(claudeInstalls.length - before).toBe(has === undefined ? 1 : 0));
     await boot.cleanup();
   });
 

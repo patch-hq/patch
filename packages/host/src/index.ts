@@ -351,6 +351,12 @@ export interface MainTestHooks {
    * credential. Undefined in production, where the real check runs.
    */
   validateClaudeToken?: ClaudeTokenValidator;
+  /**
+   * Replaces running Claude Code's installer on a host that has none (spec/02 §
+   * Agent backends). Present ONLY so a test that boots a real backend never
+   * downloads and installs Claude Code onto the machine running the tests.
+   */
+  installClaudeCode?: (home: string) => Promise<import('./claudeInstall.js').ClaudeInstallResult>;
   /** Where the host's log lines go instead of stdout — lets a test read what boot logged. */
   logStream?: import('pino').DestinationStream;
   /**
@@ -4987,7 +4993,9 @@ async function startHost(
       claudeProvision = { state: 'installing' };
       emit(describeHost());
       logger.info('claude-install: this host has no Claude Code; installing it');
-      const result = await installClaudeCode({ home: homedir() });
+      const result = await (testHooks?.installClaudeCode
+        ? testHooks.installClaudeCode(homedir())
+        : installClaudeCode({ home: homedir() }));
       const installed = result.ok ? resolveClaude() : undefined;
       if (installed === undefined) {
         const error = result.ok
