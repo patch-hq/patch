@@ -171,11 +171,25 @@ describe('layoutStore — splitting', () => {
     ]);
   });
 
-  it('dragging a pane onto its own edge with only one tab is a no-op', () => {
+  it('the lone tab of the only pane dragged onto its own edge splits it, leaving an empty pane beside', () => {
     store().openTab({ kind: 'chat', chatId: 'c1' });
     const leaf = rootLeaf();
     store().splitWithTab(leaf.id, leaf.tabs[0]!.id, leaf.id, 'right');
-    expect(store().root).toEqual(leaf);
+    const split = store().root as SplitPane;
+    expect(split.type).toBe('split');
+    expect(split.direction).toBe('row');
+    expect((split.children[0]!.pane as LeafPane).tabs).toHaveLength(0);
+    expect((split.children[1]!.pane as LeafPane).tabs.map((t) => t.id)).toEqual([leaf.tabs[0]!.id]);
+    expect(store().activePaneId).toBe(split.children[1]!.pane.id);
+  });
+
+  it('a pane with a lone tab among other panes dragged onto its own edge is still a no-op', () => {
+    store().openTab({ kind: 'chat', chatId: 'c1' });
+    store().openTab({ kind: 'chat', chatId: 'c2' }, { placement: 'split', edge: 'right' });
+    const before = store().root;
+    const right = (before as SplitPane).children[1]!.pane as LeafPane;
+    store().splitWithTab(right.id, right.tabs[0]!.id, right.id, 'right');
+    expect(store().root).toEqual(before);
   });
 });
 
