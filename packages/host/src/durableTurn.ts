@@ -367,6 +367,10 @@ export class DurableTurn {
         'durable turn: a previous turn of this chat was still on disk; ending it',
       );
       keepRunnerLog(this.dir, 'leftover');
+      // A turn of this chat still running in this process is the one being
+      // replaced: its runner is about to be SIGTERMed, and that is an ending
+      // it should report as a kill, not as a runner that died unexplained.
+      for (const t of liveTurns) if (t !== this && t.chatId === this.chatId) t.proc?.supersede();
       retireTurn(this.dir);
     }
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
@@ -404,7 +408,9 @@ export class DurableTurn {
     );
     child.on('exit', (code, signal) => {
       // Once connected, the socket closing is what reports a runner that went.
-      if (!proc.finished && !proc.connected && !detaching) {
+      if (proc.superseded && !proc.finished) {
+        proc.finish(code, signal);
+      } else if (!proc.finished && !proc.connected && !detaching) {
         proc.fail(
           new Error(
             `the turn runner exited (${code ?? signal}) without reporting claude's exit; see ${join(this.dir, RUNNER_LOG)}`,
@@ -815,6 +821,12 @@ class RunnerProcess extends EventEmitter implements SpawnedProcess {
     this.killed = true;
     this.frame({ t: 'kill', signal });
     return true;
+  }
+
+  /** A newer turn of the same chat is retiring this one's runner. */
+  superseded = false;
+  supersede(): void {
+    this.superseded = true;
   }
 
   detach(): void {
