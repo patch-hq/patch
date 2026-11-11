@@ -515,6 +515,16 @@ Certificate setup and the failure modes around it are in `docs/desktop-packaging
 - `~/.patch-server/data` is the server's only stateful directory — the registry, job definitions, run/webhook logs, pending queues and the broadcast log. Snapshot it off-host nightly (the reference deployment uses restic).
 - Chat history and per-chat metadata live on each host, under that user's `~/.claude/projects/` and `~/.patch/` (`04-chats-and-folders.md` § History). Each host is backed up on its own; a server snapshot does not carry them.
 
+## Website
+
+The public website, https://patchhq.dev, is the static `site/` folder, published
+to GitHub Pages by `.github/workflows/pages.yml` whenever `site/` changes on
+main. Its download links point at the fixed asset names on the latest stable
+release (`releases/latest/download/<name>`), so it never needs editing for a
+release. The apex and `www` are DNS-only records on Cloudflare pointing at
+GitHub Pages, which issues the certificate. Screenshots are the real web app,
+captured from the dev harness by `site/tools/capture.mjs`.
+
 ## Cross-refs
 
 - Server config knobs: `01-server.md`

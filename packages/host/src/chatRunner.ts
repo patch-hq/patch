@@ -1078,6 +1078,20 @@ export const MODEL_SWITCH_TURN_REMINDER =
   'rather than starting the whole request again.\n' +
   '</system-reminder>\n\n';
 
+/**
+ * Folded into a turn re-sent on a fresh session after the SDK aborted its
+ * session twice. The new session is rebuilt from the chat log, so the work
+ * done so far is in front of the model; it must continue that, not answer
+ * only the latest message.
+ */
+export const SESSION_RESTART_TURN_REMINDER =
+  '<system-reminder>\n' +
+  'This turn was cut off partway through when its session failed, and has been restarted ' +
+  'on a new session. The conversation and any task in progress are in the history above. ' +
+  'Check what had already been done and carry on any unfinished task from there, ' +
+  'as well as answering the latest message.\n' +
+  '</system-reminder>\n\n';
+
 const ORIGINAL_OPEN = '<original-prompt>\n';
 const ORIGINAL_CLOSE = '\n</original-prompt>';
 const REMINDER_CLOSE = '</system-reminder>';
@@ -5956,9 +5970,10 @@ export class Daemon {
   }
 
   /**
-   * Running, idle between turns with a goal still to be judged, or idle with a
-   * one-shot self-wake armed (the chat is about to wake itself). A loop never
-   * completes, so it is not work to wait for.
+   * Running, idle between turns with a goal still to be judged, idle with a
+   * one-shot self-wake armed (the chat is about to wake itself), or waiting on a
+   * delegated agent that has not returned. A loop never completes, so it is not
+   * work to wait for.
    */
   private hasWorkToComplete(chatId: string): boolean {
     const state = this.chatState.get(chatId);
@@ -5966,13 +5981,15 @@ export class Daemon {
     return (
       this.aggregateActivity(chatId) === 'running' ||
       (state?.goal ?? null) !== null ||
-      (wake !== null && wake.every === undefined)
+      (wake !== null && wake.every === undefined) ||
+      this.hasRunningDelegates(chatId)
     );
   }
 
   /**
    * "Until complete" (spec/04 § Snooze): the snooze ends when the chat's work
-   * does — no turn running and no goal left to judge — or sooner if it stops
+   * does — no turn running, no goal left to judge and no delegated agent still
+   * running — or sooner if it stops
    * for a person (a permission, a question, an error), since nothing more will
    * happen without them.
    */
@@ -10977,6 +10994,11 @@ export class Daemon {
                 return { ...rest, updatedAt: this.opts.now() };
               });
               this.hydratedFromDisk.delete(chatId);
+              // The fresh session has no memory of the task in progress: rebuild
+              // it from Patch's log and tell the model to carry on, rather than
+              // handing it the latest message alone.
+              this.rebuildFromLog.add(chatId);
+              this.interruptedResend.add(chatId);
             }
             this.opts.logger.warn(
               { chatId, aborts, restartFresh, error: errMsg },
@@ -10984,7 +11006,9 @@ export class Daemon {
             );
             void this.sendInput({
               chatId,
-              message: prompt,
+              message: restartFresh
+                ? interruptedTurnResend(SESSION_RESTART_TURN_REMINDER, prompt)
+                : prompt,
               localId: `session-abort-${chatId}-${aborts}-${this.opts.now()}`,
               ...(cur?.turnOrigin ? { origin: cur.turnOrigin } : {}),
               ...(turnAnchorSeq !== undefined ? { retryOfSeq: turnAnchorSeq } : {}),
