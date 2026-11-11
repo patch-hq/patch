@@ -629,8 +629,12 @@ An `http(s)` link in a message carries a small Summarise button beside it.
 Clicking it opens a popover anchored to the button showing a
 model-written summary of the linked page, followed by the page's host. The
 server fetches the page and sends its readable text (scripts, navigation and
-footers removed, capped at 24,000 characters) to the Manager host,
-which runs the one-shot summary with the **link summary prompt**
+footers removed, capped at 24,000 characters), led by the page's title and
+description, to the Manager host. The popover shows the page title above the
+summary. A page that is only a script bundle and a stub (a web app, a sign-in
+wall) has no text to summarise and answers 422 `needs_javascript`, shown in the
+card, rather than a summary of the stub. The host
+runs the one-shot summary with the **link summary prompt**
 (`linkSummaryPrompt`, a shared setting edited under Settings → Agent → Link
 summary, with Reset to default). The card reads "Summarising…" while it waits;
 a failure — page unfetchable, Manager host offline, no account able to answer —

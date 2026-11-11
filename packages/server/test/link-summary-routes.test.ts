@@ -92,6 +92,53 @@ describe('POST /api/link-summary', () => {
     }
   });
 
+  it('leads the text with the page title and description, and returns the title', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        html(
+          '<head><title>Foraging guide</title><meta name="description" content="Where to look."></head><body><p>Body text.</p></body>',
+        ),
+      ),
+    );
+    const link = new FakeHost(() => ({ ok: true, summary: 'A guide.' }));
+    const { app, auth } = await boot(link);
+    try {
+      const res = await post(app, auth, 'https://example.com/a');
+      expect(res.json()).toEqual({
+        url: 'https://example.com/a',
+        title: 'Foraging guide',
+        summary: 'A guide.',
+      });
+      expect(link.asked[0]!.text).toBe(
+        'Title: Foraging guide\n\nDescription: Where to look.\n\nBody text.',
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('is 422 needs_javascript for an app shell, never a summary of its stub text', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        html(
+          '<head><title>Todoist</title></head><body><div>Todoist couldn\'t load the required files.</div><script src="/app.js"></script></body>',
+        ),
+      ),
+    );
+    const link = new FakeHost(() => ({ ok: true, summary: 's' }));
+    const { app, auth } = await boot(link);
+    try {
+      const res = await post(app, auth, 'https://app.todoist.com/app/task/1');
+      expect(res.statusCode).toBe(422);
+      expect(res.json().error).toBe('needs_javascript');
+      expect(link.asked).toHaveLength(0);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('caps the text sent to the model', async () => {
     vi.stubGlobal(
       'fetch',
