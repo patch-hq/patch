@@ -1,6 +1,6 @@
 # Runs a failed test run once more, failed shards only. The browser layer has
 # the odd flaky test, and a PR in the merge queue should not need a person to
-# press re-run. A second failure is left alone: that one is real.
+# press re-run. Skipped when the PR has moved on to a newer commit. A second failure is left alone: that one is real.
 #
 # Not merge-queue runs: a failed queue run has already ejected its PR and its
 # branch is gone, so a re-run tests nothing. the dequeue job files a task for it.
@@ -22,4 +22,19 @@ jobs:
     steps:
       - env:
           GH_TOKEN: ${{ github.token }}
-        run: gh run rerun "${{ github.event.workflow_run.id }}" --failed --repo "$GITHUB_REPOSITORY"
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          # A rerun joins the PR's concurrency group and cancels the newer run
+          # already going for a later commit. Only retry the PR's current head.
+          if [ -z "$PR_NUMBER" ]; then
+            echo "::error::run $RUN_ID has no associated pull request"
+            exit 1
+          fi
+          head_sha=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)
+          if [ "$head_sha" != "$RUN_SHA" ]; then
+            echo "PR #$PR_NUMBER head is $head_sha, run was for $RUN_SHA: stale, not retrying"
+            exit 0
+          fi
+          gh run rerun "$RUN_ID" --failed --repo "$GITHUB_REPOSITORY"
