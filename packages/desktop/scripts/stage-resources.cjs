@@ -43,6 +43,11 @@ function stage({ repoRoot, desktopDir, buildServer, target = targetFor() }) {
     cpSync(path.join(hostOut, name), path.join(staged, 'host', name), { recursive: true });
     if (name.endsWith(`-${target}.tar.gz`)) carried++;
   }
+  // The local server hands this to `curl …/api/daemon/install.sh | sh`; without
+  // it the host install answers 404 and the first run cannot finish.
+  if (!existsSync(path.join(staged, 'host', 'install.sh'))) {
+    throw new Error(`${hostOut} has no install.sh (the host installer build-host.mjs puts there).`);
+  }
   if (carried === 0) {
     throw new Error(`${hostOut} has no ${target} host build; the app would have no host to install.`);
   }

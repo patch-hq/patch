@@ -457,7 +457,7 @@ export function openChildWindow(routePath: string, size?: ChildWindowSize): Brow
     // Same overlay title bar as the main window (see createMainWindow): a chat
     // or the sidebar detached into its own window is the same UI, and a native
     // bar on it would be exactly the "patch top bar" being removed.
-    ...windowChrome(process.platform),
+    ...documentWindowChrome(),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -517,7 +517,7 @@ export function createMainWindow(): BrowserWindow {
     // traffic lights float over its top-left (spec/05 § Window chrome; the user,
     // App Updates: "clean at top, no patch top bar"). The renderer reserves
     // the strip they land in; see `--overlay-titlebar-inset` in index.css.
-    ...windowChrome(process.platform),
+    ...documentWindowChrome(),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -690,6 +690,18 @@ function startServerLostWatch(): void {
   });
 }
 let serverLostNotified = false;
+
+/**
+ * A document window's chrome on this platform. On Linux the window also names
+ * its icon: the taskbar shows Electron's own otherwise, since an AppImage that
+ * was never integrated into the desktop has no .desktop file to take it from.
+ */
+function documentWindowChrome(): ReturnType<typeof windowChrome> & { icon?: string } {
+  return {
+    ...windowChrome(process.platform),
+    ...(process.platform === 'linux' ? { icon: join(__dirname, '..', 'build', 'icon.png') } : {}),
+  };
+}
 
 function trayMenu(): Menu {
   return Menu.buildFromTemplate([
@@ -1899,7 +1911,7 @@ function showSetupWindow(): {
     title: 'Patch',
     show: true,
     resizable: false,
-    ...windowChrome(process.platform),
+    ...documentWindowChrome(),
     webPreferences: {
       preload: join(__dirname, 'setup-preload.js'),
       contextIsolation: true,

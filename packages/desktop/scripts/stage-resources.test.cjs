@@ -43,6 +43,7 @@ test('carries the manifest, the installer and only this Mac’s host build', () 
 test('the AppImage carries the linux-x64 host build and nothing else', () => {
   const r = repo([
     'host-latest.json',
+    'install.sh',
     'patch-host-1-darwin-arm64.tar.gz',
     'patch-host-1-linux-x64.tar.gz',
     'patch-host-1-linux-x64.tar.gz.sig',
@@ -51,6 +52,7 @@ test('the AppImage carries the linux-x64 host build and nothing else', () => {
   const staged = stage({ ...r, buildServer: fakeRelease, target: 'linux-x64' });
   assert.deepEqual(readdirSync(path.join(staged, 'host')).sort(), [
     'host-latest.json',
+    'install.sh',
     'patch-host-1-linux-x64.tar.gz',
     'patch-host-1-linux-x64.tar.gz.sig',
   ]);
@@ -73,8 +75,16 @@ test('refuses to package an app with no host build, naming what to run', () => {
   assert.throws(() => stage({ ...r, buildServer: fakeRelease }), /pnpm build:host/);
 });
 
-test('refuses a host directory that has nothing for this Mac', () => {
+test('refuses a host directory with no installer for the host', () => {
   const r = repo(['host-latest.json', 'patch-host-1-linux-x64.tar.gz']);
+  assert.throws(
+    () => stage({ ...r, buildServer: fakeRelease, target: 'linux-x64' }),
+    /no install\.sh/,
+  );
+});
+
+test('refuses a host directory that has nothing for this Mac', () => {
+  const r = repo(['host-latest.json', 'install.sh', 'patch-host-1-linux-x64.tar.gz']);
   assert.throws(
     () => stage({ ...r, buildServer: fakeRelease, target: 'darwin-arm64' }),
     /no darwin-arm64/,
