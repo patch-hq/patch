@@ -109,3 +109,25 @@ describe('Codex notifications without params', () => {
     }
   }, 15000);
 });
+
+describe('Codex initialize timeout', () => {
+  it('kills the process and allows a retry when initialize never answers', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'patch-codex-initto-'));
+    const executable = join(home, 'silent-codex.mjs');
+    writeFileSync(executable, '#!/usr/bin/env node\nsetInterval(() => {}, 1000);\n', {
+      mode: 0o700,
+    });
+    chmodSync(executable, 0o700);
+    const client = new CodexClient({ home, executable, timeoutMs: 300 });
+    try {
+      await expect(client.start()).rejects.toThrow(/initialize timed out/);
+      expect(client.alive).toBe(false);
+      // The failure is not cached: a second start() boots again.
+      await expect(client.start()).rejects.toThrow(/initialize timed out/);
+      expect(client.alive).toBe(false);
+    } finally {
+      await client.close();
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 15000);
+});
