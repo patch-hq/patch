@@ -163,6 +163,36 @@ describe('mirrorOnce', () => {
     expect(readdirSync(dir).some((n) => n.startsWith('mobile-update-'))).toBe(false);
   });
 
+  it('serves both desktop feeds, but not the fixed-name copies a stable release carries for the website', async () => {
+    const files = {
+      ...GOOD(),
+      'latest-mac.yml': 'version: 1.2.3\n',
+      'Patch-1.2.3-arm64-mac.zip': 'MAC',
+      'latest-linux.yml': 'version: 1.2.3\n',
+      'Patch-1.2.3-x86_64.AppImage': 'LINUX',
+      'desktop-linux-latest.json': '{"version":"1.2.3"}',
+      'patch-1.2.3.apk': 'APK',
+      'Patch-mac-arm64.zip': 'MAC',
+      'Patch-mac-arm64.dmg': 'DMG',
+      'Patch-linux-x86_64.AppImage': 'LINUX',
+      'Patch-android.apk': 'APK',
+    };
+    await mirrorOnce(opts(github(files).fetchImpl));
+    for (const n of [
+      'latest-linux.yml',
+      'Patch-1.2.3-x86_64.AppImage',
+      'desktop-linux-latest.json',
+    ])
+      expect(existsSync(join(dir, n))).toBe(true);
+    for (const n of [
+      'Patch-mac-arm64.zip',
+      'Patch-mac-arm64.dmg',
+      'Patch-linux-x86_64.AppImage',
+      'Patch-android.apk',
+    ])
+      expect(existsSync(join(dir, n))).toBe(false);
+  });
+
   it('mirrors a served release again when it was mirrored by code that copied less', async () => {
     const files = { ...GOOD(), 'mobile-update.json': '{"runtimeVersion":"0.1.6"}' };
     const { fetchImpl } = github(files);

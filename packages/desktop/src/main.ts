@@ -691,18 +691,63 @@ function startServerLostWatch(): void {
 }
 let serverLostNotified = false;
 
+function trayMenu(): Menu {
+  return Menu.buildFromTemplate([
+    {
+      label: 'Open Patch',
+      click: () => {
+        if (!mainWindow) mainWindow = createMainWindow();
+        mainWindow.show();
+        mainWindow.focus();
+      },
+    },
+    {
+      // spec/11 § Version reporting — one click to "what am I running, and is
+      // anything stale?". Worth a top-level entry: the answer used to be
+      // unobtainable from inside the app at all.
+      label: 'Version & updates…',
+      click: () => {
+        if (!mainWindow) mainWindow = createMainWindow();
+        mainWindow.show();
+        mainWindow.focus();
+        sendWhenReady(mainWindow, 'patch:navigate', { path: '/settings' });
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit Patch',
+      click: () => {
+        (app as unknown as { isQuitting: boolean }).isQuitting = true;
+        app.quit();
+      },
+    },
+  ]);
+}
+
 function createTray(): Tray {
   // Group 20 fix DX-12: ship a real template image (mac auto-tints
   // light/dark) at build/trayIconTemplate.png. NO FALLBACK: if the asset
   // is missing in the bundle we throw rather than show an invisible icon.
-  const candidate = join(__dirname, '..', 'build', 'trayIconTemplate.png');
-  const icon = nativeImage.createFromPath(candidate);
-  if (icon.isEmpty()) {
+  //
+  // Linux panels do not tint a template image, and a black glyph vanishes on
+  // the dark panels most desktops use, so there the tray shows the app icon.
+  const darwin = process.platform === 'darwin';
+  const candidate = join(__dirname, '..', 'build', darwin ? 'trayIconTemplate.png' : 'icon.png');
+  const loaded = nativeImage.createFromPath(candidate);
+  if (loaded.isEmpty()) {
     throw new Error(`tray icon missing or unreadable: ${candidate}`);
   }
-  icon.setTemplateImage(true);
+  const icon = darwin ? loaded : loaded.resize({ width: 32, height: 32 });
+  if (darwin) icon.setTemplateImage(true);
   const t = new Tray(icon);
   t.setToolTip('Patch');
+  if (!darwin) {
+    // A Linux tray (StatusNotifierItem/AppIndicator) does not report clicks to
+    // the app: the panel opens the icon's menu itself. Give it the menu, and the
+    // popover is reached from the main window instead.
+    t.setContextMenu(trayMenu());
+    return t;
+  }
   t.on('click', () => {
     logDesktopEvent({ type: 'tray:click' });
     // Route through decideTrayClick so a second click always CLOSES the popover
@@ -721,37 +766,7 @@ function createTray(): Tray {
   });
   t.on('right-click', () => {
     logDesktopEvent({ type: 'tray:context-menu' });
-    const menu = Menu.buildFromTemplate([
-      {
-        label: 'Open Patch',
-        click: () => {
-          if (!mainWindow) mainWindow = createMainWindow();
-          mainWindow.show();
-          mainWindow.focus();
-        },
-      },
-      {
-        // spec/11 § Version reporting — one click to "what am I running, and is
-        // anything stale?". Worth a top-level entry: the answer used to be
-        // unobtainable from inside the app at all.
-        label: 'Version & updates…',
-        click: () => {
-          if (!mainWindow) mainWindow = createMainWindow();
-          mainWindow.show();
-          mainWindow.focus();
-          sendWhenReady(mainWindow, 'patch:navigate', { path: '/settings' });
-        },
-      },
-      { type: 'separator' },
-      {
-        label: 'Quit Patch',
-        click: () => {
-          (app as unknown as { isQuitting: boolean }).isQuitting = true;
-          app.quit();
-        },
-      },
-    ]);
-    t.popUpContextMenu(menu);
+    t.popUpContextMenu(trayMenu());
   });
   return t;
 }
@@ -921,6 +936,12 @@ function endMeetingForCall(appName: string): void {
 /** NO FALLBACK: detection that cannot run is logged loudly, once, instead of going quiet.
  *  It is background work Tom did not trigger, so it is not toasted at him. */
 function startMeetingDetection(): void {
+  // The helper is a Core Audio tap (native/patch-audio): there is no build of it
+  // for any other platform, so say so once instead of retrying a missing binary.
+  if (process.platform !== 'darwin') {
+    reportMeetingDetectionOff('noticing calls needs the macOS audio helper; it is macOS only');
+    return;
+  }
   const detector = new MeetingDetector({
     // A meeting Patch is already capturing needs no prompt to start; the end
     // prompt only matters while it is.
@@ -1523,6 +1544,8 @@ function setupAutoUpdater(): void {
     version: build.version,
     signed: build.signed,
     noFeedReason,
+    platform: process.platform,
+    appImage: process.env['APPIMAGE'],
   });
 
   let persisted = emptyPersisted();
@@ -1780,9 +1803,12 @@ function setupAutoUpdater(): void {
   });
   // Squirrel.Mac's own failures — not a background check that hit a network
   // blip — are the ones that mean the downloaded update will not install.
-  squirrel.on('error', (err: Error) => {
-    errorSinceDownload = err.message;
-  });
+  // Squirrel.Mac exists only on macOS; on Linux electron-updater swaps the AppImage itself.
+  if (process.platform === 'darwin') {
+    squirrel.on('error', (err: Error) => {
+      errorSinceDownload = err.message;
+    });
+  }
   autoUpdater.on('error', (err: Error) => {
     // Surfaced verbatim to the panel. This is the path that used to swallow the
     // "Could not get code signature" failure on an adhoc-signed build.
