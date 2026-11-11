@@ -77,3 +77,14 @@ export function originOf(c: Connection): string {
 export function appUrl(origin: string, credential: string): string {
   return `${origin}/app/#credential=${credential}`;
 }
+
+/**
+ * The welcome steps that follow a first run (spec/05 § Desktop first run), on
+ * the same server and with the same handed-over credential as `url`.
+ */
+export function welcomeUrl(url: string, mode: 'local' | 'remote' | 'relay'): string {
+  const u = new URL(url);
+  u.pathname = u.pathname.replace(/\/?$/, '/') + 'welcome';
+  u.searchParams.set('machine', mode === 'local' ? 'local' : 'server');
+  return u.toString();
+}

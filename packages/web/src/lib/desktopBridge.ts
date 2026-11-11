@@ -141,6 +141,17 @@ export interface PatchDesktopBridge {
    * host, and installing one with a freshly minted pairing code. Absent in a
    * browser and on shells that predate it.
    */
+  /**
+   * spec/05 § Keep running — whether the app opens at login and keeps this
+   * computer awake while plugged in, so a phone can reach the server it runs.
+   * Present only in a shell that runs Patch on this computer itself.
+   */
+  keepRunning?: {
+    get(): Promise<KeepRunningState>;
+    set(
+      patch: Partial<Pick<KeepRunningState, 'openAtLogin' | 'keepAwake'>>,
+    ): Promise<KeepRunningState>;
+  };
   localHost?: {
     status(): Promise<{ installed: boolean; hostId: string | null }>;
     install(code: string): Promise<{ ok: boolean; exitCode: number | null; output: string }>;
@@ -263,6 +274,14 @@ export interface DesktopUpdaterState {
   checking: boolean;
   /** When this shell first fell behind the feed — what the banner escalates on. */
   staleSince: string | null;
+}
+
+/** The shell's keep-running choices (spec/05 § Keep running). */
+export interface KeepRunningState {
+  openAtLogin: boolean;
+  keepAwake: boolean;
+  /** Whether the awake hold is in force right now (on mains power). */
+  holdingAwake: boolean;
 }
 
 export function getDesktopBridge(): PatchDesktopBridge | undefined {

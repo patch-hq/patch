@@ -53,6 +53,7 @@ import { LifecycleRoute } from './routes/LifecycleRoute.js';
 import { JobPaneRoute } from './routes/JobPaneRoute.js';
 import { SettingsPaneRoute } from './routes/SettingsPaneRoute.js';
 import { IndexRedirect } from './routes/IndexRedirect.js';
+import { WelcomeRoute } from './routes/WelcomeRoute.js';
 import { MenubarRoute, AUTO_CALL_KEY } from './routes/MenubarRoute.js';
 import { VoiceOverlayRoute } from './routes/VoiceOverlayRoute.js';
 import { SidebarWindowRoute } from './routes/SidebarWindowRoute.js';
@@ -618,7 +619,8 @@ export function AppShell(): JSX.Element {
     path === '/menubar' ||
     path === '/voice-overlay' ||
     path === '/sidebar-window' ||
-    path === '/tab-window';
+    path === '/tab-window' ||
+    path === '/welcome';
 
   if (isBareRoute) {
     return (
@@ -628,6 +630,7 @@ export function AppShell(): JSX.Element {
           <Route path="/voice-overlay" element={<VoiceOverlayRoute />} />
           <Route path="/sidebar-window" element={<SidebarWindowRoute />} />
           <Route path="/tab-window" element={<TabWindowRoute ws={wsRef.current} />} />
+          <Route path="/welcome" element={<WelcomeRoute />} />
         </Routes>
       </div>
     );

@@ -209,6 +209,8 @@ export interface BuildOptions {
   pairingNonceStore?: import('@patch/auth').PairingNonceStore;
   /** Inject the Claude token check (tests). */
   validateClaudeToken?: (token: string) => Promise<import('@patch/auth').ClaudeTokenValidation>;
+  /** Swaps a claude.ai sign-in code for a token; tests stand in for Anthropic. */
+  exchangeClaudeCode?: typeof import('@patch/auth').exchangeClaudeSignInCode;
   /** Inject the OpenAI key check (tests). */
   validateOpenAIKey?: import('./shared-settings.js').ValidateOpenAIKey;
   /** Inject the HTTP client for provider-key checks (tests). */
@@ -1905,7 +1907,12 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   });
 
   // ---- provider keys REST, shared across every host (spec/02 § Provider keys) ----
-  if (accountSettings) registerSettingsRoutes(app, { registry, shared: accountSettings });
+  if (accountSettings)
+    registerSettingsRoutes(app, {
+      registry,
+      shared: accountSettings,
+      ...(opts.exchangeClaudeCode ? { exchangeClaudeCode: opts.exchangeClaudeCode } : {}),
+    });
 
   // ---- link preview REST route (spec/14 § Message links) ----
   registerLinkPreviewRoutes(app, {

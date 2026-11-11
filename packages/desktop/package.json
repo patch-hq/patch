@@ -13,6 +13,7 @@
     "// test": "Discovery is by PATTERN, not a file list (spec/19-testing.md § Unit). The hand-written list this replaced had drifted: link-policy.test.ts and tray-toggle.test.ts were on disk and absent from it, so 16 passing tests ran in no suite and gated nothing.",
     "test": "node --test --import tsx \"src/**/*.test.ts\" scripts/stage-resources.test.cjs",
     "gen:tray": "node --import tsx ./scripts/gen-tray-icon.ts",
+    "e2e:first-run": "playwright test --config scripts/e2e/playwright.config.ts",
     "smoke": "electron scripts/smoke.cjs",
     "smoke:integration": "tsc -b && electron scripts/smoke-integration.cjs",
     "smoke:iab": "tsc -b && electron scripts/smoke-in-app-browser.cjs",
@@ -31,6 +32,7 @@
     "ws": "^8.20.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@patch/auth": "workspace:*",
     "@patch/relay": "workspace:*",
     "@patch/wire": "workspace:*",

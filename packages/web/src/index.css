@@ -18212,3 +18212,211 @@ a.drop-target {
 .turn-stop-marker {
   padding: 4px 0;
 }
+
+/* ---- Welcome: setup after the desktop app's first run (spec/05) ---- */
+.welcome {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  background: var(--bg-app);
+  padding: 48px 24px;
+  box-sizing: border-box;
+}
+.welcome-drag {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 40px;
+  -webkit-app-region: drag;
+}
+.welcome-card {
+  width: min(480px, 100%);
+  display: grid;
+  gap: 24px;
+}
+.welcome-dots {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.welcome-dots li {
+  width: 24px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+}
+.welcome-dots li.done {
+  background: var(--accent);
+}
+.welcome-step {
+  display: grid;
+  gap: 16px;
+}
+.welcome-step h1 {
+  margin: 0 0 4px;
+  font-family: 'Fraunces Variable', Georgia, serif;
+  font-variation-settings:
+    'opsz' 144,
+    'SOFT' 30,
+    'wght' 500;
+  font-size: 30px;
+  line-height: 1.15;
+  color: var(--ink);
+}
+.welcome-provider {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+}
+.welcome-provider-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.welcome-provider-name {
+  font-size: 16px;
+  font-weight: 600;
+}
+.welcome-ok {
+  font-size: 14px;
+  color: var(--accent-strong);
+}
+.welcome-ok::before {
+  content: '✓ ';
+}
+.welcome-note {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink-3);
+}
+.welcome-options {
+  display: grid;
+  gap: 8px;
+}
+.welcome-options.scroll {
+  max-height: 46vh;
+  overflow-y: auto;
+}
+.welcome-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  cursor: pointer;
+}
+.welcome-option.checked {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+.welcome-option input {
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+.welcome-option-text {
+  display: grid;
+  gap: 2px;
+}
+.welcome-option-title {
+  font-size: 16px;
+  font-weight: 500;
+}
+.welcome-option-hint {
+  font-size: 14px;
+  color: var(--ink-3);
+}
+.welcome-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+.welcome-primary {
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  padding: 10px 20px;
+  border-radius: 10px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  cursor: pointer;
+}
+.welcome-primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+}
+.welcome-primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.welcome-skip,
+.welcome-back {
+  font: inherit;
+  font-size: 14px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.welcome-skip:hover,
+.welcome-back:hover {
+  background: var(--bg-soft);
+}
+.welcome-back {
+  justify-self: start;
+  margin-left: -10px;
+}
+.welcome-phone-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 6px;
+  font-size: 16px;
+}
+.welcome-phone-steps a {
+  color: var(--accent-strong);
+}
+.welcome-qr canvas {
+  display: block;
+  padding: 12px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+}
+.claude-signin {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+.claude-signin-label {
+  font-size: 14px;
+  color: var(--ink-3);
+}
+.claude-signin .set-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+  font-size: 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--ink);
+}
+.welcome .set-error {
+  margin: 0;
+  font-size: 14px;
+}
+.claude-signin .set-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

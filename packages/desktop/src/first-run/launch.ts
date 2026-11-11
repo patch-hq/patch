@@ -26,6 +26,10 @@ export interface SetupUi {
 export interface Launch {
   /** The page for the window to load. */
   appUrl: string;
+  /** Where Patch runs: this computer, or a server of the user's own. */
+  mode: 'local' | 'remote' | 'relay';
+  /** This launch answered the first-run question; the welcome steps follow. */
+  firstRun: boolean;
   /** Everything started for it, stopped. */
   stop(): Promise<void>;
 }
@@ -58,13 +62,28 @@ async function resume(saved: SavedConnection, opts: LaunchOptions): Promise<Laun
   const { connection } = saved;
   if (connection.mode === 'local') {
     const { server } = await opts.startLocal(saved, () => undefined);
-    return { appUrl: appUrl(server.origin, saved.credential), stop: () => server.stop() };
+    return {
+      appUrl: appUrl(server.origin, saved.credential),
+      mode: 'local',
+      firstRun: false,
+      stop: () => server.stop(),
+    };
   }
   if (connection.mode === 'relay') {
     const bridge = await bridgeFor(saved as SavedConnection & { connection: { mode: 'relay' } });
-    return { appUrl: appUrl(bridge.origin, saved.credential), stop: () => bridge.close() };
+    return {
+      appUrl: appUrl(bridge.origin, saved.credential),
+      mode: 'relay',
+      firstRun: false,
+      stop: () => bridge.close(),
+    };
   }
-  return { appUrl: appUrl(originOf(connection), saved.credential), stop: async () => undefined };
+  return {
+    appUrl: appUrl(originOf(connection), saved.credential),
+    mode: 'remote',
+    firstRun: false,
+    stop: async () => undefined,
+  };
 }
 
 export async function launchPatch(opts: LaunchOptions): Promise<Launch> {
@@ -80,12 +99,17 @@ export async function launchPatch(opts: LaunchOptions): Promise<Launch> {
           opts.ui.progress(m),
         );
         writeSaved(opts.file, made);
-        return { appUrl: appUrl(server.origin, made.credential), stop: () => server.stop() };
+        return {
+          appUrl: appUrl(server.origin, made.credential),
+          mode: 'local',
+          firstRun: true,
+          stop: () => server.stop(),
+        };
       }
       opts.ui.progress('Pairing with your server…');
       const joined = await joinServer(choice.input, { label: opts.label });
       writeSaved(opts.file, joined);
-      return resume(joined, opts);
+      return { ...(await resume(joined, opts)), firstRun: true };
     } catch (e) {
       opts.ui.fail(e instanceof Error ? e.message : String(e));
     }

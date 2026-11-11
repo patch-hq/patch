@@ -1,0 +1,89 @@
+# The desktop app's first run, end to end, on a Mac with nothing set up for it
+# (spec/05 § Desktop first run, § Keep running): the packaged app, a fresh data
+# folder, a fresh home folder and a bare PATH, through both answers to "where
+# should your agents run?".
+#
+# "This computer" installs the host as a login service, which on a computer
+# already running Patch would replace that Patch's host. A runner is disposable,
+# so this is where that path runs (PATCH_E2E_THIS_COMPUTER=1).
+#
+# The host is signed with a throwaway key and the app ad hoc: the installer
+# checks the download's digest, not its signature, and nothing built here is
+# published. No secrets are needed.
+#
+# Only for changes that can affect the first run, and by hand: a macOS runner is
+# the scarce kind in the account's shared pool.
+
+name: desktop-first-run
+
+on:
+  pull_request:
+    paths:
+      - 'packages/desktop/**'
+      - 'packages/web/src/routes/WelcomeRoute.tsx'
+      - 'packages/web/src/components/ClaudeSignIn.tsx'
+      - 'packages/host/src/claudeInstall.ts'
+      - 'packages/host/src/codexInstall.ts'
+      - 'packages/host/src/codexRuntime.ts'
+      - 'packages/host/installer/**'
+      - 'packages/server/src/settings-routes.ts'
+      - '.github/workflows/desktop-first-run.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-first-run-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  first-run:
+    if: github.repository == 'patch-hq/patch'
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Build what the app carries
+        run: pnpm turbo build --filter=@patch/desktop... --filter=@patch/host... --filter=@patch/server... --filter=@patch/web --output-logs=errors-only
+      - name: Fetch the pinned runtime, native addon and model
+        run: node scripts/fetch-vendor.mjs --out="$RUNNER_TEMP/vendor" --targets=darwin-arm64
+      - name: Build the host with a throwaway key
+        run: |
+          set -euo pipefail
+          umask 077
+          node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" > "$RUNNER_TEMP/throwaway.key"
+          PATCH_BUILD_VENDOR="$RUNNER_TEMP/vendor" \
+          PATCH_ARTIFACT_SIGNING_KEY="$RUNNER_TEMP/throwaway.key" \
+          PATCH_CODESIGN_IDENTITY=- \
+          PATCH_BUILD_TARGETS=darwin-arm64 \
+          node scripts/build-host.mjs
+      - name: Package the app, unsigned
+        run: |
+          set -euo pipefail
+          cd packages/desktop
+          # 66 is the signing gate refusing an unsigned build: expected here.
+          PATCH_SKIP_NOTARIZE=1 CSC_IDENTITY_AUTO_DISCOVERY=false node scripts/dist.cjs --dir || [ $? -eq 66 ]
+          codesign --force --deep --sign - release/mac-arm64/Patch.app
+      - name: First run, both paths
+        env:
+          PATCH_E2E_THIS_COMPUTER: '1'
+          PATCH_E2E_SHOTS: ${{ runner.temp }}/shots
+        run: |
+          mkdir -p "$PATCH_E2E_SHOTS"
+          pnpm --filter @patch/desktop e2e:first-run
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: first-run-screens
+          path: |
+            ${{ runner.temp }}/shots
+            packages/desktop/test-results
+          if-no-files-found: ignore
