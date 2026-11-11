@@ -4966,7 +4966,7 @@ button.nav-row {
      this box entirely, so a grouped run sat flush against its neighbours
      (0px) while an ungrouped tool call got 10px, an inconsistency in the
      same transcript depending on how many calls happened to run together. */
-  margin: 10px 0;
+  margin: 10px -10px;
   color: var(--ink-2);
   overflow: hidden;
 }
