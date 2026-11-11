@@ -169,7 +169,16 @@ function ManagerRow({ row }: { row: ChatRow }): React.ReactElement {
             >
               {row.name ?? 'Manager'}
             </Text>
-            <Text testID="manager-status" style={{ ...typography.meta, color: statusColor }}>
+            <Text
+              testID="manager-status"
+              numberOfLines={1}
+              style={{
+                ...typography.meta,
+                flexShrink: 0,
+                marginLeft: space.sm,
+                color: statusColor,
+              }}
+            >
               {MANAGER_STATUS[badge]}
             </Text>
           </View>
@@ -1004,7 +1013,10 @@ export default function ChatsScreen(): React.ReactElement {
                     paddingBottom: space.sm,
                   }}
                 >
-                  <Text style={{ ...typography.sectionHeader, color: colors.ink3 }}>
+                  <Text
+                    numberOfLines={1}
+                    style={{ ...typography.sectionHeader, flexShrink: 0, color: colors.ink3 }}
+                  >
                     {section ? `${item.label} ${open[section] ? '▾' : '▸'}` : item.label}
                   </Text>
                   {item.pill ? (
