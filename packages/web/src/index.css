@@ -16944,7 +16944,7 @@ select.permission-mode.is-pending {
   border: 0;
   padding: 0;
   font: inherit;
-  color: var(--danger, #c0392b);
+  color: var(--danger);
   text-decoration: underline;
   cursor: pointer;
 }
@@ -16953,7 +16953,7 @@ select.permission-mode.is-pending {
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  color: var(--ink-2, var(--ink-3));
+  color: var(--ink-2);
   font-size: var(--text-min);
   white-space: pre-wrap;
   word-break: break-word;
