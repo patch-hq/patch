@@ -79,16 +79,19 @@ jobs:
       # is too small for it (verify.mjs explains); a runner is not.
       # 40 minutes: a shard normally takes 15-25, and one that hung for longer
       # held every later check behind it.
-      # Samples memory every 30s so a 137 can be traced to a process: the log
-      # shows the biggest resident processes leading up to the kill.
+      # Samples every 5s so a 137 can be traced to a process: memory, the
+      # biggest resident processes, and the job's cgroup limit and OOM counter
+      # (a cgroup kill leaves nothing in `free`). The log is printed on failure.
       - name: Memory sampler
         run: |
-          nohup bash -c 'while true; do echo "--- mem $(date +%T)"; free -m | sed -n 2,3p; ps -eo rss,comm,args --sort=-rss | head -6 | cut -c1-160; sleep 30; done' > /tmp/mem.log 2>&1 &
+          nohup bash -c 'while true; do echo "--- mem $(date +%T)"; free -m | sed -n 2,3p; for f in memory.max memory.peak memory.events; do echo "$f: $(tr "\n" " " < /sys/fs/cgroup/$f 2>/dev/null)"; done; ps -eo rss,comm,args --sort=-rss | head -6 | cut -c1-160; sleep 5; done' > /tmp/mem.log 2>&1 &
       - name: The gate
         timeout-minutes: 40
         env:
           PATCH_RUN_BROWSER_GATE: ${{ github.event_name == 'merge_group' && '1' || '0' }}
           PATCH_BROWSER_SHARD: ${{ matrix.shard }}
+          # Logs who sends any SIGKILL or group kill (scripts/ci-killtrace.cjs).
+          NODE_OPTIONS: --require=${{ github.workspace }}/scripts/ci-killtrace.cjs
         run: |
           dbus-run-session -- bash -euo pipefail -c '
             printf "ci" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
@@ -98,7 +101,8 @@ jobs:
         if: failure()
         run: |
           tail -n 120 /tmp/mem.log || true
-          sudo dmesg 2>/dev/null | grep -i -E "out of memory|oom-kill|killed process" | tail -n 20 || true
+          echo "--- kill trace"; tail -n 60 /tmp/killtrace.log || true
+          echo "--- kernel"; (sudo dmesg || sudo journalctl -k --no-pager) 2>&1 | grep -i -E "out of memory|oom|killed process|cgroup" | tail -n 20 || true
 
   # The one check that branch protection and release.yml look at: green only
   # when every shard is. Reports on forks too, where verify is skipped, so it is
