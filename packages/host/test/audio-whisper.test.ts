@@ -20,6 +20,11 @@ import {
 } from '../src/audio/whisper.js';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
+vi.mock('../src/audio/sidecarGuard.js', () => ({
+  reclaimPort: vi.fn(async () => undefined),
+  killOnHostExit: vi.fn(),
+  tailOutput: () => () => '',
+}));
 
 const logger = pino({ level: 'silent' });
 
