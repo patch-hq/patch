@@ -284,6 +284,36 @@ describe('createRealSdkBackend — one-shot path: translateSdkMessage branches',
     ).rejects.toThrow(/ended mid-turn without finishing/);
   });
 
+  it('says whether the last reply had finished when the stream ends without a result', async () => {
+    const run = async (stop_reason: string): Promise<string> => {
+      const { createRealSdkBackend } = await loadRealBackend(() => {
+        return (async function* () {
+          yield {
+            type: 'assistant',
+            message: { role: 'assistant', stop_reason, content: [{ type: 'text', text: 'Done.' }] },
+            session_id: 'sess1',
+          };
+        })();
+      });
+      const backend = createRealSdkBackend();
+      try {
+        await drain(
+          backend.run({
+            prompt: 'hi',
+            cwd: '/tmp',
+            abortController: new AbortController(),
+            oauthAccessToken: 'tok',
+          }),
+        );
+      } catch (e) {
+        return (e as Error).message;
+      }
+      throw new Error('expected the run to throw');
+    };
+    expect(await run('end_turn')).toMatch(/last reply had finished.*likely complete/);
+    expect(await run('tool_use')).toMatch(/last reply had not finished.*may be incomplete/);
+  });
+
   it('splits a multi-tool_use assistant message into one tool_use envelope per block', async () => {
     const { createRealSdkBackend } = await loadRealBackend(() => {
       return (async function* () {
