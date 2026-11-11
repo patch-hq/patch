@@ -376,6 +376,8 @@ export interface ChatState {
    * `meta.subagent` (see meta.ts). `undefined` for an ordinary chat.
    */
   subagent?: ChatSubagentInfo;
+  /** seq of the assistant message last delivered to the parent as this subagent's report. */
+  deliveredReportSeq?: number;
 }
 
 /** A subagent's durable record, persisted on its own `meta.subagent`. */
