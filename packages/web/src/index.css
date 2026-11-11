@@ -5520,6 +5520,12 @@ button.view-file-download {
 .link-preview-status {
   color: var(--ink-3);
 }
+.link-summary-title {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 600;
+  color: var(--ink);
+}
 .link-summary-text {
   display: block;
   white-space: pre-wrap;
