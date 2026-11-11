@@ -48,7 +48,18 @@ interface Harness {
   close: () => Promise<void>;
 }
 
-async function startHarness(opts: { maxConcurrentSessions?: number } = {}): Promise<Harness> {
+interface RemoteOpts {
+  mintRemoteSession: (args: {
+    credential: string;
+    chatId: string;
+  }) => Promise<{ sessionId: string; token: string }>;
+  upstreamFor: (sessionId: string) => string | undefined;
+  proxied: string[];
+}
+
+async function startHarness(
+  opts: { maxConcurrentSessions?: number; remote?: RemoteOpts } = {},
+): Promise<Harness> {
   const home = mkdtempSync(join(tmpdir(), 'patch-f2-'));
   const { publicKey, privateKey } = generateUserKeypair();
   const registry = DeviceRegistry.load(home);
@@ -65,6 +76,13 @@ async function startHarness(opts: { maxConcurrentSessions?: number } = {}): Prom
     isPhoneCallActive: () => phoneActive.value,
     maxConcurrentSessions: opts.maxConcurrentSessions ?? 3,
     logger,
+    ...(opts.remote
+      ? {
+          isChatLocal: () => false,
+          mintRemoteSession: opts.remote.mintRemoteSession,
+          proxySession: (id: string) => opts.remote!.proxied.push(id),
+        }
+      : {}),
   });
   const wss = new WebSocketServer({ noServer: true });
   const pushes: { chatId: string; message: string }[] = [];
@@ -91,6 +109,7 @@ async function startHarness(opts: { maxConcurrentSessions?: number } = {}): Prom
       if (wasPhoneCall) control.onPhoneCallEnded();
     },
     deviceControlUpgrade: mountDeviceControlUpgrade({ server: control, wss, logger }),
+    ...(opts.remote ? { upstreamFor: opts.remote.upstreamFor } : {}),
   });
   const port = audio.address().port;
 
@@ -718,6 +737,114 @@ describe('device control WSS (F2)', () => {
  * anyway from JS-land). Driving `handleConnection` directly with a fake
  * socket lets us hit them deterministically without weakening the source.
  */
+describe('device control WSS — a chat another host runs (spec/16)', () => {
+  let h: Harness;
+  let server: WebSocketServer;
+  let serverPort: number;
+  const received: { data: string; binary: boolean }[] = [];
+  const mints: { credential: string; chatId: string }[] = [];
+  let mintFails = false;
+  const remote: RemoteOpts = {
+    proxied: [],
+    mintRemoteSession: async (args) => {
+      mints.push(args);
+      if (mintFails) throw new Error('server refused a voice session (401)');
+      return { sessionId: 'srv-session-1', token: 'server-minted-token' };
+    },
+    upstreamFor: (id) =>
+      remote.proxied.includes(id) ? `ws://127.0.0.1:${serverPort}/audio/${id}` : undefined,
+  };
+
+  beforeEach(async () => {
+    received.length = 0;
+    mints.length = 0;
+    remote.proxied.length = 0;
+    mintFails = false;
+    server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+    await new Promise<void>((r) => server.once('listening', () => r()));
+    serverPort = (server.address() as { port: number }).port;
+    server.on('connection', (ws) => {
+      ws.on('message', (data: Buffer, binary: boolean) => {
+        received.push({ data: binary ? data.toString('hex') : data.toString('utf8'), binary });
+        // The far host answers with TTS audio.
+        if (binary) ws.send(Buffer.from([9, 8, 7, 6]), { binary: true });
+      });
+    });
+    h = await startHarness({ remote });
+  });
+  afterEach(async () => {
+    await h.close();
+    await new Promise<void>((r) => server.close(() => r()));
+  });
+
+  it('wake asks the server for the session with the device credential and relays the audio both ways', async () => {
+    const k = await mintDeviceJwt(h, 'kitchen', 'kitchen');
+    const dk = await connectDevice(h, 'kitchen', k);
+    await tick();
+    dk.ws.send(encodeDeviceControl({ type: 'wake_detected' } as never));
+    await tick();
+    expect(mints).toEqual([{ credential: k, chatId: 'thread_speakers' }]);
+    const start = dk.inbox.find((f) => f.type === 'session_start') as
+      | { sessionId: string; voiceToken: string }
+      | undefined;
+    expect(start).toMatchObject({ sessionId: 'srv-session-1', voiceToken: 'server-minted-token' });
+
+    const audioWs = new WebSocket(`ws://127.0.0.1:${h.port}/audio/srv-session-1`);
+    const back: Buffer[] = [];
+    audioWs.on('message', (d: Buffer) => back.push(d));
+    await new Promise<void>((resolve, reject) => {
+      audioWs.once('open', () => resolve());
+      audioWs.once('error', reject);
+    });
+    // Sent before the server leg is up: held, then delivered in order.
+    audioWs.send('{"type":"audio.session_start"}');
+    audioWs.send(Buffer.from([1, 2, 3]), { binary: true });
+    await tick();
+    await tick();
+    expect(received).toEqual([
+      { data: '{"type":"audio.session_start"}', binary: false },
+      { data: '010203', binary: true },
+    ]);
+    expect(back.map((b) => b.toString('hex'))).toEqual(['09080706']);
+    // This host ran nothing itself.
+    expect(h.audio.activeCount()).toBe(0);
+    audioWs.close();
+    await tick();
+  });
+
+  it('a session the server refuses tells the device and frees its slot', async () => {
+    mintFails = true;
+    const k = await mintDeviceJwt(h, 'kitchen', 'kitchen');
+    const dk = await connectDevice(h, 'kitchen', k);
+    await tick();
+    dk.ws.send(encodeDeviceControl({ type: 'wake_detected' } as never));
+    await tick();
+    expect(dk.inbox.find((f) => f.type === 'session_start')).toBeUndefined();
+    expect(dk.inbox.find((f) => f.type === 'error')).toBeDefined();
+    expect(h.control.activeSessionCount()).toBe(0);
+    mintFails = false;
+    dk.ws.send(encodeDeviceControl({ type: 'wake_detected' } as never));
+    await tick();
+    expect(dk.inbox.find((f) => f.type === 'session_start')).toBeDefined();
+  });
+
+  it('an unreachable server ends the device audio socket with host_unreachable', async () => {
+    const k = await mintDeviceJwt(h, 'kitchen', 'kitchen');
+    const dk = await connectDevice(h, 'kitchen', k);
+    await tick();
+    dk.ws.send(encodeDeviceControl({ type: 'wake_detected' } as never));
+    await tick();
+    await new Promise<void>((r) => server.close(() => r()));
+    const audioWs = new WebSocket(`ws://127.0.0.1:${h.port}/audio/srv-session-1`);
+    const inbox: Record<string, unknown>[] = [];
+    audioWs.on('message', (d: Buffer) => inbox.push(JSON.parse(d.toString('utf8'))));
+    const closed = new Promise<void>((r) => audioWs.once('close', () => r()));
+    await closed;
+    expect(inbox[0]).toMatchObject({ type: 'audio.error', code: 'host_unreachable' });
+    server = new WebSocketServer({ port: 0 });
+  });
+});
+
 describe('DeviceControlServer (fake socket, hard-to-reach branches)', () => {
   class FakeWs {
     private readonly handlers: Record<string, ((...args: unknown[]) => void)[]> = {};

@@ -120,7 +120,9 @@ Saying "Hey Patch" (or holding the button) opens an audio WSS to the host and a 
 
 What's different from the app surfaces' `hands-free` toggle is the session's _lifecycle_, not its turn semantics: there's no button held down on a standalone speaker to keep it open, so the session closes once the exchange lapses past the continuation window (or on user button, an explicit override) rather than staying open until manually ended. The device then drops back to local-only wake-word listening — zero cost, zero network — until "Hey Patch" fires again. This is what makes the device "available" for a three-hour drive without either holding an open mic the whole time or making every command require re-triggering from cold: the wake word gates entry cheaply and locally; the pause in conversation, not a timer, decides when a given exchange is done.
 
-The voice-device chat is persistent — every turn, whichever layer answered it, lands in its real timeline (`07-voice-app.md` § Keeping voice and text as one conversation), so context accumulates within an exchange and is still there in text later:
+A wake-word session talks to the Manager. When another host runs the Manager, the device's own host still holds its control link: on a wake it asks the server for the session with the device's credential (§ Voice-token delivery), the server records which host runs the Manager, and the device's host carries the device's audio WSS on to the server unchanged, which routes it to that host. Speech recognition and speech then run on the Manager's host.
+
+The Manager's chat is persistent — every turn, whichever layer answered it, lands in its real timeline (`07-voice-app.md` § Keeping voice and text as one conversation), so context accumulates within an exchange and is still there in text later:
 
 - "Hey Patch, when's the 73 coming?" → proxy dispatches to Manager (needs live transit data) → "It's at 3:42, six minutes."
 - "Remind me to check again in five minutes" → within the continuation window, no wake word needed → dispatches again → "Will do."
@@ -217,6 +219,6 @@ If a phone Manager call is active and another voice event lands, the device does
 - App-surface voice (phone + web), shared concepts and tiers: `07-voice-app.md`
 - Proxy and Manager, and turn semantics this device's wake-word sessions reuse: `07-voice-app.md` § The fast voice and the chat's agent, § Session modes
 - Notification channels and presence: `09-notifications.md`
-- Voice-device chat (the chat that handles inbound conversations): `06-threads-manager-speakers.md`
+- The Manager, which handles wake-word conversations: `06-threads-manager-speakers.md`
 - Host stack and host sizing: `02-host.md`, `11-deployment.md`
 - Voice-token mint and the surface/host linking flows: `01-server.md`, `10-auth.md`

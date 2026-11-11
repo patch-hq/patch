@@ -209,10 +209,17 @@ export function registerVoiceTokenRoute(app: FastifyInstance, opts: VoiceTokenRo
     const nowSec = Math.floor((opts.nowMs ? opts.nowMs() : Date.now()) / 1000);
     let claims;
     try {
+      // A voice device's credential carries no `exp` by design (spec/16), and
+      // its host fetches this token on its behalf with that credential. Every
+      // other surface kind still needs an `exp`.
       claims = await verify(jwt, {
         userPublicKey: account.userPublicKey,
         now: nowSec,
+        expectAnyExp: true,
       });
+      if (claims.surface_kind !== 'voice-device' && claims.exp === undefined) {
+        throw new Error('credential has no exp');
+      }
     } catch (err) {
       opts.logger.warn({ err: (err as Error).message }, 'voice-token: jwt verify failed');
       return reply.code(401).send({ error: 'invalid bearer' });
