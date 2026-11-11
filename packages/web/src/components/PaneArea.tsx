@@ -183,27 +183,27 @@ function tabIcon(d: TabDescriptor): JSX.Element | null {
     case 'chat':
       return null;
     case 'terminal':
-      return <TerminalSquare size={13} aria-hidden />;
+      return <TerminalSquare size={16} aria-hidden />;
     case 'browser':
-      return <Globe size={13} aria-hidden />;
+      return <Globe size={16} aria-hidden />;
     case 'file':
-      return <Files size={13} aria-hidden />;
+      return <Files size={16} aria-hidden />;
     case 'page':
       switch (d.page) {
         case 'jobs':
         case 'job':
-          return <FolderTree size={13} aria-hidden />;
+          return <FolderTree size={16} aria-hidden />;
         case 'settings':
-          return <SettingsIcon size={13} aria-hidden />;
+          return <SettingsIcon size={16} aria-hidden />;
         case 'files':
         case 'host-files':
-          return <Files size={13} aria-hidden />;
+          return <Files size={16} aria-hidden />;
         case 'pads':
         case 'pad':
         case 'new-pad':
-          return <Layers size={13} aria-hidden />;
+          return <Layers size={16} aria-hidden />;
         case 'artifact':
-          return <LayoutTemplate size={13} aria-hidden />;
+          return <LayoutTemplate size={16} aria-hidden />;
       }
   }
 }
