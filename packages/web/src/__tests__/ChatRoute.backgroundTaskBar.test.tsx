@@ -185,13 +185,27 @@ describe('ChatRoute — background task bar', () => {
     expect(api.watchCheckIn).toHaveBeenCalledWith('c1', 't1', 300 * 60);
   });
 
-  it('appears live the moment chat.state reports a count, before the list poll even resolves', async () => {
-    seed();
-    // Never resolves within this test — the bar's EXISTENCE must not wait on it.
-    watchListApi.mockReturnValue(new Promise(() => {}));
-    renderChat();
-    act(() => setLiveCount(3));
-    expect(screen.getByTestId('background-task-bar-count').textContent).toBe('3 running');
+  it('counts only its own running watch tasks, not the agents the live count also includes', async () => {
+    // Live count 4 = 2 watch tasks + 2 running subagents; the bar lists only the watch tasks.
+    await renderWithTasks(4, [
+      task({ taskId: 'a', description: 'one', startedAt: 1 }),
+      task({ taskId: 'b', description: 'two', startedAt: 2 }),
+    ]);
+    expect(screen.getByTestId('background-task-bar-count').textContent).toBe('2 running');
+  });
+
+  it('has no bar when the live count is only subagents', async () => {
+    await renderWithTasks(2, []);
+    expect(screen.queryByTestId('background-task-bar')).toBeNull();
+  });
+
+  it('does not count ended tasks as running', async () => {
+    await renderWithTasks(2, [
+      task({ taskId: 'a', description: 'live', startedAt: 2 }),
+      task({ taskId: 'b', description: 'done', startedAt: 1, status: 'exited', endedAt: 3 }),
+    ]);
+    expect(screen.queryByTestId('background-task-bar-count')).toBeNull();
+    expect(screen.getByTestId('background-task-bar-description').textContent).toBe('live');
   });
 
   it('draws one row per running task, newest first, under the pill', async () => {
