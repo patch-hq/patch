@@ -9,9 +9,11 @@ import {
   listTurnDirs,
   retireTurn,
   turnDirFor,
+  claudePidFor,
   type Consumed,
   type DurableTurnConfig,
 } from './durableTurn.js';
+import { cancelBashCall } from './cancelCommand.js';
 import type { SleepGuard } from './sleepGuard.js';
 import type { SleepWatch } from './sleepWatch.js';
 import { expandHome } from './expandHome.js';
@@ -8600,6 +8602,50 @@ export class Daemon {
     }
   }
 
+  /** Command text of each chat's Bash calls that have not returned, by callId. */
+  private readonly runningBash = new Map<string, Map<string, string>>();
+
+  private trackRunningBash(event: WireEvent): void {
+    if (event.type === 'chat.tool_call' && event.tool === 'Bash') {
+      const command = (event.args as { command?: unknown } | null)?.command;
+      if (typeof command !== 'string') return;
+      let calls = this.runningBash.get(event.chatId);
+      if (!calls) {
+        calls = new Map();
+        this.runningBash.set(event.chatId, calls);
+      }
+      calls.set(event.callId, command);
+      // Calls cut off by a stop never return a result; keep the map small.
+      if (calls.size > 20) calls.delete(calls.keys().next().value!);
+    } else if (event.type === 'chat.tool_result') {
+      this.runningBash.get(event.chatId)?.delete(event.callId);
+    }
+  }
+
+  /**
+   * Cancel one running Bash call (`chat.tool_cancel_request`): SIGINT to what
+   * that command started, leaving claude and the turn alone. Logged either
+   * way, so "I pressed it and nothing happened" is answerable from the log.
+   */
+  async cancelToolCall(chatId: string, callId: string): Promise<void> {
+    const command = this.runningBash.get(chatId)?.get(callId);
+    const durable = this.opts.durableTurns;
+    const claudePid = durable ? claudePidFor(durable, chatId) : undefined;
+    if (command === undefined || claudePid === undefined) {
+      this.opts.logger.warn(
+        { chatId, callId, knownCall: command !== undefined, claudePid },
+        'tool cancel: nothing to cancel (call not running, or no claude process recorded)',
+      );
+      return;
+    }
+    try {
+      const pids = await cancelBashCall(claudePid, command);
+      this.opts.logger.info({ chatId, callId, pids }, 'tool cancel: interrupted a Bash call');
+    } catch (err) {
+      this.opts.logger.warn({ chatId, callId, err: (err as Error).message }, 'tool cancel: failed');
+    }
+  }
+
   /** Stop a specific branch's running turn, or no-op if it has none. */
   stopBranch(chatId: string, branchId: string): void {
     const key = this.branchKey(chatId, branchId);
@@ -15547,6 +15593,7 @@ export class Daemon {
     this.opts.emit(event);
     if (!o.skipHistory) this.trackToolRun(event);
     this.trackHookToolTally(event);
+    this.trackRunningBash(event);
   }
 
   /**

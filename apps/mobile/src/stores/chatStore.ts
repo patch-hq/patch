@@ -85,6 +85,8 @@ export interface ChatEventEntry {
   tool?: string;
   toolArgs?: unknown;
   toolResult?: unknown;
+  /** The result came back as an error (`chat.tool_result.isError`). */
+  toolIsError?: boolean;
   callId?: string;
   requestId?: string;
   permissionDescription?: string;
@@ -1387,6 +1389,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             kind: 'tool_result',
             tool: event.tool,
             toolResult: event.result,
+            ...(event.isError === true ? { toolIsError: true } : {}),
             callId: event.callId,
             at: Date.now(),
           });
