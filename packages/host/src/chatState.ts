@@ -13,6 +13,7 @@ import type {
   ChatErrorCode,
   ChatStatus,
   EffortLevel,
+  ReminderEvery,
   StatusKind,
   TodoItem,
   TurnOrigin,
@@ -135,6 +136,12 @@ export interface ChatState {
    * no reminder is set. Mirrored to meta.json so it survives a restart.
    */
   reminder: string | null;
+  /** Re-injection cadence for `reminder` (spec/04 § Reminders); `null` = banner only. */
+  reminderEvery: ReminderEvery | null;
+  /** Agent turns since the reminder was last injected (in-memory, reset on set/restart). */
+  reminderTurnsSince: number;
+  /** When the reminder was last injected or set (ms; in-memory, reset on set/restart). */
+  reminderLastAt: number;
   /**
    * Auto-generated one-line "current status" summary (patch/todo.md § Features
    * to add — "Current status"), regenerated after each turn settles and CLEARED
@@ -344,11 +351,9 @@ export interface ChatState {
   /**
    * Running out of the active list (spec/04 § Hidden). Mirrored to meta.json.
    * Orthogonal to `status` like `snoozedUntil`; it survives archiving so a
-   * machine message starting the chat again puts it back where it was.
+   * host message starting the chat again puts it back where it was.
    */
   hidden: boolean;
-  /** Hidden only until the running work completes (spec/04 § Hidden). */
-  hideUntilComplete: boolean;
   /** The chat whose `patch_spawn` created this one, mirrored from `meta.spawnedByChatId`. */
   spawnedByChatId?: string;
   createdAt: number;
@@ -411,6 +416,9 @@ export function chatStateFromMeta(meta: ChatMeta): ChatState {
     goalRefusalStreak: 0,
     goalEvalAwaitingWatches: false,
     reminder: meta.reminder ?? null,
+    reminderEvery: meta.reminderEvery ?? null,
+    reminderTurnsSince: 0,
+    reminderLastAt: Date.now(),
     // Status summary is in-memory only (regenerated per turn), so a rehydrated
     // chat starts with none until its next turn settles.
     // A DECLARED status is persisted, so a rehydrated chat keeps it — that is
@@ -460,7 +468,6 @@ export function chatStateFromMeta(meta: ChatMeta): ChatState {
     snoozedUntil: meta.snoozedUntil ?? null,
     snoozeRecords: meta.snoozeRecords ?? [],
     hidden: meta.hidden ?? false,
-    hideUntilComplete: (meta.hidden ?? false) && (meta.hideUntilComplete ?? false),
     createdAt: meta.createdAt,
     lastUserActivity: meta.lastUserActivity ?? meta.createdAt,
     // Rehydrate the persisted error detail so an errored chat that survived a
