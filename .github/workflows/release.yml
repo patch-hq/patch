@@ -482,6 +482,9 @@ jobs:
         run: |
           set -euo pipefail
           mv dist/host/host-latest-linux-x64.json dist/host/host-latest.json
+          # The host's own installer, which build-host.mjs puts beside its builds
+          # and the app's server hands to `curl …/api/daemon/install.sh | sh`.
+          cp packages/host/installer/curl-install.sh dist/host/install.sh
           pnpm turbo build --filter=@patch/desktop... --output-logs=errors-only
           pnpm --filter @patch/desktop dist
       - name: Check the AppImage starts and offers the first run

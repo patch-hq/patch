@@ -132,7 +132,7 @@ if (firstRun) {
   const origin = new URL(main.url()).origin;
   const configHome = env.XDG_CONFIG_HOME ?? join(homedir(), '.config');
   const { credential } = JSON.parse(
-    readFileSync(join(configHome, 'Patch', 'connection.json'), 'utf8'),
+    readFileSync(join(configHome, '@patch', 'desktop', 'connection.json'), 'utf8'),
   );
   const hosts = await until('this computer online as a host', 180_000, async () => {
     const r = await fetch(`${origin}/api/hosts`, {
