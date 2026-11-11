@@ -6,8 +6,9 @@
 // the release the app itself carries.
 //
 // "This computer" installs a host as a login service, and the service has one
-// label per user account, so on a computer that already runs Patch it would
-// replace that Patch's host. It runs only where PATCH_E2E_THIS_COMPUTER=1 says
+// label per user account, in the account's own home (Electron's home on macOS
+// is the account's, whatever HOME says), so on a computer that already runs
+// Patch it would replace that Patch's host. It runs only where PATCH_E2E_THIS_COMPUTER=1 says
 // the computer is disposable (the CI Mac).
 
 import {
@@ -28,7 +29,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createServer } from 'node:net';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const APP =
@@ -37,6 +38,7 @@ const APP =
 const RESOURCES = resolve(APP, '../../Resources');
 const BARE_PATH = '/usr/bin:/bin:/usr/sbin:/sbin';
 const SHOTS = process.env['PATCH_E2E_SHOTS'];
+const ACCOUNT_HOME = userInfo().homedir;
 
 test.beforeAll(() => {
   if (!existsSync(APP)) {
@@ -82,7 +84,10 @@ async function launch(c: { home: string; userData: string }): Promise<ElectronAp
 function keepLogs(c: { home: string; userData: string }, name: string): void {
   if (!SHOTS) return;
   for (const [from, to] of [
-    [join(c.home, '.patch', 'logs'), `${name}-host-logs`],
+    // Only where this run installed the host: elsewhere it is another Patch's.
+    ...(name === 'this-computer'
+      ? ([[join(ACCOUNT_HOME, '.patch', 'logs'), `${name}-host-logs`]] as const)
+      : []),
     [join(c.userData, 'server', 'logs'), `${name}-server-logs`],
   ] as const) {
     if (existsSync(from)) cpSync(from, join(SHOTS, to), { recursive: true });
@@ -266,13 +271,16 @@ async function thisComputer(computer: { home: string; userData: string }): Promi
   await expect(welcome.getByTestId('welcome-providers')).toBeVisible();
 
   // Claude Code arrives on a computer that had none, by its own installer.
-  const claude = join(computer.home, '.local', 'bin', 'claude');
+  // Electron's home on macOS is the account's own, whatever HOME says, so the
+  // host and the Claude Code it installs live there (another reason this path
+  // only runs on a disposable computer).
+  const claude = join(ACCOUNT_HOME, '.local', 'bin', 'claude');
   await expect.poll(() => existsSync(claude), { timeout: 10 * 60_000 }).toBe(true);
   await expect(welcome.getByTestId('welcome-claude-install-failed')).toHaveCount(0);
   expect(
     execFileSync(claude, ['--version'], {
       encoding: 'utf8',
-      env: { PATH: BARE_PATH, HOME: computer.home },
+      env: { PATH: BARE_PATH, HOME: ACCOUNT_HOME },
     }),
   ).toMatch(/Claude Code/);
 
