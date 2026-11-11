@@ -5995,6 +5995,7 @@ export class Daemon {
     const wake = this.wake.peek(chatId);
     return (
       this.aggregateActivity(chatId) === 'running' ||
+      this.failoverRerunPending.has(chatId) ||
       (state?.goal ?? null) !== null ||
       (wake !== null && wake.every === undefined) ||
       this.hasRunningDelegates(chatId)
