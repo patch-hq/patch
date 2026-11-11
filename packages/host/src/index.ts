@@ -4827,7 +4827,22 @@ async function startHost(
   const serverApiClient = new ServerApiClient({ emit, isLinkOnline: () => linkOnline });
   const serverEventsClient = new ServerEventsClient({ emit, isLinkOnline: () => linkOnline });
   // spec/04 § Message queueing — the server-run queue's tool-boundary pull.
-  const queuePull = new QueuePullClient({ emit, isLinkOnline: () => linkOnline });
+  const queuePull = new QueuePullClient({
+    emit,
+    isLinkOnline: () => linkOnline,
+    // The server's answer came after the pull timed out: it has let go of these
+    // messages, so they join the host's own queue like any other message.
+    onLate: (chatId, items) => {
+      for (const item of items) {
+        daemon.sendInput(chatInputToSendOptions(item)).catch((err) => {
+          logger.error(
+            { chatId, localId: item.localId, err },
+            'late queue pull: could not deliver',
+          );
+        });
+      }
+    },
+  });
   pullQueuedFromServer = (chatId) => queuePull.pull(chatId);
 
   // Dial OUT to the patch-server WebSocket AS EARLY as boot allows (spec/12
