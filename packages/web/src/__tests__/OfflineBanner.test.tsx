@@ -4,6 +4,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { OfflineBanner } from '../components/OfflineBanner.js';
+import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 
@@ -68,6 +69,16 @@ describe('OfflineBanner', () => {
     usePresenceStore.getState().setRestarting({ version: '1.2.4', at: Date.now() });
     render(<OfflineBanner />);
     expect(screen.getByTestId('offline-banner')).toHaveTextContent('Restarting into 1.2.4');
+  });
+
+  it('says plain Restarting, without the version, when Update automatically is off', () => {
+    const prefs = usePreferencesStore.getState().preferences;
+    usePreferencesStore.setState({ preferences: { ...prefs, autoUpdateHosts: false } });
+    usePresenceStore.getState().setConnection('reconnecting');
+    usePresenceStore.getState().setRestarting({ version: '1.2.4', at: Date.now() });
+    render(<OfflineBanner />);
+    expect(screen.getByTestId('offline-banner')).toHaveTextContent(/^Restarting\s*Diagnose$/);
+    usePreferencesStore.setState({ preferences: { ...prefs, autoUpdateHosts: true } });
   });
 
   it('says plain Restarting when the notice carries no version', () => {
