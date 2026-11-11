@@ -125,7 +125,7 @@ test.describe('Settings — desktop', () => {
   test.use({ viewport: { width: 1290, height: 900 } });
 
   test.beforeEach(async ({ page }) => {
-    await stubSettingsApi(page);
+    await stubSettingsApi(page, { preferences: { experimentalFeatures: true } });
   });
 
   test('/settings shows Usage beside the nav', async ({ page }) => {
@@ -165,6 +165,7 @@ test.describe('Settings — desktop', () => {
       'Notifications',
       'Devices',
       'Shortcuts',
+      'Experimental features',
       'Updates',
       'Bug reports',
       'Account',
@@ -205,7 +206,7 @@ test.describe('Settings — phone', () => {
   test.use(PIXEL_7);
 
   test.beforeEach(async ({ page }) => {
-    await stubSettingsApi(page);
+    await stubSettingsApi(page, { preferences: { experimentalFeatures: true } });
   });
 
   async function noSidewaysScroll(page: Page, what: string): Promise<void> {

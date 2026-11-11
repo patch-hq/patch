@@ -15,6 +15,7 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { useBatchStore } from '../stores/batchStore.js';
+import { useExperimentalFeatures } from '../stores/preferencesStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import {
@@ -30,6 +31,7 @@ export function SidebarViewMenu(): JSX.Element {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
+  const experimental = useExperimentalFeatures();
   const mode = useBatchStore((s) => s.mode);
   const setMode = useBatchStore((s) => s.setMode);
   // spec/14 § Batch mode: "the count on the `Batch` option reflects the
@@ -42,7 +44,7 @@ export function SidebarViewMenu(): JSX.Element {
   const stateFilter = useUiStore((s) => s.stateFilter);
   const setStateFilter = useUiStore((s) => s.setStateFilter);
 
-  const view = sidebarViewFrom(mode === 'batch', attentionOnly, stateFilter);
+  const view = sidebarViewFrom(mode === 'batch' && experimental, attentionOnly, stateFilter);
 
   useDismissOnClickOff(open, [menuRef, triggerRef], () => setOpen(false));
 
@@ -87,29 +89,34 @@ export function SidebarViewMenu(): JSX.Element {
           aria-label="Sidebar view"
           ref={menuRef}
         >
-          {SIDEBAR_VIEW_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              role="option"
-              aria-selected={opt.value === view}
-              className={`sidebar-view-option ${opt.value === view ? 'selected' : ''}`}
-              data-testid={`sidebar-view-option-${opt.value}`}
-              onClick={() => choose(opt.value)}
-            >
-              <span className="sidebar-view-option-label">{opt.label}</span>
-              {opt.value === 'batch' && memberCount > 0 ? (
-                <span className="sidebar-view-option-count" data-testid="sidebar-view-batch-count">
-                  {memberCount}
-                </span>
-              ) : null}
-              {opt.value === view ? (
-                <span className="sidebar-view-option-check" aria-hidden>
-                  ✓
-                </span>
-              ) : null}
-            </button>
-          ))}
+          {SIDEBAR_VIEW_OPTIONS.filter((opt) => experimental || opt.value !== 'batch').map(
+            (opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                role="option"
+                aria-selected={opt.value === view}
+                className={`sidebar-view-option ${opt.value === view ? 'selected' : ''}`}
+                data-testid={`sidebar-view-option-${opt.value}`}
+                onClick={() => choose(opt.value)}
+              >
+                <span className="sidebar-view-option-label">{opt.label}</span>
+                {opt.value === 'batch' && memberCount > 0 ? (
+                  <span
+                    className="sidebar-view-option-count"
+                    data-testid="sidebar-view-batch-count"
+                  >
+                    {memberCount}
+                  </span>
+                ) : null}
+                {opt.value === view ? (
+                  <span className="sidebar-view-option-check" aria-hidden>
+                    ✓
+                  </span>
+                ) : null}
+              </button>
+            ),
+          )}
         </div>
       ) : null}
     </div>
