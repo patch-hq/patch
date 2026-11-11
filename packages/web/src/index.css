@@ -5005,7 +5005,7 @@ button.nav-row {
 }
 .tool-cancel {
   flex: none;
-  font-size: 13px;
+  font-size: var(--text-min);
   color: var(--danger);
   background: var(--danger-tint);
   border-radius: 6px;
@@ -5014,13 +5014,13 @@ button.nav-row {
 }
 .tool-cancelling {
   flex: none;
-  font-size: 13px;
+  font-size: var(--text-min);
   color: var(--ink-3);
 }
 .tool-cancelled-chip {
   flex: none;
   margin-left: auto;
-  font-size: 13px;
+  font-size: var(--text-min);
   color: var(--danger);
   background: var(--danger-tint);
   border-radius: 999px;
