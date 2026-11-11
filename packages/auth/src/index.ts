@@ -110,3 +110,17 @@ export {
   CredentialMissingExpError,
   CredentialFutureIatError,
 } from './errors.js';
+
+export {
+  startClaudeSignIn,
+  parseClaudeSignInCode,
+  exchangeClaudeSignInCode,
+  ClaudeSignInError,
+  CLAUDE_SIGNIN_AUTHORIZE_URL,
+  CLAUDE_SIGNIN_REDIRECT_URL,
+  CLAUDE_SIGNIN_TOKEN_URL,
+  CLAUDE_SIGNIN_SCOPE,
+  CLAUDE_SIGNIN_TOKEN_SECONDS,
+  type ClaudeSignInStart,
+  type ExchangeClaudeCodeOptions,
+} from './claude-signin.js';

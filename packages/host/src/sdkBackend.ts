@@ -1297,6 +1297,10 @@ function inferenceProfileOptions(opts: SdkRunOptions): Partial<Options> {
  * it to fall back to and nothing here should pretend otherwise.
  */
 let claudeExecutable: string | undefined | null = null;
+/** Resolve again on the next turn: Claude Code has just been installed or moved. */
+export function forgetClaudeExecutable(): void {
+  claudeExecutable = null;
+}
 function claudeExecutablePath(): string | undefined {
   if (claudeExecutable === null) {
     claudeExecutable = resolveClaudeExecutable({

@@ -3,7 +3,14 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { appUrl, originOf, readSaved, writeSaved, type SavedConnection } from './connection.js';
+import {
+  appUrl,
+  welcomeUrl,
+  originOf,
+  readSaved,
+  writeSaved,
+  type SavedConnection,
+} from './connection.js';
 
 const dir = () => mkdtempSync(join(tmpdir(), 'patch-conn-'));
 const RELAY = { url: 'wss://relay.example.com', channel: 'c', serverKey: 'k' };
@@ -52,4 +59,13 @@ test('the app url carries the credential in the fragment, which is never sent an
   const url = appUrl('https://patch.example.com', 'a.b-c_d');
   assert.equal(url, 'https://patch.example.com/app/#credential=a.b-c_d');
   assert.equal(new URL(url).search, '');
+});
+
+test('the welcome steps open on the same server, credential still in the fragment', () => {
+  const url = welcomeUrl(appUrl('http://127.0.0.1:4100', 'a.b.c'), 'local');
+  assert.equal(url, 'http://127.0.0.1:4100/app/welcome?machine=local#credential=a.b.c');
+  assert.equal(
+    welcomeUrl(appUrl('https://p.example.com', 'x.y.z'), 'relay'),
+    'https://p.example.com/app/welcome?machine=server#credential=x.y.z',
+  );
 });

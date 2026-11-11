@@ -1,8 +1,6 @@
-import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
-const run = promisify(execFile);
+import { installCodexFromRegistry } from './codexInstall.js';
 /** An install lock older than this was left by a process that died mid-install. */
 const STALE_LOCK_MS = 10 * 60_000;
 const LOCK_WAIT_MS = 5 * 60_000;
@@ -12,8 +10,8 @@ export class CodexRuntime {
   private installing: Promise<string> | undefined;
   constructor(
     private root: string,
-    /** Installs the pinned package into `root`; npm unless a test stands in. */
-    private installPackage: (root: string) => Promise<void> = npmInstall,
+    /** Installs the pinned package into `root`; from the npm registry unless a test stands in. */
+    private installPackage: (root: string) => Promise<void> = registryInstall,
   ) {}
   get version(): string | null {
     const manifest = join(this.root, 'node_modules/@openai/codex/package.json');
@@ -83,10 +81,7 @@ export class CodexRuntime {
   }
 }
 
-async function npmInstall(root: string): Promise<void> {
-  await run(
-    'npm',
-    ['install', '--prefix', root, '--no-audit', '--no-fund', `@openai/codex@${CODEX_VERSION}`],
-    { timeout: 180000, maxBuffer: 1024 * 1024 },
-  );
+/** No npm needed: a host with nothing installed has none (codexInstall.ts). */
+function registryInstall(root: string): Promise<void> {
+  return installCodexFromRegistry(root, CODEX_VERSION);
 }

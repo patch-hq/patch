@@ -78,7 +78,7 @@ Provider accounts have NO host tie. Whether a chat can run — the composer, the
 Surface in Settings (`design/web-lo-fi-settings.html` § Claude subscription), once per backend for the whole account — the accounts are shared settings, held by the server and sent to every host (`01-server.md` § Settings):
 
 - Each stored account gets its own row: connected state shows the account's label and account email (from `~/.claude.json` `oauthAccount.emailAddress` at the time it connected) plus a `Sign out` action; signed-out shows a `Sign in` action. The row's actions sit behind a ⋯ that opens a small panel beside the row — it floats over the rows below rather than pushing them — and each action that is not self-evident carries one line saying what it does: `Sign in again` replaces the stored login with a fresh token; `Sign out` keeps the row and forgets the login; `Remove` forgets the account everywhere. No row names a host: an account is every host's, and a host is only ever the reader of its usage.
-- An `Add account` action under the rows starts the same paste-a-token flow as sign-in, but always creates a new row rather than replacing one. There is no control to mark an account "active" or "default"; the sequence's order is the only ranking.
+- A `Sign in with Claude` action under the rows starts the browser sign-in (§ Signing in to Claude from a surface) and always creates a new row rather than replacing one; `Paste a token` beside it does the same from a `claude setup-token` token. There is no control to mark an account "active" or "default"; the sequence's order is the only ranking.
 - The `adopt` call (take the backend's own login on a host and add it as an account) stays as a REST and CLI operation, but Settings does not offer it per host: a host that holds accounts the server does not sends them on its first connect (`01-server.md` § Settings), so there is nothing for a person to pick a host for.
 - EVERY PROVIDER IS ONE ENTRY IN A LIST, not a branch in the page. The web page keeps a registry (`providers.tsx`) in which each provider declares its name, which shared strategy setting ranks its accounts, which limit windows it reports and in what order, where its extra-usage add-on is managed, whether a login can be replaced by pasting a token, and the control that adds an account. The page walks the list and draws every entry the same way — strategy row, ranked accounts, add control — so a new provider (a local model server, say) is a new entry and never a change to the page.
 - A strategy control per backend, over the rows (§ above).
@@ -191,6 +191,14 @@ The server owns backend credentials, as an ordered list of named accounts per ba
 - Connect sets an account's credential: a pasted token, or a host's own login.
 - Add account creates a new account entry from a pasted token, leaving every existing account untouched.
 - The server alone renews provider credentials, serializing renewal and persisting each rotated refresh token before publishing new access credentials. Hosts never receive refresh tokens. Codex uses externally managed authentication. Signing in once makes the provider available on every linked host, including hosts that reconnect later. Renewal failures appear in Settings.
+
+### Signing in to Claude from a surface
+
+A Claude account can be connected from any surface with no terminal and nothing installed. The surface asks the server to start a sign-in; the server answers with a claude.ai address and keeps the sign-in's PKCE secret, which never reaches a surface. The surface opens the address in the person's own browser, they sign in to claude.ai, and the page shows a code, which they paste back into the surface. The server exchanges it for the same year-long, inference-only token `claude setup-token` produces (same client, scope, redirect and lifetime), then stores it exactly as a pasted token: validated, refused when it is the same organisation as another row, and sent to every host.
+
+- A started sign-in waits 15 minutes for its code and can be finished once. An expired or finished one is refused and is started again.
+- A code carrying another sign-in's state is refused without calling Claude. A code Claude refuses is reported in Claude's words; Claude being unreachable is reported as that, and the code can be tried again.
+- Add account and a row's Sign in / Sign in again use this flow. Pasting a `claude setup-token` token remains available beside it.
 
 ### Validating a pasted token
 

@@ -16,6 +16,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Sidebar } from './components/Sidebar.js';
 import { MiniSidebar } from './components/MiniSidebar.js';
 import { SidebarWindowRoute } from './routes/SidebarWindowRoute.js';
+import { WelcomeRoute } from './routes/WelcomeRoute.js';
 import { SidebarExpandButton } from './components/SidebarExpandButton.js';
 import { useDiscardUnsentNewChats } from './lib/unsentNewChat.js';
 import { SidebarBackdrop } from './components/SidebarBackdrop.js';
@@ -4099,6 +4100,21 @@ function Harness(): JSX.Element {
   // instead of nesting it in the three-column shell. Rendering it inside the
   // shell would draw a second, docked Sidebar beside it and measure nothing
   // real.
+  // `?route=/welcome…` — also a bare route in AppShell: the setup steps after
+  // the desktop app's first run (spec/05 § Desktop first run).
+  if (initialRoute.startsWith('/welcome')) {
+    return (
+      <div className="app-shell bare" data-testid="app-shell-bare" style={{ height: '100vh' }}>
+        <MemoryRouter initialEntries={[initialRoute]}>
+          <Routes>
+            <Route path="/welcome" element={<WelcomeRoute />} />
+            <Route path="/" element={<div data-testid="welcome-finished" />} />
+          </Routes>
+          <PromptModal />
+        </MemoryRouter>
+      </div>
+    );
+  }
   if (initialRoute === '/sidebar-window') {
     return (
       <div className="app-shell bare" data-testid="app-shell-bare" style={{ height: '100vh' }}>

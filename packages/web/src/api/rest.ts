@@ -1010,6 +1010,18 @@ export const api = {
     backendId: SharedBackendId,
     body: { token?: string; apiKey?: string; label?: string },
   ) => request<SharedState>(`/api/accounts/${backendId}`, { method: 'POST', body }),
+  /** Start signing in to Claude in the browser (spec/10 § Signing in to Claude). */
+  claudeSignInStart: () =>
+    request<{ signInId: string; url: string }>('/api/accounts/claude-code/signin', {
+      method: 'POST',
+    }),
+  /** Finish it with the code claude.ai showed; `accountId` signs that row in again. */
+  claudeSignInComplete: (body: {
+    signInId: string;
+    code: string;
+    label?: string;
+    accountId?: string;
+  }) => request<SharedState>('/api/accounts/claude-code/signin/complete', { method: 'POST', body }),
   updateAccount: (
     backendId: SharedBackendId,
     accountId: string,
