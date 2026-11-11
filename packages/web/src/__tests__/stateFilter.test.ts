@@ -141,8 +141,17 @@ describe('matchesStateFilter', () => {
       const filters = (['failed', 'working', 'waiting', 'done'] as const).filter((f) =>
         matchesStateFilter(r, f),
       );
-      expect(filters.length, `${shown} must match exactly one state filter`).toBe(1);
+      // Waiting rows are the one overlap: they also count as Ready.
+      const expected = shown === 'permission' ? 2 : 1;
+      expect(filters.length, `${shown} must match ${expected} state filter(s)`).toBe(expected);
     }
+  });
+
+  it('`done` (Ready) includes chats waiting on the user', () => {
+    expect(matchesStateFilter(row({ activity: 'awaiting-permission' }), 'done')).toBe(true);
+    expect(matchesStateFilter(row({ statusKind: 'question', statusDeclared: true }), 'done')).toBe(
+      true,
+    );
   });
 });
 
