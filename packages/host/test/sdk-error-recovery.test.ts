@@ -277,4 +277,27 @@ describe('a session the SDK aborted unasked is re-sent, not laddered', () => {
     expect(daemon.chatState.get(chatId)?.turnRetrying).toBe(false);
     daemon.shutdown();
   });
+
+  it('the fresh restart carries on the task in progress, not just the latest message', async () => {
+    const prompts: string[] = [];
+    let calls = 0;
+    const backend: SdkBackend = {
+      async *run(opts: { prompt: unknown }) {
+        calls++;
+        prompts.push(typeof opts.prompt === 'string' ? opts.prompt : JSON.stringify(opts.prompt));
+        if (calls <= 2) throw abortErr();
+        yield { type: 'assistant', content: 'carrying on' } as SdkEnvelope;
+        yield { type: 'result', sessionId: 's-fresh' } as SdkEnvelope;
+      },
+    } as SdkBackend;
+    const { daemon, folder } = makeHost(backend, 'abort3');
+    await daemon.spawnChat({ folder, prompt: 'latest question' });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(calls).toBe(3);
+    // The resumed re-send repeats the prompt; the fresh one tells the model to continue.
+    expect(prompts[1]).not.toContain('carry on any unfinished task');
+    expect(prompts[2]).toContain('carry on any unfinished task');
+    expect(prompts[2]).toContain('latest question');
+    daemon.shutdown();
+  });
 });
