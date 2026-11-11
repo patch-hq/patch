@@ -4,6 +4,7 @@
 // — "Reconnecting…" alone says nothing the user can act on or report.
 
 import type { JSX } from 'react';
+import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 
@@ -12,12 +13,13 @@ export function OfflineBanner(): JSX.Element | null {
   const setDiagnosticsOpen = useUiStore((s) => s.setDiagnosticsOpen);
   const everConnected = usePresenceStore((s) => s.everConnected);
   const restarting = usePresenceStore((s) => s.restarting);
+  const autoUpdate = usePreferencesStore((s) => s.preferences.autoUpdateHosts);
   if (connection === 'connected' || !everConnected) return null;
   return (
     <div className="offline-banner" data-testid="offline-banner" role="status">
       <span>
         {restarting
-          ? `Restarting${restarting.version ? ` into ${restarting.version}` : ''}`
+          ? `Restarting${autoUpdate && restarting.version ? ` into ${restarting.version}` : ''}`
           : 'Reconnecting…'}
       </span>
       <button

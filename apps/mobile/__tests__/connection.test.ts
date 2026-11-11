@@ -51,6 +51,11 @@ describe('offlineBannerText — no offline flash on load', () => {
     expect(offlineBannerText('reconnecting', false, false, { version: null })).toBe('Restarting');
     expect(offlineBannerText('connected', false, false, { version: '1.2.4' })).toBeNull();
   });
+  it('drops the version when Update automatically is off', () => {
+    expect(offlineBannerText('reconnecting', false, false, { version: '1.2.4' }, false)).toBe(
+      'Restarting',
+    );
+  });
   it('renders nothing while the outage is still inside its grace period', () => {
     expect(offlineBannerText('reconnecting', false)).toBeNull();
     expect(offlineBannerText('offline', false)).toBeNull();

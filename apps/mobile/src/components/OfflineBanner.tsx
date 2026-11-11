@@ -7,6 +7,7 @@
 import React from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { usePresenceStore } from '../stores/presenceStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import { useUiStore } from '../stores/uiStore';
 import { offlineBannerText } from '../lib/connection';
 import { radii, space, typography, useTheme } from '../lib/theme';
@@ -18,7 +19,9 @@ export function OfflineBanner(): React.ReactElement | null {
   const serverLost = usePresenceStore((s) => s.serverLost);
   const setDiagnosticsOpen = useUiStore((s) => s.setDiagnosticsOpen);
   const restarting = usePresenceStore((s) => s.restarting);
-  const label = offlineBannerText(conn, outageVisible, serverLost, restarting);
+  // "Update automatically" off: the restart is not into a new version, so say only Restarting.
+  const autoUpdate = useSettingsStore((s) => s.data?.preferences.autoUpdateHosts !== false);
+  const label = offlineBannerText(conn, outageVisible, serverLost, restarting, autoUpdate);
   if (label === null) return null;
   return (
     <View
