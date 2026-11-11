@@ -68,6 +68,8 @@ jobs:
           sudo swapon /mnt/ci-extra.swap
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
+      # The runner's apt mirrors intermittently fail DNS; retry instead of failing the shard.
+      - run: echo 'Acquire::Retries "5";' | sudo tee /etc/apt/apt.conf.d/80-retries
       - run: pnpm --filter @patch/web exec playwright install --with-deps chromium
       # The host's browser tests drive a headed Chromium on Xvfb, and its Codex
       # tests keep credentials in the native keyring (Secret Service over D-Bus).
