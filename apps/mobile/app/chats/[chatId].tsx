@@ -63,6 +63,8 @@ import {
 import { apiUrl, getRoute } from '../../src/config';
 import { loadTranscript, dropTranscript, setBranch } from '../../src/lib/transcriptCache';
 import { api } from '../../src/api/rest';
+import { editRoute } from '../../src/lib/hostFiles';
+import { resolveSkillEditTarget } from '../../src/lib/jobEditor';
 import { sendQuestionActivity } from '../../src/lib/questionActivity';
 import {
   isLocalIdSettled,
@@ -1615,6 +1617,99 @@ function ToolElapsed({ since }: { since: number }): React.ReactElement {
   );
 }
 
+/**
+ * The row for a `Skill` tool call: tapping it opens the skill's SKILL.md in the
+ * file editor. NO FALLBACK: a skill the host can't point at, or a failed lookup,
+ * says why on the row rather than rendering a dead link.
+ */
+function SkillToolCallItem({
+  chatId,
+  skill,
+  entry,
+  result,
+}: {
+  chatId: string;
+  skill: string;
+  entry: ChatEventEntry;
+  result?: ChatEventEntry;
+}): React.ReactElement {
+  const colors = useTheme();
+  const router = useRouter();
+  const folder = useChatStore((s) => s.chats[chatId]?.folder ?? '');
+  const hostId = useChatStore((s) => s.chats[chatId]?.hostId ?? '');
+  const [paths, setPaths] = React.useState<Record<string, string> | undefined>(undefined);
+  const [error, setError] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (folder.trim() === '' || hostId.trim() === '') return;
+    let live = true;
+    api
+      .skills(folder, hostId)
+      .then((r) => {
+        if (live) setPaths(r.paths);
+      })
+      .catch((e: unknown) => {
+        if (live) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      live = false;
+    };
+  }, [folder, hostId]);
+  const phrase = toolCallSummary(entry.tool, entry.toolArgs);
+  const summary = result ? `${phrase} →` : phrase;
+  const target = resolveSkillEditTarget({ skill, paths, hostId });
+  // Until the lookup answers there is neither a link nor a reason to show.
+  const pending = paths === undefined && error === null && hostId.trim() !== '';
+  const reason =
+    error !== null
+      ? `couldn't look up skill: ${error}`
+      : target && 'reason' in target
+        ? target.reason
+        : null;
+  const link = target && 'path' in target && error === null ? target : null;
+  return (
+    <View
+      style={{
+        backgroundColor: colors.paperRaised,
+        paddingHorizontal: space.md,
+        paddingVertical: space.sm,
+        borderRadius: radii.md,
+        borderWidth: 1,
+        borderColor: colors.lineSoft,
+        marginBottom: space.sm,
+      }}
+    >
+      {link ? (
+        <Pressable
+          testID="tool-call-skill-link"
+          onPress={() => router.push(editRoute(link.hostId, link.path))}
+          accessibilityLabel={`Open skill ${skill}`}
+          style={{ flexDirection: 'row', alignItems: 'center' }}
+        >
+          <ExternalLink size={13} color={colors.leaf} />
+          <Text
+            style={{ ...typography.meta, color: colors.leaf, marginLeft: space.xs, flexShrink: 1 }}
+            numberOfLines={1}
+          >
+            {summary}
+          </Text>
+        </Pressable>
+      ) : (
+        <Text style={{ ...typography.meta, color: colors.ink2 }} numberOfLines={1}>
+          {summary}
+        </Text>
+      )}
+      {!pending && reason ? (
+        <Text
+          testID="tool-call-skill-unavailable"
+          style={{ ...typography.meta, color: colors.ink3, marginTop: space.xs }}
+        >
+          {reason}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 function ToolCallItem({
   chatId,
   entry,
@@ -1657,6 +1752,14 @@ function ToolCallItem({
       ? parseAskHuman(entry.toolArgs)
       : null;
   if (askHuman) return <AskHumanCard task={askHuman.task} why={askHuman.why} />;
+  // A `Skill` call names the skill and opens its SKILL.md on tap (mirrors web).
+  const skillName =
+    entry.tool === 'Skill' && entry.toolArgs && typeof entry.toolArgs === 'object'
+      ? (entry.toolArgs as Record<string, unknown>)['skill']
+      : undefined;
+  if (typeof skillName === 'string' && skillName !== '') {
+    return <SkillToolCallItem chatId={chatId} skill={skillName} entry={entry} result={result} />;
+  }
   const colors = useTheme();
   const [expanded, setExpanded] = React.useState(false);
   const diff = diffFromToolCall(entry.tool, entry.toolArgs);
