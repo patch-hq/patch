@@ -611,6 +611,15 @@ function RegularSidebar({
           <ChatSearchResults
             query={activeSearch}
             activeChatId={activeChatId}
+            {...(hiddenOpen
+              ? { section: 'hidden' as const }
+              : archivedOpen
+                ? { section: 'archived' as const }
+                : snoozedOpen
+                  ? { section: 'snoozed' as const }
+                  : automationsOpen
+                    ? { automations: true }
+                    : {})}
             renderRow={(row, hit) => (
               <ChatRowView
                 key={row.chatId}

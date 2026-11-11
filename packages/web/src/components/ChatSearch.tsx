@@ -12,7 +12,12 @@
 import type { JSX } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { OpenableLink } from './OpenableLink.js';
-import type { ChatSearchHit, ChatSearchHostResult } from '@patch/wire';
+import {
+  compareChatSearchHits,
+  type ChatSearchHit,
+  type ChatSearchHostResult,
+  type ChatSearchResponse,
+} from '@patch/wire';
 import { api } from '../api/rest.js';
 import type { ChatRow } from '../stores/chatStore.js';
 import { useChatStore } from '../stores/chatStore.js';
@@ -43,6 +48,17 @@ const PAGE = 20;
  */
 export function ChatSearchField(): JSX.Element {
   const query = useUiStore((s) => s.searchQuery);
+  const view = useUiStore((s) =>
+    s.hiddenOpen
+      ? 'hidden'
+      : s.archivedOpen
+        ? 'archived'
+        : s.snoozedOpen
+          ? 'snoozed'
+          : s.automationsOpen
+            ? 'automations'
+            : null,
+  );
   const setQuery = useUiStore((s) => s.setSearchQuery);
   return (
     <div className="chat-search-wrap">
@@ -52,8 +68,8 @@ export function ChatSearchField(): JSX.Element {
         data-testid="chat-search"
         data-search-input
         data-search-global
-        placeholder="Search chats…"
-        aria-label="Search chats"
+        placeholder={view === null ? 'Search chats…' : `Search ${view}`}
+        aria-label={view === null ? 'Search chats' : `Search ${view}`}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => {
@@ -77,19 +93,22 @@ export function ChatSearchField(): JSX.Element {
   );
 }
 
-interface Loaded {
-  query: string;
-  fullText: boolean;
-  includeArchived: boolean;
-  includeHidden: boolean;
-  hits: ChatSearchHit[];
-  hosts: ChatSearchHostResult[];
-  nextOffset: number | null;
-}
+/** One machine's part of a search: still out, answered, or failed. */
+type HostRun =
+  | { state: 'searching' }
+  | {
+      state: 'done';
+      hits: ChatSearchHit[];
+      statuses: ChatSearchHostResult[];
+      nextOffset: number | null;
+    }
+  | { state: 'failed'; message: string };
 
-interface Failure {
-  query: string;
-  message: string;
+/** A search is one request per machine, so each reports on its own. */
+interface Run {
+  key: string;
+  /** hostId → progress; `''` is the single unscoped request used before any host is known. */
+  hosts: Record<string, HostRun>;
 }
 
 function messageOf(e: unknown): string {
@@ -105,11 +124,17 @@ function appendHits(prev: ChatSearchHit[], next: ChatSearchHit[]): ChatSearchHit
 /**
  * The results band. `query` is already trimmed and at least
  * `CHAT_SEARCH_MIN_QUERY` long — the caller decides when search is on.
+ *
+ * Search always covers everything — every machine, every section, archived and
+ * hidden included. It is narrowed only by a bottom view being open (`section`,
+ * or `automations`). Each machine is asked separately so its own progress
+ * shows, and "no results" is said only once every machine has answered.
  */
 export function ChatSearchResults({
   query,
   activeChatId,
   section,
+  automations,
   renderRow,
 }: {
   query: string;
@@ -120,151 +145,177 @@ export function ChatSearchResults({
    */
   renderRow?: (row: ChatRow, hit: ChatSearchHit) => JSX.Element;
   activeChatId: string | null;
-  /** Keep only hits living in this chat-list section (the Lifecycle pages). */
+  /** Keep only hits living in this chat-list section (a bottom view is open). */
   section?: ChatSearchHit['section'];
+  /** Keep only chats a job spawned (the Automations view is open). */
+  automations?: boolean;
 }): JSX.Element {
   const fullText = useUiStore((s) => s.searchFullText);
   const setFullText = useUiStore((s) => s.setSearchFullText);
-  const archivedBox = useUiStore((s) => s.searchIncludeArchived);
-  const setArchivedBox = useUiStore((s) => s.setSearchIncludeArchived);
-  // The Archived page is searching archived chats by definition; elsewhere the
-  // box decides.
-  const includeArchived = section === 'archived' || archivedBox;
-  const hiddenBox = useUiStore((s) => s.searchIncludeHidden);
-  const setHiddenBox = useUiStore((s) => s.setSearchIncludeHidden);
-  // Likewise the Hidden page searches hidden chats by definition.
-  const includeHidden = section === 'hidden' || hiddenBox;
-  const [loaded, setLoaded] = useState<Loaded | null>(null);
-  const [failure, setFailure] = useState<Failure | null>(null);
-  // The query a "More results" fetch is running for — keyed by query so a new
-  // query never inherits a busy button.
-  const [moreFor, setMoreFor] = useState<string | null>(null);
+  const presence = usePresenceStore((s) => s.hosts);
+  const hostIdsKey = Object.keys(presence).sort().join(',');
+  const targets = useMemo(() => (hostIdsKey === '' ? [''] : hostIdsKey.split(',')), [hostIdsKey]);
+  const key = `${query}\u0000${fullText}\u0000${hostIdsKey}`;
+  const [run, setRun] = useState<Run | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   // Bumped for every query; a response only lands if it still matches.
   const genRef = useRef(0);
 
+  const ask = (
+    hostId: string,
+    opts: { offset?: number; signal?: AbortSignal },
+  ): Promise<ChatSearchResponse> =>
+    api.searchChats(query, {
+      limit: PAGE,
+      fullText,
+      includeArchived: true,
+      includeHidden: true,
+      ...(hostId !== '' ? { hostId } : {}),
+      ...(opts.offset !== undefined ? { offset: opts.offset } : {}),
+      ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
+    });
+
   useEffect(() => {
     const gen = ++genRef.current;
-    // A "More results" page still in flight belongs to the search this replaces;
-    // its answer will be discarded, so its busy state must not outlive it.
-    setMoreFor(null);
+    setLoadingMore(false);
+    setRun({
+      key,
+      hosts: Object.fromEntries(targets.map((t) => [t, { state: 'searching' } as HostRun])),
+    });
     const ctrl = new AbortController();
     const timer = setTimeout(() => {
-      setFailure(null);
-      api
-        .searchChats(query, {
-          limit: PAGE,
-          fullText,
-          includeArchived,
-          includeHidden,
-          signal: ctrl.signal,
-        })
-        .then(
+      for (const t of targets) {
+        ask(t, { signal: ctrl.signal }).then(
           (r) => {
             if (genRef.current !== gen) return;
-            setLoaded({
-              query,
-              fullText,
-              includeArchived,
-              includeHidden,
-              hits: r.hits,
-              hosts: r.hosts,
-              nextOffset: r.nextOffset,
-            });
+            setRun((prev) =>
+              prev === null || prev.key !== key
+                ? prev
+                : {
+                    ...prev,
+                    hosts: {
+                      ...prev.hosts,
+                      [t]: {
+                        state: 'done',
+                        hits: r.hits,
+                        statuses: r.hosts,
+                        nextOffset: r.nextOffset,
+                      },
+                    },
+                  },
+            );
           },
           (e: unknown) => {
             if (genRef.current !== gen) return;
-            setFailure({ query, message: messageOf(e) });
+            setRun((prev) =>
+              prev === null || prev.key !== key
+                ? prev
+                : {
+                    ...prev,
+                    hosts: { ...prev.hosts, [t]: { state: 'failed', message: messageOf(e) } },
+                  },
+            );
           },
         );
+      }
     }, SEARCH_DEBOUNCE_MS);
     return () => {
       clearTimeout(timer);
       ctrl.abort();
     };
-  }, [query, fullText, includeArchived, includeHidden]);
+    // `ask` is rebuilt every render; the key already captures what it reads.
+  }, [key]);
 
-  // A result set is for one query AND one scope; flipping the box orphans it.
-  const settled =
-    loaded !== null &&
-    loaded.query === query &&
-    loaded.fullText === fullText &&
-    loaded.includeArchived === includeArchived &&
-    loaded.includeHidden === includeHidden
-      ? loaded
-      : null;
-  const failed = failure !== null && failure.query === query ? failure : null;
+  // A run belongs to one query AND one scope; anything else is not shown.
+  const current = run !== null && run.key === key ? run : null;
+  const entries = current === null ? [] : Object.entries(current.hosts);
+  const searching = current === null || entries.some(([, h]) => h.state === 'searching');
 
   function loadMore(): void {
-    if (settled === null || settled.nextOffset === null) return;
+    if (current === null) return;
     const gen = genRef.current;
-    const q = settled.query;
-    setMoreFor(q);
-    api
-      .searchChats(q, {
-        limit: PAGE,
-        offset: settled.nextOffset,
-        fullText,
-        includeArchived,
-        includeHidden,
-      })
-      .then(
+    const more = entries.flatMap(([t, h]) =>
+      h.state === 'done' && h.nextOffset !== null ? [[t, h.nextOffset] as const] : [],
+    );
+    if (more.length === 0) return;
+    setLoadingMore(true);
+    let left = more.length;
+    for (const [t, offset] of more) {
+      ask(t, { offset }).then(
         (r) => {
           if (genRef.current !== gen) return;
-          setLoaded((prev) =>
-            prev !== null && prev.query === q
-              ? {
-                  query: q,
-                  fullText,
-                  includeArchived,
-                  includeHidden,
-                  hits: appendHits(prev.hits, r.hits),
-                  hosts: r.hosts,
-                  nextOffset: r.nextOffset,
-                }
-              : prev,
-          );
-          setMoreFor(null);
+          setRun((prev) => {
+            const cur = prev?.hosts[t];
+            return prev === null || prev.key !== key || cur?.state !== 'done'
+              ? prev
+              : {
+                  ...prev,
+                  hosts: {
+                    ...prev.hosts,
+                    [t]: {
+                      state: 'done',
+                      hits: appendHits(cur.hits, r.hits),
+                      statuses: r.hosts,
+                      nextOffset: r.nextOffset,
+                    },
+                  },
+                };
+          });
+          if (--left === 0) setLoadingMore(false);
         },
         (e: unknown) => {
           if (genRef.current !== gen) return;
-          setFailure({ query: q, message: messageOf(e) });
-          setMoreFor(null);
+          setRun((prev) =>
+            prev === null || prev.key !== key
+              ? prev
+              : {
+                  ...prev,
+                  hosts: { ...prev.hosts, [t]: { state: 'failed', message: messageOf(e) } },
+                },
+          );
+          if (--left === 0) setLoadingMore(false);
         },
       );
+    }
   }
 
   const chats = useChatStore((s) => s.chats);
-  const waiting = settled === null && failed === null;
-  const settledHits = useMemo(
+  const inScope = (h: ChatSearchHit): boolean =>
+    h.section !== 'manager' &&
+    (section === undefined || h.section === section) &&
+    (automations !== true || h.jobId !== null);
+
+  const answered = useMemo(
     () =>
-      (settled?.hits ?? []).filter(
-        (h) => h.section !== 'manager' && (section === undefined || h.section === section),
-      ),
-    [settled, section],
+      entries
+        .flatMap(([, h]) => (h.state === 'done' ? h.hits : []))
+        .filter(inScope)
+        .filter((h, i, all) => all.findIndex((o) => o.chatId === h.chatId) === i)
+        .sort(compareChatSearchHits),
+    [current, section, automations],
   );
-  const local = useMemo(
-    () =>
-      waiting
-        ? localSearchHits(Object.values(chats), query, fullText).filter(
-            (h) =>
-              h.section !== 'manager' &&
-              (section === undefined || h.section === section) &&
-              (includeArchived || h.section !== 'archived') &&
-              (includeHidden || h.section !== 'hidden'),
-          )
-        : [],
-    [waiting, chats, query, fullText, includeArchived, includeHidden, section],
-  );
+  // Until a machine answers, the chats this surface already holds for it stand
+  // in, so the band is never blank — dropped as soon as the real answer lands.
+  const local = useMemo(() => {
+    if (!searching) return [];
+    const pending = new Set(entries.flatMap(([t, h]) => (h.state === 'searching' ? [t] : [])));
+    const unscoped = pending.has('');
+    const have = new Set(answered.map((h) => h.chatId));
+    return localSearchHits(Object.values(chats), query, fullText).filter(
+      (h) => (unscoped || pending.has(h.hostId)) && !have.has(h.chatId) && inScope(h),
+    );
+  }, [searching, current, chats, query, fullText, answered, section, automations]);
 
   // A host is named by what the surface already calls it (its self-reported
   // hostName, the same label the chat header and banners use), then by the
   // name the server returned, then by its id.
-  const presence = usePresenceStore((s) => s.hosts);
   const serverNames = useMemo(() => {
     const m = new Map<string, string | null>();
-    for (const h of settled?.hosts ?? []) m.set(h.hostId, h.hostName);
+    for (const [, h] of entries) {
+      if (h.state === 'done') for (const st of h.statuses) m.set(st.hostId, st.hostName);
+    }
     return m;
-  }, [settled]);
+  }, [current]);
   const hostName = (hostId: string): string =>
     presence[hostId]?.host?.hostName ?? serverNames.get(hostId) ?? hostId;
 
@@ -290,91 +341,98 @@ export function ChatSearchResults({
     );
   };
 
-  const errorRow =
-    failed === null ? null : (
-      <div className="empty-hint" data-testid="chat-search-error">
-        Search failed: {failed.message}
-      </div>
-    );
+  const failures = entries.flatMap(([t, h]) =>
+    h.state === 'failed' ? [{ host: t, message: h.message }] : [],
+  );
+  const errorRows = failures.map((f) => (
+    <div key={f.host} className="empty-hint" data-testid="chat-search-error">
+      Search failed{f.host !== '' ? ` on ${hostName(f.host)}` : ''}: {f.message}
+    </div>
+  ));
+  const named = targets.length > 0 && targets[0] !== '';
+  const moreAvailable = entries.some(([, h]) => h.state === 'done' && h.nextOffset !== null);
 
   return (
     <section className="sb-search-results" data-testid="chat-search-results">
-      <label className="sb-search-scope">
-        <input
-          type="checkbox"
+      <div className="sb-search-mode" role="group" aria-label="Search in">
+        <button
+          type="button"
+          className={`sb-search-mode-opt${fullText ? '' : ' on'}`}
+          data-testid="chat-search-titles"
+          aria-pressed={!fullText}
+          onClick={() => setFullText(false)}
+        >
+          Titles
+        </button>
+        <button
+          type="button"
+          className={`sb-search-mode-opt${fullText ? ' on' : ''}`}
           data-testid="chat-search-fulltext"
-          checked={fullText}
-          onChange={(e) => setFullText(e.target.checked)}
-        />
-        Full text
-      </label>
-      {section === undefined ? (
-        <label className="sb-search-scope">
-          <input
-            type="checkbox"
-            data-testid="chat-search-archived"
-            checked={archivedBox}
-            onChange={(e) => setArchivedBox(e.target.checked)}
-          />
-          Archived
-        </label>
-      ) : null}
-      {section === undefined ? (
-        <label className="sb-search-scope">
-          <input
-            type="checkbox"
-            data-testid="chat-search-hidden"
-            checked={hiddenBox}
-            onChange={(e) => setHiddenBox(e.target.checked)}
-          />
-          Hidden
-        </label>
-      ) : null}
-      {waiting ? (
-        <>
-          <div className="sb-search-status" data-testid="chat-search-searching">
-            Searching…
-          </div>
-          {local.map((hit) => drawHit(hit, 'chat-search-local-hit'))}
-        </>
-      ) : null}
-      {settled === null ? errorRow : null}
-      {settled !== null ? (
-        <>
-          {settledHits.length === 0 ? (
-            <div className="empty-hint" data-testid="chat-search-empty">
-              No chats match “{query}”.
-            </div>
-          ) : (
-            settledHits.map((hit) => drawHit(hit, 'chat-search-hit'))
-          )}
-          {settled.nextOffset !== null ? (
-            <button
-              type="button"
-              className="sb-search-more"
-              data-testid="chat-search-more"
-              disabled={moreFor === query}
-              onClick={loadMore}
-            >
-              More results
-            </button>
-          ) : null}
-          {errorRow}
-          {settled.hosts.map((h) => {
-            const text = hostMarkerText(h, hostName(h.hostId));
-            return text === null ? null : (
-              <div
-                key={h.hostId}
-                className="empty-hint sb-search-host"
-                data-testid={`chat-search-host-${h.hostId}`}
-                data-state={h.state}
+          aria-pressed={fullText}
+          onClick={() => setFullText(true)}
+        >
+          Full text
+        </button>
+      </div>
+      {named ? (
+        <div className="sb-search-hosts" data-testid="chat-search-hosts">
+          {targets.map((t) => {
+            const h = current?.hosts[t];
+            const state = h === undefined ? 'searching' : h.state;
+            return (
+              <span
+                key={t}
+                className="sb-search-host-chip"
+                data-testid={`chat-search-progress-${t}`}
+                data-state={state}
               >
-                {text}
-              </div>
+                <span className={`sb-search-dot ${state}`} aria-hidden />
+                {hostName(t)}
+              </span>
             );
           })}
-        </>
+        </div>
+      ) : searching ? (
+        <div className="sb-search-status" data-testid="chat-search-searching">
+          Searching…
+        </div>
       ) : null}
+      {answered.map((hit) => drawHit(hit, 'chat-search-hit'))}
+      {local.map((hit) => drawHit(hit, 'chat-search-local-hit'))}
+      {!searching && answered.length === 0 && failures.length < entries.length ? (
+        <div className="empty-hint" data-testid="chat-search-empty">
+          No chats match “{query}”.
+        </div>
+      ) : null}
+      {moreAvailable ? (
+        <button
+          type="button"
+          className="sb-search-more"
+          data-testid="chat-search-more"
+          disabled={loadingMore}
+          onClick={loadMore}
+        >
+          More results
+        </button>
+      ) : null}
+      {errorRows}
+      {entries.flatMap(([, h]) =>
+        h.state === 'done'
+          ? h.statuses.map((st) => {
+              const text = hostMarkerText(st, hostName(st.hostId));
+              return text === null ? null : (
+                <div
+                  key={st.hostId}
+                  className="empty-hint sb-search-host"
+                  data-testid={`chat-search-host-${st.hostId}`}
+                  data-state={st.state}
+                >
+                  {text}
+                </div>
+              );
+            })
+          : [],
+      )}
     </section>
   );
 }
