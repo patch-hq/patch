@@ -72,6 +72,13 @@ jobs:
           # 66 is the signing gate refusing an unsigned build: expected here.
           PATCH_SKIP_NOTARIZE=1 CSC_IDENTITY_AUTO_DISCOVERY=false node scripts/dist.cjs --dir || [ $? -eq 66 ]
           codesign --force --deep --sign - release/mac-arm64/Patch.app
+      # A runner is not a blank Mac: it has Homebrew and Node. The app is run
+      # with a bare PATH and its own home, so neither is reachable from it; this
+      # records what is there, for reading a failure against.
+      - name: What the runner already has
+        run: |
+          for t in claude node npm brew; do printf '%s: ' "$t"; command -v "$t" || echo none; done
+          ls /usr/local/bin/claude /opt/homebrew/bin/claude 2>/dev/null || true
       - name: First run, both paths
         env:
           PATCH_E2E_THIS_COMPUTER: '1'

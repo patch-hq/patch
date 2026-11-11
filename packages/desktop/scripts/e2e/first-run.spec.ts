@@ -18,7 +18,15 @@ import {
   type Page,
 } from '@playwright/test';
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -43,8 +51,9 @@ function blankComputer(): { home: string; userData: string } {
   return { home, userData: join(root, 'user-data') };
 }
 
-function launch(c: { home: string; userData: string }): Promise<ElectronApplication> {
-  return electron.launch({
+let launches = 0;
+async function launch(c: { home: string; userData: string }): Promise<ElectronApplication> {
+  const app = await electron.launch({
     executablePath: APP,
     env: {
       HOME: c.home,
@@ -57,7 +66,27 @@ function launch(c: { home: string; userData: string }): Promise<ElectronApplicat
         ? { PATCH_RELAY_URL: process.env['PATCH_RELAY_URL'] }
         : {}),
     },
+    timeout: 5 * 60_000,
   });
+  // What the app itself says, kept beside the screenshots for a failure to be read from.
+  if (SHOTS) {
+    const file = join(SHOTS, `app-${++launches}.log`);
+    const keep = (d: Buffer): void => appendFileSync(file, d);
+    app.process().stdout?.on('data', keep);
+    app.process().stderr?.on('data', keep);
+  }
+  return app;
+}
+
+/** The host's and the server's own logs from a blank computer, for a failure to be read from. */
+function keepLogs(c: { home: string; userData: string }, name: string): void {
+  if (!SHOTS) return;
+  for (const [from, to] of [
+    [join(c.home, '.patch', 'logs'), `${name}-host-logs`],
+    [join(c.userData, 'server', 'logs'), `${name}-server-logs`],
+  ] as const) {
+    if (existsSync(from)) cpSync(from, join(SHOTS, to), { recursive: true });
+  }
 }
 
 /** The app's window whose address matches, once it has one. */
@@ -200,6 +229,7 @@ test('my own server: pairs by code, runs the welcome steps, and is remembered', 
     await expect(main).not.toHaveURL(/welcome|setup\.html/);
     await quit(app);
   } finally {
+    keepLogs(computer, 'own-server');
     server.stop();
   }
 });
@@ -220,6 +250,14 @@ test('this computer: its own server and host, Claude Code and Codex installed, k
     'Installs a host as a login service, replacing any Patch host on this computer. Set PATCH_E2E_THIS_COMPUTER=1 on a disposable computer.',
   );
   const computer = blankComputer();
+  try {
+    await thisComputer(computer);
+  } finally {
+    keepLogs(computer, 'this-computer');
+  }
+});
+
+async function thisComputer(computer: { home: string; userData: string }): Promise<void> {
   const app = await launch(computer);
   const setup = await windowAt(app, /setup\.html/);
   await setup.getByTestId('choose-local').click();
@@ -278,4 +316,4 @@ test('this computer: its own server and host, Claude Code and Codex installed, k
   expect(app.process().exitCode).toBeNull();
   expect((await fetch(`${origin}/api/healthz`)).ok).toBe(true);
   await quit(app);
-});
+}
