@@ -124,6 +124,16 @@ export function snoozeDividerText(record: SnoozeRecord): string {
     return `Snoozed ${clock(record.startedAt)} – until complete`;
   }
   const end = record.endedAt ?? record.until;
+  // A "snooze" that began and ended in the same minute with an error is not a
+  // snooze: the turn failed and was retried. Say that instead.
+  if (
+    record.endedAt !== null &&
+    record.outcome.kind === 'errored' &&
+    clock(record.startedAt) === clock(record.endedAt)
+  ) {
+    const failedAt = record.outcome.at === undefined ? record.endedAt : record.outcome.at;
+    return `Turn failed at ${clock(failedAt)} and was retried`;
+  }
   const range = `Snoozed ${formatSnoozeMoment(record.startedAt, end)} – ${clock(end)}`;
   const line =
     record.endedAt === null
