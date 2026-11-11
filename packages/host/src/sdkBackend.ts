@@ -2009,9 +2009,11 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   const toolNames = new Map<string, string>();
   const limitEvents = createLimitEventMemory();
   let sawResult = false;
+  let lastStopReason: string | undefined;
   try {
     for await (const msg of q) {
       if ((msg as { type?: unknown } | null)?.type === 'result') sawResult = true;
+      lastStopReason = noteStopReason(msg, lastStopReason);
       // A reattached turn replays claude's whole output so the per-turn state
       // below is rebuilt; what the previous host already handled is skipped.
       const plan = durable?.plan(msg) ?? { offset: undefined, skip: 0 };
@@ -2043,9 +2045,7 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
     // killed, the connection dropped), not finished. Said out loud so the turn
     // is retried or reported, never settled as complete with no reason.
     if (!sawResult && !opts.abortController.signal.aborted) {
-      throw new Error(
-        'The Claude Code process ended mid-turn without finishing (no result message). The stream was cut, not completed.',
-      );
+      throw new Error(cutTurnMessage(lastStopReason));
     }
   } finally {
     durable?.release();
@@ -2054,6 +2054,27 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
       liveRuns.delete(opts.chatId);
     }
   }
+}
+
+/** The stop reason of the latest assistant message, carried forward otherwise. */
+function noteStopReason(msg: unknown, previous: string | undefined): string | undefined {
+  const m = msg as { type?: unknown; message?: { stop_reason?: unknown } } | null;
+  if (m?.type !== 'assistant') return previous;
+  const reason = m.message?.stop_reason;
+  return typeof reason === 'string' ? reason : undefined;
+}
+
+/**
+ * Said when the stream closes with no `result`. Keeps the sentence the error
+ * classifier matches, and adds whether the last reply had finished so the
+ * reader can tell "died mid-answer" from "answered, then the process went".
+ */
+export function cutTurnMessage(lastStopReason: string | undefined): string {
+  const base =
+    'The Claude Code process ended mid-turn without finishing (no result message). The stream was cut, not completed.';
+  return lastStopReason === 'end_turn'
+    ? `${base} The last reply had finished (stop reason end_turn), so the text above is likely complete; only the closing result was lost.`
+    : `${base} The last reply had not finished, so the text above may be incomplete.`;
 }
 
 interface LiveRun {
@@ -2256,6 +2277,7 @@ async function* persistentRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> 
   opts.abortController.signal.addEventListener('abort', onAbort, { once: true });
   const toolNames = new Map<string, string>();
   const limitEvents = createLimitEventMemory();
+  let lastStopReason: string | undefined;
   try {
     s.push(opts.prompt);
     for (;;) {
@@ -2263,13 +2285,12 @@ async function* persistentRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> 
       if (next.done === true) {
         persistSessions.delete(chatId);
         if (!opts.abortController.signal.aborted) {
-          throw new Error(
-            'The Claude Code process ended mid-turn without finishing (no result message). The stream was cut, not completed.',
-          );
+          throw new Error(cutTurnMessage(lastStopReason));
         }
         return;
       }
       const msg: unknown = next.value;
+      lastStopReason = noteStopReason(msg, lastStopReason);
       const requestedMode = opts.permissionMode ?? 'auto';
       limitEvents.note(msg);
       const mismatch = permissionModeMismatch(msg, requestedMode);

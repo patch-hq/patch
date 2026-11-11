@@ -232,6 +232,7 @@ import type {
 } from '@patch/wire';
 import { BrowserHandoff, type HandoffResult, type ShareResult } from './browserHandoff.js';
 import { voicePrefixForSource } from './specialThreads.js';
+import { parseLeadingGoal } from './goalCommand.js';
 import { prefixKeepingCommandFirst } from './leadCommand.js';
 
 /**
@@ -4336,6 +4337,15 @@ export class Daemon {
     return this.browserHandoff_.viewInput(chatId, tabId, input);
   }
 
+  /** `patch.browser_view.open` from a surface: a tab the person drives, at the address they typed. */
+  async browserViewOpen(chatId: string, address: string): Promise<void> {
+    try {
+      await this.browserHandoff_.open(chatId, address);
+    } catch (err) {
+      this.opts.logger.warn({ chatId, err }, 'browser view: could not open the typed address');
+    }
+  }
+
   /** `patch.browser_view.drive` from a surface: Take over / Hand back. */
   browserViewDrive(chatId: string, tabId: string, driver: 'agent' | 'user'): void {
     try {
@@ -5946,9 +5956,10 @@ export class Daemon {
   }
 
   /**
-   * Running, idle between turns with a goal still to be judged, or idle with a
-   * one-shot self-wake armed (the chat is about to wake itself). A loop never
-   * completes, so it is not work to wait for.
+   * Running, idle between turns with a goal still to be judged, idle with a
+   * one-shot self-wake armed (the chat is about to wake itself), or waiting on a
+   * delegated agent that has not returned. A loop never completes, so it is not
+   * work to wait for.
    */
   private hasWorkToComplete(chatId: string): boolean {
     const state = this.chatState.get(chatId);
@@ -5956,13 +5967,15 @@ export class Daemon {
     return (
       this.aggregateActivity(chatId) === 'running' ||
       (state?.goal ?? null) !== null ||
-      (wake !== null && wake.every === undefined)
+      (wake !== null && wake.every === undefined) ||
+      this.hasRunningDelegates(chatId)
     );
   }
 
   /**
    * "Until complete" (spec/04 § Snooze): the snooze ends when the chat's work
-   * does — no turn running and no goal left to judge — or sooner if it stops
+   * does — no turn running, no goal left to judge and no delegated agent still
+   * running — or sooner if it stops
    * for a person (a permission, a question, an error), since nothing more will
    * happen without them.
    */
@@ -6548,6 +6561,23 @@ export class Daemon {
       throw new Error('This chat is moving to another host; send it again once it has arrived.');
     }
     this.rearmDelegate(req.chatId);
+
+    // `/goal` is Patch's, not Claude Code's: a person's turn that still leads
+    // with it (a surface that did not strip it) sets the goal here and sends
+    // only the text after it, so Claude Code never sees the command.
+    if (
+      req.origin !== 'machine' &&
+      req.jobTrigger !== true &&
+      req.hookTrigger === undefined &&
+      req.goalTrigger === undefined
+    ) {
+      const lead = parseLeadingGoal(req.message);
+      if (lead !== null) {
+        await this.setGoal(req.chatId, lead.goal);
+        if (lead.message === '') return;
+        req.message = lead.message;
+      }
+    }
 
     // spec/20-hooks.md § On the agent's response — an `advise` outcome rides
     // with the chat's NEXT turn, whichever origin it turns out to have. The

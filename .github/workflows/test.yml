@@ -68,24 +68,47 @@ jobs:
           sudo swapon /mnt/ci-extra.swap
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      # The runner's apt mirrors intermittently fail DNS; retry instead of failing the shard.
-      - run: echo 'Acquire::Retries "5";' | sudo tee /etc/apt/apt.conf.d/80-retries
-      # A runner DNS outage can outlast apt's own retries, so retry the whole install.
-      - run: |
-          for i in 1 2 3; do
+      # Runners have been failing to resolve every *.ubuntu.com name (azure.archive,
+      # archive, security) while other hosts such as packages.microsoft.com resolve,
+      # so apt -- and with it `playwright install --with-deps` -- failed every shard
+      # before a test ran. Point apt at a mirror outside ubuntu.com instead: the
+      # deb822 sources read /etc/apt/apt-mirrors.txt through their mirror+file: URIs,
+      # and any source naming an ubuntu.com host directly is rewritten too. The
+      # retry and timeout settings apply to every apt call, including Playwright's.
+      - name: Use a non-ubuntu.com apt mirror
+        run: |
+          mirror=https://mirrors.edge.kernel.org/ubuntu/
+          echo "$mirror" | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+          sudo find /etc/apt -maxdepth 2 -type f \( -name '*.list' -o -name '*.sources' \) \
+            -exec sed -E -i "s#https?://([a-z0-9-]+\.)*(archive|security)\.ubuntu\.com/ubuntu/?#$mirror#g" {} +
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "20";\nAcquire::https::Timeout "20";\n' \
+            | sudo tee /etc/apt/apt.conf.d/99ci-mirror >/dev/null
+          grep -rhE '^(URIs|deb) ' /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null || true
+      # Two attempts, so a runner that cannot reach the mirror at all fails fast.
+      - name: Install Chromium and its system packages
+        run: |
+          for attempt in 1 2; do
             pnpm --filter @patch/web exec playwright install --with-deps chromium && exit 0
-            echo "playwright install failed (attempt $i); retrying in 60s" >&2
-            sleep 60
+            [ "$attempt" = 2 ] && break
+            wait=$((30 + RANDOM % 31))
+            echo "::warning::playwright install: attempt $attempt failed; retrying in ${wait}s"
+            sleep "$wait"
           done
+          echo "::error::playwright install: failed after 2 attempts"
           exit 1
       # The host's browser tests drive a headed Chromium on Xvfb, and its Codex
       # tests keep credentials in the native keyring (Secret Service over D-Bus).
-      - run: |
-          for i in 1 2 3; do
-            sudo apt-get install -y -qq xvfb x11-utils gnome-keyring libsecret-tools dbus-x11 && exit 0
-            echo "apt install failed (attempt $i); retrying in 60s" >&2
-            sleep 60
+      - name: Install Xvfb and the keyring
+        run: |
+          for attempt in 1 2; do
+            sudo apt-get install -y -qq -o Acquire::Retries=3 -o Acquire::http::Timeout=20 \
+              xvfb x11-utils gnome-keyring libsecret-tools dbus-x11 && exit 0
+            [ "$attempt" = 2 ] && break
+            wait=$((30 + RANDOM % 31))
+            echo "::warning::apt-get install: attempt $attempt failed; retrying in ${wait}s"
+            sleep "$wait"
           done
+          echo "::error::apt-get install: failed after 2 attempts"
           exit 1
       # Some suites run against built output (the server serves the web build).
       # Not the phone: its "build" is an Expo export + prebuild that rewrites android/.
