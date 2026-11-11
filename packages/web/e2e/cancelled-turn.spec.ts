@@ -13,25 +13,26 @@ const STOPPED = '/app/dev-harness.html?chat=chat_stopped';
 const INTERRUPTED = '/app/dev-harness.html?chat=chat_interrupted';
 
 test.describe('stopped turn status', () => {
-  test('the stopped message carries the status and Continue, below its own text', async ({
+  test('the stopped status sits where the reply stopped, after its partial text', async ({
     page,
   }) => {
     await page.goto(STOPPED);
-    const msg = page.locator('[data-turn-stopped="true"]');
-    await expect(msg).toHaveCount(1);
-    await expect(msg).toContainText('refactor the scheduler');
+    // Not on the user's message any more.
+    await expect(
+      page.locator('[data-turn-stopped="true"] [data-testid="turn-stopped"]'),
+    ).toHaveCount(0);
 
-    const status = msg.getByTestId('turn-stopped');
+    const status = page.getByTestId('turn-stopped');
     await expect(status).toHaveText(/Stopped\./);
     await expect(status).not.toContainText('cancelled');
 
-    const continueBtn = msg.getByTestId('turn-stopped-continue');
+    const continueBtn = page.getByTestId('turn-stopped-continue');
     await expect(continueBtn).toHaveText('Continue');
     const box = await continueBtn.boundingBox();
-    const text = await msg.getByTestId('msg-content').boundingBox();
-    if (!box || !text) throw new Error('missing stopped-turn boxes');
-    // Below the message it belongs to, and a real target rather than a sliver.
-    expect(box.y).toBeGreaterThan(text.y);
+    const reply = await page.getByTestId('msg').nth(1).boundingBox();
+    if (!box || !reply) throw new Error('missing stopped-turn boxes');
+    // Below the partial reply it cut off, and a real target rather than a sliver.
+    expect(box.y).toBeGreaterThan(reply.y + reply.height - 1);
     expect(box.width).toBeGreaterThanOrEqual(60);
     expect(box.height).toBeGreaterThanOrEqual(16);
   });
@@ -68,18 +69,18 @@ test.describe('stopped turn status', () => {
 });
 
 test.describe('interrupted turn status', () => {
-  test('the interrupted message carries a muted status and no action', async ({ page }) => {
+  test('the interrupted status sits at the cut-off point with no action', async ({ page }) => {
     await page.goto(INTERRUPTED);
-    const msg = page.locator('[data-turn-interrupted="true"]');
-    await expect(msg).toHaveCount(1);
-    await expect(msg).toContainText('rename the config module');
+    await expect(
+      page.locator('[data-turn-interrupted="true"] [data-testid="turn-interrupted"]'),
+    ).toHaveCount(0);
 
-    const status = msg.getByTestId('turn-interrupted');
+    const status = page.getByTestId('turn-interrupted');
     await expect(status).toHaveText(/Interrupted by a newer message\./);
     await expect(status).not.toContainText('cancelled');
 
     // No retry, no Continue — the agent already saw it via the promoted turn.
-    await expect(msg.getByTestId('turn-stopped-continue')).toHaveCount(0);
+    await expect(page.getByTestId('turn-stopped-continue')).toHaveCount(0);
     await expect(status.locator('button')).toHaveCount(0);
   });
 });
