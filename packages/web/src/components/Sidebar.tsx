@@ -40,6 +40,7 @@ import {
   Ear,
   Phone,
   PanelRightOpen,
+  Layers,
   Target,
 } from 'lucide-react';
 import { CloseIcon, DeleteIcon } from './icons.js';
@@ -2314,6 +2315,12 @@ const ChatRowView = memo(function ChatRowView({
     }
     items.push(
       {
+        id: 'open-here',
+        label: 'Open here',
+        icon: <Layers size={14} aria-hidden />,
+        run: () => useLayoutStore.getState().showChat(row.chatId),
+      },
+      {
         id: 'open-new-group',
         label: 'Open in new group',
         icon: <PanelRightOpen size={14} aria-hidden />,
@@ -2443,34 +2450,39 @@ const ChatRowView = memo(function ChatRowView({
   const reorderable =
     manualSort && !special && !pinned && !archived && !deleted && !snoozed && !hidden && !to;
   const [dropOver, setDropOver] = useState(false);
-  const dragProps = reorderable
-    ? {
-        draggable: true,
-        onDragStart: (e: DragEvent) => {
-          e.dataTransfer.setData('application/x-patch-chat', row.chatId);
-          e.dataTransfer.effectAllowed = 'move';
-        },
-        onDragOver: (e: DragEvent) => {
-          if (!e.dataTransfer.types.includes('application/x-patch-chat')) return;
-          e.preventDefault();
-          setDropOver(true);
-        },
-        onDragLeave: () => setDropOver(false),
-        onDrop: (e: DragEvent) => {
-          e.preventDefault();
-          setDropOver(false);
-          const dragId = e.dataTransfer.getData('application/x-patch-chat');
-          if (dragId === '' || dragId === row.chatId) return;
-          const section = (e.currentTarget as HTMLElement).closest('.sb-folder');
-          if (section === null) throw new Error('manual reorder: row is outside a project section');
-          const siblings = Array.from(section.querySelectorAll('[data-testid^="chat-row-"]')).map(
-            (el) => (el.getAttribute('data-testid') as string).slice('chat-row-'.length),
-          );
-          if (!siblings.includes(dragId)) return; // dragged in from another project
-          useUiStore.getState().moveChatManual(siblings, dragId, row.chatId);
-        },
-      }
-    : {};
+  // Any chat row can be dragged onto a group or into the gap between groups
+  // (spec/14 § Groups); a manually sorted row also takes drops from its siblings.
+  const dragProps = {
+    draggable: true,
+    onDragStart: (e: DragEvent) => {
+      e.dataTransfer.setData('application/x-patch-chat', row.chatId);
+      e.dataTransfer.effectAllowed = 'move';
+    },
+    ...(reorderable
+      ? {
+          onDragOver: (e: DragEvent) => {
+            if (!e.dataTransfer.types.includes('application/x-patch-chat')) return;
+            e.preventDefault();
+            setDropOver(true);
+          },
+          onDragLeave: () => setDropOver(false),
+          onDrop: (e: DragEvent) => {
+            e.preventDefault();
+            setDropOver(false);
+            const dragId = e.dataTransfer.getData('application/x-patch-chat');
+            if (dragId === '' || dragId === row.chatId) return;
+            const section = (e.currentTarget as HTMLElement).closest('.sb-folder');
+            if (section === null)
+              throw new Error('manual reorder: row is outside a project section');
+            const siblings = Array.from(section.querySelectorAll('[data-testid^="chat-row-"]')).map(
+              (el) => (el.getAttribute('data-testid') as string).slice('chat-row-'.length),
+            );
+            if (!siblings.includes(dragId)) return; // dragged in from another project
+            useUiStore.getState().moveChatManual(siblings, dragId, row.chatId);
+          },
+        }
+      : {}),
+  };
   return (
     <>
       <Link

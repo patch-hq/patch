@@ -5,13 +5,14 @@
 // resizing need real pointer/DataTransfer behaviour jsdom can't give them —
 // those are e2e/panes-and-tabs.spec.ts.
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent, createEvent, act } from '@testing-library/react';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { render, screen, fireEvent, createEvent, act, within } from '@testing-library/react';
 import { StrictMode, useState } from 'react';
 import type { JSX } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PaneArea } from '../components/PaneArea.js';
+import { _setDragKind } from '../lib/dragState.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useLayoutStore, type LeafPane, type SplitPane } from '../stores/layoutStore.js';
 
@@ -157,14 +158,37 @@ describe('PaneArea — one pane, several tabs', () => {
     expect(root.tabs.map((t) => cid(t.descriptor))).toEqual(['c1']);
   });
 
-  it('right-click opens a menu offering to split, open in a new window, or close', () => {
+  it('right-click on a chat tab offers Open here, in a new group, in a new window, or close', () => {
     const pane = seedTwoTabs();
     renderPanes();
     const firstTabId = pane.tabs[0]!.id;
     fireEvent.contextMenu(screen.getByTestId(`tab-${firstTabId}`));
+    const items = [...screen.getByRole('menu').querySelectorAll('[role="menuitem"]')].map(
+      (n) => n.textContent,
+    );
+    // A chat is shown by a group, so "Open to the side" is not offered for one.
+    expect(items).toEqual(['Open here', 'Open in new group', 'Open in new window', 'Close tab']);
+  });
+
+  it('right-click on a page tab also offers Open to the side', () => {
+    seedChats(['a']);
+    useLayoutStore.getState().showChat('a');
+    useLayoutStore.getState().openTab({ kind: 'page', page: 'jobs' }, { placement: 'tab' });
+    renderPanes();
+    fireEvent.contextMenu(screen.getByTestId('tab-page:jobs'));
     expect(screen.getByText('Open to the side')).toBeInTheDocument();
-    expect(screen.getByText('Open in new window')).toBeInTheDocument();
-    expect(screen.getByText('Close tab')).toBeInTheDocument();
+  });
+
+  it('Open in new group on a tab moves it into a group of its own beside this one', () => {
+    seedChats(['a']);
+    useLayoutStore.getState().showChat('a');
+    useLayoutStore.getState().openTab({ kind: 'terminal', chatId: 'a' }, { placement: 'tab' });
+    renderPanes();
+    fireEvent.contextMenu(screen.getByTestId('tab-terminal:a'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Open in new group' }));
+    const groups = useLayoutStore.getState().groups;
+    expect(groups.map((g) => g.chatId)).toEqual(['a', 'a']);
+    expect((groups[1]!.root as LeafPane).tabs.map((t) => t.id)).toEqual(['terminal:a']);
   });
 });
 
@@ -445,5 +469,212 @@ describe('PaneArea — groups (spec/14 § Groups)', () => {
     expect(screen.getAllByTestId('chat-head')).toHaveLength(1);
     expect(screen.getByTestId('chat-title').textContent).toBe('b');
     spy.mockRestore();
+  });
+});
+
+// spec/14 § Panes and tabs, § Groups — the + menu, and the drop targets drawn
+// while a tab or a chat row is dragged. jsdom has no native drag, so the drag
+// is simulated by putting the drag state in place and firing drag events that
+// carry a `dataTransfer`.
+describe('PaneArea — the + menu', () => {
+  function plusMenu(): HTMLElement {
+    fireEvent.click(document.querySelector('.pane-tab-new')!);
+    return screen.getByRole('menu');
+  }
+  const labels = (menu: HTMLElement): (string | null)[] =>
+    [...menu.querySelectorAll('[role="menuitem"]')].map((n) => n.textContent);
+
+  it('lists this chat’s things, then other chats, then pages', () => {
+    seedChats(['a', 'b']);
+    useLayoutStore.getState().showChat('a');
+    renderPanes();
+    const menu = plusMenu();
+    expect(labels(menu)).toEqual([
+      'Chat',
+      'Terminal',
+      'Files',
+      'Browser',
+      'b',
+      'Pads',
+      'Jobs',
+      'Settings',
+    ]);
+    expect([...menu.querySelectorAll('.context-menu-section')].map((n) => n.textContent)).toEqual([
+      'a',
+      'Chats',
+      'Pages',
+    ]);
+  });
+
+  it('lists the chat’s artifacts', () => {
+    seedChats(['a']);
+    useChatStore.setState({
+      timelines: {
+        a: [
+          {
+            kind: 'artifact',
+            artifactId: 'x1',
+            artifactTitle: 'Departures',
+            artifactUrl: '/api/chats/a/artifact/x1',
+          },
+        ] as never,
+      },
+    });
+    useLayoutStore.getState().showChat('a');
+    renderPanes();
+    fireEvent.click(within(plusMenu()).getByRole('menuitem', { name: 'Departures' }));
+    expect(
+      useLayoutStore.getState().findTab({
+        kind: 'page',
+        page: 'artifact',
+        chatId: 'a',
+        artifactId: 'x1',
+        url: new URL('/api/chats/a/artifact/x1', window.location.origin).toString(),
+      }),
+    ).not.toBeNull();
+  });
+
+  it('the search box filters across every section and takes focus', () => {
+    seedChats(['a', 'bus-watch', 'nightcap']);
+    useLayoutStore.getState().showChat('a');
+    renderPanes();
+    const menu = plusMenu();
+    const search = within(menu).getByRole('searchbox');
+    expect(search).toHaveFocus();
+    fireEvent.change(search, { target: { value: 'ter' } });
+    expect(labels(menu)).toEqual(['Terminal']);
+    fireEvent.change(search, { target: { value: 'bus' } });
+    expect(labels(menu)).toEqual(['bus-watch']);
+    fireEvent.change(search, { target: { value: 'zzz' } });
+    expect(labels(menu)).toEqual([]);
+  });
+
+  it('Enter opens the first match', () => {
+    seedChats(['a']);
+    useLayoutStore.getState().showChat('a');
+    renderPanes();
+    const search = within(plusMenu()).getByRole('searchbox');
+    fireEvent.change(search, { target: { value: 'jobs' } });
+    fireEvent.keyDown(search, { key: 'Enter' });
+    expect(useLayoutStore.getState().findTab({ kind: 'page', page: 'jobs' })).not.toBeNull();
+  });
+
+  it('choosing another chat switches this group to it instead of adding a tab', () => {
+    seedChats(['a', 'b']);
+    useLayoutStore.getState().showChat('a');
+    renderPanes();
+    fireEvent.click(within(plusMenu()).getByTestId(/-chat-b$/));
+    const { groups } = useLayoutStore.getState();
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.chatId).toBe('b');
+    expect((groups[0]!.root as LeafPane).tabs.map((t) => t.id)).toEqual(['chat:b']);
+  });
+});
+
+describe('PaneArea — drop targets while dragging', () => {
+  const drag = (el: Element, type: string, data: Record<string, string>, types: string[]): void => {
+    const ev = createEvent[type as 'dragOver'](el);
+    Object.assign(ev, {
+      dataTransfer: { getData: (t: string) => data[t] ?? '', types, dropEffect: 'move' },
+    });
+    fireEvent(el, ev);
+  };
+  afterEach(() => act(() => _setDragKind(null)));
+
+  it('draws no targets until something is dragged', () => {
+    seedChats(['a', 'b']);
+    useLayoutStore.getState().showChat('a');
+    useLayoutStore.getState().showChat('b', { newGroup: true });
+    renderPanes();
+    expect(screen.queryByTestId('pane-droptargets')).toBeNull();
+    expect(document.querySelector('.gap-drop')).toBeNull();
+  });
+
+  it('a dragged tab shows split and add-as-tab targets on its own group, and a gap between groups', () => {
+    seedChats(['a', 'b']);
+    useLayoutStore.getState().showChat('a');
+    useLayoutStore.getState().showChat('b', { newGroup: true });
+    renderPanes();
+    act(() => _setDragKind('tab'));
+    // Every pane of both groups offers the five targets (no tab source is recorded).
+    expect(screen.getAllByTestId('pane-droptargets')).toHaveLength(2);
+    const labels = [...document.querySelectorAll('.pane-dz')].map((n) => n.textContent);
+    expect(labels.slice(0, 5)).toEqual([
+      'Split left',
+      'Split right',
+      'Split top',
+      'Split bottom',
+      'Add as tab',
+    ]);
+    // One gap between the two groups, one after the last.
+    expect(
+      [...document.querySelectorAll('.gap-drop')].map((n) => n.getAttribute('data-testid')),
+    ).toEqual(['gap-drop-1', 'gap-drop-2']);
+  });
+
+  it('a tab dropped on a gap becomes a new group for its chat', () => {
+    seedChats(['a']);
+    useLayoutStore.getState().showChat('a');
+    useLayoutStore.getState().openTab({ kind: 'terminal', chatId: 'a' }, { placement: 'tab' });
+    renderPanes();
+    const pane = useLayoutStore.getState().root as LeafPane;
+    act(() => _setDragKind('tab'));
+    const payload = JSON.stringify({ paneId: pane.id, tabId: 'terminal:a' });
+    drag(screen.getByTestId('gap-drop-1'), 'dragOver', {}, ['application/x-patch-tab']);
+    expect(screen.getByTestId('gap-drop-1')).toHaveClass('hot');
+    drag(screen.getByTestId('gap-drop-1'), 'drop', { 'application/x-patch-tab': payload }, [
+      'application/x-patch-tab',
+    ]);
+    const groups = useLayoutStore.getState().groups;
+    expect(groups.map((g) => g.chatId)).toEqual(['a', 'a']);
+    expect((groups[1]!.root as LeafPane).tabs.map((t) => t.id)).toEqual(['terminal:a']);
+  });
+
+  it('a dragged chat row shows "Show here" over each group and drops into it', () => {
+    seedChats(['a', 'b', 'c']);
+    useLayoutStore.getState().showChat('a');
+    useLayoutStore.getState().showChat('b', { newGroup: true });
+    renderPanes();
+    act(() => _setDragKind('chat'));
+    const target = useLayoutStore.getState().groups[0]!;
+    const zone = screen.getByTestId(`group-drop-${target.id}`);
+    expect(zone.textContent).toBe('Show here');
+    drag(zone, 'drop', { 'application/x-patch-chat': 'c' }, ['application/x-patch-chat']);
+    expect(useLayoutStore.getState().groups.map((g) => g.chatId)).toEqual(['c', 'b']);
+  });
+
+  it('a chat row dropped on a gap makes a new group there', () => {
+    seedChats(['a', 'b', 'c']);
+    useLayoutStore.getState().showChat('a');
+    useLayoutStore.getState().showChat('b', { newGroup: true });
+    renderPanes();
+    act(() => _setDragKind('chat'));
+    drag(screen.getByTestId('gap-drop-1'), 'drop', { 'application/x-patch-chat': 'c' }, [
+      'application/x-patch-chat',
+    ]);
+    expect(useLayoutStore.getState().groups.map((g) => g.chatId)).toEqual(['a', 'c', 'b']);
+  });
+
+  it('a tab dropped on the middle of another group’s pane showing the same chat joins it', () => {
+    seedChats(['a']);
+    useLayoutStore.getState().showChat('a');
+    useLayoutStore.getState().openTab({ kind: 'terminal', chatId: 'a' }, { placement: 'tab' });
+    const src = useLayoutStore.getState().root as LeafPane;
+    useLayoutStore.getState().showChat('a', { newGroup: true });
+    renderPanes();
+    const second = useLayoutStore.getState().groups[1]!.root as LeafPane;
+    const content = screen.getByTestId(`pane-content-${second.id}`);
+    const payload = JSON.stringify({ paneId: src.id, tabId: 'terminal:a' });
+    const ev = createEvent.drop(content);
+    Object.assign(ev, {
+      dataTransfer: {
+        getData: () => payload,
+        types: ['application/x-patch-tab'],
+      },
+    });
+    fireEvent(content, ev);
+    const groups = useLayoutStore.getState().groups;
+    expect((groups[1]!.root as LeafPane).tabs.map((t) => t.id)).toContain('terminal:a');
+    expect((groups[0]!.root as LeafPane).tabs.map((t) => t.id)).not.toContain('terminal:a');
   });
 });

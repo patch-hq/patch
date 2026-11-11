@@ -108,6 +108,7 @@ describe('sidebar row context menu', () => {
     const menu = screen.getByTestId(MENU);
     expect(menu.getAttribute('role')).toBe('menu');
     expect([...menu.querySelectorAll('[role="menuitem"]')].map((n) => n.textContent)).toEqual([
+      'Open here',
       'Open in new group',
       'Open in new window',
       'Rename',

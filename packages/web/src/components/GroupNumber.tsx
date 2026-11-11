@@ -8,12 +8,23 @@ import { useLayoutStore } from '../stores/layoutStore.js';
 import { groupColourClass } from './PaneArea.js';
 
 /** Zero-based position of the group showing `chatId`, or null — also null
- *  while there is only one group, since a lone group needs no number. */
+ *  while there is only one group, since a lone group needs no number. When
+ *  several groups show the chat it is the one a click on the row would focus:
+ *  the focused one, else the most recently used (spec/14 § Groups). */
 export function useGroupIndex(chatId: string): number | null {
   return useLayoutStore((s) => {
     if (s.groups.length < 2) return null;
-    const i = s.groups.findIndex((g) => g.chatId === chatId);
-    return i === -1 ? null : i;
+    let best = -1;
+    s.groups.forEach((g, i) => {
+      if (g.chatId !== chatId) return;
+      if (g.id === s.focusedGroupId) best = i;
+      else if (
+        best === -1 ||
+        (s.groups[best]!.id !== s.focusedGroupId && (g.usedAt ?? 0) > (s.groups[best]!.usedAt ?? 0))
+      )
+        best = i;
+    });
+    return best === -1 ? null : best;
   });
 }
 
