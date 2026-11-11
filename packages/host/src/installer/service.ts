@@ -307,6 +307,32 @@ async function launchdMode(def: ServiceDefinition): Promise<LaunchdMode> {
   };
 }
 
+/**
+ * Is the job already loaded from exactly the plist we would write now, with no
+ * copy in the other domain? Then nothing about its registration needs to change.
+ */
+async function launchdJobUnchanged(
+  def: ServiceDefinition,
+  mode: LaunchdMode,
+  agentPath: string,
+): Promise<boolean> {
+  const system = mode.domain === 'system';
+  if (system ? existsSync(agentPath) : existsSync(SYSTEM_PLIST_PATH)) return false;
+  let current: string;
+  try {
+    current = system
+      ? (await run('sudo', ['-n', 'cat', SYSTEM_PLIST_PATH])).stdout
+      : readFileSync(agentPath, 'utf8');
+  } catch {
+    return false;
+  }
+  if (current !== launchdPlist(def, system)) return false;
+  return mode.launchctl(['print', mode.target]).then(
+    () => true,
+    () => false,
+  );
+}
+
 export const launchdOps: ServiceOps = {
   async register(def) {
     mkdirSync(join(def.home, '.patch', 'logs'), { recursive: true });
@@ -333,6 +359,20 @@ export const launchdOps: ServiceOps = {
         await run('sudo', ['-n', 'rm', legacySystem]);
         otherDomainNotes.push(`removed the pre-rename system job at ${legacySystem}`);
       }
+    }
+    // Re-registering boots the whole job out, and a chat's turn runner belongs
+    // to that job as far as launchd is concerned: 2026-11-11, every chat that
+    // was running died with the update. So when the job is already loaded from
+    // a plist identical to the one we would write, it is left exactly as it is
+    // and `start` restarts only the host process.
+    if (await launchdJobUnchanged(def, mode, agentPath)) {
+      return {
+        unitPath: mode.plistPath,
+        notes: [
+          ...otherDomainNotes,
+          `launchd job ${SERVICE_LABEL} already registered with this definition — left loaded so running chats keep going`,
+        ],
+      };
     }
     if (mode.domain === 'system') {
       // ONE label, ONE job. macOS auto-bootstraps anything in
@@ -419,8 +459,20 @@ export const launchdOps: ServiceOps = {
   },
   async start(def) {
     const mode = await launchdMode(def);
+    // `kickstart -k` kills the job's processes, which takes every running
+    // chat's turn runner with it. Ask the host process alone to exit instead;
+    // KeepAlive brings it back, and AbandonProcessGroup leaves its children.
+    const state = await launchdOps.runState(def);
+    if (state.running && state.pid !== undefined) {
+      try {
+        process.kill(state.pid, 'SIGTERM');
+      } catch (err) {
+        throw new ServiceRegistrationError(`signalling host pid ${state.pid}`, detail(err));
+      }
+      return;
+    }
     try {
-      await mode.launchctl(['kickstart', '-k', mode.target]);
+      await mode.launchctl(['kickstart', mode.target]);
     } catch (err) {
       throw new ServiceRegistrationError('launchctl kickstart', detail(err));
     }
