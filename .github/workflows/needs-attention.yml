@@ -1,0 +1,67 @@
+# Every other "needs attention" event goes to Patch as one webhook, which spawns
+# a fresh chat for the PR or issue (conflicts: pr-conflicts.yml). Nothing is
+# handed back to the chat that opened it, and there is no attempt cap.
+#
+#   - a `test` run fails on a PR            -> pr-check-failed
+#   - a `test` run fails in the merge queue -> merge-queue-failed
+#   - an issue is opened                    -> issue-opened
+#   - run by hand with a number             -> the same, for backlog items
+#
+# A flaky test is a failure like any other: the agent decides.
+
+name: needs-attention
+
+on:
+  workflow_run:
+    workflows: [test]
+    types: [completed]
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: pr-check-failed | merge-queue-failed | pr-conflict | issue-opened
+        required: true
+      number:
+        description: PR or issue number
+        required: true
+      detail:
+        description: What is wrong
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    if: github.repository == 'patch-hq/patch' && (github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'failure' && (github.event.workflow_run.event == 'pull_request' || github.event.workflow_run.event == 'merge_group')))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          PATCH_ATTENTION_URL: ${{ secrets.PATCH_ATTENTION_URL }}
+          PATCH_ATTENTION_SECRET: ${{ secrets.PATCH_ATTENTION_SECRET }}
+          EVENT: ${{ github.event_name }}
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+          ISSUE: ${{ github.event.issue.number }}
+          IN_KIND: ${{ inputs.kind }}
+          IN_NUMBER: ${{ inputs.number }}
+          IN_DETAIL: ${{ inputs.detail }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            issues)
+              node scripts/needs-attention.mjs --kind issue-opened --repo "$GITHUB_REPOSITORY" --number "$ISSUE" \
+                --detail "Investigate; close the issue yourself or open a PR saying Closes #$ISSUE." ;;
+            workflow_dispatch)
+              node scripts/needs-attention.mjs --kind "$IN_KIND" --repo "$GITHUB_REPOSITORY" --number "$IN_NUMBER" --detail "$IN_DETAIL" ;;
+            workflow_run)
+              if [ "$RUN_EVENT" = merge_group ]; then
+                node scripts/needs-attention.mjs --kind merge-queue-failed --repo "$GITHUB_REPOSITORY" --branch "$RUN_BRANCH" --detail "Failed merge-queue run: $RUN_URL"
+              else
+                node scripts/needs-attention.mjs --kind pr-check-failed --repo "$GITHUB_REPOSITORY" --number "$RUN_PR" --detail "Failed check run: $RUN_URL"
+              fi ;;
+          esac

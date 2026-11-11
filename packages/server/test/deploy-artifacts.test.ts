@@ -132,14 +132,18 @@ describe('H1 deploy artifacts — deploy command + backup scripts', () => {
     expect(read('.github/workflows/pr-automerge.yml')).not.toMatch(
       /--delete-branch|--rebase|\s-d\s/,
     );
-    expect(read('.github/workflows/pr-conflicts.yml')).toMatch(/needs-rebase/);
-    // GitHub owns a PR from green to merged: nothing re-queues an ejected PR.
-    // The dequeued event goes to a Patch job (scripts/merge-queue-dequeue.mjs).
-    expect(existsSync(join(repoRoot, '.github/workflows/pr-requeue.yml'))).toBe(false);
-    expect(read('scripts/merge-queue-dequeue.mjs')).not.toMatch(/enqueuePullRequest/);
-    expect(read('.github/workflows/test-retry.yml')).toMatch(
-      /github\.event\.workflow_run\.event == 'pull_request'/,
+    // Failures and conflicts go to Patch as a webhook, never a label or a sweep.
+    expect(read('.github/workflows/pr-conflicts.yml')).toMatch(
+      /needs-attention\.mjs --kind pr-conflict/,
     );
+    expect(read('.github/workflows/pr-conflicts.yml')).not.toMatch(/needs-rebase/);
+    expect(read('.github/workflows/pr-automerge.yml')).not.toMatch(/schedule:|sweep/);
+    // GitHub owns a PR from green to merged: nothing re-queues an ejected PR.
+    // A failure goes to a fresh Patch chat (scripts/needs-attention.mjs).
+    expect(existsSync(join(repoRoot, '.github/workflows/pr-requeue.yml'))).toBe(false);
+    expect(read('scripts/needs-attention.mjs')).not.toMatch(/enqueuePullRequest/);
+    expect(existsSync(join(repoRoot, '.github/workflows/test-retry.yml'))).toBe(false);
+    expect(read('.github/workflows/needs-attention.yml')).toMatch(/merge-queue-failed/);
     // ...and the phone's over-the-air update is one of those surfaces: release
     // files the servers mirror, never published anywhere else first
     // (spec/11 § Mobile updates).

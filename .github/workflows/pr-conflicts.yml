@@ -1,7 +1,6 @@
-# After main moves, any open PR that no longer merges cleanly is labelled
-# `needs-rebase` and gets a comment, which is the hand-back to the chat that
-# owns it: rebase on main, resolve, force-push. The label clears itself once
-# the PR merges cleanly again.
+# GitHub sends no event when main moves under a PR and it starts to conflict, so
+# this runs on each push to main, finds the open PRs that no longer merge, and
+# sends each one to Patch as a needs-attention webhook (a fresh chat rebases it).
 
 name: pr-conflicts
 
@@ -10,18 +9,21 @@ on:
     branches: [main]
 
 permissions:
-  pull-requests: write
+  contents: read
+  pull-requests: read
 
 jobs:
   conflicts:
     if: github.repository == 'patch-hq/patch'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - env:
           GH_TOKEN: ${{ github.token }}
+          PATCH_ATTENTION_URL: ${{ secrets.PATCH_ATTENTION_URL }}
+          PATCH_ATTENTION_SECRET: ${{ secrets.PATCH_ATTENTION_SECRET }}
         run: |
           set -euo pipefail
-          gh label create needs-rebase --color d93f0b --description "Conflicts with main: rebase and resolve" --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
           for n in $(gh pr list --state open --json number --jq '.[].number' --repo "$GITHUB_REPOSITORY"); do
             # mergeable is computed lazily; ask until GitHub has an answer.
             state=UNKNOWN
@@ -30,11 +32,8 @@ jobs:
               [ "$state" != UNKNOWN ] && break
               sleep 10
             done
-            has=$(gh pr view "$n" --json labels --jq '[.labels[].name] | index("needs-rebase") != null' --repo "$GITHUB_REPOSITORY")
-            if [ "$state" = CONFLICTING ] && [ "$has" = false ]; then
-              gh pr edit "$n" --add-label needs-rebase --repo "$GITHUB_REPOSITORY"
-              gh pr comment "$n" --repo "$GITHUB_REPOSITORY" --body "Main moved and this PR now conflicts with it. Rebase onto main, resolve the conflicts, and force-push; auto-merge resumes once the tests pass."
-            elif [ "$state" = MERGEABLE ] && [ "$has" = true ]; then
-              gh pr edit "$n" --remove-label needs-rebase --repo "$GITHUB_REPOSITORY"
+            if [ "$state" = CONFLICTING ]; then
+              node scripts/needs-attention.mjs --kind pr-conflict --repo "$GITHUB_REPOSITORY" --number "$n" \
+                --detail "Conflicts with main as of $GITHUB_SHA. Rebase onto main, resolve, force-push."
             fi
           done
