@@ -133,7 +133,7 @@ import {
   creditPause,
   type QueueRelease,
 } from '../lib/queueLabel.js';
-import { attemptPaging } from '../lib/turnAttempts.js';
+import { attemptPaging, liveAttemptSelection, type AttemptSelection } from '../lib/turnAttempts.js';
 import { ASK_USER_QUESTION, isQuestionRowCoveredByCard } from '../lib/askUserQuestion.js';
 import { QuestionCard } from '../components/QuestionCard.js';
 import { AskHumanCard } from '../components/AskHumanCard.js';
@@ -1377,9 +1377,9 @@ export function ChatRoute({
   // lost the race has to go into the composer).
   // spec/14 § Attempt pager — which attempt each re-sent turn's pager is parked
   // on, by the turn's own seq. Absent means the one that settled (the last).
-  const [attemptSel, setAttemptSel] = useState<ReadonlyMap<number, number>>(new Map());
-  const handleAttemptAt = useCallback((seq: number, idx: number) => {
-    setAttemptSel((m) => new Map(m).set(seq, idx));
+  const [attemptSelRaw, setAttemptSel] = useState<ReadonlyMap<number, AttemptSelection>>(new Map());
+  const handleAttemptAt = useCallback((seq: number, idx: number, lastSeq: number) => {
+    setAttemptSel((m) => new Map(m).set(seq, { idx, lastSeq }));
   }, []);
   const [queuedEdit, setQueuedEdit] = useState<{ localId: string; text: string } | null>(null);
   // Text handed to the mounted composer (a queued edit that lost the race).
@@ -2085,6 +2085,9 @@ export function ChatRoute({
     });
     return found;
   };
+
+  // A page chosen before a newer attempt arrived is dropped, so the new run shows.
+  const attemptSel = liveAttemptSelection(timeline, attemptSelRaw);
   const paging = attemptPaging(timeline, attemptSel);
   const renderEntries = (from: number, to: number): JSX.Element[] => {
     const out: JSX.Element[] = [];
@@ -2535,7 +2538,7 @@ const TimelineEntry = memo(function TimelineEntry({
   attemptPageable?: boolean;
   /** The attempt the pager is parked on; absent = the last. */
   attemptAt?: number;
-  onAttemptAt?(seq: number, idx: number): void;
+  onAttemptAt?(seq: number, idx: number, lastSeq: number): void;
 }): JSX.Element {
   // spec/14 § Background task completions — a completion notice reported by the
   // layer underneath is its own entry, not a system message the reader has to
@@ -2914,7 +2917,7 @@ function MessageEntry({
   attemptPageable?: boolean;
   /** The attempt the pager is parked on; absent = the last. */
   attemptAt?: number;
-  onAttemptAt?(seq: number, idx: number): void;
+  onAttemptAt?(seq: number, idx: number, lastSeq: number): void;
 }): JSX.Element {
   // spec/04 ## Message queueing — a queued entry on a chat paused for credit
   // says so. Selected as a primitive so the selector never returns a fresh object.
@@ -3014,7 +3017,8 @@ function MessageEntry({
   // pager — arrows onto an empty page are a control that does nothing.
   const pagedAttempts = attempts !== undefined && attemptPageable ? attempts : undefined;
   const attemptIdx = Math.min(attemptAt ?? attemptCount - 1, attemptCount - 1);
-  const setAttemptAt = (idx: number): void => onAttemptAt?.(entry.seq, idx);
+  const setAttemptAt = (idx: number): void =>
+    onAttemptAt?.(entry.seq, idx, attempts?.[attemptCount - 1]?.seq ?? entry.seq);
   const shownAttempt = pagedAttempts?.[attemptIdx];
   // A voice note appears LIVE (the user, patch/todo.md): its bubble renders the
   // instant the user finishes speaking, before any transcript exists — so an
