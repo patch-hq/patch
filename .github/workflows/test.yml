@@ -70,10 +70,23 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # The runner's apt mirrors intermittently fail DNS; retry instead of failing the shard.
       - run: echo 'Acquire::Retries "5";' | sudo tee /etc/apt/apt.conf.d/80-retries
-      - run: pnpm --filter @patch/web exec playwright install --with-deps chromium
+      # A runner DNS outage can outlast apt's own retries, so retry the whole install.
+      - run: |
+          for i in 1 2 3; do
+            pnpm --filter @patch/web exec playwright install --with-deps chromium && exit 0
+            echo "playwright install failed (attempt $i); retrying in 60s" >&2
+            sleep 60
+          done
+          exit 1
       # The host's browser tests drive a headed Chromium on Xvfb, and its Codex
       # tests keep credentials in the native keyring (Secret Service over D-Bus).
-      - run: sudo apt-get install -y -qq xvfb x11-utils gnome-keyring libsecret-tools dbus-x11
+      - run: |
+          for i in 1 2 3; do
+            sudo apt-get install -y -qq xvfb x11-utils gnome-keyring libsecret-tools dbus-x11 && exit 0
+            echo "apt install failed (attempt $i); retrying in 60s" >&2
+            sleep 60
+          done
+          exit 1
       # Some suites run against built output (the server serves the web build).
       # Not the phone: its "build" is an Expo export + prebuild that rewrites android/.
       - run: pnpm turbo build --filter='!@patch/mobile' --output-logs=errors-only
