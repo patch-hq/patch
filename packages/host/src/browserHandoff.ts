@@ -19,7 +19,7 @@ import type {
   BrowserViewInput,
   WireEvent,
 } from '@patch/wire';
-import type { BrowserManager, Screencast } from './browser.js';
+import { addressToUrl, type BrowserManager, type Screencast } from './browser.js';
 
 /** The live-view input this host takes: `patch.browser_view.input` and `.drive` at any time. */
 export const BROWSER_VIEW_INPUT_VERSION = 2;
@@ -328,6 +328,13 @@ export class BrowserHandoff {
       },
       { chatId, tabId },
     );
+  }
+
+  /** `patch.browser_view.open`: the person's own new tab for the chat, driven by them from the start. */
+  async open(chatId: string, address: string): Promise<void> {
+    const { browser } = this.opts;
+    const { tabId } = await browser.open({ url: addressToUrl(address), chatId });
+    browser.setDriver(tabId, 'user');
   }
 
   /** `patch.browser_view.drive`: Take over / Hand back. A hand-off the agent asked for ends only by Done. */

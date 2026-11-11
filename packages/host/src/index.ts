@@ -7472,6 +7472,10 @@ export async function handleServerEvent(
         daemon.browserViewDrive(event.chatId, event.tabId, event.driver);
         return;
       }
+      case 'patch.browser_view.open': {
+        void daemon.browserViewOpen(event.chatId, event.url);
+        return;
+      }
       case 'patch.browser_view.stop': {
         void daemon.browserViewStop(event.chatId);
         return;
