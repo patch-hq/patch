@@ -3305,7 +3305,14 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       return reply.code(503).send({ error: 'chat search not configured' });
     }
     try {
-      const result = await opts.searchAccountChats(q.data.callerChatId, q.data.query, q.data.limit);
+      const answer = await opts.searchAccountChats(q.data.callerChatId, q.data.query, q.data.limit);
+      // The agent finds a chat by its chatId and reads it with patch_peek /
+      // patch_history, which route to the owning machine themselves. Naming the
+      // machine here only invites the agent to reason about hosts.
+      const result = {
+        ...answer,
+        results: answer.results.map(({ hostId: _hostId, ...rest }) => rest),
+      };
       toolLog({
         tool: 'patch_search_chats',
         callerChatId: q.data.callerChatId,
