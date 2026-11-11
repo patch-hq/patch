@@ -2169,10 +2169,12 @@ export function bootstrap(): void {
     }
   });
 
-  // macOS — keep running with no windows so tray + hotkey stay live.
-  app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') app.quit();
-  });
+  // Keep running with no windows so the tray and hotkeys stay live — on Linux
+  // too. Closing the main window only hides it, so this fires in the moment
+  // between the first-run window closing and Patch's own opening, and quitting
+  // there ended every Linux first run just as it succeeded. Quit is in the tray
+  // menu and the app menu; launching the app again shows its window.
+  app.on('window-all-closed', () => undefined);
 }
 
 // A PACKAGED app is always the entry — Electron loads `main` from package.json,
