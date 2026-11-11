@@ -68,11 +68,14 @@ jobs:
           sudo swapon /mnt/ci-extra.swap
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      # Runner DNS blips make apt fail; retry the whole install.
+      # Runner DNS outages make apt fail, sometimes for several minutes; retry
+      # the whole install with growing waits and apt's own per-file retries.
       - run: |
-          for i in 1 2 3; do
+          echo 'Acquire::Retries "5";' | sudo tee /etc/apt/apt.conf.d/80-retries >/dev/null
+          for i in 1 2 3 4 5 6; do
+            sudo apt-get update -qq || true
             pnpm --filter @patch/web exec playwright install --with-deps chromium && exit 0
-            echo "playwright install failed (attempt $i)" >&2; sleep 20
+            echo "playwright install failed (attempt $i)" >&2; sleep $((i * 30))
           done
           exit 1
       # The host's browser tests drive a headed Chromium on Xvfb, and its Codex
