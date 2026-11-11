@@ -83,8 +83,15 @@ const ModelsQuery = z.object({ hostId: z.string().min(1) }).strict();
 /** `GET /api/skills?folder=&hostId=` — the folder and host being listed. */
 const SkillsQuery = z.object({ folder: z.string().min(1), hostId: z.string().min(1) }).strict();
 
-/** How long POST /api/chats blocks waiting for an immediate spawn-time chat.error. */
-const SPAWN_ERROR_WAIT_MS = 5_000;
+/**
+ * How long POST /api/chats blocks waiting for the host to answer a spawn: either
+ * `chat.spawned` or an immediate spawn-time `chat.error`. The host re-reads its
+ * backend credential before it creates the chat (a keychain read and possible
+ * token refresh on a Mac), so a cold host can take well over 5s to confirm. A
+ * timeout here shows the user a failed spawn for a chat the host then creates
+ * anyway, so the budget is generous.
+ */
+const SPAWN_ERROR_WAIT_MS = 20_000;
 
 /** Host's placeholder chatId for spawn-time errors that pre-date a real chat. */
 const PENDING_SPAWN_PLACEHOLDER = 'pending-spawn';
