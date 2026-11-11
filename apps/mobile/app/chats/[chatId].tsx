@@ -1548,6 +1548,49 @@ function PermissionOutcome({
   );
 }
 
+/** Calls the user asked to cancel; the chip shows only once the call comes back as an error. */
+const cancelRequested = new Set<string>();
+
+/** Icon-only cancel for one running Bash command. 44px, the touch minimum. */
+function CancelCommandButton({
+  chatId,
+  callId,
+}: {
+  chatId: string;
+  callId: string;
+}): React.ReactElement {
+  const colors = useTheme();
+  const [asked, setAsked] = React.useState(false);
+  return (
+    <Pressable
+      testID="tool-cancel"
+      accessibilityRole="button"
+      accessibilityLabel="Cancel this command"
+      disabled={asked}
+      onPress={() => {
+        setAsked(true);
+        cancelRequested.add(callId);
+        getWs().send({ type: 'chat.tool_cancel_request', chatId, callId });
+      }}
+      style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}
+    >
+      <View
+        style={{
+          width: 32,
+          height: 32,
+          borderRadius: radii.md,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: colors.diffDel,
+          opacity: asked ? 0.5 : 1,
+        }}
+      >
+        <X size={16} color={colors.red} />
+      </View>
+    </Pressable>
+  );
+}
+
 /** A running call's elapsed time, from the host's start stamp. Display only. */
 function ToolElapsed({ since }: { since: number }): React.ReactElement {
   const colors = useTheme();
@@ -1649,26 +1692,44 @@ function ToolCallItem({
         marginBottom: space.sm,
       }}
     >
-      <Pressable
-        onPress={() => setExpanded((v) => !v)}
-        onLongPress={() => showMessageActions(copyableText(entry) ?? '')}
-        delayLongPress={350}
-        style={{ flexDirection: 'row', alignItems: 'center' }}
-        accessibilityLabel={`Tool call ${entry.tool ?? ''} — tap to ${expanded ? 'collapse' : 'expand'}`}
-      >
-        {expanded ? (
-          <ChevronDown size={14} color={colors.ink3} />
-        ) : (
-          <ChevronRight size={14} color={colors.ink3} />
-        )}
-        <Text
-          style={{ ...typography.meta, color: colors.ink2, marginLeft: space.xs, flexShrink: 1 }}
-          numberOfLines={1}
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <Pressable
+          onPress={() => setExpanded((v) => !v)}
+          onLongPress={() => showMessageActions(copyableText(entry) ?? '')}
+          delayLongPress={350}
+          style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}
+          accessibilityLabel={`Tool call ${entry.tool ?? ''} — tap to ${expanded ? 'collapse' : 'expand'}`}
         >
-          {summary}
-        </Text>
-        {runningSince !== undefined ? <ToolElapsed since={runningSince} /> : null}
-      </Pressable>
+          {expanded ? (
+            <ChevronDown size={14} color={colors.ink3} />
+          ) : (
+            <ChevronRight size={14} color={colors.ink3} />
+          )}
+          <Text
+            style={{ ...typography.meta, color: colors.ink2, marginLeft: space.xs, flexShrink: 1 }}
+            numberOfLines={1}
+          >
+            {summary}
+          </Text>
+          {runningSince !== undefined ? <ToolElapsed since={runningSince} /> : null}
+        </Pressable>
+        {runningSince !== undefined && entry.tool === 'Bash' && entry.callId ? (
+          <CancelCommandButton chatId={chatId} callId={entry.callId} />
+        ) : null}
+        {result?.toolIsError && entry.callId && cancelRequested.has(entry.callId) ? (
+          <View
+            testID="tool-cancelled"
+            style={{
+              borderRadius: 999,
+              paddingHorizontal: space.sm,
+              paddingVertical: 2,
+              backgroundColor: colors.diffDel,
+            }}
+          >
+            <Text style={{ ...typography.meta, color: colors.red }}>Cancelled by you</Text>
+          </View>
+        ) : null}
+      </View>
       {deepLink ? (
         <Pressable
           onPress={() => void Linking.openURL(deepLink)}

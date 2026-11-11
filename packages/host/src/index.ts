@@ -7196,6 +7196,10 @@ export async function handleServerEvent(
         else await daemon.stopAllBranches(event.chatId);
         return;
       }
+      case 'chat.tool_cancel_request': {
+        await daemon.cancelToolCall(event.chatId, event.callId);
+        return;
+      }
       case 'chat.resume_now_request': {
         // spec/10 § Usage: stop waiting out the limit and try now. Logged
         // either way — "I pressed it and nothing happened" has to be
