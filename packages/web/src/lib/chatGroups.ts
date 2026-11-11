@@ -515,7 +515,15 @@ export function matchesStateFilter(row: ChatRow, filter: ChatStateFilter): boole
         badge === 'permission' || (row.statusKind === 'question' && row.statusDeclared === true)
       );
     case 'done':
-      return !pending && (badge === 'done' || badge === 'read');
+      // Waiting-on-you chats are ready too: they have responded and the next
+      // move is the user's, so Ready is the whole queue of things to look at.
+      return (
+        !pending &&
+        (badge === 'done' ||
+          badge === 'read' ||
+          badge === 'permission' ||
+          (row.statusKind === 'question' && row.statusDeclared === true))
+      );
   }
 }
 

@@ -158,7 +158,7 @@ The sidebar is the only multi-session navigator. Top to bottom:
 
 - `All` — nothing is filtered.
 - `Unread` — the needs-attention queue (see § Chat lifecycle → Unread below): Pinned + Folders only, filtered to rows that need you and re-ordered FIFO, holding the chat you're looking at until you move on.
-- `Ready` — every chat that has responded and is ready to read, whether or not it has been read yet (`done` or `read` badge). Unlike `Unread` it keeps read rows and holds nothing. Same narrowing as the three below.
+- `Ready` — every chat that has responded and is ready to read, whether or not it has been read yet (`done` or `read` badge), plus every chat that is waiting on the user (a permission or declared question), so a chat shown under `Waiting on you` also appears here. Unlike `Unread` it keeps read rows and holds nothing. Same narrowing as the three below.
 - `Working` / `Waiting on you` / `Failed` — narrows Pinned + Folders to rows in that one state (§ Status badges), leaving Channels, Recent projects, Archived and Deleted showing — these ask "what's in this state", not "what needs me", so the rest of the list stays reachable. Driven off the same `deriveBadge` the row's own icon uses (`working`/`background`/`monitoring` for Working; a `permission` badge or a declared question for Waiting on you; `errored` for Failed), so what you filter for and what you see on the row can never disagree.
 - `Batch` — swaps the list for the batch review view (see § Batch mode). The option carries a count badge when the batch is non-zero, the same number the batch view itself lists.
 
