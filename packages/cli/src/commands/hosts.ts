@@ -72,13 +72,21 @@ async function hostRoute(
   opts: HostsOpts,
   udsPath: string,
   restPath: (hostId: string) => string,
-): Promise<{ t: ReturnType<typeof getTransport>; path: string }> {
+): Promise<{ t: ReturnType<typeof getTransport>; path: string; hostId: string | undefined }> {
   if (opts.host === undefined) {
     const t = getTransport(opts);
-    return { t, path: t.kind === 'uds' ? udsPath : restPath('') };
+    return { t, path: t.kind === 'uds' ? udsPath : restPath(''), hostId: undefined };
   }
   const hostId = await resolveHost(opts);
-  return { t: getTransport({ ...opts, remote: true }), path: restPath(hostId) };
+  return { t: getTransport({ ...opts, remote: true }), path: restPath(hostId), hostId };
+}
+
+/** A remote call names its machine in the body; a local one needs no id. */
+export function withHost<T extends object>(
+  body: T,
+  hostId: string | undefined,
+): T | (T & { hostId: string }) {
+  return hostId === undefined ? body : { ...body, hostId };
 }
 
 export function registerHostsCommands(program: Command): void {
@@ -112,13 +120,16 @@ export function registerHostsCommands(program: Command): void {
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
       await run(opts, async () => {
-        const { t, path } = await hostRoute(
-          opts,
-          '/host',
-          (id) => `/api/hosts${id ? `?hostId=${encodeURIComponent(id)}` : ''}`,
-        );
+        const { t, path, hostId } = await hostRoute(opts, '/host', () => '/api/hosts');
         const res = await t.get<unknown>(path);
-        emitJson(res);
+        if (hostId === undefined || t.kind === 'uds') {
+          emitJson(res);
+          return;
+        }
+        // The server lists every machine; --host names one, so return that one.
+        const match = (res as { hosts: HostSummary[] }).hosts.find((h) => h.hostId === hostId);
+        if (!match) throw new Error(`machine ${hostId} is not in the server's host list`);
+        emitJson(match);
       });
     });
 
@@ -224,12 +235,12 @@ export function registerHostsCommands(program: Command): void {
     .option('--json', 'JSON output')
     .action(async (component: string, opts: HostsOpts) => {
       await run(opts, async () => {
-        const { t, path } = await hostRoute(
+        const { t, path, hostId } = await hostRoute(
           opts,
           '/components/install',
           () => '/api/hosts/components/install',
         );
-        emitJson(await t.post<unknown>(path, { componentId: component }));
+        emitJson(await t.post<unknown>(path, withHost({ componentId: component }, hostId)));
       });
     });
 
@@ -240,12 +251,12 @@ export function registerHostsCommands(program: Command): void {
     .option('--json', 'JSON output')
     .action(async (component: string, opts: HostsOpts) => {
       await run(opts, async () => {
-        const { t, path } = await hostRoute(
+        const { t, path, hostId } = await hostRoute(
           opts,
           '/components/remove',
           () => '/api/hosts/components/remove',
         );
-        emitJson(await t.post<unknown>(path, { componentId: component }));
+        emitJson(await t.post<unknown>(path, withHost({ componentId: component }, hostId)));
       });
     });
 
@@ -276,12 +287,14 @@ export function registerHostsCommands(program: Command): void {
     .option('--json', 'JSON output')
     .action(async (file: string, opts: HostsOpts) => {
       await run(opts, async () => {
-        const { t, path } = await hostRoute(
+        const { t, path, hostId } = await hostRoute(
           opts,
           '/claude-settings',
           () => '/api/hosts/claude-settings',
         );
-        emitJson(await t.post<unknown>(path, { text: readFileSync(file, 'utf8') }));
+        emitJson(
+          await t.post<unknown>(path, withHost({ text: readFileSync(file, 'utf8') }, hostId)),
+        );
       });
     });
 
@@ -294,12 +307,12 @@ export function registerHostsCommands(program: Command): void {
     .option('--json', 'JSON output')
     .action(async (project: string, file: string, opts: HostsOpts) => {
       await run(opts, async () => {
-        const { t, path } = await hostRoute(
+        const { t, path, hostId } = await hostRoute(
           opts,
           '/claude-settings/memory/delete',
           () => '/api/hosts/claude-settings/memory/delete',
         );
-        emitJson(await t.post<unknown>(path, { project, file }));
+        emitJson(await t.post<unknown>(path, withHost({ project, file }, hostId)));
       });
     });
 
@@ -310,8 +323,8 @@ export function registerHostsCommands(program: Command): void {
     .option('--json', 'JSON output')
     .action(async (opts: HostsOpts) => {
       await run(opts, async () => {
-        const { t, path } = await hostRoute(opts, '/update', () => '/api/hosts/update');
-        emitJson(await t.post<unknown>(path, {}));
+        const { t, path, hostId } = await hostRoute(opts, '/update', () => '/api/hosts/update');
+        emitJson(await t.post<unknown>(path, withHost({}, hostId)));
       });
     });
 
