@@ -86,6 +86,18 @@ describe('matchesStateFilter', () => {
     ).toBe(false);
   });
 
+  it('`done` (Ready) includes chats waiting on the user', () => {
+    expect(matchesStateFilter(row({ chatId: 'a', activity: 'awaiting-permission' }), 'done')).toBe(
+      true,
+    );
+    expect(
+      matchesStateFilter(
+        row({ chatId: 'a', statusKind: 'question', statusDeclared: true }),
+        'done',
+      ),
+    ).toBe(true);
+  });
+
   it('`done` never includes a failure', () => {
     expect(
       matchesStateFilter(
