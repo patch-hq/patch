@@ -4857,7 +4857,12 @@ export class Daemon {
     if (waiters?.length) {
       for (const w of waiters) w({ status: outcome, reply });
     } else if (outcome !== 'stopped') {
-      this.deliverToParent(parentChatId, formatAgentReturn(label, chatId, reply));
+      // A wake that adds no assistant message would re-send the same report.
+      const last = outcome === 'done' ? lastAssistantMessage(state) : undefined;
+      if (last === undefined || last.seq !== state.deliveredReportSeq) {
+        if (last !== undefined) state.deliveredReportSeq = last.seq;
+        this.deliverToParent(parentChatId, formatAgentReturn(label, chatId, reply));
+      }
     }
     this.emitDelegateUpdate(parentChatId, chatId, label, outcome);
     if (this.chatState.has(parentChatId)) this.emitState(parentChatId);
