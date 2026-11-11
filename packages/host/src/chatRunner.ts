@@ -6044,6 +6044,7 @@ export class Daemon {
         askingQuestion: this.isAskingQuestion(state),
         finishedAt: open.finishedAt,
         erroredAt: open.erroredAt,
+        error: open.error,
         waitingSince: open.waitingSince,
         now: endedAt,
       }),
@@ -6073,12 +6074,16 @@ export class Daemon {
     const next: SnoozeRecord = { ...open };
     if (prev === 'running' && activity === 'idle') next.finishedAt = now;
     if (activity === 'errored' && prev !== 'errored') next.erroredAt = now;
+    if (activity === 'errored' && state.lastError) {
+      next.error = { code: state.lastError.code, message: state.lastError.message };
+    }
     const waiting = activity === 'awaiting-permission' || this.isAskingQuestion(state);
     if (waiting && next.waitingSince === undefined) next.waitingSince = now;
     if (!waiting && next.waitingSince !== undefined) delete next.waitingSince;
     if (
       next.finishedAt !== open.finishedAt ||
       next.erroredAt !== open.erroredAt ||
+      next.error?.message !== open.error?.message ||
       next.waitingSince !== open.waitingSince
     ) {
       this.replaceLastSnoozeRecord(chatId, next);
