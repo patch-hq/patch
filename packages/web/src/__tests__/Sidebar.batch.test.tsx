@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { Sidebar } from '../components/Sidebar.js';
+import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
@@ -65,6 +66,9 @@ function renderSidebar(): void {
 
 describe('Sidebar batch mode', () => {
   beforeEach(() => {
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    });
     localStorage.clear();
     useChatStore.getState()._reset();
     useBatchStore.getState()._reset();

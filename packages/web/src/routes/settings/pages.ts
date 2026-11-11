@@ -20,6 +20,7 @@ export type SettingsPageId =
   | 'notifications'
   | 'devices'
   | 'shortcuts'
+  | 'experimental'
   | 'updates'
   | 'bugs'
   | 'account';
@@ -43,6 +44,7 @@ export const SETTINGS_PAGES: { id: SettingsPageId; title: string; group: string 
   { id: 'notifications', title: 'Notifications', group: 'Setup' },
   { id: 'devices', title: 'Devices', group: 'Setup' },
   { id: 'shortcuts', title: 'Shortcuts', group: 'Setup' },
+  { id: 'experimental', title: 'Experimental features', group: 'System' },
   { id: 'updates', title: 'Updates', group: 'System' },
   { id: 'bugs', title: 'Bug reports', group: 'System' },
   { id: 'account', title: 'Account', group: 'System' },
@@ -50,3 +52,10 @@ export const SETTINGS_PAGES: { id: SettingsPageId; title: string; group: string 
 
 /** The page `/settings` itself shows beside the nav on a wide screen. */
 export const DEFAULT_SETTINGS_PAGE: SettingsPageId = 'usage';
+
+/** Pages that only exist while Settings → Experimental features is on. */
+export const EXPERIMENTAL_SETTINGS_PAGES: readonly SettingsPageId[] = ['manager'];
+
+export function visibleSettingsPages(experimental: boolean): typeof SETTINGS_PAGES {
+  return SETTINGS_PAGES.filter((p) => experimental || !EXPERIMENTAL_SETTINGS_PAGES.includes(p.id));
+}
