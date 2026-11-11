@@ -100,7 +100,9 @@ describe('H1 deploy artifacts — deploy command + backup scripts', () => {
     const workflow = read('.github/workflows/release.yml');
     // Nothing is published unless every surface built and this commit's test
     // run (test.yml) passed; the tests are not re-run here, they run alongside...
-    expect(workflow).toMatch(/needs: \[tests, server, host, mac, android, mobile-update\]/);
+    expect(workflow).toMatch(
+      /needs: \[tests, server, host, mac, linux-desktop, android, mobile-update\]/,
+    );
     expect(workflow).not.toMatch(/PATCH_BROWSER_SHARD/);
     const tests = read('.github/workflows/test.yml');
     // ...the cheap layers on every PR and the full gate, four shards, in the merge
