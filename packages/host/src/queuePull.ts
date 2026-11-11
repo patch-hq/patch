@@ -15,11 +15,19 @@ export interface QueuePullClientOptions {
   emit: (event: WireEvent) => void;
   isLinkOnline: () => boolean;
   timeoutMs?: number;
+  /**
+   * The server answered after this side gave up waiting. The server has already
+   * taken those messages off its queue, so they must be handled here or they are
+   * lost: the turn went on without them and nothing else would ever send them.
+   */
+  onLate: (chatId: string, items: ChatInputEvent[]) => void;
 }
 
 export class QueuePullClient {
   private enabled = false;
   private readonly pending = new Map<string, (items: ChatInputEvent[]) => void>();
+  /** Requests given up on, by id, so a late answer can still be handed on. */
+  private readonly abandoned = new Map<string, string>();
 
   constructor(private readonly opts: QueuePullClientOptions) {}
 
@@ -35,6 +43,7 @@ export class QueuePullClient {
     return await new Promise<ChatInputEvent[]>((resolve) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId);
+        this.abandoned.set(requestId, chatId);
         resolve([]);
       }, this.opts.timeoutMs ?? QUEUE_PULL_TIMEOUT_MS);
       timer.unref();
@@ -47,6 +56,12 @@ export class QueuePullClient {
   }
 
   handleResponse(event: PatchQueuePullResponseEvent): void {
+    const lateChat = this.abandoned.get(event.requestId);
+    if (lateChat !== undefined) {
+      this.abandoned.delete(event.requestId);
+      if (event.items.length > 0) this.opts.onLate(lateChat, event.items);
+      return;
+    }
     const resolve = this.pending.get(event.requestId);
     if (!resolve) return;
     this.pending.delete(event.requestId);
