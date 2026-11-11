@@ -5946,9 +5946,10 @@ export class Daemon {
   }
 
   /**
-   * Running, idle between turns with a goal still to be judged, or idle with a
-   * one-shot self-wake armed (the chat is about to wake itself). A loop never
-   * completes, so it is not work to wait for.
+   * Running, idle between turns with a goal still to be judged, idle with a
+   * one-shot self-wake armed (the chat is about to wake itself), or waiting on a
+   * delegated agent that has not returned. A loop never completes, so it is not
+   * work to wait for.
    */
   private hasWorkToComplete(chatId: string): boolean {
     const state = this.chatState.get(chatId);
@@ -5956,13 +5957,15 @@ export class Daemon {
     return (
       this.aggregateActivity(chatId) === 'running' ||
       (state?.goal ?? null) !== null ||
-      (wake !== null && wake.every === undefined)
+      (wake !== null && wake.every === undefined) ||
+      this.hasRunningDelegates(chatId)
     );
   }
 
   /**
    * "Until complete" (spec/04 § Snooze): the snooze ends when the chat's work
-   * does — no turn running and no goal left to judge — or sooner if it stops
+   * does — no turn running, no goal left to judge and no delegated agent still
+   * running — or sooner if it stops
    * for a person (a permission, a question, an error), since nothing more will
    * happen without them.
    */

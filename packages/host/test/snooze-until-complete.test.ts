@@ -171,4 +171,24 @@ describe('Snooze until complete', () => {
     expect(metaStore.read(id)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
     daemon.shutdown();
   });
+
+  it('stays snoozed while a delegated agent is still running, and wakes once all agents are done', async () => {
+    const { backend, release } = gated();
+    const { daemon, folder } = setup(backend);
+    const parent = await daemon.spawnChat({ folder });
+    // The parent itself is idle; only its agent has work in flight.
+    const { id: agent } = await daemon.createDelegate({ parentChatId: parent, prompt: 'research' });
+    await sleep(20);
+    expect(daemon.chatState.get(agent)?.subagent?.outcome).toBeUndefined();
+
+    await daemon.setSnoozed(parent, SNOOZE_UNTIL_COMPLETE);
+    await sleep(60);
+    expect(daemon.chatState.get(parent)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
+
+    release();
+    await sleep(300);
+    expect(daemon.chatState.get(agent)?.subagent?.outcome).toBe('done');
+    expect(daemon.chatState.get(parent)?.snoozedUntil).toBe(null);
+    daemon.shutdown();
+  });
 });
