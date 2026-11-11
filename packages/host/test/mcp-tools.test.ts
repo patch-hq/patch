@@ -755,10 +755,9 @@ describe('patch_search_chats — full MCP round-trip with a configured searchAcc
       arguments: { query: 'garden', limit: 5 },
     })) as { content: { text: string }[]; isError?: boolean };
     expect(res.isError).toBeFalsy();
-    expect(JSON.parse(res.content[0]!.text)).toMatchObject({
-      results: [{ chatId: 'c9', hostId: 'other-host' }],
-      chatsWithoutLog: 2,
-    });
+    const body = JSON.parse(res.content[0]!.text) as { results: Array<Record<string, unknown>> };
+    expect(body).toMatchObject({ results: [{ chatId: 'c9' }], chatsWithoutLog: 2 });
+    expect(body.results[0]).not.toHaveProperty('hostId');
     expect(calls).toEqual([{ callerChatId: 'caller-search-1', query: 'garden', limit: 5 }]);
   });
 

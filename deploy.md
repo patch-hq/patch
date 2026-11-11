@@ -45,6 +45,11 @@ To mark a dev build stable — the same files, re-published, no rebuild:
 node scripts/promote.mjs 1.1.42    # or no argument for the newest dev build
 ```
 
+A stable release also carries fixed-name copies the website links to through
+`https://github.com/patch-hq/patch/releases/latest/download/<name>`:
+`Patch-mac-arm64.zip`, `Patch-mac-arm64.dmg`, `Patch-linux-x86_64.AppImage`,
+`Patch-android.apk` and `install.sh`. A release missing one is not promoted.
+
 Versions are `<major>.<minor>.<commit count>` (`scripts/version.mjs`); bump
 `version` in the root `package.json` for a new headline number.
 

@@ -2051,6 +2051,40 @@ export function ChatRoute({
     });
     return found;
   };
+  // Where each stopped / interrupted turn ended (spec/14 § Running-turn
+  // controls): the marker sits before the next turn's user message, or at the
+  // end of the live transcript, so it reads as "the agent stopped HERE". A turn
+  // that also failed keeps its failed line on the message instead.
+  const stopMarkerAt = new Map<number, ChatEventEntry[]>();
+  timeline.forEach((e, idx) => {
+    if (e.kind !== 'message' || e.role !== 'user' || e.queued) return;
+    if (!(e.turnStopped || e.turnInterrupted) || e.turnFailed || e.deliveryFailed) return;
+    let end = idx + 1;
+    while (end < queuedFrom) {
+      const n = timeline[end];
+      if (n && n.kind === 'message' && n.role === 'user') break;
+      end++;
+    }
+    stopMarkerAt.set(end, [...(stopMarkerAt.get(end) ?? []), e]);
+  });
+  const stopMarkersPlaced = new Set<number>();
+  const stopMarkersBefore = (idx: number): JSX.Element[] => {
+    const found: JSX.Element[] = [];
+    stopMarkerAt.forEach((entries, at) => {
+      if (at > idx || stopMarkersPlaced.has(at)) return;
+      stopMarkersPlaced.add(at);
+      for (const e of entries) {
+        found.push(
+          <TurnStopMarker
+            key={`stop-${e.seq}-${at}`}
+            entry={e}
+            onContinueTurn={handleContinueTurn}
+          />,
+        );
+      }
+    });
+    return found;
+  };
   const paging = attemptPaging(timeline, attemptSel);
   const renderEntries = (from: number, to: number): JSX.Element[] => {
     const out: JSX.Element[] = [];
@@ -2075,6 +2109,7 @@ export function ChatRoute({
     while (i < to) {
       const entry = timeline[i];
       if (!entry) break;
+      out.push(...stopMarkersBefore(i));
       out.push(...dividersBefore(entry.seq));
       if (i >= limitTailStart) {
         i++;
@@ -2207,6 +2242,7 @@ export function ChatRoute({
       );
       i++;
     }
+    out.push(...stopMarkersBefore(to));
     // Snoozes that began after everything drawn so far close the transcript.
     if (to === timeline.length) out.push(...dividersBefore(null));
     return out;
@@ -3327,33 +3363,6 @@ function MessageEntry({
         // separate error line): the failure reads as "this message needs
         // resending", regardless of which hop actually broke.
         <TurnFailedStatus entry={entry} onRetryTurn={onRetryTurn} onContinueTurn={onContinueTurn} />
-      ) : entry.turnInterrupted ? (
-        // spec/14 § Running-turn controls — a newer message got promoted ahead
-        // of this one. The agent DID see it (the promoted turn resumed the same
-        // session), so there is nothing to retry — just say so, muted, with no
-        // action, rather than offer a retry that would duplicate it.
-        <div className="delivery-status interrupted" data-testid="turn-interrupted">
-          <span>Interrupted by a newer message.</span>
-        </div>
-      ) : entry.turnStopped ? (
-        // spec/14 § Running-turn controls — the user pressed Stop / Esc with
-        // nothing queued behind it. The agent saw this turn and started on it,
-        // so Continue nudges it onward with a fresh turn rather than
-        // resubmitting this message's text, which it already has in context.
-        // Muted, not the danger colour — a stop is what the user asked for.
-        <div className="delivery-status stopped" data-testid="turn-stopped">
-          <span>Stopped.</span>
-          {onContinueTurn ? (
-            <button
-              type="button"
-              className="delivery-retry"
-              data-testid="turn-stopped-continue"
-              onClick={() => onContinueTurn()}
-            >
-              Continue
-            </button>
-          ) : null}
-        </div>
       ) : entry.deliveryPending && !entry.queued ? (
         <div
           className="delivery-status pending"
@@ -3565,6 +3574,47 @@ function MessageReadButton({ readKey, text }: { readKey: string; text: string })
  * moment, or a cross when the write fails (NO FALLBACK: a copy that did nothing
  * must say so).
  */
+/**
+ * spec/14 § Running-turn controls — where a turn was stopped or cut off by a
+ * newer message. Drawn in the transcript at the point the turn ended (after
+ * whatever the agent had produced), not under the user's message that started
+ * it. Muted, not the danger colour: neither is an error.
+ */
+function TurnStopMarker({
+  entry,
+  onContinueTurn,
+}: {
+  entry: ChatEventEntry;
+  onContinueTurn: (() => void) | undefined;
+}): JSX.Element {
+  if (entry.turnInterrupted) {
+    // A newer message got promoted ahead of this turn; the agent saw it, so
+    // there is nothing to retry or continue.
+    return (
+      <div className="delivery-status interrupted turn-stop-marker" data-testid="turn-interrupted">
+        <span>Interrupted by a newer message.</span>
+      </div>
+    );
+  }
+  // Stop / Esc with nothing queued: Continue nudges with a fresh turn rather
+  // than resubmitting text the agent already has in context.
+  return (
+    <div className="delivery-status stopped turn-stop-marker" data-testid="turn-stopped">
+      <span>Stopped.</span>
+      {onContinueTurn ? (
+        <button
+          type="button"
+          className="delivery-retry"
+          data-testid="turn-stopped-continue"
+          onClick={() => onContinueTurn()}
+        >
+          Continue
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function MessageCopyButton({ text }: { text: string }): JSX.Element {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const timer = useRef<number | undefined>(undefined);

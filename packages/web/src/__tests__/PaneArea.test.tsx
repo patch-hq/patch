@@ -192,6 +192,22 @@ describe('PaneArea — one pane, several tabs', () => {
   });
 });
 
+describe('PaneArea — tab icons', () => {
+  it('draws a tab kind icon at the size of the tab title text (16px)', () => {
+    seedChats(['c1']);
+    useLayoutStore.getState().openTab({ kind: 'chat', chatId: 'c1' }, { placement: 'tab' });
+    useLayoutStore.getState().openTab({ kind: 'browser', chatId: 'c1' }, { placement: 'tab' });
+    useLayoutStore.getState().openTab({ kind: 'page', page: 'settings' }, { placement: 'tab' });
+    renderPanes();
+    const icons = screen
+      .getAllByRole('tab')
+      .map((t) => t.firstElementChild)
+      .filter((el): el is SVGSVGElement => el instanceof SVGSVGElement);
+    expect(icons.length).toBeGreaterThanOrEqual(2);
+    for (const svg of icons) expect(svg.getAttribute('width')).toBe('16');
+  });
+});
+
 describe('PaneArea — two panes', () => {
   it('each pane draws its own tab bar even with one tab each, and clicking one focuses it', () => {
     seedChats(['c1', 'c2']);
