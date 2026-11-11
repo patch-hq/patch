@@ -579,7 +579,9 @@ export function ChatRoute({
     if (!ws) return;
     let cancelled = false;
     void (async () => {
-      if ((useChatStore.getState().timelines[chatId]?.length ?? 0) === 0) {
+      // A chat holding only error rows has no transcript: a failed turn's
+      // error reaches every surface, so it can land before the chat is opened.
+      if (!(useChatStore.getState().timelines[chatId] ?? []).some((e) => e.kind !== 'error')) {
         const cached = await loadTranscript(chatId);
         if (cancelled) return;
         if (cached && cached.events.length > 0) {
