@@ -212,7 +212,12 @@ export function BackgroundTaskBar({ chatId }: { chatId: string }): JSX.Element |
 
   const running = runningWatchTasks(effectiveTasks);
   const shown = showAll ? sortWatchTasks(effectiveTasks) : running;
-  const grouped = liveCount > 1 || shown.length > 1;
+  // `liveCount` also counts running `patch_delegate` subagents (the sidebar
+  // badge wants them), but this bar lists only watch tasks — agents have their
+  // own strip. So the bar's own count and grouping come from its running rows,
+  // never from `liveCount`, or it claims tasks it has no row for.
+  if (running.length === 0) return null;
+  const grouped = running.length > 1 || shown.length > 1;
   const open = !collapsed;
   const oldestStart = running.reduce<number | null>(
     (min, t) => (min === null || t.startedAt < min ? t.startedAt : min),
@@ -345,7 +350,7 @@ export function BackgroundTaskBar({ chatId }: { chatId: string }): JSX.Element |
     ) : null;
   }
 
-  const summary = `${liveCount} running`;
+  const summary = `${running.length} running`;
   return (
     <div data-testid="background-task-bar" data-collapsed={open ? 'false' : 'true'} role="status">
       <StatusRow
