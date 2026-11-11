@@ -210,6 +210,19 @@ describe('host hello brings a stale host in step', () => {
     }
   });
 
+  it('leaves a behind host inside the supported window to update itself when idle', async () => {
+    publish(VERSION);
+    const c = await connectHost('0.1.375');
+    try {
+      expect(c.frames).toEqual([]);
+      c.recheck();
+      await new Promise((r) => setTimeout(r, 100));
+      expect(c.frames).toEqual([]);
+    } finally {
+      await c.close();
+    }
+  });
+
   it('sends nothing to a behind host when auto-update is off', async () => {
     publish(VERSION);
     const c = await connectHost('0.0.1', { autoUpdateHosts: false });
