@@ -1043,15 +1043,6 @@ export function restartResendAsOwnMessage<E extends { type: string }>(
 /** Total attempts `maybeGenerateTitle` makes before leaving a chat unnamed. */
 const TITLE_GEN_ATTEMPTS = 5;
 
-/**
- * The inline line a restart-interrupted turn leaves in the history, before the
- * host's automated re-send. Hosts before 2026-11-05 wrote the legacy text,
- * which replay recognises so those chats show the same way.
- */
-const RESTART_INTERRUPTION_MARKER = 'Turn interrupted by restart';
-const LEGACY_RESTART_INTERRUPTION_MARKER =
-  'Host restarted — the running turn was cut off and has been re-sent';
-
 /** Delay before the first retry in `maybeGenerateTitle`; doubles each attempt, so a host that is briefly saturated (a deploy restart) gets time to recover. */
 const TITLE_GEN_RETRY_DELAY_MS = 3_000;
 
@@ -10298,6 +10289,24 @@ export class Daemon {
       const path = chatTranscriptPath(this.chatDirFor(chatId), state.folder, claudeResumeId);
       claudeTranscript = { path, size: transcriptSize(path) };
     }
+    // A turn the user stopped before the model answered leaves a track of bare
+    // prompts, which the session store drops — so the next send (a "Continue")
+    // starts a fresh session and the model sees only that word. Carry the
+    // unanswered prompts in with it.
+    // Only the bare "Continue" nudge (the stop-card button / Threads carry-on):
+    // any other message after a stop is the user moving on, not asking to resume.
+    const sdkPrompt =
+      !fork &&
+      prompt.trim().toLowerCase() === 'continue' &&
+      retryOfSeq === undefined &&
+      userMessageSeq !== undefined &&
+      !isProviderSwitch &&
+      !isNativeRebuild &&
+      !state.claudeSessionId &&
+      this.hasPriorTrack(chatId, userMessageSeq) &&
+      !this.hasAnsweredTrack(chatId, userMessageSeq)
+        ? this.withUnansweredPrompts(chatId, userMessageSeq, prompt)
+        : prompt;
     const sdkOpts: SdkRunOptions = {
       prompt: sdkPrompt,
       cwd: state.folder,
