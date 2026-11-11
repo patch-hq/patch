@@ -1,9 +1,9 @@
 // Render coverage for the foreground-only incoming-call surface (dev/JS
 // fallback for when CallKeep's native UI isn't driving the call). Mounted at
 // the root layout, it renders ONLY when the voice store has an incomingCall
-// AND no activeSession is already underway. Accept/decline both best-effort
-// send a wire response and clear the incoming call; a failed send must be
-// surfaced via uiStore.pushError rather than swallowed (NO FALLBACK).
+// AND no activeSession is already underway. Accept/decline both send a wire response and clear the incoming call only after it succeeds; a
+// failed send is surfaced via uiStore.pushError and the sheet stays up so the
+// user can retry (NO FALLBACK).
 //
 // getWs() is mocked (no real WS in the test runner); startVoiceCall is mocked
 // too so accept() doesn't reach into the real voice-call pipeline (network
@@ -114,7 +114,7 @@ describe('IncomingCallSheet — accept', () => {
     expect(useUiStore.getState().errors).toEqual([]);
   });
 
-  it('surfaces a pushError (does not throw) when the send fails, but still starts the call', () => {
+  it('surfaces a pushError and keeps the sheet up (no call started) when the send fails', () => {
     useVoiceStore.setState({
       incomingCall: {
         callId: 'c1',
@@ -131,8 +131,8 @@ describe('IncomingCallSheet — accept', () => {
     expect(useUiStore.getState().errors[0]?.message).toContain(
       'failed to send call response — retry: socket not open',
     );
-    expect(startVoiceCall).toHaveBeenCalledWith('thread_manager');
-    expect(useVoiceStore.getState().incomingCall).toBeNull();
+    expect(startVoiceCall).not.toHaveBeenCalled();
+    expect(useVoiceStore.getState().incomingCall?.callId).toBe('c1');
   });
 });
 
@@ -157,7 +157,7 @@ describe('IncomingCallSheet — decline', () => {
     expect(useVoiceStore.getState().incomingCall).toBeNull();
   });
 
-  it('surfaces a pushError when the decline send fails', () => {
+  it('surfaces a pushError and keeps the sheet up when the decline send fails', () => {
     useVoiceStore.setState({
       incomingCall: {
         callId: 'c2',
@@ -174,6 +174,6 @@ describe('IncomingCallSheet — decline', () => {
     expect(useUiStore.getState().errors[0]?.message).toContain(
       'failed to send call response — retry: socket not open',
     );
-    expect(useVoiceStore.getState().incomingCall).toBeNull();
+    expect(useVoiceStore.getState().incomingCall?.callId).toBe('c2');
   });
 });

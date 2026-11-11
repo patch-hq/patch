@@ -30,6 +30,7 @@ export function IncomingCallSheet(): React.ReactElement | null {
       useUiStore
         .getState()
         .pushError(`failed to send call response — retry: ${(e as Error).message}`);
+      return;
     }
     startVoiceCall(incoming.chatId);
     useVoiceStore.getState().setIncoming(null);
@@ -45,6 +46,7 @@ export function IncomingCallSheet(): React.ReactElement | null {
       useUiStore
         .getState()
         .pushError(`failed to send call response — retry: ${(e as Error).message}`);
+      return;
     }
     useVoiceStore.getState().setIncoming(null);
   };
