@@ -18179,3 +18179,7 @@ a.drop-target {
     height: var(--tap-min);
   }
 }
+/* Stopped / interrupted marker sits in the transcript flow, between entries. */
+.turn-stop-marker {
+  padding: 4px 0;
+}
