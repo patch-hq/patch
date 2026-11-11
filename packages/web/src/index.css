@@ -1069,42 +1069,111 @@ body {
   font-size: var(--text-min);
 }
 
-/* The drop-target highlight shown while dragging a tab over a pane's content
-   (not its tab bar) — a thin band at the edge for a split, the whole area for
-   a plain move-into-this-pane. */
-.pane-dropzone {
+/* Drop targets drawn over every pane that can take the tab being dragged
+   (spec/14 § Panes and tabs): the outer quarter on each side splits, the middle
+   adds a tab. The zone the pointer is over is the hot one. They ignore the
+   pointer so the pane's own drag listeners keep seeing the events. */
+.pane-droptargets {
   position: absolute;
+  inset: 0;
   z-index: 10;
-  background: var(--accent-tint);
-  border: 2px solid var(--accent);
+  background: rgb(255 255 255 / 55%);
   pointer-events: none;
 }
-.pane-dropzone-center {
-  inset: 0;
+.pane-dz {
+  position: absolute;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent-soft);
+  border-radius: 10px;
+  font:
+    600 14px Inter,
+    system-ui,
+    sans-serif;
+  color: var(--accent-strong);
 }
-.pane-dropzone-left {
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 50%;
+.pane-dz.hot {
+  background: var(--accent-tint);
+  border: 2px solid var(--accent);
 }
-.pane-dropzone-right {
-  top: 0;
-  bottom: 0;
-  right: 0;
-  width: 50%;
+.pane-dz-left {
+  top: 6px;
+  bottom: 6px;
+  left: 6px;
+  width: calc(25% - 9px);
 }
-.pane-dropzone-top {
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 50%;
+.pane-dz-right {
+  top: 6px;
+  bottom: 6px;
+  right: 6px;
+  width: calc(25% - 9px);
 }
-.pane-dropzone-bottom {
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 50%;
+.pane-dz-top {
+  top: 6px;
+  left: calc(25% + 3px);
+  right: calc(25% + 3px);
+  height: calc(25% - 9px);
+}
+.pane-dz-bottom {
+  bottom: 6px;
+  left: calc(25% + 3px);
+  right: calc(25% + 3px);
+  height: calc(25% - 9px);
+}
+.pane-dz-center {
+  top: calc(25% + 3px);
+  bottom: calc(25% + 3px);
+  left: calc(25% + 3px);
+  right: calc(25% + 3px);
+}
+
+/* Between groups while a tab or chat row is dragged: a slot for a new group. */
+.gap-drop {
+  flex: none;
+  width: 56px;
+  margin: 0 -4px;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent-soft);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 40%);
+  font:
+    600 14px Inter,
+    system-ui,
+    sans-serif;
+  color: var(--accent-strong);
+  writing-mode: vertical-rl;
+}
+.gap-drop.hot {
+  background: var(--accent-tint);
+  border: 2px solid var(--accent);
+}
+
+/* Over a group while a sidebar chat row is dragged: drop to show it there. */
+.gdrop {
+  position: absolute;
+  inset: 44px 0 0;
+  z-index: 20;
+  display: grid;
+  padding: 14px;
+  background: rgb(255 255 255 / 70%);
+}
+.gdrop .z {
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent-soft);
+  border-radius: 10px;
+  font:
+    600 14px Inter,
+    system-ui,
+    sans-serif;
+  color: var(--accent-strong);
+}
+.gdrop .z.hot {
+  background: var(--accent-tint);
+  border: 2px solid var(--accent);
 }
 
 /* ---------- Sidebar ---------- */
@@ -3606,6 +3675,36 @@ button.nav-row {
   background: var(--accent-tint);
   color: var(--accent-strong);
   outline: none;
+}
+/* A searchable menu can list every chat: it scrolls inside the window, the
+   search box staying put at the top. */
+.context-menu-searchable {
+  max-height: calc(100vh - 12px);
+  overflow-y: auto;
+}
+.context-menu-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 260px;
+  margin: 0 0 4px;
+  padding: 9px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--bg-elevated);
+  color: var(--ink);
+  font: inherit;
+  outline: none;
+}
+.context-menu-section {
+  padding: 8px 10px 3px;
+  font-size: var(--text-min);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
 }
 .context-menu-item.sub {
   padding-left: 28px;

@@ -689,3 +689,98 @@ describe('showChat replaceOnly', () => {
     setTabDirty(t.id, false);
   });
 });
+
+describe('dragging tabs and chats between groups (spec/14 § Groups, § Panes and tabs)', () => {
+  const group = (i: number) => store().groups[i]!;
+  const paneOf = (g: ReturnType<typeof group>): LeafPane => g.root as LeafPane;
+
+  it('a tab dropped in the gap between groups becomes a new group for the same chat', () => {
+    store().showChat('c1');
+    store().showChat('c2', { newGroup: true });
+    store().focusGroup(group(0).id);
+    store().openTab({ kind: 'terminal', chatId: 'c1' }, { placement: 'tab' });
+    const pane = paneOf(group(0));
+    const term = pane.tabs.find((t) => t.descriptor.kind === 'terminal')!;
+    store().moveTabToNewGroup(pane.id, term.id, 1);
+    expect(store().groups.map((g) => g.chatId)).toEqual(['c1', 'c1', 'c2']);
+    expect(store().groups[1]!.id).toBe(store().focusedGroupId);
+    expect(paneOf(group(1)).tabs.map((t) => t.descriptor.kind)).toEqual(['terminal']);
+    expect(paneOf(group(0)).tabs.map((t) => t.descriptor.kind)).toEqual(['chat']);
+    expect(store().groups.reduce((n, g) => n + g.size, 0)).toBeCloseTo(1);
+  });
+
+  it('a tab dropped past the last group makes the last group', () => {
+    store().showChat('c1');
+    store().openTab({ kind: 'page', page: 'jobs' }, { placement: 'tab' });
+    const pane = paneOf(group(0));
+    const jobs = pane.tabs.find((t) => t.descriptor.kind === 'page')!;
+    store().moveTabToNewGroup(pane.id, jobs.id, 1);
+    expect(store().groups).toHaveLength(2);
+    expect(paneOf(group(1)).tabs.map((t) => t.id)).toEqual([jobs.id]);
+  });
+
+  it('a tab can be dropped into another group showing the same chat, as a tab or a split', () => {
+    store().showChat('c1');
+    store().openTab({ kind: 'terminal', chatId: 'c1' }, { placement: 'tab' });
+    store().openTab({ kind: 'page', page: 'files', chatId: 'c1' }, { placement: 'tab' });
+    const src = paneOf(group(0));
+    const term = src.tabs.find((t) => t.descriptor.kind === 'terminal')!;
+    const files = src.tabs.find((t) => t.descriptor.kind === 'page')!;
+    store().showChat('c1', { newGroup: true });
+    const target = paneOf(group(1));
+    expect(store().moveTabToGroup(src.id, term.id, target.id, 'center')).toBe(true);
+    expect(paneOf(group(1)).tabs.map((t) => t.descriptor.kind)).toEqual(['chat', 'terminal']);
+    expect(store().focusedGroupId).toBe(group(1).id);
+    expect(store().moveTabToGroup(src.id, files.id, target.id, 'right')).toBe(true);
+    const root = group(1).root as SplitPane;
+    expect(root.type).toBe('split');
+    expect(root.direction).toBe('row');
+    expect(paneOf(group(0)).tabs.map((t) => t.descriptor.kind)).toEqual(['chat']);
+  });
+
+  it('a tab cannot be dropped into a group showing a different chat', () => {
+    store().showChat('c1');
+    store().openTab({ kind: 'terminal', chatId: 'c1' }, { placement: 'tab' });
+    store().showChat('c2', { newGroup: true });
+    const src = paneOf(group(0));
+    const term = src.tabs.find((t) => t.descriptor.kind === 'terminal')!;
+    const before = JSON.stringify(store().groups);
+    expect(store().moveTabToGroup(src.id, term.id, paneOf(group(1)).id, 'center')).toBe(false);
+    expect(JSON.stringify(store().groups)).toBe(before);
+  });
+
+  it('a chat row dropped on a group makes that group show the chat, even if another does', () => {
+    store().showChat('c1');
+    store().showChat('c2', { newGroup: true });
+    const first = group(0).id;
+    store().showChat('c2', { groupId: first });
+    expect(store().groups.map((g) => g.chatId)).toEqual(['c2', 'c2']);
+    expect(store().focusedGroupId).toBe(first);
+  });
+
+  it('a chat row dropped in a gap makes a new group at that position', () => {
+    store().showChat('c1');
+    store().showChat('c2', { newGroup: true });
+    store().showChat('c3', { newGroup: true, at: 1 });
+    expect(store().groups.map((g) => g.chatId)).toEqual(['c1', 'c3', 'c2']);
+    expect(store().groups[1]!.id).toBe(store().focusedGroupId);
+  });
+
+  it('a sidebar click on a chat showing in several groups focuses the most recently used', () => {
+    store().showChat('c1');
+    store().showChat('c1', { newGroup: true });
+    store().showChat('c2', { newGroup: true });
+    const [a, b, c] = store().groups.map((g) => g.id) as [string, string, string];
+    store().focusGroup(a);
+    store().focusGroup(c);
+    store().focusGroup(b);
+    store().focusGroup(c);
+    store().showChat('c1');
+    expect(store().focusedGroupId).toBe(b);
+    store().focusGroup(c);
+    store().focusGroup(a);
+    store().focusGroup(c);
+    store().showChat('c1');
+    expect(store().focusedGroupId).toBe(a);
+  });
+});

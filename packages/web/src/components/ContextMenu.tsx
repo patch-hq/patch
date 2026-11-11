@@ -37,6 +37,8 @@ export interface ContextMenuItem {
    * the menu open; `run` is ignored. Each sub-item runs and closes as usual.
    */
   submenu?: ContextMenuItem[];
+  /** Heading drawn above this item when it differs from the item before it. */
+  section?: string;
 }
 
 /** Where the menu was asked for, in viewport coordinates. */
@@ -100,6 +102,7 @@ export function ContextMenu({
   onClose,
   label,
   testId,
+  searchPlaceholder,
 }: {
   anchor: ContextMenuAnchor | null;
   items: ContextMenuItem[];
@@ -107,6 +110,8 @@ export function ContextMenu({
   /** Names the menu for assistive tech, e.g. `Chat actions`. */
   label: string;
   testId: string;
+  /** Adds a search box that filters the items by label and takes focus on open. */
+  searchPlaceholder?: string;
 }): JSX.Element | null {
   const menuRef = useRef<HTMLDivElement | null>(null);
   // null until the menu has been measured; the raw anchor is used for that
@@ -115,6 +120,10 @@ export function ContextMenu({
   // What had focus when the menu opened, so Esc / dismissal hands it back.
   const returnFocusTo = useRef<HTMLElement | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const searchable = searchPlaceholder !== undefined;
+  const needle = query.trim().toLowerCase();
+  const shown = needle === '' ? items : items.filter((i) => i.label.toLowerCase().includes(needle));
 
   useDismissOnClickOff(anchor !== null, [menuRef], onClose);
 
@@ -136,10 +145,13 @@ export function ContextMenu({
           ? Math.max(EDGE, Math.min(anchor.y - height, maxTop))
           : anchor.y,
     });
-  }, [anchor, items.length, expanded]);
+  }, [anchor, shown.length, expanded]);
 
   useEffect(() => {
-    if (anchor === null) setExpanded(null);
+    if (anchor === null) {
+      setExpanded(null);
+      setQuery('');
+    }
   }, [anchor]);
 
   // Focus moves into the menu on open (the ARIA menu pattern) so it is usable
@@ -153,7 +165,7 @@ export function ContextMenu({
     // document `scroll` that this same component reads as "the user scrolled
     // away" and closes on, so the menu shut itself the instant it opened.
     menuRef.current
-      ?.querySelector<HTMLButtonElement>('[role="menuitem"]')
+      ?.querySelector<HTMLElement>(searchable ? 'input' : '[role="menuitem"]')
       ?.focus({ preventScroll: true });
   }, [anchor]);
 
@@ -172,9 +184,17 @@ export function ContextMenu({
         onClose();
         return;
       }
+      const inSearch = e.target instanceof HTMLInputElement;
+      if (inSearch && e.key === 'Enter') {
+        e.preventDefault();
+        itemsInMenu()[0]?.click();
+        return;
+      }
       if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') {
         return;
       }
+      // Home/End belong to the search box's caret.
+      if (inSearch && (e.key === 'Home' || e.key === 'End')) return;
       const options = itemsInMenu();
       if (options.length === 0) return;
       e.preventDefault();
@@ -237,7 +257,7 @@ export function ContextMenu({
 
   return createPortal(
     <div
-      className="context-menu"
+      className={`context-menu${searchable ? ' context-menu-searchable' : ''}`}
       data-testid={testId}
       role="menu"
       aria-label={label}
@@ -250,11 +270,33 @@ export function ContextMenu({
         e.stopPropagation();
       }}
     >
-      {items.flatMap((item) => {
+      {searchable ? (
+        <input
+          type="search"
+          className="context-menu-search"
+          data-testid={`${testId}-search`}
+          placeholder={searchPlaceholder}
+          aria-label={searchPlaceholder}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      ) : null}
+      {shown.flatMap((item, at) => {
         const open = item.submenu !== undefined && expanded === item.id;
         const rows = [{ item, sub: false }];
         if (open) for (const child of item.submenu!) rows.push({ item: child, sub: true });
-        return rows.map(({ item: it, sub }) => (
+        const heading =
+          item.section !== undefined && item.section !== shown[at - 1]?.section ? (
+            <div
+              key={`section/${item.section}`}
+              className="context-menu-section"
+              data-testid={`${testId}-section-${item.section}`}
+              role="presentation"
+            >
+              {item.section}
+            </div>
+          ) : null;
+        const buttons = rows.map(({ item: it, sub }) => (
           <button
             key={sub ? `${item.id}/${it.id}` : it.id}
             type="button"
@@ -285,6 +327,7 @@ export function ContextMenu({
             {it.label}
           </button>
         ));
+        return heading ? [heading, ...buttons] : buttons;
       })}
     </div>,
     document.body,

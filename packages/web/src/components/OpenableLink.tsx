@@ -1,13 +1,14 @@
 // OpenableLink — a link to something Patch can open (a chat, a job, a page)
 // that offers every way of opening it: click opens here, ⌘/Ctrl-click opens it
 // in a new window, middle-click in a new tab in the active pane, and
-// right-click a menu with Open in new tab / to the side / in new window
+// right-click a menu: Open here / in new group / in new window for a chat, or
+// Open in new tab / to the side / in new window for anything else
 // (spec/14 § Opening things). `useOpenable` is the same for things that are
 // buttons rather than anchors.
 
 import type { ButtonHTMLAttributes, JSX, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { Link, type LinkProps } from 'react-router-dom';
-import { ExternalLink, PanelRightOpen, SquarePlus } from 'lucide-react';
+import { ExternalLink, Layers, PanelRightOpen, SquarePlus } from 'lucide-react';
 import { ContextMenu, useContextMenu, type ContextMenuItem } from './ContextMenu.js';
 import { useLayoutStore, type TabDescriptor } from '../stores/layoutStore.js';
 import { openDescriptorInNewWindow } from '../lib/newWindow.js';
@@ -33,6 +34,12 @@ export function useOpenable(
   const items: ContextMenuItem[] = [
     ...(chatId !== null
       ? [
+          {
+            id: 'open-here',
+            label: 'Open here',
+            icon: <Layers size={14} aria-hidden />,
+            run: () => useLayoutStore.getState().showChat(chatId),
+          },
           {
             id: 'open-new-group',
             label: 'Open in new group',

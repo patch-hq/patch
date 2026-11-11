@@ -96,6 +96,9 @@ export interface Group extends GroupLayout {
   layouts: Record<string, GroupLayout>;
   /** This group's fraction of the row width (all groups sum to 1). */
   size: number;
+  /** When the group was last focused (monotonic stamp, not a clock reading), so
+   *  a chat showing in several groups focuses the most recently used one. */
+  usedAt?: number;
 }
 
 /** Which edge of a pane a tab was dropped on (spec/14 § Panes and tabs). */
@@ -318,7 +321,16 @@ interface LayoutState {
    */
   showChat(
     chatId: string,
-    opts?: { seq?: number; newGroup?: boolean; replaceOnly?: boolean },
+    opts?: {
+      seq?: number;
+      newGroup?: boolean;
+      replaceOnly?: boolean;
+      /** Make this group show the chat, even if another group already does
+       *  (a chat row dropped onto a group). */
+      groupId?: string;
+      /** With `newGroup`: where in the row the new group goes (default: after the focused one). */
+      at?: number;
+    },
   ): boolean;
   focusGroup(groupId: string): void;
   /** Add an empty group beside the focused one and focus it. */
@@ -338,6 +350,18 @@ interface LayoutState {
   reorderTab(paneId: string, tabId: string, toIndex: number): void;
   /** Move a tab (drag) into a different pane at `toIndex`. */
   moveTab(fromPaneId: string, tabId: string, toPaneId: string, toIndex: number): void;
+  /** Drag a tab into the gap before group `at` (or past the last): it leaves
+   *  its pane and becomes the only tab of a new group for the same chat. */
+  moveTabToNewGroup(fromPaneId: string, tabId: string, at: number): void;
+  /** Drag a tab onto a pane of ANOTHER group showing the same chat: `'center'`
+   *  adds it as a tab there, an edge splits that pane. Returns false (and does
+   *  nothing) when the groups show different chats. */
+  moveTabToGroup(
+    fromPaneId: string,
+    tabId: string,
+    toPaneId: string,
+    zone: SplitEdge | 'center',
+  ): boolean;
   /** Drag a tab onto a pane's edge: pull it out of its pane and split there. */
   splitWithTab(fromPaneId: string, tabId: string, targetPaneId: string, edge: SplitEdge): void;
   /** ⌘\, and a tab's own "Open to the side" menu item — split a pane,
@@ -582,6 +606,7 @@ export function loadLayout(): { groups: Group[]; focusedGroupId: string } {
           chatId: typeof o['chatId'] === 'string' ? o['chatId'] : null,
           layouts: parseLayouts(o['layouts']),
           size: typeof o['size'] === 'number' ? o['size'] : 1,
+          ...(typeof o['usedAt'] === 'number' ? { usedAt: o['usedAt'] } : {}),
           ...l,
         });
       }
@@ -604,6 +629,9 @@ export function loadLayout(): { groups: Group[]; focusedGroupId: string } {
   }
 }
 
+/** The last `usedAt` stamp handed out; keeps stamps strictly increasing. */
+let lastStamp = 0;
+
 export const useLayoutStore = create<LayoutState>((set, get) => {
   const initial = loadLayout();
   const initialFocused = initial.groups.find((g) => g.id === initial.focusedGroupId)!;
@@ -624,6 +652,12 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
   }
 
   function commitGroups(groups: Group[], focusedGroupId: string): void {
+    if (focusedGroupId !== get().focusedGroupId) {
+      // Moving focus stamps the group, so "most recently used" is well defined.
+      lastStamp = Math.max(Date.now(), lastStamp + 1);
+      const stamp = lastStamp;
+      groups = groups.map((g) => (g.id === focusedGroupId ? { ...g, usedAt: stamp } : g));
+    }
     const f = groups.find((g) => g.id === focusedGroupId)!;
     set({ groups, focusedGroupId, root: f.root, activePaneId: f.activePaneId });
     persistState({ groups, focusedGroupId });
@@ -645,7 +679,22 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
 
     showChat(chatId, opts = {}) {
       const s = get();
-      const showing = opts.newGroup ? undefined : s.groups.find((g) => g.chatId === chatId);
+      const here =
+        opts.groupId !== undefined ? s.groups.find((g) => g.id === opts.groupId) : undefined;
+      // A chat showing in several groups focuses the one used most recently
+      // (the focused group, if it is one of them, is by definition that).
+      const showingIn = s.groups.filter((g) => g.chatId === chatId);
+      const showing = opts.newGroup
+        ? undefined
+        : here !== undefined
+          ? here.chatId === chatId
+            ? here
+            : undefined
+          : (showingIn.find((g) => g.id === s.focusedGroupId) ??
+            showingIn.reduce<Group | undefined>(
+              (best, g) => (best === undefined || (g.usedAt ?? 0) > (best.usedAt ?? 0) ? g : best),
+              undefined,
+            ));
       if (showing) {
         commitGroups(s.groups, showing.id);
         // Bring the chat's own tab forward (or open it when only its pages —
@@ -670,7 +719,13 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
       };
       if (opts.newGroup) {
         const g = withChat({ ...emptyGroup(), ...fresh(), chatId });
-        const at = s.groups.findIndex((x) => x.id === s.focusedGroupId) + 1;
+        const at = Math.max(
+          0,
+          Math.min(
+            opts.at ?? s.groups.findIndex((x) => x.id === s.focusedGroupId) + 1,
+            s.groups.length,
+          ),
+        );
         const groups = [...s.groups];
         groups.splice(at, 0, { ...g, size: 1 / (s.groups.length + 1) });
         const scaled = groups.map((x) =>
@@ -679,7 +734,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
         commitGroups(normaliseSizes(scaled), g.id);
         return true;
       }
-      const cur = s.groups.find((g) => g.id === s.focusedGroupId)!;
+      const cur = here ?? s.groups.find((g) => g.id === s.focusedGroupId)!;
       const layouts = { ...cur.layouts };
       if (cur.chatId !== null)
         layouts[cur.chatId] = {
@@ -1046,6 +1101,82 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
       });
     },
 
+    moveTabToNewGroup(fromPaneId, tabId, at) {
+      const s = get();
+      const source = s.groups.find((g) => findPane(g.root, fromPaneId));
+      if (!source || source.chatId === null) return;
+      const fromPane = findPane(source.root, fromPaneId);
+      if (!fromPane || fromPane.type !== 'leaf') return;
+      const tab = fromPane.tabs.find((t) => t.id === tabId);
+      if (!tab) return;
+      const emptied = withoutTab(source, fromPane, tab);
+      const leaf = makeLeaf([tab], tab.id);
+      const created: Group = withChat({
+        ...emptyGroup(),
+        root: leaf,
+        activePaneId: leaf.id,
+        chatId: source.chatId,
+        toolHomes: withToolHome(undefined, tab, leaf.id),
+      });
+      const rest = s.groups.map((g) => (g.id === source.id ? emptied : g));
+      // `at` counts gaps in the row as it stood; keep it valid.
+      const index = Math.max(0, Math.min(at, rest.length));
+      const n = rest.length;
+      const scaled = rest.map((g) => ({ ...g, size: (g.size * n) / (n + 1) }));
+      scaled.splice(index, 0, { ...created, size: 1 / (n + 1) });
+      commitGroups(normaliseSizes(scaled), created.id);
+    },
+
+    moveTabToGroup(fromPaneId, tabId, toPaneId, zone) {
+      const s = get();
+      const source = s.groups.find((g) => findPane(g.root, fromPaneId));
+      const target = s.groups.find((g) => findPane(g.root, toPaneId));
+      if (!source || !target || source.id === target.id) return false;
+      if (source.chatId !== target.chatId) return false;
+      const fromPane = findPane(source.root, fromPaneId);
+      const toPane = findPane(target.root, toPaneId);
+      if (!fromPane || fromPane.type !== 'leaf' || !toPane || toPane.type !== 'leaf') return false;
+      const tab = fromPane.tabs.find((t) => t.id === tabId);
+      if (!tab) return false;
+      // The same thing is one tab per group: an equal tab already there is focused instead.
+      const dup = findTabByKey(target.root, tab.id);
+      const emptied = withoutTab(source, fromPane, tab);
+      let landed: Group;
+      if (dup) {
+        landed = {
+          ...target,
+          activePaneId: dup.pane.id,
+          root:
+            rebuild(target.root, dup.pane.id, (p) =>
+              p.type === 'leaf' ? { ...p, activeTabId: tab.id } : p,
+            ) ?? target.root,
+        };
+      } else if (zone === 'center') {
+        landed = {
+          ...target,
+          activePaneId: toPane.id,
+          root:
+            rebuild(target.root, toPane.id, (p) =>
+              p.type === 'leaf' ? { ...p, tabs: [...p.tabs, tab], activeTabId: tab.id } : p,
+            ) ?? target.root,
+          toolHomes: withToolHome(target.toolHomes, tab, toPane.id),
+        };
+      } else {
+        const leaf = makeLeaf([tab], tab.id);
+        landed = {
+          ...target,
+          activePaneId: leaf.id,
+          root: splitTree(target.root, toPane.id, leaf, zone),
+          toolHomes: withToolHome(target.toolHomes, tab, leaf.id),
+        };
+      }
+      commitGroups(
+        s.groups.map((g) => (g.id === source.id ? emptied : g.id === target.id ? landed : g)),
+        target.id,
+      );
+      return true;
+    },
+
     splitWithTab(fromPaneId, tabId, targetPaneId, edge) {
       focusOwner(fromPaneId);
       const state = get();
@@ -1169,6 +1300,35 @@ function withToolHome(
 ): GroupLayout['toolHomes'] {
   const cls = toolClass(tab.descriptor);
   return cls === null ? homes : { ...homes, [cls]: paneId };
+}
+
+/** `group` with `tab` taken out of `fromPane` — an emptied pane closes, except
+ *  the last one left, which stays (spec/14 § Panes and tabs). */
+function withoutTab(group: Group, fromPane: LeafPane, tab: Tab): Group {
+  const remaining = fromPane.tabs.filter((t) => t.id !== tab.id);
+  let root: PaneNode | null;
+  if (remaining.length === 0) {
+    root =
+      fromPane.id === group.root.id
+        ? { ...fromPane, tabs: [], activeTabId: null }
+        : rebuild(group.root, fromPane.id, () => null);
+  } else {
+    const activeTabId =
+      fromPane.activeTabId === tab.id
+        ? (remaining[remaining.length - 1]?.id ?? null)
+        : fromPane.activeTabId;
+    root = rebuild(group.root, fromPane.id, (p) =>
+      p.type === 'leaf' ? { ...p, tabs: remaining, activeTabId } : p,
+    );
+  }
+  const finalRoot = root ?? defaultRoot();
+  return withChat({
+    ...group,
+    root: finalRoot,
+    activePaneId: findPane(finalRoot, group.activePaneId)
+      ? group.activePaneId
+      : firstLeaf(finalRoot).id,
+  });
 }
 
 /** Add `leaf` along `edge` of the whole group, taking `fraction` of it. */

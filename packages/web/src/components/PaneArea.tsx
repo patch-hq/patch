@@ -14,6 +14,7 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -42,6 +43,7 @@ import {
 import {
   GROUP_COLOURS,
   MIN_GROUP_WIDTH_PX,
+  findPane,
   firstLeaf,
   isTabDirty,
   useLayoutStore,
@@ -54,6 +56,7 @@ import {
 } from '../stores/layoutStore.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
+import type { ChatRow } from '../stores/types.js';
 import { deriveChatTitle } from '../lib/chatTitle.js';
 import { stripMarkdown } from '../lib/stripMarkdown.js';
 import { StatusBadge } from './StatusBadge.js';
@@ -78,11 +81,14 @@ import { PadPane } from './PadPane.js';
 import { NewPadPage } from './NewPadPage.js';
 import type { PatchWs } from '../api/ws.js';
 import { useContextMenu, ContextMenu, type ContextMenuItem } from './ContextMenu.js';
-
-/** The custom MIME type a tab drag carries — `{ paneId, tabId }` JSON. Not
- *  `text/plain`: that would let a tab title be "dropped" as text anywhere
- *  else the browser accepts a text drop (a composer, an address bar). */
-const TAB_DRAG_TYPE = 'application/x-patch-tab';
+import {
+  CHAT_DRAG_TYPE,
+  TAB_DRAG_TYPE,
+  acceptsTabDrop,
+  beginTabDrag,
+  useDragKind,
+} from '../lib/dragState.js';
+import { usePadsStore } from '../stores/padsStore.js';
 
 interface DragPayload {
   paneId: string;
@@ -307,6 +313,10 @@ export function PaneArea({ ws }: { ws: PatchWs | null }): JSX.Element {
   const visible = fits ? groups : groups.filter((g) => g.id === focusedGroupId);
   const cards = groups.length > 1;
   const minFraction = rowWidth > 0 ? MIN_GROUP_WIDTH_PX / rowWidth : 0;
+  // While a tab or a chat row is being dragged, the gaps between groups (and
+  // after the last) become drop targets for a new group (spec/14 § Groups).
+  const dragging = useDragKind() !== null;
+  const lastVisibleIndex = groups.indexOf(visible[visible.length - 1]!);
 
   return (
     <div ref={rowRef} className="group-row" data-testid="group-row">
@@ -317,10 +327,14 @@ export function PaneArea({ ws }: { ws: PatchWs | null }): JSX.Element {
         return (
           <Fragment key={group.id}>
             {i > 0 ? (
-              <PaneDividerHandle
-                direction="row"
-                onResize={(delta) => resizeGroups(index - 1, delta, minFraction)}
-              />
+              dragging ? (
+                <GapDrop at={index} />
+              ) : (
+                <PaneDividerHandle
+                  direction="row"
+                  onResize={(delta) => resizeGroups(index - 1, delta, minFraction)}
+                />
+              )
             ) : null}
             <GroupCtx.Provider value={{ group, focused }}>
               <HeaderScope chatId={group.chatId}>
@@ -347,6 +361,40 @@ export function PaneArea({ ws }: { ws: PatchWs | null }): JSX.Element {
           </Fragment>
         );
       })}
+      {dragging ? <GapDrop at={lastVisibleIndex + 1} /> : null}
+    </div>
+  );
+}
+
+/** A slot between groups (or after the last) that turns a dropped tab, or a
+ *  dropped sidebar chat row, into a new group at position `at`. */
+function GapDrop({ at }: { at: number }): JSX.Element {
+  const [hot, setHot] = useState(false);
+  return (
+    <div
+      className={`gap-drop${hot ? ' hot' : ''}`}
+      data-testid={`gap-drop-${at}`}
+      onDragOver={(e) => {
+        const types = e.dataTransfer?.types ?? [];
+        if (!types.includes(TAB_DRAG_TYPE) && !types.includes(CHAT_DRAG_TYPE)) return;
+        e.preventDefault();
+        setHot(true);
+      }}
+      onDragLeave={() => setHot(false)}
+      onDrop={(e) => {
+        setHot(false);
+        const tab = readDragPayload(e);
+        const chatId = e.dataTransfer?.getData(CHAT_DRAG_TYPE);
+        if (tab) {
+          e.preventDefault();
+          useLayoutStore.getState().moveTabToNewGroup(tab.paneId, tab.tabId, at);
+        } else if (chatId) {
+          e.preventDefault();
+          useLayoutStore.getState().showChat(chatId, { newGroup: true, at });
+        }
+      }}
+    >
+      New group
     </div>
   );
 }
@@ -387,6 +435,8 @@ function GroupCard({
   const closeGroup = useLayoutStore((s) => s.closeGroup);
   const chat = useChatStore((s) => (group.chatId ? s.chats[group.chatId] : undefined));
   const colour = groupColourClass(index);
+  const chatDrag = useDragKind() === 'chat';
+  const [chatHot, setChatHot] = useState(false);
   const header =
     group.chatId !== null && chat ? (
       <ChatHeader
@@ -437,6 +487,27 @@ function GroupCard({
     >
       {header}
       <div className="group-body">{children}</div>
+      {chatDrag ? (
+        <div
+          className="gdrop"
+          data-testid={`group-drop-${group.id}`}
+          onDragOver={(e) => {
+            if (!e.dataTransfer?.types.includes(CHAT_DRAG_TYPE)) return;
+            e.preventDefault();
+            setChatHot(true);
+          }}
+          onDragLeave={() => setChatHot(false)}
+          onDrop={(e) => {
+            setChatHot(false);
+            const chatId = e.dataTransfer?.getData(CHAT_DRAG_TYPE);
+            if (!chatId) return;
+            e.preventDefault();
+            useLayoutStore.getState().showChat(chatId, { groupId: group.id });
+          }}
+        >
+          <div className={`z${chatHot ? ' hot' : ''}`}>Show here</div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -478,6 +549,9 @@ function Pane({ pane }: { pane: LeafPane }): JSX.Element {
   const setActivePane = useLayoutStore((s) => s.setActivePane);
   const moveTab = useLayoutStore((s) => s.moveTab);
   const splitWithTab = useLayoutStore((s) => s.splitWithTab);
+  const moveTabToGroup = useLayoutStore((s) => s.moveTabToGroup);
+  const dragKind = useDragKind();
+  const offerDrop = dragKind === 'tab' && acceptsTabDrop(group.id, group.chatId);
   const focused = groupFocused && group.activePaneId === pane.id;
   const [dropEdge, setDropEdge] = useState<SplitEdge | 'center' | null>(null);
   // `onDrop` reads this REF, not the `dropEdge` state above: a native drag
@@ -495,8 +569,12 @@ function Pane({ pane }: { pane: LeafPane }): JSX.Element {
   // (`HostedTab`), so a drop on it bubbles through the DOM to this pane but
   // through React to `PaneArea`, and a React `onDrop` here never heard it.
   const contentRef = useRef<HTMLDivElement>(null);
+  const groupIdentity = useRef({ id: group.id, chatId: group.chatId });
+  groupIdentity.current = { id: group.id, chatId: group.chatId };
   const onContentDragOver = useCallback((e: DragEvent): void => {
     if (!e.dataTransfer?.types.includes(TAB_DRAG_TYPE)) return;
+    // A tab cannot be dropped into a group showing a different chat.
+    if (!acceptsTabDrop(groupIdentity.current.id, groupIdentity.current.chatId)) return;
     e.preventDefault();
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
@@ -525,13 +603,17 @@ function Pane({ pane }: { pane: LeafPane }): JSX.Element {
       setDropEdge(null);
       if (!payload) return;
       e.preventDefault();
-      if (edge === 'center' || edge === null) {
+      const own = useLayoutStore.getState().groups.find((g) => g.id === groupIdentity.current.id);
+      if (!own || !findPane(own.root, payload.paneId)) {
+        // Dragged in from another group showing the same chat.
+        moveTabToGroup(payload.paneId, payload.tabId, pane.id, edge ?? 'center');
+      } else if (edge === 'center' || edge === null) {
         moveTab(payload.paneId, payload.tabId, pane.id, pane.tabs.length);
       } else {
         splitWithTab(payload.paneId, payload.tabId, pane.id, edge);
       }
     },
-    [moveTab, splitWithTab, pane.id, pane.tabs.length],
+    [moveTab, splitWithTab, moveTabToGroup, pane.id, pane.tabs.length],
   );
   useEffect(() => {
     const el = contentRef.current;
@@ -563,8 +645,19 @@ function Pane({ pane }: { pane: LeafPane }): JSX.Element {
     >
       <TabBar pane={pane} focused={focused} />
       <div ref={contentRef} className="pane-content" data-testid={`pane-content-${pane.id}`}>
-        {dropEdge ? (
-          <div className={`pane-dropzone pane-dropzone-${dropEdge}`} data-testid="pane-dropzone" />
+        {offerDrop ? (
+          <div className="pane-droptargets" data-testid="pane-droptargets" aria-hidden>
+            {(['left', 'right', 'top', 'bottom', 'center'] as const).map((zone) => (
+              <div
+                key={zone}
+                className={`pane-dz pane-dz-${zone}${dropEdge === zone ? ' hot' : ''}`}
+                data-testid={dropEdge === zone ? 'pane-dropzone' : `pane-dz-${zone}`}
+                data-zone={zone}
+              >
+                {zone === 'center' ? 'Add as tab' : `Split ${zone}`}
+              </div>
+            ))}
+          </div>
         ) : null}
         {activeTab ? (
           <TabSlot tabId={`${group.id}:${activeTab.id}`} />
@@ -664,14 +757,18 @@ function TabBar({ pane, focused }: { pane: LeafPane; focused: boolean }): JSX.El
   const setActivePane = useLayoutStore((s) => s.setActivePane);
   const closeTab = useLayoutStore((s) => s.closeTab);
   const closePane = useLayoutStore((s) => s.closePane);
-  const multiplePanes = useGroupView().group.root.type === 'split';
+  const { group } = useGroupView();
+  const multiplePanes = group.root.type === 'split';
+  const moveTabToGroup = useLayoutStore((s) => s.moveTabToGroup);
+  /** The tab arrived from another group showing the same chat. */
+  const fromOtherGroup = (paneId: string): boolean => !findPane(group.root, paneId);
   const reorderTab = useLayoutStore((s) => s.reorderTab);
   const moveTab = useLayoutStore((s) => s.moveTab);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const menu = useContextMenu();
   const newMenu = useContextMenu();
-  const chatId = useGroupView().group.chatId;
   const [menuTab, setMenuTab] = useState<Tab | null>(null);
+  const newItems = useNewTabItems(group, pane.id, newMenu.anchor !== null);
 
   return (
     <div
@@ -701,9 +798,11 @@ function TabBar({ pane, focused }: { pane: LeafPane; focused: boolean }): JSX.El
               JSON.stringify({ paneId: pane.id, tabId: tab.id }),
             );
             e.dataTransfer.effectAllowed = 'move';
+            beginTabDrag(group.id, group.chatId);
           }}
           onDragOver={(e) => {
             if (!e.dataTransfer?.types.includes(TAB_DRAG_TYPE)) return;
+            if (!acceptsTabDrop(group.id, group.chatId)) return;
             e.preventDefault();
             setDragOverId(tab.id);
           }}
@@ -713,6 +812,10 @@ function TabBar({ pane, focused }: { pane: LeafPane; focused: boolean }): JSX.El
             setDragOverId(null);
             if (!payload) return;
             e.preventDefault();
+            if (fromOtherGroup(payload.paneId)) {
+              moveTabToGroup(payload.paneId, payload.tabId, pane.id, 'center');
+              return;
+            }
             const rect = e.currentTarget.getBoundingClientRect();
             const before = e.clientX < rect.left + rect.width / 2;
             const targetIndex = pane.tabs.findIndex((t) => t.id === tab.id);
@@ -748,13 +851,17 @@ function TabBar({ pane, focused }: { pane: LeafPane; focused: boolean }): JSX.El
         data-testid={`tab-bar-fill-${pane.id}`}
         onDragOver={(e) => {
           if (!e.dataTransfer?.types.includes(TAB_DRAG_TYPE)) return;
+          if (!acceptsTabDrop(group.id, group.chatId)) return;
           e.preventDefault();
         }}
         onDrop={(e) => {
           const payload = readDragPayload(e);
           if (!payload) return;
           e.preventDefault();
-          if (payload.paneId === pane.id) reorderTab(pane.id, payload.tabId, pane.tabs.length);
+          if (fromOtherGroup(payload.paneId)) {
+            moveTabToGroup(payload.paneId, payload.tabId, pane.id, 'center');
+          } else if (payload.paneId === pane.id)
+            reorderTab(pane.id, payload.tabId, pane.tabs.length);
           else moveTab(payload.paneId, payload.tabId, pane.id, pane.tabs.length);
         }}
       />
@@ -767,6 +874,8 @@ function TabBar({ pane, focused }: { pane: LeafPane; focused: boolean }): JSX.El
         onClick={(e) => {
           setActivePane(pane.id);
           setMenuTab(null);
+          // The menu lists this chat's Pads; make sure the list is current.
+          void usePadsStore.getState().refresh();
           newMenu.openAt(e);
         }}
       >
@@ -774,10 +883,11 @@ function TabBar({ pane, focused }: { pane: LeafPane; focused: boolean }): JSX.El
       </button>
       <ContextMenu
         anchor={newMenu.anchor}
-        items={newTabItems(chatId)}
+        items={newItems}
         onClose={newMenu.close}
         label="New tab"
         testId={`tab-new-menu-${pane.id}`}
+        searchPlaceholder="Open…"
       />
       {multiplePanes && (
         <button
@@ -792,7 +902,7 @@ function TabBar({ pane, focused }: { pane: LeafPane; focused: boolean }): JSX.El
       )}
       <ContextMenu
         anchor={menu.anchor}
-        items={menuTab ? tabContextItems(menuTab, pane) : []}
+        items={menuTab ? tabContextItems(menuTab, pane, group) : []}
         onClose={() => {
           menu.close();
           setMenuTab(null);
@@ -915,39 +1025,141 @@ function PaneTab({ tab, active, dragOver, ...on }: PaneTabProps): JSX.Element {
   );
 }
 
-/** The + menu: what can be opened as a tab in this group — its chat's tools,
- *  then the app's pages. Every item opens an ordinary tab. */
-function newTabItems(chatId: string | null): ContextMenuItem[] {
-  const item = (id: string, label: string, d: TabDescriptor): ContextMenuItem => ({
-    id,
-    label,
-    icon: tabIcon(d),
-    run: () => useLayoutStore.getState().openTab(d, { placement: 'tab' }),
-  });
-  return [
-    ...(chatId === null
-      ? []
-      : [
-          item('new-chat', 'Chat', { kind: 'chat', chatId }),
-          item('new-terminal', 'Terminal', { kind: 'terminal', chatId }),
-          item('new-files', 'Files', { kind: 'page', page: 'files', chatId }),
-          item('new-browser', 'Browser', { kind: 'browser', chatId }),
-        ]),
-    item('new-pads', 'Pads', { kind: 'page', page: 'pads' }),
-    item('new-jobs', 'Jobs', { kind: 'page', page: 'jobs' }),
-    item('new-settings', 'Settings', { kind: 'page', page: 'settings' }),
-  ];
+/** The + menu (spec/14 § Panes and tabs): this chat's things — its tools, its
+ *  artifacts and Pads — then the other chats (choosing one switches this group
+ *  to it), then the app's pages. Every item but a chat opens an ordinary tab;
+ *  the menu's search box filters across all three. */
+function useNewTabItems(group: Group, paneId: string, open: boolean): ContextMenuItem[] {
+  const chatId = group.chatId;
+  const chats = useChatStore((s) => s.chats);
+  const timeline = useChatStore((s) => (chatId ? s.timelines[chatId] : undefined));
+  const pads = usePadsStore((s) => s.pads);
+  return useMemo(() => {
+    if (!open) return [];
+    const openTab = (d: TabDescriptor) => (): void => {
+      useLayoutStore.getState().setActivePane(paneId);
+      useLayoutStore.getState().openTab(d, { placement: 'tab', paneId });
+    };
+    const tab = (
+      id: string,
+      label: string,
+      d: TabDescriptor,
+      section: string,
+    ): ContextMenuItem => ({
+      id,
+      label,
+      icon: tabIcon(d),
+      run: openTab(d),
+      section,
+    });
+    const out: ContextMenuItem[] = [];
+    if (chatId !== null) {
+      const here = chatTitle(chatId, chats[chatId]?.name);
+      out.push(
+        tab('new-chat', 'Chat', { kind: 'chat', chatId }, here),
+        tab('new-terminal', 'Terminal', { kind: 'terminal', chatId }, here),
+        tab('new-files', 'Files', { kind: 'page', page: 'files', chatId }, here),
+        tab('new-browser', 'Browser', { kind: 'browser', chatId }, here),
+      );
+      const seen = new Set<string>();
+      for (const e of timeline ?? []) {
+        if (e.kind !== 'artifact' || !e.artifactId || !e.artifactUrl || seen.has(e.artifactId))
+          continue;
+        seen.add(e.artifactId);
+        // A Pad card is an artifact whose url is the Pad's own route; the Pads
+        // list below covers it.
+        if (/^\/pads\//.test(e.artifactUrl)) continue;
+        out.push(
+          tab(
+            `new-artifact-${e.artifactId}`,
+            e.artifactTitle ?? 'Artifact',
+            {
+              kind: 'page',
+              page: 'artifact',
+              chatId,
+              artifactId: e.artifactId,
+              url: new URL(e.artifactUrl, window.location.origin).toString(),
+            },
+            here,
+          ),
+        );
+      }
+      for (const pad of pads ?? []) {
+        if (pad.chatId !== chatId) continue;
+        out.push(
+          tab(`new-pad-${pad.id}`, pad.name, { kind: 'page', page: 'pad', padId: pad.id }, here),
+        );
+      }
+    }
+    const others = Object.values(chats)
+      .filter((r) => r.chatId !== chatId && r.status === 'active' && r.hidden !== true)
+      .sort((a, b) => b.lastUpdated - a.lastUpdated);
+    for (const r of others) {
+      out.push({
+        id: `chat-${r.chatId}`,
+        label: chatTitle(r.chatId, r.name),
+        icon: <StatusBadgeFor row={r} />,
+        run: () => useLayoutStore.getState().showChat(r.chatId, { groupId: group.id }),
+        section: 'Chats',
+      });
+    }
+    out.push(
+      tab('new-pads', 'Pads', { kind: 'page', page: 'pads' }, 'Pages'),
+      tab('new-jobs', 'Jobs', { kind: 'page', page: 'jobs' }, 'Pages'),
+      tab('new-settings', 'Settings', { kind: 'page', page: 'settings' }, 'Pages'),
+    );
+    return out;
+  }, [open, chatId, chats, timeline, pads, group.id, paneId]);
 }
 
-function tabContextItems(tab: Tab, pane: LeafPane): ContextMenuItem[] {
+/** A chat's status badge for a menu row. */
+function StatusBadgeFor({ row }: { row: ChatRow }): JSX.Element {
+  const badge = useChatBadge(row);
+  if (!badge) return <></>;
+  return (
+    <StatusBadge
+      badge={badge}
+      pendingWake={row.pendingWake ?? null}
+      failureReason={row.lastError?.message ?? null}
+    />
+  );
+}
+
+/** A tab's right-click menu (spec/14 § Opening things): the same three ways of
+ *  opening as a chat row's — here, in a new group, in a new window — plus, for
+ *  a page, to the side; and Close. */
+function tabContextItems(tab: Tab, pane: LeafPane, group: Group): ContextMenuItem[] {
   const layout = useLayoutStore.getState();
+  const isChat = tab.descriptor.kind === 'chat';
   return [
     {
-      id: 'split-right',
-      label: 'Open to the side',
-      icon: <PanelRightOpen size={14} aria-hidden />,
-      run: () => layout.splitActivePane(pane.id, 'right', tab.id),
+      id: 'open-here',
+      label: 'Open here',
+      icon: <Layers size={14} aria-hidden />,
+      run: () => {
+        layout.setActivePane(pane.id);
+        layout.setActiveTab(pane.id, tab.id);
+      },
     },
+    {
+      id: 'open-new-group',
+      label: 'Open in new group',
+      icon: <PanelRightOpen size={14} aria-hidden />,
+      run: () => {
+        const at = layout.groups.findIndex((g) => g.id === group.id) + 1;
+        layout.moveTabToNewGroup(pane.id, tab.id, at);
+      },
+    },
+    ...(isChat
+      ? []
+      : [
+          {
+            id: 'split-right',
+            label: 'Open to the side',
+            icon: <PanelRightOpen size={14} aria-hidden />,
+            run: () => layout.splitActivePane(pane.id, 'right', tab.id),
+          },
+        ]),
     {
       id: 'new-window',
       label: 'Open in new window',
