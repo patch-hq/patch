@@ -331,6 +331,23 @@ describe('a durable turn', () => {
     }
   }, 20000);
 
+  it('a turn replaced by a newer one of the same chat ends as killed, not as an unexplained runner exit', async () => {
+    const { cfg, cwd } = fresh();
+    const first = new DurableTurn({ config: cfg, chatId: 'c-dup', localId: 'L1', log });
+    const p1 = first.spawn({ ...spawnOpts, cwd });
+    const errors: Error[] = [];
+    p1.on('error', (e) => errors.push(e));
+    const ended = new Promise<void>((r) => p1.once('exit', () => r()));
+    const second = new DurableTurn({ config: cfg, chatId: 'c-dup', localId: 'L2', log });
+    const d2 = drive(second.spawn({ ...spawnOpts, cwd }));
+    await ended;
+    expect(errors).toEqual([]);
+    d2.send(initialize('r1'));
+    d2.send(prompt);
+    await d2.until(() => texts(d2.lines).includes('a1'), 'a1');
+    retireTurn(second.dir);
+  }, 20000);
+
   it('ends a turn nobody is attached to once claude has been silent too long', async () => {
     const { cfg, cwd } = fresh();
     process.env['PATCH_TURN_ORPHAN_IDLE_MS'] = '800';
