@@ -53,8 +53,15 @@ export class CodexClient {
 
   start(): Promise<void> {
     if (this.started) return this.started;
-    this.started = this.boot();
-    return this.started;
+    const started = this.boot().catch(async (error) => {
+      // A failed boot (e.g. initialize timed out) must not leave the child
+      // running or the rejection cached: tear down so a later start() retries.
+      if (this.started === started) this.started = undefined;
+      await this.close();
+      throw error;
+    });
+    this.started = started;
+    return started;
   }
   private async boot(): Promise<void> {
     mkdirSync(this.options.home, { recursive: true, mode: 0o700 });
