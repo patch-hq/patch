@@ -10006,8 +10006,26 @@ export class Daemon {
         );
       }
     }
+    // A turn the user stopped before the model answered leaves a track of bare
+    // prompts, which the session store drops — so the next send (a "Continue")
+    // starts a fresh session and the model sees only that word. Carry the
+    // unanswered prompts in with it.
+    // Only the bare "Continue" nudge (the stop-card button / Threads carry-on):
+    // any other message after a stop is the user moving on, not asking to resume.
+    const sdkPrompt =
+      !fork &&
+      prompt.trim().toLowerCase() === 'continue' &&
+      retryOfSeq === undefined &&
+      userMessageSeq !== undefined &&
+      !isProviderSwitch &&
+      !isNativeRebuild &&
+      !state.claudeSessionId &&
+      this.hasPriorTrack(chatId, userMessageSeq) &&
+      !this.hasAnsweredTrack(chatId, userMessageSeq)
+        ? this.withUnansweredPrompts(chatId, userMessageSeq, prompt)
+        : prompt;
     const sdkOpts: SdkRunOptions = {
-      prompt,
+      prompt: sdkPrompt,
       cwd: state.folder,
       // Keys the persistent warm-session map (PATCH_PERSISTENT_SESSIONS=1);
       // ignored by the one-shot default path.
@@ -14443,6 +14461,25 @@ export class Daemon {
    * unanswered prompts, so a session rebuilt from a track of nothing else is
    * empty and Claude Code cannot resume it ("No conversation found").
    */
+  private withUnansweredPrompts(
+    chatId: string,
+    beforeSeq: number | undefined,
+    prompt: string,
+  ): string {
+    const meta = this.opts.metaStore.read(chatId);
+    if (!meta) return prompt;
+    const branchId = meta.activeBranchId ?? this.branchIdFor(chatId);
+    const earlier = readTrack(this.chatLog, chatId, meta, branchId, -1)
+      .filter((t) => beforeSeq === undefined || t.record.seq < beforeSeq)
+      .flatMap((t) =>
+        t.event.type === 'chat.message' && t.event.role === 'user' && t.event.content
+          ? [t.event.content]
+          : [],
+      );
+    if (earlier.length === 0) return prompt;
+    return `Earlier in this chat, not yet answered (the turn was stopped):\n\n${earlier.join('\n\n')}\n\nNow: ${prompt}`;
+  }
+
   private hasAnsweredTrack(chatId: string, beforeSeq: number | undefined): boolean {
     const meta = this.opts.metaStore.read(chatId);
     if (!meta) return false;
