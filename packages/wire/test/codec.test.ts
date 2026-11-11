@@ -578,6 +578,11 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     tabId: 't1',
     input: { kind: 'pointer', action: 'down', x: 10, y: 20, button: 'left', clickCount: 1 },
   },
+  'patch.browser_view.open': {
+    type: 'patch.browser_view.open',
+    chatId: 'c1',
+    url: 'example.com',
+  },
   'patch.browser_view.drive': {
     type: 'patch.browser_view.drive',
     chatId: 'c1',

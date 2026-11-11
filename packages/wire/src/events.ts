@@ -4878,6 +4878,21 @@ export const PatchBrowserViewDriveEvent = z
   .strict();
 export type PatchBrowserViewDriveEvent = z.infer<typeof PatchBrowserViewDriveEvent>;
 
+/**
+ * Surface → host: the person typed an address into a chat's browser view that
+ * has no tab yet. The host opens a tab for the chat at that address, and the
+ * person is driving it from the start (the agent's browser tools on it wait
+ * until they Hand back). `url` is what was typed: a bare host name is allowed.
+ */
+export const PatchBrowserViewOpenEvent = z
+  .object({
+    type: z.literal('patch.browser_view.open'),
+    chatId: z.string().min(1),
+    url: z.string().min(1),
+  })
+  .strict();
+export type PatchBrowserViewOpenEvent = z.infer<typeof PatchBrowserViewOpenEvent>;
+
 /** Host → surfaces: the page's selection, for the surface to put on the user's clipboard. */
 export const PatchBrowserViewClipboardEvent = z
   .object({
@@ -9436,6 +9451,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchBrowserHandoffControlEvent,
   PatchBrowserViewInputEvent,
   PatchBrowserViewDriveEvent,
+  PatchBrowserViewOpenEvent,
   PatchBrowserViewClipboardEvent,
   PatchBrowserViewFormEvent,
   SurfaceHeartbeatEvent,
@@ -9748,6 +9764,7 @@ export const EVENT_SCHEMAS = {
   'patch.browser_handoff.control': PatchBrowserHandoffControlEvent,
   'patch.browser_view.input': PatchBrowserViewInputEvent,
   'patch.browser_view.drive': PatchBrowserViewDriveEvent,
+  'patch.browser_view.open': PatchBrowserViewOpenEvent,
   'patch.browser_view.clipboard': PatchBrowserViewClipboardEvent,
   'patch.browser_view.form': PatchBrowserViewFormEvent,
   'surface.heartbeat': SurfaceHeartbeatEvent,

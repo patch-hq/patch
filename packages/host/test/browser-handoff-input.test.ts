@@ -110,3 +110,22 @@ it('takes the tab over on a press or a key, not on a move or a scroll, and drive
   expect(driver).toBe('agent');
   handoff.dispose();
 });
+
+it('opens a tab for the chat at the typed address and the person drives it from the start', async () => {
+  const calls: string[] = [];
+  const fake = {
+    open: async (o: { url: string; chatId?: string }) => {
+      calls.push(`open:${o.chatId}:${o.url}`);
+      return { tabId: 't9', title: '', url: o.url };
+    },
+    setDriver: (tab: string, d: 'agent' | 'user') => calls.push(`driver:${tab}:${d}`),
+  } as unknown as BrowserManager;
+  const handoff = new BrowserHandoff({
+    browser: fake,
+    emit: () => undefined,
+    logger: pino({ level: 'silent' }),
+  });
+  await handoff.open('c1', 'example.com');
+  expect(calls).toEqual(['open:c1:https://example.com', 'driver:t9:user']);
+  handoff.dispose();
+});
