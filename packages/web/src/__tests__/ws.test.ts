@@ -387,6 +387,46 @@ describe('PatchWs chat.replay cursor excludes non-durable entries', () => {
   });
 });
 
+describe('PatchWs chat.replay cursor ignores a lone error row', () => {
+  it('asks for the whole history when the only entry held is a failed-turn error', async () => {
+    useChatStore.getState().hydrate([
+      {
+        chatId: 'c-err',
+        hostId: 'd1',
+        permissionMode: 'bypassPermissions' as const,
+        name: null,
+        folder: '~/x',
+        activity: 'idle',
+        status: 'active',
+        pinned: false,
+        pinnedAt: null,
+        disabled: false,
+        lastUpdated: 1,
+      },
+    ]);
+    // A failed turn's error is fanned out to every surface, so it lands in a
+    // chat this surface never opened and becomes its only timeline entry.
+    useChatStore.getState().applyEvent({
+      type: 'chat.error',
+      chatId: 'c-err',
+      seq: 500,
+      error: { code: 'sdk_error', message: 'process ended mid-turn' },
+    } as never);
+    expect(useChatStore.getState().timelines['c-err']?.length).toBe(1);
+
+    const ws = new PatchWs('ws://test/ws');
+    ws.connect();
+    await Promise.resolve();
+    const fake = FakeWS.instances[0]!;
+    fake.open();
+    const replay = fake.sent
+      .map((s) => JSON.parse(s) as { type: string; chatId?: string; fromSeq?: number })
+      .find((e) => e.type === 'chat.replay' && e.chatId === 'c-err');
+    expect(replay?.fromSeq).toBe(-1); // NOT 500 — the history before the error is still unseen
+    ws.close();
+  });
+});
+
 describe('PatchWs requestReplay dedup guard vs. a deliberately cleared timeline', () => {
   const row = (chatId: string) => ({
     chatId,
