@@ -17,29 +17,37 @@ files:
   # every launch (no menubar icon). NO FALLBACK: the asset must ship.
   - build/trayIconTemplate.png
   - build/trayIconTemplate@2x.png
-# What "On this Mac" runs with nothing installed: the Patch server release and the
-# host build for this Mac (scripts/stage-resources.cjs puts them in build/staged).
+  # The Linux tray shows the app icon (panels there do not tint a template image).
+  - build/icon.png
+# What "On this computer" runs with nothing installed: the Patch server release and
+# the host build for this platform (scripts/stage-resources.cjs puts them in
+# build/staged). first-run/index.ts reads them from resources/server and
+# resources/host — the folder was named daemon here once, and the app shipped
+# without its host builds.
 extraResources:
   - from: build/staged/server
     to: server
-  - from: build/staged/daemon
-    to: daemon
-  # Meeting mode's native audio helper (scripts/build-native.cjs): system audio via
-  # a Core Audio tap, and noticing which apps have the mic open.
-  - from: build/native/patch-audio
-    to: bin/patch-audio
+  - from: build/staged/host
+    to: host
 mac:
+  extraResources:
+    # Meeting mode's native audio helper (scripts/build-native.cjs): system audio via
+    # a Core Audio tap, and noticing which apps have the mic open. macOS only.
+    - from: build/native/patch-audio
+      to: bin/patch-audio
   category: public.app-category.developer-tools
   # App icon = the web favicon (build/icon.png, rendered 1024² from
   # packages/web/public/favicon.svg). electron-builder generates the .icns.
   icon: build/icon.png
-  # Only what the deploy actually publishes: the arm64 zip electron-updater pulls
-  # out of latest-mac.yml. The dmg and the x64 slice were built every time and
-  # shipped never — and `hdiutil` cannot attach a disk image from the ssh session
-  # the deploy runs in ("Resource temporarily unavailable"), so the dmg failed the
-  # whole build for an artifact nothing consumes.
+  # The arm64 zip is what electron-updater pulls out of latest-mac.yml; the dmg is
+  # the download the website hands a new user (published as Patch-mac-arm64.dmg
+  # by scripts/promote.mjs). Both are built only by the release workflow on a
+  # GitHub runner, which signs and notarises the dmg after this. (`hdiutil` cannot
+  # attach a disk image from an ssh session, so a dmg cannot be built that way.)
   target:
     - target: zip
+      arch: [arm64]
+    - target: dmg
       arch: [arm64]
   hardenedRuntime: true
   gatekeeperAssess: false
@@ -66,4 +74,13 @@ publish:
   provider: generic
   url: https://updates.invalid/api/desktop/
   channel: latest
-# Win/Linux targets stay deferred; the build matrix flips them on later.
+linux:
+  # One x86_64 AppImage: electron-updater replaces it in place from latest-linux.yml.
+  target:
+    - target: AppImage
+      arch: [x64]
+  icon: build/icon.png
+  category: Development
+  executableName: patch
+  artifactName: Patch-${version}-x86_64.${ext}
+# Windows stays deferred.

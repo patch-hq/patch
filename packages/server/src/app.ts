@@ -1145,7 +1145,8 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   }
 
   // Public desktop-shell update feed (spec/11 § Version reporting). This is what
-  // electron-updater's `generic` provider polls: it fetches `latest-mac.yml`,
+  // electron-updater's `generic` provider polls: it fetches `latest-mac.yml`
+  // (`latest-linux.yml` from the Linux AppImage),
   // compares its `version` against the running app's, and if newer pulls the
   // matching `.zip` (using the `.blockmap` for a delta). It MUST be
   // unauthenticated — the updater runs in the Electron main process, before and
@@ -1161,8 +1162,10 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       const name = req.params.name;
       const allowed =
         name === 'latest-mac.yml' ||
+        name === 'latest-linux.yml' ||
         name === 'desktop-latest.json' ||
-        /^Patch-[A-Za-z0-9._-]+\.(zip|dmg)(\.blockmap)?$/.test(name);
+        name === 'desktop-linux-latest.json' ||
+        /^Patch-[A-Za-z0-9._-]+\.(zip|dmg|AppImage)(\.blockmap)?$/.test(name);
       if (!allowed) {
         return reply.code(404).send({ error: 'not found' });
       }

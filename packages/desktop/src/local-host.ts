@@ -28,11 +28,26 @@ export interface LocalHostInstallResult {
   output: string;
 }
 
-export function localHostStatus(home: string): LocalHostStatus {
+/** The systemd user units the installer writes on Linux (`installer/service.ts`). */
+export const HOST_SYSTEMD_UNITS = ['patch-host.service', 'patch-daemon.service'] as const;
+
+/** Where the installer leaves its service definition on this platform. */
+function serviceFiles(home: string, platform: NodeJS.Platform): string[] {
+  if (platform === 'linux') {
+    const units = join(home, '.config', 'systemd', 'user');
+    return HOST_SYSTEMD_UNITS.map((u) => join(units, u));
+  }
   const agents = join(home, 'Library', 'LaunchAgents');
   // A Mac installed before the host rename still carries the old label until its next update.
   const legacyServiceLabel = HOST_SERVICE_LABEL.replace(/patch-host$/, 'patch-daemon');
-  const plists = [HOST_SERVICE_LABEL, legacyServiceLabel].map((l) => join(agents, `${l}.plist`));
+  return [HOST_SERVICE_LABEL, legacyServiceLabel].map((l) => join(agents, `${l}.plist`));
+}
+
+export function localHostStatus(
+  home: string,
+  platform: NodeJS.Platform = process.platform,
+): LocalHostStatus {
+  const plists = serviceFiles(home, platform);
   const identityFile = join(home, '.patch', 'daemon-identity.json');
   let hostId: string | null = null;
   if (existsSync(identityFile)) {
@@ -44,6 +59,15 @@ export function localHostStatus(home: string): LocalHostStatus {
     if (typeof id === 'string') hostId = id;
   }
   return { installed: plists.some((p) => existsSync(p)), hostId };
+}
+
+function passThrough(names: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const n of names) {
+    const v = process.env[n];
+    if (v) out[n] = v;
+  }
+  return out;
 }
 
 /** A pairing code is a base64url nonce; anything else never reaches a shell. */
@@ -92,6 +116,9 @@ export function installLocalHost(opts: {
           // The installer reads the service's PATH from the user's own login
           // shell; without this it would have to assume which one that is.
           ...(process.env['SHELL'] ? { SHELL: process.env['SHELL'] } : {}),
+          // On Linux the installer registers a systemd user unit, and
+          // `systemctl --user` finds the user's manager only through these.
+          ...passThrough(['XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS', 'USER', 'LOGNAME']),
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       },

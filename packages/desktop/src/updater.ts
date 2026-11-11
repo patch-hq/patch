@@ -133,6 +133,14 @@ export function diagnoseUpdater(env: {
    * (spec/05 § Desktop first run, "On this Mac"). The feed is the server's.
    */
   noFeedReason?: string | null;
+  /**
+   * The platform the shell runs on. Only macOS gates an update on the bundle's
+   * signature (Squirrel.Mac); on Linux electron-updater replaces the AppImage
+   * file itself, which it can only do when the app was started from one.
+   */
+  platform: NodeJS.Platform;
+  /** Linux: the path of the AppImage this app runs from (`$APPIMAGE`), if any. */
+  appImage?: string | undefined;
 }): string | null {
   if (!env.isPackaged) {
     return 'running from source (pnpm dev) — only a packaged build can self-update';
@@ -146,6 +154,15 @@ export function diagnoseUpdater(env: {
   }
   if (/^0\.0\.0/.test(env.version)) {
     return `version is ${env.version}, which can never compare as older than a release — rebuild with a real version`;
+  }
+  if (env.platform === 'linux') {
+    if (!env.appImage) {
+      return (
+        'this app was not started from its AppImage (no $APPIMAGE), so there is no file ' +
+        'for the updater to replace — run the downloaded Patch AppImage to get updates'
+      );
+    }
+    return null;
   }
   if (!env.signed) {
     // Measured, not assumed: an adhoc build downloads the update and then fails

@@ -1,24 +1,31 @@
-// Stage what the packaged app carries so "On this Mac" can run a Patch server and
-// a host with nothing installed and nothing downloaded (spec/05 § Desktop first
-// run): the server release, and the host build for this Mac. electron-builder
+// Stage what the packaged app carries so "On this computer" can run a Patch server
+// and a host with nothing installed and nothing downloaded (spec/05 § Desktop first
+// run): the server release, and the host build for the platform being packaged
+// (darwin-arm64 for the Mac app, linux-x64 for the AppImage). electron-builder
 // copies build/staged/{server,host} into the app's resources.
 //
 // NO FALLBACK: an app packaged without either would ship a first-run choice that
 // cannot be honoured, so a missing host build or a failed server build stops
 // the packaging here, with what to run.
 //
-//   node scripts/stage-resources.cjs
+//   node scripts/stage-resources.cjs [--target=linux-x64]   (default: this machine)
 //
-// Exported for the test: stage({ repoRoot, desktopDir, buildServer }).
+// Exported for the test: stage({ repoRoot, desktopDir, buildServer, target }).
 
 const { cpSync, existsSync, mkdirSync, readdirSync, rmSync } = require('node:fs');
 const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 
-/** The host files this Mac needs: the manifest, the installer, and the darwin-arm64 build. */
-const wanted = (name) => !/\.tar\.gz(\.sig)?$/.test(name) || /darwin-arm64/.test(name);
+/** The host target the app is packaged for, as the host builds name it (`darwin-arm64`). */
+function targetFor(platform = process.platform, arch = process.arch) {
+  return `${platform}-${arch}`;
+}
 
-function stage({ repoRoot, desktopDir, buildServer }) {
+/** The host files the app needs: the manifest, the installer, and the build for `target`. */
+const wanted = (name, target = 'darwin-arm64') =>
+  !/\.tar\.gz(\.sig)?$/.test(name) || name.includes(`-${target}.`);
+
+function stage({ repoRoot, desktopDir, buildServer, target = targetFor() }) {
   const staged = path.join(desktopDir, 'build', 'staged');
   rmSync(staged, { recursive: true, force: true });
   mkdirSync(staged, { recursive: true });
@@ -26,18 +33,18 @@ function stage({ repoRoot, desktopDir, buildServer }) {
   const hostOut = path.join(repoRoot, 'dist', 'host');
   if (!existsSync(path.join(hostOut, 'host-latest.json'))) {
     throw new Error(
-      `No host build at ${hostOut}. Run \`pnpm build:host\` first: the app carries the host it sets up on this Mac.`,
+      `No host build at ${hostOut}. Run \`pnpm build:host\` first: the app carries the host it sets up on this computer.`,
     );
   }
   mkdirSync(path.join(staged, 'host'));
   let carried = 0;
   for (const name of readdirSync(hostOut)) {
-    if (!wanted(name)) continue;
+    if (!wanted(name, target)) continue;
     cpSync(path.join(hostOut, name), path.join(staged, 'host', name), { recursive: true });
-    if (/darwin-arm64/.test(name)) carried++;
+    if (name.endsWith(`-${target}.tar.gz`)) carried++;
   }
   if (carried === 0) {
-    throw new Error(`${hostOut} has no darwin-arm64 host build; the app would have no host to install.`);
+    throw new Error(`${hostOut} has no ${target} host build; the app would have no host to install.`);
   }
 
   const release = buildServer(path.join(staged, 'server-build'));
@@ -57,10 +64,14 @@ function buildServerRelease(out) {
   return path.join(out, dirs[0]);
 }
 
-module.exports = { stage, wanted };
+module.exports = { stage, wanted, targetFor };
 
 if (require.main === module) {
   const desktopDir = path.resolve(__dirname, '..');
   const repoRoot = path.resolve(desktopDir, '..', '..');
-  console.log(`[stage] staged into ${stage({ repoRoot, desktopDir, buildServer: buildServerRelease })}`);
+  const flag = process.argv.find((a) => a.startsWith('--target='));
+  const target = flag ? flag.slice('--target='.length) : targetFor();
+  console.log(
+    `[stage] ${target}: staged into ${stage({ repoRoot, desktopDir, buildServer: buildServerRelease, target })}`,
+  );
 }
