@@ -82,7 +82,7 @@ export const WatchRecord = z
     /** Set when the process vanished with no exit code: the task was killed by a restart and is NOT re-run. */
     killed: z.boolean().optional(),
   })
-  .strict();
+  .passthrough();
 export type WatchRecord = z.infer<typeof WatchRecord>;
 
 export interface WatchSchedulerDeps {

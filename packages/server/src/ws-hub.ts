@@ -50,6 +50,7 @@ import type { NewChatDraftStore } from './new-chat-drafts.js';
 import type { DraftAttachmentStore } from './draft-attachments.js';
 import { InputDedupe } from './dedupe.js';
 import { hostLockstep, hostStageTarget } from './host-lockstep.js';
+import { hostSupport } from './version-report.js';
 
 /**
  * Message shown to the user when an in-flight chat is force-resolved to
@@ -1265,6 +1266,13 @@ export class WsHub {
         return;
       case 'update':
         if (this.deps.autoUpdateHosts && !this.deps.autoUpdateHosts()) return;
+        // Components update independently: a host inside the supported window
+        // still speaks to this server, so it catches up on its own scheduled
+        // check, when idle. Forcing it here restarts it mid-chat.
+        if (hostSupport(hostVersion).supported) {
+          log.info(ctx, 'host is behind the server but supported; it will update when idle');
+          return;
+        }
         log.warn(ctx, 'host is behind the server; telling it to update');
         socket.send(encode({ type: 'host.update', hostId }));
         return;

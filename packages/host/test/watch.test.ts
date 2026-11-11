@@ -15,6 +15,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   writeFileSync,
 } from 'node:fs';
@@ -235,6 +236,37 @@ describe('WatchScheduler — survives a host restart', () => {
       expect(after?.pid).toBe(rec.pid);
     } finally {
       schedulerB.dispose();
+    }
+  });
+});
+
+describe('WatchScheduler — records written by another version', () => {
+  it('still loads a record carrying a field this version does not know', () => {
+    const deps = makeDeps();
+    const a = mkScheduler(deps);
+    const rec = a.start({
+      chatId: 'c-unknown',
+      command: 'sleep 5',
+      description: 'newer record',
+      timeoutSec: 600,
+      cwd: deps.home,
+    });
+    a.dispose();
+    const dir = join(deps.dirForChat('c-unknown'), 'watch');
+    const file = join(dir, readdirSync(dir).find((f) => f.endsWith('.json'))!);
+    const raw = JSON.parse(readFileSync(file, 'utf8'));
+    writeFileSync(file, JSON.stringify({ ...raw, someFutureField: 1 }), 'utf8');
+    const b = mkScheduler(deps);
+    try {
+      expect(b.list('c-unknown')).toHaveLength(1);
+      expect(b.list('c-unknown')[0]?.taskId).toBe(rec.taskId);
+    } finally {
+      b.dispose();
+      try {
+        process.kill(-rec.pid, 'SIGKILL');
+      } catch {
+        /* already gone */
+      }
     }
   });
 });
