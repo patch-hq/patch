@@ -143,9 +143,17 @@ if (firstRun) {
     return hosts.some((h) => h.online) ? hosts : null;
   });
   console.log(`[smoke-appimage] hosts: ${JSON.stringify(hosts)}`);
-  await main.reload();
-  await main.waitForLoadState('networkidle').catch(() => undefined);
   await shot(main, '3-host-online');
+
+  // A new chat on this computer: the composer is ready and offers this host.
+  const host = hosts.find((h) => h.online);
+  await main.goto(`${origin}/app/chats/new`);
+  await main.getByTestId('composer-input').waitFor({ state: 'visible', timeout: 60_000 });
+  const offered = await main.getByTestId(`host-option-${host.hostId}`).count();
+  console.log(
+    `[smoke-appimage] new chat: composer ready, ${offered ? 'offers' : 'does not list'} host ${host.hostName ?? host.hostId}`,
+  );
+  await shot(main, '4-new-chat');
 }
 
 console.log('[smoke-appimage] OK');

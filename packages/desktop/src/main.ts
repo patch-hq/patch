@@ -287,6 +287,7 @@ export interface DesktopEvent {
     | 'meeting:detection-off'
     | 'meeting:detection-restart'
     | 'meeting:detection-recovered'
+    | 'meeting:detection-unsupported'
     | 'meeting:prompt-shown'
     | 'meeting:auto-ended'
     | 'server-watch:error';
@@ -949,9 +950,10 @@ function endMeetingForCall(appName: string): void {
  *  It is background work Tom did not trigger, so it is not toasted at him. */
 function startMeetingDetection(): void {
   // The helper is a Core Audio tap (native/patch-audio): there is no build of it
-  // for any other platform, so say so once instead of retrying a missing binary.
+  // for any other platform, so the feature does not exist there. Not a fault to
+  // banner about ("detection is off… retrying" on every launch would be false).
   if (process.platform !== 'darwin') {
-    reportMeetingDetectionOff('noticing calls needs the macOS audio helper; it is macOS only');
+    logMeetingDetection('meeting:detection-unsupported', { platform: process.platform });
     return;
   }
   const detector = new MeetingDetector({

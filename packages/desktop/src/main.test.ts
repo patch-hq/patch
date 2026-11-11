@@ -55,8 +55,11 @@ test('both document windows drop the native title bar (spec/05 § Window chrome)
     src.indexOf('export function createMainWindow'),
     src.indexOf('/** Tray popover'),
   );
-  assert.match(childBody, /\.\.\.windowChrome\(process\.platform\)/, 'child window keeps a frame');
-  assert.match(mainBody, /\.\.\.windowChrome\(process\.platform\)/, 'main window keeps a frame');
+  // Both spread documentWindowChrome(), which is windowChrome(process.platform)
+  // plus the Linux window icon.
+  assert.match(src, /function documentWindowChrome[\s\S]*?\.\.\.windowChrome\(process\.platform\)/);
+  assert.match(childBody, /\.\.\.documentWindowChrome\(\)/, 'child window keeps a frame');
+  assert.match(mainBody, /\.\.\.documentWindowChrome\(\)/, 'main window keeps a frame');
 });
 
 test('the renderer is told whether its window has an overlay title bar', () => {
