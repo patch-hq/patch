@@ -873,8 +873,10 @@ async function startHost(
    * not.
    */
   let autoResumeRateLimit = persistedHostState.autoResumeRateLimit ?? true;
-  // Whether the scheduled check installs a published build itself. A manual
-  // `host.update` and an unreadable server greeting always apply.
+  // Whether this host installs a published build on its own: the scheduled
+  // check and the unreadable-greeting path both obey it. The server's
+  // lockstep `host.update` is gated server-side on the same shared setting.
+  // Only an explicit Update click bypasses it.
   let autoUpdateHosts = persistedHostState.autoUpdateHosts ?? true;
 
   /**
@@ -2285,6 +2287,14 @@ async function startHost(
     // build is (or is about to be) published — go and get it. The update gate
     // joins repeat calls from each reconnect and waits out running turns.
     onGreetingUnreadable: () => {
+      // Automatic, so it obeys "update automatically". Off: say what is wrong
+      // and wait for an explicit Update.
+      if (!autoUpdateHosts) {
+        logger.warn(
+          'self-update: server greeting unreadable, but automatic updates are off; use Update to install',
+        );
+        return;
+      }
       void applyUpdateOnce().then(
         (result) =>
           logger.warn(

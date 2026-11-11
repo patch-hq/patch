@@ -209,6 +209,8 @@ interface FakeServer {
   waitForHello(): Promise<void>;
   /** Reply auth.ok + daemon.online to the most recent hello. */
   authNow(): void;
+  /** Send raw text to the connected client, bypassing the wire codec. */
+  sendRaw(text: string): void;
   /** Resolves once a client has said hello and been auth'd (waitForHello + authNow, auto). */
   waitForAuthed(): Promise<void>;
   /** Resolves when `pred` first matches an already-received or future frame. */
@@ -306,6 +308,7 @@ async function startFakeServer(): Promise<FakeServer> {
     send: (event) => current?.send(encode(event)),
     waitForHello: () =>
       sawHello ? Promise.resolve() : new Promise<void>((resolve) => helloResolvers.push(resolve)),
+    sendRaw: (text) => current?.send(text),
     authNow: () => {
       current?.send(
         JSON.stringify({ type: 'auth.ok', hosts: [], accountId: 'acct-1', surfaceId: 'daemon-1' }),
@@ -3579,6 +3582,28 @@ describe('src/index.ts main() — scheduled self-update actually applies', () =>
       await waitFor(() => lines.some((l) => l.includes('self-update: availability changed')));
       await new Promise((r) => setTimeout(r, 300));
       expect(lines.some((l) => l.includes('self-update: scheduled apply refused'))).toBe(false);
+    } finally {
+      await boot.cleanup();
+    }
+  });
+
+  it('does not self-update on an unreadable server greeting when auto-update is off', async () => {
+    const lines: string[] = [];
+    const boot = await bootMain(
+      {},
+      {
+        hostJson: { autoUpdateHosts: false },
+        logStream: { write: (chunk: string) => void lines.push(chunk) },
+      },
+    );
+    try {
+      await boot.fakeServer.waitForHello();
+      // A greeting this build cannot decode (auth.ok missing its fields).
+      boot.fakeServer.sendRaw(JSON.stringify({ type: 'auth.ok' }));
+      await waitFor(() => lines.some((l) => l.includes('automatic updates are off')));
+      await new Promise((r) => setTimeout(r, 200));
+      expect(lines.some((l) => l.includes('requested because the server greeting'))).toBe(false);
+      expect(lines.some((l) => l.includes('after an unreadable server greeting'))).toBe(false);
     } finally {
       await boot.cleanup();
     }
