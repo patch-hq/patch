@@ -26,6 +26,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { createServer } from 'node:net';
@@ -68,7 +69,7 @@ async function launch(c: { home: string; userData: string }): Promise<ElectronAp
         ? { PATCH_RELAY_URL: process.env['PATCH_RELAY_URL'] }
         : {}),
     },
-    timeout: 5 * 60_000,
+    timeout: 90_000,
   });
   // What the app itself says, kept beside the screenshots for a failure to be read from.
   if (SHOTS) {
@@ -111,10 +112,17 @@ async function windowAt(app: ElectronApplication, match: RegExp, timeout = 60_00
 }
 
 /** Quit as Quit Patch does, and wait for the process to be gone. */
-async function quit(app: ElectronApplication): Promise<void> {
+async function quit(app: ElectronApplication, userData: string): Promise<void> {
   const proc = app.process();
-  if (proc.exitCode !== null) return;
-  const gone = new Promise<void>((r) => proc.once('exit', () => r()));
+  const finished = new Promise<void>((r) => {
+    if (proc.exitCode !== null) return r();
+    proc.once('exit', () => r());
+    // The app has done all its quitting and is only held open by the test's
+    // own debugger connection: Node waits for it to detach.
+    proc.stderr?.on('data', (d: Buffer) => {
+      if (d.toString().includes('Waiting for the debugger to disconnect')) r();
+    });
+  });
   // The page closes under the call as the app goes, so its answer may never come.
   void app
     .evaluate(({ app: a }) => {
@@ -123,11 +131,70 @@ async function quit(app: ElectronApplication): Promise<void> {
     })
     .catch(() => undefined);
   await Promise.race([
-    gone,
+    finished,
     new Promise((_, rej) =>
       setTimeout(() => rej(new Error('Patch did not quit within 30s')), 30_000),
     ),
   ]);
+  // Whatever still holds the profile is the debugger-held husk: end it, and wait
+  // until the process named in Chromium's lock is gone, or the next launch of
+  // this profile sees "already running" and steps aside.
+  const holder = (): number | null => {
+    try {
+      const pid = Number(readlinkSync(join(userData, 'SingletonLock')).split('-').pop());
+      process.kill(pid, 0);
+      return pid;
+    } catch {
+      return null;
+    }
+  };
+  if (proc.exitCode === null) proc.kill('SIGKILL');
+  const deadline = Date.now() + 15_000;
+  for (let pid = holder(); pid !== null; pid = holder()) {
+    if (Date.now() > deadline) throw new Error(`process ${pid} still holds ${userData}`);
+    process.kill(pid, 'SIGKILL');
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
+/**
+ * Launch the app as a person does, with a debugging port, and return the
+ * addresses of its windows once it has one at the app; then quit it.
+ */
+async function plainLaunch(c: { home: string; userData: string }): Promise<string[]> {
+  const port = await freePort();
+  const child = spawn(APP, [`--remote-debugging-port=${port}`], {
+    env: {
+      HOME: c.home,
+      PATH: BARE_PATH,
+      USER: process.env['USER'] ?? 'patch',
+      TMPDIR: tmpdir(),
+      PATCH_USER_DATA_DIR: c.userData,
+    },
+    stdio: 'ignore',
+  });
+  const exited = new Promise<void>((r) => child.once('exit', () => r()));
+  try {
+    let pages: string[] = [];
+    await expect
+      .poll(
+        async () => {
+          const r = await fetch(`http://127.0.0.1:${port}/json/list`).catch(() => null);
+          if (!r?.ok) return false;
+          pages = ((await r.json()) as Array<{ type: string; url: string }>)
+            .filter((t) => t.type === 'page')
+            .map((t) => t.url);
+          return pages.some((u) => /\/app\//.test(u));
+        },
+        { timeout: 60_000 },
+      )
+      .toBe(true);
+    return pages;
+  } finally {
+    child.kill('SIGTERM');
+    await Promise.race([exited, new Promise((r) => setTimeout(r, 15_000))]);
+    if (child.exitCode === null) child.kill('SIGKILL');
+  }
 }
 
 async function shot(page: Page, name: string): Promise<void> {
@@ -190,7 +257,7 @@ test('my own server: pairs by code, runs the welcome steps, and is remembered', 
   const server = await throwawayServer();
   const computer = blankComputer();
   try {
-    let app = await launch(computer);
+    const app = await launch(computer);
     const setup = await windowAt(app, /setup\.html/);
     await expect(
       setup.getByRole('heading', { name: 'Where should your agents run?' }),
@@ -226,13 +293,15 @@ test('my own server: pairs by code, runs the welcome steps, and is remembered', 
     expect(shared.settings.permissionModeDefault).toBe('default');
     expect(existsSync(join(computer.userData, 'connection.json'))).toBe(true);
     expect(existsSync(join(computer.userData, 'keep-running.json'))).toBe(false);
-    await quit(app);
+    await quit(app, computer.userData);
 
-    // The next launch goes straight in: no question, no welcome.
-    app = await launch(computer);
-    const main = await windowAt(app, /\/app\//);
-    await expect(main).not.toHaveURL(/welcome|setup\.html/);
-    await quit(app);
+    // The next launch goes straight in: no question, no welcome. Started as a
+    // plain process and read over its debugging port: Playwright's Electron
+    // launcher does not return for a second launch of a profile that opens
+    // its window at once, though the app is up (seen on CI and here).
+    const pages = await plainLaunch(computer);
+    expect(pages.some((u) => /\/app\//.test(u))).toBe(true);
+    expect(pages.filter((u) => /welcome|setup\.html/.test(u))).toEqual([]);
   } finally {
     keepLogs(computer, 'own-server');
     server.stop();
@@ -323,5 +392,5 @@ async function thisComputer(computer: { home: string; userData: string }): Promi
   await new Promise((r) => setTimeout(r, 2000));
   expect(app.process().exitCode).toBeNull();
   expect((await fetch(`${origin}/api/healthz`)).ok).toBe(true);
-  await quit(app);
+  await quit(app, computer.userData);
 }
