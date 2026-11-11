@@ -1101,6 +1101,13 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
   // (send_to / spawn / stop). Read-only tools (peek/history/list/job_list)
   // skip this gate.
   const limiter = opts.rateLimiter ?? new RateLimiter({ windowMs: 60_000, max: 60 });
+  // patch_send_to with no caller-supplied localId gets a fresh random one per
+  // call, so a retried tool call (client timeout, transport replay) was
+  // delivered to the recipient again and again. Remember what each caller just
+  // sent each target and answer an identical repeat inside the window without
+  // delivering it a second time.
+  const SEND_TO_DEDUPE_MS = 30_000;
+  const recentSendTos = new Map<string, number>();
   const toolLog = opts.toolLogger ?? ((): void => undefined);
 
   // Centralized 429: emit a Retry-After header (seconds until a slot frees) plus
@@ -2059,6 +2066,28 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     // still reveals, same safe default as before.
     const revealTarget = opts.daemon!.chatState.get(callerChatId)?.hidden !== true;
     const localId = parsed.data.localId ?? randomUUID();
+    const dedupeKey = JSON.stringify([
+      callerChatId,
+      chatId,
+      voicePrefix ?? '',
+      message,
+      goal ?? '',
+    ]);
+    if (parsed.data.localId === undefined) {
+      const now = Date.now();
+      for (const [k, at] of recentSendTos)
+        if (now - at >= SEND_TO_DEDUPE_MS) recentSendTos.delete(k);
+      if (recentSendTos.has(dedupeKey)) {
+        toolLog({
+          tool: 'patch_send_to',
+          callerChatId,
+          targetChatId: chatId,
+          durationMs: Date.now() - start,
+          ok: true,
+        });
+        return { ok: true, queued: true, duplicate: true };
+      }
+    }
     if (!limiter.check(`send_to:${callerChatId}`)) {
       toolLog({
         tool: 'patch_send_to',
@@ -2108,6 +2137,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         durationMs: Date.now() - start,
         ok: true,
       });
+      recentSendTos.set(dedupeKey, Date.now());
       return { ok: true, queued: true };
     } catch (err) {
       const code = err instanceof ChatNotFoundError ? 'chat_not_found' : 'sdk_error';
@@ -2146,6 +2176,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
             durationMs: Date.now() - start,
             ok: true,
           });
+          recentSendTos.set(dedupeKey, Date.now());
           return { ok: true, queued: true };
         } catch (remoteErr) {
           const remoteCode = remoteErr instanceof RemoteRelayError ? remoteErr.code : 'sdk_error';
