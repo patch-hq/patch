@@ -307,6 +307,7 @@ export interface PadCreateBody {
 /** POST /api/link-summary — a model's summary of a link in a message. */
 export interface LinkSummaryData {
   url: string;
+  title?: string;
   summary: string;
 }
 

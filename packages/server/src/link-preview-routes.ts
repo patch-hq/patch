@@ -156,6 +156,20 @@ function extractExcerpt(html: string): string | undefined {
   return text.length > EXCERPT_CHARS ? `${text.slice(0, EXCERPT_CHARS).trimEnd()}…` : text;
 }
 
+/** The page's own title and description (OpenGraph first, then the plain tags). */
+export function extractPageMeta(html: string): { title?: string; description?: string } {
+  const title =
+    extractMetaContent(html, 'property', 'og:title') ??
+    /<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1]?.trim();
+  const description =
+    extractMetaContent(html, 'property', 'og:description') ??
+    extractMetaContent(html, 'name', 'description');
+  return {
+    ...(title ? { title: decodeEntities(title) } : {}),
+    ...(description ? { description: decodeEntities(description) } : {}),
+  };
+}
+
 function parsePreview(html: string, baseUrl: string): Omit<LinkPreview, 'url'> {
   const title =
     extractMetaContent(html, 'property', 'og:title') ??
