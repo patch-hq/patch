@@ -3059,6 +3059,9 @@ function MessageEntry({
       {...(canSideThread
         ? {
             onContextMenu: (e: React.MouseEvent<HTMLDivElement>) => {
+              // A link keeps the platform's own menu (Copy Link Address, Open Link in
+              // Patch/Browser): this menu's Copy would take the whole message.
+              if ((e.target as Element).closest?.('a[href]')) return;
               setMenuSelection(selectionWithin(e.currentTarget));
               sideThreadMenu.openAt(e);
             },
