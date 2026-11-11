@@ -101,3 +101,8 @@ export function useNow(on: boolean, ms = 1000): number {
   }, [on, ms]);
   return now;
 }
+
+/** The person typed an address into a chat's browser view that has no tab: open one they drive. */
+export function sendOpen(chatId: string, url: string): void {
+  sendBrowser({ type: 'patch.browser_view.open', chatId, url });
+}

@@ -1600,6 +1600,7 @@ export class WsHub {
       case 'patch.browser_handoff.control':
       case 'patch.browser_view.input':
       case 'patch.browser_view.drive':
+      case 'patch.browser_view.open':
       case 'meeting.action_request':
       case 'meeting.notes_request':
       case 'meeting.my_notes_request':

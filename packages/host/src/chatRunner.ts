@@ -4336,6 +4336,15 @@ export class Daemon {
     return this.browserHandoff_.viewInput(chatId, tabId, input);
   }
 
+  /** `patch.browser_view.open` from a surface: a tab the person drives, at the address they typed. */
+  async browserViewOpen(chatId: string, address: string): Promise<void> {
+    try {
+      await this.browserHandoff_.open(chatId, address);
+    } catch (err) {
+      this.opts.logger.warn({ chatId, err }, 'browser view: could not open the typed address');
+    }
+  }
+
   /** `patch.browser_view.drive` from a surface: Take over / Hand back. */
   browserViewDrive(chatId: string, tabId: string, driver: 'agent' | 'user'): void {
     try {
