@@ -68,10 +68,36 @@ jobs:
           sudo swapon /mnt/ci-extra.swap
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @patch/web exec playwright install --with-deps chromium
+      - name: Install Chromium and its system packages
+        run: |
+          # A runner sometimes can't resolve the Ubuntu mirrors for a minute
+          # ("Temporary failure resolving azure.archive.ubuntu.com"). Retry the
+          # apt-backed install rather than fail the shard; give up loudly after 4.
+          for attempt in 1 2 3 4; do
+            pnpm --filter @patch/web exec playwright install --with-deps chromium && exit 0
+            [ "$attempt" = 4 ] && break
+            wait=$((30 + RANDOM % 31))
+            echo "::warning::playwright install: attempt $attempt failed; retrying in ${wait}s"
+            sleep "$wait"
+          done
+          echo "::error::playwright install: failed after 4 attempts"
+          exit 1
       # The host's browser tests drive a headed Chromium on Xvfb, and its Codex
       # tests keep credentials in the native keyring (Secret Service over D-Bus).
-      - run: sudo apt-get install -y -qq xvfb x11-utils gnome-keyring libsecret-tools dbus-x11
+      - name: Install Xvfb and the keyring
+        run: |
+          # A runner sometimes can't resolve the Ubuntu mirrors for a minute
+          # ("Temporary failure resolving azure.archive.ubuntu.com"). Retry the
+          # apt-backed install rather than fail the shard; give up loudly after 4.
+          for attempt in 1 2 3 4; do
+            sudo apt-get install -y -qq xvfb x11-utils gnome-keyring libsecret-tools dbus-x11 && exit 0
+            [ "$attempt" = 4 ] && break
+            wait=$((30 + RANDOM % 31))
+            echo "::warning::apt-get install: attempt $attempt failed; retrying in ${wait}s"
+            sleep "$wait"
+          done
+          echo "::error::apt-get install: failed after 4 attempts"
+          exit 1
       # Some suites run against built output (the server serves the web build).
       # Not the phone: its "build" is an Expo export + prebuild that rewrites android/.
       - run: pnpm turbo build --filter='!@patch/mobile' --output-logs=errors-only
