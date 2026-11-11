@@ -1317,6 +1317,7 @@ function hostOpts(
   opts: SdkRunOptions,
   durable?: DurableTurn,
   onPid?: (pid: number | undefined) => void,
+  onExit?: (exit: ProcessExit) => void,
 ): {
   pathToClaudeCodeExecutable?: string;
   spawnClaudeCodeProcess: (spawnOpts: SpawnOptions) => SpawnedProcess;
@@ -1324,10 +1325,17 @@ function hostOpts(
   const exe = claudeExecutablePath();
   // Own process group per claude, reaped whole: see claudeSpawn.ts. A durable
   // turn's runner does the same reaping on the far side of its socket.
-  const spawnClaudeCodeProcess = durable
+  const spawnRaw = durable
     ? durable.spawn
     : (spawnOpts: SpawnOptions): SpawnedProcess =>
         spawnClaudeInGroup(spawnOpts, opts.onReapRefused, onPid);
+  // How claude ended, however it was spawned: a cut stream is reported with it,
+  // since "killed by SIGKILL" and "exited 1" point at different causes.
+  const spawnClaudeCodeProcess = (spawnOpts: SpawnOptions): SpawnedProcess => {
+    const proc = spawnRaw(spawnOpts);
+    if (onExit) proc.once('exit', (code, signal) => onExit({ code, signal }));
+    return proc;
+  };
   return exe === undefined
     ? { spawnClaudeCodeProcess }
     : { pathToClaudeCodeExecutable: exe, spawnClaudeCodeProcess };
@@ -1961,6 +1969,7 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   const { env, mcpServers } = buildSdkEnv(opts);
   const durable = opts.durableTurn ? new DurableTurn(opts.durableTurn) : undefined;
   const sup = mcpServers === undefined ? undefined : new McpSupervisor({});
+  let claudeExit: ProcessExit | undefined;
   // The chat's mode can change while this process is running (the composer's
   // mode control, or "Approve & resume bypass" on a plan-mode card). `live`
   // is what every later decision in this turn reads, and `setLiveRunPermissionMode`
@@ -1995,7 +2004,9 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
           }
         : {}),
       ...SHARED_OPTS,
-      ...hostOpts(opts, durable),
+      ...hostOpts(opts, durable, undefined, (e) => {
+        claudeExit = e;
+      }),
       ...withMcpSupervisor(boundaryHooks(boundaryOpts), sup),
       disallowedTools: disallowedToolsFor(opts),
       env,
@@ -2052,6 +2063,7 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
     // killed, the connection dropped), not finished. Said out loud so the turn
     // is retried or reported, never settled as complete with no reason.
     if (!sawResult && !opts.abortController.signal.aborted) {
+<<<<<<< HEAD
       const exit = durable?.describeCut();
       // The model had already ended its turn: every word of the answer is in,
       // and only Claude Code's closing `result` went missing. Retrying would
@@ -2066,6 +2078,9 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
         return;
       }
       throw new Error(cutTurnMessage(lastStopReason, exit));
+=======
+      throw new Error(cutTurnMessage(lastStopReason, claudeExit));
+>>>>>>> 73d7dd886 (Host: a cut turn says how claude ended (signal or exit code))
     }
   } finally {
     durable?.release();
@@ -2104,6 +2119,7 @@ export function noteStopReason(msg: unknown, previous: string | undefined): stri
  * classifier matches, and adds whether the last reply had finished so the
  * reader can tell "died mid-answer" from "answered, then the process went".
  */
+<<<<<<< HEAD
 export function cutTurnMessage(lastStopReason: string | undefined, exit?: string): string {
   const base =
     'The Claude Code process ended mid-turn without finishing (no result message). The stream was cut, not completed.';
@@ -2111,6 +2127,26 @@ export function cutTurnMessage(lastStopReason: string | undefined, exit?: string
   return lastStopReason === 'end_turn'
     ? `${base} The last reply had finished (stop reason end_turn), so the text above is likely complete; only the closing result was lost.${how}`
     : `${base} The last reply had not finished, so the text above may be incomplete.${how}`;
+=======
+export function cutTurnMessage(lastStopReason: string | undefined, exit?: ProcessExit): string {
+  const base =
+    'The Claude Code process ended mid-turn without finishing (no result message). The stream was cut, not completed.';
+  const how =
+    exit?.signal != null
+      ? ` Claude was killed by ${exit.signal}.`
+      : exit?.code != null
+        ? ` Claude exited with code ${exit.code}.`
+        : '';
+  return lastStopReason === 'end_turn'
+    ? `${base}${how} The last reply had finished (stop reason end_turn), so the text above is likely complete; only the closing result was lost.`
+    : `${base}${how} The last reply had not finished, so the text above may be incomplete.`;
+}
+
+/** How a Claude process ended: its exit code, or the signal that killed it. */
+export interface ProcessExit {
+  code: number | null;
+  signal: string | null;
+>>>>>>> 73d7dd886 (Host: a cut turn says how claude ended (signal or exit code))
 }
 
 interface LiveRun {
