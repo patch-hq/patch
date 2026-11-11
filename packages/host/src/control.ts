@@ -3311,7 +3311,9 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       // machine here only invites the agent to reason about hosts.
       const result = {
         ...answer,
-        results: answer.results.map(({ hostId: _hostId, ...rest }) => rest),
+        results: (answer.results as Array<Record<string, unknown>>).map(
+          ({ hostId: _hostId, ...rest }) => rest,
+        ),
       };
       toolLog({
         tool: 'patch_search_chats',
