@@ -10,6 +10,7 @@
 import WebSocket from 'ws';
 import type { Logger } from 'pino';
 import { encodeAudio } from '@patch/wire/audio';
+import { watchPeerLiveness } from './peer-liveness.js';
 
 /** The WebSocket close code for "the far end went away" (RFC 6455 1011). */
 const CLOSE_UPSTREAM_FAILED = 1011;
@@ -18,6 +19,8 @@ export interface ProxyDeps {
   logger: Logger;
   /** Test seam: substitute the upstream WebSocket client. */
   wsCtor?: new (url: string) => WebSocket;
+  deadPeerTimeoutMs?: number;
+  pingIntervalMs?: number;
 }
 
 /** Pipe `client` to `upstreamUrl`. Frames the device sends before the upstream opens are held, in order. */
@@ -31,6 +34,14 @@ export function proxyAudioSession(
   const upstream = new Ctor(upstreamUrl);
   const held: { data: WebSocket.RawData; isBinary: boolean }[] = [];
   let open = false;
+
+  // The device leg is the one that can vanish without a close frame.
+  watchPeerLiveness(client, {
+    ...(deps.deadPeerTimeoutMs !== undefined ? { timeoutMs: deps.deadPeerTimeoutMs } : {}),
+    ...(deps.pingIntervalMs !== undefined ? { pingIntervalMs: deps.pingIntervalMs } : {}),
+    onDead: (silentMs) =>
+      deps.logger.warn({ sessionId, silentMs }, 'audio: device went silent, dropping its session'),
+  });
 
   client.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
     if (open) upstream.send(data, { binary: isBinary });

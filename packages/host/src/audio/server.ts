@@ -56,6 +56,7 @@ import type { EngineCosting } from './voiceCost.js';
 import { verifyVoiceToken, VoiceTokenError, type VoiceTokenClaims } from './token-verifier.js';
 import { DEVICE_CONTROL_PATH } from '../devices/control-ws.js';
 import { proxyAudioSession } from './session-proxy.js';
+import { watchPeerLiveness } from './peer-liveness.js';
 import { readKey, type KeySource } from './keySource.js';
 import { DeepgramDictationSession } from './deepgram-dictation.js';
 import { ElevenLabsDictationSession } from './elevenlabs-dictation.js';
@@ -226,6 +227,10 @@ export interface AudioServerOptions {
    * Default 4 (matches Groq budget per spec).
    */
   maxConcurrentSessions?: number;
+  /** A peer silent (no frame, no pong) this long is dropped. Default 45 s. */
+  deadPeerTimeoutMs?: number;
+  /** How often peers are pinged. Default 15 s. */
+  pingIntervalMs?: number;
   /**
    * Fired when a physical voice-device session (surfaceKind === 'device')
    * opens (`active: true`) or closes (`active: false`). The host wires this
@@ -543,6 +548,10 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
       wss.handleUpgrade(req, socket, head, (ws) => {
         proxyAudioSession(ws, upstreamUrl, expected, {
           logger: log,
+          ...(opts.deadPeerTimeoutMs !== undefined
+            ? { deadPeerTimeoutMs: opts.deadPeerTimeoutMs }
+            : {}),
+          ...(opts.pingIntervalMs !== undefined ? { pingIntervalMs: opts.pingIntervalMs } : {}),
           ...(opts.upstreamWsCtor ? { wsCtor: opts.upstreamWsCtor } : {}),
         });
       });
@@ -576,6 +585,12 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
     let isAppCall = false;
     let pendingBinaryMeta: { samples: number } | undefined;
 
+    watchPeerLiveness(ws, {
+      ...(opts.deadPeerTimeoutMs !== undefined ? { timeoutMs: opts.deadPeerTimeoutMs } : {}),
+      ...(opts.pingIntervalMs !== undefined ? { pingIntervalMs: opts.pingIntervalMs } : {}),
+      onDead: (silentMs) =>
+        log.warn({ sessionId: urlSessionId, silentMs }, 'audio: peer went silent, ending session'),
+    });
     ws.on('message', (data: Buffer | string, isBinary: boolean) => {
       if (isBinary) {
         if (!session) {
