@@ -48,6 +48,14 @@ export function DelegateStrip({ chatId }: { chatId: string }): React.ReactElemen
             <Text style={{ ...typography.meta, color: colors.ink2, flex: 1 }} numberOfLines={1}>
               {d.label}
             </Text>
+            {d.followUp ? (
+              <Text
+                testID="delegate-strip-followup"
+                style={{ ...typography.meta, color: colors.ink3 }}
+              >
+                follow-up
+              </Text>
+            ) : null}
             <Text testID="delegate-strip-time" style={{ ...typography.meta, color: colors.ink3 }}>
               {d.outOfCredit
                 ? d.outOfCredit.resetsAt !== undefined

@@ -680,6 +680,28 @@ describe('patch_delegate', () => {
       expect(daemon.listDelegates(parentChatId)).toHaveLength(1);
     });
 
+    it('a follow-up wake restarts the run clock host-side and a reconnecting surface is told the same start', async () => {
+      const { daemon, sdk, folder } = setup();
+      const parentChatId = await daemon.spawnChat({ folder });
+      sdk.enqueue([{ type: 'assistant', content: 'first' }, { type: 'result' }]);
+      const first = await daemon.createDelegate({ parentChatId, prompt: 'start', wait: true });
+      await first.result!;
+
+      sdk.enqueue([{ type: 'assistant', content: 'second' }, { type: 'result' }]);
+      const next = await daemon.sendToDelegate({
+        parentChatId,
+        id: first.id,
+        message: 'again',
+        wait: true,
+      });
+      await next.result!;
+      const meta = (
+        daemon as unknown as { opts: { metaStore: { read(id: string): any } } }
+      ).opts.metaStore.read(first.id);
+      expect(meta.subagent.followUp).toBe(true);
+      expect(meta.subagent.runStartedAt).toBe(1_700_000_000_000);
+    });
+
     it("sendToDelegate refuses another chat's subagent and a non-subagent", async () => {
       const { daemon, folder } = setup();
       const a = await daemon.spawnChat({ folder });
