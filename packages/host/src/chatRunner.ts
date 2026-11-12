@@ -9,9 +9,11 @@ import {
   listTurnDirs,
   retireTurn,
   turnDirFor,
+  claudePidFor,
   type Consumed,
   type DurableTurnConfig,
 } from './durableTurn.js';
+import { cancelBashCall } from './cancelCommand.js';
 import type { SleepGuard } from './sleepGuard.js';
 import type { SleepWatch } from './sleepWatch.js';
 import { expandHome } from './expandHome.js';
@@ -3155,6 +3157,13 @@ export class Daemon {
    * that waits for the reset.
    */
   private readonly failoverTriedAccounts = new Map<string, Set<string>>();
+
+  /**
+   * Chats whose turn is being re-run on another account. The chat sits idle for
+   * a moment between the failed run and the re-run, but its work is not done —
+   * so a snooze "until complete" must not read that gap as completion.
+   */
+  private readonly failoverRerunPending = new Set<string>();
   /**
    * The account each chat's most recent turn resolved onto, as `resolveOAuth`
    * reported it. Set as that turn starts, and left standing after it — a usage
@@ -4881,7 +4890,12 @@ export class Daemon {
     if (waiters?.length) {
       for (const w of waiters) w({ status: outcome, reply });
     } else if (outcome !== 'stopped') {
-      this.deliverToParent(parentChatId, formatAgentReturn(label, chatId, reply));
+      // A wake that adds no assistant message would re-send the same report.
+      const last = outcome === 'done' ? lastAssistantMessage(state) : undefined;
+      if (last === undefined || last.seq !== state.deliveredReportSeq) {
+        if (last !== undefined) state.deliveredReportSeq = last.seq;
+        this.deliverToParent(parentChatId, formatAgentReturn(label, chatId, reply));
+      }
     }
     this.emitDelegateUpdate(parentChatId, chatId, label, outcome);
     if (this.chatState.has(parentChatId)) this.emitState(parentChatId);
@@ -5279,6 +5293,7 @@ export class Daemon {
     // was bounced would still be marked as tried.
     this.overloadRetryCount.delete(chatId);
     this.failoverTriedAccounts.delete(chatId);
+    this.failoverRerunPending.delete(chatId);
     const goalPoll = this.goalWatchPollTimers.get(chatId);
     if (goalPoll !== undefined) clearTimeout(goalPoll);
     this.goalWatchPollTimers.delete(chatId);
@@ -5980,6 +5995,7 @@ export class Daemon {
     const wake = this.wake.peek(chatId);
     return (
       this.aggregateActivity(chatId) === 'running' ||
+      this.failoverRerunPending.has(chatId) ||
       (state?.goal ?? null) !== null ||
       (wake !== null && wake.every === undefined) ||
       this.hasRunningDelegates(chatId)
@@ -6035,6 +6051,7 @@ export class Daemon {
         askingQuestion: this.isAskingQuestion(state),
         finishedAt: open.finishedAt,
         erroredAt: open.erroredAt,
+        error: open.error,
         waitingSince: open.waitingSince,
         now: endedAt,
       }),
@@ -6064,12 +6081,16 @@ export class Daemon {
     const next: SnoozeRecord = { ...open };
     if (prev === 'running' && activity === 'idle') next.finishedAt = now;
     if (activity === 'errored' && prev !== 'errored') next.erroredAt = now;
+    if (activity === 'errored' && state.lastError) {
+      next.error = { code: state.lastError.code, message: state.lastError.message };
+    }
     const waiting = activity === 'awaiting-permission' || this.isAskingQuestion(state);
     if (waiting && next.waitingSince === undefined) next.waitingSince = now;
     if (!waiting && next.waitingSince !== undefined) delete next.waitingSince;
     if (
       next.finishedAt !== open.finishedAt ||
       next.erroredAt !== open.erroredAt ||
+      next.error?.message !== open.error?.message ||
       next.waitingSince !== open.waitingSince
     ) {
       this.replaceLastSnoozeRecord(chatId, next);
@@ -8600,6 +8621,50 @@ export class Daemon {
     }
   }
 
+  /** Command text of each chat's Bash calls that have not returned, by callId. */
+  private readonly runningBash = new Map<string, Map<string, string>>();
+
+  private trackRunningBash(event: WireEvent): void {
+    if (event.type === 'chat.tool_call' && event.tool === 'Bash') {
+      const command = (event.args as { command?: unknown } | null)?.command;
+      if (typeof command !== 'string') return;
+      let calls = this.runningBash.get(event.chatId);
+      if (!calls) {
+        calls = new Map();
+        this.runningBash.set(event.chatId, calls);
+      }
+      calls.set(event.callId, command);
+      // Calls cut off by a stop never return a result; keep the map small.
+      if (calls.size > 20) calls.delete(calls.keys().next().value!);
+    } else if (event.type === 'chat.tool_result') {
+      this.runningBash.get(event.chatId)?.delete(event.callId);
+    }
+  }
+
+  /**
+   * Cancel one running Bash call (`chat.tool_cancel_request`): SIGINT to what
+   * that command started, leaving claude and the turn alone. Logged either
+   * way, so "I pressed it and nothing happened" is answerable from the log.
+   */
+  async cancelToolCall(chatId: string, callId: string): Promise<void> {
+    const command = this.runningBash.get(chatId)?.get(callId);
+    const durable = this.opts.durableTurns;
+    const claudePid = durable ? claudePidFor(durable, chatId) : undefined;
+    if (command === undefined || claudePid === undefined) {
+      this.opts.logger.warn(
+        { chatId, callId, knownCall: command !== undefined, claudePid },
+        'tool cancel: nothing to cancel (call not running, or no claude process recorded)',
+      );
+      return;
+    }
+    try {
+      const pids = await cancelBashCall(claudePid, command);
+      this.opts.logger.info({ chatId, callId, pids }, 'tool cancel: interrupted a Bash call');
+    } catch (err) {
+      this.opts.logger.warn({ chatId, callId, err: (err as Error).message }, 'tool cancel: failed');
+    }
+  }
+
   /** Stop a specific branch's running turn, or no-op if it has none. */
   stopBranch(chatId: string, branchId: string): void {
     const key = this.branchKey(chatId, branchId);
@@ -9816,6 +9881,8 @@ export class Daemon {
     // like a fresh one.
     const assistantSeqBeforeTurn = lastAssistantMessage(state)?.seq ?? -1;
 
+    // The re-run (if any) has begun: from here activity itself says it is working.
+    this.failoverRerunPending.delete(chatId);
     this.chatState.setActivity(chatId, 'running');
     // A turn is starting, so a goal held by an earlier stop is live again.
     if (state.goalProgress?.pausedByStop)
@@ -10269,8 +10336,26 @@ export class Daemon {
       const path = chatTranscriptPath(this.chatDirFor(chatId), state.folder, claudeResumeId);
       claudeTranscript = { path, size: transcriptSize(path) };
     }
+    // A turn the user stopped before the model answered leaves a track of bare
+    // prompts, which the session store drops — so the next send (a "Continue")
+    // starts a fresh session and the model sees only that word. Carry the
+    // unanswered prompts in with it.
+    // Only the bare "Continue" nudge (the stop-card button / Threads carry-on):
+    // any other message after a stop is the user moving on, not asking to resume.
+    const sdkPrompt =
+      !fork &&
+      prompt.trim().toLowerCase() === 'continue' &&
+      retryOfSeq === undefined &&
+      userMessageSeq !== undefined &&
+      !isProviderSwitch &&
+      !isNativeRebuild &&
+      !state.claudeSessionId &&
+      this.hasPriorTrack(chatId, userMessageSeq) &&
+      !this.hasAnsweredTrack(chatId, userMessageSeq)
+        ? this.withUnansweredPrompts(chatId, userMessageSeq, prompt)
+        : prompt;
     const sdkOpts: SdkRunOptions = {
-      prompt,
+      prompt: sdkPrompt,
       cwd: state.folder,
       // Keys the persistent warm-session map (PATCH_PERSISTENT_SESSIONS=1);
       // ignored by the one-shot default path.
@@ -10709,6 +10794,7 @@ export class Daemon {
               'account out of credit — re-running this turn on an account that has some',
             );
             if (prompt !== undefined) {
+              this.failoverRerunPending.add(chatId);
               void this.sendInput({
                 chatId,
                 message: prompt,
@@ -10717,6 +10803,11 @@ export class Daemon {
                 // the message as a new one.
                 ...(userMessageSeq !== undefined ? { retryOfSeq: userMessageSeq } : {}),
                 ...(cur?.turnOrigin === 'machine' ? { origin: 'machine' as const } : {}),
+              }).catch((err: unknown) => {
+                // The re-run never started: nothing is pending, so a snooze may end.
+                this.failoverRerunPending.delete(chatId);
+                this.wakeIfSnoozeComplete(chatId);
+                this.opts.logger.error({ chatId, err }, 'account failover re-run failed to start');
               });
             }
             this.chatState.setActivity(chatId, 'idle');
@@ -14734,6 +14825,25 @@ export class Daemon {
    * unanswered prompts, so a session rebuilt from a track of nothing else is
    * empty and Claude Code cannot resume it ("No conversation found").
    */
+  private withUnansweredPrompts(
+    chatId: string,
+    beforeSeq: number | undefined,
+    prompt: string,
+  ): string {
+    const meta = this.opts.metaStore.read(chatId);
+    if (!meta) return prompt;
+    const branchId = meta.activeBranchId ?? this.branchIdFor(chatId);
+    const earlier = readTrack(this.chatLog, chatId, meta, branchId, -1)
+      .filter((t) => beforeSeq === undefined || t.record.seq < beforeSeq)
+      .flatMap((t) =>
+        t.event.type === 'chat.message' && t.event.role === 'user' && t.event.content
+          ? [t.event.content]
+          : [],
+      );
+    if (earlier.length === 0) return prompt;
+    return `Earlier in this chat, not yet answered (the turn was stopped):\n\n${earlier.join('\n\n')}\n\nNow: ${prompt}`;
+  }
+
   private hasAnsweredTrack(chatId: string, beforeSeq: number | undefined): boolean {
     const meta = this.opts.metaStore.read(chatId);
     if (!meta) return false;
@@ -15547,6 +15657,7 @@ export class Daemon {
     this.opts.emit(event);
     if (!o.skipHistory) this.trackToolRun(event);
     this.trackHookToolTally(event);
+    this.trackRunningBash(event);
   }
 
   /**

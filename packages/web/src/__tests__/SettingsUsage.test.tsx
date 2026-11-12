@@ -201,6 +201,54 @@ describe('Settings → Usage → changing accounts', () => {
     );
   });
 
+  it('signs in to Claude in the browser: opens claude.ai, takes the code back', async () => {
+    loadShared();
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    vi.spyOn(api, 'claudeSignInStart').mockResolvedValue({
+      signInId: 's1',
+      url: 'https://claude.com/cai/oauth/authorize?state=x',
+    });
+    const complete = vi
+      .spyOn(api, 'claudeSignInComplete')
+      .mockResolvedValue(sharedState({ version: 2, secrets: { claude: [WORK] } }));
+    renderSettings('/settings/usage');
+    fireEvent.click(screen.getByTestId('claude-signin-start'));
+    await waitFor(() =>
+      expect(open).toHaveBeenCalledWith(
+        'https://claude.com/cai/oauth/authorize?state=x',
+        '_blank',
+        'noopener',
+      ),
+    );
+    fireEvent.change(await screen.findByTestId('claude-signin-code'), {
+      target: { value: ' code#x ' },
+    });
+    fireEvent.click(screen.getByTestId('claude-signin-finish'));
+    await waitFor(() => expect(complete).toHaveBeenCalledWith({ signInId: 's1', code: 'code#x' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('account-claude-code-acct-a')).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId('claude-signin-code')).toBeNull();
+  });
+
+  it('an expired Claude sign-in goes back to the start, saying so', async () => {
+    loadShared();
+    vi.spyOn(window, 'open').mockReturnValue(null);
+    vi.spyOn(api, 'claudeSignInStart').mockResolvedValue({ signInId: 's1', url: 'https://x' });
+    vi.spyOn(api, 'claudeSignInComplete').mockRejectedValue(
+      new ApiError(410, 'signin_expired', {
+        error: 'signin_expired',
+        message: 'That sign-in has expired. Start it again.',
+      }),
+    );
+    renderSettings('/settings/usage');
+    fireEvent.click(screen.getByTestId('claude-signin-start'));
+    fireEvent.change(await screen.findByTestId('claude-signin-code'), { target: { value: 'c' } });
+    fireEvent.click(screen.getByTestId('claude-signin-finish'));
+    expect(await screen.findByTestId('claude-signin-error')).toHaveTextContent('expired');
+    expect(screen.getByTestId('claude-signin-start')).toBeInTheDocument();
+  });
+
   it('says why the server refused a token, in its own words', async () => {
     loadShared();
     vi.spyOn(api, 'addAccount').mockRejectedValue(
@@ -296,7 +344,11 @@ describe('Settings → Usage → changing accounts', () => {
       'Sign in again',
     );
     expect(screen.getByTestId('account-connect-claude-code-acct-a')).toHaveTextContent(
-      /fresh token/,
+      /in your browser/,
+    );
+    // Pasting a `claude setup-token` token stays beside the browser sign-in.
+    expect(screen.getByTestId('account-paste-claude-code-acct-a')).toHaveTextContent(
+      /claude setup-token/,
     );
     expect(screen.getByTestId('account-disconnect-claude-code-acct-a')).toHaveTextContent(
       'Sign out',

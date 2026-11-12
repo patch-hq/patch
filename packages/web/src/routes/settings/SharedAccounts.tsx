@@ -10,6 +10,7 @@
 import type { JSX, ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import type { AccountStrategy, HostAccountSummary } from '@patch/wire';
+import { ClaudeSignIn } from '../../components/ClaudeSignIn.js';
 import { api, type SharedBackendId } from '../../api/rest.js';
 import { getActiveWs } from '../../api/ws.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
@@ -116,6 +117,7 @@ function AccountEntry({
 }): JSX.Element {
   const backendId = provider.id;
   const reading = useReading(backendId, row.id);
+  const [signingIn, setSigningIn] = useState(false);
   const name = provider.name;
   const id = `${backendId}-${row.id}`;
   // Two rows on one Claude organisation are one pool of credit under two
@@ -167,19 +169,22 @@ function AccountEntry({
     },
     ...(provider.pasteToken
       ? [
-          row.connected
-            ? {
-                label: 'Sign in again',
-                detail: 'Replace the stored login with a fresh token',
-                testid: `account-connect-${id}`,
-                onSelect: () => pasteToken(`Sign in again to ${row.label}`, 'Sign in'),
-              }
-            : {
-                label: 'Sign in',
-                detail: 'Paste a token to start using this account',
-                testid: `account-connect-${id}`,
-                onSelect: () => pasteToken(`Sign in to ${row.label}`, 'Sign in'),
-              },
+          {
+            label: row.connected ? 'Sign in again' : 'Sign in',
+            detail: 'Sign in with Claude in your browser',
+            testid: `account-connect-${id}`,
+            onSelect: () => setSigningIn(true),
+          },
+          {
+            label: 'Paste a token',
+            detail: 'Use a token from `claude setup-token` instead',
+            testid: `account-paste-${id}`,
+            onSelect: () =>
+              pasteToken(
+                `${row.connected ? 'Sign in again to' : 'Sign in to'} ${row.label}`,
+                'Sign in',
+              ),
+          },
         ]
       : []),
     ...(row.connected
@@ -250,6 +255,7 @@ function AccountEntry({
           {reading.error}
         </p>
       ) : null}
+      {signingIn ? <ClaudeSignIn accountId={row.id} onDone={() => setSigningIn(false)} /> : null}
       <UsageBars
         usage={reading?.usage}
         windows={provider.windows}
@@ -261,13 +267,14 @@ function AccountEntry({
   );
 }
 
-/** Add a Claude account from a pasted `claude setup-token` token. */
+/** Add a Claude account: sign in in the browser, or paste a `claude setup-token` token. */
 export function AddClaudeAccount(): JSX.Element {
   return (
     <div className="set-inline set-add-bar start">
+      <ClaudeSignIn />
       <button
         type="button"
-        className="set-btn"
+        className="set-btn ghost"
         data-testid="add-claude-account"
         onClick={() =>
           void (async () => {
@@ -284,7 +291,7 @@ export function AddClaudeAccount(): JSX.Element {
           })()
         }
       >
-        Add account
+        Paste a token
       </button>
     </div>
   );

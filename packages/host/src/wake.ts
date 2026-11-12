@@ -158,6 +158,9 @@ export class WakeScheduler {
   }
 
   private arm(rec: WakeRecord): void {
+    // Never leave an earlier timer orphaned in the slot: it would still fire
+    // and deliver whatever record is on disk by then.
+    this.disarm(rec.chatId);
     const delay = Math.max(0, rec.fireAt - this.deps.now());
     if (delay > MAX_TIMEOUT_MS) {
       // Long horizon: re-arm in chunks so the 32-bit setTimeout cap can't overflow.
@@ -166,15 +169,24 @@ export class WakeScheduler {
       return;
     }
     const t = this.setTimer(() => {
-      void this.fire(rec.chatId);
+      void this.fire(rec.chatId, rec.fireAt);
     }, delay);
     this.timers.set(rec.chatId, t);
   }
 
-  private async fire(chatId: string): Promise<void> {
+  private async fire(chatId: string, armedFor?: number): Promise<void> {
     this.timers.delete(chatId);
     const rec = this.read(chatId);
     if (!rec) return;
+    if (armedFor !== undefined && rec.fireAt !== armedFor) {
+      // A timer armed for a record that has since been replaced: the on-disk
+      // record is not the one this timer was for, so it is not due.
+      this.deps.logger.warn(
+        { chatId, armedFor, fireAt: rec.fireAt },
+        'wake: stale timer ignored (record was replaced)',
+      );
+      return;
+    }
     if (rec.notAfter !== undefined && this.deps.now() > rec.notAfter) {
       this.deps.logger.info({ chatId, notAfter: rec.notAfter }, 'wake: dropped (past notAfter)');
       rmSync(this.filePath(chatId), { force: true });

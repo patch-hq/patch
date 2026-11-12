@@ -211,6 +211,27 @@ describe('patch_delegate', () => {
     expect(daemon.listDelegates(parentChatId)[0]).toMatchObject({ id, status: 'done' });
   });
 
+  it('does not deliver the same reply twice when a settled subagent is woken and says nothing new', async () => {
+    const { daemon, sdk, events, folder } = setup();
+    const parentChatId = await daemon.spawnChat({ folder });
+    sdk.enqueue([{ type: 'assistant', content: 'ONLY REPORT' }, { type: 'result' }]);
+    const { id } = await daemon.createDelegate({ parentChatId, prompt: 'job' });
+    await flushUntil(() =>
+      messagesOn(events, parentChatId).some((m) => m.content.includes('ONLY REPORT')),
+    );
+
+    // Something wakes the finished child; its turn adds no assistant message.
+    sdk.enqueue([{ type: 'result' }]);
+    await daemon.sendInput({ chatId: id, message: 'ping', localId: 'wake-x', origin: 'machine' });
+    await new Promise((r) => setTimeout(r, 300));
+
+    const delivered = messagesOn(events, parentChatId).filter(
+      (m) =>
+        m.role === 'user' && m.content.startsWith('[from') && m.content.includes('ONLY REPORT'),
+    );
+    expect(delivered).toHaveLength(1);
+  });
+
   it('runs several delegates from the same parent in parallel, each delivering independently', async () => {
     const { daemon, sdk, events, folder } = setup();
     const parentChatId = await daemon.spawnChat({ folder });

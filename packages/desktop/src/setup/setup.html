@@ -7,22 +7,38 @@
       content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
     />
     <title>Patch</title>
+    <!--
+      The first setup step (spec/05 § Desktop first run): where agents run. It is
+      the shell's own page because there is no server to load anything from
+      until it is answered. The steps after it are the app's own welcome route.
+      Same colours and type as the app, so the hand-over is seamless.
+    -->
     <style>
       :root {
         color-scheme: light dark;
-        --ink: #1b1f1d;
-        --paper: #fbfaf7;
-        --line: #d9d6cc;
-        --accent: #2f6b4f;
-        --red: #b3382c;
+        --bg: #f2f0ea;
+        --card: #ffffff;
+        --ink: #1b1813;
+        --ink-3: #645c50;
+        --line: #ddd6c6;
+        --accent: #46802f;
+        --accent-strong: #356026;
+        --accent-tint: #e7f0dd;
+        --on-accent: #ffffff;
+        --danger: #b4462f;
       }
       @media (prefers-color-scheme: dark) {
         :root {
-          --ink: #ecebe6;
-          --paper: #1b1d1c;
-          --line: #3a3d3b;
-          --accent: #6fbf94;
-          --red: #ef7b6e;
+          --bg: #191817;
+          --card: #2d2b28;
+          --ink: #efede9;
+          --ink-3: #928d84;
+          --line: #4a463f;
+          --accent: #77a966;
+          --accent-strong: #8fbf7d;
+          --accent-tint: #2b3726;
+          --on-accent: #10140e;
+          --danger: #e07a62;
         }
       }
       * {
@@ -33,41 +49,126 @@
         min-height: 100vh;
         display: grid;
         place-items: center;
-        background: var(--paper);
+        background: var(--bg);
         color: var(--ink);
-        font: 15px/1.4 -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif;
+        font:
+          16px/1.45 'Figtree',
+          -apple-system,
+          BlinkMacSystemFont,
+          system-ui,
+          sans-serif;
         -webkit-app-region: drag;
       }
       main {
-        width: min(420px, 90vw);
+        width: min(440px, 88vw);
         display: grid;
-        gap: 16px;
+        gap: 20px;
         -webkit-app-region: no-drag;
       }
+      .dots {
+        display: flex;
+        gap: 6px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .dots li {
+        width: 24px;
+        height: 4px;
+        border-radius: 2px;
+        background: var(--line);
+      }
+      .dots li:first-child {
+        background: var(--accent);
+      }
       h1 {
-        margin: 0 0 8px;
-        font: 600 28px/1.1 'Fraunces', Georgia, serif;
+        margin: 0;
+        font:
+          500 30px/1.15 'Fraunces',
+          Georgia,
+          serif;
+      }
+      .choices {
+        display: grid;
+        gap: 10px;
       }
       button,
       textarea {
         font: inherit;
         color: inherit;
-        background: transparent;
+      }
+      .choice {
+        display: grid;
+        gap: 2px;
+        text-align: left;
+        padding: 14px 16px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--card);
+        cursor: pointer;
+      }
+      .choice:hover:not(:disabled) {
+        border-color: var(--accent);
+      }
+      .choice-title {
+        font-size: 16px;
+        font-weight: 600;
+      }
+      .choice-hint {
+        font-size: 14px;
+        color: var(--ink-3);
+      }
+      label {
+        font-size: 14px;
+        color: var(--ink-3);
+      }
+      textarea {
+        width: 100%;
+        min-height: 96px;
+        resize: vertical;
+        padding: 12px;
         border: 1px solid var(--line);
         border-radius: 10px;
-        padding: 14px 16px;
+        background: var(--card);
+        font:
+          14px/1.4 ui-monospace,
+          'JetBrains Mono',
+          monospace;
       }
-      button {
-        text-align: left;
-        cursor: pointer;
-        min-height: 48px;
+      form {
+        display: grid;
+        gap: 10px;
       }
-      button.primary {
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 4px;
+      }
+      .primary {
+        font-size: 16px;
+        font-weight: 600;
+        padding: 10px 20px;
+        border-radius: 10px;
+        border: 1px solid var(--accent);
         background: var(--accent);
-        border-color: var(--accent);
-        color: var(--paper);
+        color: var(--on-accent);
+        cursor: pointer;
       }
-      button:disabled {
+      .primary:hover:not(:disabled) {
+        background: var(--accent-strong);
+      }
+      .ghost {
+        font-size: 14px;
+        padding: 8px 10px;
+        border: 0;
+        border-radius: 8px;
+        background: none;
+        color: var(--ink-3);
+        cursor: pointer;
+      }
+      button:disabled,
+      textarea:disabled {
         opacity: 0.5;
         cursor: default;
       }
@@ -76,31 +177,19 @@
         outline: 2px solid var(--accent);
         outline-offset: 2px;
       }
-      textarea {
-        width: 100%;
-        min-height: 96px;
-        resize: vertical;
-        font-family: ui-monospace, 'JetBrains Mono', monospace;
-        font-size: 13px;
-      }
-      form {
-        display: grid;
-        gap: 12px;
-      }
-      .row {
-        display: flex;
-        gap: 12px;
-      }
       [hidden] {
         display: none !important;
       }
       #status {
         margin: 0;
-        min-height: 1.4em;
+        min-height: 1.45em;
+        font-size: 14px;
+        color: var(--ink-3);
       }
       #error {
         margin: 0;
-        color: var(--red);
+        font-size: 14px;
+        color: var(--danger);
         white-space: pre-wrap;
         word-break: break-word;
       }
@@ -108,14 +197,21 @@
   </head>
   <body>
     <main>
-      <h1>Patch</h1>
-      <div id="choose" class="choices">
-        <div style="display: grid; gap: 12px">
-          <button type="button" id="local" data-testid="choose-local">On this computer</button>
-          <button type="button" id="remote" data-testid="choose-remote">On my server</button>
+      <div id="choose">
+        <h1>Where should your agents run?</h1>
+        <div class="choices" style="margin-top: 20px">
+          <button type="button" class="choice" id="local" data-testid="choose-local">
+            <span class="choice-title">This computer</span>
+            <span class="choice-hint">Your phone reaches it from anywhere</span>
+          </button>
+          <button type="button" class="choice" id="remote" data-testid="choose-remote">
+            <span class="choice-title">My own server</span>
+            <span class="choice-hint">Paste the pairing code it printed</span>
+          </button>
         </div>
       </div>
       <form id="join" hidden data-testid="join-form">
+        <h1>Connect to your server</h1>
         <label for="code">Pairing code</label>
         <textarea
           id="code"
@@ -126,7 +222,7 @@
         ></textarea>
         <div class="row">
           <button type="submit" class="primary" id="connect" data-testid="connect">Connect</button>
-          <button type="button" id="back" data-testid="back">Back</button>
+          <button type="button" class="ghost" id="back" data-testid="back">Back</button>
         </div>
       </form>
       <p id="status" role="status" data-testid="status"></p>

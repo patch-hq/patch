@@ -3,7 +3,7 @@
 // the host's `activity` has gone idle.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { ChatRoute } from '../routes/ChatRoute.js';
 import { useChatStore } from '../stores/chatStore.js';
@@ -239,5 +239,60 @@ describe('running tool call', () => {
     const group = screen.getByTestId('tool-group');
     expect(group.getAttribute('data-open')).toBe('false');
     expect(screen.getByTestId('tool-running')).toBeTruthy();
+  });
+});
+
+describe('cancel one running command', () => {
+  const sent: unknown[] = [];
+  beforeEach(() => {
+    sent.length = 0;
+    useChatStore.getState()._reset();
+    usePresenceStore.getState().setConnection('connected');
+    usePresenceStore.getState().setHostOnline('d1', true);
+    setActiveWs({ send: (e: unknown) => sent.push(e) } as never);
+  });
+  afterEach(() => {
+    cleanup();
+    setActiveWs(null);
+  });
+  const call = {
+    type: 'chat.tool_call' as const,
+    chatId: 'c1',
+    seq: 1,
+    tool: 'Bash',
+    args: { command: 'sleep 100' },
+    callId: 'call-cancel',
+    startedAt: Date.now(),
+  };
+
+  it('sends chat.tool_cancel_request for just that call, then shows the chip once it returns as an error', () => {
+    seed();
+    useChatStore.getState().applyEvent(call);
+    renderChat();
+    fireEvent.click(screen.getByTestId('tool-cancel'));
+    expect(sent.filter((e) => (e as { type: string }).type === 'chat.tool_cancel_request')).toEqual(
+      [{ type: 'chat.tool_cancel_request', chatId: 'c1', callId: 'call-cancel' }],
+    );
+    expect(screen.queryByTestId('tool-cancelled')).toBeNull();
+    act(() => {
+      useChatStore.getState().applyEvent({
+        type: 'chat.tool_result',
+        chatId: 'c1',
+        tool: 'Bash',
+        callId: 'call-cancel',
+        result: 'Exit code 130',
+        isError: true,
+        seq: 2,
+      });
+    });
+    expect(screen.getByTestId('tool-cancelled').textContent).toBe('Cancelled by you');
+    expect(screen.queryByTestId('tool-cancel')).toBeNull();
+  });
+
+  it('offers no cancel on a non-Bash call', () => {
+    seed();
+    useChatStore.getState().applyEvent({ ...call, tool: 'Read', args: { file_path: '/x' } });
+    renderChat();
+    expect(screen.queryByTestId('tool-cancel')).toBeNull();
   });
 });

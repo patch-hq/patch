@@ -142,12 +142,31 @@ Packaging invariants that must hold:
 
 #### Desktop first run
 
-No server address is built into the app. A launch with no remembered connection asks one question, in a window of its own: "On this Mac" or "On my server". The answer is remembered (`connection.json` in the app's data directory, 0600, with the app's credential on that server) and the question is not asked again; App menu → Switch Server… forgets it and asks on the next launch. Closing the question unanswered quits.
+No server address is built into the app. A launch with no remembered connection opens a short setup, one question per step, each with one obvious primary action. Every answer is stored where Settings stores it and can be changed there later; nothing is kept in a store of the setup's own.
 
-- On this Mac. The app runs a Patch server of its own and a host beside it, and nothing has to be installed. The server is the release the app carries, started with the app's own Node, listening on a loopback port chosen once and kept; its data lives in the app's data directory. The app makes the account, and sets this Mac up as a machine with the host build the app carries, served from that server's own download channel like any other (`11-deployment.md` § Host installation). The server holds a relay channel (`10-auth.md` § Relay) so a phone can join it by QR from anywhere. Quitting the app stops the server. Choosing this again after Switch Server… picks the same account up. This app takes no updates from a server it runs itself; a newer app is installed over it.
-- On my server. The user pastes the pairing code their server printed (`patch-server pair`, `11-deployment.md` § Server installation). A code naming the server's address pairs with it directly and loads its web app. A code naming a relay pairs through the relay and loads the web app from a loopback listener on this Mac that carries every request and WebSocket through the encrypted session (`10-auth.md` § Relay), so the page cannot tell. The app's updates come from the feed the connected server publishes.
+1. Where your agents run: "This computer" or "My own server". This step is a window of the shell's own, because there is no server to load anything from until it is answered. The answer is remembered (`connection.json` in the app's data directory, 0600, with the app's credential on that server) and not asked again; App menu → Switch Server… forgets it and asks on the next launch. Closing the window unanswered quits. A step that fails says why on the same window, and the question is asked again.
+2. Connect an AI: Claude, and ChatGPT or an OpenAI API key (`10-auth.md` § Signing in to Claude from a surface, § OpenAI accounts). Continue is enabled once any account is connected; the step can be skipped. While a host is installing Claude Code (`02-host.md` § Agent backends) the step says so, and a failed install shows the installer's own reason.
+3. The permission mode new chats start in (`02-host.md` § Permission mode), each mode named with a few words on what it does.
+4. The model new chats start on (the shared default model, `01-server.md` § Settings), from the host's catalogue.
+5. Keep running, only for "This computer" (§ Keep running).
+6. Connect your phone: a link to the Android app and a pairing QR for this server (§ QR-code linking). Done finishes the setup and opens the app.
 
-A step that fails says why, on the question's own window, and the question is asked again. The page the shell loads receives the credential in the URL fragment (`/app/#credential=…`), which is never sent anywhere and is taken only inside the shell.
+Steps 2 to 6 are pages of the app itself, opened on the server step 1 chose, with Back on every step but the first of them.
+
+- This computer. The app runs a Patch server of its own and a host beside it, and nothing has to be installed. The server is the release the app carries, started with the app's own Node, listening on a loopback port chosen once and kept; its data lives in the app's data directory. The app makes the account, and sets this computer up as a machine with the host build the app carries, served from that server's own download channel like any other (`11-deployment.md` § Host installation). The server holds a relay channel (`10-auth.md` § Relay) so a phone can join it by QR from anywhere. Choosing this again after Switch Server… picks the same account up. This app takes no updates from a server it runs itself; a newer app is installed over it.
+- My own server. The user pastes the pairing code their server printed (`patch-server pair`, `11-deployment.md` § Server installation). A code naming the server's address pairs with it directly and loads its web app. A code naming a relay pairs through the relay and loads the web app from a loopback listener on this computer that carries every request and WebSocket through the encrypted session (`10-auth.md` § Relay), so the page cannot tell. The app's updates come from the feed the connected server publishes.
+
+The page the shell loads receives the credential in the URL fragment (`/app/#credential=…`), which is never sent anywhere and is taken only inside the shell.
+
+#### Keep running
+
+When this computer runs Patch, the agents and the phone's connection depend on the app, not on its window.
+
+- Closing the window leaves the app running in the menu bar (the tray, off macOS), with its server and host.
+- Open at login, on by default. Opened at login, the app starts in the menu bar with no window. On Linux this is a desktop autostart entry for the AppImage; a run not started from its AppImage has no file to start at login, so the choice is not offered there.
+- Keep this computer awake while plugged in, on by default. While on mains power the system is kept from sleeping so the phone can reach it; the display still sleeps. On battery nothing is held.
+- Both are offered in the setup's Keep running step, in Settings → Hosts → Keep running, and as checkboxes in the tray menu, and all three show the same state.
+- Quit Patch in the tray menu asks first, saying that agents on this computer stop and the phone cannot reach it until Patch is opened again. Quitting stops the server and host and releases the awake hold.
 
 #### Runtime invariants
 

@@ -22,6 +22,7 @@ import { notificationClickPath } from './notificationTarget';
 import { parseOpenChat, writeFrontChat } from './front-chat';
 import { spawn } from 'node:child_process';
 import { ensureSpotlightIndexed } from './spotlight';
+import { KeepRunning, OPENED_AT_LOGIN_ARG, setLinuxAutostart } from './keep-running';
 import {
   app,
   BrowserWindow,
@@ -33,6 +34,7 @@ import {
   ipcMain,
   nativeImage,
   powerMonitor,
+  powerSaveBlocker,
   session,
   desktopCapturer,
   dialog,
@@ -121,6 +123,13 @@ let SERVER_URL = process.env['PATCH_SERVER_URL'] ?? (app.isPackaged ? '' : DEV_S
 let initialUrl: string | null = null;
 /** What the first run started (the local server, a relay bridge), to stop at quit. */
 let activeLaunch: { stop(): Promise<void> } | null = null;
+/**
+ * spec/05 § Keep running — present only when this computer runs Patch itself:
+ * open at login, and the system kept awake on mains power so a phone reaches it.
+ */
+let keepRunning: KeepRunning | null = null;
+/** The command-line flag that tells the main window's preload this computer runs Patch. */
+const LOCAL_MACHINE_ARG = '--patch-local-machine';
 
 // Group 20 fix-7 (DX-11): the global hotkey is configurable via env.
 // Default `Control+Space` collides with macOS "Select previous input
@@ -513,7 +522,9 @@ export function createMainWindow(): BrowserWindow {
     width: placement.width,
     height: placement.height,
     title: 'Patch',
-    show: !QUIET,
+    // Opened at login to keep agents and the phone connection running, the app
+    // starts in the menu bar rather than putting a window in front of the user.
+    show: !QUIET && !openedAtLogin(),
     // No native title bar — the SPA runs to the window's top edge and the
     // traffic lights float over its top-left (spec/05 § Window chrome; the user,
     // App Updates: "clean at top, no patch top bar"). The renderer reserves
@@ -523,6 +534,7 @@ export function createMainWindow(): BrowserWindow {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      ...(keepRunning ? { additionalArguments: [LOCAL_MACHINE_ARG] } : {}),
       // Group 19: explicit CSP relax — the renderer is the same web SPA
       // bundle Caddy serves; in dev we additionally need to talk to
       // localhost:3000 (server) and any audio WSS the host exposes.
@@ -726,13 +738,11 @@ function trayMenu(): Menu {
         sendWhenReady(mainWindow, 'patch:navigate', { path: '/settings' });
       },
     },
+    ...(keepRunning ? keepRunningMenuItems(keepRunning) : []),
     { type: 'separator' },
     {
-      label: 'Quit Patch',
-      click: () => {
-        (app as unknown as { isQuitting: boolean }).isQuitting = true;
-        app.quit();
-      },
+      label: keepRunning ? 'Quit Patch…' : 'Quit Patch',
+      click: () => void quitFromTray(),
     },
   ]);
 }
@@ -782,6 +792,116 @@ function createTray(): Tray {
     t.popUpContextMenu(trayMenu());
   });
   return t;
+}
+
+/** Whether this app was started at login (spec/05 § Keep running). */
+function openedAtLogin(): boolean {
+  if (process.platform === 'darwin') return app.getLoginItemSettings().wasOpenedAtLogin === true;
+  // A Linux autostart entry says so on the command line (keep-running.ts).
+  return process.argv.includes(OPENED_AT_LOGIN_ARG);
+}
+
+/**
+ * Rebuild the tray menu after a keep-running choice changes. A Linux tray holds
+ * the menu it was given rather than asking for one on each click, so its
+ * checkboxes would otherwise go on showing the old choice.
+ */
+function refreshTrayMenu(): void {
+  if (tray && process.platform !== 'darwin') tray.setContextMenu(trayMenu());
+}
+
+/** Change a keep-running choice from anywhere: the welcome step, Settings or the tray. */
+function setKeepRunning(
+  k: KeepRunning,
+  patch: { openAtLogin?: boolean; keepAwake?: boolean },
+): ReturnType<KeepRunning['set']> {
+  const state = k.set(patch);
+  refreshTrayMenu();
+  return state;
+}
+
+/** The tray's keep-running switches: the same choices as the welcome step and Settings. */
+function keepRunningMenuItems(k: KeepRunning): Electron.MenuItemConstructorOptions[] {
+  const state = k.state();
+  const report = (err: unknown): void =>
+    dialog.showErrorBox('Patch', err instanceof Error ? err.message : String(err));
+  const set = (patch: { openAtLogin?: boolean; keepAwake?: boolean }): void => {
+    try {
+      setKeepRunning(k, patch);
+    } catch (err) {
+      report(err);
+    }
+  };
+  return [
+    { type: 'separator' },
+    ...(state.canOpenAtLogin
+      ? [
+          {
+            label: 'Open at Login',
+            type: 'checkbox' as const,
+            checked: state.openAtLogin,
+            click: (item: Electron.MenuItem) => set({ openAtLogin: item.checked }),
+          },
+        ]
+      : []),
+    {
+      label: 'Keep Awake While Plugged In',
+      type: 'checkbox',
+      checked: state.keepAwake,
+      click: (item) => set({ keepAwake: item.checked }),
+    },
+  ];
+}
+
+/**
+ * Quit, said plainly. When this computer runs Patch, quitting stops the agents
+ * here and cuts the phone off until the app is opened again, so it is asked.
+ */
+async function quitFromTray(): Promise<void> {
+  if (keepRunning) {
+    const { response } = await dialog.showMessageBox({
+      type: 'question',
+      buttons: ['Quit', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      message: 'Quit Patch?',
+      detail: `Agents on this computer stop, and your phone cannot reach it, until Patch is opened again. Closing the window keeps Patch running in the ${process.platform === 'darwin' ? 'menu bar' : 'tray'}.`,
+    });
+    if (response !== 0) return;
+  }
+  (app as unknown as { isQuitting: boolean }).isQuitting = true;
+  app.quit();
+}
+
+/** spec/05 § Keep running: start following the user's choices on this computer. */
+function startKeepRunning(userData: string): void {
+  // On Linux the login entry has to start the AppImage file itself, which only
+  // a run from that file knows; elsewhere the system's own login items.
+  const linux = process.platform === 'linux';
+  const appImage = process.env['APPIMAGE'];
+  const autostart = join(
+    process.env['XDG_CONFIG_HOME'] ?? join(app.getPath('home'), '.config'),
+    'autostart',
+    'patch.desktop',
+  );
+  keepRunning = new KeepRunning(join(userData, 'keep-running.json'), {
+    canOpenAtLogin: !linux || appImage !== undefined,
+    // A quiet instance is a test run beside a real Patch: it never registers
+    // itself as a login item on the computer it runs on.
+    setOpenAtLogin: (on) => {
+      if (QUIET) console.log(`[patch] quiet instance: open at login ${on} not applied`);
+      else if (linux) setLinuxAutostart(autostart, appImage as string, on);
+      else app.setLoginItemSettings({ openAtLogin: on });
+    },
+    onBattery: () => powerMonitor.isOnBatteryPower(),
+    onPowerSourceChange: (cb) => {
+      powerMonitor.on('on-battery', () => cb(true));
+      powerMonitor.on('on-ac', () => cb(false));
+    },
+    holdAwake: () => powerSaveBlocker.start('prevent-app-suspension'),
+    releaseAwake: (id) => powerSaveBlocker.stop(id),
+  });
+  keepRunning.start();
 }
 
 function createVoiceOverlay(): BrowserWindow {
@@ -1751,6 +1871,20 @@ function setupAutoUpdater(): void {
   });
   ipcMain.handle('patch:local-stt:finish', () => localStt.finish());
   ipcMain.on('patch:local-stt:cancel', () => localStt.cancel());
+  // spec/05 § Keep running — the welcome step and Settings read and change the
+  // same choices the tray menu shows. Refused when this computer does not run
+  // Patch itself: there is nothing to keep running.
+  ipcMain.handle('patch:keep-running:get', () => {
+    if (!keepRunning) throw new Error('This computer does not run Patch itself');
+    return keepRunning.state();
+  });
+  ipcMain.handle('patch:keep-running:set', (_e, patch: unknown) => {
+    if (!keepRunning) throw new Error('This computer does not run Patch itself');
+    return setKeepRunning(
+      keepRunning,
+      (patch ?? {}) as { openAtLogin?: boolean; keepAwake?: boolean },
+    );
+  });
   ipcMain.handle('patch:local-host:status', () => localHostStatus(app.getPath('home')));
   ipcMain.handle('patch:local-host:install', (_e, payload: { code?: unknown }) =>
     installLocalHost({
@@ -1911,7 +2045,8 @@ function showSetupWindow(): {
     width: 560,
     height: 460,
     title: 'Patch',
-    show: true,
+    // A quiet instance (a test run beside a real Patch) puts nothing on screen.
+    show: !QUIET,
     resizable: false,
     ...documentWindowChrome(),
     webPreferences: {
@@ -1978,7 +2113,11 @@ async function resolveServer(): Promise<void> {
       hostInstalled: () => localHostStatus(app.getPath('home')).installed,
     });
     activeLaunch = launched;
-    initialUrl = launched.appUrl;
+    if (launched.mode === 'local') startKeepRunning(userData);
+    // A first run goes on to the welcome steps: AI sign-in, defaults, phone.
+    initialUrl = launched.firstRun
+      ? firstRun.welcomeUrl(launched.appUrl, launched.mode)
+      : launched.appUrl;
     const base = new URL(launched.appUrl);
     base.hash = '';
     SERVER_URL = base.toString();
@@ -2158,6 +2297,7 @@ export function bootstrap(): void {
       });
     }
     globalShortcut.unregisterAll();
+    keepRunning?.stop();
     systemAudio.stop();
     stopMicWatch?.();
     tray?.destroy();
@@ -2167,7 +2307,14 @@ export function bootstrap(): void {
       e.preventDefault();
       const launched = activeLaunch;
       activeLaunch = null;
-      void launched.stop().finally(() => app.quit());
+      // Exit, not quit again: everything this handler cleans up is done, and a
+      // second app.quit() issued while this one is still unwinding is ignored.
+      // A stop that resolves at once (a remembered remote server has nothing to
+      // stop) lands exactly there, and the app hung with no window, never exiting.
+      void launched
+        .stop()
+        .catch((err: unknown) => console.error('[patch] stopping the server failed', err))
+        .finally(() => app.exit(0));
     }
   });
 

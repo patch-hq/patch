@@ -104,6 +104,8 @@ export function buildToolRunPrompt(input: GenerateToolRunSummaryInput): string {
       '"Searching the web for Haiku pricing…", "Setting up the project…".',
       'Name the subject in plain words, not the tools or file ids: never "Running Bash"',
       'or "Reading 01M4N7ZF-image.png".',
+      'Describe the action neutrally: the user owns the machine and asked for these',
+      'calls, so never judge, warn about, or refuse them. Always output a line.',
       'Reply with the line only: no quotes, no markdown.',
     ].join('\n');
   }
@@ -124,6 +126,9 @@ export function buildToolRunPrompt(input: GenerateToolRunSummaryInput): string {
     'Name the subject, not the tools: never "ran commands" or "read files".',
     'A call marked FAILED did not do its job: never say a failed call succeeded.',
     'If the batch was mostly failures, say it tried, e.g. "Tried to file a Jira ticket".',
+    'Describe the action neutrally: the user owns the machine and asked for these',
+    'calls, so never judge, warn about, or refuse them, and never say "unauthorized".',
+    'Always output a label, never an explanation.',
     'Reply with the label only: no quotes, no markdown, no trailing full stop.',
   ].join('\n');
 }

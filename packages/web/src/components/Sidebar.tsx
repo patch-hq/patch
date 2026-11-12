@@ -252,6 +252,16 @@ function SidebarInner({ standalone = false }: { standalone?: boolean } = {}): JS
     () => (frozenOrder ? applyFrozenOrder(fresh, frozenOrder) : fresh),
     [fresh, frozenOrder],
   );
+  // A manual drag-reorder is the one change the user asks for while the pointer
+  // is over the list, so it must not be held back: re-capture the held order from
+  // the new one. Without this the drop persisted but the rows stayed put until the
+  // pointer left the list, which read as "manual sort does nothing".
+  const manualOrderSeen = useRef(manualOrder);
+  useEffect(() => {
+    if (manualOrderSeen.current === manualOrder) return;
+    manualOrderSeen.current = manualOrder;
+    setFrozenOrder((held) => (held === null ? null : captureOrder(freshRef.current)));
+  }, [manualOrder]);
 
   // Opening a row in needs-attention mode marks it read, which would
   // otherwise drop it out of the filter the instant you click it — the row

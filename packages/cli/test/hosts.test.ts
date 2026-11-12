@@ -124,3 +124,10 @@ test('pickHost: an empty --host names no host, even with one host registered', a
   assert.equal(pickHost(hosts, 'mac'), 'd-abc');
   assert.equal(pickHost(hosts, 'd-a'), 'd-abc');
 });
+
+test('withHost: a remote call carries its machine id in the body, a local one does not', async () => {
+  const { withHost } = await import('../src/commands/hosts.js');
+  assert.deepEqual(withHost({}, 'd-abc'), { hostId: 'd-abc' });
+  assert.deepEqual(withHost({ componentId: 'x' }, 'd-abc'), { componentId: 'x', hostId: 'd-abc' });
+  assert.deepEqual(withHost({ componentId: 'x' }, undefined), { componentId: 'x' });
+});

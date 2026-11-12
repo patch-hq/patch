@@ -506,6 +506,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     prompt: 'go',
   },
   'chat.stop_request': { type: 'chat.stop_request', chatId: 'c1' },
+  'chat.tool_cancel_request': { type: 'chat.tool_cancel_request', chatId: 'c1', callId: 'call1' },
   'chat.resume_request': { type: 'chat.resume_request', chatId: 'c1' },
   'chat.focus_change': { type: 'chat.focus_change', chatId: 'c1' },
   'chat.pin_request': { type: 'chat.pin_request', chatId: 'c1', pinned: true },

@@ -136,7 +136,7 @@ can run, the credential those models authenticate with, the permission modes it
 accepts, and the transcript store it persists sessions to. A chat's model
 selects its backend, and the host reports the backends a host has to surfaces.
 
-Claude Code runs through `@anthropic-ai/claude-agent-sdk` against the host's installation. OpenAI runs through a managed, version-pinned Codex app-server process, with an isolated credential profile per account. A model's provider selects the backend; an existing conversation cannot change provider. OpenAI models use provider-qualified identities in the model catalogue.
+Claude Code runs through `@anthropic-ai/claude-agent-sdk` against the host's installation. OpenAI runs through a managed, version-pinned Codex app-server process, with an isolated credential profile per account. The pinned Codex is downloaded from the npm registry and checked against the registry's own integrity, and runs as its native binary, so a host needs no Node toolchain for it. A model's provider selects the backend; an existing conversation cannot change provider. OpenAI models use provider-qualified identities in the model catalogue.
 
 Codex supports explicit approval, workspace edits, read-only planning and explicitly unrestricted execution. It does not offer Claude's automatic approval classifier. A new OpenAI chat inherits explicit approval when the host default is Claude's automatic mode.
 
@@ -151,7 +151,9 @@ version and configuration the user gets in their terminal:
 1. Present: use it. The resolved path and version go to surfaces and appear in
    Settings → Hosts.
 2. Absent: install it via the backend's own installer, reporting progress to
-   surfaces over the same channel as § Optional components.
+   surfaces over the same channel as § Optional components. Claude Code's
+   native installer needs only a shell and curl and installs to the user's own
+   `~/.local/bin`, where the host then finds it and keeps it updated.
 3. Present and logged out: report `host.unauthenticated` naming the backend.
    Settings offers that backend's routes to a credential (`10-auth.md`).
 

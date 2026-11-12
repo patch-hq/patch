@@ -103,6 +103,22 @@ function rec(chatId: string, fireAt: number, extra: Partial<WakeRecord> = {}): W
 }
 
 describe('WakeScheduler', () => {
+  it('a replaced wake never fires from the old timer, and fires exactly once', async () => {
+    const h = harness();
+    h.sched.schedule(rec('c1', h.at(10_000), { message: 'old' }));
+    // A second arm of the same persisted record (e.g. an import re-load) must
+    // not leave an orphaned timer behind.
+    h.sched.load('c1');
+    h.sched.schedule(rec('c1', h.at(30_000), { message: 'new' }));
+    await h.advance(10_000);
+    expect(h.delivered).toEqual([]);
+    await h.advance(20_000);
+    expect(h.delivered).toHaveLength(1);
+    expect(h.delivered[0]!.message).toContain('new');
+    await h.advance(60_000);
+    expect(h.delivered).toHaveLength(1);
+  });
+
   it('holds a wake while the chat is out of usage and delivers it once, after credit returns', async () => {
     const h = harness();
     h.setLimited(true);

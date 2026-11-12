@@ -125,6 +125,7 @@ import {
 import {
   createMockSdkBackend,
   createRealSdkBackend,
+  forgetClaudeExecutable,
   type LimitFacts,
   type SdkBackend,
 } from './sdkBackend.js';
@@ -182,6 +183,7 @@ import {
 import { AccountUsageTracker } from './accountUsage.js';
 import { CreditResume } from './creditResume.js';
 import { resolveClaudeExecutable } from './claudeExecutable.js';
+import { installClaudeCode, installFailure } from './claudeInstall.js';
 import { DeviceAdoption } from './devices/adoption.js';
 import { localKeyPath, mintLocalKey } from './localKey.js';
 import {
@@ -349,6 +351,12 @@ export interface MainTestHooks {
    * credential. Undefined in production, where the real check runs.
    */
   validateClaudeToken?: ClaudeTokenValidator;
+  /**
+   * Replaces running Claude Code's installer on a host that has none (spec/02 §
+   * Agent backends). Present ONLY so a test that boots a real backend never
+   * downloads and installs Claude Code onto the machine running the tests.
+   */
+  installClaudeCode?: (home: string) => Promise<import('./claudeInstall.js').ClaudeInstallResult>;
   /** Where the host's log lines go instead of stdout — lets a test read what boot logged. */
   logStream?: import('pino').DestinationStream;
   /**
@@ -1212,6 +1220,17 @@ async function startHost(
     onError: (err) => logger.warn({ err }, 'power: battery read failed'),
   });
   const sleepDetector = createSleepDetector();
+  // Whether this host has the Claude Code its turns run (spec/02 § Agent
+  // backends). A mock backend runs none, so it counts as present.
+  let claudeProvision: { state: 'present' | 'installing' | 'absent' | 'failed'; error?: string } =
+    config.sdkBackend === 'mock' ||
+    resolveClaudeExecutable({
+      home: homedir(),
+      pathEnv: process.env['PATH'] ?? '',
+      override: process.env['CLAUDE_CODE_PATH'],
+    }) !== undefined
+      ? { state: 'present' }
+      : { state: 'absent' };
   const describeHost = (): import('@patch/wire').HostInfoEvent =>
     buildHostDescription({
       ...(link.lastDrop() ? { lastDisconnect: link.lastDrop() } : {}),
@@ -1250,7 +1269,8 @@ async function startHost(
               : 'logged-out',
         },
         claudeBackendEntry({
-          executableResolved: true,
+          executableResolved: claudeProvision.state === 'present',
+          provision: claudeProvision,
           version: null,
           credentialOk,
           ...(oauth.error ? { error: oauth.error.message } : {}),
@@ -4955,15 +4975,47 @@ async function startHost(
   // Nothing here fails the host: a host with no `claude` at all reports its
   // backend absent through the existing gate, and a failed update is logged
   // with the CLI's own stderr.
-  const refreshClaudeCli = async (): Promise<void> => {
-    const executable = resolveClaudeExecutable({
+  //
+  // A host with no `claude` at all installs it with Claude Code's own installer
+  // (spec/02 § Agent backends, "Absent"): on a computer with nothing installed
+  // this is what makes a Claude chat possible at all. A mock SDK backend runs no
+  // Claude Code, so it provisions none.
+  const resolveClaude = (): string | undefined =>
+    resolveClaudeExecutable({
       home: homedir(),
       pathEnv: process.env['PATH'] ?? '',
       override: process.env['CLAUDE_CODE_PATH'],
     });
+  const refreshClaudeCli = async (): Promise<void> => {
+    const executable = resolveClaude();
     if (executable === undefined) {
-      logger.debug('claude-cli-update: this host has no Claude Code to update');
+      if (config.sdkBackend === 'mock' || claudeProvision.state === 'installing') return;
+      claudeProvision = { state: 'installing' };
+      emit(describeHost());
+      logger.info('claude-install: this host has no Claude Code; installing it');
+      const result = await (testHooks?.installClaudeCode
+        ? testHooks.installClaudeCode(homedir())
+        : installClaudeCode({ home: homedir() }));
+      const installed = result.ok ? resolveClaude() : undefined;
+      if (installed === undefined) {
+        const error = result.ok
+          ? `The Claude Code installer finished but no claude executable appeared (looked in ~/.local/bin and PATH)`
+          : installFailure(result);
+        claudeProvision = { state: 'failed', error };
+        logger.error({ exitCode: result.exitCode, output: result.output.slice(-4000) }, error);
+      } else {
+        // The SDK path is resolved once per process; it resolved to nothing.
+        forgetClaudeExecutable();
+        claudeProvision = { state: 'present' };
+        logger.info({ executable: installed }, 'claude-install: installed');
+      }
+      emit(describeHost());
       return;
+    }
+    if (claudeProvision.state !== 'present') {
+      forgetClaudeExecutable();
+      claudeProvision = { state: 'present' };
+      emit(describeHost());
     }
     await updateClaudeCli({ executable, logger });
   };
@@ -7194,6 +7246,10 @@ export async function handleServerEvent(
         // which ends every branch's turn.
         if (event.branchId !== undefined) daemon.stopBranch(event.chatId, event.branchId);
         else await daemon.stopAllBranches(event.chatId);
+        return;
+      }
+      case 'chat.tool_cancel_request': {
+        await daemon.cancelToolCall(event.chatId, event.callId);
         return;
       }
       case 'chat.resume_now_request': {
