@@ -37,6 +37,7 @@ import { getDesktopBridge } from '../lib/desktopBridge.js';
 import { deliveryTracker } from '../lib/deliveryTracker.js';
 import { permissionDeliveryTracker } from '../lib/permissionDeliveryTracker.js';
 import { stripMarkdown } from '../lib/stripMarkdown.js';
+import { showBrowserNotification } from '../lib/browserNotifications.js';
 import { onServerVersion } from '../lib/liveUpdate.js';
 import { getAutoUpdateHosts } from '../lib/autoUpdatePref.js';
 import { useWebUpdateStore } from '../stores/webUpdateStore.js';
@@ -1027,10 +1028,23 @@ export class PatchWs {
     }
     // spec/09 § `### desktop` — a desktop-channel notify becomes a native OS
     // toast. Only the main process can raise one, so it goes out over the
-    // preload bridge; in a plain browser there is no bridge and nothing to do
-    // (the server only fans this channel out to `desktop` surfaces).
+    // preload bridge; in a plain browser there is no bridge, so the tab raises
+    // a web Notification itself.
     if (event.type === 'notify' && event.channel === 'desktop') {
-      getDesktopBridge()?.notify?.({
+      const bridge = getDesktopBridge();
+      if (!bridge) {
+        try {
+          showBrowserNotification({
+            body: stripMarkdown(event.message),
+            chatId: event.chatId,
+            ...(event.kind ? { kind: event.kind } : {}),
+          });
+        } catch (err) {
+          useUiStore.getState().pushError(err instanceof Error ? err.message : String(err));
+        }
+        return;
+      }
+      bridge.notify?.({
         title: 'Patch',
         // The OS toast renders the body verbatim, not as markdown — flatten it
         // so `**x**` etc. don't show as literal syntax.

@@ -340,12 +340,16 @@ export class NotificationRouter {
   }
 
   private routeDesktop(event: NotifyEvent, skipIfFocused: boolean): void {
-    // Fanout to every connected desktop surface — except, when opted in, one
+    // Fanout to every connected computer surface — the desktop app (native
+    // toast) and a browser tab (web Notification) — except, when opted in, one
     // that already has this chat focused (RouteOptions.skipDesktopIfFocused).
     const wire: WireEvent = { ...event };
-    const count = skipIfFocused
-      ? this.deps.wsHub.sendToKindUnlessFocused('desktop', event.chatId, wire)
-      : this.deps.wsHub.sendToKind('desktop', wire);
+    let count = 0;
+    for (const kind of ['desktop', 'web'] as const) {
+      count += skipIfFocused
+        ? this.deps.wsHub.sendToKindUnlessFocused(kind, event.chatId, wire)
+        : this.deps.wsHub.sendToKind(kind, wire);
+    }
     if (count === 0) {
       this.deps.logger.info(
         { chatId: event.chatId, skipIfFocused },
