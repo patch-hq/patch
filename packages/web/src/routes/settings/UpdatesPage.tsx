@@ -1,12 +1,8 @@
-// Settings → Updates: whether Patch is up to date, and one Update button when it
-// is not. A Versions group gives the installed and latest version of the Patch
-// app and the server, and each host its installed version (plus the latest when
-// behind) — no shas, no developer commands (spec/11 § Version reporting). A host that is behind only
-// because its chats are mid-turn says so: it updates itself once they finish.
-//
-// Hosts update themselves by default; the toggle turns that off, and then Update
-// is the way. The desktop shell's staged update is restarted from the banner
-// (DesktopUpdateBanner), never from here.
+// Settings → Updates: one account-wide switch over every part of Patch
+// (spec/11 § One update switch). On: the server and hosts move to each new release
+// together in the background, and the window offers one Restart (UpdateBanner).
+// Off: nothing moves until "Update everything", which updates the server, then
+// every host. The user never manages parts one by one.
 
 import type { JSX } from 'react';
 import { useCallback, useEffect, useState } from 'react';
@@ -18,8 +14,7 @@ import { relativeIso } from '../../lib/relativeTime.js';
 import { Toggle } from '../../components/Toggle.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore, type HostPresence } from '../../stores/presenceStore.js';
-import { hostLabel, sortHosts } from './hostScope.js';
-import { sendToHost } from './hostWrite.js';
+import { sortHosts } from './hostScope.js';
 import { patchShared } from './sharedWrite.js';
 import { Group, Row, SettingsPage } from './ui.js';
 
@@ -72,38 +67,69 @@ export function useBehind(): BehindItem[] {
   return items;
 }
 
-function installedLatest(installed: string, latest: string | null): string {
-  return latest ? `Installed ${installed} · Latest ${latest}` : `Installed ${installed}`;
+function isNewer(candidate: string, running: string): boolean {
+  const parse = (v: string): number[] | null => {
+    const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(v);
+    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+  };
+  const a = parse(candidate);
+  const b = parse(running);
+  if (!a || !b) return false;
+  for (let i = 0; i < 3; i += 1) if (a[i] !== b[i]) return a[i]! > b[i]!;
+  return false;
 }
 
-function hostStatus(h: HostPresence): string {
-  if (!h.online) return 'Offline';
-  if (h.host?.updatePending) return 'Update on its way';
-  return h.host?.updateAvailable ? 'Update available' : 'Up to date';
-}
+export const AUTO_ON_HINT =
+  'Controls when hosts and server move to a new version. Updates are synchronised between all components.';
+export const UPDATE_ALL_HINT = 'Chats run in their own processes and keep running.';
 
 export function UpdatesPage(): JSX.Element {
-  const { data: report, error, isFetching, refetch, dataUpdatedAt } = useVersionReport();
-  const { shell, checkShell } = useShell();
+  const { data: report, error, isFetching, refetch } = useVersionReport();
+  const { checkShell } = useShell();
   const behind = useBehind();
   const autoUpdate = usePreferencesStore((s) => s.preferences.autoUpdateHosts);
   const loaded = usePreferencesStore((s) => s.loaded);
-  const updatable = behind.flatMap((b) => (b.kind === 'host' && b.host.online ? [b.host] : []));
-  const shellReady = shell?.lastResult === 'downloaded';
-  const shellBusy = shell?.checking === true || shell?.lastResult === 'update-available';
-  const upToDate = behind.length === 0 && !shellReady && !shellBusy;
-  const hosts = sortHosts(Object.values(usePresenceStore((s) => s.hosts)));
+  const [requested, setRequested] = useState(false);
+  const [requestError, setRequestError] = useState<string | null>(null);
+
+  const running = report?.server.version ?? null;
+  const available = report?.release?.available ?? null;
+  const newer = running !== null && available !== null && isNewer(available, running);
+  const hostsBehind = behind.some((b) => b.kind === 'host');
+  const updating = report?.release?.updating === true || requested;
+
+  // Poll while an update runs, so the page follows it to the end.
+  useEffect(() => {
+    if (!updating) return;
+    const id = window.setInterval(() => void refetch(), 10_000);
+    return () => window.clearInterval(id);
+  }, [updating, refetch]);
+  useEffect(() => {
+    if (requested && report?.release?.updating === false && !newer && !hostsBehind) {
+      setRequested(false);
+    }
+  }, [requested, report, newer, hostsBehind]);
 
   const checkAll = (): void => {
     void refetch();
     checkShell();
   };
 
+  const updateEverything = (): void => {
+    setRequestError(null);
+    setRequested(true);
+    api.updateAll().then(
+      () => void refetch(),
+      (err: unknown) => {
+        setRequested(false);
+        setRequestError(err instanceof Error ? err.message : String(err));
+      },
+    );
+  };
+
   let status = 'Up to date';
-  if (error || shell?.lastResult === 'error') status = 'Couldn’t check';
-  else if (!report) status = 'Checking…';
-  else if (shellReady) status = 'Update ready — restart to apply';
-  else if (!upToDate) status = shellBusy && behind.length === 0 ? 'Checking…' : 'Update available';
+  if (!report) status = 'Checking…';
+  else if (updating || newer || hostsBehind) status = 'Updating…';
 
   return (
     <SettingsPage
@@ -112,7 +138,7 @@ export function UpdatesPage(): JSX.Element {
       actions={
         <button
           type="button"
-          className="set-btn primary"
+          className="set-btn"
           data-testid="version-check-now"
           disabled={isFetching}
           onClick={checkAll}
@@ -135,78 +161,11 @@ export function UpdatesPage(): JSX.Element {
       ) : null}
 
       <Group>
-        <Row title={<span data-testid="update-status">{status}</span>} testid="version-status">
-          {updatable.length > 0 ? (
-            <button
-              type="button"
-              className="set-btn primary"
-              data-testid="update-all"
-              onClick={() =>
-                updatable.forEach((h) => sendToHost(h, { type: 'host.update', hostId: h.hostId }))
-              }
-            >
-              Update
-            </button>
-          ) : null}
-        </Row>
-        {shell?.lastResult === 'error' && shell.lastError ? (
-          <Row
-            title={
-              shell.lastErrorKind === 'install'
-                ? 'Last update install failed'
-                : 'Last update check failed'
-            }
-            sub={shell.lastError}
-            testid="version-shell-error"
-          />
-        ) : null}
-      </Group>
-
-      {report || shell ? (
-        <Group label="Versions" testid="version-layers">
-          {shell ? (
-            <Row
-              title="Patch app"
-              testid="version-shell"
-              sub={installedLatest(
-                shell.currentVersion,
-                shell.availableVersion ?? report?.desktop?.version ?? null,
-              )}
-            />
-          ) : null}
-          {report ? (
-            <Row
-              title="Server"
-              testid="version-server"
-              sub={installedLatest(report.server.version, report.server.version)}
-            />
-          ) : null}
-        </Group>
-      ) : null}
-
-      {hosts.length > 0 ? (
-        <Group label="Hosts" testid="version-hosts">
-          {hosts.map((h) => (
-            <Row
-              key={h.hostId}
-              title={hostLabel(h)}
-              testid={`version-host-${h.hostId}`}
-              sub={h.host ? hostStatus(h) : 'not reported'}
-            >
-              {h.host ? (
-                <span className="set-val">
-                  {h.host.updateAvailable && report
-                    ? installedLatest(h.host.hostVersion, report.server.version)
-                    : h.host.hostVersion}
-                </span>
-              ) : null}
-            </Row>
-          ))}
-        </Group>
-      ) : null}
-
-      <Group>
-        <Row title="Update automatically" testid="auto-update">
+        <Row
+          title="Update automatically"
+          sub={autoUpdate ? AUTO_ON_HINT : undefined}
+          testid="auto-update"
+        >
           <Toggle
             checked={autoUpdate}
             disabled={!loaded}
@@ -214,11 +173,55 @@ export function UpdatesPage(): JSX.Element {
             testid="auto-update-toggle"
           />
         </Row>
-        <Row title="Last checked" testid="version-checked">
-          <span className="set-val">
-            {report ? relativeIso(new Date(dataUpdatedAt).toISOString()) : '—'}
-          </span>
+      </Group>
+
+      <Group testid="version-layers">
+        <Row title="Version" testid="version-server">
+          <span className="set-val">{running ?? '—'}</span>
         </Row>
+        {autoUpdate ? (
+          <>
+            <Row title="Status" testid="version-status">
+              <span className="set-val" data-testid="update-status">
+                {status}
+              </span>
+            </Row>
+            <Row title="Last updated" testid="version-last-updated">
+              <span className="set-val">{report ? relativeIso(report.server.startedAt) : '—'}</span>
+            </Row>
+          </>
+        ) : (
+          <>
+            {newer ? (
+              <Row title="Available" testid="version-available">
+                <span className="set-val set-val-available">{available}</span>
+              </Row>
+            ) : null}
+            {newer || hostsBehind || updating ? (
+              <Row
+                title={
+                  <button
+                    type="button"
+                    className="set-btn primary"
+                    data-testid="update-all"
+                    disabled={updating}
+                    onClick={updateEverything}
+                  >
+                    {updating ? 'Updating…' : 'Update everything'}
+                  </button>
+                }
+                sub={requestError ?? UPDATE_ALL_HINT}
+                testid="update-all-row"
+              />
+            ) : (
+              <Row title="Status" testid="version-status">
+                <span className="set-val" data-testid="update-status">
+                  {status}
+                </span>
+              </Row>
+            )}
+          </>
+        )}
       </Group>
     </SettingsPage>
   );

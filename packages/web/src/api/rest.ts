@@ -400,6 +400,7 @@ export const api = {
   // Validated at the boundary: a partial report must reach the panel's error state,
   // not render as "all layers agree".
   version: async () => assertVersionReport(await request<unknown>('/api/version')),
+  updateAll: () => request<{ ok: true }>('/api/update-all', { method: 'POST' }),
   me: () =>
     request<{
       account: { accountId: string; userPublicKey: string; createdAt: number };

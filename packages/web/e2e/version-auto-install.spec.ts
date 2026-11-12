@@ -1,11 +1,8 @@
 import { test, expect } from '@playwright/test';
 
-// spec/11 § Version reporting. Patch deploys ~20 times a day, and every one of
-// those downloads used to raise a "restart to install" button in the version
-// panel — ~20 interruptions a day for an answer that was always yes. A
-// downloaded update now installs and relaunches itself (desktop main.ts,
-// `update-downloaded` → `installUpdateNow`), so this panel REPORTS the shell's
-// update state and never asks for a restart.
+// spec/11 § One update switch. One banner (UpdateBanner) offers the restart when the app
+// or page is newer; Settings → Updates reports where the server and hosts stand
+// under the one auto-update switch and never asks about parts one by one.
 //
 // The Electron shell can't be driven from Linux, so what's pinned here is the
 // renderer's half — booted through the real /settings route with the one thing
@@ -113,44 +110,25 @@ test.describe('version panel — updates wait to be taken', () => {
     );
   });
 
-  test('a downloaded update reports itself as ready, not as installing', async ({ page }) => {
+  test('a staged app update is offered by the banner, not by Settings', async ({ page }) => {
     await asDesktopShell(page, SHELL);
     await page.goto(SETTINGS);
-
-    const row = page.getByTestId('update-status');
-    // It is staged, not underway — saying "installing" would describe something
-    // that is not happening.
-    await expect(row).toContainText('restart to apply');
-    await expect(row).not.toContainText('installing');
+    await expect(page.getByTestId('update-banner')).toBeVisible();
+    // Settings speaks for the server and hosts, which are in step.
+    await expect(page.getByTestId('update-status')).toHaveText('Up to date');
   });
 
-  test('states installed and latest versions for the app and the server', async ({ page }) => {
-    await asDesktopShell(page, SHELL);
-    await page.goto(SETTINGS);
-
-    await expect(page.getByTestId('version-shell')).toContainText(
-      'Installed 0.1.899 · Latest 0.1.900',
-    );
-    await expect(page.getByTestId('version-server')).toContainText(
-      'Installed 0.1.900 · Latest 0.1.900',
-    );
-  });
-
-  test('the versions read the same at phone width, and a browser has no app row', async ({
-    page,
-  }) => {
+  test('states the version, the same at phone width', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 800 });
     await page.goto(SETTINGS);
-
-    await expect(page.getByTestId('version-server')).toContainText('Installed 0.1.900');
-    await expect(page.getByTestId('version-shell')).toHaveCount(0);
+    await expect(page.getByTestId('version-server')).toContainText('0.1.900');
   });
 
   test('the banner offers the restart, and only a click takes it', async ({ page }) => {
     await asDesktopShell(page, SHELL);
     await page.goto(SETTINGS);
 
-    const banner = page.getByTestId('desktop-update-banner');
+    const banner = page.getByTestId('update-banner');
     await expect(banner).toBeVisible();
     await expect(banner).toContainText('A new version of Patch is ready');
     // Behind since yesterday → the middle of the three levels.
@@ -161,7 +139,7 @@ test.describe('version panel — updates wait to be taken', () => {
       await page.evaluate(() => (window as unknown as { __installs: number }).__installs),
     ).toBe(0);
 
-    await page.getByTestId('desktop-update-restart').click();
+    await page.getByTestId('update-banner-restart').click();
     expect(
       await page.evaluate(() => (window as unknown as { __installs: number }).__installs),
     ).toBe(1);
@@ -173,28 +151,23 @@ test.describe('version panel — updates wait to be taken', () => {
       staleSince: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
     });
     await page.goto(SETTINGS);
-    await expect(page.getByTestId('desktop-update-banner')).toHaveAttribute(
-      'data-urgency',
-      'overdue',
-    );
+    await expect(page.getByTestId('update-banner')).toHaveAttribute('data-urgency', 'overdue');
   });
 
   test('a browser gets no banner — there is no shell to restart', async ({ page }) => {
     // No `window.patch` at all, which is what a real browser looks like.
     await page.goto(SETTINGS);
-    await expect(page.getByTestId('desktop-update-banner')).toHaveCount(0);
+    await expect(page.getByTestId('update-banner')).toHaveCount(0);
   });
 
-  test('still reports status and last check, without shas, and checks on demand', async ({
+  test('reports status and when it last updated, without shas, and checks on demand', async ({
     page,
   }) => {
     await asDesktopShell(page, { ...SHELL, lastResult: 'up-to-date', downloaded: false });
     await page.goto(SETTINGS);
 
     await expect(page.getByTestId('update-status')).toHaveText('Up to date');
-    await expect(page.getByTestId('version-checked')).toContainText('Last checked');
-    await expect(page.getByTestId('version-checked')).not.toContainText('—');
-    // Hosts are listed with a plain version, never a sha.
+    await expect(page.getByTestId('version-last-updated')).not.toContainText('—');
     expect((await page.getByTestId('settings-version').textContent()) ?? '').not.toMatch(
       /[0-9a-f]{7,}/,
     );
@@ -205,10 +178,9 @@ test.describe('version panel — updates wait to be taken', () => {
       .toBeGreaterThan(0);
   });
 
-  test('an install the shell refused is surfaced verbatim', async ({ page }) => {
-    // Squirrel.Mac refuses to apply an update to an adhoc-signed build. With no
-    // prompt left, this error line is the ONLY way that reaches the user — it
-    // must never be swallowed or read as "up to date".
+  test('an install the shell refused is never swallowed', async ({ page }) => {
+    // Squirrel.Mac refuses to apply an update to an adhoc-signed build. The
+    // banner says the restart failed and what to do; the reason goes to the log.
     await asDesktopShell(page, {
       ...SHELL,
       lastResult: 'error',
@@ -217,10 +189,6 @@ test.describe('version panel — updates wait to be taken', () => {
       lastError: 'Could not get code signature for running application',
     });
     await page.goto(SETTINGS);
-
-    await expect(page.getByTestId('version-shell-error')).toContainText(
-      'Could not get code signature for running application',
-    );
-    await expect(page.getByTestId('update-status')).not.toContainText('Up to date');
+    await expect(page.getByTestId('update-banner')).toContainText("Patch didn't restart.");
   });
 });

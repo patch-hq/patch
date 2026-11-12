@@ -345,6 +345,30 @@ between versions. A release therefore costs each host one drop, not two:
 - Staged builds live in `<patchHome>/staged/<version>`; those at or below the
   running version are removed on start.
 
+### One update switch
+
+One account-wide switch, Update automatically, decides whether any part of
+Patch moves to a new release: the server, every host and the desktop app.
+Updating one part on its own while the switch is off is a bug.
+
+- On: releases are mirrored and installed as they appear, the server first and
+  the hosts behind it (§ Updates in lockstep), only when nothing is running on
+  a host. The user sees nothing except one prompt in the window.
+- Off: the release mirror only notes which release is on offer
+  (`release-available.json`); it downloads nothing, so nothing a host or the
+  desktop app reads from the server moves, and the server does not install
+  itself. Settings → Updates shows the version, the one available, and one
+  button, Update everything (`POST /api/update-all`). That lifts the hold for
+  one release: the server mirrors and installs it, then tells every host to
+  update. The hold returns once the server and every online host are on it, or
+  after two hours if that never happens.
+- `GET /api/version` reports `release: { available, autoUpdate, updating }`.
+- The window has one prompt, never two: "A new version of Patch is ready." with
+  one Restart button. It appears when the desktop app has a build staged or the
+  page has a newer deploy, and pressing it does whatever is needed: relaunch
+  the app into its staged build, or reload the page. Hosts and the server never
+  prompt. A restart that fails says so and says what to do.
+
 ## Mobile updates (Android)
 
 The phone updates the way the hosts and the desktop app do: from the server it

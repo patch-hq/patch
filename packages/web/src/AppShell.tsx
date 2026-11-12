@@ -23,9 +23,8 @@ import { SideThreadsPanel, SideThreadsReconciler } from './components/SideThread
 import { ColumnDivider } from './components/ColumnDivider.js';
 import { OfflineBanner } from './components/OfflineBanner.js';
 import { HostOfflineBanner } from './components/HostOfflineBanner.js';
-import { DesktopUpdateBanner } from './components/DesktopUpdateBanner.js';
+import { UpdateBanner } from './components/UpdateBanner.js';
 import { MeetingDetectionBanner } from './components/MeetingDetectionBanner.js';
-import { WebUpdateBanner } from './components/WebUpdateBanner.js';
 import { ConnectionDiagnosticsGate } from './components/ConnectionDiagnostics.js';
 import { IncomingCallBanner } from './components/IncomingCallBanner.js';
 import { SignInApprovalPrompt } from './components/SignInApprovalPrompt.js';
@@ -650,13 +649,10 @@ export function AppShell(): JSX.Element {
           ChatRoute, means it is never missing on the screens that aren't a
           chat, and never doubled on the ones that are. */}
       <HostOfflineBanner />
-      {/* Standing chrome, not an interruption: the shell has a newer build
-          staged and is waiting to be asked. Renders nothing in a browser. */}
-      <DesktopUpdateBanner />
+      {/* The one update prompt: a newer shell build or page is ready and
+          waiting to be asked. Renders nothing until one is. */}
+      <UpdateBanner />
       <MeetingDetectionBanner />
-      {/* Same contract, for the SPA bundle itself — a deploy landed while this
-          tab was open. Renders nothing until one has (lib/liveUpdate.ts). */}
-      <WebUpdateBanner />
       {/* A sustained voice session takes a strip IN FLOW at the top of the
           shell — it pushes the app down rather than floating over it, and says
           what the open line is doing in either mode (spec/07 § Session

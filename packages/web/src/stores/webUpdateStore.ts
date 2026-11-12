@@ -1,6 +1,6 @@
 // webUpdateStore — a newer SPA bundle has been reported over the WS
 // (liveUpdate.ts's onServerVersion), waiting for the user to press Reload
-// (components/WebUpdateBanner.tsx). Mirrors the desktop shell's own
+// (components/UpdateBanner.tsx). Mirrors the desktop shell's own
 // `staleSince` (packages/desktop/src/updater.ts): the moment the FIRST report
 // landed, not the latest one — a deploy that lands again before the user
 // reloads must not reset the clock and start the escalation over.

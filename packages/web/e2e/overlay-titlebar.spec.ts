@@ -292,7 +292,7 @@ const BANNERS: {
         store.setState({ connection: 'connected', hostsSeeded: true, hostOnline: false });
       }),
   },
-  { name: 'staged update', testId: 'desktop-update-banner', show: async () => {} },
+  { name: 'staged update', testId: 'update-banner', show: async () => {} },
 ];
 
 for (const banner of BANNERS) {
