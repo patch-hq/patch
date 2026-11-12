@@ -6,6 +6,13 @@
     linux: { label: 'Download for Linux', file: 'Patch-linux-x86_64.AppImage' },
     android: { label: 'Download for Android', file: 'Patch-android.apk' },
   };
+  // What to do once each file has downloaded, shown after its link is clicked.
+  var NEXT = {
+    'Patch-mac-arm64.dmg': 'Open the disk image and drag Patch to Applications.',
+    'Patch-mac-arm64.zip': 'Open the zip and drag Patch to Applications.',
+    'Patch-linux-x86_64.AppImage': 'Make the AppImage executable, then open it.',
+    'Patch-android.apk': 'Open the downloaded file to install Patch.',
+  };
   var UNAVAILABLE = { ios: 'Not on iPhone yet', windows: 'Not on Windows' };
 
   function detect() {
@@ -79,6 +86,19 @@
     .catch(function (err) {
       console.error('Patch: download sizes unavailable:', err);
     });
+
+  // After a download starts, one line on what to do with the file, under every
+  // download button so it is beside whichever was clicked.
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('a[href^="' + BASE + '"]');
+    if (!a) return;
+    var line = NEXT[a.getAttribute('href').slice(BASE.length)];
+    if (!line) return;
+    document.querySelectorAll('[data-next]').forEach(function (p) {
+      p.textContent = line;
+      p.hidden = false;
+    });
+  });
 
   document.querySelectorAll('[data-copy]').forEach(function (btn) {
     btn.addEventListener('click', function () {

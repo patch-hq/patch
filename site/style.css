@@ -373,6 +373,12 @@ code {
   padding-bottom: 120px;
 }
 
+.next {
+  margin: 14px 0 0;
+  color: var(--ink-2);
+  font-size: 15px;
+}
+
 .detected {
   margin: 14px 0 0;
   color: var(--ink-3);
