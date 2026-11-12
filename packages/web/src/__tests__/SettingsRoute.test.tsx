@@ -944,9 +944,8 @@ describe('Settings → Voice', () => {
   });
 
   it('voiceCellStatus mirrors the host’s branching', () => {
-    expect(voiceCellStatus('device', 'openai', 'light')).toMatch(
-      /Not implemented yet for this surface/,
-    );
+    // Voice devices run every hosted engine too.
+    expect(voiceCellStatus('device', 'openai', 'light')).toBeNull();
     expect(voiceCellStatus('call', 'local', 'light')).toMatch(/no front model built for local/);
     // Gemini hands-free enforces the address word on the host, so there is nothing to warn about.
     expect(voiceCellStatus('handsFree', 'gemini', 'light')).toBeNull();

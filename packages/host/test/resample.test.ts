@@ -6,8 +6,8 @@
 // These assert the DSP contract directly (no VoiceSession), which the
 // integration test in audio-session.test.ts cannot isolate.
 
-import { describe, test, expect } from 'vitest';
-import { resampleTtsTo48k } from '../src/audio/session.js';
+import { describe, it, test, expect } from 'vitest';
+import { resampleTtsTo48k, StreamingUpsampler48k } from '../src/audio/session.js';
 
 describe('resampleTtsTo48k (24 kHz → 48 kHz)', () => {
   test('output length is exactly 2× the input (clean 2x upsample)', () => {
@@ -73,5 +73,27 @@ describe('resampleTtsTo48k (24 kHz → 48 kHz)', () => {
 
   test('an empty buffer resamples to an empty buffer', () => {
     expect(resampleTtsTo48k(new Int16Array(0)).length).toBe(0);
+  });
+});
+
+describe('StreamingUpsampler48k', () => {
+  it('pieces resampled as a stream match resampling the whole thing, with no seams', () => {
+    const whole = new Int16Array(4800);
+    for (let i = 0; i < whole.length; i++)
+      whole[i] = Math.round(9000 * Math.sin(i / 7) + 3000 * Math.sin(i / 2.3));
+    const up = new StreamingUpsampler48k();
+    const parts: number[] = [];
+    let at = 0;
+    for (const size of [480, 7, 1000, 33, 3280]) {
+      parts.push(...up.push(whole.slice(at, at + size)));
+      at += size;
+    }
+    const reference = resampleTtsTo48k(whole);
+    // Everything but the 32 samples held back for a next piece comes out, and
+    // matches the one-shot result exactly from the first sample on.
+    expect(parts.length).toBe(reference.length - 32);
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i] !== reference[i]) throw new Error(`sample ${i}: ${parts[i]} vs ${reference[i]}`);
+    }
   });
 });
