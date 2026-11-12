@@ -22,7 +22,7 @@ import { notificationClickPath } from './notificationTarget';
 import { parseOpenChat, writeFrontChat } from './front-chat';
 import { spawn } from 'node:child_process';
 import { ensureSpotlightIndexed } from './spotlight';
-import { KeepRunning } from './keep-running';
+import { KeepRunning, OPENED_AT_LOGIN_ARG, setLinuxAutostart } from './keep-running';
 import {
   app,
   BrowserWindow,
@@ -794,27 +794,61 @@ function createTray(): Tray {
   return t;
 }
 
-/** Whether macOS started this app as a login item (spec/05 § Keep running). */
+/** Whether this app was started at login (spec/05 § Keep running). */
 function openedAtLogin(): boolean {
-  return process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAtLogin === true;
+  if (process.platform === 'darwin') return app.getLoginItemSettings().wasOpenedAtLogin === true;
+  // A Linux autostart entry says so on the command line (keep-running.ts).
+  return process.argv.includes(OPENED_AT_LOGIN_ARG);
+}
+
+/**
+ * Rebuild the tray menu after a keep-running choice changes. A Linux tray holds
+ * the menu it was given rather than asking for one on each click, so its
+ * checkboxes would otherwise go on showing the old choice.
+ */
+function refreshTrayMenu(): void {
+  if (tray && process.platform !== 'darwin') tray.setContextMenu(trayMenu());
+}
+
+/** Change a keep-running choice from anywhere: the welcome step, Settings or the tray. */
+function setKeepRunning(
+  k: KeepRunning,
+  patch: { openAtLogin?: boolean; keepAwake?: boolean },
+): ReturnType<KeepRunning['set']> {
+  const state = k.set(patch);
+  refreshTrayMenu();
+  return state;
 }
 
 /** The tray's keep-running switches: the same choices as the welcome step and Settings. */
 function keepRunningMenuItems(k: KeepRunning): Electron.MenuItemConstructorOptions[] {
   const state = k.state();
+  const report = (err: unknown): void =>
+    dialog.showErrorBox('Patch', err instanceof Error ? err.message : String(err));
+  const set = (patch: { openAtLogin?: boolean; keepAwake?: boolean }): void => {
+    try {
+      setKeepRunning(k, patch);
+    } catch (err) {
+      report(err);
+    }
+  };
   return [
     { type: 'separator' },
-    {
-      label: 'Open at Login',
-      type: 'checkbox',
-      checked: state.openAtLogin,
-      click: (item) => void k.set({ openAtLogin: item.checked }),
-    },
+    ...(state.canOpenAtLogin
+      ? [
+          {
+            label: 'Open at Login',
+            type: 'checkbox' as const,
+            checked: state.openAtLogin,
+            click: (item: Electron.MenuItem) => set({ openAtLogin: item.checked }),
+          },
+        ]
+      : []),
     {
       label: 'Keep Awake While Plugged In',
       type: 'checkbox',
       checked: state.keepAwake,
-      click: (item) => void k.set({ keepAwake: item.checked }),
+      click: (item) => set({ keepAwake: item.checked }),
     },
   ];
 }
@@ -831,8 +865,7 @@ async function quitFromTray(): Promise<void> {
       defaultId: 1,
       cancelId: 1,
       message: 'Quit Patch?',
-      detail:
-        'Agents on this computer stop, and your phone cannot reach it, until Patch is opened again. Closing the window keeps Patch running in the menu bar.',
+      detail: `Agents on this computer stop, and your phone cannot reach it, until Patch is opened again. Closing the window keeps Patch running in the ${process.platform === 'darwin' ? 'menu bar' : 'tray'}.`,
     });
     if (response !== 0) return;
   }
@@ -842,11 +875,22 @@ async function quitFromTray(): Promise<void> {
 
 /** spec/05 § Keep running: start following the user's choices on this computer. */
 function startKeepRunning(userData: string): void {
+  // On Linux the login entry has to start the AppImage file itself, which only
+  // a run from that file knows; elsewhere the system's own login items.
+  const linux = process.platform === 'linux';
+  const appImage = process.env['APPIMAGE'];
+  const autostart = join(
+    process.env['XDG_CONFIG_HOME'] ?? join(app.getPath('home'), '.config'),
+    'autostart',
+    'patch.desktop',
+  );
   keepRunning = new KeepRunning(join(userData, 'keep-running.json'), {
+    canOpenAtLogin: !linux || appImage !== undefined,
     // A quiet instance is a test run beside a real Patch: it never registers
     // itself as a login item on the computer it runs on.
     setOpenAtLogin: (on) => {
       if (QUIET) console.log(`[patch] quiet instance: open at login ${on} not applied`);
+      else if (linux) setLinuxAutostart(autostart, appImage as string, on);
       else app.setLoginItemSettings({ openAtLogin: on });
     },
     onBattery: () => powerMonitor.isOnBatteryPower(),
@@ -1836,7 +1880,10 @@ function setupAutoUpdater(): void {
   });
   ipcMain.handle('patch:keep-running:set', (_e, patch: unknown) => {
     if (!keepRunning) throw new Error('This computer does not run Patch itself');
-    return keepRunning.set((patch ?? {}) as { openAtLogin?: boolean; keepAwake?: boolean });
+    return setKeepRunning(
+      keepRunning,
+      (patch ?? {}) as { openAtLogin?: boolean; keepAwake?: boolean },
+    );
   });
   ipcMain.handle('patch:local-host:status', () => localHostStatus(app.getPath('home')));
   ipcMain.handle('patch:local-host:install', (_e, payload: { code?: unknown }) =>

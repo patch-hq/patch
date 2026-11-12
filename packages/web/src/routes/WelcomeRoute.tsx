@@ -255,13 +255,15 @@ function KeepRunningStep({ onNext }: { onNext: () => void }): JSX.Element {
     <section className="welcome-step" data-testid="welcome-keep-running">
       <h1>Keep Patch running</h1>
       <div className="welcome-options">
-        <Toggle
-          id="welcome-open-at-login"
-          title="Open at login"
-          checked={state?.openAtLogin ?? false}
-          disabled={state === null}
-          onChange={(v) => set({ openAtLogin: v })}
-        />
+        {state?.canOpenAtLogin === false ? null : (
+          <Toggle
+            id="welcome-open-at-login"
+            title="Open at login"
+            checked={state?.openAtLogin ?? false}
+            disabled={state === null}
+            onChange={(v) => set({ openAtLogin: v })}
+          />
+        )}
         <Toggle
           id="welcome-keep-awake"
           title="Keep this computer awake while plugged in"
