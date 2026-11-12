@@ -21,6 +21,9 @@ void patch_led_init(void);
 // picks it up next tick).
 void patch_led_set(pds_state_t state);
 
+/** Show a volume level (0..max) on the ring for ~1.5 s, over the state pattern. */
+void patch_led_show_level(int level, int max);
+
 #ifdef __cplusplus
 }
 #endif

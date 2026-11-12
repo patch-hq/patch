@@ -7,6 +7,7 @@
 #include "freertos/task.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "led_strip.h"
 #include "sdkconfig.h"
 
@@ -23,6 +24,9 @@ static volatile pds_state_t s_state = PDS_STATE_DISCONNECTED;
 // the wire. Comparing them lets us skip `led_strip_refresh` when the frame
 // is identical (RMT bus would otherwise hold the line ~30 µs/LED). See
 // pixels_differ() for the pure-C diff used here and in host tests.
+static volatile int s_level = 0, s_level_max = 10;
+static volatile int64_t s_level_until_us = 0;
+
 static uint8_t s_cur[LED_COUNT][3];
 static uint8_t s_prev[LED_COUNT][3];
 
@@ -132,6 +136,13 @@ static void renderer_task(void *arg) {
             case PLP_BLUE_ROTATE:    render_rotate(d.r, d.g, d.b, frame / 4); break;
             case PLP_MAGENTA_DOUBLE_PULSE: render_double_pulse(d.r, d.g, d.b, frame); break;
         }
+        if (esp_timer_get_time() < s_level_until_us) {
+            // Volume overlay: one lit LED per step of the level, the rest off.
+            int lit = (s_level * LED_COUNT + s_level_max / 2) / s_level_max;
+            render_off();
+            for (int i = 0; i < lit; i++) put(i, 60, 60, 60);
+            if (s_level == 0) put(0, 40, 0, 0);
+        }
         // Skip the RMT refresh entirely if nothing changed since last push.
         if (patch_led_pixels_differ(&s_cur[0][0], &s_prev[0][0], LED_COUNT)) {
             push_to_strip();
@@ -178,4 +189,10 @@ void patch_led_init(void) {
 
 void patch_led_set(pds_state_t state) {
     s_state = state;
+}
+
+void patch_led_show_level(int level, int max) {
+    s_level_max = max > 0 ? max : 1;
+    s_level = level;
+    s_level_until_us = esp_timer_get_time() + 1500000;
 }

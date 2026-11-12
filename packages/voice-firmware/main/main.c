@@ -16,6 +16,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -35,6 +36,10 @@
 #include "patch_button.h"
 #include "patch_audio.h"
 #include "patch_codec.h"
+#include "patch_tts_render.h"
+#include "patch_dial.h"
+#include "nvs.h"
+#include "esp_timer.h"
 #include "patch_wakeword.h"
 #include "patch_control.h"
 #include "patch_provision.h"
@@ -62,6 +67,65 @@ static void on_tts_started(void *user);
 static void on_tts_ended(void *user);
 static void on_audio_session_closed(void *user);
 static void render_state(void);
+
+// ---------- volume (the dial) ----------
+// Levels 0..10: 0 is mute, 7 is 0 dB on the DAC (with the codec's analog
+// output at +12 dB), each click is 2.5 dB.
+// Saved to NVS a moment after the dial stops so a spin is one flash write.
+#define VOL_MAX 10
+#define VOL_DEFAULT 7
+#define VOL_HALF_STEPS_PER_LEVEL 5
+static int s_volume = VOL_DEFAULT;
+static esp_timer_handle_t s_vol_save_timer;
+
+static void volume_apply(void) {
+    // Up to the default level the DAC attenuates. Above it the DAC stays at 0 dB, so
+    // full-scale replies never clip, and the extra gain goes through the
+    // reply limiter instead.
+    int steps = (s_volume - VOL_DEFAULT) * VOL_HALF_STEPS_PER_LEVEL;
+    int hs = s_volume == 0 ? -127 : (steps < 0 ? steps : 0);
+    float gain = steps > 0 ? powf(10.0f, (float)steps / 40.0f) : 1.0f;
+    patch_codec_set_dac_vol(hs);
+    patch_audio_set_reply_gain(gain);
+    ESP_LOGI(TAG, "volume %d/%d (dac %d half-steps, reply gain %.2f)", s_volume, VOL_MAX, hs, (double)gain);
+}
+
+static void volume_save_cb(void *arg) {
+    (void)arg;
+    nvs_handle_t h;
+    if (nvs_open("patch.cfg", NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_u8(h, "volume", (uint8_t)s_volume);
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+static void volume_load(void) {
+    nvs_handle_t h;
+    uint8_t v;
+    if (nvs_open("patch.cfg", NVS_READONLY, &h) == ESP_OK) {
+        if (nvs_get_u8(h, "volume", &v) == ESP_OK && v <= VOL_MAX) s_volume = v;
+        nvs_close(h);
+    }
+    const esp_timer_create_args_t a = { .callback = volume_save_cb, .name = "vol-save" };
+    esp_timer_create(&a, &s_vol_save_timer);
+    volume_apply();
+}
+
+static void volume_set(int level) {
+    if (level < 0) level = 0;
+    if (level > VOL_MAX) level = VOL_MAX;
+    s_volume = level;
+    volume_apply();
+    patch_led_show_level(s_volume, VOL_MAX);
+    esp_timer_stop(s_vol_save_timer);
+    esp_timer_start_once(s_vol_save_timer, 2000000);
+}
+
+static void on_dial(int delta, void *user) {
+    (void)user;
+    volume_set(s_volume + delta);
+}
+
 
 // ---------- Wi-Fi -----------------------------------------------------------
 //
@@ -235,14 +299,49 @@ static void on_control_inbound(const pcf_inbound_t *f, void *user) {
 
 // ---------- audio callbacks -------------------------------------------------
 
+// One exchange per wake word: once a reply has finished playing and no more
+// reply audio follows, the device ends the session and goes back to listening
+// only for the wake word, so room speech isn't answered.
+static volatile uint32_t s_tts_epoch = 0;
+static volatile bool s_end_task_running = false;
+
+static volatile bool s_tts_active = false;
+
+static void end_after_reply_task(void *arg) {
+    (void)arg;
+    for (int round = 0; round < 20; round++) {
+        uint32_t epoch = s_tts_epoch;
+        for (int i = 0; i < 300 && patch_audio_playback_pending() > 0; i++) vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(1500));
+        if (!patch_audio_session_active()) break;
+        if (!s_tts_active && epoch == s_tts_epoch && patch_audio_playback_pending() == 0) {
+            ESP_LOGI(TAG, "reply finished; ending session");
+            patch_control_send_session_end(PCF_SESSION_END_AGENT_FINISHED);
+            patch_audio_session_stop("agent-finished");
+            break;
+        }
+    }
+    s_end_task_running = false;
+    vTaskDelete(NULL);
+}
+
 static void on_tts_started(void *u) {
     (void)u;
+    s_tts_epoch++;
+    s_tts_active = true;
     pds_dispatch(&s_state, PDS_EV_TTS_STARTED);
     render_state();
 }
 static void on_tts_ended(void *u) {
     (void)u;
     pds_dispatch(&s_state, PDS_EV_TTS_ENDED);
+    s_tts_active = false;
+    if (!s_end_task_running) {
+        s_end_task_running = true;
+        if (xTaskCreate(end_after_reply_task, "end-after-reply", 3072, NULL, 4, NULL) != pdPASS) {
+            s_end_task_running = false;
+        }
+    }
     render_state();
 }
 static void on_audio_session_closed(void *u) {
@@ -419,8 +518,16 @@ static void handle_diag_line(const char *line) {
         sscanf(line + 3, "%i", &v);   // %i parses 0x.. too
         ESP_LOGW(TAG, "diag: DAC PTM = 0x%02x", v);
         patch_codec_set_dac_ptm((uint8_t)v);
+    } else if (strncmp(line, "outgain ", 8) == 0) {
+        int hp = -2, lo = 0;
+        sscanf(line + 8, "%d %d", &hp, &lo);
+        patch_codec_set_out_gain(hp, lo);
+    } else if (strncmp(line, "gain ", 5) == 0) {
+        patch_audio_set_reply_gain((float)atof(line + 5));
+    } else if (strncmp(line, "vol ", 4) == 0) {
+        volume_set(atoi(line + 4));
     } else if (strncmp(line, "dacvol", 6) == 0) {
-        int hs = -36;                 // default boot level (-18 dB)
+        int hs = PATCH_TTS_DAC_VOL_HALF_STEPS;  // default boot level
         sscanf(line + 6, "%d", &hs);
         ESP_LOGW(TAG, "diag: DAC vol = %d half-steps (%.1f dB)", hs, hs * 0.5);
         patch_codec_set_dac_vol(hs);
@@ -537,6 +644,8 @@ void app_main(void) {
     // and keeps the console available during the blocking BLE provisioning flow.
     patch_audio_init();
     patch_button_init(on_button, NULL);
+    volume_load();
+    patch_dial_init(on_dial, NULL);
     patch_wakeword_init(on_wake_word, NULL);
     xTaskCreate(diag_console_task, "patch-diag", 3072, NULL, 4, NULL);
 

@@ -108,10 +108,10 @@ static bool aic3204_configure(void) {
     REG(AIC3204_HPR_ROUTE, 0x08, "HPR_ROUTE");       // R DAC -> HPR
     REG(AIC3204_LOL_ROUTE, 0x08, "LOL_ROUTE");       // L DAC -> LOL
     REG(AIC3204_LOR_ROUTE, 0x08, "LOR_ROUTE");       // R DAC -> LOR
-    REG(AIC3204_HPL_GAIN, 0x3e, "HPL_GAIN");         // unmute HPL, -2dB
-    REG(AIC3204_HPR_GAIN, 0x3e, "HPR_GAIN");         // unmute HPR, -2dB
-    REG(AIC3204_LOL_DRV_GAIN, 0x00, "LOL_DRV_GAIN"); // unmute LOL, 0dB
-    REG(AIC3204_LOR_DRV_GAIN, 0x00, "LOR_DRV_GAIN"); // unmute LOR, 0dB
+    REG(AIC3204_HPL_GAIN, 0x0a, "HPL_GAIN");         // unmute HPL, +10dB
+    REG(AIC3204_HPR_GAIN, 0x0a, "HPR_GAIN");         // unmute HPR, +10dB
+    REG(AIC3204_LOL_DRV_GAIN, 0x0c, "LOL_DRV_GAIN"); // unmute LOL, +12dB
+    REG(AIC3204_LOR_DRV_GAIN, 0x0c, "LOR_DRV_GAIN"); // unmute LOR, +12dB
     REG(AIC3204_OP_PWR_CTRL, 0x3C, "OP_PWR_CTRL");   // power HPL/HPR/LOL/LOR
 
     // Soft-step settling before powering the DAC (ESPHome waits 2.5s).
@@ -169,6 +169,25 @@ bool patch_codec_set_dac_vol(int half_steps) {
     ESP_LOGI(TAG, "DAC vol = %d half-steps (reg 0x%02x) (%s/%s)",
              half_steps, v, esp_err_to_name(e1), esp_err_to_name(e2));
     return e1 == ESP_OK && e2 == ESP_OK;
+}
+
+// Analog output driver gains (page-1 HPL/HPR 0x10/0x11, LOL/LOR 0x12/0x13),
+// -6..+29 dB each, 6-bit two's complement, bit 6 clear = unmuted.
+bool patch_codec_set_out_gain(int hp_db, int lo_db) {
+    if (!s_dev) return false;
+    if (hp_db < -6) hp_db = -6;
+    if (hp_db > 29) hp_db = 29;
+    if (lo_db < -6) lo_db = -6;
+    if (lo_db > 29) lo_db = 29;
+    uint8_t hp = (uint8_t)(hp_db & 0x3f), lo = (uint8_t)(lo_db & 0x3f);
+    reg_write(AIC3204_PAGE_CTRL, 0x01);
+    esp_err_t e = reg_write(AIC3204_HPL_GAIN, hp);
+    e |= reg_write(AIC3204_HPR_GAIN, hp);
+    e |= reg_write(AIC3204_LOL_DRV_GAIN, lo);
+    e |= reg_write(AIC3204_LOR_DRV_GAIN, lo);
+    reg_write(AIC3204_PAGE_CTRL, 0x00);
+    ESP_LOGI(TAG, "out gain hp=%d dB lo=%d dB (%s)", hp_db, lo_db, esp_err_to_name(e));
+    return e == ESP_OK;
 }
 
 bool patch_codec_set_xmos_pipeline(int ch0_stage, int ch1_stage) {

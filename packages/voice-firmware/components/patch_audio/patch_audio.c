@@ -108,6 +108,9 @@ static TaskHandle_t s_text_task = NULL;
 static QueueHandle_t s_ws_send_q = NULL;        // patch_mic_frame_t *
 static QueueHandle_t s_text_q = NULL;           // heap-alloc'd char *
 static atomic_bool s_active = false;
+// Set when the host says a reply is complete (audio.tts_end): a reply shorter
+// than PREBUFFER must still play rather than wait for audio that never comes.
+static atomic_bool s_tts_flush = false;
 static uint32_t s_rx_csum = 0;   // running sum of received PCM samples (corruption diag)
 static uint32_t s_rx_ccnt = 0;   // running count of received PCM samples
 // Timestamp (us) of the last received TTS frame. EXPERIMENT: the mic uplink
@@ -403,6 +406,43 @@ void patch_audio_play_embedded_speech_via_feeder(void) {
 // codec. When the buffer is momentarily empty it writes a frame of SILENCE so
 // the I2S never underruns (an underrun repeats stale DMA = a click/buzz). Runs
 // at high priority on core 1, away from the websocket/mic work on core 0.
+
+// ---------- reply shaping: high-pass + gain + peak limiter ----------
+// The speaker is a small driver: deep bass only adds distortion, and gain
+// above full scale clips. So replies get a 2nd-order high-pass at ~180 Hz,
+// then the volume's extra gain, then a limiter that pulls peaks under 90 %
+// of full scale (instant attack, ~60 ms release) instead of clipping them.
+static volatile float s_reply_gain = 1.0f;
+static float s_hp_x1, s_hp_x2, s_hp_y1, s_hp_y2;
+static float s_lim_gain = 1.0f;
+
+size_t patch_audio_playback_pending(void) {
+    return s_play_buf ? xStreamBufferBytesAvailable(s_play_buf) : 0;
+}
+
+void patch_audio_set_reply_gain(float gain) { s_reply_gain = gain < 1.0f ? 1.0f : gain; }
+
+static void shape_reply(int16_t *pcm, size_t n) {
+    // RBJ high-pass, fc=180 Hz, Q=0.707, fs=48 kHz.
+    static const float b0 = 0.98347f, b1 = -1.96694f, b2 = 0.98347f, a1 = -1.96667f, a2 = 0.96722f;
+    const float ceiling = 0.9f * 32767.0f;
+    const float release = 0.99965f;  // ~60 ms at 48 kHz
+    float g = s_reply_gain;
+    for (size_t i = 0; i < n; i++) {
+        float x = (float)pcm[i];
+        float y = b0 * x + b1 * s_hp_x1 + b2 * s_hp_x2 - a1 * s_hp_y1 - a2 * s_hp_y2;
+        s_hp_x2 = s_hp_x1; s_hp_x1 = x; s_hp_y2 = s_hp_y1; s_hp_y1 = y;
+        float v = y * g;
+        float a = fabsf(v) * s_lim_gain;
+        if (a > ceiling) s_lim_gain = ceiling / fabsf(v);
+        else s_lim_gain = 1.0f - (1.0f - s_lim_gain) * release;
+        v *= s_lim_gain;
+        if (v > 32767.0f) v = 32767.0f;
+        if (v < -32768.0f) v = -32768.0f;
+        pcm[i] = (int16_t)v;
+    }
+}
+
 static void play_feeder_task(void *arg) {
     (void)arg;
     // Work in DMA-descriptor-sized blocks (one TX DMA buffer = TX_DMA_FRAME_NUM
@@ -455,13 +495,15 @@ static void play_feeder_task(void *arg) {
 #endif
     while (atomic_load(&s_active)) {
         if (!primed) {
-            if (xStreamBufferBytesAvailable(s_play_buf) < PREBUFFER) {
+            size_t avail = xStreamBufferBytesAvailable(s_play_buf);
+            if (avail < PREBUFFER && !(atomic_load(&s_tts_flush) && avail > 0)) {
                 memset(mono, 0, BLOCK_BYTES);   // keep DAC fed with silence while priming
                 if (patch_tts_widen_pcm16_stereo(mono, BLOCK_SAMPLES, s32, BLOCK_SAMPLES * 2))
                     i2s_channel_write(s_tx, s32, BLOCK_SAMPLES * 2 * sizeof(int32_t), &wrote, pdMS_TO_TICKS(60));
                 continue;
             }
             primed = true;
+            atomic_store(&s_tts_flush, false);
         }
         // HA fill-then-pad: gather ONE full DMA block, looping reads over a small
         // budget so WS data that trickles in (the host's frames arrive split /
@@ -495,6 +537,7 @@ static void play_feeder_task(void *arg) {
                          (unsigned)gaps, (unsigned)partials, (unsigned)real,
                          (unsigned)xStreamBufferBytesAvailable(s_play_buf));
         }
+        if (n > 0) shape_reply(mono, n);
         if (!patch_tts_widen_pcm16_stereo(mono, BLOCK_SAMPLES, s32, BLOCK_SAMPLES * 2)) continue;
         i2s_channel_write(s_tx, s32, BLOCK_SAMPLES * 2 * sizeof(int32_t), &wrote, pdMS_TO_TICKS(60));
     }
@@ -594,6 +637,7 @@ static void text_dispatch_task(void *arg) {
         if (strstr(body, "audio.tts_chunk")) {
             if (s_cfg.on_tts_started) s_cfg.on_tts_started(s_cfg.user);
         } else if (strstr(body, "audio.tts_end")) {
+            atomic_store(&s_tts_flush, true);
             if (s_cfg.on_tts_ended) s_cfg.on_tts_ended(s_cfg.user);
         } else if (strstr(body, "audio.error")) {
             ESP_LOGE(TAG, "audio error from daemon: %s", body);
@@ -941,6 +985,7 @@ void patch_audio_session_start(const patch_audio_session_cfg_t *cfg) {
     // Start the dedicated playback feeder (sole TX writer during the session).
     // Reset the buffer so no stale audio from a previous session leaks in.
     if (s_play_buf) xStreamBufferReset(s_play_buf);
+    atomic_store(&s_tts_flush, false);
     if (!s_play_task) {
         xTaskCreatePinnedToCore(play_feeder_task, "patch-play", 4096, NULL, 6, &s_play_task, 1);
     }

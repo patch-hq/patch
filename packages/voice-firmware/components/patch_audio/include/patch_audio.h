@@ -52,6 +52,12 @@ typedef struct {
 
 void patch_audio_init(void);
 
+/** Gain (linear, >= 1) applied to reply audio before a peak limiter, for volume above 0 dB. */
+void patch_audio_set_reply_gain(float gain);
+
+/** Bytes of reply audio still waiting to be played. */
+size_t patch_audio_playback_pending(void);
+
 // Accessor for the shared I2S RX channel — used by patch_wakeword to feed
 // WakeNet from the same DMA buffer the active session reads from. Returns
 // NULL until patch_audio_init() has been called. The return type is opaque

@@ -82,7 +82,7 @@ uint8_t patch_tts_dac_vol_reg(int db_half_steps);
 // "horrible noise". The earlier garble was NOT a volume problem (it reproduced
 // at every level) — it was the speaker I2S framing (mono slot vs the codec's
 // 2-slot stereo bus), fixed by patch_tts_widen_pcm16_stereo. 0xf4 = -12 half-steps.
-#define PATCH_TTS_DAC_VOL_HALF_STEPS  (-36)  /* -18 dB, 0xdc — quiet (user is right beside the device; -9 dB was "irritatingly loud" and the small speaker distorts when driven hard) */
+#define PATCH_TTS_DAC_VOL_HALF_STEPS  (0)  /* 0 dB: -18 dB was too quiet to hear replies across a room */
 
 #ifdef __cplusplus
 }

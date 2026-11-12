@@ -46,6 +46,7 @@ bool patch_codec_set_dac_ptm(int cfg);
 // Set the DAC digital volume at runtime (page-0 regs 0x41/0x42), in half-dB
 // steps (+48 = +24 dB max, negative = attenuation). For live level A/B.
 bool patch_codec_set_dac_vol(int half_steps);
+bool patch_codec_set_out_gain(int hp_db, int lo_db);
 
 #ifdef __cplusplus
 }

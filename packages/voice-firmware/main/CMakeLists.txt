@@ -6,4 +6,5 @@ idf_component_register(
         esp_driver_usb_serial_jtag
         patch_state patch_led patch_button patch_audio
         patch_wakeword patch_control patch_provision patch_ota
+        patch_dial patch_codec esp_timer
 )
