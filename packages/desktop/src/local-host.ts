@@ -12,7 +12,13 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /** The launchd label the installer registers (`installer/service.ts`). */
-export const HOST_SERVICE_LABEL = 'me.tomchambers.patch-host';
+export const HOST_SERVICE_LABEL = 'io.github.patch-hq.host';
+
+/** Labels an older install carries until its next update (`installer/service.ts`). */
+export const LEGACY_HOST_SERVICE_LABELS = [
+  'me.tomchambers.patch-host',
+  'me.tomchambers.patch-daemon',
+] as const;
 
 export interface LocalHostStatus {
   /** Whether a host service is installed for this user on this Mac. */
@@ -38,9 +44,7 @@ function serviceFiles(home: string, platform: NodeJS.Platform): string[] {
     return HOST_SYSTEMD_UNITS.map((u) => join(units, u));
   }
   const agents = join(home, 'Library', 'LaunchAgents');
-  // A Mac installed before the host rename still carries the old label until its next update.
-  const legacyServiceLabel = HOST_SERVICE_LABEL.replace(/patch-host$/, 'patch-daemon');
-  return [HOST_SERVICE_LABEL, legacyServiceLabel].map((l) => join(agents, `${l}.plist`));
+  return [HOST_SERVICE_LABEL, ...LEGACY_HOST_SERVICE_LABELS].map((l) => join(agents, `${l}.plist`));
 }
 
 export function localHostStatus(
