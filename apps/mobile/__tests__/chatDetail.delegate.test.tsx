@@ -85,10 +85,10 @@ function emitDelegateCall(tool: string, result: unknown): void {
 }
 
 describe('patch_delegate tool row', () => {
-  it('shows a Running pill and Open transcript row once the ack lands', () => {
+  it('shows a fixed Started pill and Open transcript row once the ack lands', () => {
     emitDelegateCall('patch_delegate', { id: 'sub-1', label: 'draft the email' });
     const r = renderRN(<ChatDetailScreen />);
-    expect(hasText(findHost(r.root, byTestId('delegate-status-pill')), 'Running')).toBe(true);
+    expect(hasText(findHost(r.root, byTestId('delegate-status-pill')), 'Started')).toBe(true);
     expect(findHost(r.root, byTestId('delegate-open-transcript'))).toBeDefined();
   });
 
@@ -128,22 +128,26 @@ describe('patch_delegate tool row', () => {
     expect(findHost(r.root, byTestId('delegate-open-transcript'))).toBeDefined();
   });
 
-  it('updates the pill in place from chat.delegate_update, by the subagent id the ack returned', () => {
+  it('does not re-colour the spawn pill when the child later runs again or settles', () => {
     emitDelegateCall('patch_delegate', { id: 'sub-1', label: 'draft the email' });
     const r = renderRN(<ChatDetailScreen />);
-    expect(hasText(findHost(r.root, byTestId('delegate-status-pill')), 'Running')).toBe(true);
-
-    actSync(() => {
-      useChatStore.getState().applyEvent({
-        type: 'chat.delegate_update',
-        chatId: 'c1',
-        delegateId: 'sub-1',
-        label: 'draft the email',
-        status: 'failed',
-        seq: 3,
+    for (const [seq, status] of [
+      [3, 'done'],
+      [4, 'running'],
+      [5, 'failed'],
+    ] as const) {
+      actSync(() => {
+        useChatStore.getState().applyEvent({
+          type: 'chat.delegate_update',
+          chatId: 'c1',
+          delegateId: 'sub-1',
+          label: 'draft the email',
+          status,
+          seq,
+        });
       });
-    });
-    expect(hasText(findHost(r.root, byTestId('delegate-status-pill')), 'Failed')).toBe(true);
+      expect(hasText(findHost(r.root, byTestId('delegate-status-pill')), 'Started')).toBe(true);
+    }
   });
 
   it('a delegate_update for a DIFFERENT subagent id leaves this row alone', () => {
@@ -159,7 +163,7 @@ describe('patch_delegate tool row', () => {
         seq: 3,
       });
     });
-    expect(hasText(findHost(r.root, byTestId('delegate-status-pill')), 'Running')).toBe(true);
+    expect(hasText(findHost(r.root, byTestId('delegate-status-pill')), 'Started')).toBe(true);
   });
 
   it('is a collapsible row: collapsed by default, expands inline to the transcript, collapses again', async () => {

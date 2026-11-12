@@ -1728,7 +1728,9 @@ function ToolCallItem({
           >
             {summary}
           </Text>
-          {runningSince !== undefined ? <ToolElapsed since={runningSince} turnSince={turnSince} /> : null}
+          {runningSince !== undefined ? (
+            <ToolElapsed since={runningSince} turnSince={turnSince} />
+          ) : null}
         </Pressable>
         {runningSince !== undefined && entry.tool === 'Bash' && entry.callId ? (
           <CancelCommandButton chatId={chatId} callId={entry.callId} />
@@ -2255,6 +2257,9 @@ function DelegateToolCallItem({
 
   const status = live?.status ?? 'running';
   const label = live?.label ?? ack.label;
+  // With the call's result in, the card records the spawn only: a later run of
+  // the same child must not re-colour it (the Agents bar carries live state).
+  const spawned = resultAck !== null;
 
   return (
     <View
@@ -2289,7 +2294,7 @@ function DelegateToolCallItem({
             paddingHorizontal: space.sm,
             paddingVertical: 1,
             borderRadius: 999,
-            backgroundColor: delegateStatusColor(status, colors),
+            backgroundColor: spawned ? colors.ink3 : delegateStatusColor(status, colors),
           }}
         >
           <Text
@@ -2300,7 +2305,7 @@ function DelegateToolCallItem({
               color: colors.onAccent,
             }}
           >
-            {DELEGATE_STATUS_LABEL[status]}
+            {spawned ? 'Started' : DELEGATE_STATUS_LABEL[status]}
           </Text>
         </View>
       </Pressable>

@@ -11643,6 +11643,7 @@ main.empty-state p {
   background: color-mix(in srgb, var(--permission) 20%, transparent);
   color: var(--permission);
 }
+.delegate-pill-started,
 .delegate-pill-done,
 .delegate-pill-stopped {
   background: color-mix(in srgb, var(--ink-3) 18%, transparent);

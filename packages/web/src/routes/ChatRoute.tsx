@@ -4795,6 +4795,10 @@ function DelegateToolCall({
   }
 
   const status = live?.status ?? 'running';
+  // Once the call has its result the card records the spawn and nothing more:
+  // later runs of the same child (a follow-up) must not re-colour it. The
+  // child's current state lives in the Agents bar.
+  const spawned = resultAck !== null;
 
   return (
     <div
@@ -4812,10 +4816,10 @@ function DelegateToolCall({
       >
         <span className="tool-summary-text">{summary}</span>
         <span
-          className={`delegate-pill delegate-pill-${status}`}
+          className={`delegate-pill delegate-pill-${spawned ? 'started' : status}`}
           data-testid="delegate-status-pill"
         >
-          {DELEGATE_STATUS_LABEL[status]}
+          {spawned ? 'Started' : DELEGATE_STATUS_LABEL[status]}
         </span>
         <ChevronDown
           size={13}
@@ -5473,7 +5477,9 @@ const ToolGroup = memo(
             {open ? '▾' : '▸'}
           </span>
           <span className="tool-summary-text">{summary}</span>
-          {runningCall && !open ? <ToolRunning since={runningCall.startedAt} turnSince={turnSince} /> : null}
+          {runningCall && !open ? (
+            <ToolRunning since={runningCall.startedAt} turnSince={turnSince} />
+          ) : null}
           {runningCall && !open && runningCall.tool === 'Bash' && runningCall.callId ? (
             <CancelCommandButton onCancel={() => requestToolCancel(chatId, runningCall.callId!)} />
           ) : null}
@@ -5672,7 +5678,9 @@ function ToolDisclosure({
         </span>
         {badge}
         <span className="tool-summary-text">{summary}</span>
-        {runningSince !== undefined ? <ToolRunning since={runningSince.at} turnSince={runningSince.turn} /> : null}
+        {runningSince !== undefined ? (
+          <ToolRunning since={runningSince.at} turnSince={runningSince.turn} />
+        ) : null}
         {cancelledChip ? (
           <span className="tool-cancelled-chip" data-testid="tool-cancelled">
             Cancelled by you
