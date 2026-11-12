@@ -21,7 +21,12 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { useWebUpdateStore } from '../stores/webUpdateStore.js';
 import { reloadNow } from '../lib/liveUpdate.js';
-import { updateUrgency, waitedWords } from './DesktopUpdateBanner.js';
+import {
+  updateUrgency,
+  waitedWords,
+  UPDATE_READY_TEXT,
+  UPDATE_FAILED,
+} from './DesktopUpdateBanner.js';
 import { useDesktopUpdaterState } from '../lib/desktopBridge.js';
 
 const RELOAD_GRACE_MS = 8_000;
@@ -52,7 +57,7 @@ export function WebUpdateBanner(): JSX.Element | null {
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
       setPressed(false);
-      setError('Patch did not reload. Try again, or quit and reopen it.');
+      setError(UPDATE_FAILED);
     }, RELOAD_GRACE_MS);
   }
 
@@ -78,7 +83,8 @@ export function WebUpdateBanner(): JSX.Element | null {
     >
       <span className="dot" aria-hidden />
       <span className="desktop-update-text">
-        Patch has updated{waited === null ? '' : `, waiting ${waited}`}.
+        {UPDATE_READY_TEXT}
+        {waited === null ? '' : ` Waiting ${waited}.`}
       </span>
       {error !== null && (
         <span className="desktop-update-text" data-testid="web-update-error">
@@ -92,7 +98,7 @@ export function WebUpdateBanner(): JSX.Element | null {
         disabled={pressed}
         onClick={press}
       >
-        {pressed ? 'Updating…' : 'Update Patch'}
+        {pressed ? 'Restarting…' : 'Restart Patch'}
       </button>
     </div>
   );

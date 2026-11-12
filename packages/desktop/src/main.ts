@@ -49,6 +49,7 @@ import {
   diagnoseUpdater,
   emptyPersisted,
   createInstaller,
+  checkForLatestWithoutRestaging,
   createLatestInstaller,
   initialUpdaterState,
   parsePersisted,
@@ -92,6 +93,7 @@ import {
   type MeetingPermissionKind,
 } from './meeting-permissions';
 import { watchSpeakers } from './meeting-speakers';
+import { MeetingRecorder } from './meeting-recording';
 import {
   buildNotificationExtras,
   decideDesktopIntent,
@@ -1327,6 +1329,22 @@ function readDesktopBuildInfo(): DesktopBuildInfo {
   }
 }
 
+/**
+ * Whether the running bundle is really signed, asked of macOS itself. The
+ * build-time `signed` flag in build-info.json is stamped BEFORE electron-builder
+ * signs, and shipped as false for a correctly signed app — which made the
+ * updater report 'adhoc-signed' and the web layer show a second banner. The
+ * bundle on disk is the only source that cannot disagree with reality. Off
+ * macOS (or unpackaged) there is no bundle signature, so the stamped flag stands.
+ */
+function isBundleDeveloperSigned(stamped: boolean): boolean {
+  if (process.platform !== 'darwin' || !app.isPackaged) return stamped;
+  const bundle = join(process.execPath, '..', '..', '..');
+  const probe = spawnSync('codesign', ['-dv', '--verbose=2', bundle], { encoding: 'utf8' });
+  const out = `${probe.stdout ?? ''}${probe.stderr ?? ''}`;
+  return !/Signature=adhoc/.test(out) && /Authority=/.test(out);
+}
+
 /** The feed electron-updater will poll, read from the shipped app-update.yml. */
 function readFeedUrl(updateConfigPath: string): string | null {
   if (!existsSync(updateConfigPath)) return null;
@@ -1402,7 +1420,15 @@ const installUpdate = createInstaller({
 });
 
 const installLatest = createLatestInstaller({
-  check: () => checkForUpdates(),
+  check: () =>
+    checkForLatestWithoutRestaging({
+      setAutoDownload: (on) => {
+        autoUpdater.autoDownload = on;
+      },
+      check: () => checkForUpdates(),
+      getState: () => updaterState as UpdaterState,
+      download: () => autoUpdater.downloadUpdate(),
+    }),
   getState: () => updaterState as UpdaterState,
   install: installUpdate,
   onError: (err) =>
@@ -1439,7 +1465,7 @@ function setupAutoUpdater(): void {
     isPackaged: app.isPackaged,
     hasUpdateConfig,
     version: build.version,
-    signed: build.signed,
+    signed: isBundleDeveloperSigned(build.signed),
     noFeedReason,
   });
 
@@ -1516,6 +1542,25 @@ function setupAutoUpdater(): void {
     requestMeetingPermission(kind, meetingPermissionDeps),
   );
   ipcMain.on('patch:system-audio:stop', () => systemAudio.stop());
+  // Meeting mode, opt-in: raw lanes saved to userData/meeting-recordings/<time>/
+  // so the system-audio level and the echo canceller can be checked.
+  let recorder: MeetingRecorder | null = null;
+  ipcMain.on('patch:meeting-recording:chunk', (_e, lane: string, pcm: Uint8Array) => {
+    recorder ??= new MeetingRecorder(
+      join(
+        app.getPath('userData'),
+        'meeting-recordings',
+        new Date().toISOString().replace(/[:.]/g, '-'),
+      ),
+    );
+    recorder.append(lane, Buffer.from(pcm));
+  });
+  ipcMain.handle('patch:meeting-recording:end', () => {
+    const done = recorder;
+    recorder = null;
+    done?.end();
+    return done?.dir ?? null;
+  });
   // Meeting mode: who is lit up on the call, read through macOS Accessibility.
   // A failure (e.g. permission not granted) is sent to the renderer to show.
   let stopSpeakers: (() => void) | null = null;
