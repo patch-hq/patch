@@ -138,8 +138,10 @@ describe('WebUpdateBanner', () => {
   it('says what pressing it does: Reload', () => {
     useWebUpdateStore.getState().setAvailable('assets/index-BBBB.js');
     render(<WebUpdateBanner />);
-    expect(screen.getByTestId('web-update-banner')).toHaveTextContent('Patch has updated');
-    expect(screen.getByTestId('web-update-reload')).toHaveTextContent('Reload');
+    expect(screen.getByTestId('web-update-banner')).toHaveTextContent(
+      'A new version of Patch is ready',
+    );
+    expect(screen.getByTestId('web-update-reload')).toHaveTextContent('Restart Patch');
   });
 
   it('acknowledges the press, and says so if the page is still here afterwards', async () => {
@@ -148,12 +150,14 @@ describe('WebUpdateBanner', () => {
     useWebUpdateStore.getState().setAvailable('assets/index-BBBB.js');
     render(<WebUpdateBanner />);
     fireEvent.click(screen.getByTestId('web-update-reload'));
-    expect(screen.getByTestId('web-update-reload')).toHaveTextContent('Reloading');
+    expect(screen.getByTestId('web-update-reload')).toHaveTextContent('Restarting');
     expect(screen.getByTestId('web-update-reload')).toBeDisabled();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
-    expect(screen.getByTestId('web-update-error')).toHaveTextContent('did not reload');
+    expect(screen.getByTestId('web-update-error')).toHaveTextContent(
+      'Quit Patch and open it again',
+    );
     expect(screen.getByTestId('web-update-reload')).not.toBeDisabled();
   });
 
