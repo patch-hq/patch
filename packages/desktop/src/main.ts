@@ -23,6 +23,7 @@ import { parseOpenChat, writeFrontChat } from './front-chat';
 import { spawn } from 'node:child_process';
 import { ensureSpotlightIndexed } from './spotlight';
 import { KeepRunning, OPENED_AT_LOGIN_ARG, setLinuxAutostart } from './keep-running';
+import { applyMacLoginItem, macLoginItemBlocker, shouldOfferMove } from './app-location';
 import {
   app,
   BrowserWindow,
@@ -876,21 +877,37 @@ async function quitFromTray(): Promise<void> {
 /** spec/05 § Keep running: start following the user's choices on this computer. */
 function startKeepRunning(userData: string): void {
   // On Linux the login entry has to start the AppImage file itself, which only
-  // a run from that file knows; elsewhere the system's own login items.
+  // a run from that file knows. On a Mac the login item is the bundle this run
+  // is, registered afresh when the app has moved (app-location.ts).
   const linux = process.platform === 'linux';
+  const mac = process.platform === 'darwin';
   const appImage = process.env['APPIMAGE'];
+  const bundlePath = mac ? join(process.execPath, '..', '..', '..') : '';
+  const macBlocker = mac ? macLoginItemBlocker(bundlePath) : null;
   const autostart = join(
     process.env['XDG_CONFIG_HOME'] ?? join(app.getPath('home'), '.config'),
     'autostart',
     'patch.desktop',
   );
   keepRunning = new KeepRunning(join(userData, 'keep-running.json'), {
-    canOpenAtLogin: !linux || appImage !== undefined,
+    canOpenAtLogin: linux ? appImage !== undefined : macBlocker === null,
+    whyNotOpenAtLogin: linux
+      ? 'Patch cannot open at login here: it was not started from its AppImage'
+      : (macBlocker ?? undefined),
     // A quiet instance is a test run beside a real Patch: it never registers
     // itself as a login item on the computer it runs on.
     setOpenAtLogin: (on) => {
       if (QUIET) console.log(`[patch] quiet instance: open at login ${on} not applied`);
       else if (linux) setLinuxAutostart(autostart, appImage as string, on);
+      else if (mac)
+        applyMacLoginItem(on, {
+          bundlePath,
+          recordFile: join(userData, 'login-item.json'),
+          registered: () => app.getLoginItemSettings().openAtLogin,
+          register: () => app.setLoginItemSettings({ openAtLogin: true }),
+          unregister: () => app.setLoginItemSettings({ openAtLogin: false }),
+          warn: (m) => console.error(`[patch] login item: ${m}`),
+        });
       else app.setLoginItemSettings({ openAtLogin: on });
     },
     onBattery: () => powerMonitor.isOnBatteryPower(),
@@ -2035,11 +2052,18 @@ function isAppEntry(): boolean {
 
 /**
  * What the shell looks like to the first-run page (spec/05 § Desktop first run):
- * a small window of its own asking where Patch runs, answered over IPC.
+ * a small window of its own asking where Patch runs, answered over IPC. With
+ * `offerMove` it first asks to move the app to Applications.
  */
-function showSetupWindow(): {
+function showSetupWindow(offerMove = false): {
   window: BrowserWindow;
-  ui: { choose(): Promise<SetupChoice>; progress(m: string): void; fail(m: string): void };
+  ui: {
+    choose(): Promise<SetupChoice>;
+    /** The answer to "Move Patch to Applications?": true to move. */
+    moveAnswer(): Promise<boolean>;
+    progress(m: string): void;
+    fail(m: string): void;
+  };
 } {
   const window = new BrowserWindow({
     width: 560,
@@ -2055,19 +2079,30 @@ function showSetupWindow(): {
       nodeIntegration: false,
     },
   });
-  void window.loadFile(join(__dirname, 'setup.html'));
+  void window.loadFile(join(__dirname, 'setup.html'), offerMove ? { hash: 'move' } : {});
   let pending: ((c: SetupChoice) => void) | null = null;
+  let pendingMove: ((yes: boolean) => void) | null = null;
   const onChoose = (event: { sender: unknown }, choice: SetupChoice): void => {
     if (event.sender !== window.webContents) return;
     pending?.(choice);
     pending = null;
   };
+  const onMove = (event: { sender: unknown }, yes: unknown): void => {
+    if (event.sender !== window.webContents) return;
+    pendingMove?.(yes === true);
+    pendingMove = null;
+  };
   ipcMain.on('patch:setup:choose', onChoose as never);
-  window.once('closed', () => ipcMain.removeListener('patch:setup:choose', onChoose as never));
+  ipcMain.on('patch:setup:move', onMove as never);
+  window.once('closed', () => {
+    ipcMain.removeListener('patch:setup:choose', onChoose as never);
+    ipcMain.removeListener('patch:setup:move', onMove as never);
+  });
   return {
     window,
     ui: {
       choose: () => new Promise<SetupChoice>((resolve) => (pending = resolve)),
+      moveAnswer: () => new Promise<boolean>((resolve) => (pendingMove = resolve)),
       progress: (m) => window.webContents.send('patch:setup:progress', m),
       fail: (m) => window.webContents.send('patch:setup:fail', m),
     },
@@ -2080,26 +2115,40 @@ function showSetupWindow(): {
  * the credential-carrying first page, or quits if the question is closed
  * unanswered. A developer run (`pnpm dev`, or PATCH_SERVER_URL) skips all of it.
  */
-async function resolveServer(): Promise<void> {
-  if (process.env['PATCH_SERVER_URL'] || !app.isPackaged) return;
+async function resolveServer(): Promise<'ready' | 'stop'> {
+  if (process.env['PATCH_SERVER_URL'] || !app.isPackaged) return 'ready';
   const firstRun = loadFirstRun();
   const userData = app.getPath('userData');
   let setup: ReturnType<typeof showSetupWindow> | null = null;
+  const openSetup = (offerMove: boolean): ReturnType<typeof showSetupWindow> => {
+    const opened = showSetupWindow(offerMove);
+    // Closing the question unanswered is declining to use the app.
+    opened.window.once('closed', () => {
+      if (!activeLaunch) app.exit(0);
+    });
+    return opened;
+  };
   const ui = {
     choose: () => {
-      if (!setup) {
-        setup = showSetupWindow();
-        // Closing the question unanswered is declining to use the app.
-        setup.window.once('closed', () => {
-          if (!activeLaunch) app.exit(0);
-        });
-      }
+      if (!setup) setup = openSetup(false);
       return setup.ui.choose();
     },
     progress: (m: string) => setup?.ui.progress(m),
     fail: (m: string) => setup?.ui.fail(m),
   };
   try {
+    if (
+      shouldOfferMove({
+        platform: process.platform,
+        packaged: app.isPackaged,
+        quiet: QUIET !== null,
+        inApplications: process.platform === 'darwin' && app.isInApplicationsFolder(),
+        firstRun: firstRun.remembered(userData) === null,
+      })
+    ) {
+      setup = openSetup(true);
+      if (await offerMoveToApplications(setup.ui)) return 'stop';
+    }
     const launched = await firstRun.launch({
       userData,
       home: app.getPath('home'),
@@ -2126,10 +2175,34 @@ async function resolveServer(): Promise<void> {
     // so and stop. Carrying on with no server would be a window with nothing in it.
     dialog.showErrorBox('Patch could not start', err instanceof Error ? err.message : String(err));
     app.exit(1);
-    return;
+    return 'stop';
   }
   const done = setup as ReturnType<typeof showSetupWindow> | null;
   if (done) done.window.destroy();
+  return 'ready';
+}
+
+/**
+ * The first run's "Move Patch to Applications?" (spec/05 § Desktop first run).
+ * True when the app has been moved: Electron then quits it and opens the copy
+ * in Applications, so this run goes no further. A move that fails says why on
+ * the same window and the question stands.
+ */
+async function offerMoveToApplications(ui: {
+  moveAnswer(): Promise<boolean>;
+  fail(m: string): void;
+}): Promise<boolean> {
+  for (;;) {
+    if (!(await ui.moveAnswer())) return false;
+    try {
+      if (app.moveToApplicationsFolder()) return true;
+      ui.fail('Patch was not moved to Applications.');
+    } catch (err) {
+      ui.fail(
+        `Patch could not be moved to Applications: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 }
 
 /** The relay a phone reaches this Mac's own server through, unless PATCH_RELAY_URL says otherwise. */
@@ -2204,7 +2277,9 @@ export function bootstrap(): void {
     }).catch((err) => console.error('[spotlight]', err));
     // Which server this app talks to — the remembered one, or the first-run
     // question — before any window shows Patch itself.
-    await resolveServer();
+    // Moving to Applications quits this run and opens the moved copy; an error
+    // that stops the start has already been shown and the app is exiting.
+    if ((await resolveServer()) === 'stop') return;
     // Reload has to exist. The UI is a remote page, so when the window and the
     // deployed SPA disagree there is otherwise no way back — see app-menu.ts.
     Menu.setApplicationMenu(

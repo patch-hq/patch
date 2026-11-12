@@ -37,3 +37,19 @@ test('the first run reads them from the same names', () => {
     assert.match(firstRun, new RegExp(`join\\(env\\.resources, '${to}'\\)`), `reads ${to}`);
   }
 });
+
+/** Width and height of a PNG, from its header. */
+function pngSize(file: string): [number, number] {
+  const b = readFileSync(file);
+  return [b.readUInt32BE(16), b.readUInt32BE(20)];
+}
+
+test('the disk image opens as the install window: Patch, an Applications shortcut and a background the size of the window', () => {
+  const dmg = /\ndmg:\n([\s\S]*?)\n(?=\S)/.exec(yml)?.[1] ?? '';
+  assert.match(dmg, /background: build\/background\.png/);
+  assert.match(dmg, /type: link\n\s+path: \/Applications/);
+  const width = Number(/width: (\d+)/.exec(dmg)?.[1]);
+  const height = Number(/height: (\d+)/.exec(dmg)?.[1]);
+  assert.deepEqual(pngSize(join(root, 'build', 'background.png')), [width, height]);
+  assert.deepEqual(pngSize(join(root, 'build', 'background@2x.png')), [width * 2, height * 2]);
+});

@@ -1,12 +1,16 @@
 // Preload for the first-run window (src/setup/setup.html): the page's whole
-// connection to the shell. It can make one choice and be told how it is going;
-// it can reach nothing else.
+// connection to the shell. It can answer whether to move the app to
+// Applications, make one choice, and be told how it is going; it can reach
+// nothing else.
 
 import { contextBridge, ipcRenderer } from 'electron';
 
 type Choice = { kind: 'local' } | { kind: 'remote'; input: string };
 
 contextBridge.exposeInMainWorld('patchSetup', {
+  move(yes: boolean): void {
+    ipcRenderer.send('patch:setup:move', yes === true);
+  },
   choose(choice: Choice): void {
     ipcRenderer.send('patch:setup:choose', choice);
   },
