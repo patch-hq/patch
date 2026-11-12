@@ -95,6 +95,8 @@ export const DeviceSessionStartFrame = z
     chatId: z.string().min(1),
     /** True for a ring-initiated call; false for a one-way speakers notify. */
     conversational: z.boolean(),
+    /** How long the device stays open for a follow-up after a reply, in ms. Patch decides it. */
+    followupMs: z.number().int().nonnegative().optional(),
   })
   .strict();
 export type DeviceSessionStartFrame = z.infer<typeof DeviceSessionStartFrame>;

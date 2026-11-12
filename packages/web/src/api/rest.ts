@@ -1124,6 +1124,12 @@ export const api = {
     }),
   signInDeny: (id: string) =>
     request<{ ok: true }>(`/api/auth/signin/${encodeURIComponent(id)}/deny`, { method: 'POST' }),
+  // Settings → Voice devices → Add device: a long-lived device token, shown once.
+  addVoiceDevice: (label: string) =>
+    request<{ surfaceId: string; label: string; token: string }>('/api/voice-devices', {
+      method: 'POST',
+      body: { label },
+    }),
   surfacePairStart: () =>
     request<{ nonce: string; expiresAt: number; uri?: string }>('/api/auth/pair/start', {
       method: 'POST',

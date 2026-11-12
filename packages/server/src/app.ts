@@ -128,6 +128,7 @@ import { NotificationLog } from './notifications/log.js';
 import { registerNotificationLogRoutes } from './notifications/log-routes.js';
 import { registerVoiceTokenRoute } from './voice/token.js';
 import { AudioSessionRouter, registerAudioRelayRoute } from './audio-relay.js';
+import { registerDeviceControlRoute } from './device-control.js';
 import { registerVoiceNoteRoute } from './voice/note.js';
 import { registerAttachmentRoutes } from './attachments.js';
 import { registerArtifactRoutes } from './artifacts.js';
@@ -2085,6 +2086,16 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   if (opts.internalToken && opts.internalToken.length >= 16) {
     registerVoiceTokenRoute(app, {
       logger: log.child({ component: 'voice-token' }),
+      registry,
+      chatRegistry,
+      internalToken: opts.internalToken,
+      isHostOnline: (hostId) => hostLink.isOnline(hostId),
+      recordSessionHost: (sessionId, hostId) => audioSessionRouter.record(sessionId, hostId),
+      ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
+    });
+    // Voice devices connect here, not to a host (spec/16 § Connection model).
+    registerDeviceControlRoute(app, {
+      logger: log.child({ component: 'device-control' }),
       registry,
       chatRegistry,
       internalToken: opts.internalToken,

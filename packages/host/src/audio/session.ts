@@ -472,9 +472,7 @@ export class VoiceSession implements VoiceSessionLike {
     if (this.state === next) return;
     if (this.state === 'speaking') this.lastSpokeAt = Date.now();
     this.state = next;
-    if (this.init.surfaceKind !== 'device') {
-      this.deps.sendAudio({ type: 'audio.state', sessionId: this.init.sessionId, state: next });
-    }
+    this.deps.sendAudio({ type: 'audio.state', sessionId: this.init.sessionId, state: next });
   }
 
   /**
