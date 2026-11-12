@@ -4552,6 +4552,9 @@ button.nav-row {
   font-size: var(--text-min);
   opacity: 0;
   transition: opacity 0.12s ease;
+  /* Hidden at rest, but opacity:0 text is still selectable and rides along
+     when a message is selected and copied. Metadata is not message text. */
+  user-select: none;
 }
 .msg-user .msg-meta {
   inset-inline-start: auto;
