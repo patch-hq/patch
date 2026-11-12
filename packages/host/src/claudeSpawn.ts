@@ -1,9 +1,11 @@
-import { spawn } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, symlinkSync } from 'node:fs';
+import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import type { Readable, Writable } from 'node:stream';
+import { closeSync, existsSync, lstatSync, mkdirSync, symlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { newTurnTag, TURN_TAG_ENV, killTagged } from './turnTag.js';
 import { inWorkSlice } from './workSlice.js';
+import { claudeStderrLogPath, noteClaudeProcess, openClaudeStderrLog } from './claudeStderrLog.js';
 import type { SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
 
 /** What a resumed chat needs from the user's own Claude config dir. */
@@ -65,14 +67,24 @@ export function spawnClaudeInGroup(
   linkUserConfigIntoChatDir(opts.env);
   const turnTag = newTurnTag();
   const launch = inWorkSlice(opts.command, opts.args);
-  const child = spawn(launch.command, launch.args, {
-    cwd: opts.cwd,
-    env: { ...opts.env, [TURN_TAG_ENV]: turnTag },
-    stdio: ['pipe', 'pipe', 'ignore'],
-    detached: true,
-    windowsHide: true,
-  });
+  // claude's stderr and its exit are kept: a process that ends mid-turn
+  // without a result otherwise leaves nothing to say why.
+  const stderrLog = claudeStderrLogPath(opts.env);
+  const stderrFd = openClaudeStderrLog(stderrLog);
+  let child: ChildProcessByStdio<Writable, Readable, null>;
+  try {
+    child = spawn(launch.command, launch.args, {
+      cwd: opts.cwd,
+      env: { ...opts.env, [TURN_TAG_ENV]: turnTag },
+      stdio: ['pipe', 'pipe', stderrFd],
+      detached: true,
+      windowsHide: true,
+    }) as ChildProcessByStdio<Writable, Readable, null>;
+  } finally {
+    closeSync(stderrFd);
+  }
   const pgid = child.pid;
+  noteClaudeProcess(stderrLog, `spawned claude pid ${pgid ?? '?'}`);
   onPid?.(pgid);
   const killGroup = (signal: NodeJS.Signals): boolean => {
     if (pgid === undefined) return child.kill(signal);
@@ -102,7 +114,11 @@ export function spawnClaudeInGroup(
   };
   if (opts.signal.aborted) onAbort();
   else opts.signal.addEventListener('abort', onAbort, { once: true });
-  child.once('exit', () => {
+  child.once('exit', (code, signal) => {
+    noteClaudeProcess(
+      stderrLog,
+      `claude pid ${pgid ?? '?'} exited code=${code ?? 'null'} signal=${signal ?? 'null'}${opts.signal.aborted ? ' (turn aborted)' : ''}`,
+    );
     clearTimeout(killTimer);
     opts.signal.removeEventListener('abort', onAbort);
     // Whatever claude left behind is in its group: sweep it.
