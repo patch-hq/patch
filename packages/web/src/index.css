@@ -5005,12 +5005,18 @@ button.nav-row {
 }
 .tool-cancel {
   flex: none;
-  font-size: var(--text-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--ink-3);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.tool-cancel:hover {
   color: var(--danger);
   background: var(--danger-tint);
-  border-radius: 6px;
-  padding: 3px 10px;
-  cursor: pointer;
 }
 .tool-cancelling {
   flex: none;

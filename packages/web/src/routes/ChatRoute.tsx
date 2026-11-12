@@ -5530,6 +5530,8 @@ function CancelCommandButton({ onCancel }: { onCancel: () => void }): JSX.Elemen
       tabIndex={0}
       className="tool-cancel"
       data-testid="tool-cancel"
+      title="Cancel command"
+      aria-label="Cancel command"
       onClick={(e) => {
         e.stopPropagation();
         setAsked(true);
@@ -5544,7 +5546,7 @@ function CancelCommandButton({ onCancel }: { onCancel: () => void }): JSX.Elemen
         }
       }}
     >
-      Cancel command
+      <X size={12} aria-hidden="true" />
     </span>
   );
 }
