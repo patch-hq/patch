@@ -491,6 +491,33 @@ describe('JobDispatcher', () => {
     disp.close();
   });
 
+  it('continue forwards action.permissionMode onto the creating spawn request', () => {
+    const link = new InProcessHostLink();
+    const disp = new TrackedJobDispatcher({
+      dataDir: dir,
+      logs: new JobLogs(dir),
+      hostLink: link,
+      logger: silentLogger,
+      idGenerator: () => 'fid',
+    });
+    const job = makeJob({
+      id: 'j_0000000000000000000contperm',
+      action: {
+        type: 'continue',
+        hostId: 'd1',
+        folder: '/persist',
+        prompt: 'tick',
+        permissionMode: 'bypassPermissions',
+      },
+    });
+    disp.dispatch(job, {}, 'cron');
+    const spawn = link.sent.find((s) => s.event.type === 'chat.spawn_request')?.event;
+    expect(spawn).toBeDefined();
+    if (spawn && spawn.type === 'chat.spawn_request')
+      expect(spawn.permissionMode).toBe('bypassPermissions');
+    disp.close();
+  });
+
   // The gate the notifier reads hangs off the chatId → jobId link, so a job
   // that silences its doorbell must still RECORD that link — otherwise the
   // option would be unreadable at settle time (and the chat would drop out of
