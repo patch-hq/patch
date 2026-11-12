@@ -34,7 +34,6 @@ import {
   copyFileSync,
   cpSync,
   existsSync,
-  linkSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -98,7 +97,7 @@ function signHostApp(outDir, identity) {
   chmodSync(exe, 0o755);
   sh('codesign', [
     '--force',
-    '--timestamp=none',
+    '--timestamp',
     '--identifier',
     HOST_APP_BUNDLE_ID,
     '--options',
@@ -110,10 +109,9 @@ function signHostApp(outDir, identity) {
     app,
   ]);
   sh('codesign', ['--verify', '--strict', '--deep', '--verbose=2', app]);
-  // `node` becomes a hard link to the bundle's executable, so the tarball
-  // carries the binary once.
-  rmSync(join(outDir, 'node'));
-  linkSync(exe, join(outDir, 'node'));
+  // `node` stays its own standalone-signed file. It used to be a hard link to
+  // the bundle's executable, but that signature is bound to the bundle's
+  // Info.plist, so Apple's notarisation rejected `node` as an invalid signature.
 }
 
 /** The three shipping targets. */
@@ -476,7 +474,7 @@ function codesignMacArtifact(outDir, machos) {
     // takes the last, which is how an earlier stray one silently won.
     sh('codesign', [
       '--force',
-      '--timestamp=none',
+      '--timestamp',
       '--identifier',
       basename(file) === 'node' ? HOST_APP_BUNDLE_ID : basename(file),
       '--options',
@@ -490,6 +488,14 @@ function codesignMacArtifact(outDir, machos) {
     sh('codesign', ['--verify', '--strict', '--verbose=2', file]);
   }
   return identity;
+}
+
+/** The sherpa-onnx addon package ships prebuilt, unsigned Mach-Os; notarisation needs them signed too. */
+function sherpaMachOs(outDir, t) {
+  const dir = join(outDir, 'node_modules', `sherpa-onnx-${t.platform}-${t.arch}`);
+  return readdirSync(dir)
+    .filter((f) => /\.(dylib|node)$/.test(f))
+    .map((f) => join(dir, f));
 }
 
 async function buildTarget(t, ctx) {
@@ -607,6 +613,7 @@ async function buildTarget(t, ctx) {
       ...['libonnxruntime.1.26.0.dylib', 'libonnxruntime.1.dylib']
         .map((f) => join(binDir, f))
         .filter((f) => existsSync(f)),
+      ...sherpaMachOs(outDir, t),
       join(outDir, 'node'),
     ]);
     signHostApp(outDir, codesignIdentity);
