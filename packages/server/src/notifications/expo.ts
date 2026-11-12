@@ -79,7 +79,11 @@ export class ExpoPushBackend implements PushBackend {
         to,
         title: payload.title,
         body: payload.body,
-        ...(payload.data ? { data: payload.data } : {}),
+        // `channelId` also rides in data so the phone can re-present the push on
+        // the same channel when it has to redraw it (dynamic action buttons).
+        ...(payload.data
+          ? { data: { ...payload.data, ...(channelFields.channelId ? { channelId: channelFields.channelId } : {}) } }
+          : {}),
         // Expo reads the action-button category from the message's own field;
         // inside `data` it only reaches the app's JS, never the OS's builder.
         ...(payload.data?.['categoryId'] ? { categoryId: payload.data['categoryId'] } : {}),
