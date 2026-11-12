@@ -20,7 +20,7 @@
 
 import { notificationClickPath } from './notificationTarget';
 import { parseOpenChat, writeFrontChat } from './front-chat';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { ensureSpotlightIndexed } from './spotlight';
 import { KeepRunning, OPENED_AT_LOGIN_ARG, setLinuxAutostart } from './keep-running';
 import { applyMacLoginItem, macLoginItemBlocker, shouldOfferMove } from './app-location';
