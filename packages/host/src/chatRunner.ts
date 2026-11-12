@@ -3459,9 +3459,14 @@ export class Daemon {
   ): void {
     const owned = metas.filter((m) => this.chatState.has(m.chatId));
     this.hideArchivedWithLiveWork(owned);
+    // Interrupted turns first: re-sending (or reattaching) one marks the chat
+    // busy synchronously, so an overdue wake loaded after it is held until that
+    // turn ends. Loaded first, the wake's own turn started ahead of the resend,
+    // took the reattach marker for itself and killed the surviving runner
+    // (2026-11-12, Mac restart).
+    this.resumeInterruptedTurns(owned, lastTurnOutcomeByChatId, lastTurnLocalIdByChatId);
     this.wake.loadAll();
     this.watch.loadAll();
-    this.resumeInterruptedTurns(owned, lastTurnOutcomeByChatId, lastTurnLocalIdByChatId);
     this.flagUnresumedInterruptions(owned);
     this.settleUntilCompleteSnoozes(owned);
     this.resumeDeferredGoalEvaluations(owned);
