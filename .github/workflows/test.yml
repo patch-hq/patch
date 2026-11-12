@@ -81,7 +81,8 @@ jobs:
           echo "$mirror" | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
           sudo find /etc/apt -maxdepth 2 -type f \( -name '*.list' -o -name '*.sources' \) \
             -exec sed -E -i "s#https?://([a-z0-9-]+\.)*(archive|security)\.ubuntu\.com/ubuntu/?#$mirror#g" {} +
-          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "20";\nAcquire::https::Timeout "20";\n' \
+          # IPv4 only: runners have also failed to connect to the mirror over IPv6.
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "20";\nAcquire::https::Timeout "20";\nAcquire::ForceIPv4 "true";\n' \
             | sudo tee /etc/apt/apt.conf.d/99ci-mirror >/dev/null
           grep -rhE '^(URIs|deb) ' /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null || true
       # Two attempts, so a runner that cannot reach the mirror at all fails fast.
