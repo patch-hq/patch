@@ -8152,6 +8152,17 @@ button.view-file-download {
     opacity: 0.35;
   }
 }
+.desktop-update-text b {
+  font-weight: 600;
+}
+.desktop-update-detail {
+  color: var(--ink-2);
+}
+.desktop-update-banner.failed .desktop-update-detail,
+.desktop-update-banner.due .desktop-update-detail,
+.desktop-update-banner.overdue .desktop-update-detail {
+  color: inherit;
+}
 .desktop-update-text {
   min-width: 0;
 }
@@ -18484,4 +18495,9 @@ a.drop-target {
 .claude-signin .set-input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+.set-val-available {
+  color: var(--waiting);
+  font-weight: 600;
 }

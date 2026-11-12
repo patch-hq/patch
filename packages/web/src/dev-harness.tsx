@@ -46,7 +46,7 @@ import { VoiceBar } from './components/VoiceBar.js';
 import { RemoteCallBanner } from './components/RemoteCallBanner.js';
 import { VoiceNoteOverlay } from './components/VoiceNoteOverlay.js';
 import { startVoiceNote, cancelVoiceNote } from './lib/voiceController.js';
-import { DesktopUpdateBanner } from './components/DesktopUpdateBanner.js';
+import { UpdateBanner } from './components/UpdateBanner.js';
 import { OfflineBanner } from './components/OfflineBanner.js';
 import { HostOfflineBanner } from './components/HostOfflineBanner.js';
 import { useChatStore } from './stores/chatStore.js';
@@ -4200,7 +4200,7 @@ function Harness(): JSX.Element {
     <>
       <OfflineBanner />
       <HostOfflineBanner />
-      <DesktopUpdateBanner />
+      <UpdateBanner />
       {columns}
       <VoiceNoteOverlay />
     </>

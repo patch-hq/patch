@@ -26,6 +26,9 @@ import {
 import { verifySurfaceCredential, verifyDaemonKey } from '@patch/auth';
 import { GIT_SHA, SERVER_SHA, VERSION } from './version.js';
 import { buildVersionReport, readPublishedArtifact, readWebLayer } from './version-report.js';
+import { UpdateControl } from './update-control.js';
+import { isNewer } from './self-update.js';
+import { readAvailableRelease } from './release-mirror.js';
 import { Registry } from './registry.js';
 import { PresenceTracker } from './presence.js';
 import { createActivityReader } from './activity.js';
@@ -145,6 +148,8 @@ export interface BuildOptions {
   webDistDir?: string;
   /** Required for WS auth + pairing — file-backed registry is loaded from this dir. */
   dataDir?: string;
+  /** The one auto-update switch (update-control.ts); a held-open default in tests. */
+  updateControl?: UpdateControl;
   /** How long the Manager host must be offline before another takes over (tests shorten it). */
   managerFailoverGraceMs?: number;
   /** How long a host must stay offline before its in-flight chats are errored (tests shorten it). */
@@ -700,6 +705,11 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         logger: log.child({ component: 'shared-settings' }),
       })
     : undefined;
+  // The one switch over server, hosts and app updates (update-control.ts).
+  const updateControl = opts.updateControl ?? new UpdateControl({ dataDir: null });
+  updateControl.setAutoUpdate(
+    () => (accountSettings?.current() ?? DEFAULT_SETTINGS).autoUpdateHosts,
+  );
   if (accountSettings) {
     accountSettings.startCredentialRefresh();
     app.addHook('onClose', async () => accountSettings.close());
@@ -904,7 +914,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     idGenerator,
     getAppVersion: () => readServedBundleVersion?.() ?? appBundleVersion,
     serverVersion: VERSION,
-    autoUpdateHosts: () => (accountSettings?.current() ?? DEFAULT_SETTINGS).autoUpdateHosts,
+    autoUpdateHosts: () => updateControl.mayUpdate(),
     // Read per connect, not cached: a deploy publishes the host and restarts
     // this server in one run, but a hand-published host must count too. A
     // missing or unreadable manifest is null — "nothing published", which the
@@ -1738,6 +1748,44 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   //
   // Deliberately re-reads the mounted web-dist and the downloads dir on EVERY
   // request, so the panel's "Check now" reflects the box as it is right now.
+  const surfaceAuthorised = async (authHeader: string | undefined): Promise<boolean> => {
+    const account = registry.getAccount();
+    if (!account || !authHeader || !authHeader.startsWith('Bearer ')) return false;
+    try {
+      const claims = await verifySurfaceCredential(authHeader.slice('Bearer '.length).trim(), {
+        userPublicKey: account.userPublicKey,
+      });
+      return !registry.isRevoked(claims.surface_id);
+    } catch {
+      return false;
+    }
+  };
+
+  // "Update everything": the server, then every host, move to the newest
+  // release, whatever the switch says. The hold returns once all are on it.
+  app.post('/api/update-all', async (req, reply) => {
+    if (!(await surfaceAuthorised(req.headers.authorization))) {
+      return reply.code(401).send({ error: 'unauthenticated' });
+    }
+    log.info({ running: VERSION }, 'update everything requested');
+    updateControl.requestUpdateAll();
+    return reply.code(202).send({ ok: true });
+  });
+
+  const updateAllDone = setInterval(() => {
+    if (!updateControl.updateAllPending()) return;
+    const available = readAvailableRelease(downloadsDir)?.version ?? null;
+    if (available && isNewer(available, VERSION)) return;
+    const behind = wsHub
+      .hosts()
+      .filter((h) => h.online && h.host?.hostVersion && h.host.hostVersion !== VERSION);
+    if (behind.length > 0) return;
+    log.info({ version: VERSION }, 'update everything finished: server and hosts are in step');
+    updateControl.clearUpdateAll();
+  }, 30_000);
+  updateAllDone.unref();
+  app.addHook('onClose', async () => clearInterval(updateAllDone));
+
   app.get('/api/version', async (req, reply) => {
     const account = registry.getAccount();
     if (!account) return reply.code(401).send({ error: 'unauthenticated' });
@@ -1787,6 +1835,11 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
         gitSha: h.host?.gitSha ?? null,
         builtAt: h.host?.builtAt ?? null,
       })),
+      release: {
+        available: readAvailableRelease(downloadsDir)?.version ?? null,
+        autoUpdate: updateControl.isAutoUpdate(),
+        updating: updateControl.updateAllPending(),
+      },
       desktop: readPublishedArtifact(
         downloadsDir,
         'desktop-latest.json',

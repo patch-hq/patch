@@ -10,6 +10,7 @@ import { RelayService } from './relay-service.js';
 import { startReleaseMirror } from './release-mirror.js';
 import { RELEASE_REPO, readChannel } from './release-channel.js';
 import { createSelfUpdater } from './self-update.js';
+import { UpdateControl } from './update-control.js';
 import { portInUseMessage } from './port-holder.js';
 import { activatedFd } from './socket-activation.js';
 
@@ -46,9 +47,12 @@ export async function startServer(
   const relay = config.relayUrl
     ? new RelayService({ dataDir: config.dataDir, url: config.relayUrl })
     : undefined;
+  // One switch for every part of Patch; the app wires it to account settings.
+  const updateControl = new UpdateControl({ dataDir: config.dataDir });
   const { app, issueFiler } = await buildAll({
     logger,
     dataDir: config.dataDir,
+    updateControl,
     internalToken: config.internalToken,
     restartTarget: () =>
       readRestartTarget(process.env.PATCH_SERVER_HOME, process.env.PATCH_VERSION),
@@ -113,6 +117,11 @@ export async function startServer(
     repo: RELEASE_REPO,
     channel: () => readChannel(config.dataDir),
     downloadsDir,
+    // With the switch off, a check only notes which release is available.
+    hold: () => !updateControl.mayUpdate(),
+    onCheckNow: (checkNow) => {
+      updateControl.onUpdateAllRequested(checkNow);
+    },
     log: (msg) => app.log.info(msg),
     ...(home && running
       ? {

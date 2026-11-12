@@ -151,6 +151,31 @@ export interface MirrorOptions {
   downloadsDir: string;
   fetchImpl?: typeof fetch;
   log?: (msg: string) => void;
+  /**
+   * Only note which release is available, without mirroring it. Used while the
+   * auto-update switch is off, so nothing a host or the desktop app reads from
+   * downloads/ moves until the user asks (update-control.ts).
+   */
+  peekOnly?: boolean;
+}
+
+const AVAILABLE_FILE = 'release-available.json';
+
+export interface AvailableRelease {
+  tag: string;
+  version: string;
+  seenAt: string;
+}
+
+/** The newest release the channel offers, as last seen by a check; null if never seen. */
+export function readAvailableRelease(downloadsDir: string): AvailableRelease | null {
+  const file = join(downloadsDir, AVAILABLE_FILE);
+  if (!existsSync(file)) return null;
+  try {
+    return JSON.parse(readFileSync(file, 'utf8')) as AvailableRelease;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -203,6 +228,17 @@ export async function mirrorOnce(opts: MirrorOptions): Promise<string | null> {
   const release = selectRelease(list, opts.channel);
   if (!release) {
     log(`release mirror: ${opts.repo} has no ${opts.channel} release yet`);
+    return null;
+  }
+  if (opts.peekOnly) {
+    // Only a note of what is on offer; a mirrored release speaks for itself.
+    mkdirSync(opts.downloadsDir, { recursive: true });
+    const available: AvailableRelease = {
+      tag: release.tag_name,
+      version: /\d+\.\d+\.\d+/.exec(release.tag_name)?.[0] ?? release.tag_name,
+      seenAt: new Date().toISOString(),
+    };
+    writeFileSync(join(opts.downloadsDir, AVAILABLE_FILE), JSON.stringify(available));
     return null;
   }
   const served = readMirrorState(opts.downloadsDir, log);
@@ -317,6 +353,10 @@ export function startReleaseMirror(
   opts: Omit<MirrorOptions, 'channel'> & {
     channel: () => Channel | 'off';
     afterCheck?: () => void;
+    /** True while releases must not move (auto-update off, no update requested). */
+    hold?: () => boolean;
+    /** Receives a function that runs a check at once (after "Update everything"). */
+    onCheckNow?: (checkNow: () => void) => void;
   },
   everyMs = 2 * 60 * 1000,
 ): () => void {
@@ -326,6 +366,10 @@ export function startReleaseMirror(
     try {
       channel = opts.channel();
       if (channel === 'off') return;
+      if (opts.hold?.()) {
+        await mirrorOnce({ ...opts, channel, peekOnly: true });
+        return;
+      }
       await mirrorOnce({ ...opts, channel });
     } catch (err: unknown) {
       log(`release mirror FAILED: ${err instanceof Error ? err.message : String(err)}`);
@@ -338,6 +382,7 @@ export function startReleaseMirror(
     }
   };
   void tick();
+  opts.onCheckNow?.(() => void tick());
   const timer = setInterval(tick, everyMs);
   timer.unref();
   return () => clearInterval(timer);

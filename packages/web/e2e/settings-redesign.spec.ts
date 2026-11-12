@@ -558,13 +558,12 @@ test.describe('Settings — behaviour', () => {
     await reportHost(page, { updateAvailable: true });
     await expect(page.getByTestId('settings-nav-updates-pip')).toBeVisible();
 
+    // With auto-update on, the host catches up by itself: no button, no per-host chores.
     await page.getByTestId('settings-nav-updates').click();
-    await expect(page.getByTestId('update-status')).toHaveText('Update available');
-    await page.getByTestId('update-all').click();
-    expect(await wsSent(page)).toContainEqual({ type: 'host.update', hostId: 'd1' });
+    await expect(page.getByTestId('update-status')).toHaveText('Updating…');
+    await expect(page.getByTestId('update-all')).toHaveCount(0);
 
     await reportHost(page, { updateAvailable: false });
     await expect(page.getByTestId('settings-nav-updates-pip')).toHaveCount(0);
-    await expect(page.getByTestId('update-all')).toHaveCount(0);
   });
 });
