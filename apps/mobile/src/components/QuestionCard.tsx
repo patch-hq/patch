@@ -159,12 +159,15 @@ export function QuestionCard({
   onAnswer: answerRequest,
   onCancel: cancelRequest,
   onActivity,
+  onInputFocusChange,
 }: {
   entry: ChatEventEntry;
   onAnswer(requestId: string, answers: Record<string, string>): void;
   onCancel(requestId: string): void;
   /** The user is picking/typing — keeps the host's question window open. */
   onActivity?(): void;
+  /** The free-text answer box gained or lost focus — the chat list stops re-pinning to the newest message while it has focus. */
+  onInputFocusChange?(focused: boolean): void;
 }): React.JSX.Element {
   const colors = useTheme();
   const questions = useMemo(() => parseAskUserQuestion(entry.toolArgs), [entry.toolArgs]);
@@ -220,6 +223,7 @@ export function QuestionCard({
       onAnswer={onAnswer}
       onCancel={onCancel}
       onActivity={onActivity}
+      onInputFocusChange={onInputFocusChange}
     />
   );
 }
@@ -351,12 +355,14 @@ function QuestionForm({
   onAnswer,
   onCancel,
   onActivity,
+  onInputFocusChange,
 }: {
   entry: ChatEventEntry;
   questions: AskQuestion[];
   onAnswer(requestId: string, answers: Record<string, string>): void;
   onCancel(requestId: string): void;
   onActivity: (() => void) | undefined;
+  onInputFocusChange: ((focused: boolean) => void) | undefined;
 }): React.JSX.Element {
   const colors = useTheme();
   const resolved = entry.permissionResolved;
@@ -558,6 +564,8 @@ function QuestionForm({
                 accessibilityLabel={`Other answer for ${q.question}`}
                 multiline
                 autoFocus
+                onFocus={() => onInputFocusChange?.(true)}
+                onBlur={() => onInputFocusChange?.(false)}
                 value={otherText[q.question] ?? ''}
                 onChangeText={(text) => setOtherText((prev) => ({ ...prev, [q.question]: text }))}
                 style={{
