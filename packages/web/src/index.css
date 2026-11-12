@@ -441,7 +441,8 @@ body {
   -webkit-app-region: drag;
 }
 .overlay-titlebar .sb-brand button,
-.overlay-titlebar .sb-brand input {
+.overlay-titlebar .sb-brand input,
+.overlay-titlebar .sb-brand .conn-dot {
   -webkit-app-region: no-drag;
 }
 
