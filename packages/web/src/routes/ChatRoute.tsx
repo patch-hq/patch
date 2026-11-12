@@ -4894,7 +4894,10 @@ function DelegateStrip({ chatId }: { chatId: string }): JSX.Element | null {
           activateLabel={`Open transcript of "${d.label}"`}
           meta={
             live ? (
-              <span data-testid="delegate-strip-time">{formatElapsed(d.since, now)}</span>
+              <>
+                {d.followUp ? <span data-testid="delegate-strip-followup">follow-up</span> : null}{' '}
+                <span data-testid="delegate-strip-time">{formatElapsed(d.since, now)}</span>
+              </>
             ) : null
           }
         >
@@ -5473,7 +5476,9 @@ const ToolGroup = memo(
             {open ? '▾' : '▸'}
           </span>
           <span className="tool-summary-text">{summary}</span>
-          {runningCall && !open ? <ToolRunning since={runningCall.startedAt} turnSince={turnSince} /> : null}
+          {runningCall && !open ? (
+            <ToolRunning since={runningCall.startedAt} turnSince={turnSince} />
+          ) : null}
           {runningCall && !open && runningCall.tool === 'Bash' && runningCall.callId ? (
             <CancelCommandButton onCancel={() => requestToolCancel(chatId, runningCall.callId!)} />
           ) : null}
@@ -5672,7 +5677,9 @@ function ToolDisclosure({
         </span>
         {badge}
         <span className="tool-summary-text">{summary}</span>
-        {runningSince !== undefined ? <ToolRunning since={runningSince.at} turnSince={runningSince.turn} /> : null}
+        {runningSince !== undefined ? (
+          <ToolRunning since={runningSince.at} turnSince={runningSince.turn} />
+        ) : null}
         {cancelledChip ? (
           <span className="tool-cancelled-chip" data-testid="tool-cancelled">
             Cancelled by you

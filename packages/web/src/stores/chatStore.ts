@@ -575,8 +575,10 @@ export interface DelegateUpdateInfo {
   status: ChatDelegateUpdateEvent['status'];
   /** Set while the subagent is parked on a usage limit; `resetsAt` is when it resumes. */
   outOfCredit?: { resetsAt?: number };
-  /** Epoch ms this surface first saw the subagent — the running-time clock. */
+  /** Epoch ms the current run began — the running-time clock. The host's `runStartedAt`; the time this surface first saw it only against a host that sends none. */
   since: number;
+  /** The current run is a follow-up wake of a settled subagent. */
+  followUp?: boolean;
 }
 
 export interface ChatEventEntry {
@@ -2685,7 +2687,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 label: event.label,
                 status: event.status,
                 ...(event.outOfCredit ? { outOfCredit: event.outOfCredit } : {}),
-                since: delegateUpdates[event.chatId]?.[event.delegateId]?.since ?? Date.now(),
+                since:
+                  event.runStartedAt ??
+                  delegateUpdates[event.chatId]?.[event.delegateId]?.since ??
+                  Date.now(),
+                ...(event.followUp ? { followUp: true } : {}),
               },
             },
           };

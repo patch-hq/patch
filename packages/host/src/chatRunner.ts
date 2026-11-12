@@ -4791,12 +4791,16 @@ export class Daemon {
   private rearmDelegate(chatId: string): void {
     const state = this.chatState.get(chatId);
     if (state?.subagent?.outcome === undefined) return;
-    const { outcome: _o, finishedAt: _f, ...rest } = state.subagent;
+    const { outcome: _o, finishedAt: _f, ...base } = state.subagent;
+    const rest = { ...base, runStartedAt: this.opts.now(), followUp: true };
     state.subagent = rest;
     this.opts.metaStore.update(chatId, (m) => {
       if (!m.subagent) return m;
       const { outcome: _mo, finishedAt: _mf, ...mrest } = m.subagent;
-      return { ...m, subagent: mrest };
+      return {
+        ...m,
+        subagent: { ...mrest, runStartedAt: rest.runStartedAt, followUp: true },
+      };
     });
     this.emitDelegateUpdate(rest.parentChatId, chatId, rest.label, 'running');
   }
@@ -5007,6 +5011,21 @@ export class Daemon {
     });
   }
 
+  /** When the subagent's current run began, and whether it is a follow-up wake. Live statuses only. */
+  private delegateRunFields(
+    delegateId: string,
+    status: DelegateStatus,
+  ): { runStartedAt?: number; followUp?: boolean } {
+    if (status !== 'running' && status !== 'awaiting-permission') return {};
+    const sub =
+      this.chatState.get(delegateId)?.subagent ?? this.opts.metaStore.read(delegateId)?.subagent;
+    const startedAt = sub?.runStartedAt ?? this.opts.metaStore.read(delegateId)?.createdAt;
+    return {
+      ...(startedAt !== undefined ? { runStartedAt: startedAt } : {}),
+      ...(sub?.followUp ? { followUp: true } : {}),
+    };
+  }
+
   /** Live status ping for the parent's `patch_delegate` tool row (spec/14 §
    *  Main chat panel — Delegate tool row). Never withheld by `private emit()`
    *  — it is emitted under the PARENT's own chatId, which is never itself a
@@ -5027,6 +5046,7 @@ export class Daemon {
       delegateId,
       label,
       status,
+      ...this.delegateRunFields(delegateId, status),
       ...(outOfCredit ? { outOfCredit } : {}),
       seq: this.bumpSeq(parentChatId),
     };
@@ -6515,6 +6535,7 @@ export class Daemon {
         delegateId: d.id,
         label: d.label,
         status: d.status,
+        ...this.delegateRunFields(d.id, d.status),
         seq: lastSeq,
       });
     }
