@@ -215,7 +215,7 @@ describe('Agent page: Permission mode', () => {
 
   it('sets a default for Codex among only the modes it can run', async () => {
     const r = await renderAgent();
-    expect(textOf(get(r, 'permission-default-codex'))).toBe('Default');
+    expect(textOf(get(r, 'permission-default-codex'))).toBe('Ask');
     await openPicker(r, 'permission-default-codex');
     expect(query(r, 'permission-default-codex-option-auto')).toBeNull();
     await pick(r, 'permission-default-codex', 'bypassPermissions');

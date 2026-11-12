@@ -26,6 +26,7 @@ import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { setActiveWs } from '../api/ws.js';
 import { setModelCatalog, resetModelCatalog } from '../lib/models.js';
+import { usePreferencesStore } from '../stores/preferencesStore.js';
 
 vi.mock('../api/rest.js', () => ({
   api: {
@@ -131,6 +132,22 @@ describe('composer model selector', () => {
   it('is still on screen when the host has reported no model — never a guessed one', () => {
     render(row({ model: null }));
     expect(screen.getByTestId('chat-model')).toBeInTheDocument();
+  });
+
+  it('a Manager that has not reported a model reads the account’s Manager model, not "Choose a model…"', () => {
+    usePreferencesStore.setState((s) => ({
+      preferences: { ...s.preferences, specialThreadModel: 'claude-opus-4-1' },
+    }));
+    render(row({ chatId: 'thread_manager', model: null }));
+    expect(pillLabel()).toBe('Opus 4.1');
+  });
+
+  it('a regular chat with no reported model still reads empty, not a guess', () => {
+    usePreferencesStore.setState((s) => ({
+      preferences: { ...s.preferences, specialThreadModel: 'claude-opus-4-1' },
+    }));
+    render(row({ model: null }));
+    expect(pillLabel()).not.toBe('Opus 4.1');
   });
 
   it('the model readout IS the picker — clicking it opens the model list', () => {

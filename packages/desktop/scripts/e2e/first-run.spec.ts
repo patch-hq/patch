@@ -241,16 +241,53 @@ async function throwawayServer(): Promise<{ code: string; stop: () => void; orig
   return { code, origin, stop: () => child.kill('SIGTERM') };
 }
 
-/** Walk the welcome steps that are the same on both paths. */
-async function permissionsAndModel(page: Page): Promise<void> {
+/**
+ * Skip the AI step as a newcomer might: it says once what that costs, then
+ * carries on.
+ */
+async function skipAi(page: Page): Promise<void> {
+  await page.getByTestId('welcome-skip').click();
+  await expect(page.getByTestId('welcome-skip-note')).toHaveText(
+    'Chats won’t run until you connect an AI. You can do it later from the banner in any chat.',
+  );
+  await shot(page, 'providers-skipped');
+  await page.getByTestId('welcome-next').click();
+}
+
+/** Walk the welcome steps that are the same on both paths, with no AI connected. */
+async function permissions(page: Page): Promise<void> {
   await expect(page.getByTestId('welcome-permissions')).toBeVisible();
+  // The mode that asks first is called what it does, not "Default".
+  await expect(page.getByTestId('welcome-mode-default')).toContainText('Ask');
   await page.getByTestId('welcome-mode-default').click();
   await expect(page.getByTestId('welcome-mode-default')).toHaveClass(/checked/);
   await shot(page, 'permissions');
   await page.getByTestId('welcome-next').click();
-  await expect(page.getByTestId('welcome-model')).toBeVisible();
-  await shot(page, 'model');
+  // No AI, no models to choose between: the model step is not asked.
+  await expect(page.getByTestId('welcome-model')).toHaveCount(0);
+}
+
+/** The phone step: the app download first, then on its own the pairing code. */
+async function phone(page: Page): Promise<void> {
+  await expect(page.getByTestId('welcome-phone')).toHaveAttribute('data-phase', 'app');
+  await expect(page.getByTestId('welcome-apk-qr')).toHaveAttribute(
+    'data-payload',
+    'https://github.com/patch-hq/patch/releases/latest/download/Patch-android.apk',
+  );
+  await expect(page.getByTestId('welcome-qr')).toHaveCount(0);
+  await shot(page, 'phone-app');
   await page.getByTestId('welcome-next').click();
+  await expect(page.getByTestId('welcome-qr')).toBeVisible();
+  await expect(page.getByTestId('welcome-apk-qr')).toHaveCount(0);
+  await shot(page, 'phone-pair');
+  await page.getByTestId('welcome-next').click();
+}
+
+/** What a newcomer's sidebar holds: nothing empty or unexplained. */
+async function newcomerSidebar(page: Page): Promise<void> {
+  await expect(page.getByTestId('sidebar')).toBeVisible();
+  await expect(page.getByTestId('channels-toggle')).toHaveCount(0);
+  await expect(page.getByTestId('sb-lifecycle')).toHaveCount(0);
 }
 
 /**
@@ -259,7 +296,7 @@ async function permissionsAndModel(page: Page): Promise<void> {
  * straight to signing in.
  */
 async function firstChat(page: Page): Promise<void> {
-  await page.getByTestId('new-chat-fab').click();
+  // Setup ends on a new chat, ready to type into — not on the Manager.
   await expect(page).toHaveURL(/\/chats\/new/);
   await expect(page.getByTestId('composer-input')).toBeVisible();
   const notice = page.getByTestId('composer-signed-out');
@@ -302,15 +339,14 @@ test('my own server: pairs by code, runs the welcome steps, and is remembered', 
     // The credential was taken from the address, never left in it.
     expect(welcome.url()).not.toContain('credential=');
     await shot(welcome, 'providers');
-    await welcome.getByTestId('welcome-skip').click();
-    await permissionsAndModel(welcome);
+    await skipAi(welcome);
+    await permissions(welcome);
     // No keep-running step: this computer does not run Patch.
-    await expect(welcome.getByTestId('welcome-phone')).toBeVisible();
-    await expect(welcome.getByTestId('welcome-qr')).toBeVisible();
-    await shot(welcome, 'phone');
-    await welcome.getByTestId('welcome-next').click();
+    await expect(welcome.getByTestId('welcome-keep-running')).toHaveCount(0);
+    await phone(welcome);
     await expect(welcome).not.toHaveURL(/welcome/);
     await firstChat(welcome);
+    await newcomerSidebar(welcome);
 
     // The permission mode chosen was written to the server's shared settings.
     const shared = await welcome.evaluate(async () => {
@@ -400,11 +436,12 @@ async function thisComputer(computer: { home: string; userData: string }): Promi
   await shot(welcome, 'chatgpt-pending');
   await welcome.getByRole('button', { name: 'Cancel sign-in' }).click();
 
-  await welcome.getByTestId('welcome-skip').click();
-  await permissionsAndModel(welcome);
+  await skipAi(welcome);
+  await permissions(welcome);
 
-  // A brand-new host has a project folder for its first chat.
-  expect(existsSync(join(ACCOUNT_HOME, 'Patch'))).toBe(true);
+  // A brand-new host has a project folder for its first chat, named as the
+  // person's own starting folder rather than after Patch.
+  expect(existsSync(join(ACCOUNT_HOME, 'My first project'))).toBe(true);
 
   // Keep running: both on by default, remembered.
   await expect(welcome.getByTestId('welcome-keep-running')).toBeVisible();
@@ -416,17 +453,26 @@ async function thisComputer(computer: { home: string; userData: string }): Promi
     keepAwake: true,
   });
   await welcome.getByTestId('welcome-next').click();
-  await expect(welcome.getByTestId('welcome-phone')).toBeVisible();
-  await welcome.getByTestId('welcome-next').click();
+  await phone(welcome);
   await firstChat(welcome);
-  // With a host: the first chat's folder is the new ~/Patch, and the model
-  // reads by the name setup used, never as an id.
-  await expect(welcome.getByTestId(`folder-quick-${join(ACCOUNT_HOME, 'Patch')}`)).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  );
+  await newcomerSidebar(welcome);
+  // With a host: the first chat's folder is the new starting folder, and the
+  // model reads by the name setup used, never as an id.
+  const first = welcome.getByTestId(`folder-quick-${join(ACCOUNT_HOME, 'My first project')}`);
+  await expect(first).toHaveAttribute('aria-pressed', 'true');
+  await expect(first).toHaveText('My first project');
   await expect(welcome.getByTestId('new-chat-setup')).not.toContainText('claude-');
   await shot(welcome, 'new-chat-this-computer');
+
+  // The Manager says what it is, shows no empty Threads panel, and names the
+  // model it starts on rather than "Choose a model…".
+  await welcome.getByTestId('chat-row-thread_manager').click();
+  await expect(welcome.getByTestId('empty-chat-line')).toHaveText(
+    'Ask about any of your chats, or have it message them for you.',
+  );
+  await expect(welcome.getByTestId('threads-strip')).toHaveCount(0);
+  await expect(welcome.getByTestId('chat-model')).not.toContainText('Choose a model');
+  await shot(welcome, 'manager-this-computer');
 
   // Closing every window leaves the server answering: the phone can still reach it.
   const origin = new URL(welcome.url()).origin;

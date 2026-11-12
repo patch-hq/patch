@@ -69,8 +69,9 @@ test('this computer: every step, each choice written where Settings writes it', 
   // 1. Connect an AI — Claude in the browser, the code pasted back.
   await expect(page.getByTestId('welcome-providers')).toBeVisible();
   await expect(page.getByTestId('welcome-next')).toBeDisabled();
-  // One dot per step this page asks: AI, permissions, model, keep running, phone.
-  await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(5);
+  // One dot per step this page asks: AI, permissions, keep running, phone —
+  // and the model step joins once an AI is connected.
+  await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(4);
   await expect(page.getByTestId('welcome-dots').locator('li.done')).toHaveCount(1);
   await expect(page.getByTestId('welcome-claude-plans')).toHaveText(
     'Works with a Claude Pro, Max, Team or Enterprise plan.',
@@ -89,6 +90,7 @@ test('this computer: every step, each choice written where Settings writes it', 
   await page.getByTestId('claude-signin-code').fill('the-code#state');
   await page.getByTestId('claude-signin-finish').click();
   await expect(page.getByTestId('welcome-claude-connected')).toContainText('Claude 1');
+  await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(5);
   expect(server.writes.map((w) => [w.path, w.body])).toEqual([
     ['/api/accounts/claude-code/signin', undefined],
     ['/api/accounts/claude-code/signin/complete', { signInId: 's1', code: 'the-code#state' }],
@@ -126,29 +128,42 @@ test('this computer: every step, each choice written where Settings writes it', 
     .toEqual([{ keepAwake: false }]);
   await page.getByTestId('welcome-next').click();
 
-  // 5. The phone: the APK link and a real pairing QR; Done finishes.
-  await expect(page.getByTestId('welcome-phone')).toBeVisible();
-  await expect(page.getByTestId('welcome-apk')).toHaveAttribute(
-    'href',
+  // 5. The phone: first a QR that opens the app download on the phone, then,
+  // on its own, the pairing QR — never both on screen to be scanned wrongly.
+  await expect(page.getByTestId('welcome-phone')).toHaveAttribute('data-phase', 'app');
+  await expect(page.getByTestId('welcome-apk-qr')).toHaveAttribute(
+    'data-payload',
     'https://github.com/patch-hq/patch/releases/latest/download/Patch-android.apk',
   );
-  await expect(page.getByTestId('welcome-qr')).toBeVisible();
+  await expect(page.getByTestId('welcome-qr')).toHaveCount(0);
+  await expect(page.getByTestId('welcome-phone')).toContainText(
+    'Scan with your phone’s camera to get the Android app.',
+  );
   await expect(page.getByTestId('welcome-phone')).toContainText('iPhone isn’t available yet');
-  // Numbered, flush with the heading.
-  const steps = page.locator('.welcome-phone-steps');
-  expect(await steps.evaluate((el) => getComputedStyle(el).listStyleType)).toBe('decimal');
-  const [list, heading] = await Promise.all([
-    steps.boundingBox(),
-    page.getByTestId('welcome-phone').locator('h1').boundingBox(),
-  ]);
-  expect(Math.abs(list!.x - heading!.x)).toBeLessThan(2);
+  await expect(page.getByTestId('welcome-skip')).toHaveText('No phone, skip');
   await expect(page.getByTestId('welcome-dots').locator('li.done')).toHaveCount(5);
   await shot(page, '6-phone');
   await page.getByTestId('welcome-next').click();
+  await expect(page.getByTestId('welcome-phone')).toHaveAttribute('data-phase', 'pair');
+  await expect(page.getByTestId('welcome-apk-qr')).toHaveCount(0);
+  await expect(page.getByTestId('welcome-qr')).toHaveAttribute(
+    'data-payload',
+    'patch-pair://?nonce=n1&relay=wss://relay.example&ch=c&pk=k',
+  );
+  await expect(page.getByTestId('welcome-phone')).toContainText(
+    'Open Patch on your phone and scan this code.',
+  );
+  await shot(page, '6c-phone-pair');
+  // Back from the pairing code returns to the app download, not the step before.
+  await page.getByTestId('welcome-back').click();
+  await expect(page.getByTestId('welcome-phone')).toHaveAttribute('data-phase', 'app');
+  await page.getByTestId('welcome-next').click();
+  await page.getByTestId('welcome-next').click();
+  // Setup ends on a new chat, ready to type into — not the Manager.
   await expect(page.getByTestId('welcome-finished')).toBeAttached();
 });
 
-test('nothing connected: neutral permission copy, the model step says why the list is short, and the phone can be skipped', async ({
+test('nothing connected: skipping says once what it costs, the model step is not asked, and the phone can be skipped', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 960, height: 720 });
@@ -158,31 +173,84 @@ test('nothing connected: neutral permission copy, the model step says why the li
     r.fulfill({ status: 502, json: { error: 'upstream' } }),
   );
   await page.goto('/app/dev-harness.html?route=/welcome?machine=server');
-  await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(4);
+  // AI, permissions, phone: no model step with nothing to choose from.
+  await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(3);
+  await expect(page.getByTestId('welcome-skip-note')).toHaveCount(0);
   await page.getByTestId('welcome-skip').click();
+  // Still on the AI step: one plain line, then Continue carries on.
+  await expect(page.getByTestId('welcome-providers')).toBeVisible();
+  await expect(page.getByTestId('welcome-skip-note')).toHaveText(
+    'Chats won’t run until you connect an AI. You can do it later from the banner in any chat.',
+  );
+  await expect(page.getByTestId('welcome-skip')).toHaveCount(0);
+  await shot(page, '2d-skipped');
+  await page.getByTestId('welcome-next').click();
 
   await expect(page.getByTestId('welcome-permissions')).toBeVisible();
   await expect(page.getByTestId('welcome-permissions')).not.toContainText('Claude');
   await expect(page.getByTestId('welcome-mode-auto').locator('.welcome-option-hint')).toHaveText(
     'Asks only when something looks risky',
   );
+  // The mode that asks first reads as what it does, not "Default" beside a
+  // preselected Auto.
+  await expect(page.getByTestId('welcome-mode-default')).toContainText('Ask');
+  await expect(page.getByTestId('welcome-permissions')).not.toContainText('Default');
   await page.getByTestId('welcome-next').click();
 
-  await expect(page.getByTestId('welcome-model')).toBeVisible();
-  await expect(page.getByTestId('welcome-model-problem')).toHaveText(
-    'Models appear once you connect an AI.',
-  );
-  await expect(page.getByTestId('welcome-model')).not.toContainText('upstream');
-  await expect(page.getByTestId('welcome-model-claude-opus-5')).toContainText('Opus 5');
-  await shot(page, '4b-model-nothing-connected');
-  await page.getByTestId('welcome-next').click();
-
+  await expect(page.getByTestId('welcome-model')).toHaveCount(0);
   await expect(page.getByTestId('welcome-phone')).toBeVisible();
   await expect(page.getByTestId('welcome-skip')).toHaveText('No phone, skip');
-  await expect(page.getByTestId('welcome-qr')).toHaveAttribute('width', /\d+/);
+  await expect(page.getByTestId('welcome-apk-qr')).toHaveAttribute('width', /\d+/);
   await shot(page, '6b-phone-nothing-connected');
   await page.getByTestId('welcome-skip').click();
   await expect(page.getByTestId('welcome-finished')).toBeAttached();
+});
+
+test('ChatGPT only: the model step offers ChatGPT models and moves every chat default off Claude', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 960, height: 720 });
+  const server = await stub(page, {
+    secrets: { codex: [{ id: 'o1', label: 'ChatGPT 1', connected: true }] },
+  });
+  // A host with only ChatGPT connected lists only ChatGPT's models; a Claude
+  // entry here would still be held back, since it cannot run.
+  await page.route('**/api/models*', (r) =>
+    r.fulfill({
+      json: {
+        models: [
+          { id: 'openai/gpt-5.2', label: 'GPT-5.2' },
+          { id: 'openai/gpt-5.2-mini', label: 'GPT-5.2 mini' },
+          { id: 'claude-opus-5', label: 'Opus 5' },
+        ],
+        fetchedAt: '2026-01-01T00:00:00.000Z',
+      },
+    }),
+  );
+  await page.goto('/app/dev-harness.html?route=/welcome?machine=server');
+  await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(4);
+  await page.getByTestId('welcome-next').click();
+  await page.getByTestId('welcome-next').click();
+
+  await expect(page.getByTestId('welcome-model')).toBeVisible();
+  await expect(page.getByTestId('welcome-model-openai/gpt-5.2')).toBeVisible();
+  await expect(page.getByTestId('welcome-model-openai/gpt-5.2-mini')).toBeVisible();
+  await expect(page.getByTestId('welcome-model-claude-opus-5')).toHaveCount(0);
+  // The Claude default could not run: it is moved to the newest ChatGPT model,
+  // along with the jobs' and the Manager's.
+  await expect
+    .poll(() => server.patches)
+    .toContainEqual({
+      defaultModel: 'openai/gpt-5.2',
+      jobDefaultModel: 'openai/gpt-5.2',
+      specialThreadModel: 'openai/gpt-5.2',
+    });
+  await expect(page.getByTestId('welcome-model-openai/gpt-5.2').locator('input')).toBeChecked();
+  await shot(page, '4-model-chatgpt');
+  await page.getByTestId('welcome-model-openai/gpt-5.2-mini').click();
+  await expect.poll(() => server.patches.at(-1)).toEqual({ defaultModel: 'openai/gpt-5.2-mini' });
+  await page.getByTestId('welcome-next').click();
+  await expect(page.getByTestId('welcome-phone')).toBeVisible();
 });
 
 test('with an AI connected, a model list that fails says so in words, the code one click down', async ({
@@ -203,15 +271,17 @@ test('with an AI connected, a model list that fails says so in words, the code o
 });
 
 test('own server: no keep-running step, and the AI step can be skipped', async ({ page }) => {
-  await stub(page);
+  await stub(page, { secrets: { claude: [{ id: 'c1', label: 'Claude 1', connected: true }] } });
   await page.goto('/app/dev-harness.html?route=/welcome?machine=server');
-  await page.getByTestId('welcome-skip').click();
+  await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(4);
+  await page.getByTestId('welcome-next').click();
   await expect(page.getByTestId('welcome-permissions')).toBeVisible();
   await page.getByTestId('welcome-next').click();
+  await expect(page.getByTestId('welcome-model')).toBeVisible();
   await page.getByTestId('welcome-next').click();
   await expect(page.getByTestId('welcome-phone')).toBeVisible();
   await expect(page.getByTestId('welcome-keep-running')).toHaveCount(0);
-  await page.getByTestId('welcome-next').click();
+  await page.getByTestId('welcome-skip').click();
   await expect(page.getByTestId('welcome-finished')).toBeAttached();
 });
 
@@ -234,6 +304,22 @@ test('a host installing Claude Code says so, and a failed install shows why', as
     backends: [{ ...claude, state: 'failed', error: 'Installing Claude Code failed (6): curl' }],
   });
   await expect(page.getByTestId('welcome-claude-install-failed')).toContainText('curl');
+  await expect(page.getByTestId('welcome-claude-installed')).toHaveCount(0);
+});
+
+test('a finished Claude Code install says so briefly instead of vanishing', async ({ page }) => {
+  await stub(page);
+  await page.goto('/app/dev-harness.html?route=/welcome?machine=local');
+  const claude = { id: 'claude-code', label: 'Claude Code', version: null };
+  await reportHost(page, { backends: [{ ...claude, state: 'installing' }] });
+  await expect(page.getByTestId('welcome-claude-installing')).toBeVisible();
+  await reportHost(page, { backends: [{ ...claude, state: 'present', version: '2.1.0' }] });
+  await expect(page.getByTestId('welcome-claude-installing')).toHaveCount(0);
+  await expect(page.getByTestId('welcome-claude-installed')).toHaveText(
+    'Claude Code is installed.',
+  );
+  await shot(page, '2e-claude-code-installed');
+  await expect(page.getByTestId('welcome-claude-installed')).toHaveCount(0, { timeout: 15_000 });
 });
 
 test('a refused Claude code says why and can be tried again', async ({ page }) => {

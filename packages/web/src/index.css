@@ -10665,6 +10665,11 @@ button.set-row-open:focus-visible {
   font-size: 22px;
   color: var(--ink);
 }
+.empty-chat-line {
+  margin: 0;
+  font-size: 15px;
+  color: var(--ink-3);
+}
 
 /* The chat panel when the route names a chat this surface has no row for
    (spec/14 § Main chat panel — Unknown chat). Same centred treatment as
@@ -18432,7 +18437,13 @@ a.drop-target {
   gap: 6px;
   font-size: 16px;
 }
+.welcome-lead {
+  margin: 0;
+  font-size: 16px;
+  color: var(--ink);
+}
 .welcome-muted {
+  margin: 0;
   font-size: 14px;
   color: var(--ink-3);
 }

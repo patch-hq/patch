@@ -58,7 +58,7 @@ function readStoredHeight(): number {
   return Math.min(MAX_STRIP_HEIGHT, Math.max(MIN_STRIP_HEIGHT, parsed));
 }
 
-export function ThreadsStrip(): JSX.Element {
+export function ThreadsStrip(): JSX.Element | null {
   const chats = useChatStore((s) => s.chats);
   const resolvePermission = useChatStore((s) => s.resolvePermission);
   const hosts = usePresenceStore((s) => s.hosts);
@@ -137,6 +137,10 @@ export function ThreadsStrip(): JSX.Element {
     window.addEventListener('mouseup', onUp);
   };
 
+  // Nothing to watch, nothing to show: an empty strip of unexplained controls
+  // is all a newcomer would see. It appears with the first chat.
+  if (rows.length === 0) return null;
+
   return (
     <>
       <div
@@ -157,97 +161,91 @@ export function ThreadsStrip(): JSX.Element {
           <ReachSwitch />
         </div>
         <SweepStatusLine />
-        {rows.length === 0 ? (
-          <div className="threads-empty empty-hint" data-testid="threads-empty">
-            Nothing running.
-          </div>
-        ) : (
-          rows.map((row) => {
-            const state = rowState(row);
-            const question = state === 'question' ? pendingQuestion(row) : undefined;
-            const permission =
-              state === 'permission'
-                ? row.pendingPermissions.find((p) => p.tool !== ASK_USER_QUESTION)
-                : undefined;
-            const hostName = hosts[row.hostId]?.host?.hostName ?? row.hostId;
-            return (
-              <div className="thread-row" data-testid={`thread-row-${row.chatId}`} key={row.chatId}>
-                <ChatStatusBadge row={row} />
-                <div className="thread-body">
-                  <div className="thread-title">
-                    {deriveChatTitle(row.name)}
-                    <span className="thread-where">
-                      {hostName} · {row.folder}
-                    </span>
+        {rows.map((row) => {
+          const state = rowState(row);
+          const question = state === 'question' ? pendingQuestion(row) : undefined;
+          const permission =
+            state === 'permission'
+              ? row.pendingPermissions.find((p) => p.tool !== ASK_USER_QUESTION)
+              : undefined;
+          const hostName = hosts[row.hostId]?.host?.hostName ?? row.hostId;
+          return (
+            <div className="thread-row" data-testid={`thread-row-${row.chatId}`} key={row.chatId}>
+              <ChatStatusBadge row={row} />
+              <div className="thread-body">
+                <div className="thread-title">
+                  {deriveChatTitle(row.name)}
+                  <span className="thread-where">
+                    {hostName} · {row.folder}
+                  </span>
+                </div>
+                {row.statusSummary ? (
+                  <div className="thread-summary" data-testid={`thread-summary-${row.chatId}`}>
+                    {row.statusSummary}
                   </div>
-                  {row.statusSummary ? (
-                    <div className="thread-summary" data-testid={`thread-summary-${row.chatId}`}>
-                      {row.statusSummary}
-                    </div>
-                  ) : null}
-                  {question ? (
-                    <QuestionOptions
-                      permission={question}
-                      onAnswer={(answers) => answer(row.chatId, question.requestId, answers)}
-                      onOpen={() => navigate(`/chats/${row.chatId}`)}
-                    />
-                  ) : null}
-                </div>
-                <div className="thread-actions">
-                  {permission ? (
-                    <>
-                      <button
-                        type="button"
-                        className="thread-btn primary"
-                        data-testid={`thread-approve-${row.chatId}`}
-                        onClick={() => answer(row.chatId, permission.requestId)}
-                      >
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        className="thread-btn"
-                        data-testid={`thread-deny-${row.chatId}`}
-                        onClick={() => deny(row.chatId, permission.requestId)}
-                      >
-                        Deny
-                      </button>
-                    </>
-                  ) : null}
-                  {state === 'idle' ? (
-                    <button
-                      type="button"
-                      className="thread-btn"
-                      data-testid={`thread-carry-on-${row.chatId}`}
-                      onClick={() => carryOn(row.chatId)}
-                    >
-                      <ArrowRight size={14} aria-hidden /> Carry on
-                    </button>
-                  ) : null}
-                  {state === 'working' ? (
-                    <button
-                      type="button"
-                      className="thread-btn"
-                      data-testid={`thread-stop-${row.chatId}`}
-                      onClick={() => stop(row.chatId)}
-                    >
-                      <Square size={12} aria-hidden /> Stop
-                    </button>
-                  ) : null}
-                  <OpenableButton
-                    opens={{ kind: 'chat', chatId: row.chatId }}
-                    className="thread-btn ghost"
-                    data-testid={`thread-open-${row.chatId}`}
-                    aria-label={`open ${deriveChatTitle(row.name)}`}
+                ) : null}
+                {question ? (
+                  <QuestionOptions
+                    permission={question}
+                    onAnswer={(answers) => answer(row.chatId, question.requestId, answers)}
                     onOpen={() => navigate(`/chats/${row.chatId}`)}
-                  >
-                    <ExternalLink size={14} aria-hidden />
-                  </OpenableButton>
-                </div>
+                  />
+                ) : null}
               </div>
-            );
-          })
-        )}
+              <div className="thread-actions">
+                {permission ? (
+                  <>
+                    <button
+                      type="button"
+                      className="thread-btn primary"
+                      data-testid={`thread-approve-${row.chatId}`}
+                      onClick={() => answer(row.chatId, permission.requestId)}
+                    >
+                      Approve
+                    </button>
+                    <button
+                      type="button"
+                      className="thread-btn"
+                      data-testid={`thread-deny-${row.chatId}`}
+                      onClick={() => deny(row.chatId, permission.requestId)}
+                    >
+                      Deny
+                    </button>
+                  </>
+                ) : null}
+                {state === 'idle' ? (
+                  <button
+                    type="button"
+                    className="thread-btn"
+                    data-testid={`thread-carry-on-${row.chatId}`}
+                    onClick={() => carryOn(row.chatId)}
+                  >
+                    <ArrowRight size={14} aria-hidden /> Carry on
+                  </button>
+                ) : null}
+                {state === 'working' ? (
+                  <button
+                    type="button"
+                    className="thread-btn"
+                    data-testid={`thread-stop-${row.chatId}`}
+                    onClick={() => stop(row.chatId)}
+                  >
+                    <Square size={12} aria-hidden /> Stop
+                  </button>
+                ) : null}
+                <OpenableButton
+                  opens={{ kind: 'chat', chatId: row.chatId }}
+                  className="thread-btn ghost"
+                  data-testid={`thread-open-${row.chatId}`}
+                  aria-label={`open ${deriveChatTitle(row.name)}`}
+                  onOpen={() => navigate(`/chats/${row.chatId}`)}
+                >
+                  <ExternalLink size={14} aria-hidden />
+                </OpenableButton>
+              </div>
+            </div>
+          );
+        })}
       </section>
     </>
   );

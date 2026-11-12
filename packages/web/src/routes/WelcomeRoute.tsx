@@ -13,14 +13,20 @@ import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { compactModelLabel, encodePairingUri, type PermissionMode } from '@patch/wire';
+import {
+  accountsKeyForBackend,
+  backendIdForModel,
+  compactModelLabel,
+  encodePairingUri,
+  type PermissionMode,
+} from '@patch/wire';
 import { api } from '../api/rest.js';
 import { ClaudeSignIn } from '../components/ClaudeSignIn.js';
 import { ErrorDetail } from '../components/ErrorDetail.js';
 import { PERMISSION_MODES } from '../components/Composer.js';
 import { getDesktopBridge, type KeepRunningState } from '../lib/desktopBridge.js';
 import { permissionModeLabel } from '../lib/permissionModeLabel.js';
-import { usePreferencesStore } from '../stores/preferencesStore.js';
+import { anyProviderConnected, usePreferencesStore } from '../stores/preferencesStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { AddChatGPTAccount } from './settings/SharedAccounts.js';
 import { useModelOptions } from './settings/modelOptions.js';
@@ -31,6 +37,10 @@ export const ANDROID_APK_URL =
   'https://github.com/patch-hq/patch/releases/latest/download/Patch-android.apk';
 
 type StepId = 'providers' | 'permissions' | 'model' | 'keep-running' | 'phone';
+type PhonePhase = 'app' | 'pair';
+
+/** How long the "installed" line stays after Claude Code finishes installing. */
+export const INSTALLED_NOTE_MS = 6000;
 
 /** What each mode does, in a few words: the names alone don't say. Said of
  *  "the agent", never of one provider: nothing may be connected yet. */
@@ -50,19 +60,30 @@ export function WelcomeRoute(): JSX.Element {
   // The shell says whether this computer runs Patch itself; only then is there
   // anything to keep running.
   const local = params.get('machine') === 'local' && getDesktopBridge()?.keepRunning !== undefined;
+  // With no AI connected there are no models to choose between, so the model
+  // step is not asked at all rather than offering one meaningless option.
+  const connected = usePreferencesStore((s) => anyProviderConnected(s.shared)) === true;
   const steps: StepId[] = [
     'providers',
     'permissions',
-    'model',
+    ...(connected ? (['model'] as const) : []),
     ...(local ? (['keep-running'] as const) : []),
     'phone',
   ];
   const [index, setIndex] = useState(0);
-  const step = steps[index]!;
-  const last = index === steps.length - 1;
+  // The phone step asks for the app first, then shows the pairing code, so the
+  // two codes are never on screen together to be scanned the wrong way round.
+  const [phonePhase, setPhonePhase] = useState<PhonePhase>('app');
+  const step = steps[Math.min(index, steps.length - 1)]!;
+  const last = index >= steps.length - 1;
   const next = (): void => {
-    if (last) navigate('/', { replace: true });
+    // A newcomer lands on a chat ready to type into, not on the Manager.
+    if (last) navigate('/chats/new', { replace: true });
     else setIndex(index + 1);
+  };
+  const back = (): void => {
+    if (step === 'phone' && phonePhase === 'pair') setPhonePhase('app');
+    else setIndex(index - 1);
   };
 
   return (
@@ -85,14 +106,11 @@ export function WelcomeRoute(): JSX.Element {
         {step === 'permissions' ? <PermissionStep onNext={next} /> : null}
         {step === 'model' ? <ModelStep onNext={next} /> : null}
         {step === 'keep-running' ? <KeepRunningStep onNext={next} /> : null}
-        {step === 'phone' ? <PhoneStep onNext={next} /> : null}
+        {step === 'phone' ? (
+          <PhoneStep onNext={next} phase={phonePhase} onPhase={setPhonePhase} />
+        ) : null}
         {index > 0 ? (
-          <button
-            type="button"
-            className="welcome-back"
-            data-testid="welcome-back"
-            onClick={() => setIndex(index - 1)}
-          >
+          <button type="button" className="welcome-back" data-testid="welcome-back" onClick={back}>
             Back
           </button>
         ) : null}
@@ -106,11 +124,14 @@ function Footer({
   ready,
   label = 'Continue',
   skip,
+  onSkip = onNext,
 }: {
   onNext: () => void;
   ready: boolean;
   label?: string;
   skip?: string;
+  /** What the quiet action does; it moves on unless told otherwise. */
+  onSkip?: () => void;
 }): JSX.Element {
   return (
     <div className="welcome-footer">
@@ -124,7 +145,7 @@ function Footer({
         {label}
       </button>
       {skip ? (
-        <button type="button" className="welcome-skip" data-testid="welcome-skip" onClick={onNext}>
+        <button type="button" className="welcome-skip" data-testid="welcome-skip" onClick={onSkip}>
           {skip}
         </button>
       ) : null}
@@ -134,15 +155,28 @@ function Footer({
 
 function ProvidersStep({ onNext }: { onNext: () => void }): JSX.Element {
   const connected = useConnectedCount();
+  // Skipping says once what it costs, then lets the person carry on.
+  const [skipping, setSkipping] = useState(false);
+  const warned = skipping && connected === 0;
   return (
     <section className="welcome-step" data-testid="welcome-providers">
       <h1>Connect an AI</h1>
       <ProviderCards />
-      <Footer
-        onNext={onNext}
-        ready={connected > 0}
-        skip={connected > 0 ? undefined : 'Skip for now'}
-      />
+      {warned ? (
+        <p className="welcome-note" role="status" data-testid="welcome-skip-note">
+          Chats won’t run until you connect an AI. You can do it later from the banner in any chat.
+        </p>
+      ) : null}
+      {connected > 0 || warned ? (
+        <Footer onNext={onNext} ready />
+      ) : (
+        <Footer
+          onNext={onNext}
+          ready={false}
+          skip="Skip for now"
+          onSkip={() => setSkipping(true)}
+        />
+      )}
     </section>
   );
 }
@@ -170,6 +204,7 @@ export function ProviderCards(): JSX.Element {
     .filter((b) => b !== undefined);
   const installing = claudeOnHosts.some((b) => b.state === 'installing');
   const failed = claudeOnHosts.find((b) => b.state === 'failed');
+  const installed = useJustInstalled(installing, failed !== undefined);
 
   return (
     <>
@@ -193,6 +228,11 @@ export function ProviderCards(): JSX.Element {
         {installing ? (
           <p className="welcome-note" data-testid="welcome-claude-installing">
             Installing Claude Code on this computer…
+          </p>
+        ) : null}
+        {installed ? (
+          <p className="welcome-note" data-testid="welcome-claude-installed">
+            Claude Code is installed.
           </p>
         ) : null}
         {failed ? (
@@ -223,6 +263,31 @@ export function ProviderCards(): JSX.Element {
   );
 }
 
+/**
+ * True for a few seconds after an install this page watched finishes without
+ * failing, so the "installing" line ends in a "done" rather than vanishing.
+ */
+function useJustInstalled(installing: boolean, failed: boolean): boolean {
+  const wasInstalling = useRef(false);
+  const [done, setDone] = useState(false);
+  useEffect(() => {
+    if (installing) {
+      wasInstalling.current = true;
+      setDone(false);
+      return;
+    }
+    if (!wasInstalling.current) return;
+    wasInstalling.current = false;
+    if (!failed) setDone(true);
+  }, [installing, failed]);
+  useEffect(() => {
+    if (!done) return;
+    const t = setTimeout(() => setDone(false), INSTALLED_NOTE_MS);
+    return () => clearTimeout(t);
+  }, [done]);
+  return done;
+}
+
 function PermissionStep({ onNext }: { onNext: () => void }): JSX.Element {
   const value = usePreferencesStore((s) => s.preferences.permissionModeDefault);
   const loaded = usePreferencesStore((s) => s.loaded);
@@ -250,10 +315,40 @@ function PermissionStep({ onNext }: { onNext: () => void }): JSX.Element {
   );
 }
 
+/**
+ * The chat models the setup's choice is written to: what new chats, jobs and
+ * the Manager and Speakers start on. Each is moved only when it is the default
+ * being chosen, or sits on a provider that isn't connected and so could not
+ * run at all.
+ */
+const CHAT_MODEL_SETTINGS = ['jobDefaultModel', 'specialThreadModel'] as const;
+
 function ModelStep({ onNext }: { onNext: () => void }): JSX.Element {
-  const value = usePreferencesStore((s) => s.preferences.defaultModel);
+  const preferences = usePreferencesStore((s) => s.preferences);
+  const value = preferences.defaultModel;
   const loaded = usePreferencesStore((s) => s.loaded);
-  const { options, problem } = useModelOptions(value);
+  const secrets = usePreferencesStore((s) => s.shared?.secrets);
+  const { options: all, problem } = useModelOptions(value);
+  // Only the connected providers' models: a ChatGPT user is never offered, or
+  // left on, a Claude model they cannot run.
+  const runnable = (id: string): boolean =>
+    (secrets?.[accountsKeyForBackend(backendIdForModel(id))] ?? []).some((a) => a.connected);
+  const options = all.filter((m) => runnable(m.id));
+  const choose = (id: string): void => {
+    const others = Object.fromEntries(
+      CHAT_MODEL_SETTINGS.filter((k) => !runnable(preferences[k])).map((k) => [k, id]),
+    );
+    void patchShared('default model', { defaultModel: id, ...others });
+  };
+  // A default on a provider that isn't connected is moved to the newest model
+  // that is, so what is shown chosen is what new chats will really use.
+  const first = options[0]?.id;
+  const stranded = loaded && secrets !== undefined && !runnable(value);
+  useEffect(() => {
+    if (stranded && first !== undefined) choose(first);
+    // Once per stranded default: `choose` is rebuilt every render and is not
+    // what the move depends on.
+  }, [stranded, first]);
   return (
     <section className="welcome-step" data-testid="welcome-model">
       <h1>Which model should new chats use?</h1>
@@ -265,7 +360,7 @@ function ModelStep({ onNext }: { onNext: () => void }): JSX.Element {
             checked={value === m.id}
             disabled={!loaded}
             title={compactModelLabel(m.id, m.label === m.id ? undefined : m.label)}
-            onPick={() => void patchShared('default model', { defaultModel: m.id })}
+            onPick={() => choose(m.id)}
           />
         ))}
       </div>
@@ -277,7 +372,7 @@ function ModelStep({ onNext }: { onNext: () => void }): JSX.Element {
           ) : null}
         </div>
       ) : null}
-      <Footer onNext={onNext} ready={loaded} />
+      <Footer onNext={onNext} ready={loaded && runnable(value)} />
     </section>
   );
 }
@@ -330,8 +425,39 @@ function KeepRunningStep({ onNext }: { onNext: () => void }): JSX.Element {
   );
 }
 
-function PhoneStep({ onNext }: { onNext: () => void }): JSX.Element {
-  const canvas = useRef<HTMLCanvasElement | null>(null);
+function PhoneStep({
+  onNext,
+  phase,
+  onPhase,
+}: {
+  onNext: () => void;
+  phase: PhonePhase;
+  onPhase: (p: PhonePhase) => void;
+}): JSX.Element {
+  return (
+    <section className="welcome-step" data-testid="welcome-phone" data-phase={phase}>
+      <h1>Connect your phone</h1>
+      {phase === 'app' ? (
+        <>
+          <p className="welcome-lead">Scan with your phone’s camera to get the Android app.</p>
+          <QrCode payload={ANDROID_APK_URL} testId="welcome-apk-qr" label="Android app download" />
+          <p className="welcome-muted">iPhone isn’t available yet.</p>
+          <Footer
+            onNext={() => onPhase('pair')}
+            ready
+            label="I have the app"
+            skip="No phone, skip"
+            onSkip={onNext}
+          />
+        </>
+      ) : (
+        <PairPhase onNext={onNext} />
+      )}
+    </section>
+  );
+}
+
+function PairPhase({ onNext }: { onNext: () => void }): JSX.Element {
   const { data, error, refetch } = useQuery({
     queryKey: ['welcome-pair-nonce'],
     queryFn: () => api.surfacePairStart(),
@@ -342,6 +468,34 @@ function PhoneStep({ onNext }: { onNext: () => void }): JSX.Element {
   const payload = data
     ? (data.uri ?? encodePairingUri({ nonce: data.nonce, server: window.location.origin }))
     : null;
+  return (
+    <>
+      <p className="welcome-lead">Open Patch on your phone and scan this code.</p>
+      {error ? (
+        <p className="set-error" role="alert" data-testid="welcome-qr-error">
+          Could not make a pairing code: {(error as Error).message}{' '}
+          <button type="button" className="set-btn" onClick={() => void refetch()}>
+            Retry
+          </button>
+        </p>
+      ) : (
+        <QrCode payload={payload} testId="welcome-qr" label="Pairing code" />
+      )}
+      <Footer onNext={onNext} ready label="Done" />
+    </>
+  );
+}
+
+function QrCode({
+  payload,
+  testId,
+  label,
+}: {
+  payload: string | null;
+  testId: string;
+  label: string;
+}): JSX.Element {
+  const canvas = useRef<HTMLCanvasElement | null>(null);
   const [drawError, setDrawError] = useState<string | null>(null);
   useEffect(() => {
     if (!payload || !canvas.current) return;
@@ -350,32 +504,10 @@ function PhoneStep({ onNext }: { onNext: () => void }): JSX.Element {
     );
   }, [payload]);
   return (
-    <section className="welcome-step" data-testid="welcome-phone">
-      <h1>Connect your phone</h1>
-      <ol className="welcome-phone-steps">
-        <li>
-          <a href={ANDROID_APK_URL} target="_blank" rel="noreferrer" data-testid="welcome-apk">
-            Get the Android app
-          </a>{' '}
-          <span className="welcome-muted">(iPhone isn’t available yet)</span>
-        </li>
-        <li>Open it and scan this code</li>
-      </ol>
-      <div className="welcome-qr">
-        {error ? (
-          <p className="set-error" role="alert" data-testid="welcome-qr-error">
-            Could not make a pairing code: {(error as Error).message}{' '}
-            <button type="button" className="set-btn" onClick={() => void refetch()}>
-              Retry
-            </button>
-          </p>
-        ) : (
-          <canvas ref={canvas} data-testid="welcome-qr" aria-label="Pairing code" />
-        )}
-        {drawError ? <p className="set-error">{drawError}</p> : null}
-      </div>
-      <Footer onNext={onNext} ready label="Done" skip="No phone, skip" />
-    </section>
+    <div className="welcome-qr">
+      <canvas ref={canvas} data-testid={testId} data-payload={payload ?? ''} aria-label={label} />
+      {drawError ? <p className="set-error">{drawError}</p> : null}
+    </div>
   );
 }
 

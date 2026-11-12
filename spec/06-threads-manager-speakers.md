@@ -233,6 +233,8 @@ Account settings (`specialThreadModel`, `rotationEnabled`, `rotationTime`, `01-s
 2. A `system` `chat.message` records the boundary ("Session rotated · digest carried over"), same arrangement a compaction boundary uses (`02-host.md` § Context compression), so it replays with the rest of the chat.
 3. The session is retired (`claudeSessionId` cleared) and a fresh one starts on `specialThreadModel`, seeded with the digest as its first turn.
 
+The Manager host puts both threads on `specialThreadModel` when they are created and whenever the setting changes. A model the host's catalogue does not offer is refused, so before any AI is connected (no catalogue at all) nothing is set; the host tries again after each successful catalogue read, so the first sign-in puts the threads on their model without the setting having to change.
+
 The chat's own id (`thread_manager`, etc.) never changes — only the session underneath it — so pinning, ingress wiring and sidebar identity are untouched. A digest generation failure skips that day's rotation rather than starting a fresh session with nothing carried over (NO FALLBACK, `12-...md`).
 
 ## Sidebar placement

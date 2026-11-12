@@ -45,7 +45,7 @@ for (const viewport of [
       await page.goto(SITE);
 
       await expect(page.getByTestId('needs')).toHaveText(
-        'Needs a Claude Pro or Max plan, a ChatGPT plan or an OpenAI API key. Patch installs everything else. Free and open source (MIT).',
+        'Needs a Claude Pro, Max, Team or Enterprise plan, a ChatGPT plan or an OpenAI API key. Patch installs everything else. Free and open source (MIT).',
       );
       await expect(page.getByTestId('needs')).toBeVisible();
 
@@ -97,4 +97,27 @@ test('a failed size lookup leaves the sizes off and says so', async ({ page }) =
     'href',
     `${LATEST}Patch-mac-arm64.dmg`,
   );
+});
+
+test('after Download, one line says what to do with the disk image', async ({ page }) => {
+  await onMac(page);
+  await stubRelease(page, ASSETS);
+  // The file itself: answered as a download so the page stays put.
+  await page.route(`${LATEST}**`, (route) =>
+    route.fulfill({
+      body: 'dmg',
+      headers: { 'content-disposition': 'attachment; filename="Patch-mac-arm64.dmg"' },
+    }),
+  );
+  await page.goto(SITE);
+  const next = page.locator('.hero [data-next]');
+  await expect(next).toBeHidden();
+  const download = page.waitForEvent('download');
+  await page.locator('.hero [data-download]').click();
+  await download;
+  await expect(next).toHaveText('Open the disk image and drag Patch to Applications.');
+  await expect(next).toBeVisible();
+  if (process.env['PATCH_SITE_SHOTS']) {
+    await page.screenshot({ path: `${process.env['PATCH_SITE_SHOTS']}/site-download-next.png` });
+  }
 });

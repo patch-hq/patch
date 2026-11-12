@@ -4,7 +4,7 @@
 // with the message about to be sent rather than in the header.
 
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { harnessForModel } from '@patch/wire';
+import { harnessForModel, isReservedSpecialThread } from '@patch/wire';
 import { Cpu, UserRound } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
@@ -176,7 +176,14 @@ export function ModelControl({
   // mount, not on open, because the pill itself reads the catalogue's name.
   // With no model reported there is no name to read, so the catalogue waits
   // for the pop-up to open instead.
-  const wantsCatalogue = row.model != null || modelOpen;
+  // A Manager or Speakers thread that has not reported a model yet (its host
+  // puts it on the account's Manager model as soon as it can) reads that
+  // model, not an empty "Choose a model…": it is the one its next turn starts on.
+  const specialThreadModel = usePreferencesStore((s) => s.preferences.specialThreadModel);
+  const shownModel =
+    row.model ??
+    (isReservedSpecialThread(row.chatId) && specialThreadModel ? specialThreadModel : null);
+  const wantsCatalogue = shownModel != null || modelOpen;
   useEffect(() => {
     if (!wantsCatalogue) return;
     void loadModels(row.hostId === '' ? null : row.hostId);
@@ -228,7 +235,7 @@ export function ModelControl({
   return (
     <>
       <ModelPicker
-        selected={pendingModel ?? row.model}
+        selected={pendingModel ?? shownModel}
         pending={pendingModel !== null}
         onSelect={chooseModel}
         open={modelOpen}
