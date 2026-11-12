@@ -71,7 +71,7 @@ function makeArtifact(target = BUILD.target): string {
     const app = join(dir, 'Patch Host.app', 'Contents');
     mkdirSync(join(app, 'MacOS'), { recursive: true });
     writeFileSync(join(app, 'MacOS', 'patch-host'), '#!/bin/sh\n');
-    writeFileSync(join(app, 'Info.plist'), '<string>me.tomchambers.patch-host</string>\n');
+    writeFileSync(join(app, 'Info.plist'), '<string>io.github.patch-hq.host</string>\n');
   }
   writeFileSync(join(dir, 'silero_vad.onnx'), 'onnx');
   writeFileSync(join(dir, 'install'), '#!/bin/sh\n');
@@ -598,7 +598,7 @@ describe('what the install puts on the host', () => {
     expect(readFileSync(exe, 'utf8')).toBe('#!/bin/sh\n');
     const plist = readFileSync(join(runtime, 'Patch Host.app', 'Contents', 'Info.plist'), 'utf8');
     // The signed bundle from the artifact, copied whole, never rewritten here.
-    expect(plist).toBe('<string>me.tomchambers.patch-host</string>\n');
+    expect(plist).toBe('<string>io.github.patch-hq.host</string>\n');
     expect(existsSync(join(runtime, 'patch-host'))).toBe(false);
   });
 
