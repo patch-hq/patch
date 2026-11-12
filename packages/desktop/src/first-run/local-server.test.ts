@@ -177,25 +177,58 @@ test('a server that never answers is stopped and reported, not waited on for eve
   );
 });
 
-test('picks up a server of this same release that is already running on its port', async () => {
+test('a relaunch replaces a server of this same release left running by a previous app', async () => {
   const root = scratch();
   const port = await freePort();
   const first = await startLocalServer({ ...opts(root), port });
+  const oldPid = Number(readFileSync(join(root, 'server/server.pid'), 'utf8'));
+  const second = await startLocalServer({ ...opts(root), port });
   try {
-    const second = await startLocalServer({ ...opts(root), port });
     assert.equal(second.origin, first.origin);
-    await second.stop(); // does not own it: the first keeps running
-    assert.equal((await fetch(`${first.origin}/api/healthz`)).status, 200);
+    assert.equal((await fetch(`${second.origin}/api/healthz`)).status, 200);
+    const newPid = Number(readFileSync(join(root, 'server/server.pid'), 'utf8'));
+    assert.notEqual(newPid, oldPid);
+    assert.throws(() => process.kill(oldPid, 0), /ESRCH/);
   } finally {
-    await first.stop();
+    await second.stop();
+  }
+  assert.equal(existsSync(join(root, 'server/server.pid')), false);
+});
+
+test('a relaunch from a different app location replaces a leftover server of another build', async () => {
+  const root = scratch();
+  const port = await freePort();
+  const old = await startLocalServer({
+    ...opts(root, { releaseDir: fakeRelease(scratch(), 'old0001') }),
+    port,
+  });
+  const fresh = await startLocalServer({ ...opts(root), port });
+  try {
+    const health = (await (await fetch(`${fresh.origin}/api/healthz`)).json()) as { gitSha: string };
+    assert.equal(health.gitSha, 'abc1234');
+  } finally {
+    await fresh.stop();
+    await old.stop();
   }
 });
 
-test('refuses a port held by a different build, rather than talking to it', async () => {
+test('a stale pid file with nothing alive behind it is ignored', async () => {
+  const root = scratch();
+  mkdirSync(join(root, 'server'), { recursive: true });
+  writeFileSync(join(root, 'server/server.pid'), '99999999');
+  const server = await startLocalServer({ ...opts(root), port: await freePort() });
+  try {
+    assert.equal((await fetch(`${server.origin}/api/healthz`)).status, 200);
+  } finally {
+    await server.stop();
+  }
+});
+
+test('refuses a port held by a different build it did not start, rather than talking to it', async () => {
   const root = scratch();
   const port = await freePort();
   const other = await startLocalServer({
-    ...opts(root, { releaseDir: fakeRelease(scratch(), 'other999') }),
+    ...opts(scratch(), { releaseDir: fakeRelease(scratch(), 'other999') }),
     port,
   });
   try {
