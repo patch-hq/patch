@@ -55,6 +55,7 @@ import type { VoiceSessionLike, VoiceTimeline } from './voice-session-like.js';
 import type { EngineCosting } from './voiceCost.js';
 import { verifyVoiceToken, VoiceTokenError, type VoiceTokenClaims } from './token-verifier.js';
 import { DEVICE_CONTROL_PATH } from '../devices/control-ws.js';
+import { proxyAudioSession } from './session-proxy.js';
 import { readKey, type KeySource } from './keySource.js';
 import { DeepgramDictationSession } from './deepgram-dictation.js';
 import { ElevenLabsDictationSession } from './elevenlabs-dictation.js';
@@ -286,6 +287,14 @@ export interface AudioServerOptions {
     socket: import('node:stream').Duplex,
     head: Buffer,
   ) => void;
+  /**
+   * A device session this host forwards to the server rather than runs
+   * (spec/16 § Connection model): the server URL to carry `/audio/<id>` on to,
+   * or undefined for a session this host runs itself. Read once per connect.
+   */
+  upstreamFor?: (sessionId: string) => string | undefined;
+  /** Test seam: the WebSocket client a forwarded session dials. */
+  upstreamWsCtor?: new (url: string) => import('ws').WebSocket;
   /** Test hooks. */
   nowMs?: () => number;
   /**
@@ -527,6 +536,16 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
     if (expected.length === 0) {
       socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
       socket.destroy();
+      return;
+    }
+    const upstreamUrl = opts.upstreamFor?.(expected);
+    if (upstreamUrl !== undefined) {
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        proxyAudioSession(ws, upstreamUrl, expected, {
+          logger: log,
+          ...(opts.upstreamWsCtor ? { wsCtor: opts.upstreamWsCtor } : {}),
+        });
+      });
       return;
     }
     wss.handleUpgrade(req, socket, head, (ws) => {

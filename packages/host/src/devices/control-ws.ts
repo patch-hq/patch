@@ -56,8 +56,25 @@ export interface DeviceControlDeps {
   accountId: string;
   /** Shared HMAC secret (PATCH_INTERNAL_TOKEN) used to mint voice tokens. */
   internalToken: string;
-  /** Chat the voice-device conversation routes to (spec/06 Speakers thread). */
+  /** Chat a wake-word conversation routes to (spec/16 — the Manager). */
   voiceDeviceChatId: string;
+  /**
+   * Whether a chat runs on this host. A session for a chat that runs on
+   * another host (the Manager, when another host runs it) is minted by the
+   * server instead, which routes its audio to that host (spec/16 § Connection
+   * model). Unset means every chat is local.
+   */
+  isChatLocal?: (chatId: string) => boolean;
+  /**
+   * Ask the server for a session on another host's chat, presenting the
+   * device's own credential (spec/16 § Voice-token delivery).
+   */
+  mintRemoteSession?: (args: {
+    credential: string;
+    chatId: string;
+  }) => Promise<{ sessionId: string; token: string }>;
+  /** Have the audio listener carry this session's audio WSS on to the server. */
+  proxySession?: (sessionId: string) => void;
   /** True while a phone Manager call holds the voice focus (spec/16 concurrency). */
   isPhoneCallActive: () => boolean;
   /**
@@ -96,6 +113,8 @@ export class DeviceControlServer {
   private readonly now: () => number;
   /** deviceId → live connection, so a ring can find the socket. */
   private readonly conns = new Map<string, DeviceConn>();
+  /** deviceId → the credential it last authenticated with, for server-minted sessions. */
+  private readonly credentials = new Map<string, string>();
 
   constructor(deps: DeviceControlDeps) {
     this.deps = deps;
@@ -167,6 +186,7 @@ export class DeviceControlServer {
     if (record.revoked === true) {
       throw new ControlAuthError(`device revoked: ${claims.surface_id}`);
     }
+    this.credentials.set(claims.surface_id, jwt);
     return claims.surface_id;
   }
 
@@ -346,6 +366,10 @@ export class DeviceControlServer {
     deviceId: string,
     opts: { chatId: string; conversational: boolean },
   ): void {
+    if (this.deps.isChatLocal !== undefined && !this.deps.isChatLocal(opts.chatId)) {
+      void this.openRemoteSession(conn, deviceId, opts);
+      return;
+    }
     const sessionId = randomUUID();
     const { token } = mintVoiceToken({
       secret: this.deps.internalToken,
@@ -372,6 +396,52 @@ export class DeviceControlServer {
       { deviceId, sessionId, chatId: opts.chatId, conversational: opts.conversational },
       'device-control: session_start sent',
     );
+  }
+
+  /**
+   * A session on a chat another host runs: the server mints it, so the server
+   * knows which host to send its audio to, and this host's audio listener
+   * carries the device's audio WSS on to the server. A failure is told to the
+   * device and frees its slot rather than leaving it waiting.
+   */
+  private async openRemoteSession(
+    conn: DeviceConn,
+    deviceId: string,
+    opts: { chatId: string; conversational: boolean },
+  ): Promise<void> {
+    const log = this.deps.logger;
+    const credential = this.credentials.get(deviceId);
+    try {
+      if (credential === undefined || !this.deps.mintRemoteSession || !this.deps.proxySession) {
+        throw new Error(`${opts.chatId} runs on another host and this host cannot reach it`);
+      }
+      const { sessionId, token } = await this.deps.mintRemoteSession({
+        credential,
+        chatId: opts.chatId,
+      });
+      this.deps.proxySession(sessionId);
+      conn.sessionId = sessionId;
+      this.deps.presence.touch(deviceId, this.now());
+      conn.send({
+        type: 'session_start',
+        sessionId,
+        voiceToken: token,
+        accountId: this.deps.accountId,
+        chatId: opts.chatId,
+        conversational: opts.conversational,
+      });
+      log.info(
+        { deviceId, sessionId, chatId: opts.chatId, conversational: opts.conversational },
+        'device-control: session_start sent (chat on another host)',
+      );
+    } catch (err) {
+      log.error(
+        { deviceId, chatId: opts.chatId, err: (err as Error).message },
+        'device-control: could not open a session on another host',
+      );
+      conn.send({ type: 'error', message: `could not reach ${opts.chatId}` });
+      this.arbiter.release(deviceId);
+    }
   }
 
   private endSession(conn: DeviceConn, deviceId: string, reason: string): void {

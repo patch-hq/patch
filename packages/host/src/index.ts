@@ -3725,6 +3725,12 @@ async function startHost(
   // attended act and must not survive a restart.
   const deviceAdoption = new DeviceAdoption();
 
+  // Device sessions minted by the server for a chat another host runs, by
+  // sessionId, until the device connects (once) or the server's own route for
+  // it lapses.
+  const MANAGER_THREAD_ID: SpecialThreadId = 'thread_manager';
+  const FORWARDED_SESSION_TTL_MS = 5 * 60_000;
+  const forwardedDeviceSessions = new Map<string, number>();
   const deviceControl = new DeviceControlServer({
     registry: deviceRegistry,
     // The window the CLI opens is what admits an unknown device. Without this
@@ -3734,10 +3740,29 @@ async function startHost(
     accountPublicKey,
     accountId: accountPublicKey,
     internalToken: config.internalToken,
-    // Wake-word conversations route to the Speakers thread (spec/06 ## Speakers
-    // thread). 'thread_speakers' is the canonical id (specialThreads.ts /
-    // wire SPECIAL_THREAD_IDS.speakers).
-    voiceDeviceChatId: 'thread_speakers',
+    // Wake-word conversations go to the Manager (spec/16 § Wake-word
+    // session). When another host runs it, the server mints the session and
+    // routes its audio there; this host only carries the device's socket on.
+    voiceDeviceChatId: MANAGER_THREAD_ID,
+    isChatLocal: (chatId: string): boolean =>
+      chatId === MANAGER_THREAD_ID
+        ? runsManager
+        : daemon.chatState.has(chatId) || metaStore.read(chatId) !== undefined,
+    mintRemoteSession: async ({ credential, chatId }) => {
+      const res = await fetch(new URL('/api/voice/token', config.serverUrl), {
+        method: 'POST',
+        headers: { authorization: `Bearer ${credential}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ chatId, role: 'voice-device-conv', surfaceKind: 'device' }),
+      });
+      if (!res.ok) {
+        throw new Error(`server refused a voice session (${res.status}): ${await res.text()}`);
+      }
+      const body = (await res.json()) as { sessionId: string; token: string };
+      return { sessionId: body.sessionId, token: body.token };
+    },
+    proxySession: (sessionId: string): void => {
+      forwardedDeviceSessions.set(sessionId, Date.now() + FORWARDED_SESSION_TTL_MS);
+    },
     // DeviceControlServer calls `isPhoneCallActive` only while routing a ring
     // to a PAIRED, CONNECTED voice device, to decide whether an in-progress
     // phone call should suppress it (spec/16 § Concurrency). Driving it for
@@ -5585,6 +5610,13 @@ async function startHost(
       if (wasPhoneCall) deviceControl.onPhoneCallEnded();
     },
     // F2: share the audio HTTP listener for the persistent device control WSS.
+    upstreamFor: (sessionId: string): string | undefined => {
+      const expiresAt = forwardedDeviceSessions.get(sessionId);
+      if (expiresAt === undefined) return undefined;
+      forwardedDeviceSessions.delete(sessionId);
+      if (expiresAt < Date.now()) return undefined;
+      return new URL(`/audio/${sessionId}`, config.serverWsUrl).toString();
+    },
     deviceControlUpgrade: mountDeviceControlUpgrade({
       server: deviceControl,
       wss: deviceControlWss,
