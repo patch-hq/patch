@@ -148,11 +148,11 @@ describe('ChatRoute — patch_delegate tool row', () => {
     setActiveWs(null);
   });
 
-  it('shows a Running pill and Open transcript link once the ack lands', () => {
+  it('shows a fixed Started pill and Open transcript link once the ack lands', () => {
     seed();
     emitDelegateCall('mcp__patch__patch_delegate', { id: 'sub-1', label: 'draft the email' });
     renderChat();
-    expect(screen.getByTestId('delegate-status-pill').textContent).toBe('Running');
+    expect(screen.getByTestId('delegate-status-pill').textContent).toBe('Started');
     expect(screen.getByTestId('delegate-open-transcript')).toBeDefined();
   });
 
@@ -171,35 +171,28 @@ describe('ChatRoute — patch_delegate tool row', () => {
     expect(screen.getByTestId('tool-call')).toBeDefined();
   });
 
-  it('updates the pill in place from chat.delegate_update, by the subagent id the ack returned', () => {
+  it('does not re-colour the spawn pill when the child later runs again or settles', () => {
     seed();
     emitDelegateCall('patch_delegate', { id: 'sub-1', label: 'draft the email' });
     renderChat();
-    expect(screen.getByTestId('delegate-status-pill').textContent).toBe('Running');
-
-    act(() => {
-      useChatStore.getState().applyEvent({
-        type: 'chat.delegate_update',
-        chatId: 'c1',
-        delegateId: 'sub-1',
-        label: 'draft the email',
-        status: 'awaiting-permission',
-        seq: 3,
+    for (const [seq, status] of [
+      [3, 'done'],
+      [4, 'running'],
+      [5, 'awaiting-permission'],
+      [6, 'failed'],
+    ] as const) {
+      act(() => {
+        useChatStore.getState().applyEvent({
+          type: 'chat.delegate_update',
+          chatId: 'c1',
+          delegateId: 'sub-1',
+          label: 'draft the email',
+          status,
+          seq,
+        });
       });
-    });
-    expect(screen.getByTestId('delegate-status-pill').textContent).toBe('Awaiting permission');
-
-    act(() => {
-      useChatStore.getState().applyEvent({
-        type: 'chat.delegate_update',
-        chatId: 'c1',
-        delegateId: 'sub-1',
-        label: 'draft the email',
-        status: 'failed',
-        seq: 4,
-      });
-    });
-    expect(screen.getByTestId('delegate-status-pill').textContent).toBe('Failed');
+      expect(screen.getByTestId('delegate-status-pill').textContent).toBe('Started');
+    }
   });
 
   it('a delegate_update for a DIFFERENT subagent id leaves this row alone', () => {
@@ -216,7 +209,7 @@ describe('ChatRoute — patch_delegate tool row', () => {
         seq: 3,
       });
     });
-    expect(screen.getByTestId('delegate-status-pill').textContent).toBe('Running');
+    expect(screen.getByTestId('delegate-status-pill').textContent).toBe('Started');
   });
 
   it('a waiting patch_agent call with no result yet opens its running child from the live update', async () => {
