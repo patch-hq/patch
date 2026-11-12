@@ -74,14 +74,15 @@ jobs:
       # before a test ran. Point apt at a mirror outside ubuntu.com instead: the
       # deb822 sources read /etc/apt/apt-mirrors.txt through their mirror+file: URIs,
       # and any source naming an ubuntu.com host directly is rewritten too. The
-      # retry and timeout settings apply to every apt call, including Playwright's.
+      # IPv4 is forced: runners have had no IPv6 route to the mirror ("Network is
+      # unreachable"). The retry and timeout settings apply to every apt call, including Playwright's.
       - name: Use a non-ubuntu.com apt mirror
         run: |
           mirror=https://mirrors.edge.kernel.org/ubuntu/
           echo "$mirror" | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
           sudo find /etc/apt -maxdepth 2 -type f \( -name '*.list' -o -name '*.sources' \) \
             -exec sed -E -i "s#https?://([a-z0-9-]+\.)*(archive|security)\.ubuntu\.com/ubuntu/?#$mirror#g" {} +
-          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "20";\nAcquire::https::Timeout "20";\n' \
+          printf 'Acquire::ForceIPv4 "true";\nAcquire::Retries "3";\nAcquire::http::Timeout "20";\nAcquire::https::Timeout "20";\n' \
             | sudo tee /etc/apt/apt.conf.d/99ci-mirror >/dev/null
           grep -rhE '^(URIs|deb) ' /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null || true
       # Two attempts, so a runner that cannot reach the mirror at all fails fast.
