@@ -155,8 +155,6 @@ afterEach(() => {
   for (const d of tmpRoots) rmSync(d, { recursive: true, force: true });
 });
 
-const recent = (msAgo: number) => Date.now() - msAgo;
-
 describe('TC3 [test-runner] notify wire emission + sidecar over real UDS', () => {
   it('B5a speakers notify emits a notify wire event AND appends to the speakers sidecar', async () => {
     const s = await startHost();
