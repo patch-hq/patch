@@ -45,8 +45,9 @@ export function scannedFiles(paths) {
 }
 
 // The product's own identity names its owner, and that is not a personal setup:
-// the app id every install carries, and the public repository releases come from.
-const PRODUCT_IDENTITY = /io[./]github[./]tomchambers2[./]patch|github\.com\/tomchambers2\/patch|tomchambers2\/patch/gi;
+// the app id every install carries, the public repository releases come from, and
+// the former service labels that an update must still find in order to remove.
+const PRODUCT_IDENTITY = /io[./]github[./]tomchambers2[./]patch|github\.com\/tomchambers2\/patch|tomchambers2\/patch|me\.tomchambers\.patch-(?:host|daemon)/gi;
 
 /** Personal-string count for one file's text. */
 export function countPersonal(text) {
