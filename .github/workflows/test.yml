@@ -133,6 +133,18 @@ jobs:
       - name: Memory sampler
         run: |
           nohup bash -c 'while true; do echo "--- mem $(date +%T)"; free -m | sed -n 2,3p; for f in memory.max memory.peak memory.events; do echo "$f: $(tr "\n" " " < /sys/fs/cgroup/$f 2>/dev/null)"; done; ps -eo rss,comm,args --sort=-rss | head -6 | cut -c1-160; sleep 5; done' > /tmp/mem.log 2>&1 &
+      # Names the sender of any SIGKILL, whatever it is: the kernel's own
+      # signal_generate event, read from tracefs, records the sending task. The
+      # kill trace below only sees Node senders; this sees pkill, the runner, the
+      # kernel. Needs no install. Fails the step if tracefs is unavailable.
+      - name: Signal tracer
+        run: |
+          T=/sys/kernel/tracing
+          [ -d "$T/events/signal" ] || { sudo mount -t tracefs nodev "$T"; }
+          [ -d "$T/events/signal/signal_generate" ] || { echo "::error::no tracefs signal events"; exit 1; }
+          echo 'sig == 9' | sudo tee "$T/events/signal/signal_generate/filter" >/dev/null
+          echo 1 | sudo tee "$T/events/signal/signal_generate/enable" >/dev/null
+          nohup sudo sh -c "cat $T/trace_pipe" > /tmp/sigtrace.log 2>&1 &
       - name: The gate
         timeout-minutes: 40
         env:
@@ -150,6 +162,7 @@ jobs:
         run: |
           tail -n 120 /tmp/mem.log || true
           echo "--- kill trace"; tail -n 60 /tmp/killtrace.log || true
+          echo "--- SIGKILLs, sender first (kernel signal_generate; comm-pid is the sender, comm= pid= the target)"; tail -n 80 /tmp/sigtrace.log || true
           echo "--- kernel"; (sudo dmesg || sudo journalctl -k --no-pager) 2>&1 | grep -i -E "out of memory|oom|killed process|cgroup" | tail -n 20 || true
 
   # The one check that branch protection and release.yml look at: green only

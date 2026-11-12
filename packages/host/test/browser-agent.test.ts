@@ -751,6 +751,24 @@ describeRealBrowser('agent browser — a crashed tab or a closed browser heals i
     m = new BrowserManager({ root, logger: silent, virtualDisplay: display });
     return m;
   }
+  /**
+   * SIGKILL every process launched with exactly this --user-data-dir, from this
+   * process, so the kill is one the CI kill trace (scripts/ci-killtrace.cjs) can
+   * see. `pkill -9 -f <path>` did the same by regex over every command line on
+   * the machine, from a binary nothing traces. Returns how many it killed.
+   */
+  function killBrowserOf(userDataDir: string): number {
+    const ps = spawnSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8' });
+    if (ps.status !== 0) throw new Error(`ps failed: ${ps.stderr}`);
+    let killed = 0;
+    for (const line of ps.stdout.split('\n')) {
+      const m = /^\s*(\d+)\s+(.*)$/.exec(line);
+      if (!m || !m[2]!.split(' ').includes(`--user-data-dir=${userDataDir}`)) continue;
+      process.kill(Number(m[1]), 'SIGKILL');
+      killed++;
+    }
+    return killed;
+  }
   const tabsById = (
     mm: BrowserManager,
   ): Map<string, { page: import('playwright').Page; crashed: boolean; contextDead: boolean }> =>
@@ -791,8 +809,7 @@ describeRealBrowser('agent browser — a crashed tab or a closed browser heals i
     try {
       const a = (await mm.open({ url: `${fx.base}/nav1` })).tabId;
       const b = (await mm.open({ url: `${fx.base}/nav2` })).tabId;
-      const killed = spawnSync('pkill', ['-9', '-f', join(root, 'profile')]);
-      expect(killed.status).toBe(0);
+      expect(killBrowserOf(join(root, 'profile'))).toBeGreaterThan(0);
       await until(() => [...tabsById(mm).values()].every((t) => t.contextDead));
 
       // Any action on any tab works again, with nobody doing anything.
