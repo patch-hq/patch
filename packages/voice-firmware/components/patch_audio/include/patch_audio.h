@@ -45,6 +45,9 @@ typedef struct {
     void (*on_tts_started)(void *user);
     /** Called when host emits `audio.tts_end`. */
     void (*on_tts_ended)(void *user);
+    // The host finished transcribing what the user said. `meaningful` is false
+    // for an empty transcript or one the host decided wasn't addressed to it.
+    void (*on_transcript)(bool meaningful, void *user);
     /** Called when the WSS closes (any reason). */
     void (*on_session_closed)(void *user);
     void *user;
@@ -57,6 +60,9 @@ void patch_audio_set_reply_gain(float gain);
 
 /** Bytes of reply audio still waiting to be played. */
 size_t patch_audio_playback_pending(void);
+
+/** Peak absolute sample of the most recent mic frame sent in a session. */
+int patch_audio_mic_peak(void);
 
 // Accessor for the shared I2S RX channel — used by patch_wakeword to feed
 // WakeNet from the same DMA buffer the active session reads from. Returns

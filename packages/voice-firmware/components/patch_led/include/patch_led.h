@@ -24,6 +24,17 @@ void patch_led_set(pds_state_t state);
 /** Show a volume level (0..max) on the ring for ~1.5 s, over the state pattern. */
 void patch_led_show_level(int level, int max);
 
+/** Conversation phase. While not NONE it decides the ring, over the device state. */
+typedef enum {
+    PLED_PHASE_NONE = 0,  // off / the device state's own pattern
+    PLED_PHASE_LISTENING, // steady blue: the user is talking
+    PLED_PHASE_THINKING,  // amber, rotating: waiting on the agent
+    PLED_PHASE_SPEAKING,  // green, breathing: a reply is playing
+    PLED_PHASE_FOLLOWUP,  // dim blue, slow breathing: open for a follow-up
+} pled_phase_t;
+
+void patch_led_set_phase(pled_phase_t phase);
+
 #ifdef __cplusplus
 }
 #endif

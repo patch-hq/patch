@@ -416,6 +416,14 @@ static volatile float s_reply_gain = 1.0f;
 static float s_hp_x1, s_hp_x2, s_hp_y1, s_hp_y2;
 static float s_lim_gain = 1.0f;
 
+static atomic_int s_mic_peak = 0;
+// When the speaker last played real reply audio; the mic uplink is turned
+// right down while replies play (and briefly after) so the host doesn't hear
+// the device's own voice as the user speaking.
+static volatile int64_t s_last_play_us = 0;
+#define ECHO_TAIL_US 800000
+int patch_audio_mic_peak(void) { return atomic_load(&s_mic_peak); }
+
 size_t patch_audio_playback_pending(void) {
     return s_play_buf ? xStreamBufferBytesAvailable(s_play_buf) : 0;
 }
@@ -530,6 +538,7 @@ static void play_feeder_task(void *arg) {
             if (n == 0) pending++;                                 // fully dry = mid-stream gap
         }
         if (n > 0) {
+            s_last_play_us = esp_timer_get_time();
             if (pending > 0) { gaps += pending; pending = 0; }
             real++;
             if (real % 128 == 0)
@@ -578,6 +587,20 @@ static void mic_consumer_task(void *arg) {
         }
         patch_mic_frame_t *f = NULL;
         if (xQueueReceive(pump_q, &f, pdMS_TO_TICKS(40)) != pdTRUE) continue;
+        {
+            const int16_t *d = patch_mic_frame_data(f);
+            size_t ns = patch_mic_frame_samples(f);
+            int pk = 0;
+            for (size_t i = 0; i < ns; i++) { int v = d[i] < 0 ? -d[i] : d[i]; if (v > pk) pk = v; }
+            bool playing = xStreamBufferBytesAvailable(s_play_buf) > 0 ||
+                           esp_timer_get_time() - s_last_play_us < ECHO_TAIL_US;
+            if (playing) {
+                int16_t *w = (int16_t *)d;
+                for (size_t i = 0; i < ns; i++) w[i] = (int16_t)(w[i] / 64);
+                pk = 0;
+            }
+            atomic_store(&s_mic_peak, pk);
+        }
         // Hand off to the WS sender. Non-blocking: if the queue is full,
         // the TLS write is behind — drop this frame deliberately and emit
         // a metric. NOT a fallback; this is an explicit drop with telemetry.
@@ -636,6 +659,9 @@ static void text_dispatch_task(void *arg) {
         if (xQueueReceive(s_text_q, &body, pdMS_TO_TICKS(50)) != pdTRUE) continue;
         if (strstr(body, "audio.tts_chunk")) {
             if (s_cfg.on_tts_started) s_cfg.on_tts_started(s_cfg.user);
+        } else if (strstr(body, "audio.transcript_final")) {
+            bool meaningful = !strstr(body, "\"text\":\"\"") && !strstr(body, "\"addressed\":false");
+            if (s_cfg.on_transcript) s_cfg.on_transcript(meaningful, s_cfg.user);
         } else if (strstr(body, "audio.tts_end")) {
             atomic_store(&s_tts_flush, true);
             if (s_cfg.on_tts_ended) s_cfg.on_tts_ended(s_cfg.user);

@@ -65,6 +65,7 @@ static void on_button(pb_event_t ev, void *user);
 static void on_wake_word(void *user);
 static void on_tts_started(void *user);
 static void on_tts_ended(void *user);
+static void on_transcript(bool meaningful, void *user);
 static void on_audio_session_closed(void *user);
 static void render_state(void);
 
@@ -242,9 +243,11 @@ static void open_audio_session_now(void) {
         .voice_token = s_voice_token,
         .on_tts_started     = on_tts_started,
         .on_tts_ended       = on_tts_ended,
+        .on_transcript      = on_transcript,
         .on_session_closed  = on_audio_session_closed,
     };
     patch_audio_session_start(&cfg);
+    patch_led_set_phase(PLED_PHASE_LISTENING);
     pds_dispatch(&s_state, PDS_EV_AUDIO_SESSION_OPENED);
     patch_wakeword_pause();
     render_state();
@@ -299,36 +302,77 @@ static void on_control_inbound(const pcf_inbound_t *f, void *user) {
 
 // ---------- audio callbacks -------------------------------------------------
 
-// One exchange per wake word: once a reply has finished playing and no more
-// reply audio follows, the device ends the session and goes back to listening
-// only for the wake word, so room speech isn't answered.
+// After a reply the session stays open FOLLOWUP_MS for a follow-up. The host
+// doesn't tell the device when the user starts talking, so the device watches
+// its own mic level; if nobody speaks in the window the session ends and only
+// the wake word opens a new one.
+#define FOLLOWUP_MS 5000
+#define SPEECH_PEAK 5000          // mic frame peak that counts as someone talking
+#define SPEECH_POLLS 3            // consecutive 50 ms polls above it
+#define TRANSCRIPT_WAIT_MS 20000  // after speech, how long to wait for the host's transcript
 static volatile uint32_t s_tts_epoch = 0;
-static volatile bool s_end_task_running = false;
-
 static volatile bool s_tts_active = false;
+static volatile bool s_followup_running = false;
+static volatile uint32_t s_transcript_epoch = 0;
+static volatile bool s_last_transcript_meaningful = false;
 
-static void end_after_reply_task(void *arg) {
+static void end_session_now(const char *why) {
+    if (!patch_audio_session_active()) return;
+    ESP_LOGI(TAG, "ending session: %s", why);
+    patch_control_send_session_end(PCF_SESSION_END_AGENT_FINISHED);
+    patch_audio_session_stop("agent-finished");
+}
+
+static void followup_task(void *arg) {
     (void)arg;
-    for (int round = 0; round < 20; round++) {
+    // Let the whole reply play, including any further pieces of it.
+    for (;;) {
         uint32_t epoch = s_tts_epoch;
         for (int i = 0; i < 300 && patch_audio_playback_pending() > 0; i++) vTaskDelay(pdMS_TO_TICKS(100));
-        vTaskDelay(pdMS_TO_TICKS(1500));
-        if (!patch_audio_session_active()) break;
-        if (!s_tts_active && epoch == s_tts_epoch && patch_audio_playback_pending() == 0) {
-            ESP_LOGI(TAG, "reply finished; ending session");
-            patch_control_send_session_end(PCF_SESSION_END_AGENT_FINISHED);
-            patch_audio_session_stop("agent-finished");
-            break;
-        }
+        vTaskDelay(pdMS_TO_TICKS(600));
+        if (!patch_audio_session_active()) goto done;
+        if (!s_tts_active && epoch == s_tts_epoch && patch_audio_playback_pending() == 0) break;
     }
-    s_end_task_running = false;
+    patch_led_set_phase(PLED_PHASE_FOLLOWUP);
+    uint32_t t_epoch = s_transcript_epoch;
+    uint32_t tts_epoch = s_tts_epoch;
+    int above = 0;
+    bool spoke = false;
+    for (int waited = 0; waited < FOLLOWUP_MS; waited += 50) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+        if (!patch_audio_session_active() || s_tts_epoch != tts_epoch) goto done;
+        if (s_transcript_epoch != t_epoch) { spoke = true; break; }  // host already heard something
+        above = patch_audio_mic_peak() > SPEECH_PEAK ? above + 1 : 0;
+        if (above >= SPEECH_POLLS) { spoke = true; break; }
+    }
+    if (!spoke) { end_session_now("no follow-up"); goto done; }
+    patch_led_set_phase(PLED_PHASE_LISTENING);
+    for (int waited = 0; waited < TRANSCRIPT_WAIT_MS; waited += 100) {
+        if (!patch_audio_session_active() || s_tts_epoch != tts_epoch) goto done;
+        if (s_transcript_epoch != t_epoch) {
+            if (!s_last_transcript_meaningful) end_session_now("follow-up wasn't for us");
+            goto done;  // meaningful: on_transcript already moved to thinking
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    end_session_now("no transcript after speech");
+done:
+    s_followup_running = false;
     vTaskDelete(NULL);
+}
+
+static void on_transcript(bool meaningful, void *u) {
+    (void)u;
+    s_last_transcript_meaningful = meaningful;
+    s_transcript_epoch++;
+    if (meaningful) patch_led_set_phase(PLED_PHASE_THINKING);
 }
 
 static void on_tts_started(void *u) {
     (void)u;
     s_tts_epoch++;
     s_tts_active = true;
+    patch_led_set_phase(PLED_PHASE_SPEAKING);
     pds_dispatch(&s_state, PDS_EV_TTS_STARTED);
     render_state();
 }
@@ -336,17 +380,16 @@ static void on_tts_ended(void *u) {
     (void)u;
     pds_dispatch(&s_state, PDS_EV_TTS_ENDED);
     s_tts_active = false;
-    if (!s_end_task_running) {
-        s_end_task_running = true;
-        if (xTaskCreate(end_after_reply_task, "end-after-reply", 3072, NULL, 4, NULL) != pdPASS) {
-            s_end_task_running = false;
-        }
+    if (!s_followup_running) {
+        s_followup_running = true;
+        if (xTaskCreate(followup_task, "followup", 3072, NULL, 4, NULL) != pdPASS) s_followup_running = false;
     }
     render_state();
 }
 static void on_audio_session_closed(void *u) {
     (void)u;
     s_active_session_id[0] = '\0';
+    patch_led_set_phase(PLED_PHASE_NONE);
     pds_dispatch(&s_state, PDS_EV_AUDIO_SESSION_CLOSED);
     if (!patch_button_is_muted()) patch_wakeword_resume();
     render_state();

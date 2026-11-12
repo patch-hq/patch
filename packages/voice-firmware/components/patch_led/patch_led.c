@@ -2,6 +2,7 @@
 #include "patch_led_table.h"
 
 #include <string.h>
+#include <stdbool.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -24,6 +25,7 @@ static volatile pds_state_t s_state = PDS_STATE_DISCONNECTED;
 // the wire. Comparing them lets us skip `led_strip_refresh` when the frame
 // is identical (RMT bus would otherwise hold the line ~30 µs/LED). See
 // pixels_differ() for the pure-C diff used here and in host tests.
+static volatile pled_phase_t s_phase = PLED_PHASE_NONE;
 static volatile int s_level = 0, s_level_max = 10;
 static volatile int64_t s_level_until_us = 0;
 
@@ -111,7 +113,17 @@ static void renderer_task(void *arg) {
             last = cur;
         }
         plp_descriptor_t d = plp_for_state(cur);
-        switch (d.pattern) {
+        pled_phase_t ph = s_phase;
+        bool phased = ph != PLED_PHASE_NONE && cur != PDS_STATE_MUTED && cur != PDS_STATE_DISCONNECTED;
+        if (phased) {
+            switch (ph) {
+                case PLED_PHASE_LISTENING: render_solid(0, 80, 255); d.pattern = PLP_STEADY_CYAN; break;
+                case PLED_PHASE_THINKING:  render_rotate(255, 120, 0, frame / 3); d.pattern = PLP_YELLOW_ROTATE; break;
+                case PLED_PHASE_SPEAKING:  render_pulse(0, 255, 60, frame, 38, 90); d.pattern = PLP_PULSING_WHITE; break;
+                case PLED_PHASE_FOLLOWUP:  render_pulse(0, 30, 140, frame, 20, 120); d.pattern = PLP_PULSING_WHITE; break;
+                default: break;
+            }
+        } else switch (d.pattern) {
             case PLP_OFF:            render_off(); break;
             case PLP_DIM_AMBIENT:    render_solid(d.r, d.g, d.b); break;
             case PLP_SINGLE_PULSE: {
@@ -196,3 +208,5 @@ void patch_led_show_level(int level, int max) {
     s_level = level;
     s_level_until_us = esp_timer_get_time() + 1500000;
 }
+
+void patch_led_set_phase(pled_phase_t phase) { s_phase = phase; }
