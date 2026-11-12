@@ -314,9 +314,47 @@ export function registerChatMoveRoutes(app: FastifyInstance, deps: ChatMoveRoute
     if (unknownHost) return reply.code(UNKNOWN_HOST_STATUS).send(unknownHost);
     const source = chat.hostId;
     if (source === target) {
-      return reply
-        .code(400)
-        .send({ error: 'same_host', message: `this chat is already on ${hostLabel(target)}` });
+      // A move within one machine: the host does all three steps itself.
+      if (chat.folder === folder) {
+        return reply
+          .code(400)
+          .send({ error: 'same_folder', message: `this chat already runs in ${folder}` });
+      }
+      if (!deps.hostLink.isOnline(source)) {
+        return reply.code(503).send({
+          error: 'host_offline',
+          message: `${hostLabel(source)} is offline`,
+          hostId: source,
+        });
+      }
+      if (moving.has(chatId)) {
+        return reply.code(409).send({ error: 'busy', message: 'this chat is already being moved' });
+      }
+      moving.add(chatId);
+      const log = deps.logger.child({ chatId, host: source, folder });
+      try {
+        const res = await step(source, auth.surfaceId, chatId, 'refolder', { folder });
+        if (res === 'timeout') {
+          log.warn('chat move: refolder timed out');
+          return reply.code(504).send({
+            error: 'daemon_timeout',
+            message: `${hostLabel(source)} did not answer the move in time`,
+          });
+        }
+        if (!res.ok) {
+          const code = res.error?.code ?? 'internal';
+          log.warn({ code }, 'chat move: refolder refused');
+          return reply.code(STATUS_BY_CODE[code]).send({
+            error: code,
+            message: `${hostLabel(source)}: ${res.error?.message ?? 'move failed'}`,
+          });
+        }
+        deps.chatRegistry.rehome(chatId, target, folder);
+        log.info('chat move: refoldered');
+        return reply.send({ ok: true, chatId, hostId: target, folder });
+      } finally {
+        moving.delete(chatId);
+      }
     }
     // Only the target must be online: a chat whose host is off is built from
     // the server's own copy instead of exported (spec/04 § Moving a chat to

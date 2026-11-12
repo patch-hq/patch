@@ -7012,6 +7012,14 @@ export function handleChatMoveRequest(
       sender({ ...base, ok: true });
       return;
     }
+    if (event.op === 'refolder') {
+      if (event.folder === undefined) {
+        throw new ChatMoveError('internal', 'a refolder needs a folder');
+      }
+      daemon.refolderChat(event.chatId, event.folder);
+      sender({ ...base, ok: true });
+      return;
+    }
     if (event.op === 'retire' && event.force === true) {
       // A takeover stops running work, which takes a moment: answer when done.
       void daemon

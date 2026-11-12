@@ -65,12 +65,12 @@ describe('Chat Move screen', () => {
     __setLocalSearchParams({ chatId: 'c1' });
   });
 
-  it('offers the other host with its same-named folder filled in', () => {
+  it('offers every host, another one chosen, with its same-named folder filled in', () => {
     const r = renderRN(<ChatMove />);
     expect(hasText(findHost(r.root, byTestId('move-from')), 'Mac · /Users/tom/wpp/Unite')).toBe(
       true,
     );
-    expect(() => findHost(r.root, byTestId('move-host-mac'))).toThrow();
+    expect(findHost(r.root, byTestId('move-host-mac'))).toBeTruthy();
     expect(findHost(r.root, byTestId('move-folder')).props.value).toBe('/home/tom/Unite');
   });
 

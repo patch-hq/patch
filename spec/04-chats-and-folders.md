@@ -278,6 +278,15 @@ finished or failed.
 - The old host keeps the retired chat's directory under `~/.patch/moved/`
   rather than deleting it.
 
+A chat can also be moved to another folder on the machine it is already on.
+The picker lists its own machine as a target (marked "this machine", the folder it runs in left out of
+the folder offers) and the same `POST /api/chats/:id/move` takes `{hostId: <its own host>, folder}`. The
+server sends one `refolder` step to that host, which does export, retire and import itself, so the chat
+keeps its id, history and session and the same refusals apply (mid-turn, a wake or watch, a Codex
+session, a folder that is not a directory). The old directory is kept under `~/.patch/moved/`; if the
+import fails, it is put back and the chat is as it was. A folder the chat already runs in is refused
+(`same_folder`). The host must be online; the server-copy takeover does not apply.
+
 A chat can also be moved from the server's copy. The picker never offers it as
 a choice: the user picks only the folder. The client asks for it by itself when
 the chat's host refuses an ordinary move (`busy`, `unsupported`), and it is the

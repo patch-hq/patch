@@ -7839,7 +7839,7 @@ export const ChatMoveBundle = z
   .strict();
 export type ChatMoveBundle = z.infer<typeof ChatMoveBundle>;
 
-export const ChatMoveOp = z.enum(['export', 'import', 'retire', 'release']);
+export const ChatMoveOp = z.enum(['export', 'import', 'retire', 'release', 'refolder']);
 export type ChatMoveOp = z.infer<typeof ChatMoveOp>;
 
 export const PatchChatMoveRequestEvent = z
@@ -7850,7 +7850,11 @@ export const PatchChatMoveRequestEvent = z
     ...hostIdField,
     chatId: z.string().min(1),
     op: ChatMoveOp,
-    /** `import` only: the absolute folder the chat will run in on this host. */
+    /**
+     * `import` and `refolder`: the absolute folder the chat will run in on this
+     * host. `refolder` is a move within one host: the host does export, retire
+     * and import itself, so the chat keeps its id and its session.
+     */
     folder: z.string().min(1).optional(),
     /** `import` only: what `export` produced, or what the server built from its own copy. */
     bundle: ChatMoveBundle.optional(),
