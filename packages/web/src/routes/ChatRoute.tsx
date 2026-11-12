@@ -83,7 +83,7 @@ import { HookBlockCard } from '../components/HookBlockCard.js';
 import type { HookRunResult } from '@patch/wire/hooks';
 import { useWholeChatDrop } from '../lib/wholeChatDrop.js';
 import { ThreadsStrip } from '../components/ThreadsStrip.js';
-import { ClaudeDisconnectedBanner } from '../components/ClaudeDisconnectedBanner.js';
+import { CONNECT_PATH, ClaudeDisconnectedBanner } from '../components/ClaudeDisconnectedBanner.js';
 import { OutOfUsageBanner } from '../components/OutOfUsageBanner.js';
 import { JobBar } from '../components/JobBar.js';
 import { HostOfflineBanner } from '../components/HostOfflineBanner.js';
@@ -2730,7 +2730,7 @@ const TimelineEntry = memo(function TimelineEntry({
       <div className="turn-error" role="alert" data-testid="turn-error">
         <span className="turn-error-body">{presentFailure(entry.content ?? '')}</span>
         {entry.errorCode === 'chatgpt_login_required' ? (
-          <Link className="turn-error-action" to="/settings/usage" data-testid="turn-error-sign-in">
+          <Link className="turn-error-action" to={CONNECT_PATH} data-testid="turn-error-sign-in">
             Sign in
           </Link>
         ) : entry.errorCode === 'handoff_too_large' || entry.errorCode === 'handoff_overflow' ? (

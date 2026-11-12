@@ -108,7 +108,7 @@ export function ClaudeSignIn({
       }}
     >
       <label className="claude-signin-label" htmlFor="claude-signin-code">
-        Code from claude.ai
+        Sign in at claude.ai, copy the code it shows, and paste it here.
       </label>
       <input
         id="claude-signin-code"

@@ -16,6 +16,7 @@ import { useQuery } from '@tanstack/react-query';
 import { compactModelLabel, encodePairingUri, type PermissionMode } from '@patch/wire';
 import { api } from '../api/rest.js';
 import { ClaudeSignIn } from '../components/ClaudeSignIn.js';
+import { ErrorDetail } from '../components/ErrorDetail.js';
 import { PERMISSION_MODES } from '../components/Composer.js';
 import { getDesktopBridge, type KeepRunningState } from '../lib/desktopBridge.js';
 import { permissionModeLabel } from '../lib/permissionModeLabel.js';
@@ -31,14 +32,17 @@ export const ANDROID_APK_URL =
 
 type StepId = 'providers' | 'permissions' | 'model' | 'keep-running' | 'phone';
 
-/** What each mode does, in a few words: the names alone don't say. */
-const MODE_HINT: Record<string, string> = {
-  auto: 'Claude judges what is safe to run',
+/** What each mode does, in a few words: the names alone don't say. Said of
+ *  "the agent", never of one provider: nothing may be connected yet. */
+export const MODE_HINT: Record<string, string> = {
+  auto: 'Asks only when something looks risky',
   default: 'Asks before changing files or running commands',
   acceptEdits: 'Edits files freely, asks before commands',
-  bypassPermissions: 'Never asks',
+  bypassPermissions: 'Never asks, so it can delete or overwrite anything',
   plan: 'Reads and plans, changes nothing',
 };
+/** The modes whose hint is a warning, drawn as one. */
+const MODE_WARNS = new Set(['bypassPermissions']);
 
 export function WelcomeRoute(): JSX.Element {
   const navigate = useNavigate();
@@ -65,10 +69,16 @@ export function WelcomeRoute(): JSX.Element {
     <div className="welcome" data-testid="welcome" data-step={step}>
       <div className="welcome-drag" />
       <main className="welcome-card">
-        <ol className="welcome-dots" aria-label={`Step ${index + 2} of ${steps.length + 1}`}>
-          {/* The first dot is the shell's own step: where agents run. */}
-          {['where', ...steps].map((s, i) => (
-            <li key={s} className={i <= index + 1 ? 'done' : ''} />
+        {/* One dot per step on this page, and nothing else: the shell's own
+            question before it draws no bar, so counting it here made the bar
+            start part-filled and count a step the page never shows. */}
+        <ol
+          className="welcome-dots"
+          data-testid="welcome-dots"
+          aria-label={`Step ${index + 1} of ${steps.length}`}
+        >
+          {steps.map((s, i) => (
+            <li key={s} className={i <= index ? 'done' : ''} />
           ))}
         </ol>
         {step === 'providers' ? <ProvidersStep onNext={next} /> : null}
@@ -123,6 +133,31 @@ function Footer({
 }
 
 function ProvidersStep({ onNext }: { onNext: () => void }): JSX.Element {
+  const connected = useConnectedCount();
+  return (
+    <section className="welcome-step" data-testid="welcome-providers">
+      <h1>Connect an AI</h1>
+      <ProviderCards />
+      <Footer
+        onNext={onNext}
+        ready={connected > 0}
+        skip={connected > 0 ? undefined : 'Skip for now'}
+      />
+    </section>
+  );
+}
+
+/** How many AI accounts are connected, of any provider. */
+export function useConnectedCount(): number {
+  const secrets = usePreferencesStore((s) => s.shared?.secrets);
+  return [...(secrets?.claude ?? []), ...(secrets?.codex ?? [])].filter((a) => a.connected).length;
+}
+
+/**
+ * One card per provider, each with its sign-in. The welcome step and the
+ * Connect page (routes/ConnectRoute) draw the same cards.
+ */
+export function ProviderCards(): JSX.Element {
   const secrets = usePreferencesStore((s) => s.shared?.secrets);
   const hosts = usePresenceStore((s) => s.hosts);
   const claude = secrets?.claude.filter((a) => a.connected) ?? [];
@@ -137,8 +172,7 @@ function ProvidersStep({ onNext }: { onNext: () => void }): JSX.Element {
   const failed = claudeOnHosts.find((b) => b.state === 'failed');
 
   return (
-    <section className="welcome-step" data-testid="welcome-providers">
-      <h1>Connect an AI</h1>
+    <>
       <div className="welcome-provider" data-testid="welcome-claude">
         <div className="welcome-provider-head">
           <span className="welcome-provider-name">Claude</span>
@@ -148,7 +182,14 @@ function ProvidersStep({ onNext }: { onNext: () => void }): JSX.Element {
             </span>
           ) : null}
         </div>
-        {claude.length === 0 ? <ClaudeSignIn primary /> : null}
+        {claude.length === 0 ? (
+          <>
+            <p className="welcome-note" data-testid="welcome-claude-plans">
+              Works with a Claude Pro, Max, Team or Enterprise plan.
+            </p>
+            <ClaudeSignIn primary />
+          </>
+        ) : null}
         {installing ? (
           <p className="welcome-note" data-testid="welcome-claude-installing">
             Installing Claude Code on this computer…
@@ -169,14 +210,16 @@ function ProvidersStep({ onNext }: { onNext: () => void }): JSX.Element {
             </span>
           ) : null}
         </div>
-        {chatgpt.length === 0 ? <AddChatGPTAccount /> : null}
+        {chatgpt.length === 0 ? (
+          <>
+            <p className="welcome-note" data-testid="welcome-chatgpt-plans">
+              Works with a ChatGPT plan or an OpenAI API key.
+            </p>
+            <AddChatGPTAccount />
+          </>
+        ) : null}
       </div>
-      <Footer
-        onNext={onNext}
-        ready={claude.length + chatgpt.length > 0}
-        skip={claude.length + chatgpt.length > 0 ? undefined : 'Skip for now'}
-      />
-    </section>
+    </>
   );
 }
 
@@ -195,6 +238,7 @@ function PermissionStep({ onNext }: { onNext: () => void }): JSX.Element {
             disabled={!loaded}
             title={permissionModeLabel(m)}
             hint={MODE_HINT[m]}
+            warn={MODE_WARNS.has(m)}
             onPick={() =>
               void patchShared('permission mode', { permissionModeDefault: m as PermissionMode })
             }
@@ -226,9 +270,12 @@ function ModelStep({ onNext }: { onNext: () => void }): JSX.Element {
         ))}
       </div>
       {problem ? (
-        <p className="welcome-note" data-testid="welcome-model-problem">
-          {problem.text}
-        </p>
+        <div className="welcome-note" data-testid="welcome-model-problem" data-kind={problem.kind}>
+          <p>{problem.text}</p>
+          {problem.kind === 'error' ? (
+            <ErrorDetail detail={problem.detail} testId="welcome-model-problem-detail" />
+          ) : null}
+        </div>
       ) : null}
       <Footer onNext={onNext} ready={loaded} />
     </section>
@@ -309,7 +356,8 @@ function PhoneStep({ onNext }: { onNext: () => void }): JSX.Element {
         <li>
           <a href={ANDROID_APK_URL} target="_blank" rel="noreferrer" data-testid="welcome-apk">
             Get the Android app
-          </a>
+          </a>{' '}
+          <span className="welcome-muted">(iPhone isn’t available yet)</span>
         </li>
         <li>Open it and scan this code</li>
       </ol>
@@ -326,7 +374,7 @@ function PhoneStep({ onNext }: { onNext: () => void }): JSX.Element {
         )}
         {drawError ? <p className="set-error">{drawError}</p> : null}
       </div>
-      <Footer onNext={onNext} ready label="Done" />
+      <Footer onNext={onNext} ready label="Done" skip="No phone, skip" />
     </section>
   );
 }
@@ -337,6 +385,7 @@ function Option({
   disabled,
   title,
   hint,
+  warn = false,
   onPick,
 }: {
   id: string;
@@ -344,6 +393,8 @@ function Option({
   disabled: boolean;
   title: string;
   hint?: string | undefined;
+  /** Draw the hint as a warning. */
+  warn?: boolean;
   onPick: () => void;
 }): JSX.Element {
   return (
@@ -358,7 +409,7 @@ function Option({
       />
       <span className="welcome-option-text">
         <span className="welcome-option-title">{title}</span>
-        {hint ? <span className="welcome-option-hint">{hint}</span> : null}
+        {hint ? <span className={`welcome-option-hint${warn ? ' warn' : ''}`}>{hint}</span> : null}
       </span>
     </label>
   );

@@ -10545,18 +10545,6 @@ button.set-row-open:focus-visible {
   }
 }
 
-/* The new-chat screen when the host cannot run a turn. Stated ABOVE the
-   setup row: this was previously discoverable only by opening the model picker,
-   so the app looked usable and failed at the send. */
-.new-chat-blocked {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  margin-bottom: 16px;
-  font-size: 14px;
-  color: var(--ink-2);
-}
 .new-chat-failed {
   display: flex;
   flex-direction: column;
@@ -10575,12 +10563,6 @@ button.set-row-open:focus-visible {
 }
 .draft-row .draft-failed {
   color: var(--danger);
-}
-.new-chat-blocked-title {
-  margin: 0;
-}
-.new-chat-blocked a {
-  color: var(--accent-strong);
 }
 
 /* Inline empty/placeholder text (list "No jobs yet", "No folders configured")
@@ -10637,6 +10619,25 @@ button.set-row-open:focus-visible {
   text-align: center;
   padding: 56px 24px;
   margin: auto;
+}
+/* A short pane (the Manager with its Threads panel, a banner above, a small
+   window) has less room than the drawing wants. The transcript is pinned to
+   its foot, so an empty state taller than the pane had its top scrolled out of
+   sight, under the banner. Instead it shrinks to fit: the stream's content may
+   be no taller than the stream, the drawing
+   scales down. */
+.chat-stream-content:has(> .empty-chat:only-child) {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.chat-stream-content > .empty-chat:only-child {
+  min-height: 0;
+  padding-block: 0;
+}
+.chat-stream-content > .empty-chat:only-child .empty-chat-art {
+  flex: 0 1 132px;
+  min-height: 48px;
+  width: auto;
 }
 .empty-chat-art {
   width: 176px;
@@ -17360,6 +17361,20 @@ select.permission-mode.is-pending {
   opacity: 0.35;
   pointer-events: none;
 }
+.composer-signed-out {
+  width: 100%;
+  max-width: 780px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0 8px;
+  font-size: var(--text-min);
+  color: var(--ink-2);
+}
+.composer-signed-out a {
+  color: var(--accent-strong);
+  font-weight: 600;
+}
 .composer-edit-banner {
   display: flex;
   align-items: center;
@@ -18314,6 +18329,9 @@ a.drop-target {
   font-size: 14px;
   color: var(--ink-3);
 }
+.welcome-note p {
+  margin: 0;
+}
 .welcome-options {
   display: grid;
   gap: 8px;
@@ -18351,6 +18369,9 @@ a.drop-target {
 .welcome-option-hint {
   font-size: 14px;
   color: var(--ink-3);
+}
+.welcome-option-hint.warn {
+  color: var(--danger);
 }
 .welcome-footer {
   display: flex;
@@ -18395,12 +18416,22 @@ a.drop-target {
   justify-self: start;
   margin-left: -10px;
 }
+/* A footer whose only action is quiet lines its text up with the cards. */
+.welcome-footer > .welcome-skip:first-child {
+  margin-left: -10px;
+}
 .welcome-phone-steps {
   margin: 0;
-  padding-left: 20px;
+  /* Numbered, flush with the heading: the global reset drops list markers. */
+  padding-left: 0;
+  list-style: decimal inside;
   display: grid;
   gap: 6px;
   font-size: 16px;
+}
+.welcome-muted {
+  font-size: 14px;
+  color: var(--ink-3);
 }
 .welcome-phone-steps a {
   color: var(--accent-strong);

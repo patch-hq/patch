@@ -469,6 +469,34 @@ describe('an install whose service does not stay up', () => {
 });
 
 describe('what the install puts on the host', () => {
+  it('a brand-new host gets ~/Patch as its first project folder (spec/04 § Folders)', async () => {
+    const home = mkTmp('patch-home-');
+    const ctx = makeCtx({
+      home,
+      serviceOps: recordingOps(),
+      argv: ['--non-interactive', '--server', 'http://s', '--internal-token', 't'],
+    });
+    await runInstaller(ctx);
+    expect(statSync(join(home, 'Patch')).isDirectory()).toBe(true);
+    expect(JSON.parse(readFileSync(join(home, '.patch', 'host.json'), 'utf8')).folderRoots).toEqual(
+      [join(home, 'Patch')],
+    );
+    expect(streams(ctx).out).toContain(`first project folder: ${join(home, 'Patch')}`);
+  });
+
+  it('an update of a host with chats adds no folder', async () => {
+    const home = mkTmp('patch-home-');
+    mkdirSync(join(home, '.patch', 'chats', 'chat_1'), { recursive: true });
+    await runInstaller(
+      makeCtx({
+        home,
+        serviceOps: recordingOps(),
+        argv: ['--non-interactive', '--server', 'http://s', '--internal-token', 't'],
+      }),
+    );
+    expect(existsSync(join(home, 'Patch'))).toBe(false);
+  });
+
   it('replaces a legacy CLI symlink without overwriting the bundled JavaScript', async () => {
     const home = mkTmp('patch-home-');
     const artifactDir = makeArtifact('linux-x64');

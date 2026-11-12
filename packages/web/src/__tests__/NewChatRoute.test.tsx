@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, Link } from 'react-router-dom';
+import { compactModelLabel } from '@patch/wire';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NewChatRoute } from '../routes/NewChatRoute.js';
 import { ChatRoute } from '../routes/ChatRoute.js';
@@ -904,12 +905,7 @@ describe('/chats/new', () => {
     renderPicker();
 
     await waitFor(() => {
-      expect(quickModelLabels()).toEqual([
-        'Claude Opus 5',
-        'Sonnet 4.6',
-        'Claude Sonnet 5',
-        'Claude Haiku 4.5',
-      ]);
+      expect(quickModelLabels()).toEqual(['Opus 5', 'Sonnet 4.6', 'Sonnet 5', 'Haiku 4.5']);
     });
     expect(screen.queryByTestId('model-quick-claude-ancient-1')).toBeNull();
     expect(
@@ -938,7 +934,7 @@ describe('/chats/new', () => {
 
     // NO second source: a model the pop-up disowns is offered nowhere.
     await waitFor(() => {
-      expect(quickModelLabels()).toEqual(['Claude Opus 5', 'Claude Sonnet 5', 'Claude Haiku 4.5']);
+      expect(quickModelLabels()).toEqual(['Opus 5', 'Sonnet 5', 'Haiku 4.5']);
     });
     expect(screen.queryByTestId('model-quick-claude-retired-1')).toBeNull();
   });
@@ -965,7 +961,7 @@ describe('/chats/new', () => {
     // Nothing chosen yet, so the pressed chip is the account default — exactly
     // what an omitted `model` resolves to — and the pill is only the way to the
     // rest of the catalogue.
-    expect(chosenModelLabel()).toBe('Claude Opus 5');
+    expect(chosenModelLabel()).toBe('Opus 5');
     expect(pill.querySelector('.model-pill-label')?.textContent).toBe('More…');
     expect(pill).not.toHaveAttribute('title');
     const sonnet = await screen.findByTestId('model-quick-claude-sonnet-5');
@@ -975,7 +971,7 @@ describe('/chats/new', () => {
     );
 
     fireEvent.click(sonnet);
-    expect(chosenModelLabel()).toBe('Claude Sonnet 5');
+    expect(chosenModelLabel()).toBe('Sonnet 5');
     expect(screen.getByTestId('model-quick-claude-sonnet-5')).toHaveAttribute(
       'aria-pressed',
       'true',
@@ -987,7 +983,7 @@ describe('/chats/new', () => {
     // A chat always spawns on some model, so there is no deselect: clicking the
     // chosen one again leaves it chosen (spec/14 § Model selector).
     fireEvent.click(screen.getByTestId('model-quick-claude-sonnet-5'));
-    expect(chosenModelLabel()).toBe('Claude Sonnet 5');
+    expect(chosenModelLabel()).toBe('Sonnet 5');
     // Selecting from the row never opens the pop-up.
     expect(screen.queryByTestId('model-popup')).not.toBeInTheDocument();
   });
@@ -1068,7 +1064,7 @@ describe('/chats/new', () => {
     renderPicker();
     await waitFor(() => expect(quickFolderLabels()).toEqual(['alpha', 'bravo', 'charlie']));
     const models = quickModelLabels();
-    expect(models).toEqual(['Claude Opus 5', 'Claude Sonnet 5', 'Claude Haiku 4.5']);
+    expect(models).toEqual(['Opus 5', 'Sonnet 5', 'Haiku 4.5']);
 
     // An agent finishes a turn in alpha; a job lands a new chat on haiku.
     act(() => {
@@ -1338,6 +1334,23 @@ describe('/chats/new', () => {
       expect(screen.getByTestId('new-chat-host')).toHaveAttribute('data-selected', 'd2'),
     );
     expect(pillLabel()).toBe('bravo');
+  });
+
+  it('a first chat, with nothing to remember, defaults to the host’s first project folder', async () => {
+    useChatStore.setState({ chats: {} });
+    usePresenceStore.getState().setHostFolders('d1', ['/Users/new/Patch'], []);
+    stubPickerFetch({ folders: [] });
+    renderPicker();
+    await waitFor(() => expect(chosenFolderLabel()).toBe('Patch'));
+  });
+
+  it('the first-folder default never overrides a remembered project', async () => {
+    usePresenceStore.getState().setHostFolders('d1', ['/Users/new/Patch'], []);
+    useChatStore.setState({ chats: { c1: makeRow('c1', '/home/tom/projects/alpha', 300, 'd1') } });
+    stubPickerFetch({ folders: [] });
+    renderPicker();
+    await screen.findByTestId('folder-quick-/Users/new/Patch');
+    expect(chosenFolderLabel()).toBe('alpha');
   });
 
   it("offers a host's own registered roots once it is chosen", async () => {
@@ -2986,7 +2999,8 @@ describe('/chats/new model picker treatment', () => {
     renderNewChat();
     const model = screen.getByTestId('new-chat-model');
     const current = MODEL_OPTIONS.find((m: ModelOption) => m.id === ACCOUNT_DEFAULT_MODEL)!;
-    expect(chosenModelLabel()).toBe(current.label);
+    // Read by its short name, never `Claude Opus 5` (spec/14 § Composer).
+    expect(chosenModelLabel()).toBe(compactModelLabel(current.id, current.label));
     expect(screen.queryByTestId('model-popup')).not.toBeInTheDocument();
     expect(model).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(model);
@@ -3002,7 +3016,7 @@ describe('/chats/new model picker treatment', () => {
     fireEvent.click(screen.getByTestId('new-chat-model'));
     fireEvent.click(screen.getByTestId(`model-option-${target.id}`));
     expect(screen.queryByTestId('model-popup')).not.toBeInTheDocument();
-    expect(chosenModelLabel()).toBe(target.label);
+    expect(chosenModelLabel()).toBe(compactModelLabel(target.id, target.label));
   });
 
   // The picker used to append the host's code to its own copy

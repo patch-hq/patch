@@ -17,10 +17,9 @@ type Perms = Record<
   'granted' | 'missing' | 'unknown'
 >;
 
-async function fakeShell(page: Page, perms: Perms, opts: { seen?: boolean } = {}) {
+async function fakeShell(page: Page, perms: Perms) {
   await page.addInitScript(
-    ({ perms, seen }) => {
-      if (seen) localStorage.setItem('patch.meetingSetupSeen', '1');
+    ({ perms }) => {
       const state = { ...perms };
       const calls: string[] = [];
       (window as unknown as { __shellCalls: string[] }).__shellCalls = calls;
@@ -43,7 +42,7 @@ async function fakeShell(page: Page, perms: Perms, opts: { seen?: boolean } = {}
         onMeetingSpeakers: () => () => {},
       };
     },
-    { perms, seen: opts.seen ?? false },
+    { perms },
   );
 }
 
@@ -58,17 +57,19 @@ const sent = (page: Page, type: string) =>
     type,
   );
 
-test('first run: a popover on the Meeting button lists what a meeting needs, once', async ({
+test('nothing is asked before Meeting is pressed: the popover opens on the button, anchored above it', async ({
   page,
 }) => {
   await fakeShell(page, { microphone: 'granted', callAudio: 'unknown', accessibility: 'missing' });
   await page.goto(URL);
+  await page.waitForSelector('[data-testid=composer]');
+  await page.waitForTimeout(800);
+  await expect(page.getByTestId('meeting-setup')).toHaveCount(0);
+  await page.getByTestId('meeting-btn').click();
   const pop = page.getByTestId('meeting-setup');
-  await expect(pop).toHaveAttribute('data-mode', 'intro');
+  await expect(pop).toHaveAttribute('data-mode', 'start');
   await expect(pop.getByTestId('meeting-perm-microphone')).toContainText('✓ Allowed');
   await expect(pop.getByTestId('meeting-perm-allow-callAudio')).toBeVisible();
-  await expect(pop.getByTestId('meeting-perm-allow-accessibility')).toBeVisible();
-  // anchored above the Meeting button
   const [p, b] = await Promise.all([
     pop.boundingBox(),
     page.getByTestId('meeting-btn').boundingBox(),
@@ -77,15 +78,12 @@ test('first run: a popover on the Meeting button lists what a meeting needs, onc
   expect(p!.x).toBeLessThanOrEqual(b!.x);
   await page.getByTestId('meeting-setup-close').click();
   await expect(pop).toHaveCount(0);
-  await page.reload();
-  await page.waitForSelector('[data-testid=composer]');
-  await page.waitForTimeout(500);
-  await expect(page.getByTestId('meeting-setup')).toHaveCount(0);
 });
 
 test('Allow asks the shell for that permission and the row turns Allowed', async ({ page }) => {
   await fakeShell(page, { microphone: 'granted', callAudio: 'unknown', accessibility: 'missing' });
   await page.goto(URL);
+  await page.getByTestId('meeting-btn').click();
   await page.getByTestId('meeting-perm-allow-callAudio').click();
   await expect(page.getByTestId('meeting-perm-callAudio')).toContainText('✓ Allowed');
   expect(await shellCalls(page)).toEqual(['request:callAudio']);
@@ -105,11 +103,7 @@ test('nothing to set up: no popover, and Meeting starts at once', async ({ page 
 test('pressing Meeting with Accessibility missing shows what is missing, and can start without names', async ({
   page,
 }) => {
-  await fakeShell(
-    page,
-    { microphone: 'granted', callAudio: 'granted', accessibility: 'missing' },
-    { seen: true },
-  );
+  await fakeShell(page, { microphone: 'granted', callAudio: 'granted', accessibility: 'missing' });
   await page.goto(URL);
   await page.waitForTimeout(500);
   await expect(page.getByTestId('meeting-setup')).toHaveCount(0);
@@ -129,11 +123,7 @@ test('pressing Meeting with Accessibility missing shows what is missing, and can
 });
 
 test('the microphone missing at start: Start waits until it is allowed', async ({ page }) => {
-  await fakeShell(
-    page,
-    { microphone: 'missing', callAudio: 'granted', accessibility: 'granted' },
-    { seen: true },
-  );
+  await fakeShell(page, { microphone: 'missing', callAudio: 'granted', accessibility: 'granted' });
   await page.goto(URL);
   await page.getByTestId('meeting-btn').click();
   const pop = page.getByTestId('meeting-setup');
@@ -148,11 +138,7 @@ test('the microphone missing at start: Start waits until it is allowed', async (
 test('starting without names is remembered: the next Meeting press starts without asking', async ({
   page,
 }) => {
-  await fakeShell(
-    page,
-    { microphone: 'granted', callAudio: 'granted', accessibility: 'missing' },
-    { seen: true },
-  );
+  await fakeShell(page, { microphone: 'granted', callAudio: 'granted', accessibility: 'missing' });
   await page.goto(URL);
   await page.getByTestId('meeting-btn').click();
   await page.getByTestId('meeting-start-without-names').click();
@@ -168,11 +154,7 @@ test('starting without names is remembered: the next Meeting press starts withou
 test('Settings → Voice toggle: off remembers a decline, on asks for Accessibility again', async ({
   page,
 }) => {
-  await fakeShell(
-    page,
-    { microphone: 'granted', callAudio: 'granted', accessibility: 'missing' },
-    { seen: true },
-  );
+  await fakeShell(page, { microphone: 'granted', callAudio: 'granted', accessibility: 'missing' });
   await page.addInitScript(() => localStorage.setItem('patch.meetingNamesDeclined', '1'));
   await stubSettingsApi(page);
   await page.goto(settingsUrl('voice'));

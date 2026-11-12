@@ -769,8 +769,8 @@ describe('no connected account blocks the new-chat screen', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
-    const blocked = await screen.findByTestId('new-chat-blocked');
-    expect(blocked).toHaveTextContent(/not signed in/i);
+    const blocked = await screen.findByTestId('composer-signed-out');
+    expect(blocked).toHaveTextContent('Sign in to Claude to send messages.');
     expect(screen.getByTestId('new-chat-folder-pill')).toBeDisabled();
     expect(screen.getByTestId('new-chat-model')).toBeDisabled();
   });
