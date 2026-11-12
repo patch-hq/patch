@@ -295,7 +295,6 @@ import {
   type VoiceConfig,
   type VoiceKeys,
 } from '@patch/wire/audio';
-import { WebSocketServer } from 'ws';
 import type { FastifyInstance } from 'fastify';
 
 /**
@@ -712,7 +711,6 @@ async function startHost(
     }
     return { sub: payload.sub, daemon_id: payload.daemon_id };
   })();
-  const accountPublicKey = daemonKeyClaims.sub;
   /** This host's id. Stamped on every frame this host emits. */
   const selfHostId = daemonKeyClaims.daemon_id;
   // The service manager appends stdout/stderr to daemon.log for ever; cap it.
