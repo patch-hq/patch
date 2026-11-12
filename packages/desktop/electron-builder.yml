@@ -64,6 +64,22 @@ mac:
   # The system-audio permission prompt's wording (Meeting mode hears the call).
   extendInfo:
     NSAudioCaptureUsageDescription: Patch hears your meetings' audio so it can take notes.
+# The disk image the website hands a new Mac user opens as the usual install
+# window: Patch beside an Applications shortcut, an arrow and one line saying to
+# drag it across. build/background.png and its @2x are combined into one
+# Retina-ready image; the icon positions are where the arrow in it points from and to.
+dmg:
+  background: build/background.png
+  window:
+    width: 540
+    height: 340
+  contents:
+    - x: 130
+      y: 150
+    - x: 410
+      y: 150
+      type: link
+      path: /Applications
 afterSign: scripts/notarize.cjs
 # Update feed. NO server address is built in (spec/05 § Desktop first run): the
 # feed is the server this app is connected to, set at launch (main.ts,
