@@ -13,6 +13,7 @@ export type UpdateLogEvent =
   | 'downloaded'
   | 'install-requested'
   | 'install-error'
+  | 'install-force-exit'
   | 'prompt-shown'
   | 'prompt-cleared'
   | 'banner';
