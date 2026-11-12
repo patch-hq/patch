@@ -3979,9 +3979,12 @@ function ToolCall({
     const id = entry.callId;
     return id === undefined ? undefined : s.toolRunSummaries[chatId]?.[id];
   });
+  // The whole turn's clock, shown beside the call's own: the per-call timer
+  // restarts with every call, so a long run of short calls never reads as long.
+  const turnSince = useChatStore((s) => turnStartOf(s.timelines[chatId]));
   const runningSince =
     !result && isCallOpen && !awaitingApproval && !isQuestionTool(entry.tool)
-      ? { at: entry.startedAt }
+      ? { at: entry.startedAt, turn: turnSince }
       : undefined;
 
   // spec/14 § Tool calls — `view_file` exists to SHOW the user a file, so its
@@ -5443,6 +5446,7 @@ const ToolGroup = memo(
     // A collapsed run hides its calls, so the unreturned one's own spinner is
     // out of sight: surface the oldest still-open call on the run's row.
     const openCallIds = useChatStore((s) => s.chats[chatId]?.openCallIds);
+    const turnSince = useChatStore((s) => turnStartOf(s.timelines[chatId]));
     const runningCall = calls.find(
       (c) =>
         c.callId !== undefined &&
@@ -5469,7 +5473,7 @@ const ToolGroup = memo(
             {open ? '▾' : '▸'}
           </span>
           <span className="tool-summary-text">{summary}</span>
-          {runningCall && !open ? <ToolRunning since={runningCall.startedAt} /> : null}
+          {runningCall && !open ? <ToolRunning since={runningCall.startedAt} turnSince={turnSince} /> : null}
           {runningCall && !open && runningCall.tool === 'Bash' && runningCall.callId ? (
             <CancelCommandButton onCancel={() => requestToolCancel(chatId, runningCall.callId!)} />
           ) : null}
@@ -5550,18 +5554,37 @@ function CancelCommandButton({ onCancel }: { onCancel: () => void }): JSX.Elemen
 }
 
 // Spinner and ticking elapsed time on a tool row whose call has not returned.
-function ToolRunning({ since }: { since: number | undefined }): JSX.Element {
+/** When the current turn began: the latest user message that is not still queued. */
+export function turnStartOf(timeline: readonly ChatEventEntry[] | undefined): number | undefined {
+  if (timeline === undefined) return undefined;
+  for (let i = timeline.length - 1; i >= 0; i--) {
+    const e = timeline[i]!;
+    if (e.kind === 'message' && e.role === 'user' && e.queued !== true) return e.messageAt ?? e.at;
+  }
+  return undefined;
+}
+
+function ToolRunning({
+  since,
+  turnSince,
+}: {
+  since: number | undefined;
+  turnSince?: number | undefined;
+}): JSX.Element {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (since === undefined) return;
+    if (since === undefined && turnSince === undefined) return;
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
-  }, [since]);
+  }, [since, turnSince]);
   return (
     <span className="tool-running" data-testid="tool-running">
       <LoaderCircle className="tool-running-spinner" size={13} aria-hidden />
       {since !== undefined ? (
         <span data-testid="tool-running-elapsed">{formatElapsed(since, now)}</span>
+      ) : null}
+      {turnSince !== undefined ? (
+        <span data-testid="tool-running-turn">working for {formatElapsed(turnSince, now)}</span>
       ) : null}
     </span>
   );
@@ -5608,7 +5631,7 @@ function ToolDisclosure({
   /** The user cancelled this command and it has come back. */
   cancelledChip?: boolean;
   /** Present while the call is running: draws a spinner, and the elapsed time when `at` (the real start) is known. */
-  runningSince?: { at: number | undefined };
+  runningSince?: { at: number | undefined; turn?: number | undefined };
   /** Call id this row's open state survives remounts under. */
   openKey?: string;
   testid: string;
@@ -5649,7 +5672,7 @@ function ToolDisclosure({
         </span>
         {badge}
         <span className="tool-summary-text">{summary}</span>
-        {runningSince !== undefined ? <ToolRunning since={runningSince.at} /> : null}
+        {runningSince !== undefined ? <ToolRunning since={runningSince.at} turnSince={runningSince.turn} /> : null}
         {cancelledChip ? (
           <span className="tool-cancelled-chip" data-testid="tool-cancelled">
             Cancelled by you

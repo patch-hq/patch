@@ -95,6 +95,23 @@ describe('running tool call', () => {
     expect(screen.getByTestId('tool-running-elapsed').textContent).toBe('1m 30s');
   });
 
+  // A long run of short calls: each call's clock restarts, the turn's does not.
+  it('shows how long the whole turn has been working beside the call clock', () => {
+    seed();
+    useChatStore.getState().applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      seq: 0,
+      role: 'user',
+      content: 'go',
+      createdAt: NOW - 25 * 60_000,
+    } as never);
+    useChatStore.getState().applyEvent({ ...call, startedAt: NOW - 5_000 });
+    renderChat();
+    expect(screen.getByTestId('tool-running-elapsed').textContent).toBe('5s');
+    expect(screen.getByTestId('tool-running-turn').textContent).toBe('working for 25m 00s');
+  });
+
   it('shows the spinner but no clock when the start time is unknown', () => {
     seed();
     const noStart = { ...call };
