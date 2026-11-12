@@ -339,6 +339,7 @@ jobs:
           PATCH_BUILD_VENDOR="$RUNNER_TEMP/vendor" \
           PATCH_ARTIFACT_SIGNING_KEY="$RUNNER_TEMP/artifact-signing.key" \
           PATCH_CODESIGN_IDENTITY="$IDENTITY" \
+          PATCH_CODESIGN_TIMESTAMP=1 \
           PATCH_BUILD_TARGETS=darwin-arm64 \
           node scripts/build-host.mjs
           rm -f "$RUNNER_TEMP/artifact-signing.key"

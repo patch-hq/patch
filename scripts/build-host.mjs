@@ -34,7 +34,6 @@ import {
   copyFileSync,
   cpSync,
   existsSync,
-  linkSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -98,7 +97,7 @@ function signHostApp(outDir, identity) {
   chmodSync(exe, 0o755);
   sh('codesign', [
     '--force',
-    '--timestamp=none',
+    timestampFlag(),
     '--identifier',
     HOST_APP_BUNDLE_ID,
     '--options',
@@ -110,10 +109,14 @@ function signHostApp(outDir, identity) {
     app,
   ]);
   sh('codesign', ['--verify', '--strict', '--deep', '--verbose=2', app]);
-  // `node` becomes a hard link to the bundle's executable, so the tarball
-  // carries the binary once.
-  rmSync(join(outDir, 'node'));
-  linkSync(exe, join(outDir, 'node'));
+  // The bare `node` stays its own standalone-signed copy (selfUpdate runs the new
+  // artifact's installer with it). A hard link to the bundle executable carries a
+  // bundle-bound signature, which Apple's notary rejects as invalid outside the bundle.
+}
+
+/** `--timestamp=none` locally; CI sets PATCH_CODESIGN_TIMESTAMP=1 because notarisation needs Apple's secure timestamp. */
+function timestampFlag() {
+  return process.env.PATCH_CODESIGN_TIMESTAMP === '1' ? '--timestamp' : '--timestamp=none';
 }
 
 /** The three shipping targets. */
@@ -476,7 +479,7 @@ function codesignMacArtifact(outDir, machos) {
     // takes the last, which is how an earlier stray one silently won.
     sh('codesign', [
       '--force',
-      '--timestamp=none',
+      timestampFlag(),
       '--identifier',
       basename(file) === 'node' ? HOST_APP_BUNDLE_ID : basename(file),
       '--options',
@@ -490,6 +493,15 @@ function codesignMacArtifact(outDir, machos) {
     sh('codesign', ['--verify', '--strict', '--verbose=2', file]);
   }
   return identity;
+}
+
+/** The sherpa-onnx addon's own Mach-Os (the .node and its dylibs): the notary inspects every one. */
+function sherpaMachos(outDir) {
+  const dir = join(outDir, 'node_modules', 'sherpa-onnx-darwin-arm64');
+  if (!existsSync(dir)) die(`${dir} is missing; the macOS host carries the sherpa-onnx addon`);
+  const files = readdirSync(dir).filter((f) => f.endsWith('.dylib') || f.endsWith('.node'));
+  if (files.length === 0) die(`${dir} has no Mach-O files to sign`);
+  return files.map((f) => join(dir, f));
 }
 
 async function buildTarget(t, ctx) {
@@ -607,6 +619,7 @@ async function buildTarget(t, ctx) {
       ...['libonnxruntime.1.26.0.dylib', 'libonnxruntime.1.dylib']
         .map((f) => join(binDir, f))
         .filter((f) => existsSync(f)),
+      ...sherpaMachos(outDir),
       join(outDir, 'node'),
     ]);
     signHostApp(outDir, codesignIdentity);
