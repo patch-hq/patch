@@ -12,8 +12,8 @@ plp_descriptor_t plp_for_state(pds_state_t s) {
         // speaking are unmistakable (no more "everything white").
         case PDS_STATE_IDLE:           d = (plp_descriptor_t){  0,  0,  0, PLP_OFF }; break;
         case PDS_STATE_WAKE_DETECTED:  d = (plp_descriptor_t){255,255,255, PLP_SINGLE_PULSE }; break;
-        case PDS_STATE_LISTENING:      d = (plp_descriptor_t){  0, 80,255, PLP_STEADY_CYAN }; break;   // blue, steady
-        case PDS_STATE_AGENT_SPEAKING: d = (plp_descriptor_t){  0,255, 60, PLP_PULSING_WHITE }; break;  // green, breathe
+        case PDS_STATE_LISTENING:      d = (plp_descriptor_t){178,178,178, PLP_STEADY_CYAN }; break;   // white, steady
+        case PDS_STATE_AGENT_SPEAKING: d = (plp_descriptor_t){230,230,230, PLP_PULSING_WHITE }; break;  // white, breathe
         case PDS_STATE_RINGING:        d = (plp_descriptor_t){160,  0,255, PLP_YELLOW_ROTATE }; break;   // purple, rotate
         case PDS_STATE_MUTED:          d = (plp_descriptor_t){255,  0,  0, PLP_SOLID_RED }; break;
         case PDS_STATE_DISCONNECTED:   d = (plp_descriptor_t){128,  0,  0, PLP_SLOW_RED_PULSE }; break;

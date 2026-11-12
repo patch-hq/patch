@@ -27,13 +27,17 @@ void patch_led_show_level(int level, int max);
 /** Conversation phase. While not NONE it decides the ring, over the device state. */
 typedef enum {
     PLED_PHASE_NONE = 0,  // off / the device state's own pattern
-    PLED_PHASE_LISTENING, // steady blue: the user is talking
-    PLED_PHASE_THINKING,  // amber, rotating: waiting on the agent
-    PLED_PHASE_SPEAKING,  // green, breathing: a reply is playing
-    PLED_PHASE_FOLLOWUP,  // dim blue, slow breathing: open for a follow-up
+    PLED_PHASE_LISTENING, // solid white: the user is talking
+    PLED_PHASE_THINKING,  // white, spinning: waiting on the agent
+    PLED_PHASE_SPEAKING,  // white glow that follows the reply's loudness
+    PLED_PHASE_FOLLOWUP,  // dim white ring draining away over the follow-up window
 } pled_phase_t;
 
 void patch_led_set_phase(pled_phase_t phase);
+
+/** Where the speaking glow reads the reply's loudness (0..1), and the follow-up window length. */
+void patch_led_set_level_source(float (*level)(void));
+void patch_led_set_followup_ms(int ms);
 
 #ifdef __cplusplus
 }

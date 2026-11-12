@@ -69,6 +69,11 @@ static void on_transcript(bool meaningful, void *user);
 static void on_audio_session_closed(void *user);
 static void render_state(void);
 
+// Conversation state shared by the audio callbacks, follow-up timer and interruption.
+static volatile bool s_tts_active = false;
+static volatile uint32_t s_session_gen = 0;  // bumped per audio session; stale timers check it
+static volatile bool s_reopen_after_close = false;
+
 // ---------- volume (the dial) ----------
 // Levels 0..10: 0 is mute, 7 is 0 dB on the DAC (with the codec's analog
 // output at +12 dB), each click is 2.5 dB.
@@ -246,10 +251,13 @@ static void open_audio_session_now(void) {
         .on_transcript      = on_transcript,
         .on_session_closed  = on_audio_session_closed,
     };
+    s_session_gen++;
+    s_tts_active = false;
     patch_audio_session_start(&cfg);
     patch_led_set_phase(PLED_PHASE_LISTENING);
     pds_dispatch(&s_state, PDS_EV_AUDIO_SESSION_OPENED);
-    patch_wakeword_pause();
+    // The wake word stays on during the session: saying it while a reply
+    // plays interrupts the reply (see barge_in).
     render_state();
 }
 
@@ -311,7 +319,6 @@ static void on_control_inbound(const pcf_inbound_t *f, void *user) {
 #define SPEECH_POLLS 3            // consecutive 50 ms polls above it
 #define TRANSCRIPT_WAIT_MS 20000  // after speech, how long to wait for the host's transcript
 static volatile uint32_t s_tts_epoch = 0;
-static volatile bool s_tts_active = false;
 static volatile bool s_followup_running = false;
 static volatile uint32_t s_transcript_epoch = 0;
 static volatile bool s_last_transcript_meaningful = false;
@@ -325,14 +332,17 @@ static void end_session_now(const char *why) {
 
 static void followup_task(void *arg) {
     (void)arg;
+    const uint32_t gen = s_session_gen;
+#define SESSION_GONE() (!patch_audio_session_active() || s_session_gen != gen)
     // Let the whole reply play, including any further pieces of it.
     for (;;) {
         uint32_t epoch = s_tts_epoch;
         for (int i = 0; i < 300 && patch_audio_playback_pending() > 0; i++) vTaskDelay(pdMS_TO_TICKS(100));
         vTaskDelay(pdMS_TO_TICKS(600));
-        if (!patch_audio_session_active()) goto done;
+        if (SESSION_GONE()) goto done;
         if (!s_tts_active && epoch == s_tts_epoch && patch_audio_playback_pending() == 0) break;
     }
+    patch_audio_reset_reply_mic_peak();
     patch_led_set_phase(PLED_PHASE_FOLLOWUP);
     uint32_t t_epoch = s_transcript_epoch;
     uint32_t tts_epoch = s_tts_epoch;
@@ -340,7 +350,7 @@ static void followup_task(void *arg) {
     bool spoke = false;
     for (int waited = 0; waited < FOLLOWUP_MS; waited += 50) {
         vTaskDelay(pdMS_TO_TICKS(50));
-        if (!patch_audio_session_active() || s_tts_epoch != tts_epoch) goto done;
+        if (SESSION_GONE() || s_tts_epoch != tts_epoch) goto done;
         if (s_transcript_epoch != t_epoch) { spoke = true; break; }  // host already heard something
         above = patch_audio_mic_peak() > SPEECH_PEAK ? above + 1 : 0;
         if (above >= SPEECH_POLLS) { spoke = true; break; }
@@ -348,7 +358,7 @@ static void followup_task(void *arg) {
     if (!spoke) { end_session_now("no follow-up"); goto done; }
     patch_led_set_phase(PLED_PHASE_LISTENING);
     for (int waited = 0; waited < TRANSCRIPT_WAIT_MS; waited += 100) {
-        if (!patch_audio_session_active() || s_tts_epoch != tts_epoch) goto done;
+        if (SESSION_GONE() || s_tts_epoch != tts_epoch) goto done;
         if (s_transcript_epoch != t_epoch) {
             if (!s_last_transcript_meaningful) end_session_now("follow-up wasn't for us");
             goto done;  // meaningful: on_transcript already moved to thinking
@@ -389,10 +399,51 @@ static void on_tts_ended(void *u) {
 static void on_audio_session_closed(void *u) {
     (void)u;
     s_active_session_id[0] = '\0';
-    patch_led_set_phase(PLED_PHASE_NONE);
+    s_tts_active = false;
     pds_dispatch(&s_state, PDS_EV_AUDIO_SESSION_CLOSED);
+    if (s_reopen_after_close && patch_control_is_linked() && !patch_button_is_muted()) {
+        s_reopen_after_close = false;
+        pds_dispatch(&s_state, PDS_EV_WAKE_FIRED);
+        patch_control_send_wake_detected();
+        render_state();
+        return;
+    }
+    s_reopen_after_close = false;
+    patch_led_set_phase(PLED_PHASE_NONE);
     if (!patch_button_is_muted()) patch_wakeword_resume();
     render_state();
+}
+
+
+// ---------- interrupting a reply ---------------------------------------------
+// The speaker sits beside the mics and the XMOS canceller only takes ~5 dB off
+// the device's own voice, so plain speech can't be told apart from it. A reply
+// is interrupted by the wake word or a button press instead: playback stops,
+// the session ends, and a fresh one opens straight away to listen.
+
+static bool reply_playing(void) {
+    return s_tts_active || patch_audio_playback_pending() > 0;
+}
+
+static void barge_in_task(void *arg) {
+    (void)arg;
+    patch_control_send_session_end(PCF_SESSION_END_USER_BUTTON);
+    patch_audio_session_stop("user-button");
+    vTaskDelay(pdMS_TO_TICKS(150));
+    // A deliberate stop doesn't always raise the socket-closed callback, so
+    // reopen here if it hasn't already.
+    if (s_reopen_after_close) on_audio_session_closed(NULL);
+    vTaskDelete(NULL);
+}
+
+// Called from the wake-word and button tasks, which must not block on the
+// network: the teardown runs on its own short task.
+static void barge_in(const char *why) {
+    if (!patch_audio_session_active() || s_reopen_after_close) return;
+    ESP_LOGI(TAG, "interrupting the reply (%s)", why);
+    s_reopen_after_close = true;
+    patch_led_set_phase(PLED_PHASE_LISTENING);
+    if (xTaskCreate(barge_in_task, "barge-in", 4096, NULL, 5, NULL) != pdPASS) s_reopen_after_close = false;
 }
 
 // ---------- wake word -------------------------------------------------------
@@ -400,6 +451,10 @@ static void on_audio_session_closed(void *u) {
 static void on_wake_word(void *u) {
     (void)u;
     if (patch_button_is_muted() || !patch_control_is_linked()) return;
+    if (patch_audio_session_active()) {
+        if (reply_playing()) barge_in("wake word");
+        return;  // already listening: nothing to do
+    }
     pds_dispatch(&s_state, PDS_EV_WAKE_FIRED);
     render_state();
     patch_control_send_wake_detected();
@@ -420,6 +475,8 @@ static void on_button(pb_event_t ev, void *user) {
                     pds_dispatch(&s_state, PDS_EV_RING_ACCEPTED);
                     render_state();
                 }
+            } else if (patch_audio_session_active() && reply_playing()) {
+                barge_in("button");
             } else if (!patch_audio_session_active() && !patch_button_is_muted()
                        && patch_control_is_linked()) {
                 // Push-to-talk: behaves like a wake-word fire.
@@ -688,6 +745,8 @@ void app_main(void) {
     patch_audio_init();
     patch_button_init(on_button, NULL);
     volume_load();
+    patch_led_set_level_source(patch_audio_play_level);
+    patch_led_set_followup_ms(FOLLOWUP_MS);
     patch_dial_init(on_dial, NULL);
     patch_wakeword_init(on_wake_word, NULL);
     xTaskCreate(diag_console_task, "patch-diag", 3072, NULL, 4, NULL);

@@ -101,28 +101,15 @@ static void test_dac_vol_reg_encoding(void) {
     ASSERT_EQ_INT(patch_tts_dac_vol_reg(-1000), 0x81);
 }
 
-// The SHIPPED DAC volume must match what patch_codec.c actually programs
-// (0xdc = -18 dB), sit within the conservative-quiet band the bring-up enforces
-// (close-range verification mic; at/below ~-18 dB and never the +24 dB hardware
-// max that clips), and decode to a real non-muted register byte. The
-// F1-audible-1 garble was NOT a volume problem — it was the I2S TX clock
-// declared at 16 kHz on the 48 kHz speaker bus (fixed 2026-06-21), which
-// reproduced at every level — so this guard pins the shipped quiet level rather
-// than chasing loudness.
+// The SHIPPED DAC volume is 0 dB: the DAC never boosts (full-scale replies
+// would clip), and loudness comes from the codec's analog output stage and the
+// reply limiter. It must decode to a real, non-muted register byte.
 static void test_shipped_dac_vol_is_audible(void) {
-    // The configured loudness, in 0.5 dB steps (-18 dB).
-    ASSERT_EQ_INT(PATCH_TTS_DAC_VOL_HALF_STEPS, -36);
-
-    // Stays at-or-below the ~-18 dB quiet ceiling the bring-up enforces, and
-    // strictly above the reserved/mute floor — i.e. quiet but not silent.
-    ASSERT_TRUE(PATCH_TTS_DAC_VOL_HALF_STEPS <= -36);  // <= -18 dB ceiling
+    ASSERT_EQ_INT(PATCH_TTS_DAC_VOL_HALF_STEPS, 0);
+    ASSERT_TRUE(PATCH_TTS_DAC_VOL_HALF_STEPS <= 0);    // never digital gain
     ASSERT_TRUE(PATCH_TTS_DAC_VOL_HALF_STEPS > -127);  // above the -63.5 dB min
-    // Never the +24 dB hardware maximum (clips).
-    ASSERT_TRUE(PATCH_TTS_DAC_VOL_HALF_STEPS < 48);
-
-    // And it encodes to exactly the register byte patch_codec.c writes (0xdc).
     uint8_t reg = patch_tts_dac_vol_reg(PATCH_TTS_DAC_VOL_HALF_STEPS);
-    ASSERT_EQ_INT(reg, 0xDC);
+    ASSERT_EQ_INT(reg, 0x00);
     ASSERT_TRUE(reg != 0x80); // 0x80 is the reserved/mute code
 }
 

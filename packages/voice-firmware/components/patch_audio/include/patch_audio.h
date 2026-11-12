@@ -64,6 +64,13 @@ size_t patch_audio_playback_pending(void);
 /** Peak absolute sample of the most recent mic frame sent in a session. */
 int patch_audio_mic_peak(void);
 
+/** Loudness of the reply audio playing right now, 0..1 (RMS of the last block). */
+float patch_audio_play_level(void);
+
+/** Loudest mic frame during the current reply, and log + reset it. */
+int patch_audio_reply_mic_peak(void);
+void patch_audio_reset_reply_mic_peak(void);
+
 // Accessor for the shared I2S RX channel — used by patch_wakeword to feed
 // WakeNet from the same DMA buffer the active session reads from. Returns
 // NULL until patch_audio_init() has been called. The return type is opaque

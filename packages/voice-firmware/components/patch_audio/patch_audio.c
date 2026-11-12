@@ -421,6 +421,26 @@ static atomic_int s_mic_peak = 0;
 // right down while replies play (and briefly after) so the host doesn't hear
 // the device's own voice as the user speaking.
 static volatile int64_t s_last_play_us = 0;
+static volatile float s_play_level = 0.0f;
+// Loudest mic frame heard while a reply played (before ducking): the echo
+// that gets past the XMOS canceller. Read by barge-in detection.
+static atomic_int s_play_mic_peak = 0;
+static atomic_int s_play_mic_hist[8];
+static volatile double s_play_mic_sq = 0; static volatile int s_play_mic_n = 0;
+int patch_audio_reply_mic_peak(void) { return atomic_load(&s_play_mic_peak); }
+void patch_audio_reset_reply_mic_peak(void) {
+    ESP_LOGI(TAG, "mic during reply: rms=%d", s_play_mic_n ? (int)sqrt(s_play_mic_sq / s_play_mic_n) : 0);
+    s_play_mic_sq = 0; s_play_mic_n = 0;
+    ESP_LOGI(TAG, "mic during reply: peak=%d hist(4k bins)=%d,%d,%d,%d,%d,%d,%d,%d", atomic_load(&s_play_mic_peak),
+             atomic_load(&s_play_mic_hist[0]), atomic_load(&s_play_mic_hist[1]), atomic_load(&s_play_mic_hist[2]),
+             atomic_load(&s_play_mic_hist[3]), atomic_load(&s_play_mic_hist[4]), atomic_load(&s_play_mic_hist[5]),
+             atomic_load(&s_play_mic_hist[6]), atomic_load(&s_play_mic_hist[7]));
+    atomic_store(&s_play_mic_peak, 0);
+    for (int i = 0; i < 8; i++) atomic_store(&s_play_mic_hist[i], 0);
+}
+float patch_audio_play_level(void) {
+    return esp_timer_get_time() - s_last_play_us < 60000 ? s_play_level : 0.0f;
+}
 #define ECHO_TAIL_US 800000
 int patch_audio_mic_peak(void) { return atomic_load(&s_mic_peak); }
 
@@ -546,7 +566,12 @@ static void play_feeder_task(void *arg) {
                          (unsigned)gaps, (unsigned)partials, (unsigned)real,
                          (unsigned)xStreamBufferBytesAvailable(s_play_buf));
         }
-        if (n > 0) shape_reply(mono, n);
+        if (n > 0) {
+            shape_reply(mono, n);
+            float acc = 0;
+            for (size_t i = 0; i < n; i++) acc += (float)mono[i] * (float)mono[i];
+            s_play_level = sqrtf(acc / (float)n) / 32768.0f;
+        }
         if (!patch_tts_widen_pcm16_stereo(mono, BLOCK_SAMPLES, s32, BLOCK_SAMPLES * 2)) continue;
         i2s_channel_write(s_tx, s32, BLOCK_SAMPLES * 2 * sizeof(int32_t), &wrote, pdMS_TO_TICKS(60));
     }
@@ -595,9 +620,12 @@ static void mic_consumer_task(void *arg) {
             bool playing = xStreamBufferBytesAvailable(s_play_buf) > 0 ||
                            esp_timer_get_time() - s_last_play_us < ECHO_TAIL_US;
             if (playing) {
-                int16_t *w = (int16_t *)d;
-                for (size_t i = 0; i < ns; i++) w[i] = (int16_t)(w[i] / 64);
-                pk = 0;
+                if (pk > atomic_load(&s_play_mic_peak)) atomic_store(&s_play_mic_peak, pk);
+                for (size_t i = 0; i < ns; i++) s_play_mic_sq += (double)d[i] * d[i];
+                s_play_mic_n += ns;
+                int b = pk >= 32000 ? 7 : pk / 4000;
+                atomic_fetch_add(&s_play_mic_hist[b], 1);
+                pk = 0;  // ducked below on the uplink copy; the shared frame stays intact for the wake word
             }
             atomic_store(&s_mic_peak, pk);
         }
@@ -631,7 +659,17 @@ static void ws_sender_task(void *arg) {
         }
         if (s_ws && esp_websocket_client_is_connected(s_ws)) {
             const int16_t *pcm = patch_mic_frame_data(f);
-            size_t bytes = patch_mic_frame_samples(f) * sizeof(int16_t);
+            size_t ns = patch_mic_frame_samples(f);
+            size_t bytes = ns * sizeof(int16_t);
+            static int16_t ducked[1024];
+            bool playing = xStreamBufferBytesAvailable(s_play_buf) > 0 ||
+                           esp_timer_get_time() - s_last_play_us < ECHO_TAIL_US;
+            if (playing && ns <= 1024) {
+                // Turn the device's own voice right down so the host doesn't
+                // transcribe it as the user (frames are shared with the wake word).
+                for (size_t i = 0; i < ns; i++) ducked[i] = (int16_t)(pcm[i] / 64);
+                pcm = ducked;
+            }
             // Allow up to 50 ms blocking here — we have a 4-deep queue
             // upstream that absorbs that jitter without dropping audio.
             int sent = esp_websocket_client_send_bin(

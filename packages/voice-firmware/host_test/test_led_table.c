@@ -21,11 +21,10 @@ static void test_spec_colours(void) {
     // From spec/16-voice-device.md §LED ring states table.
     plp_descriptor_t d;
 
-    // Listening = blue, steady (distinct from speaking's green-breathe).
+    // Listening = white, steady: the ring is one colour, motion carries meaning.
     d = plp_for_state(PDS_STATE_LISTENING);
-    ASSERT_EQ_INT(d.r, 0); ASSERT_EQ_INT(d.g, 80); ASSERT_EQ_INT(d.b, 255);
+    ASSERT_EQ_INT(d.r, 178); ASSERT_EQ_INT(d.g, 178); ASSERT_EQ_INT(d.b, 178);
     ASSERT_EQ_INT(d.pattern, PLP_STEADY_CYAN);
-    ASSERT_TRUE(d.b > d.g);  // unmistakably blue
 
     d = plp_for_state(PDS_STATE_AGENT_SPEAKING);
     ASSERT_EQ_INT(d.pattern, PLP_PULSING_WHITE);

@@ -26,6 +26,10 @@ static volatile pds_state_t s_state = PDS_STATE_DISCONNECTED;
 // is identical (RMT bus would otherwise hold the line ~30 µs/LED). See
 // pixels_differ() for the pure-C diff used here and in host tests.
 static volatile pled_phase_t s_phase = PLED_PHASE_NONE;
+static volatile int64_t s_phase_since_us = 0;
+static float (*s_level_fn)(void) = NULL;
+static volatile int s_followup_ms = 5000;
+static float s_voice_env = 0.0f;
 static volatile int s_level = 0, s_level_max = 10;
 static volatile int64_t s_level_until_us = 0;
 
@@ -117,10 +121,34 @@ static void renderer_task(void *arg) {
         bool phased = ph != PLED_PHASE_NONE && cur != PDS_STATE_MUTED && cur != PDS_STATE_DISCONNECTED;
         if (phased) {
             switch (ph) {
-                case PLED_PHASE_LISTENING: render_solid(0, 80, 255); d.pattern = PLP_STEADY_CYAN; break;
-                case PLED_PHASE_THINKING:  render_rotate(255, 120, 0, frame / 3); d.pattern = PLP_YELLOW_ROTATE; break;
-                case PLED_PHASE_SPEAKING:  render_pulse(0, 255, 60, frame, 38, 90); d.pattern = PLP_PULSING_WHITE; break;
-                case PLED_PHASE_FOLLOWUP:  render_pulse(0, 30, 140, frame, 20, 120); d.pattern = PLP_PULSING_WHITE; break;
+                case PLED_PHASE_LISTENING: render_solid(178, 178, 178); d.pattern = PLP_STEADY_CYAN; break;
+                case PLED_PHASE_THINKING:  render_rotate(204, 204, 204, frame / 3); d.pattern = PLP_YELLOW_ROTATE; break;
+                case PLED_PHASE_SPEAKING: {
+                    // Smoothed loudness: rises over ~0.1 s, falls over ~0.4 s,
+                    // never below a third, so it glows with the speech rather
+                    // than flickering on every syllable.
+                    float v = s_level_fn ? s_level_fn() * 4.0f : 0.0f;
+                    if (v > 1.0f) v = 1.0f;
+                    float tau = v > s_voice_env ? 0.10f : 0.40f;
+                    s_voice_env += (v - s_voice_env) * (1.0f / (float)TICK_HZ) / tau;
+                    float k = 0.35f + 0.65f * s_voice_env;
+                    uint8_t c = (uint8_t)(230.0f * k);
+                    render_solid(c, c, c);
+                    d.pattern = PLP_PULSING_WHITE;
+                    break;
+                }
+                case PLED_PHASE_FOLLOWUP: {
+                    float elapsed = (float)(esp_timer_get_time() - s_phase_since_us) / 1000.0f;
+                    float left = (1.0f - elapsed / (float)s_followup_ms) * LED_COUNT;
+                    render_off();
+                    for (int i = 0; i < LED_COUNT; i++) {
+                        float k = left - (float)i;
+                        if (k >= 1.0f) put(i, 115, 115, 115);
+                        else if (k > 0.0f) put(i, (uint8_t)(115 * k), (uint8_t)(115 * k), (uint8_t)(115 * k));
+                    }
+                    d.pattern = PLP_PULSING_WHITE;
+                    break;
+                }
                 default: break;
             }
         } else switch (d.pattern) {
@@ -209,4 +237,10 @@ void patch_led_show_level(int level, int max) {
     s_level_until_us = esp_timer_get_time() + 1500000;
 }
 
-void patch_led_set_phase(pled_phase_t phase) { s_phase = phase; }
+void patch_led_set_phase(pled_phase_t phase) {
+    if (phase != s_phase) s_phase_since_us = esp_timer_get_time();
+    if (phase == PLED_PHASE_SPEAKING && s_phase != PLED_PHASE_SPEAKING) s_voice_env = 0.0f;
+    s_phase = phase;
+}
+void patch_led_set_level_source(float (*level)(void)) { s_level_fn = level; }
+void patch_led_set_followup_ms(int ms) { s_followup_ms = ms > 0 ? ms : 5000; }
