@@ -28,7 +28,9 @@ import {
   useLogUpdateBanner,
 } from '../lib/desktopBridge.js';
 
-const UPDATE_FAILED = 'Update failed. Try again.';
+export const UPDATE_READY_TEXT =
+  'A new version of Patch is ready. Restart Patch to use it. Your chats keep running.';
+export const UPDATE_FAILED = 'Patch could not restart. Quit Patch and open it again.';
 
 /**
  * Mirrors `updateUrgency` in packages/desktop/src/updater.ts. Duplicated rather
@@ -151,7 +153,8 @@ export function DesktopUpdateBanner(): JSX.Element | null {
       <span className="dot" aria-hidden />
       {failure === null ? (
         <span className="desktop-update-text">
-          Patch has updated{waited === null ? '' : `, waiting ${waited}`}.
+          {UPDATE_READY_TEXT}
+          {waited === null ? '' : ` Waiting ${waited}.`}
         </span>
       ) : (
         <span className="desktop-update-text" data-testid="desktop-update-error">

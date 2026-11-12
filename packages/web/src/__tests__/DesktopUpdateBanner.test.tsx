@@ -182,7 +182,7 @@ describe('DesktopUpdateBanner', () => {
     expect(screen.getByTestId('desktop-update-restart')).toHaveTextContent('Restart Patch');
     expect(screen.getByTestId('desktop-update-restart')).not.toBeDisabled();
     expect(screen.getByTestId('desktop-update-error')).toHaveTextContent(
-      'Update failed. Try again.',
+      'Patch could not restart. Quit Patch and open it again.',
     );
   });
 
@@ -210,10 +210,10 @@ describe('DesktopUpdateBanner', () => {
     // One plain sentence, no installer detail, in place of the update message,
     // and the banner in the error colour whatever its urgency.
     expect(screen.getByTestId('desktop-update-error')).toHaveTextContent(
-      'Update failed. Try again.',
+      'Patch could not restart. Quit Patch and open it again.',
     );
     expect(screen.getByTestId('desktop-update-error')).not.toHaveTextContent('adhoc');
-    expect(screen.queryByText(/Patch has updated/)).toBeNull();
+    expect(screen.queryByText(/A new version of Patch is ready/)).toBeNull();
     expect(screen.getByTestId('desktop-update-banner')).toHaveClass('failed');
     expect(screen.getByTestId('desktop-update-restart')).not.toBeDisabled();
   });
@@ -244,7 +244,7 @@ describe('DesktopUpdateBanner', () => {
         );
       });
       expect(screen.getByTestId('desktop-update-error')).toHaveTextContent(
-        'Update failed. Try again.',
+        'Patch could not restart. Quit Patch and open it again.',
       );
       expect(screen.getByTestId('desktop-update-restart')).not.toBeDisabled();
     }
@@ -273,7 +273,7 @@ describe('DesktopUpdateBanner', () => {
     await act(async () => {});
     fireEvent.click(screen.getByTestId('desktop-update-restart'));
     expect(screen.getByTestId('desktop-update-error')).toHaveTextContent(
-      'Update failed. Try again.',
+      'Patch could not restart. Quit Patch and open it again.',
     );
     expect(screen.getByTestId('desktop-update-restart')).not.toBeDisabled();
   });
