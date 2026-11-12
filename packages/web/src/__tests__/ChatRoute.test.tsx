@@ -2236,6 +2236,21 @@ describe('ChatRoute regression', () => {
     expect(line.querySelector('button')).toBeNull();
   });
 
+  it('the stopped status sits after the partial reply, before the next user message', () => {
+    seedChat('c-stop-place', [
+      { seq: 1, kind: 'message', role: 'user', content: 'first', turnStopped: true, at: 0 },
+      { seq: 2, kind: 'message', role: 'assistant', content: 'partial reply', at: 1 },
+      { seq: 3, kind: 'message', role: 'user', content: 'second', at: 2 },
+    ]);
+    renderChat('c-stop-place');
+    const msgs = screen.getAllByTestId('msg');
+    const line = screen.getByTestId('turn-stopped');
+    // Not inside the user message that started the turn.
+    expect(msgs[0]!.contains(line)).toBe(false);
+    expect(msgs[1]!.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(line.compareDocumentPosition(msgs[2]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('tapping "Continue" on a stopped message sends a fresh nudge turn, not the original text', () => {
     const send = vi.fn();
     seedChat('c-stop-continue', [
