@@ -1,9 +1,9 @@
 # Caddy config for the LOCAL TEST STACK ONLY (docker-compose.test.yml).
 #
 # Production is NOT configured here. patch.tomchambers.me is served by the
-# Hetzner host's own Caddy at /etc/caddy/Caddyfile, which sends /device/* to
-# :3003 and EVERYTHING ELSE (/audio/* included — the server relays it to the
-# chat's host) to patch-server on :3970. That file
+# Hetzner host's own Caddy at /etc/caddy/Caddyfile, which sends everything
+# (/audio/* and /device/* included — the server relays audio to the chat's
+# host, and voice devices connect to the server) to patch-server on :3970. That file
 # lives on the box, outside this repo, and is the only routing that matters in
 # prod.
 #
