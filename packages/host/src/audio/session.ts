@@ -1546,6 +1546,29 @@ const FIR_24_48: readonly number[] = [
   0.0001855, -0.00017301, -0.00008088, 0.00002924,
 ];
 
+/**
+ * `resampleTtsTo48k` for a stream of chunks: hosted engines send 24 kHz audio
+ * in small pieces, and resampling each piece on its own would put an edge at
+ * every boundary. This keeps the last input samples and holds back the last
+ * few output samples (under 1 ms) until the next piece supplies what they need.
+ */
+export class StreamingUpsampler48k {
+  private tail = new Int16Array(0);
+  private static readonly KEEP = 32; // input samples kept across pieces
+  private static readonly HOLD = 32; // output samples held back
+
+  push(pcm24: Int16Array): Int16Array {
+    const combined = new Int16Array(this.tail.length + pcm24.length);
+    combined.set(this.tail, 0);
+    combined.set(pcm24, this.tail.length);
+    const up = resampleTtsTo48k(combined);
+    const from = Math.max(0, this.tail.length * 2 - StreamingUpsampler48k.HOLD);
+    const to = Math.max(from, up.length - StreamingUpsampler48k.HOLD);
+    this.tail = combined.slice(Math.max(0, combined.length - StreamingUpsampler48k.KEEP));
+    return up.slice(from, to);
+  }
+}
+
 export function resampleTtsTo48k(pcm24: Int16Array): Int16Array {
   const N = pcm24.length;
   const M = N * 2; // 2x upsample
