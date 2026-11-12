@@ -128,7 +128,7 @@ import { NotificationLog } from './notifications/log.js';
 import { registerNotificationLogRoutes } from './notifications/log-routes.js';
 import { registerVoiceTokenRoute } from './voice/token.js';
 import { AudioSessionRouter, registerAudioRelayRoute } from './audio-relay.js';
-import { registerDeviceControlRoute } from './device-control.js';
+import { registerDeviceControlRoute, type DeviceControlHandle } from './device-control.js';
 import { registerVoiceNoteRoute } from './voice/note.js';
 import { registerAttachmentRoutes } from './attachments.js';
 import { registerArtifactRoutes } from './artifacts.js';
@@ -794,7 +794,13 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
   }
 
   const notificationsDataDir = registry.dataDir;
+  // Voice devices (spec/16): the control route is mounted further down, but
+  // announcements and audio relay need it from here. Text for a device
+  // announcement waits here, by session, until the device joins its session.
+  let deviceControl: DeviceControlHandle | undefined;
+  const pendingDeviceSpeech = new Map<string, string>();
   const notificationRouter = new NotificationRouter({
+    announce: (a) => deviceControl?.announce(a) ?? 0,
     logger: log.child({ component: 'notification-router' }),
     registry,
     presence,
@@ -1883,6 +1889,11 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     router: audioSessionRouter,
     hostLink,
     audioRelayHostFor: (hostId) => wsHub.audioRelayHost(hostId),
+    takeSpeech: (sessionId) => {
+      const text = pendingDeviceSpeech.get(sessionId);
+      pendingDeviceSpeech.delete(sessionId);
+      return text;
+    },
   });
 
   // ---- chat REST routes ----
@@ -2094,8 +2105,13 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       ...(opts.nowMs ? { nowMs: opts.nowMs } : {}),
     });
     // Voice devices connect here, not to a host (spec/16 § Connection model).
-    registerDeviceControlRoute(app, {
+    deviceControl = registerDeviceControlRoute(app, {
       logger: log.child({ component: 'device-control' }),
+      queueSpeech: (sessionId, text) => {
+        pendingDeviceSpeech.set(sessionId, text);
+        // A device that never joins must not leave its text behind.
+        setTimeout(() => pendingDeviceSpeech.delete(sessionId), 5 * 60_000).unref();
+      },
       registry,
       chatRegistry,
       internalToken: opts.internalToken,

@@ -29,7 +29,6 @@ const NOT_IN_APP_PREFIXES = [
   'design/',
   'testing/',
   'deploy/', // the production box's own scripts
-  'packages/voice-firmware/',
   '.github/', // except the release workflow, which decides how the app is built
 ];
 

@@ -129,15 +129,6 @@ async function startHost(opts: { home?: string; cwd?: string } = {}): Promise<St
     daemon,
     jobs,
     emitWire: (e) => upstream.push(e),
-    speakers: {
-      presence: {
-        enumerate: () => [],
-        isOnline: () => false,
-        isMuted: () => false,
-        send: () => false,
-      },
-      pushFallback: () => {},
-    },
     onBroadcast: ({ channel, message, sourceChatId }) => {
       const threadId = threadForChannel(channel);
       if (!threadId) return;

@@ -13,7 +13,6 @@ import type {
   ChatCallRequestEvent,
   ChatCallTimeoutEvent,
   ChatCallWinnerEvent,
-  NotifyEvent,
   WireEvent,
 } from '@patch/wire';
 import { generateUserKeypair, mintSurfaceCredential } from '@patch/auth';
@@ -892,16 +891,19 @@ describe('NotificationRouter — desktop / speakers', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('speakers: routes to specific deviceId when provided', async () => {
+  it('speakers: speaks on voice devices, passing the named device on', async () => {
     const { dir, registry } = makeRegistryDir();
-    const presence = new PresenceTracker();
-    const wsHub = makeFakeWsHub();
+    const asked: { chatId: string; message: string; deviceId?: string }[] = [];
     const router = new NotificationRouter({
       logger: silent,
       registry,
-      presence,
-      wsHub: wsHub as never,
+      presence: new PresenceTracker(),
+      wsHub: makeFakeWsHub() as never,
       dataDir: dir,
+      announce: (a) => {
+        asked.push(a);
+        return 1;
+      },
     });
     await router.route({
       type: 'notify',
@@ -910,20 +912,19 @@ describe('NotificationRouter — desktop / speakers', () => {
       message: 'lights off',
       deviceId: 'kitchen',
     });
-    expect(wsHub.delivered.find((d) => d.surfaceId === 'kitchen')).toBeDefined();
+    expect(asked).toEqual([{ chatId: 'c1', message: 'lights off', deviceId: 'kitchen' }]);
   });
 
-  it('speakers: records via speakersRecorder (dev/test observability seam) before fanout, with deviceId', async () => {
+  it('speakers: records via speakersRecorder (dev/test observability seam), with deviceId', async () => {
     const { dir, registry } = makeRegistryDir();
-    const presence = new PresenceTracker();
-    const wsHub = makeFakeWsHub();
     const recorded: { ts: number; chatId: string; deviceId?: string; message: string }[] = [];
     const router = new NotificationRouter({
       logger: silent,
       registry,
-      presence,
-      wsHub: wsHub as never,
+      presence: new PresenceTracker(),
+      wsHub: makeFakeWsHub() as never,
       dataDir: dir,
+      announce: () => 1,
       speakersRecorder: { record: (entry) => recorded.push(entry) },
     });
     await router.route({
@@ -940,15 +941,14 @@ describe('NotificationRouter — desktop / speakers', () => {
 
   it('speakers: records via speakersRecorder without a deviceId (broadcast)', async () => {
     const { dir, registry } = makeRegistryDir();
-    const presence = new PresenceTracker();
-    const wsHub = makeFakeWsHub();
     const recorded: { ts: number; chatId: string; deviceId?: string; message: string }[] = [];
     const router = new NotificationRouter({
       logger: silent,
       registry,
-      presence,
-      wsHub: wsHub as never,
+      presence: new PresenceTracker(),
+      wsHub: makeFakeWsHub() as never,
       dataDir: dir,
+      announce: () => 1,
       speakersRecorder: { record: (entry) => recorded.push(entry) },
     });
     await router.route({ type: 'notify', chatId: 'c1', channel: 'speakers', message: 'hi all' });
@@ -956,61 +956,32 @@ describe('NotificationRouter — desktop / speakers', () => {
     expect(recorded[0]).not.toHaveProperty('deviceId');
   });
 
-  it('logs to undelivered.jsonl when a specific deviceId is offline (sendToSurface returns false)', async () => {
+  it('speakers: pushes instead when no device is reachable', async () => {
     const { dir, registry } = makeRegistryDir();
-    const presence = new PresenceTracker();
-    const wsHub: FakeWsHub = {
-      delivered: [],
-      sendToKind: () => 0,
-      sendToKinds: () => 0,
-      sendToKindUnlessFocused: () => 0,
-      sendToSurface: () => false,
-      sendToAll: () => 0,
-    };
+    registry.upsertSurface({
+      surfaceId: 'srf-1',
+      surfaceKind: 'mobile',
+      label: 'phone',
+      issuedAt: 1,
+    });
+    registry.registerPushToken({
+      surfaceId: 'srf-1',
+      accountId: ACCOUNT.publicKey,
+      token: 'tok-1',
+      registeredAt: 1,
+    });
+    const push = fakePush();
     const router = new NotificationRouter({
       logger: silent,
       registry,
-      presence,
-      wsHub: wsHub as never,
+      presence: new PresenceTracker(),
+      wsHub: makeFakeWsHub() as never,
       dataDir: dir,
+      announce: () => 0,
+      pushBackend: push.backend,
     });
-    await router.route({
-      type: 'notify',
-      chatId: 'c1',
-      channel: 'speakers',
-      message: 'm',
-      deviceId: 'offline-device',
-    });
-    expect(readFileSync(join(dir, 'undelivered.jsonl'), 'utf8')).toContain('no speaker surfaces');
-  });
-
-  it('logs to undelivered.jsonl when speakers channel has no devices', async () => {
-    const { dir, registry } = makeRegistryDir();
-    const presence = new PresenceTracker();
-    const wsHub: FakeWsHub = {
-      delivered: [],
-      sendToKind: () => 0,
-      sendToKinds: () => 0,
-      sendToKindUnlessFocused: () => 0,
-      sendToSurface: () => false,
-      sendToAll: () => 0,
-    };
-    const router = new NotificationRouter({
-      logger: silent,
-      registry,
-      presence,
-      wsHub: wsHub as never,
-      dataDir: dir,
-    });
-    await router.route({
-      type: 'notify',
-      chatId: 'c1',
-      channel: 'speakers',
-      message: 'm',
-    });
-    const logPath = join(dir, 'undelivered.jsonl');
-    expect(existsSync(logPath)).toBe(true);
-    expect(readFileSync(logPath, 'utf8')).toContain('no speaker surfaces');
+    await router.route({ type: 'notify', chatId: 'c1', channel: 'speakers', message: 'm' });
+    expect(push.sent.map((p) => p.tokens)).toEqual([['tok-1']]);
   });
 });
 
@@ -1160,16 +1131,19 @@ describe('CallOrchestrator', () => {
 });
 
 describe('ReplyRouter — outbound assistant message routes back to source channel', () => {
-  it('voice-device: assistant message on thread_speakers → notify channel=speakers, deviceId pinned', async () => {
+  it('voice-device: assistant message on thread_speakers → spoken on the device, deviceId pinned', async () => {
     const { dir, registry } = makeRegistryDir();
-    const presence = new PresenceTracker();
-    const wsHub = makeFakeWsHub();
+    const asked: { chatId: string; message: string; deviceId?: string }[] = [];
     const router = new NotificationRouter({
       logger: silent,
       registry,
-      presence,
-      wsHub: wsHub as never,
+      presence: new PresenceTracker(),
+      wsHub: makeFakeWsHub() as never,
       dataDir: dir,
+      announce: (a) => {
+        asked.push(a);
+        return 1;
+      },
     });
     const reply = new ReplyRouter({
       logger: silent,
@@ -1190,10 +1164,9 @@ describe('ReplyRouter — outbound assistant message routes back to source chann
       content: 'kitchen lights off',
       seq: 1,
     });
-    const sent = wsHub.delivered.find((d) => d.surfaceId === 'kitchen');
-    expect(sent).toBeDefined();
-    expect((sent?.event as NotifyEvent).channel).toBe('speakers');
-    expect((sent?.event as NotifyEvent).deviceId).toBe('kitchen');
+    expect(asked).toEqual([
+      { chatId: 'thread_speakers', message: 'kitchen lights off', deviceId: 'kitchen' },
+    ]);
   });
 
   it('ignores non chat.message wire events', async () => {
@@ -1582,12 +1555,17 @@ describe('Group 12 — MED-4: ReplyRouter and CallOrchestrator are bounded', () 
     const { dir, registry } = makeRegistryDir();
     const presence = new PresenceTracker();
     const wsHub = makeFakeWsHub();
+    let spoken = 0;
     const router = new NotificationRouter({
       logger: silent,
       registry,
       presence,
       wsHub: wsHub as never,
       dataDir: dir,
+      announce: (a) => {
+        if (a.deviceId === 'kitchen') spoken++;
+        return 1;
+      },
     });
     const reply = new ReplyRouter({
       logger: silent,
@@ -1614,7 +1592,7 @@ describe('Group 12 — MED-4: ReplyRouter and CallOrchestrator are bounded', () 
     // Reach into private state for the test — ReplyRouter exposes no count.
     const internal = reply as unknown as { pending: Map<string, unknown> };
     expect(internal.pending.size).toBe(0);
-    expect(wsHub.delivered.filter((d) => d.surfaceId === 'kitchen')).toHaveLength(1000);
+    expect(spoken).toBe(1000);
   });
 
   it('CallOrchestrator entries are GCd after resolution', async () => {

@@ -47,6 +47,8 @@ export interface DeviceControlDeps {
   targetChatId?: () => string;
   /** The follow-up window sent with each session. */
   followupMs?: () => number;
+  /** Text the session's host should speak as soon as the device joins (announcements). */
+  queueSpeech?: (sessionId: string, text: string) => void;
   nowMs?: () => number;
   /** Test seam: credential verifier. */
   verifyCredential?: typeof verifySurfaceCredential;
@@ -58,6 +60,17 @@ export interface DevicePresence {
   muted: boolean;
   fwVersion: string;
   connectedAt: number;
+  /** When the user last spoke to it (a wake), or 0. */
+  lastUsedAt: number;
+}
+
+/** A spoken announcement for the house (`patch_speak`, spec/09 § speakers). */
+export interface Announcement {
+  /** The chat that is speaking; its host speaks the text. */
+  chatId: string;
+  message: string;
+  /** A device id or name to speak on; otherwise the one used most recently, else every device. */
+  deviceId?: string;
 }
 
 interface Socket {
@@ -72,6 +85,8 @@ interface Socket {
 export interface DeviceControlHandle {
   /** Devices connected right now. */
   list(): DevicePresence[];
+  /** Speak an announcement on the right device(s). Returns how many it went to (0: none reachable). */
+  announce(a: Announcement): number;
   /** Close a device's connection (after its token is revoked). */
   disconnect(deviceId: string): void;
 }
@@ -83,7 +98,7 @@ export function registerDeviceControlRoute(
   const now = deps.nowMs ?? Date.now;
   const verify = deps.verifyCredential ?? verifySurfaceCredential;
   const target = deps.targetChatId ?? ((): string => SPECIAL_THREAD_IDS.manager);
-  const live = new Map<string, { socket: Socket; presence: DevicePresence }>();
+  const live = new Map<string, { socket: Socket; presence: DevicePresence; accountId: string }>();
 
   const send = (socket: Socket, frame: DeviceControlOutbound): void => {
     if (socket.readyState === WebSocket.OPEN) socket.send(encodeDeviceControl(frame));
@@ -106,13 +121,19 @@ export function registerDeviceControlRoute(
     return { deviceId: claims.surface_id, label: claims.label, accountId: account.accountId };
   };
 
-  const openSession = (socket: Socket, deviceId: string, accountId: string): void => {
-    const chatId = target();
+  const openSession = (
+    socket: Socket,
+    deviceId: string,
+    accountId: string,
+    opts: { chatId: string; conversational: boolean; speak?: string },
+  ): boolean => {
+    const { chatId } = opts;
     const chat = deps.chatRegistry.get(chatId);
     if (!chat || !deps.isHostOnline(chat.hostId)) {
       deps.logger.warn({ deviceId, chatId }, 'device-control: no online host owns the target chat');
-      send(socket, { type: 'error', message: `${chatId} is not reachable right now` });
-      return;
+      if (opts.conversational)
+        send(socket, { type: 'error', message: `${chatId} is not reachable right now` });
+      return false;
     }
     const sessionId = randomBytes(12).toString('hex');
     const { token } = mintVoiceToken({
@@ -124,19 +145,21 @@ export function registerDeviceControlRoute(
       nowMs: now(),
     });
     deps.recordSessionHost(sessionId, chat.hostId);
+    if (opts.speak !== undefined) deps.queueSpeech?.(sessionId, opts.speak);
     send(socket, {
       type: 'session_start',
       sessionId,
       voiceToken: token,
       accountId,
       chatId,
-      conversational: true,
+      conversational: opts.conversational,
       followupMs: (deps.followupMs ?? ((): number => DEFAULT_FOLLOWUP_MS))(),
     });
     deps.logger.info(
-      { deviceId, sessionId, chatId, hostId: chat.hostId },
+      { deviceId, sessionId, chatId, hostId: chat.hostId, announcement: opts.speak !== undefined },
       'device-control: session opened',
     );
+    return true;
   };
 
   app.get(DEVICE_CONTROL_PATH, { websocket: true }, (socket: Socket, req) => {
@@ -172,12 +195,14 @@ export function registerDeviceControlRoute(
               if (previous && previous.socket !== socket) previous.socket.close(1000, 'replaced');
               live.set(deviceId, {
                 socket,
+                accountId,
                 presence: {
                   deviceId,
                   label,
                   muted: frame.muted,
                   fwVersion: frame.fwVersion,
                   connectedAt: now(),
+                  lastUsedAt: previous?.presence.lastUsedAt ?? 0,
                 },
               });
               deps.logger.info(
@@ -196,7 +221,9 @@ export function registerDeviceControlRoute(
                 send(socket, { type: 'error', message: 'wake_detected before hello' });
                 return;
               }
-              openSession(socket, deviceId, accountId);
+              const entry = live.get(deviceId);
+              if (entry) entry.presence.lastUsedAt = now();
+              openSession(socket, deviceId, accountId, { chatId: target(), conversational: true });
               return;
             }
             case 'session_end':
@@ -269,8 +296,34 @@ export function registerDeviceControlRoute(
     return reply.code(200).send({ surfaceId, label: parsed.data.label, token });
   });
 
+  const announce = (a: Announcement): number => {
+    const reachable = [...live.values()].filter((e) => !e.presence.muted);
+    let chosen: typeof reachable;
+    if (a.deviceId !== undefined) {
+      const want = a.deviceId.toLowerCase();
+      chosen = reachable.filter(
+        (e) => e.presence.deviceId === a.deviceId || e.presence.label.toLowerCase() === want,
+      );
+    } else {
+      const recent = reachable.filter((e) => e.presence.lastUsedAt > 0);
+      recent.sort((x, y) => y.presence.lastUsedAt - x.presence.lastUsedAt);
+      chosen = recent.length > 0 ? recent.slice(0, 1) : reachable;
+    }
+    let spoken = 0;
+    for (const e of chosen) {
+      const ok = openSession(e.socket, e.presence.deviceId, e.accountId, {
+        chatId: a.chatId,
+        conversational: false,
+        speak: a.message,
+      });
+      if (ok) spoken++;
+    }
+    return spoken;
+  };
+
   return {
     list: () => [...live.values()].map((e) => ({ ...e.presence })),
+    announce,
     disconnect: (deviceId: string): void => {
       const entry = live.get(deviceId);
       if (entry) entry.socket.close(CLOSE_UNAUTHORISED, 'revoked');

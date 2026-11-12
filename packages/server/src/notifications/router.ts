@@ -9,9 +9,9 @@
 //               (spec/09 § Reaching the user). Failures logged to
 //               /data/undelivered.jsonl.
 //   desktop   — forward `notify` wire event to all connected desktop surfaces.
-//   speakers  — emit `notify` to voice-device surfaces (broadcast, or pinned
-//               to deviceId when supplied). Surface-side TTS / firmware
-//               handles playback.
+//   speakers  — spoken on a connected voice device (device-control.ts picks
+//               it: the named one, else the one used last, else all), or
+//               pushed when no device is reachable.
 //
 // NO FALLBACKS:
 //   - No push backend injected → fail loudly when channel='push' fires
@@ -44,6 +44,11 @@ export interface NotificationRouterDeps {
    * dev boot (app.ts, gated on PATCH_SPEAKERS_MOCK=1) — never in production.
    */
   speakersRecorder?: SpeakersTtsRecorder;
+  /**
+   * Speak an announcement on voice devices; returns how many it reached.
+   * Unset, or 0 reached, and the notify is pushed instead (spec/09 § speakers).
+   */
+  announce?: (a: { chatId: string; message: string; deviceId?: string }) => number;
   /**
    * True while the chat is snoozed. A snoozed chat is silent on every channel
    * (spec/09 § Snoozed chats): nothing routed for it is delivered or replayed.
@@ -180,7 +185,7 @@ export class NotificationRouter {
           );
           break;
         case 'speakers':
-          this.routeSpeakers(routed);
+          await this.routeSpeakers(routed, opts.suppressOn ?? 'any');
           break;
       }
     } catch (err) {
@@ -356,10 +361,12 @@ export class NotificationRouter {
     }
   }
 
-  private routeSpeakers(event: NotifyEvent): void {
+  private async routeSpeakers(
+    event: NotifyEvent,
+    suppressOn: 'any' | 'computer' | 'chat-open',
+  ): Promise<void> {
     // DEV/TEST observability seam (no-op in production — recorder is undefined
-    // unless the dev boot injected it). Records the TTS the host auto-routed
-    // back to the originating device so the mock stack can assert D1-6.
+    // unless the dev boot injected it).
     if (this.deps.speakersRecorder) {
       this.deps.speakersRecorder.record({
         ts: this.now(),
@@ -368,29 +375,23 @@ export class NotificationRouter {
         message: event.message,
       });
     }
-    // Fan out to voice-device surfaces. Surface-side TTS handles playback.
-    let delivered = 0;
-    if (event.deviceId) {
-      // Specific device: scan voice-device surfaces with matching id.
-      const ok = this.deps.wsHub.sendToSurface(event.deviceId, { ...event });
-      delivered = ok ? 1 : 0;
-    } else {
-      delivered = this.deps.wsHub.sendToKind('voice-device', { ...event });
+    const reached = this.deps.announce
+      ? this.deps.announce({
+          chatId: event.chatId,
+          message: event.message,
+          ...(event.deviceId ? { deviceId: event.deviceId } : {}),
+        })
+      : 0;
+    if (reached > 0) {
+      this.deps.logger.info({ chatId: event.chatId, devices: reached }, 'speakers notify spoken');
+      return;
     }
-    if (delivered === 0) {
-      this.logUndelivered({
-        ts: this.now(),
-        channel: 'speakers',
-        chatId: event.chatId,
-        message: event.message,
-        error: 'no speaker surfaces online',
-      });
-    } else {
-      this.deps.logger.info(
-        { chatId: event.chatId, surfaces: delivered },
-        'speakers notify routed',
-      );
-    }
+    // Nothing in the house to say it on: the message still reaches the user.
+    this.deps.logger.info(
+      { chatId: event.chatId },
+      'speakers notify: no device reachable; pushing',
+    );
+    await this.routePush({ ...event, channel: 'push' }, suppressOn);
   }
 
   private logUndelivered(entry: {

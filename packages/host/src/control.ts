@@ -85,7 +85,6 @@ import {
   UserHandedBackError,
 } from './browser.js';
 import { RateLimiter } from './rate-limit.js';
-import { resolveSpeakers, type SpeakerCascadeDeps } from './devices/speakers-cascade.js';
 import { GIT_SHA, VERSION } from './version.js';
 import { RemoteRelayError } from './remote-relay.js';
 import { buildPeekResult, stripBinaryPayloads } from './peek.js';
@@ -140,22 +139,6 @@ export interface BuildOptions {
   localKey?: string;
   /** Jobs store backing patch_job_*. Production: RemoteJobsStore. Tests: MemoryJobsStore. */
   jobs?: AsyncJobsInterface;
-  /**
-   * Backs `patch_list_devices` (spec/06 § Cross-chat toolset, spec/16
-   * § Outbound routing). Returns the registered voice devices combined with
-   * live presence: `{ deviceId, name, online, muted, lastUsedAt }`. Production
-   * wires this to `PresenceRegistry.enumerate(DeviceRegistry.list())`; when
-   * unset the endpoint 503s. NO FALLBACK — an unwired registry is a config
-   * error, surfaced loudly rather than returning a fake empty list.
-   */
-  listDevices?: () => {
-    deviceId: string;
-    name: string;
-    online: boolean;
-    muted: boolean;
-    lastUsedAt: number;
-    fwVersion?: string;
-  }[];
   /** Optional upstream emit hook — used to surface cross-chat tool events for audit. */
   emitWire?: (event: WireEvent) => void;
   /**
@@ -372,12 +355,6 @@ export interface BuildOptions {
     };
     /** Apply an available host update (spec/02 § Self-update). */
     update: () => Promise<{ applied: boolean; message: string; deferred?: boolean }>;
-    /**
-     * Open the five-minute voice-device adoption window (spec/16). Optional
-     * because device adoption itself is not implemented yet — the route says
-     * so plainly rather than handing back a window nothing honours.
-     */
-    pairDevice?: () => { opensAt: number; expiresAt: number };
   };
   /**
    * Live host→server link diagnostics + the spec/12 link-drop control
@@ -401,15 +378,6 @@ export interface BuildOptions {
      */
     floodBuffer: (chatId: string, count: number) => number;
   };
-  /**
-   * Backs the `patch_speak` device-resolution
-   * cascade (spec/09 § `### speakers`, spec/16 § Outbound routing). Composes
-   * the live `PresenceRegistry` primitives + the push fallback. When unset,
-   * a speakers notify still emits its wire event + writes the sidecar but
-   * does not ring any device — the in-process control smoke tests have no
-   * presence registry. Production always wires this.
-   */
-  speakers?: SpeakerCascadeDeps;
   /**
    * Speak a `patch_call` message into an app voice call that is already open,
    * returning false when none is (spec/07 § Agent-initiated voice). Unset in
@@ -991,11 +959,7 @@ const CallBody = z
     /** When omitted, the calling chat is the call target. */
     chatId: z.string().min(1).optional(),
     message: z.string().min(1).optional(),
-    /**
-     * Optional physical voice device to ring (spec/16 § Outbound routing — the
-     * agent picks a candidate device). When omitted, the speakers cascade
-     * resolves the most-recently-active device.
-     */
+    /** Accepted for older callers; voice devices are not rung for calls. */
     deviceId: z.string().min(1).optional(),
     callerChatId: z.string().min(1),
   })
@@ -1866,22 +1830,6 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       return reply.code(409).send({ error: 'no_update_available', message: result.message });
     }
     return { ok: true, message: result.message };
-  });
-
-  // POST /pair-device — open the five-minute voice-device adoption window.
-  // Local-only by design: the host adopts the device itself, so this has no
-  // wire frame (spec/02 § Control IPC, spec/16).
-  app.post('/pair-device', async (req, reply) => {
-    const host = hostGate(req, reply);
-    if (!host) return;
-    if (!host.pairDevice) {
-      return reply.code(501).send({
-        error: 'not_implemented',
-        message:
-          'voice-device adoption is not implemented on this host yet — no adoption window to open',
-      });
-    }
-    return { ok: true, ...host.pairDevice() };
   });
 
   // POST /stop — shut the host down.
@@ -3431,17 +3379,6 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     }
   });
 
-  // patch_list_devices — registered voice devices + live presence.
-  app.get('/internal/devices', async (_req, reply) => {
-    const start = Date.now();
-    if (!opts.listDevices) {
-      return reply.code(503).send({ error: 'devices not configured' });
-    }
-    const devices = opts.listDevices();
-    toolLog({ tool: 'patch_list_devices', durationMs: Date.now() - start, ok: true });
-    return { devices };
-  });
-
   // patch_stop.
   app.post<{ Params: { id: string } }>('/internal/stop/:id', async (req, reply) => {
     const start = Date.now();
@@ -3994,21 +3931,8 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (opts.onBroadcast && channel !== undefined) {
       opts.onBroadcast({ channel, message, sourceChatId: callerChatId });
     }
-    // Speakers channel: run the device-resolution cascade (spec/09
-    // § `### speakers`). Resolves which physical device to ring (explicit →
-    // most-recently-active → all-low-volume → push fallback), skipping muted
-    // devices at every step, and emits the one-way `ring` frame.
-    if (channel === 'speakers' && opts.speakers) {
-      resolveSpeakers(
-        {
-          chatId: callerChatId,
-          message,
-          ...(deviceId !== undefined ? { deviceId } : {}),
-          now: Date.now(),
-        },
-        opts.speakers,
-      );
-    }
+    // A speakers notify needs nothing more here: the server speaks it on a
+    // connected voice device, or pushes it (spec/09 § speakers, spec/16).
     toolLog({
       tool: 'patch_notify',
       callerChatId,
@@ -4163,25 +4087,6 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         ...(parsed.data.message !== undefined ? { message: parsed.data.message } : {}),
       };
       opts.emitWire(event);
-    }
-    // patch_call also rings any connected physical voice device as a CALL
-    // (spec/16 § Patch-initiated calls). Unlike patch_notify(speakers) — a
-    // one-way announcement — this is a conversational ring: on ring_accepted
-    // the host opens a session that stays open for the user's reply. Runs the
-    // same device-resolution cascade (explicit deviceId → most-recently-active
-    // → all-low-volume → push fallback) with conversational:true so a speaker
-    // can be CALLED, not just notified.
-    if (opts.speakers && !spokenIntoOpenCall) {
-      resolveSpeakers(
-        {
-          chatId: targetChatId,
-          message: parsed.data.message ?? '',
-          ...(parsed.data.deviceId !== undefined ? { deviceId: parsed.data.deviceId } : {}),
-          now: Date.now(),
-          conversational: true,
-        },
-        opts.speakers,
-      );
     }
     toolLog({
       tool: 'patch_call',

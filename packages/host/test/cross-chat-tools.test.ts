@@ -379,53 +379,6 @@ describe('UDS internal endpoints — patch_list_chats', () => {
   });
 });
 
-describe('UDS internal endpoints — patch_list_devices', () => {
-  it('returns registered devices with presence when listDevices is wired', async () => {
-    const { daemon, jobs } = setup();
-    const app = await buildControl({
-      localKey: LOCAL_KEY,
-      daemon,
-      jobs,
-      listDevices: () => [
-        { deviceId: 'kitchen', name: 'Kitchen', online: true, muted: false, lastUsedAt: 42 },
-        { deviceId: 'bedroom', name: 'Bedroom', online: false, muted: true, lastUsedAt: 0 },
-      ],
-    });
-    try {
-      const res = await app.inject({
-        method: 'GET',
-        url: '/internal/devices',
-        headers: { authorization: `Bearer ${LOCAL_KEY}` },
-      });
-      expect(res.statusCode).toBe(200);
-      const body = res.json() as {
-        devices: { deviceId: string; online: boolean; muted: boolean }[];
-      };
-      expect(body.devices).toHaveLength(2);
-      expect(body.devices[0]).toMatchObject({ deviceId: 'kitchen', online: true, muted: false });
-      expect(body.devices[1]).toMatchObject({ deviceId: 'bedroom', online: false, muted: true });
-    } finally {
-      await app.close();
-    }
-  });
-
-  it('503s when listDevices is not configured (NO FALLBACK)', async () => {
-    const { daemon, jobs } = setup();
-    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
-    try {
-      const res = await app.inject({
-        method: 'GET',
-        url: '/internal/devices',
-        headers: { authorization: `Bearer ${LOCAL_KEY}` },
-      });
-      expect(res.statusCode).toBe(503);
-      expect(res.json().error).toBe('devices not configured');
-    } finally {
-      await app.close();
-    }
-  });
-});
-
 describe('UDS internal endpoints — patch_stop', () => {
   it('stops a known chat; 404 on unknown', async () => {
     const { daemon, jobs, folder } = setup();
