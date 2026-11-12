@@ -4,7 +4,7 @@ import { isDictatedSend } from '../../src/lib/dictatedSends';
 import { useViewPositionStore } from '../../src/stores/viewPositionStore';
 import { presentFailure } from '../../src/lib/usage';
 import React from 'react';
-import { formatElapsed as formatToolElapsed } from '../../src/lib/backgroundTasks';
+import { formatElapsed as formatToolElapsed, turnStartOf } from '../../src/lib/backgroundTasks';
 import {
   ActivityIndicator,
   Animated,
@@ -1598,7 +1598,13 @@ function CancelCommandButton({
 }
 
 /** A running call's elapsed time, from the host's start stamp. Display only. */
-function ToolElapsed({ since }: { since: number }): React.ReactElement {
+function ToolElapsed({
+  since,
+  turnSince,
+}: {
+  since: number;
+  turnSince?: number | undefined;
+}): React.ReactElement {
   const colors = useTheme();
   const [now, setNow] = React.useState(() => Date.now());
   React.useEffect(() => {
@@ -1611,6 +1617,9 @@ function ToolElapsed({ since }: { since: number }): React.ReactElement {
       style={{ ...typography.meta, color: colors.ink3, marginLeft: space.sm }}
     >
       {formatToolElapsed(since, now)}
+      {turnSince !== undefined ? (
+        <Text testID="tool-running-turn"> · working for {formatToolElapsed(turnSince, now)}</Text>
+      ) : null}
     </Text>
   );
 }
@@ -1675,6 +1684,8 @@ function ToolCallItem({
   const summary = result ? `${phrase} →` : phrase;
   const chatRunning = useChatStore((s) => s.chats[chatId]?.activity === 'running');
   const runningSince = !result && chatRunning ? entry.startedAt : undefined;
+  // The whole turn's clock beside the call's own, which restarts with every call.
+  const turnSince = useChatStore((s) => turnStartOf(s.timelines[chatId]));
   // patch_notify calls carrying a deepLink render a tappable link row on the
   // collapsed summary itself — same tap-target the push notification itself
   // opens (spec/09 § `### push`, spec/15 § Chat detail) — rather than
@@ -1717,7 +1728,7 @@ function ToolCallItem({
           >
             {summary}
           </Text>
-          {runningSince !== undefined ? <ToolElapsed since={runningSince} /> : null}
+          {runningSince !== undefined ? <ToolElapsed since={runningSince} turnSince={turnSince} /> : null}
         </Pressable>
         {runningSince !== undefined && entry.tool === 'Bash' && entry.callId ? (
           <CancelCommandButton chatId={chatId} callId={entry.callId} />
