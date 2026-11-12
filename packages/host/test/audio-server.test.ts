@@ -61,6 +61,7 @@ async function recvOne(ws: WebSocket): Promise<AudioEvent> {
 
 async function startServer(opts?: {
   cap?: number;
+  deadPeerMs?: number;
   reply?: string;
   onDeviceSession?: (deviceId: string, active: boolean) => void;
   chatExists?: (chatId: string) => boolean;
@@ -77,6 +78,9 @@ async function startServer(opts?: {
     // Default: every chat exists. Tests for E1-d3 override this.
     chatExists: opts?.chatExists ?? ((): boolean => true),
     ...(opts?.cap !== undefined ? { maxConcurrentSessions: opts.cap } : {}),
+    ...(opts?.deadPeerMs !== undefined
+      ? { deadPeerTimeoutMs: opts.deadPeerMs, pingIntervalMs: 50 }
+      : {}),
     ...(opts?.onDeviceSession !== undefined ? { onDeviceSession: opts.onDeviceSession } : {}),
   });
   const addr = handle.address();
@@ -2062,5 +2066,26 @@ describe('audio WSS server', () => {
     expect(server.injectUtterance(surfaceA, 'hello')).toBe(false);
     expect(server.speakCanned(surfaceA, 'hello')).toBe(false);
     expect(() => server.setFocusForSurface(surfaceA, 'some-chat')).not.toThrow();
+  });
+});
+
+describe('audio WSS server — dead peer', () => {
+  test('a peer that never answers is dropped by the server', async () => {
+    const server = await startServer({ deadPeerMs: 250 });
+    try {
+      const ws = new WebSocket(`ws://127.0.0.1:${server.port}/audio/s-dead`, {
+        autoPong: false,
+      });
+      await new Promise<void>((r) => ws.once('open', () => r()));
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('peer was not dropped')), 3000);
+        ws.once('close', () => {
+          clearTimeout(t);
+          resolve();
+        });
+      });
+    } finally {
+      await server.close();
+    }
   });
 });
