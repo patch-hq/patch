@@ -234,4 +234,62 @@ describe('voice device control on the server', () => {
     await log.waitFor(() => log.frames.some((f) => f.type === 'session_start'));
     ws.close();
   });
+
+  it('a speakers notify is spoken on the connected device, whose host is asked to say it', async () => {
+    await start({ managerChat: true });
+    hostLink.emit({ type: 'chat.spawned', chatId: 'chat-x', hostId: HOST_ID, folder: '/srv/x' });
+    const { ws, log } = connect(await deviceJwt('dev-kitchen'));
+    await new Promise<void>((r) => ws.once('open', () => r()));
+    hello(ws, 'dev-kitchen');
+    await new Promise((r) => setTimeout(r, 50));
+    hostLink.emit({
+      type: 'notify',
+      chatId: 'chat-x',
+      channel: 'speakers',
+      message: 'The bus is due',
+    });
+    await log.waitFor(() => log.frames.some((f) => f.type === 'session_start'));
+    const st = log.frames.find((f) => f.type === 'session_start') as {
+      sessionId: string;
+      chatId: string;
+      conversational: boolean;
+    };
+    expect(st.chatId).toBe('chat-x');
+    expect(st.conversational).toBe(false);
+    const audio = new WebSocket(`${url}/audio/${st.sessionId}`);
+    await new Promise<void>((r) => audio.once('open', () => r()));
+    audio.send('{"type":"audio.session_start"}');
+    await log.waitFor(() => upstreamGot.length >= 2);
+    expect(upstreamGot[0]).toBe('{"type":"audio.session_start"}');
+    expect(JSON.parse(upstreamGot[1] as string)).toEqual({
+      type: 'audio.speak',
+      sessionId: st.sessionId,
+      text: 'The bus is due',
+    });
+    audio.close();
+    ws.close();
+  });
+
+  it('a named speaker is matched by its label; a muted one is skipped', async () => {
+    await start({ managerChat: true });
+    const k = connect(await deviceJwt('dev-k'));
+    const b = connect(await deviceJwt('dev-b'));
+    await Promise.all([k, b].map((d) => new Promise<void>((r) => d.ws.once('open', () => r()))));
+    hello(k.ws, 'dev-k');
+    b.ws.send(
+      JSON.stringify({ type: 'hello', deviceId: 'dev-b', fwVersion: '0.1.0', muted: true }),
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    hostLink.emit({
+      type: 'notify',
+      chatId: 'thread_manager',
+      channel: 'speakers',
+      message: 'hi',
+      deviceId: 'Kitchen',
+    });
+    await k.log.waitFor(() => k.log.frames.some((f) => f.type === 'session_start'));
+    expect(b.log.frames.some((f) => f.type === 'session_start')).toBe(false);
+    k.ws.close();
+    b.ws.close();
+  });
 });

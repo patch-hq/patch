@@ -184,7 +184,6 @@ import { AccountUsageTracker } from './accountUsage.js';
 import { CreditResume } from './creditResume.js';
 import { resolveClaudeExecutable } from './claudeExecutable.js';
 import { installClaudeCode, installFailure } from './claudeInstall.js';
-import { DeviceAdoption } from './devices/adoption.js';
 import { localKeyPath, mintLocalKey } from './localKey.js';
 import {
   CLAUDE_BACKEND_ID,
@@ -287,10 +286,6 @@ import {
   type Vad,
 } from './audio/vad.js';
 import { clipHasSpeech } from './meetingSpeechGate.js';
-import { DeviceRegistry } from './devices/registry.js';
-import { PresenceRegistry } from './devices/presence.js';
-import { DeviceControlServer, mountDeviceControlUpgrade } from './devices/control-ws.js';
-import type { DeviceRingFrame } from '@patch/wire/device-control';
 import {
   DEFAULT_VOICE_CONFIG,
   voiceKeyMissingMessage,
@@ -335,8 +330,6 @@ export interface MainTestHooks {
     secretsStore: SecretsStore;
     /** The control-IPC Fastify app — lets a test `app.inject(...)` directly. */
     app: FastifyInstance;
-    /** The host-owned voice-device pairing registry (spec/16 § F2). */
-    deviceRegistry: DeviceRegistry;
     /**
      * The SDK backend this host is running against — under `SDK_BACKEND=mock`
      * (every test boot) this is a `MockSdkBackend`, letting a test `enqueue()`
@@ -3726,81 +3719,6 @@ async function startHost(
   const toolLogStore = new ToolLogStore(config.patchHome);
   const usageHistory = new UsageHistoryStore(config.patchHome);
   const chatTokens = new ChatTokenReader(join(config.patchHome, 'chats'));
-  // Voice-device registries — persistent pairing records + live presence.
-  // Back `patch_list_devices` and (in later voice groups) outbound routing.
-  // `presence` starts empty on boot: a device only shows `online: true` once
-  // its control WSS connects, which is correct — presence cannot outlive the
-  // socket that proves it (see devices/presence.ts).
-  const deviceRegistry = DeviceRegistry.load(config.patchHome);
-  const presence = new PresenceRegistry();
-  // Voice-device control plane (F2, spec/16). Owns device presence + outbound
-  // ring + the phone>device>idle concurrency arbiter. The firmware/mock dial
-  // `wss://<host>/device/control` on the SAME host:port as the audio WSS, so
-  // the control upgrade (mounted at step 8) shares the audio HTTP listener.
-  // Constructed here so the speakers cascade (buildControl, below) can route
-  // its ring frames through it; `isPhoneCallActive` reads the live audio server
-  // lazily (forward-declared `audioServer`, assigned by the time a frame lands).
-  // The five-minute voice-device adoption window this host's command line
-  // opens on it (spec/16 § F2). In-memory by design: a window is a live,
-  // attended act and must not survive a restart.
-  const deviceAdoption = new DeviceAdoption();
-
-  // Device sessions minted by the server for a chat another host runs, by
-  // sessionId, until the device connects (once) or the server's own route for
-  // it lapses.
-  const MANAGER_THREAD_ID: SpecialThreadId = 'thread_manager';
-  const FORWARDED_SESSION_TTL_MS = 5 * 60_000;
-  const forwardedDeviceSessions = new Map<string, number>();
-  const deviceControl = new DeviceControlServer({
-    registry: deviceRegistry,
-    // The window the CLI opens is what admits an unknown device. Without this
-    // it was opened and never consulted, so no device could ever be adopted.
-    adoption: deviceAdoption,
-    presence,
-    accountPublicKey,
-    accountId: accountPublicKey,
-    internalToken: config.internalToken,
-    // Wake-word conversations go to the Manager (spec/16 § Wake-word
-    // session). When another host runs it, the server mints the session and
-    // routes its audio there; this host only carries the device's socket on.
-    voiceDeviceChatId: MANAGER_THREAD_ID,
-    isChatLocal: (chatId: string): boolean =>
-      chatId === MANAGER_THREAD_ID
-        ? runsManager
-        : daemon.chatState.has(chatId) || metaStore.read(chatId) !== undefined,
-    mintRemoteSession: async ({ credential, chatId }) => {
-      const res = await fetch(new URL('/api/voice/token', config.serverUrl), {
-        method: 'POST',
-        headers: { authorization: `Bearer ${credential}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ chatId, role: 'voice-device-conv', surfaceKind: 'device' }),
-      });
-      if (!res.ok) {
-        throw new Error(`server refused a voice session (${res.status}): ${await res.text()}`);
-      }
-      const body = (await res.json()) as { sessionId: string; token: string };
-      return { sessionId: body.sessionId, token: body.token };
-    },
-    proxySession: (sessionId: string): void => {
-      forwardedDeviceSessions.set(sessionId, Date.now() + FORWARDED_SESSION_TTL_MS);
-    },
-    // DeviceControlServer calls `isPhoneCallActive` only while routing a ring
-    // to a PAIRED, CONNECTED voice device, to decide whether an in-progress
-    // phone call should suppress it (spec/16 § Concurrency). Driving it for
-    // real needs a live device-control WS session (its own JWT-authenticated
-    // pairing handshake — devices/control-ws.ts's own 100%-covered domain,
-    // exercised end-to-end in test/device-control-ws.test.ts) concurrently
-    // with an open phone-call-role audio session. Replicating that whole
-    // cross-subsystem harness here just to tick this one-line delegation is
-    // out of proportion to what it could realistically catch — a real bug in
-    // `phoneCallActive()` itself is caught by audio/server.ts's own 100%
-    // coverage; a real bug in the ring-routing decision is caught by
-    // devices/control-ws.ts's own 100% coverage.
-    isPhoneCallActive: /* v8 ignore next */ () => audioServer?.phoneCallActive() ?? false,
-    // Device sessions run concurrently up to the same whisper concurrency cap
-    // the audio server enforces (spec/07 §Concurrency on the host).
-    maxConcurrentSessions: config.audio.maxConcurrentSessions,
-    logger: logger.child({ component: 'device-control' }),
-  });
   /**
    * The stdio MCP server every SDK query launches (spec/02 § MCP server). It
    * sits beside this module — as `.js` in a built host, as `.ts` when the
@@ -5214,7 +5132,6 @@ async function startHost(
           emit(describeHost());
         },
       },
-      pairDevice: () => deviceAdoption.open(),
       update: async () => {
         const result = await applyUpdateOnce();
         // A refused apply (nothing newer, bad digest, bad signature) is
@@ -5261,44 +5178,10 @@ async function startHost(
     historyRemoteChat,
     sendToRemoteChat,
     stopRemoteChat,
-    listDevices: () => presence.enumerate(deviceRegistry.list()),
-    // Speakers-channel device-resolution cascade (spec/09 § `### speakers`).
-    // Composes the live presence registry; step-4 exhaustion re-routes the
-    // text through the `push` notify path (server delivers it or logs to
-    // undelivered.jsonl). The ring frame the cascade emits is consumed by the
-    // device's control WSS handler (firmware specifics: F2).
     // spec/07 § Agent-initiated voice — an app call already open takes the
     // message as speech instead of a ring. Late-bound: the audio server starts
     // after buildControl, and is up long before any tool call lands.
     interruptOpenCall: (text: string) => audioServer?.interruptOpenCall(text) ?? false,
-    speakers: {
-      presence: {
-        enumerate: () => presence.enumerate(deviceRegistry.list()),
-        isOnline: (id) => presence.isOnline(id),
-        // speakers-cascade.ts's `reachable()` short-circuits on `isOnline(id)`
-        // first; this host-side `isMuted` closure (and `send` below) is
-        // only reached for a device that IS online, which — like
-        // `isPhoneCallActive` above — needs a real, paired, connected
-        // device-control WS session to produce (its own 100%-covered domain
-        // in devices/control-ws.ts + presence.ts, exercised end-to-end in
-        // test/device-control-ws.test.ts). The boot test here proves the
-        // explicit-deviceId path's `reachable()` call for an OFFLINE
-        // registered device (isOnline=false, hence these closures
-        // short-circuited away) and the cascade's fallthrough to pushFallback.
-        isMuted: /* v8 ignore next */ (id) => presence.isMuted(id),
-        // Route the ring through the control plane (F2) rather than the raw
-        // presence socket, so the device's eventual `ring_accepted` resolves
-        // to the right chat (`deviceControl` records the pending ring). The
-        // frame the cascade builds IS a DeviceRingFrame (type:'ring', chatId,
-        // message, conversational:false, [lowVolume]). Returns false when the
-        // device is not connected → cascade falls to the next candidate.
-        /* v8 ignore next */
-        send: (id, frame) => deviceControl.ring(id, frame as unknown as DeviceRingFrame),
-      },
-      pushFallback: ({ chatId, message }) => {
-        emit({ type: 'notify', chatId, channel: 'push', message });
-      },
-    },
     emitWire: emit,
     publishArtifact: artifactPublisher.publish,
     padRequest: padClient.request,
@@ -5623,7 +5506,6 @@ async function startHost(
       ? await createSileroVadFactory({ modelPath: config.audio.vadModelPath })
       : (): Vad => new MockVad();
 
-  const deviceControlWss = new WebSocketServer({ noServer: true });
   audioServer = await startAudioServer({
     host: config.audio.host,
     port: config.audio.port,
@@ -5648,38 +5530,18 @@ async function startHost(
     // resumable from disk still exists, even if not currently hydrated).
     chatExists: (chatId: string): boolean =>
       daemon.chatState.has(chatId) || metaStore.read(chatId) !== undefined,
-    // spec/14 ## Sidebar + spec/16 — a physical voice-device session opening
-    // or closing drives the "mid-session" pill on the Speakers row across all
-    // surfaces. Resolve the user-given device name from the registry so the
-    // pill reads e.g. "🎙 kitchen". `device.session` is account-scoped (no
-    // chatId) so the server fans it out to every connected surface.
+    // spec/14 ## Sidebar + spec/16 — a voice-device session opening or
+    // closing drives the "mid-session" pill across all surfaces.
+    // `device.session` is account-scoped (no chatId) so the server fans it out
+    // to every connected surface. Devices are known to the server, not to
+    // hosts, so the pill names the device by its id.
     onDeviceSession: (deviceId, active) => {
-      const record = deviceRegistry.get(deviceId);
-      const name = record?.name ?? deviceId;
-      emit({ type: 'device.session', deviceId, name, active });
+      emit({ type: 'device.session', deviceId, name: deviceId, active });
     },
     // spec/07 § A call can move between devices — account-scoped, so every
     // surface learns a call is live on this chat and can offer to take it.
     onCallSession: (info) =>
       emit({ type: 'voice.call', ...info, surfaceKind: String(info.surfaceKind) }),
-    // F2: when a phone Manager call ends, release any device events the
-    // concurrency arbiter queued behind it (spec/16 §Concurrency).
-    onSessionClosed: ({ wasPhoneCall }) => {
-      if (wasPhoneCall) deviceControl.onPhoneCallEnded();
-    },
-    // F2: share the audio HTTP listener for the persistent device control WSS.
-    upstreamFor: (sessionId: string): string | undefined => {
-      const expiresAt = forwardedDeviceSessions.get(sessionId);
-      if (expiresAt === undefined) return undefined;
-      forwardedDeviceSessions.delete(sessionId);
-      if (expiresAt < Date.now()) return undefined;
-      return new URL(`/audio/${sessionId}`, config.serverWsUrl).toString();
-    },
-    deviceControlUpgrade: mountDeviceControlUpgrade({
-      server: deviceControl,
-      wss: deviceControlWss,
-      logger: logger.child({ component: 'device-control' }),
-    }),
     submitUserTurn: async ({ chatId, message, source, onReplyText, handoff, onAccepted }) => {
       // Tag the turn by its ingress. Physical voice devices get
       // `[voice • device:<deviceId>]` (spec/06 ## Speakers thread) so the
@@ -5838,10 +5700,6 @@ async function startHost(
     } catch (err) {
       logger.error({ err }, 'patch-daemon: history log flush failed on shutdown');
     }
-    // Close device control sockets first so the shared audio HTTP listener can
-    // close cleanly (otherwise http.close() waits on the persistent control
-    // WSS connections; F2).
-    deviceControl.closeAll();
     // Terminal shells die with the host (spec/02 — no reattach); surfaces are
     // told via `patch.terminal.exit { reason: 'daemon_shutdown' }`.
     await terminals.shutdown().catch(() => undefined);
@@ -5883,7 +5741,6 @@ async function startHost(
     folderRegistry,
     secretsStore,
     app,
-    deviceRegistry,
     sdkBackend,
   });
 }

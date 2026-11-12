@@ -1015,7 +1015,6 @@ Merge order into a chat's `mcpServers`: `patch`, then Claude Code's own discover
 | `/claude-settings/memory/delete` | POST | Delete one memory entry                                                        |
 | `/claude-settings`               | POST | Replace settings.json with `{text}`; text that is not a JSON object is refused |
 | `/update`                        | POST | Apply an available host update                                                 |
-| `/pair-device`                   | POST | Open the five-minute voice-device adoption window (`16-voice-device.md`)       |
 
 Below the chat endpoints, the socket carries every host-scoped control of
 `03-wire-protocol.md` § Host events that this host owns, one endpoint per
@@ -1027,9 +1026,7 @@ endpoint here: the CLI changes them through the server wherever it runs
 (`01-server.md` § Settings). Three host controls are reached over HTTP too, even
 when the CLI is invoked on that host, because the server owns them rather than
 the host: minting a registration code for a new host, renaming a host, and
-revoking one. `/pair-device` runs
-the other way round — it exists here and has no wire frame, since the host
-adopts the device itself and the command is local-only (`17-cli.md` § Commands).
+revoking one.
 
 Requests carry a `Bearer` local key — a defence-in-depth measure over the OS-level same-host/same-user trust the `0600` socket already provides (cheap to add, closes the case where another local process can reach the socket). When the CLI runs on a different host, it goes via the WebSocket server, not this IPC.
 

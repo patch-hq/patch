@@ -1,18 +1,15 @@
-// Voice-device control-plane WSS frames (spec/16-voice-device.md §Wire
-// protocol). The persistent control WSS terminates at the host
-// (`wss://<host>/device/control`); the per-session audio WSS uses the
-// separate `@patch/wire/audio` frames.
+// Voice-device control-plane WSS frames (spec/16-voice-device.md § Control
+// WSS). The persistent control WSS terminates at the server
+// (`wss://<server>/device/control`, packages/server/src/device-control.ts);
+// the per-session audio WSS uses the separate `@patch/wire/audio` frames.
 //
-// These mirror the firmware's hand-rolled C encoder/decoder in
-// `packages/voice-firmware/components/.../patch_control_frames.{h,c}` and the
-// Python mock harness in `packages/voice-firmware/mock`. The host is the
-// authoritative implementation of the other side, so the shapes here must
-// match the firmware exactly — any drift fails loudly (zod `.strict()`), never
-// silently coerces (spec/principles.md "No fallbacks").
+// Device firmware (e.g. patch-hq/patch-voice-pe) implements the other side.
+// Any drift fails loudly (zod `.strict()`), never silently coerces
+// (spec/principles.md "No fallbacks").
 //
 // Kept in a subpath (`@patch/wire/device-control`) like `./audio` so the
-// surface-facing wire union stays lean — only the host's control-WSS handler
-// imports this.
+// surface-facing wire union stays lean — only the server's control-WSS
+// handler imports this.
 
 import { z } from 'zod';
 

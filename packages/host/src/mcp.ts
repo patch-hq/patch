@@ -1357,7 +1357,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_speak',
     {
       description:
-        "Say something OUT LOUD on a voice device in the house. A different act from notifying: it fills the room, anyone there hears it, and it is gone — no notification is left behind for later. Use it when the user is in the house and away from screens, and the thing is worth saying to the room. deviceId picks a speaker ('kitchen', 'bedroom'); omit it and Patch picks the one most recently used, or all of them quietly if none was. If no speaker is reachable it falls through to a push.",
+        "Say something OUT LOUD on a voice device in the house. A different act from notifying: it fills the room, anyone there hears it, and it is gone — no notification is left behind for later. Use it when the user is in the house and away from screens, and the thing is worth saying to the room. deviceId picks a speaker ('kitchen', 'bedroom'); omit it and Patch picks the one most recently used, or all of them if none was. If no speaker is reachable it falls through to a push.",
       inputSchema: {
         message: z.string().min(1),
         deviceId: z.string().min(1).optional(),

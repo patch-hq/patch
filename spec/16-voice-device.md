@@ -70,9 +70,13 @@ The target chat is persistent, so everything said by voice is there in text afte
 
 The device setting in Settings → Voice chooses how a device's conversation is answered, the same matrix as the app surfaces (`07-voice-app.md` § Voice is a config matrix). The device is unaffected by the choice: it streams the same audio either way.
 
-## Not yet routed through the server
+## Announcements
 
-Rings and `patch_notify(channel: 'speakers')` announcements need the server to push to a device; until that is built, `speakers` falls through to push (`09-notifications.md`). Per-device target chats are likewise not configurable yet: every device talks to the Manager.
+`patch_speak` and `patch_notify(channel: 'speakers')` are spoken on a connected device (`09-notifications.md` § speakers). The server opens a session on the chosen device for the calling chat, with `conversational: false`, and asks that chat's host to speak the message as soon as the device joins. The device then behaves as after any reply: it stays open for the follow-up window. With no device reachable, the notify is pushed instead.
+
+## Not built yet
+
+`patch_call` does not ring voice devices; calls reach the app surfaces only. Per-device target chats are not configurable: every device's wake-word conversations go to the Manager.
 
 ## Cross-refs
 

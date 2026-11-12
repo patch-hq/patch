@@ -54,9 +54,6 @@ import {
 import type { VoiceSessionLike, VoiceTimeline } from './voice-session-like.js';
 import type { EngineCosting } from './voiceCost.js';
 import { verifyVoiceToken, VoiceTokenError, type VoiceTokenClaims } from './token-verifier.js';
-import { DEVICE_CONTROL_PATH } from '../devices/control-ws.js';
-import { proxyAudioSession } from './session-proxy.js';
-import { watchPeerLiveness } from './peer-liveness.js';
 import { readKey, type KeySource } from './keySource.js';
 import { DeepgramDictationSession } from './deepgram-dictation.js';
 import { ElevenLabsDictationSession } from './elevenlabs-dictation.js';
@@ -280,26 +277,6 @@ export interface AudioServerOptions {
     endedAt: number;
     engine: EngineCosting;
   }) => void;
-  /**
-   * Optional `/device/control` WSS upgrade handler (spec/16 voice-device
-   * control plane, F2). The firmware/mock dial the SAME host:port for
-   * both `/audio/<sessionId>` and `/device/control`, so the control plane
-   * shares this HTTP listener. When unset, `/device/control` upgrades 404 —
-   * the in-process audio smoke tests don't wire a device registry.
-   */
-  deviceControlUpgrade?: (
-    req: import('node:http').IncomingMessage,
-    socket: import('node:stream').Duplex,
-    head: Buffer,
-  ) => void;
-  /**
-   * A device session this host forwards to the server rather than runs
-   * (spec/16 § Connection model): the server URL to carry `/audio/<id>` on to,
-   * or undefined for a session this host runs itself. Read once per connect.
-   */
-  upstreamFor?: (sessionId: string) => string | undefined;
-  /** Test seam: the WebSocket client a forwarded session dials. */
-  upstreamWsCtor?: new (url: string) => import('ws').WebSocket;
   /** Test hooks. */
   nowMs?: () => number;
   /**
@@ -514,22 +491,6 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
   const wss = new WebSocketServer({ noServer: true });
 
   http.on('upgrade', (req, socket, head) => {
-    // Device control plane shares this listener (spec/16, F2). Route it first;
-    // the device's persistent control WSS lives at /device/control while
-    // per-session audio is under /audio/<sessionId>.
-    // Same unreachable-fallback reasoning as the diag-speak handler above:
-    // `req.url` is always populated for a real upgrade request, and
-    // `.split()` always yields >=1 element.
-    const path = (req.url ?? '').split('?')[0] ?? ''; /* v8 ignore next */
-    if (path === DEVICE_CONTROL_PATH) {
-      if (opts.deviceControlUpgrade) {
-        opts.deviceControlUpgrade(req, socket, head);
-      } else {
-        socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
-        socket.destroy();
-      }
-      return;
-    }
     if (!req.url || !req.url.startsWith(AUDIO_PATH_PREFIX)) {
       socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
       socket.destroy();
@@ -541,20 +502,6 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
     if (expected.length === 0) {
       socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
       socket.destroy();
-      return;
-    }
-    const upstreamUrl = opts.upstreamFor?.(expected);
-    if (upstreamUrl !== undefined) {
-      wss.handleUpgrade(req, socket, head, (ws) => {
-        proxyAudioSession(ws, upstreamUrl, expected, {
-          logger: log,
-          ...(opts.deadPeerTimeoutMs !== undefined
-            ? { deadPeerTimeoutMs: opts.deadPeerTimeoutMs }
-            : {}),
-          ...(opts.pingIntervalMs !== undefined ? { pingIntervalMs: opts.pingIntervalMs } : {}),
-          ...(opts.upstreamWsCtor ? { wsCtor: opts.upstreamWsCtor } : {}),
-        });
-      });
       return;
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
