@@ -34,6 +34,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readSync,
   readdirSync,
   renameSync,
   rmSync,
@@ -136,9 +137,28 @@ export interface WatchProgress {
   lastOutputAt?: number;
 }
 
+/** Progress only needs the last non-empty line, so read just the file's tail, never the whole (possibly huge) output. */
+const PROGRESS_TAIL_BYTES = 16 * 1024;
+
 export function readProgress(outputFile: string): WatchProgress {
-  if (!existsSync(outputFile)) return {};
-  const lines = readFileSync(outputFile, 'utf8').split('\n');
+  let st: ReturnType<typeof statSync>;
+  try {
+    st = statSync(outputFile);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    throw err;
+  }
+  const len = Math.min(st.size, PROGRESS_TAIL_BYTES);
+  const buf = Buffer.alloc(len);
+  if (len > 0) {
+    const fd = openSync(outputFile, 'r');
+    try {
+      readSync(fd, buf, 0, len, st.size - len);
+    } finally {
+      closeSync(fd);
+    }
+  }
+  const lines = buf.toString('utf8').split('\n');
   let last: string | undefined;
   for (let i = lines.length - 1; i >= 0; i--) {
     const l = (lines[i] ?? '').trim();
@@ -149,7 +169,7 @@ export function readProgress(outputFile: string): WatchProgress {
   }
   return {
     ...(last !== undefined ? { lastLine: last } : {}),
-    lastOutputAt: Math.floor(statSync(outputFile).mtimeMs),
+    lastOutputAt: Math.floor(st.mtimeMs),
   };
 }
 
@@ -208,6 +228,14 @@ export class WatchScheduler {
   private readonly setIntervalFn: (cb: () => void, ms: number) => ReturnType<typeof setInterval>;
   private readonly clearIntervalFn: (t: ReturnType<typeof setInterval>) => void;
   private readonly timer: ReturnType<typeof setInterval>;
+  /**
+   * Chats that may have a running watch. The tick visits only these, so it
+   * does not stat/readdir every chat on disk every 3 s (that blocked the host
+   * main thread for seconds with ~1,000 chats). Filled by one full scan on the
+   * first tick, then by `writeRecord`; a chat leaves once nothing runs in it.
+   */
+  private activeChats: Set<string> | null = null;
+  private readonly warnedCorrupt = new Set<string>();
 
   constructor(private readonly deps: WatchSchedulerDeps) {
     this.spawnFn = deps.spawnFn ?? spawn;
@@ -238,6 +266,7 @@ export class WatchScheduler {
     const tmp = `${path}.tmp`;
     writeFileSync(tmp, JSON.stringify(rec), 'utf8');
     renameSync(tmp, path); // atomic — a crash mid-write can't corrupt the record
+    this.activeChats?.add(rec.chatId);
   }
 
   private readOne(chatId: string, taskId: string): WatchRecord | null {
@@ -246,7 +275,11 @@ export class WatchScheduler {
     try {
       return WatchRecord.parse(JSON.parse(readFileSync(path, 'utf8')));
     } catch (err) {
-      this.deps.logger.warn({ chatId, taskId, err }, 'watch: corrupt record, dropping');
+      // Once per record: the tick re-reads every 3 s and would repeat this forever.
+      if (!this.warnedCorrupt.has(path)) {
+        this.warnedCorrupt.add(path);
+        this.deps.logger.warn({ chatId, taskId, err }, 'watch: corrupt record, dropping');
+      }
       return null;
     }
   }
@@ -422,8 +455,15 @@ export class WatchScheduler {
 
   /** The resident poll: notice every RUNNING record whose process has ended. */
   private async tick(): Promise<void> {
-    for (const chatId of this.deps.allChatIds()) {
-      for (const rec of this.list(chatId)) {
+    if (this.activeChats === null) {
+      this.activeChats = new Set(
+        this.deps.allChatIds().filter((id) => this.list(id).some((r) => r.status === 'running')),
+      );
+    }
+    for (const chatId of [...this.activeChats]) {
+      const records = this.list(chatId);
+      if (!records.some((r) => r.status === 'running')) this.activeChats.delete(chatId);
+      for (const rec of records) {
         if (rec.status !== 'running') continue;
         if (
           rec.timeoutSec !== undefined &&
