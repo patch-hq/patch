@@ -558,3 +558,13 @@ describe('WatchScheduler — timeout, progress and stall nudge', () => {
     }
   });
 });
+
+describe('readProgress tail read', () => {
+  it('returns the last line of a large output without needing the whole file', () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'patch-progress-')));
+    const f = join(dir, 'out.log');
+    writeFileSync(f, `${'x'.repeat(200_000)}\nfirst\nlast line\n\n`);
+    expect(readProgress(f).lastLine).toBe('last line');
+    expect(readProgress(join(dir, 'missing.log'))).toEqual({});
+  });
+});
