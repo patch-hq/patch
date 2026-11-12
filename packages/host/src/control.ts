@@ -25,7 +25,7 @@ import Fastify, {
 } from 'fastify';
 import { z } from 'zod';
 import { imageSize } from './imageSize.js';
-import { BACKEND_IDS, MeetingAgentNotesEdit } from '@patch/wire';
+import { BACKEND_IDS, MeetingAgentNotesEdit, isReservedSpecialThread } from '@patch/wire';
 import type {
   HostAccountEvent,
   ClaudeMemoryEntry,
@@ -257,6 +257,13 @@ export interface BuildOptions {
    * has ever reported that chat, or the host that owns it is offline. When
    * unset, a chat not found locally 404s exactly as before this existed.
    */
+  /**
+   * Whether this host runs the Manager. When it does not, a local copy of a
+   * reserved special thread is stale (the Manager moved), so patch_send_to /
+   * patch_peek / patch_history addressed to one skip it and relay to the host
+   * that does run it. Unset means "do not special-case".
+   */
+  runsManager?: () => boolean;
   peekRemoteChat?: (req: {
     sourceChatId: string;
     targetChatId: string;
@@ -1059,6 +1066,8 @@ interface ErrorEnvelope {
 }
 
 export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInstance> {
+  const isForeignSpecialThread = (chatId: string): boolean =>
+    opts.runsManager !== undefined && !opts.runsManager() && isReservedSpecialThread(chatId);
   const app = Fastify({ logger: opts.logger ?? false });
 
   // Normalize fastify's OWN errors (e.g. a malformed/empty JSON body, which
@@ -1992,7 +2001,9 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       // chat's own state, so they are true whether or not the ring is warm:
       // `eventCount: 23, hasClaudeSession: false` is the whole diagnosis of a
       // chat whose session has been lost, in the first thing an agent looks at.
-      const local = buildPeekResult(opts.daemon!, req.params.id, limit);
+      const local = isForeignSpecialThread(req.params.id)
+        ? undefined
+        : buildPeekResult(opts.daemon!, req.params.id, limit);
       if (!local) {
         // Not on THIS host — spec/03 § Cross-chat tools: relayed to whichever
         // host the server's chat mirror says owns it, resolved from a bare
@@ -2111,6 +2122,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       // Armed before the message lands so the evaluator judges the very turn
       // this message starts. A chat that is not on this host throws
       // ChatNotFoundError here and is refused below (NO FALLBACK).
+      if (isForeignSpecialThread(chatId)) throw new ChatNotFoundError(chatId);
       if (goal !== undefined) await opts.daemon!.setGoal(chatId, goal);
       // Accepted, not finished: the sender is inside its own turn and must not
       // wait out the target's.
@@ -3222,6 +3234,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       return reply.code(400).send({ error: 'invalid_input', message: q.error.message });
     }
     try {
+      if (isForeignSpecialThread(params.data.id)) throw new ChatNotFoundError(params.data.id);
       const slice = opts.daemon!.readHistory({
         chatId: params.data.id,
         ...(q.data.fromSeq !== undefined ? { fromSeq: q.data.fromSeq } : {}),

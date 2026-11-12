@@ -5251,6 +5251,7 @@ async function startHost(
     // spec/03 § Cross-chat tools — a chat not found among THIS host's own
     // resolves on the OWNING host's own answer, exactly like a cross-host
     // spawn, once the server's chat mirror says where it actually lives.
+    runsManager: () => runsManager,
     peekRemoteChat,
     historyRemoteChat,
     sendToRemoteChat,
