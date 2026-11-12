@@ -14,7 +14,9 @@ import {
   openSync,
   readFileSync,
   readdirSync,
+  rmSync,
   statSync,
+  writeFileSync,
 } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
@@ -61,6 +63,48 @@ async function healthz(origin: string): Promise<{ gitSha?: string } | null> {
   }
 }
 
+const alive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'EPERM';
+  }
+};
+
+/** The pid a previous app instance recorded for the server it started, if it is still running. */
+function leftoverPid(pidFile: string): number | null {
+  if (!existsSync(pidFile)) return null;
+  const pid = Number(readFileSync(pidFile, 'utf8').trim());
+  return Number.isInteger(pid) && pid > 1 && alive(pid) ? pid : null;
+}
+
+/** Stop a server left by a previous app instance and wait for its port to go quiet. */
+async function stopLeftover(pid: number, origin: string, port: number): Promise<void> {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const wait = async (ms: number): Promise<boolean> => {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      if (!alive(pid) && (await healthz(origin)) === null) return true;
+      await sleep(100);
+    }
+    return false;
+  };
+  try {
+    process.kill(pid, 'SIGTERM');
+    if (await wait(5000)) return;
+    process.kill(pid, 'SIGKILL');
+  } catch (e) {
+    throw new Error(
+      `A Patch server left by an earlier launch (pid ${pid}) is holding port ${port} and could not be stopped: ${(e as Error).message}. Quit it and relaunch.`,
+    );
+  }
+  if (await wait(3000)) return;
+  throw new Error(
+    `A Patch server left by an earlier launch (pid ${pid}) is still holding port ${port} after being killed. Quit it and relaunch.`,
+  );
+}
+
 function tail(file: string, lines = 15): string {
   try {
     return readFileSync(file, 'utf8').trimEnd().split('\n').slice(-lines).join('\n');
@@ -97,7 +141,17 @@ export async function startLocalServer(opts: LocalServerOptions): Promise<LocalS
   for (const d of ['data', 'downloads', 'logs']) mkdirSync(join(opts.home, d), { recursive: true });
   if (opts.hostArtifacts) seed(opts.hostArtifacts, join(opts.home, 'downloads'));
 
-  const running = await healthz(origin);
+  const pidFile = join(opts.home, 'server.pid');
+  let running = await healthz(origin);
+  if (running !== null) {
+    // Answering, and we recorded starting it: a previous app instance died without
+    // stopping it. Replace it rather than inherit a server nobody can stop.
+    const pid = leftoverPid(pidFile);
+    if (pid !== null) {
+      await stopLeftover(pid, origin, opts.port);
+      running = await healthz(origin);
+    }
+  }
   if (running !== null) {
     if (running.gitSha !== ourSha) {
       throw new Error(
@@ -122,9 +176,11 @@ export async function startLocalServer(opts: LocalServerOptions): Promise<LocalS
       ...(opts.relayUrl ? { PATCH_RELAY_URL: opts.relayUrl } : {}),
     },
   });
+  if (child.pid) writeFileSync(pidFile, String(child.pid));
   let exited: number | null | undefined;
   child.once('exit', (code) => {
     exited = code;
+    rmSync(pidFile, { force: true });
   });
   child.once('error', (e) => {
     exited = -1;
