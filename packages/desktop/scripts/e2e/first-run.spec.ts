@@ -253,6 +253,35 @@ async function permissionsAndModel(page: Page): Promise<void> {
   await page.getByTestId('welcome-next').click();
 }
 
+/**
+ * The first minutes in the app with no AI connected: nothing asks for meeting
+ * permissions, the composer says why it can't send, and every "Sign in" goes
+ * straight to signing in.
+ */
+async function firstChat(page: Page): Promise<void> {
+  await page.getByTestId('new-chat-fab').click();
+  await expect(page).toHaveURL(/\/chats\/new/);
+  await expect(page.getByTestId('composer-input')).toBeVisible();
+  const notice = page.getByTestId('composer-signed-out');
+  await expect(notice).toHaveText(/Sign in to Claude to send messages\./);
+  const banner = page.getByTestId('claude-disconnected-banner');
+  await expect(banner).toBeVisible();
+  // Meeting permissions wait until a meeting is started.
+  await page.waitForTimeout(1500);
+  await expect(page.getByTestId('meeting-setup')).toHaveCount(0);
+  await shot(page, 'new-chat');
+  await notice.getByRole('link', { name: 'Sign in' }).click();
+  await expect(page).toHaveURL(/\/connect/);
+  await expect(page.getByTestId('claude-signin-start')).toBeVisible();
+  await shot(page, 'connect');
+  await page.getByTestId('connect-close').click();
+  await expect(page).toHaveURL(/\/chats\/new/);
+  await banner.getByRole('link', { name: 'Sign in' }).click();
+  await expect(page).toHaveURL(/\/connect/);
+  await page.getByTestId('connect-close').click();
+  await expect(page).toHaveURL(/\/chats\/new/);
+}
+
 test('my own server: pairs by code, runs the welcome steps, and is remembered', async () => {
   const server = await throwawayServer();
   const computer = blankComputer();
@@ -281,6 +310,7 @@ test('my own server: pairs by code, runs the welcome steps, and is remembered', 
     await shot(welcome, 'phone');
     await welcome.getByTestId('welcome-next').click();
     await expect(welcome).not.toHaveURL(/welcome/);
+    await firstChat(welcome);
 
     // The permission mode chosen was written to the server's shared settings.
     const shared = await welcome.evaluate(async () => {
@@ -373,6 +403,9 @@ async function thisComputer(computer: { home: string; userData: string }): Promi
   await welcome.getByTestId('welcome-skip').click();
   await permissionsAndModel(welcome);
 
+  // A brand-new host has a project folder for its first chat.
+  expect(existsSync(join(ACCOUNT_HOME, 'Patch'))).toBe(true);
+
   // Keep running: both on by default, remembered.
   await expect(welcome.getByTestId('welcome-keep-running')).toBeVisible();
   await expect(welcome.getByTestId('welcome-open-at-login').locator('input')).toBeChecked();
@@ -385,6 +418,15 @@ async function thisComputer(computer: { home: string; userData: string }): Promi
   await welcome.getByTestId('welcome-next').click();
   await expect(welcome.getByTestId('welcome-phone')).toBeVisible();
   await welcome.getByTestId('welcome-next').click();
+  await firstChat(welcome);
+  // With a host: the first chat's folder is the new ~/Patch, and the model
+  // reads by the name setup used, never as an id.
+  await expect(welcome.getByTestId(`folder-quick-${join(ACCOUNT_HOME, 'Patch')}`)).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(welcome.getByTestId('new-chat-setup')).not.toContainText('claude-');
+  await shot(welcome, 'new-chat-this-computer');
 
   // Closing every window leaves the server answering: the phone can still reach it.
   const origin = new URL(welcome.url()).origin;
