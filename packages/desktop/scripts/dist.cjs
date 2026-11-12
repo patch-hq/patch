@@ -20,27 +20,37 @@ const version = execFileSync('node', [path.join(REPO_ROOT, 'scripts', 'version.m
   encoding: 'utf8',
 }).trim();
 
-// Stamp provenance into dist/ first so it is inside the packaged bundle.
+// What is being packaged: the Mac app on a Mac, the AppImage on Linux. Each is
+// built on its own platform (the release workflow has a job for each), because
+// the app carries native pieces built for it.
+const PLATFORM = process.platform;
+if (PLATFORM !== 'darwin' && PLATFORM !== 'linux') {
+  console.error(`[dist] packaging on ${PLATFORM} is not supported (macOS and Linux only)`);
+  process.exit(64);
+}
+
+// Stamp provenance first so it is inside the packaged bundle.
 execFileSync('node', [path.join(__dirname, 'write-build-info.cjs')], { stdio: 'inherit' });
-// The server release and this Mac's host build ride inside the app (electron-builder.yml
-// extraResources), so "On this Mac" works with nothing installed.
+// The server release and this platform's host build ride inside the app
+// (electron-builder.yml extraResources), so "On this computer" works with nothing installed.
 execFileSync('node', [path.join(__dirname, 'stage-resources.cjs')], { stdio: 'inherit' });
-// Meeting mode's native audio helper, carried as Contents/Resources/bin/patch-audio.
-execFileSync('node', [path.join(__dirname, 'build-native.cjs')], { stdio: 'inherit' });
+// Meeting mode's native audio helper, carried as Contents/Resources/bin/patch-audio (macOS only).
+if (PLATFORM === 'darwin') {
+  execFileSync('node', [path.join(__dirname, 'build-native.cjs')], { stdio: 'inherit' });
+}
 
 const args = [
-  '--mac',
+  PLATFORM === 'darwin' ? '--mac' : '--linux',
   '--config',
   'electron-builder.yml',
   `-c.extraMetadata.version=${version}`,
-  // Build the artifacts but never upload: publishing to the box is an rsync in
-  // scripts/local/deliver.mjs, not electron-builder's job.
+  // Build the artifacts but never upload: the release workflow publishes them.
   '--publish',
   'never',
 ];
 if (process.argv.includes('--dir')) args.push('--dir');
 
-console.log(`[dist] packaging Patch ${version}${process.argv.includes('--dir') ? ' (--dir)' : ''}`);
+console.log(`[dist] packaging Patch ${version} for ${PLATFORM}${process.argv.includes('--dir') ? ' (--dir)' : ''}`);
 execFileSync(path.join(DESKTOP_DIR, 'node_modules', '.bin', 'electron-builder'), args, {
   cwd: DESKTOP_DIR,
   stdio: 'inherit',
@@ -54,7 +64,9 @@ execFileSync(path.join(DESKTOP_DIR, 'node_modules', '.bin', 'electron-builder'),
 //
 // A Developer ID is NOT required — any trusted code-signing identity works,
 // self-signed included. What is refused is the ABSENCE of one.
-if (!process.argv.includes('--skip-sign-check')) {
+//
+// Linux has no such gate: electron-updater replaces the AppImage file itself.
+if (PLATFORM === 'darwin' && !process.argv.includes('--skip-sign-check')) {
   // `release` is electron-builder.yml's `directories.output`. It used to be
   // dist-electron, and this gate kept the old name — so it condemned every build
   // as "nothing was built" while the bundle sat next door.

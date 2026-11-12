@@ -125,7 +125,23 @@ const PASS_THROUGH = [
   /^latest-mac\.yml$/,
   /^.+\.zip(\.blockmap)?$/,
   /^desktop-latest\.json$/,
+  // The Linux desktop app's feed: electron-updater reads latest-linux.yml and
+  // replaces the AppImage it names.
+  /^latest-linux\.yml$/,
+  /^Patch-.+\.AppImage$/,
+  /^desktop-linux-latest\.json$/,
 ];
+/**
+ * A stable release's fixed-name copies for the website (scripts/promote.mjs).
+ * No client asks a server for them, and each is a full duplicate of a file that
+ * is mirrored under its versioned name.
+ */
+export const STABLE_ALIAS_ASSETS = new Set([
+  'Patch-mac-arm64.zip',
+  'Patch-mac-arm64.dmg',
+  'Patch-linux-x86_64.AppImage',
+  'Patch-android.apk',
+]);
 const SERVER_RELEASE = ['patch-server.tar.gz', 'patch-server.tar.gz.sha256', 'install.sh'];
 const HOST_MANIFEST = /^host-latest-.+\.json$/;
 
@@ -221,7 +237,9 @@ export async function mirrorOnce(opts: MirrorOptions): Promise<string | null> {
     // Everything else is copied as published. Hosts verify their own artifacts
     // against the signing key they trust, so this server adds no trust of its own.
     const names = [...assets.keys()];
-    for (const name of names.filter((n) => PASS_THROUGH.some((re) => re.test(n)))) {
+    const passThrough = (n: string) =>
+      !STABLE_ALIAS_ASSETS.has(n) && PASS_THROUGH.some((re) => re.test(n));
+    for (const name of names.filter(passThrough)) {
       writeFileSync(join(staging, name), await fetchAsset(name));
     }
 
@@ -260,6 +278,8 @@ export async function mirrorOnce(opts: MirrorOptions): Promise<string | null> {
       'mobile-update.json',
       'latest-mac.yml',
       'desktop-latest.json',
+      'latest-linux.yml',
+      'desktop-linux-latest.json',
     ]);
     const staged = readdirSync(staging).filter((n) => n !== 'server-release');
     for (const n of staged.filter((n) => !MANIFESTS.has(n)))
