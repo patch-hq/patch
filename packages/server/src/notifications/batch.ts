@@ -84,6 +84,22 @@ export class BatchNotifier {
     return chat.activity !== 'running';
   }
 
+  /** An archived or deleted chat is out of sight, so it can neither be waited on nor opened. */
+  private isGone(chatId: string): boolean {
+    const status = this.deps.chats.get(chatId)?.status;
+    return status === 'archived' || status === 'deleted';
+  }
+
+  /** Drop archived/deleted chats from the running batch. Idempotent; called before
+   *  any batch read or trigger evaluation. */
+  pruneGone(): void {
+    const batch = this.deps.store.current();
+    if (!batch) return;
+    for (const id of batch.members) {
+      if (this.isGone(id)) this.deps.store.removeMember(id);
+    }
+  }
+
   /** Observe the host's wire stream: auto-join, and recompute both triggers. */
   observe(event: WireEvent): void {
     if (event.type === 'chat.state') {
@@ -105,6 +121,7 @@ export class BatchNotifier {
     if (event.activity !== 'running') return;
     if (event.turnOrigin === 'machine') return;
     if (isReservedSpecialThread(event.chatId)) return;
+    if (this.isGone(event.chatId)) return;
     this.deps.store.ensureMember(event.chatId);
   }
 
@@ -112,6 +129,7 @@ export class BatchNotifier {
    *  every relevant chat.state AND after a REST mutation (remove/opened) that
    *  could complete either. */
   recomputeTriggers(): void {
+    this.pruneGone();
     const batch = this.deps.store.current();
     if (!batch) {
       this.clearTimer();
