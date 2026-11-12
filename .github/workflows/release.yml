@@ -602,10 +602,24 @@ jobs:
     needs: [tests, server, host, mac, linux-desktop, android, mobile-update]
     runs-on: ubuntu-latest
     steps:
+      # Each artifact into its own folder, then only the release's own into
+      # assets/. Merging every artifact once published the Mac first-run
+      # screenshots (`mac-first-run`, kept for reading a failed run) as release files.
       - uses: actions/download-artifact@v4
         with:
-          path: assets
-          merge-multiple: true
+          path: artifacts
+      - name: Gather the release files
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          for dir in artifacts/*/; do
+            name=$(basename "$dir")
+            case "$name" in
+              mac-first-run) echo "not published: $name"; continue ;;
+            esac
+            cp -a "$dir". assets/
+          done
+          ls assets | grep -E '^[0-9]+-.*\.png$' && { echo "a first-run screenshot is in the release files" >&2; exit 1; } || true
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
