@@ -145,6 +145,14 @@ export function sendMessage(
  * goes out as soon as everything ahead of it in the chat has.
  */
 export function releaseHeld(chatId: string, localId: string): void {
+  // The upload can fail before the check lands, which moves the turn out of
+  // the chain into `failed`. It must still be released, or a later Retry
+  // would re-queue it held and it would never go out.
+  const failedItem = failed.get(key(chatId, localId));
+  if (failedItem) {
+    failedItem.held = false;
+    return;
+  }
   const item = chains.get(chatId)?.find((i) => i.localId === localId);
   if (!item) return;
   item.held = false;
@@ -156,6 +164,11 @@ export function releaseHeld(chatId: string, localId: string): void {
  * stream and out of the chain, never delivered. Turns behind it carry on.
  */
 export function cancelHeld(chatId: string, localId: string): void {
+  if (failed.has(key(chatId, localId))) {
+    // Upload already failed, then the check refused it: nothing left to retry.
+    discardUpload(chatId, localId);
+    return;
+  }
   const chain = chains.get(chatId);
   const item = chain?.find((i) => i.localId === localId);
   if (!chain || !item) return;
