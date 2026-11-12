@@ -326,14 +326,40 @@ describe('ChatsScreen — ChannelRow', () => {
 });
 
 describe('ChatsScreen — Channels section (empty state + collapse toggle)', () => {
-  it('shows the channels empty state when expanded with no channel chats hydrated', () => {
+  it('starts closed, with no empty state, when no channel chats are hydrated', () => {
     const r = renderRN(<ChatsScreen />);
+    expect(hasText(r.root, 'Channels ▸')).toBe(true);
+    expect(hasText(r.root, 'No channels yet')).toBe(false);
+  });
+
+  it('opening the empty Channels section shows the channels empty state', () => {
+    const r = renderRN(<ChatsScreen />);
+    const header = findAllHost(r.root, byType('Pressable')).find((p) => hasText(p, 'Channels'))!;
+    actSync(() => header.props.onPress());
     expect(hasText(r.root, 'Channels ▾')).toBe(true);
     expect(hasText(r.root, 'No channels yet')).toBe(true);
   });
 
+  it('opens by default once a channel chat exists', () => {
+    useChatStore.getState().hydrate([
+      {
+        chatId: 'thread_speakers',
+        name: null,
+        folder: '',
+        activity: 'idle',
+        status: 'active',
+        pinned: false,
+        pinnedAt: null,
+        lastUpdated: 1,
+      },
+    ]);
+    const r = renderRN(<ChatsScreen />);
+    expect(hasText(r.root, 'Channels ▾')).toBe(true);
+  });
+
   it('collapsing the Channels header hides the empty state, expanding again shows it', () => {
     const r = renderRN(<ChatsScreen />);
+    actSync(() => findAllHost(r.root, byType('Pressable')).find((p) => hasText(p, 'Channels'))!.props.onPress());
     // The header row is a Pressable wrapping the "Channels ▾/▸" Text — pick it
     // out by its text content rather than index (there are several headers).
     const headerPressable = (): ReturnType<typeof findHost> =>
