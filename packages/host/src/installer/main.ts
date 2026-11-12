@@ -51,6 +51,8 @@ import { hostname, userInfo } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadOrCreateHostIdentity } from '../identity.js';
+import { initialProjectRoots } from '../folders.js';
+import { HostStateStore } from '../hostState.js';
 import { readDaemonKey, writeDaemonKey } from '../registration.js';
 import { redeemPairingCode } from './pairing.js';
 import { provisionSandbox, SandboxProvisionError } from './sandbox.js';
@@ -594,6 +596,24 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
       `patch install: WARNING the artifact carries no patch CLI at ${cliBundle}; ` +
         'the patch-cli skill describes commands this host cannot run',
     );
+  }
+
+  // ---- 4c. A first project folder, on a brand-new host only ----------
+  // So a first chat has somewhere sensible to run (spec/04 § Folders). Done
+  // here rather than at boot because this is the one place that knows it is
+  // installing a host; an update of a host with chats, or one whose folders
+  // were ever set, is left as it is.
+  const hostState = new HostStateStore(patchHome);
+  const chatsDir = join(patchHome, 'chats');
+  const firstRoots = initialProjectRoots({
+    persisted: hostState.get().folderRoots,
+    chatIds: existsSync(chatsDir) ? readdirSync(chatsDir) : [],
+    home,
+    mkdir: (path) => mkdirSync(path, { recursive: true }),
+  });
+  if (firstRoots.seeded) {
+    hostState.update({ folderRoots: firstRoots.roots });
+    io.out(`  first project folder: ${firstRoots.roots.join(', ')}`);
   }
 
   // ---- 5. The agent sandbox this host will run every turn inside -----

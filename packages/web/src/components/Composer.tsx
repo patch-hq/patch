@@ -28,6 +28,7 @@
 // start opens a skill autocomplete sourced from the chat's folder (spec/14 §
 // Composer — skill autocomplete).
 
+import { Link } from 'react-router-dom';
 import { DateTimeField } from './DateTimeField.js';
 import { LONG_PASTE_CHARS, pastedTextName } from '../lib/pastedText';
 import { insertDictation } from '../lib/dictationInsert.js';
@@ -64,7 +65,7 @@ import {
   Plus,
 } from 'lucide-react';
 import { endMeeting } from '../lib/meetingControl.js';
-import { beginMeeting, maybeIntroduceMeetings } from '../lib/meetingSetup.js';
+import { beginMeeting } from '../lib/meetingSetup.js';
 import { MeetingSetupPopover } from './MeetingSetup.js';
 import { isMeetingOpen, useMeetingStore } from '../stores/meetingStore.js';
 import { EffortControl } from './EffortControl.js';
@@ -88,6 +89,7 @@ import { voiceKeyHostStatus } from '@patch/wire/audio';
 import { hostOutage } from '../lib/usage.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { providerConnectedForModel, usePreferencesStore } from '../stores/preferencesStore.js';
+import { CONNECT_PATH, providerNameForModel } from './ClaudeDisconnectedBanner.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { useComposerDraftStore } from '../stores/composerDraftStore.js';
@@ -1184,20 +1186,12 @@ export const Composer = forwardRef(function Composer(
   const noteActive = useVoiceStore((s) => s.note !== null);
   const onCall = useVoiceStore((s) => s.call !== null && s.call.chatId === chatId);
   const inMeeting = useMeetingStore((s) => isMeetingOpen(s.byChat[chatId]));
-  // Once ever: introduce what a meeting needs on this Mac, on the Meeting button.
-  // The Manager coordinates other chats; it takes no meeting notes.
+  // The Manager coordinates other chats; it takes no meeting notes. Meeting
+  // permissions are asked for only when Meeting is pressed (lib/meetingSetup).
   const hasMeetingButton =
     !edit &&
     chatId !== SPECIAL_THREAD_IDS.manager &&
     (chatId !== 'new' || onStartMeeting !== undefined);
-  useEffect(() => {
-    if (!hasMeetingButton) return;
-    maybeIntroduceMeetings(chatId).catch((err: unknown) =>
-      useUiStore
-        .getState()
-        .pushError(`Could not check meeting permissions: ${(err as Error).message}`),
-    );
-  }, [chatId, hasMeetingButton]);
   // A note that failed or was cancelled hands back the text it lifted out of a
   // composer when it started (voiceStore § composerRestore). Take it back into
   // the input so the user can retry or send it by hand — NO FALLBACK: a note
@@ -2289,6 +2283,14 @@ export const Composer = forwardRef(function Composer(
           >
             Cancel
           </button>
+        </div>
+      ) : null}
+      {claudeDisconnected && !edit ? (
+        // The input stays, so a draft can be written, but it says at once why
+        // it won't send and goes straight to signing in.
+        <div className="composer-signed-out" data-testid="composer-signed-out" role="status">
+          <span>Sign in to {providerNameForModel(accountModel)} to send messages.</span>
+          <Link to={CONNECT_PATH}>Sign in</Link>
         </div>
       ) : null}
       {dragDepth > 0 ? (

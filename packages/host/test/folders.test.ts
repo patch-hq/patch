@@ -11,7 +11,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node
 import { tmpdir, homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
-import { FolderRegistry, FolderNotFoundError } from '../src/folders.js';
+import { FolderRegistry, FolderNotFoundError, initialProjectRoots } from '../src/folders.js';
 
 interface Chat {
   chatId: string;
@@ -338,5 +338,54 @@ describe('FolderRegistry.browse', () => {
       vi.useRealTimers();
       rmSync(fresh, { recursive: true, force: true });
     }
+  });
+});
+
+describe('initialProjectRoots — a brand-new host starts with ~/Patch (spec/04 § Folders)', () => {
+  const made: string[] = [];
+  const base = { home: '/Users/new', mkdir: (p: string) => void made.push(p) };
+
+  it('a host never set up, with no chat of the user’s, creates ~/Patch and makes it the root', () => {
+    made.length = 0;
+    const out = initialProjectRoots({
+      ...base,
+      persisted: undefined,
+      chatIds: ['thread_manager', 'thread_speakers'],
+    });
+    expect(out).toEqual({ roots: ['/Users/new/Patch'], seeded: true });
+    expect(made).toEqual(['/Users/new/Patch']);
+  });
+
+  it('a host with chats already is an upgrade, not new: nothing is created', () => {
+    made.length = 0;
+    const out = initialProjectRoots({ ...base, persisted: undefined, chatIds: ['chat_1'] });
+    expect(out).toEqual({ roots: [], seeded: false });
+    expect(made).toEqual([]);
+  });
+
+  it('roots ever set — even emptied — are kept, so a removed ~/Patch never returns', () => {
+    made.length = 0;
+    expect(initialProjectRoots({ ...base, persisted: [], chatIds: [] })).toEqual({
+      roots: [],
+      seeded: false,
+    });
+    expect(initialProjectRoots({ ...base, persisted: ['/src/app'], chatIds: [] })).toEqual({
+      roots: ['/src/app'],
+      seeded: false,
+    });
+    expect(made).toEqual([]);
+  });
+
+  it('a folder that cannot be made is an error, not a quiet empty list', () => {
+    expect(() =>
+      initialProjectRoots({
+        ...base,
+        persisted: undefined,
+        chatIds: [],
+        mkdir: () => {
+          throw new Error('EACCES');
+        },
+      }),
+    ).toThrow('EACCES');
   });
 });

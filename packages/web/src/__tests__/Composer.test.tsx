@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { render, screen, fireEvent, act, waitFor, cleanup } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { Composer } from '../components/Composer.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
@@ -435,10 +436,18 @@ describe('Composer', () => {
     // the turn can never run, so accepting the message would be a lie — this is
     // the "new chat cannot work but doesn't say so" case.
     setSharedAccounts({ claude: [{ connected: false }] });
-    render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+    render(
+      <MemoryRouter>
+        <Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />
+      </MemoryRouter>,
+    );
     const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
     expect(input.disabled).toBe(true);
     expect(input.title).toMatch(/Claude isn’t connected/);
+    // Said on screen, not only on hover, with the way straight to signing in.
+    const notice = screen.getByTestId('composer-signed-out');
+    expect(notice).toHaveTextContent('Sign in to Claude to send messages.');
+    expect(notice.querySelector('a')).toHaveAttribute('href', '/connect');
     expect((screen.getByTestId('send-btn') as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByTestId('composer-add-btn') as HTMLButtonElement).disabled).toBe(true);
   });
@@ -473,7 +482,11 @@ describe('Composer', () => {
   it('blocks sending in any chat when no account is connected, whichever host it is on', () => {
     reportAccount('host-a', true);
     setSharedAccounts({ claude: [{ connected: false }] });
-    render(<Composer chatId="c1" hostId="host-a" onSend={() => {}} onStartVoiceNote={() => {}} />);
+    render(
+      <MemoryRouter>
+        <Composer chatId="c1" hostId="host-a" onSend={() => {}} onStartVoiceNote={() => {}} />
+      </MemoryRouter>,
+    );
     expect((screen.getByTestId('composer-input') as HTMLTextAreaElement).disabled).toBe(true);
   });
 
@@ -481,6 +494,7 @@ describe('Composer', () => {
     clearHosts();
     render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
     expect((screen.getByTestId('composer-input') as HTMLTextAreaElement).disabled).toBe(false);
+    expect(screen.queryByTestId('composer-signed-out')).toBeNull();
   });
 
   // Item 3 (desktop): the separate image + file buttons are collapsed into ONE
@@ -1410,7 +1424,11 @@ describe('Composer', () => {
 
       it('dropping while Claude is disconnected shows the blocked hint and does not attach', async () => {
         setSharedAccounts({ claude: [{ connected: false }] });
-        render(<Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />);
+        render(
+          <MemoryRouter>
+            <Composer chatId="c1" hostId="d1" onSend={() => {}} onStartVoiceNote={() => {}} />
+          </MemoryRouter>,
+        );
         const composer = screen.getByTestId('composer');
         fireEvent.dragEnter(composer, { dataTransfer: { types: ['Files'] } });
         expect(screen.getByTestId('composer-drop-hint')).toHaveTextContent(

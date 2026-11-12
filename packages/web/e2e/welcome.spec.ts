@@ -69,12 +69,22 @@ test('this computer: every step, each choice written where Settings writes it', 
   // 1. Connect an AI — Claude in the browser, the code pasted back.
   await expect(page.getByTestId('welcome-providers')).toBeVisible();
   await expect(page.getByTestId('welcome-next')).toBeDisabled();
+  // One dot per step this page asks: AI, permissions, model, keep running, phone.
+  await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(5);
+  await expect(page.getByTestId('welcome-dots').locator('li.done')).toHaveCount(1);
+  await expect(page.getByTestId('welcome-claude-plans')).toHaveText(
+    'Works with a Claude Pro, Max, Team or Enterprise plan.',
+  );
   await shot(page, '2-providers');
   const opened = page.context().waitForEvent('page');
   await page.getByTestId('claude-signin-start').click();
   // claude.ai opens in the person's own browser (a new window, in the shell).
   expect((await opened).url()).toBe('https://claude.test/oauth/authorize?x=1');
   await expect(page.getByTestId('claude-signin-code')).toBeVisible();
+  // The card says what to do with the page that just opened.
+  await expect(page.locator('label[for="claude-signin-code"]')).toHaveText(
+    'Sign in at claude.ai, copy the code it shows, and paste it here.',
+  );
   await shot(page, '2b-claude-code');
   await page.getByTestId('claude-signin-code').fill('the-code#state');
   await page.getByTestId('claude-signin-finish').click();
@@ -88,6 +98,10 @@ test('this computer: every step, each choice written where Settings writes it', 
 
   // 2. Permission mode, through the shared settings.
   await expect(page.getByTestId('welcome-permissions')).toBeVisible();
+  await expect(page.getByTestId('welcome-dots').locator('li.done')).toHaveCount(2);
+  const bypass = page.getByTestId('welcome-mode-bypassPermissions').locator('.welcome-option-hint');
+  await expect(bypass).toHaveText('Never asks, so it can delete or overwrite anything');
+  await expect(bypass).toHaveClass(/warn/);
   await shot(page, '3-permissions');
   await page.getByTestId('welcome-mode-acceptEdits').click();
   await expect.poll(() => server.patches).toContainEqual({ permissionModeDefault: 'acceptEdits' });
@@ -119,9 +133,73 @@ test('this computer: every step, each choice written where Settings writes it', 
     'https://github.com/patch-hq/patch/releases/latest/download/Patch-android.apk',
   );
   await expect(page.getByTestId('welcome-qr')).toBeVisible();
+  await expect(page.getByTestId('welcome-phone')).toContainText('iPhone isn’t available yet');
+  // Numbered, flush with the heading.
+  const steps = page.locator('.welcome-phone-steps');
+  expect(await steps.evaluate((el) => getComputedStyle(el).listStyleType)).toBe('decimal');
+  const [list, heading] = await Promise.all([
+    steps.boundingBox(),
+    page.getByTestId('welcome-phone').locator('h1').boundingBox(),
+  ]);
+  expect(Math.abs(list!.x - heading!.x)).toBeLessThan(2);
+  await expect(page.getByTestId('welcome-dots').locator('li.done')).toHaveCount(5);
   await shot(page, '6-phone');
   await page.getByTestId('welcome-next').click();
   await expect(page.getByTestId('welcome-finished')).toBeAttached();
+});
+
+test('nothing connected: neutral permission copy, the model step says why the list is short, and the phone can be skipped', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 960, height: 720 });
+  await stub(page);
+  // With no AI signed in the host refuses the catalogue.
+  await page.route('**/api/models*', (r) =>
+    r.fulfill({ status: 502, json: { error: 'upstream' } }),
+  );
+  await page.goto('/app/dev-harness.html?route=/welcome?machine=server');
+  await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(4);
+  await page.getByTestId('welcome-skip').click();
+
+  await expect(page.getByTestId('welcome-permissions')).toBeVisible();
+  await expect(page.getByTestId('welcome-permissions')).not.toContainText('Claude');
+  await expect(page.getByTestId('welcome-mode-auto').locator('.welcome-option-hint')).toHaveText(
+    'Asks only when something looks risky',
+  );
+  await page.getByTestId('welcome-next').click();
+
+  await expect(page.getByTestId('welcome-model')).toBeVisible();
+  await expect(page.getByTestId('welcome-model-problem')).toHaveText(
+    'Models appear once you connect an AI.',
+  );
+  await expect(page.getByTestId('welcome-model')).not.toContainText('upstream');
+  await expect(page.getByTestId('welcome-model-claude-opus-5')).toContainText('Opus 5');
+  await shot(page, '4b-model-nothing-connected');
+  await page.getByTestId('welcome-next').click();
+
+  await expect(page.getByTestId('welcome-phone')).toBeVisible();
+  await expect(page.getByTestId('welcome-skip')).toHaveText('No phone, skip');
+  await expect(page.getByTestId('welcome-qr')).toHaveAttribute('width', /\d+/);
+  await shot(page, '6b-phone-nothing-connected');
+  await page.getByTestId('welcome-skip').click();
+  await expect(page.getByTestId('welcome-finished')).toBeAttached();
+});
+
+test('with an AI connected, a model list that fails says so in words, the code one click down', async ({
+  page,
+}) => {
+  await stub(page, { secrets: { claude: [{ id: 'c1', label: 'Claude 1', connected: true }] } });
+  await page.route('**/api/models*', (r) =>
+    r.fulfill({ status: 502, json: { error: 'upstream' } }),
+  );
+  await page.goto('/app/dev-harness.html?route=/welcome?machine=server');
+  await page.getByTestId('welcome-next').click();
+  await page.getByTestId('welcome-next').click();
+  const problem = page.getByTestId('welcome-model-problem');
+  await expect(problem).toContainText('Couldn’t load the model list');
+  await expect(problem.locator('p')).not.toContainText('upstream');
+  await problem.getByText('Details').click();
+  await expect(page.getByTestId('welcome-model-problem-detail-text')).toHaveText('upstream');
 });
 
 test('own server: no keep-running step, and the AI step can be skipped', async ({ page }) => {

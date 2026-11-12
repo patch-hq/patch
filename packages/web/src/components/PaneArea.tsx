@@ -176,6 +176,17 @@ function tabTitle(
   }
 }
 
+/**
+ * A group with no chat is showing a page (Settings, Jobs, Pads…): its header
+ * names the page in front, as that page's tab does. Only a group with nothing
+ * in it at all is empty.
+ */
+export function pageGroupTitle(group: Group): string {
+  const pane = findPane(group.root, group.activePaneId);
+  const tab = pane?.type === 'leaf' ? pane.tabs.find((t) => t.id === pane.activeTabId) : undefined;
+  return tab ? tabTitle(tab, undefined, undefined) : 'Empty group';
+}
+
 /** Icon for a tab's kind (spec/14 § Panes and tabs) — a chat tab draws its
  *  status badge instead (see `TabBar`), so this never covers that case. */
 function tabIcon(d: TabDescriptor): JSX.Element | null {
@@ -456,8 +467,8 @@ function GroupCard({
               {index + 1}
             </span>
           ) : null}
-          <span className="group-title">
-            {group.chatId === null ? 'Empty group' : chatTitle(group.chatId, undefined)}
+          <span className="group-title" data-testid="group-title">
+            {group.chatId === null ? pageGroupTitle(group) : chatTitle(group.chatId, undefined)}
           </span>
         </span>
         {cards ? (

@@ -13,7 +13,7 @@
 import type { JSX, KeyboardEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadLastNewChat, saveLastNewChat } from '../lib/lastNewChat';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   folderName,
@@ -21,6 +21,7 @@ import {
   isJunkFolder,
   isReservedSpecialThread,
   backendIdForModel,
+  compactModelLabel,
   providerForModel,
 } from '@patch/wire';
 import { api } from '../api/rest.js';
@@ -437,6 +438,21 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // to the live default), and then the folder is another machine's: it is
   // dropped rather than sent to a host where it does not exist.
   const [folderHostId, setFolderHostId] = useState<string | null>(chosenHostId);
+  // With nothing to remember — no new chat made yet, no project chat, no
+  // draft or shortcut — the chosen host's first project folder is the
+  // default, so a first chat starts without a decision nobody has explained
+  // (a fresh host makes `~/Patch` its first, spec/04 § Folders). Seeded once,
+  // as the host's folders arrive; clearing it afterwards is the user's choice.
+  const firstRoot =
+    pickerHostId === null ? undefined : presenceHosts[pickerHostId]?.folders?.roots?.[0];
+  const seededFirstRoot = useRef(false);
+  useEffect(() => {
+    if (seededFirstRoot.current || mruPair !== null || draftFolder || folderParam) return;
+    if (firstRoot === undefined || folder !== '') return;
+    seededFirstRoot.current = true;
+    setFolder(firstRoot);
+    setFolderHostId(pickerHostId);
+  }, [firstRoot, mruPair, draftFolder, folderParam, folder, pickerHostId]);
   // `null` = no host recorded for it (a bare `?folder=` naming no known host),
   // which belongs to whichever host is selected.
   const folderOnOtherHost =
@@ -1351,7 +1367,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                     onClick={() => chooseModel(id)}
                   >
                     <span className="quick-label">
-                      {catalogModels.find((m) => m.id === id)?.label ?? id}
+                      {compactModelLabel(id, catalogModels.find((m) => m.id === id)?.label)}
                     </span>
                     {id === hostModel ? <span className="quick-sub">default</span> : null}
                   </button>
@@ -1519,14 +1535,8 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
               drifting to the foot of the panel. */}
             <div className="new-chat-intro">
               <EmptyChat title="New chat" />
-              {signedOut ? (
-                <div className="new-chat-blocked" data-testid="new-chat-blocked" role="alert">
-                  <p className="new-chat-blocked-title">
-                    Not signed in to {effectiveModel?.startsWith('openai/') ? 'Codex' : 'Claude'}
-                  </p>
-                  <Link to="/settings/usage">Sign in</Link>
-                </div>
-              ) : null}
+              {/* Not signed in is said by the banner and in the composer,
+                  where sending fails — not a third time here. */}
               {draftFailure ? (
                 <div className="new-chat-failed" data-testid="new-chat-failed" role="alert">
                   <p className="new-chat-failed-title">Chat didn’t start</p>
