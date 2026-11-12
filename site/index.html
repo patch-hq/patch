@@ -44,6 +44,10 @@
           Run Claude Code and Codex on your own machines. Steer them from your desktop, your
           phone or by voice.
         </p>
+        <p class="needs" data-testid="needs">
+          Needs a Claude Pro or Max plan, a ChatGPT plan or an OpenAI API key. Patch installs
+          everything else. Free and open source (MIT).
+        </p>
         <div class="cta">
           <a class="btn btn-primary" data-download href="#download">Download</a>
           <a class="btn btn-quiet" data-all-platforms href="#download">All platforms</a>
@@ -122,13 +126,13 @@
           </li>
           <li>
             <span class="num">2</span>
-            <h3>Answer four questions</h3>
-            <p>Where your agents run, this computer or your own server. Which AI providers. Default permission mode. Default model.</p>
+            <h3>Make a few choices</h3>
+            <p>Where your agents run: this computer or your own server. Which AI accounts to connect. The permission mode and model new chats start with. On this computer, whether Patch opens at login and keeps it awake.</p>
           </li>
           <li>
             <span class="num">3</span>
             <h3>Scan the QR code</h3>
-            <p>Pair the phone app and connect from anywhere through an end-to-end encrypted relay. No ports to open.</p>
+            <p>The last step pairs the phone app. It connects from anywhere through an end-to-end encrypted relay. No ports to open.</p>
           </li>
         </ol>
       </section>
@@ -141,17 +145,20 @@
         <ul id="platforms" class="platforms">
           <li data-os="mac">
             <span class="p-name">Mac</span>
-            <span class="p-meta">Apple Silicon</span>
-            <a class="p-link" href="https://github.com/patch-hq/patch/releases/latest/download/Patch-mac-arm64.zip">.zip</a>
+            <span class="p-meta">Apple Silicon<span data-size="Patch-mac-arm64.dmg"></span></span>
+            <span class="p-links">
+              <a class="p-link" href="https://github.com/patch-hq/patch/releases/latest/download/Patch-mac-arm64.dmg">.dmg</a>
+              <a class="p-link p-link-quiet" href="https://github.com/patch-hq/patch/releases/latest/download/Patch-mac-arm64.zip">.zip</a>
+            </span>
           </li>
           <li data-os="linux">
             <span class="p-name">Linux</span>
-            <span class="p-meta">x86_64 AppImage</span>
+            <span class="p-meta">x86_64 AppImage<span data-size="Patch-linux-x86_64.AppImage"></span></span>
             <a class="p-link" href="https://github.com/patch-hq/patch/releases/latest/download/Patch-linux-x86_64.AppImage">.AppImage</a>
           </li>
           <li data-os="android">
             <span class="p-name">Android</span>
-            <span class="p-meta">Phone app</span>
+            <span class="p-meta">Phone app<span data-size="Patch-android.apk"></span></span>
             <a class="p-link" href="https://github.com/patch-hq/patch/releases/latest/download/Patch-android.apk">.apk</a>
           </li>
           <li data-os="ios">

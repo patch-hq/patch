@@ -231,6 +231,19 @@ code {
   color: var(--ink-2);
 }
 
+.needs {
+  max-width: 580px;
+  margin: 16px auto 0;
+  font-size: 15px;
+  color: var(--ink-3);
+}
+
+.btn-size {
+  margin-left: 10px;
+  font-weight: 400;
+  opacity: 0.7;
+}
+
 .cta {
   display: flex;
   justify-content: center;
@@ -414,6 +427,16 @@ code {
   color: var(--ink-2);
 }
 
+.p-links {
+  display: flex;
+  gap: 8px;
+}
+
+.p-link-quiet {
+  border-color: transparent;
+  color: var(--ink-3);
+}
+
 .p-link:hover {
   color: var(--ink);
   border-color: var(--ink-3);
@@ -543,7 +566,8 @@ code {
     grid-column: 1;
     grid-row: 2;
   }
-  .p-link {
+  .p-link,
+  .p-links {
     grid-column: 2;
     grid-row: 1 / span 2;
   }
