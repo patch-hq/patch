@@ -395,9 +395,12 @@ jobs:
           done
           spctl -a -vvv -t open --context context:primary-signature "$DMG"
           # It opens as the install window: Patch, an Applications shortcut, the background.
-          MNT="$RUNNER_TEMP/dmg"
-          mkdir -p "$MNT" "$RUNNER_TEMP/first-run"
-          hdiutil attach -readonly -mountpoint "$MNT" "$DMG"
+          # Mounted where a double-click mounts it (/Volumes/<name>): the window's
+          # background is found by that path, so a mount elsewhere shows none.
+          mkdir -p "$RUNNER_TEMP/first-run"
+          MNT=$(hdiutil attach -readonly "$DMG" | awk -F'\t' '/\/Volumes\//{print $NF}' | tail -1)
+          echo "mounted at $MNT"
+          case "$MNT" in /Volumes/*) ;; *) echo "the disk image did not mount under /Volumes" >&2; exit 1 ;; esac
           test -d "$MNT/Patch.app"
           [ "$(readlink "$MNT/Applications")" = /Applications ]
           ls "$MNT"/.background/*.tiff

@@ -53,6 +53,7 @@ export interface MacLoginItemHost {
   register(): void;
   unregister(): void;
   warn(message: string): void;
+  info(message: string): void;
 }
 
 /** The bundle path the login item was last registered from, if known. */
@@ -99,4 +100,5 @@ export function applyMacLoginItem(on: boolean, host: MacLoginItemHost): void {
   const tmp = `${host.recordFile}.tmp`;
   writeFileSync(tmp, JSON.stringify({ path: host.bundlePath }));
   renameSync(tmp, host.recordFile);
+  host.info(`registered from ${host.bundlePath}${recorded ? ` (was ${recorded})` : ''}`);
 }

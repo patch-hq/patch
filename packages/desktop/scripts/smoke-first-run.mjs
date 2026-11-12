@@ -179,9 +179,19 @@ if (firstRun) {
   await shot(main, '4-new-chat');
 }
 
-console.log('[smoke-first-run] OK');
 await browser.close().catch(() => undefined);
-app.kill('SIGTERM');
-await new Promise((r) => setTimeout(r, 3000));
-if (!exited) app.kill('SIGKILL');
+if (process.platform === 'darwin') {
+  // Quit as a person does, so the app stops the server and host it started:
+  // a killed app leaves its server running for whatever opens Patch next.
+  execFileSync('osascript', ['-e', 'tell application id "io.github.tomchambers2.patch" to quit']);
+  const deadline = Date.now() + 30_000;
+  while (!exited && Date.now() < deadline) await new Promise((r) => setTimeout(r, 250));
+  if (!exited) fail('the app did not quit within 30s of being asked');
+  console.log(`[smoke-first-run] quit: ${JSON.stringify(exited)}`);
+} else {
+  app.kill('SIGTERM');
+  await new Promise((r) => setTimeout(r, 3000));
+  if (!exited) app.kill('SIGKILL');
+}
+console.log('[smoke-first-run] OK');
 process.exit(0);

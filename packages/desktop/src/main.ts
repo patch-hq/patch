@@ -907,6 +907,7 @@ function startKeepRunning(userData: string): void {
           register: () => app.setLoginItemSettings({ openAtLogin: true }),
           unregister: () => app.setLoginItemSettings({ openAtLogin: false }),
           warn: (m) => console.error(`[patch] login item: ${m}`),
+          info: (m) => console.log(`[patch] login item: ${m}`),
         });
       else app.setLoginItemSettings({ openAtLogin: on });
     },
@@ -1673,10 +1674,7 @@ const installUpdate = createInstaller({
     globalShortcut.unregisterAll();
     tray?.destroy();
     const stopped = launched
-      ? Promise.race([
-          launched.stop(),
-          new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
-        ])
+      ? Promise.race([launched.stop(), new Promise<void>((resolve) => setTimeout(resolve, 5_000))])
       : Promise.resolve();
     void stopped
       .catch((err: unknown) => console.error('[patch] stopping the server failed', err))
@@ -2165,6 +2163,7 @@ async function resolveServer(): Promise<'ready' | 'stop'> {
       setup = openSetup(true);
       if (await offerMoveToApplications(setup.ui)) return 'stop';
     }
+    console.log('[patch] start: bringing up the server');
     const launched = await firstRun.launch({
       userData,
       home: app.getPath('home'),
@@ -2178,6 +2177,7 @@ async function resolveServer(): Promise<'ready' | 'stop'> {
       hostInstalled: () => localHostStatus(app.getPath('home')).installed,
     });
     activeLaunch = launched;
+    console.log(`[patch] start: ${launched.mode} server at ${new URL(launched.appUrl).origin}`);
     if (launched.mode === 'local') startKeepRunning(userData);
     // A first run goes on to the welcome steps: AI sign-in, defaults, phone.
     initialUrl = launched.firstRun
@@ -2189,6 +2189,8 @@ async function resolveServer(): Promise<'ready' | 'stop'> {
   } catch (err) {
     // A remembered connection that cannot be brought up, or a damaged file: say
     // so and stop. Carrying on with no server would be a window with nothing in it.
+    // In the log too: the dialog is all a person sees, and nothing else records it.
+    console.error('[patch] could not start:', err instanceof Error ? err.message : String(err));
     dialog.showErrorBox('Patch could not start', err instanceof Error ? err.message : String(err));
     app.exit(1);
     return 'stop';
@@ -2277,7 +2279,8 @@ export function bootstrap(): void {
     void ensureSpotlightIndexed({
       platform: process.platform,
       isPackaged: app.isPackaged,
-      bundlePath: '/Applications/Patch.app',
+      // Where this copy really is: it may have been moved, or never been in Applications.
+      bundlePath: join(process.execPath, '..', '..', '..'),
       run: (cmd, args) =>
         new Promise((resolve, reject) => {
           const p = spawn(cmd, args);
@@ -2355,6 +2358,7 @@ export function bootstrap(): void {
       });
     }
     mainWindow = createMainWindow();
+    console.log('[patch] start: main window open');
     // A quiet instance takes no tray icon and, above all, no global hotkeys: they
     // belong to the Patch someone is actually using.
     if (!QUIET) {

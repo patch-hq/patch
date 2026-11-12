@@ -61,6 +61,7 @@ function fakeMac(bundlePath: string, dir = mkdtempSync(join(tmpdir(), 'patch-log
       mac.item = null;
     },
     warn: (m) => warnings.push(m),
+    info: () => undefined,
   };
   return { host, mac, calls, warnings, dir };
 }
