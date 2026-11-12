@@ -2100,6 +2100,7 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
 export function noteStopReason(msg: unknown, previous: string | undefined): string | undefined {
   const m = msg as {
     type?: unknown;
+    parent_tool_use_id?: unknown;
     message?: { stop_reason?: unknown };
     event?: { type?: unknown; delta?: { stop_reason?: unknown } };
   } | null;
@@ -2110,6 +2111,8 @@ export function noteStopReason(msg: unknown, previous: string | undefined): stri
     return typeof reason === 'string' ? reason : previous;
   }
   if (m?.type !== 'assistant') return previous;
+  // A sub-agent finishing its own reply says nothing about the main turn.
+  if (typeof m.parent_tool_use_id === 'string') return previous;
   const reason = m.message?.stop_reason;
   return typeof reason === 'string' ? reason : previous;
 }
