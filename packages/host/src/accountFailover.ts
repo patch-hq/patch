@@ -369,6 +369,18 @@ export interface RouteOptions {
    */
   resumeOnAnyAccount?: boolean;
   /**
+   * The key the chat's live provider session was created on. A session cache
+   * belongs to its key, so moving a chat to another key discards the session
+   * and rebuilds it from the chat log — for a long-lived chat that is a full
+   * re-read and re-compaction of its whole history on EVERY turn. Under a
+   * spreading strategy (round-robin, soonest-reset, least-used) this key
+   * therefore goes first for as long as it is connected, has credit and is not
+   * about to run out; the chat only moves when it has to. Ignored under
+   * `priority`, whose whole meaning is "first key with credit, and back to it
+   * on reset", and ignored when the chat is locked to a key (`preferred`).
+   */
+  sessionAccount?: string;
+  /**
    * When each key's WEEKLY window resets, for `soonest-reset`. The week is the
    * window whose leftover allowance is actually lost at the reset — the 5-hour
    * session comes round again before anyone would notice. Undefined for a key
@@ -628,6 +640,13 @@ export class AccountRotation {
     const nearly = (a: FailoverAccount) => route.nearlyOut?.(a.id) === true;
     // Stable: healthy keys keep their order ahead of the ones about to run out.
     ordered = [...ordered.filter((a) => !nearly(a)), ...ordered.filter(nearly)];
+    const session =
+      route.strategy !== undefined && route.strategy !== 'priority'
+        ? ordered.find((a) => a.id === route.sessionAccount)
+        : undefined;
+    if (session && session.connected && !this.isExhausted(session.id) && !nearly(session)) {
+      ordered = [session, ...ordered.filter((a) => a.id !== session.id)];
+    }
     const locked = ordered.find((a) => a.id === route.preferred);
     if (!locked) return ordered;
     if (route.resumeOnAnyAccount === true && this.isExhausted(locked.id)) {
