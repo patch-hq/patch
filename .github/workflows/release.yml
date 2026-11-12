@@ -23,6 +23,8 @@
 #   APPLE_API_KEY_ID, APPLE_API_ISSUER
 #   PATCH_UPDATE_SIGNING_KEY         signs the phone's over-the-air update (its certificate is
 #                                    apps/mobile/certs/certificate.pem, built into the APK)
+#   CLOUDFLARE_API_TOKEN             deploys the public relay (the `relay` job)
+#   CLOUDFLARE_ACCOUNT_ID            the Cloudflare account it runs in
 
 name: release
 
@@ -593,6 +595,62 @@ jobs:
           name: mobile-update
           if-no-files-found: error
           path: ${{ runner.temp }}/mobile-update/*
+
+  # The public relay, relay.patchhq.dev: a Cloudflare Worker (packages/relay-worker),
+  # not a release asset — every version of every client reaches the same one. It
+  # is deployed from main once the commit's tests pass, and only when its code
+  # changed, because a deploy restarts every channel and drops each relayed
+  # connection once (both ends redial). Then /healthz has to answer every time,
+  # not once, and the relay's behaviour tests run against the live address. Only
+  # main deploys: a run dispatched on another branch must not put that branch live.
+  #   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID   a token that can deploy Workers
+  relay:
+    if: github.repository == 'patch-hq/patch' && github.ref == 'refs/heads/main'
+    needs: [tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: changed
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          elif git diff --quiet "$BEFORE" "$GITHUB_SHA" -- packages/relay-worker packages/relay/src; then
+            echo "the relay did not change; not deploying"
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.changed.outputs.deploy == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - if: steps.changed.outputs.deploy == 'true'
+        run: corepack enable && pnpm install --frozen-lockfile
+      - if: steps.changed.outputs.deploy == 'true'
+        run: pnpm turbo build --filter=@patch/relay --output-logs=errors-only
+      - name: Deploy the relay
+        if: steps.changed.outputs.deploy == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: 'false'
+        run: pnpm --filter @patch/relay-worker run deploy
+      - name: Check the live relay
+        if: steps.changed.outputs.deploy == 'true'
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 20); do
+            curl -fsS --max-time 10 https://relay.patchhq.dev/healthz
+            echo
+            sleep 3
+          done
+          node packages/relay-worker/test/run.mjs wss://relay.patchhq.dev
 
   # Only main publishes. A run dispatched on another branch builds, signs,
   # notarises and checks everything, and publishes nothing — how a change to the

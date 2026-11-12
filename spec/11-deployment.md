@@ -167,6 +167,14 @@ relay when `PATCH_RELAY_URL` names one; the desktop app's own server uses the
 project's hosted relay unless that is set. Anyone may run their own and point
 their servers at it.
 
+The project's hosted relay is `wss://relay.patchhq.dev`: the same protocol as a
+Cloudflare Worker (`packages/relay-worker`) with one Durable Object per channel.
+Its sockets hibernate, so a connected but quiet channel costs nothing, and it
+runs on Cloudflare's free plan. The release workflow deploys it from `main` when
+the relay's code changes. One set of behaviour tests (`packages/relay/test`)
+runs against the Node relay, against the Worker under `wrangler dev`, and against
+the live address.
+
 ## Host installation
 
 The host is built as a per-OS/arch binary artifact and installed; the runtime

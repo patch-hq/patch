@@ -2133,7 +2133,7 @@ async function resolveServer(): Promise<void> {
 }
 
 /** The relay a phone reaches this Mac's own server through, unless PATCH_RELAY_URL says otherwise. */
-const DEFAULT_RELAY_URL = 'wss://patch.tomchambers.me/relay';
+const DEFAULT_RELAY_URL = 'wss://relay.patchhq.dev';
 
 /** App menu → Switch Server…: forget the server this app uses, then ask again on relaunch. */
 async function switchServer(): Promise<void> {

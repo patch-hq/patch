@@ -1,0 +1,16 @@
+// The public relay. `pnpm deploy` (or CI) publishes it to relay.patchhq.dev with
+// CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in the environment. Durable
+// Objects on the Workers free plan must be SQLite-backed, hence new_sqlite_classes.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "patch-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false,
+  "routes": [{ "pattern": "relay.patchhq.dev", "custom_domain": true }],
+  "durable_objects": {
+    "bindings": [{ "name": "CHANNEL", "class_name": "Channel" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Channel"] }],
+  "observability": { "enabled": true },
+}
