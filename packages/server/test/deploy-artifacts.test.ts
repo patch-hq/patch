@@ -104,6 +104,9 @@ describe('H1 deploy artifacts — deploy command + backup scripts', () => {
       /needs: \[tests, server, host, mac, linux-desktop, android, mobile-update\]/,
     );
     expect(workflow).not.toMatch(/PATCH_BROWSER_SHARD/);
+    // The first-run screenshots are an artifact for reading a failed run, never a release file.
+    expect(workflow).not.toMatch(/merge-multiple: true/);
+    expect(workflow).toMatch(/mac-first-run\) echo "not published/);
     const tests = read('.github/workflows/test.yml');
     // ...the cheap layers on every PR and the full gate, four shards, in the merge
     // queue, behind one required check. Nothing re-runs on main: the queue moves
