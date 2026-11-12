@@ -228,7 +228,7 @@ describe('the docker build context', () => {
 // to the local host's :3003 (what this installer and prod's Caddy once did)
 // sends a session for a chat on another host to a host that has never
 // heard of it: "session_not_found: chat not found: <id>". `/device/*` is the
-// one path that does belong to the local host.
+// server's too: voice devices connect to the server (spec/16).
 describe('H1 deploy artifacts — the installer Caddyfile routes the audio plane', () => {
   const printed = execFileSync(
     'sh',
@@ -247,7 +247,8 @@ describe('H1 deploy artifacts — the installer Caddyfile routes the audio plane
     for (const line of audioMatcher) expect(line).not.toContain('/audio/');
   });
 
-  it('still sends /device/* to the local host', () => {
-    expect(printed).toMatch(/@\w+ path \/device\/\*\n\treverse_proxy @\w+ 127\.0\.0\.1:3003/);
+  it('sends /device/* to the server too: voice devices connect there', () => {
+    expect(printed).not.toContain('/device/');
+    expect(printed).not.toContain('3003');
   });
 });
