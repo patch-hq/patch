@@ -34,13 +34,13 @@ import {
   copyFileSync,
   cpSync,
   existsSync,
-  linkSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -67,6 +67,16 @@ const DAEMON = join(REPO_ROOT, 'packages', 'host');
  * The plist carries no version, so the bundle only changes when node does.
  */
 const HOST_APP_NAME = 'Patch Host.app';
+
+/**
+ * Apple's notary service refuses a signature without a secure timestamp, so a
+ * Developer ID build must take one (it needs network access to Apple's
+ * timestamp server). Any other identity (ad-hoc `-`, a local test cert) cannot
+ * be notarised and stays offline.
+ */
+export function timestampFlag(identity) {
+  return /^Developer ID Application/.test(identity) ? '--timestamp' : '--timestamp=none';
+}
 
 function hostAppInfoPlist() {
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -98,7 +108,7 @@ function signHostApp(outDir, identity) {
   chmodSync(exe, 0o755);
   sh('codesign', [
     '--force',
-    '--timestamp=none',
+    timestampFlag(identity),
     '--identifier',
     HOST_APP_BUNDLE_ID,
     '--options',
@@ -110,10 +120,12 @@ function signHostApp(outDir, identity) {
     app,
   ]);
   sh('codesign', ['--verify', '--strict', '--deep', '--verbose=2', app]);
-  // `node` becomes a hard link to the bundle's executable, so the tarball
-  // carries the binary once.
+  // `node` becomes a symlink to the bundle's executable, so the tarball carries
+  // the binary once. It was a hard link: notarisation unpacks the tarball and
+  // judged the top-level `node` on its own, outside the bundle whose Info.plist
+  // the signature is bound to, and called its signature invalid.
   rmSync(join(outDir, 'node'));
-  linkSync(exe, join(outDir, 'node'));
+  symlinkSync(join(HOST_APP_NAME, 'Contents', 'MacOS', 'patch-host'), join(outDir, 'node'));
 }
 
 /** The three shipping targets. */
@@ -442,6 +454,16 @@ function copySherpaOnnx(outDir, t) {
   }
 }
 
+/** sherpa-onnx's `.node` addon and dylibs: notarisation rejects them unsigned. */
+function sherpaMachOs(outDir, t) {
+  const dir = join(outDir, 'node_modules', `sherpa-onnx-${t.platform}-${t.arch}`);
+  const files = readdirSync(dir)
+    .filter((f) => f.endsWith('.node') || f.endsWith('.dylib'))
+    .map((f) => join(dir, f));
+  if (!files.some((f) => f.endsWith('.node'))) die(`${dir} has no .node to sign`);
+  return files;
+}
+
 /**
  * macOS: every Mach-O in the artifact is signed with the project identity,
  * hardened runtime ON. The entitlements are not optional — V8 JITs, and without
@@ -476,7 +498,7 @@ function codesignMacArtifact(outDir, machos) {
     // takes the last, which is how an earlier stray one silently won.
     sh('codesign', [
       '--force',
-      '--timestamp=none',
+      timestampFlag(identity),
       '--identifier',
       basename(file) === 'node' ? HOST_APP_BUNDLE_ID : basename(file),
       '--options',
@@ -607,6 +629,7 @@ async function buildTarget(t, ctx) {
       ...['libonnxruntime.1.26.0.dylib', 'libonnxruntime.1.dylib']
         .map((f) => join(binDir, f))
         .filter((f) => existsSync(f)),
+      ...sherpaMachOs(outDir, t),
       join(outDir, 'node'),
     ]);
     signHostApp(outDir, codesignIdentity);
