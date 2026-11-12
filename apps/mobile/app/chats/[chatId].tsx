@@ -190,6 +190,12 @@ import { QuestionCard } from '../../src/components/QuestionCard';
 // anchoring to the DOM element at the top edge; a FlatList has no DOM to
 // re-measure, so `onViewableItemsChanged` + `scrollToIndex` — the same
 // primitive the search-jump feature already uses — stand in for that here).
+// True while a question card's free-text answer box has focus. Re-pinning to
+// the newest message then (keyboard opening, the box growing as you type)
+// scrolls the box itself out of view, so both re-pins stand down. Module
+// level because the card is rendered by a row component, not the screen.
+const answerInputFocusedRef = { current: false };
+
 const chatScrollMemory = new Map<
   string,
   { offset: number; atBottom: boolean; anchorSeq: number | null }
@@ -888,7 +894,7 @@ function ChatDetailBody(): React.ReactElement {
       return;
     }
     if (tryJump()) return;
-    if (followRef.current) scrollToNewest(false);
+    if (followRef.current && !answerInputFocusedRef.current) scrollToNewest(false);
   }, [chatId, scrollToNewest, armSettleTimer, tryJump]);
 
   const onScroll = React.useCallback(
@@ -1021,7 +1027,7 @@ function ChatDetailBody(): React.ReactElement {
   // user reading history (not following) is left where they are.
   React.useEffect(() => {
     const sub = Keyboard.addListener('keyboardDidShow', () => {
-      if (followRef.current) scrollToNewest(true);
+      if (followRef.current && !answerInputFocusedRef.current) scrollToNewest(true);
     });
     return () => sub.remove();
   }, [scrollToNewest]);
@@ -3019,6 +3025,9 @@ const TimelineItem = React.memo(function TimelineItem({
       return (
         <QuestionCard
           entry={entry}
+          onInputFocusChange={(focused) => {
+            answerInputFocusedRef.current = focused;
+          }}
           onAnswer={(requestId, answers) => {
             // Routed through `permissionDeliveryTracker`, not a bare
             // `getWs().send` — a phone answering a question is usually doing

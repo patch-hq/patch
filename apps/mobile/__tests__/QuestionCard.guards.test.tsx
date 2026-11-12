@@ -2,6 +2,7 @@
 // taps come, and a countdown ring that is always a number.
 
 import React from 'react';
+import { act } from 'react-test-renderer';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderRN, findHost, findAllHost, byTestId, hasText } from './testUtils/render';
 import { QuestionCard } from '../src/components/QuestionCard';
@@ -117,5 +118,26 @@ describe('an answer the host refused as expired', () => {
         'Not received: the question had timed out',
       ),
     ).toBe(true);
+  });
+});
+
+describe('free-text answer focus', () => {
+  it('reports focus and blur of the answer box so the chat list stops re-pinning', () => {
+    const onInputFocusChange = vi.fn();
+    const r = renderRN(
+      <QuestionCard
+        entry={entry()}
+        onAnswer={vi.fn()}
+        onCancel={vi.fn()}
+        onInputFocusChange={onInputFocusChange}
+      />,
+    );
+    act(() => {
+      findHost(r.root, byTestId('question-other')).props.onPress();
+    });
+    const input = findHost(r.root, byTestId('question-other-input'));
+    input.props.onFocus();
+    input.props.onBlur();
+    expect(onInputFocusChange.mock.calls).toEqual([[true], [false]]);
   });
 });
