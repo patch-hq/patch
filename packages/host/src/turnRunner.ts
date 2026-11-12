@@ -43,6 +43,7 @@ import {
 import { createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 import { killTagged, newTurnTag, TURN_TAG_ENV } from './turnTag.js';
+import { claudeStderrLogPath, noteClaudeProcess } from './claudeStderrLog.js';
 
 export interface RunnerSpawnSpec {
   command: string;
@@ -145,6 +146,7 @@ export async function runTurnRunner(dir: string): Promise<void> {
   // `close` open for as long as anything claude started still had it. Kept so
   // a claude that exits without its result leaves its reason behind.
   const errFd = openSync(join(dir, CLAUDE_STDERR), 'a');
+  const stderrLog = claudeStderrLogPath(spec.env);
   const child = spawn(spec.command, spec.args, {
     cwd: spec.cwd,
     env: { ...spec.env, [TURN_TAG_ENV]: turnTag },
@@ -158,6 +160,7 @@ export async function runTurnRunner(dir: string): Promise<void> {
   const { stdin: claudeIn, stdout: claudeOut } = child;
   if (claudeIn === null || claudeOut === null)
     throw new Error('claude spawned without stdio pipes');
+  noteClaudeProcess(stderrLog, `spawned claude pid ${child.pid ?? '?'} (durable turn runner)`);
   const pgid = child.pid;
   // `script` names the install this runner came from, so an install that
   // prunes old version folders leaves alone one a live turn still uses
@@ -290,6 +293,7 @@ export async function runTurnRunner(dir: string): Promise<void> {
     exited = { code, signal };
     writeJsonAtomic(join(dir, RUNNER_EXIT), exited);
     log(`claude exited code=${code} signal=${signal}`);
+    noteClaudeProcess(stderrLog, `claude pid ${pgid ?? '?'} exited code=${code} signal=${signal}`);
     // Whatever claude left behind is in its group: sweep it, as the host did.
     killGroup('SIGKILL');
     // ...and whatever left the group.
