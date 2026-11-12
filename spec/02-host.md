@@ -204,7 +204,9 @@ deliberate choice, made by someone who intends to be there to answer it.
 The modes are `auto`, `acceptEdits`, `bypassPermissions`, `default` and `plan`.
 They are the Agent SDK's own mode names and are passed through to it unchanged,
 so every surface that offers the choice names them exactly as written here
-rather than in words of its own.
+rather than in words of its own — except `default`, which surfaces call Ask:
+it is not the default mode, and "Default" beside a preselected Auto reads as
+a contradiction.
 
 Every chat carries its own mode. It is stamped at creation from the host
 default in force at that moment (a spawn request naming a mode wins over it),

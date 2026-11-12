@@ -102,6 +102,29 @@ describe('ModelCatalog', () => {
     expect(headers['anthropic-version']).toBeTruthy();
   });
 
+  it('tells the host after each real read, and not after a failed one', async () => {
+    // The first read after a sign-in is what lets the Manager be put on its
+    // model, which was refused while there was no catalogue (spec/06).
+    let signedIn = false;
+    const onRefreshed = vi.fn();
+    const catalog = new ModelCatalog({
+      runOnAccountWithCredit: runWith(() =>
+        signedIn ? { ok: true, accessToken: 'tok' } : { ok: false },
+      ),
+      fetchImpl: okFetch(),
+      onRefreshed,
+    });
+
+    await expect(catalog.get()).rejects.toThrow();
+    expect(onRefreshed).not.toHaveBeenCalled();
+
+    signedIn = true;
+    await catalog.get();
+    expect(onRefreshed).toHaveBeenCalledTimes(1);
+    await catalog.get(); // cached: no new read, no new call
+    expect(onRefreshed).toHaveBeenCalledTimes(1);
+  });
+
   it('serves the cached catalogue inside the TTL and re-reads once it expires', async () => {
     const fetchImpl = okFetch();
     let now = 1_000_000;

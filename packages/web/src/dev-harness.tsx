@@ -153,6 +153,8 @@ useChatStore.getState().hydrate([
     hostId: 'd1',
     permissionMode: 'auto' as const,
     name: 'speakers',
+    // Spoken to, so the sidebar draws Channels (it stays out of the way until used).
+    preview: 'turn the kitchen lights off',
     folder: '/home/tom/.patch/threads/speakers',
     activity: 'idle',
     status: 'active',
@@ -4110,7 +4112,9 @@ function Harness(): JSX.Element {
           <Routes>
             <Route path="/welcome" element={<WelcomeRoute />} />
             <Route path="/connect" element={<ConnectRoute />} />
-            <Route path="/" element={<div data-testid="welcome-finished" />} />
+            {/* Setup ends on a new chat, ready to type into. */}
+            <Route path="/chats/new" element={<div data-testid="welcome-finished" />} />
+            <Route path="/" element={<div data-testid="harness-root" />} />
           </Routes>
           <PromptModal />
         </MemoryRouter>

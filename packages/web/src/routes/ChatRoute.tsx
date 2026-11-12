@@ -83,6 +83,9 @@ import { HookBlockCard } from '../components/HookBlockCard.js';
 import type { HookRunResult } from '@patch/wire/hooks';
 import { useWholeChatDrop } from '../lib/wholeChatDrop.js';
 import { ThreadsStrip } from '../components/ThreadsStrip.js';
+
+/** What the Manager is, said where a newcomer first meets it: its empty chat. */
+export const MANAGER_EMPTY_LINE = 'Ask about any of your chats, or have it message them for you.';
 import { CONNECT_PATH, ClaudeDisconnectedBanner } from '../components/ClaudeDisconnectedBanner.js';
 import { OutOfUsageBanner } from '../components/OutOfUsageBanner.js';
 import { JobBar } from '../components/JobBar.js';
@@ -2317,7 +2320,14 @@ export function ChatRoute({
             >
               <div className="chat-stream-content" ref={contentRef}>
                 {timeline.length === 0 && !showThinking ? (
-                  <EmptyChat title={replaying ? 'Loading…' : undefined} />
+                  <EmptyChat
+                    title={replaying ? 'Loading…' : undefined}
+                    line={
+                      !replaying && chatId === SPECIAL_THREAD_IDS.manager
+                        ? MANAGER_EMPTY_LINE
+                        : undefined
+                    }
+                  />
                 ) : (
                   renderEntries(Math.min(windowStart, queuedFrom), queuedFrom)
                 )}
@@ -5473,7 +5483,9 @@ const ToolGroup = memo(
             {open ? '▾' : '▸'}
           </span>
           <span className="tool-summary-text">{summary}</span>
-          {runningCall && !open ? <ToolRunning since={runningCall.startedAt} turnSince={turnSince} /> : null}
+          {runningCall && !open ? (
+            <ToolRunning since={runningCall.startedAt} turnSince={turnSince} />
+          ) : null}
           {runningCall && !open && runningCall.tool === 'Bash' && runningCall.callId ? (
             <CancelCommandButton onCancel={() => requestToolCancel(chatId, runningCall.callId!)} />
           ) : null}
@@ -5672,7 +5684,9 @@ function ToolDisclosure({
         </span>
         {badge}
         <span className="tool-summary-text">{summary}</span>
-        {runningSince !== undefined ? <ToolRunning since={runningSince.at} turnSince={runningSince.turn} /> : null}
+        {runningSince !== undefined ? (
+          <ToolRunning since={runningSince.at} turnSince={runningSince.turn} />
+        ) : null}
         {cancelledChip ? (
           <span className="tool-cancelled-chip" data-testid="tool-cancelled">
             Cancelled by you

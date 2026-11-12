@@ -34,7 +34,7 @@ test.describe('Sidebar lifecycle icon row — selected state + scroll paging', (
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ hidden: 1, archived: 0, snoozed: 0, deleted: 0, automations: 0 }),
+        body: JSON.stringify({ hidden: 1, archived: 2, snoozed: 0, deleted: 0, automations: 0 }),
       }),
     );
     await page.route('**/api/chats?hidden=only*', (route) =>
@@ -121,7 +121,7 @@ test.describe('Sidebar lifecycle icon row — selected state + scroll paging', (
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ hidden: 30, archived: 0, snoozed: 0, deleted: 0, automations: 0 }),
+        body: JSON.stringify({ hidden: 30, archived: 2, snoozed: 0, deleted: 0, automations: 0 }),
       }),
     );
     await page.route('**/api/chats?hidden=only*', (route) =>

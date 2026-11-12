@@ -1,20 +1,17 @@
 // permissionModeLabel — how a permission mode is written on screen.
 //
 // The value itself is the agent SDK's own `permissionMode` and is passed
-// through verbatim (spec/02 § Permission mode), so the label must be the SAME
-// WORDS as the id — only cased and spaced for reading. `bypassPermissions`
-// becomes "Bypass permissions", not "YOLO": an invented word would mean the
-// user picks one thing and the model is told another, which is why the earlier
-// friendly names were removed (ab57424). This is the readable middle ground
-// the user asked for ("have nice names for bypassPermissions, like Bypass
-// permissions etc") — nothing here renames a mode, it just stops shouting
-// camelCase at him.
+// through verbatim (spec/02 § Permission mode). The label is the same words as
+// the id, cased and spaced for reading, with one exception: `default` reads
+// "Ask". It is not the default (`auto` is), so "Default" beside a preselected
+// Auto contradicted itself; "Ask" is what it does, and the word the composer
+// already uses for it.
 
 import type { PermissionMode } from '@patch/wire';
 
 const LABELS: Record<string, string> = {
   auto: 'Auto',
-  default: 'Default',
+  default: 'Ask',
   acceptEdits: 'Accept edits',
   bypassPermissions: 'Bypass permissions',
   plan: 'Plan',

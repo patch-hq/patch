@@ -4265,7 +4265,13 @@ async function startHost(
   if (config.sdkBackend === 'real') accountUsage.start();
 
   const modelLimits = new ModelLimits();
-  const modelCatalog = new ModelCatalog({ runOnAccountWithCredit, limits: modelLimits });
+  const modelCatalog = new ModelCatalog({
+    runOnAccountWithCredit,
+    limits: modelLimits,
+    // The Manager's model is refused while there is no catalogue (no AI
+    // connected yet); the first real read after a sign-in puts it on it.
+    onRefreshed: () => applySpecialThreadModel(),
+  });
   // spec/08 § Recurrence — the job editor's natural-language schedule input.
   // Cheap one-shot Haiku, same gate as the title/status/digest generators.
   const translateRecurrenceRule = makeRecurrenceTranslator({

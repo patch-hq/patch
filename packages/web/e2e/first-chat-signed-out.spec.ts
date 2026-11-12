@@ -92,6 +92,43 @@ test('the Manager with no AI: the illustration clears the banner', async ({ page
   expect(a!.y).toBeGreaterThanOrEqual(b!.y + b!.height);
 });
 
+test('a newcomer’s app: Manager says what it is, and nothing empty or unexplained is drawn', async ({
+  page,
+}) => {
+  // A fresh install: every cold-storage section empty, and no chats yet but
+  // the two special threads, Speakers never spoken to.
+  await page.route('**/api/chats/counts', (r) =>
+    r.fulfill({ json: { hidden: 0, archived: 0, snoozed: 0, deleted: 0, automations: 0 } }),
+  );
+  await page.route('**/api/manager/sweeps*', (r) => r.fulfill({ json: { runs: [] } }));
+  await page.goto('/app/dev-harness.html?chat=thread_manager');
+  await expect(page.getByTestId('sidebar')).toBeVisible();
+  await page.evaluate(() => {
+    type Store = {
+      getState: () => { chats: Record<string, Record<string, unknown>> };
+      setState: (s: { chats: Record<string, Record<string, unknown>> }) => void;
+    };
+    const store = (window as unknown as { __chatStore: Store }).__chatStore;
+    const { chats } = store.getState();
+    store.setState({
+      chats: {
+        thread_manager: chats['thread_manager']!,
+        thread_speakers: { ...chats['thread_speakers']!, preview: null },
+      },
+    });
+  });
+  await expect(page.getByTestId('empty-chat-line')).toHaveText(
+    'Ask about any of your chats, or have it message them for you.',
+  );
+  await expect(page.getByTestId('threads-strip')).toHaveCount(0);
+  await expect(page.getByTestId('sweep-check-now')).toHaveCount(0);
+  await expect(page.getByTestId('channels-toggle')).toHaveCount(0);
+  await expect(page.getByTestId('sb-lifecycle')).toHaveCount(0);
+  // The pill names the model the Manager starts on, never "Choose a model…".
+  await expect(page.getByTestId('chat-model')).not.toContainText('Choose a model');
+  await shot(page, '10-manager-newcomer');
+});
+
 test('Settings in a group of its own is titled Settings, not Empty group', async ({ page }) => {
   await page.goto('/app/dev-harness.html?route=/settings/usage');
   await expect(page.getByTestId('settings-usage')).toBeVisible();

@@ -341,19 +341,19 @@ describe('FolderRegistry.browse', () => {
   });
 });
 
-describe('initialProjectRoots — a brand-new host starts with ~/Patch (spec/04 § Folders)', () => {
+describe('initialProjectRoots — a brand-new host starts with ~/My first project (spec/04 § Folders)', () => {
   const made: string[] = [];
   const base = { home: '/Users/new', mkdir: (p: string) => void made.push(p) };
 
-  it('a host never set up, with no chat of the user’s, creates ~/Patch and makes it the root', () => {
+  it('a host never set up, with no chat of the user’s, creates ~/My first project and makes it the root', () => {
     made.length = 0;
     const out = initialProjectRoots({
       ...base,
       persisted: undefined,
       chatIds: ['thread_manager', 'thread_speakers'],
     });
-    expect(out).toEqual({ roots: ['/Users/new/Patch'], seeded: true });
-    expect(made).toEqual(['/Users/new/Patch']);
+    expect(out).toEqual({ roots: ['/Users/new/My first project'], seeded: true });
+    expect(made).toEqual(['/Users/new/My first project']);
   });
 
   it('a host with chats already is an upgrade, not new: nothing is created', () => {
@@ -363,7 +363,7 @@ describe('initialProjectRoots — a brand-new host starts with ~/Patch (spec/04 
     expect(made).toEqual([]);
   });
 
-  it('roots ever set — even emptied — are kept, so a removed ~/Patch never returns', () => {
+  it('roots ever set — even emptied — are kept, so a removed starting folder never returns', () => {
     made.length = 0;
     expect(initialProjectRoots({ ...base, persisted: [], chatIds: [] })).toEqual({
       roots: [],
