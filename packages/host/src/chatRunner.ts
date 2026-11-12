@@ -6045,6 +6045,7 @@ export class Daemon {
     return (
       this.aggregateActivity(chatId) === 'running' ||
       this.failoverRerunPending.has(chatId) ||
+      state?.turnRetrying === true ||
       (state?.goal ?? null) !== null ||
       (wake !== null && wake.every === undefined) ||
       this.hasRunningDelegates(chatId)
@@ -6062,8 +6063,12 @@ export class Daemon {
     const state = this.chatState.get(chatId);
     if (!state || state.snoozedUntil !== SNOOZE_UNTIL_COMPLETE) return;
     const activity = this.aggregateActivity(chatId);
+    // An errored turn the retry ladder is about to run again is not waiting on
+    // a person: only an error the ladder has given up on is.
     const needsPerson =
-      activity === 'awaiting-permission' || activity === 'errored' || this.isAskingQuestion(state);
+      activity === 'awaiting-permission' ||
+      (activity === 'errored' && !state.turnRetrying) ||
+      this.isAskingQuestion(state);
     if (!needsPerson && this.hasWorkToComplete(chatId)) return;
     this.wakeFromSnooze(chatId);
   }

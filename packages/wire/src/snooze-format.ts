@@ -42,8 +42,13 @@ function startOfDay(d: Date): number {
  * today, `Fri 08:00` within the next 6 days, `Thu 22 Oct` beyond that
  * (spec/14 § Snooze sheet). Always 24-hour, whatever the locale.
  */
-export function formatWakeAt(at: number, now: number = Date.now()): string {
-  if (isSnoozeUntilComplete(at)) return 'when done';
+export function formatWakeAt(
+  at: number,
+  now: number = Date.now(),
+  /** The chat has a goal: an "until complete" snooze is waiting for it to be met. */
+  goalSet = false,
+): string {
+  if (isSnoozeUntilComplete(at)) return goalSet ? 'goal is met' : 'when done';
   const d = new Date(at);
   const days = Math.round((startOfDay(d) - startOfDay(new Date(now))) / DAY);
   if (days === 0) return clockOf(d);

@@ -141,8 +141,8 @@ export function resolvePreset(preset: SnoozePreset): number {
  * sheet (spec/04 § Snooze): `HH:MM` today, `Fri 08:00` within six days,
  * `Thu 22 Oct` beyond, always 24-hour; "when done" for a snooze until complete.
  */
-export function formatWakeTime(at: number): string {
-  return formatWakeAt(at);
+export function formatWakeTime(at: number, goalSet = false): string {
+  return formatWakeAt(at, Date.now(), goalSet);
 }
 
 /**

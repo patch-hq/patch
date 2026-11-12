@@ -119,8 +119,8 @@ export const UNTIL_COMPLETE_DISABLED_TIP =
  * within six days, `Thu 22 Oct` beyond, always 24-hour; "when done" for a
  * snooze until complete.
  */
-export function formatWakeTime(at: number): string {
-  return formatWakeAt(at);
+export function formatWakeTime(at: number, goalSet = false): string {
+  return formatWakeAt(at, Date.now(), goalSet);
 }
 
 export { formatWakeAt, formatSnoozeMoment, formatElapsed } from '@patch/wire';

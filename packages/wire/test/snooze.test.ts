@@ -108,6 +108,7 @@ describe('formatSnoozeDuration', () => {
 describe('until complete', () => {
   it('reads as "when done" and the open divider says until complete', () => {
     expect(formatWakeAt(SNOOZE_UNTIL_COMPLETE)).toBe('when done');
+    expect(formatWakeAt(SNOOZE_UNTIL_COMPLETE, Date.now(), true)).toBe('goal is met');
     const open = rec({ until: SNOOZE_UNTIL_COMPLETE, endedAt: null, startedAt: 1_700_000_000_000 });
     expect(snoozeDividerText(open)).toMatch(/^Snoozed \d\d:\d\d – until complete$/);
   });
