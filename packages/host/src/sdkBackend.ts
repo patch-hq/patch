@@ -2095,7 +2095,15 @@ export async function setLiveRunPermissionMode(
   const live = liveRuns.get(chatId);
   if (!live) return;
   live.mode = mode;
-  await live.query?.setPermissionMode(mode);
+  try {
+    await live.query?.setPermissionMode(mode);
+  } catch (err) {
+    // The process closed while the change was in flight: the turn ended, which
+    // is the "no turn in flight" case above — the next turn starts on `mode`.
+    // Anything else is a real failure and still throws.
+    if (err instanceof Error && err.message === 'Query closed before response received') return;
+    throw err;
+  }
 }
 
 /**
