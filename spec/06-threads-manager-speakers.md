@@ -34,7 +34,7 @@ deals with the server. Only the Manager host creates the thread folders and
 announces the threads: a host that is not running the Manager has none, and the
 server passes on nothing such a host says about them. When the Manager moves, the
 new host creates the threads, leaving the old transcripts readable on the previous
-one.
+one. A host that is not running the Manager may still hold such an old copy; `patch_send_to`, `patch_peek` and `patch_history` addressed to a special thread from that host skip the copy and go to the Manager host, never to the old one.
 
 Through the cross-chat tools the Manager reaches any host: `patch_spawn` takes a
 host alongside the folder.
