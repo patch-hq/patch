@@ -1561,6 +1561,22 @@ function readDesktopBuildInfo(): DesktopBuildInfo {
   }
 }
 
+/**
+ * Whether the running bundle is really signed, asked of macOS itself. The
+ * build-time `signed` flag in build-info.json is stamped BEFORE electron-builder
+ * signs, and shipped as false for a correctly signed app — which made the
+ * updater report 'adhoc-signed' and the web layer show a second banner. The
+ * bundle on disk is the only source that cannot disagree with reality. Off
+ * macOS (or unpackaged) there is no bundle signature, so the stamped flag stands.
+ */
+function isBundleDeveloperSigned(stamped: boolean): boolean {
+  if (process.platform !== 'darwin' || !app.isPackaged) return stamped;
+  const bundle = join(process.execPath, '..', '..', '..');
+  const probe = spawnSync('codesign', ['-dv', '--verbose=2', bundle], { encoding: 'utf8' });
+  const out = `${probe.stdout ?? ''}${probe.stderr ?? ''}`;
+  return !/Signature=adhoc/.test(out) && /Authority=/.test(out);
+}
+
 /** The feed electron-updater will poll, read from the shipped app-update.yml. */
 function readFeedUrl(updateConfigPath: string): string | null {
   if (!existsSync(updateConfigPath)) return null;
@@ -1709,7 +1725,7 @@ function setupAutoUpdater(): void {
     isPackaged: app.isPackaged,
     hasUpdateConfig,
     version: build.version,
-    signed: build.signed,
+    signed: isBundleDeveloperSigned(build.signed),
     noFeedReason,
     platform: process.platform,
     appImage: process.env['APPIMAGE'],
