@@ -22,7 +22,7 @@ async function shot(page: Page, name: string): Promise<void> {
 /** A desktop shell that runs Patch on this computer: the keep-running bridge. */
 async function localShell(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    const state = { openAtLogin: true, keepAwake: true, holdingAwake: true };
+    const state = { openAtLogin: true, keepAwake: true, holdingAwake: true, canOpenAtLogin: true };
     const calls: unknown[] = [];
     (window as unknown as { __keepCalls: unknown[] }).__keepCalls = calls;
     (window as unknown as { patch: unknown }).patch = {

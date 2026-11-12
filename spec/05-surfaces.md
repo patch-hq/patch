@@ -163,7 +163,7 @@ The page the shell loads receives the credential in the URL fragment (`/app/#cre
 When this computer runs Patch, the agents and the phone's connection depend on the app, not on its window.
 
 - Closing the window leaves the app running in the menu bar (the tray, off macOS), with its server and host.
-- Open at login, on by default. Opened at login, the app starts in the menu bar with no window.
+- Open at login, on by default. Opened at login, the app starts in the menu bar with no window. On Linux this is a desktop autostart entry for the AppImage; a run not started from its AppImage has no file to start at login, so the choice is not offered there.
 - Keep this computer awake while plugged in, on by default. While on mains power the system is kept from sleeping so the phone can reach it; the display still sleeps. On battery nothing is held.
 - Both are offered in the setup's Keep running step, in Settings → Hosts → Keep running, and as checkboxes in the tray menu, and all three show the same state.
 - Quit Patch in the tray menu asks first, saying that agents on this computer stop and the phone cannot reach it until Patch is opened again. Quitting stops the server and host and releases the awake hold.

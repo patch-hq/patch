@@ -12,7 +12,8 @@
 // Kept free of Electron so it can be tested under plain node: the shell hands
 // in the pieces of Electron it drives.
 
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 export interface KeepRunningPrefs {
   openAtLogin: boolean;
@@ -22,6 +23,11 @@ export interface KeepRunningPrefs {
 export interface KeepRunningState extends KeepRunningPrefs {
   /** Whether the awake hold is in force right now. */
   holdingAwake: boolean;
+  /**
+   * Whether this app can open itself at login here. A Linux app not started
+   * from its AppImage has no file a login entry could start, so it cannot.
+   */
+  canOpenAtLogin: boolean;
 }
 
 export const KEEP_RUNNING_DEFAULTS: KeepRunningPrefs = { openAtLogin: true, keepAwake: true };
@@ -56,6 +62,8 @@ export function writePrefs(file: string, prefs: KeepRunningPrefs): void {
 
 /** The pieces of Electron this drives. */
 export interface KeepRunningHost {
+  /** False where nothing can start this app at login (see KeepRunningState). */
+  canOpenAtLogin: boolean;
   setOpenAtLogin(on: boolean): void;
   onBattery(): boolean;
   /** Fires with `true` on battery and `false` on mains power. */
@@ -79,17 +87,26 @@ export class KeepRunning {
   /** Apply the saved choices (or the defaults, which are then saved) and follow the power source. */
   start(): KeepRunningState {
     if (!existsSync(this.file)) writePrefs(this.file, this.prefs);
-    this.host.setOpenAtLogin(this.prefs.openAtLogin);
+    if (this.host.canOpenAtLogin) this.host.setOpenAtLogin(this.prefs.openAtLogin);
     this.host.onPowerSourceChange(() => this.applyAwake());
     this.applyAwake();
     return this.state();
   }
 
   state(): KeepRunningState {
-    return { ...this.prefs, holdingAwake: this.blocker !== null };
+    return {
+      ...this.prefs,
+      // Never reported on where it cannot be: that would be a switch that does nothing.
+      openAtLogin: this.host.canOpenAtLogin && this.prefs.openAtLogin,
+      holdingAwake: this.blocker !== null,
+      canOpenAtLogin: this.host.canOpenAtLogin,
+    };
   }
 
   set(patch: Partial<KeepRunningPrefs>): KeepRunningState {
+    if (patch.openAtLogin === true && !this.host.canOpenAtLogin) {
+      throw new Error('Patch cannot open at login here: it was not started from its AppImage');
+    }
     for (const k of ['openAtLogin', 'keepAwake'] as const) {
       const v = patch[k];
       if (v === undefined) continue;
@@ -116,4 +133,35 @@ export class KeepRunning {
       this.blocker = null;
     }
   }
+}
+
+/**
+ * Opening at login on Linux: an XDG autostart entry for the AppImage, which is
+ * what desktops start at login. Electron's own login-item setting does nothing
+ * there. The entry passes `--patch-opened-at-login`, so the app knows to start
+ * in the tray with no window, as it does on a Mac.
+ */
+export const OPENED_AT_LOGIN_ARG = '--patch-opened-at-login';
+
+export function autostartEntry(appImage: string): string {
+  const exec = `"${appImage.replace(/(["`$\\])/g, '\\$1')}" ${OPENED_AT_LOGIN_ARG}`;
+  return [
+    '[Desktop Entry]',
+    'Type=Application',
+    'Name=Patch',
+    `Exec=${exec}`,
+    'X-GNOME-Autostart-enabled=true',
+    '',
+  ].join('\n');
+}
+
+export function setLinuxAutostart(file: string, appImage: string, on: boolean): void {
+  if (!on) {
+    rmSync(file, { force: true });
+    return;
+  }
+  mkdirSync(dirname(file), { recursive: true });
+  const tmp = `${file}.tmp`;
+  writeFileSync(tmp, autostartEntry(appImage));
+  renameSync(tmp, file);
 }

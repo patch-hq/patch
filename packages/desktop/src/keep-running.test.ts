@@ -3,17 +3,25 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { KeepRunning, readPrefs, type KeepRunningHost } from './keep-running';
+import {
+  KeepRunning,
+  OPENED_AT_LOGIN_ARG,
+  autostartEntry,
+  readPrefs,
+  setLinuxAutostart,
+  type KeepRunningHost,
+} from './keep-running';
 
-function fakeHost(battery = false) {
+function fakeHost(battery = false, canOpenAtLogin = true) {
   const log: string[] = [];
   let onChange: ((b: boolean) => void) | null = null;
   let next = 1;
   const host: KeepRunningHost & { battery: boolean } = {
     battery,
+    canOpenAtLogin,
     setOpenAtLogin: (on) => log.push(`login:${on}`),
     onBattery: () => host.battery,
     onPowerSourceChange: (cb) => (onChange = cb),
@@ -31,7 +39,12 @@ test('first start: both on, saved, login item set, awake held on mains', () => {
   const f = file();
   const { host, log } = fakeHost(false);
   const state = new KeepRunning(f, host).start();
-  assert.deepEqual(state, { openAtLogin: true, keepAwake: true, holdingAwake: true });
+  assert.deepEqual(state, {
+    openAtLogin: true,
+    keepAwake: true,
+    holdingAwake: true,
+    canOpenAtLogin: true,
+  });
   assert.deepEqual(log, ['login:true', 'hold']);
   assert.deepEqual(JSON.parse(readFileSync(f, 'utf8')), { openAtLogin: true, keepAwake: true });
 });
@@ -59,6 +72,7 @@ test('turning things off is remembered and applied at once', () => {
     openAtLogin: false,
     keepAwake: false,
     holdingAwake: false,
+    canOpenAtLogin: true,
   });
   assert.deepEqual(again.log, ['login:false']);
 });
@@ -90,4 +104,29 @@ test('set refuses a value that is not a boolean', () => {
   const k = new KeepRunning(file(), host);
   k.start();
   assert.throws(() => k.set({ keepAwake: 'yes' as unknown as boolean }), /true or false/);
+});
+
+test('where nothing can start the app at login, the switch is neither shown on nor applied', () => {
+  const { host, log } = fakeHost(false, false);
+  const k = new KeepRunning(file(), host);
+  assert.deepEqual(k.start(), {
+    openAtLogin: false,
+    keepAwake: true,
+    holdingAwake: true,
+    canOpenAtLogin: false,
+  });
+  assert.deepEqual(log, ['hold']);
+  assert.throws(() => k.set({ openAtLogin: true }), /cannot open at login/);
+  assert.equal(k.set({ keepAwake: false }).keepAwake, false);
+});
+
+test('Linux: the autostart entry starts the AppImage in the tray, and is removed when off', () => {
+  const f = join(mkdtempSync(join(tmpdir(), 'patch-autostart-')), 'autostart', 'patch.desktop');
+  setLinuxAutostart(f, '/home/a/Apps/Patch "x".AppImage', true);
+  const entry = readFileSync(f, 'utf8');
+  assert.match(entry, /^\[Desktop Entry\]/);
+  assert.ok(entry.includes(`Exec="/home/a/Apps/Patch \\"x\\".AppImage" ${OPENED_AT_LOGIN_ARG}`));
+  assert.equal(entry, autostartEntry('/home/a/Apps/Patch "x".AppImage'));
+  setLinuxAutostart(f, '/x', false);
+  assert.equal(existsSync(f), false);
 });

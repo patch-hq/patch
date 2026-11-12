@@ -28,15 +28,17 @@ export function KeepRunningGroup(): JSX.Element | null {
   };
   return (
     <Group label="Keep running" testid="keep-running">
-      <Row title="Open at login">
-        <Toggle
-          testid="keep-running-login"
-          label="Open at login"
-          checked={state?.openAtLogin ?? false}
-          disabled={state === null}
-          onChange={(v) => set({ openAtLogin: v })}
-        />
-      </Row>
+      {state?.canOpenAtLogin === false ? null : (
+        <Row title="Open at login">
+          <Toggle
+            testid="keep-running-login"
+            label="Open at login"
+            checked={state?.openAtLogin ?? false}
+            disabled={state === null}
+            onChange={(v) => set({ openAtLogin: v })}
+          />
+        </Row>
+      )}
       <Row
         title="Keep this computer awake while plugged in"
         sub="So your phone can reach it. The display still sleeps."

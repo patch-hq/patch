@@ -282,6 +282,8 @@ export interface KeepRunningState {
   keepAwake: boolean;
   /** Whether the awake hold is in force right now (on mains power). */
   holdingAwake: boolean;
+  /** False where nothing can start the app at login (a Linux run not from its AppImage). */
+  canOpenAtLogin: boolean;
 }
 
 export function getDesktopBridge(): PatchDesktopBridge | undefined {
