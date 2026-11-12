@@ -77,7 +77,16 @@ jobs:
       # retry and timeout settings apply to every apt call, including Playwright's.
       - name: Use a non-ubuntu.com apt mirror
         run: |
-          mirror=https://mirrors.edge.kernel.org/ubuntu/
+          # Probe: one mirror is sometimes unreachable from a runner (kernel.org timed
+          # out on every connection on 2026-11-12), so use the first that answers.
+          codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
+          mirror=
+          for m in https://mirrors.edge.kernel.org/ubuntu/ https://azure.archive.ubuntu.com/ubuntu/ https://archive.ubuntu.com/ubuntu/ https://mirror.us.leaseweb.net/ubuntu/ https://mirrors.xtom.com/ubuntu/; do
+            if curl -4 -fsS --max-time 8 -o /dev/null "${m}dists/${codename}/InRelease"; then mirror=$m; break; fi
+            echo "::warning::apt mirror unreachable: $m"
+          done
+          [ -n "$mirror" ] || { echo "::error::no apt mirror reachable"; exit 1; }
+          echo "using apt mirror $mirror"
           echo "$mirror" | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
           sudo find /etc/apt -maxdepth 2 -type f \( -name '*.list' -o -name '*.sources' \) \
             -exec sed -E -i "s#https?://([a-z0-9-]+\.)*(archive|security)\.ubuntu\.com/ubuntu/?#$mirror#g" {} +
