@@ -3937,6 +3937,7 @@ async function startHost(
   const claudeRoute = (
     store: NonNullable<ReturnType<typeof readPatchStore>>,
     preferredAccountId?: string,
+    sessionAccountId?: string,
   ): { accounts: FailoverAccount[]; route: RouteOptions } => ({
     accounts: store.accounts.map((a) => ({
       id: a.id,
@@ -3948,6 +3949,7 @@ async function startHost(
     route: {
       strategy: accountStrategy.claude,
       ...(preferredAccountId !== undefined ? { preferred: preferredAccountId } : {}),
+      ...(sessionAccountId !== undefined ? { sessionAccount: sessionAccountId } : {}),
       resumeOnAnyAccount: autoResumeRateLimit,
       weekResetsAt: (id) => accountUsage?.get(id)?.reading.windows.week?.resetsAt,
       nearlyOut: (id) => accountUsage?.nearlyOut(id) === true,
@@ -4062,6 +4064,7 @@ async function startHost(
   const resolveOAuthWithCredit = async (turn?: {
     chatId: string;
     preferredAccountId?: string;
+    sessionAccountId?: string;
   }): Promise<
     { ok: true; accessToken: string; accountId?: string } | { ok: false; reason: string }
   > => {
@@ -4071,7 +4074,11 @@ async function startHost(
       // name, and inventing one would put a fiction in the usage report.
       return resolveOAuth();
     }
-    const { accounts, route } = claudeRoute(store, turn?.preferredAccountId);
+    const { accounts, route } = claudeRoute(
+      store,
+      turn?.preferredAccountId,
+      turn?.sessionAccountId,
+    );
     // Read before `startTurn`, which moves a round-robin on.
     const first = accountRotation.order(accounts, route)[0]?.id;
     // Only a starting turn moves the rotation; a credential check peeks.
@@ -4103,7 +4110,7 @@ async function startHost(
    */
   const resolveModelOAuth = async (
     model?: string,
-    turn?: { chatId: string; preferredAccountId?: string },
+    turn?: { chatId: string; preferredAccountId?: string; sessionAccountId?: string },
   ): Promise<
     { ok: true; accessToken: string; accountId?: string } | { ok: false; reason: string }
   > => {

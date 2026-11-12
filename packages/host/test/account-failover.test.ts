@@ -511,6 +511,29 @@ describe('AccountRotation — strategies (spec/10 § Backend credentials — acc
     expect([1, 2, 3].map(() => r.startTurn([A, B, C], route))).toEqual(['a', 'c', 'a']);
   });
 
+  it('a chat with a live session stays on its key under round-robin', () => {
+    const r = new AccountRotation();
+    const route = { strategy: 'round-robin' as const, sessionAccount: 'b' };
+    expect([1, 2, 3].map(() => r.startTurn([A, B, C], route))).toEqual(['b', 'b', 'b']);
+  });
+
+  it('a session key that is spent or nearly out releases the chat', () => {
+    const r = new AccountRotation();
+    r.markExhausted('b', 'spent');
+    expect(r.startTurn([A, B, C], { strategy: 'round-robin', sessionAccount: 'b' })).toBe('a');
+    const r2 = new AccountRotation();
+    const nearly = { strategy: 'least-used' as const, sessionAccount: 'b', nearlyOut: (id: string) => id === 'b' };
+    expect(r2.startTurn([A, B, C], nearly)).toBe('a');
+  });
+
+  it('priority ignores the session key, and a lock outranks it', () => {
+    const r = new AccountRotation();
+    expect(r.startTurn([A, B, C], { strategy: 'priority', sessionAccount: 'b' })).toBe('a');
+    expect(
+      r.startTurn([A, B, C], { strategy: 'round-robin', preferred: 'c', sessionAccount: 'b' }),
+    ).toBe('c');
+  });
+
   it('asking where a turn would start does not move the rotation', () => {
     const r = new AccountRotation();
     const route = { strategy: 'round-robin' as const };

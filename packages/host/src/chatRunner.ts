@@ -360,7 +360,7 @@ export interface HostOptions {
      * a check that runs nothing (a spawn's credential check), which must not
      * spend a place in the rotation.
      */
-    turn?: { chatId: string; preferredAccountId?: string },
+    turn?: { chatId: string; preferredAccountId?: string; sessionAccountId?: string },
   ) => OAuthCheckResult | Promise<OAuthCheckResult>;
   /**
    * A turn just failed because ITS ACCOUNT has no credit left. Return the next
@@ -9746,6 +9746,10 @@ export class Daemon {
       chatId,
       ...(state.preferredAccountId !== undefined
         ? { preferredAccountId: state.preferredAccountId }
+        : {}),
+      // The key the live session sits on: moving off it throws the session away.
+      ...(state.claudeSessionId !== undefined && state.claudeSessionAccountId !== undefined
+        ? { sessionAccountId: state.claudeSessionAccountId }
         : {}),
     });
     // Which key this turn is actually spending, for as long as it runs. Not a
