@@ -18,8 +18,9 @@
 // app's own output.
 
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 
@@ -33,6 +34,30 @@ const APP_ID = 'io.github.tomchambers2.patch';
 const shots = process.env.PATCH_SMOKE_SHOTS;
 if (shots) mkdirSync(shots, { recursive: true });
 const log = (m) => console.log(`[smoke-app-location] ${m}`);
+// Electron's userData for this app on a Mac.
+const DATA = join(homedir(), 'Library', 'Application Support', '@patch', 'desktop');
+
+/** The loopback server a remembered "This computer" setup uses, if there is one. */
+function rememberedOrigin() {
+  const file = join(DATA, 'connection.json');
+  if (!existsSync(file)) return null;
+  const { connection } = JSON.parse(readFileSync(file, 'utf8'));
+  return connection.mode === 'local' ? `http://127.0.0.1:${connection.port}` : null;
+}
+
+async function answering(origin) {
+  const r = await fetch(`${origin}/api/healthz`, { signal: AbortSignal.timeout(2000) }).catch(
+    () => null,
+  );
+  return r?.ok ? await r.json().catch(() => ({})) : null;
+}
+
+const before = rememberedOrigin();
+if (before && (await answering(before))) {
+  log(
+    `before launch, a server is already answering on ${before}: ${JSON.stringify(await answering(before))}`,
+  );
+}
 
 const port = await new Promise((ok, no) => {
   const s = createServer();
@@ -52,8 +77,46 @@ app.stderr.on('data', (d) => (output += d));
 let exited = null;
 app.on('exit', (code, signal) => (exited = { code, signal }));
 
+let pagesNow = () => [];
 function fail(message) {
   console.error(`[smoke-app-location] FAIL: ${message}`);
+  // What there is to see: the screen (an error dialog is only on screen), the
+  // app's pages, the Patch processes, and the end of this computer's server log.
+  if (shots) {
+    try {
+      execFileSync('screencapture', ['-x', join(shots, `fail-${mode}.png`)]);
+    } catch (e) {
+      console.error(`(could not capture the screen: ${e.message})`);
+    }
+  }
+  try {
+    console.error(
+      `--- the app's pages ---\n${
+        pagesNow()
+          .map((p) => p.url())
+          .join('\n') || '(none)'
+      }`,
+    );
+  } catch (e) {
+    console.error(`(could not list pages: ${e.message})`);
+  }
+  try {
+    const ps = execFileSync('ps', ['-axo', 'pid=,ppid=,etime=,command='], { encoding: 'utf8' });
+    console.error(
+      `--- Patch processes ---\n${ps
+        .split('\n')
+        .filter((l) => /Patch|patch-server|patch-host/.test(l))
+        .join('\n')}`,
+    );
+  } catch (e) {
+    console.error(`(could not list processes: ${e.message})`);
+  }
+  const serverLog = join(DATA, 'server', 'logs', 'server.log');
+  if (existsSync(serverLog)) {
+    console.error(
+      `--- end of ${serverLog} ---\n${readFileSync(serverLog, 'utf8').split('\n').slice(-40).join('\n')}`,
+    );
+  }
   console.error(`--- the app's output ---\n${output.slice(-6000)}`);
   if (!exited) app.kill('SIGKILL');
   process.exit(1);
@@ -85,6 +148,7 @@ await until('DevTools endpoint', 60_000, async () =>
 );
 const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
 const pages = () => browser.contexts().flatMap((c) => c.pages());
+pagesNow = pages;
 
 if (mode === 'move') {
   const target = '/Applications/Patch.app';
@@ -156,6 +220,21 @@ if (oldArg) {
     fail(`the login item still opens ${old}:\n${stale.map((s) => s.block).join('\n')}`);
   log(`no login item opens ${old} any more`);
 }
-app.kill('SIGTERM');
-await until('the app to stop', 30_000, async () => exited, { exitOk: true });
+// Quit as a person does (⌘Q, or Quit in the Dock), so the app stops what it
+// started; then this computer's server must be gone with it.
+const origin = new URL(main.url()).origin;
+await browser.close().catch(() => undefined);
+execFileSync('osascript', ['-e', `tell application id "${APP_ID}" to quit`]);
+await until('the app to quit', 30_000, async () => exited, { exitOk: true });
+log(`quit: ${JSON.stringify(exited)}`);
+await until(
+  `the server on ${origin} to stop with the app`,
+  20_000,
+  async () => !(await answering(origin)),
+  {
+    exitOk: true,
+  },
+);
+log(`the server on ${origin} stopped with the app`);
+console.log(`--- the app's output ---\n${output.trim()}`);
 process.exit(0);
