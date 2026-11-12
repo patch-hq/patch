@@ -1053,37 +1053,37 @@ describe('Settings → Voice', () => {
       ],
     };
 
-    it('says none are paired, and mints no code until Pair is pressed', async () => {
+    it('says none are set up, and creates a token only when asked', async () => {
       const fetchMock = makeFetch();
       vi.stubGlobal('fetch', fetchMock);
       renderSettings('/settings/voice');
       await waitFor(() => expect(screen.getByTestId('voice-devices-empty')).toBeInTheDocument());
       // Linked phones and browsers are not voice devices.
       expect(screen.queryByTestId('device-mob-7')).toBeNull();
-      const minted = (): boolean =>
-        fetchMock.mock.calls.some((c) => String(c[0]).includes('/pair/start'));
-      expect(minted()).toBe(false);
-      fireEvent.click(screen.getByTestId('pair-voice-device-open'));
+      const created = (): boolean =>
+        fetchMock.mock.calls.some((c) => String(c[0]).includes('/api/voice-devices'));
+      fireEvent.click(screen.getByTestId('voice-device-add-open'));
+      expect(screen.getByTestId('voice-device-add-submit')).toBeDisabled();
+      fireEvent.change(screen.getByTestId('voice-device-label'), { target: { value: 'Kitchen' } });
+      expect(created()).toBe(false);
+      fireEvent.click(screen.getByTestId('voice-device-add-submit'));
       await waitFor(() =>
-        expect(screen.getByTestId('pair-voice-device-code')).toHaveTextContent(
-          'NONCE-abc123def456',
-        ),
+        expect(screen.getByTestId('voice-device-token')).toHaveTextContent('DEVICE-TOKEN-xyz'),
       );
-      expect(minted()).toBe(true);
-      // While open there is no second Pair button.
-      expect(screen.queryByTestId('pair-voice-device-open')).toBeNull();
-      fireEvent.click(screen.getByTestId('pair-voice-device-close'));
-      await waitFor(() => expect(screen.queryByTestId('pair-voice-device-panel')).toBeNull());
-      expect(screen.getByTestId('pair-voice-device-open')).toBeInTheDocument();
+      expect(created()).toBe(true);
+      expect(screen.queryByTestId('voice-device-add-open')).toBeNull();
+      fireEvent.click(screen.getByTestId('voice-device-add-close'));
+      await waitFor(() => expect(screen.queryByTestId('voice-device-add-panel')).toBeNull());
+      expect(screen.getByTestId('voice-device-add-open')).toBeInTheDocument();
     });
 
-    it('lists paired voice devices, each revocable, with Pair another', async () => {
+    it('lists voice devices, each revocable, with Add another', async () => {
       const fetchMock = makeFetch(withVoiceDevice);
       vi.stubGlobal('fetch', fetchMock);
       renderSettings('/settings/voice');
       await waitFor(() => expect(screen.getByTestId('device-vd-1')).toHaveTextContent('kitchen'));
       expect(screen.getByTestId('device-vd-1')).toHaveTextContent('Voice device');
-      expect(screen.getByTestId('pair-voice-device-open')).toBeInTheDocument();
+      expect(screen.getByTestId('voice-device-add-open')).toBeInTheDocument();
       fireEvent.click(screen.getByTestId('device-revoke-vd-1'));
       await waitFor(() =>
         expect(

@@ -110,6 +110,9 @@ export function makeFetch(overrides: Record<string, unknown> = {}, handler?: Han
     if (u.includes('/api/usage-report')) return json({ samples: [], chats: [] });
     if (u.includes('/api/models')) return json({ models: [] });
     if (u.includes('/api/secrets')) return json({ secrets: [] });
+    if (u.includes('/api/voice-devices')) {
+      return json({ surfaceId: 'vd-new', label: 'Kitchen', token: 'DEVICE-TOKEN-xyz' });
+    }
     if (u.includes('/api/auth/daemon/pair/start') || u.includes('/pair/start')) {
       return json({ nonce: 'NONCE-abc123def456', expiresAt: Date.now() + 300_000 });
     }
