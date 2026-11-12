@@ -28,9 +28,11 @@ const chosen = (page: Page): Promise<unknown[]> =>
 test.describe('first run', () => {
   test('asks one question with two answers, and nothing else', async ({ page }) => {
     await open(page);
-    await expect(page.getByRole('heading', { name: 'Patch' })).toBeVisible();
-    await expect(page.getByTestId('choose-local')).toHaveText('On this computer');
-    await expect(page.getByTestId('choose-remote')).toHaveText('On my server');
+    await expect(
+      page.getByRole('heading', { name: 'Where should your agents run?' }),
+    ).toBeVisible();
+    await expect(page.getByTestId('choose-local')).toContainText('This computer');
+    await expect(page.getByTestId('choose-remote')).toContainText('My own server');
     await expect(page.getByTestId('join-form')).toBeHidden();
     await expect(page.getByTestId('error')).toBeHidden();
   });
