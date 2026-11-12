@@ -12,6 +12,12 @@ import {
   requestIdleDetection,
   type IdleDetectionState,
 } from '../../lib/inputPresence.js';
+import {
+  browserNotificationState,
+  requestBrowserNotifications,
+  type BrowserNotificationState,
+} from '../../lib/browserNotifications.js';
+import { getDesktopBridge } from '../../lib/desktopBridge.js';
 import { patchShared } from './sharedWrite.js';
 import { Group, Pills, Row, SettingsPage } from './ui.js';
 
@@ -27,6 +33,11 @@ export function NotificationsPage(): JSX.Element {
   const loaded = usePreferencesStore((s) => s.loaded);
   const pushError = useUiStore((s) => s.pushError);
   const [idle, setIdle] = useState<IdleDetectionState | null>(null);
+  const [browserNotify, setBrowserNotify] = useState<BrowserNotificationState>(
+    browserNotificationState(),
+  );
+  // The desktop app raises its own native toasts; this grant is a browser's.
+  const inDesktopApp = getDesktopBridge() !== undefined;
 
   useEffect(() => {
     idleDetectionState().then(setIdle, (err: unknown) =>
@@ -42,9 +53,36 @@ export function NotificationsPage(): JSX.Element {
     }
   }
 
+  async function allowBrowserNotifications(): Promise<void> {
+    try {
+      setBrowserNotify(await requestBrowserNotifications());
+    } catch (err) {
+      pushError(`browser notifications: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   return (
     <SettingsPage title="Notifications" testid="settings-notifications">
       <Group>
+        {inDesktopApp || browserNotify === 'unsupported' ? null : (
+          <Row title="Browser notifications" testid="browser-notifications">
+            {browserNotify === 'granted' ? (
+              <span className="set-sub" data-testid="browser-notifications-granted">
+                Allowed
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="set-btn"
+                data-testid="browser-notifications-grant"
+                disabled={browserNotify === 'denied'}
+                onClick={() => void allowBrowserNotifications()}
+              >
+                {browserNotify === 'denied' ? 'Blocked in browser' : 'Allow'}
+              </button>
+            )}
+          </Row>
+        )}
         <Row title="Send to my phone after" testid="send-to-phone-after">
           <Pills
             label="Send to my phone after"

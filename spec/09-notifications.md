@@ -197,6 +197,8 @@ A push from an **archived** chat un-archives it, one-way, exactly as blocking on
 
 Routed to the desktop notifier process. Direct OS toast — no thread record. A `patch_notify` reaches it when the user is at a computer (§ Presence heuristic); the notifications the server raises itself follow § Chat completion.
 
+A browser tab is a computer surface too: it receives the same frame and raises a web Notification, once the user has allowed them in Settings → Notifications. A tab that has not been allowed reports that in an error rather than dropping the notification silently.
+
 Clicking the toast brings the Patch window forward and opens the source chat in it, the same tap target a push has. The window is raised by the desktop shell and the chat is opened by the app running inside it, so both halves have to act on one click.
 
 ### `speakers`

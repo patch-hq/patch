@@ -847,6 +847,20 @@ describe('NotificationRouter — desktop / speakers', () => {
     expect(wsHub.delivered.find((d) => d.kind === 'desktop')).toBeDefined();
   });
 
+  it('desktop: also reaches browser tabs (web surfaces)', async () => {
+    const { dir, registry } = makeRegistryDir();
+    const wsHub = makeFakeWsHub();
+    const router = new NotificationRouter({
+      logger: silent,
+      registry,
+      presence: new PresenceTracker(),
+      wsHub: wsHub as never,
+      dataDir: dir,
+    });
+    await router.route({ type: 'notify', chatId: 'c1', channel: 'desktop', message: 'm' });
+    expect(wsHub.delivered.map((d) => d.kind).sort()).toEqual(['desktop', 'web']);
+  });
+
   // spec/09 § Chat completion / § Waiting on you — opt-in only, and scoped to
   // the exact chatId the caller names.
   it('desktop: routes via the focused-surface filter only when skipDesktopIfFocused is set', async () => {
