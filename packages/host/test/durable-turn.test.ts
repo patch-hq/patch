@@ -290,6 +290,27 @@ describe('a durable turn', () => {
     expect(readFileSync(join(kept, files[0] as string), 'utf8')).toContain('runner stderr marker');
   }, 30000);
 
+  it('a claude that exits with no result: describeCut reports its exit and keeps its stderr', async () => {
+    const { cfg, cwd } = fresh();
+    const turn = new DurableTurn({ config: cfg, chatId: 'c8', localId: 'L8', log });
+    const d = drive(turn.spawn({ ...spawnOpts, cwd }));
+    d.send(initialize('r1'));
+    d.send(prompt);
+    await d.until(() => texts(d.lines).includes('a1'), 'a1');
+    writeFileSync(join(cwd, 'die'), '');
+    await d.exited;
+    expect(d.lines.some((l) => l['type'] === 'result')).toBe(false);
+    expect(turn.describeCut()).toBe('claude exited code=0 signal=null');
+    turn.release();
+    const kept = join(root, 'turn-failures');
+    const files = readdirSync(kept);
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatch(/-cut\.log$/);
+    expect(readFileSync(join(kept, files[0] as string), 'utf8')).toContain(
+      'fake claude stderr marker',
+    );
+  }, 30000);
+
   it('retireTurn ends a runner and claude and removes the directory', async () => {
     const { cfg, cwd } = fresh();
     const turn = new DurableTurn({ config: cfg, chatId: 'c4', localId: 'L4', log });

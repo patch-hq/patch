@@ -2014,10 +2014,13 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   const limitEvents = createLimitEventMemory();
   let sawResult = false;
   let lastStopReason: string | undefined;
+  let sessionId: string | undefined;
   try {
     for await (const msg of q) {
       if ((msg as { type?: unknown } | null)?.type === 'result') sawResult = true;
       lastStopReason = noteStopReason(msg, lastStopReason);
+      const sid = (msg as { session_id?: unknown } | null)?.session_id;
+      if (typeof sid === 'string' && sid !== '') sessionId = sid;
       // A reattached turn replays claude's whole output so the per-turn state
       // below is rebuilt; what the previous host already handled is skipped.
       const plan = durable?.plan(msg) ?? { offset: undefined, skip: 0 };
@@ -2049,7 +2052,20 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
     // killed, the connection dropped), not finished. Said out loud so the turn
     // is retried or reported, never settled as complete with no reason.
     if (!sawResult && !opts.abortController.signal.aborted) {
-      throw new Error(cutTurnMessage(lastStopReason));
+      const exit = durable?.describeCut();
+      // The model had already ended its turn: every word of the answer is in,
+      // and only Claude Code's closing `result` went missing. Retrying would
+      // run the same input again (a watch alert handled twice, a message sent
+      // twice), so the turn settles as done and the loss is logged instead.
+      if (lastStopReason === 'end_turn') {
+        durable?.warn(
+          { exit },
+          'claude exited after the reply ended (end_turn) without its result; settling the turn as complete',
+        );
+        yield { type: 'result', sessionId };
+        return;
+      }
+      throw new Error(cutTurnMessage(lastStopReason, exit));
     }
   } finally {
     durable?.release();
@@ -2060,12 +2076,27 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   }
 }
 
-/** The stop reason of the latest assistant message, carried forward otherwise. */
-function noteStopReason(msg: unknown, previous: string | undefined): string | undefined {
-  const m = msg as { type?: unknown; message?: { stop_reason?: unknown } } | null;
+/**
+ * The stop reason of the model's latest message, carried forward otherwise.
+ * With partial messages on, Claude Code's `assistant` messages carry no stop
+ * reason (one per content block, emitted before the message ends): it arrives
+ * on the `message_delta` stream event. A new message, or a user message, clears it.
+ */
+export function noteStopReason(msg: unknown, previous: string | undefined): string | undefined {
+  const m = msg as {
+    type?: unknown;
+    message?: { stop_reason?: unknown };
+    event?: { type?: unknown; delta?: { stop_reason?: unknown } };
+  } | null;
+  if (m?.type === 'user') return undefined;
+  if (m?.type === 'stream_event') {
+    if (m.event?.type === 'message_start') return undefined;
+    const reason = m.event?.type === 'message_delta' ? m.event.delta?.stop_reason : undefined;
+    return typeof reason === 'string' ? reason : previous;
+  }
   if (m?.type !== 'assistant') return previous;
   const reason = m.message?.stop_reason;
-  return typeof reason === 'string' ? reason : undefined;
+  return typeof reason === 'string' ? reason : previous;
 }
 
 /**
@@ -2073,12 +2104,13 @@ function noteStopReason(msg: unknown, previous: string | undefined): string | un
  * classifier matches, and adds whether the last reply had finished so the
  * reader can tell "died mid-answer" from "answered, then the process went".
  */
-export function cutTurnMessage(lastStopReason: string | undefined): string {
+export function cutTurnMessage(lastStopReason: string | undefined, exit?: string): string {
   const base =
     'The Claude Code process ended mid-turn without finishing (no result message). The stream was cut, not completed.';
+  const how = exit !== undefined ? ` (${exit})` : '';
   return lastStopReason === 'end_turn'
-    ? `${base} The last reply had finished (stop reason end_turn), so the text above is likely complete; only the closing result was lost.`
-    : `${base} The last reply had not finished, so the text above may be incomplete.`;
+    ? `${base} The last reply had finished (stop reason end_turn), so the text above is likely complete; only the closing result was lost.${how}`
+    : `${base} The last reply had not finished, so the text above may be incomplete.${how}`;
 }
 
 interface LiveRun {

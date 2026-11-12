@@ -55,6 +55,7 @@ export const RUNNER_SOCKET = 's';
 export const RUNNER_OUT = 'out.jsonl';
 export const RUNNER_IN = 'in.jsonl';
 export const RUNNER_EXIT = 'exit.json';
+export const CLAUDE_STDERR = 'claude-stderr.log';
 export const RUNNER_INFO = 'runner.json';
 
 /**
@@ -140,15 +141,23 @@ export async function runTurnRunner(dir: string): Promise<void> {
   };
 
   const turnTag = newTurnTag();
+  // claude's stderr goes straight to a file, never a pipe: a pipe would hold
+  // `close` open for as long as anything claude started still had it. Kept so
+  // a claude that exits without its result leaves its reason behind.
+  const errFd = openSync(join(dir, CLAUDE_STDERR), 'a');
   const child = spawn(spec.command, spec.args, {
     cwd: spec.cwd,
     env: { ...spec.env, [TURN_TAG_ENV]: turnTag },
-    stdio: ['pipe', 'pipe', 'ignore'],
+    stdio: ['pipe', 'pipe', errFd],
     // claude leads its own process group, as it did as the host's child
     // (claudeSpawn.ts): one kill(-pgid) takes everything it started.
     detached: true,
     windowsHide: true,
   });
+  closeSync(errFd);
+  const { stdin: claudeIn, stdout: claudeOut } = child;
+  if (claudeIn === null || claudeOut === null)
+    throw new Error('claude spawned without stdio pipes');
   const pgid = child.pid;
   // `script` names the install this runner came from, so an install that
   // prunes old version folders leaves alone one a live turn still uses
@@ -174,14 +183,14 @@ export async function runTurnRunner(dir: string): Promise<void> {
   const endStdin = (): void => {
     if (stdinEnded) return;
     stdinEnded = true;
-    child.stdin.end();
+    claudeIn.end();
   };
   // A broken pipe means claude has gone; its exit is reported on its own.
-  child.stdin.on('error', (err) => log(`claude stdin: ${err.message}`));
+  claudeIn.on('error', (err) => log(`claude stdin: ${err.message}`));
 
   const writeIn = (line: string): void => {
     writeSync(inFd, `${line}\n`);
-    if (!stdinEnded) child.stdin.write(`${line}\n`);
+    if (!stdinEnded) claudeIn.write(`${line}\n`);
   };
 
   let partial = '';
@@ -203,8 +212,8 @@ export async function runTurnRunner(dir: string): Promise<void> {
       }
     }
   };
-  child.stdout.setEncoding('utf8');
-  child.stdout.on('data', (chunk: string) => {
+  claudeOut.setEncoding('utf8');
+  claudeOut.on('data', (chunk: string) => {
     partial += chunk;
     let nl = partial.indexOf('\n');
     while (nl !== -1) {
