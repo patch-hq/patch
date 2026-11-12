@@ -297,6 +297,7 @@ This exists for the same reason session rotation does (§ Session rotation above
 
 > Naming note: "Speakers" = the special thread for the physical voice devices (kitchen, bedroom, etc — the HA Voice PE units). Distinct from voice mode, which is the per-chat action of opening a tap-to-talk session for a regular chat (invoked via the mic icon in any chat's header — no text label, just the icon).
 
+- Wake-word conversations from a device go to the Manager, not this thread (`16-voice-device.md` § Wake-word session). This thread holds what reaches devices from Patch: rings and `speakers` announcements.
 - Ingress: one or more standalone voice devices (HA Voice Preview Edition re-flashed with patch's custom firmware — see `16-voice-device.md`). Audio streams from device to the host's audio WSS; host runs Whisper STT and Kokoro TTS locally. No third-party voice service.
 - Voice: yes, full bidirectional. Audio is the only ingress for this thread.
 - Web composer: disabled (read-only transcript).
