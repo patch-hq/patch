@@ -1058,6 +1058,16 @@ interface ErrorEnvelope {
   message: string;
 }
 
+const NOT_DELIVERED_SNOOZED = {
+  ok: true,
+  delivered: false,
+  reason: 'chat is snoozed',
+} as const;
+
+function isSnoozedNow(state: { snoozedUntil: number | null } | undefined): boolean {
+  return state?.snoozedUntil != null && state.snoozedUntil > Date.now();
+}
+
 export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({ logger: opts.logger ?? false });
 
@@ -4005,6 +4015,10 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       durationMs: Date.now() - start,
       ok: true,
     });
+    // A snoozed chat is silent on every channel (spec/09 § Snoozed chats): the
+    // server drops the event above. Say so, or the agent believes the user was
+    // asked and waits for a reply nobody was prompted to give.
+    if (isSnoozedNow(opts.daemon!.chatState.get(callerChatId))) return NOT_DELIVERED_SNOOZED;
     return { ok: true };
   });
 
@@ -4063,6 +4077,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     }
     app.log.info({ chatId: callerChatId, task, why }, 'patch_ask_human: blocked on the user');
     toolLog({ tool: 'patch_ask_human', callerChatId, durationMs: Date.now() - start, ok: true });
+    if (isSnoozedNow(state)) return NOT_DELIVERED_SNOOZED;
     return { ok: true };
   });
 
