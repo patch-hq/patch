@@ -10,17 +10,19 @@ import { startBridge, type Bridge } from '../src/bridge.js';
 import { RelayClient, type WebSocketCtor } from '../src/client.js';
 import { channelFor, generateServerIdentity, toBase64Url } from '../src/crypto.js';
 import { RelayHost } from '../src/host.js';
-import { createRelayServer, type RelayServerHandle } from '../src/server.js';
+import { budget, startRelay, untilOffline, type TestRelay } from './target.js';
 
-let relay: RelayServerHandle;
+let relay: TestRelay;
 let target: Server;
 let wss: WebSocketServer;
 let host: RelayHost;
 let bridge: Bridge;
 let connects: number;
+/** The session the bridge dialled last. */
+let lastSession: RelayClient | null;
 
 async function until(pick: () => boolean, ms = 3000): Promise<void> {
-  const end = Date.now() + ms;
+  const end = Date.now() + budget(ms);
   while (!pick()) {
     if (Date.now() > end) throw new Error('timed out');
     await new Promise((r) => setTimeout(r, 5));
@@ -29,7 +31,8 @@ async function until(pick: () => boolean, ms = 3000): Promise<void> {
 
 beforeEach(async () => {
   connects = 0;
-  relay = await createRelayServer({ port: 0, host: '127.0.0.1' });
+  lastSession = null;
+  relay = await startRelay();
   target = createServer((req, res) => {
     const parts: Buffer[] = [];
     req.on('data', (c: Buffer) => parts.push(c));
@@ -59,23 +62,24 @@ beforeEach(async () => {
   await new Promise<void>((r) => target.listen(0, '127.0.0.1', r));
   const identity = generateServerIdentity();
   host = new RelayHost({
-    relayUrl: `ws://127.0.0.1:${relay.port}`,
+    relayUrl: relay.url,
     identity,
     target: `http://127.0.0.1:${(target.address() as AddressInfo).port}`,
   });
   host.start();
   await until(() => host.status().connected);
   bridge = await startBridge({
-    connect: () => {
+    connect: async () => {
       connects++;
-      return RelayClient.connect(
+      lastSession = await RelayClient.connect(
         {
-          url: `ws://127.0.0.1:${relay.port}`,
+          url: relay.url,
           channel: channelFor(identity.publicKey),
           serverKey: toBase64Url(identity.publicKey),
         },
         { WebSocket: WebSocket as unknown as WebSocketCtor },
       );
+      return lastSession;
     },
   });
 });
@@ -129,7 +133,8 @@ describe('the bridge', () => {
     host.stop();
     host.start();
     await until(() => host.status().connected);
-    await until(() => connects === 1 && relay.stats().clients === 0);
+    // The relay dropped the bridge's session when the server went away.
+    await until(() => connects === 1 && lastSession?.closed === true);
     const res = await fetch(`${bridge.origin}/c`);
     expect(res.status).toBe(200);
     expect(connects).toBe(2);
@@ -137,7 +142,7 @@ describe('the bridge', () => {
 
   it('answers 502 and says why when the relay cannot be reached', async () => {
     host.stop();
-    await until(() => relay.stats().servers === 0);
+    await untilOffline(relay.url, host.channel);
     const res = await fetch(`${bridge.origin}/anything`);
     expect(res.status).toBe(502);
     expect(await res.text()).toMatch(/offline/);

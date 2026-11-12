@@ -37,8 +37,18 @@ Restart=on-failure
 
 A server uses it with `PATCH_RELAY_URL=wss://relay.example.com`.
 
-Production runs one at `wss://patch.tomchambers.me/relay` — a path on the
-server's own host, so it needs no DNS record of its own. `scripts/install-relay.mjs`
-installs it (`~/.patch-relay`, the `patch-relay` user service on 127.0.0.1:8787);
-Caddy's `handle_path /relay/*` strips the prefix. This is the address the desktop
-app hands its own server by default.
+The project's public relay, `wss://relay.patchhq.dev`, is not this process but
+the same protocol as a Cloudflare Worker (`packages/relay-worker`), and is the
+address the desktop app hands its own server by default. This package's
+behaviour tests run against either: `PATCH_RELAY_TEST_URL=wss://… pnpm test`
+points them at a relay they did not start (`test/target.ts`).
+
+## Keepalive
+
+Both ends of a relayed connection ping, every 30 s by default (`keepaliveMs`):
+the host sends WebSocket pings to the relay, and a device sends an encrypted
+PING through its session, which the server answers. That keeps a quiet
+connection from being dropped as idle, and two pings in a row without an answer
+end a dead one — the host redials, and a device's `RelayConnection` dials a new
+session the next time it is used. A device only treats silence as death once
+its server has answered a ping, since a server from before PING never will.

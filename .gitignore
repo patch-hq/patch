@@ -78,3 +78,6 @@ design/*/app.css
 design/*/fonts/
 design/meeting-mode-v3/*.html
 design/meeting-mode-v4/*.html
+
+# Wrangler local dev state (Cloudflare relay worker)
+**/.wrangler/

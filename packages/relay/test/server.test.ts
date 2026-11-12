@@ -1,20 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { ed25519 } from '@noble/curves/ed25519';
-import { createRelayServer, type RelayServerHandle } from '../src/server.js';
 import {
   channelFor,
   generateServerIdentity,
   toBase64Url,
   type ServerIdentity,
 } from '../src/crypto.js';
+import { budget, external, serverOnline, startRelay, type TestRelay } from './target.js';
 
-let relay: RelayServerHandle;
+let relay: TestRelay;
 let base: string;
 
 beforeEach(async () => {
-  relay = await createRelayServer({ port: 0, host: '127.0.0.1', maxClientsPerChannel: 3 });
-  base = `ws://127.0.0.1:${relay.port}`;
+  relay = await startRelay({ maxClientsPerChannel: 3 });
+  base = relay.url;
 });
 afterEach(async () => {
   await relay.close();
@@ -35,7 +35,7 @@ class Tape {
     });
   }
   async until<T>(pick: () => T | undefined, ms = 2000): Promise<T> {
-    const end = Date.now() + ms;
+    const end = Date.now() + budget(ms);
     for (;;) {
       const v = pick();
       if (v !== undefined) return v;
@@ -46,8 +46,8 @@ class Tape {
   text(type: string): Promise<Record<string, unknown>> {
     return this.until(() => this.texts.find((t) => t['type'] === type));
   }
-  closedWith(): Promise<{ code: number; reason: string }> {
-    return this.until(() => this.closed ?? undefined);
+  closedWith(ms?: number): Promise<{ code: number; reason: string }> {
+    return this.until(() => this.closed ?? undefined, ms);
   }
 }
 
@@ -76,9 +76,10 @@ async function connectServer(
 
 describe('a server joining its channel', () => {
   it('proves it holds the key the channel is named for', async () => {
-    const { tape } = await connectServer();
+    const { id, tape } = await connectServer();
     expect(tape.closed).toBeNull();
-    expect(relay.stats().servers).toBe(1);
+    expect(await serverOnline(base, channelFor(id.publicKey))).toBe(true);
+    if (relay.local) expect(relay.local.stats().servers).toBe(1);
   });
 
   it('is refused if it signs with a different key — nobody else can squat a channel', async () => {
@@ -99,7 +100,8 @@ describe('a server joining its channel', () => {
       }),
     );
     expect((await tape.closedWith()).code).toBe(4401);
-    expect(relay.stats().servers).toBe(0);
+    expect(await serverOnline(base, channel)).toBe(false);
+    if (relay.local) expect(relay.local.stats().servers).toBe(0);
   });
 
   it('is refused if it replays a signature made for another challenge', async () => {
@@ -122,20 +124,22 @@ describe('a server joining its channel', () => {
   });
 
   it('is refused if it never answers the challenge', async () => {
-    const quick = await createRelayServer({ port: 0, host: '127.0.0.1', helloTimeoutMs: 50 });
-    const tape = open(
-      `ws://127.0.0.1:${quick.port}/v1/connect?channel=abcdefghijklmnopqrstuv&role=server`,
-    );
-    expect((await tape.closedWith()).code).toBe(4408);
-    await quick.close();
-  });
+    // An external relay has the timeout it was deployed with; a local one is made quick.
+    const quick = external ? relay : await startRelay({ helloTimeoutMs: 50 });
+    const channel = channelFor(generateServerIdentity().publicKey);
+    const tape = open(`${quick.url}/v1/connect?channel=${channel}&role=server`);
+    await tape.text('challenge');
+    expect((await tape.closedWith(quick.limits.helloTimeoutMs + 2000)).code).toBe(4408);
+    if (quick !== relay) await quick.close();
+  }, 30_000);
 
   it('is replaced by a newer connection from the same server, which wins the channel', async () => {
     const first = await connectServer();
     const second = await connectServer(first.id);
     expect((await first.tape.closedWith()).code).toBe(4409);
     expect(second.tape.closed).toBeNull();
-    expect(relay.stats().servers).toBe(1);
+    expect(await serverOnline(base, channelFor(first.id.publicKey))).toBe(true);
+    if (relay.local) expect(relay.local.stats().servers).toBe(1);
   });
 });
 
@@ -150,9 +154,11 @@ describe('a client reaching a server', () => {
   it('is announced to the server, and bytes flow both ways, labelled so clients cannot mix', async () => {
     const { id, tape: server } = await connectServer();
     const channel = channelFor(id.publicKey);
+    // One after the other, so the first "open" is a's even across the internet.
     const a = open(`${base}/v1/connect?channel=${channel}&role=client`);
-    const b = open(`${base}/v1/connect?channel=${channel}&role=client`);
     await a.text('ready');
+    await server.text('open');
+    const b = open(`${base}/v1/connect?channel=${channel}&role=client`);
     await b.text('ready');
     const opens = await server.until(() =>
       server.texts.filter((t) => t['type'] === 'open').length === 2
@@ -211,7 +217,9 @@ describe('a client reaching a server', () => {
   it('is refused beyond the per-channel limit', async () => {
     const { id } = await connectServer();
     const channel = channelFor(id.publicKey);
-    const held = [1, 2, 3].map(() => open(`${base}/v1/connect?channel=${channel}&role=client`));
+    const held = Array.from({ length: relay.limits.maxClientsPerChannel }, () =>
+      open(`${base}/v1/connect?channel=${channel}&role=client`),
+    );
     for (const h of held) await h.text('ready');
     const over = open(`${base}/v1/connect?channel=${channel}&role=client`);
     expect((await over.closedWith()).code).toBe(4429);
@@ -221,7 +229,7 @@ describe('a client reaching a server', () => {
     const { id } = await connectServer();
     const c = open(`${base}/v1/connect?channel=${channelFor(id.publicKey)}&role=client`);
     await c.text('ready');
-    c.ws.send(new Uint8Array(200_000));
+    c.ws.send(new Uint8Array(relay.limits.maxMessageBytes + 1));
     expect((await c.closedWith()).code).toBe(1009);
   });
 
@@ -237,7 +245,7 @@ describe('a client reaching a server', () => {
 
 describe('the endpoint', () => {
   it('answers /healthz', async () => {
-    const res = await fetch(`http://127.0.0.1:${relay.port}/healthz`);
+    const res = await fetch(`${relay.httpUrl}/healthz`);
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true });
   });
