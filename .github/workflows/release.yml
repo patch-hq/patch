@@ -368,6 +368,9 @@ jobs:
           ASSESS=$(spctl --assess --type execute -vv "$APP" 2>&1)
           echo "$ASSESS"
           grep -q 'source=Notarized Developer ID' <<<"$ASSESS"
+          xcrun stapler validate "$APP"
+          # The host build "On this computer" installs rides inside, notarised with it.
+          ls "$APP/Contents/Resources/host/"patch-host-*-darwin-arm64.tar.gz
           PATCH_REAL_DESKTOP=1 PATCH_TEST_DESKTOP_BINARY="$PWD/$APP/Contents/MacOS/Patch" \
             node --test packages/desktop/scripts/single-instance.test.cjs
       - name: Notarise the disk image
@@ -389,6 +392,32 @@ jobs:
             sleep 20
           done
           spctl -a -vvv -t open --context context:primary-signature "$DMG"
+      # A stranger's first run, on the app as it is published: the zip, downloaded
+      # (quarantined) and unpacked the way Safari does, accepted by Gatekeeper,
+      # then "On this computer" — the server starts, the host this app carries is
+      # installed as a login service and comes online, and a chat opens. The
+      # runner is disposable, so installing a host here replaces nothing.
+      - name: First run of the notarised app, "On this computer"
+        if: steps.scope.outputs.build == 'true'
+        env:
+          PATCH_SMOKE_SHOTS: ${{ runner.temp }}/first-run
+        run: |
+          set -euo pipefail
+          ZIP=$(ls packages/desktop/release/Patch-*-arm64-mac.zip)
+          DL="$RUNNER_TEMP/download"
+          mkdir -p "$DL"
+          cp "$ZIP" "$DL/"
+          xattr -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;$(uuidgen)" "$DL/$(basename "$ZIP")"
+          ditto -x -k "$DL/$(basename "$ZIP")" "$DL"
+          xattr -p com.apple.quarantine "$DL/Patch.app"
+          spctl -a -vvv -t exec "$DL/Patch.app"
+          node packages/desktop/scripts/smoke-first-run.mjs "$DL/Patch.app/Contents/MacOS/Patch" --first-run
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.scope.outputs.build == 'true'
+        with:
+          name: mac-first-run
+          path: ${{ runner.temp }}/first-run
+          if-no-files-found: ignore
       - name: Collect the desktop release
         if: steps.scope.outputs.build == 'true'
         run: |
@@ -497,7 +526,7 @@ jobs:
           # The runner has no FUSE and its kernel refuses Chromium's sandbox to
           # unprivileged users; neither applies to what is being checked here.
           APPIMAGE_EXTRACT_AND_RUN=1 PATCH_SMOKE_HOME="$RUNNER_TEMP/smoke-home" \
-            xvfb-run -a node packages/desktop/scripts/smoke-appimage.mjs "$IMAGE" --no-sandbox
+            xvfb-run -a node packages/desktop/scripts/smoke-first-run.mjs "$IMAGE" --no-sandbox
       - name: Collect the Linux desktop release
         if: steps.scope.outputs.build == 'true'
         run: |
@@ -565,8 +594,11 @@ jobs:
           if-no-files-found: error
           path: ${{ runner.temp }}/mobile-update/*
 
+  # Only main publishes. A run dispatched on another branch builds, signs,
+  # notarises and checks everything, and publishes nothing — how a change to the
+  # release itself is proved before it merges.
   publish:
-    if: github.repository == 'patch-hq/patch'
+    if: github.repository == 'patch-hq/patch' && github.ref == 'refs/heads/main'
     needs: [tests, server, host, mac, linux-desktop, android, mobile-update]
     runs-on: ubuntu-latest
     steps:

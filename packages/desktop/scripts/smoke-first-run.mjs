@@ -1,22 +1,26 @@
 #!/usr/bin/env node
-// Run a built Linux AppImage and check what a new user sees, over the Chrome
-// DevTools protocol (Playwright's connectOverCDP: the AppImage is the real
-// binary, not an Electron Playwright launches itself).
+// Run a packaged Patch app — the Linux AppImage, or Patch.app/Contents/MacOS/Patch —
+// and check what a new user sees, over the Chrome DevTools protocol
+// (Playwright's connectOverCDP: the packaged binary itself, not an Electron
+// Playwright launches).
 //
-//   node scripts/smoke-appimage.mjs <Patch-*.AppImage> [electron args…]
+//   node scripts/smoke-first-run.mjs <app binary> [electron args…]
 //       the first-run window opens and offers "On this computer"
-//   node scripts/smoke-appimage.mjs <Patch-*.AppImage> --first-run [electron args…]
+//   node scripts/smoke-first-run.mjs <app binary> --first-run [electron args…]
 //       …and choosing it brings up this computer's own server and host, and
 //       ends on Patch itself with the host online and a chat open
 //
-// It needs a display (xvfb-run). PATCH_SMOKE_HOME, when set, is used as the
-// app's config directory (XDG_CONFIG_HOME) so a run starts from nothing.
+// "On this computer" installs the host as a login service for this account, so
+// --first-run belongs on a disposable computer (a CI runner, a container).
+//
+// On Linux it needs a display (xvfb-run); PATCH_SMOKE_HOME, when set, is used
+// as the app's config directory (XDG_CONFIG_HOME) so a run starts from nothing.
 // PATCH_SMOKE_SHOTS, when set, is a directory for screenshots of each step.
 //
 // NO FALLBACK: any step that does not happen within its time fails the run,
 // with the app's own output.
 
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { createServer } from 'node:net';
@@ -25,7 +29,7 @@ import { chromium } from 'playwright';
 
 const [image, ...rest] = process.argv.slice(2);
 if (!image) {
-  console.error('usage: smoke-appimage.mjs <Patch-*.AppImage> [--first-run] [electron args…]');
+  console.error('usage: smoke-first-run.mjs <app binary> [--first-run] [electron args…]');
   process.exit(64);
 }
 const firstRun = rest.includes('--first-run');
@@ -57,7 +61,7 @@ let exited = null;
 app.on('exit', (code, signal) => (exited = { code, signal }));
 
 function fail(message) {
-  console.error(`[smoke-appimage] FAIL: ${message}`);
+  console.error(`[smoke-first-run] FAIL: ${message}`);
   console.error(`--- the app's output ---\n${output.slice(-6000)}`);
   app.kill('SIGKILL');
   process.exit(1);
@@ -90,7 +94,7 @@ const setup = await until('first-run window', 60_000, async () =>
 await setup.getByTestId('choose-local').waitFor({ state: 'visible', timeout: 15_000 });
 const label = (await setup.getByTestId('choose-local').textContent())?.trim();
 console.log(
-  `[smoke-appimage] first run offers: "${label}" / "${(await setup.getByTestId('choose-remote').textContent())?.trim()}"`,
+  `[smoke-first-run] first run offers: "${label}" / "${(await setup.getByTestId('choose-remote').textContent())?.trim()}"`,
 );
 await shot(setup, '1-first-run');
 
@@ -105,7 +109,7 @@ if (firstRun) {
           .getByTestId('status')
           .textContent({ timeout: 500 })
           .catch(() => null);
-    if (statusText) console.log(`[smoke-appimage] setup: ${statusText}`);
+    if (statusText) console.log(`[smoke-first-run] setup: ${statusText}`);
     const err = setup.isClosed()
       ? null
       : await setup
@@ -123,14 +127,19 @@ if (firstRun) {
     }
     return pages().find((p) => /^http:\/\/127\.0\.0\.1:\d+\//.test(p.url()));
   });
-  console.log(`[smoke-appimage] Patch is at ${new URL(main.url()).origin}`);
+  console.log(`[smoke-first-run] Patch is at ${new URL(main.url()).origin}`);
   await main.waitForLoadState('domcontentloaded');
   await shot(main, '2-patch');
 
   // The host this computer just installed has paired with that server and is
   // online. Asked as the app asks: with the credential the first run saved.
   const origin = new URL(main.url()).origin;
-  const configHome = env.XDG_CONFIG_HOME ?? join(homedir(), '.config');
+  // Electron's userData for this app: ~/.config/@patch/desktop on Linux,
+  // ~/Library/Application Support/@patch/desktop on a Mac.
+  const configHome =
+    process.platform === 'darwin'
+      ? join(homedir(), 'Library', 'Application Support')
+      : (env.XDG_CONFIG_HOME ?? join(homedir(), '.config'));
   const { credential } = JSON.parse(
     readFileSync(join(configHome, '@patch', 'desktop', 'connection.json'), 'utf8'),
   );
@@ -142,8 +151,22 @@ if (firstRun) {
     const { hosts } = await r.json();
     return hosts.some((h) => h.online) ? hosts : null;
   });
-  console.log(`[smoke-appimage] hosts: ${JSON.stringify(hosts)}`);
+  console.log(`[smoke-first-run] hosts: ${JSON.stringify(hosts)}`);
   await shot(main, '3-host-online');
+  // What is running as the host: on a Mac, the runtime inside Patch Host.app
+  // that the installer put in ~/.patch/runtime, and who signed it.
+  const ps = execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' })
+    .split('\n')
+    .filter((l) => /patch-host/.test(l) && /host\.mjs/.test(l));
+  if (ps.length === 0) fail('no host process is running');
+  console.log(`[smoke-first-run] host process: ${ps[0].trim()}`);
+  if (process.platform === 'darwin') {
+    const hostApp = join(homedir(), '.patch', 'runtime', 'Patch Host.app');
+    // codesign reports on stderr.
+    const sig = spawnSync('codesign', ['-dv', '--verbose=2', hostApp], { encoding: 'utf8' });
+    console.log(`${sig.stdout}${sig.stderr}`.trim());
+    if (!/Authority=/.test(sig.stderr)) fail(`${hostApp} is not signed`);
+  }
 
   // A new chat on this computer: the composer is ready and offers this host.
   const host = hosts.find((h) => h.online);
@@ -151,12 +174,12 @@ if (firstRun) {
   await main.getByTestId('composer-input').waitFor({ state: 'visible', timeout: 60_000 });
   const offered = await main.getByTestId(`host-option-${host.hostId}`).count();
   console.log(
-    `[smoke-appimage] new chat: composer ready, ${offered ? 'offers' : 'does not list'} host ${host.hostName ?? host.hostId}`,
+    `[smoke-first-run] new chat: composer ready, ${offered ? 'offers' : 'does not list'} host ${host.hostName ?? host.hostId}`,
   );
   await shot(main, '4-new-chat');
 }
 
-console.log('[smoke-appimage] OK');
+console.log('[smoke-first-run] OK');
 await browser.close().catch(() => undefined);
 app.kill('SIGTERM');
 await new Promise((r) => setTimeout(r, 3000));
