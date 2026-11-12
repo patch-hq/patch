@@ -173,7 +173,7 @@ A `push` or `desktop` notification carries inline actions so it can be acted on 
 
 Buttons that answer with a fixed text (quick replies, a question's options) open the app as they send, because Android only hands the tap to the app's code while that code is running — with the app killed, a button that did not open it would do nothing. Reply and Deny send without opening it.
 
-Tapping the notification's body (rather than one of these actions) still opens the source chat, or follows a `deepLink`, exactly as without actions.
+Button text that is itself dynamic (quick replies, a question's options) is only known once the push arrives, and the OS draws the push before the app can set it. So when the app receives such a push it rebuilds the category and replaces the notification with a local copy drawn against the right buttons. With the app's code not running at all (killed) there is no one to do this, and that notification shows without them; tapping it still opens the chat.\n\nTapping the notification's body (rather than one of these actions) still opens the source chat, or follows a `deepLink`, exactly as without actions.
 
 A reply/action that can't be delivered (offline, not authenticated) keeps the notification up, reading "Not sent — tap to retry", and keeps whatever was typed — tapping it again retries the same thing. Nothing an action tries to send is ever silently dropped. A delivered reply/action updates the notification to read "Sent".
 
