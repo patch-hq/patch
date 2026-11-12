@@ -2394,6 +2394,8 @@ export class Daemon {
    * hydrated after a restart it joins this set.
    */
   private readonly hydratedFromDisk = new Set<string>();
+  /** Chats whose log held a turn the previous process never ended (closed `interrupted` at hydrate). */
+  private readonly interruptedAtHydrate = new Set<string>();
   /**
    * Chats being moved to another host (spec/04 § Moving a chat to another
    * host): exported, and not yet retired or released. A new turn is refused
@@ -3363,6 +3365,7 @@ export class Daemon {
         state.nextSeq = opened.nextSeq;
         lastTurnOutcomeByChatId.set(m.chatId, opened.lastTurnOutcome);
         lastTurnLocalIdByChatId.set(m.chatId, opened.lastTurnLocalId);
+        if (opened.interruptedTurnId !== null) this.interruptedAtHydrate.add(m.chatId);
         if (opened.repaired) {
           repaired.push({ chatId: m.chatId, droppedBytes: opened.repaired.droppedBytes });
         }
@@ -3459,6 +3462,7 @@ export class Daemon {
     this.wake.loadAll();
     this.watch.loadAll();
     this.resumeInterruptedTurns(owned, lastTurnOutcomeByChatId, lastTurnLocalIdByChatId);
+    this.flagUnresumedInterruptions(owned);
     this.settleUntilCompleteSnoozes(owned);
     this.resumeDeferredGoalEvaluations(owned);
   }
@@ -3479,6 +3483,26 @@ export class Daemon {
       if (this.owedResend.has(m.chatId) || this.parkedTurns.has(m.chatId)) continue;
       if (this.watch.count(m.chatId) === 0 && !this.hasRunningDelegates(m.chatId)) continue;
       this.armGoalWatchPoll(m.chatId);
+    }
+  }
+
+  /**
+   * A chat hydrates `idle`, which every surface reads as "done". A turn the
+   * previous process was cut off in the middle of, and that nothing re-sent
+   * (no owed turn was recorded, or it was dropped), would therefore look like
+   * it finished. Say it stopped partway instead (spec/12 § No fallbacks).
+   */
+  private flagUnresumedInterruptions(metas: ChatMeta[]): void {
+    const interrupted = new Set(this.interruptedAtHydrate);
+    this.interruptedAtHydrate.clear();
+    for (const m of metas) {
+      if (!interrupted.has(m.chatId) || m.status === 'deleted') continue;
+      if (this.owedResend.has(m.chatId) || this.parkedTurns.has(m.chatId)) continue;
+      this.failPreflight(
+        m.chatId,
+        'sdk_error',
+        'This chat was stopped partway by a restart and its last turn was not resumed. Send a message to carry on.',
+      );
     }
   }
 

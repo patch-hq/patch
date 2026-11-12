@@ -608,6 +608,27 @@ describe('resuming turns a host restart interrupted', () => {
     expect(pendingOf(second.metaStore, chatId)).toEqual([]);
   });
 
+  it('shows a chat cut off with no owed turn as errored, not idle (done)', async () => {
+    const g1 = gatedBackend();
+    const { home, folder } = setup();
+    const first = hostOver(home, g1.backend);
+    const chatId = await chatWithHistory(first.daemon, folder, g1);
+    void first.daemon.sendInput({ chatId, message: 'running', localId: 'L1' });
+    await tick();
+    // The turn is open in the log but nothing records it as owed.
+    first.metaStore.update(chatId, (m) => ({ ...m, pendingTurns: [] }));
+
+    const g2 = gatedBackend();
+    const second = hostOver(home, g2.backend);
+    second.daemon.hydrate();
+    await tick();
+
+    expect(g2.prompts).toEqual([]);
+    expect(second.metaStore.read(chatId)?.lastError?.message).toContain('stopped partway');
+    const states = second.events.filter((e) => e.type === 'chat.state' && e.chatId === chatId);
+    expect(states.at(-1)).toMatchObject({ activity: 'errored' });
+  });
+
   it('a chat that was idle at the restart is not given a turn it never had', async () => {
     const g1 = gatedBackend();
     const { home, folder } = setup();
