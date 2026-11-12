@@ -58,13 +58,15 @@ test('the AppImage carries the linux-x64 host build and nothing else', () => {
   ]);
 });
 
-test('electron-builder copies exactly the staged folders the first run reads', () => {
+test('electron-builder copies the staged folders the first run reads', () => {
   // first-run/index.ts reads resources/server and resources/host. The config once
   // copied build/staged/daemon, which nothing stages, and the app shipped hostless.
+  // The Mac app does not carry the host yet (it fails notarisation), the AppImage does.
   const yml = readFileSync(path.join(__dirname, '..', 'electron-builder.yml'), 'utf8');
-  for (const dir of ['server', 'host']) {
-    assert.match(yml, new RegExp(`from: build/staged/${dir}\\n\\s+to: ${dir}\\n`));
-  }
+  assert.match(yml, /from: build\/staged\/server\n\s+to: server\n/);
+  const linux = yml.slice(yml.indexOf('\nlinux:'));
+  assert.match(linux, /from: build\/staged\/host\n\s+to: host\n/);
+  assert.doesNotMatch(yml, /staged\/daemon/);
   const firstRun = readFileSync(path.join(__dirname, '..', 'src', 'first-run', 'index.ts'), 'utf8');
   assert.match(firstRun, /join\(env\.resources, 'server'\)/);
   assert.match(firstRun, /join\(env\.resources, 'host'\)/);

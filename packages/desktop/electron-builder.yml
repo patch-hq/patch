@@ -27,14 +27,16 @@ files:
 extraResources:
   - from: build/staged/server
     to: server
-  - from: build/staged/host
-    to: host
 mac:
   extraResources:
     # Meeting mode's native audio helper (scripts/build-native.cjs): system audio via
     # a Core Audio tap, and noticing which apps have the mic open. macOS only.
     - from: build/native/patch-audio
       to: bin/patch-audio
+    # NOT the host build yet. Notarisation unpacks the tarball and refuses the
+    # host's binaries (signed without a secure timestamp; sherpa-onnx's not
+    # signed at all), which failed every release. Until build-host.mjs signs
+    # them for notarisation, the Mac app ships without its host, as before.
   category: public.app-category.developer-tools
   # App icon = the web favicon (build/icon.png, rendered 1024² from
   # packages/web/public/favicon.svg). electron-builder generates the .icns.
@@ -83,4 +85,7 @@ linux:
   category: Development
   executableName: patch
   artifactName: Patch-${version}-x86_64.${ext}
+  extraResources:
+    - from: build/staged/host
+      to: host
 # Windows stays deferred.
