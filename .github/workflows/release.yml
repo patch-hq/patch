@@ -394,11 +394,27 @@ jobs:
             sleep 20
           done
           spctl -a -vvv -t open --context context:primary-signature "$DMG"
+          # It opens as the install window: Patch, an Applications shortcut, the background.
+          MNT="$RUNNER_TEMP/dmg"
+          mkdir -p "$MNT" "$RUNNER_TEMP/first-run"
+          hdiutil attach -readonly -mountpoint "$MNT" "$DMG"
+          test -d "$MNT/Patch.app"
+          [ "$(readlink "$MNT/Applications")" = /Applications ]
+          ls "$MNT"/.background/*.tiff
+          # A picture of that window, for a person to look at; not a gate (the
+          # runner's screen may not be capturable).
+          open "$MNT" && sleep 5 && screencapture -x "$RUNNER_TEMP/first-run/dmg-window.png" \
+            || echo "::warning::could not capture the disk image's window"
+          osascript -e 'tell application "Finder" to close every window' || true
+          hdiutil detach "$MNT"
       # A stranger's first run, on the app as it is published: the zip, downloaded
-      # (quarantined) and unpacked the way Safari does, accepted by Gatekeeper,
-      # then "On this computer" — the server starts, the host this app carries is
-      # installed as a login service and comes online, and a chat opens. The
-      # runner is disposable, so installing a host here replaces nothing.
+      # (quarantined) and unpacked the way Safari does, accepted by Gatekeeper.
+      # Opened from Downloads it offers to move itself to Applications, and does.
+      # Then "On this computer" — the server starts, the host this app carries is
+      # installed as a login service and comes online, and a chat opens — and
+      # the login item macOS holds opens the app where it now is, following it
+      # when it is moved again. The runner is disposable, so installing a host
+      # or a login item here replaces nothing.
       - name: First run of the notarised app, "On this computer"
         if: steps.scope.outputs.build == 'true'
         env:
@@ -413,7 +429,12 @@ jobs:
           ditto -x -k "$DL/$(basename "$ZIP")" "$DL"
           xattr -p com.apple.quarantine "$DL/Patch.app"
           spctl -a -vvv -t exec "$DL/Patch.app"
-          node packages/desktop/scripts/smoke-first-run.mjs "$DL/Patch.app/Contents/MacOS/Patch" --first-run
+          node packages/desktop/scripts/smoke-app-location.mjs move "$DL/Patch.app"
+          node packages/desktop/scripts/smoke-first-run.mjs /Applications/Patch.app/Contents/MacOS/Patch --first-run
+          node packages/desktop/scripts/smoke-app-location.mjs login-item /Applications/Patch.app
+          mkdir -p "$HOME/Applications"
+          mv /Applications/Patch.app "$HOME/Applications/Patch.app"
+          node packages/desktop/scripts/smoke-app-location.mjs login-item "$HOME/Applications/Patch.app" /Applications/Patch.app
       - uses: actions/upload-artifact@v4
         if: always() && steps.scope.outputs.build == 'true'
         with:
@@ -446,7 +467,7 @@ jobs:
           # A build from before the disk image has none to carry.
           DMG=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).dmg ?? "")' "$RUNNER_TEMP/out/desktop-latest.json")
           gh release download "$PREV" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/out" \
-            --pattern latest-mac.yml --pattern "$ZIP" --pattern "$ZIP.blockmap" ${DMG:+--pattern "$DMG""
+            --pattern latest-mac.yml --pattern "$ZIP" --pattern "$ZIP.blockmap" ${DMG:+--pattern "$DMG"}
           # NO FALLBACK: the feed and the zip it names must both be there.
           test -f "$RUNNER_TEMP/out/latest-mac.yml"
           test -f "$RUNNER_TEMP/out/$ZIP"
