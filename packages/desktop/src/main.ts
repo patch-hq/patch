@@ -1666,6 +1666,22 @@ const installUpdate = createInstaller({
       message: err.message,
       at: new Date().toISOString(),
     }),
+  forceExit: () => {
+    logUpdate('install-force-exit', 'the quit did not complete; exiting so the installer can run');
+    const launched = activeLaunch;
+    activeLaunch = null;
+    globalShortcut.unregisterAll();
+    tray?.destroy();
+    const stopped = launched
+      ? Promise.race([
+          launched.stop(),
+          new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
+        ])
+      : Promise.resolve();
+    void stopped
+      .catch((err: unknown) => console.error('[patch] stopping the server failed', err))
+      .finally(() => app.exit(0));
+  },
 });
 
 function setupAutoUpdater(): void {

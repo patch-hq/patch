@@ -393,6 +393,17 @@ export function initialUpdaterState(args: {
 export const INSTALL_WATCHDOG_MS = 120_000;
 
 /**
+ * How long `quitAndInstall()` gets to actually end the process before it is
+ * ended for it. The installer (ShipIt) only proceeds once this process has
+ * exited, and a quit that something in the shutdown chain swallows (seen on
+ * 12 Nov: ShipIt waiting, app alive, banner "Update failed") leaves it waiting
+ * for ever. Ending the process is exactly what the installer is waiting for,
+ * so this is the request completed, not a workaround; it is logged by the
+ * caller's `forceExit`.
+ */
+export const QUIT_GRACE_MS = 10_000;
+
+/**
  * An updater error as one short clause for the banner, which prefixes it with
  * "Couldn't install Patch <version>:". Squirrel's messages carry the full
  * file:// path of the staged bundle, which says nothing to the person reading.
@@ -417,6 +428,11 @@ export function quitAndInstallNow(deps: {
    * and it is what the user is told — not that the installer stalled.
    */
   pendingError?: () => string | null;
+  /**
+   * Ends the process (cleanup, then `app.exit`) when the quit requested by
+   * `quitAndInstall` has not happened within QUIT_GRACE_MS.
+   */
+  forceExit?: () => void;
   /** Test seam for the stall watchdog below; real callers get the real timer. */
   setTimer?: (fn: () => void, ms: number) => { unref?: () => void };
 }): void {
@@ -428,6 +444,10 @@ export function quitAndInstallNow(deps: {
     deps.app.isQuitting = false;
     deps.onError(err as Error);
     return;
+  }
+  if (deps.forceExit) {
+    const forceExit = deps.forceExit;
+    schedule(forceExit, QUIT_GRACE_MS).unref?.();
   }
   // A call that returns without throwing is not proof the install is
   // happening. If it genuinely is, this process exits before the timer below

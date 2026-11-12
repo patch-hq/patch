@@ -17,6 +17,7 @@ import {
   emptyPersisted,
   initialUpdaterState,
   INSTALL_WATCHDOG_MS,
+  QUIT_GRACE_MS,
   parsePersisted,
   persistedOf,
   quitAndInstallNow,
@@ -918,4 +919,25 @@ test('the stall watchdog outlasts a slow healthy install, so it cannot cause a s
     },
   });
   assert.deepEqual(delays, [INSTALL_WATCHDOG_MS]);
+});
+
+test('quitAndInstallNow force-exits when the quit never happens, after the grace period', () => {
+  const timers: Array<{ fn: () => void; ms: number }> = [];
+  let exits = 0;
+  quitAndInstallNow({
+    app: { isQuitting: false },
+    autoUpdater: { quitAndInstall: () => undefined },
+    onError: () => undefined,
+    forceExit: () => exits++,
+    setTimer: (fn, ms) => {
+      timers.push({ fn, ms });
+      return {};
+    },
+  });
+  const grace = timers.find((t) => t.ms === QUIT_GRACE_MS);
+  assert.ok(grace, 'a grace timer is armed');
+  assert.ok(QUIT_GRACE_MS < INSTALL_WATCHDOG_MS);
+  assert.equal(exits, 0, 'not before the grace period ends');
+  grace.fn();
+  assert.equal(exits, 1);
 });
