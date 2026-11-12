@@ -1579,6 +1579,7 @@ export class WsHub {
       }
       case 'chat.permission_response':
       case 'chat.stop_request':
+      case 'chat.tool_cancel_request':
       case 'chat.unqueue_request':
       case 'chat.resume_now_request':
       case 'chat.promote_request':

@@ -5003,6 +5003,29 @@ button.nav-row {
   flex: none;
   color: var(--ink-3);
 }
+.tool-cancel {
+  flex: none;
+  font-size: var(--text-min);
+  color: var(--danger);
+  background: var(--danger-tint);
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.tool-cancelling {
+  flex: none;
+  font-size: var(--text-min);
+  color: var(--ink-3);
+}
+.tool-cancelled-chip {
+  flex: none;
+  margin-left: auto;
+  font-size: var(--text-min);
+  color: var(--danger);
+  background: var(--danger-tint);
+  border-radius: 999px;
+  padding: 2px 10px;
+}
 .tool-running-spinner {
   animation: background-task-spin 1.8s linear infinite;
 }
@@ -5519,6 +5542,12 @@ button.view-file-download {
 }
 .link-preview-status {
   color: var(--ink-3);
+}
+.link-summary-title {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 600;
+  color: var(--ink);
 }
 .link-summary-text {
   display: block;

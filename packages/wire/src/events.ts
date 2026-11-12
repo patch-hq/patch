@@ -3597,6 +3597,25 @@ export const ChatStopRequestEvent = z
   .strict();
 export type ChatStopRequestEvent = z.infer<typeof ChatStopRequestEvent>;
 
+/**
+ * Cancel ONE running Bash tool call without ending the turn. The host sends
+ * SIGINT to the processes that command started (never claude itself, never its
+ * MCP servers), so the call comes back to the agent as an error result and the
+ * turn carries on. `chat.stop_request` stays the way to end the whole turn.
+ *
+ * A host that predates this event drops the frame as an unknown type, so the
+ * button does nothing there and nothing else changes.
+ */
+export const ChatToolCancelRequestEvent = z
+  .object({
+    type: z.literal('chat.tool_cancel_request'),
+    chatId: z.string().min(1),
+    /** The `callId` of the running `chat.tool_call` to cancel. */
+    callId: z.string().min(1),
+  })
+  .strict();
+export type ChatToolCancelRequestEvent = z.infer<typeof ChatToolCancelRequestEvent>;
+
 export const ChatResumeRequestEvent = z
   .object({
     type: z.literal('chat.resume_request'),
@@ -9399,6 +9418,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   ChatPermissionResponseEvent,
   ChatSpawnRequestEvent,
   ChatStopRequestEvent,
+  ChatToolCancelRequestEvent,
   ChatUnqueueRequestEvent,
   ChatResumeNowRequestEvent,
   ChatPromoteRequestEvent,
@@ -9712,6 +9732,7 @@ export const EVENT_SCHEMAS = {
   'chat.permission_response': ChatPermissionResponseEvent,
   'chat.spawn_request': ChatSpawnRequestEvent,
   'chat.stop_request': ChatStopRequestEvent,
+  'chat.tool_cancel_request': ChatToolCancelRequestEvent,
   'chat.unqueue_request': ChatUnqueueRequestEvent,
   'chat.resume_now_request': ChatResumeNowRequestEvent,
   'chat.promote_request': ChatPromoteRequestEvent,

@@ -1427,7 +1427,7 @@ export const api = {
   // links). Fetched server-side because the target's CORS policy would
   // otherwise block the browser doing it directly.
   linkSummary: (url: string) =>
-    request<{ url: string; summary: string }>('/api/link-summary', {
+    request<{ url: string; title?: string; summary: string }>('/api/link-summary', {
       method: 'POST',
       body: { url },
     }),
