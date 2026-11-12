@@ -29,6 +29,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
+  appendFileSync,
   closeSync,
   existsSync,
   mkdirSync,
@@ -55,6 +56,7 @@ import {
   RUNNER_OUT,
   RUNNER_PROTOCOL,
   RUNNER_SOCKET,
+  CLAUDE_STDERR,
   type RunnerExit,
 } from './turnRunner.js';
 
@@ -96,6 +98,8 @@ export interface DurableTurnRequest {
 const TURN_META = 'turn.json';
 const CONSUMED = 'consumed.json';
 const RUNNER_LOG = 'runner.log';
+/** How much of claude's stderr a kept failure log carries. */
+const KEPT_STDERR_BYTES = 32 * 1024;
 /** The field each replayed/live line carries to `oneShotRun`, then loses. */
 export const OFFSET_FIELD = '__patchOffset';
 
@@ -212,7 +216,15 @@ export function keepRunnerLog(dir: string, reason: string): void {
   if (!existsSync(log)) return;
   const dest = join(dirname(dirname(dir)), 'turn-failures');
   mkdirSync(dest, { recursive: true });
-  copyFileSync(log, join(dest, `${Date.now()}-${basename(dir)}-${reason}.log`));
+  const kept = join(dest, `${Date.now()}-${basename(dir)}-${reason}.log`);
+  copyFileSync(log, kept);
+  const stderr = join(dir, CLAUDE_STDERR);
+  if (existsSync(stderr)) {
+    const text = readFileSync(stderr);
+    const tail = text.subarray(Math.max(0, text.length - KEPT_STDERR_BYTES)).toString('utf8');
+    if (tail.trim() !== '')
+      appendFileSync(kept, `--- claude stderr (last ${KEPT_STDERR_BYTES} bytes) ---\n${tail}`);
+  }
   const old = readdirSync(dest).sort().slice(0, -KEPT_LOGS);
   for (const f of old) rmSync(join(dest, f), { force: true });
 }
@@ -337,6 +349,24 @@ export class DurableTurn {
       : randomUUID();
     this.consumed = req.attach?.consumed ?? null;
     this.skipUntil = req.attach ? (req.attach.consumed ?? null) : null;
+  }
+
+  /**
+   * How claude went, for a turn whose stream closed with no result: its exit
+   * code and signal. Keeps the runner log (with claude's stderr) in
+   * turn-failures, since the turn directory is removed when the turn ends.
+   */
+  describeCut(): string {
+    keepRunnerLog(this.dir, 'cut');
+    const exit = readJson<RunnerExit>(join(this.dir, RUNNER_EXIT));
+    const code = exit?.code ?? this.proc?.exitCode ?? null;
+    const signal = exit?.signal ?? this.proc?.exitSignal ?? null;
+    return `claude exited code=${code} signal=${signal}`;
+  }
+
+  /** Log a warning about this turn to the host log. */
+  warn(fields: Record<string, unknown>, msg: string): void {
+    this.req.log.warn({ chatId: this.chatId, ...fields }, msg);
   }
 
   /** claude's pid, once the runner has started it. */
@@ -608,6 +638,7 @@ class RunnerProcess extends EventEmitter implements SpawnedProcess {
   readonly stdout: Readable;
   killed = false;
   exitCode: number | null = null;
+  exitSignal: string | null = null;
   finished = false;
   exited = false;
   private sock: Socket | undefined;
@@ -835,6 +866,7 @@ class RunnerProcess extends EventEmitter implements SpawnedProcess {
     this.finished = true;
     this.exited = true;
     this.exitCode = code;
+    this.exitSignal = signal;
     this.stdout.push(null);
     setImmediate(() => this.emit('exit', code, signal));
   }

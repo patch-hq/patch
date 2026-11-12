@@ -1,6 +1,7 @@
 // A stand-in for `claude` speaking just enough stream-json for the durable
 // turn tests: answers `initialize`, says "a1" on the prompt, then — once the
-// file `go` appears in its cwd — says "a2" and finishes with a result.
+// file `go` appears in its cwd — says "a2" and finishes with a result. If the
+// file `die` appears instead, it writes to stderr and exits with no result.
 import { existsSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
@@ -14,6 +15,11 @@ rl.on('line', (line) => {
     writeFileSync('prompted', '1');
     say({ type: 'assistant', text: 'a1' });
     const timer = setInterval(() => {
+      if (existsSync('die')) {
+        clearInterval(timer);
+        process.stderr.write('fake claude stderr marker\n', () => process.exit(0));
+        return;
+      }
       if (!existsSync('go')) return;
       clearInterval(timer);
       say({ type: 'assistant', text: 'a2' });
