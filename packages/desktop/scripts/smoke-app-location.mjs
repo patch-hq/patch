@@ -18,7 +18,8 @@
 // app's own output.
 
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 import { chromium } from 'playwright';
@@ -50,11 +51,20 @@ const app = spawn(join(bundle, 'Contents/MacOS/Patch'), [`--remote-debugging-por
 app.stdout.on('data', (d) => (output += d));
 app.stderr.on('data', (d) => (output += d));
 let exited = null;
+let browser = null;
 app.on('exit', (code, signal) => (exited = { code, signal }));
 
 function fail(message) {
   console.error(`[smoke-app-location] FAIL: ${message}`);
   console.error(`--- the app's output ---\n${output.slice(-6000)}`);
+  // What the app's windows were showing, and what its server said: a page that
+  // never reached Patch is otherwise a bare timeout.
+  const open = browser === null ? [] : browser.contexts().flatMap((c) => c.pages());
+  console.error(`--- windows ---\n${open.map((p) => p.url()).join('\n') || '(none)'}`);
+  const serverLog = join(homedir(), '.patch', 'logs', 'server.log');
+  console.error(
+    `--- ${serverLog} ---\n${existsSync(serverLog) ? readFileSync(serverLog, 'utf8').slice(-3000) : '(no such file)'}`,
+  );
   if (!exited) app.kill('SIGKILL');
   process.exit(1);
 }
@@ -83,7 +93,7 @@ function runningFrom(path) {
 await until('DevTools endpoint', 60_000, async () =>
   (await fetch(`http://127.0.0.1:${port}/json/version`)).ok ? true : null,
 );
-const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
 const pages = () => browser.contexts().flatMap((c) => c.pages());
 
 if (mode === 'move') {
