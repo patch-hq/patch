@@ -140,8 +140,9 @@ jobs:
       - name: Signal tracer
         run: |
           T=/sys/kernel/tracing
-          [ -d "$T/events/signal" ] || { sudo mount -t tracefs nodev "$T"; }
-          [ -d "$T/events/signal/signal_generate" ] || { echo "::error::no tracefs signal events"; exit 1; }
+          # tracefs is root-only (0700), so test through sudo, and only mount if it is not already.
+          mountpoint -q "$T" || sudo mount -t tracefs nodev "$T"
+          sudo test -d "$T/events/signal/signal_generate" || { echo "::error::no tracefs signal events"; exit 1; }
           echo 'sig == 9' | sudo tee "$T/events/signal/signal_generate/filter" >/dev/null
           echo 1 | sudo tee "$T/events/signal/signal_generate/enable" >/dev/null
           nohup sudo sh -c "cat $T/trace_pipe" > /tmp/sigtrace.log 2>&1 &
