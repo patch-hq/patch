@@ -263,6 +263,30 @@ describe('UDS /internal/notify', () => {
     }
   });
 
+  it('says delivered:false when the caller chat is snoozed', async () => {
+    const { daemon, jobs, folder, upstream } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.setSnoozed(chatId, Date.now() + 3_600_000);
+    const app = await buildControl({
+      localKey: LOCAL_KEY,
+      daemon,
+      jobs,
+      emitWire: (e) => upstream.push(e),
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/notify',
+        headers: AUTH,
+        payload: { message: 'log in', priority: 'normal', callerChatId: chatId },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ ok: true, delivered: false, reason: 'chat is snoozed' });
+    } finally {
+      await app.close();
+    }
+  });
+
   it('returns 404 for unknown caller', async () => {
     const { daemon, jobs } = setup();
     const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
