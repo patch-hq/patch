@@ -1596,6 +1596,64 @@ describe('C1 Control IPC: POST /internal/send-to', () => {
     }
   });
 
+  it('delivers once when a retry arrives while the first send is still in flight', async () => {
+    const { daemon, jobs, folder } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    const real = daemon.submitInput.bind(daemon);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const submit = vi.spyOn(daemon, 'submitInput').mockImplementation(async (a) => {
+      await gate;
+      return real(a);
+    });
+    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
+    try {
+      const send = () =>
+        app.inject({
+          method: 'POST',
+          url: '/internal/send-to',
+          headers: AUTH,
+          payload: { chatId, message: 'do X', callerChatId: 'mgr' },
+        });
+      const first = send();
+      await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+      const second = await send();
+      expect(second.json()).toMatchObject({ ok: true, duplicate: true });
+      release();
+      expect((await first).json().duplicate).toBeUndefined();
+      expect(submit).toHaveBeenCalledTimes(1);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('lets a retry through after a failed send releases its claim', async () => {
+    const { daemon, jobs, folder } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    const real = daemon.submitInput.bind(daemon);
+    const submit = vi
+      .spyOn(daemon, 'submitInput')
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockImplementation((a) => real(a));
+    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
+    try {
+      const send = () =>
+        app.inject({
+          method: 'POST',
+          url: '/internal/send-to',
+          headers: AUTH,
+          payload: { chatId, message: 'do X', callerChatId: 'mgr' },
+        });
+      expect((await send()).statusCode).toBe(500);
+      const retry = await send();
+      expect(retry.statusCode).toBe(200);
+      expect(retry.json().duplicate).toBeUndefined();
+      expect(submit).toHaveBeenCalledTimes(2);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('keeps a hidden target hidden when the caller is hidden automation', async () => {
     const { daemon, jobs, folder } = setup();
     const callerChatId = await daemon.spawnChat({ folder, hidden: true });

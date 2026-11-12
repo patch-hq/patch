@@ -2099,6 +2099,14 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       });
       return sendRateLimited(reply, `send_to:${callerChatId}`);
     }
+    // Claimed BEFORE the awaits: the retry this guard exists for arrives while
+    // the first call is still in flight. Released on any failure so a genuine
+    // retry after an error still goes through.
+    const dedupeClaimed = parsed.data.localId === undefined;
+    if (dedupeClaimed) recentSendTos.set(dedupeKey, Date.now());
+    const releaseClaim = () => {
+      if (dedupeClaimed) recentSendTos.delete(dedupeKey);
+    };
     try {
       // Armed before the message lands so the evaluator judges the very turn
       // this message starts. A chat that is not on this host throws
@@ -2137,7 +2145,6 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         durationMs: Date.now() - start,
         ok: true,
       });
-      recentSendTos.set(dedupeKey, Date.now());
       return { ok: true, queued: true };
     } catch (err) {
       const code = err instanceof ChatNotFoundError ? 'chat_not_found' : 'sdk_error';
@@ -2147,6 +2154,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       // error naming why it couldn't — never a silent 404 for a chat that
       // does exist, just not here.
       if (code === 'chat_not_found' && goal !== undefined) {
+        releaseClaim();
         toolLog({
           tool: 'patch_send_to',
           callerChatId,
@@ -2176,9 +2184,9 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
             durationMs: Date.now() - start,
             ok: true,
           });
-          recentSendTos.set(dedupeKey, Date.now());
           return { ok: true, queued: true };
         } catch (remoteErr) {
+          releaseClaim();
           const remoteCode = remoteErr instanceof RemoteRelayError ? remoteErr.code : 'sdk_error';
           toolLog({
             tool: 'patch_send_to',
@@ -2194,6 +2202,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
           });
         }
       }
+      releaseClaim();
       toolLog({
         tool: 'patch_send_to',
         callerChatId,
