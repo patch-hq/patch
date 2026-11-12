@@ -70,6 +70,14 @@ bundle is non-adhoc and passes `codesign --verify --deep --strict` before shippi
 - An update installs itself, and the install must actually quit. `update-downloaded` calls `installUpdate()` unconditionally — there is no "restart to install" prompt, because Patch deploys ~20x a day and the answer was always yes. That makes the `app.isQuitting` rule load-bearing rather than incidental: `quitAndInstall` closes every window and then quits, and the main window's `close` handler cancels any close it hasn't been told is a real quit, so without the flag ~20 prompts a day become ~20 silent app deaths on the old build. One wrapper (`quitAndInstallNow`, `updater.ts`) sets the flag, force-relaunches, and hands a refusal to the version panel.
 - Main→renderer "start" IPC must be readiness-gated (`sendWhenReady`). A freshly created window's `loadURL` is async; a synchronous `webContents.send` right after creation is dropped because the renderer hasn't registered its listeners. The voice-note overlay is lazily created, so the first ⌃Space press would open the overlay without starting recording. Sends defer to `did-finish-load` while loading.
 
+## Where the Mac app runs from
+
+`app-location.ts` holds the rules; `scripts/smoke-app-location.mjs` checks them on the notarised build in the release workflow.
+
+- The move offer is the first screen of the setup window (`setup.html#move`), not a native dialog, so the release smoke can click it over CDP. "Move" calls `app.moveToApplicationsFolder()`, which quits and relaunches the moved copy through Launch Services.
+- `app.setLoginItemSettings` on macOS 13+ registers `SMAppService.mainApp`, and Background Task Management keeps the bundle URL it was registered from. Registering again while the item is enabled does not repoint it, so an app moved after registering kept opening the old path (seen: `~/Downloads/Patch.app`). The shell records the path in `login-item.json` beside its data and unregisters then registers when the running bundle differs. `sudo sfltool dumpbtm` shows what macOS holds.
+- A quiet instance (the first-run e2e) neither asks to move nor touches login items, which is why the move and login-item checks live in the release smoke on a disposable runner.
+
 ## Changing the app id breaks every installed Mac
 
 ShipIt unpacks an update and looks for a bundle whose identifier matches the running

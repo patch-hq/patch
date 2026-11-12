@@ -142,7 +142,9 @@ Packaging invariants that must hold:
 
 #### Desktop first run
 
-No server address is built into the app. A launch with no remembered connection opens a short setup, one question per step, each with one obvious primary action. Every answer is stored where Settings stores it and can be changed there later; nothing is kept in a store of the setup's own.
+No server address is built into the app. A launch with no remembered connection opens a short setup, one question per step, each with one obvious primary action.
+
+On a Mac, a first run opened from anywhere but Applications (Downloads, the disk image, a quarantined download macOS runs from a temporary copy) first asks "Move Patch to Applications?" on the same window, with Move and Not now. Move puts the app in /Applications, quits, and opens the moved copy, which goes on to the setup; a move that fails says why and the question stands. Not now goes on to the setup from where the app is. Every answer is stored where Settings stores it and can be changed there later; nothing is kept in a store of the setup's own.
 
 1. Where your agents run: "This computer" or "My own server". This step is a window of the shell's own, because there is no server to load anything from until it is answered. The answer is remembered (`connection.json` in the app's data directory, 0600, with the app's credential on that server) and not asked again; App menu → Switch Server… forgets it and asks on the next launch. Closing the window unanswered quits. A step that fails says why on the same window, and the question is asked again.
 2. Connect an AI: Claude, and ChatGPT or an OpenAI API key (`10-auth.md` § Signing in to Claude from a surface, § OpenAI accounts). Continue is enabled once any account is connected; the step can be skipped. While a host is installing Claude Code (`02-host.md` § Agent backends) the step says so, and a failed install shows the installer's own reason.
@@ -163,7 +165,7 @@ The page the shell loads receives the credential in the URL fragment (`/app/#cre
 When this computer runs Patch, the agents and the phone's connection depend on the app, not on its window.
 
 - Closing the window leaves the app running in the menu bar (the tray, off macOS), with its server and host.
-- Open at login, on by default. Opened at login, the app starts in the menu bar with no window. On Linux this is a desktop autostart entry for the AppImage; a run not started from its AppImage has no file to start at login, so the choice is not offered there.
+- Open at login, on by default. Opened at login, the app starts in the menu bar with no window. On Linux this is a desktop autostart entry for the AppImage; a run not started from its AppImage has no file to start at login, so the choice is not offered there. On a Mac the login item opens the app from where it runs: macOS records the path an item was registered from, so when the app has moved since, the item is removed and registered again from the new place on the next launch. A Mac app running from its disk image or a quarantined download has no path that lasts until the next login, so the choice is not offered there either.
 - Keep this computer awake while plugged in, on by default. While on mains power the system is kept from sleeping so the phone can reach it; the display still sleeps. On battery nothing is held.
 - Both are offered in the setup's Keep running step, in Settings → Hosts → Keep running, and as checkboxes in the tray menu, and all three show the same state.
 - Quit Patch in the tray menu asks first, saying that agents on this computer stop and the phone cannot reach it until Patch is opened again. Quitting stops the server and host and releases the awake hold.

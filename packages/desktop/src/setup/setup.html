@@ -11,6 +11,7 @@
       The first setup step (spec/05 § Desktop first run): where agents run. It is
       the shell's own page because there is no server to load anything from
       until it is answered. The steps after it are the app's own welcome route.
+      Opened as setup.html#move, it first asks to move the app to Applications.
       Same colours and type as the app, so the hand-over is seamless.
     -->
     <style>
@@ -197,6 +198,13 @@
   </head>
   <body>
     <main>
+      <div id="move" hidden data-testid="move">
+        <h1>Move Patch to Applications?</h1>
+        <div class="row" style="margin-top: 20px">
+          <button type="button" class="primary" id="move-yes" data-testid="move-yes">Move</button>
+          <button type="button" class="ghost" id="move-no" data-testid="move-no">Not now</button>
+        </div>
+      </div>
       <div id="choose">
         <h1>Where should your agents run?</h1>
         <div class="choices" style="margin-top: 20px">
@@ -230,6 +238,7 @@
     </main>
     <script>
       const $ = (id) => document.getElementById(id);
+      const move = $('move');
       const choose = $('choose');
       const join = $('join');
       const status = $('status');
@@ -253,6 +262,23 @@
         busy(true);
         window.patchSetup.choose(choice);
       }
+
+      if (location.hash === '#move') {
+        choose.hidden = true;
+        move.hidden = false;
+      }
+      $('move-yes').addEventListener('click', () => {
+        error.hidden = true;
+        busy(true);
+        say('Moving…');
+        window.patchSetup.move(true);
+      });
+      $('move-no').addEventListener('click', () => {
+        error.hidden = true;
+        move.hidden = true;
+        choose.hidden = false;
+        window.patchSetup.move(false);
+      });
 
       $('local').addEventListener('click', () => pick({ kind: 'local' }));
       $('remote').addEventListener('click', () => {
