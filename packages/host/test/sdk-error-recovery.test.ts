@@ -12,7 +12,7 @@ import { mkdtempSync, mkdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
-import type { WireEvent } from '@patch/wire';
+import { SNOOZE_UNTIL_COMPLETE, type WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { TurnFailedError, type SdkBackend, type SdkEnvelope } from '../src/sdkBackend.js';
@@ -173,6 +173,50 @@ describe('a transient SDK error is retried, not dropped', () => {
       prev = e.activity;
     }
     expect(edges).toEqual([true, true, true, false]);
+    daemon.shutdown();
+  });
+});
+
+describe('an "until complete" snooze waits out the retry ladder', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('is not ended by a transient error the ladder recovers from', async () => {
+    const { daemon, folder } = makeHost(
+      throwingOnce('socket hang up', [
+        { type: 'assistant', content: 'ok' },
+        { type: 'result', sessionId: 's2' },
+      ] as SdkEnvelope[]),
+      'snz-recover',
+    );
+    const chatId = await daemon.spawnChat({ folder, prompt: 'flaky' });
+    await daemon.setSnoozed(chatId, SNOOZE_UNTIL_COMPLETE);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(daemon.chatState.get(chatId)?.activity).toBe('errored');
+    expect(daemon.chatState.get(chatId)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
+
+    await vi.advanceTimersByTimeAsync(10_500);
+    expect(daemon.chatState.get(chatId)?.activity).toBe('idle');
+    expect(daemon.chatState.get(chatId)?.snoozedUntil).toBe(null);
+    const last = daemon.chatState.get(chatId)!.snoozeRecords.at(-1)!;
+    expect(last.outcome.kind).toBe('finished');
+    daemon.shutdown();
+  });
+
+  it('ends with the error once the ladder is exhausted', async () => {
+    const { backend } = alwaysThrows('ECONNRESET');
+    const { daemon, folder } = makeHost(backend, 'snz-exhaust');
+    const chatId = await daemon.spawnChat({ folder, prompt: 'never works' });
+    await daemon.setSnoozed(chatId, SNOOZE_UNTIL_COMPLETE);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(daemon.chatState.get(chatId)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
+    await vi.advanceTimersByTimeAsync(400_000);
+    expect(daemon.chatState.get(chatId)?.snoozedUntil).toBe(null);
+    expect(daemon.chatState.get(chatId)!.snoozeRecords.at(-1)!.outcome.kind).toBe('errored');
     daemon.shutdown();
   });
 });

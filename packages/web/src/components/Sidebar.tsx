@@ -2623,7 +2623,7 @@ const ChatRowView = memo(function ChatRowView({
         {snoozed ? (
           <span className="row-when" data-testid={`row-when-${row.chatId}`}>
             <span className="when-time mono" data-testid={`snooze-when-${row.chatId}`}>
-              {row.snoozedUntil === null ? '' : formatWakeTime(row.snoozedUntil)}
+              {row.snoozedUntil === null ? '' : formatWakeTime(row.snoozedUntil, row.goal !== null)}
             </span>
             <button
               type="button"

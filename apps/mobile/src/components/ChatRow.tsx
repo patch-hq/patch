@@ -351,7 +351,7 @@ export function ChatRowItem({ row, to, matchLine, onOpened }: Props): React.Reac
         {row.snoozedUntil !== null && isSnoozed(row) ? (
           <View
             testID={`wake-time-${row.chatId}`}
-            accessibilityLabel={`Snoozed until ${formatWakeTime(row.snoozedUntil)}`}
+            accessibilityLabel={`Snoozed until ${formatWakeTime(row.snoozedUntil, row.goal !== null)}`}
             style={{ flexDirection: 'row', alignItems: 'center', marginLeft: space.sm }}
           >
             <AlarmClock size={12} color={colors.ink3} />
