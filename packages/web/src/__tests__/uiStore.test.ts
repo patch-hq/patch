@@ -328,6 +328,23 @@ describe('uiStore browse requests', () => {
         .findTab({ kind: 'file', chatId: 'chat-a', path: '.claude/skills/plant.md' }),
     ).not.toBeNull();
   });
+
+  it('openFileInBrowser with placement tab keeps the tab that was active', () => {
+    const layout = useLayoutStore.getState();
+    layout.openTab({ kind: 'file', chatId: 'chat-a', path: 'first.md' });
+    useUiStore
+      .getState()
+      .openFileInBrowser(
+        { chatId: 'chat-a', path: 'second.md', name: 'second.md' },
+        { placement: 'tab' },
+      );
+    expect(
+      useLayoutStore.getState().findTab({ kind: 'file', chatId: 'chat-a', path: 'first.md' }),
+    ).not.toBeNull();
+    expect(
+      useLayoutStore.getState().findTab({ kind: 'file', chatId: 'chat-a', path: 'second.md' }),
+    ).not.toBeNull();
+  });
 });
 
 describe('uiStore error toast dedupe + dismiss', () => {
