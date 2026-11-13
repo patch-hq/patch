@@ -1212,8 +1212,7 @@ export function Composer({
   // error rather than silently doing nothing.
   const pickImage = async (): Promise<void> => {
     try {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) throw new Error('photo library permission denied');
+      if (!(await ensurePermission('photos'))) throw new Error('photo library permission denied');
       const res = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         quality: 1,
