@@ -1,6 +1,6 @@
 # Patch — Overview
 
-Patch is a thin coordination layer over LLMs. It adds multi-surface access (terminal, web, phone, standalone voice device), external triggers (cron, webhooks, Todoist), voice (host-hosted Whisper + Kokoro across all surfaces), and cross-chat management — without altering the agent's native UX.
+Patch runs and steers coding agents (Claude Code and Codex) from anywhere. It adds multi-surface access (terminal, web, phone, standalone voice device), external triggers (cron, webhooks, Todoist), voice (host-hosted Whisper + Kokoro across all surfaces), and cross-chat management. It also gives agents their own tools for working with Patch: goals, background sub-agents, watches, wakes, pads, notifications and messaging other chats.
 
 One server, and one host per host. A host is any host whose files
 and commands the agent works with: an always-on box, a laptop, a work host.
@@ -17,8 +17,9 @@ exists to avoid.
 
 ## Principles
 
-- Preserve the agent's interface. No second permission system, no wrapped prompts. Pass-through by default.
-- Thin layer. Add only what's missing: remote surfaces, triggers, voice routing, cross-chat tools, notifications. Everything else is the agent as-is.
+- Preserve the agent's own interface. The agent's native conversation, permissions and prompts are not replaced or rewrapped; there is no second permission system. Pass-through by default.
+- Extend the agent through tools, not by altering it. Patch adds what the agent lacks (remote surfaces, triggers, voice routing, and a set of Patch tools for goals, sub-agents, watches, wakes, pads, notifications and cross-chat messaging) and exposes them as tools the agent chooses to call.
+- Agent-neutral. Claude Code and Codex are both first-class; Patch's own features must not depend on one agent's internals.
 - Copy from Happy where it works. Wire protocol, voice architecture, QR-code auth linking, host model.
 - Server routes, hosts execute. Surfaces are dumb clients.
 - No fallbacks. Failures surface immediately; we don't paper over them (portfolio repo convention).
