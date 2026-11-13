@@ -4006,6 +4006,13 @@ function ToolCall({
     const view = viewFilePayload(result.toolResult);
     if (view) return <ViewFileCard view={view} chatId={chatId} />;
   }
+  // `link_file` points at a file on the host's disk: a card with its path and
+  // open / reveal buttons, nothing uploaded. Same rule — an error result falls
+  // through to the ordinary row.
+  if (entry.tool && toolLabel(entry.tool) === 'link_file' && result) {
+    const link = linkFilePayload(result.toolResult);
+    if (link) return <LinkFileCard link={link} chatId={chatId} />;
+  }
 
   // One-line summary naming what the call is doing (spec/14 ## Main chat
   // panel) — the same derivation a collapsed run labels its calls with, so a
@@ -4608,6 +4615,135 @@ function asViewFile(value: unknown): ViewFileView | null {
   const previewError = typeof v['previewError'] === 'string' ? v['previewError'] : undefined;
   const absPath = typeof v['absPath'] === 'string' ? v['absPath'] : undefined;
   return { kind, url, name, width, height, size, previewUrl, previewError, absPath };
+}
+
+/** What `link_file` hands back: a place on the host's disk, nothing uploaded. */
+interface LinkFileView {
+  name: string;
+  absPath: string;
+  isDirectory: boolean;
+  size?: number | undefined;
+}
+
+/** Unwrap a `link_file` ack — same three result shapes as `viewFilePayload`. */
+function linkFilePayload(result: unknown): LinkFileView | null {
+  const asLink = (value: unknown): LinkFileView | null => {
+    if (typeof value !== 'object' || value === null) return null;
+    const v = value as Record<string, unknown>;
+    if (v['kind'] !== 'link') return null;
+    const name = v['name'];
+    const absPath = v['absPath'];
+    if (typeof name !== 'string' || name.length === 0) return null;
+    if (typeof absPath !== 'string' || absPath.length === 0) return null;
+    return {
+      name,
+      absPath,
+      isDirectory: v['isDirectory'] === true,
+      size: typeof v['size'] === 'number' ? v['size'] : undefined,
+    };
+  };
+  const direct = asLink(result);
+  if (direct) return direct;
+  if (typeof result !== 'object' || result === null) return null;
+  const content = Array.isArray(result) ? result : (result as Record<string, unknown>)['content'];
+  if (!Array.isArray(content)) return null;
+  for (const block of content) {
+    if (typeof block !== 'object' || block === null) continue;
+    const text = (block as Record<string, unknown>)['text'];
+    if (typeof text !== 'string') continue;
+    try {
+      const parsed = asLink(JSON.parse(text));
+      if (parsed) return parsed;
+    } catch {
+      // Not this block — a `link_file` ack is always valid JSON.
+    }
+  }
+  return null;
+}
+
+/**
+ * A `link_file` card: the file's name and where it is, with open / show-in-folder
+ * buttons. They act on the disk the file is on, so they are offered only when
+ * this Mac's own host owns the chat; anywhere else the card is the path alone.
+ */
+function LinkFileCard({ link, chatId }: { link: LinkFileView; chatId: string }): JSX.Element {
+  const [openError, setOpenError] = useState<string | null>(null);
+  const chatHostId = useChatStore((st) => st.chats[chatId]?.hostId ?? '');
+  const bridge = getDesktopBridge();
+  const localHostBridge = bridge?.localHost;
+  const openPathBridge = bridge?.openPath;
+  const [localHostId, setLocalHostId] = useState<string | null>(null);
+  useEffect(() => {
+    if (localHostBridge === undefined || openPathBridge === undefined) return;
+    let live = true;
+    localHostBridge.status().then(
+      (st) => {
+        if (live) setLocalHostId(st.hostId);
+      },
+      (err: unknown) => console.error('local host status failed', err),
+    );
+    return () => {
+      live = false;
+    };
+  }, [localHostBridge, openPathBridge]);
+  const canOpen =
+    openPathBridge !== undefined && localHostId !== null && localHostId === chatHostId;
+  const open = (mode: 'file' | 'folder'): void => {
+    setOpenError(null);
+    (openPathBridge as NonNullable<typeof openPathBridge>)(link.absPath, mode).catch(
+      (err: unknown) => setOpenError(err instanceof Error ? err.message : String(err)),
+    );
+  };
+  const Icon = link.isDirectory ? FolderOpen : FileText;
+  return (
+    <div className="view-file view-file-file" data-testid="link-file" data-kind="link">
+      <div className="view-file-bar">
+        <Icon size={14} aria-hidden />
+        <span className="view-file-name" data-testid="link-file-name">
+          {link.name}
+        </span>
+        {link.size !== undefined ? (
+          <span className="view-file-size" data-testid="link-file-size">
+            {formatBytes(link.size)}
+          </span>
+        ) : null}
+        {canOpen ? (
+          <>
+            <button
+              type="button"
+              className="view-file-download"
+              data-testid="link-file-open"
+              aria-label={`Open ${link.name}`}
+              title={link.isDirectory ? 'Open folder' : 'Open file'}
+              onClick={() => open('file')}
+            >
+              <ExternalLink size={14} aria-hidden />
+            </button>
+            {link.isDirectory ? null : (
+              <button
+                type="button"
+                className="view-file-download"
+                data-testid="link-file-reveal"
+                aria-label={`Show ${link.name} in its folder`}
+                title="Show in folder"
+                onClick={() => open('folder')}
+              >
+                <FolderOpen size={14} aria-hidden />
+              </button>
+            )}
+          </>
+        ) : null}
+      </div>
+      <div className="view-file-path" data-testid="link-file-path">
+        {link.absPath}
+      </div>
+      {openError !== null ? (
+        <div className="view-file-error" data-testid="link-file-open-error" role="alert">
+          {openError}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 /**
@@ -5421,6 +5557,7 @@ function isViewFileCall(entry: ChatEventEntry): boolean {
     entry.kind === 'tool_call' &&
     !!entry.tool &&
     (toolLabel(entry.tool) === 'view_file' ||
+      toolLabel(entry.tool) === 'link_file' ||
       toolLabel(entry.tool) === 'patch_notify' ||
       toolLabel(entry.tool) === 'patch_agent' ||
       toolLabel(entry.tool) === 'patch_delegate' ||

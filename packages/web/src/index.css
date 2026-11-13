@@ -5280,6 +5280,13 @@ button.view-file-download {
   background: none;
   cursor: pointer;
 }
+.view-file-path {
+  padding: 0 10px 8px;
+  color: var(--ink-3);
+  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+  font-size: var(--text-min);
+  overflow-wrap: anywhere;
+}
 .view-file-error {
   padding: 4px 10px 8px;
   color: var(--ink-3);

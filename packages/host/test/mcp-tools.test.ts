@@ -145,6 +145,7 @@ describe('patch-tools MCP server — full client round-trip', () => {
         'patch_watch_list',
         'patch_watch_output',
         'patch_watch_stop',
+        'link_file',
         'view_file',
       ].sort(),
     );

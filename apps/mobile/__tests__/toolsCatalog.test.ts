@@ -29,6 +29,7 @@ const EXPECTED_PATCH_TOOLS = [
   'patch_ask_human',
   'patch_report',
   'patch_artifact',
+  'link_file',
   'view_file',
   'patch_call',
   'patch_browser_open',
