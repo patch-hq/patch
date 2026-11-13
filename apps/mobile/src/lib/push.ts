@@ -18,10 +18,9 @@ import { useChatStore } from '../stores/chatStore';
 import { useUiStore } from '../stores/uiStore';
 import { ensurePermission } from './permissionGate';
 import { showIncomingCall } from './callkeep';
-import { parseActionsPayload } from './notificationActions';
 import {
   initNotificationCategories,
-  registerDynamicCategoryIfNeeded,
+  presentWithDynamicCategory,
   registerNotificationResponseListener,
 } from './notificationResponses';
 
@@ -168,11 +167,13 @@ async function register(): Promise<void> {
       const data = n.request.content.data ?? {};
       // spec/09 § Notification actions — a question's own option text or
       // patch_notify's quickReplies can't be pre-registered (the labels aren't
-      // known ahead of time), so rebuild the one dynamic category fresh,
-      // right as the push arrives. Best-effort: this is a no-op for the common
-      // Reply/Approve-Deny case, which the static categories above already
-      // cover regardless of timing.
-      void registerDynamicCategoryIfNeeded(parseActionsPayload(data['actions']));
+      // known ahead of time). The OS has already drawn this push against the
+      // dynamic category as it stood, so rebuild the category and replace the
+      // notification with a copy drawn against the right buttons. A failure is
+      // shown, not swallowed: the notification would otherwise be button-less.
+      presentWithDynamicCategory(n).catch((e: Error) => {
+        useUiStore.getState().pushError(`notification buttons failed: ${e.message}`);
+      });
       if (data['kind'] === 'call') {
         const callId = String(data['callId'] ?? '');
         const chatId = String(data['chatId'] ?? '');

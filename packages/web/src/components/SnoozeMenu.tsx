@@ -54,7 +54,11 @@ export function SnoozeMenu({
         role={label ? 'menuitem' : undefined}
         data-testid="action-snooze"
         aria-label={snoozed ? 'Unsnooze' : 'Snooze chat'}
-        title={snoozed ? `Snoozed until ${formatWakeTime(row.snoozedUntil!)}` : 'Snooze'}
+        title={
+          snoozed
+            ? `Snoozed until ${formatWakeTime(row.snoozedUntil!, row.goal !== null)}`
+            : 'Snooze'
+        }
         onClick={() =>
           snoozed ? void unsnooze() : openSnoozeSheet({ kind: 'chat', chatId: row.chatId })
         }

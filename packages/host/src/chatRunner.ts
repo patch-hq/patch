@@ -3459,9 +3459,14 @@ export class Daemon {
   ): void {
     const owned = metas.filter((m) => this.chatState.has(m.chatId));
     this.hideArchivedWithLiveWork(owned);
+    // Interrupted turns first: re-sending (or reattaching) one marks the chat
+    // busy synchronously, so an overdue wake loaded after it is held until that
+    // turn ends. Loaded first, the wake's own turn started ahead of the resend,
+    // took the reattach marker for itself and killed the surviving runner
+    // (2026-11-12, Mac restart).
+    this.resumeInterruptedTurns(owned, lastTurnOutcomeByChatId, lastTurnLocalIdByChatId);
     this.wake.loadAll();
     this.watch.loadAll();
-    this.resumeInterruptedTurns(owned, lastTurnOutcomeByChatId, lastTurnLocalIdByChatId);
     this.flagUnresumedInterruptions(owned);
     this.settleUntilCompleteSnoozes(owned);
     this.resumeDeferredGoalEvaluations(owned);
@@ -4791,12 +4796,16 @@ export class Daemon {
   private rearmDelegate(chatId: string): void {
     const state = this.chatState.get(chatId);
     if (state?.subagent?.outcome === undefined) return;
-    const { outcome: _o, finishedAt: _f, ...rest } = state.subagent;
+    const { outcome: _o, finishedAt: _f, ...base } = state.subagent;
+    const rest = { ...base, runStartedAt: this.opts.now(), followUp: true };
     state.subagent = rest;
     this.opts.metaStore.update(chatId, (m) => {
       if (!m.subagent) return m;
       const { outcome: _mo, finishedAt: _mf, ...mrest } = m.subagent;
-      return { ...m, subagent: mrest };
+      return {
+        ...m,
+        subagent: { ...mrest, runStartedAt: rest.runStartedAt, followUp: true },
+      };
     });
     this.emitDelegateUpdate(rest.parentChatId, chatId, rest.label, 'running');
   }
@@ -5007,6 +5016,21 @@ export class Daemon {
     });
   }
 
+  /** When the subagent's current run began, and whether it is a follow-up wake. Live statuses only. */
+  private delegateRunFields(
+    delegateId: string,
+    status: DelegateStatus,
+  ): { runStartedAt?: number; followUp?: boolean } {
+    if (status !== 'running' && status !== 'awaiting-permission') return {};
+    const sub =
+      this.chatState.get(delegateId)?.subagent ?? this.opts.metaStore.read(delegateId)?.subagent;
+    const startedAt = sub?.runStartedAt ?? this.opts.metaStore.read(delegateId)?.createdAt;
+    return {
+      ...(startedAt !== undefined ? { runStartedAt: startedAt } : {}),
+      ...(sub?.followUp ? { followUp: true } : {}),
+    };
+  }
+
   /** Live status ping for the parent's `patch_delegate` tool row (spec/14 §
    *  Main chat panel — Delegate tool row). Never withheld by `private emit()`
    *  — it is emitted under the PARENT's own chatId, which is never itself a
@@ -5027,6 +5051,7 @@ export class Daemon {
       delegateId,
       label,
       status,
+      ...this.delegateRunFields(delegateId, status),
       ...(outOfCredit ? { outOfCredit } : {}),
       seq: this.bumpSeq(parentChatId),
     };
@@ -6020,6 +6045,7 @@ export class Daemon {
     return (
       this.aggregateActivity(chatId) === 'running' ||
       this.failoverRerunPending.has(chatId) ||
+      state?.turnRetrying === true ||
       (state?.goal ?? null) !== null ||
       (wake !== null && wake.every === undefined) ||
       this.hasRunningDelegates(chatId)
@@ -6037,8 +6063,12 @@ export class Daemon {
     const state = this.chatState.get(chatId);
     if (!state || state.snoozedUntil !== SNOOZE_UNTIL_COMPLETE) return;
     const activity = this.aggregateActivity(chatId);
+    // An errored turn the retry ladder is about to run again is not waiting on
+    // a person: only an error the ladder has given up on is.
     const needsPerson =
-      activity === 'awaiting-permission' || activity === 'errored' || this.isAskingQuestion(state);
+      activity === 'awaiting-permission' ||
+      (activity === 'errored' && !state.turnRetrying) ||
+      this.isAskingQuestion(state);
     if (!needsPerson && this.hasWorkToComplete(chatId)) return;
     this.wakeFromSnooze(chatId);
   }
@@ -6515,6 +6545,7 @@ export class Daemon {
         delegateId: d.id,
         label: d.label,
         status: d.status,
+        ...this.delegateRunFields(d.id, d.status),
         seq: lastSeq,
       });
     }

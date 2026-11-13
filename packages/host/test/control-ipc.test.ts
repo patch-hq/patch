@@ -2274,34 +2274,6 @@ describe('C1 Control IPC: GET /internal/chats — 503 with no host', () => {
   });
 });
 
-describe('C1 Control IPC: GET /internal/devices', () => {
-  it('503s when not configured; 200s when wired', async () => {
-    const { daemon, jobs } = setup();
-    const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });
-    try {
-      const res = await app.inject({ method: 'GET', url: '/internal/devices', headers: AUTH });
-      expect(res.statusCode).toBe(503);
-    } finally {
-      await app.close();
-    }
-    const app2 = await buildControl({
-      localKey: LOCAL_KEY,
-      daemon,
-      jobs,
-      listDevices: () => [
-        { deviceId: 'd1', name: 'D1', online: true, muted: false, lastUsedAt: 1 },
-      ],
-    });
-    try {
-      const res2 = await app2.inject({ method: 'GET', url: '/internal/devices', headers: AUTH });
-      expect(res2.statusCode).toBe(200);
-      expect(res2.json().devices).toHaveLength(1);
-    } finally {
-      await app2.close();
-    }
-  });
-});
-
 describe('C1 Control IPC: POST /internal/stop/:id', () => {
   it('503s with no host; 400s a zod violation', async () => {
     const app = await buildControl({ localKey: LOCAL_KEY });
@@ -2626,48 +2598,6 @@ describe('C1 Control IPC: POST /internal/notify — remaining branches', () => {
       await app.close();
     }
   });
-
-  it('a speakers-channel notify WITH speakers deps wired runs the cascade', async () => {
-    const { daemon, jobs, folder } = setup();
-    const chatId = await daemon.spawnChat({ folder });
-    const sent: string[] = [];
-    const app = await buildControl({
-      localKey: LOCAL_KEY,
-      daemon,
-      jobs,
-      speakers: {
-        presence: {
-          enumerate: () => [
-            { deviceId: 'kitchen', online: true, muted: false, lastUsedAt: Date.now() },
-          ],
-          isOnline: () => true,
-          isMuted: () => false,
-          send: (id) => {
-            sent.push(id);
-            return true;
-          },
-        },
-        pushFallback: () => undefined,
-      },
-    });
-    try {
-      const res = await app.inject({
-        method: 'POST',
-        url: '/internal/notify',
-        headers: AUTH,
-        payload: {
-          channel: 'speakers',
-          message: 'ping',
-          callerChatId: chatId,
-          deviceId: 'kitchen',
-        },
-      });
-      expect(res.statusCode).toBe(200);
-      expect(sent).toEqual(['kitchen']);
-    } finally {
-      await app.close();
-    }
-  });
 });
 
 describe('C1 Control IPC: POST /internal/call', () => {
@@ -2737,28 +2667,15 @@ describe('C1 Control IPC: POST /internal/call', () => {
     }
   });
 
-  it('emits a message field only when one was given; runs the speakers cascade conversationally', async () => {
+  it('emits a message field only when one was given', async () => {
     const { daemon, jobs, folder } = setup();
     const chatId = await daemon.spawnChat({ folder });
     const upstream: WireEvent[] = [];
-    const sent: { id: string; frame: Record<string, unknown> }[] = [];
     const app = await buildControl({
       localKey: LOCAL_KEY,
       daemon,
       jobs,
       emitWire: (e) => upstream.push(e),
-      speakers: {
-        presence: {
-          enumerate: () => [{ deviceId: 'd1', online: true, muted: false, lastUsedAt: Date.now() }],
-          isOnline: () => true,
-          isMuted: () => false,
-          send: (id, frame) => {
-            sent.push({ id, frame });
-            return true;
-          },
-        },
-        pushFallback: () => undefined,
-      },
     });
     try {
       const noMessage = await app.inject({
@@ -2770,7 +2687,6 @@ describe('C1 Control IPC: POST /internal/call', () => {
       expect(noMessage.statusCode).toBe(200);
       const evNoMsg = upstream.find((e) => e.type === 'patch.call');
       expect(evNoMsg && 'message' in evNoMsg ? evNoMsg.message : undefined).toBeUndefined();
-      expect(sent[0]?.frame).toMatchObject({ conversational: true });
 
       upstream.length = 0;
       const withMessage = await app.inject({
@@ -3804,82 +3720,6 @@ describe('GET /internal/history/:id — fromSeq spread branch', () => {
   });
 });
 
-describe('POST /internal/notify — speakers cascade deviceId spread branch', () => {
-  it('runs the cascade with NO explicit deviceId (falls to most-recently-active)', async () => {
-    const { daemon, jobs, folder } = setup();
-    const chatId = await daemon.spawnChat({ folder });
-    const sent: string[] = [];
-    const app = await buildControl({
-      localKey: LOCAL_KEY,
-      daemon,
-      jobs,
-      speakers: {
-        presence: {
-          enumerate: () => [
-            { deviceId: 'only-device', online: true, muted: false, lastUsedAt: Date.now() },
-          ],
-          isOnline: () => true,
-          isMuted: () => false,
-          send: (id) => {
-            sent.push(id);
-            return true;
-          },
-        },
-        pushFallback: () => undefined,
-      },
-    });
-    try {
-      const res = await app.inject({
-        method: 'POST',
-        url: '/internal/notify',
-        headers: AUTH,
-        payload: { channel: 'speakers', message: 'ping', callerChatId: chatId },
-      });
-      expect(res.statusCode).toBe(200);
-      expect(sent).toEqual(['only-device']);
-    } finally {
-      await app.close();
-    }
-  });
-});
-
-describe('POST /internal/call — deviceId spread branch', () => {
-  it('passes an explicit deviceId through to the cascade input', async () => {
-    const { daemon, jobs, folder } = setup();
-    const chatId = await daemon.spawnChat({ folder });
-    const seenDeviceIds: (string | undefined)[] = [];
-    const app = await buildControl({
-      localKey: LOCAL_KEY,
-      daemon,
-      jobs,
-      speakers: {
-        presence: {
-          enumerate: () => [{ deviceId: 'd1', online: true, muted: false, lastUsedAt: Date.now() }],
-          isOnline: () => true,
-          isMuted: () => false,
-          send: (id) => {
-            seenDeviceIds.push(id);
-            return true;
-          },
-        },
-        pushFallback: () => undefined,
-      },
-    });
-    try {
-      const res = await app.inject({
-        method: 'POST',
-        url: '/internal/call',
-        headers: AUTH,
-        payload: { callerChatId: chatId, deviceId: 'd1' },
-      });
-      expect(res.statusCode).toBe(200);
-      expect(seenDeviceIds).toEqual(['d1']);
-    } finally {
-      await app.close();
-    }
-  });
-});
-
 describe('GET /internal/jobs — plain success path', () => {
   it('returns { jobs } on a successful list()', async () => {
     const { daemon } = setup();
@@ -3968,7 +3808,6 @@ describe('host-scoped control endpoints (spec/02 § Control IPC)', () => {
     ['POST', '/components/install'],
     ['POST', '/components/remove'],
     ['POST', '/update'],
-    ['POST', '/pair-device'],
   ];
 
   it('every spec-named host endpoint exists (none 404s)', async () => {

@@ -67,7 +67,7 @@ patch_speak({
 })
 ```
 
-It fills the room, anyone in it hears, and nothing is left behind to read later. `deviceId` names a speaker; omitted, the host runs the cascade in `### speakers`.
+It fills the room, anyone in it hears, and nothing is left behind to read later. `deviceId` names a speaker; omitted, the server picks one as in `### speakers`.
 
 `deepLink` is a URI for an installed app — its own custom scheme (e.g. `citymapper://directions?...`) or an `https://` link the OS routes to that app — that the notification should open instead of the source chat. Only a delivery that lands as a push acts on it (see `### push` below); a desktop toast or a speaker ignores it. Every notify's tool-call record carries whatever `deepLink` was given, so the chat transcript shows the same tappable link that fired (`04-chats-and-folders.md` § tool-call rendering, `14-design-web.md` § Main chat panel, `15-design-mobile.md` § Chat detail).
 
@@ -173,7 +173,7 @@ A `push` or `desktop` notification carries inline actions so it can be acted on 
 
 Buttons that answer with a fixed text (quick replies, a question's options) open the app as they send, because Android only hands the tap to the app's code while that code is running — with the app killed, a button that did not open it would do nothing. Reply and Deny send without opening it.
 
-Tapping the notification's body (rather than one of these actions) still opens the source chat, or follows a `deepLink`, exactly as without actions.
+Button text that is itself dynamic (quick replies, a question's options) is only known once the push arrives, and the OS draws the push before the app can set it. So when the app receives such a push it rebuilds the category and replaces the notification with a local copy drawn against the right buttons. With the app's code not running at all (killed) there is no one to do this, and that notification shows without them; tapping it still opens the chat.\n\nTapping the notification's body (rather than one of these actions) still opens the source chat, or follows a `deepLink`, exactly as without actions.
 
 A reply/action that can't be delivered (offline, not authenticated) keeps the notification up, reading "Not sent — tap to retry", and keeps whatever was typed — tapping it again retries the same thing. Nothing an action tries to send is ever silently dropped. A delivered reply/action updates the notification to read "Sent".
 
@@ -201,18 +201,16 @@ Clicking the toast brings the Patch window forward and opens the source chat in 
 
 ### `speakers`
 
-Speakers are paired to one host (`16-voice-device.md` § Connection model), so the notify is relayed to that host — not the calling chat's — and that host synthesises the message via its Kokoro and broadcasts to a specific physical voice device. Resolution order:
+Voice devices connect to the server (`16-voice-device.md` § Connection model), so the server delivers a speakers notify. It picks the device and opens a session on it for the calling chat; the chat's host speaks the message on that session. Muted devices are skipped. Resolution order:
 
-1. Explicit `deviceId` in the call (e.g. `kitchen`) → speak there.
-2. Most-recently-active device (per `16-voice-device.md` § Outbound routing) → speak there if it had a session in the last few minutes.
-3. All devices at low volume → general announcement.
-4. All devices offline / cascade exhausted → that host re-issues the message to the server as a `push` notify carrying the text and a deep-link. Voicemail.
+1. Explicit `deviceId` in the call, matched against a device's id or name (e.g. `kitchen`) → speak there.
+2. Otherwise the device the user spoke to most recently.
+3. If none has been used since it connected, every connected device.
+4. No device reachable → the server routes it as a `push` notify instead. Voicemail.
 
-Step 4 hands back to the server rather than that host reaching Expo's push API itself, so one host holds the account's push tokens and one host records the outcome.
+After speaking, the device stays open for the follow-up window like any reply, so the user can answer without the wake word.
 
-`speakers` is one-way only — speak and end. No listening window after; if the user wants to reply, they wake-word the device or pick up a separate voice session.
-
-The Speakers thread's agent is not in the delivery loop. Host calls TTS directly. The agent only gets involved when the user replies via voice — see Broadcast context.
+The Speakers thread's agent is not in the delivery loop. The agent only gets involved when the user replies — see Broadcast context.
 
 Failures (Expo push rejected, a speakers voicemail whose push the provider then refused) are logged to `/data/undelivered.jsonl` and surfaced via `patch doctor`. Every channel either delivers on the server or comes back to it as a further notify, so that log has a single writer.
 
@@ -230,7 +228,7 @@ For the thread that mediates a channel (Speakers), the server keeps an append-on
 
 Each entry: `{ ts, sourceChatName, message }`. The server appends one as it routes a notify on that channel, whichever host goes on to deliver it. Never read by the agent directly.
 
-The log lives on the server because delivery is spread across hosts while the thread that reads it is on one: the bot post happens on the server, a speakers announcement on the host those devices are paired with, and the thread runs on the Manager host (`06-threads-manager-speakers.md` § Where special threads run). The server is on the path of every notify (`03-wire-protocol.md` § Notifications), so it is the one host that can record them all, and an announcement made while the Manager host is offline is still context when that host returns.
+The log lives on the server because delivery is spread across hosts while the thread that reads it is on one: the bot post happens on the server, a speakers announcement on the server those devices connect to, and the thread runs on the Manager host (`06-threads-manager-speakers.md` § Where special threads run). The server is on the path of every notify (`03-wire-protocol.md` § Notifications), so it is the one host that can record them all, and an announcement made while the Manager host is offline is still context when that host returns.
 
 A record is written as the notify is routed rather than on a host's confirmation that it spoke or posted: an announcement that fell through to voicemail reached the user too, and a reply to it needs the same context.
 

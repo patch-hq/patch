@@ -16,7 +16,6 @@ import { createKokoro } from '../src/audio/kokoro.js';
 import type { KokoroBackend, KokoroSynthesis } from '../src/audio/kokoro.js';
 import { encodeAudio, decodeAudio, type AudioEvent } from '@patch/wire/audio';
 import { MockVad, type Vad, type VadFrameResult } from '../src/audio/vad.js';
-import { DEVICE_CONTROL_PATH } from '../src/devices/control-ws.js';
 
 const SECRET = 'unit-test-internal-token-aaaaaaaaaa';
 const logger = pino({ level: 'silent' });
@@ -1105,7 +1104,7 @@ describe('audio WSS server', () => {
 
   // --- device-control-upgrade mounting --------------------------------------
 
-  test('a /device/control upgrade 404s (raw socket write + destroy) when no deviceControlUpgrade handler is configured', async () => {
+  test('a /device/control upgrade 404s: devices connect to the server, not to a host', async () => {
     const socket = netConnect(server.port, '127.0.0.1');
     await new Promise<void>((resolve, reject) => {
       socket.once('connect', () => resolve());
@@ -1119,7 +1118,7 @@ describe('audio WSS server', () => {
       });
     });
     socket.write(
-      `GET ${DEVICE_CONTROL_PATH} HTTP/1.1\r\n` +
+      'GET /device/control HTTP/1.1\r\n' +
         'Host: 127.0.0.1\r\n' +
         'Upgrade: websocket\r\n' +
         'Connection: Upgrade\r\n' +
@@ -1128,51 +1127,6 @@ describe('audio WSS server', () => {
     );
     const resp = await responseText;
     expect(resp).toContain('404');
-    socket.destroy();
-  });
-
-  test('a /device/control upgrade delegates to the configured deviceControlUpgrade handler', async () => {
-    await server.close();
-    let called: { url: string | undefined } | undefined;
-    const handle = await startAudioServer({
-      host: '127.0.0.1',
-      port: 0,
-      logger,
-      internalToken: SECRET,
-      whisper: createWhisper({ backend: 'mock', logger }),
-      kokoro: createKokoro({ backend: 'mock', logger }),
-      submitUserTurn: async () => 'ok',
-      chatExists: (): boolean => true,
-      deviceControlUpgrade: (req, socket) => {
-        called = { url: req.url };
-        socket.write('HTTP/1.1 200 OK\r\n\r\ncustom-handler-ran');
-        socket.end();
-      },
-    });
-    server = Object.assign(handle, { port: handle.address().port });
-    const socket = netConnect(server.port, '127.0.0.1');
-    await new Promise<void>((resolve, reject) => {
-      socket.once('connect', () => resolve());
-      socket.once('error', reject);
-    });
-    const responseText = new Promise<string>((resolve) => {
-      let buf = '';
-      socket.on('data', (d: Buffer) => {
-        buf += d.toString();
-        resolve(buf);
-      });
-    });
-    socket.write(
-      `GET ${DEVICE_CONTROL_PATH} HTTP/1.1\r\n` +
-        'Host: 127.0.0.1\r\n' +
-        'Upgrade: websocket\r\n' +
-        'Connection: Upgrade\r\n' +
-        'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n' +
-        'Sec-WebSocket-Version: 13\r\n\r\n',
-    );
-    const resp = await responseText;
-    expect(resp).toContain('custom-handler-ran');
-    expect(called?.url).toBe(DEVICE_CONTROL_PATH);
     socket.destroy();
   });
 

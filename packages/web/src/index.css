@@ -11405,6 +11405,10 @@ main.empty-state p {
 }
 .wake-edit-modal {
   max-width: 640px;
+  /* A long message grows the card past the window and pushes the date/time
+     picker off-screen: cap it and scroll inside instead. */
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
 }
 .wake-edit-field {
   display: flex;
@@ -11415,6 +11419,7 @@ main.empty-state p {
   font-size: var(--text-min);
 }
 .wake-edit-textarea {
+  max-height: 40vh;
   width: 100%;
   resize: vertical;
   padding: 8px 10px;

@@ -1800,6 +1800,15 @@ export const ChatDelegateUpdateEvent = z
      * without it means the subagent is running again.
      */
     outOfCredit: z.object({ resetsAt: z.number().int().positive().optional() }).strict().optional(),
+    /**
+     * Host epoch ms the subagent's current run began. Present on live statuses
+     * (`running`, `awaiting-permission`). Surfaces time the run from this, not
+     * from when they first saw the update, so a reload does not restart the
+     * clock. Optional: older hosts omit it and surfaces fall back to local time.
+     */
+    runStartedAt: z.number().int().nonnegative().optional(),
+    /** The current run is a follow-up wake of a settled subagent (by its parent or a timer). */
+    followUp: z.boolean().optional(),
     seq: z.number().int().nonnegative(),
     ...forSurfaceIdField,
   })

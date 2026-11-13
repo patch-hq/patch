@@ -391,6 +391,10 @@ export interface ChatSubagentInfo {
   label: string;
   outcome?: 'done' | 'failed' | 'stopped';
   finishedAt?: number;
+  /** Epoch ms the current run began (set on a follow-up wake); absent means creation. */
+  runStartedAt?: number;
+  /** The current run is a follow-up wake of a settled subagent. */
+  followUp?: boolean;
   /** Tools the parent withheld from this subagent. */
   disallowedTools?: string[];
 }

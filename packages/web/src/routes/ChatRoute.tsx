@@ -4908,7 +4908,10 @@ function DelegateStrip({ chatId }: { chatId: string }): JSX.Element | null {
           activateLabel={`Open transcript of "${d.label}"`}
           meta={
             live ? (
-              <span data-testid="delegate-strip-time">{formatElapsed(d.since, now)}</span>
+              <>
+                {d.followUp ? <span data-testid="delegate-strip-followup">follow-up</span> : null}{' '}
+                <span data-testid="delegate-strip-time">{formatElapsed(d.since, now)}</span>
+              </>
             ) : null
           }
         >

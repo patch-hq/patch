@@ -579,8 +579,6 @@ importers:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@26.6.4)(jsdom@29.1.1(@noble/hashes@1.8.0))(lightningcss@1.32.0)(terser@5.46.2)
 
-  packages/voice-firmware/mock: {}
-
   packages/web:
     dependencies:
       '@fontsource-variable/figtree':

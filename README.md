@@ -76,7 +76,6 @@ packages/
   cli/              Node + commander + Ink terminal client
   web/              Vite + React 19 + Tailwind v4 SPA (mounts at /app/)
   desktop/          Electron + electron-builder shell (macOS)
-  voice-firmware/   ESP-IDF project for the voice device (NOT a pnpm package)
   kokoro-sidecar/   Python (uv) Kokoro TTS sidecar — host spawns it; 24 kHz PCM16 over WS
   whisper-sidecar/  Python (uv) faster-whisper STT sidecar (WHISPER_BACKEND=local)
 apps/

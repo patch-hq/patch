@@ -48,7 +48,7 @@ export function SnoozedBanner({ row }: { row: ChatRow | undefined }): ReactEleme
           flex: 1,
         }}
       >
-        Snoozed until {formatWakeTime(row.snoozedUntil)}
+        Snoozed until {formatWakeTime(row.snoozedUntil, row.goal !== null)}
       </Text>
       <Pressable
         testID="unsnooze-banner-btn"

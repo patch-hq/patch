@@ -20,7 +20,7 @@ import { useUiStore } from '../../stores/uiStore.js';
 import { chordFromEvent, chordGlyphs } from '../../lib/dictateChord.js';
 import { getDesktopBridge } from '../../lib/desktopBridge.js';
 import { shortcutLabel } from '../../lib/shortcuts.js';
-import { PairVoiceDevice } from '../../components/PairVoiceDevice.js';
+import { AddVoiceDevice } from '../../components/AddVoiceDevice.js';
 import { reenableSpeakerNames, setNamesDeclined, useMeetingSetup } from '../../lib/meetingSetup.js';
 import { Toggle } from '../../components/Toggle.js';
 import { patchShared } from './sharedWrite.js';
@@ -723,10 +723,10 @@ function VoiceDevicesGroup(): JSX.Element {
     <button
       type="button"
       className="set-btn"
-      data-testid="pair-voice-device-open"
+      data-testid="voice-device-add-open"
       onClick={() => setPairing(true)}
     >
-      Pair a device
+      Add device
     </button>
   );
   return (
@@ -734,7 +734,7 @@ function VoiceDevicesGroup(): JSX.Element {
       {voice === null ? (
         <Note>Loading…</Note>
       ) : voice.length === 0 ? (
-        <Row title="None paired" testid="voice-devices-empty">
+        <Row title="None yet" testid="voice-devices-empty">
           {pairButton}
         </Row>
       ) : (
@@ -742,12 +742,12 @@ function VoiceDevicesGroup(): JSX.Element {
           {voice.map((d) => (
             <DeviceRow key={d.surfaceId} device={d} onRevoke={revoke} />
           ))}
-          {pairButton ? <Row title="Pair another">{pairButton}</Row> : null}
+          {pairButton ? <Row title="Add another">{pairButton}</Row> : null}
         </>
       )}
       {pairing ? (
         <div className="set-row stack">
-          <PairVoiceDevice onClose={() => setPairing(false)} />
+          <AddVoiceDevice onClose={() => setPairing(false)} />
         </div>
       ) : null}
     </Group>

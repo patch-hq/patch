@@ -610,8 +610,8 @@ export type AudioSessionStateName = z.infer<typeof AudioSessionStateName>;
  * Host → surface: a session-state transition. Emitted on every meaningful
  * edge of the turn cycle (spec/15 § Voice states) so the call overlay can drive
  * a live LISTENING → TRANSCRIBING → THINKING → SPEAKING indicator from the wire
- * rather than guessing. NOT emitted to `surfaceKind: 'device'` sessions (the
- * firmware ignores unknown control frames; keep its wire byte-identical). The
+ * rather than guessing. Voice devices get it too, so any device can show what
+ * the session is doing without inferring it. The
  * return-to-listening after TTS is signalled by `audio.tts_end`, so no state
  * frame follows a `tts_end` (surfaces map tts_end → listening themselves).
  */

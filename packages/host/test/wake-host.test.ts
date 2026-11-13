@@ -2,7 +2,7 @@
 // deliverWake → sendInput → the SDK, delivering the [wake]-prefixed message as a
 // new turn into the SAME chat (spec/02 § Self-wake).
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, realpathSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -230,7 +230,10 @@ describe('self-wake on the host (spec/02 § Self-wake)', () => {
     await tick();
 
     daemon.scheduleWake(chatId, { in: '0', message: 'nag once' });
-    await tick(80);
+    // Wait for the loop to cycle rather than a fixed delay: a loaded runner can
+    // take far longer than 80ms to deliver both wakes.
+    await vi.waitFor(() => expect(prompts).toContain('[wake] nag again'), { timeout: 10_000 });
+    await tick();
 
     // Both the initial wake and the re-armed one were delivered — the loop cycled.
     expect(prompts).toContain('[wake] nag once');

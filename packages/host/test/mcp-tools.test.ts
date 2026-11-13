@@ -51,15 +51,6 @@ describe('patch-tools MCP server — full client round-trip', () => {
       localKey: LOCAL_KEY,
       daemon,
       jobs,
-      listDevices: () => [
-        {
-          deviceId: 'kitchen',
-          name: 'Kitchen',
-          online: true,
-          muted: false,
-          lastUsedAt: 1_700_000_000_000,
-        },
-      ],
     });
     await app.listen({ path: socketPath });
 
