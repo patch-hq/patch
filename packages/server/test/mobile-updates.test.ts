@@ -52,6 +52,7 @@ describe('GET /api/mobile/updates', () => {
     expect(res.statusCode).toBe(200);
     expect(res.headers['expo-protocol-version']).toBe('1');
     expect(res.headers['expo-sfv-version']).toBe('0');
+    expect(res.headers['cache-control']).toBe('no-store');
     const boundary = /boundary=(\S+)/.exec(String(res.headers['content-type']))?.[1];
     expect(boundary).toBeDefined();
     const parts = res.body.split(`--${boundary}`);
