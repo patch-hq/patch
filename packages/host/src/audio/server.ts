@@ -36,6 +36,7 @@ import {
 } from '@patch/wire/audio';
 import { VoiceSession, type SessionDeps, type SessionInit, type SessionState } from './session.js';
 import { MockVad, type Vad } from './vad.js';
+import { watchPeerLiveness } from './peer-liveness.js';
 import { NlmsAec, PassThroughAec, type AecProcessor } from './aec.js';
 import type { WhisperBackend } from './whisper.js';
 import type { KokoroBackend } from './kokoro.js';
