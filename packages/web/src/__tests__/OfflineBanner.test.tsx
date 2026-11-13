@@ -77,7 +77,7 @@ describe('OfflineBanner', () => {
     usePresenceStore.getState().setConnection('reconnecting');
     usePresenceStore.getState().setRestarting({ version: '1.2.4', at: Date.now() });
     render(<OfflineBanner />);
-    expect(screen.getByTestId('offline-banner')).toHaveTextContent(/^Restarting\s*Diagnose$/);
+    expect(screen.getByTestId('offline-banner')).toHaveTextContent(/^Restarting$/);
     usePreferencesStore.setState({ preferences: { ...prefs, autoUpdateHosts: true } });
   });
 
@@ -85,7 +85,7 @@ describe('OfflineBanner', () => {
     usePresenceStore.getState().setConnection('reconnecting');
     usePresenceStore.getState().setRestarting({ version: null, at: 1 });
     render(<OfflineBanner />);
-    expect(screen.getByTestId('offline-banner')).toHaveTextContent(/^Restarting\s*Diagnose$/);
+    expect(screen.getByTestId('offline-banner')).toHaveTextContent(/^Restarting$/);
   });
 
   it('shows Reconnecting… for an unplanned drop', () => {
