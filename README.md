@@ -5,7 +5,12 @@ Claude Code across the terminal, web, phone, desktop and a voice device, with
 triggers (cron, webhooks, Todoist) and hosts you run yourself. A host does the
 work on a host you choose; a server connects your devices to your hosts.
 
-The design is written up in `spec/`. Licensed under the MIT licence.
+The design is written up in `spec/`.
+
+Copyright (c) 2026 Tom Chambers. Licensed under the GNU Affero General Public
+Licence v3 (AGPL-3.0): you can read, change and run your own version; if you
+offer a modified Patch to others over a network, you must publish your changes
+under the same licence. Releases up to v1.1.1276 were published under MIT.
 
 ## Install a server
 

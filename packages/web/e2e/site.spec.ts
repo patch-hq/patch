@@ -45,7 +45,7 @@ for (const viewport of [
       await page.goto(SITE);
 
       await expect(page.getByTestId('needs')).toHaveText(
-        'Needs a Claude Pro, Max, Team or Enterprise plan, a ChatGPT plan or an OpenAI API key. Patch installs everything else. Free and open source (MIT).',
+        'Needs a Claude Pro, Max, Team or Enterprise plan, a ChatGPT plan or an OpenAI API key. Patch installs everything else. Free and open source (AGPL).',
       );
       await expect(page.getByTestId('needs')).toBeVisible();
 
