@@ -456,7 +456,7 @@ export function groupByStatus(folders: readonly FolderGroup[]): StatusGroup[] {
         ? 'status:waiting'
         : matchesStateFilter(row, 'working')
           ? 'status:working'
-          : badge === 'done'
+          : badge === 'done' || commandsOnlyBackground(row)
             ? 'status:ready'
             : 'status:done';
     buckets.get(key)?.push(row);
@@ -464,6 +464,16 @@ export function groupByStatus(folders: readonly FolderGroup[]): StatusGroup[] {
   return STATUS_GROUP_DEFS.map((d) => ({ ...d, rows: buckets.get(d.key) ?? [] })).filter(
     (g) => g.rows.length > 0,
   );
+}
+
+/**
+ * An idle chat whose only background work is commands — no sub-agent among
+ * them. It has said its piece, so it is Ready to review; a chat with an agent
+ * still going is not. Needs a POSITIVE `runningAgents === 0`: unknown
+ * (`null`/absent, an older host) stays Working rather than guessing.
+ */
+function commandsOnlyBackground(row: ChatRow): boolean {
+  return deriveBadge(row) === 'background' && row.runningAgents === 0;
 }
 
 /** The states the sidebar can be filtered down to (spec/14 § Sidebar). */
@@ -502,7 +512,8 @@ export function matchesStateFilter(row: ChatRow, filter: ChatStateFilter): boole
     case 'working':
       // `background` and `monitoring` both belong here, not under `done`. The
       // chat is idle in the sense that no turn is in flight, but either a
-      // command/sub-agent it launched is still running, or it has a self-wake
+      // sub-agent it launched is still running (a chat with only background
+      // COMMANDS running is Ready instead), or it has a self-wake
       // armed and will check back on its own — asking the list for what is
       // working and being shown only mid-turn chats would hide exactly the
       // work that is easiest to forget about, since nothing about it is on
@@ -511,7 +522,7 @@ export function matchesStateFilter(row: ChatRow, filter: ChatStateFilter): boole
         pending ||
         badge === 'working' ||
         badge === 'agents' ||
-        badge === 'background' ||
+        (badge === 'background' && !commandsOnlyBackground(row)) ||
         badge === 'monitoring'
       );
     case 'waiting':
@@ -527,6 +538,7 @@ export function matchesStateFilter(row: ChatRow, filter: ChatStateFilter): boole
         !pending &&
         (badge === 'done' ||
           badge === 'read' ||
+          commandsOnlyBackground(row) ||
           badge === 'permission' ||
           (row.statusKind === 'question' && row.statusDeclared === true))
       );
