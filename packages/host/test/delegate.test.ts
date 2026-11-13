@@ -388,6 +388,7 @@ describe('patch_delegate', () => {
 
     listCalls = 0;
     expect(daemon.currentStateEvent(parentChatId)?.backgroundTasks).toBe(1);
+    expect(daemon.currentStateEvent(parentChatId)?.runningAgents).toBe(1);
     expect(listCalls).toBe(0);
   });
 

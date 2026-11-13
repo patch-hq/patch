@@ -1761,6 +1761,7 @@ export function HiddenSection({
           statusSummary: string | null;
           statusKind: StatusKind | null;
           backgroundTasks?: number | null;
+          runningAgents?: number | null;
         }>
       ).map((c) => ({
         chatId: c.chatId,
@@ -1784,6 +1785,7 @@ export function HiddenSection({
         statusSummary: c.statusSummary,
         statusKind: c.statusKind,
         backgroundTasks: c.backgroundTasks,
+        runningAgents: c.runningAgents,
       }));
       mergeChats(rows);
     },
@@ -1902,6 +1904,7 @@ export function AutomationsSection({
            * what you know" rather than as none running.
            */
           backgroundTasks?: number | null;
+          runningAgents?: number | null;
         }>
       ).map((c) => ({
         chatId: c.chatId,
@@ -1924,6 +1927,7 @@ export function AutomationsSection({
         // working, and a job whose whole payload is a backgrounded build is
         // exactly the case the badge was getting wrong.
         backgroundTasks: c.backgroundTasks,
+        runningAgents: c.runningAgents,
       }));
       mergeChats(rows);
     },
