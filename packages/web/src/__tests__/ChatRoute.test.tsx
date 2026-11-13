@@ -2894,6 +2894,103 @@ describe('ChatRoute regression', () => {
     }
   });
 
+  function seedLinkCard(id: string, ack: Record<string, unknown>): void {
+    seedChat(id, [
+      {
+        seq: 1,
+        kind: 'tool_call',
+        tool: 'link_file',
+        callId: 'l1',
+        toolArgs: { file_path: '/home/u/Documents/plan.xlsx' },
+        at: 0,
+      },
+      {
+        seq: 2,
+        kind: 'tool_result',
+        tool: 'link_file',
+        callId: 'l1',
+        toolResult: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              ok: true,
+              linked: true,
+              kind: 'link',
+              name: 'plan.xlsx',
+              absPath: '/home/u/Documents/plan.xlsx',
+              isDirectory: false,
+              size: 4096,
+              ...ack,
+            }),
+          },
+        ],
+        at: 1,
+      },
+    ]);
+  }
+
+  it('shows a link_file card with the path and no open buttons outside the desktop app', () => {
+    seedLinkCard('c-link-plain', {});
+    renderChat('c-link-plain');
+    expect(screen.getByTestId('link-file-name').textContent).toBe('plan.xlsx');
+    expect(screen.getByTestId('link-file-path').textContent).toBe('/home/u/Documents/plan.xlsx');
+    expect(screen.queryByTestId('link-file-open')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('link-file-reveal')).not.toBeInTheDocument();
+  });
+
+  it("opens or reveals a link_file when this Mac's own host owns the chat", async () => {
+    const openPath = vi.fn().mockResolvedValue(undefined);
+    (window as unknown as { patch: unknown }).patch = {
+      openPath,
+      localHost: { status: async () => ({ installed: true, hostId: 'd1' }) },
+    };
+    try {
+      seedLinkCard('c-link-open', {});
+      renderChat('c-link-open');
+      fireEvent.click(await screen.findByTestId('link-file-open'));
+      fireEvent.click(screen.getByTestId('link-file-reveal'));
+      expect(openPath).toHaveBeenNthCalledWith(1, '/home/u/Documents/plan.xlsx', 'file');
+      expect(openPath).toHaveBeenNthCalledWith(2, '/home/u/Documents/plan.xlsx', 'folder');
+    } finally {
+      delete (window as unknown as { patch?: unknown }).patch;
+    }
+  });
+
+  it('shows the bridge error on a link_file whose path has gone', async () => {
+    (window as unknown as { patch: unknown }).patch = {
+      openPath: vi.fn().mockRejectedValue(new Error('open-path: gone')),
+      localHost: { status: async () => ({ installed: true, hostId: 'd1' }) },
+    };
+    try {
+      seedLinkCard('c-link-gone', {});
+      renderChat('c-link-gone');
+      fireEvent.click(await screen.findByTestId('link-file-open'));
+      expect((await screen.findByTestId('link-file-open-error')).textContent).toContain('gone');
+    } finally {
+      delete (window as unknown as { patch?: unknown }).patch;
+    }
+  });
+
+  it('offers no reveal button on a linked folder, and hides open on another host', async () => {
+    (window as unknown as { patch: unknown }).patch = {
+      openPath: vi.fn(),
+      localHost: { status: async () => ({ installed: true, hostId: 'd1' }) },
+    };
+    try {
+      seedLinkCard('c-link-dir', {
+        name: 'Documents',
+        absPath: '/home/u/Documents',
+        isDirectory: true,
+        size: undefined,
+      });
+      renderChat('c-link-dir');
+      await screen.findByTestId('link-file-open');
+      expect(screen.queryByTestId('link-file-reveal')).not.toBeInTheDocument();
+    } finally {
+      delete (window as unknown as { patch?: unknown }).patch;
+    }
+  });
+
   // spec/14 § Viewing files — a PDF gets the same sandboxed-iframe treatment
   // as an HTML page (not the image/lightbox path), since neither is a
   // lightbox candidate.

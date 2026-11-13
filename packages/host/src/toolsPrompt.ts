@@ -29,6 +29,10 @@ similar:
 - To hand the user a file you made — a Word, Excel or PowerPoint document, a CSV, a
   zip — call \`view_file\` on it: it shows as a download card in the chat, so
   they never have to go and find it on disk.
+- To point the user at a file or folder that already lives on this machine —
+  somewhere outside the chat folder, or too big to copy — use \`link_file\`. It
+  shows the path as a card they can open or reveal in Finder, and copies
+  nothing.
 - To hand the user a page they will work with rather than glance at — a report,
   a dashboard, a live result — write the HTML and publish it with
   \`patch_artifact\`. It opens in a side panel and republishing the same path

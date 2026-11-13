@@ -1551,6 +1551,26 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     },
   );
 
+  // ---- link_file ----------------------------------------------------------
+  server.registerTool(
+    'link_file',
+    {
+      description:
+        "Point the USER at a file or folder that already sits on this host's disk, anywhere on it, without uploading or reading it. In the chat it shows as a card with the file's name and path, and in the desktop app (when the app is running on this same machine) buttons to open the file or reveal it in Finder / the file manager. Use it when the user needs to go and find or work on a file in place — a project folder, a download, a document you edited — rather than view it inline (that is view_file, which only reaches files inside the chat folder and copies them to the screen). file_path must be absolute or start with ~/. Returns { name, absPath, isDirectory, size? }.",
+      inputSchema: {
+        file_path: z.string().min(1),
+      },
+    },
+    async ({ file_path }) => {
+      const res = await uds<unknown>({
+        method: 'POST',
+        path: '/internal/link_file',
+        body: { file_path, callerChatId },
+      });
+      return toolResult(res);
+    },
+  );
+
   // ---- patch_call ---------------------------------------------------------
   server.registerTool(
     'patch_call',

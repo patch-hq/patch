@@ -15,8 +15,9 @@
 
 import { expandHome } from './expandHome.js';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { basename, extname, resolve, join, sep } from 'node:path';
+import { readdirSync, readFileSync, statSync, type Stats } from 'node:fs';
+import { homedir } from 'node:os';
+import { basename, extname, isAbsolute, resolve, join, sep } from 'node:path';
 import Fastify, {
   type FastifyError,
   type FastifyInstance,
@@ -999,6 +1000,16 @@ const ArtifactBody = z
 // view_file (spec/14 § Tool calls). `file_path` may be absolute or
 // chat-folder-relative; the resolver rejects anything outside the chat folder.
 const ViewFileBody = z
+  .object({
+    file_path: z.string().min(1),
+    callerChatId: z.string().min(1),
+  })
+  .strict();
+
+// link_file: a pointer to a file anywhere on this host's disk. Unlike view_file
+// nothing is read or published, so there is no chat-folder boundary: the card
+// only offers to open it on the machine the host runs on.
+const LinkFileBody = z
   .object({
     file_path: z.string().min(1),
     callerChatId: z.string().min(1),
@@ -3888,6 +3899,72 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       ...(previewError !== undefined ? { previewError } : {}),
       ...(size ?? {}),
       ...(fileBytes !== undefined ? { size: fileBytes } : {}),
+    };
+  });
+
+  // link_file — point the USER at a file that lives on this host's disk, wherever
+  // it is. Nothing is read, copied or published: the ack is the name, absolute
+  // path and size, and the desktop app opens it from there (open file / show in
+  // folder) when its own host owns the chat. A missing path is a loud 404.
+  app.post('/internal/link_file', async (req, reply) => {
+    const start = Date.now();
+    if (require503(reply)) return;
+    const parsed = LinkFileBody.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
+    }
+    const { file_path: filePath, callerChatId } = parsed.data;
+    if (!opts.daemon!.chatState.get(callerChatId)) {
+      return reply.code(404).send({
+        error: 'chat_not_found',
+        message: `chat not found: ${callerChatId}`,
+      } satisfies ErrorEnvelope);
+    }
+    const expanded =
+      filePath === '~' || filePath.startsWith('~/') ? join(homedir(), filePath.slice(1)) : filePath;
+    if (!isAbsolute(expanded)) {
+      toolLog({
+        tool: 'link_file',
+        callerChatId,
+        durationMs: Date.now() - start,
+        ok: false,
+        err: 'invalid_input',
+      });
+      return reply.code(400).send({
+        error: 'invalid_input',
+        message: `link_file needs an absolute path (or one starting with ~/): ${filePath}`,
+      } satisfies ErrorEnvelope);
+    }
+    const absPath = resolve(expanded);
+    let stat: Stats;
+    try {
+      stat = statSync(absPath);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      const notFound = code === 'ENOENT' || code === 'ENOTDIR';
+      toolLog({
+        tool: 'link_file',
+        callerChatId,
+        durationMs: Date.now() - start,
+        ok: false,
+        err: notFound ? 'not_found' : 'invalid_input',
+      });
+      return reply.code(notFound ? 404 : 400).send({
+        error: notFound ? 'link_file_not_found' : 'invalid_input',
+        message: notFound
+          ? `nothing at ${absPath}`
+          : `cannot read ${absPath}: ${err instanceof Error ? err.message : String(err)}`,
+      } satisfies ErrorEnvelope);
+    }
+    toolLog({ tool: 'link_file', callerChatId, durationMs: Date.now() - start, ok: true });
+    return {
+      ok: true,
+      linked: true,
+      kind: 'link',
+      name: basename(absPath),
+      absPath,
+      isDirectory: stat.isDirectory(),
+      ...(stat.isFile() ? { size: stat.size } : {}),
     };
   });
 
