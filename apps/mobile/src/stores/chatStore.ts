@@ -514,6 +514,7 @@ function emptyRow(chatId: string, folder: string): ChatRow {
     snoozedUntil: null,
     hidden: false,
     backgroundTasks: null,
+    runningAgents: null,
     context: null,
     // Unknown until the roster or `chat.spawned` names it.
     model: null,
@@ -567,6 +568,7 @@ function mergeListRow(prior: ChatRow | undefined, rosterRow: ChatListRow): ChatR
     runningSince: r.runningSince !== undefined ? r.runningSince : base.runningSince,
     hidden: r.hidden !== undefined ? r.hidden : base.hidden,
     backgroundTasks: r.backgroundTasks !== undefined ? r.backgroundTasks : base.backgroundTasks,
+    runningAgents: r.runningAgents !== undefined ? r.runningAgents : base.runningAgents,
     context: r.context !== undefined ? r.context : base.context,
   };
 }
@@ -678,6 +680,7 @@ function toListRow(row: ChatRow): ChatListRow {
     ...(row.runningSince !== undefined ? { runningSince: row.runningSince } : {}),
     hidden: row.hidden,
     backgroundTasks: row.backgroundTasks,
+    runningAgents: row.runningAgents,
     context: row.context,
     model: row.model,
     jobId: row.jobId,
@@ -930,6 +933,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
               event.backgroundTasks !== undefined
                 ? event.backgroundTasks
                 : (row.backgroundTasks ?? null),
+            runningAgents:
+              event.runningAgents !== undefined ? event.runningAgents : (row.runningAgents ?? null),
             context: event.context !== undefined ? event.context : (row.context ?? null),
             // spec/04 § Model — the model the next turn runs on. Also the
             // acknowledgement of a `chat.model_request` from ANY surface. An

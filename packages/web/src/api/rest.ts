@@ -95,6 +95,8 @@ export interface ChatSummaryRow {
   backgroundTasks?: number | null;
   /** Why the chat is errored; null otherwise. Absent from an older server. */
   lastError?: { code: string; message: string; at: number } | null;
+  /** The sub-agent share of `backgroundTasks`; absent or null is unknown. */
+  runningAgents?: number | null;
   /**
    * Running out of the active list (spec/04 § Hidden). Optional because an
    * older server does not send it; absent keeps whatever the store knows.

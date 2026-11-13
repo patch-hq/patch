@@ -189,6 +189,8 @@ export interface ChatSummary {
    * rather than claim nothing is running (spec/12 — NO FALLBACK).
    */
   backgroundTasks: number | null;
+  /** The running sub-agent share of `backgroundTasks`; `null` is unknown. */
+  runningAgents: number | null;
   /**
    * Why the chat is `errored`, mirrored from the host's `chat.state`. Held here
    * so a surface that cold-starts from REST (a reload, a reconnect) can still
@@ -387,6 +389,7 @@ export class ChatRegistry {
         // Nothing has reported on this chat's background work yet — unknown,
         // which is not the same as none.
         backgroundTasks: null,
+        runningAgents: null,
         context: null,
         branches: [],
         activeBranchId: null,
@@ -506,6 +509,10 @@ export class ChatRegistry {
           event.backgroundTasks !== undefined
             ? event.backgroundTasks
             : (existing?.backgroundTasks ?? null),
+        runningAgents:
+          event.runningAgents !== undefined
+            ? event.runningAgents
+            : (existing?.runningAgents ?? null),
         context: event.context !== undefined ? event.context : (existing?.context ?? null),
         // Only meaningful while errored, so it never outlives the failure.
         lastError:

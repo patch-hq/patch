@@ -1003,6 +1003,24 @@ useChatStore.getState().hydrate([
     // the two readouts can be checked against each other in one browser.
     backgroundTasks: 2,
   },
+  // spec/14 § Status badges — `agents`: an idle chat with two sub-agents
+  // running and nothing else. The host counts them in `backgroundTasks` too
+  // (2) and names the share that is agents in `runningAgents`.
+  {
+    chatId: 'chat_agents',
+    hostId: 'd1',
+    permissionMode: 'auto' as const,
+    name: 'agents-fixture',
+    folder: '/home/tom/projects/patch',
+    activity: 'idle',
+    status: 'active',
+    pinned: false,
+    pinnedAt: null,
+    disabled: false,
+    lastUpdated: 0,
+    backgroundTasks: 2,
+    runningAgents: 2,
+  },
   // job-editor-origin e2e (job-editor-back.spec.ts) — a chat whose transcript
   // carries a `patch_job_create` row with an Open job link, so the spec can
   // click through into the editor and prove Back returns HERE rather than
@@ -1273,7 +1291,7 @@ useChatStore.getState().hydrate([
 // QUIET badge (`background`, `monitoring`) in the sidebar's OWN list, without
 // requiring a click into it first, has to be marked read explicitly or it
 // shows `done` instead, per "unread beats background/monitoring, always".
-for (const id of ['chat_bgtask', 'chat_monitoring']) {
+for (const id of ['chat_bgtask', 'chat_agents', 'chat_monitoring']) {
   useChatStore.getState().markRead(id);
 }
 

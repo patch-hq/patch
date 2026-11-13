@@ -58,6 +58,30 @@ function row(over: Partial<ChatRow> = {}): ChatRow {
   } as ChatRow;
 }
 
+describe('agents badge', () => {
+  it('running sub-agents are their own state, ahead of background tasks', () => {
+    expect(deriveBadge(row({ backgroundTasks: 2, runningAgents: 1 }))).toBe('agents');
+    expect(deriveBadge(row({ backgroundTasks: 1, runningAgents: 0 }))).toBe('background');
+  });
+
+  it('NO FALLBACK: an unknown or zero agent count shows nothing', () => {
+    expect(deriveBadge(row({ runningAgents: null }))).toBe('read');
+    expect(deriveBadge(row({ runningAgents: 0 }))).toBe('read');
+  });
+
+  it('unread beats agents', () => {
+    expect(deriveBadge(row({ runningAgents: 1, lastSeq: 3, lastReadSeq: 1 }))).toBe('done');
+  });
+
+  it('counts as Working in the state filter and draws its own testid', () => {
+    expect(matchesStateFilter(row({ runningAgents: 1, backgroundTasks: 1 }), 'working')).toBe(true);
+    render(<StatusBadge badge="agents" />);
+    expect(screen.getByTestId('badge-agents')).toBeTruthy();
+    expect(screen.queryByTestId('badge-background')).toBeNull();
+    cleanup();
+  });
+});
+
 describe('deriveBadge — an idle chat with background work is not a finished one', () => {
   it('replaces the READ tick when a background task is still running', () => {
     // Visited since the last activity, so this is the darker ✓ the sidebar was

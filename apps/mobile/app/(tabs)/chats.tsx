@@ -99,6 +99,7 @@ const MANAGER_STATUS: Record<DisplayBadge, string> = {
   permission: 'Waiting on you',
   errored: 'Failed',
   done: 'New reply',
+  agents: 'Agents running',
   background: 'Background job',
   monitoring: 'Monitoring',
   read: 'Idle',

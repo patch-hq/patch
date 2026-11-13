@@ -23,7 +23,13 @@ export function matchesStateFilter(row: ChatRow, filter: ChatStateFilter): boole
       // `background` and `monitoring` both belong here — no turn is in
       // flight, but a command/sub-agent is still running, or a self-wake is
       // armed and will check back on its own.
-      return pending || badge === 'working' || badge === 'background' || badge === 'monitoring';
+      return (
+        pending ||
+        badge === 'working' ||
+        badge === 'agents' ||
+        badge === 'background' ||
+        badge === 'monitoring'
+      );
     case 'waiting':
       // Anything paused ON THE USER: a permission prompt, or an agent that
       // stopped on a declared question.

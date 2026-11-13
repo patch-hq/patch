@@ -253,6 +253,11 @@ export interface ChatRow {
    */
   backgroundTasks?: number | null;
   /**
+   * The running `patch_delegate` sub-agent share of `backgroundTasks` (the
+   * rest are `patch_watch` tasks). Same unknown-is-not-zero rule.
+   */
+  runningAgents?: number | null;
+  /**
    * Tool calls this surface has seen start and not yet seen finish. A call that
    * is still running means the chat is working, whatever `activity` says: a
    * two-minute `Bash` showed the finished tick in the sidebar because nothing
@@ -333,6 +338,7 @@ export type DisplayBadge =
   | 'permission'
   | 'errored'
   | 'done'
+  | 'agents'
   | 'background'
   | 'monitoring'
   | 'read';
@@ -406,6 +412,11 @@ export function deriveBadge(row: ChatRow): DisplayBadge {
   // NO FALLBACK: only a POSITIVE count does this. `null`/`undefined` is "nobody
   // measured" — an older host, or a row that has not yet heard a state frame
   // — and shows the badge it always did rather than inventing a state.
+  // Running sub-agents are their own state, drawn with their own icon: an
+  // agent is another model working on the chat's behalf, a background task is
+  // a plain process. When both are in flight the agents win — they are the
+  // ones that will talk back.
+  if (typeof row.runningAgents === 'number' && row.runningAgents > 0) return 'agents';
   if (typeof row.backgroundTasks === 'number' && row.backgroundTasks > 0) return 'background';
   // A self-wake armed (`patch_wake_me`): the agent is not doing anything right
   // now, has said everything it has to say, and will check back on its own —
