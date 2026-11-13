@@ -832,8 +832,8 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
     // has been revoked still has the file, so "re-using the stored credential"
     // and "it appears under Settings → Hosts" were both asserted for a host
     // the server refuses on every reconnect. The host says so in its own log
-    // within a second of starting — so look, rather than claim.
-    const revoked = /daemon revoked|4401/.test(hostLogTail(def.home, 40));
+    // within a second of starting — so look, rather than claim.  Match the logged close code, not bare digits: a timestamp or pid can contain 4401.
+    const revoked = /daemon revoked|"code":4401\b/.test(hostLogTail(def.home, 40));
     if (revoked) {
       io.err('');
       io.err('patch install: this host is registered but its credential has been REVOKED.');
