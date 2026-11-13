@@ -18,7 +18,7 @@
 // exactly the thing that runs once and is gone at the next reboot.
 
 import { execFile } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { installerLog } from './runLog.js';
@@ -238,15 +238,21 @@ export interface ServiceOps {
   runState(def: ServiceDefinition): Promise<ServiceRunState>;
 }
 
+/** Bytes in the host log now: the mark to pass as `sinceByte` to read only what a new start wrote. */
+export function hostLogSize(home: string): number {
+  const path = join(home, '.patch', 'logs', 'daemon.log');
+  return existsSync(path) ? statSync(path).size : 0;
+}
+
 /**
  * The host's own last words, for an installer that has to explain why the
  * service it just started is not running. Without this the user is told "it
  * failed" and has to go and find the log themselves.
  */
-export function hostLogTail(home: string, lines = 20): string {
+export function hostLogTail(home: string, lines = 20, sinceByte = 0): string {
   const path = join(home, '.patch', 'logs', 'daemon.log');
   if (!existsSync(path)) return `(no host log at ${path})`;
-  const text = readFileSync(path, 'utf8').trimEnd();
+  const text = readFileSync(path).subarray(sinceByte).toString('utf8').trimEnd();
   if (text.length === 0) return `(${path} is empty)`;
   return text.split('\n').slice(-lines).join('\n');
 }
