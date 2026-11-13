@@ -1104,7 +1104,18 @@ function usePinnedScroll(deps: unknown[], pin = true) {
       pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32;
     };
     el.addEventListener('scroll', onScroll);
-    return () => el.removeEventListener('scroll', onScroll);
+    // Layout settling after mount (fonts, panes) grows the content without a scroll
+    // event; a pinned feed follows it to the bottom.
+    const stick = () => {
+      if (pinned.current) el.scrollTop = el.scrollHeight;
+    };
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(stick);
+    ro?.observe(el);
+    for (const child of Array.from(el.children)) ro?.observe(child);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      ro?.disconnect();
+    };
   }, []);
   useLayoutEffect(() => {
     pinned.current = pin;
