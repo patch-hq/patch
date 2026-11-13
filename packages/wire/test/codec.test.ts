@@ -924,6 +924,21 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     ok: true,
     stats: [{ taskId: 'baiw888mq', cpuPercent: 98.4, rssBytes: 412_000_000, processes: 3 }],
   },
+  'patch.stray_processes.request': {
+    type: 'patch.stray_processes.request',
+    requestId: 'sp1',
+    chatId: 'c1',
+    stopPid: 4242,
+  },
+  'patch.stray_processes.response': {
+    type: 'patch.stray_processes.response',
+    requestId: 'sp1',
+    ok: true,
+    processes: [
+      { pid: 4242, command: 'node server.js', startedAt: 1_700_000_000_000, running: true },
+    ],
+    stopped: true,
+  },
   'patch.watch_list.request': {
     type: 'patch.watch_list.request',
     requestId: 'wl1',
