@@ -42,11 +42,12 @@ function run(cmd, args, opts) {
   });
 }
 
-let target = process.argv[2];
-let dev = null;
-if (!target) {
+// freePort() frees the port before wrangler binds it, so another process on a
+// busy runner can take it in between. That race is the only failure retried,
+// and only by picking new ports; anything else exits straight away.
+async function startDev() {
   const port = await freePort();
-  dev = spawn(
+  const dev = spawn(
     'pnpm',
     [
       'exec',
@@ -71,36 +72,53 @@ if (!target) {
       detached: true,
     },
   );
-  let log = '';
-  dev.stdout.on('data', (d) => (log += d));
-  dev.stderr.on('data', (d) => (log += d));
-  const stop = () => {
-    try {
-      process.kill(-dev.pid, 'SIGTERM');
-    } catch {
-      /* already gone */
+  const state = { dev, port, log: '' };
+  dev.stdout.on('data', (d) => (state.log += d));
+  dev.stderr.on('data', (d) => (state.log += d));
+  return state;
+}
+
+let target = process.argv[2];
+let dev = null;
+if (!target) {
+  for (let attempt = 1; ; attempt++) {
+    const state = await startDev();
+    dev = state.dev;
+    const stop = () => {
+      try {
+        process.kill(-state.dev.pid, 'SIGTERM');
+      } catch {
+        /* already gone */
+      }
+    };
+    process.on('exit', stop);
+    for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(1));
+    target = `http://127.0.0.1:${state.port}`;
+    const end = Date.now() + 60_000;
+    let portTaken = false;
+    for (;;) {
+      if (dev.exitCode !== null) {
+        if (attempt < 3 && /Address already in use/.test(state.log)) {
+          console.error(`relay-worker: port ${state.port} was taken, retrying (${attempt}/3)`);
+          portTaken = true;
+          break;
+        }
+        console.error(`wrangler dev exited (${dev.exitCode}):\n${state.log}`);
+        process.exit(1);
+      }
+      try {
+        const res = await fetch(`${target}/healthz`);
+        if (res.ok) break;
+      } catch {
+        /* not listening yet */
+      }
+      if (Date.now() > end) {
+        console.error(`wrangler dev did not answer /healthz within 60s:\n${state.log}`);
+        process.exit(1);
+      }
+      await new Promise((r) => setTimeout(r, 250));
     }
-  };
-  process.on('exit', stop);
-  for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(1));
-  target = `http://127.0.0.1:${port}`;
-  const end = Date.now() + 60_000;
-  for (;;) {
-    if (dev.exitCode !== null) {
-      console.error(`wrangler dev exited (${dev.exitCode}):\n${log}`);
-      process.exit(1);
-    }
-    try {
-      const res = await fetch(`${target}/healthz`);
-      if (res.ok) break;
-    } catch {
-      /* not listening yet */
-    }
-    if (Date.now() > end) {
-      console.error(`wrangler dev did not answer /healthz within 60s:\n${log}`);
-      process.exit(1);
-    }
-    await new Promise((r) => setTimeout(r, 250));
+    if (!portTaken) break;
   }
   console.log(`relay-worker: wrangler dev is up at ${target}`);
 }
