@@ -8,6 +8,7 @@
 
 import React from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { __emitKeyboardEvent } from './stubs/react-native';
 import { findHost, byLabel, byType, renderRN, update, flushMicrotasks } from './testUtils/render';
 import {
   usePresenceStore,
@@ -186,6 +187,27 @@ describe('Composer — per-chat draft ownership', () => {
 
       findHost(r.root, byType('TextInput')).props['onBlur']();
       update(r, <Composer chatId="c1" folder="work" />);
+      expect(findHost(r.root, byType('TextInput')).props['value']).toBe('');
+    });
+
+    it('hiding the keyboard drops focus, so a clear held for another surface applies', () => {
+      const r = renderRN(<Composer chatId="c1" folder="work" />);
+      const input = findHost(r.root, byType('TextInput'));
+      input.props['onChangeText']('sent from the other device');
+      update(r, <Composer chatId="c1" folder="work" />);
+      input.props['onFocus']();
+      update(r, <Composer chatId="c1" folder="work" />);
+
+      useComposerDraftStore.getState().applyDraftCleared('c1', Date.now() + 60_000);
+      update(r, <Composer chatId="c1" folder="work" />);
+      expect(findHost(r.root, byType('TextInput')).props['value']).toBe(
+        'sent from the other device',
+      );
+
+      // Android back: the keyboard goes, the TextInput keeps focus unless told otherwise.
+      __emitKeyboardEvent('keyboardDidHide');
+      update(r, <Composer chatId="c1" folder="work" />);
+      expect(useComposerDraftStore.getState().focused['c1']).toBe(false);
       expect(findHost(r.root, byType('TextInput')).props['value']).toBe('');
     });
   });
