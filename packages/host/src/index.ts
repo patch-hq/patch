@@ -203,6 +203,7 @@ import { FolderRegistry } from './folders.js';
 import { ModelCatalog } from './modelCatalog.js';
 import { ModelLimits } from './handoffRun.js';
 import { handleBackgroundTaskStatsRequest } from './backgroundTaskStats.js';
+import { StrayProcessTracker, handleStrayProcessesRequest } from './strayProcesses.js';
 import {
   handleWatchCheckInRequest,
   handleWatchOutputRequest,
@@ -2513,6 +2514,16 @@ async function startHost(
         );
         return;
       }
+      if (event.type === 'patch.stray_processes.request') {
+        handleStrayProcessesRequest(
+          event,
+          strayProcesses,
+          (chatId) => daemon.chatState.get(chatId) !== undefined,
+          sender,
+          logger,
+        );
+        return;
+      }
       if (event.type === 'patch.watch_list.request') {
         handleWatchListRequest(
           event,
@@ -4210,6 +4221,7 @@ async function startHost(
     smallJobModels: config.smallJobModels,
   });
   let pullQueuedFromServer: ((chatId: string) => Promise<ChatInputEvent[]>) | undefined;
+  const strayProcesses = new StrayProcessTracker();
   const daemon: Daemon = new Daemon({
     ...(durableTurns ? { durableTurns } : {}),
     pullQueued: (chatId) => pullQueuedFromServer?.(chatId) ?? Promise.resolve([]),

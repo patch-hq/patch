@@ -6626,6 +6626,55 @@ export const PatchWatchStopResponseEvent = z
   .strict();
 export type PatchWatchStopResponseEvent = z.infer<typeof PatchWatchStopResponseEvent>;
 
+// ---------------------------------------------------------------------------
+// Stray processes (server → host → server), spec/02 § Stray processes. What a
+// chat started outside Patch's tracked tools (a `nohup … &` in a Bash call)
+// that is still running, or was when last seen. One pair: list, optionally
+// stopping one first (`stopPid`, which the host only honours for a pid it
+// currently reports as that chat's stray).
+
+export const StrayProcessRow = z
+  .object({
+    pid: z.number().int().positive(),
+    command: z.string(),
+    /** Epoch ms the process started. */
+    startedAt: z.number().int(),
+    running: z.boolean(),
+    /** Epoch ms the host first noticed it gone; absent while running. */
+    endedAt: z.number().int().optional(),
+  })
+  .strict();
+export type StrayProcessRow = z.infer<typeof StrayProcessRow>;
+
+export const PatchStrayProcessesRequestEvent = z
+  .object({
+    type: z.literal('patch.stray_processes.request'),
+    requestId: z.string().min(1),
+    chatId: z.string().min(1),
+    stopPid: z.number().int().positive().optional(),
+  })
+  .strict();
+export type PatchStrayProcessesRequestEvent = z.infer<typeof PatchStrayProcessesRequestEvent>;
+
+export const PatchStrayProcessesResponseEvent = z
+  .object({
+    type: z.literal('patch.stray_processes.response'),
+    requestId: z.string().min(1),
+    ok: z.boolean(),
+    processes: z.array(StrayProcessRow).optional(),
+    /** Present when `stopPid` was sent: false if it was not a running stray of that chat. */
+    stopped: z.boolean().optional(),
+    error: z
+      .object({
+        code: z.enum(['chat_not_found', 'unsupported_platform', 'internal']),
+        message: z.string(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type PatchStrayProcessesResponseEvent = z.infer<typeof PatchStrayProcessesResponseEvent>;
+
 // Change a running task's check-in interval (the bar's "next check-in" control).
 export const PatchWatchCheckInRequestEvent = z
   .object({
@@ -9544,6 +9593,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchDocExportResponseEvent,
   PatchBackgroundTaskStatsRequestEvent,
   PatchBackgroundTaskStatsResponseEvent,
+  PatchStrayProcessesRequestEvent,
+  PatchStrayProcessesResponseEvent,
   PatchWatchListRequestEvent,
   PatchWatchListResponseEvent,
   PatchWatchStopRequestEvent,
@@ -9857,6 +9908,8 @@ export const EVENT_SCHEMAS = {
   'patch.doc_export.response': PatchDocExportResponseEvent,
   'patch.background_task_stats.request': PatchBackgroundTaskStatsRequestEvent,
   'patch.background_task_stats.response': PatchBackgroundTaskStatsResponseEvent,
+  'patch.stray_processes.request': PatchStrayProcessesRequestEvent,
+  'patch.stray_processes.response': PatchStrayProcessesResponseEvent,
   'patch.watch_list.request': PatchWatchListRequestEvent,
   'patch.watch_list.response': PatchWatchListResponseEvent,
   'patch.watch_stop.request': PatchWatchStopRequestEvent,
