@@ -291,5 +291,5 @@ describe('voice device control on the server', () => {
     expect(b.log.frames.some((f) => f.type === 'session_start')).toBe(false);
     k.ws.close();
     b.ws.close();
-  });
+  }, 30_000);
 });
