@@ -54,12 +54,8 @@ test('new chat: no meetings popover, the composer says why and links to signing 
   await expect(page.getByTestId('claude-signin-start')).toBeVisible();
   await page.getByTestId('connect-close').click();
   await expect(page.getByTestId('composer-signed-out')).toBeVisible();
-
-  await page
-    .getByTestId('claude-disconnected-banner')
-    .getByRole('link', { name: 'Sign in' })
-    .click();
-  await expect(page.getByTestId('connect')).toBeVisible();
+  // Signed out is said once on this screen: the notice, with no banner above it.
+  await expect(page.getByTestId('claude-disconnected-banner')).toHaveCount(0);
 });
 
 test('Meeting still asks for what it needs, when it is pressed', async ({ page }) => {
