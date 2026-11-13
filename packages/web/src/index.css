@@ -2131,13 +2131,15 @@ a.ch-row:hover {
    order is the filled segment. Same pill outline as the view trigger beside it. */
 .sidebar-sort-seg {
   display: flex;
+  /* Tabs wrap rather than clip when the sidebar is narrow ("Name" read "Nar"). */
+  flex-wrap: wrap;
   flex: 1 1 0;
   min-width: 0;
   padding: 0;
   border: none;
 }
 .sidebar-sort-seg button {
-  flex: 1;
+  flex: 1 0 auto;
   padding: 3px 4px;
   color: var(--ink-3);
   font-size: var(--text-min);
@@ -14269,6 +14271,7 @@ button.chat-usage-crumb:hover {
 }
 .context-ring-label {
   line-height: 1;
+  white-space: nowrap;
 }
 .context-ring-track {
   fill: none;
@@ -18537,4 +18540,10 @@ a.drop-target {
 .set-val-available {
   color: var(--waiting);
   font-weight: 600;
+}
+
+.new-chat-folder-path {
+  margin: 4px 0 0;
+  font-size: var(--text-min);
+  word-break: break-all;
 }

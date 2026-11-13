@@ -1334,6 +1334,11 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
             ) : null}
           </div>
         </div>
+        {folder !== '' ? (
+          <p className="new-chat-folder-path mono muted" data-testid="new-chat-folder-path">
+            {folder}
+          </p>
+        ) : null}
         {/* The model: the account default first, marked, then the head of the
             catalogue, and the pill that opens the full live list (spec/14 §
             Model selector) — the SAME control the chat header uses to change a

@@ -330,6 +330,22 @@ describe('/chats/new', () => {
     );
   });
 
+  it("shows the chosen project's full folder path under the project chips", () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={['/chats/new?folder=%2Fhome%2Ftom%2FMy%20first%20project']}>
+          <Routes>
+            <Route path="/chats/new" element={<NewChatRoute ws={null} />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(screen.getByTestId('new-chat-folder-path')).toHaveTextContent(
+      '/home/tom/My first project',
+    );
+  });
+
   // spec/14 § Empty states — the "Type your first message below…" hint is
   // dropped; the empty state is just the graphic + the "New chat" title.
   it('shows the new-chat empty state with NO hint line', () => {

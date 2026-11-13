@@ -2,7 +2,7 @@
 // of Send (spec/14 § Composer — context ring), read as a gauge: a solid track
 // that fills clockwise, with the percentage said beside it. Pressing it opens
 // the usage popover. It remains present before the host has measured the chat
-// (empty track, `–`), so usage details always have one stable home.
+// (empty track, `Context –`, so the gauge names itself without a hover), so usage details always have one stable home.
 
 import { useRef, useState, type JSX } from 'react';
 import { useChatStore } from '../stores/chatStore.js';
@@ -45,7 +45,7 @@ export function ContextRing({ chatId }: { chatId: string }): JSX.Element {
           />
         </svg>
         <span className="context-ring-label" data-testid="context-ring-label">
-          {ctx?.percent ?? '–'}
+          {ctx?.percent ?? 'Context –'}
         </span>
       </button>
       {open ? (
