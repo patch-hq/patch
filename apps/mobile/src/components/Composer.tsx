@@ -836,6 +836,17 @@ export function Composer({
     selectionEndRef.current = pos;
   }, [body]);
 
+  // Android's back button hides the keyboard but leaves the TextInput focused,
+  // and a focused composer holds back a draft change from another surface
+  // (spec/14 § Composer) until it blurs — so a message sent elsewhere never
+  // cleared this composer. Hiding the keyboard is the user leaving the field.
+  React.useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidHide', () => {
+      if (inputRef.current?.isFocused()) inputRef.current.blur();
+    });
+    return () => sub.remove();
+  }, []);
+
   // Dictation (spec/07 § "Dictation into the composer"): the mic streams live
   // to the composer — the interim transcript renders inside the input
   // while recording (`livePartial` below), then lands in `draft`, editable, on

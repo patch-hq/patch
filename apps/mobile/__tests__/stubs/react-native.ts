@@ -348,7 +348,11 @@ export const TextInput = React.forwardRef<TextInputHandle, Record<string, unknow
     const [focused, setFocused] = React.useState(false);
     React.useImperativeHandle(ref, () => ({
       focus: () => setFocused(true),
-      blur: () => setFocused(false),
+      // Like the real TextInput, an imperative blur() fires onBlur.
+      blur: () => {
+        setFocused(false);
+        (props as { onBlur?: () => void }).onBlur?.();
+      },
       clear: () => (props as { onChangeText?: (t: string) => void }).onChangeText?.(''),
       isFocused: () => focused,
       setNativeProps: (p: Record<string, unknown>) => {
