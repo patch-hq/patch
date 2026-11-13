@@ -548,7 +548,10 @@ export class InboundHostLink implements HostLink {
         return;
       }
     }
-    this.opts.logger.error(
+    // A machine staying offline past the resend window is the user's
+    // environment, not a server fault, and the surface was already told
+    // (`daemon_unavailable`). An error-level log would auto-file a bug.
+    this.opts.logger.warn(
       { chatId, surfaceId, type: event.type },
       'host-link: chat host never registered; dropping held frame',
     );
