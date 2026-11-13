@@ -1112,3 +1112,59 @@ describe('latest message mirror', () => {
     expect(reg.get('m')?.lastSeq).toBe(6);
   });
 });
+
+describe('ChatRegistry keeps why a chat failed', () => {
+  const spawn = (reg: ChatRegistry) =>
+    reg.observe({ type: 'chat.spawned', hostId: 'h1', chatId: 'c1', folder: '/x' });
+  const state = (
+    activity: 'idle' | 'errored',
+    lastError?: { code: 'sdk_error'; message: string; at: number },
+  ) =>
+    ({
+      type: 'chat.state',
+      permissionMode: 'bypassPermissions',
+      chatId: 'c1',
+      activity,
+      lastUpdated: 1,
+      folder: '/x',
+      ...(lastError ? { lastError } : {}),
+    }) as const;
+
+  it('serves the reason a chat.state carried, so a REST cold start can explain the failure', () => {
+    const reg = new ChatRegistry({ logger: silentLogger() });
+    spawn(reg);
+    reg.observe(state('errored', { code: 'sdk_error', message: 'Claude session expired', at: 5 }));
+    expect(reg.get('c1')?.lastError).toEqual({
+      code: 'sdk_error',
+      message: 'Claude session expired',
+      at: 5,
+    });
+  });
+
+  it('keeps the reason across a later errored chat.state that omits it', () => {
+    const reg = new ChatRegistry({ logger: silentLogger() });
+    spawn(reg);
+    reg.observe(state('errored', { code: 'sdk_error', message: 'boom', at: 5 }));
+    reg.observe(state('errored'));
+    expect(reg.get('c1')?.lastError?.message).toBe('boom');
+  });
+
+  it('drops the reason once the chat is no longer errored', () => {
+    const reg = new ChatRegistry({ logger: silentLogger() });
+    spawn(reg);
+    reg.observe(state('errored', { code: 'sdk_error', message: 'boom', at: 5 }));
+    reg.observe(state('idle'));
+    expect(reg.get('c1')?.lastError).toBeNull();
+  });
+
+  it('markErrored records the reason too', () => {
+    const reg = new ChatRegistry({ logger: silentLogger() });
+    spawn(reg);
+    reg.markErrored('c1', { code: 'daemon_unavailable', message: 'Connection lost' }, 9);
+    expect(reg.get('c1')?.lastError).toEqual({
+      code: 'daemon_unavailable',
+      message: 'Connection lost',
+      at: 9,
+    });
+  });
+});
