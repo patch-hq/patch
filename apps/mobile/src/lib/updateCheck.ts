@@ -107,6 +107,20 @@ export async function fetchPublishedApk(): Promise<PublishedApk | null> {
   };
 }
 
+let updateQueue: Promise<unknown> = Promise.resolve();
+
+/**
+ * Run an expo-updates check/fetch only after any earlier one has finished.
+ * The native downloader throws an uncaught IllegalStateException("closed") on
+ * its OkHttp thread when downloads overlap (launch, 30-minute, foreground and
+ * manual checks all land here), and that kills the app: JS cannot catch it.
+ */
+export function serialiseUpdateWork<T>(work: () => Promise<T>): Promise<T> {
+  const run = updateQueue.then(work, work);
+  updateQueue = run.catch(() => undefined);
+  return run;
+}
+
 export type UpdateCheckResult =
   | { status: 'disabled' } // dev / Expo Go — updates are off
   | { status: 'current' } // checked, nothing newer on the channel
@@ -129,11 +143,13 @@ export async function runUpdateCheck(): Promise<UpdateCheckResult> {
     return { status: 'error', message: problem };
   }
   try {
-    const res = await Updates.checkForUpdateAsync();
-    recordUpdateCheck(new Date().toISOString());
-    if (!res.isAvailable) return { status: 'current' };
-    await Updates.fetchUpdateAsync();
-    return { status: 'downloaded' };
+    return await serialiseUpdateWork(async (): Promise<UpdateCheckResult> => {
+      const res = await Updates.checkForUpdateAsync();
+      recordUpdateCheck(new Date().toISOString());
+      if (!res.isAvailable) return { status: 'current' };
+      await Updates.fetchUpdateAsync();
+      return { status: 'downloaded' };
+    });
   } catch (err) {
     recordUpdateCheck(new Date().toISOString());
     return { status: 'error', message: (err as Error).message };
