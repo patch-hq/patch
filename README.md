@@ -1,8 +1,10 @@
 # Patch
 
-Run and steer Claude Code agents from anywhere: a thin coordination layer over
-Claude Code across the terminal, web, phone, desktop and a voice device, with
-triggers (cron, webhooks, Todoist) and hosts you run yourself. A host does the
+Run and steer coding agents (Claude Code and Codex) from anywhere: the terminal,
+web, phone, desktop and a voice device, with triggers (cron, webhooks, Todoist)
+and hosts you run yourself. Patch also gives agents their own tools: goals,
+background sub-agents, watches, wakes, pads, notifications and messaging
+between chats. A host does the
 work on a host you choose; a server connects your devices to your hosts.
 
 The design is written up in `spec/`. Licensed under the MIT licence.
