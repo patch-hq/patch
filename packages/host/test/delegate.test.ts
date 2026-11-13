@@ -340,6 +340,25 @@ describe('patch_delegate', () => {
     await flushUntil(() => lastCount() === 0);
   });
 
+  it('reports the sub-agent share of the count as runningAgents', async () => {
+    const { daemon, events, folder } = setupHanging();
+    const parentChatId = await daemon.spawnChat({ folder });
+    const last = () =>
+      events
+        .filter(
+          (e): e is Extract<WireEvent, { type: 'chat.state' }> =>
+            e.type === 'chat.state' && e.chatId === parentChatId,
+        )
+        .at(-1);
+
+    const { id } = await daemon.createDelegate({ parentChatId, prompt: 'a slow task' });
+    await flushUntil(() => last()?.runningAgents === 1);
+    expect(last()?.backgroundTasks).toBe(1);
+
+    await daemon.stopDelegate(parentChatId, id);
+    await flushUntil(() => last()?.runningAgents === 0);
+  });
+
   it('builds a chat.state without scanning every chat on disk (reconnect sends one per chat)', async () => {
     const home = mkdtempSync(join(tmpdir(), 'patch-delegate-scan-'));
     const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-delegate-scan-folder-')));

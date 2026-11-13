@@ -1482,6 +1482,13 @@ export const ChatStateEvent = z
      */
     backgroundTasks: z.number().int().nonnegative().optional(),
     /**
+     * How many of `backgroundTasks` are running `patch_delegate` sub-agents
+     * (the rest are `patch_watch` tasks), so a surface can draw the two
+     * differently. Optional, and absence is not zero — same rule as
+     * `backgroundTasks`.
+     */
+    runningAgents: z.number().int().nonnegative().optional(),
+    /**
      * How full the chat's context window is (spec/14 § Composer — context
      * ring): the tokens the model read on the chat's latest request, against
      * the window its model has. `null` when nothing has been measured — a chat

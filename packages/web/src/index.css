@@ -3021,7 +3021,8 @@ button.nav-row {
    strongest "happening right now" signal in the list, and giving it to a quiet
    background job that needs no attention until it reports back would make it
    compete with `working` for the eye instead of sitting calmly below it. */
-.badge.badge-background {
+.badge.badge-background,
+.badge.badge-agents {
   background: none;
   box-shadow: none;
   border-radius: 0;

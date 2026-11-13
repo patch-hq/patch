@@ -1394,6 +1394,7 @@ const AGENT_STATE_LABEL: Record<DisplayBadge, string> = {
   permission: 'Needs you',
   errored: 'Failed',
   done: 'Done',
+  agents: 'Working…',
   background: 'Working…',
   monitoring: 'Working…',
   read: 'Done',

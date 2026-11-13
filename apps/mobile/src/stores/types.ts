@@ -109,6 +109,8 @@ export interface ChatRow {
    * known to be nonzero, so a chat with nothing running never polls at all.
    */
   backgroundTasks: number | null;
+  /** The running sub-agent share of `backgroundTasks`; `null` is unknown. */
+  runningAgents: number | null;
   /**
    * How full the chat's context window is (spec/14 § Composer — context ring):
    * the roster's value, then every `chat.state` that carries one. `null` is
@@ -203,6 +205,7 @@ export type ChatListRow = Omit<
   | 'snoozedUntil'
   | 'hidden'
   | 'backgroundTasks'
+  | 'runningAgents'
   | 'context'
   | 'model'
   | 'jobId'
@@ -226,6 +229,7 @@ export type ChatListRow = Omit<
   snoozedUntil?: number | null;
   hidden?: boolean;
   backgroundTasks?: number | null;
+  runningAgents?: number | null;
   context?: ChatContextUsage | null;
   model?: string | null;
   jobId?: string | null;
@@ -281,6 +285,7 @@ export type DisplayBadge =
   | 'permission'
   | 'errored'
   | 'done'
+  | 'agents'
   | 'background'
   | 'monitoring'
   | 'read';
@@ -301,6 +306,8 @@ export function deriveBadge(row: ChatRow): DisplayBadge {
   }
   // Unread beats a background job or self-wake loop.
   if (row.lastSeq > row.lastReadSeq) return 'done';
+  // Running sub-agents get their own state and icon; they win over plain background tasks.
+  if (typeof row.runningAgents === 'number' && row.runningAgents > 0) return 'agents';
   if (typeof row.backgroundTasks === 'number' && row.backgroundTasks > 0) return 'background';
   if (row.pendingWake) return 'monitoring';
   return 'read';

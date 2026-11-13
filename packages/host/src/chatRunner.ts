@@ -16570,6 +16570,8 @@ export class Daemon {
       // Running `patch_delegate` subagents are background work too: the chat is
       // idle but agents it launched are still going.
       backgroundTasks: this.watch.count(chatId) + this.countRunningDelegates(chatId),
+      // The sub-agent share of the count above, so surfaces can tell agents from tasks.
+      runningAgents: this.countRunningDelegates(chatId),
       // spec/14 § Composer — context ring. `null` is "not measured", never zero.
       context: s.context ?? null,
       // spec/04 § Model — the model the chat's NEXT turn will run on, carried on

@@ -507,7 +507,13 @@ export function matchesStateFilter(row: ChatRow, filter: ChatStateFilter): boole
       // working and being shown only mid-turn chats would hide exactly the
       // work that is easiest to forget about, since nothing about it is on
       // screen.
-      return pending || badge === 'working' || badge === 'background' || badge === 'monitoring';
+      return (
+        pending ||
+        badge === 'working' ||
+        badge === 'agents' ||
+        badge === 'background' ||
+        badge === 'monitoring'
+      );
     case 'waiting':
       // Anything paused ON THE USER: a permission prompt, or an agent that
       // stopped on a question.

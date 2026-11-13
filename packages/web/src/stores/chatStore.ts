@@ -999,6 +999,7 @@ function emptyRow(chatId: string, folder: string): ChatRow {
     // not zero — the sidebar draws no background state until a host that
     // tracks them reports a number (spec/02 § Background task completions).
     backgroundTasks: null,
+    runningAgents: null,
     context: null,
     providerContext: {},
   };
@@ -1159,6 +1160,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // known value — a caller that predates the field must not blank it.
       const backgroundTasks =
         r.backgroundTasks !== undefined ? r.backgroundTasks : (existing?.backgroundTasks ?? null);
+      const runningAgents =
+        r.runningAgents !== undefined ? r.runningAgents : (existing?.runningAgents ?? null);
       const context = r.context !== undefined ? r.context : (existing?.context ?? null);
       const lastUserActivity = snapshotUserActivity(r, existing);
       const createdAt = r.createdAt ?? existing?.createdAt;
@@ -1206,6 +1209,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           statusKind,
           statusDeclared,
           backgroundTasks,
+          runningAgents,
           context,
           lastUserActivity,
           ...(createdAt !== undefined ? { createdAt } : {}),
@@ -1237,6 +1241,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           statusKind,
           statusDeclared,
           backgroundTasks,
+          runningAgents,
           context,
           lastUserActivity,
           ...(createdAt !== undefined ? { createdAt } : {}),
@@ -1320,6 +1325,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // known value — a caller that predates the field must not blank it.
       const backgroundTasks =
         r.backgroundTasks !== undefined ? r.backgroundTasks : (existing?.backgroundTasks ?? null);
+      const runningAgents =
+        r.runningAgents !== undefined ? r.runningAgents : (existing?.runningAgents ?? null);
       const context = r.context !== undefined ? r.context : (existing?.context ?? null);
       const lastUserActivity = snapshotUserActivity(r, existing);
       const createdAt = r.createdAt ?? existing?.createdAt;
@@ -1355,6 +1362,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           statusKind,
           statusDeclared,
           backgroundTasks,
+          runningAgents,
           context,
           lastUserActivity,
           ...(createdAt !== undefined ? { createdAt } : {}),
@@ -1386,6 +1394,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           statusKind,
           statusDeclared,
           backgroundTasks,
+          runningAgents,
           context,
           lastUserActivity,
           ...(createdAt !== undefined ? { createdAt } : {}),
@@ -1854,6 +1863,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
               event.backgroundTasks !== undefined
                 ? event.backgroundTasks
                 : (row.backgroundTasks ?? null),
+            runningAgents:
+              event.runningAgents !== undefined ? event.runningAgents : (row.runningAgents ?? null),
             context: event.context !== undefined ? event.context : (row.context ?? null),
           };
           // The host is speaking for this chat again. If it reports anything

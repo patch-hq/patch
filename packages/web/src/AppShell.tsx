@@ -166,6 +166,7 @@ export function AppShell(): JSX.Element {
           // `chat.state` only comes when something changes. `null` here is the
           // server saying it does not know, and stays unknown.
           backgroundTasks: c.backgroundTasks,
+          runningAgents: c.runningAgents,
           // spec/04 § Hidden. Nothing in this snapshot is hidden, and saying so
           // clears a stale `true` on a chat that was shown from another surface.
           hidden: c.hidden,
