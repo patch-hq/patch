@@ -402,6 +402,11 @@ export const api = {
   // Validated at the boundary: a partial report must reach the panel's error state,
   // not render as "all layers agree".
   version: async () => assertVersionReport(await request<unknown>('/api/version')),
+  setReleaseChannel: (channel: 'stable' | 'dev') =>
+    request<{ channel: 'stable' | 'dev' }>('/api/release-channel', {
+      method: 'PUT',
+      body: { channel },
+    }),
   updateAll: () => request<{ ok: true }>('/api/update-all', { method: 'POST' }),
   me: () =>
     request<{
