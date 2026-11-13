@@ -246,7 +246,14 @@
     }
     wrap.dataset.scale = String(scale);
   }
-  window.addEventListener('resize', function () { applyWidth(); draw(); });
+  // The layer sits over the iframe, so it would swallow the design's own
+  // scrollbar: leave that strip uncovered so it can be grabbed and dragged.
+  function fitLayer() {
+    var d = doc(), bar = 0;
+    if (d && d.documentElement) bar = Math.max(0, frame.clientWidth - d.documentElement.clientWidth);
+    layer.style.right = (bar * scale) + 'px';
+  }
+  window.addEventListener('resize', function () { applyWidth(); fitLayer(); draw(); });
   function renderScreens() {
     applyWidth();
     var seen = seenIds();
@@ -306,6 +313,7 @@
   frame.addEventListener('load', function () {
     var d = doc();
     frameReady = true; notesLayer.style.visibility = '';
+    fitLayer();
     applyPreviews();
     if (restoring) {
       var r = restoring; restoring = null;
@@ -325,9 +333,11 @@
     var queued = false;
     observer = new (win().MutationObserver)(function () {
       if (queued) return; queued = true;
-      requestAnimationFrame(function () { queued = false; applyPreviews(); notesDirty = true; draw(); });
+      requestAnimationFrame(function () { queued = false; applyPreviews(); notesDirty = true; fitLayer(); draw(); });
     });
     observer.observe(d.documentElement, { subtree: true, childList: true, characterData: true });
+    // A scrollbar appears or goes when the content's height crosses the pane's.
+    if (win().ResizeObserver) new (win().ResizeObserver)(fitLayer).observe(d.body);
     d.addEventListener('keydown', onKey, true);
     // A design that routes with the hash changes screen without a load.
     win().addEventListener('hashchange', syncScreen);
@@ -602,7 +612,9 @@
   layer.addEventListener('wheel', function (e) {
     if (tool === 'interact') return;
     e.preventDefault();
-    scrollerFor(hit(local(e))).scrollBy(e.deltaX, e.deltaY);
+    // Wheel deltas are screen pixels; a scaled-down screen scrolls in unscaled ones.
+    var unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? layer.clientHeight : 1;
+    scrollerFor(hit(local(e))).scrollBy({ left: e.deltaX * unit / scale, top: e.deltaY * unit / scale, behavior: 'instant' });
   }, { passive: false });
 
   // ---------- draw ----------
