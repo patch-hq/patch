@@ -3,6 +3,10 @@
 // permission + a chosen asset, or a denied permission).
 export const MediaTypeOptions = { Images: 'Images', Videos: 'Videos', All: 'All' } as const;
 
+export async function getMediaLibraryPermissionsAsync(): Promise<{ granted: boolean }> {
+  return { granted: true };
+}
+
 export async function requestMediaLibraryPermissionsAsync(): Promise<{ granted: boolean }> {
   return { granted: true };
 }
@@ -14,8 +18,8 @@ export interface ImagePickerAsset {
   width?: number;
   height?: number;
 }
-export async function launchImageLibraryAsync(_opts?: unknown): Promise<
-  { canceled: true } | { canceled: false; assets: ImagePickerAsset[] }
-> {
+export async function launchImageLibraryAsync(
+  _opts?: unknown,
+): Promise<{ canceled: true } | { canceled: false; assets: ImagePickerAsset[] }> {
   return { canceled: true };
 }

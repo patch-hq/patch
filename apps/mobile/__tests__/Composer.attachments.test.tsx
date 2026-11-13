@@ -32,14 +32,14 @@ import { deliveryTracker } from '../src/lib/deliveryTracker';
 import { _resetSendQueue } from '../src/lib/sendQueue';
 import { lightColors } from '../src/lib/theme';
 
-const { requestPermSpy, launchLibrarySpy, requestCameraPermSpy, launchCameraSpy } = vi.hoisted(
-  () => ({
+const { requestPermSpy, getPermSpy, launchLibrarySpy, requestCameraPermSpy, launchCameraSpy } =
+  vi.hoisted(() => ({
     requestPermSpy: vi.fn(),
+    getPermSpy: vi.fn(),
     launchLibrarySpy: vi.fn(),
     requestCameraPermSpy: vi.fn(),
     launchCameraSpy: vi.fn(),
-  }),
-);
+  }));
 // Message hooks have their own tests (Composer.hooks.test.tsx); here the check passes.
 vi.mock('../src/lib/hookCheck', async (orig) => ({
   ...(await orig<typeof import('../src/lib/hookCheck')>()),
@@ -49,6 +49,7 @@ vi.mock('../src/lib/hookCheck', async (orig) => ({
 vi.mock('expo-image-picker', () => ({
   MediaTypeOptions: { Images: 'Images' },
   requestMediaLibraryPermissionsAsync: requestPermSpy,
+  getMediaLibraryPermissionsAsync: getPermSpy,
   launchImageLibraryAsync: launchLibrarySpy,
   requestCameraPermissionsAsync: requestCameraPermSpy,
   launchCameraAsync: launchCameraSpy,
@@ -124,6 +125,7 @@ beforeEach(() => {
   submitSpy = vi.spyOn(deliveryTracker, 'submit').mockImplementation(() => {});
 
   requestPermSpy.mockReset().mockResolvedValue({ granted: true });
+  getPermSpy.mockReset().mockResolvedValue({ granted: true });
   launchLibrarySpy.mockReset().mockResolvedValue({ canceled: true });
   requestCameraPermSpy.mockReset().mockResolvedValue({ granted: true });
   launchCameraSpy.mockReset().mockResolvedValue({ canceled: true });
@@ -224,12 +226,23 @@ describe('Composer — image picker (attach photo/image button)', () => {
   });
 
   it('a denied permission surfaces a loud error (NO FALLBACK) and adds nothing', async () => {
+    getPermSpy.mockResolvedValue({ granted: false });
     requestPermSpy.mockResolvedValue({ granted: false });
+    const asked: string[] = [];
+    const unsub = usePermissionGate.subscribe((st) => {
+      if (st.pending) {
+        asked.push(st.pending.kind);
+        queueMicrotask(() => answerExplainer(true));
+      }
+    });
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
       pickFromAddMenu(r.root, 'image');
       await flush();
     });
+    unsub();
+    // The explainer (what + why) is shown before the OS dialog.
+    expect(asked).toEqual(['photos']);
     const errors = useUiStore.getState().errors.map((e) => e.message);
     expect(errors.some((m) => /attach image failed: photo library permission denied/.test(m))).toBe(
       true,
