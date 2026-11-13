@@ -96,7 +96,10 @@ export function registerMobileUpdateRoutes(
     const headers = {
       'expo-protocol-version': '1',
       'expo-sfv-version': '0',
-      'cache-control': 'private, max-age=0',
+      // no-store, not max-age=0: a cacheable response makes OkHttp wrap the body in
+      // its cache writer, and expo-updates crashes the app on an uncaught
+      // "closed" from it when the connection drops mid-read (#577).
+      'cache-control': 'no-store',
     };
     // Another runtime is another APK: this bundle would not run on it. The
     // install notice (MobileUpdateNotifier) is what moves that phone on.
