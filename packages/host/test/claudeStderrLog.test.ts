@@ -6,6 +6,7 @@ import { spawnClaudeInGroup } from '../src/claudeSpawn.js';
 import {
   CLAUDE_STDERR_LOG,
   claudeStderrLogPath,
+  noteClaudeProcess,
   openClaudeStderrLog,
 } from '../src/claudeStderrLog.js';
 
@@ -23,6 +24,13 @@ describe('claude stderr log', () => {
     closeSync(openClaudeStderrLog(path, 10));
     expect(readFileSync(`${path}.1`, 'utf8')).toHaveLength(100);
     expect(readFileSync(path, 'utf8')).toBe('');
+  });
+
+  it('notes a line in a log whose directory does not exist yet', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stderrlog-'));
+    const path = join(dir, 'logs', CLAUDE_STDERR_LOG);
+    noteClaudeProcess(path, 'spawned claude pid 1');
+    expect(readFileSync(path, 'utf8')).toContain('spawned claude pid 1');
   });
 
   it('keeps a spawned process stderr and its exit status', async () => {

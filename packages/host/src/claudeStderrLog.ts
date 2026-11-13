@@ -37,5 +37,6 @@ export function openClaudeStderrLog(path: string, maxBytes = CLAUDE_STDERR_MAX_B
 
 /** One timestamped line in the log: a spawn, an exit. */
 export function noteClaudeProcess(path: string, line: string): void {
+  mkdirSync(dirname(path), { recursive: true });
   appendFileSync(path, `${new Date().toISOString()} ${line}\n`);
 }
