@@ -1490,6 +1490,15 @@ describe('/chats/new', () => {
     expect(screen.getByTestId('new-chat-folder-pill')).toBeDisabled();
   });
 
+  it('says signed out once on the landing chat: the composer notice, no banner', async () => {
+    setSharedAccounts({ claude: [{ connected: false }] });
+    stubPickerFetch({ folders: [] });
+    renderPicker();
+
+    expect(await screen.findByTestId('composer-signed-out')).toBeInTheDocument();
+    expect(screen.queryByTestId('claude-disconnected-banner')).toBeNull();
+  });
+
   // ---- Usage (spec/14 §8): apart from the selections, visual, in words ----
 
   it('shows a usage card per connected account, apart from the selections, with 5-hour and weekly meters', async () => {

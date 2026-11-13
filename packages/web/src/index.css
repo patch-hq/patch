@@ -11806,8 +11806,15 @@ main.empty-state p {
   opacity: 0.75;
 }
 .folder-quick:disabled,
-.model-quick:disabled {
+.model-quick:disabled,
+.folder-pill:disabled,
+.model-pill:disabled {
   cursor: default;
+}
+/* A control that cannot act reads as one: faded, whatever its fill. */
+.folder-pill:disabled,
+.model-pill:disabled {
+  opacity: 0.5;
 }
 /* The 50% fade that marks an unavailable pill as unavailable washes out the
    SELECTED fill instead: white-on-accent and the dimming both converge toward
