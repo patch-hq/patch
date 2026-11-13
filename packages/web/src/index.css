@@ -14118,6 +14118,23 @@ input.browse-filter {
   position: relative;
   z-index: 2;
 }
+/* A file editor in a narrow tab: the meta strip holds up to nine controls that
+   cannot shrink, so on one line they were clipped off the right edge. Below a
+   column width of 520px the path takes its own row and the controls wrap under
+   it. Sized to the editor column, not the viewport, because the rail and tabs
+   are resizable. */
+.browse-editor {
+  container-type: inline-size;
+}
+@container (max-width: 520px) {
+  .browse-meta {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .browse-meta .browse-meta-path {
+    flex: 1 1 100%;
+  }
+}
 
 /* Unsaved-edit indicator in a form route's header (spec/14 § Jobs view —
    Unsaved changes). Deliberately the SAME chip as `.question-header`: small,

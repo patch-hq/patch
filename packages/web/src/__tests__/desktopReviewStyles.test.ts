@@ -145,4 +145,13 @@ describe('DESKTOP-REVIEW styles', () => {
     // Accent-coloured (not the base ink-3 grey).
     expect(/color:\s*var\(--accent-strong\)/.test(joined)).toBe(true);
   });
+
+  // A narrow file-editor tab must wrap the meta strip's controls under the path
+  // instead of clipping them off the right edge.
+  it('file editor meta strip wraps in a narrow editor column', () => {
+    expect(css).toMatch(/\.browse-editor\s*\{[^}]*container-type:\s*inline-size/);
+    const m = css.match(/@container \(max-width: \d+px\)\s*\{\s*\.browse-meta\s*\{([^}]*)\}/);
+    expect(m).not.toBeNull();
+    expect(m?.[1]).toMatch(/flex-wrap:\s*wrap/);
+  });
 });
