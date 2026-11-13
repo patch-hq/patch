@@ -220,6 +220,9 @@ describe('Settings → Usage → changing accounts', () => {
         'noopener',
       ),
     );
+    expect(await screen.findByTestId('claude-signin-hint')).toHaveTextContent(
+      'Open claude.ai again',
+    );
     fireEvent.change(await screen.findByTestId('claude-signin-code'), {
       target: { value: ' code#x ' },
     });
