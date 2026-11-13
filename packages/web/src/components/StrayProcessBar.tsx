@@ -25,6 +25,9 @@ export function StrayProcessBar({ chatId }: { chatId: string }): JSX.Element | n
   const [now, setNow] = useState(() => Date.now());
 
   const apply = useCallback((res: { processes: StrayProcessRow[] }) => {
+    if (!Array.isArray(res.processes)) {
+      throw new Error('stray-processes response has no processes list');
+    }
     setRows(res.processes);
     setError(null);
   }, []);
