@@ -77,10 +77,20 @@ export function UpdateBanner(): JSX.Element | null {
   const shellStaged = shell !== null && shell.downloaded && !!shell.availableVersion;
   const shellInstallError =
     shell?.lastResult === 'error' && shell.lastErrorKind === 'install' ? shell.lastError : null;
+  // The shell is still fetching its own build for this same deploy. Pressing now
+  // would only reload the page, then the banner would come back for the shell:
+  // two presses for one update. Hold until the shell has either staged its
+  // build (one Restart does both) or settled without one (reload is all there is).
+  const shellPending =
+    shell === null
+      ? getDesktopBridge()?.getUpdaterState !== undefined
+      : !shellStaged &&
+        shell.disabledReason === null &&
+        (shell.checking || shell.lastResult === 'update-available');
   const staleSince = earliest(shellStaged ? (shell?.staleSince ?? null) : null, webStaleSince);
   const urgency = shellStaged || webStaleSince !== null ? updateUrgency(staleSince, now) : 'none';
   // A refused install must never be swallowed, even once nothing is staged.
-  const shown = urgency !== 'none' || shellInstallError !== null;
+  const shown = (urgency !== 'none' && !shellPending) || shellInstallError !== null;
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 5 * 60_000);

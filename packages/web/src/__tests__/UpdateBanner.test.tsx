@@ -89,6 +89,19 @@ describe('UpdateBanner', () => {
     expect(screen.getAllByRole('button')).toHaveLength(1);
   });
 
+  it('a new page while the shell is still downloading waits, so one press does both', async () => {
+    installBridge(state({ downloaded: false, lastResult: 'update-available', checking: false }));
+    act(() => useWebUpdateStore.getState().setAvailable('bundle-2', new Date().toISOString()));
+    render(<UpdateBanner />);
+    await act(async () => {});
+    expect(screen.queryByTestId('update-banner')).toBeNull();
+    // The shell settles without a build: a reload is all there is, so offer it.
+    installBridge(state({ downloaded: false, lastResult: 'up-to-date', availableVersion: null }));
+    cleanup();
+    render(<UpdateBanner />);
+    expect(await screen.findByTestId('update-banner')).toBeInTheDocument();
+  });
+
   it('a new page only: the same banner, offered in a browser too', () => {
     act(() => useWebUpdateStore.getState().setAvailable('bundle-2', new Date().toISOString()));
     render(<UpdateBanner />);
