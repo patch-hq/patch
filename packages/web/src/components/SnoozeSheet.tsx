@@ -25,6 +25,7 @@ import {
   distinctPresets,
   UNTIL_COMPLETE_PRESET,
   UNTIL_COMPLETE_DISABLED_TIP,
+  hasWorkToWaitFor,
   formatElapsed,
   formatWakeAt,
   resolveSliderHours,
@@ -73,6 +74,7 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
   const close = useUiStore((s) => s.closeSnoozeSheet);
   const pushError = useUiStore((s) => s.pushError);
   const chats = useChatStore((s) => s.chats);
+  const delegateUpdates = useChatStore((s) => s.delegateUpdates);
   const navigate = useNavigate();
   const morningHour = usePreferencesStore((s) => s.preferences.snoozeMorningHour);
   const eveningHour = usePreferencesStore((s) => s.preferences.snoozeEveningHour);
@@ -102,13 +104,7 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
         : stripMarkdown(deriveChatTitle(targets[0]?.name ?? null));
   // Enabled only when every chat has work to wait for; the host refuses the rest.
   const canUntilComplete =
-    targets.length > 0 &&
-    targets.every(
-      (c) =>
-        c.activity === 'running' ||
-        c.goal !== null ||
-        (c.pendingWake != null && c.pendingWake.every === undefined),
-    );
+    targets.length > 0 && targets.every((c) => hasWorkToWaitFor(c, delegateUpdates));
   const presets = [...distinctPresets(allPresets), UNTIL_COMPLETE_PRESET];
   const wake = wakeFor(selected, customValue, allPresets, sliderIndex);
   const canConfirm = selected !== null && targets.length > 0;
