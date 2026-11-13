@@ -242,16 +242,15 @@ async function throwawayServer(): Promise<{ code: string; stop: () => void; orig
 }
 
 /**
- * Skip the AI step as a newcomer might: it says once what that costs, then
- * carries on.
+ * Skip the AI step as a newcomer might: the cost is already on screen, and one
+ * click carries on.
  */
 async function skipAi(page: Page): Promise<void> {
-  await page.getByTestId('welcome-skip').click();
   await expect(page.getByTestId('welcome-skip-note')).toHaveText(
     'Chats won’t run until you connect an AI. You can do it later from the banner in any chat.',
   );
   await shot(page, 'providers-skipped');
-  await page.getByTestId('welcome-next').click();
+  await page.getByTestId('welcome-skip').click();
 }
 
 /** Walk the welcome steps that are the same on both paths, with no AI connected. */
