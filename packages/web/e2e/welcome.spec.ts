@@ -68,7 +68,7 @@ test('this computer: every step, each choice written where Settings writes it', 
 
   // 1. Connect an AI — Claude in the browser, the code pasted back.
   await expect(page.getByTestId('welcome-providers')).toBeVisible();
-  await expect(page.getByTestId('welcome-next')).toBeDisabled();
+  await expect(page.getByTestId('welcome-next')).toHaveCount(0);
   // One dot per step this page asks: AI, permissions, keep running, phone —
   // and the model step joins once an AI is connected.
   await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(4);
@@ -175,16 +175,13 @@ test('nothing connected: skipping says once what it costs, the model step is not
   await page.goto('/app/dev-harness.html?route=/welcome?machine=server');
   // AI, permissions, phone: no model step with nothing to choose from.
   await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(3);
-  await expect(page.getByTestId('welcome-skip-note')).toHaveCount(0);
-  await page.getByTestId('welcome-skip').click();
-  // Still on the AI step: one plain line, then Continue carries on.
-  await expect(page.getByTestId('welcome-providers')).toBeVisible();
+  // The cost of skipping is on screen before the click, and one click skips.
   await expect(page.getByTestId('welcome-skip-note')).toHaveText(
     'Chats won’t run until you connect an AI. You can do it later from the banner in any chat.',
   );
-  await expect(page.getByTestId('welcome-skip')).toHaveCount(0);
+  await expect(page.getByTestId('welcome-next')).toHaveCount(0);
   await shot(page, '2d-skipped');
-  await page.getByTestId('welcome-next').click();
+  await page.getByTestId('welcome-skip').click();
 
   await expect(page.getByTestId('welcome-permissions')).toBeVisible();
   await expect(page.getByTestId('welcome-permissions')).not.toContainText('Claude');

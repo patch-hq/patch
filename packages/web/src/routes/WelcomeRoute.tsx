@@ -125,6 +125,7 @@ function Footer({
   label = 'Continue',
   skip,
   onSkip = onNext,
+  primary = true,
 }: {
   onNext: () => void;
   ready: boolean;
@@ -132,18 +133,22 @@ function Footer({
   skip?: string;
   /** What the quiet action does; it moves on unless told otherwise. */
   onSkip?: () => void;
+  /** False leaves the quiet action as the only one. */
+  primary?: boolean;
 }): JSX.Element {
   return (
     <div className="welcome-footer">
-      <button
-        type="button"
-        className="welcome-primary"
-        data-testid="welcome-next"
-        disabled={!ready}
-        onClick={onNext}
-      >
-        {label}
-      </button>
+      {primary ? (
+        <button
+          type="button"
+          className="welcome-primary"
+          data-testid="welcome-next"
+          disabled={!ready}
+          onClick={onNext}
+        >
+          {label}
+        </button>
+      ) : null}
       {skip ? (
         <button type="button" className="welcome-skip" data-testid="welcome-skip" onClick={onSkip}>
           {skip}
@@ -155,27 +160,19 @@ function Footer({
 
 function ProvidersStep({ onNext }: { onNext: () => void }): JSX.Element {
   const connected = useConnectedCount();
-  // Skipping says once what it costs, then lets the person carry on.
-  const [skipping, setSkipping] = useState(false);
-  const warned = skipping && connected === 0;
   return (
     <section className="welcome-step" data-testid="welcome-providers">
       <h1>Connect an AI</h1>
       <ProviderCards />
-      {warned ? (
-        <p className="welcome-note" role="status" data-testid="welcome-skip-note">
+      {connected === 0 ? (
+        <p className="welcome-note" data-testid="welcome-skip-note">
           Chats won’t run until you connect an AI. You can do it later from the banner in any chat.
         </p>
       ) : null}
-      {connected > 0 || warned ? (
+      {connected > 0 ? (
         <Footer onNext={onNext} ready />
       ) : (
-        <Footer
-          onNext={onNext}
-          ready={false}
-          skip="Skip for now"
-          onSkip={() => setSkipping(true)}
-        />
+        <Footer onNext={onNext} ready={false} primary={false} skip="Skip for now" />
       )}
     </section>
   );
