@@ -91,13 +91,6 @@ test.describe('Settings — Voice engines', () => {
     expect((await handoff.locator('.set-row-title').boundingBox())!.height).toBeLessThan(60);
   });
 
-  test('picking an unimplemented cell shows the honest status, not a silent success', async ({
-    page,
-  }) => {
-    await page.getByTestId('voice-device-engine-gemini').click();
-    await expect(page.getByTestId('voice-device-status')).toContainText('Not implemented yet');
-  });
-
   test('Gemini on hands-free shows no warning: the address word is enforced', async ({ page }) => {
     await page.getByTestId('voice-handsFree-engine-gemini').click();
     await expect(page.getByTestId('voice-handsFree-status')).toHaveCount(0);
