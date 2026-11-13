@@ -143,7 +143,9 @@ jobs:
           # tracefs is root-only (0700), so test through sudo, and only mount if it is not already.
           mountpoint -q "$T" || sudo mount -t tracefs nodev "$T"
           sudo test -d "$T/events/signal/signal_generate" || { echo "::error::no tracefs signal events"; exit 1; }
-          echo 'sig == 9' | sudo tee "$T/events/signal/signal_generate/filter" >/dev/null
+          # Drop the targets that are just tests tidying their own children (sleep, sh), which
+          # otherwise bury the one kill that matters in the tail below.
+          echo 'sig == 9 && comm != sleep && comm != sh && comm != head && comm != yes' | sudo tee "$T/events/signal/signal_generate/filter" >/dev/null
           echo 1 | sudo tee "$T/events/signal/signal_generate/enable" >/dev/null
           nohup sudo sh -c "cat $T/trace_pipe" > /tmp/sigtrace.log 2>&1 &
       - name: The gate
@@ -163,7 +165,7 @@ jobs:
         run: |
           tail -n 120 /tmp/mem.log || true
           echo "--- kill trace"; tail -n 60 /tmp/killtrace.log || true
-          echo "--- SIGKILLs, sender first (kernel signal_generate; comm-pid is the sender, comm= pid= the target)"; tail -n 80 /tmp/sigtrace.log || true
+          echo "--- SIGKILLs, sender first (kernel signal_generate; comm-pid is the sender, comm= pid= the target)"; tail -n 80 /tmp/sigtrace.log || true; echo "--- SIGKILLs not sent by a vitest worker"; grep -v 'vitest' /tmp/sigtrace.log | tail -n 40 || true
           echo "--- kernel"; (sudo dmesg || sudo journalctl -k --no-pager) 2>&1 | grep -i -E "out of memory|oom|killed process|cgroup" | tail -n 20 || true
 
   # The one check that branch protection and release.yml look at: green only
