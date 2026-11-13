@@ -257,6 +257,54 @@ describe('running tool call', () => {
     expect(group.getAttribute('data-open')).toBe('false');
     expect(screen.getByTestId('tool-running')).toBeTruthy();
   });
+
+  // 12 Nov 2026: a growing run showed only a vague AI label ("Investigating…")
+  // that lagged several calls behind, so a working chat looked stuck.
+  it('shows the newest call beside the label of a live collapsed run, not once it is final', () => {
+    seed();
+    const store = useChatStore.getState();
+    store.applyEvent(call);
+    store.applyEvent({
+      ...call,
+      seq: 2,
+      callId: 'call-2',
+      args: { command: 'ls', description: 'List the repo' },
+    });
+    store.applyEvent({
+      type: 'chat.tool_run_summary',
+      chatId: 'c1',
+      callIds: ['call-1'],
+      summary: 'Investigating…',
+      live: true,
+      seq: 3,
+    });
+    renderChat();
+    expect(screen.getByTestId('tool-group-latest').textContent).toBe('List the repo');
+    act(() => {
+      store.applyEvent({
+        type: 'chat.tool_result',
+        chatId: 'c1',
+        callId: 'call-1',
+        result: 'ok',
+        seq: 4,
+      } as never);
+      store.applyEvent({
+        type: 'chat.tool_result',
+        chatId: 'c1',
+        callId: 'call-2',
+        result: 'ok',
+        seq: 5,
+      } as never);
+      store.applyEvent({
+        type: 'chat.tool_run_summary',
+        chatId: 'c1',
+        callIds: ['call-1', 'call-2'],
+        summary: 'Looked around',
+        seq: 6,
+      });
+    });
+    expect(screen.queryByTestId('tool-group-latest')).toBeNull();
+  });
 });
 
 describe('cancel one running command', () => {
