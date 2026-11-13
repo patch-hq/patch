@@ -1497,7 +1497,8 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
         data-testid={testid}
         onClick={() => {
           setActiveChat(target.chatId);
-          openFileInBrowser(target);
+          // A new tab: the default would replace this job editor tab.
+          openFileInBrowser(target, { placement: 'tab' });
         }}
       >
         Edit

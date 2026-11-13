@@ -29,7 +29,7 @@ import {
 } from '../lib/keymap.js';
 import { loadDictateChord, saveDictateChord, type DictateChord } from '../lib/dictateChord.js';
 import type { SettingsPageId } from '../routes/settings/pages.js';
-import { useLayoutStore } from './layoutStore.js';
+import { useLayoutStore, type OpenTabOptions } from './layoutStore.js';
 
 // Column widths persist per-user across reloads (spec/14 ## Layout: "State
 // persists per-user"). localStorage is the surface-local store. NO FALLBACK
@@ -1026,7 +1026,7 @@ interface UiState {
    * Open one file as its own tab (spec/14 § Panes and tabs) — the job
    * editor's Edit-skill link (spec/14 § Jobs view).
    */
-  openFileInBrowser(r: BrowseRequest): void;
+  openFileInBrowser(r: BrowseRequest, opts?: OpenTabOptions): void;
   /**
    * Record where a chat's file browser is now. Merges into that chat's entry,
    * marks it most-recently-used and persists the bounded map.
@@ -1379,9 +1379,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   clearFileDiff() {
     set({ fileDiff: null });
   },
-  openFileInBrowser(r) {
+  openFileInBrowser(r, opts) {
     // spec/14 § Panes and tabs: a file tab, not the old docked rail.
-    useLayoutStore.getState().openTab({ kind: 'file', chatId: r.chatId, path: r.path });
+    useLayoutStore.getState().openTab({ kind: 'file', chatId: r.chatId, path: r.path }, opts);
   },
   requestSettingsPage(p) {
     set({ settingsPageRequest: p });
