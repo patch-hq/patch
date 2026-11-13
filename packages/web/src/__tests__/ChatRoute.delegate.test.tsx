@@ -363,6 +363,21 @@ describe('ChatRoute — patch_delegate tool row', () => {
       expect(screen.queryByTestId('delegate-strip')).toBeNull();
     });
 
+    it('a slim bar above the composer says an agent is running, and goes when none is', () => {
+      seed();
+      renderChat();
+      expect(screen.queryByTestId('agent-running-bar')).toBeNull();
+      update('sub-1', 'draft the email', 'running', 1);
+      expect(screen.getByTestId('agent-running-bar').textContent).toBe(
+        'Agent running · draft the email',
+      );
+      update('sub-2', 'build the design', 'running', 2);
+      expect(screen.getByTestId('agent-running-bar').textContent).toBe('2 agents running');
+      update('sub-1', 'draft the email', 'done', 3);
+      update('sub-2', 'build the design', 'done', 4);
+      expect(screen.queryByTestId('agent-running-bar')).toBeNull();
+    });
+
     it('several fold into one Agents row, open to one row each, and count the done ones', () => {
       seed();
       renderChat();
