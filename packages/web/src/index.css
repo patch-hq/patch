@@ -4993,6 +4993,13 @@ button.nav-row {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.tool-summary-latest {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-left: 8px;
+  color: var(--ink-3);
+}
 .tool-summary:hover {
   background: var(--accent-soft, #cad9be);
 }

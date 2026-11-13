@@ -5468,6 +5468,11 @@ const ToolGroup = memo(
         openCallIds?.includes(c.callId) &&
         !entries.some((e) => e.kind === 'tool_result' && e.callId === c.callId),
     );
+    // The AI label is a guess written a few calls back and stays vague while a
+    // run grows ("Investigating…"), so a chat mid-turn looked stuck. While the
+    // run is live, the newest call's own line rides beside it so the row moves.
+    const liveCall =
+      matched?.live === true || runningCall !== undefined ? calls[calls.length - 1] : undefined;
     return (
       <div
         className={`tool-group${open ? ' open' : ''}`}
@@ -5487,6 +5492,11 @@ const ToolGroup = memo(
             {open ? '▾' : '▸'}
           </span>
           <span className="tool-summary-text">{summary}</span>
+          {liveCall && !open ? (
+            <span className="tool-summary-latest" data-testid="tool-group-latest">
+              {toolCallSummary(liveCall.tool, liveCall.toolArgs)}
+            </span>
+          ) : null}
           {runningCall && !open ? (
             <ToolRunning since={runningCall.startedAt} turnSince={turnSince} />
           ) : null}
