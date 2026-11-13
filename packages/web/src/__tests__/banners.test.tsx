@@ -17,6 +17,8 @@ afterEach(() => {
     hosts: {},
     everConnected: false,
     hostsSeeded: false,
+    restarting: null,
+    hostsUpdating: {},
   });
 });
 
@@ -116,5 +118,35 @@ describe('ColumnDivider', () => {
     render(<ColumnDivider side="left" width={100} onResize={() => {}} />);
     const el = screen.getByRole('separator');
     expect(el.getAttribute('aria-orientation')).toBe('vertical');
+  });
+});
+
+describe('restart banners', () => {
+  it('hides Diagnose while the server is restarting', () => {
+    usePresenceStore.setState({
+      connection: 'reconnecting',
+      everConnected: true,
+      restarting: { version: '1.2.3', at: 1 },
+    });
+    render(<OfflineBanner />);
+    expect(screen.queryByTestId('offline-diagnose')).toBeNull();
+  });
+
+  it('says a host is being updated, without Diagnose, instead of offline', () => {
+    usePresenceStore.setState({
+      connection: 'connected',
+      hostsSeeded: true,
+      hostOnline: true,
+      hosts: {
+        a: { hostId: 'a', online: true, host: { hostName: 'box' } },
+        b: { hostId: 'b', online: false, host: { hostName: 'mac' } },
+      } as never,
+      hostsUpdating: { b: '1.2.3' },
+    });
+    render(<HostOfflineBanner hostId="b" />);
+    expect(screen.getByTestId('daemon-offline-banner').textContent).toContain(
+      'mac is being updated to 1.2.3',
+    );
+    expect(screen.queryByTestId('daemon-offline-diagnose')).toBeNull();
   });
 });
