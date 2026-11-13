@@ -204,7 +204,9 @@ test.describe('meeting mode — live', () => {
   test('the feed stays pinned to the newest until Tom scrolls up', async ({ page }) => {
     await page.setViewportSize({ width: 1000, height: 600 });
     await page.goto(URL_LIVE);
+    await page.evaluate(() => document.fonts.ready);
     const scroller = page.getByTestId('meeting-points');
+    await expect(scroller).toBeVisible();
     const gap = () => scroller.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
     await expect.poll(gap).toBeLessThan(5);
     const add = (n: number) =>
@@ -315,7 +317,7 @@ test.describe('meeting mode — live', () => {
     await page.getByTestId('meeting-transcript').evaluate((el) => {
       (el.parentElement as HTMLElement).scrollTop = 400;
     });
-    expect(Math.abs((await copy.boundingBox())!.y - before)).toBeLessThan(2);
+    await expect.poll(async () => Math.abs((await copy.boundingBox())!.y - before)).toBeLessThan(2);
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
     await copy.click();
     const text = await page.evaluate(() => navigator.clipboard.readText());
