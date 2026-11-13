@@ -110,6 +110,10 @@ export function ClaudeSignIn({
       <label className="claude-signin-label" htmlFor="claude-signin-code">
         Sign in at claude.ai, copy the code it shows, and paste it here.
       </label>
+      <p className="claude-signin-hint" data-testid="claude-signin-hint">
+        If you were signed out, claude.ai takes you to its dashboard after signing in. Then press
+        Open claude.ai again to get the code.
+      </p>
       <input
         id="claude-signin-code"
         type="text"
