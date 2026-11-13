@@ -8,7 +8,7 @@ import { reportHost, settingsUrl, stubSettingsApi, wsSent } from './settingsHarn
 const AGENT = settingsUrl('agent');
 
 test.describe('Settings → Agent → Permission mode', () => {
-  test('offers exactly the five SDK mode names and writes the choice to the server', async ({
+  test('offers the five SDK modes by name (default reads Ask) and writes the choice to the server', async ({
     page,
   }) => {
     const server = await stubSettingsApi(page);
@@ -16,7 +16,8 @@ test.describe('Settings → Agent → Permission mode', () => {
     const select = page.getByTestId('permission-default');
     await expect(select).toHaveValue('auto');
     const options = await select.locator('option').allTextContents();
-    expect(options).toEqual(['Auto', 'Default', 'Accept edits', 'Bypass permissions', 'Plan']);
+    // `default` reads Ask: it is not the default mode, Auto is (spec/02).
+    expect(options).toEqual(['Auto', 'Ask', 'Accept edits', 'Bypass permissions', 'Plan']);
     await select.selectOption('acceptEdits');
     await expect
       .poll(() => server.patches)
