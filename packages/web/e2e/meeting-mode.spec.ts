@@ -204,7 +204,9 @@ test.describe('meeting mode — live', () => {
   test('the feed stays pinned to the newest until Tom scrolls up', async ({ page }) => {
     await page.setViewportSize({ width: 1000, height: 600 });
     await page.goto(URL_LIVE);
+    await page.evaluate(() => document.fonts.ready);
     const scroller = page.getByTestId('meeting-points');
+    await expect(scroller).toBeVisible();
     const gap = () => scroller.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
     await expect.poll(gap).toBeLessThan(5);
     const add = (n: number) =>
