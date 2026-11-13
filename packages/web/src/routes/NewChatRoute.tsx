@@ -51,7 +51,6 @@ import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import { summariseUsage } from '../lib/usage.js';
 import { Composer, type ComposerHandle } from '../components/Composer.js';
 import { useWholeChatDrop } from '../lib/wholeChatDrop.js';
-import { ClaudeDisconnectedBanner } from '../components/ClaudeDisconnectedBanner.js';
 import { EmptyChat } from '../components/EmptyChat.js';
 import { NavHistoryControls } from '../components/NavHistoryControls.js';
 import { UsageCrumb } from '../components/UsageCrumb.js';
@@ -1568,9 +1567,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
           </div>
         </section>
       )}
-      {/* A new chat cannot run without a credential, so say so here too — this is
-          the screen where someone would otherwise type into a dead composer. */}
-      <ClaudeDisconnectedBanner model={effectiveModel ?? undefined} />
+      {/* Signed out is said once, by the composer's own notice. */}
       {/* spec/14 § Terminal — available HERE above all: you are on this screen
           because the folder you want does not exist on the host yet, and a
           shell is how you clone it there. Rooted by the daemon (no folder
