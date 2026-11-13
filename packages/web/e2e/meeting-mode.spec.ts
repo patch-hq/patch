@@ -311,11 +311,21 @@ test.describe('meeting mode — live', () => {
       })),
     });
     const copy = page.getByTestId('meeting-transcript-copy');
+    const scroller = page.getByTestId('meeting-transcript');
+    // The feed pins to the newest line; wait for that to settle so the baseline is the stuck position.
+    await expect
+      .poll(() =>
+        scroller.evaluate((el) => {
+          const sc = el.parentElement as HTMLElement;
+          return sc.scrollHeight - sc.scrollTop - sc.clientHeight;
+        }),
+      )
+      .toBeLessThan(2);
     const before = (await copy.boundingBox())!.y;
-    await page.getByTestId('meeting-transcript').evaluate((el) => {
+    await scroller.evaluate((el) => {
       (el.parentElement as HTMLElement).scrollTop = 400;
     });
-    expect(Math.abs((await copy.boundingBox())!.y - before)).toBeLessThan(2);
+    await expect.poll(async () => Math.abs((await copy.boundingBox())!.y - before)).toBeLessThan(2);
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
     await copy.click();
     const text = await page.evaluate(() => navigator.clipboard.readText());
