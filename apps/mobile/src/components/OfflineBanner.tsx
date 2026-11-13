@@ -53,20 +53,24 @@ export function OfflineBanner(): React.ReactElement | null {
         />
         <Text style={{ color: colors.waiting, ...typography.meta }}>{label}</Text>
       </View>
-      {/* spec/12 § Connection diagnostics screen: 'Reconnecting…' on its own is
+      {restarting ? null : (
+        <>
+          {/* spec/12 § Connection diagnostics screen: 'Reconnecting…' on its own is
           a dead end — the banner must open the diagnostics screen. */}
-      <Pressable
-        testID="offline-diagnose"
-        accessibilityRole="button"
-        accessibilityLabel="Diagnose the connection"
-        onPress={() => setDiagnosticsOpen(true)}
-      >
-        <Text
-          style={{ color: colors.waiting, ...typography.meta, textDecorationLine: 'underline' }}
-        >
-          Diagnose
-        </Text>
-      </Pressable>
+          <Pressable
+            testID="offline-diagnose"
+            accessibilityRole="button"
+            accessibilityLabel="Diagnose the connection"
+            onPress={() => setDiagnosticsOpen(true)}
+          >
+            <Text
+              style={{ color: colors.waiting, ...typography.meta, textDecorationLine: 'underline' }}
+            >
+              Diagnose
+            </Text>
+          </Pressable>
+        </>
+      )}
     </View>
   );
 }
