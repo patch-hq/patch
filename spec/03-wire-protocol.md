@@ -292,6 +292,17 @@ Backing the background task bar (`14-design-web.md` § Main chat panel — Backg
 | `patch.background_task_stats.request`  | surface → host | `{requestId, chatId, taskIds[]}` — measure these running background tasks                                                              |
 | `patch.background_task_stats.response` | host → surface | `{requestId, stats?, error?}` — `stats[]` is `{taskId, cpuPercent, rssBytes, processes}`, one entry per MEASURED task and never per id |
 
+### Stray processes (surface ↔ host)
+
+Backing the stray process bar (`14-design-web.md` § Main chat panel — Stray process bar; `02-host.md` § Stray processes).
+
+| Event                            | Direction      | Payload                                                                                                                                                                                                                               |
+| -------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `patch.stray_processes.request`  | surface → host | `{requestId, chatId, stopPid?}` — list the chat's strays; with `stopPid`, stop that one first                                                                                                                                         |
+| `patch.stray_processes.response` | host → surface | `{requestId, ok, processes?, stopped?, error?}` — `processes[]` is `{pid, command, startedAt, running, endedAt?}`; `stopped` is present only when `stopPid` was sent; `error.code` ∈ chat_not_found / unsupported_platform / internal |
+
+REST: `GET /api/chats/:id/stray-processes`, `POST /api/chats/:id/stray-processes/:pid/stop` (`unsupported_platform` → 501).
+
 ### Audio session (surface ↔ host)
 
 Voice runs on its own WSS to the chat's host, opened with the one-shot token from `POST /api/voice/token` (`07-voice-app.md`, `16-voice-device.md`). Control frames are JSON; `audio.pcm16` and `audio.tts_chunk` are binary PCM16 frames. Nothing here carries a `seq` — audio is ephemeral and is never replayed.

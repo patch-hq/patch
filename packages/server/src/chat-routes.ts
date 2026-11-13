@@ -1818,6 +1818,92 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     },
   );
 
+  // ---- GET /api/chats/:id/stray-processes, POST .../stray-processes/:pid/stop ----
+  // Processes the chat started outside Patch's tracked tools (spec/02 § Stray
+  // processes). One host round trip serves both: a stop is the same request
+  // with `stopPid`, answered with the refreshed list.
+  const strayPending = new Map<
+    string,
+    {
+      resolve: (ev: Extract<WireEvent, { type: 'patch.stray_processes.response' }>) => void;
+      timeout: NodeJS.Timeout;
+    }
+  >();
+  deps.hostLink.onEvent((event: WireEvent) => {
+    if (event.type !== 'patch.stray_processes.response') return;
+    const w = strayPending.get(event.requestId);
+    if (!w) return;
+    strayPending.delete(event.requestId);
+    clearTimeout(w.timeout);
+    w.resolve(event);
+  });
+  const strayRoute = async (
+    req: { headers: unknown; params: { id: string; pid?: string } } & Parameters<
+      typeof requireAuth
+    >[0],
+    reply: import('fastify').FastifyReply,
+    stopPid: number | undefined,
+  ): Promise<unknown> => {
+    let auth;
+    try {
+      auth = await requireAuth(req, deps.registry);
+    } catch (e) {
+      return reply
+        .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+        .send({ error: (e as Error).message });
+    }
+    if (!deps.chatRegistry.get(req.params.id)) {
+      return sendUnknownChat(reply, req.params.id);
+    }
+    const requestId = deps.idGenerator();
+    const result = await new Promise<
+      Extract<WireEvent, { type: 'patch.stray_processes.response' }> | 'timeout'
+    >((resolveP) => {
+      const timeout = setTimeout(() => {
+        strayPending.delete(requestId);
+        resolveP('timeout');
+      }, WATCH_REQUEST_TIMEOUT_MS);
+      strayPending.set(requestId, { resolve: resolveP, timeout });
+      deps.hostLink.send(auth.surfaceId, {
+        type: 'patch.stray_processes.request',
+        requestId,
+        chatId: req.params.id,
+        ...(stopPid !== undefined ? { stopPid } : {}),
+      });
+    });
+    if (result === 'timeout') {
+      return reply.code(504).send({ error: 'daemon_timeout' });
+    }
+    if (!result.ok) {
+      const code = result.error?.code ?? 'internal';
+      const statusByCode: Record<string, number> = {
+        chat_not_found: 404,
+        unsupported_platform: 501,
+        internal: 502,
+      };
+      return reply
+        .code(statusByCode[code] ?? 502)
+        .send({ error: code, message: result.error?.message ?? 'stray processes error' });
+    }
+    return reply.code(200).send({
+      processes: result.processes ?? [],
+      ...(result.stopped !== undefined ? { stopped: result.stopped } : {}),
+    });
+  };
+  app.get<{ Params: { id: string } }>('/api/chats/:id/stray-processes', (req, reply) =>
+    strayRoute(req, reply, undefined),
+  );
+  app.post<{ Params: { id: string; pid: string } }>(
+    '/api/chats/:id/stray-processes/:pid/stop',
+    (req, reply) => {
+      const pid = Number(req.params.pid);
+      if (!Number.isInteger(pid) || pid <= 0) {
+        return reply.code(400).send({ error: 'invalid_pid' });
+      }
+      return strayRoute(req, reply, pid);
+    },
+  );
+
   app.post<{ Params: { id: string; taskId: string }; Body: { checkInSec?: unknown } }>(
     '/api/chats/:id/watch/:taskId/check-in',
     async (req, reply) => {

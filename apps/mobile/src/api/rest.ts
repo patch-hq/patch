@@ -21,6 +21,7 @@ import type {
   StatusKind,
   TodoItem,
   WatchTaskRow,
+  StrayProcessRow,
   UsageSample,
   ChatTokenUsage,
 } from '@patch/wire';
@@ -521,6 +522,16 @@ export const api = {
   watchOutput: (chatId: string, taskId: string, tail = 200) =>
     request<{ output: string }>(
       `/api/chats/${chatId}/watch/${encodeURIComponent(taskId)}/output?tail=${tail}`,
+    ),
+  // Processes the chat started outside Patch's tracked tools (a `nohup … &`),
+  // running or recently ended (spec/15 § Chat detail — Stray process bar).
+  // A 501 means the host cannot detect them.
+  strayProcesses: (chatId: string) =>
+    request<{ processes: StrayProcessRow[] }>(`/api/chats/${chatId}/stray-processes`),
+  strayProcessStop: (chatId: string, pid: number) =>
+    request<{ processes: StrayProcessRow[]; stopped: boolean }>(
+      `/api/chats/${chatId}/stray-processes/${pid}/stop`,
+      { method: 'POST' },
     ),
   // POST /api/chats/:id/snooze — `snoozedUntil` is ABSOLUTE ms epoch, resolved
   // from a preset delta on this surface (spec/04 § Snooze); `null` unsnoozes.

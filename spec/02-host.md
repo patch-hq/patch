@@ -899,6 +899,16 @@ The host also counts how many of each chat's background tasks are still running,
 
 A `patch_watch` task must be given a `timeoutSec`; the host kills the task's whole process group when it is exceeded and delivers a `[watch]` message saying it timed out. Whatever the task prints is its progress: the last non-empty line of its output, and when it was written, are reported with each task so a surface can show it beside the elapsed time (`14-design-web.md` § Main chat panel — Background task bar). A task that prints nothing for an hour is flagged amber on the bar. At each check-in interval a task is still running (default one hour, a host setting; the agent may give a different `checkInMinutes` when it starts the task, and the user may change it from the bar, which restarts the clock), the host sends the owning chat a `[watch]` check-in asking whether it is still working as intended; the prompt text is a setting too, with `{description}`, `{running}`, `{lastOutput}` and `{taskId}` filled in. Each running task reports when its next check-in is due, and the bar shows it as `next check-in at HH:MM`; clicking it opens a field to change the interval. The setting is currently held by the host (`setWatchCheckIn`); the prompts settings page will edit it.
 
+## Stray processes
+
+A chat can start work that no tracked tool knows about: `nohup long-thing &` inside a plain Bash call is neither a `patch_watch` task nor a refused background request. The shell exits, the process is adopted by init and keeps running. The host answers a surface's request for these, so the user can see that something is running and stop it.
+
+A chat's shell commands carry `PATCH_CHAT_ID` in their environment (`buildSdkEnv`). An environment survives reparenting and `setsid`, where a process group or session does not, so it is the handle. A stray is a process carrying the chat's id whose parent is no longer one of the chat's own processes AND which has been adopted by init or a subreaper. The second condition is what keeps the agent process itself (parent: the host or the durable runner), its MCP servers and any command still running inside the tree out of the list.
+
+Each stray is reported with its command line, when it started, and whether it is still running. The host remembers each stray it has seen, in memory only, so one that exits is reported as ended, with when the host noticed, rather than vanishing; the last twenty ended are kept per chat. The ended time is the host's observation, not the process's own. A request may name a pid to stop: the host stops it, and everything it started, only if that pid is currently one of that chat's strays, and answers `stopped: false` otherwise, so a surface cannot make the host signal an arbitrary process.
+
+Detection reads `/proc`, so it is Linux only. NO FALLBACK: on a host without it the request fails with `unsupported_platform` rather than answering with an empty list, which would read as "nothing is running". A surface treats that as "this host cannot tell" and shows nothing; any other failure it shows.
+
 Nothing else on a user message is chat-visible. Tool results and the turn's own prompt echo arrive the same way and are not transcript entries.
 
 ## Output style

@@ -112,6 +112,7 @@ import { MeetingEditChips, MeetingLayout } from '../components/MeetingPanel.js';
 import { isMeetingShown, useMeetingStore } from '../stores/meetingStore.js';
 import { presentFailure } from '../lib/usage.js';
 import { BackgroundTaskBar } from '../components/BackgroundTaskBar.js';
+import { StrayProcessBar } from '../components/StrayProcessBar.js';
 import { StatusPill, StatusRow } from '../components/StatusRow.js';
 import { BrowserHandoffPanel } from '../components/BrowserHandoffPanel.js';
 import { ArtifactBar } from '../components/ArtifactBar.js';
@@ -2287,6 +2288,7 @@ export function ChatRoute({
         <FinishedGoalBanner row={row} />
         <TaskBar key={`tasks-${row.chatId}`} row={row} />
         <BackgroundTaskBar chatId={chatId} />
+        <StrayProcessBar chatId={chatId} />
         <DelegateStrip chatId={chatId} />
         <ArtifactBar chatId={chatId} />
       </div>

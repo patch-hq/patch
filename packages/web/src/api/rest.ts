@@ -21,6 +21,7 @@ import type {
   UsageSample,
   ChatTokenUsage,
   WatchTaskRow,
+  StrayProcessRow,
 } from '@patch/wire';
 import type { Hook, HookCreateBody, HookPatchBody, HookCheckResponse } from '@patch/wire/hooks';
 import { assertVersionReport } from '@patch/wire';
@@ -1282,6 +1283,16 @@ export const api = {
     request<{ stopped: boolean }>(`/api/chats/${chatId}/watch/${encodeURIComponent(taskId)}/stop`, {
       method: 'POST',
     }),
+  // Processes the chat started outside Patch's tracked tools (a `nohup … &`
+  // in a Bash call), running or recently ended (spec/14 § Main chat panel —
+  // Stray process bar). A 501 means the host cannot detect them.
+  strayProcesses: (chatId: string) =>
+    request<{ processes: StrayProcessRow[] }>(`/api/chats/${chatId}/stray-processes`),
+  strayProcessStop: (chatId: string, pid: number) =>
+    request<{ processes: StrayProcessRow[]; stopped: boolean }>(
+      `/api/chats/${chatId}/stray-processes/${pid}/stop`,
+      { method: 'POST' },
+    ),
   // Change how often a running task's owning agent is checked in with. The
   // next check-in is one new interval from now.
   watchCheckIn: (chatId: string, taskId: string, checkInSec: number) =>
