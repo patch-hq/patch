@@ -3,7 +3,7 @@
   "// version": "Headline <major>.<minor> only — the effective build version is major.minor.<commit count>, computed by scripts/version.mjs. Bump this by hand for a new headline number.",
   "version": "1.1.0",
   "private": true,
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "description": "Patch — thin coordination layer over Claude Code (monorepo root)",
   "packageManager": "pnpm@10.29.3",
   "scripts": {
