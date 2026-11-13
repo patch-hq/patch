@@ -83,7 +83,7 @@ const MANAGER_SWEEP_TICK_MS = 10_000;
 const THREAD_ROTATION_TICK_MS = 30_000;
 import { registerLinkPreviewRoutes } from './link-preview-routes.js';
 import { registerLinkSummaryRoutes } from './link-summary-routes.js';
-import { RELEASE_REPO } from './release-channel.js';
+import { RELEASE_REPO, readChannel, writeChannel } from './release-channel.js';
 import { MobileUpdateNotifier, registerMobileUpdateRoutes } from './mobile-updates.js';
 import { registerClientCrashRoutes } from './client-crash-routes.js';
 import { IssueFiler, hostTurnFailureReport } from './issue-filer.js';
@@ -1779,6 +1779,28 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     return reply.code(202).send({ ok: true });
   });
 
+  // Which release channel this server follows: stable (default) or dev, which
+  // includes prereleases. `off` stays an operator choice (`patch-server channel off`);
+  // this route only moves between the two a user may pick, and refuses to touch off.
+  app.put('/api/release-channel', async (req, reply) => {
+    if (!(await surfaceAuthorised(req.headers.authorization))) {
+      return reply.code(401).send({ error: 'unauthenticated' });
+    }
+    const wanted = (req.body as { channel?: unknown } | null)?.channel;
+    if (wanted !== 'stable' && wanted !== 'dev') {
+      return reply.code(400).send({ error: 'channel must be "stable" or "dev"' });
+    }
+    const dir = opts.dataDir ?? registry.dataDir;
+    if (readChannel(dir) === 'off') {
+      return reply.code(409).send({
+        error: 'this server has updates turned off by its operator (patch-server channel)',
+      });
+    }
+    writeChannel(dir, wanted);
+    log.info({ channel: wanted }, 'release channel changed');
+    return reply.send({ channel: wanted });
+  });
+
   const updateAllDone = setInterval(() => {
     if (!updateControl.updateAllPending()) return;
     const available = readAvailableRelease(downloadsDir)?.version ?? null;
@@ -1844,6 +1866,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       })),
       release: {
         available: readAvailableRelease(downloadsDir)?.version ?? null,
+        channel: readChannel(opts.dataDir ?? registry.dataDir),
         autoUpdate: updateControl.isAutoUpdate(),
         updating: updateControl.updateAllPending(),
       },
