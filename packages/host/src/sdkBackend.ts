@@ -2063,8 +2063,11 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
     // killed, the connection dropped), not finished. Said out loud so the turn
     // is retried or reported, never settled as complete with no reason.
     if (!sawResult && !opts.abortController.signal.aborted) {
-<<<<<<< HEAD
-      const exit = durable?.describeCut();
+      const exit =
+        durable?.describeCut() ??
+        (claudeExit
+          ? `claude exited code=${claudeExit.code} signal=${claudeExit.signal}`
+          : undefined);
       // The model had already ended its turn: every word of the answer is in,
       // and only Claude Code's closing `result` went missing. Retrying would
       // run the same input again (a watch alert handled twice, a message sent
@@ -2078,9 +2081,6 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
         return;
       }
       throw new Error(cutTurnMessage(lastStopReason, exit));
-=======
-      throw new Error(cutTurnMessage(lastStopReason, claudeExit));
->>>>>>> 73d7dd886 (Host: a cut turn says how claude ended (signal or exit code))
     }
   } finally {
     durable?.release();
@@ -2119,7 +2119,6 @@ export function noteStopReason(msg: unknown, previous: string | undefined): stri
  * classifier matches, and adds whether the last reply had finished so the
  * reader can tell "died mid-answer" from "answered, then the process went".
  */
-<<<<<<< HEAD
 export function cutTurnMessage(lastStopReason: string | undefined, exit?: string): string {
   const base =
     'The Claude Code process ended mid-turn without finishing (no result message). The stream was cut, not completed.';
@@ -2127,26 +2126,12 @@ export function cutTurnMessage(lastStopReason: string | undefined, exit?: string
   return lastStopReason === 'end_turn'
     ? `${base} The last reply had finished (stop reason end_turn), so the text above is likely complete; only the closing result was lost.${how}`
     : `${base} The last reply had not finished, so the text above may be incomplete.${how}`;
-=======
-export function cutTurnMessage(lastStopReason: string | undefined, exit?: ProcessExit): string {
-  const base =
-    'The Claude Code process ended mid-turn without finishing (no result message). The stream was cut, not completed.';
-  const how =
-    exit?.signal != null
-      ? ` Claude was killed by ${exit.signal}.`
-      : exit?.code != null
-        ? ` Claude exited with code ${exit.code}.`
-        : '';
-  return lastStopReason === 'end_turn'
-    ? `${base}${how} The last reply had finished (stop reason end_turn), so the text above is likely complete; only the closing result was lost.`
-    : `${base}${how} The last reply had not finished, so the text above may be incomplete.`;
 }
 
 /** How a Claude process ended: its exit code, or the signal that killed it. */
 export interface ProcessExit {
   code: number | null;
   signal: string | null;
->>>>>>> 73d7dd886 (Host: a cut turn says how claude ended (signal or exit code))
 }
 
 interface LiveRun {
