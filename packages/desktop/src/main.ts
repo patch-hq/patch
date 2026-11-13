@@ -1228,6 +1228,7 @@ function registerGlobalHotkeys(): void {
  * SPA proxies those through the preload bridge.
  */
 let lastNotification: Notification | null = null;
+const liveToasts = new Set<Notification>();
 
 /** The most recently shown native notification (test/smoke introspection). */
 export function getLastNotification(): Notification | null {
@@ -1304,6 +1305,14 @@ function showNativeNotification(opts: {
     });
   }
   lastNotification = n;
+  // Hold every shown toast until it is clicked or closed: an unreferenced
+  // Notification can be garbage-collected, and a click on a collected toast
+  // (any but the latest) is dropped, leaving the window on whatever chat was
+  // already open instead of navigating.
+  liveToasts.add(n);
+  const release = () => liveToasts.delete(n);
+  n.on('click', release);
+  n.on('close', release);
   n.show();
 }
 
