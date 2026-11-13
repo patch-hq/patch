@@ -59,6 +59,7 @@ import { provisionSandbox, SandboxProvisionError } from './sandbox.js';
 import { versionDirsInUse } from '../durableTurn.js';
 import {
   opsFor,
+  hostLogSize,
   hostLogTail,
   ServiceRegistrationError,
   SERVICE_LABEL,
@@ -797,6 +798,11 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
 
   // ---- 8. Start it ------------------------------------------------------
   if (paired) {
+    // The host log outlives every start. Note where it ends now, so the
+    // revoked check below reads only what THIS start wrote: a 4401 left by the
+    // previous host (it reconnected to a server that was still coming up)
+    // is not this host's credential being refused.
+    const logMark = hostLogSize(def.home);
     try {
       await ops.start(def);
     } catch (err) {
@@ -833,7 +839,7 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
     // and "it appears under Settings → Hosts" were both asserted for a host
     // the server refuses on every reconnect. The host says so in its own log
     // within a second of starting — so look, rather than claim.  Match the logged close code, not bare digits: a timestamp or pid can contain 4401.
-    const revoked = /daemon revoked|"code":4401\b/.test(hostLogTail(def.home, 40));
+    const revoked = /daemon revoked|"code":4401\b/.test(hostLogTail(def.home, 40, logMark));
     if (revoked) {
       io.err('');
       io.err('patch install: this host is registered but its credential has been REVOKED.');
