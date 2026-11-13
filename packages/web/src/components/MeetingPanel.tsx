@@ -1104,7 +1104,17 @@ function usePinnedScroll(deps: unknown[], pin = true) {
       pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32;
     };
     el.addEventListener('scroll', onScroll);
-    return () => el.removeEventListener('scroll', onScroll);
+    // Content that grows without a dep changing (fonts loading, a row opening) must not
+    // leave the feed short of the bottom while it is pinned.
+    const col = el.firstElementChild;
+    const ro = new ResizeObserver(() => {
+      if (pinned.current) el.scrollTop = el.scrollHeight;
+    });
+    if (col) ro.observe(col);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      ro.disconnect();
+    };
   }, []);
   useLayoutEffect(() => {
     pinned.current = pin;

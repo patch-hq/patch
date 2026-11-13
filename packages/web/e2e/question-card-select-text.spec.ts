@@ -11,6 +11,7 @@ test.describe('question option text', () => {
     await page.goto(HARNESS);
     const option = page.getByTestId('question-option').filter({ hasText: 'Luxon' }).first();
     const label = option.locator('.question-option-label');
+    await page.evaluate(() => document.fonts.ready);
     // The harness keeps laying out after load; a drag aimed at a stale box
     // lands on a neighbouring row. Re-measure and retry until it selects.
     await expect(async () => {

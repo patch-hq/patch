@@ -315,7 +315,7 @@ test.describe('meeting mode — live', () => {
     await page.getByTestId('meeting-transcript').evaluate((el) => {
       (el.parentElement as HTMLElement).scrollTop = 400;
     });
-    expect(Math.abs((await copy.boundingBox())!.y - before)).toBeLessThan(2);
+    await expect.poll(async () => Math.abs((await copy.boundingBox())!.y - before)).toBeLessThan(2);
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
     await copy.click();
     const text = await page.evaluate(() => navigator.clipboard.readText());
