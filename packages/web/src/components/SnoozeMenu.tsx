@@ -7,13 +7,21 @@
 // and reverts on failure with a toast (NO FALLBACK).
 
 import type { JSX } from 'react';
-import { Clock } from 'lucide-react';
+import { Clock, CircleCheck } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useChatStore } from '../stores/chatStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { api } from '../api/rest.js';
 import { isSnoozed } from '../stores/types.js';
 import type { ChatRow } from '../stores/types.js';
-import { formatWakeTime } from '../lib/snoozePresets.js';
+import {
+  formatWakeTime,
+  UNTIL_COMPLETE_PRESET,
+  UNTIL_COMPLETE_DISABLED_TIP,
+} from '../lib/snoozePresets.js';
+import { applySnooze } from '../lib/snoozeApply.js';
+import { deriveChatTitle } from '../lib/chatTitle.js';
+import { stripMarkdown } from '../lib/stripMarkdown.js';
 import { failed } from '../lib/errorCopy.js';
 
 export { formatWakeTime };
@@ -33,7 +41,23 @@ export function SnoozeMenu({
   const setSnoozed = useChatStore((s) => s.setSnoozed);
   const pushError = useUiStore((s) => s.pushError);
   const openSnoozeSheet = useUiStore((s) => s.openSnoozeSheet);
+  const navigate = useNavigate();
   const snoozed = isSnoozed(row);
+  // Same rule as the sheet: only a chat with work to wait for can be snoozed until complete.
+  const canUntilComplete =
+    row.activity === 'running' ||
+    row.goal !== null ||
+    (row.pendingWake != null && row.pendingWake.every === undefined);
+
+  function snoozeUntilComplete(): void {
+    applySnooze({
+      targets: [row],
+      until: UNTIL_COMPLETE_PRESET.resolve(),
+      name: stripMarkdown(deriveChatTitle(row.name ?? null)),
+      isProject: false,
+      navigate,
+    });
+  }
 
   async function unsnooze(): Promise<void> {
     const previous = row.snoozedUntil;
@@ -66,6 +90,20 @@ export function SnoozeMenu({
         <Clock size={iconSize} aria-hidden />
         {label === undefined ? undefined : snoozed ? 'Unsnooze' : label}
       </button>
+      {label !== undefined && !snoozed ? (
+        <button
+          type="button"
+          className="head-menu-item"
+          role="menuitem"
+          data-testid="action-snooze-until-complete"
+          disabled={!canUntilComplete}
+          title={canUntilComplete ? undefined : UNTIL_COMPLETE_DISABLED_TIP}
+          onClick={snoozeUntilComplete}
+        >
+          <CircleCheck size={iconSize} aria-hidden />
+          Snooze until complete
+        </button>
+      ) : null}
     </span>
   );
 }

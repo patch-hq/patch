@@ -126,6 +126,26 @@ describe('ChatHeader — snooze', () => {
     }
   });
 
+  it('menu has a direct "Snooze until complete" that posts the until-complete sentinel', async () => {
+    const r = row({ activity: 'running' });
+    seed(r);
+    render(<ChatHeader row={r} />);
+    fireEvent.click(screen.getByTestId('action-more'));
+    fireEvent.click(screen.getByTestId('action-snooze-until-complete'));
+    await waitFor(() =>
+      expect(api.snoozeChat).toHaveBeenCalledWith('c1', 8_640_000_000_000_000, expect.any(String)),
+    );
+    expect(screen.queryByTestId('snooze-sheet')).toBeNull();
+  });
+
+  it('"Snooze until complete" is disabled when the chat has no work to wait for', () => {
+    const r = row();
+    seed(r);
+    render(<ChatHeader row={r} />);
+    fireEvent.click(screen.getByTestId('action-more'));
+    expect(screen.getByTestId('action-snooze-until-complete')).toBeDisabled();
+  });
+
   it('choosing "1 hour" posts an absolute now+1h and stamps the row optimistically', async () => {
     const r = row();
     seed(r);
