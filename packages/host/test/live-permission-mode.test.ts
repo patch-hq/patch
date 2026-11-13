@@ -61,4 +61,38 @@ describe('setLiveRunPermissionMode', () => {
     await setLiveRunPermissionMode('c1', 'plan');
     expect(setPermissionMode).toHaveBeenCalledTimes(1);
   });
+  async function startPlanRun(chatId: string) {
+    const backend = createRealSdkBackend();
+    const it = backend
+      .run({
+        prompt: 'hi',
+        cwd: '/tmp',
+        chatId,
+        permissionMode: 'plan',
+        abortController: new AbortController(),
+        onPermissionRequest: async () => ({ approve: true }),
+      } as never)
+      [Symbol.asyncIterator]();
+    const first = it.next();
+    await vi.waitFor(() => expect(capturedOptions.canUseTool).toBeDefined());
+    return async () => {
+      release();
+      await first;
+      while (!(await it.next()).done);
+    };
+  }
+
+  it('treats a process that closed mid-change as the turn having ended', async () => {
+    const finish = await startPlanRun('c2');
+    setPermissionMode.mockRejectedValueOnce(new Error('Query closed before response received'));
+    await expect(setLiveRunPermissionMode('c2', 'bypassPermissions')).resolves.toBeUndefined();
+    await finish();
+  });
+
+  it('rethrows any other failure changing the mode', async () => {
+    const finish = await startPlanRun('c3');
+    setPermissionMode.mockRejectedValueOnce(new Error('boom'));
+    await expect(setLiveRunPermissionMode('c3', 'bypassPermissions')).rejects.toThrow('boom');
+    await finish();
+  });
 });

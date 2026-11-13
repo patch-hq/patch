@@ -42,16 +42,24 @@ export interface LocalServer {
   stop(): Promise<void>;
 }
 
-/** A port nothing is listening on, to keep for good once chosen. */
+/**
+ * A port nothing is listening on, to keep for good once chosen. Drawn from
+ * below the OS's ephemeral range (Linux 32768+, macOS 49152+): the kernel hands
+ * ephemeral ports to every outbound connection, so one probed free there can be
+ * taken before the server binds it.
+ */
 export function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = createServer();
-    probe.once('error', reject);
-    probe.listen(0, '127.0.0.1', () => {
-      const port = (probe.address() as { port: number }).port;
-      probe.close(() => resolve(port));
+  const tryPort = (left: number): Promise<number> =>
+    new Promise((resolve, reject) => {
+      const port = 20000 + Math.floor(Math.random() * 10000);
+      const probe = createServer();
+      probe.once('error', (e: NodeJS.ErrnoException) => {
+        if (e.code === 'EADDRINUSE' && left > 0) tryPort(left - 1).then(resolve, reject);
+        else reject(e);
+      });
+      probe.listen(port, '127.0.0.1', () => probe.close(() => resolve(port)));
     });
-  });
+  return tryPort(20);
 }
 
 async function healthz(origin: string): Promise<{ gitSha?: string } | null> {

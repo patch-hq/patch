@@ -135,6 +135,7 @@ const EXPECTED_PATCH_TOOLS = [
   'patch_pad_reply',
   'patch_pad_update',
   'view_file',
+  'link_file',
   'patch_call',
   'patch_browser_open',
   'patch_browser_read',

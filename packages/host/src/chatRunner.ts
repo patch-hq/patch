@@ -107,7 +107,7 @@ import {
   type ChatLastError,
   type SdkPermissionMode,
 } from './chatState.js';
-import { type MetaStore, type ChatMeta, type UnreadableChat } from './meta.js';
+import { type MetaStore, ChatMeta, type UnreadableChat } from './meta.js';
 import {
   PermissionModeDowngradedError,
   type ExtraMcpServer,
@@ -9461,6 +9461,42 @@ export class Daemon {
       ...(state.model !== undefined ? { model: state.model } : {}),
     });
     this.emitState(chatId);
+  }
+
+  /**
+   * Move a chat to another folder on THIS host (spec/04 § Moving a chat). It is
+   * the cross-host move done in one place: export, set the old directory aside,
+   * import under the new folder. The folder is checked first so the usual
+   * refusal never happens half-way; if the import fails anyway, the set-aside
+   * directory is put back and the chat is as it was.
+   */
+  refolderChat(chatId: string, requestedFolder: string): void {
+    const folder = expandHome(requestedFolder);
+    const state = this.chatState.get(chatId);
+    if (!state) throw new ChatMoveError('not_found', `no chat ${chatId} on this host`);
+    if (state.folder === folder) {
+      throw new ChatMoveError('already_exists', `this chat already runs in ${requestedFolder}`);
+    }
+    if (!existsSync(folder) || !statSync(folder).isDirectory()) {
+      throw new ChatMoveError(
+        'folder_not_found',
+        `${requestedFolder} is not a folder on this host`,
+      );
+    }
+    const bundle = this.exportChatForMove(chatId);
+    const keptAt = this.retireMovedChat(chatId);
+    try {
+      this.importMovedChat(bundle, folder);
+    } catch (err) {
+      const chatDir = join(this.movePaths().chatsRoot, chatId);
+      rmSync(chatDir, { recursive: true, force: true });
+      renameSync(keptAt, chatDir);
+      const meta = ChatMeta.parse(JSON.parse(readFileSync(join(chatDir, 'meta.json'), 'utf8')));
+      this.chatState.hydrate([meta]);
+      this.hydratedFromDisk.add(chatId);
+      this.chatLog.hydrate(chatId, this.chatState.get(chatId)!.nextSeq);
+      throw err;
+    }
   }
 
   /** Chats left out of hydrate because their meta.json could not be read. */

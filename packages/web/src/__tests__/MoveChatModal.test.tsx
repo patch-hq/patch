@@ -41,15 +41,39 @@ describe('MoveChatModal', () => {
   });
   afterEach(() => cleanup());
 
-  it('offers the other hosts, the online one chosen, with its same-named folder filled in', () => {
+  it('offers every host, another online one chosen, with its same-named folder filled in', () => {
     render(<MoveChatModal row={row} onClose={() => undefined} />);
     expect(screen.getByTestId('move-chat-from').textContent).toBe('Mac · /Users/tom/wpp/Unite');
-    expect(screen.queryByTestId('move-chat-host-mac')).toBeNull();
     expect(screen.getByTestId('move-chat-host-box').getAttribute('aria-checked')).toBe('true');
     expect((screen.getByTestId('move-chat-host-pi') as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByTestId('move-chat-folder') as HTMLInputElement).value).toBe(
       '/home/tom/Unite',
     );
+  });
+
+  it("offers the chat's own host as a target, without its current folder, and moves within it", async () => {
+    usePresenceStore.setState({
+      hosts: {
+        mac: host('mac', 'Mac', true, ['/Users/tom/wpp/Unite', '/Users/tom/wpp/Unite2']),
+        box: host('box', 'Hetzner', false, []),
+      },
+    });
+    vi.mocked(api.moveChat).mockResolvedValue({
+      ok: true,
+      chatId: 'c1',
+      hostId: 'mac',
+      folder: '/Users/tom/wpp/Unite2',
+    });
+    const onClose = vi.fn();
+    render(<MoveChatModal row={row} onClose={onClose} />);
+    expect(screen.getByTestId('move-chat-host-mac').textContent).toContain('this machine');
+    expect(screen.getByTestId('move-chat-host-mac').getAttribute('aria-checked')).toBe('true');
+    expect((screen.getByTestId('move-chat-folder') as HTMLInputElement).value).toBe(
+      '/Users/tom/wpp/Unite2',
+    );
+    fireEvent.click(screen.getByTestId('move-chat-confirm'));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(api.moveChat).toHaveBeenCalledWith('c1', 'mac', '/Users/tom/wpp/Unite2');
   });
 
   it('keeps a typed folder when presence updates for an unrelated reason', () => {

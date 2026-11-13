@@ -2100,6 +2100,7 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
 export function noteStopReason(msg: unknown, previous: string | undefined): string | undefined {
   const m = msg as {
     type?: unknown;
+    parent_tool_use_id?: unknown;
     message?: { stop_reason?: unknown };
     event?: { type?: unknown; delta?: { stop_reason?: unknown } };
   } | null;
@@ -2110,6 +2111,8 @@ export function noteStopReason(msg: unknown, previous: string | undefined): stri
     return typeof reason === 'string' ? reason : previous;
   }
   if (m?.type !== 'assistant') return previous;
+  // A sub-agent finishing its own reply says nothing about the main turn.
+  if (typeof m.parent_tool_use_id === 'string') return previous;
   const reason = m.message?.stop_reason;
   return typeof reason === 'string' ? reason : previous;
 }
@@ -2179,7 +2182,15 @@ export async function setLiveRunPermissionMode(
   // process out of plan.
   if (live.mode !== 'plan') return;
   live.mode = mode;
-  await live.query?.setPermissionMode(mode);
+  try {
+    await live.query?.setPermissionMode(mode);
+  } catch (err) {
+    // The process closed while the change was in flight: the turn ended, which
+    // is the "no turn in flight" case above — the next turn starts on `mode`.
+    // Anything else is a real failure and still throws.
+    if (err instanceof Error && err.message === 'Query closed before response received') return;
+    throw err;
+  }
 }
 
 /**

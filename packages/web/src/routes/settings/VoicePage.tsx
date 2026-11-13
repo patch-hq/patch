@@ -137,9 +137,6 @@ export function voiceCellStatus(
   backend: VoiceBackend,
   layer?: VoiceLayer,
 ): string | null {
-  if (backend !== 'local' && surface === 'device') {
-    return 'Not implemented yet for this surface. Refused at connect time.';
-  }
   if (backend === 'local' && layer !== undefined && layer !== 'direct') {
     return 'Not implemented yet — no front model built for local. Refused at connect time.';
   }

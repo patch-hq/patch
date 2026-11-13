@@ -81,6 +81,8 @@ function isNewer(candidate: string, running: string): boolean {
 
 export const AUTO_ON_HINT =
   'Controls when hosts and server move to a new version. Updates are synchronised between all components.';
+export const DEV_CHANNEL_WARNING =
+  'Development builds are unstable and can break things. You get every build as soon as it is made, not just tagged releases.';
 export const UPDATE_ALL_HINT = 'Chats run in their own processes and keep running.';
 
 export function UpdatesPage(): JSX.Element {
@@ -91,6 +93,7 @@ export function UpdatesPage(): JSX.Element {
   const loaded = usePreferencesStore((s) => s.loaded);
   const [requested, setRequested] = useState(false);
   const [requestError, setRequestError] = useState<string | null>(null);
+  const [channelError, setChannelError] = useState<string | null>(null);
 
   const running = report?.server.version ?? null;
   const available = report?.release?.available ?? null;
@@ -124,6 +127,15 @@ export function UpdatesPage(): JSX.Element {
         setRequested(false);
         setRequestError(err instanceof Error ? err.message : String(err));
       },
+    );
+  };
+
+  const channel = report?.release?.channel ?? null;
+  const setDev = (next: boolean): void => {
+    setChannelError(null);
+    api.setReleaseChannel(next ? 'dev' : 'stable').then(
+      () => void refetch(),
+      (err: unknown) => setChannelError(err instanceof Error ? err.message : String(err)),
     );
   };
 
@@ -174,6 +186,21 @@ export function UpdatesPage(): JSX.Element {
           />
         </Row>
       </Group>
+
+      {channel !== null && channel !== 'off' ? (
+        <Group>
+          <Row
+            title="Include development builds"
+            sub={
+              channelError ??
+              (channel === 'dev' ? DEV_CHANNEL_WARNING : 'Off: tagged stable releases only.')
+            }
+            testid="release-channel"
+          >
+            <Toggle checked={channel === 'dev'} onChange={setDev} testid="release-channel-toggle" />
+          </Row>
+        </Group>
+      ) : null}
 
       <Group testid="version-layers">
         <Row title="Version" testid="version-server">

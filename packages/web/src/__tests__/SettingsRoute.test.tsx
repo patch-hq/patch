@@ -912,7 +912,7 @@ describe('Settings → Voice', () => {
           voiceConfig: {
             dictation: { phone: 'device', computer: 'whisper', tidy: false },
             meeting: 'local',
-            device: { backend: 'gemini', layer: 'light', handoff: 'auto' },
+            device: { backend: 'local', layer: 'light', handoff: 'auto' },
             handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
             call: { backend: 'local', layer: 'direct', handoff: 'auto' },
           },
@@ -922,7 +922,7 @@ describe('Settings → Voice', () => {
       renderSettings('/settings/voice');
       await waitFor(() =>
         expect(screen.getByTestId('voice-device-status')).toHaveTextContent(
-          voiceCellStatus('device', 'gemini', 'light')!,
+          voiceCellStatus('device', 'local', 'light')!,
         ),
       );
       expect(screen.queryByTestId('voice-call-status')).toBeNull();
@@ -944,9 +944,8 @@ describe('Settings → Voice', () => {
   });
 
   it('voiceCellStatus mirrors the host’s branching', () => {
-    expect(voiceCellStatus('device', 'openai', 'light')).toMatch(
-      /Not implemented yet for this surface/,
-    );
+    // Voice devices run every hosted engine too.
+    expect(voiceCellStatus('device', 'openai', 'light')).toBeNull();
     expect(voiceCellStatus('call', 'local', 'light')).toMatch(/no front model built for local/);
     // Gemini hands-free enforces the address word on the host, so there is nothing to warn about.
     expect(voiceCellStatus('handsFree', 'gemini', 'light')).toBeNull();

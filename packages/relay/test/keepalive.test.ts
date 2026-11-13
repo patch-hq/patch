@@ -26,8 +26,8 @@ import {
 import { RelayHost } from '../src/host.js';
 import { budget, startRelay, type TestRelay } from './target.js';
 
-/** The keepalive interval against the relay under test: short, but not shorter than its round trip. */
-const PING = budget(100);
+/** The keepalive interval against the relay under test. Two missed pings end a connection, so it must outlast a stalled event loop on a loaded CI runner. */
+const PING = budget(300);
 
 let relay: TestRelay;
 let target: Server;

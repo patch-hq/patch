@@ -93,6 +93,8 @@ export interface ChatSummaryRow {
    * whole cold-start roster away.
    */
   backgroundTasks?: number | null;
+  /** Why the chat is errored; null otherwise. Absent from an older server. */
+  lastError?: { code: string; message: string; at: number } | null;
   /**
    * Running out of the active list (spec/04 § Hidden). Optional because an
    * older server does not send it; absent keeps whatever the store knows.
@@ -400,6 +402,11 @@ export const api = {
   // Validated at the boundary: a partial report must reach the panel's error state,
   // not render as "all layers agree".
   version: async () => assertVersionReport(await request<unknown>('/api/version')),
+  setReleaseChannel: (channel: 'stable' | 'dev') =>
+    request<{ channel: 'stable' | 'dev' }>('/api/release-channel', {
+      method: 'PUT',
+      body: { channel },
+    }),
   updateAll: () => request<{ ok: true }>('/api/update-all', { method: 'POST' }),
   me: () =>
     request<{

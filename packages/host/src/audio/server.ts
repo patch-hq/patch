@@ -34,7 +34,13 @@ import {
   type VoiceHandoff,
   type VoiceLayer,
 } from '@patch/wire/audio';
-import { VoiceSession, type SessionDeps, type SessionInit, type SessionState } from './session.js';
+import {
+  StreamingUpsampler48k,
+  VoiceSession,
+  type SessionDeps,
+  type SessionInit,
+  type SessionState,
+} from './session.js';
 import { MockVad, type Vad } from './vad.js';
 import { watchPeerLiveness } from './peer-liveness.js';
 import { NlmsAec, PassThroughAec, type AecProcessor } from './aec.js';
@@ -744,19 +750,15 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         const sendAudioFn = (ev: AudioEvent): void => send(ws, ev);
         const sendBinaryFn = (pcm: Int16Array): void =>
           ws.send(Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength), { binary: true });
+        // Hosted engines speak 24 kHz; a voice device plays 48 kHz (spec/16
+        // § Audio WSS), so their audio to a device is upsampled as it streams.
+        // (VoiceSession upsamples its own device audio.)
+        const deviceUpsampler = voiceSurface === 'device' ? new StreamingUpsampler48k() : null;
+        const hostedSendBinary = (pcm24: Int16Array): void => {
+          const pcm = deviceUpsampler ? deviceUpsampler.push(pcm24) : pcm24;
+          if (pcm.length > 0) sendBinaryFn(pcm);
+        };
 
-        if (voiceSurface === 'device' && cell.backend !== 'local') {
-          // The device's 16 kHz-mic / 48 kHz-speaker path is specific to
-          // VoiceSession's device branch; no hosted session speaks it yet.
-          // A real, accepted config cell with no engine behind it — refuse
-          // loudly, never run `local` in its place.
-          rejectConn(
-            ws,
-            'voice_config_not_implemented',
-            `device does not support backend "${cell.backend}" yet; select "local" instead`,
-          );
-          return;
-        }
         if (cell.backend === 'local' && cell.layer !== undefined && cell.layer !== 'direct') {
           // local + light/heavy: no front model exists for the local backend
           // (Haiku was tried and rejected as not capable enough — spec/07
@@ -783,7 +785,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             timeline: opts.makeTimeline(sessionInit),
             logger: sessionLog,
             sendAudio: sendAudioFn,
-            sendBinary: sendBinaryFn,
+            sendBinary: hostedSendBinary,
             submitUserTurn: opts.submitUserTurn,
             apiKey: geminiKey,
             gate: {
@@ -812,7 +814,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             timeline: opts.makeTimeline(sessionInit),
             logger: sessionLog,
             sendAudio: sendAudioFn,
-            sendBinary: sendBinaryFn,
+            sendBinary: hostedSendBinary,
             submitUserTurn: opts.submitUserTurn,
             apiKey: openaiKey,
             ...(cell.handoff !== undefined ? { handoff: cell.handoff } : {}),
@@ -837,7 +839,7 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             timeline: opts.makeTimeline(sessionInit),
             logger: sessionLog,
             sendAudio: sendAudioFn,
-            sendBinary: sendBinaryFn,
+            sendBinary: hostedSendBinary,
             submitUserTurn: opts.submitUserTurn,
             apiKey: elevenKey,
             ...(cell.handoff !== undefined ? { handoff: cell.handoff } : {}),

@@ -190,6 +190,13 @@ export interface ChatSummary {
    */
   backgroundTasks: number | null;
   /**
+   * Why the chat is `errored`, mirrored from the host's `chat.state`. Held here
+   * so a surface that cold-starts from REST (a reload, a reconnect) can still
+   * say what failed instead of a bare "Failed". `null` whenever the chat is not
+   * errored.
+   */
+  lastError: { code: string; message: string; at: number } | null;
+  /**
    * How full the chat's context window is, as the host last reported on
    * `chat.state` (spec/14 § Composer — context ring). Mirrored for the same
    * cold-start reason as `backgroundTasks`. `null` means nothing measured.
@@ -376,6 +383,7 @@ export class ChatRegistry {
         jobId: this.jobChatLinks?.get(event.chatId) ?? null,
         model: event.model ?? null,
         effort: null,
+        lastError: null,
         // Nothing has reported on this chat's background work yet — unknown,
         // which is not the same as none.
         backgroundTasks: null,
@@ -499,6 +507,13 @@ export class ChatRegistry {
             ? event.backgroundTasks
             : (existing?.backgroundTasks ?? null),
         context: event.context !== undefined ? event.context : (existing?.context ?? null),
+        // Only meaningful while errored, so it never outlives the failure.
+        lastError:
+          event.activity !== 'errored'
+            ? null
+            : event.lastError !== undefined
+              ? event.lastError
+              : (existing?.lastError ?? null),
         branches: existing?.branches ?? [],
         activeBranchId: existing?.activeBranchId ?? null,
       };
@@ -606,7 +621,11 @@ export class ChatRegistry {
     // `lastUpdated` is host-owned and clients drop any chat.state older than the
     // one they hold. Stamping the server clock here would outrank every frame
     // the host sends once it recovers, leaving the errored badge stuck for good.
-    const next: ChatSummary = { ...existing, activity: 'errored' };
+    const next: ChatSummary = {
+      ...existing,
+      activity: 'errored',
+      lastError: { code: error.code, message: error.message, at },
+    };
     this.chats.set(chatId, next);
     this.markDirty();
     return {
