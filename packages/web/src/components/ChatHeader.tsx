@@ -18,6 +18,7 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useChatStore } from '../stores/chatStore.js';
+import { hasWorkToWaitFor } from '../lib/snoozePresets.js';
 import { clearComposerDraft } from '../stores/composerDraftStore.js';
 import { api } from '../api/rest.js';
 import { useUiStore } from '../stores/uiStore.js';
@@ -85,6 +86,7 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
   // the panel with all this chat's side threads." Shown only once the chat
   // actually has one (an empty panel with nothing to pick from is a dead end).
   const branchGraph = useChatStore((s) => s.branchGraphs[row.chatId]);
+  const delegateUpdates = useChatStore((s) => s.delegateUpdates);
   const sideThreadBranches = (branchGraph?.branches ?? []).filter((b) => b.sideThread);
   const openThread = useSideThreadsStore((s) => s.openThread);
   const threadsActiveTab = useSideThreadsStore((s) => s.activeTabByChatId[row.chatId]);
@@ -230,7 +232,7 @@ export function ChatHeader({ row }: { row: ChatRow }): JSX.Element {
   }
   const canHide = !isSpecial && row.status === 'active' && !isHidden(row);
   // Hide until complete: only a chat with running work has something to wait for.
-  const canHideUntilComplete = canHide && row.activity === 'running';
+  const canHideUntilComplete = canHide && hasWorkToWaitFor(row, delegateUpdates);
 
   // Disable / enable (spec/06 § Disabled) — the special-thread "off" switch,
   // since `toggleArchive` above is refused for them server-side. Same

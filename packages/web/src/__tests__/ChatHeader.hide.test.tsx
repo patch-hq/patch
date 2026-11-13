@@ -113,6 +113,17 @@ describe('ChatHeader — hide', () => {
     expect(useChatStore.getState().chats['c1']?.hidden).toBe(true);
   });
 
+  it('hide until complete: offered when only a delegated agent is running', () => {
+    const r = row();
+    seed(r);
+    useChatStore.setState({
+      delegateUpdates: { c1: { d1: { label: 'research', status: 'running', since: 1 } } },
+    });
+    render(<ChatHeader row={r} />);
+    fireEvent.click(screen.getByTestId('action-more'));
+    expect(screen.getByTestId('action-hide-until-complete')).toBeTruthy();
+  });
+
   it('reverts and toasts when the host refuses', async () => {
     vi.mocked(api.hideChat).mockRejectedValue(new Error('boom'));
     const r = row();
