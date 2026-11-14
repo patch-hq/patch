@@ -568,7 +568,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
         "Bash's `run_in_background` (disabled: see the tool-call denial for why). Spawns " +
         '`command` as a detached process the host holds a real pid for, persists it, and returns ' +
         'immediately with `{ taskId }` — it does NOT block this turn. The host polls it in the ' +
-        'background and, once it exits, delivers a `[watch]`-prefixed message into THIS chat as a new ' +
+        'background and, once it exits (or, with `wakeOnMatch`, whenever an output line matches), delivers a `[watch]`-prefixed message into THIS chat as a new ' +
         'turn (survives a host restart either way — the task keeps running and is re-attached). Use ' +
         'for anything that takes longer than you want to wait: a build, a long test run, a download. ' +
         "Every line the command prints is its progress: the last one shows in the user's task strip, so print short status lines. " +
@@ -597,16 +597,24 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
           .describe(
             'How often, in minutes, you are sent a check-in while this runs. Omit for the default (an hour). A long wait warrants a longer interval, e.g. a 10-hour wait every 5 hours.',
           ),
+        wakeOnMatch: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Regular expression. While the command keeps running, each complete output line matching it wakes this chat with a `[watch]` message carrying the matching lines (batched per few seconds). For a monitor that stays up after an alert, e.g. "^GUARD:". The normal exit message still arrives when it ends. Omit to be woken only on exit.',
+          ),
         cwd: z.string().min(1).optional(),
       },
     },
-    async ({ command, description, timeoutSec, checkInMinutes, cwd }) => {
+    async ({ command, description, timeoutSec, checkInMinutes, wakeOnMatch, cwd }) => {
       const body: Record<string, unknown> = {
         chatId: callerChatId,
         command,
         description,
         timeoutSec,
         ...(checkInMinutes !== undefined ? { checkInSec: checkInMinutes * 60 } : {}),
+        ...(wakeOnMatch !== undefined ? { wakeOnMatch } : {}),
       };
       if (cwd !== undefined) body['cwd'] = cwd;
       const res = await uds<unknown>({ method: 'POST', path: '/internal/watch', body });

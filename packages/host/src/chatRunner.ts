@@ -4067,6 +4067,7 @@ export class Daemon {
       description: string;
       timeoutSec: number;
       checkInSec?: number;
+      wakeOnMatch?: string;
       cwd?: string;
     },
   ): WatchRecord {
@@ -4084,6 +4085,7 @@ export class Daemon {
       cwd,
       timeoutSec: opts.timeoutSec,
       ...(opts.checkInSec !== undefined ? { checkInSec: opts.checkInSec } : {}),
+      ...(opts.wakeOnMatch !== undefined ? { wakeOnMatch: opts.wakeOnMatch } : {}),
     });
     this.opts.logger.info({ chatId, taskId: rec.taskId }, 'watch: started');
     // spec/02 § Background task completions — a launch starts work the turn
