@@ -3523,12 +3523,15 @@ function MessageEntry({
               label: 'Quote',
               icon: <Quote size={14} aria-hidden="true" />,
               run: () => {
-                quoteSelectionIntoComposer(chatId, menuSelection || text);
-                requestAnimationFrame(() =>
-                  document
-                    .querySelector<HTMLTextAreaElement>('[data-testid="composer-input"]')
-                    ?.focus(),
+                const input = document.querySelector<HTMLTextAreaElement>(
+                  '[data-testid="composer-input"]',
                 );
+                quoteSelectionIntoComposer(
+                  chatId,
+                  menuSelection || text,
+                  input?.selectionStart ?? undefined,
+                );
+                requestAnimationFrame(() => input?.focus());
               },
             },
             {
