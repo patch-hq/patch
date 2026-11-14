@@ -2284,7 +2284,10 @@ export function ChatRoute({
       ) : null}
       <div className="status-list" data-testid="status-list">
         <GoalBanner row={row} />
-        <FinishedGoalBanner row={row} />
+        <FinishedGoalBanner
+          row={row}
+          onNotMet={(condition) => void handleSend(`/goal ${condition}`)}
+        />
         <TaskBar key={`tasks-${row.chatId}`} row={row} />
         <BackgroundTaskBar chatId={chatId} />
         <DelegateStrip chatId={chatId} />

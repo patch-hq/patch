@@ -254,7 +254,14 @@ function readDismissed(): Record<string, number> {
  * tokens and the evaluator's reason, wrapped. Dismissible per finished goal
  * (remembered by its end time, so the next goal to finish shows again).
  */
-export function FinishedGoalBanner({ row }: { row: ChatRow }): JSX.Element | null {
+export function FinishedGoalBanner({
+  row,
+  onNotMet,
+}: {
+  row: ChatRow;
+  /** Re-arm the finished goal and send the agent back to work on it. Absent: no button. */
+  onNotMet?: (condition: string) => void;
+}): JSX.Element | null {
   const last = row.lastGoal;
   const [dismissed, setDismissed] = useState<Record<string, number>>(readDismissed);
   const [expanded, setExpanded] = useState(false);
@@ -289,15 +296,28 @@ export function FinishedGoalBanner({ row }: { row: ChatRow }): JSX.Element | nul
         ) : undefined
       }
       action={
-        <button
-          type="button"
-          data-testid="finished-goal-dismiss"
-          aria-label="Dismiss"
-          title="Dismiss"
-          onClick={dismiss}
-        >
-          <X size={16} aria-hidden />
-        </button>
+        <>
+          {met && onNotMet && (
+            <button
+              type="button"
+              className="status-link status-link-underline"
+              data-testid="finished-goal-not-met"
+              title="The evaluator was wrong: re-open this goal and send the agent back"
+              onClick={() => onNotMet(last!.condition)}
+            >
+              Not met
+            </button>
+          )}
+          <button
+            type="button"
+            data-testid="finished-goal-dismiss"
+            aria-label="Dismiss"
+            title="Dismiss"
+            onClick={dismiss}
+          >
+            <X size={16} aria-hidden />
+          </button>
+        </>
       }
     >
       <StatusPill

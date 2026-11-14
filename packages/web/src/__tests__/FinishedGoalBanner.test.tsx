@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { FinishedGoalBanner } from '../components/GoalBanner.js';
 import type { ChatRow } from '../stores/types.js';
@@ -63,5 +63,20 @@ describe('FinishedGoalBanner', () => {
   it('labels impossible distinctly', () => {
     render(<FinishedGoalBanner row={row({ lastGoal: { ...lastGoal, outcome: 'impossible' } })} />);
     expect(screen.getByTestId('finished-goal-pill')).toHaveTextContent('Impossible');
+  });
+
+  it('Not met hands the condition back, only for a met goal', () => {
+    const onNotMet = vi.fn();
+    const r = render(<FinishedGoalBanner row={row()} onNotMet={onNotMet} />);
+    fireEvent.click(screen.getByTestId('finished-goal-not-met'));
+    expect(onNotMet).toHaveBeenCalledWith(long);
+    r.unmount();
+    render(
+      <FinishedGoalBanner
+        row={row({ lastGoal: { ...lastGoal, outcome: 'impossible' } })}
+        onNotMet={onNotMet}
+      />,
+    );
+    expect(screen.queryByTestId('finished-goal-not-met')).not.toBeInTheDocument();
   });
 });
