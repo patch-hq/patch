@@ -63,6 +63,7 @@ import {
   Clock,
   Zap,
   Plus,
+  SquareSlash,
 } from 'lucide-react';
 import { endMeeting } from '../lib/meetingControl.js';
 import { beginMeeting } from '../lib/meetingSetup.js';
@@ -1901,7 +1902,24 @@ export const Composer = forwardRef(function Composer(
       : []),
   ];
   const addMenu = useContextMenu();
+  // Opens the skill list without needing to know to type `/`: puts a `/` at
+  // the caret (after a space if it would otherwise glue onto a word) and the
+  // existing autocomplete takes over from there.
+  function startSkill(): void {
+    const at = Math.min(cursorPos, body.length);
+    const glue = at > 0 && !/\s/.test(body.charAt(at - 1)) ? ' ' : '';
+    setValue(joinThread(thread, `${body.slice(0, at)}${glue}/${body.slice(at)}`));
+    pendingCursorRef.current = at + glue.length + 1;
+    setSlashDismissed(false);
+    inputRef.current?.focus();
+  }
   const addMenuItems: ContextMenuItem[] = [
+    {
+      id: 'skill',
+      label: 'Skill',
+      icon: <SquareSlash size={14} aria-hidden />,
+      run: startSkill,
+    },
     {
       id: 'attach',
       label: 'File or image',
