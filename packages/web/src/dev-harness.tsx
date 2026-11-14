@@ -2125,6 +2125,8 @@ useChatStore.setState((s) => ({
         role: i % 2 === 0 ? 'user' : 'assistant',
         content: `history line ${i} — lorem ipsum dolor sit amet consectetur adipiscing.`,
         at: i,
+        // Spread over weeks so the scroll rail has dates to mark.
+        messageAt: Date.UTC(2026, 9, 1) + i * 3 * 3_600_000,
       }),
     ),
     chat_deeplink: [

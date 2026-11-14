@@ -3817,8 +3817,41 @@ button.nav-row {
   align-self: flex-end;
   overflow: visible;
 }
-.scroll-up-anchor .scroll-down-btn {
+.scroll-rail {
+  position: absolute;
+  right: 4px;
   bottom: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 6px 4px;
+  border-radius: 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+}
+.scroll-rail-stop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 4px;
+  background: none;
+  border: 0;
+  color: var(--text-dim, inherit);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.scroll-rail-stop:hover {
+  color: inherit;
+}
+.scroll-rail-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
 }
 .scroll-down-btn {
   position: absolute;
