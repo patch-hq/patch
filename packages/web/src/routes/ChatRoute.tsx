@@ -2288,7 +2288,6 @@ export function ChatRoute({
           row={row}
           onNotMet={(condition) => void handleSend(`/goal ${condition}`)}
         />
-        <TaskBar key={`tasks-${row.chatId}`} row={row} />
         <BackgroundTaskBar chatId={chatId} />
         <DelegateStrip chatId={chatId} />
         <ArtifactBar chatId={chatId} />
@@ -2378,6 +2377,7 @@ export function ChatRoute({
             </section>
           </PendingApprovalCountContext.Provider>
         </BlobChatIdContext.Provider>
+        <TaskBar key={`tasks-${row.chatId}`} row={row} />
         {composerBlocked ? (
           <div className="composer-readonly" data-testid="composer-readonly">
             {disabledThread
