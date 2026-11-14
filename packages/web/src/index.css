@@ -3817,6 +3817,9 @@ button.nav-row {
   align-self: flex-end;
   overflow: visible;
 }
+.scroll-up-anchor .scroll-down-btn {
+  bottom: 56px;
+}
 .scroll-down-btn {
   position: absolute;
   right: 0;
