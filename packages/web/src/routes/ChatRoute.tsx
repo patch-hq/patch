@@ -147,6 +147,7 @@ import {
   ArrowUp,
   CalendarClock,
   ChevronDown,
+  ChevronUp,
   ChevronLeft,
   ChevronRight,
   Bell,
@@ -680,6 +681,11 @@ export function ChatRoute({
   const streamRef = useRef<HTMLElement>(null);
   // Mirrors `followRef` for the floating down arrow (spec/14 § Main chat panel).
   const [showScrollDown, setShowScrollDown] = useState(false);
+  // The up arrow above it: jump straight to the first message of a long chat.
+  const [showScrollUp, setShowScrollUp] = useState(false);
+  // Set when the first message is asked for while older entries are still
+  // unmounted: the scroll to the top waits for them to mount.
+  const pendingTopRef = useRef(false);
   const contentRef = useRef<HTMLDivElement>(null);
   // Index of the oldest mounted entry. `null` = the newest TAIL_ENTRIES, tracking
   // the tail as it grows. Keyed to the chat so a chat switch starts at the tail.
@@ -708,6 +714,11 @@ export function ChatRoute({
   useLayoutEffect(() => {
     const el = streamRef.current;
     if (!el) return;
+    if (pendingTopRef.current && windowStart === 0) {
+      pendingTopRef.current = false;
+      setSelfScrollTop(el, 0);
+      return;
+    }
     const hold = expandHoldRef.current;
     if (hold !== null) {
       expandHoldRef.current = null;
@@ -1168,6 +1179,10 @@ export function ChatRoute({
     const maxTop = el.scrollHeight - el.clientHeight;
     const prev = lastScrollRef.current;
     lastScrollRef.current = { top: el.scrollTop, maxTop };
+    setShowScrollUp(
+      timelineRef.current.length > TAIL_ENTRIES &&
+        (windowStartRef.current > 0 || el.scrollTop > el.clientHeight),
+    );
     if (el.scrollTop < TAIL_NEAR_TOP_PX && windowStartRef.current > 0) {
       expandTo(windowStartRef.current - TAIL_CHUNK, true);
     }
@@ -2356,6 +2371,33 @@ export function ChatRoute({
                 <RateLimitCard row={row} />
                 <WakeHoldBubble row={row} />
               </div>
+              {showScrollUp ? (
+                <div className="scroll-down-anchor scroll-up-anchor">
+                  <button
+                    type="button"
+                    className="scroll-down-btn"
+                    data-testid="scroll-to-top"
+                    aria-label="Scroll to first message"
+                    title="Scroll to first message"
+                    onClick={() => {
+                      followRef.current = false;
+                      setShowScrollDown(true);
+                      setShowScrollUp(false);
+                      jumpRef.current = null;
+                      restoreAnchorRef.current = null;
+                      const el = streamRef.current;
+                      if (windowStartRef.current > 0) {
+                        pendingTopRef.current = true;
+                        expandTo(0, false);
+                      } else if (el) {
+                        setSelfScrollTop(el, 0);
+                      }
+                    }}
+                  >
+                    <ChevronUp size={18} aria-hidden="true" />
+                  </button>
+                </div>
+              ) : null}
               {showScrollDown ? (
                 <div className="scroll-down-anchor">
                   <button
