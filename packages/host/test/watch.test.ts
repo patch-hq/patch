@@ -8,7 +8,7 @@
 // process can't prove a real pid/pgid was actually held, signalled, or
 // re-discovered).
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import {
   existsSync,
@@ -310,6 +310,32 @@ describe('WatchScheduler.stop', () => {
       expect(scheduler.stop('c-stop2', rec.taskId)).toBe(false);
     } finally {
       scheduler.dispose();
+    }
+  });
+
+  it('never signals a recorded pid that is no longer the task (the OS may have reused it)', () => {
+    const deps = makeDeps();
+    const first = mkScheduler(deps);
+    const second = mkScheduler({ ...deps, isAlive: () => false });
+    const kill = vi.spyOn(process, 'kill');
+    try {
+      const rec = first.start({
+        chatId: 'c-reuse',
+        command: 'sleep 5',
+        description: 'pid since reused',
+        timeoutSec: 600,
+        cwd: deps.home,
+      });
+      kill.mockClear();
+      expect(second.stop('c-reuse', rec.taskId)).toBe(true);
+      expect(kill).not.toHaveBeenCalled();
+      expect(second.list('c-reuse')[0]?.status).toBe('stopped');
+      kill.mockRestore();
+      first.stop('c-reuse', rec.taskId);
+    } finally {
+      kill.mockRestore();
+      first.dispose();
+      second.dispose();
     }
   });
 
