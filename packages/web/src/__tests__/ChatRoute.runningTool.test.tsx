@@ -334,6 +334,8 @@ describe('cancel one running command', () => {
     seed();
     useChatStore.getState().applyEvent(call);
     renderChat();
+    expect(screen.getByTestId('tool-cancel').getAttribute('title')).toBe('Cancel command');
+    expect(screen.getByTestId('tool-cancel').textContent).toBe('');
     fireEvent.click(screen.getByTestId('tool-cancel'));
     expect(sent.filter((e) => (e as { type: string }).type === 'chat.tool_cancel_request')).toEqual(
       [{ type: 'chat.tool_cancel_request', chatId: 'c1', callId: 'call-cancel' }],
