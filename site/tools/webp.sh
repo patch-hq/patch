@@ -17,7 +17,7 @@ done
 for name in switch pad jobs panes; do
   for theme in light dark; do
     for v in "$name-$theme" "$name-$theme-phone"; do
-      for ext in webm mp4; do
+      for ext in mp4; do
         [ -f "$src/vid/$v.$ext" ] && cp "$src/vid/$v.$ext" "$out/vid/"
       done
       [ -f "$src/vid/$v-poster.jpg" ] && cwebp -quiet -q 80 "$src/vid/$v-poster.jpg" -o "$out/vid/$v-poster.webp"
