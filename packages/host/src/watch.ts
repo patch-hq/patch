@@ -423,11 +423,7 @@ export class WatchScheduler {
   stop(chatId: string, taskId: string): boolean {
     const rec = this.readOne(chatId, taskId);
     if (!rec || rec.status !== 'running') return false;
-    try {
-      process.kill(-rec.pid, 'SIGKILL'); // negative pid = the whole process group
-    } catch {
-      // Group already gone — nothing to signal.
-    }
+    this.killGroup(rec); // negative pid = the whole process group
     this.writeRecord({ ...rec, status: 'stopped', endedAt: this.deps.now() });
     this.liveHandles.delete(taskId);
     return true;
@@ -493,6 +489,23 @@ export class WatchScheduler {
     }
   }
 
+  /**
+   * SIGKILL a task's process group, but only while the pid is still the task's.
+   * A finished task releases its pid and the OS may hand it to an unrelated
+   * group (CI saw the test runner itself SIGKILLed, exit 137), so never signal
+   * a pid whose child has exited or that no longer matches the recorded start.
+   */
+  private killGroup(rec: WatchRecord): void {
+    const handle = this.liveHandles.get(rec.taskId);
+    if (handle ? handle.exitCode !== null || handle.signalCode !== null : !this.isOurProcess(rec))
+      return;
+    try {
+      process.kill(-rec.pid, 'SIGKILL');
+    } catch {
+      // Group already gone — nothing to signal.
+    }
+  }
+
   /** Alive AND the same process: after a reboot a saved pid can belong to something unrelated. */
   private isOurProcess(rec: WatchRecord): boolean {
     if (!this.isAliveFn(rec.pid)) return false;
@@ -538,11 +551,7 @@ export class WatchScheduler {
   }
 
   private async timeOut(rec: WatchRecord): Promise<void> {
-    try {
-      process.kill(-rec.pid, 'SIGKILL');
-    } catch {
-      // Group already gone — nothing to signal.
-    }
+    this.killGroup(rec);
     this.liveHandles.delete(rec.taskId);
     this.writeRecord({
       ...rec,
