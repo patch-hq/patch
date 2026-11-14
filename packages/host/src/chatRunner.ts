@@ -10648,7 +10648,13 @@ export class Daemon {
         // errored status and the persisted error detail so it no longer counts
         // toward doctor's erroredChats and stops advertising a stale lastError.
         const settled = this.chatState.get(chatId);
-        if (settled && settled.status === 'errored') {
+        // The status is not the only carrier: a retried failure leaves the chat
+        // `active` with its `lastError` persisted, and that stale reason kept
+        // showing under a conversation whose retry had succeeded.
+        if (
+          settled &&
+          (settled.status === 'errored' || this.opts.metaStore.read(chatId)?.lastError)
+        ) {
           settled.status = 'active';
           this.opts.metaStore.update(chatId, (m) => {
             const { lastError: _drop, ...rest } = m;

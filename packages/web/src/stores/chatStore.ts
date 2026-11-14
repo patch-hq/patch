@@ -1057,6 +1057,9 @@ function stepsInCurrentTurn(
   return steps;
 }
 
+/** Chats whose last failure the host reported it is retrying (outlives one applyEvent). */
+const retryingChats = new Set<string>();
+
 export const useChatStore = create<ChatState>((set, get) => ({
   chats: {},
   hydrated: false,
@@ -1485,14 +1488,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
      * for a link drop is removable. A real turn failure (`sdk_error`,
      * `claude_oauth_missing`, …) is an outcome and stays put forever.
      */
-    function clearTransientErrors(chatId: string): void {
+    function clearTransientErrors(chatId: string, alsoRetried = false): void {
+      // `alsoRetried`: the host said this failure was being retried, and the
+      // retry is now running — a standalone `sdk_error` card that could not be
+      // attached to a bubble is just as over as a lost-link card.
+      const removable = (e: ChatEventEntry): boolean =>
+        e.kind === 'error' &&
+        (isTransientChatError(e.errorCode) || (alsoRetried && e.errorCode === 'sdk_error'));
       const held = timelines[chatId];
-      if (!held?.some((e) => e.kind === 'error' && isTransientChatError(e.errorCode))) return;
+      if (!held?.some(removable)) return;
       const list = ownTimeline(chatId);
       let last: ChatEventEntry | undefined;
       for (let i = list.length - 1; i >= 0; i--) {
         const e = list[i]!;
-        if (e.kind === 'error' && isTransientChatError(e.errorCode)) {
+        if (removable(e)) {
           last ??= e;
           list.splice(i, 1);
         }
@@ -1875,7 +1884,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // (a host returning says nothing about whether THIS chat's turn did).
           // If the host never comes back there is no such event and the notice
           // stays, which is the truth.
-          if (event.activity !== 'errored') clearTransientErrors(event.chatId);
+          if (event.activity !== 'errored') {
+            clearTransientErrors(event.chatId, retryingChats.has(event.chatId));
+            if (event.activity === 'running') retryingChats.delete(event.chatId);
+          } else if (event.turnRetrying === true) retryingChats.add(event.chatId);
+          else retryingChats.delete(event.chatId);
           // A generic `sdk_error` is marked on the turn's own bubble, and the
           // host then retries that turn on its own. The mark is cleared when
           // the re-send folds in (`foldRetryAttempt`), but a turn that carries
@@ -3372,6 +3385,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   _reset() {
+    retryingChats.clear();
     retractedChatIds.clear();
     rosteredChatIds.clear();
     settledLocalIds.clear();
