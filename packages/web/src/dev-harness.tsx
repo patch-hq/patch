@@ -52,6 +52,8 @@ import { HostOfflineBanner } from './components/HostOfflineBanner.js';
 import { useChatStore } from './stores/chatStore.js';
 import { useUiStore, SIDEBAR_MINI_WIDTH } from './stores/uiStore.js';
 import { usePreferencesStore } from './stores/preferencesStore.js';
+import { ViewPositionSync } from './components/ViewPositionSync.js';
+import { useViewPositionStore } from './stores/viewPositionStore.js';
 import { useVoiceStore } from './stores/voiceStore.js';
 import { useMeetingStore } from './stores/meetingStore.js';
 import { DEMO_SCRIPT } from './dev/meetingScript.js';
@@ -2649,6 +2651,11 @@ Object.assign(window, { __startVoiceNote: startVoiceNote, __cancelVoiceNote: can
 // the server pushes one, without a live server.
 (window as unknown as { __preferencesStore?: typeof usePreferencesStore }).__preferencesStore =
   usePreferencesStore;
+// Exposed so specs can play a `view_position.updated` from another surface
+// (spec/05 § Handover). The sync component itself is only mounted with
+// `?viewsync=1`, so no other spec sees it report positions.
+(window as unknown as { __viewPositionStore?: typeof useViewPositionStore }).__viewPositionStore =
+  useViewPositionStore;
 
 // Exposed so the voice specs can drive a call's live transcript and chat.
 (window as unknown as { __voiceStore?: typeof useVoiceStore }).__voiceStore = useVoiceStore;
@@ -4173,6 +4180,7 @@ function Harness(): JSX.Element {
         {/* A LATER sibling of `<Routes>` — see `EditorFixtureBridge`'s own
             note on why its effect has to commit after `ChatPaneRoute`'s. */}
         <EditorFixtureBridge />
+        {params.get('viewsync') === '1' ? <ViewPositionSync ws={harnessWs} /> : null}
         {/* Mirrors AppShell: after the routes, so its no-drag hole is folded
             in after `.chat-head`'s drag region (spec/05 § Window chrome). */}
         <SidebarExpandButton />
