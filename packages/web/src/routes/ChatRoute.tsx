@@ -148,6 +148,7 @@ import {
   ArrowUp,
   CalendarClock,
   ChevronDown,
+  ChevronUp,
   ChevronLeft,
   ChevronRight,
   Bell,
@@ -713,6 +714,21 @@ export function ChatRoute({
       setShowScrollUp(true);
     }
     if (showScrollUpRef.current || isFar(farRef.current, el.clientHeight)) armRailHide();
+  }
+  function railJump(seq: number | undefined, first: boolean): void {
+    if (seq === undefined) return;
+    followRef.current = false;
+    setShowScrollDown(true);
+    restoreAnchorRef.current = null;
+    jumpRef.current = {
+      chatId,
+      seq: first ? (timelineRef.current[0]?.seq ?? seq) : seq,
+      found: false,
+      settleUntil: 0,
+      expireAt: Date.now() + JUMP_WAIT_MS,
+    };
+    tryJump();
+    armRailHide();
   }
   useEffect(
     () => () => {
@@ -2411,6 +2427,16 @@ export function ChatRoute({
                       armRailHide();
                     }}
                   >
+                    <button
+                      type="button"
+                      className="scroll-rail-top"
+                      data-testid="scroll-to-top"
+                      aria-label="Scroll to first message"
+                      title="Scroll to first message"
+                      onClick={() => railJump(railPoints[0]?.seq, true)}
+                    >
+                      <ChevronUp size={16} aria-hidden="true" />
+                    </button>
                     {railPoints.map((m, idx) => (
                       <button
                         key={m.seq}
@@ -2418,20 +2444,7 @@ export function ChatRoute({
                         className="scroll-rail-stop"
                         data-testid="scroll-rail-stop"
                         aria-label={idx === 0 ? `First message, ${m.label}` : `Jump to ${m.label}`}
-                        onClick={() => {
-                          followRef.current = false;
-                          setShowScrollDown(true);
-                          restoreAnchorRef.current = null;
-                          jumpRef.current = {
-                            chatId,
-                            seq: idx === 0 ? (timelineRef.current[0]?.seq ?? m.seq) : m.seq,
-                            found: false,
-                            settleUntil: 0,
-                            expireAt: Date.now() + JUMP_WAIT_MS,
-                          };
-                          tryJump();
-                          armRailHide();
-                        }}
+                        onClick={() => railJump(m.seq, idx === 0)}
                       >
                         <span className="scroll-rail-label">{m.label}</span>
                         <span className="scroll-rail-dot" aria-hidden="true" />
