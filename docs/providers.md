@@ -27,3 +27,7 @@ Cost note: any paid API needs Tom's sign-off and a spend cap before first use.
 | xAI Grok                               | `xai/`        | OpenAI-compatible API                           | Optional.                                                                     |
 
 Recommended order: (1) a generic **OpenAI-compatible harness** (base URL + key + model list, tool-calling loop) — one backend that makes DeepSeek, Local, OpenRouter, Groq, Mistral and xAI each a registry entry plus a config block; (2) Gemini via its CLI as a separate harness, mirroring Codex; (3) local first for zero-cost testing.
+
+## Status
+
+Built: the generic OpenAI-compatible engine (`packages/host/src/openaiCompatBackend.ts`) — streaming, tool loop (Bash/Read/Write), permission modes, saved sessions. Not yet reachable from a chat: it has no registry entries, no host routing, no key/endpoint config, no history reader, no MCP tools, and Gemini's CLI harness is not started.
