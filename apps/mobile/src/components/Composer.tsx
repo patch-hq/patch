@@ -691,6 +691,15 @@ export function Composer({
     // Remembered per folder so the next `/` defaults to it.
     setLastUsedSkill(trimmedFolder, name);
   };
+  // The + menu's Skill entry: puts a `/` at the caret (after a space if it
+  // would glue onto a word) and the autocomplete takes over.
+  const startSkill = (): void => {
+    const at = Math.min(cursorPos, body.length);
+    const glue = at > 0 && !/\s/.test(body.charAt(at - 1)) ? ' ' : '';
+    updateDraft(joinQuotes(quotes, `${body.slice(0, at)}${glue}/${body.slice(at)}`));
+    pendingCursorRef.current = at + glue.length + 1;
+    inputRef.current?.focus();
+  };
   const conn = usePresenceStore((s) => s.connection);
   const daemon = usePresenceStore((s) => s.daemon);
   // Two distinct gates (spec/12 § Daemon-offline UX): text + send stay usable
@@ -2580,6 +2589,7 @@ export function Composer({
       <AnchoredMenu
         visible={addMenuOpen}
         items={[
+          { id: 'skill', label: 'Skill', testID: 'add-menu-skill' },
           { id: 'camera', label: 'Take photo', testID: 'add-menu-camera' },
           { id: 'image', label: 'Photo or image', testID: 'add-menu-image' },
           { id: 'file', label: 'Any file', testID: 'add-menu-file' },
@@ -2590,7 +2600,8 @@ export function Composer({
           // The + is disabled while the host can't take a file; a menu left
           // open across that change must not act on it either.
           if (disabled || resolving) return;
-          if (id === 'camera') void takePhoto();
+          if (id === 'skill') startSkill();
+          else if (id === 'camera') void takePhoto();
           else if (id === 'image') void pickImage();
           else if (id === 'file') void pickDocument();
           else if (id === 'sketch') setSketching(true);
