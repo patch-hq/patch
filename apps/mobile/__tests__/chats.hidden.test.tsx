@@ -123,7 +123,7 @@ describe('Hidden section — header', () => {
     const r = renderRN(<ChatsScreen />);
     await actAsync(async () => {});
     expect(hasText(r.root, 'Hidden ▸')).toBe(true);
-    const channels = indexOfText(r, 'Channels ▾');
+    const channels = indexOfText(r, 'Channels ▸');
     const hidden = indexOfText(r, 'Hidden ▸');
     const snoozed = indexOfText(r, 'Snoozed ▸');
     expect(channels).toBeLessThan(hidden);

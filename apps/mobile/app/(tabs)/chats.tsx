@@ -72,7 +72,7 @@ import type { ChatRow, DisplayBadge } from '../../src/stores/types';
 import { useChatBadge } from '../../src/lib/chatBadge';
 import { isHidden, isSnoozed } from '../../src/stores/types';
 import { badgeColor } from '../../src/lib/badge';
-import { getSectionOpen, setSectionOpen } from '../../src/lib/sectionCollapse';
+import { getSectionOpen, getStoredSectionOpen, setSectionOpen } from '../../src/lib/sectionCollapse';
 import type { CollapsibleSection } from '../../src/lib/sectionCollapse';
 import { hasDraftText, useNewChatDraftStore } from '../../src/stores/newChatDraftStore';
 
@@ -927,12 +927,14 @@ export default function ChatsScreen(): React.ReactElement {
   const colors = useTheme();
   const router = useRouter();
   const chats = useChatStore((s) => s.chats);
-  // Channels is EXPANDED by default (spec/15 §4): a collapsed channel list
-  // reads as "hidden/broken". Hidden, Snoozed and Archived are COLLAPSED by default
+  // Channels is EXPANDED by default when it has a channel in it (spec/15 §4),
+  // and CLOSED by default while it is empty — an open section with nothing in
+  // it is just a gap. Hidden, Snoozed and Archived are COLLAPSED by default
   // (§§5–7) — they are cold storage, and their header count says what is in
-  // them without opening. Every toggle is remembered across launches.
+  // them without opening. Every toggle is remembered across launches; Channels'
+  // own default is resolved below, since it depends on the roster.
   const [open, setOpen] = React.useState<Open>(() => ({
-    channels: getSectionOpen('channels', true),
+    channels: getSectionOpen('channels', false),
     hidden: getSectionOpen('hidden', false),
     snoozed: getSectionOpen('snoozed', false),
     archived: getSectionOpen('archived', false),
@@ -998,15 +1000,26 @@ export default function ChatsScreen(): React.ReactElement {
 
   const serverQuery = searching ? searchableQuery(query) : null;
   const grouping = useUiStore((s) => s.grouping);
+  // Channels with no stored choice follows its contents: open once there is a
+  // channel, closed while there is none.
+  const hasChannels = Object.values(chats).some(
+    (c) => c.awaitingState !== true && c.chatId === SPEAKERS_ID,
+  );
+  const channelsChosen = getStoredSectionOpen('channels') !== undefined;
+  const effectiveOpen = React.useMemo<Open>(
+    () => (channelsChosen ? open : { ...open, channels: hasChannels }),
+    [open, channelsChosen, hasChannels],
+  );
   const items = React.useMemo(
-    () => buildSections(chats, open, counts, query, attentionMatches, stateFilter, grouping),
-    [chats, open, counts, query, attentionMatches, stateFilter, grouping],
+    () =>
+      buildSections(chats, effectiveOpen, counts, query, attentionMatches, stateFilter, grouping),
+    [chats, effectiveOpen, counts, query, attentionMatches, stateFilter, grouping],
   );
 
   const toggle = (section: ChatsTabSection): void => {
-    const next = !open[section];
+    const next = !effectiveOpen[section];
     setSectionOpen(section, next);
-    setOpen({ ...open, [section]: next });
+    setOpen({ ...effectiveOpen, [section]: next });
   };
 
   // Shared by the header's close button and pressing a search result: either
@@ -1070,7 +1083,7 @@ export default function ChatsScreen(): React.ReactElement {
                     numberOfLines={1}
                     style={{ ...typography.sectionHeader, flexShrink: 0, color: colors.ink3 }}
                   >
-                    {section ? `${item.label} ${open[section] ? '▾' : '▸'}` : item.label}
+                    {section ? `${item.label} ${effectiveOpen[section] ? '▾' : '▸'}` : item.label}
                   </Text>
                   {item.pill ? (
                     <View
