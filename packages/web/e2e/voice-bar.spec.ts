@@ -21,26 +21,25 @@ test.describe('voice bar', () => {
     expect(barBox!.y).toBeLessThan(4);
     expect(cols!.y).toBeGreaterThanOrEqual(barBox!.y + barBox!.height - 1);
     // A strip, not a takeover.
-    expect(barBox!.height).toBeLessThan(60);
+    expect(barBox!.height).toBeLessThan(90);
     // And it spans the window, so it reads as a mode that is switched on.
     expect(barBox!.width).toBeGreaterThan(1000);
   });
 
-  test('hands-free says the word that wakes it, and names the chat', async ({ page }) => {
+  test('hands-free says the word that wakes it', async ({ page }) => {
     await page.goto(HANDS_FREE);
     await expect(page.getByTestId('voice-bar-head')).toContainText('Hands-free');
-    await expect(page.getByTestId('voice-bar-chat')).toContainText(/manager/i);
-    await expect(page.getByTestId('voice-bar-line')).toContainText('Waiting for you to say');
-    await expect(page.getByTestId('voice-bar-line')).toContainText('patch');
+    await expect(page.getByTestId('voice-bar-note')).toContainText('Start with');
+    await expect(page.getByTestId('voice-bar-note')).toContainText('patch');
   });
 
   test('a dropped utterance is shown, greyed, as heard-but-not-sent', async ({ page }) => {
     await page.goto(`${HANDS_FREE}&voiceLine=${encodeURIComponent('hello, how is it going')}`);
     const bar = page.getByTestId('voice-bar');
     await expect(bar).toHaveAttribute('data-state', 'heard');
-    await expect(page.getByTestId('voice-bar-line')).toContainText('not addressed, so not sent');
+    await expect(page.getByTestId('voice-bar-note')).toContainText('not addressed, so not sent');
     const opacity = await page
-      .getByTestId('voice-bar-line')
+      .getByTestId('voice-bar-note')
       .evaluate((el) => getComputedStyle(el).opacity);
     expect(Number(opacity)).toBeLessThan(1);
   });
@@ -63,7 +62,7 @@ test.describe('voice bar', () => {
     await page.setViewportSize({ width: 390, height: 800 });
     const long = 'this is a long thing that was said out loud and it keeps going '.repeat(4);
     await page.goto(`${HANDS_FREE}&voiceLine=${encodeURIComponent(long)}`);
-    const text = page.locator('.vb-text');
+    const text = page.getByTestId('voice-bar-note');
     await expect(text).toBeVisible();
     const m = await text.evaluate((el) => ({
       clipped: el.scrollWidth > el.clientWidth + 1,

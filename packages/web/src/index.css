@@ -13840,32 +13840,37 @@ input.browse-filter {
 .voice-bar {
   flex: 0 0 auto;
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  gap: 4px;
   padding: 8px 16px;
   background: #1f1c17;
   color: #f4f0e4;
   font-size: var(--text-min);
   border-bottom: 1px solid #3a342a;
 }
+.vb-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.vb-note {
+  color: #cfc8b8;
+  font-size: var(--text-min);
+  overflow-wrap: anywhere;
+}
+.voice-bar[data-state='heard'] .vb-note {
+  opacity: 0.75;
+  font-style: italic;
+}
 .vb-mode {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  letter-spacing: 0.1em;
   /* The strip is the same dark in both themes, so its inks are fixed too —
      a theme token here went dark-on-dark in the dark theme. */
   color: #a9d391;
   font-weight: 600;
   flex: 0 0 auto;
-}
-.vb-chat {
-  color: #e6e0d2;
-  flex: 0 0 auto;
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .vb-line {
   flex: 1 1 auto;
@@ -13909,6 +13914,7 @@ input.browse-filter {
 .overlay-titlebar .voice-bar {
   padding-left: var(--overlay-titlebar-inset);
   min-height: calc(var(--overlay-titlebar-lights-bottom) + 3px);
+  justify-content: center;
   -webkit-app-region: drag;
 }
 .overlay-titlebar .voice-bar button {
@@ -13957,29 +13963,6 @@ input.browse-filter {
   border-color: var(--voice);
   color: var(--on-accent);
 }
-/* Phone width: the transcript gets its own full-width row and wraps, so the bar
-   grows to hold what was said instead of clipping it. */
-@media (max-width: 800px) {
-  .voice-bar {
-    flex-wrap: wrap;
-    row-gap: 6px;
-  }
-  .vb-chat {
-    flex: 1 1 0;
-    min-width: 0;
-  }
-  .vb-line {
-    order: 1;
-    flex: 1 1 100%;
-    overflow: visible;
-  }
-  .vb-text {
-    overflow: visible;
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-}
-
 /* --- Usage, where the work happens ---------------------------------------
    A crumb on the New chat header (spec/14 §8 New-chat setup row), and the
    notes on the pause banner. Both exist because the only way to learn an
