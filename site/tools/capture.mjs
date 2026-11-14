@@ -1055,7 +1055,8 @@ async function regionOf(page, selector, height) {
 //
 // `capture.mjs <out-dir> --videos [name…]` records short scripted clips of the
 // harness through the DevTools screencast (crisper than Playwright's own
-// recorder), then encodes each as <name>-<theme>.webm/.mp4 plus a poster.
+// recorder), then encodes each as <name>-<theme>.mp4 (H.264) plus a poster. No WebM: Chrome failed
+// to decode the VP9 versions intermittently on the page, while H.264 played every time.
 
 /** A drawn pointer, since a screencast shows none. Moves are eased. */
 async function cursor(page) {
@@ -1478,21 +1479,6 @@ async function record(b, name, theme) {
     '-an',
     `${base}.mp4`,
   ]);
-  ff([
-    ...input,
-    '-vf',
-    vf,
-    '-c:v',
-    'libvpx-vp9',
-    '-crf',
-    '38',
-    '-b:v',
-    '0',
-    '-row-mt',
-    '1',
-    '-an',
-    `${base}.webm`,
-  ]);
   // The poster is the last frame: the finished state reads best standing still.
   ff(['-sseof', '-0.1', '-i', `${base}.mp4`, '-frames:v', '1', '-q:v', '3', `${base}-poster.jpg`]);
   // A phone-width version, from the desktop one.
@@ -1515,21 +1501,6 @@ async function record(b, name, theme) {
     '+faststart',
     '-an',
     `${base}-phone.mp4`,
-  ]);
-  ff([
-    ...src,
-    '-vf',
-    pvf,
-    '-c:v',
-    'libvpx-vp9',
-    '-crf',
-    '38',
-    '-b:v',
-    '0',
-    '-row-mt',
-    '1',
-    '-an',
-    `${base}-phone.webm`,
   ]);
   ff([
     '-sseof',

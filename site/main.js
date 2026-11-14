@@ -154,13 +154,9 @@
     if (!withSources) return;
     if (video.dataset.loaded === name) return;
     video.dataset.loaded = name;
-    video.innerHTML =
-      '<source src="' +
-      name +
-      '.webm" type="video/webm"><source src="' +
-      name +
-      '.mp4" type="video/mp4">';
-    video.load();
+    // H.264 only: every browser plays it, and Chrome failed to decode the VP9
+    // WebM versions intermittently on this page.
+    video.src = name + '.mp4';
   }
 
   videos.forEach(function (v) {

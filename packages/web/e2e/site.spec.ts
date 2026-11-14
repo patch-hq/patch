@@ -157,7 +157,7 @@ test('a clip loads and plays once it is on screen, and pauses off it', async ({ 
   await clip.scrollIntoViewIfNeeded();
   await expect
     .poll(() => clip.evaluate((v: HTMLVideoElement) => v.currentSrc))
-    .toMatch(/pad-light\.webm$/);
+    .toMatch(/pad-light\.mp4$/);
   await expect.poll(() => clip.evaluate((v: HTMLVideoElement) => !v.paused)).toBe(true);
   await page.evaluate(() => window.scrollTo(0, 0));
   await expect.poll(() => clip.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
@@ -171,7 +171,7 @@ test('a phone gets the phone cut of each clip', async ({ page }) => {
   await clip.scrollIntoViewIfNeeded();
   await expect
     .poll(() => clip.evaluate((v: HTMLVideoElement) => v.currentSrc))
-    .toMatch(/pad-light-phone\.webm$/);
+    .toMatch(/pad-light-phone\.mp4$/);
 });
 
 test('dark mode gets the dark recordings', async ({ page }) => {
