@@ -141,6 +141,7 @@ import {
 } from '../lib/skillToken.js';
 import { GOAL_COMMAND_NAME, GOAL_COMMAND_DESCRIPTION } from '../lib/goalCommand.js';
 import { JOB_COMMAND_NAME, JOB_COMMAND_DESCRIPTION } from '../lib/jobCommand.js';
+import { activeBangToken, filterJobs, removeBangToken } from '../lib/jobToken.js';
 import { CLEAR_COMMAND_NAME, CLEAR_COMMAND_DESCRIPTION } from '../lib/clearCommand.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import { isSubmitChord } from '../lib/submitChord.js';
@@ -1035,6 +1036,56 @@ export const Composer = forwardRef(function Composer(
   // clicking back into the input (or its actions) doesn't dismiss.
   const formRef = useRef<HTMLFormElement>(null);
   useDismissOnClickOff(showSkillMenu, [formRef], () => setSlashDismissed(true));
+  // Run a job (spec/14 § Composer — Run a job): `!` opens a menu of jobs where
+  // `/` opens skills. Picking one fires it now (POST /api/jobs/:id/run, the
+  // Jobs page's "Run now") and removes the token; no chat turn is sent. The
+  // list is re-read on every open. NO FALLBACK: a failed read or run is shown.
+  const bangToken = activeBangToken(body, cursorPos);
+  const bangActive = bangToken !== null;
+  const [bangDismissed, setBangDismissed] = useState(false);
+  const [bangIndex, setBangIndex] = useState(0);
+  const [jobList, setJobList] = useState<{ id: string; name: string }[] | null>(null);
+  const [jobsError, setJobsError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!bangActive || bangDismissed) return;
+    let live = true;
+    void api
+      .listJobs()
+      .then((r) => {
+        if (!live) return;
+        setJobList(
+          (r.jobs as { id: string; name: string }[]).map((j) => ({ id: j.id, name: j.name })),
+        );
+        setJobsError(null);
+      })
+      .catch((e) => {
+        if (live) setJobsError((e as Error).message);
+      });
+    return () => {
+      live = false;
+    };
+  }, [bangActive, bangDismissed]);
+  const bangItems =
+    bangToken !== null && jobList !== null ? filterJobs(jobList, bangToken.query) : [];
+  const showJobMenu = bangActive && !bangDismissed && (jobList !== null || jobsError !== null);
+  const activeBangIndex = Math.min(bangIndex, Math.max(0, bangItems.length - 1));
+  useEffect(() => {
+    setBangIndex(0);
+  }, [bangToken?.query]);
+  function runJobItem(job: { id: string; name: string }): void {
+    /* v8 ignore next -- the menu only renders while the token is active. */
+    if (bangToken === null) return;
+    const { text, cursor } = removeBangToken(body, bangToken, cursorPos);
+    setValue(joinThread(thread, text));
+    pendingCursorRef.current = cursor;
+    setBangDismissed(true);
+    inputRef.current?.focus();
+    void api.runJob(job.id).catch((err) => {
+      pushError(`couldn’t run job “${job.name}”: ${(err as Error).message}`);
+    });
+  }
+
+  useDismissOnClickOff(showJobMenu, [formRef], () => setBangDismissed(true));
   // Reset the highlight whenever the typed query changes.
   useEffect(() => {
     setSkillIndex(0);
@@ -2368,6 +2419,44 @@ export const Composer = forwardRef(function Composer(
           ) : null}
         </div>
       ) : null}
+      {showJobMenu ? (
+        <div className="composer-skill-popover">
+          <div className="composer-skill-menu" data-testid="composer-job-menu" role="listbox">
+            {jobsError ? (
+              <p className="composer-skill-error" data-testid="composer-job-error">
+                {jobsError}
+              </p>
+            ) : bangItems.length === 0 ? (
+              <p className="composer-skill-empty" data-testid="composer-job-empty">
+                {jobList?.length === 0 ? 'No jobs' : 'No matching job'}
+              </p>
+            ) : (
+              bangItems.map((job, i) => (
+                <button
+                  key={job.id}
+                  type="button"
+                  role="option"
+                  aria-selected={i === activeBangIndex}
+                  className={`composer-skill-option${i === activeBangIndex ? ' active' : ''}`}
+                  data-testid={`composer-job-option-${job.id}`}
+                  onMouseMove={() => setBangIndex(i)}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    runJobItem(job);
+                  }}
+                >
+                  <span className="composer-skill-option-row">
+                    <span className="composer-skill-slash" aria-hidden>
+                      !
+                    </span>
+                    {job.name}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      ) : null}
       {/* Removable thumbnails/chips above the input (spec/14 § Composer).
           Step 3 of 3: each chip tracks its OWN upload independently — a
           failed one reads "Not uploaded" with Retry (same pattern as a sent
@@ -2584,6 +2673,7 @@ export const Composer = forwardRef(function Composer(
                 setValue(joinThread(thread, e.target.value));
                 // Any edit re-opens a menu the user had Esc-dismissed.
                 setSlashDismissed(false);
+                setBangDismissed(false);
                 syncCursor(e.target);
               }}
               onClick={(e) => syncCursor(e.currentTarget)}
@@ -2639,6 +2729,32 @@ export const Composer = forwardRef(function Composer(
                       pendingCursorRef.current = chip.start;
                       return;
                     }
+                  }
+                }
+                if (showJobMenu) {
+                  if (bangItems.length > 0) {
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setBangIndex((i) => (i + 1) % bangItems.length);
+                      return;
+                    }
+                    if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setBangIndex((i) => (i - 1 + bangItems.length) % bangItems.length);
+                      return;
+                    }
+                    if ((e.key === 'Enter' || e.key === 'Tab') && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      const picked = bangItems[activeBangIndex];
+                      if (picked) runJobItem(picked);
+                      return;
+                    }
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setBangDismissed(true);
+                    return;
                   }
                 }
                 // Skill-menu navigation takes priority over send/stop while open.
