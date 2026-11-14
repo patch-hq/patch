@@ -262,6 +262,11 @@ const GENERAL_QUESTION_RULE =
   'never ask whether they want you to look it up or pass it to the agent — just do one. If a ' +
   'request is already with the agent, do not offer or ask about handing it off again.\n\n';
 
+const CAN_LOG_TASKS =
+  'The agent can log tasks, including Patch tasks (bugs and features for Patch itself), so when ' +
+  `the user asks you to log, add or note a task, call ${DISPATCH_TOOL_NAME} with it — never say you ` +
+  'cannot do that. ';
+
 const NEVER_GUESS =
   'Never guess. Anything about their files, folders, tasks, calendar, devices or any other ' +
   "real data must come from the agent's result — never make up file names, contents or " +
@@ -310,6 +315,7 @@ export function hostedVoiceInstruction(handoff: VoiceHandoff, asyncResult = fals
     return (
       VOICE_PREAMBLE +
       agent +
+      CAN_LOG_TASKS +
       `You do not answer anything yourself. Whatever the user asks or says, call ${DISPATCH_TOOL_NAME} ` +
       'with a clear description of what they said and what they want, then speak only what the ' +
       'agent returns. ' +
@@ -321,6 +327,7 @@ export function hostedVoiceInstruction(handoff: VoiceHandoff, asyncResult = fals
   return (
     VOICE_PREAMBLE +
     agent +
+    CAN_LOG_TASKS +
     'Answer yourself from the conversation when you can. Never say you do not know or ask the ' +
     'user for a manual or document: anything you are not sure of, including general factual ' +
     'questions, product details and anything that needs looking up, goes to the agent, which can ' +
@@ -338,14 +345,14 @@ export const HOSTED_VOICE_INSTRUCTION = hostedVoiceInstruction('auto');
 
 /** The dispatch tool's description for a hand-off mode (`never` has no tool). */
 export const DISPATCH_TOOL_DESCRIPTION =
-  "Call this for ANYTHING needing the user's actual data, tasks, calendar, smart " +
+  "Call this for ANYTHING needing the user's actual data, tasks (including logging a task, Patch tasks too), calendar, smart " +
   'home, or any action — you have no access to any of that yourself. Say at most one ' +
   'brief acknowledgement, then stay silent until the result returns; never ' +
   'answer from a guess.';
 
 /** The same, for a session where the call is answered at once and the result comes later. */
 export const ASYNC_DISPATCH_TOOL_DESCRIPTION =
-  "Call this for ANYTHING needing the user's actual data, tasks, calendar, smart " +
+  "Call this for ANYTHING needing the user's actual data, tasks (including logging a task, Patch tasks too), calendar, smart " +
   'home, or any action — you have no access to any of that yourself. It answers "started" ' +
   'at once and the result arrives later as a message; meanwhile keep talking normally. ' +
   'Never answer from a guess.';
