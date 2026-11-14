@@ -70,6 +70,7 @@ const OpenedBody = z.object({ chatId: z.string().min(1) }).strict();
 export function registerBatchRoutes(app: FastifyInstance, deps: BatchRoutesDeps): void {
   app.get('/api/batch', async (req, reply) => {
     if (!(await authOr401(req, reply, deps.registry))) return;
+    deps.notifier.recomputeTriggers();
     return reply.code(200).send(snapshot(deps));
   });
 
