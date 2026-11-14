@@ -302,7 +302,7 @@ export function FinishedGoalBanner({
               type="button"
               className="status-link status-link-underline"
               data-testid="finished-goal-not-met"
-              title="The evaluator was wrong: re-open this goal and send the agent back"
+              title="Mark as not met"
               onClick={() => onNotMet(last!.condition)}
             >
               Not met
