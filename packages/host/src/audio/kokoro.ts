@@ -18,6 +18,7 @@ import type { Logger } from 'pino';
 import type { ChildProcess } from 'node:child_process';
 import { existsSync as existsSyncFs } from 'node:fs';
 import { PersistentWsClient } from './persistent-ws.js';
+import { killOnHostExit, reclaimPort } from './sidecarGuard.js';
 
 export interface KokoroChunk {
   /** PCM16 mono @ 24 kHz. */
@@ -258,6 +259,7 @@ class RealKokoroBackend implements KokoroBackend {
     if (!this.opts.modelPath) {
       throw new Error('KOKORO_MODEL_PATH missing — required for backend=real (NO FALLBACKS).');
     }
+    await reclaimPort(this.port, 'kokoro sidecar', this.opts.logger);
     const { spawn } = await import('node:child_process');
     // `--no-sync`: use the venv baked at image-build time (CPU torch) AS-IS.
     // Plain `uv run` auto-syncs against uv.lock, which resolves the default
@@ -283,6 +285,7 @@ class RealKokoroBackend implements KokoroBackend {
     // inference) exited the process with NO visible reason — it just logged
     // "exited; will respawn" and synthesis silently produced nothing. Tail the
     // last lines so the exit log can include why it died.
+    killOnHostExit(proc);
     let lastErr = '';
     const tail = (buf: Buffer): void => {
       lastErr = (lastErr + buf.toString()).split('\n').slice(-8).join('\n');

@@ -25,6 +25,7 @@ import { PersistentWsClient } from './persistent-ws.js';
 import { pcmFromWav } from './smartTurn.js';
 import { readKey, type KeySource } from './keySource.js';
 import { ParakeetWhisperBackend } from './parakeet.js';
+import { killOnHostExit, reclaimPort, tailOutput } from './sidecarGuard.js';
 
 /** Subset of the host's audio config the credential check needs. */
 export interface WhisperCredentialConfig {
@@ -596,6 +597,7 @@ export class LocalWhisperBackend implements WhisperBackend {
     if (this.modelPath !== '' && !existsSyncFs(modelPath)) {
       throw new Error(`Transcription model directory does not exist: ${modelPath}`);
     }
+    await reclaimPort(this.port, 'faster-whisper sidecar', this.opts.logger);
     const { spawn } = await import('node:child_process');
     // `--no-sync`: use the image-baked venv as-is (see kokoro.ts) — plain
     // `uv run` re-syncs to the CUDA-torch lockfile and bloats the disk.
@@ -614,9 +616,11 @@ export class LocalWhisperBackend implements WhisperBackend {
         stdio: ['ignore', 'pipe', 'pipe'],
       },
     );
-    proc.on('exit', (code) => {
+    killOnHostExit(proc);
+    const lastOutput = tailOutput(proc);
+    proc.on('exit', (code, signal) => {
       this.opts.logger.warn(
-        { code },
+        { code, signal, tail: lastOutput() },
         'faster-whisper sidecar exited; will respawn on next request',
       );
       this.proc = undefined;
