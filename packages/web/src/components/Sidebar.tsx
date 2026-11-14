@@ -61,6 +61,7 @@ import { clearComposerDraft } from '../stores/composerDraftStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { useUiStore } from '../stores/uiStore.js';
 import { useBatchStore } from '../stores/batchStore.js';
+import { useExperimentalFeatures } from '../stores/preferencesStore.js';
 import { useSelectionStore } from '../stores/selectionStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { isKeptDraft, useDraftStore } from '../stores/draftStore.js';
@@ -223,7 +224,10 @@ function SidebarInner({ standalone = false }: { standalone?: boolean } = {}): JS
   // between the normal chat list and the batch review view. The Manager is not
   // a sidebar view — it is a chat, with everything it watches beneath it
   // (spec/14 § Manager view).
-  const batchMode = useBatchStore((s) => s.mode) === 'batch';
+  // Manager and Batch are experimental: absent unless Settings → Experimental
+  // features is on, whatever mode the batch store last persisted.
+  const experimental = useExperimentalFeatures();
+  const batchMode = useBatchStore((s) => s.mode) === 'batch' && experimental;
   const navigate = useNavigate();
 
   // The folder roster seeds Recent projects with folders whose chats are all
@@ -444,7 +448,7 @@ function SidebarInner({ standalone = false }: { standalone?: boolean } = {}): JS
             <SidebarViewMenu />
           </div>
           {/* Manager stays reachable from its top slot even in batch view. */}
-          <ManagerRow row={grouped.manager} active={highlightedChatId} />
+          {experimental ? <ManagerRow row={grouped.manager} active={highlightedChatId} /> : null}
           <div className="sb-scroll" data-testid="sb-scroll">
             <BatchPanel />
           </div>
@@ -591,6 +595,7 @@ function RegularSidebar({
   activeDevices: Record<string, string>;
   sectionCounts: SectionCounts | null;
 }): JSX.Element {
+  const experimental = useExperimentalFeatures();
   const channelsGlyphs = useActionGlyphs('toggleChannels');
   const archivedGlyphs = useActionGlyphs('toggleArchived');
   const navigate = useNavigate();
@@ -724,7 +729,9 @@ function RegularSidebar({
 
       {/* Manager — always-visible top slot. Not in a lifecycle view, which is
           its own list. */}
-      {openKind === null ? <ManagerRow row={grouped.manager} active={activeChatId} /> : null}
+      {openKind === null && experimental ? (
+        <ManagerRow row={grouped.manager} active={activeChatId} />
+      ) : null}
 
       {/* Bulk actions for a shift-click selection (spec/14 § Sidebar →
           Selecting multiple rows). Absent while nothing is selected. Part of

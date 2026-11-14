@@ -42,6 +42,7 @@ Shared by every host, stored on the server:
 - Backend accounts: the Claude and Codex credentials, their order and each backend's account strategy (`10-auth.md` § Backend credentials).
 - Provider keys (`02-host.md` § Provider keys). Saving one makes a free read-only request to its provider and answers with the verdict (working and what it powers, limited, rejected, or provider unreachable); saved keys are rechecked at start and hourly, and a key the provider has since refused is flagged in Settings. The key is saved whatever the verdict. Verdicts are held in memory, not stored.
 - Agent behaviour: default model, default permission mode, auto-resume after a limit, question expiry, chat-name interval, and the layers in `14-design-web.md` § Agent behavior.
+- Experimental features: one on/off switch, off by default, that shows or hides the half-finished features (`14-design-web.md` § `/settings` details → Experimental features). Account-wide, so every surface agrees.
 - Voice: the Kokoro voice and the voice config matrix (`07-voice-app.md`).
 - Manager sweep and quiet hours, the voice address word, and the special threads' model and rotation schedule.
 - `Send to my phone after`: how long a computer may sit idle before notifications go to the phone instead (`09-notifications.md` § Presence heuristic). 1 minute (the default), 5 minutes, or `Only when I lock`.

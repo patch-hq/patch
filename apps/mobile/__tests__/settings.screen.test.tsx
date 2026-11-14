@@ -105,7 +105,7 @@ function rowTitles(r: ReactTestRenderer): string[] {
 }
 
 describe('Settings tab — the list', () => {
-  it('shows the title and the design’s groups, rows and order', async () => {
+  it('shows the title and the design’s groups, rows and order (experimental features off)', async () => {
     const r = render(<SettingsScreen />);
     await flush();
     const headers = findAllHost(
@@ -119,7 +119,6 @@ describe('Settings tab — the list', () => {
       'Agent',
       'MCP',
       'Memories',
-      'Manager',
       'Goals',
       'Prompts',
       'Voice',
@@ -129,6 +128,7 @@ describe('Settings tab — the list', () => {
       'Agent identity',
       'Providers',
       'Devices',
+      'Experimental features',
       'Updates',
       'Account',
     ]);
@@ -142,7 +142,6 @@ describe('Settings tab — the list', () => {
       'Agent',
       'MCP',
       'Memories',
-      'Manager',
       'Goals',
       'Prompts',
       'Voice',
@@ -150,7 +149,19 @@ describe('Settings tab — the list', () => {
       'Computer use',
     ]);
     expect(inGroup('Setup')).toEqual(['Hosts', 'Agent identity', 'Providers', 'Devices']);
-    expect(inGroup('System')).toEqual(['Updates', 'Account']);
+    expect(inGroup('System')).toEqual(['Experimental features', 'Updates', 'Account']);
+  });
+
+  it('shows the Manager page in the Agents group once experimental features are on', async () => {
+    const fixture = settingsFixture();
+    vi.mocked(api.settings).mockResolvedValue({
+      ...fixture,
+      preferences: { ...fixture.preferences, experimentalFeatures: true },
+    });
+    const r = render(<SettingsScreen />);
+    await flush();
+    expect(rowTitles(r)).toContain('Manager');
+    expect(rowTitles(r).indexOf('Manager')).toBe(rowTitles(r).indexOf('Memories') + 1);
   });
 
   it('draws no page content on the list itself', async () => {
@@ -180,6 +191,11 @@ describe('Settings tab — the list', () => {
   });
 
   it('tapping a row opens that page as its own screen', async () => {
+    const fixture = settingsFixture();
+    vi.mocked(api.settings).mockResolvedValue({
+      ...fixture,
+      preferences: { ...fixture.preferences, experimentalFeatures: true },
+    });
     const r = render(<SettingsScreen />);
     await flush();
     for (const p of SETTINGS_PAGES) {

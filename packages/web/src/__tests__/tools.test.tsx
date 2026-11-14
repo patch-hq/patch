@@ -183,6 +183,9 @@ const KEY = 'patch.tools.disabledByChat.v1';
 
 describe('toolsStore', () => {
   beforeEach(() => {
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    });
     window.localStorage.clear();
     useToolsStore.getState()._reset();
   });
@@ -284,6 +287,9 @@ function GoTo({ to }: { to: string }): JSX.Element {
 
 describe('ToolsPanel', () => {
   beforeEach(() => {
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    });
     window.localStorage.clear();
     useToolsStore.getState()._reset();
     useUiStore.setState({ toolsPanelChatId: null });
@@ -411,6 +417,9 @@ describe('ToolsPanel', () => {
 // Navigating anywhere that is not that chat … closes it".
 describe('ToolsPanel — closes when the chat it belongs to leaves the screen', () => {
   beforeEach(() => {
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    });
     window.localStorage.clear();
     useToolsStore.getState()._reset();
     useUiStore.setState({ toolsPanelChatId: null });
@@ -470,6 +479,9 @@ describe('ToolsPanel — closes when the chat it belongs to leaves the screen', 
 // is editable here; the edit is a shared setting.
 describe('ToolsPanel — editing a Patch tool prompt', () => {
   beforeEach(() => {
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    });
     window.localStorage.clear();
     useToolsStore.getState()._reset();
     useUiStore.setState({ toolsPanelChatId: 'c1' });

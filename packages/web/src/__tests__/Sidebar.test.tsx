@@ -4,7 +4,9 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { Sidebar } from '../components/Sidebar.js';
 import { SnoozeSheet } from '../components/SnoozeSheet.js';
 import { ConfirmModal } from '../components/ConfirmModal.js';
+import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
 import { useChatStore } from '../stores/chatStore.js';
+import { useBatchStore } from '../stores/batchStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { reportHost } from './presenceHelpers.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
@@ -139,6 +141,9 @@ function selectUnreadView(): void {
 
 describe('Sidebar', () => {
   beforeEach(() => {
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    });
     useChatStore.getState()._reset();
     usePresenceStore.getState().setConnection('connected');
     usePresenceStore.setState({ hostOnline: true });
@@ -355,6 +360,30 @@ describe('Sidebar', () => {
     // ...and NOT duplicated into the pinned section.
     expect(screen.queryByTestId('manager-row-empty')).not.toBeInTheDocument();
     expect(screen.queryByTestId('pinned-section')).not.toBeInTheDocument();
+  });
+
+  it('hides the Manager row and ignores a persisted Batch mode while experimental features are off', () => {
+    usePreferencesStore.setState({ preferences: DEFAULT_PREFERENCES });
+    useBatchStore.setState({ mode: 'batch' });
+    useChatStore.getState().hydrate([
+      {
+        chatId: 'thread_manager',
+        hostId: 'd1',
+        permissionMode: 'bypassPermissions' as const,
+        name: 'manager',
+        folder: '/home/tom/.patch/threads/manager',
+        activity: 'idle',
+        status: 'active',
+        pinned: true,
+        pinnedAt: 50,
+        disabled: false,
+        lastUpdated: 1,
+      },
+    ]);
+    renderInRouter();
+    expect(screen.queryByTestId('chat-row-thread_manager')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('batch-panel')).not.toBeInTheDocument();
+    useBatchStore.getState()._reset();
   });
 
   // spec/04 § Goals, spec/14 § Sidebar — a chat working toward a goal carries

@@ -1091,6 +1091,8 @@ The Settings page is a compact list of titled sections, each showing only
 its title, live value, and its control(s) — no explanatory prose. The user
 reads the state, not paragraphs about it.
 
+**Experimental features.** The last group, System, holds an `Experimental features` page with one switch, `Show experimental features`, off by default and stored as the account-wide `experimentalFeatures` setting (`01-server.md` § Settings). It is the home for half-finished work. While it is off, nothing experimental is drawn or reachable: the Manager row (the sidebar, the mini rail), the `Batch` option in the view dropdown, and the `Manager` page in Settings are all absent, and a Batch view left selected from an earlier session is not shown. Turning it on brings them all back at once. The Manager's background work is governed by its own settings and is not stopped by this switch. Anything new that is not ready for everyone is added to this page rather than shipped on.
+
 Where a setting is an editable value on the same line as its name, the value is
 drawn as a field: a bordered, padded box separated from the name by a clear gap,
 so the line reads as a name and a value rather than as one run-together string.

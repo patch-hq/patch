@@ -129,6 +129,12 @@ describe('SharedSettingsService', () => {
     expect(() => service.update({ sweepIntervalMinutes: -5 })).toThrow();
   });
 
+  it('has experimental features off by default, and a write persists across a restart', () => {
+    expect(service.current().experimentalFeatures).toBe(false);
+    expect(service.update({ experimentalFeatures: true }).experimentalFeatures).toBe(true);
+    expect(make().current().experimentalFeatures).toBe(true);
+  });
+
   it('has the sweep off by default', () => {
     expect(service.current().sweepEnabled).toBe(false);
   });
