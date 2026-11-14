@@ -32,6 +32,11 @@ const BASELINE = join(ROOT, 'scripts', 'personal-check.baseline.json');
 // Strings that mean "this is the user's setup". Case-insensitive.
 export const PERSONAL = /tomchambers|tomsownclaw|tom\.chambers|netcup|hetzner|claude-dev/gi;
 
+// A first name is only a personal string inside prompt files: a stranger's agent
+// is handed that text verbatim, so it must say "the user", not the author.
+export const PERSONAL_NAME = /\bTom\b/g;
+const isPromptFile = (p) => /prompt/i.test(p);
+
 const SKIP_PATH = /^(spec|design|docs|testing|\.cadence|\.claude)\//;
 const SKIP_FILE = /(pnpm-lock\.yaml|\.(png|jpe?g|gif|ico|onnx|bin|wav|pcm|mp3|woff2?|apk|jar|keystore)$|personal-check\.)/;
 const isTest = (p) =>
@@ -50,8 +55,10 @@ export function scannedFiles(paths) {
 const PRODUCT_IDENTITY = /io[./]github[./]tomchambers2[./]patch|github\.com\/tomchambers2\/patch|tomchambers2\/patch|me\.tomchambers\.patch-(?:host|daemon)/gi;
 
 /** Personal-string count for one file's text. */
-export function countPersonal(text) {
-  return (text.replace(PRODUCT_IDENTITY, '').match(PERSONAL) ?? []).length;
+export function countPersonal(text, file = '') {
+  const clean = text.replace(PRODUCT_IDENTITY, '');
+  const names = isPromptFile(file) ? (clean.match(PERSONAL_NAME) ?? []).length : 0;
+  return (clean.match(PERSONAL) ?? []).length + names;
 }
 
 /** Compare today's counts to the baseline. Pure, so it can be tested. */
@@ -84,7 +91,7 @@ function scan() {
       continue; // a tracked path that is a directory or a dangling link
     }
     if (text.includes('\0')) continue; // binary
-    const n = countPersonal(text);
+    const n = countPersonal(text, file);
     if (n > 0) counts[file] = n;
   }
   return counts;
