@@ -53,3 +53,14 @@ describe('HOSTED_VOICE_INSTRUCTION', () => {
     expect(text).toMatch(/one or two short sentences/i);
   });
 });
+
+describe('task logging', () => {
+  test.each(['auto', 'always'] as const)(
+    '%s: voice knows the agent can log tasks, Patch ones included',
+    (mode) => {
+      const text = hostedVoiceInstruction(mode);
+      expect(text).toMatch(/log tasks, including Patch tasks/i);
+      expect(text).toMatch(/never say you cannot do that/i);
+    },
+  );
+});
