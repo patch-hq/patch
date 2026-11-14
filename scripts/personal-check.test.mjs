@@ -7,6 +7,12 @@ test('counts every personal string, whatever the case', () => {
   assert.equal(countPersonal('nothing to see'), 0);
 });
 
+test('a first name counts in prompt files only', () => {
+  assert.equal(countPersonal('so it can go to Tom', 'packages/wire/src/sweep-prompt.ts'), 1);
+  assert.equal(countPersonal('so it can go to Tom', 'packages/web/src/App.tsx'), 0);
+  assert.equal(countPersonal('Tomorrow, tomato', 'packages/wire/src/x-prompt.ts'), 0);
+});
+
 test('the product\'s own id and repository are not personal strings', () => {
   assert.equal(countPersonal('package io.github.tomchambers2.patch'), 0);
   assert.equal(countPersonal('io/github/tomchambers2/patch/Main.kt'), 0);
