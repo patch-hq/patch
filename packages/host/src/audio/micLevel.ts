@@ -15,7 +15,8 @@ const SILENT_PEAK = 16;
 export function micSilentMessage(surfaceKind: string): string {
   const fix =
     surfaceKind === 'mobile'
-      ? 'Allow Patch to use the microphone in Android Settings → Apps → Patch → Permissions.'
+      ? 'Check that Patch is allowed to use the microphone in Android Settings → Apps → Patch → Permissions, ' +
+        'that no other app is using the microphone, and that a Bluetooth headset is not capturing it.'
       : 'On a Mac, allow Patch in System Settings → Privacy & Security → Microphone, then quit ' +
         'and reopen Patch, and check the input device and its volume in System Settings → Sound.';
   return `Your microphone is sending silence, so nothing you say can be heard. ${fix}`;

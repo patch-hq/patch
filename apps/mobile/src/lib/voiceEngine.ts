@@ -76,3 +76,26 @@ export function describeVoiceError(code: AudioErrorCode, message: string): strin
       return `${code}: ${message}`;
   }
 }
+
+/**
+ * The call-bar sentence for a silent microphone, decided by what the phone
+ * actually holds. The host only sees silence and cannot tell a revoked
+ * permission from another app (or a Bluetooth headset) holding the mic, so a
+ * granted permission must not be blamed. A missing one is asked for in place
+ * rather than sending the user to Settings.
+ */
+export async function describeMicSilent(
+  hostMessage: string,
+  deps: { has: () => Promise<boolean>; ask: () => Promise<boolean> },
+): Promise<string> {
+  if (await deps.has()) {
+    return (
+      'Your microphone is sending silence, though Patch is allowed to use it. Another app may be ' +
+      'holding the microphone, or a Bluetooth headset may be capturing it. End the call and start it again.'
+    );
+  }
+  if (await deps.ask()) {
+    return 'Microphone access was missing and is now allowed. End the call and start it again.';
+  }
+  return hostMessage;
+}
