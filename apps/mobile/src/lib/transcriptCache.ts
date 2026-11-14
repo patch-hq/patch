@@ -283,6 +283,9 @@ export function heldCursor(chatId: string): number {
   const held = readChat(chatId);
   if (held === null) return -1;
   return held.events.reduce<number>((max, e) => {
+    // A failed turn's error reaches every surface, so it can be the only event
+    // held for a chat never replayed; it must not move the cursor.
+    if ((e as { type?: unknown }).type === 'chat.error') return max;
     const seq = durableSeq(e);
     return seq !== null && seq > max ? seq : max;
   }, -1);

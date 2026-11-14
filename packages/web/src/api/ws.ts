@@ -458,7 +458,16 @@ export class PatchWs {
       timeline && timeline.length > 0
         ? timeline.reduce(
             (max, e) =>
-              e.localId === undefined && e.streaming !== true && e.seq > max ? e.seq : max,
+              e.localId === undefined &&
+              e.streaming !== true &&
+              // A failed turn's error is fanned out to every surface, open
+              // chat or not, so it can be the only entry held for a chat the
+              // surface never replayed. Counting it would put the cursor past
+              // the whole unseen history. A replayed error is de-duplicated.
+              e.kind !== 'error' &&
+              e.seq > max
+                ? e.seq
+                : max,
             -1,
           )
         : -1;

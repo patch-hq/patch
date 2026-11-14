@@ -213,7 +213,13 @@ export class PatchWs {
     this.flushStoreQueue();
     const timeline = useChatStore.getState().timelines[chatId];
     if (timeline === undefined || timeline.length === 0) return -1;
-    return timeline.reduce((max, e) => (e.seq >= 0 && e.seq > max ? e.seq : max), -1);
+    // Error rows are left out: a failed turn's error reaches every surface, so
+    // it can be the only entry held for a chat never replayed, and counting it
+    // would put the cursor past the whole unseen history.
+    return timeline.reduce(
+      (max, e) => (e.kind !== 'error' && e.seq >= 0 && e.seq > max ? e.seq : max),
+      -1,
+    );
   }
 
   /**
