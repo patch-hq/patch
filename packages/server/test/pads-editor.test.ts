@@ -25,7 +25,7 @@ const home = (title: string) =>
 describe('pad editor in a browser', () => {
   let dir: string;
   let browser: Browser;
-  let pw: { devices: typeof devicesT };
+  let pw: { devices: typeof devicesT; chromium: typeof import('playwright').chromium };
   let built: Awaited<ReturnType<typeof buildAll>>;
   let link: InProcessHostLink;
   let base: string;
@@ -241,6 +241,44 @@ describe('pad editor in a browser', () => {
     const nameBox = await page.locator('#screenName').boundingBox();
     expect(nameBox!.height).toBeLessThan(48);
     await ctx.close();
+  });
+
+  it('a tall page scrolls by the wheel delta and its scrollbar is left uncovered by the edit layer', async () => {
+    const frameUrl = await newPad();
+    // Playwright hides scrollbars by default; a real browser shows one.
+    const shown = await pw.chromium.launch({ ignoreDefaultArgs: ['--hide-scrollbars'] });
+    const ctx = await shown.newContext({ viewport: { width: 1200, height: 800 } });
+    const page = await ctx.newPage();
+    await page.goto(frameUrl);
+    await page.frameLocator('#frame').locator('#t').waitFor();
+    await page.frameLocator('#frame').locator('body').evaluate((b) => {
+      b.style.height = '6000px';
+    });
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const d = (document.getElementById('frame') as HTMLIFrameElement).contentDocument;
+          return d?.documentElement.scrollHeight ?? 0;
+        }),
+      )
+      .toBeGreaterThan(5000);
+    await page.mouse.move(400, 400);
+    await page.mouse.wheel(0, 300);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => (document.getElementById('frame') as HTMLIFrameElement).contentDocument!.documentElement.scrollTop,
+        ),
+      )
+      .toBe(300);
+    const gap = await page.evaluate(() => {
+      const f = document.getElementById('frame')!.getBoundingClientRect();
+      const l = document.getElementById('layer')!.getBoundingClientRect();
+      return f.right - l.right;
+    });
+    expect(gap).toBeGreaterThan(0);
+    await ctx.close();
+    await shown.close();
   });
 
   it('phone: the screen bar has a + that adds a screen', async () => {

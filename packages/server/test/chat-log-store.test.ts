@@ -188,6 +188,36 @@ describe('ChatLogStore', () => {
     expect(store.highWater('c1')).toBe(9);
   });
 
+  test('history it does not keep still raises the high-water mark, and a restart remembers it', () => {
+    const store = new ChatLogStore({ dataDir: dir, logger });
+    store.commit(message('c1', 1));
+    const summary = {
+      type: 'chat.tool_run_summary',
+      chatId: 'c1',
+      callIds: [],
+      summary: 's',
+      seq: 2,
+    } as WireEvent;
+    expect(store.commit(summary)).toBe('ignored');
+    expect(store.highWater('c1')).toBe(2);
+    expect(store.read('c1', -1)).toHaveLength(1);
+    expect(new ChatLogStore({ dataDir: dir, logger }).highWater('c1')).toBe(2);
+  });
+
+  test('a reach is only noted for a chat it holds, and never lowers the mark', () => {
+    const store = new ChatLogStore({ dataDir: dir, logger });
+    store.noteReach('c1', 5);
+    expect(store.highWater('c1')).toBe(-1);
+    expect(store.has('c1')).toBe(false);
+    store.commit(message('c1', 4));
+    store.noteReach('c1', 2);
+    expect(store.highWater('c1')).toBe(4);
+    store.noteReach('c1', 6);
+    store.commit(message('c1', 8));
+    expect(store.highWater('c1')).toBe(8);
+    expect(new ChatLogStore({ dataDir: dir, logger }).highWater('c1')).toBe(8);
+  });
+
   test('a batched replay is kept event by event', () => {
     const store = new ChatLogStore({ logger });
     store.observe({

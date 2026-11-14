@@ -2053,10 +2053,11 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       message,
       goal ?? '',
     ]);
+    // Prune on every call, including ones that carry a localId, so the map
+    // cannot grow unbounded when callers always pass one.
+    const now = Date.now();
+    for (const [k, at] of recentSendTos) if (now - at >= SEND_TO_DEDUPE_MS) recentSendTos.delete(k);
     if (parsed.data.localId === undefined) {
-      const now = Date.now();
-      for (const [k, at] of recentSendTos)
-        if (now - at >= SEND_TO_DEDUPE_MS) recentSendTos.delete(k);
       if (recentSendTos.has(dedupeKey)) {
         toolLog({
           tool: 'patch_send_to',
