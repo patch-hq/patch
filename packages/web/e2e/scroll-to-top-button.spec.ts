@@ -47,3 +47,13 @@ test('the first stop lands on the first message; a dated stop lands on its turn'
   await expect(page.getByText('history line 399 —')).toBeVisible();
   await expect(page.getByTestId('scroll-rail')).toHaveCount(0);
 });
+
+test('the top button sits with the dots and lands on the first message', async ({ page }) => {
+  await page.goto('/app/dev-harness.html?chat=chat_long_history');
+  const stream = page.locator('.chat-stream');
+  await expect(stream).toBeVisible();
+  await stream.hover();
+  for (let i = 0; i < 12; i++) await page.mouse.wheel(0, -400);
+  await page.getByTestId('scroll-to-top').click();
+  await expect(page.getByText('history line 0 —')).toBeVisible();
+});
