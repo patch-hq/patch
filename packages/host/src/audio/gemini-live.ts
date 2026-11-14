@@ -238,8 +238,11 @@ const WAIT_RULE =
 /** The async variant: the call is answered at once and the result arrives later as a message. */
 const ASYNC_WAIT_RULE =
   `${DISPATCH_TOOL_NAME} answers at once with "started": the agent is working in the background. ` +
-  'Say once, in a few words, that you have passed it on, then carry on the conversation normally — ' +
-  'answer anything else the user says. Never say "still working on it", "waiting" or anything ' +
+  'Say once, in a few words, that you have passed it on (for example "Right, I\'ve asked that — now ' +
+  'on to the rest of your question"), then carry straight on with the rest of what the user said ' +
+  'in the same breath: answer every other part yourself, and never stop to wait for the agent. ' +
+  "Only hold back a part that genuinely depends on the agent's result, and say that part will " +
+  'follow. Then carry on the conversation normally — answer anything else the user says. Never say "still working on it", "waiting" or anything ' +
   'like it unless the user asks how it is going. When the agent finishes, its result arrives as a ' +
   'message from the agent: tell the user the answer in one or two short sentences, never the ' +
   'whole text, and let them ask for more. Several ' +
@@ -347,7 +350,8 @@ export const DISPATCH_TOOL_DESCRIPTION =
 export const ASYNC_DISPATCH_TOOL_DESCRIPTION =
   "Call this for ANYTHING needing the user's actual data, tasks, calendar, smart " +
   'home, or any action — you have no access to any of that yourself. It answers "started" ' +
-  'at once and the result arrives later as a message; meanwhile keep talking normally. ' +
+  'at once and the result arrives later as a message; meanwhile carry on with the rest of the ' +
+  "user's question rather than waiting. " +
   'Never answer from a guess.';
 
 function buildSetupMessage(
@@ -1255,7 +1259,8 @@ export class GeminiLiveSession implements VoiceSessionLike {
                   result: 'started',
                   note:
                     'The agent has the request and is working on it in the background. Tell the user once, in a few ' +
-                    'words, that you have passed it on, then carry on the conversation. Its result ' +
+                    'words, that you have passed it on, then carry straight on with the rest of ' +
+                    'what they asked, answering the other parts yourself. Its result ' +
                     'will arrive as a message; do not wait for it or keep mentioning it.',
                   scheduling: 'WHEN_IDLE',
                 },
