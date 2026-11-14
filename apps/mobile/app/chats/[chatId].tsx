@@ -47,7 +47,15 @@ import {
   Clock,
   CloudOff,
 } from 'lucide-react-native';
-import { ArrowUp, Check, ChevronDown, ChevronRight, Copy, Hand } from 'lucide-react-native';
+import {
+  ArrowUp,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
+  Copy,
+  Hand,
+} from 'lucide-react-native';
 import {
   SPECIAL_THREAD_IDS,
   folderName,
@@ -213,6 +221,9 @@ const chatScrollMemory = new Map<
 // grows or streams (see the block comment above), so this alone is a reliable
 // test — no content-size/viewport comparison needed.
 const AT_BOTTOM_SLOP = 24;
+// Scrolled this far (px) from the newest message, a "go to beginning" button
+// appears: a long transcript is otherwise a long drag back to the first message.
+const SHOW_TO_BEGINNING_OFFSET = 3000;
 
 // Hoisted so the style object identity is stable — an inline literal here is a
 // new prop on every render, which defeats FlatList's own bail-outs.
@@ -567,6 +578,7 @@ function ChatDetailBody(): React.ReactElement {
   // Mirrors `followRef` into React state so the floating "scroll to bottom"
   // button can react to it — the ref alone doesn't trigger a re-render.
   const [showScrollToBottom, setShowScrollToBottom] = React.useState(false);
+  const [showToBeginning, setShowToBeginning] = React.useState(false);
   // True between the user putting a finger on the list and the resulting
   // momentum settling. Follow mode is turned off ONLY inside that window — a
   // drag is a real, unambiguous signal of intent, so use it rather than
@@ -923,6 +935,7 @@ function ChatDetailBody(): React.ReactElement {
       // message?", true however the list got there (a drag, or the keyboard
       // shrinking the list under a reader who is not following).
       setShowScrollToBottom(!atNewest);
+      setShowToBeginning(contentOffset.y > SHOW_TO_BEGINNING_OFFSET);
       if (draggingRef.current) {
         followRef.current = atNewest;
         // Only remember a position the user actually chose. Recording our own
@@ -1430,6 +1443,36 @@ function ChatDetailBody(): React.ReactElement {
             }}
           >
             <ChevronDown size={20} color={colors.ink} />
+          </Pressable>
+        ) : null}
+        {showToBeginning ? (
+          <Pressable
+            testID="scroll-to-beginning"
+            accessibilityRole="button"
+            accessibilityLabel="Go to beginning of chat"
+            onPress={() => {
+              followRef.current = false;
+              listRef.current?.scrollToEnd({ animated: true });
+            }}
+            style={{
+              position: 'absolute',
+              right: space.md,
+              bottom: space.xl * 2 + 48,
+              width: 40,
+              height: 40,
+              borderRadius: 20,
+              backgroundColor: colors.paperRaised,
+              borderWidth: 1,
+              borderColor: colors.divider,
+              alignItems: 'center',
+              justifyContent: 'center',
+              elevation: 4,
+              shadowColor: fixed.shadow,
+              shadowOpacity: 0.15,
+              shadowRadius: 4,
+            }}
+          >
+            <ChevronUp size={20} color={colors.ink} />
           </Pressable>
         ) : null}
         {readOnlyMirror ? (
