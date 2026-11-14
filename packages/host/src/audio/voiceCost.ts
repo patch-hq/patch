@@ -224,11 +224,10 @@ function realChargeParts(real: RealCharge | undefined): string[] {
   if ('error' in real) return ['cost unavailable'];
   const out = [`${Math.round(real.credits).toLocaleString('en-GB')} credits`];
   if (real.usd !== null) out.push(formatUsd(real.usd));
-  out.push(
-    real.creditsLeft === null
-      ? 'credits left unknown'
-      : `${Math.round(real.creditsLeft).toLocaleString('en-GB')} left this month`,
-  );
+  // An unknown balance is left off rather than announced.
+  if (real.creditsLeft !== null) {
+    out.push(`${Math.round(real.creditsLeft).toLocaleString('en-GB')} left this month`);
+  }
   return out;
 }
 
@@ -238,16 +237,15 @@ export function callSummaryLine(c: CallCosting): string {
   if (c.backend === 'elevenlabs') {
     parts.push(...realChargeParts(c.real));
   } else {
-    parts.push(c.engineUsd === null ? 'price unknown' : formatUsd(c.engineUsd));
+    if (c.engineUsd !== null) parts.push(formatUsd(c.engineUsd));
   }
   if (c.tokens) {
     const tin = c.tokens.textIn + c.tokens.audioIn + c.tokens.cachedIn;
     const tout = c.tokens.textOut + c.tokens.audioOut;
-    parts.push(
-      tin + tout === 0
-        ? 'token usage not reported'
-        : `${tin.toLocaleString('en-GB')} tokens in / ${tout.toLocaleString('en-GB')} out`,
-    );
+    // An engine that reports no tokens says nothing, not "0 tokens".
+    if (tin + tout > 0) {
+      parts.push(`${tin.toLocaleString('en-GB')} tokens in / ${tout.toLocaleString('en-GB')} out`);
+    }
   }
   // Only a fast voice hands anything off; a call that reads 0 here but made requests is the tell.
   if (c.backend !== 'local' && c.handoffs !== undefined) {
