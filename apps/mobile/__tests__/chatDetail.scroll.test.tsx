@@ -1312,4 +1312,20 @@ describe('floating "scroll to bottom" button — mirrors follow mode', () => {
     await flush();
     expect(queryHost(r.root, byTestId('scroll-to-bottom'))).toBeNull();
   });
+
+  it('shows a go-to-beginning button after a long scroll and scrolls to the oldest end', async () => {
+    __setLocalSearchParams({ chatId: 'scroll-beginning-1' });
+    const r = render(<ChatDetailScreen />);
+    await flush();
+    await waitForSettle();
+    const list = flatListNode(r.root);
+    actSync(() => {
+      list.props.onScroll(scrollEvent(500));
+    });
+    expect(queryHost(r.root, byTestId('scroll-to-beginning'))).toBeNull();
+    actSync(() => {
+      list.props.onScroll(scrollEvent(5000));
+    });
+    expect(queryHost(r.root, byTestId('scroll-to-beginning'))).not.toBeNull();
+  });
 });
