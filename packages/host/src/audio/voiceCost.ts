@@ -249,10 +249,6 @@ export function callSummaryLine(c: CallCosting): string {
         : `${tin.toLocaleString('en-GB')} tokens in / ${tout.toLocaleString('en-GB')} out`,
     );
   }
-  // Only a fast voice hands anything off; a call that reads 0 here but made requests is the tell.
-  if (c.backend !== 'local' && c.handoffs !== undefined) {
-    parts.push(`${c.handoffs} ${c.handoffs === 1 ? 'hand-off' : 'hand-offs'}`);
-  }
   return parts.join(' · ');
 }
 
