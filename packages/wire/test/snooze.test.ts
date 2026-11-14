@@ -112,6 +112,16 @@ describe('until complete', () => {
     const open = rec({ until: SNOOZE_UNTIL_COMPLETE, endedAt: null, startedAt: 1_700_000_000_000 });
     expect(snoozeDividerText(open)).toMatch(/^Snoozed \d\d:\d\d – until complete$/);
   });
+  it('a same-minute snooze that errored reads as a failed, retried turn', () => {
+    const t = new Date(2026, 10, 11, 12, 24, 5).getTime();
+    const r = rec({
+      startedAt: t,
+      endedAt: t + 2_000,
+      until: t + 2_000,
+      outcome: { kind: 'errored', at: t + 1_000 },
+    });
+    expect(snoozeDividerText(r)).toBe('Turn failed at 12:24 and was retried');
+  });
 });
 
 describe('snooze slider stops', () => {
