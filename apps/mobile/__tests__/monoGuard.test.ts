@@ -33,6 +33,10 @@ const ALLOWED: Record<string, [number, string]> = {
     3,
     'the shell command a background task is running or a monitor is watching (row preview and modal), and its output log in the modal',
   ],
+  'src/components/StrayProcessBar.tsx': [
+    1,
+    'the shell command of a background process the chat left running',
+  ],
   'app/hosts/[hostId]/edit.tsx': [1, 'the file editor'],
   'app/chats/[chatId]/doc.tsx': [1, 'the document editor text area, which shows the file verbatim'],
   'src/components/DocToolsPanel.tsx': [1, "a document version's preview in History"],

@@ -3169,6 +3169,16 @@ const archiveSize = Number(new URLSearchParams(window.location.search).get('arch
         }),
       );
     }
+    // No host here, so the stray-process bar would draw its "can't list" row in every chat and
+    // shift whatever a spec is measuring. The harness host has none running.
+    if (/\/api\/chats\/[^/?]+\/stray-processes(?:\?|$)/.test(url)) {
+      return Promise.resolve(
+        new Response(JSON.stringify({ processes: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    }
     return prevFetch(input, init);
   }) as typeof window.fetch;
 }
