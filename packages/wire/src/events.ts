@@ -8,7 +8,7 @@
 // inputs (`chat.input`) carry `localId` for server-side dedup on (chatId, localId).
 
 import { z } from 'zod';
-import { DictationSetting, MeetingEngine } from './audio.js';
+import { DictationSetting, MeetingEngine, SpeechToTextEngine } from './audio.js';
 import { DEFAULT_SWEEP_PROMPT } from './sweep-prompt.js';
 import { DEFAULT_LINK_SUMMARY_PROMPT } from './link-summary-prompt.js';
 import { DEFAULT_QUESTION_EXPIRED_PROMPT } from './question-expired-prompt.js';
@@ -2161,6 +2161,8 @@ const VoiceSurfaceSetting = z
 /** Per-surface voice config (spec/07 § Voice is a config matrix). */
 export const VoiceConfigSetting = z
   .object({
+    // Absent in settings saved before speech to text became a setting.
+    speechToText: SpeechToTextEngine.default('groq'),
     dictation: DictationSetting,
     // Absent in settings saved before the meeting engine was a setting.
     meeting: MeetingEngine.default('local'),
@@ -2390,6 +2392,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   // Every surface starts on the free, self-hosted pipeline talking straight to
   // Manager; each hosted cell is a deliberate opt-in.
   voiceConfig: {
+    speechToText: 'groq',
     dictation: { phone: 'device', computer: 'whisper', tidy: false },
     meeting: 'local',
     device: { backend: 'local', layer: 'direct', handoff: 'auto' },

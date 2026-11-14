@@ -615,7 +615,21 @@ describe('Voice page: dictation engines (shared)', () => {
     });
   });
 
-  it('tidy-up with Whisper is one switch for both', async () => {
+  it('speech to text: the account picks the engine and the tidy-up row names it', async () => {
+    seedSettings();
+    const r = renderRN(<VoicePage />);
+    expect(textOf(findHost(r.root, byTestId('stt-row')))).toMatch(
+      /Speech to text.*Groq Whisper.*Whisper on host.*Parakeet on host.*ElevenLabs Scribe/,
+    );
+    await actAsync(async () => {
+      findHost(r.root, byTestId('stt-engine-elevenlabs')).props.onPress();
+    });
+    expect(api.setPreferences).toHaveBeenLastCalledWith({
+      voiceConfig: expect.objectContaining({ speechToText: 'elevenlabs' }),
+    });
+  });
+
+  it('tidy-up is one switch for both', async () => {
     seedSettings();
     const r = renderRN(<VoicePage />);
     const tidy = findHost(r.root, byTestId('dictation-tidy'));

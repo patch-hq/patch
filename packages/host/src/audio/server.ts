@@ -29,6 +29,7 @@ import {
   DEFAULT_VOICE_CONFIG,
   type AudioErrorCode,
   type AudioSurfaceKind,
+  type SpeechToTextEngine,
   type VoiceBackend,
   type VoiceConfig,
   type VoiceHandoff,
@@ -45,6 +46,7 @@ import { MockVad, type Vad } from './vad.js';
 import { watchPeerLiveness } from './peer-liveness.js';
 import { NlmsAec, PassThroughAec, type AecProcessor } from './aec.js';
 import type { WhisperBackend } from './whisper.js';
+import type { SpeechToTextResolution } from './stt-engines.js';
 import type { KokoroBackend } from './kokoro.js';
 import { GeminiLiveSession, geminiLiveModelFor, type GeminiContextTurn } from './gemini-live.js';
 import {
@@ -151,6 +153,13 @@ export interface AudioServerOptions {
    * `direct`).
    */
   getVoiceConfig?: () => VoiceConfig;
+  /**
+   * Resolves the account's `speechToText` choice on this host (stt-engines.ts).
+   * Used for turn-based conversation sessions and the dictation tidy-up; a
+   * session whose engine this host can't run is refused with
+   * `whisper_unavailable`. Absent (in-process tests): `whisper` is used as is.
+   */
+  resolveSpeechToText?: (engine: SpeechToTextEngine) => SpeechToTextResolution;
   /**
    * GEMINI_API_KEY. Required to construct a `GeminiLiveSession` — absent (or
    * empty) on a surface configured for `backend: 'gemini'` rejects the
@@ -732,6 +741,12 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
           voiceSurface === 'dictation'
             ? dictationEngineFor(voiceConfig.dictation, start.surfaceKind)
             : null;
+        // The account's speech-to-text engine, resolved on this host. Only
+        // asked of paths that read speech with it.
+        const resolveStt = (): SpeechToTextResolution =>
+          opts.resolveSpeechToText
+            ? opts.resolveSpeechToText(voiceConfig.speechToText)
+            : { ok: true, whisper: opts.whisper };
         const cell: { backend: VoiceBackend; layer?: VoiceLayer; handoff?: VoiceHandoff } =
           voiceSurface === 'dictation'
             ? { backend: 'local' }
@@ -889,11 +904,20 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
             rejectConn(ws, 'voice_key_missing', voiceKeyMissingMessage('dictation', 'deepgram'));
             return;
           }
+          let tidyWhisper: WhisperBackend | undefined;
+          if (voiceConfig.dictation.tidy) {
+            const stt = resolveStt();
+            if (!stt.ok) {
+              rejectConn(ws, 'whisper_unavailable', stt.message);
+              return;
+            }
+            tidyWhisper = stt.whisper;
+          }
           session = new DeepgramDictationSession(sessionInit, {
             logger: sessionLog,
             apiKey: opts.deepgramApiKey,
             sendAudio: sendAudioFn,
-            ...(voiceConfig.dictation.tidy ? { tidyWith: opts.whisper } : {}),
+            ...(tidyWhisper ? { tidyWith: tidyWhisper } : {}),
             ...(opts.deepgramWsCtor ? { wsCtor: opts.deepgramWsCtor } : {}),
             ...(opts.deepgramWsUrl ? { wsUrl: opts.deepgramWsUrl } : {}),
           });
@@ -912,7 +936,15 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
         } else {
           // The self-hosted pipeline — and a dictation on Whisper, or a phone
           // on its own recogniser whose dictation-mode preview still needs one.
-          const whisper: WhisperBackend = opts.whisper;
+          let whisper: WhisperBackend = opts.whisper;
+          if (voiceSurface !== 'dictation') {
+            const stt = resolveStt();
+            if (!stt.ok) {
+              rejectConn(ws, 'whisper_unavailable', stt.message);
+              return;
+            }
+            whisper = stt.whisper;
+          }
           const vad = (opts.makeVad ?? ((): Vad => new MockVad()))();
           const aec = (
             opts.makeAec ??

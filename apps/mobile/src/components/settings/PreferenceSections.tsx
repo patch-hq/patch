@@ -18,6 +18,8 @@ import { space, typography, useTheme } from '../../lib/theme';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { usePresenceStore } from '../../stores/presenceStore';
 import {
+  SPEECH_TO_TEXT_LABEL,
+  SpeechToTextEngine,
   voiceKeyHostStatus,
   type ComputerDictationEngine,
   type DictationEngine,
@@ -494,6 +496,24 @@ function DictationEngines(): React.ReactElement {
         };
         return (
           <>
+            <Row title="Speech to text" testID="stt-row" stack>
+              <Chips
+                options={SpeechToTextEngine.options}
+                selected={voiceConfig.speechToText}
+                labelOf={(e) => SPEECH_TO_TEXT_LABEL[e]}
+                disabled={busy}
+                testIDPrefix="stt-engine"
+                labelPrefix="Speech to text"
+                onSelect={(speechToText) => {
+                  setBusy(true);
+                  void useSettingsStore
+                    .getState()
+                    .updatePreferences({ voiceConfig: { ...voiceConfig, speechToText } })
+                    .catch((e: Error) => Alert.alert('Settings failed', e.message))
+                    .finally(() => setBusy(false));
+                }}
+              />
+            </Row>
             <Row
               title="Phone"
               testID="dictation-phone"
@@ -527,7 +547,7 @@ function DictationEngines(): React.ReactElement {
               />
             </Row>
             <ToggleRow
-              label="Tidy up with Whisper"
+              label={`Tidy up each phrase with ${SPEECH_TO_TEXT_LABEL[voiceConfig.speechToText]}`}
               testID="dictation-tidy"
               value={dictation.tidy}
               disabled={busy}
