@@ -2,6 +2,7 @@
 // selection-to-ask attaches the selection to the chat by quoting it into the
 // chat's own composer draft.
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { splitThread } from '../lib/composerQuotes.js';
 import { withQuotedSelection, quoteSelectionIntoComposer } from '../lib/quoteSelection.js';
 import { useComposerDraftStore } from '../stores/composerDraftStore.js';
 import { setActiveWs } from '../api/ws.js';
@@ -15,6 +16,31 @@ describe('withQuotedSelection', () => {
     expect(withQuotedSelection('already typed  \n', 'quoted')).toBe(
       '> quoted\n\nalready typed  \n',
     );
+  });
+});
+
+describe('withQuotedSelection at the caret', () => {
+  it('splits typed text around the caret', () => {
+    expect(withQuotedSelection('before after', 'q', 7)).toBe('before\n\n> q\n\nafter');
+  });
+  it('puts the quote at the end when the caret is at the end', () => {
+    expect(withQuotedSelection('typed', 'q', 5)).toBe('typed\n\n> q\n\n');
+  });
+  it('puts the quote ahead when the caret is at the start', () => {
+    expect(withQuotedSelection('typed', 'q', 0)).toBe('> q\n\ntyped');
+  });
+  it('splits the reply to the last quote when quotes already exist', () => {
+    expect(withQuotedSelection('> one\n\nab cd', 'two', 2)).toBe('> one\n\nab\n\n> two\n\n cd');
+  });
+  it('round-trips through splitThread with a leading reply', () => {
+    const d = withQuotedSelection('before after', 'q', 7);
+    expect(splitThread(d)).toEqual({
+      thread: [
+        { kind: 'reply', text: 'before' },
+        { kind: 'quote', text: 'q' },
+      ],
+      body: 'after',
+    });
   });
 });
 
