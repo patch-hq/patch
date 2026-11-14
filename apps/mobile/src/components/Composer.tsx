@@ -154,6 +154,7 @@ import { useNewChatDraftStore } from '../stores/newChatDraftStore';
 import { radii, space, textMin, typography, useTheme } from '../lib/theme';
 import { getWs } from '../api/ws';
 import { api } from '../api/rest';
+import { activeBangToken, filterJobs, removeBangToken } from '../lib/jobToken';
 import { useChatStore } from '../stores/chatStore';
 import { useUiStore } from '../stores/uiStore';
 import {
@@ -644,6 +645,43 @@ export function Composer({
     if (cursor < body.length) nodes.push(<Text key="tail">{body.slice(cursor)}</Text>);
     return nodes;
   }
+  // Run a job (spec/15 § Composer): `!` opens a list of jobs where `/` opens
+  // skills. Tapping one fires it now (POST /api/jobs/:id/run, the Jobs tab's
+  // run) and removes the token; no chat turn is sent. Re-read on every open.
+  // NO FALLBACK: a failed read or run is surfaced.
+  const bangToken = activeBangToken(body, cursorPos);
+  const bangActive = bangToken !== null;
+  const [jobList, setJobList] = React.useState<{ id: string; name: string }[] | null>(null);
+  React.useEffect(() => {
+    if (!bangActive) return;
+    let live = true;
+    void api
+      .listJobs()
+      .then((r) => {
+        if (live)
+          setJobList(
+            (r.jobs as { id: string; name: string }[]).map((j) => ({ id: j.id, name: j.name })),
+          );
+      })
+      .catch((e) => {
+        if (live) useUiStore.getState().pushError(`jobs unavailable: ${(e as Error).message}`);
+      });
+    return () => {
+      live = false;
+    };
+  }, [bangActive]);
+  const bangItems =
+    bangToken !== null && jobList !== null ? filterJobs(jobList, bangToken.query) : [];
+  const showJobMenu = bangActive && bangItems.length > 0;
+  const runJobItem = (job: { id: string; name: string }): void => {
+    if (bangToken === null) return;
+    const { text, cursor } = removeBangToken(body, bangToken, cursorPos);
+    updateDraft(joinQuotes(quotes, text));
+    pendingCursorRef.current = cursor;
+    void api.runJob(job.id).catch((err) => {
+      useUiStore.getState().pushError(`couldn’t run job “${job.name}”: ${(err as Error).message}`);
+    });
+  };
   const completeSkill = (name: string): void => {
     if (skills.includes(name) && providerCommands.has(name)) return;
     if (activeToken === null) return;
@@ -1886,6 +1924,43 @@ export function Composer({
                 </Pressable>
               );
             })}
+          </ScrollView>
+        </View>
+      ) : null}
+
+      {/* Run-a-job list (spec/15 § Composer). Tap a row to run that job. */}
+      {showJobMenu ? (
+        <View
+          testID="job-menu"
+          style={{
+            marginBottom: space.xs,
+            borderWidth: 1,
+            borderColor: colors.divider,
+            borderRadius: radii.md,
+            backgroundColor: colors.paper,
+            overflow: 'hidden',
+            maxHeight: 200,
+          }}
+        >
+          <ScrollView keyboardShouldPersistTaps="handled">
+            {bangItems.map((j) => (
+              <Pressable
+                key={j.id}
+                testID={`job-option-${j.id}`}
+                onPress={() => runJobItem(j)}
+                style={({ pressed }) => ({
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: space.xs,
+                  paddingHorizontal: space.md,
+                  paddingVertical: space.sm,
+                  backgroundColor: pressed ? colors.divider : 'transparent',
+                })}
+              >
+                <Text style={{ ...typography.secondary, color: colors.leaf }}>!</Text>
+                <Text style={{ ...typography.secondary, color: colors.ink }}>{j.name}</Text>
+              </Pressable>
+            ))}
           </ScrollView>
         </View>
       ) : null}
