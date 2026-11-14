@@ -64,21 +64,21 @@ describe('costing a call', () => {
     );
   });
 
-  it('says usage was not reported rather than printing 0 tokens', () => {
+  it('leaves tokens out rather than printing 0 or a not-reported note', () => {
     const c = costCall({ ...base, engine: { ...gemini, tokens: { ...ZERO_TOKENS } }, handoffs: 0 });
     const line = callSummaryLine(c);
     expect(line).not.toContain('0 tokens in');
-    expect(line).toContain('token usage not reported');
+    expect(line).not.toContain('token');
   });
 
-  it('says price unknown for an unpriced model', () => {
+  it('leaves the price out for an unpriced model', () => {
     const c = costCall({
       ...base,
       engine: { ...gemini, model: 'models/gemini-made-up' },
       handoffs: 0,
     });
     expect(c.engineUsd).toBeNull();
-    expect(callSummaryLine(c)).toContain('price unknown');
+    expect(callSummaryLine(c)).not.toMatch(/unknown|\$/);
   });
 
   it('costs local STT at Groq rates with the 10s minimum per request', () => {
@@ -172,10 +172,10 @@ describe('ElevenLabs Agents', () => {
     expect(createVoiceLedger(join(dir, 'u.jsonl')).totals(base.endedAt).allUsd).toBeCloseTo(0.29);
   });
 
-  it('says so when credits left or the charge could not be read', () => {
+  it('leaves credits left out when unknown, and says when the charge could not be read', () => {
     const c = costCall({ ...base, engine, handoffs: 0 });
     c.real = { credits: 100, usd: null, creditsLeft: null };
-    expect(callSummaryLine(c)).toContain('credits left unknown');
+    expect(callSummaryLine(c)).not.toContain('unknown');
     c.real = { error: 'HTTP 401' };
     expect(callSummaryLine(c)).toContain('cost unavailable');
   });
