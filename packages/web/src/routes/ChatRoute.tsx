@@ -2405,6 +2405,7 @@ export function ChatRoute({
                 onSendAnyway={handleHookSendAnyway}
               />
             ) : null}
+            <AgentRunningBar chatId={chatId} />
             <Composer
               key={chatId}
               ref={composerRef}
@@ -5110,6 +5111,30 @@ function DelegateStrip({ chatId }: { chatId: string }): JSX.Element | null {
         )}
       </StatusRow>
       {open ? listed.map(([id, d]) => agentRow(id, d, true)) : null}
+    </div>
+  );
+}
+
+/**
+ * A slim pill directly above the composer, same width and corner radius as the
+ * input, while any `patch_delegate` subagent of this chat is running. Quiet by
+ * design: one muted line, no controls. The full list lives in the Agents row.
+ */
+function AgentRunningBar({ chatId }: { chatId: string }): JSX.Element | null {
+  const updates = useChatStore((s) => s.delegateUpdates[chatId] ?? NO_DELEGATES);
+  const live = Object.values(updates).filter(
+    (d) => d.status === 'running' || d.status === 'awaiting-permission',
+  );
+  if (live.length === 0) return null;
+  const first = live[0] as DelegateUpdateInfo;
+  const text =
+    live.length === 1 ? `Agent running · ${first.label}` : `${live.length} agents running`;
+  return (
+    <div className="agent-running-bar-wrap" data-testid="agent-running-bar-wrap">
+      <div className="agent-running-bar" data-testid="agent-running-bar" role="status">
+        <LoaderCircle className="status-spinner" size={14} aria-hidden />
+        <span className="agent-running-bar-text">{text}</span>
+      </div>
     </div>
   );
 }

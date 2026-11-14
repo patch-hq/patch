@@ -18555,3 +18555,40 @@ a.drop-target {
   font-size: var(--text-min);
   word-break: break-all;
 }
+
+/* Slim running-agent pill above the composer: matches the input's width and
+   corner radius, muted so it never competes with it. */
+.agent-running-bar-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 0 20px;
+  margin-bottom: -6px;
+}
+.agent-running-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 780px;
+  box-sizing: border-box;
+  padding: 5px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  color: var(--ink-2);
+  font-size: var(--text-min);
+  line-height: 1.4;
+}
+.agent-running-bar-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
+  /* Same slim gutter as the composer, so the pill stays flush with the input. */
+  .agent-running-bar-wrap {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+}
