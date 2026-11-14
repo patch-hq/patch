@@ -61,6 +61,7 @@ function recording(extra: Partial<ReturnType<typeof useVoiceStore.getState>> = {
     voiceNoteChatId: 'c1',
     voiceNoteState: 'recording',
     voiceNoteTranscript: '',
+    voiceNotePartial: '',
     voiceNoteStartedAt: T0,
     ...extra,
   });
@@ -84,6 +85,19 @@ describe('VoiceNoteOverlay — recording', () => {
     expect(hasText(r.root, 'Recording… 0:05')).toBe(true);
     // No transcript area while recording — nothing has been recognised yet.
     expect(queryHost(r.root, byTestId('voice-note-transcript'))).toBeNull();
+  });
+
+  it('shows the live words under the timer while recording', () => {
+    recording({ voiceNotePartial: 'walk the dog' });
+    const r = renderRN(<VoiceNoteOverlay />);
+    expect(hasText(r.root, 'walk the dog')).toBe(true);
+    expect(queryHost(r.root, byTestId('voice-note-partial'))).not.toBeNull();
+  });
+
+  it('shows no live-words line before any words arrive', () => {
+    recording();
+    const r = renderRN(<VoiceNoteOverlay />);
+    expect(queryHost(r.root, byTestId('voice-note-partial'))).toBeNull();
   });
 
   it('reads 0:00 when the start time is not known', () => {

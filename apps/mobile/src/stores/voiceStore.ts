@@ -60,6 +60,8 @@ interface VoiceState {
   voiceNoteState: VoiceNoteState;
   voiceNoteMode: VoiceNoteMode;
   voiceNoteTranscript: string;
+  /** Interim words of the note being recorded; empty once it is sent. */
+  voiceNotePartial: string;
   /** When the current note's recording began — drives its `0:05` timer. */
   voiceNoteStartedAt: number | null;
   callMuted: boolean;
@@ -110,6 +112,7 @@ interface VoiceState {
   startVoiceNote(chatId: string, mode: VoiceNoteMode): void;
   setVoiceNoteState(s: VoiceNoteState): void;
   setVoiceNoteTranscript(t: string): void;
+  setVoiceNotePartial(t: string): void;
   endVoiceNote(): void;
   setMuted(m: boolean): void;
   setError(msg: string | null): void;
@@ -129,6 +132,7 @@ export const useVoiceStore = create<VoiceState>((set) => ({
   voiceNoteState: 'idle',
   voiceNoteMode: 'tap',
   voiceNoteTranscript: '',
+  voiceNotePartial: '',
   voiceNoteStartedAt: null,
   callMuted: false,
   callError: null,
@@ -180,6 +184,7 @@ export const useVoiceStore = create<VoiceState>((set) => ({
       voiceNoteState: 'recording',
       voiceNoteMode: mode,
       voiceNoteTranscript: '',
+      voiceNotePartial: '',
       voiceNoteStartedAt: Date.now(),
     });
   },
@@ -189,11 +194,15 @@ export const useVoiceStore = create<VoiceState>((set) => ({
   setVoiceNoteTranscript(t) {
     set({ voiceNoteTranscript: t });
   },
+  setVoiceNotePartial(t) {
+    set({ voiceNotePartial: t });
+  },
   endVoiceNote() {
     set({
       voiceNoteChatId: null,
       voiceNoteState: 'idle',
       voiceNoteTranscript: '',
+      voiceNotePartial: '',
       voiceNoteStartedAt: null,
     });
   },
