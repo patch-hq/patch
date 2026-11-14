@@ -391,7 +391,15 @@ describe('WatchScheduler — timeout, progress and stall nudge', () => {
       expect(after.status).toBe('failed');
       expect(after.timedOut).toBe(true);
       expect(deps.delivered[0]!.message).toMatch(/timed out after 1m and was killed/);
-      expect(() => process.kill(rec.pid, 0)).toThrow();
+      // SIGKILL is asynchronous: wait for the process to actually be gone.
+      await flushUntil(() => {
+        try {
+          process.kill(rec.pid, 0);
+          return false;
+        } catch {
+          return true;
+        }
+      });
     } finally {
       scheduler.dispose();
     }
