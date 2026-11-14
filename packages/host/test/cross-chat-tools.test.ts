@@ -132,6 +132,31 @@ describe('UDS internal endpoints — patch_send_to', () => {
     }
   });
 
+  it('un-archives an archived target and tells the sender it was archived', async () => {
+    const { daemon, jobs, folder, upstream } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    await daemon.setArchived(chatId, true);
+    const app = await buildControl({
+      localKey: LOCAL_KEY,
+      daemon,
+      jobs,
+      emitWire: (e) => upstream.push(e),
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/send-to',
+        headers: AUTH,
+        payload: { chatId, message: 'go', callerChatId: 'manager' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ ok: true, queued: true, targetWasArchived: true });
+      expect(daemon.chatState.get(chatId)?.status).toBe('active');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('rejects bad input via zod 400', async () => {
     const { daemon, jobs } = setup();
     const app = await buildControl({ localKey: LOCAL_KEY, daemon, jobs });

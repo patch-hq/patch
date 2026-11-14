@@ -2094,6 +2094,9 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       // this message starts. A chat that is not on this host throws
       // ChatNotFoundError here and is refused below (NO FALLBACK).
       if (isForeignSpecialThread(chatId)) throw new ChatNotFoundError(chatId);
+      // Read before the send: delivering un-archives the target, and the sender
+      // is told it was archived (spec/04 § Lifecycle).
+      const targetWasArchived = opts.daemon!.chatState.get(chatId)?.status === 'archived';
       if (goal !== undefined) await opts.daemon!.setGoal(chatId, goal);
       // Accepted, not finished: the sender is inside its own turn and must not
       // wait out the target's.
@@ -2110,7 +2113,6 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         // Visible agent-to-agent handoff brings the target into the list. Hidden
         // automation-to-automation traffic leaves the target hidden.
         fromAgent: revealTarget,
-        fromSibling: true,
       });
       if (opts.emitWire) {
         opts.emitWire({
@@ -2128,7 +2130,14 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         durationMs: Date.now() - start,
         ok: true,
       });
-      return { ok: true, queued: true };
+      return targetWasArchived
+        ? {
+            ok: true,
+            queued: true,
+            targetWasArchived: true,
+            note: 'The target chat was archived. The message un-archived it and it is running again.',
+          }
+        : { ok: true, queued: true };
     } catch (err) {
       const code = err instanceof ChatNotFoundError ? 'chat_not_found' : 'sdk_error';
       // Not on THIS host — spec/03 § Cross-chat tools, same relay
