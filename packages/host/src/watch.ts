@@ -70,6 +70,10 @@ export const WatchRecord = z
     checkInSec: z.number().int().positive().optional(),
     /** When the periodic check-in last went to the chat. */
     lastCheckInAt: z.number().int().optional(),
+    /** Regex source: a complete output line matching it wakes the chat while the command keeps running. */
+    wakeOnMatch: z.string().min(1).optional(),
+    /** Bytes of the output file already scanned for `wakeOnMatch`. */
+    matchOffset: z.number().int().nonnegative().optional(),
     status: z.enum(['running', 'exited', 'stopped', 'failed']),
     /** Set once the task leaves `running`. Undefined = unknown (e.g. a
      *  restart re-attached to the pid and only ever observed it vanish). */
@@ -139,6 +143,9 @@ export interface WatchProgress {
 
 /** Progress only needs the last non-empty line, so read just the file's tail, never the whole (possibly huge) output. */
 const PROGRESS_TAIL_BYTES = 16 * 1024;
+/** Most output a single tick scans for `wakeOnMatch`, and most matching lines one wake carries. */
+const MATCH_SCAN_BYTES = 1024 * 1024;
+const MAX_MATCH_LINES_PER_WAKE = 20;
 
 export function readProgress(outputFile: string): WatchProgress {
   let st: ReturnType<typeof statSync>;
@@ -297,7 +304,17 @@ export class WatchScheduler {
     cwd: string;
     timeoutSec: number;
     checkInSec?: number;
+    wakeOnMatch?: string;
   }): WatchRecord {
+    if (opts.wakeOnMatch !== undefined) {
+      try {
+        new RegExp(opts.wakeOnMatch);
+      } catch (err) {
+        throw new Error(
+          `patch_watch: wakeOnMatch is not a valid regular expression: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
     const taskId = this.generateTaskId();
     const dir = this.dirFor(opts.chatId);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -324,6 +341,7 @@ export class WatchScheduler {
       startedAt: this.deps.now(),
       timeoutSec: opts.timeoutSec,
       ...(opts.checkInSec !== undefined ? { checkInSec: opts.checkInSec } : {}),
+      ...(opts.wakeOnMatch !== undefined ? { wakeOnMatch: opts.wakeOnMatch, matchOffset: 0 } : {}),
       status: 'running',
     };
     this.writeRecord(rec);
@@ -468,7 +486,8 @@ export class WatchScheduler {
           await this.timeOut(rec);
           continue;
         }
-        await this.checkInIfDue(rec);
+        const scanned = await this.wakeOnMatches(rec);
+        await this.checkInIfDue(scanned);
         const handle = this.liveHandles.get(rec.taskId);
         if (handle) {
           // Node tracks a spawned child's exit internally regardless of
@@ -589,6 +608,62 @@ export class WatchScheduler {
     if (!rec || rec.status !== 'running') return false;
     this.writeRecord({ ...rec, checkInSec, lastCheckInAt: this.deps.now() });
     return true;
+  }
+
+  /**
+   * Deliver complete output lines that match the record's `wakeOnMatch`, while
+   * the command keeps running. Scans only bytes written since the last scan
+   * (`matchOffset`), stops at the last newline so a half-written line is never
+   * matched, and sends one message per tick however many lines matched.
+   * Returns the record with its advanced offset.
+   */
+  private async wakeOnMatches(rec: WatchRecord): Promise<WatchRecord> {
+    if (rec.wakeOnMatch === undefined) return rec;
+    const from = rec.matchOffset ?? 0;
+    let size: number;
+    try {
+      size = statSync(rec.outputFile).size;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return rec;
+      throw err;
+    }
+    if (size <= from) return rec;
+    const len = Math.min(size - from, MATCH_SCAN_BYTES);
+    const buf = Buffer.alloc(len);
+    const fd = openSync(rec.outputFile, 'r');
+    try {
+      readSync(fd, buf, 0, len, from);
+    } finally {
+      closeSync(fd);
+    }
+    const lastNl = buf.lastIndexOf(0x0a);
+    if (lastNl < 0) {
+      // No newline in a full-size chunk: skip it rather than stall behind one endless line.
+      if (len < MATCH_SCAN_BYTES) return rec;
+      const skipped = { ...rec, matchOffset: from + len };
+      this.writeRecord(skipped);
+      return skipped;
+    }
+    const re = new RegExp(rec.wakeOnMatch);
+    const matched = buf
+      .subarray(0, lastNl)
+      .toString('utf8')
+      .split('\n')
+      .map((l) => l.trimEnd())
+      .filter((l) => l !== '' && re.test(l));
+    const updated = { ...rec, matchOffset: from + lastNl + 1 };
+    this.writeRecord(updated);
+    if (matched.length === 0) return updated;
+    const shown = matched.slice(0, MAX_MATCH_LINES_PER_WAKE).join('\n');
+    const more =
+      matched.length > MAX_MATCH_LINES_PER_WAKE
+        ? `\n(+${matched.length - MAX_MATCH_LINES_PER_WAKE} more matching lines)`
+        : '';
+    await this.send(
+      updated,
+      `${WATCH_PREFIX} "${rec.description}" printed ${matched.length === 1 ? 'a line' : `${matched.length} lines`} matching /${rec.wakeOnMatch}/ and is still running (task ${rec.taskId}):\n${shown}${more}`,
+    );
+    return updated;
   }
 
   /** Whenever a task's check-in is due while it is still running, ask the owning agent whether it is healthy. */

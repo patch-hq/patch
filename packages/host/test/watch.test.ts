@@ -602,3 +602,74 @@ describe('readProgress tail read', () => {
     expect(readProgress(join(dir, 'missing.log'))).toEqual({});
   });
 });
+
+describe('WatchScheduler wakeOnMatch', () => {
+  it('wakes the chat on matching lines while the command keeps running', async () => {
+    const deps = makeDeps();
+    const scheduler = mkScheduler(deps);
+    try {
+      const rec = scheduler.start({
+        chatId: 'c-match',
+        command: 'echo noise; echo GUARD: spend high; sleep 5',
+        description: 'guard',
+        timeoutSec: 600,
+        cwd: deps.home,
+        wakeOnMatch: '^GUARD:',
+      });
+      await flushUntil(() => deps.delivered.length > 0);
+      const msg = deps.delivered[0]!.message;
+      expect(msg).toMatch(/^\[watch\].*matching \/\^GUARD:\/ and is still running/);
+      expect(msg).toContain('GUARD: spend high');
+      expect(msg).not.toContain('noise');
+      expect(scheduler.list('c-match')[0]?.status).toBe('running');
+      // Already-scanned lines are not delivered again.
+      await new Promise((r) => setTimeout(r, 150));
+      expect(deps.delivered).toHaveLength(1);
+      scheduler.stop('c-match', rec.taskId);
+    } finally {
+      scheduler.dispose();
+    }
+  });
+
+  it('never matches a half-written line, and delivers it once complete', async () => {
+    const deps = makeDeps();
+    const scheduler = mkScheduler(deps);
+    try {
+      const rec = scheduler.start({
+        chatId: 'c-partial',
+        command: 'printf "GUARD: par"; sleep 0.3; printf "tial\\n"; sleep 5',
+        description: 'partial',
+        timeoutSec: 600,
+        cwd: deps.home,
+        wakeOnMatch: '^GUARD:',
+      });
+      await new Promise((r) => setTimeout(r, 150));
+      expect(deps.delivered).toHaveLength(0);
+      await flushUntil(() => deps.delivered.length > 0);
+      expect(deps.delivered[0]!.message).toContain('GUARD: partial');
+      scheduler.stop('c-partial', rec.taskId);
+    } finally {
+      scheduler.dispose();
+    }
+  });
+
+  it('rejects an invalid regular expression at start', () => {
+    const deps = makeDeps();
+    const scheduler = mkScheduler(deps);
+    try {
+      expect(() =>
+        scheduler.start({
+          chatId: 'c-bad',
+          command: 'true',
+          description: 'd',
+          timeoutSec: 60,
+          cwd: deps.home,
+          wakeOnMatch: '(',
+        }),
+      ).toThrow(/valid regular expression/);
+      expect(scheduler.list('c-bad')).toEqual([]);
+    } finally {
+      scheduler.dispose();
+    }
+  });
+});
