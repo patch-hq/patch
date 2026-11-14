@@ -8,12 +8,14 @@ const item = (localId: string): ChatInputEvent =>
 describe('QueuePullClient', () => {
   function make(over: { online?: boolean; timeoutMs?: number } = {}) {
     const sent: WireEvent[] = [];
+    const late: { chatId: string; ids: string[] }[] = [];
     const client = new QueuePullClient({
       emit: (e) => sent.push(e),
       isLinkOnline: () => over.online ?? true,
       timeoutMs: over.timeoutMs ?? 50,
+      onLate: (chatId, items) => late.push({ chatId, ids: items.map((i) => i.localId) }),
     });
-    return { client, sent };
+    return { client, sent, late };
   }
 
   it('asks nothing while the server is not running the queue', async () => {
@@ -56,13 +58,15 @@ describe('QueuePullClient', () => {
     expect(await client.pull('c1')).toEqual([]);
   });
 
-  it('ignores a late answer', async () => {
-    const { client, sent } = make({ timeoutMs: 10 });
+  it('hands a late answer on instead of losing it', async () => {
+    const { client, sent, late } = make({ timeoutMs: 10 });
     client.setEnabled(true);
     await client.pull('c1');
     const { requestId } = sent[0] as { requestId: string };
-    expect(() =>
-      client.handleResponse({ type: 'patch.queue_pull.response', requestId, items: [item('L')] }),
-    ).not.toThrow();
+    client.handleResponse({ type: 'patch.queue_pull.response', requestId, items: [item('L')] });
+    expect(late).toEqual([{ chatId: 'c1', ids: ['L'] }]);
+    // Only once.
+    client.handleResponse({ type: 'patch.queue_pull.response', requestId, items: [item('L')] });
+    expect(late).toHaveLength(1);
   });
 });
