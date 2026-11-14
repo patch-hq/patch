@@ -4,7 +4,6 @@
   var BUILDS = {
     mac: { label: 'Download for Mac', file: 'Patch-mac-arm64.dmg' },
     linux: { label: 'Download for Linux', file: 'Patch-linux-x86_64.AppImage' },
-    android: { label: 'Download for Android', file: 'Patch-android.apk' },
   };
   // What to do once each file has downloaded, shown after its link is clicked.
   var NEXT = {
@@ -13,7 +12,10 @@
     'Patch-linux-x86_64.AppImage': 'Make the AppImage executable, then open it.',
     'Patch-android.apk': 'Open the downloaded file to install Patch.',
   };
-  var UNAVAILABLE = { ios: 'Not on iPhone yet', windows: 'Not on Windows' };
+  var UNAVAILABLE = {
+    ios: 'Download it on a Mac or Linux computer, or install it on your own server.',
+    windows: 'No Windows app yet. Install Patch on your own server instead.',
+  };
 
   function detect() {
     var ua = navigator.userAgent || '';
@@ -39,14 +41,17 @@
       a.href = BASE + build.file;
       a.dataset.file = build.file;
     } else {
-      a.textContent = 'Choose a platform';
-      a.href = '#platforms';
+      // Phones, Windows and anything unrecognised pick from the list below.
+      a.hidden = true;
     }
   });
-  if (!build) {
-    var all = document.querySelector('[data-all-platforms]');
-    if (all) all.hidden = true;
-  }
+  // Without a build for this device, the hero points to Get started instead.
+  document.querySelectorAll('[data-no-build]').forEach(function (a) {
+    a.hidden = Boolean(build);
+  });
+  document.querySelectorAll('[data-build-only]').forEach(function (a) {
+    a.hidden = !build;
+  });
   if (os) {
     var row = document.querySelector('.platforms [data-os="' + os + '"]');
     if (row) row.classList.add('current');
@@ -116,4 +121,96 @@
       );
     });
   });
+
+  // "and more", and "See everything": a button that shows the panel it names.
+  document.querySelectorAll('[data-more], [data-see-all]').forEach(function (btn) {
+    var panel = document.getElementById(btn.getAttribute('aria-controls'));
+    btn.addEventListener('click', function () {
+      var open = btn.getAttribute('aria-expanded') !== 'true';
+      btn.setAttribute('aria-expanded', String(open));
+      panel.hidden = !open;
+      if (btn.hasAttribute('data-see-all')) btn.textContent = open ? 'Show less' : 'See everything';
+    });
+  });
+
+  // The clips: the light or dark recording to match the page, loaded only when
+  // one comes near the screen, playing only while it is on it. With reduced
+  // motion they stay on their poster.
+  var dark = window.matchMedia('(prefers-color-scheme: dark)');
+  var still = window.matchMedia('(prefers-reduced-motion: reduce)');
+  var narrow = window.matchMedia('(max-width: 640px)');
+  var videos = Array.prototype.slice.call(document.querySelectorAll('video[data-video]'));
+
+  function theme() {
+    return dark.matches ? 'dark' : 'light';
+  }
+
+  function dress(video, withSources) {
+    // Phones get a smaller cut of each clip; some are cropped to what matters.
+    var phone = narrow.matches;
+    var name = 'vid/' + video.dataset.video + '-' + theme() + (phone ? '-phone' : '');
+    video.style.aspectRatio = (phone && video.dataset.phoneRatio) || '';
+    video.poster = name + '-poster.webp';
+    if (!withSources) return;
+    if (video.dataset.loaded === name) return;
+    video.dataset.loaded = name;
+    video.innerHTML =
+      '<source src="' +
+      name +
+      '.webm" type="video/webm"><source src="' +
+      name +
+      '.mp4" type="video/mp4">';
+    video.load();
+  }
+
+  videos.forEach(function (v) {
+    dress(v, false);
+    v.addEventListener(
+      'error',
+      function () {
+        console.error('Patch: clip failed to load:', v.dataset.video);
+      },
+      true,
+    );
+  });
+
+  var onScreen = new Set();
+  function update(video) {
+    if (still.matches || !onScreen.has(video)) {
+      video.pause();
+      return;
+    }
+    dress(video, true);
+    var playing = video.play();
+    if (playing && playing.catch) {
+      playing.catch(function (err) {
+        // Scrolling past before it starts pauses it first: not a failure.
+        if (err.name === 'AbortError') return;
+        console.error('Patch: clip would not play:', video.dataset.video, err);
+      });
+    }
+  }
+
+  var seen = new IntersectionObserver(
+    function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) onScreen.add(e.target);
+        else onScreen.delete(e.target);
+        update(e.target);
+      });
+    },
+    { threshold: 0.35 },
+  );
+  videos.forEach(function (v) {
+    seen.observe(v);
+  });
+  function redress() {
+    videos.forEach(function (v) {
+      dress(v, Boolean(v.dataset.loaded));
+      update(v);
+    });
+  }
+  dark.addEventListener('change', redress);
+  narrow.addEventListener('change', redress);
+  still.addEventListener('change', redress);
 })();
