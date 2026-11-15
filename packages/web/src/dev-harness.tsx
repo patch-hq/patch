@@ -27,6 +27,7 @@ import * as transcriptCache from './lib/transcriptCache.js';
 import { NewChatRoute } from './routes/NewChatRoute.js';
 import { SettingsPaneRoute } from './routes/SettingsPaneRoute.js';
 import { JobPaneRoute } from './routes/JobPaneRoute.js';
+import { TriagePaneRoute } from './routes/TriagePaneRoute.js';
 import { JobsPaneRoute } from './routes/JobsPaneRoute.js';
 import { LifecycleRoute } from './routes/LifecycleRoute.js';
 import { IndexRedirect } from './routes/IndexRedirect.js';
@@ -4214,6 +4215,7 @@ function Harness(): JSX.Element {
           <Route path="/settings/*" element={<SettingsPaneRoute ws={harnessWs} />} />
           <Route path="/jobs/new" element={<JobPaneRoute ws={harnessWs} />} />
           <Route path="/jobs/:id" element={<JobPaneRoute ws={harnessWs} />} />
+          <Route path="/triage" element={<TriagePaneRoute ws={harnessWs} />} />
           <Route path="/jobs" element={<JobsPaneRoute ws={harnessWs} />} />
           <Route path="/lifecycle/:kind" element={<LifecycleRoute />} />
           <Route path="/connect" element={<ConnectRoute />} />

@@ -1229,6 +1229,8 @@ function RegularSidebar({
 function BottomNav(): JSX.Element {
   const location = useLocation();
   const onPads = location.pathname.startsWith('/pads');
+  const onTriage = location.pathname.startsWith('/triage');
+  const experimentalNav = useExperimentalFeatures();
   const onJobs = location.pathname.startsWith('/jobs');
   const onSettings = location.pathname.startsWith('/settings');
   // spec/14 § File browser — open without a chat: the one entry point that
@@ -1251,6 +1253,16 @@ function BottomNav(): JSX.Element {
           >
             Files
           </button>
+          {experimentalNav && (
+            <OpenableLink
+              to="/triage"
+              opens={{ kind: 'page', page: 'triage' }}
+              className={`nav-row ${onTriage ? 'active' : ''}`}
+              data-testid="nav-triage"
+            >
+              Triage
+            </OpenableLink>
+          )}
           <OpenableLink
             to="/pads"
             opens={{ kind: 'page', page: 'pads' }}

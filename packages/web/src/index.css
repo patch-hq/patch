@@ -18614,3 +18614,72 @@ a.drop-target {
   font-size: var(--text-min);
   word-break: break-all;
 }
+
+/* Triage (spec/14 § Triage): one waiting chat at a time. */
+.triage-route {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.triage-count {
+  color: var(--ink-3);
+  font-size: 13px;
+}
+.triage-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 16px 28px calc(16px + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+.triage-title {
+  margin: 0;
+  font-size: 16px;
+  color: var(--ink-2);
+}
+.triage-message {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.triage-reply {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.triage-reply textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  /* 16px stops iOS/Android zooming the page when the box takes focus. */
+  font-size: 16px;
+}
+.triage-reply .primary-btn {
+  align-self: flex-end;
+}
+.triage-empty,
+.triage-loading {
+  color: var(--ink-3);
+  text-align: center;
+  padding: 48px 16px;
+}
+@media (max-width: 700px) {
+  .triage-card {
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  }
+  .triage-reply .primary-btn {
+    align-self: stretch;
+  }
+}
