@@ -10,7 +10,6 @@ import {
   projectRunOut,
 } from '../src/usageForecast.js';
 import { AccountUsageTracker } from '../src/accountUsage.js';
-import { AccountRotation } from '../src/accountFailover.js';
 import type { ClaudeStoredAccount, ClaudeUsageResult } from '@patch/auth';
 
 const MIN = 60_000;
