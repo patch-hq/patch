@@ -3,7 +3,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import pino from 'pino';
 import {
-  NEARLY_OUT_MS,
   PROBE_FAST_MS,
   PROBE_MEDIUM_MS,
   PROBE_SLOW_MS,
@@ -128,22 +127,11 @@ function trackerWith(readings: { at: number; session: number; week?: number }[])
 }
 
 describe('AccountUsageTracker forecast', () => {
-  it('flags an account burning at 29 Oct pace as nearly out, before it is refused', async () => {
+  it('projects a run-out for an account burning at 29 Oct pace, before it is refused', async () => {
     // 0 -> 95% in 70 min, probed every 10 min.
     const pace = [0, 0.14, 0.27, 0.41, 0.54, 0.68, 0.81, 0.95];
     const tracker = trackerWith(pace.map((u, i) => ({ at: T0 + i * 10 * MIN, session: u })));
-    for (let i = 0; i < 4; i++) await tracker.refresh('a', true);
-    // 41% at 30 min, ~1.37%/min -> ~41 min to go: not yet.
-    expect(tracker.nearlyOut('a')).toBe(false);
-    for (let i = 4; i < 6; i++) await tracker.refresh('a', true);
-    // 68% -> ~22 min to go: still not.
-    expect(tracker.nearlyOut('a')).toBe(false);
-    await tracker.refresh('a', true);
-    // 81% at 60 min -> ~12 min to go: not under 10.
-    expect(tracker.nearlyOut('a')).toBe(false);
-    await tracker.refresh('a', true);
-    // 95% -> ~2 min to go: move turns off.
-    expect(tracker.nearlyOut('a')).toBe(true);
+    for (let i = 0; i < pace.length; i++) await tracker.refresh('a', true);
     expect(tracker.runOutAt('a').session).toBeGreaterThan(T0 + 70 * MIN);
   });
 
@@ -158,46 +146,6 @@ describe('AccountUsageTracker forecast', () => {
     const at = tracker.runOutAt('a').week!;
     expect((at - (T0 + 30 * MIN)) / MIN).toBeCloseTo(24, 0);
     expect(tracker.runOutAt('a').session).toBeUndefined();
-    expect(tracker.nearlyOut('a')).toBe(false);
-  });
-});
-
-describe('AccountRotation with a nearly-out account', () => {
-  const held = [
-    { id: 'work', connected: true },
-    { id: 'home', connected: true },
-  ];
-  const nearlyOut = (id: string) => id === 'work';
-
-  it('sends a new turn to the account that is not about to run out', () => {
-    expect(new AccountRotation().startTurn(held, { nearlyOut })).toBe('home');
-  });
-
-  it('still uses the nearly-out account when it is the only one', () => {
-    expect(new AccountRotation().startTurn([held[0]!], { nearlyOut })).toBe('work');
-    const r = new AccountRotation();
-    r.markExhausted('home', 'spent');
-    expect(r.startTurn(held, { nearlyOut })).toBe('work');
-    expect(r.usableAccount(held, { nearlyOut })).toBe('work');
-  });
-
-  it('keeps a chat on its own account unless auto-resume lets it move', () => {
-    const r = new AccountRotation();
-    expect(r.startTurn(held, { nearlyOut, preferred: 'work' })).toBe('work');
-    expect(r.startTurn(held, { nearlyOut, preferred: 'work', resumeOnAnyAccount: true })).toBe(
-      'home',
-    );
-  });
-
-  it('moves a chat back to its own account once it is no longer nearly out', () => {
-    const r = new AccountRotation();
-    const route = { preferred: 'work', resumeOnAnyAccount: true };
-    expect(r.startTurn(held, { ...route, nearlyOut })).toBe('home');
-    expect(r.startTurn(held, { ...route, nearlyOut: () => false })).toBe('work');
-  });
-
-  it('exposes the ten minute threshold', () => {
-    expect(NEARLY_OUT_MS).toBe(10 * MIN);
   });
 });
 

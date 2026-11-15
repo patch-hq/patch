@@ -3923,7 +3923,6 @@ async function startHost(
       ...(sessionAccountId !== undefined ? { sessionAccount: sessionAccountId } : {}),
       resumeOnAnyAccount: autoResumeRateLimit,
       weekResetsAt: (id) => accountUsage?.get(id)?.reading.windows.week?.resetsAt,
-      nearlyOut: (id) => accountUsage?.nearlyOut(id) === true,
       utilization: (id) => {
         const w = accountUsage?.get(id)?.reading.windows;
         const values = [w?.session?.utilization, w?.week?.utilization].filter(
