@@ -16,7 +16,7 @@ const assert = require('node:assert/strict');
 const { app, ipcMain, BrowserWindow } = require('electron');
 
 if (!process.env.PATCH_SERVER_URL) {
-  process.env.PATCH_SERVER_URL = 'https://patch.tomchambers.me/app/?credential=SMOKE';
+  process.env.PATCH_SERVER_URL = 'https://patch.example.com/app/?credential=SMOKE';
 }
 
 app.disableHardwareAcceleration();
@@ -109,7 +109,7 @@ app.whenReady().then(async () => {
   try {
     await once(win.webContents, 'did-finish-load');
     check('main-window-loads-server', () =>
-      assert.match(win.webContents.getURL(), /patch\.tomchambers\.me\/app\//),
+      assert.match(win.webContents.getURL(), /patch\.example\.com\/app\//),
     );
   } catch (e) {
     check('main-window-loads-server', () => {
@@ -194,7 +194,7 @@ app.whenReady().then(async () => {
     await delay(400);
     check('in-app-link-does-not-navigate-spa-away', () =>
       assert.ok(
-        win.webContents.getURL().includes('patch.tomchambers.me/app/'),
+        win.webContents.getURL().includes('patch.example.com/app/'),
         `SPA navigated away to ${win.webContents.getURL()}`,
       ),
     );

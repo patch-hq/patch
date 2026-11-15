@@ -70,7 +70,7 @@ export function getPatchToolsPrompt(): string {
  * What a Settings save of the tools prompt stores: `null` restores the
  * built-in default, and so does saving the default's own text. Stored, that
  * text would be a frozen copy that never picks up a later change to the
- * built-in guidance — which is how hetzner's agents went two weeks without the
+ * built-in guidance — which is how one host's agents went two weeks without the
  * headless-host paragraph: its override was the guidance as it stood before
  * the paragraph was added. `''` is a real override (the guidance turned off).
  */

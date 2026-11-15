@@ -1,13 +1,13 @@
 # Caddy config for the LOCAL TEST STACK ONLY (docker-compose.test.yml).
 #
-# Production is NOT configured here. patch.tomchambers.me is served by the
-# Hetzner host's own Caddy at /etc/caddy/Caddyfile, which sends everything
+# Production is NOT configured here. your Patch domain is served by the
+# the production host's own Caddy at /etc/caddy/Caddyfile, which sends everything
 # (/audio/* and /device/* included — the server relays audio to the chat's
 # host, and voice devices connect to the server) to patch-server on :3970. That file
 # lives on the box, outside this repo, and is the only routing that matters in
 # prod.
 #
-# This file previously also carried a `patch.tomchambers.me` block, reachable
+# This file previously also carried a `your Patch domain` block, reachable
 # only through deploy/docker-compose.yml + scripts/deploy.mjs — an orphaned
 # deploy path nothing invoked (releases come from GitHub Actions). Because
 # it listed a NARROWER set of proxied paths than prod actually serves, reading it

@@ -32,10 +32,38 @@ const BASELINE = join(ROOT, 'scripts', 'personal-check.baseline.json');
 // Strings that mean "this is the user's setup". Case-insensitive.
 export const PERSONAL = /tomchambers|tomsownclaw|tom\.chambers|netcup|hetzner|claude-dev/gi;
 
-// A first name is only a personal string inside prompt files: a stranger's agent
-// is handed that text verbatim, so it must say "the user", not the author.
+// A first name is a personal string wherever it is copy: a stranger's agent or
+// screen is handed that text verbatim, so it must say "the user", not the author.
 export const PERSONAL_NAME = /\bTom\b/g;
 const isPromptFile = (p) => /prompt/i.test(p);
+const isCodeFile = (p) => /\.[cm]?[jt]sx?$/.test(p);
+
+/** Code with its comments blanked, strings kept: what a user or an agent can actually be shown. */
+export function stringsOnly(code) {
+  let out = '';
+  let i = 0;
+  let quote = null; // ' " or `
+  while (i < code.length) {
+    const c = code[i];
+    const next = code[i + 1];
+    if (quote) {
+      out += c;
+      if (c === '\\') out += code[++i] ?? '';
+      else if (c === quote || (c === '\n' && quote !== '`')) quote = null;
+      i++;
+    } else if (c === '/' && next === '/') {
+      while (i < code.length && code[i] !== '\n') i++;
+    } else if (c === '/' && next === '*') {
+      const end = code.indexOf('*/', i + 2);
+      i = end < 0 ? code.length : end + 2;
+    } else {
+      if (c === "'" || c === '"' || c === '`') quote = c;
+      out += quote ? c : ' ';
+      i++;
+    }
+  }
+  return out;
+}
 
 const SKIP_PATH = /^(spec|design|docs|testing|\.cadence|\.claude)\//;
 const SKIP_FILE = /(pnpm-lock\.yaml|\.(png|jpe?g|gif|ico|onnx|bin|wav|pcm|mp3|woff2?|apk|jar|keystore)$|personal-check\.)/;
@@ -57,7 +85,10 @@ const PRODUCT_IDENTITY = /io[./]github[./]tomchambers2[./]patch|github\.com\/tom
 /** Personal-string count for one file's text. */
 export function countPersonal(text, file = '') {
   const clean = text.replace(PRODUCT_IDENTITY, '');
-  const names = isPromptFile(file) ? (clean.match(PERSONAL_NAME) ?? []).length : 0;
+  // A prompt file is all copy; in any other code file only string literals are
+  // (a comment naming the author never reaches a stranger, a prompt string does).
+  const copy = isPromptFile(file) ? clean : isCodeFile(file) ? stringsOnly(clean) : '';
+  const names = (copy.match(PERSONAL_NAME) ?? []).length;
   return (clean.match(PERSONAL) ?? []).length + names;
 }
 

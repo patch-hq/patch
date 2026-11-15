@@ -1185,7 +1185,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
 
   // GET /chats/folders?path=<partial> — host-mediated folder discovery for
   // the CLI's interactive picker and `--folder` tab-completion (spec/13: "Lists
-  // recent folders on the Hetzner box"; "Tab-completion for --folder is
+  // recent folders on the host machine"; "Tab-completion for --folder is
   // host-mediated — the CLI asks the host what's there"). The listing is
   // sourced from THIS (host) box's filesystem, independent of where the CLI
   // runs. Returns:

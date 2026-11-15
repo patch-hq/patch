@@ -167,7 +167,7 @@ services:
   caddy:
     image: caddy:2
     # No PATCH_PUBLIC_HOST: leave the public TLS site at its default
-    # patch.tomchambers.me, which won't match localhost and so won't auto-
+    # your Patch domain, which won't match localhost and so won't auto-
     # provision certs in the test stack. The plain `:80` site block in
     # Caddyfile catches localhost.
     ports:
