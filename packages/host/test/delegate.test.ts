@@ -736,3 +736,145 @@ describe('patch_delegate', () => {
     });
   });
 });
+
+describe('patch_delegate across a host restart', () => {
+  function setupWaitGone() {
+    const home = mkdtempSync(join(tmpdir(), 'patch-delegate-gone-'));
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-delegate-gone-f-')));
+    const events: WireEvent[] = [];
+    const sdk = createMockSdkBackend();
+    sdk.enqueue([{ type: 'assistant', content: 'done it' }, { type: 'result' }]);
+    const daemon = new Daemon({
+      hostId: 'd1',
+      metaStore: createMetaStore(home),
+      sdkBackend: sdk,
+      oauthAccessToken: 'tok',
+      emit: (e) => events.push(e),
+      logger: silent,
+      now: () => 1_700_000_000_000,
+      generateChatId: (() => {
+        let n = 0;
+        return () => `gone-${++n}`;
+      })(),
+      discoverClaudeMcpServers: () => [],
+    });
+    return { daemon, events, folder };
+  }
+
+  function host(home: string, sdkBackend: SdkBackend) {
+    const events: WireEvent[] = [];
+    const daemon = new Daemon({
+      hostId: 'd1',
+      metaStore: createMetaStore(home),
+      sdkBackend,
+      oauthAccessToken: 'tok',
+      emit: (e) => events.push(e),
+      logger: silent,
+      now: () => 1_700_000_000_000,
+      generateChatId: (() => {
+        let n = 0;
+        return () => `r${++n}-${Math.random().toString(36).slice(2, 6)}`;
+      })(),
+      discoverClaudeMcpServers: () => [],
+    });
+    return { daemon, events };
+  }
+  const held: SdkBackend = {
+    async *run() {
+      await new Promise<void>(() => undefined);
+    },
+  } as unknown as SdkBackend;
+
+  it('a background subagent cut off by a restart still delivers its result to the parent', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'patch-delegate-restart-'));
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-delegate-restart-f-')));
+    let parentChatId = '';
+    let childId = '';
+    {
+      const { daemon } = host(home, held);
+      parentChatId = await daemon.spawnChat({ folder });
+      ({ id: childId } = await daemon.createDelegate({
+        parentChatId,
+        prompt: 'work',
+        title: 'Worker',
+      }));
+      await new Promise((r) => setTimeout(r, 30));
+      daemon.shutdown();
+    }
+    const sdk = createMockSdkBackend();
+    sdk.enqueue([{ type: 'assistant', content: 'all done' }, { type: 'result' }]);
+    const { daemon, events } = host(home, sdk);
+    daemon.hydrate();
+    await flushUntil(() =>
+      messagesOn(events, parentChatId).some((m) => m.content.includes(`agent ${childId}`)),
+    );
+    expect(
+      messagesOn(events, parentChatId)
+        .map((m) => m.content)
+        .join('\n'),
+    ).toContain('all done');
+    daemon.shutdown();
+  });
+
+  it('a settled subagent whose own child is cut off by a restart is woken by the result, and reports up', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'patch-delegate-restart2-'));
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-delegate-restart2-f-')));
+    let topId = '';
+    let midId = '';
+    let leafId = '';
+    {
+      const sdk1 = createMockSdkBackend();
+      sdk1.enqueue([{ type: 'assistant', content: 'waiting on leaf' }, { type: 'result' }]);
+      let n = 0;
+      const { daemon } = host(home, sdk1);
+      topId = await daemon.spawnChat({ folder });
+      ({ id: midId } = await daemon.createDelegate({
+        parentChatId: topId,
+        prompt: 'mid',
+        title: 'Mid',
+      }));
+      await new Promise((r) => setTimeout(r, 50));
+      // the middle agent has settled; now its own child starts and hangs
+      (daemon as unknown as { opts: { sdkBackend: SdkBackend } }).opts.sdkBackend = held;
+      ({ id: leafId } = await daemon.createDelegate({
+        parentChatId: midId,
+        prompt: 'leaf',
+        title: 'Leaf',
+      }));
+      void n;
+      await new Promise((r) => setTimeout(r, 30));
+      daemon.shutdown();
+    }
+    const sdk = createMockSdkBackend();
+    sdk.enqueue([{ type: 'assistant', content: 'leaf finished' }, { type: 'result' }]);
+    sdk.enqueue([{ type: 'assistant', content: 'mid relays leaf finished' }, { type: 'result' }]);
+    const { daemon, events } = host(home, sdk);
+    daemon.hydrate();
+    await flushUntil(() =>
+      messagesOn(events, topId).some((m) => m.content.includes('mid relays leaf finished')),
+    );
+    expect(leafId).not.toBe('');
+    daemon.shutdown();
+  });
+
+  it('a waiting caller that went away gets the result delivered to the parent as a turn instead', async () => {
+    const { daemon, events, folder } = setupWaitGone();
+    const parentChatId = await daemon.spawnChat({ folder });
+    const { id, result } = await daemon.createDelegate({
+      parentChatId,
+      prompt: 'work',
+      title: 'Worker',
+      wait: true,
+    });
+    void result;
+    daemon.abandonDelegateWait(id);
+    await flushUntil(() =>
+      messagesOn(events, parentChatId).some((m) => m.content.includes(`agent ${id}`)),
+    );
+    expect(
+      messagesOn(events, parentChatId)
+        .map((m) => m.content)
+        .join('\n'),
+    ).toContain('done it');
+  });
+});

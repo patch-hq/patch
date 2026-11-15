@@ -4754,6 +4754,16 @@ export class Daemon {
   }
 
   /**
+   * The caller blocked on `id` (`wait: true`) is gone — its connection closed
+   * before the result arrived. Drop its waiter so the subagent's settle takes
+   * the delivery path and the result reaches the parent as a `[from]` turn;
+   * left registered, it would be handed to a dead socket and lost.
+   */
+  abandonDelegateWait(id: string): void {
+    this.delegateWaiters.delete(id);
+  }
+
+  /**
    * `patch_delegate_send` — a follow-up message to one of the caller's own
    * subagents. A settled one is re-armed (outcome cleared, running again) and
    * keeps its whole context; a running one queues the message behind its
