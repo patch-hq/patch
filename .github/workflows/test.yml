@@ -82,7 +82,10 @@ jobs:
           codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
           mirror=
           for m in https://mirrors.edge.kernel.org/ubuntu/ https://azure.archive.ubuntu.com/ubuntu/ https://archive.ubuntu.com/ubuntu/ https://mirror.us.leaseweb.net/ubuntu/ https://mirrors.xtom.com/ubuntu/; do
-            if curl -4 -fsS --max-time 8 -o /dev/null "${m}dists/${codename}/InRelease"; then mirror=$m; break; fi
+            # InRelease alone is not enough: a mirror has answered it while failing every
+            # .deb download (kernel.org, 2026-11-15), so also fetch a real package file.
+            deb=$(curl -4 -fsS --max-time 20 "${m}dists/${codename}/main/binary-amd64/Packages.gz" 2>/dev/null | zcat 2>/dev/null | awk '/^Filename: /{print $2; exit}') || deb=
+            if [ -n "$deb" ] && curl -4 -fsS --max-time 20 -o /dev/null "${m}${deb}"; then mirror=$m; break; fi
             echo "::warning::apt mirror unreachable: $m"
           done
           [ -n "$mirror" ] || { echo "::error::no apt mirror reachable"; exit 1; }
