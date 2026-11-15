@@ -32,6 +32,13 @@ export interface OpenAICompatEndpoint {
 export interface OpenAICompatOptions {
   resolveEndpoint: (opts: SdkRunOptions) => OpenAICompatEndpoint;
   sessionDir: string;
+  /** Session ids are `<prefix><uuid>`; each provider using the engine owns its own prefix. */
+  sessionPrefix?: string;
+  /**
+   * Messages a chat arriving from another provider starts with, built from its
+   * track. Only used when the turn has no session of its own yet.
+   */
+  seedMessages?: (opts: SdkRunOptions) => Message[] | undefined;
   /** Hard stop on model round-trips within one turn. */
   maxSteps?: number;
   fetchImpl?: typeof fetch;
@@ -42,7 +49,7 @@ interface ToolCall {
   type: 'function';
   function: { name: string; arguments: string };
 }
-type Message =
+export type Message =
   | { role: 'system' | 'user'; content: string }
   | { role: 'assistant'; content: string | null; tool_calls?: ToolCall[] }
   | { role: 'tool'; tool_call_id: string; content: string };
@@ -138,15 +145,17 @@ export class OpenAICompatBackend implements SdkBackend {
   async *run(opts: SdkRunOptions): AsyncIterable<SdkEnvelope> {
     openaiCompatPermission(opts.permissionMode);
     const endpoint = this.o.resolveEndpoint(opts);
+    const prefix = this.o.sessionPrefix ?? OPENAI_COMPAT_SESSION_PREFIX;
     const prior = opts.resumeSessionId;
-    if (prior && !prior.startsWith(OPENAI_COMPAT_SESSION_PREFIX))
+    if (prior && !prior.startsWith(prefix))
       throw new Error('Another harness’s session cannot be resumed on an OpenAI-compatible model');
-    const sessionId = prior ?? `${OPENAI_COMPAT_SESSION_PREFIX}${randomUUID()}`;
+    const sessionId = prior ?? `${prefix}${randomUUID()}`;
     const messages: Message[] = prior
       ? this.load(prior)
-      : opts.systemPrompt
-        ? [{ role: 'system', content: opts.systemPrompt }]
-        : [];
+      : [
+          ...(opts.systemPrompt ? [{ role: 'system' as const, content: opts.systemPrompt }] : []),
+          ...(this.o.seedMessages?.(opts) ?? []),
+        ];
     messages.push({ role: 'user', content: opts.prompt });
     yield { type: 'system', sessionId };
 

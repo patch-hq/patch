@@ -18,11 +18,14 @@ import {
   providerForBackendId,
   CLAUDE_BACKEND_ID,
   ChatErrorCode,
+  ACCOUNT_PROVIDERS,
 } from '../src/index.js';
 
 describe('provider built-in commands', () => {
   it('every provider declares its own, and routing follows the model', () => {
-    for (const p of PROVIDERS) expect(p.builtinCommands.length).toBeGreaterThan(0);
+    // The local engine has no CLI of its own, so nothing for Patch to avoid colliding with.
+    for (const p of ACCOUNT_PROVIDERS) expect(p.builtinCommands.length).toBeGreaterThan(0);
+    expect(providerDescriptor('local').builtinCommands).toEqual([]);
     expect(providerBuiltinCommands('claude-opus-5').has('context')).toBe(true);
     expect(providerBuiltinCommands(null).has('context')).toBe(true);
     expect(providerBuiltinCommands('openai/gpt-5-codex').has('context')).toBe(false);
@@ -79,8 +82,11 @@ describe('provider registry', () => {
 describe('provider account and capability facts', () => {
   it('every provider has a unique backend id and accounts key', () => {
     expect(new Set(PROVIDERS.map((p) => p.backendId)).size).toBe(PROVIDERS.length);
-    expect(new Set(PROVIDERS.map((p) => p.accountsKey)).size).toBe(PROVIDERS.length);
-    expect([...BACKEND_IDS]).toEqual(PROVIDERS.map((p) => p.backendId));
+    expect(new Set(ACCOUNT_PROVIDERS.map((p) => p.accountsKey)).size).toBe(
+      ACCOUNT_PROVIDERS.length,
+    );
+    // Only providers with accounts take part in the accounts RPC and settings.
+    expect([...BACKEND_IDS]).toEqual(ACCOUNT_PROVIDERS.map((p) => p.backendId));
     for (const p of PROVIDERS) expect(() => ChatErrorCode.parse(p.loginRequiredCode)).not.toThrow();
   });
 
@@ -105,5 +111,23 @@ describe('provider account and capability facts', () => {
     expect(accountsKeyForBackend('claude-code')).toBe('claude');
     expect(modelSupportsEffort('claude-opus-5')).toBe(true);
     expect(modelSupportsEffort('openai/gpt-5')).toBe(false);
+  });
+});
+
+describe('the local model provider', () => {
+  it('claims local/ models and its own sessions, with no accounts', () => {
+    expect(providerForModel('local/qwen3:8b')).toBe('local');
+    expect(providerForSessionId('local-3f2a')).toBe('local');
+    expect(backendIdForModel('local/llama3.2')).toBe('local');
+    expect(providerByName('ollama')).toBe('local');
+    expect(providerDescriptor('local').accountsKey).toBeNull();
+    expect(() => accountsKeyForBackend('local')).toThrow('no accounts');
+    expect([...BACKEND_IDS]).not.toContain('local');
+  });
+
+  it('cannot run auto and has no effort control', () => {
+    expect(permissionModesFor('local/llama3.2')).not.toContain('auto');
+    expect(modelSupportsEffort('local/llama3.2')).toBe(false);
+    expect(HarnessId.parse('local')).toBe('local');
   });
 });
