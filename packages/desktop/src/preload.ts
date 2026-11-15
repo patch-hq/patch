@@ -202,6 +202,10 @@ contextBridge.exposeInMainWorld('patch', {
   requestRaise(): void {
     ipcRenderer.send('patch:request-raise');
   },
+  // Whether any agent is working right now; main turns the tray icon orange.
+  setAgentWorking(working: boolean): void {
+    ipcRenderer.send('patch:agent-working', working);
+  },
   // spec/05 ## Menu-bar surface: the tray popover's show/hide, sent from main
   // because Electron's `BrowserWindow.hide()` does NOT fire the renderer's
   // `visibilitychange`. The menu-bar surface uses this to start/stop its

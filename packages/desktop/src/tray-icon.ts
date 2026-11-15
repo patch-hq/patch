@@ -95,6 +95,26 @@ export function renderTrayTemplate(size: number): RasterImage {
   return { width: size, height: size, data, channels: 2 };
 }
 
+/** Orange used for "an agent is working" — the sidebar badge's dark-mode `--waiting`. */
+export const WORKING_ORANGE = { r: 0xe8, g: 0x87, b: 0x3a } as const;
+
+/**
+ * The same "p" in orange, as a full-colour (non-template) RGBA image. A macOS
+ * template image is always recoloured to the menu-bar ink, so the working state
+ * has to ship as a coloured raster instead.
+ */
+export function renderTrayWorking(size: number): RasterImage {
+  const alpha = renderPGlyphAlpha(size);
+  const data = new Uint8Array(size * size * 4);
+  for (let i = 0; i < alpha.length; i++) {
+    data[i * 4] = WORKING_ORANGE.r;
+    data[i * 4 + 1] = WORKING_ORANGE.g;
+    data[i * 4 + 2] = WORKING_ORANGE.b;
+    data[i * 4 + 3] = alpha[i]!;
+  }
+  return { width: size, height: size, data, channels: 4 };
+}
+
 // ── PNG codec (grayscale+alpha encode, gray+alpha / rgba decode) ───────────
 
 const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -124,20 +144,19 @@ function chunk(type: string, data: Buffer): Buffer {
   return Buffer.concat([len, typeBuf, data, crc]);
 }
 
-/** Encode an 8-bit grayscale+alpha (color type 4) PNG. */
-export function encodeGrayAlphaPng(img: RasterImage): Buffer {
-  if (img.channels !== 2) throw new Error('encodeGrayAlphaPng expects 2 channels');
+function encodePng(img: RasterImage, colorType: number, channels: number): Buffer {
+  if (img.channels !== channels) throw new Error(`expected ${channels} channels`);
   const { width, height, data } = img;
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(width, 0);
   ihdr.writeUInt32BE(height, 4);
   ihdr.writeUInt8(8, 8); // bit depth
-  ihdr.writeUInt8(4, 9); // color type: gray + alpha
+  ihdr.writeUInt8(colorType, 9);
   ihdr.writeUInt8(0, 10); // compression
   ihdr.writeUInt8(0, 11); // filter
   ihdr.writeUInt8(0, 12); // interlace
 
-  const stride = width * 2;
+  const stride = width * channels;
   const raw = Buffer.alloc(height * (stride + 1));
   for (let y = 0; y < height; y++) {
     raw[y * (stride + 1)] = 0; // filter type: None
@@ -151,6 +170,16 @@ export function encodeGrayAlphaPng(img: RasterImage): Buffer {
     chunk('IDAT', idat),
     chunk('IEND', Buffer.alloc(0)),
   ]);
+}
+
+/** Encode an 8-bit grayscale+alpha (color type 4) PNG. */
+export function encodeGrayAlphaPng(img: RasterImage): Buffer {
+  return encodePng(img, 4, 2);
+}
+
+/** Encode an 8-bit RGBA (color type 6) PNG. */
+export function encodeRgbaPng(img: RasterImage): Buffer {
+  return encodePng(img, 6, 4);
 }
 
 function paeth(a: number, b: number, c: number): number {

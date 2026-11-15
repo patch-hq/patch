@@ -748,21 +748,36 @@ function trayMenu(): Menu {
   ]);
 }
 
-function createTray(): Tray {
-  // Group 20 fix DX-12: ship a real template image (mac auto-tints
-  // light/dark) at build/trayIconTemplate.png. NO FALLBACK: if the asset
-  // is missing in the bundle we throw rather than show an invisible icon.
-  //
-  // Linux panels do not tint a template image, and a black glyph vanishes on
-  // the dark panels most desktops use, so there the tray shows the app icon.
+/**
+ * The tray image for idle or working. Idle keeps the template "p" (mac tints it
+ * to the menu bar) / the app icon (Linux). Working is the orange "p" as a plain
+ * coloured image on both — a template image would be recoloured and lose the
+ * orange. NO FALLBACK: a missing asset throws.
+ */
+function trayImage(working: boolean): Electron.NativeImage {
   const darwin = process.platform === 'darwin';
-  const candidate = join(__dirname, '..', 'build', darwin ? 'trayIconTemplate.png' : 'icon.png');
+  const file = working ? 'trayIconWorking.png' : darwin ? 'trayIconTemplate.png' : 'icon.png';
+  const candidate = join(__dirname, '..', 'build', file);
   const loaded = nativeImage.createFromPath(candidate);
   if (loaded.isEmpty()) {
     throw new Error(`tray icon missing or unreadable: ${candidate}`);
   }
-  const icon = darwin ? loaded : loaded.resize({ width: 32, height: 32 });
-  if (darwin) icon.setTemplateImage(true);
+  // Linux panels do not tint a template image, and a black glyph vanishes on
+  // the dark panels most desktops use, so there idle shows the app icon.
+  const icon = !darwin && !working ? loaded.resize({ width: 32, height: 32 }) : loaded;
+  icon.setTemplateImage(darwin && !working);
+  return icon;
+}
+
+/** Swap the tray between its idle and orange "an agent is working" image. */
+export function setTrayWorking(working: boolean): void {
+  if (!tray) return;
+  tray.setImage(trayImage(working));
+}
+
+function createTray(): Tray {
+  const icon = trayImage(false);
+  const darwin = process.platform === 'darwin';
   const t = new Tray(icon);
   t.setToolTip('Patch');
   if (!darwin) {
@@ -1407,6 +1422,14 @@ function registerIpc(): void {
   panelWidthFraction = loadPanelWidthFraction();
   ipcMain.on('patch:request-raise', () => {
     raiseMainWindow();
+  });
+  // The renderer owns the chat store, so it reports whether any agent is
+  // working and main only swaps the menu-bar image.
+  ipcMain.on('patch:agent-working', (_e, working: unknown) => {
+    if (typeof working !== 'boolean') {
+      throw new Error('patch:agent-working expects a boolean');
+    }
+    setTrayWorking(working);
   });
   // In-app browser toolbar buttons (in-app-browser.ts / iab-preload.ts). Each
   // drives the single embedded browser controller; a stray message when nothing
