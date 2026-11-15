@@ -66,6 +66,7 @@ import { useSectionCounts } from './lib/sectionCounts.js';
 import { useDocumentTitleSync } from './lib/documentTitle.js';
 import { useFrontChatReport } from './lib/frontChat.js';
 import { useChatStore, deriveBadge } from './stores/chatStore.js';
+import { useAgentWorkingIndicator } from './lib/agentWorkingIndicator.js';
 import { useSelectionStore } from './stores/selectionStore.js';
 import { stepVisibleChat } from './lib/chatGroups.js';
 import { useUiStore, SIDEBAR_MINI_WIDTH } from './stores/uiStore.js';
@@ -123,6 +124,7 @@ export function AppShell(): JSX.Element {
   // (spec/14 § New chat drafts).
   useDiscardUnsentNewChats();
   const activeChatId = useChatStore((s) => s.activeChatId);
+  useAgentWorkingIndicator();
   useLeaveWhenArchivedElsewhere(navigate);
   const hydrate = useChatStore((s) => s.hydrate);
   const pushError = useUiStore((s) => s.pushError);

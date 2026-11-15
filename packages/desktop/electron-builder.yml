@@ -17,6 +17,8 @@ files:
   # every launch (no menubar icon). NO FALLBACK: the asset must ship.
   - build/trayIconTemplate.png
   - build/trayIconTemplate@2x.png
+  - build/trayIconWorking.png
+  - build/trayIconWorking@2x.png
   # The Linux tray shows the app icon (panels there do not tint a template image).
   - build/icon.png
 # What "On this computer" runs with nothing installed: the Patch server release and
