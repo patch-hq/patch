@@ -103,6 +103,8 @@ jobs:
             wait=$((30 + RANDOM % 31))
             echo "::warning::playwright install: attempt $attempt failed; retrying in ${wait}s"
             sleep "$wait"
+            # A 404 means the runner package index is stale: refresh it.
+            sudo apt-get update -qq || true
           done
           echo "::error::playwright install: failed after 2 attempts"
           exit 1
@@ -117,6 +119,8 @@ jobs:
             wait=$((30 + RANDOM % 31))
             echo "::warning::apt-get install: attempt $attempt failed; retrying in ${wait}s"
             sleep "$wait"
+            # A 404 means the runner package index is stale: refresh it.
+            sudo apt-get update -qq || true
           done
           echo "::error::apt-get install: failed after 2 attempts"
           exit 1
