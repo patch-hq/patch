@@ -511,6 +511,7 @@ describe('PaneArea — the + menu', () => {
       'Files',
       'Browser',
       'b',
+      'Triage',
       'Pads',
       'Jobs',
       'Settings',
