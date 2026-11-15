@@ -199,6 +199,16 @@ function TerminalSession({
 
   const live = session?.status === 'live';
 
+  // A shell that died with the link or the machine reopens itself once both are
+  // back. Any other end (exit, idle, error) waits for the Restart button.
+  const connection = usePresenceStore((s) => s.connection);
+  const hostOnline = usePresenceStore((s) => s.hosts[hostId]?.online === true);
+  const reopen = session?.reopen === 'now';
+  React.useEffect(() => {
+    if (reopen && connection === 'connected' && hostOnline) restart();
+    // restart only swaps the session id; the three inputs are what say it is time.
+  }, [reopen, connection, hostOnline]);
+
   const sendInput = (data: string): void => {
     if (!live || data === '') return;
     try {

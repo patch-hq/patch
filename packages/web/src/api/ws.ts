@@ -625,6 +625,9 @@ export class PatchWs {
         );
         return;
       }
+      // No exit frame will come down a dead socket: end the shells here so
+      // none of them keeps claiming to be live.
+      useTerminalStore.getState().interrupt('connection lost, reconnecting');
       usePresenceStore.getState().setConnection('reconnecting');
       // The server said it is going away and when it is back: dial at once
       // rather than waiting out a backoff, and show 'Restarting' live.
@@ -824,6 +827,7 @@ export class PatchWs {
     }
     if (event.type === 'host.offline') {
       usePresenceStore.getState().setHostOnline(event.hostId, false, event.reason);
+      useTerminalStore.getState().interrupt('machine offline, waiting for it to return', event.hostId);
       return;
     }
     if (event.type === 'host.unauthenticated') {
