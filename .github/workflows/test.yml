@@ -111,7 +111,7 @@ jobs:
       - name: Install Xvfb and the keyring
         run: |
           for attempt in 1 2; do
-            sudo apt-get install -y -qq -o Acquire::Retries=3 -o Acquire::http::Timeout=20 \
+            sudo apt-get update -qq && sudo apt-get install -y -qq -o Acquire::Retries=3 -o Acquire::http::Timeout=20 \
               xvfb x11-utils gnome-keyring libsecret-tools dbus-x11 && exit 0
             [ "$attempt" = 2 ] && break
             wait=$((30 + RANDOM % 31))
