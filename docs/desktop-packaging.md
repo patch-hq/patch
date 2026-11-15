@@ -88,3 +88,28 @@ and the Update button does nothing. The old binary cannot be fixed from here: th
 needs one manual reinstall of the new build (`pnpm --filter @patch/desktop install:app`
 after a `dist`, or copy the zip's `Patch.app` into /Applications). `src/app-id.test.ts`
 pins the id so it cannot change again by accident.
+
+### The move to `dev.patchhq.app` (before the public launch)
+
+The id moved from `io.github.tomchambers2.patch` to the product id `dev.patchhq.app`
+everywhere it is derived: electron-builder `appId`, the Mac bundle check in
+`release.yml`, the Android `applicationId`/namespace/Kotlin package, the iOS bundle id
+and the Maestro flows. Neither the host (`dev.patch.host`, launchd
+`io.github.patch-hq.host`) nor keychain/service names carried the old id, so they are
+unchanged. The update feeds are unchanged; they are keyed by repository and channel, not by id.
+
+Existing installs (Tom's machines, test Macs, the phone) cannot update across the change:
+
+- Mac: the old app downloads the new zip and ShipIt fails. The updater now reports
+  "this Patch is an older app id and cannot update itself; install the latest Patch from
+  the download page once" instead of Squirrel's text. That wording only reaches a Mac if it
+  is in the old-id build, so cut one last release under the old id from the commit that
+  adds `conciseReason`'s message (and nothing else) before releasing the rename. Each Mac
+  then needs one manual install of the new build (`pnpm --filter @patch/desktop install:app`, or
+  drop the zip's `Patch.app` into /Applications) and to delete the old `Patch.app`.
+- Android: a package rename is a new app. The in-app installer hands the new APK to Android,
+  which installs it beside the old one rather than over it. Open the new app, sign in again,
+  then uninstall the old one. FCM for the new package is a separate Firebase app
+  (`1:236103167818:android:fc7dd87b382daeb9285bb3`), already in `google-services.json`
+  beside the old clients so a build from either side of the change still registers.
+- iOS: nothing is published under the old id.

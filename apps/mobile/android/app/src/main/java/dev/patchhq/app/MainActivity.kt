@@ -1,4 +1,4 @@
-package io.github.tomchambers2.patch
+package dev.patchhq.app
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build

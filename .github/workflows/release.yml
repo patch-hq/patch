@@ -224,8 +224,8 @@ jobs:
           test -f "$APK"
           # Refuse anything that is not this app: a wrong id would install beside it.
           PKG=$("$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging "$APK" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")
-          if [ "$PKG" != "io.github.tomchambers2.patch" ]; then
-            echo "built package is '$PKG', expected io.github.tomchambers2.patch" >&2
+          if [ "$PKG" != "dev.patchhq.app" ]; then
+            echo "built package is '$PKG', expected dev.patchhq.app" >&2
             exit 1
           fi
           mkdir -p "$RUNNER_TEMP/apk"
@@ -365,7 +365,7 @@ jobs:
           set -euo pipefail
           APP=packages/desktop/release/mac-arm64/Patch.app
           codesign --verify --deep --strict "$APP"
-          codesign -dv "$APP" 2>&1 | grep -q 'Identifier=io.github.tomchambers2.patch'
+          codesign -dv "$APP" 2>&1 | grep -q 'Identifier=dev.patchhq.app'
           # Notarised and stapled: Gatekeeper accepts it as a download.
           ASSESS=$(spctl --assess --type execute -vv "$APP" 2>&1)
           echo "$ASSESS"

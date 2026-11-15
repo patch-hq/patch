@@ -10,7 +10,7 @@ import { resolve } from 'node:path';
 const root = resolve(__dirname, '..');
 const plugin = readFileSync(resolve(root, 'plugins/native/PatchVoiceMicModule.kt'), 'utf8');
 const android = readFileSync(
-  resolve(root, 'android/app/src/main/java/io/github/tomchambers2/patch/PatchVoiceMicModule.kt'),
+  resolve(root, 'android/app/src/main/java/dev/patchhq/app/PatchVoiceMicModule.kt'),
   'utf8',
 );
 

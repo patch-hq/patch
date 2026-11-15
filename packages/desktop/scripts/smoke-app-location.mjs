@@ -30,7 +30,7 @@ if (!['move', 'login-item'].includes(mode) || !bundleArg) {
   process.exit(64);
 }
 const bundle = resolve(bundleArg);
-const APP_ID = 'io.github.tomchambers2.patch';
+const APP_ID = 'dev.patchhq.app';
 const shots = process.env.PATCH_SMOKE_SHOTS;
 if (shots) mkdirSync(shots, { recursive: true });
 const log = (m) => console.log(`[smoke-app-location] ${m}`);

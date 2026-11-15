@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { runtimeVersionOf } from './build-mobile-update.mjs';
 
 const MOBILE = 'apps/mobile';
-const JAVA = join(MOBILE, 'android/app/src/main/java/io/github/tomchambers2/patch');
+const JAVA = join(MOBILE, 'android/app/src/main/java/dev/patchhq/app');
 
 test('the committed Android project runs the runtimeVersion app.config.ts declares', () => {
   const config = readFileSync(join(MOBILE, 'app.config.ts'), 'utf8');

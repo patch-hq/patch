@@ -152,7 +152,7 @@ For tests / dev a `patch://?credential=<jwt>` deep link is accepted by
 The `withConnectionService` Expo plugin injects:
 
 - `<service android:name="io.wazo.callkeep.VoiceConnectionService" …/>`
-- `<service android:name="io.github.tomchambers2.patch.VoiceAudioService"
+- `<service android:name="dev.patchhq.app.VoiceAudioService"
 android:foregroundServiceType="microphone"/>`
 
 …into `AndroidManifest.xml` during `expo prebuild`. **NO FALLBACK** — if
