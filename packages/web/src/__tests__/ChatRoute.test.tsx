@@ -324,6 +324,71 @@ describe('ChatRoute regression', () => {
     expect(stream.scrollTop).toBe(12000);
   });
 
+  // A message sent from the phone or by voice arrives persisted (no localId), so
+  // the optimistic-echo re-pin never fires. The reply after it must still pin
+  // unless the user scrolled up SINCE that message.
+  describe('reply pin after a remote user message', () => {
+    async function setup(id: string) {
+      const base: ChatEventEntry[] = Array.from({ length: 40 }, (_v, i) => ({
+        seq: i,
+        kind: 'message' as const,
+        role: 'user' as const,
+        content: `m${i}`,
+        at: 0,
+      }));
+      seedChat(id, base);
+      renderChat(id);
+      const stream = screen.getByTestId('chat-stream');
+      Object.defineProperty(stream, 'scrollHeight', { configurable: true, value: 12000 });
+      Object.defineProperty(stream, 'clientHeight', { configurable: true, value: 780 });
+      const frames = async () => {
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+      };
+      await frames();
+      const push = async (...extra: ChatEventEntry[]) => {
+        useChatStore.setState((s) => ({
+          timelines: { ...s.timelines, [id]: [...base, ...extra] },
+        }));
+        await frames();
+      };
+      return { stream, push };
+    }
+    const remoteUser: ChatEventEntry = {
+      seq: 40,
+      kind: 'message',
+      role: 'user',
+      content: 'from phone',
+      at: 0,
+    };
+    const reply: ChatEventEntry = {
+      seq: 41,
+      kind: 'message',
+      role: 'assistant',
+      content: 'done',
+      at: 0,
+    };
+
+    it('pins to the reply when follow was dropped before the phone message', async () => {
+      const { stream, push } = await setup('c-remote-pin');
+      stream.scrollTop = 2000;
+      stream.dispatchEvent(new Event('scroll'));
+      await push(remoteUser);
+      expect(stream.scrollTop).toBe(2000);
+      await push(remoteUser, reply);
+      expect(stream.scrollTop).toBe(12000);
+    });
+
+    it('does not pin when the user scrolled up after the phone message', async () => {
+      const { stream, push } = await setup('c-remote-nopin');
+      await push(remoteUser);
+      stream.scrollTop = 2000;
+      stream.dispatchEvent(new Event('scroll'));
+      await push(remoteUser, reply);
+      expect(stream.scrollTop).toBe(2000);
+    });
+  });
+
   // The echo is the last entry only at the instant it is appended. Anything the
   // turn emits next — here the permission-mode marker (spec/02 § Permission
   // mode) — shares the commit, and a re-pin that only ever reads
