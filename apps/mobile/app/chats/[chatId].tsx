@@ -28,8 +28,6 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 import { dismissChatNotifications } from '../../src/lib/chatNotifications';
-import { swipeNeighbours } from '../../src/lib/chatSwipeOrder';
-import { horizontalScrollTouchActive } from '../../src/lib/horizontalScrollTouch';
 import * as Clipboard from 'expo-clipboard';
 import { ChatErrorBoundary } from '../../src/components/ChatErrorBoundary';
 import { useMarkChatNotificationsRead } from '../../src/stores/notificationsStore';
@@ -271,12 +269,6 @@ export default function ChatDetailScreen(): React.ReactElement {
   );
 }
 
-// A drag of SWIPE_MIN_DX commits on its own; a quicker flick commits from
-// SWIPE_FLICK_DX (a thumb on a phone rarely travels 80px).
-const SWIPE_MIN_DX = 48;
-const SWIPE_FLICK_DX = 24;
-const SWIPE_FLICK_VX = 0.5;
-
 function ChatDetailBody(): React.ReactElement {
   const colors = useTheme();
   const router = useRouter();
@@ -292,32 +284,6 @@ function ChatDetailBody(): React.ReactElement {
   const row = useChatStore((s) => s.chats[chatId]);
   useLeaveWhenArchivedElsewhere(chatId, router, '/(tabs)/chats');
   useMarkChatNotificationsRead(chatId);
-  // Swipe sideways to step to the neighbouring chat in the Chats tab's order.
-  // Claimed in the capture phase: the message list is a scroll view that would
-  // otherwise take any slightly diagonal drag before this surface is asked.
-  // The claim still has to be clearly horizontal, so vertical scrolling wins,
-  // and a drag that starts on an overflowing table scrolls the table instead.
-  // Read the store at release rather than subscribing: the list moving under a
-  // finger must not re-render this screen.
-  const swipe = React.useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponderCapture: (_e, g) =>
-        !horizontalScrollTouchActive() &&
-        Math.abs(g.dx) > 14 &&
-        Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
-      onPanResponderTerminationRequest: () => false,
-      onPanResponderRelease: (_e, g) => {
-        const adx = Math.abs(g.dx);
-        if (adx <= Math.abs(g.dy)) return;
-        const flick = adx >= SWIPE_FLICK_DX && Math.abs(g.vx) >= SWIPE_FLICK_VX;
-        if (adx < SWIPE_MIN_DX && !flick) return;
-        const { prev, next } = swipeNeighbours(useChatStore.getState().chats, chatIdRef.current);
-        // Finger moving right drags the previous chat in from the left.
-        const target = g.dx > 0 ? prev : next;
-        if (target) routerRef.current.replace(`/chats/${target}`);
-      },
-    }),
-  ).current;
   const chatIdRef = React.useRef(chatId);
   chatIdRef.current = chatId;
   const routerRef = React.useRef(router);
@@ -1099,9 +1065,8 @@ function ChatDetailBody(): React.ReactElement {
 
   return (
     <View
-      testID="chat-swipe-surface"
+      testID="chat-surface"
       style={{ flex: 1, backgroundColor: colors.paper }}
-      {...swipe.panHandlers}
     >
       <View
         testID="chat-header"
