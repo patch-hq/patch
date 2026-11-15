@@ -103,8 +103,8 @@ Existing installs (Tom's machines, test Macs, the phone) cannot update across th
 - Mac: the old app downloads the new zip and ShipIt fails. The updater now reports
   "this Patch is an older app id and cannot update itself; install the latest Patch from
   the download page once" instead of Squirrel's text. That wording only reaches a Mac if it
-  is in the old-id build, so cut one last release under the old id from the commit that
-  adds `conciseReason`'s message (and nothing else) before releasing the rename. Each Mac
+  is in the old-id build, so cut one last release under the old id with just the
+  `conciseReason` change (`updater.ts`) cherry-picked, before releasing the rename. Each Mac
   then needs one manual install of the new build (`pnpm --filter @patch/desktop install:app`, or
   drop the zip's `Patch.app` into /Applications) and to delete the old `Patch.app`.
 - Android: a package rename is a new app. The in-app installer hands the new APK to Android,
