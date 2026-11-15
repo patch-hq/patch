@@ -171,7 +171,13 @@ export class HostSearchManager {
       if (!caseSensitive) args.push('-i');
       args.push('--', query, '.');
       const child = spawn('rg', args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
-      control.kill = () => child.kill();
+      // A spawn that failed (no `rg` on PATH) has no pid until its error event
+      // fires on the next tick. Killing it in that window signals pid 0 — the
+      // caller's whole process group — which took the test runner down (exit
+      // 137 in the merge queue). Only a child that really started is killed.
+      control.kill = () => {
+        if (child.pid !== undefined) child.kill();
+      };
 
       let spawnFailed = false;
       let sawError = false;
