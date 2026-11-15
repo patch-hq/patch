@@ -1396,7 +1396,6 @@ import {
   transcriptSize,
   type ClaudeSessionStore,
 } from './claudeSessionStore.js';
-import { isCodexModel } from './codexAccounts.js';
 import { hasConversation } from './syntheticTurns.js';
 import { cutAt } from './textClean.js';
 import { untilAborted } from './untilAborted.js';
