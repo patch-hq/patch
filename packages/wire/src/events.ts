@@ -2052,8 +2052,7 @@ export const HostOfflineEvent = z
     type: z.literal('host.offline'),
     ...hostIdField,
     /**
-     * Why, when the server can tell from the host's last heartbeat: `battery`
-     * (it was nearly flat and discharging), `asleep` (the host reported going
+     * Why, when the server can tell from the host's last heartbeat: `asleep` (the host reported going
      * to sleep) or `unresponsive`. Absent when it was not worked out, e.g. the
      * host was removed. See `describeHostOffline`.
      */
@@ -2093,7 +2092,7 @@ export const HostHealthEvent = z
     eventLoopLagMs: z.number().gte(0),
     /** Milliseconds between reports, so the server knows when one is late. */
     intervalMs: z.number().int().gte(1),
-    /** Battery state; absent on a host with no battery. */
+    /** Deprecated, ignored: hosts no longer report battery. Accepted so an older host's heartbeat still validates. */
     power: z
       .object({ onBattery: z.boolean(), percent: z.number().gte(0).lte(100) })
       .strict()
@@ -2923,11 +2922,7 @@ export const HostInfoEvent = z
      * current host states `true`; absent means the host predates it.
      */
     harnessClaudeMdEnabled: z.boolean().optional(),
-    /**
-     * The host's power state: whether it is running on battery, and the
-     * charge, 0-100. Absent when the host has no battery (a desktop, a server)
-     * or cannot read one — absent never means "plugged in".
-     */
+    /** Deprecated, ignored: hosts no longer report battery. Accepted so an older host's description still validates. */
     power: z
       .object({
         onBattery: z.boolean(),

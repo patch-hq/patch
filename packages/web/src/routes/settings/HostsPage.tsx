@@ -143,15 +143,6 @@ function HostListRow({
           {report
             ? `${PLATFORM_LABEL[report.platform] ?? report.platform} · ${seen}`
             : 'awaiting first report'}
-          {report?.power ? (
-            <>
-              {' · '}
-              <span data-testid={`host-${host.hostId}-power`}>
-                {Math.round(report.power.percent)}%{' '}
-                {report.power.onBattery ? 'on battery' : 'plugged in'}
-              </span>
-            </>
-          ) : null}
         </span>
       }
     >
