@@ -162,7 +162,7 @@ describe('Composer — daemon-offline / link-down disabled controls (spec/12)', 
   it('WS connected but host offline: attach/mic disabled (named reason), Send still enabled but QUEUED', async () => {
     setPresence('connected', 'offline');
     const r = renderRN(<Composer chatId="c1" folder="work" />);
-    const reason = 'Host offline — paused until your Hetzner box reconnects.';
+    const reason = 'Host offline — paused until your host reconnects.';
     // The + in the field carries the attach controls, and the reason.
     const attachButtons = findAllHost(r.root, byLabel(`Attach unavailable — ${reason}`));
     expect(attachButtons).toHaveLength(1);

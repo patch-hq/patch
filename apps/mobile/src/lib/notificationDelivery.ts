@@ -118,7 +118,7 @@ export async function sendBackgroundChatInput(
 /**
  * Approve/Deny a pending tool-approval permission request. Carries `chatId`
  * so the server relays the response to the chat's OWNING host — without it a
- * response for a Mac-owned chat lands on Hetzner and is lost.
+ * response for a Mac-owned chat lands on the server and is lost.
  */
 export async function sendBackgroundPermissionDecision(
   chatId: string,

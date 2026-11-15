@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the nightly restic backup cron on the Hetzner box
+# Install the nightly restic backup cron on the host machine
 # (spec/11-deployment.md § Backup: "restic to remote storage nightly").
 #
 # Idempotent: re-running replaces the patch-backup crontab line in place rather

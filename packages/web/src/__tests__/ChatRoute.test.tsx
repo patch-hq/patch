@@ -3577,14 +3577,14 @@ describe('ChatRoute regression', () => {
           seq: 0,
           kind: 'message',
           role: 'user',
-          content: '[Pad] Tom sent 2 changes on "Settings" (pad id: settings)\n\n1. Moved h1',
+          content: '[Pad] The user sent 2 changes on "Settings" (pad id: settings)\n\n1. Moved h1',
           jobTrigger: true,
           at: 0,
         },
       ]);
       renderChat('c-pad-input');
       expect(screen.getByTestId('job-trigger-summary').textContent).toContain(
-        '[Pad] Tom sent 2 changes on "Settings" (pad id: settings)',
+        '[Pad] The user sent 2 changes on "Settings" (pad id: settings)',
       );
       expect(document.querySelector('.msg-user')).toBeNull();
     });

@@ -16,7 +16,7 @@
 //      leg that went silent instead of just "timed out".
 //
 //   node scripts/voice-probe-fullpath.mjs
-//     [--server https://patch.tomchambers.me]   target stack
+//     --server https://your-patch-server   target stack (or PATCH_SERVER_URL)
 //     [--chat thread_manager]                   chat to bind the call to
 //     [--mode call]                             session mode (call | …)
 //     [--mic-wav scripts/fixtures/probe-utterance-16k.wav]
@@ -50,7 +50,12 @@ const arg = (name, fallback) => {
 };
 const has = (name) => process.argv.includes(`--${name}`);
 
-const SERVER = arg('server', 'https://patch.tomchambers.me').replace(/\/$/, '');
+const SERVER_RAW = arg('server', process.env.PATCH_SERVER_URL);
+if (!SERVER_RAW) {
+  console.error('FAIL: pass --server <url> or set PATCH_SERVER_URL');
+  process.exit(2);
+}
+const SERVER = SERVER_RAW.replace(/\/$/, '');
 const CHAT_ID = arg('chat', 'thread_manager');
 const MODE = arg('mode', 'call');
 const MIC_WAV = resolve(REPO, arg('mic-wav', 'scripts/fixtures/probe-utterance-16k.wav'));

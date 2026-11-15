@@ -3,7 +3,7 @@
 # (scripts/voice-probe-fullpath.mjs) against production and pushes an ntfy
 # alert naming the failed leg if — and only if — it fails. Quiet on pass.
 #
-# Installed as a cron entry on the Hetzner host (see testing-strategy.md
+# Installed as a cron entry on the host (see testing-strategy.md
 # § Voice). Needs ~/.patch/probe-credential.jwt — a surface credential the
 # probe presents to POST /api/voice/token, same as a phone would.
 #
@@ -14,7 +14,10 @@ set -u
 cd "$(dirname "$0")/.."
 
 LOG="$HOME/.patch/logs/voice-probe.log"
-NTFY="${PATCH_NTFY_URL:-https://ntfy.sh/tomchambers-phone-hgzsxwk9kah}"
+: "${PATCH_NTFY_URL:?set PATCH_NTFY_URL to the ntfy topic URL that should receive alerts}"
+: "${PATCH_SERVER_URL:?set PATCH_SERVER_URL to the server the probe checks}"
+export PATCH_SERVER_URL
+NTFY="$PATCH_NTFY_URL"
 CRED="$HOME/.patch/probe-credential.jwt"
 
 # Three cases, mirroring how the surfaces are actually used:
@@ -51,7 +54,7 @@ if [ -n "$FAILED" ]; then
     -H "Priority: high" \
     -H "Tags: rotating_light,telephone" \
     -d "Automated voice probe failed.
-${FAILED}Full log: ~/.patch/logs/voice-probe.log on hetzner" \
+${FAILED}Full log: ~/.patch/logs/voice-probe.log on the host" \
     "$NTFY" >/dev/null
   exit 1
 fi

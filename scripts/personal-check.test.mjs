@@ -7,10 +7,16 @@ test('counts every personal string, whatever the case', () => {
   assert.equal(countPersonal('nothing to see'), 0);
 });
 
-test('a first name counts in prompt files only', () => {
+test('a first name counts in prompt files and in string literals, not in comments', () => {
   assert.equal(countPersonal('so it can go to Tom', 'packages/wire/src/sweep-prompt.ts'), 1);
-  assert.equal(countPersonal('so it can go to Tom', 'packages/web/src/App.tsx'), 0);
   assert.equal(countPersonal('Tomorrow, tomato', 'packages/wire/src/x-prompt.ts'), 0);
+  assert.equal(countPersonal('const m = "so it can go to Tom";', 'packages/web/src/App.tsx'), 1);
+  assert.equal(countPersonal('const m = `[Pad] Tom sent ${n}`;', 'packages/server/src/format.ts'), 1);
+  assert.equal(countPersonal("const m = 'it\\'s Tom';", 'packages/server/src/a.ts'), 1);
+  assert.equal(countPersonal('// written for Tom\nconst a = 1;', 'packages/web/src/App.tsx'), 0);
+  assert.equal(countPersonal('/* Tom said\n so */ const a = "x";', 'packages/web/src/App.tsx'), 0);
+  assert.equal(countPersonal('const u = "https://x.test"; // Tom', 'packages/web/src/App.tsx'), 0);
+  assert.equal(countPersonal('Tom wrote this', 'packages/web/src/index.css'), 0);
 });
 
 test('the product\'s own id and repository are not personal strings', () => {

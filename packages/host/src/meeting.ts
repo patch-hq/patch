@@ -122,8 +122,8 @@ export interface MeetingPrompts {
 
 /** How many already-analysed lines each pass re-reads as context. */
 const EARLIER_CONTEXT_LINES = 40;
-/** Names an `other` owner can take that actually mean Tom. */
-const TOM_NAMES = new Set(['tom', 'you', 'me']);
+/** Names an `other` owner can take that actually mean the user. */
+const USER_NAMES = new Set(['you', 'me', 'the user', 'user']);
 
 export interface AnalyseInput {
   chatId: string;
@@ -1222,8 +1222,8 @@ export class MeetingManager {
       // The model's owner is only a claim: Tom's own name means the action is Tom's,
       // and a name nobody spoke under means someone who was not in the meeting.
       const owner = act.owner?.trim();
-      const toTom = act.kind === 'other' && owner !== undefined && TOM_NAMES.has(norm(owner));
-      const kind = toTom ? 'mine' : act.kind;
+      const toUser = act.kind === 'other' && owner !== undefined && USER_NAMES.has(norm(owner));
+      const kind = toUser ? 'mine' : act.kind;
       const absent =
         kind === 'other' &&
         owner !== undefined &&

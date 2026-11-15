@@ -233,7 +233,7 @@ describe('pads', () => {
       >;
       expect(input.chatId).toBe('c1');
       expect(input.source).toEqual({ kind: 'pad', padId: expect.any(String) });
-      expect(input.message).toContain('[Pad] Tom sent 2 changes on "Care screens"');
+      expect(input.message).toContain('[Pad] The user sent 2 changes on "Care screens"');
       expect(input.message).toContain('Moved h1 "Credit" 30px right, 12px down');
       expect(input.message).toContain('Note on h1 "Credit": "Make it bigger"');
       const pic = /picture: https:\/\/patch\.test(\S+\.png)/.exec(input.message);
@@ -321,7 +321,7 @@ describe('pads', () => {
       expect((first.result as { message: string }).message).not.toMatch(/earlier batch/);
       const input = inputs()[0]!.event as Extract<WireEvent, { type: 'chat.input' }>;
       expect(input.chatId).toBe('c1');
-      expect(input.message).toContain('[Pad] Tom sent 1 change on "Care screens"');
+      expect(input.message).toContain('[Pad] The user sent 1 change on "Care screens"');
       expect(input.message).toContain('Deleted h1 "Credit"');
       const pic = /picture: https:\/\/patch\.test(\/\S+\.png)/.exec(input.message);
       expect(pic).not.toBeNull();

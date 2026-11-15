@@ -53,7 +53,7 @@ patch chats spawn /tmp/work --json
 patch chats send-to <chatId> --message 'hello' --json
 ```
 
-The CLI prefers the local UDS on Hetzner (faster), and REST elsewhere.
+The CLI prefers the local UDS on the host machine (faster), and REST elsewhere.
 
 ## Auth
 
