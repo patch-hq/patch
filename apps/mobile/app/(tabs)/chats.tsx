@@ -10,6 +10,7 @@ import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
 import { useRouter, type Href } from 'expo-router';
 import {
   AlarmClock,
+  Archive,
   Bell,
   Bot,
   Ear,
@@ -294,12 +295,14 @@ function ChatsHeader({
   onQuery,
   onOpenSearch,
   onCloseSearch,
+  onShowArchived,
 }: {
   searching: boolean;
   query: string;
   onQuery: (q: string) => void;
   onOpenSearch: () => void;
   onCloseSearch: () => void;
+  onShowArchived: () => void;
 }): React.ReactElement {
   const colors = useTheme();
   const router = useRouter();
@@ -419,6 +422,15 @@ function ChatsHeader({
               </View>
             </Pressable>
           ) : null}
+          <Pressable
+            testID="chats-archived-button"
+            onPress={onShowArchived}
+            accessibilityRole="button"
+            accessibilityLabel="Archived chats"
+            style={iconButton}
+          >
+            <Archive size={20} color={colors.ink2} />
+          </Pressable>
           <Pressable
             onPress={showNotificationsDrawer}
             accessibilityRole="button"
@@ -1024,6 +1036,24 @@ export default function ChatsScreen(): React.ReactElement {
 
   // Shared by the header's close button and pressing a search result: either
   // way, search is done and the normal list should be what's there next.
+  // The header's Archive button: archived is the last section of a long list,
+  // so open it and scroll straight to its header instead of making the user
+  // hunt for the collapsed row at the bottom.
+  const listRef = React.useRef<FlatList<Section>>(null);
+  const [jumpToArchived, setJumpToArchived] = React.useState(false);
+  const showArchived = (): void => {
+    setSectionOpen('archived', true);
+    setOpen((o) => ({ ...o, archived: true }));
+    setJumpToArchived(true);
+  };
+  React.useEffect(() => {
+    if (!jumpToArchived || batchMode || serverQuery !== null) return;
+    const index = items.findIndex((i) => i.kind === 'header' && i.toggle === 'archived');
+    if (index < 0) return;
+    setJumpToArchived(false);
+    listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0 });
+  }, [jumpToArchived, items, batchMode, serverQuery]);
+
   const closeSearch = (): void => {
     setQuery('');
     setSearching(false);
@@ -1037,6 +1067,7 @@ export default function ChatsScreen(): React.ReactElement {
         onQuery={setQuery}
         onOpenSearch={() => setSearching(true)}
         onCloseSearch={closeSearch}
+        onShowArchived={showArchived}
       />
       <SidebarViewMenu />
       <OfflineBanner />
@@ -1048,7 +1079,14 @@ export default function ChatsScreen(): React.ReactElement {
         <SearchResults query={serverQuery} onHitPress={closeSearch} />
       ) : (
         <FlatList
+          ref={listRef}
           data={items}
+          onScrollToIndexFailed={({ index }) => {
+            // Rows vary in height, so the target may not be measured yet: scroll
+            // to the end (archived is the last section) and retry.
+            listRef.current?.scrollToEnd({ animated: false });
+            setTimeout(() => listRef.current?.scrollToIndex({ index, animated: true }), 100);
+          }}
           onEndReached={open.archived ? loadMoreArchived : undefined}
           onEndReachedThreshold={1}
           keyboardShouldPersistTaps="handled"
