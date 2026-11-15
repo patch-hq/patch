@@ -836,6 +836,11 @@ export function ChatRoute({
   const seenLocalIdsRef = useRef<Set<string> | null>(null);
   // Whether a send has re-pinned since this chat was opened.
   const repinnedForSendRef = useRef(false);
+  // Reply pin (see the effect below): how many user / assistant messages the
+  // transcript held last time (null until seeded for this open), and whether
+  // the user has scrolled UP since their latest message.
+  const turnCountsRef = useRef<{ user: number; assistant: number } | null>(null);
+  const scrolledUpSinceUserMsgRef = useRef(false);
   // The message a `?seq=` open is heading for. Held in a ref, not read from the
   // URL, because the param is cleared as soon as it is taken — so a later
   // re-render (or reopening the chat) never jumps again.
@@ -875,6 +880,7 @@ export function ChatRoute({
     const el = streamRef.current;
     if (!el || el.scrollTop <= 0) return;
     followRef.current = false;
+    scrolledUpSinceUserMsgRef.current = true;
   }
 
   // Wheel/trackpad up.
@@ -976,6 +982,7 @@ export function ChatRoute({
     const top =
       t.height > el.clientHeight ? offset - 16 : offset - (el.clientHeight - t.height) / 2;
     followRef.current = false;
+    scrolledUpSinceUserMsgRef.current = true;
     setSelfScrollTop(el, Math.max(0, top));
     if (!jump.found) {
       jump.found = true;
@@ -1033,6 +1040,9 @@ export function ChatRoute({
     // now on screen rather than carrying the last one's echoes over.
     seenLocalIdsRef.current = null;
     repinnedForSendRef.current = false;
+    turnCountsRef.current = null;
+    // Reopened away from the bottom: the user's earlier scroll-up still stands.
+    scrolledUpSinceUserMsgRef.current = saved ? !saved.atBottom : false;
     lastScrollRef.current = { top: 0, maxTop: 0 };
     touchStartYRef.current = null;
     applyInitialScroll();
@@ -1140,6 +1150,32 @@ export function ChatRoute({
     // saying where they want to be, more recently than either of these.
     jumpRef.current = null;
     restoreAnchorRef.current = null;
+    requestAnimationFrame(() => scrollToBottom());
+  }, [timeline]);
+
+  // A reply landing after the user's own latest message pins to the bottom
+  // unless the user has scrolled up since sending. The send re-pin above only
+  // sees optimistic echoes, so a message sent from the phone or by voice (which
+  // arrives as a persisted user message, no localId) never re-armed follow, and
+  // a follow flag dropped by any stray scroll left the reply below the fold
+  // with only the scroll-to-bottom arrow. Counts, not seqs: an echo
+  // reconciling into its persisted copy changes the seq but not the count.
+  useEffect(() => {
+    let user = 0;
+    let assistant = 0;
+    for (const e of timeline) {
+      if (e.kind !== 'message') continue;
+      if (e.role === 'user') user++;
+      else if (e.role === 'assistant') assistant++;
+    }
+    const prev = turnCountsRef.current;
+    turnCountsRef.current = { user, assistant };
+    if (prev === null) return;
+    if (user > prev.user) scrolledUpSinceUserMsgRef.current = false;
+    if (assistant <= prev.assistant || user === 0) return;
+    if (scrolledUpSinceUserMsgRef.current) return;
+    followRef.current = true;
+    setShowScrollDown(false);
     requestAnimationFrame(() => scrollToBottom());
   }, [timeline]);
 
@@ -1260,6 +1296,7 @@ export function ChatRoute({
     // attachment image decoding) before its scroll event is dispatched, so
     // the event reports a position short of the grown bottom. Reading that
     // as "scrolled away" dropped follow and stranded the chat short of it.
+    if (movedUp) scrolledUpSinceUserMsgRef.current = true;
     followRef.current = movedUp ? false : followRef.current || atBottom;
     setShowScrollDown(!followRef.current);
     // Remember this chat's position so reopening restores it (spec/14 § Main
