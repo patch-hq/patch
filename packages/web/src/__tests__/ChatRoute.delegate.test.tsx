@@ -21,8 +21,19 @@ const getDelegateHistory = vi.fn(async () => ({
   ],
 }));
 
+const delegateControl = vi.fn(
+  async (
+    _c: string,
+    _d: string,
+    _a: string,
+  ): Promise<{ applied: boolean; spunOffChatId?: string }> => ({
+    applied: true,
+  }),
+);
+
 vi.mock('../api/rest.js', () => ({
   api: {
+    delegateControl: (c: string, d: string, a: string) => delegateControl(c, d, a),
     markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
     getFileContent: vi.fn(async () => ({ path: '', content: '', size: 0 })),
     getFileContentAtHead: vi.fn(async () => ({ path: '', content: '', size: 0 })),
@@ -376,6 +387,50 @@ describe('ChatRoute — patch_delegate tool row', () => {
       update('sub-1', 'draft the email', 'done', 3);
       update('sub-2', 'build the design', 'done', 4);
       expect(screen.queryByTestId('agent-running-bar')).toBeNull();
+    });
+
+    it('the bar controls an agent: pause, resume once paused, stop, open as its own chat', async () => {
+      seed();
+      renderChat();
+      update('sub-1', 'draft the email', 'running', 1);
+
+      fireEvent.click(screen.getByTestId('agent-pause'));
+      await waitFor(() => expect(delegateControl).toHaveBeenCalledWith('c1', 'sub-1', 'pause'));
+      expect(screen.queryByTestId('agent-resume')).toBeNull();
+
+      act(() => {
+        useChatStore.getState().applyEvent({
+          type: 'chat.delegate_update',
+          chatId: 'c1',
+          delegateId: 'sub-1',
+          label: 'draft the email',
+          status: 'running',
+          paused: true,
+          seq: 2,
+        });
+      });
+      expect(screen.getByTestId('agent-running-bar').textContent).toBe(
+        'Agent paused · draft the email',
+      );
+      fireEvent.click(screen.getByTestId('agent-resume'));
+      await waitFor(() => expect(delegateControl).toHaveBeenCalledWith('c1', 'sub-1', 'resume'));
+
+      fireEvent.click(screen.getByTestId('agent-stop'));
+      await waitFor(() => expect(delegateControl).toHaveBeenCalledWith('c1', 'sub-1', 'stop'));
+
+      fireEvent.click(screen.getByTestId('agent-spin-off'));
+      await waitFor(() => expect(delegateControl).toHaveBeenCalledWith('c1', 'sub-1', 'spin-off'));
+    });
+
+    it('says so when a control fails rather than hiding it', async () => {
+      seed();
+      renderChat();
+      update('sub-1', 'draft the email', 'running', 1);
+      delegateControl.mockRejectedValueOnce(new Error('daemon_timeout'));
+      fireEvent.click(screen.getByTestId('agent-stop'));
+      expect((await screen.findByTestId('agent-running-bar-error')).textContent).toContain(
+        'daemon_timeout',
+      );
     });
 
     it('several fold into one Agents row, open to one row each, and count the done ones', () => {

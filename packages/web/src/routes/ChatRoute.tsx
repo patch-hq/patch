@@ -174,6 +174,8 @@ import {
   Check,
   Volume2,
   Square,
+  Pause,
+  Play,
 } from 'lucide-react';
 import { CloseIcon } from '../components/icons.js';
 import { ImageLightbox, imageDownloadName } from '../components/ImageLightbox.js';
@@ -5256,23 +5258,114 @@ function DelegateStrip({ chatId }: { chatId: string }): JSX.Element | null {
 
 /**
  * A slim pill directly above the composer, same width and corner radius as the
- * input, while any `patch_delegate` subagent of this chat is running. Quiet by
- * design: one muted line, no controls. The full list lives in the Agents row.
+ * input, while any `patch_delegate` subagent of this chat is running. One agent
+ * carries its own controls inline; several fold to a count that opens to one
+ * row each. Controls: pause or resume, stop, and open as a chat of its own.
  */
 function AgentRunningBar({ chatId }: { chatId: string }): JSX.Element | null {
+  const navigate = useNavigate();
   const updates = useChatStore((s) => s.delegateUpdates[chatId] ?? NO_DELEGATES);
-  const live = Object.values(updates).filter(
-    (d) => d.status === 'running' || d.status === 'awaiting-permission',
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const live = Object.entries(updates).filter(
+    ([, d]) => d.status === 'running' || d.status === 'awaiting-permission',
   );
   if (live.length === 0) return null;
-  const first = live[0] as DelegateUpdateInfo;
+
+  const control = async (
+    id: string,
+    action: 'pause' | 'resume' | 'stop' | 'spin-off',
+  ): Promise<void> => {
+    setBusy(id);
+    setError(null);
+    try {
+      const res = await api.delegateControl(chatId, id, action);
+      if (action === 'spin-off' && res.spunOffChatId) navigate(`/chats/${res.spunOffChatId}`);
+    } catch (e) {
+      setError(`Could not ${action.replace('-', ' ')}: ${(e as Error).message}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const controls = (id: string, d: DelegateUpdateInfo): JSX.Element => {
+    const btn = (
+      action: 'pause' | 'resume' | 'stop' | 'spin-off',
+      label: string,
+      icon: JSX.Element,
+    ): JSX.Element => (
+      <button
+        type="button"
+        className="agent-running-bar-btn"
+        data-testid={`agent-${action}`}
+        aria-label={`${label} ${d.label}`}
+        title={label}
+        disabled={busy === id}
+        onClick={() => void control(id, action)}
+      >
+        {icon}
+      </button>
+    );
+    return (
+      <span className="agent-running-bar-controls">
+        {d.paused
+          ? btn('resume', 'Resume', <Play size={14} aria-hidden />)
+          : btn('pause', 'Pause', <Pause size={14} aria-hidden />)}
+        {btn('stop', 'Stop', <Square size={14} aria-hidden />)}
+        {btn('spin-off', 'Open as its own chat', <ExternalLink size={14} aria-hidden />)}
+      </span>
+    );
+  };
+  const icon = (d: DelegateUpdateInfo): JSX.Element =>
+    d.paused ? (
+      <Pause size={14} aria-hidden />
+    ) : (
+      <LoaderCircle className="status-spinner" size={14} aria-hidden />
+    );
+
+  const [firstId, first] = live[0] as [string, DelegateUpdateInfo];
+  const paused = live.filter(([, d]) => d.paused).length;
+  const word = paused === live.length ? 'paused' : 'running';
   const text =
-    live.length === 1 ? `Agent running · ${first.label}` : `${live.length} agents running`;
+    live.length === 1
+      ? `Agent ${word} · ${first.label}`
+      : `${live.length} agents ${word}${paused > 0 && paused < live.length ? ` (${paused} paused)` : ''}`;
   return (
     <div className="agent-running-bar-wrap" data-testid="agent-running-bar-wrap">
       <div className="agent-running-bar" data-testid="agent-running-bar" role="status">
-        <LoaderCircle className="status-spinner" size={14} aria-hidden />
-        <span className="agent-running-bar-text">{text}</span>
+        <div className="agent-running-bar-row">
+          {icon(first)}
+          <span className="agent-running-bar-text">{text}</span>
+          {live.length === 1 ? (
+            controls(firstId, first)
+          ) : (
+            <button
+              type="button"
+              className="agent-running-bar-btn"
+              data-testid="agent-running-bar-toggle"
+              aria-label={open ? 'Hide agents' : 'Show agents'}
+              aria-expanded={open}
+              onClick={() => setOpen((v) => !v)}
+            >
+              <ChevronDown size={14} aria-hidden className={open ? 'agent-chevron-open' : ''} />
+            </button>
+          )}
+        </div>
+        {open && live.length > 1
+          ? live.map(([id, d]) => (
+              <div className="agent-running-bar-row" key={id} data-testid="agent-running-row">
+                {icon(d)}
+                <span className="agent-running-bar-text">{d.label}</span>
+                {controls(id, d)}
+              </div>
+            ))
+          : null}
+        {error ? (
+          <div className="agent-running-bar-error" data-testid="agent-running-bar-error">
+            {error}
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -971,6 +971,20 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     ok: true,
     stopped: true,
   },
+  'patch.delegate_control.request': {
+    type: 'patch.delegate_control.request',
+    requestId: 'dc1',
+    chatId: 'c1',
+    delegateId: 'sub-1',
+    action: 'spin_off',
+  },
+  'patch.delegate_control.response': {
+    type: 'patch.delegate_control.response',
+    requestId: 'dc1',
+    ok: true,
+    applied: true,
+    spunOffChatId: 'sub-1',
+  },
   'patch.watch_checkin.request': {
     type: 'patch.watch_checkin.request',
     requestId: 'wc1',

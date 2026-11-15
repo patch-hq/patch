@@ -27,3 +27,23 @@ for (const [name, size] of [
     await page.screenshot({ path: `/tmp/agentbar-${name}.png` });
   });
 }
+
+test('one agent carries pause, stop and open-as-chat; several fold to a count', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.goto('/app/dev-harness.html?chat=chat_delegate');
+  for (const id of ['agent-pause', 'agent-stop', 'agent-spin-off']) {
+    await expect(page.getByTestId(id)).toBeVisible();
+  }
+  const bar = page.getByTestId('agent-running-bar');
+  expect((await bar.boundingBox())!.height).toBeLessThan(40);
+  await page.screenshot({ path: '/tmp/agentbar-controls-one.png' });
+
+  await page.goto('/app/dev-harness.html?chat=chat_status');
+  await expect(page.getByTestId('agent-running-bar')).toContainText('3 agents running');
+  await expect(page.getByTestId('agent-stop')).toHaveCount(0);
+  await page.getByTestId('agent-running-bar-toggle').click();
+  await expect(page.getByTestId('agent-running-row')).toHaveCount(3);
+  await page.screenshot({ path: '/tmp/agentbar-controls-many.png' });
+});

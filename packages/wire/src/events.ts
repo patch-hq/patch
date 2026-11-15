@@ -1818,6 +1818,16 @@ export const ChatDelegateUpdateEvent = z
     runStartedAt: z.number().int().nonnegative().optional(),
     /** The current run is a follow-up wake of a settled subagent (by its parent or a timer). */
     followUp: z.boolean().optional(),
+    /**
+     * The user paused this subagent: it is alive, idle and waiting to be
+     * resumed (status stays `running`, so an older surface shows it as live).
+     */
+    paused: z.boolean().optional(),
+    /**
+     * The user spun this subagent off into a chat of its own. Status is
+     * `stopped` for the parent's row; this is the new ordinary chat's id.
+     */
+    spunOffChatId: z.string().min(1).optional(),
     seq: z.number().int().nonnegative(),
     ...forSurfaceIdField,
   })
@@ -6639,6 +6649,38 @@ export const PatchWatchStopResponseEvent = z
   .strict();
 export type PatchWatchStopResponseEvent = z.infer<typeof PatchWatchStopResponseEvent>;
 
+export const PatchDelegateControlRequestEvent = z
+  .object({
+    type: z.literal('patch.delegate_control.request'),
+    requestId: z.string().min(1),
+    /** The parent chat; the host refuses a delegate that is not this chat's own. */
+    chatId: z.string().min(1),
+    delegateId: z.string().min(1),
+    action: z.enum(['pause', 'resume', 'stop', 'spin_off']),
+  })
+  .strict();
+export type PatchDelegateControlRequestEvent = z.infer<typeof PatchDelegateControlRequestEvent>;
+
+export const PatchDelegateControlResponseEvent = z
+  .object({
+    type: z.literal('patch.delegate_control.response'),
+    requestId: z.string().min(1),
+    ok: z.boolean(),
+    /** False when the delegate had already finished — idempotent, like `patch_delegate_stop`. */
+    applied: z.boolean().optional(),
+    /** `spin_off` only: the id of the new ordinary chat. */
+    spunOffChatId: z.string().min(1).optional(),
+    error: z
+      .object({
+        code: z.enum(['chat_not_found', 'not_a_delegate', 'internal']),
+        message: z.string(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type PatchDelegateControlResponseEvent = z.infer<typeof PatchDelegateControlResponseEvent>;
+
 // ---------------------------------------------------------------------------
 // Stray processes (server → host → server), spec/02 § Stray processes. What a
 // chat started outside Patch's tracked tools (a `nohup … &` in a Bash call)
@@ -9612,6 +9654,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchWatchListResponseEvent,
   PatchWatchStopRequestEvent,
   PatchWatchStopResponseEvent,
+  PatchDelegateControlRequestEvent,
+  PatchDelegateControlResponseEvent,
   PatchWatchCheckInRequestEvent,
   PatchWatchCheckInResponseEvent,
   PatchWatchOutputRequestEvent,
@@ -9927,6 +9971,8 @@ export const EVENT_SCHEMAS = {
   'patch.watch_list.response': PatchWatchListResponseEvent,
   'patch.watch_stop.request': PatchWatchStopRequestEvent,
   'patch.watch_stop.response': PatchWatchStopResponseEvent,
+  'patch.delegate_control.request': PatchDelegateControlRequestEvent,
+  'patch.delegate_control.response': PatchDelegateControlResponseEvent,
   'patch.watch_checkin.request': PatchWatchCheckInRequestEvent,
   'patch.watch_checkin.response': PatchWatchCheckInResponseEvent,
   'patch.watch_output.request': PatchWatchOutputRequestEvent,

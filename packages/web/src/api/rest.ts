@@ -1292,6 +1292,18 @@ export const api = {
     request<{ stopped: boolean }>(`/api/chats/${chatId}/watch/${encodeURIComponent(taskId)}/stop`, {
       method: 'POST',
     }),
+  // The user's own controls over one delegated agent of this chat. `applied`
+  // is false when the agent had already finished; `spunOffChatId` comes back
+  // for `spin-off`, the id of the new ordinary chat.
+  delegateControl: (
+    chatId: string,
+    delegateId: string,
+    action: 'pause' | 'resume' | 'stop' | 'spin-off',
+  ) =>
+    request<{ applied: boolean; spunOffChatId?: string }>(
+      `/api/chats/${chatId}/delegates/${encodeURIComponent(delegateId)}/${action}`,
+      { method: 'POST' },
+    ),
   // Processes the chat started outside Patch's tracked tools (a `nohup … &`
   // in a Bash call), running or recently ended (spec/14 § Main chat panel —
   // Stray process bar). A 501 means the host cannot detect them.
