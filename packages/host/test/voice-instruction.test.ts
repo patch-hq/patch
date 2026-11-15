@@ -18,6 +18,8 @@ describe('HOSTED_VOICE_INSTRUCTION', () => {
     const text = hostedVoiceInstruction('auto', true);
     expect(text).toMatch(/answers at once/i);
     expect(text).toMatch(/carry on the conversation/i);
+    expect(text).toMatch(/rest of what the user said/i);
+    expect(text).toMatch(/never stop to wait/i);
     expect(text).toMatch(/never say "still working on it"/i);
     expect(text).toMatch(/result arrives as a message/i);
     expect(text).toMatch(/never guess/i);
