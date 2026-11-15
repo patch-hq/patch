@@ -203,7 +203,6 @@ import {
   claudeBackendEntry,
   describeHost as buildHostDescription,
 } from './host.js';
-import { createPowerWatcher } from './power.js';
 import { createSleepDetector } from './linkDropCause.js';
 import { createServerLink } from './serverLink.js';
 import { createHealthSampler } from './healthReport.js';
@@ -1233,10 +1232,6 @@ async function startHost(
    * time so a surface never renders a stale backend or component list. Emitted
    * on connect and after anything it reports changes.
    */
-  const powerWatcher = createPowerWatcher({
-    onChange: () => emit(describeHost()),
-    onError: (err) => logger.warn({ err }, 'power: battery read failed'),
-  });
   const sleepDetector = createSleepDetector();
   // Whether this host has the Claude Code its turns run (spec/02 § Agent
   // backends). A mock backend runs none, so it counts as present.
@@ -1252,7 +1247,6 @@ async function startHost(
   const describeHost = (): import('@patch/wire').HostInfoEvent =>
     buildHostDescription({
       ...(link.lastDrop() ? { lastDisconnect: link.lastDrop() } : {}),
-      ...(powerWatcher.current() ? { power: powerWatcher.current() } : {}),
       hostId: selfHostId,
       hostName,
       hostVersion: VERSION,
@@ -2299,13 +2293,11 @@ async function startHost(
       );
       if (!critical) daemon.releaseHeldTurns();
     }
-    const power = powerWatcher.current();
     if (linkOnline) {
       link.send({
         type: 'host.health',
         hostId: selfHostId,
         ...sample,
-        ...(power ? { power } : {}),
       });
     }
   };
@@ -4969,10 +4961,6 @@ async function startHost(
   void refreshUpdateAvailable().catch((err: unknown) => {
     logger.warn({ err }, 'self-update: initial availability check failed');
   });
-  void powerWatcher.poll().catch((err: unknown) => {
-    logger.warn({ err }, 'power: initial battery read failed');
-  });
-  powerWatcher.start();
   sleepDetector.start();
   const updateCheckTimer = setInterval(() => {
     void refreshUpdateAvailable().catch((err: unknown) => {

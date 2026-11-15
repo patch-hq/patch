@@ -45,10 +45,7 @@ export function platformLabel(platform: string): string {
 export function hostSubtitle(h: HostPresence, now: number = Date.now()): string {
   if (!h.host) return 'awaiting first report';
   const where = platformLabel(h.host.platform);
-  const power = h.host.power
-    ? ` · ${Math.round(h.host.power.percent)}% ${h.host.power.onBattery ? 'on battery' : 'plugged in'}`
-    : '';
-  return `${where} · ${h.online ? 'online' : `seen ${agoLabel(h.lastSeenAt, now)}`}${power}`;
+  return `${where} · ${h.online ? 'online' : `seen ${agoLabel(h.lastSeenAt, now)}`}`;
 }
 
 // ── Hosts ────────────────────────────────────────────────────────────────────

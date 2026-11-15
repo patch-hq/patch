@@ -122,8 +122,6 @@ export interface HostDescriptionInput {
   patchMcpEnabled?: boolean | undefined;
   /** Always true now: the shipped Manager/Speakers CLAUDE.md always loads. */
   harnessClaudeMdEnabled: boolean;
-  /** Battery state (`host.host.power`); absent when the host has no readable battery. */
-  power?: { onBattery: boolean; percent: number } | undefined;
   /** Why this host's server link last dropped (`host.host.lastDisconnect`). */
   lastDisconnect?: LinkDrop | undefined;
 }
@@ -196,7 +194,6 @@ export function describeHost(input: HostDescriptionInput): HostInfoEvent {
     harnessMcpServers: input.harnessMcpServers,
     ...(input.patchMcpEnabled !== undefined ? { patchMcpEnabled: input.patchMcpEnabled } : {}),
     harnessClaudeMdEnabled: input.harnessClaudeMdEnabled,
-    ...(input.power !== undefined ? { power: input.power } : {}),
     ...(input.lastDisconnect !== undefined ? { lastDisconnect: input.lastDisconnect } : {}),
   };
 }
