@@ -397,6 +397,8 @@ export interface ChatSubagentInfo {
   followUp?: boolean;
   /** Tools the parent withheld from this subagent. */
   disallowedTools?: string[];
+  /** The user paused it: idle and alive, not settled, until a turn runs again. */
+  userPaused?: boolean;
 }
 
 export function chatStateFromMeta(meta: ChatMeta): ChatState {

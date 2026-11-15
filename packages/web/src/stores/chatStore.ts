@@ -579,6 +579,8 @@ export interface DelegateUpdateInfo {
   since: number;
   /** The current run is a follow-up wake of a settled subagent. */
   followUp?: boolean;
+  /** The user paused it: alive and idle until resumed. */
+  paused?: boolean;
 }
 
 export interface ChatEventEntry {
@@ -2716,6 +2718,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   delegateUpdates[event.chatId]?.[event.delegateId]?.since ??
                   Date.now(),
                 ...(event.followUp ? { followUp: true } : {}),
+                ...(event.paused ? { paused: true } : {}),
               },
             },
           };

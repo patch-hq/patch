@@ -2330,7 +2330,7 @@ a.ch-row:hover {
   cursor: pointer;
 }
 .batch-remove-btn:hover {
-  color: var(--danger, #c0392b);
+  color: var(--danger);
   background: var(--bg-soft);
 }
 /* The per-row add-to-batch control tints when the chat is in the batch. */
@@ -3579,7 +3579,7 @@ button.nav-row {
   color: var(--accent-strong);
 }
 .head-action.danger:hover {
-  color: var(--danger, #c0392b);
+  color: var(--danger);
   background: var(--danger-tint);
 }
 /* Snooze (spec/04 § Snooze): the trigger reads as active while the chat is
@@ -3635,7 +3635,7 @@ button.nav-row {
   cursor: pointer;
 }
 .head-menu-item.danger:hover {
-  color: var(--danger, #c0392b);
+  color: var(--danger);
   background: var(--danger-tint);
 }
 
@@ -3715,7 +3715,7 @@ button.nav-row {
 }
 .context-menu-item.danger:hover,
 .context-menu-item.danger:focus {
-  color: var(--danger, #c0392b);
+  color: var(--danger);
   background: var(--danger-tint);
 }
 .snooze-wrap {
@@ -4486,7 +4486,7 @@ button.nav-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--danger, #c0392b);
+  color: var(--danger);
 }
 .delivery-status.turn-failed {
   flex-direction: column;
@@ -4569,7 +4569,7 @@ button.nav-row {
   border: 1px solid var(--danger, #c0392b);
   border-radius: 8px;
   background: var(--danger-tint);
-  color: var(--danger, #c0392b);
+  color: var(--danger);
   font-size: 14px;
 }
 .turn-error-body {
@@ -4604,7 +4604,7 @@ button.nav-row {
   justify-content: space-between;
   gap: 12px;
   margin: 2px 0 4px;
-  color: var(--danger, #c0392b);
+  color: var(--danger);
   font-size: var(--text-min);
   opacity: 0.85;
 }
@@ -7545,7 +7545,7 @@ button.view-file-download {
 }
 .doc-suggestion-find {
   text-decoration: line-through;
-  color: var(--danger, #c0392b);
+  color: var(--danger);
 }
 .doc-suggestion-arrow {
   margin: 0 6px;
@@ -13058,7 +13058,7 @@ main.empty-state p {
 }
 .move-chat-error {
   margin: 0 0 12px;
-  color: var(--danger, #c0392b);
+  color: var(--danger);
   font-size: var(--text-min);
 }
 
@@ -13829,7 +13829,7 @@ input.browse-filter {
   color: var(--ink-2);
 }
 .sweep-status-error {
-  color: var(--danger, #c0392b);
+  color: var(--danger);
   font-size: var(--text-min);
 }
 
@@ -17074,7 +17074,7 @@ select.permission-mode.is-pending {
   font-weight: 600;
 }
 .snooze-back-line.is-error {
-  color: var(--danger, #c0392b);
+  color: var(--danger);
 }
 .snooze-divider {
   display: flex;
@@ -18693,12 +18693,12 @@ a.drop-target {
 }
 .agent-running-bar {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 4px;
   width: 100%;
   max-width: 780px;
   box-sizing: border-box;
-  padding: 5px 14px;
+  padding: 4px 10px 4px 14px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--bg-elevated);
@@ -18706,11 +18706,49 @@ a.drop-target {
   font-size: var(--text-min);
   line-height: 1.4;
 }
+.agent-running-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
 .agent-running-bar-text {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.agent-running-bar-controls {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+.agent-running-bar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 22px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.agent-running-bar-btn:hover:not(:disabled) {
+  background: var(--bg-soft);
+  color: var(--ink);
+}
+.agent-running-bar-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.agent-chevron-open {
+  transform: rotate(180deg);
+}
+.agent-running-bar-error {
+  color: var(--danger);
 }
 @media (max-width: 640px) {
   /* Same slim gutter as the composer, so the pill stays flush with the input. */

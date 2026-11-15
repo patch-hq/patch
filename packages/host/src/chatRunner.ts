@@ -857,6 +857,8 @@ export interface DelegateSummary {
   id: string;
   label: string;
   status: DelegateStatus;
+  /** The user paused it (status stays `running`). */
+  paused?: boolean;
   createdAt: number;
   finishedAt: number | null;
 }
@@ -4859,6 +4861,9 @@ export class Daemon {
         id: meta.chatId,
         label: meta.subagent.label,
         status,
+        ...(meta.subagent.userPaused && meta.subagent.outcome === undefined
+          ? { paused: true }
+          : {}),
         createdAt: meta.createdAt,
         finishedAt: meta.subagent.finishedAt ?? null,
       });
@@ -4880,6 +4885,104 @@ export class Daemon {
     await this.stopChat(id);
     this.finishDelegate(id, 'stopped');
     return true;
+  }
+
+  /** Persist and mirror the user-pause flag on a subagent. */
+  private setDelegatePaused(chatId: string, paused: boolean): void {
+    const state = this.chatState.get(chatId);
+    if (!state?.subagent) return;
+    const { userPaused: _u, ...rest } = state.subagent;
+    state.subagent = paused ? { ...rest, userPaused: true } : rest;
+    this.opts.metaStore.update(chatId, (m) => {
+      if (!m.subagent) return m;
+      const { userPaused: _mu, ...mrest } = m.subagent;
+      return { ...m, subagent: paused ? { ...mrest, userPaused: true } : mrest };
+    });
+  }
+
+  /** The parent's own, unfinished subagent `id`; hydrated into chat state. Undefined for anything else. */
+  private liveDelegateMeta(parentChatId: string, id: string): ChatMeta | undefined {
+    const meta = this.opts.metaStore.read(id);
+    if (!meta?.subagent || meta.subagent.parentChatId !== parentChatId) return undefined;
+    if (!this.chatState.has(id)) this.chatState.hydrate([meta]);
+    return meta;
+  }
+
+  /**
+   * The user pauses a running subagent: its turn is interrupted but it is not
+   * settled, so nothing is reported to the parent and it keeps its context.
+   * False when it is not the parent's, or already finished.
+   */
+  async pauseDelegate(parentChatId: string, id: string): Promise<boolean> {
+    const meta = this.liveDelegateMeta(parentChatId, id);
+    if (!meta?.subagent || meta.subagent.outcome !== undefined) return false;
+    if (this.chatState.get(id)?.subagent?.userPaused) return true;
+    this.setDelegatePaused(id, true);
+    await this.stopChat(id);
+    this.emitDelegateUpdate(parentChatId, id, meta.subagent.label, 'running');
+    return true;
+  }
+
+  /** The user resumes a paused subagent: it carries on from where it stopped. */
+  async resumeDelegate(parentChatId: string, id: string): Promise<boolean> {
+    const meta = this.liveDelegateMeta(parentChatId, id);
+    if (!meta?.subagent || meta.subagent.outcome !== undefined) return false;
+    if (!this.chatState.get(id)?.subagent?.userPaused) return false;
+    // Not awaited: the call settles with the turn it starts, which is the
+    // agent's whole next run, and the caller only asked for it to begin.
+    void this.sendInput({
+      chatId: id,
+      message: 'You were paused. Carry on from where you stopped.',
+      localId: randomUUID(),
+      origin: 'machine',
+    }).catch((err: unknown) => {
+      this.opts.logger.error({ chatId: id, err }, 'patch_delegate: resume failed');
+    });
+    return true;
+  }
+
+  /**
+   * The user spins a subagent off into a chat of its own: it stops being a
+   * subagent (nothing it does is reported to the parent again) and becomes an
+   * ordinary chat in the list, with its whole context and any run in flight.
+   * Returns the chat id, or undefined when `id` is not the parent's subagent.
+   */
+  spinOffDelegate(parentChatId: string, id: string): string | undefined {
+    const meta = this.liveDelegateMeta(parentChatId, id);
+    const state = this.chatState.get(id);
+    if (!meta?.subagent || !state?.subagent) return undefined;
+    const { label } = meta.subagent;
+    this.opts.metaStore.update(id, (m) => {
+      const { subagent: _s, ...rest } = m;
+      return {
+        ...rest,
+        spawnedByChatId: parentChatId,
+        name: m.name ?? label,
+        updatedAt: this.opts.now(),
+      };
+    });
+    delete state.subagent;
+    state.spawnedByChatId = parentChatId;
+    state.name = state.name ?? label;
+    this.pausedDelegates.delete(id);
+    // A caller blocked on it gets an answer rather than waiting for ever.
+    const waiters = this.delegateWaiters.get(id);
+    this.delegateWaiters.delete(id);
+    for (const w of waiters ?? []) {
+      w({ status: 'stopped', reply: 'The user spun this agent off into its own chat.' });
+    }
+    this.emit({
+      type: 'chat.spawned',
+      chatId: id,
+      hostId: this.opts.hostId,
+      folder: state.folder,
+      parentChatId,
+      ...(state.model !== undefined ? { model: state.model } : {}),
+    });
+    this.emitState(id);
+    this.emitDelegateUpdate(parentChatId, id, label, 'stopped', undefined, id);
+    if (this.chatState.has(parentChatId)) this.emitState(parentChatId);
+    return id;
   }
 
   /**
@@ -4961,6 +5064,12 @@ export class Daemon {
   private maybeSettleDelegate(chatId: string): void {
     const state = this.chatState.get(chatId);
     if (!state?.subagent || state.subagent.outcome !== undefined) return;
+    if (state.subagent.userPaused) {
+      // The user paused it: the stop that ended this turn is not a settle. It
+      // stays alive and unreported until a turn runs again or it is stopped.
+      this.emitDelegateUpdate(state.subagent.parentChatId, chatId, state.subagent.label, 'running');
+      return;
+    }
     if (state.turnStopped) {
       this.finishDelegate(chatId, 'stopped');
     } else if (state.activity === 'idle') {
@@ -5056,18 +5165,23 @@ export class Daemon {
     label: string,
     status: DelegateStatus,
     outOfCredit?: { resetsAt?: number },
+    spunOffChatId?: string,
   ): void {
     if (!this.chatState.has(parentChatId)) return;
     if (outOfCredit) this.pausedDelegates.add(delegateId);
     else this.pausedDelegates.delete(delegateId);
+    const userPaused =
+      status === 'running' && this.chatState.get(delegateId)?.subagent?.userPaused === true;
     const ev: ChatDelegateUpdateEvent = {
       type: 'chat.delegate_update',
       chatId: parentChatId,
       delegateId,
       label,
       status,
-      ...this.delegateRunFields(delegateId, status),
+      ...(userPaused ? {} : this.delegateRunFields(delegateId, status)),
       ...(outOfCredit ? { outOfCredit } : {}),
+      ...(userPaused ? { paused: true } : {}),
+      ...(spunOffChatId !== undefined ? { spunOffChatId } : {}),
       seq: this.bumpSeq(parentChatId),
     };
     this.emit(ev);
@@ -9615,7 +9729,11 @@ export class Daemon {
     }
     const state = this.chatState.get(chatId);
     if (!state) throw new Error(`runQuery: unknown chatId ${chatId}`);
-    if (state.subagent && this.pausedDelegates.has(chatId)) {
+    if (state.subagent?.userPaused) {
+      // A turn is running again, whoever started it: no longer paused.
+      this.setDelegatePaused(chatId, false);
+      this.emitDelegateUpdate(state.subagent.parentChatId, chatId, state.subagent.label, 'running');
+    } else if (state.subagent && this.pausedDelegates.has(chatId)) {
       this.emitDelegateUpdate(state.subagent.parentChatId, chatId, state.subagent.label, 'running');
     }
 

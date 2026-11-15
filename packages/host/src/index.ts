@@ -222,6 +222,7 @@ import {
   handleWatchListRequest,
   handleWatchStopRequest,
 } from './watchRequests.js';
+import { handleDelegateControlRequest } from './delegateControlRequests.js';
 import { HostStateStore } from './hostState.js';
 import { AudioRelayBridge } from './audio-relay-bridge.js';
 import { webBotAuthFromServer } from './webBotAuth.js';
@@ -2585,6 +2586,22 @@ async function startHost(
             setWatchCheckIn: (chatId, taskId, sec) =>
               daemon.setWatchTaskCheckIn(chatId, taskId, sec),
             watchOutput: (chatId, taskId, tail) => daemon.watchOutput(chatId, taskId, tail),
+          },
+          sender,
+          logger,
+        );
+        return;
+      }
+      if (event.type === 'patch.delegate_control.request') {
+        void handleDelegateControlRequest(
+          event,
+          {
+            hasChat: (chatId) => daemon.chatState.get(chatId) !== undefined,
+            isDelegateOf: (parent, id) => daemon.delegateParentOf(id) === parent,
+            pause: (parent, id) => daemon.pauseDelegate(parent, id),
+            resume: (parent, id) => daemon.resumeDelegate(parent, id),
+            stop: (parent, id) => daemon.stopDelegate(parent, id),
+            spinOff: (parent, id) => daemon.spinOffDelegate(parent, id),
           },
           sender,
           logger,

@@ -322,6 +322,78 @@ describe('patch_delegate', () => {
     expect(await daemon.stopDelegate(parentChatId, id)).toBe(false);
   });
 
+  it('a user pause interrupts the turn without settling or reporting it, and stop still works', async () => {
+    const { daemon, events, folder } = setupHanging();
+    const parentChatId = await daemon.spawnChat({ folder });
+    const { id } = await daemon.createDelegate({ parentChatId, prompt: 'a slow task' });
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(await daemon.pauseDelegate(parentChatId, id)).toBe(true);
+    // Alive, not settled: still running, flagged paused, nothing delivered.
+    expect(daemon.listDelegates(parentChatId)).toEqual([
+      expect.objectContaining({ id, status: 'running', paused: true }),
+    ]);
+    expect(messagesOn(events, parentChatId)).toHaveLength(0);
+    const update = events
+      .filter((e) => e.type === 'chat.delegate_update' && e.delegateId === id)
+      .at(-1);
+    expect(update).toMatchObject({ status: 'running', paused: true });
+
+    // Pausing again is idempotent; a stranger's id is refused.
+    expect(await daemon.pauseDelegate(parentChatId, id)).toBe(true);
+    expect(await daemon.pauseDelegate('someone-else', id)).toBe(false);
+
+    // A paused agent can still be stopped outright.
+    expect(await daemon.stopDelegate(parentChatId, id)).toBe(true);
+    expect(daemon.listDelegates(parentChatId)[0]).toMatchObject({ id, status: 'stopped' });
+    expect(await daemon.pauseDelegate(parentChatId, id)).toBe(false);
+  });
+
+  it('resume only applies to a paused agent, and runs it again', async () => {
+    const { daemon, folder } = setupHanging();
+    const parentChatId = await daemon.spawnChat({ folder });
+    const { id } = await daemon.createDelegate({ parentChatId, prompt: 'a slow task' });
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(await daemon.resumeDelegate(parentChatId, id)).toBe(false);
+    await daemon.pauseDelegate(parentChatId, id);
+    expect(await daemon.resumeDelegate(parentChatId, id)).toBe(true);
+    await flushUntil(() => daemon.listDelegates(parentChatId)[0]?.paused === undefined);
+    expect(daemon.listDelegates(parentChatId)[0]?.status).toBe('running');
+    await daemon.stopDelegate(parentChatId, id);
+  });
+
+  it('spinning off makes it an ordinary chat in the list and ends its reporting to the parent', async () => {
+    const { daemon, events, folder } = setupHanging();
+    const parentChatId = await daemon.spawnChat({ folder });
+    const { id } = await daemon.createDelegate({
+      parentChatId,
+      prompt: 'a slow task',
+      title: 'slow one',
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(daemon.listWithFilter({}).map((c) => c.chatId)).not.toContain(id);
+
+    expect(daemon.spinOffDelegate('someone-else', id)).toBeUndefined();
+    expect(daemon.spinOffDelegate(parentChatId, id)).toBe(id);
+
+    expect(daemon.isSubagent(id)).toBe(false);
+    expect(daemon.delegateParentOf(id)).toBeUndefined();
+    expect(daemon.listWithFilter({}).map((c) => c.chatId)).toContain(id);
+    expect(daemon.listDelegates(parentChatId)).toEqual([]);
+    expect(
+      events.some(
+        (e) => e.type === 'chat.spawned' && e.chatId === id && e.parentChatId === parentChatId,
+      ),
+    ).toBe(true);
+    expect(events.at(-1)).toBeDefined();
+    expect(
+      events.filter((e) => e.type === 'chat.delegate_update' && e.delegateId === id).at(-1),
+    ).toMatchObject({ status: 'stopped', spunOffChatId: id });
+    // Spun off, it is no longer stopped with its parent.
+    await daemon.stopChat(id);
+  });
+
   it("counts a running subagent in the parent's chat.state backgroundTasks, and drops it once stopped", async () => {
     const { daemon, events, folder } = setupHanging();
     const parentChatId = await daemon.spawnChat({ folder });

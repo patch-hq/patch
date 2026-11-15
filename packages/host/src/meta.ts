@@ -456,6 +456,8 @@ export const ChatMeta = z
         followUp: z.boolean().optional(),
         /** Tools the parent withheld from this subagent (patch_delegate `disallowedTools`). */
         disallowedTools: z.array(z.string().min(1)).optional(),
+        /** The user paused it: idle and alive, not settled, until a turn runs again. */
+        userPaused: z.boolean().optional(),
       })
       .strict()
       .optional(),
