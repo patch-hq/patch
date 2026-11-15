@@ -3001,6 +3001,17 @@ if (verbosityParam === 'off' || verbosityParam === 'summary' || verbosityParam =
     loaded: true,
   });
 }
+// The Manager and Batch are experimental and off by default in the product, but
+// the sidebar specs here are about them, so the harness turns them on.
+// `?experimentalFeatures=off` shows the product default.
+usePreferencesStore.setState({
+  preferences: {
+    ...usePreferencesStore.getState().preferences,
+    experimentalFeatures:
+      new URLSearchParams(window.location.search).get('experimentalFeatures') !== 'off',
+  },
+  loaded: true,
+});
 usePresenceStore.getState().setConnection('connected');
 // The `auth.ok` greeting, as the server replays it: one registered host, online,
 // with its own credential and its own last-used model. The last-used model lives
