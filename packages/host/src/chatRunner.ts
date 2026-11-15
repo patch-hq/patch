@@ -2519,6 +2519,8 @@ export class Daemon {
    * running `patch_watch` tasks, so it can re-check once they finish instead
    * of leaving the goal silently un-evaluated until the next real turn.
    */
+  /** Chats whose current goal-evaluation deferral has already been logged. */
+  private readonly goalDeferLogged = new Set<string>();
   private readonly goalWatchPollTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private static readonly RECENT_EVENTS_CAP = 200;
   /** OAuth gate run before every query. See HostOptions.resolveOAuth. */
@@ -5346,6 +5348,7 @@ export class Daemon {
     const goalPoll = this.goalWatchPollTimers.get(chatId);
     if (goalPoll !== undefined) clearTimeout(goalPoll);
     this.goalWatchPollTimers.delete(chatId);
+    this.goalDeferLogged.delete(chatId);
     this.parkedTurns.delete(chatId);
     this.persistPendingTurns(chatId);
     // spec/04 § Branching — "Archiving/stopping the chat stops all its
@@ -11740,12 +11743,42 @@ export class Daemon {
     if (isReservedSpecialThread(chatId)) return;
     const state = this.chatState.get(chatId);
     if (!state || state.goal === null) return;
+    if (state.status !== 'active') {
+      this.opts.logger.warn(
+        { chatId, status: state.status },
+        'goal evaluation skipped: chat is not active',
+      );
+      return;
+    }
 
     // A running delegate is work this chat is waiting on, exactly like a watch:
     // judging the goal now would call an idle parent done while it is in flight.
-    if (this.watch.count(chatId) > 0 || this.hasRunningDelegates(chatId)) {
+    // Every deferral is logged at warn level once per episode (not per 15 s
+    // poll) with its reason; the poll re-checks until the blocker clears.
+    const watches = this.watch.count(chatId);
+    const delegates = this.hasRunningDelegates(chatId);
+    const pendingPermission = this.hasPendingPermission(chatId);
+    if (watches > 0 || delegates || pendingPermission) {
+      if (!this.goalDeferLogged.has(chatId)) {
+        this.goalDeferLogged.add(chatId);
+        this.opts.logger.warn(
+          { chatId, runningWatches: watches, runningDelegates: delegates, pendingPermission },
+          'goal evaluation deferred: waiting on ' +
+            [
+              watches > 0 ? 'a running patch_watch task' : null,
+              delegates ? 'a running delegated agent' : null,
+              pendingPermission ? 'a pending permission request' : null,
+            ]
+              .filter(Boolean)
+              .join(' and ') +
+            '; re-checking until it clears',
+        );
+      }
       this.armGoalWatchPoll(chatId);
       return;
+    }
+    if (this.goalDeferLogged.delete(chatId)) {
+      this.opts.logger.warn({ chatId }, 'goal evaluation unblocked; evaluating now');
     }
 
     const condition = state.goal;
@@ -11831,9 +11864,9 @@ export class Daemon {
     // The chat was archived or deleted while the judge was thinking: a
     // continuation turn now would be a host message, which un-archives it.
     if (state.status !== 'active') {
-      this.opts.logger.info(
+      this.opts.logger.warn(
         { chatId, status: state.status },
-        'goal verdict dropped: chat not active',
+        'goal verdict dropped: chat not active (goal stays set but nothing re-checks until the chat is active and a turn settles)',
       );
       return;
     }
