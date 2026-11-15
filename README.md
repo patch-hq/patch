@@ -1,11 +1,16 @@
 # Patch
 
-Run and steer coding agents (Claude Code and Codex) from anywhere: the terminal,
-web, phone, desktop and a voice device, with triggers (cron, webhooks, Todoist)
-and hosts you run yourself. Patch also gives agents their own tools: goals,
-background sub-agents, watches, wakes, pads, notifications and messaging
-between chats. A host does the
-work on a host you choose; a server connects your devices to your hosts.
+A harness for Claude Code, Codex and more, for people who spend their day in
+agents. Self-hosted, free and open source. Use the subscriptions you already
+have: any provider, any account.
+
+Every machine you run agents on shows up in one list, across the terminal, web,
+phone and desktop. Jobs run agents on a schedule or in response to cron,
+webhooks and Todoist. Built-in design tools (pads) let you react to a mock-up
+directly, and nothing is hidden: you can see what each agent is doing. Agents
+also get their own tools: goals, background sub-agents, watches, wakes,
+notifications and messaging between chats. A host does the work on a machine you
+choose; a server connects your devices to your hosts.
 
 The design is written up in `spec/`.
 
