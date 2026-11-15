@@ -2885,6 +2885,16 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     daemon().browserViewport(tabId, req),
   );
 
+  // A caller blocked on a subagent (`wait: true`) whose connection dies before
+  // the result arrives (the host or its tool bridge restarted under it) will
+  // never read the answer. Stop waiting for it, so the result is delivered into
+  // the parent as a turn instead of being resolved into a dead socket.
+  const abandonDelegateWaitOnClose = (reply: FastifyReply, id: string): void => {
+    reply.raw.once('close', () => {
+      if (!reply.raw.writableFinished) opts.daemon!.abandonDelegateWait(id);
+    });
+  };
+
   // patch_delegate — create a durable subagent chat under the caller.
   app.post('/internal/delegate', async (req, reply) => {
     const start = Date.now();
@@ -2921,7 +2931,10 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         durationMs: Date.now() - start,
         ok: true,
       });
-      if (result) return { id, label, ...(await result) };
+      if (result) {
+        abandonDelegateWaitOnClose(reply, id);
+        return { id, label, ...(await result) };
+      }
       return { id, label };
     } catch (err) {
       const code = err instanceof ChatNotFoundError ? 'chat_not_found' : 'invalid_input';
@@ -2953,7 +2966,10 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         message,
         ...(wait ? { wait } : {}),
       });
-      if (result) return { id, ...(await result) };
+      if (result) {
+        abandonDelegateWaitOnClose(reply, id);
+        return { id, ...(await result) };
+      }
       return { id };
     } catch (err) {
       return reply.code(400).send({
