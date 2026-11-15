@@ -150,3 +150,40 @@ describe('undrawn', () => {
     expect(undrawn(s1(), 0)).toHaveLength(MAX_OUTPUT_CHARS);
   });
 });
+
+describe('terminalStore — a link that dies without an exit frame', () => {
+  beforeEach(() => {
+    store()._reset();
+    store().start('s1', 'd1', '/home/tom');
+    store().ingest({ type: 'patch.terminal.ready', sessionId: 's1', cwd: '/home/tom', pty: true });
+  });
+
+  it('interrupt ends a live session with a reason and marks it to reopen', () => {
+    store().interrupt('Connection lost');
+    expect(s1()).toMatchObject({ status: 'ended', reopen: 'now', message: 'Connection lost' });
+  });
+
+  it('only the offline host’s sessions end', () => {
+    store().interrupt('offline', 'other');
+    expect(s1().status).toBe('live');
+    store().interrupt('offline', 'd1');
+    expect(s1().status).toBe('ended');
+  });
+
+  it('a daemon_shutdown waits for the host to go offline; a shell exit never reopens', () => {
+    store().ingest({
+      type: 'patch.terminal.exit',
+      sessionId: 's1',
+      code: null,
+      reason: 'daemon_shutdown',
+    });
+    expect(s1().reopen).toBe('after-offline');
+    store().interrupt('offline', 'd1');
+    expect(s1().reopen).toBe('now');
+
+    store().start('s2', 'd1', '/x');
+    store().ingest({ type: 'patch.terminal.exit', sessionId: 's2', code: 0, reason: 'shell_exit' });
+    store().interrupt('offline', 'd1');
+    expect(store().sessions['s2']?.reopen).toBe('no');
+  });
+});
