@@ -322,6 +322,8 @@ export class WsHub {
    * points at". NO FALLBACK: a session id we have never seen is refused.
    */
   private readonly terminalSessionHost = new Map<string, string>();
+  /** `sessionId → surfaceId` that opened it, so a dead host can tell that surface its shell is gone. */
+  private readonly terminalSessionSurface = new Map<string, string>();
   /**
    * The host-search counterpart of `terminalSessionHost` — `searchId →
    * hostId`, stamped from `patch.host_search.request` (the only host-search
@@ -469,6 +471,29 @@ export class WsHub {
     return { type: 'host.offline', hostId, ...(reason !== undefined ? { reason } : {}) };
   }
 
+  /**
+   * A host went away (offline or removed): every shell on it died with it.
+   * Drop the routes AND tell each owning surface, loudly — otherwise the
+   * drawer keeps showing a live prompt, swallows typed commands, and only
+   * says `no terminal session` once a keystroke is refused. NO FALLBACK.
+   */
+  private endTerminalSessionsOnHost(hostId: string): void {
+    for (const [sessionId, host] of [...this.terminalSessionHost.entries()]) {
+      if (host !== hostId) continue;
+      this.terminalSessionHost.delete(sessionId);
+      const surfaceId = this.terminalSessionSurface.get(sessionId);
+      this.terminalSessionSurface.delete(sessionId);
+      if (surfaceId !== undefined) {
+        this.sendToSurface(surfaceId, {
+          type: 'patch.terminal.exit',
+          sessionId,
+          code: null,
+          reason: 'daemon_shutdown',
+        });
+      }
+    }
+  }
+
   /** Tell every surface and host a host's status changed; on offline, resolve what died with it. */
   private announceHostStatus(hostId: string, status: 'online' | 'offline'): void {
     const ev: WireEvent =
@@ -496,9 +521,7 @@ export class WsHub {
     // Every shell on that host died with it. Drop the routes so a
     // surface still holding those ids is told `unknown_session` instead of
     // having its keystrokes buffered for a shell that no longer exists.
-    for (const [sessionId, host] of this.terminalSessionHost.entries()) {
-      if (host === hostId) this.terminalSessionHost.delete(sessionId);
-    }
+    this.endTerminalSessionsOnHost(hostId);
     // Same reasoning for a search mid-walk on that host — it died with
     // the host, and a cancel for it would otherwise route nowhere.
     for (const [searchId, host] of this.hostSearchHost.entries()) {
@@ -1646,6 +1669,7 @@ export class WsHub {
         // `open` is the ONLY terminal frame that names a host, so it is also
         // where this session's host is recorded for every later frame.
         this.terminalSessionHost.set(event.sessionId, event.hostId);
+        this.terminalSessionSurface.set(event.sessionId, conn.surfaceId);
         const tagged: WireEvent = { ...event, forSurfaceId: conn.surfaceId };
         this.deps.hostLink.sendTo(event.hostId, conn.surfaceId, tagged);
         return;
@@ -1696,7 +1720,10 @@ export class WsHub {
           );
           return;
         }
-        if (event.type === 'patch.terminal.close') this.terminalSessionHost.delete(event.sessionId);
+        if (event.type === 'patch.terminal.close') {
+          this.terminalSessionHost.delete(event.sessionId);
+          this.terminalSessionSurface.delete(event.sessionId);
+        }
         const tagged: WireEvent = { ...event, forSurfaceId: conn.surfaceId };
         this.deps.hostLink.sendTo(hostId, conn.surfaceId, tagged);
         return;
@@ -1857,6 +1884,7 @@ export class WsHub {
     // host it was on so a stale id is refused rather than mis-routed.
     if (event.type === 'patch.terminal.exit') {
       this.terminalSessionHost.delete(event.sessionId);
+      this.terminalSessionSurface.delete(event.sessionId);
     }
     if (event.type === 'patch.host_search.done') {
       this.hostSearchHost.delete(event.searchId);
@@ -2100,9 +2128,7 @@ export class WsHub {
     this.hostLastSeenAt.delete(hostId);
     this.lastFolderList.delete(hostId);
     this.lastClaudeSettings.delete(hostId);
-    for (const [sessionId, host] of this.terminalSessionHost.entries()) {
-      if (host === hostId) this.terminalSessionHost.delete(sessionId);
-    }
+    this.endTerminalSessionsOnHost(hostId);
     for (const [searchId, host] of this.hostSearchHost.entries()) {
       if (host === hostId) this.hostSearchHost.delete(searchId);
     }
