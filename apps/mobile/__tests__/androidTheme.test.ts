@@ -39,7 +39,7 @@ describe('android native theme follows the OS colour scheme', () => {
   });
 
   it('MainActivity re-applies window background and status bar when uiMode changes', () => {
-    const kt = read('java/io/github/tomchambers2/patch/MainActivity.kt');
+    const kt = read('java/dev/patchhq/app/MainActivity.kt');
     expect(kt).toMatch(/override fun onConfigurationChanged/);
     expect(kt).toContain('R.color.window_background');
     expect(kt).toContain('R.color.status_bar');

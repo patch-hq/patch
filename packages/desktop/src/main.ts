@@ -1059,7 +1059,7 @@ function sendWhenReady(win: BrowserWindow, channel: string, payload: unknown): v
 // can offer to start or end a meeting. See meeting-audio.ts.
 
 /** Patch's own helper processes also open the mic (voice notes, the meeting). */
-const OWN_BUNDLE_PREFIX = 'io.github.tomchambers2.patch';
+const OWN_BUNDLE_PREFIX = 'dev.patchhq.app';
 
 const systemAudio = new SystemAudio(() =>
   helperPath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, devDir: __dirname }),

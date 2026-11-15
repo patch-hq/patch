@@ -138,7 +138,7 @@ Packaging invariants that must hold:
 - Ship the tray template icon. `createTray` reads `build/trayIconTemplate.png` (+ `@2x`) from inside the asar. The `files` glob must list them explicitly (it bundles `dist/**` + `package.json` only by default), else the asset is absent and the tray throws on every launch.
 - App icon is `build/icon.png` — a green rounded square with a cream italic "p" (matches the web favicon's mark, square not circular). electron-builder generates the `.icns`.
 - Auto-updater needs `app-update.yml`. That config only ships in real published dmg/zip builds; a local `--dir` dev build is packaged but has no update config, so the updater is skipped when the file is absent (no unhandled rejection).
-- Local `--dir` builds skip signing, leaving a stale `Identifier=Electron` ad-hoc signature that Apple Silicon refuses to launch from Finder. Re-sign ad-hoc (`codesign --force --deep --sign -`) so the identifier becomes `io.github.tomchambers2.patch`; real release builds sign with the project's signing identity (`11-deployment.md` § Desktop code signing).
+- Local `--dir` builds skip signing, leaving a stale `Identifier=Electron` ad-hoc signature that Apple Silicon refuses to launch from Finder. Re-sign ad-hoc (`codesign --force --deep --sign -`) so the identifier becomes `dev.patchhq.app`; real release builds sign with the project's signing identity (`11-deployment.md` § Desktop code signing).
 
 #### Desktop first run
 

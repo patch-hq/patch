@@ -409,6 +409,12 @@ export const QUIT_GRACE_MS = 10_000;
  * file:// path of the staged bundle, which says nothing to the person reading.
  */
 export function conciseReason(message: string): string {
+  // ShipIt found no bundle with the running app's id in the update: the app id
+  // changed (docs/desktop-packaging.md § Changing the app id). It cannot be
+  // fixed by retrying, so say what to do instead of quoting Squirrel.
+  if (/Could not locate update bundle for/i.test(message)) {
+    return 'this Patch is an older app id and cannot update itself; install the latest Patch from the download page once';
+  }
   return (message.split('\n')[0] ?? '')
     .replace(/\s*at URL\s+\S+/gi, '')
     .replace(/\s*\S+:\/\/\S+/g, '')

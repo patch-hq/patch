@@ -43,7 +43,7 @@
         <action android:name="android.telecom.ConnectionService"/>
       </intent-filter>
     </service>
-    <service android:name="io.github.tomchambers2.patch.VoiceAudioService" android:foregroundServiceType="microphone" android:exported="false"/>
+    <service android:name="dev.patchhq.app.VoiceAudioService" android:foregroundServiceType="microphone" android:exported="false"/>
     <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true" android:screenOrientation="portrait">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>
@@ -54,7 +54,7 @@
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
         <data android:scheme="patch"/>
-        <data android:scheme="io.github.tomchambers2.patch"/>
+        <data android:scheme="dev.patchhq.app"/>
       </intent-filter>
       <intent-filter>
         <action android:name="android.intent.action.SEND"/>
