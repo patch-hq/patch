@@ -64,7 +64,12 @@ import {
 } from './voiceAudioService';
 import { startMicCapture, stopMicCapture } from './voiceMic';
 import { addressWordOrNull, voiceConfigOrNull } from './preferences';
-import { callEngineLabel, describeVoiceError, modeSwitchNeedsNewSession } from './voiceEngine';
+import {
+  callEngineLabel,
+  describeMicSilent,
+  describeVoiceError,
+  modeSwitchNeedsNewSession,
+} from './voiceEngine';
 import { startTtsPlayback, writeTtsPcm, flushTtsPlayback, stopTtsPlayback } from './voiceTts';
 import { ensurePermission } from './permissionGate';
 
@@ -351,10 +356,21 @@ export function startVoiceCall(
             // session behind a fatal one, and the close handler below finds
             // this reason already on screen.
             console.log(`[patch-voice] call audio.error ${frame.code}: ${frame.message}`);
-            const text = describeVoiceError(frame.code, frame.message);
             clearConnectTimer();
-            useVoiceStore.getState().setError(text);
-            useUiStore.getState().pushError(`voice call: ${text}`);
+            const show = (text: string): void => {
+              useVoiceStore.getState().setError(text);
+              useUiStore.getState().pushError(`voice call: ${text}`);
+            };
+            if (frame.code === 'mic_silent') {
+              void describeMicSilent(frame.message, {
+                has: async () => (await Audio.getPermissionsAsync()).granted,
+                ask: () => ensurePermission('microphone'),
+              })
+                .then(show)
+                .catch((e: unknown) => show(`microphone check failed: ${String(e)}`));
+              break;
+            }
+            show(describeVoiceError(frame.code, frame.message));
             break;
           }
           default:

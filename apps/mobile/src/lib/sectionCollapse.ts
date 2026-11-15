@@ -25,3 +25,8 @@ export function getSectionOpen(section: CollapsibleSection, initial: boolean): b
 export function setSectionOpen(section: CollapsibleSection, open: boolean): void {
   store().set(SECTION_OPEN_PREFIX + section, open);
 }
+
+/** The stored choice for `section`, or undefined when it was never toggled. */
+export function getStoredSectionOpen(section: CollapsibleSection): boolean | undefined {
+  return store().getBoolean(SECTION_OPEN_PREFIX + section);
+}

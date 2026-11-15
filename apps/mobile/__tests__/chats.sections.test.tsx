@@ -291,10 +291,11 @@ describe('items memo — Archived: chronological order', () => {
 });
 
 describe('collapse defaults', () => {
-  it('opens Channels but keeps Snoozed and Archived collapsed on a first launch', () => {
+  it('opens Channels (it has one) but keeps Snoozed and Archived collapsed on a first launch', () => {
     useChatStore
       .getState()
       .hydrate([
+        row({ chatId: 'thread_speakers' }),
         row({ chatId: 's1', name: 'Sleeping', snoozedUntil: Date.now() + 3_600_000 }),
         row({ chatId: 'a1', name: 'Filed away', status: 'archived' }),
       ]);
@@ -306,7 +307,14 @@ describe('collapse defaults', () => {
     expect(hasText(r.root, 'Filed away')).toBe(false);
   });
 
+  it('closes an empty Channels on a first launch', () => {
+    const r = renderRN(<ChatsScreen />);
+    expect(hasText(r.root, 'Channels ▸')).toBe(true);
+    expect(hasText(r.root, 'No channels yet')).toBe(false);
+  });
+
   it('remembers a toggle across launches (a fresh mount reads the stored choice)', () => {
+    useChatStore.getState().hydrate([row({ chatId: 'thread_speakers' })]);
     const first = renderRN(<ChatsScreen />);
     actSync(() => headerPressable(first, 'Snoozed').props.onPress());
     actSync(() => headerPressable(first, 'Channels').props.onPress());

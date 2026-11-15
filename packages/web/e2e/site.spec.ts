@@ -64,7 +64,7 @@ for (const viewport of [
         'Built for heavy use',
       ]);
       await expect(page.locator('.deep h3')).toHaveCount(7);
-      await expect(page.locator('.detail-grid details')).toHaveCount(10);
+      await expect(page.locator('.detail-grid details')).toHaveCount(11);
 
       // A quiet Download every couple of sections, all pointing at the same build.
       const strips = page.locator('.cta-strip [data-download]');

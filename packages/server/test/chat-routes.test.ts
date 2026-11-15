@@ -3235,6 +3235,88 @@ describe('chat REST routes', () => {
     }
   }, 8_000);
 
+  // ---- GET /api/chats/:id/stray-processes (spec/02 § Stray processes) ----
+  it('GET and POST stop on /api/chats/:id/stray-processes relay to the host, stop carrying the pid', async () => {
+    const { registry, jwt } = await bootstrap();
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
+    try {
+      seedStatsChat(hostLink, 'c-stray');
+      const asked: Array<number | undefined> = [];
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
+        origSend(surfaceId, event);
+        if (event.type === 'patch.stray_processes.request') {
+          asked.push(event.stopPid);
+          setImmediate(() => {
+            hostLink.emit({
+              type: 'patch.stray_processes.response',
+              requestId: event.requestId,
+              ok: true,
+              processes: [{ pid: 4321, command: 'node run.js', startedAt: 1, running: true }],
+              ...(event.stopPid !== undefined ? { stopped: true } : {}),
+            });
+          });
+        }
+      };
+      const headers = { authorization: `Bearer ${jwt}` };
+      const list = await built.app.inject({
+        method: 'GET',
+        url: '/api/chats/c-stray/stray-processes',
+        headers,
+      });
+      expect(list.statusCode).toBe(200);
+      expect((list.json() as { processes: unknown[] }).processes).toHaveLength(1);
+      const stop = await built.app.inject({
+        method: 'POST',
+        url: '/api/chats/c-stray/stray-processes/4321/stop',
+        headers,
+      });
+      expect(stop.statusCode).toBe(200);
+      expect((stop.json() as { stopped: boolean }).stopped).toBe(true);
+      expect(asked).toEqual([undefined, 4321]);
+      const bad = await built.app.inject({
+        method: 'POST',
+        url: '/api/chats/c-stray/stray-processes/abc/stop',
+        headers,
+      });
+      expect(bad.statusCode).toBe(400);
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('GET /api/chats/:id/stray-processes surfaces an unsupported host as 501, not an empty list', async () => {
+    const { registry, jwt } = await bootstrap();
+    const hostLink = new InProcessHostLink();
+    const built = await makeApp({ registry, hostLink });
+    try {
+      seedStatsChat(hostLink, 'c-stray2');
+      const origSend = hostLink.send.bind(hostLink);
+      hostLink.send = (surfaceId, event) => {
+        origSend(surfaceId, event);
+        if (event.type === 'patch.stray_processes.request') {
+          setImmediate(() => {
+            hostLink.emit({
+              type: 'patch.stray_processes.response',
+              requestId: event.requestId,
+              ok: false,
+              error: { code: 'unsupported_platform', message: 'Linux only' },
+            });
+          });
+        }
+      };
+      const res = await built.app.inject({
+        method: 'GET',
+        url: '/api/chats/c-stray2/stray-processes',
+        headers: { authorization: `Bearer ${jwt}` },
+      });
+      expect(res.statusCode).toBe(501);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   // ---- GET /api/chats/:id/background-task-stats ----
   // The background task bar's readout (spec/14 § Main chat panel — Background
   // task bar), relayed to the chat's own host. The rule under every one of

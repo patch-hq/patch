@@ -2125,6 +2125,8 @@ useChatStore.setState((s) => ({
         role: i % 2 === 0 ? 'user' : 'assistant',
         content: `history line ${i} — lorem ipsum dolor sit amet consectetur adipiscing.`,
         at: i,
+        // Spread over weeks so the scroll rail has dates to mark.
+        messageAt: Date.UTC(2026, 9, 1) + i * 3 * 3_600_000,
       }),
     ),
     chat_deeplink: [
@@ -3164,6 +3166,16 @@ const archiveSize = Number(new URLSearchParams(window.location.search).get('arch
           : [];
       return Promise.resolve(
         new Response(JSON.stringify({ jobs }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    }
+    // No host here, so the stray-process bar would draw its "can't list" row in every chat and
+    // shift whatever a spec is measuring. The harness host has none running.
+    if (/\/api\/chats\/[^/?]+\/stray-processes(?:\?|$)/.test(url)) {
+      return Promise.resolve(
+        new Response(JSON.stringify({ processes: [] }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         }),

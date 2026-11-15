@@ -22,6 +22,7 @@ import { useMarkChatNotificationsRead } from '../stores/notificationsStore.js';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { OpenableLink } from '../components/OpenableLink.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
+import { railMarkers, nextFarState, isFar, type FarState } from '../lib/scrollRail.js';
 import { classifyTurnFailure } from '../lib/turnFailure.js';
 import { sendToNewChat, selectionWithin } from '../lib/sendToNewChat.js';
 import { quoteSelectionIntoComposer } from '../lib/quoteSelection.js';
@@ -112,6 +113,7 @@ import { MeetingEditChips, MeetingLayout } from '../components/MeetingPanel.js';
 import { isMeetingShown, useMeetingStore } from '../stores/meetingStore.js';
 import { presentFailure } from '../lib/usage.js';
 import { BackgroundTaskBar } from '../components/BackgroundTaskBar.js';
+import { StrayProcessBar } from '../components/StrayProcessBar.js';
 import { StatusPill, StatusRow } from '../components/StatusRow.js';
 import { BrowserHandoffPanel } from '../components/BrowserHandoffPanel.js';
 import { ArtifactBar } from '../components/ArtifactBar.js';
@@ -264,6 +266,8 @@ const chatScrollMemory = new Map<
 // through the transcript's own late layout; and how long the ring stays.
 const JUMP_WAIT_MS = 5000;
 const JUMP_SETTLE_MS = 1000;
+// The scroll rail stays this long after the reader stops scrolling.
+const RAIL_IDLE_MS = 4000;
 const JUMP_HIGHLIGHT_MS = 2000;
 
 // How long a restored (non-bottom) open keeps re-pinning to its anchor
@@ -683,9 +687,56 @@ export function ChatRoute({
   const [showScrollDown, setShowScrollDown] = useState(false);
   // The up arrow above it: jump straight to the first message of a long chat.
   const [showScrollUp, setShowScrollUp] = useState(false);
-  // Set when the first message is asked for while older entries are still
-  // unmounted: the scroll to the top waits for them to mount.
-  const pendingTopRef = useRef(false);
+  const railPoints = useMemo(() => railMarkers(timeline), [timeline]);
+  const showScrollUpRef = useRef(false);
+  showScrollUpRef.current = showScrollUp;
+  // The scroll rail (up arrow + dated dots) is for someone heading a long way
+  // up: it opens after a sustained upward burst, not whenever the chat is long,
+  // and goes away again once the reader stops scrolling.
+  const farRef = useRef<FarState>({ up: 0, lastAt: 0 });
+  const railHideRef = useRef<number | null>(null);
+  const railHoverRef = useRef(false);
+  const armRailHide = (): void => {
+    if (railHideRef.current !== null) window.clearTimeout(railHideRef.current);
+    railHideRef.current = window.setTimeout(() => {
+      railHideRef.current = null;
+      if (railHoverRef.current) armRailHide();
+      else setShowScrollUp(false);
+    }, RAIL_IDLE_MS);
+  };
+  function noteFarScroll(el: HTMLElement, delta: number): void {
+    farRef.current = nextFarState(farRef.current, delta, Date.now());
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 50;
+    if (atBottom) {
+      setShowScrollUp(false);
+      return;
+    }
+    if (timelineRef.current.length > TAIL_ENTRIES && isFar(farRef.current, el.clientHeight)) {
+      setShowScrollUp(true);
+    }
+    if (showScrollUpRef.current || isFar(farRef.current, el.clientHeight)) armRailHide();
+  }
+  function railJump(seq: number | undefined, first: boolean): void {
+    if (seq === undefined) return;
+    followRef.current = false;
+    setShowScrollDown(true);
+    restoreAnchorRef.current = null;
+    jumpRef.current = {
+      chatId,
+      seq: first ? (timelineRef.current[0]?.seq ?? seq) : seq,
+      found: false,
+      settleUntil: 0,
+      expireAt: Date.now() + JUMP_WAIT_MS,
+    };
+    tryJump();
+    armRailHide();
+  }
+  useEffect(
+    () => () => {
+      if (railHideRef.current !== null) window.clearTimeout(railHideRef.current);
+    },
+    [],
+  );
   const contentRef = useRef<HTMLDivElement>(null);
   // Index of the oldest mounted entry. `null` = the newest TAIL_ENTRIES, tracking
   // the tail as it grows. Keyed to the chat so a chat switch starts at the tail.
@@ -714,11 +765,6 @@ export function ChatRoute({
   useLayoutEffect(() => {
     const el = streamRef.current;
     if (!el) return;
-    if (pendingTopRef.current && windowStart === 0) {
-      pendingTopRef.current = false;
-      setSelfScrollTop(el, 0);
-      return;
-    }
     const hold = expandHoldRef.current;
     if (hold !== null) {
       expandHoldRef.current = null;
@@ -1179,10 +1225,6 @@ export function ChatRoute({
     const maxTop = el.scrollHeight - el.clientHeight;
     const prev = lastScrollRef.current;
     lastScrollRef.current = { top: el.scrollTop, maxTop };
-    setShowScrollUp(
-      timelineRef.current.length > TAIL_ENTRIES &&
-        (windowStartRef.current > 0 || el.scrollTop > el.clientHeight),
-    );
     if (el.scrollTop < TAIL_NEAR_TOP_PX && windowStartRef.current > 0) {
       expandTo(windowStartRef.current - TAIL_CHUNK, true);
     }
@@ -1202,6 +1244,7 @@ export function ChatRoute({
     // them back, and neither must a still-settling restore (above).
     jumpRef.current = null;
     restoreAnchorRef.current = null;
+    noteFarScroll(el, el.scrollTop - prev.top);
     // A shrinking scroll range (a tool block collapsing, a placeholder being
     // replaced) drops scrollTop by exactly the amount the range lost, with no
     // input from anyone — subtract it before reading the rest as intent.
@@ -2304,6 +2347,7 @@ export function ChatRoute({
           onNotMet={(condition) => void handleSend(`/goal ${condition}`)}
         />
         <BackgroundTaskBar chatId={chatId} />
+        <StrayProcessBar chatId={chatId} />
         <DelegateStrip chatId={chatId} />
         <ArtifactBar chatId={chatId} />
       </div>
@@ -2371,31 +2415,44 @@ export function ChatRoute({
                 <RateLimitCard row={row} />
                 <WakeHoldBubble row={row} />
               </div>
-              {showScrollUp ? (
+              {showScrollUp && railPoints.length > 0 ? (
                 <div className="scroll-down-anchor scroll-up-anchor">
-                  <button
-                    type="button"
-                    className="scroll-down-btn"
-                    data-testid="scroll-to-top"
-                    aria-label="Scroll to first message"
-                    title="Scroll to first message"
-                    onClick={() => {
-                      followRef.current = false;
-                      setShowScrollDown(true);
-                      setShowScrollUp(false);
-                      jumpRef.current = null;
-                      restoreAnchorRef.current = null;
-                      const el = streamRef.current;
-                      if (windowStartRef.current > 0) {
-                        pendingTopRef.current = true;
-                        expandTo(0, false);
-                      } else if (el) {
-                        setSelfScrollTop(el, 0);
-                      }
+                  <nav
+                    className="scroll-rail"
+                    data-testid="scroll-rail"
+                    aria-label="Jump through the chat"
+                    onPointerEnter={() => {
+                      railHoverRef.current = true;
+                    }}
+                    onPointerLeave={() => {
+                      railHoverRef.current = false;
+                      armRailHide();
                     }}
                   >
-                    <ChevronUp size={18} aria-hidden="true" />
-                  </button>
+                    <button
+                      type="button"
+                      className="scroll-rail-top"
+                      data-testid="scroll-to-top"
+                      aria-label="Scroll to first message"
+                      title="Scroll to first message"
+                      onClick={() => railJump(railPoints[0]?.seq, true)}
+                    >
+                      <ChevronUp size={16} aria-hidden="true" />
+                    </button>
+                    {railPoints.map((m, idx) => (
+                      <button
+                        key={m.seq}
+                        type="button"
+                        className="scroll-rail-stop"
+                        data-testid="scroll-rail-stop"
+                        aria-label={idx === 0 ? `First message, ${m.label}` : `Jump to ${m.label}`}
+                        onClick={() => railJump(m.seq, idx === 0)}
+                      >
+                        <span className="scroll-rail-label">{m.label}</span>
+                        <span className="scroll-rail-dot" aria-hidden="true" />
+                      </button>
+                    ))}
+                  </nav>
                 </div>
               ) : null}
               {showScrollDown ? (

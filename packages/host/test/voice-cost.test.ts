@@ -60,7 +60,7 @@ describe('costing a call', () => {
     const c = costCall({ ...base, engine: gemini, handoffs: 0 });
     expect(c.engineUsd).toBeCloseTo((3000 * 3 + 2000 * 0.5 + 600 * 12) / 1e6, 9);
     expect(callSummaryLine(c)).toBe(
-      'Call 0:52 · Gemini Flash · $0.017 · 5,000 tokens in / 600 out · 0 hand-offs',
+      'Call 0:52 · Gemini Flash · $0.017 · 5,000 tokens in / 600 out',
     );
   });
 

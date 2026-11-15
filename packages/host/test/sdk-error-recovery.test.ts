@@ -125,7 +125,7 @@ describe('a transient SDK error is retried, not dropped', () => {
   });
 
   it('re-sends the turn after the first backoff step and the chat recovers', async () => {
-    const { daemon, folder } = makeHost(
+    const { daemon, folder, metaStore } = makeHost(
       throwingOnce('socket hang up', [
         { type: 'assistant', content: 'second time lucky' },
         { type: 'result', sessionId: 's2' },
@@ -136,11 +136,15 @@ describe('a transient SDK error is retried, not dropped', () => {
     await vi.advanceTimersByTimeAsync(100);
     // The failure is still reported — surfaces must see it.
     expect(daemon.chatState.get(chatId)?.activity).toBe('errored');
+    expect(metaStore.read(chatId)?.lastError?.code).toBe('sdk_error');
 
     // First ladder step is 10s; the retry then lands on its own.
     await vi.advanceTimersByTimeAsync(10_000);
     await vi.advanceTimersByTimeAsync(500);
     expect(daemon.chatState.get(chatId)?.activity).toBe('idle');
+    // A retry that got through leaves no stale failure behind.
+    expect(metaStore.read(chatId)?.lastError).toBeUndefined();
+    expect(daemon.chatState.get(chatId)?.lastError).toBeNull();
     daemon.shutdown();
   });
 
