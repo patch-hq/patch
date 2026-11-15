@@ -5,6 +5,14 @@ import { createSleepGuard } from './sleepGuard.js';
 import { createSleepWatch } from './sleepWatch.js';
 import { CodexBackend } from './codexBackend.js';
 import { CodexHistory } from './codexHistory.js';
+import {
+  LOCAL_BACKEND_ID,
+  LocalBackend,
+  LocalModels,
+  isLocalModel,
+  localHistoryDir,
+  localSessionDir,
+} from './localModels.js';
 import { ChatSearchIndex, handleChatSearchRequest } from './chatSearch.js';
 // Entry point for the patch-daemon process.
 //
@@ -95,7 +103,12 @@ import { ArtifactAutoRepublisher, ArtifactPublisher } from './artifacts.js';
 import { PadClient } from './pads.js';
 import { RemoteJobsStore } from './jobs-interface.js';
 import { QueuePullClient } from './queuePull.js';
-import { assessHostHealth, HOST_HEALTH_INTERVAL_MS } from '@patch/wire';
+import {
+  assessHostHealth,
+  HOST_HEALTH_INTERVAL_MS,
+  providerDescriptor,
+  providerForModel,
+} from '@patch/wire';
 import type { ChatInputEvent } from '@patch/wire';
 import { createMetaStore } from './meta.js';
 import { readAccountExhaustion, writeAccountExhaustion } from './accountAvailabilityStore.js';
@@ -746,6 +759,7 @@ async function startHost(
     {
       claudeProjectsRoot: config.claudeProjectsRoot,
       codexHistoryRoot: join(config.patchHome, 'openai-history'),
+      localHistoryRoot: localHistoryDir(config.patchHome),
       seqIndexPath: (chatId) => join(dirname(metaStore.pathFor(chatId)), 'seqindex.jsonl'),
       now: () => Date.now(),
       onCorruptLine: ({ path, message }) =>
@@ -760,8 +774,20 @@ async function startHost(
     chatSearchBuilt = resolve;
   });
   const codexBackend = new CodexBackend(codexAccounts, codexHistory);
+  const localModels = new LocalModels();
+  const localHistory = new CodexHistory(localHistoryDir(config.patchHome), 'local');
+  const localBackend = new LocalBackend(
+    localModels,
+    localHistory,
+    localSessionDir(config.patchHome),
+  );
   const routedBackend: SdkBackend = {
-    run: (opts) => (isCodexModel(opts.model) ? codexBackend.run(opts) : sdkBackend.run(opts)),
+    run: (opts) =>
+      isCodexModel(opts.model)
+        ? codexBackend.run(opts)
+        : isLocalModel(opts.model)
+          ? localBackend.run(opts)
+          : sdkBackend.run(opts),
   };
 
   /**
@@ -1885,6 +1911,7 @@ async function startHost(
       );
     }
     daemon.setProviderPermissionDefaults(shared.providerPermissionDefaults);
+    localModels.setBaseUrl(shared.localModelBaseUrl);
     setDefaultModel(shared.defaultModel);
     if (shared.specialThreadModel !== specialThreadModel) {
       specialThreadModel = shared.specialThreadModel;
@@ -2603,7 +2630,15 @@ async function startHost(
         return;
       }
       if (event.type === 'patch.models.request') {
-        void handleModelsRequest(event, modelCatalog, sender, logger, selfHostId, codexAccounts);
+        void handleModelsRequest(
+          event,
+          modelCatalog,
+          sender,
+          logger,
+          selfHostId,
+          codexAccounts,
+          localModels,
+        );
         return;
       }
       if (event.type === 'patch.recurrence.translate.request') {
@@ -4030,6 +4065,13 @@ async function startHost(
   ): Promise<
     { ok: true; accessToken: string; accountId?: string } | { ok: false; reason: string }
   > => {
+    if (isLocalModel(model))
+      return localModels.configured
+        ? { ok: true, accessToken: '' }
+        : {
+            ok: false,
+            reason: 'No local model endpoint is set. Add its URL under Settings → Providers.',
+          };
     if (!isCodexModel(model)) return resolveOAuthWithCredit(turn);
     try {
       const account = await codexAccounts.resolve(
@@ -4226,6 +4268,7 @@ async function startHost(
       const results = await Promise.allSettled([
         modelCatalog.get().then((r) => r.models),
         codexAccounts.models(),
+        localModels.configured ? localModels.models() : Promise.resolve([]),
       ]);
       const models = results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
       if (!models.length)
@@ -4255,14 +4298,17 @@ async function startHost(
             'history: skipping unreadable JSONL line',
           ),
       });
+      const readerFor = (sessionId: string) =>
+        sessionId.startsWith('codex-')
+          ? codexHistory
+          : sessionId.startsWith('local-')
+            ? localHistory
+            : claudeHistory;
       return {
-        hasSession: (o) =>
-          (o.sessionId.startsWith('codex-') ? codexHistory : claudeHistory).hasSession(o),
-        read: (o) => (o.sessionId.startsWith('codex-') ? codexHistory : claudeHistory).read(o),
-        forkPoint: (o) =>
-          (o.sessionId.startsWith('codex-') ? codexHistory : claudeHistory).forkPoint(o),
-        sidePoint: (o) =>
-          (o.sessionId.startsWith('codex-') ? codexHistory : claudeHistory).sidePoint(o),
+        hasSession: (o) => readerFor(o.sessionId).hasSession(o),
+        read: (o) => readerFor(o.sessionId).read(o),
+        forkPoint: (o) => readerFor(o.sessionId).forkPoint(o),
+        sidePoint: (o) => readerFor(o.sessionId).sidePoint(o),
       };
     })(),
     // OAuth gate (spec/10-auth.md): the gate protects the real SDK path only;
@@ -4275,10 +4321,13 @@ async function startHost(
     // then on `resolveOAuthWithCredit` routes the rest without any of them
     // failing (spec/10-auth.md § Backend credentials).
     accountLabel: (model, accountId) =>
-      isCodexModel(model)
-        ? codexAccounts.report().accounts?.find((a) => a.id === accountId)?.label
-        : readPatchStore(oauthOpts)?.accounts.find((a) => a.id === accountId)?.label,
+      isLocalModel(model)
+        ? undefined
+        : isCodexModel(model)
+          ? codexAccounts.report().accounts?.find((a) => a.id === accountId)?.label
+          : readPatchStore(oauthOpts)?.accounts.find((a) => a.id === accountId)?.label,
     accountSpent: (model, fromAccountId) => {
+      if (isLocalModel(model)) return { spent: false };
       if (isCodexModel(model)) {
         const info = codexAccounts.limitInfo(fromAccountId);
         const spent = info?.scope !== undefined;
@@ -4319,7 +4368,7 @@ async function startHost(
     // The strategy and how many held keys are out, so a blocked chat says
     // "Round robin — all 3 accounts out" and not just one account's countdown.
     accountRouting: (model) => {
-      if (isCodexModel(model)) return undefined;
+      if (isCodexModel(model) || isLocalModel(model)) return undefined;
       const store = readPatchStore(oauthOpts);
       if (!store) return undefined;
       const out = store.accounts.filter((a) => accountRotation.isExhausted(a.id));
@@ -4383,6 +4432,7 @@ async function startHost(
       smallJobModels: config.smallJobModels,
       // A Codex chat is titled on its own model, like its goal check (below).
       codex: { sdkBackend: routedBackend, resolveOAuth: resolveModelOAuth },
+      local: { sdkBackend: routedBackend, resolveOAuth: resolveModelOAuth },
       logger,
     }),
     // patch/todo.md § Features to add — "Current status": after each turn
@@ -5883,6 +5933,7 @@ export async function handleModelsRequest(
   logger: Logger,
   hostId: string,
   codex?: CodexAccounts,
+  local?: LocalModels,
 ): Promise<void> {
   // Every entry names the backend serving it, and a backend that failed is
   // returned as an error AGAINST THAT BACKEND alongside the models that did
@@ -5890,14 +5941,18 @@ export async function handleModelsRequest(
   // other's models (spec/02 § Model catalogue). NO FALLBACK: a failure is never
   // papered over with a hand-maintained list.
   if (codex) {
-    const outcomes = await Promise.allSettled([
-      catalog.get().then((s) => s.models),
-      codex.models(),
-    ]);
+    // The local endpoint is only asked when one is set: an account that never
+    // configured local models has no error to report about them.
+    const sources: Array<{ backend: string; load: Promise<{ id: string; label: string }[]> }> = [
+      { backend: CLAUDE_BACKEND_ID, load: catalog.get().then((s) => s.models) },
+      { backend: CODEX_BACKEND_ID, load: codex.models() },
+      ...(local?.configured ? [{ backend: LOCAL_BACKEND_ID, load: local.models() }] : []),
+    ];
+    const outcomes = await Promise.allSettled(sources.map((src) => src.load));
     const models: { id: string; label: string; backend: string }[] = [];
     const errors: { backend: string; code: 'upstream'; message: string }[] = [];
     outcomes.forEach((result, index) => {
-      const backend = index === 0 ? CLAUDE_BACKEND_ID : CODEX_BACKEND_ID;
+      const backend = sources[index]!.backend;
       if (result.status === 'fulfilled')
         models.push(...result.value.map((m) => ({ ...m, backend })));
       else errors.push({ backend, code: 'upstream', message: String(result.reason) });
@@ -7035,11 +7090,12 @@ export async function handleServerEvent(
         // credit (spec/10 § Backend credentials); a spawn cannot name one.
         const spawnAuth = await daemon.backendCredential(event.model);
         if (!spawnAuth.ok) {
+          const spawnProvider = providerDescriptor(providerForModel(event.model));
           const host = daemon.hostId;
           sender({
             type: 'host.unauthenticated',
             hostId: host,
-            backendId: isCodexModel(event.model) ? CODEX_BACKEND_ID : CLAUDE_BACKEND_ID,
+            backendId: spawnProvider.backendId,
             reason: spawnAuth.reason,
           });
           // CORRECT THE SELF-REPORT. `connected` was computed once at boot, so a
@@ -7050,12 +7106,12 @@ export async function handleServerEvent(
           // it resolves them in order and takes the first that works — so it is
           // the host that is disconnected, not one row of it.
           const report: import('@patch/wire').HostAccountEvent =
-            accounts && !isCodexModel(event.model)
+            accounts && spawnProvider.id === 'claude'
               ? accounts.buildAccountReport({ connected: false })
               : {
                   type: 'host.account',
                   hostId: host,
-                  backendId: isCodexModel(event.model) ? CODEX_BACKEND_ID : CLAUDE_BACKEND_ID,
+                  backendId: spawnProvider.backendId,
                   connected: false,
                   accountEmail: null,
                 };
@@ -7068,11 +7124,11 @@ export async function handleServerEvent(
             type: 'chat.error',
             chatId: event.chatId ?? 'pending-spawn',
             error: {
-              code: isCodexModel(event.model) ? 'chatgpt_login_required' : 'claude_oauth_missing',
+              code: spawnProvider.loginRequiredCode as ChatErrorCode,
               // Short and actionable. This lands in a toast and in the chat, so
               // dumping the provider's raw OAuth JSON at a person tells them
               // nothing they can act on — the reason goes to the log instead.
-              message: `${host} isn't signed in to ${isCodexModel(event.model) ? 'Codex' : 'Claude'}. Sign in from Settings → Hosts.`,
+              message: `${spawnProvider.id === 'local' ? spawnAuth.reason : `${host} isn't signed in to ${spawnProvider.label}. Sign in from Settings → Hosts.`}`,
             },
             seq: OUT_OF_BAND_SEQ,
           });

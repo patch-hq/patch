@@ -60,6 +60,8 @@ import {
   deriveSnoozeOutcome,
   openSnoozeRecord,
   providerDescriptor,
+  providerForSessionId,
+  modelSupportsEffort,
   ChatErrorCode,
   type ReminderEvery,
 } from '@patch/wire';
@@ -6403,7 +6405,7 @@ export class Daemon {
         chatId,
         {
           k: 'import',
-          harness: sessionId.startsWith('codex-') ? 'codex' : 'claude',
+          harness: providerForSessionId(sessionId) ?? 'claude',
           sessionId,
           records: imported,
         },
@@ -9363,10 +9365,11 @@ export class Daemon {
         'this chat has a subagent running on this host; let it finish or stop it before moving',
       );
     }
-    if (state.claudeSessionId?.startsWith('codex-')) {
+    const nativeProvider = providerForSessionId(state.claudeSessionId);
+    if (nativeProvider !== undefined && nativeProvider !== 'claude') {
       throw new ChatMoveError(
         'unsupported',
-        'this chat is on a Codex session, which a move cannot carry yet',
+        `this chat is on a ${providerDescriptor(nativeProvider).label} session, which a move cannot carry yet`,
       );
     }
     this.movingOut.add(chatId);
@@ -10462,6 +10465,14 @@ export class Daemon {
           ? { codexAppendItems: { events: reconstructTrack } }
           : { codexReseed: { events: reconstructTrack } }
         : {}),
+      // A switch onto a local model has no native session to append to: the
+      // track becomes the opening messages of a fresh one.
+      ...((isProviderSwitch || isNativeRebuild) &&
+      targetHarness === 'local' &&
+      reconstructTrack &&
+      !resumeExistingNativeSessionId
+        ? { localReseed: { events: reconstructTrack } }
+        : {}),
       // spec/04 § Branching — this turn opens a new TRACK: resume the parent
       // session only up to the shared prefix and land the turn in a fresh
       // session, leaving the parent transcript intact.
@@ -10623,6 +10634,7 @@ export class Daemon {
                 : undefined;
             if (!tighter) throw err;
             if (targetHarness === 'codex') sdkOpts.codexReseed = { events: tighter };
+            else if (targetHarness === 'local') sdkOpts.localReseed = { events: tighter };
             else if (claudeResumeId !== undefined) {
               // The rejected handoff produced no output, so the file holds only
               // the seed that was too big: replace it outright.
@@ -10864,7 +10876,7 @@ export class Daemon {
         // This aggregate reads Claude's account rotation. Codex failures must
         // use their own structured limit or account probe below.
         let hostOutOfCredit =
-          !isCodexModel(state.model) && this.opts.hostOutOfCredit?.(chatId) === true;
+          harnessOfModel(state.model) === 'claude' && this.opts.hostOutOfCredit?.(chatId) === true;
         if (
           harnessTraitsForModel(state.model).turnRetrySafe(err) &&
           this.accountOutOfCredit(chatId, limit) &&
@@ -14884,7 +14896,7 @@ export class Daemon {
     harness: HarnessId,
     sessionId: string,
   ): Promise<boolean> {
-    if (harness === 'codex') return this.historyReader.hasSession({ folder, sessionId });
+    if (harness !== 'claude') return this.historyReader.hasSession({ folder, sessionId });
     const loaded = await this.claudeSessionStoreFor(chatId, folder).load({
       projectKey: chatId,
       sessionId,
@@ -16378,7 +16390,7 @@ export class Daemon {
   async setChatEffort(chatId: string, effort: EffortLevel | null): Promise<void> {
     const s = this.chatState.get(chatId);
     if (!s) throw new ChatNotFoundError(chatId);
-    if (isCodexModel(s.model)) throw new EffortNotSupportedError(chatId, s.model);
+    if (!modelSupportsEffort(s.model)) throw new EffortNotSupportedError(chatId, s.model);
     s.effort = effort ?? undefined;
     this.opts.metaStore.update(chatId, (m) => ({ ...m, effort: effort ?? undefined }));
     this.emitState(chatId);
@@ -16585,7 +16597,7 @@ export class Daemon {
       // turn will run at, carried on every emit for the same reason `model`
       // is. Omitted for a chat on the Codex backend — effort does not apply
       // there, and the field must not be read as "overridable but unset".
-      ...(isCodexModel(s.model) ? {} : { effort: s.effort ?? null }),
+      ...(modelSupportsEffort(s.model) ? { effort: s.effort ?? null } : {}),
     };
     return ev;
   }

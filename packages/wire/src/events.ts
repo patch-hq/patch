@@ -225,6 +225,8 @@ export const ChatErrorCode = z.enum([
   // The ChatGPT/Codex counterpart: no ChatGPT login on the host is usable (never
   // signed in, or the sign-in expired). Surfaces offer a button to sign in again.
   'chatgpt_login_required',
+  // A local model chat on a host with no local model endpoint configured.
+  'local_endpoint_missing',
   // Surface `file.write` refused because the chat was not `idle` (the agent
   // may be editing the same files) or escaped the chat folder. See
   // spec/14-design-web.md § Diff editor and spec/03-wire-protocol.md.
@@ -2289,6 +2291,14 @@ export const SharedSettings = z
      * `permissionModeDefault`.
      */
     providerPermissionDefaults: z.record(z.string(), PermissionMode),
+    /**
+     * Base URL of the OpenAI-compatible server local models run on (Ollama,
+     * llama.cpp, LM Studio), up to and including its version segment, e.g.
+     * `http://127.0.0.1:11434/v1`. Absent until set: local models are then
+     * unavailable and a chat on one says so. Reached FROM each host, so
+     * `127.0.0.1` means that host. Empty clears it.
+     */
+    localModelBaseUrl: z.union([z.literal(''), z.string().url()]).optional(),
     chatNameInterval: z.number().int().nonnegative(),
     /** Whether the one-shot AI chat title (a token-spending call) runs. */
     titleGenerationEnabled: z.boolean(),

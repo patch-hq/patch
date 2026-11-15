@@ -329,6 +329,12 @@ export interface SdkRunOptions {
    * fresh thread; it rides the resumed thread's own existing prompt cache.
    */
   codexAppendItems?: { events: readonly TrackEntry[] };
+  /**
+   * Set only for a turn that starts a local-model session from a chat's
+   * existing track (a switch onto a local model). The track becomes the
+   * session's opening messages; there is no native session to resume.
+   */
+  localReseed?: { events: readonly TrackEntry[] };
 }
 
 export interface SdkBackend {

@@ -18,6 +18,7 @@ import {
   backendIdForModel,
   compactModelLabel,
   encodePairingUri,
+  providerForModel,
   type PermissionMode,
 } from '@patch/wire';
 import { api } from '../api/rest.js';
@@ -329,7 +330,9 @@ function ModelStep({ onNext }: { onNext: () => void }): JSX.Element {
   // Only the connected providers' models: a ChatGPT user is never offered, or
   // left on, a Claude model they cannot run.
   const runnable = (id: string): boolean =>
-    (secrets?.[accountsKeyForBackend(backendIdForModel(id))] ?? []).some((a) => a.connected);
+    providerForModel(id) === 'local'
+      ? true
+      : (secrets?.[accountsKeyForBackend(backendIdForModel(id))] ?? []).some((a) => a.connected);
   const options = all.filter((m) => runnable(m.id));
   const choose = (id: string): void => {
     const others = Object.fromEntries(

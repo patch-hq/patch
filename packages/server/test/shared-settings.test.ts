@@ -239,6 +239,18 @@ describe('SharedSettingsService', () => {
     );
   });
 
+  it('stores the local model endpoint, clears it with an empty value, and refuses a non-URL', () => {
+    expect(service.current().localModelBaseUrl).toBeUndefined();
+    service.update({ localModelBaseUrl: 'http://127.0.0.1:11434/v1' });
+    expect(service.current().localModelBaseUrl).toBe('http://127.0.0.1:11434/v1');
+    service.update({ localModelBaseUrl: '' });
+    expect(service.current().localModelBaseUrl).toBe('');
+    expect(() => service.update({ localModelBaseUrl: 'not a url' })).toThrow(/invalid/i);
+    // It is not a secret: it rides in the settings snapshot hosts receive.
+    service.update({ localModelBaseUrl: 'http://h:8080/v1' });
+    expect(JSON.stringify(service.current())).toContain('http://h:8080/v1');
+  });
+
   it('merges two hosts’ accounts, dropping a second copy of the same Claude account', () => {
     service.mergeImport('d1', {
       settings: {},
