@@ -18624,7 +18624,7 @@ a.drop-target {
 }
 .triage-count {
   color: var(--ink-3);
-  font-size: 13px;
+  font-size: var(--text-min);
 }
 .triage-card {
   display: flex;
