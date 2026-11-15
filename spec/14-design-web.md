@@ -796,6 +796,16 @@ Wire frames: `chat.artifact` (host → server → surfaces, slim — no page bod
 and the `patch.artifact.publish_{request,response}` pair (host ↔ server),
 both in `03-wire-protocol.md`.
 
+## Triage
+
+Experimental: shown only while Settings → Experimental features is on (sidebar link, and a `Triage` entry in the new-tab picker). `/triage` is a page tab like Jobs.
+
+It works through the chats waiting on you one at a time. The card is the chat's name, the agent's last message in full (markdown, scrolls inside the card), a reply box and Send, with a "N waiting" count in the header. The queue is the chats that finished unread, or were left on a declared question or a report, oldest first — a chat that finishes while you work joins the end, and nothing reorders under the cursor. Chats paused on a permission, errored, working, hidden or archived are not in it: a line of text cannot grant or retry them.
+
+Send hands the reply to the chat exactly as the composer would, marks the chat read and shows the next card with an empty, focused box (`⌘/Ctrl+Enter` also sends). Send is off while the box is empty. The chat stays out of the queue until newer output arrives from it, which covers the moment before the host reports it running. With nothing waiting the page says "Nothing waiting." The transcript of a chat nobody has opened is requested when its card comes up; until it arrives the card says "Loading…". The page fits a phone width: Send is always on screen, the box text is 16px so the browser does not zoom on focus.
+
+The phone app has the same screen (`/triage`, reached from a Triage button on the Jobs tab while experimental features are on) with the same queue rules.
+
 ## Pads
 
 A Pad is a design space: a set of screens Tom edits directly while the chat that owns it acts on what he changes. It is how "here is a design to react to" becomes something he can touch instead of a description or a screenshot. Pads live in the server, are reachable from every surface, and belong to exactly one chat.
