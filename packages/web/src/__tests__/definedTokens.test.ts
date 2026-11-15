@@ -128,7 +128,7 @@ const UNDEFINED_BASELINE: Record<string, number> = {
 const SHADOWED_BASELINE: Record<string, number> = {
   '--accent-tint': 3,
   '--accent-soft': 16,
-  '--danger': 18,
+  '--danger': 7,
   '--ink-1': 11,
   '--line': 1,
   '--text-base': 1,
