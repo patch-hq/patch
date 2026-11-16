@@ -645,7 +645,7 @@ export function Composer({
     if (cursor < body.length) nodes.push(<Text key="tail">{body.slice(cursor)}</Text>);
     return nodes;
   }
-  // Run a job (spec/15 § Composer): `!` opens a list of jobs where `/` opens
+  // Run a job (spec/15 § Composer): `#` opens a list of jobs where `/` opens
   // skills. Tapping one fires it now (POST /api/jobs/:id/run, the Jobs tab's
   // run) and removes the token; no chat turn is sent. Re-read on every open.
   // NO FALLBACK: a failed read or run is surfaced.
