@@ -445,9 +445,10 @@ describe('maybeEvaluateGoal — patch_delegate', () => {
     const gate = new Promise<void>((r) => (release = r));
     const backend: SdkBackend = {
       async *run(o) {
-        yield { type: 'result', sessionId: 'sess' };
+        // A delegate's result ends its turn, so its slow work comes before it.
         if (o.prompt.includes('slow-delegate-work')) await gate;
         yield { type: 'assistant', content: 'ok', sessionId: 'sess' };
+        yield { type: 'result', sessionId: 'sess' };
       },
     };
     const evaluateGoal = vi.fn(
