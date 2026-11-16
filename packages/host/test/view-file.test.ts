@@ -633,6 +633,38 @@ describe('POST /internal/link_file (link_file)', () => {
     }
   });
 
+  it('publishes an inline preview for a previewable file outside the chat folder', async () => {
+    const { app, chatId, published } = await setup();
+    try {
+      const elsewhere = mkdtempSync(join(tmpdir(), 'patch-linkfile-preview-'));
+      writeFileSync(join(elsewhere, 'notes.md'), '# hello');
+      const res = await post(app, { callerChatId: chatId, file_path: join(elsewhere, 'notes.md') });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { previewUrl?: string; previewError?: string };
+      expect(body.previewError).toBeUndefined();
+      expect(body.previewUrl).toMatch(/^\/api\//);
+      expect(published).toHaveLength(1);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('keeps the link and reports previewError when the preview cannot be published', async () => {
+    const { app, chatId } = await setup({ publishFails: true });
+    try {
+      const elsewhere = mkdtempSync(join(tmpdir(), 'patch-linkfile-preview-fail-'));
+      writeFileSync(join(elsewhere, 'notes.md'), '# hello');
+      const res = await post(app, { callerChatId: chatId, file_path: join(elsewhere, 'notes.md') });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { linked: boolean; previewUrl?: string; previewError?: string };
+      expect(body.linked).toBe(true);
+      expect(body.previewUrl).toBeUndefined();
+      expect(typeof body.previewError).toBe('string');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('acks a directory without a size', async () => {
     const { app, chatId, folder } = await setup();
     try {

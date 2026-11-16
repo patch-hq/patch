@@ -3003,6 +3003,22 @@ describe('ChatRoute regression', () => {
     expect(screen.queryByTestId('link-file-reveal')).not.toBeInTheDocument();
   });
 
+  it('shows an inline preview frame on a link_file card when the ack has previewUrl', () => {
+    seedLinkCard('c-link-preview', { previewUrl: '/api/chats/c/artifact/a' });
+    renderChat('c-link-preview');
+    expect(screen.getByTestId('link-file-preview').getAttribute('src')).toBe(
+      '/api/chats/c/artifact/a',
+    );
+    expect(screen.getByTestId('link-file-preview-toggle')).toBeInTheDocument();
+  });
+
+  it('says why a link_file card has no preview', () => {
+    seedLinkCard('c-link-nopreview', { previewError: 'boom' });
+    renderChat('c-link-nopreview');
+    expect(screen.getByTestId('link-file-preview-error').textContent).toContain('boom');
+    expect(screen.queryByTestId('link-file-preview')).not.toBeInTheDocument();
+  });
+
   it("opens or reveals a link_file when this Mac's own host owns the chat", async () => {
     const openPath = vi.fn().mockResolvedValue(undefined);
     (window as unknown as { patch: unknown }).patch = {
