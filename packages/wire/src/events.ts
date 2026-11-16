@@ -1285,6 +1285,20 @@ export const GoalProgress = z
      * next turn starts. Absent from hosts predating the field.
      */
     pausedByStop: z.boolean().optional(),
+    /**
+     * The evaluator's latest "is this on track?" read (spec/04 § Goals — check-in),
+     * taken on the goal's own cadence. Absent before the first check-in or when the
+     * goal has no cadence.
+     */
+    lastCheckIn: z
+      .object({
+        at: z.number().int(),
+        status: z.enum(['on_track', 'off_track']),
+        reason: z.string(),
+      })
+      .strict()
+      .nullable()
+      .optional(),
   })
   .strict();
 export type GoalProgress = z.infer<typeof GoalProgress>;
@@ -1540,6 +1554,15 @@ export const ChatStateEvent = z
      * resolved met/impossible; optional for back-compat.
      */
     lastGoal: FinishedGoal.nullable().optional(),
+    /**
+     * Goals that start, in order, once the active one is judged met (spec/04 §
+     * Goals — sequence). Absent from hosts predating the field; empty when none.
+     */
+    goalQueue: z.array(z.string().min(1)).optional(),
+    /** How often the active goal is restated to the agent (spec/04 § Goals — reminders). */
+    goalReminderEvery: ReminderEvery.nullable().optional(),
+    /** How often the evaluator is asked whether the active goal is on track (spec/04 § Goals). */
+    goalCheckInEvery: ReminderEvery.nullable().optional(),
     /**
      * The chat's reminder (patch/todo.md — Reminders). A configurable reminder to
      * do / not do something, set from any surface's composer via `/remind <text>`
@@ -4400,6 +4423,12 @@ export const ChatGoalRequestEvent = z
     type: z.literal('chat.goal_request'),
     chatId: z.string().min(1),
     goal: z.string().nullable(),
+    /** Goals that follow `goal`, in order, each starting when the one before is met. */
+    then: z.array(z.string().min(1)).max(50).optional(),
+    /** Restate the goal to the agent on this cadence. Absent/null = never. */
+    remindEvery: ReminderEvery.nullable().optional(),
+    /** Ask the evaluator whether the goal is on track on this cadence. Absent/null = never. */
+    checkInEvery: ReminderEvery.nullable().optional(),
   })
   .strict();
 export type ChatGoalRequestEvent = z.infer<typeof ChatGoalRequestEvent>;

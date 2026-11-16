@@ -50,6 +50,12 @@ export const ChatMeta = z
      * before this field existed.
      */
     goal: z.string().nullable().optional(),
+    /** Goals that start in order once the active one is met (spec/04 § Goals — sequence). */
+    goalQueue: z.array(z.string().min(1)).optional(),
+    /** How often the active goal is restated to the agent (spec/04 § Goals — reminders). */
+    goalReminderEvery: ReminderEvery.nullable().optional(),
+    /** How often the evaluator is asked if the active goal is on track (spec/04 § Goals). */
+    goalCheckInEvery: ReminderEvery.nullable().optional(),
     /**
      * The chat's most recently FINISHED goal (spec/04 § Goals — "A finished
      * goal stays viewable from the chat header"). `null`/absent until a goal

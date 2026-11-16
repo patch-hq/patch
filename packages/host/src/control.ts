@@ -26,7 +26,12 @@ import Fastify, {
 } from 'fastify';
 import { z } from 'zod';
 import { imageSize } from './imageSize.js';
-import { BACKEND_IDS, MeetingAgentNotesEdit, isReservedSpecialThread } from '@patch/wire';
+import {
+  BACKEND_IDS,
+  MeetingAgentNotesEdit,
+  ReminderEvery,
+  isReservedSpecialThread,
+} from '@patch/wire';
 import type {
   HostAccountEvent,
   ClaudeMemoryEntry,
@@ -512,6 +517,9 @@ const GoalSetBody = z
   .object({
     chatId: z.string().min(1),
     goal: z.string().min(1).nullable(),
+    then: z.array(z.string().min(1)).max(50).optional(),
+    remindEvery: ReminderEvery.nullable().optional(),
+    checkInEvery: ReminderEvery.nullable().optional(),
   })
   .strict();
 
@@ -2488,10 +2496,14 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
     }
-    const { chatId, goal } = parsed.data;
+    const { chatId, goal, then, remindEvery, checkInEvery } = parsed.data;
     const tool = goal === null ? 'patch_goal_clear' : 'patch_goal_set';
     try {
-      await opts.daemon!.setGoal(chatId, goal);
+      await opts.daemon!.setGoal(chatId, goal, {
+        ...(then !== undefined ? { then } : {}),
+        ...(remindEvery !== undefined ? { remindEvery } : {}),
+        ...(checkInEvery !== undefined ? { checkInEvery } : {}),
+      });
       toolLog({ tool, callerChatId: chatId, durationMs: Date.now() - start, ok: true });
       return { ok: true, goal };
     } catch (err) {
@@ -2518,6 +2530,9 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     return {
       ok: true,
       goal: state.goal,
+      goalQueue: state.goalQueue,
+      goalReminderEvery: state.goalReminderEvery,
+      goalCheckInEvery: state.goalCheckInEvery,
       goalProgress: state.goalProgress,
       lastGoal: state.lastGoal,
     };

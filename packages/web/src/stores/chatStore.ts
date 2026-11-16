@@ -29,6 +29,7 @@ import {
   deriveBadge,
   type ChatRow,
   type DisplayBadge,
+  type GoalPlan,
   type FolderRosterEntry,
   type PendingPermission,
   type SectionCounts,
@@ -200,6 +201,9 @@ interface ChatState {
         | 'goal'
         | 'goalProgress'
         | 'lastGoal'
+        | 'goalQueue'
+        | 'goalReminderEvery'
+        | 'goalCheckInEvery'
         | 'reminder'
         | 'reminderEvery'
         | 'pendingWake'
@@ -222,6 +226,9 @@ interface ChatState {
         goal?: string | null;
         goalProgress?: GoalProgress | null;
         lastGoal?: FinishedGoal | null;
+        goalQueue?: string[];
+        goalReminderEvery?: ReminderEvery | null;
+        goalCheckInEvery?: ReminderEvery | null;
         reminder?: string | null;
         reminderEvery?: ReminderEvery | null;
         pendingWake?: PendingWake | null;
@@ -283,6 +290,9 @@ interface ChatState {
         | 'goal'
         | 'goalProgress'
         | 'lastGoal'
+        | 'goalQueue'
+        | 'goalReminderEvery'
+        | 'goalCheckInEvery'
         | 'reminder'
         | 'reminderEvery'
         | 'pendingWake'
@@ -305,6 +315,9 @@ interface ChatState {
         goal?: string | null;
         goalProgress?: GoalProgress | null;
         lastGoal?: FinishedGoal | null;
+        goalQueue?: string[];
+        goalReminderEvery?: ReminderEvery | null;
+        goalCheckInEvery?: ReminderEvery | null;
         reminder?: string | null;
         reminderEvery?: ReminderEvery | null;
         pendingWake?: PendingWake | null;
@@ -490,7 +503,7 @@ interface ChatState {
   /** Local optimistic update for a rename (spec/04 § Name); null clears it. */
   setName(chatId: string, name: string | null): void;
   /** Local optimistic update for the chat's goal (patch/todo.md — `/goal`). */
-  setGoal(chatId: string, goal: string | null): void;
+  setGoal(chatId: string, goal: string | null, plan?: GoalPlan): void;
   /** Local optimistic update for the chat's reminder (patch/todo.md — Reminders). */
   setReminder(chatId: string, reminder: string | null, every?: ReminderEvery | null): void;
   /**
@@ -967,6 +980,9 @@ function emptyRow(chatId: string, folder: string): ChatRow {
     goal: null,
     goalProgress: null,
     lastGoal: null,
+    goalQueue: [],
+    goalReminderEvery: null,
+    goalCheckInEvery: null,
     reminder: null,
     reminderEvery: null,
     pendingWake: null,
@@ -1115,6 +1131,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const goalProgress =
         r.goalProgress !== undefined ? r.goalProgress : (existing?.goalProgress ?? null);
       const lastGoal = r.lastGoal !== undefined ? r.lastGoal : (existing?.lastGoal ?? null);
+      const goalQueue = r.goalQueue !== undefined ? r.goalQueue : (existing?.goalQueue ?? []);
+      const goalReminderEvery =
+        r.goalReminderEvery !== undefined
+          ? r.goalReminderEvery
+          : (existing?.goalReminderEvery ?? null);
+      const goalCheckInEvery =
+        r.goalCheckInEvery !== undefined
+          ? r.goalCheckInEvery
+          : (existing?.goalCheckInEvery ?? null);
       // Reminder CAN be cleared (null is meaningful) — only fall back to the
       // known reminder when the incoming row omits the field entirely (undefined).
       const reminder = r.reminder !== undefined ? r.reminder : (existing?.reminder ?? null);
@@ -1195,6 +1220,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           goal,
           goalProgress,
           lastGoal,
+          goalQueue,
+          goalReminderEvery,
+          goalCheckInEvery,
           reminder,
           reminderEvery,
           pendingWake,
@@ -1228,6 +1256,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           goal,
           goalProgress,
           lastGoal,
+          goalQueue,
+          goalReminderEvery,
+          goalCheckInEvery,
           reminder,
           reminderEvery,
           pendingWake,
@@ -1288,6 +1319,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const goalProgress =
         r.goalProgress !== undefined ? r.goalProgress : (existing?.goalProgress ?? null);
       const lastGoal = r.lastGoal !== undefined ? r.lastGoal : (existing?.lastGoal ?? null);
+      const goalQueue = r.goalQueue !== undefined ? r.goalQueue : (existing?.goalQueue ?? []);
+      const goalReminderEvery =
+        r.goalReminderEvery !== undefined
+          ? r.goalReminderEvery
+          : (existing?.goalReminderEvery ?? null);
+      const goalCheckInEvery =
+        r.goalCheckInEvery !== undefined
+          ? r.goalCheckInEvery
+          : (existing?.goalCheckInEvery ?? null);
       const reminder = r.reminder !== undefined ? r.reminder : (existing?.reminder ?? null);
       const reminderEvery =
         r.reminderEvery !== undefined ? r.reminderEvery : (existing?.reminderEvery ?? null);
@@ -1348,6 +1388,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           goal,
           goalProgress,
           lastGoal,
+          goalQueue,
+          goalReminderEvery,
+          goalCheckInEvery,
           reminder,
           reminderEvery,
           pendingWake,
@@ -1381,6 +1424,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           goal,
           goalProgress,
           lastGoal,
+          goalQueue,
+          goalReminderEvery,
+          goalCheckInEvery,
           reminder,
           reminderEvery,
           pendingWake,
@@ -1773,6 +1819,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
             goal: event.goal !== undefined ? event.goal : row.goal,
             goalProgress: event.goalProgress !== undefined ? event.goalProgress : row.goalProgress,
             lastGoal: event.lastGoal !== undefined ? event.lastGoal : row.lastGoal,
+            goalQueue: event.goalQueue !== undefined ? event.goalQueue : row.goalQueue,
+            goalReminderEvery:
+              event.goalReminderEvery !== undefined
+                ? event.goalReminderEvery
+                : row.goalReminderEvery,
+            goalCheckInEvery:
+              event.goalCheckInEvery !== undefined ? event.goalCheckInEvery : row.goalCheckInEvery,
             // Reminder CAN be cleared (null is meaningful) — only keep the existing
             // reminder when the event omits the field (undefined), not when it's null.
             reminder: event.reminder !== undefined ? event.reminder : row.reminder,
@@ -3296,7 +3349,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
   },
 
-  setGoal(chatId, goal) {
+  setGoal(chatId, goal, plan = {}) {
     const row = get().chats[chatId];
     if (!row) return;
     // Optimistic reset of the live counters too (mirrors the host's own
@@ -3315,7 +3368,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({
       chats: {
         ...get().chats,
-        [chatId]: { ...row, goal, goalProgress },
+        [chatId]: {
+          ...row,
+          goal,
+          goalProgress,
+          goalQueue: goal === null ? [] : (plan.then ?? []),
+          goalReminderEvery: goal === null ? null : (plan.remindEvery ?? null),
+          goalCheckInEvery: goal === null ? null : (plan.checkInEvery ?? null),
+        },
       },
     });
   },

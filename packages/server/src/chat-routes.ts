@@ -2591,7 +2591,14 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
   // ---- POST /api/chats/:id/goal ----
   // patch/todo.md — `/goal`: set (or clear, with null) the chat's goal. Forwards
   // chat.goal_request to the host, which persists it + echoes chat.state.
-  const GoalBody = z.object({ goal: z.string().nullable() }).strict();
+  const GoalBody = z
+    .object({
+      goal: z.string().nullable(),
+      then: z.array(z.string().min(1)).max(50).optional(),
+      remindEvery: ReminderEvery.nullable().optional(),
+      checkInEvery: ReminderEvery.nullable().optional(),
+    })
+    .strict();
   app.post<{ Params: { id: string } }>('/api/chats/:id/goal', async (req, reply) => {
     let auth;
     try {
@@ -2612,6 +2619,9 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       type: 'chat.goal_request',
       chatId: req.params.id,
       goal: parsed.data.goal,
+      ...(parsed.data.then !== undefined ? { then: parsed.data.then } : {}),
+      ...(parsed.data.remindEvery !== undefined ? { remindEvery: parsed.data.remindEvery } : {}),
+      ...(parsed.data.checkInEvery !== undefined ? { checkInEvery: parsed.data.checkInEvery } : {}),
     });
     return reply.code(200).send({ ok: true });
   });

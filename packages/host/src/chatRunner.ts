@@ -158,6 +158,7 @@ import {
 } from './pendingDecisions.js';
 import {
   buildGoalSystemReminder,
+  buildGoalReminder,
   buildPeriodicReminder,
   buildHiddenSystemReminder,
   buildTodoEditSystemReminder,
@@ -604,9 +605,13 @@ export interface HostOptions {
     userScope: string;
     /** The agent's latest message, where it states blockers. */
     agentStatement: string;
+    /** Also report whether the goal is on track (spec/04 § Goals — check-in). */
+    checkIn?: boolean;
   }) => Promise<{
     verdict: 'met' | 'not_met' | 'refused' | 'blocked' | 'impossible';
     reason: string;
+    onTrack?: 'on_track' | 'off_track';
+    onTrackReason?: string;
   } | null>;
   /**
    * How long to wait before re-checking a goal deferred on running
@@ -1102,6 +1107,17 @@ const ORIGINAL_OPEN = '<original-prompt>\n';
 const ORIGINAL_CLOSE = '\n</original-prompt>';
 const REMINDER_CLOSE = '</system-reminder>';
 const REMINDER_CLOSE_ESCAPED = '</system-reminder-escaped>';
+
+/** What surrounds a goal (spec/04 § Goals): the goals after it and its two cadences. */
+export interface GoalPlan {
+  then?: string[];
+  remindEvery?: ReminderEvery | null;
+  checkInEvery?: ReminderEvery | null;
+}
+
+function sameQueue(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((g, i) => g === b[i]);
+}
 
 function sameEvery(a: ReminderEvery | null, b: ReminderEvery | null): boolean {
   return a === b || (a !== null && b !== null && a.unit === b.unit && a.n === b.n);
@@ -4583,6 +4599,13 @@ export class Daemon {
       name: meta.name,
       preview: meta.preview ?? null,
       goal: meta.goal ?? null,
+      goalQueue: meta.goalQueue ?? [],
+      goalReminderEvery: meta.goalReminderEvery ?? null,
+      goalCheckInEvery: meta.goalCheckInEvery ?? null,
+      goalReminderTurnsSince: 0,
+      goalReminderLastAt: this.opts.now(),
+      goalCheckInTurnsSince: 0,
+      goalCheckInLastAt: this.opts.now(),
       goalProgress: null,
       lastGoal: meta.lastGoal ?? null,
       goalRefusalStreak: 0,
@@ -5241,15 +5264,41 @@ export class Daemon {
    * set/clear, so an in-progress goal abandoned by a new `/goal` or a bare
    * clear leaves the chat header showing whatever last actually FINISHED.
    */
-  async setGoal(chatId: string, goal: string | null): Promise<void> {
+  async setGoal(chatId: string, goal: string | null, plan: GoalPlan = {}): Promise<void> {
     const state = this.chatState.get(chatId);
     if (!state) throw new ChatNotFoundError(chatId);
-    if (state.goal === goal) {
+    const then = goal === null ? [] : (plan.then ?? []);
+    const remindEvery = goal === null ? null : (plan.remindEvery ?? null);
+    const checkInEvery = goal === null ? null : (plan.checkInEvery ?? null);
+    if (
+      state.goal === goal &&
+      sameQueue(state.goalQueue, then) &&
+      sameEvery(state.goalReminderEvery, remindEvery) &&
+      sameEvery(state.goalCheckInEvery, checkInEvery)
+    ) {
       this.emitState(chatId);
       return;
     }
+    this.armGoal(chatId, goal, { then, remindEvery, checkInEvery });
+  }
+
+  /**
+   * Put `goal` (and the plan around it) in force: fresh counters, the agent
+   * told on its next turn, persisted. Shared by `setGoal` and the sequence
+   * advancing to its next goal (spec/04 § Goals — sequence).
+   */
+  private armGoal(chatId: string, goal: string | null, plan: Required<GoalPlan>): void {
+    const state = this.chatState.get(chatId);
+    if (!state) throw new ChatNotFoundError(chatId);
     const now = this.opts.now();
     state.goal = goal;
+    state.goalQueue = plan.then;
+    state.goalReminderEvery = plan.remindEvery;
+    state.goalCheckInEvery = plan.checkInEvery;
+    state.goalReminderTurnsSince = 0;
+    state.goalReminderLastAt = now;
+    state.goalCheckInTurnsSince = 0;
+    state.goalCheckInLastAt = now;
     state.goalProgress =
       goal === null
         ? null
@@ -5266,7 +5315,14 @@ export class Daemon {
     state.goalNotice = { goal };
     state.lastUpdated = now;
     if (goal === null) this.flushQueuedNudges(chatId);
-    this.opts.metaStore.update(chatId, (m) => ({ ...m, goal, updatedAt: now }));
+    this.opts.metaStore.update(chatId, (m) => ({
+      ...m,
+      goal,
+      goalQueue: plan.then,
+      goalReminderEvery: plan.remindEvery,
+      goalCheckInEvery: plan.checkInEvery,
+      updatedAt: now,
+    }));
     this.emitState(chatId);
   }
 
@@ -7002,11 +7058,30 @@ export class Daemon {
 
     // spec/04 § Goals — the goal was set, replaced or cleared since the agent's
     // last turn; one reminder per change.
+    const reminderWasNotice = state.goalNotice !== null;
     if (state.goalNotice !== null) {
       const reminder = buildGoalSystemReminder(state.goalNotice.goal);
       state.goalNotice = null;
       if (head !== null) head = reminder + head;
       else rewrittenWhole = reminder + rewrittenWhole;
+    }
+
+    // spec/04 § Goals — reminders: the active goal restated on its own cadence.
+    // A turn that already carries the goal-set notice does not count.
+    if (state.goal !== null && state.goalReminderEvery !== null && reminderWasNotice === false) {
+      state.goalReminderTurnsSince += 1;
+      const nowMs = this.opts.now();
+      const due =
+        state.goalReminderEvery.unit === 'turns'
+          ? state.goalReminderTurnsSince >= state.goalReminderEvery.n
+          : nowMs - state.goalReminderLastAt >= state.goalReminderEvery.n * 60_000;
+      if (due) {
+        state.goalReminderTurnsSince = 0;
+        state.goalReminderLastAt = nowMs;
+        const reminder = buildGoalReminder(state.goal);
+        if (head !== null) head = reminder + head;
+        else rewrittenWhole = reminder + rewrittenWhole;
+      }
     }
 
     // spec/04 § Reminders — a chat reminder with a cadence is re-injected
@@ -11953,6 +12028,14 @@ export class Daemon {
     const turnsEvaluated = (state.goalProgress?.turnsEvaluated ?? 0) + 1;
     const folder = state.folder;
     const background = this.describeBackgroundForGoal(chatId);
+    // spec/04 § Goals — check-in: on its cadence the same call also says whether
+    // the work is on track.
+    const checkInEvery = state.goalCheckInEvery;
+    const checkIn =
+      checkInEvery !== null &&
+      (checkInEvery.unit === 'turns'
+        ? state.goalCheckInTurnsSince + 1 >= checkInEvery.n
+        : this.opts.now() - state.goalCheckInLastAt >= checkInEvery.n * 60_000);
     void (async () => {
       try {
         const result = await evaluator({
@@ -11964,6 +12047,7 @@ export class Daemon {
           background,
           userScope,
           agentStatement,
+          ...(checkIn ? { checkIn: true } : {}),
         });
         this.settleGoalEvaluation(chatId, condition, turnsEvaluated, result);
       } catch (err) {
@@ -12022,6 +12106,8 @@ export class Daemon {
     result: {
       verdict: 'met' | 'not_met' | 'refused' | 'blocked' | 'impossible';
       reason: string;
+      onTrack?: 'on_track' | 'off_track';
+      onTrackReason?: string;
     } | null,
   ): void {
     const state = this.chatState.get(chatId);
@@ -12050,7 +12136,27 @@ export class Daemon {
           ? 'not_met'
           : null,
       lastReason: result.reason,
+      ...(progress?.lastCheckIn !== undefined ? { lastCheckIn: progress.lastCheckIn } : {}),
     };
+    if (state.goalCheckInEvery !== null) state.goalCheckInTurnsSince += 1;
+    if (result.onTrack !== undefined && result.onTrackReason !== undefined) {
+      state.goalCheckInTurnsSince = 0;
+      state.goalCheckInLastAt = now;
+      state.goalProgress.lastCheckIn = {
+        at: now,
+        status: result.onTrack,
+        reason: result.onTrackReason,
+      };
+      if (result.onTrack === 'off_track' && result.verdict !== 'met') {
+        void this.declareStatus(
+          chatId,
+          'report',
+          `Goal check-in: off track. ${result.onTrackReason}`,
+        ).catch((err) => {
+          this.opts.logger.warn({ chatId, err }, 'goal check-in: declareStatus failed');
+        });
+      }
+    }
 
     if (result.verdict === 'refused' || result.verdict === 'blocked') {
       state.goalRefusalStreak += 1;
@@ -12106,8 +12212,16 @@ export class Daemon {
     // chat header, and append a quiet transcript marker (no new agent turn).
     const startedAt = state.goalProgress.startedAt;
     const tokens = state.goalProgress.tokensSpent;
-    this.flushQueuedNudges(chatId);
+    // spec/04 § Goals — sequence: `met` starts the next queued goal, with the
+    // same cadences; `impossible` stops the sequence (the rest are not started).
+    const upcoming = result.verdict === 'met' ? state.goalQueue : [];
+    const unstarted = result.verdict === 'met' ? 0 : state.goalQueue.length;
+    const carried = { remindEvery: state.goalReminderEvery, checkInEvery: state.goalCheckInEvery };
+    if (upcoming.length === 0) this.flushQueuedNudges(chatId);
     state.goal = null;
+    state.goalQueue = [];
+    state.goalReminderEvery = null;
+    state.goalCheckInEvery = null;
     state.goalProgress = null;
     state.goalRefusalStreak = 0;
     state.lastGoal = {
@@ -12123,6 +12237,9 @@ export class Daemon {
     this.opts.metaStore.update(chatId, (m) => ({
       ...m,
       goal: null,
+      goalQueue: [],
+      goalReminderEvery: null,
+      goalCheckInEvery: null,
       lastGoal: state.lastGoal,
       updatedAt: now,
     }));
@@ -12137,14 +12254,33 @@ export class Daemon {
     });
     this.emitState(chatId);
     if (result.verdict === 'impossible') {
-      void this.declareStatus(chatId, 'report', `Goal impossible: ${result.reason}`).catch(
+      const tail =
+        unstarted > 0
+          ? ` The ${unstarted} goal${unstarted === 1 ? '' : 's'} queued after it ${unstarted === 1 ? 'was' : 'were'} not started.`
+          : '';
+      void this.declareStatus(chatId, 'report', `Goal impossible: ${result.reason}${tail}`).catch(
         (err) => {
           this.opts.logger.warn({ chatId, err }, 'goal impossible: declareStatus failed');
         },
       );
     }
-    // 'met' needs nothing further — the ordinary turn-complete path already
-    // rings the normal done notification for a turn that was not resubmitted.
+    // 'met' with nothing queued needs nothing further — the ordinary
+    // turn-complete path already rings the normal done notification for a turn
+    // that was not resubmitted.
+    const [next, ...rest] = upcoming;
+    if (next !== undefined) {
+      this.armGoal(chatId, next, { then: rest, ...carried });
+      if (this.isTurnRunning(chatId)) return;
+      void this.sendInput({
+        chatId,
+        message: next,
+        localId: randomUUID(),
+        origin: 'machine',
+        goalTrigger: { reason: 'Previous goal met. Starting the next goal in the sequence.' },
+      }).catch((err) => {
+        this.opts.logger.warn({ chatId, err }, 'goal sequence: next goal failed to send');
+      });
+    }
   }
 
   /**
@@ -16730,6 +16866,9 @@ export class Daemon {
       name: s.name,
       preview: s.preview,
       goal: s.goal,
+      goalQueue: s.goalQueue,
+      goalReminderEvery: s.goalReminderEvery,
+      goalCheckInEvery: s.goalCheckInEvery,
       goalProgress: s.goalProgress,
       lastGoal: s.lastGoal,
       reminder: s.reminder,

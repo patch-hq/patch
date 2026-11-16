@@ -306,8 +306,8 @@ const PATCH_TOOLS: ToolCatalogEntry[] = [
     label: 'patch_goal_set',
     category: 'patch',
     description:
-      "Sets this chat's goal — the same mechanism as the composer's /goal — so Patch's evaluator judges it after every turn.",
-    params: 'condition: string',
+      "Sets this chat's goal — the same mechanism as the composer's /goal — so Patch's evaluator judges it after every turn, optionally with goals to follow and a cadence to restate it and check progress.",
+    params: 'condition: string, then?: string[], remindEvery?: object, checkInEvery?: object',
   },
   {
     name: patchToolId('patch_goal_get'),
