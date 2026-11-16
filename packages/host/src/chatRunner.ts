@@ -7571,6 +7571,27 @@ export class Daemon {
     this.persistPendingTurns(chatId);
   }
 
+  /**
+   * Drop every queued turn that came from another agent or the harness
+   * (`origin: 'machine'`), announcing each as cancelled. A user Stop ends the
+   * turn the user was watching; without this the drain starts the next queued
+   * machine turn (a delegate's report, a `send_to`) the instant the abort
+   * settles, and Stop looks like it did nothing. Turns the user queued
+   * themselves stay: they are deliberate, and `promoteInput` relies on them.
+   */
+  private dropQueuedMachineTurns(chatId: string): void {
+    const q = this.turnQueues.get(chatId);
+    if (!q?.some((it) => it.origin === 'machine')) return;
+    const kept: QueuedTurn[] = [];
+    for (const it of q) {
+      if (it.origin === 'machine')
+        this.emit({ type: 'chat.dequeued', chatId, localId: it.localId, reason: 'cancelled' });
+      else kept.push(it);
+    }
+    this.turnQueues.set(chatId, kept);
+    this.persistPendingTurns(chatId);
+  }
+
   /** Append a turn to the chat's queue and announce it (`chat.queued`). */
   private enqueueQueued(
     chatId: string,
@@ -8863,6 +8884,9 @@ export class Daemon {
     for (const b of meta?.branches ?? []) {
       if (b.branchId !== meta?.activeBranchId) this.stopBranch(chatId, b.branchId);
     }
+    // Before the abort, so the drain that follows it finds nothing from another
+    // agent to start.
+    this.dropQueuedMachineTurns(chatId);
     await this.stopChat(chatId);
   }
 
