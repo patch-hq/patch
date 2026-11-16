@@ -16,11 +16,13 @@ test.describe('Settings → Experimental features', () => {
 
     const toggle = page.getByTestId('experimental-features');
     await expect(toggle).not.toBeChecked();
-    const patch = page.waitForRequest(
-      (r) => r.method() === 'PATCH' && new URL(r.url()).pathname === '/api/settings',
+    // The response, not the request: the fake server records the patch while
+    // handling it, so the request event can fire before it is recorded.
+    const patch = page.waitForResponse(
+      (r) => r.request().method() === 'PATCH' && new URL(r.url()).pathname === '/api/settings',
     );
     await toggle.click({ force: true });
-    expect((await patch).postDataJSON()).toEqual({ experimentalFeatures: true });
+    expect((await patch).request().postDataJSON()).toEqual({ experimentalFeatures: true });
     expect(server.patches).toEqual([{ experimentalFeatures: true }]);
 
     await expect(page.getByTestId('settings-nav-manager')).toBeVisible();
