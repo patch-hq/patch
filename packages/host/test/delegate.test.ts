@@ -322,6 +322,23 @@ describe('patch_delegate', () => {
     expect(await daemon.stopDelegate(parentChatId, id)).toBe(false);
   });
 
+  it('lists a subagent whose chat errored without settling as failed, not running', async () => {
+    const { daemon, folder } = setupHanging();
+    const parentChatId = await daemon.spawnChat({ folder });
+    const { id } = await daemon.createDelegate({ parentChatId, prompt: 'a slow task' });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(daemon.listDelegates(parentChatId)[0]?.status).toBe('running');
+
+    // Simulate the stranded case: the run is gone and the chat is errored.
+    const d = daemon as unknown as {
+      aborters: Map<string, unknown>;
+      chatState: { setActivity(id: string, a: string): void };
+    };
+    d.aborters.delete(id);
+    d.chatState.setActivity(id, 'errored');
+    expect(daemon.listDelegates(parentChatId)[0]).toMatchObject({ id, status: 'failed' });
+  });
+
   it('a user pause interrupts the turn without settling or reporting it, and stop still works', async () => {
     const { daemon, events, folder } = setupHanging();
     const parentChatId = await daemon.spawnChat({ folder });

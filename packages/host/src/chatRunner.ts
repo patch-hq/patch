@@ -4871,9 +4871,23 @@ export class Daemon {
     for (const meta of this.opts.metaStore.list()) {
       if (meta.subagent?.parentChatId !== parentChatId) continue;
       const live = this.chatState.get(meta.chatId);
+      // A subagent that ended without ever passing through `maybeSettleDelegate`
+      // (its folder vanished, so the turn never started) has no outcome and
+      // would read as running for ever. An errored chat that is not retrying,
+      // not parked on credit and not mid-run is over: report it failed.
+      const stranded =
+        meta.subagent.outcome === undefined &&
+        !this.aborters.has(meta.chatId) &&
+        !this.limitBlocks.has(meta.chatId) &&
+        !this.rateLimitPendingTurns.has(meta.chatId) &&
+        (live ? live.activity === 'errored' && !live.turnRetrying : meta.status === 'errored');
       const status: DelegateStatus =
         meta.subagent.outcome ??
-        (live?.activity === 'awaiting-permission' ? 'awaiting-permission' : 'running');
+        (stranded
+          ? 'failed'
+          : live?.activity === 'awaiting-permission'
+            ? 'awaiting-permission'
+            : 'running');
       out.push({
         id: meta.chatId,
         label: meta.subagent.label,
