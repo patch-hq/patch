@@ -543,10 +543,13 @@ export const api = {
   // surface: NO FALLBACK to a quietly-corrected "now".
   // `setId` names the user action (a project snooze sends one id for every
   // chat), so the host can clear the Back state of the whole set at once.
-  snoozeChat: (chatId: string, snoozedUntil: number | null, setId?: string) =>
+  snoozeChat: (chatId: string, snoozedUntil: number | null, setId?: string, waitForSet = false) =>
     request<unknown>(`/api/chats/${chatId}/snooze`, {
       method: 'POST',
-      body: setId === undefined ? { snoozedUntil } : { snoozedUntil, setId },
+      body:
+        setId === undefined
+          ? { snoozedUntil }
+          : { snoozedUntil, setId, ...(waitForSet ? { waitForSet: true } : {}) },
     }),
   // POST /api/chats/:id/snooze/back-clear — the chat was opened; the host
   // clears the Back state of its whole set (spec/04 § Snooze → Back).

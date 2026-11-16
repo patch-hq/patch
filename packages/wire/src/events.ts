@@ -4372,6 +4372,8 @@ export const ChatSnoozeRequestEvent = z
     snoozedUntil: z.number().int().nullable(),
     /** The set this snooze belongs to (one id per user action); the host makes one if absent. */
     setId: z.string().min(1).optional(),
+    /** Until-complete only: wait for every chat of the set (a project snooze), not just this one. */
+    waitForSet: z.boolean().optional(),
   })
   .strict();
 export type ChatSnoozeRequestEvent = z.infer<typeof ChatSnoozeRequestEvent>;

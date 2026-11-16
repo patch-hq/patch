@@ -2471,8 +2471,13 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       snoozedUntil: z.number().int().nullable(),
       // One id per user action: a project snooze sends the same id for each chat.
       setId: z.string().min(1).optional(),
+      // Until-complete only: wait for the whole set (a project snooze).
+      waitForSet: z.boolean().optional(),
     })
-    .strict();
+    .strict()
+    .refine((b) => b.waitForSet !== true || b.setId !== undefined, {
+      message: 'waitForSet needs a setId',
+    });
   app.post<{ Params: { id: string } }>('/api/chats/:id/snooze', async (req, reply) => {
     let auth;
     try {
@@ -2489,7 +2494,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     if (!deps.chatRegistry.get(req.params.id)) {
       return sendUnknownChat(reply, req.params.id);
     }
-    const { snoozedUntil, setId } = parsed.data;
+    const { snoozedUntil, setId, waitForSet } = parsed.data;
     if (snoozedUntil !== null && snoozedUntil <= Date.now()) {
       return reply.code(400).send({ error: `snoozedUntil is in the past: ${snoozedUntil}` });
     }
@@ -2498,6 +2503,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       chatId: req.params.id,
       snoozedUntil,
       ...(setId !== undefined ? { setId } : {}),
+      ...(waitForSet === true ? { waitForSet: true } : {}),
     });
     return reply.code(200).send({ ok: true });
   });

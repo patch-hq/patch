@@ -3539,12 +3539,19 @@ export class Daemon {
     for (const m of metas) {
       const state = this.chatState.get(m.chatId);
       if (!state || state.snoozedUntil !== SNOOZE_UNTIL_COMPLETE) continue;
-      const wake = this.wake.peek(m.chatId);
-      const resumed =
-        this.owedResend.has(m.chatId) ||
-        this.parkedTurns.has(m.chatId) ||
-        (wake !== null && wake.every === undefined);
-      if (resumed || this.aggregateActivity(m.chatId) === 'running') continue;
+      const open = openSnoozeRecord(state.snoozeRecords);
+      // A project snooze carries on while any chat of its set is resumed.
+      const ids = open?.waitForSet === true ? this.waitingSetMembers(open.setId) : [m.chatId];
+      const resumed = ids.some((id) => {
+        const wake = this.wake.peek(id);
+        return (
+          this.owedResend.has(id) ||
+          this.parkedTurns.has(id) ||
+          (wake !== null && wake.every === undefined) ||
+          this.aggregateActivity(id) === 'running'
+        );
+      });
+      if (resumed) continue;
       this.wakeFromSnooze(m.chatId);
     }
   }
@@ -6161,7 +6168,7 @@ export class Daemon {
   async setSnoozed(
     chatId: string,
     snoozedUntil: number | null,
-    opts: { setId?: string; byAgent?: boolean } = {},
+    opts: { setId?: string; byAgent?: boolean; waitForSet?: boolean } = {},
   ): Promise<void> {
     const state = this.chatState.get(chatId);
     if (!state) throw new ChatNotFoundError(chatId);
@@ -6172,9 +6179,18 @@ export class Daemon {
     if (snoozedUntil !== null && snoozedUntil <= now) {
       throw new Error(`setSnoozed: snoozedUntil ${snoozedUntil} is in the past (now ${now})`);
     }
-    if (snoozedUntil === SNOOZE_UNTIL_COMPLETE && !this.hasWorkToComplete(chatId)) {
-      // Nothing running means nothing to wait for (NO FALLBACK: say so).
-      throw new Error(`setSnoozed: ${chatId} has no running work to snooze until complete`);
+    if (opts.waitForSet === true && (snoozedUntil !== SNOOZE_UNTIL_COMPLETE || !opts.setId)) {
+      throw new Error('setSnoozed: waitForSet needs an until-complete snooze with a setId');
+    }
+    if (snoozedUntil === SNOOZE_UNTIL_COMPLETE) {
+      // Nothing running means nothing to wait for (NO FALLBACK: say so). A
+      // project snooze waits on the set, so an idle chat may join one that
+      // already has a chat with work in it.
+      const joinsBusySet =
+        opts.waitForSet === true && this.waitingSetMembers(opts.setId!).some((id) => id !== chatId);
+      if (!this.hasWorkToComplete(chatId) && !joinsBusySet) {
+        throw new Error(`setSnoozed: ${chatId} has no running work to snooze until complete`);
+      }
     }
     if (state.snoozedUntil === snoozedUntil) {
       this.emitState(chatId);
@@ -6194,6 +6210,7 @@ export class Daemon {
           until: snoozedUntil,
           endedAt: null,
           outcome: { kind: 'none' },
+          ...(opts.waitForSet === true ? { waitForSet: true } : {}),
           backCleared: false,
         };
         state.snoozeRecords = [...state.snoozeRecords, record].slice(-MAX_SNOOZE_RECORDS);
@@ -6264,8 +6281,32 @@ export class Daemon {
       activity === 'awaiting-permission' ||
       (activity === 'errored' && !state.turnRetrying) ||
       this.isAskingQuestion(state);
-    if (!needsPerson && this.hasWorkToComplete(chatId)) return;
+    if (needsPerson) {
+      this.wakeFromSnooze(chatId);
+      return;
+    }
+    const open = openSnoozeRecord(state.snoozeRecords);
+    if (open?.waitForSet === true) {
+      // A project snooze: the whole set comes back together, once none of it has work.
+      const members = this.waitingSetMembers(open.setId);
+      if (members.some((id) => this.hasWorkToComplete(id))) return;
+      for (const id of members) this.wakeFromSnooze(id);
+      return;
+    }
+    if (this.hasWorkToComplete(chatId)) return;
     this.wakeFromSnooze(chatId);
+  }
+
+  /** Chats snoozed until complete as part of one project snooze (same set id). */
+  private waitingSetMembers(setId: string): string[] {
+    return this.chatState
+      .list()
+      .filter((c) => {
+        if (c.snoozedUntil !== SNOOZE_UNTIL_COMPLETE) return false;
+        const open = openSnoozeRecord(c.snoozeRecords);
+        return open?.waitForSet === true && open.setId === setId;
+      })
+      .map((c) => c.chatId);
   }
 
   private persistSnoozeRecords(chatId: string): void {

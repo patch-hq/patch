@@ -102,9 +102,13 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): JSX.Element {
       : target.kind === 'chats'
         ? `${targets.length} chats`
         : stripMarkdown(deriveChatTitle(targets[0]?.name ?? null));
-  // Enabled only when every chat has work to wait for; the host refuses the rest.
+  // A chat or selection needs every chat to have work to wait for; the host
+  // refuses the rest. A project waits for the whole project, so one busy chat is enough.
   const canUntilComplete =
-    targets.length > 0 && targets.every((c) => hasWorkToWaitFor(c, delegateUpdates));
+    targets.length > 0 &&
+    (target.kind === 'project'
+      ? targets.some((c) => hasWorkToWaitFor(c, delegateUpdates))
+      : targets.every((c) => hasWorkToWaitFor(c, delegateUpdates)));
   const presets = [...distinctPresets(allPresets), UNTIL_COMPLETE_PRESET];
   const wake = wakeFor(selected, customValue, allPresets, sliderIndex);
   const canConfirm = selected !== null && targets.length > 0;

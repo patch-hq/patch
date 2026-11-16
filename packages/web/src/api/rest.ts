@@ -767,10 +767,13 @@ export const api = {
   // resolved here so a slow request can't drift the wake time); null unsnoozes.
   // `setId` names the user action — a project snooze sends one id for every
   // chat — so the host can clear the Back state of the whole set at once.
-  snoozeChat: (chatId: string, snoozedUntil: number | null, setId?: string) =>
+  snoozeChat: (chatId: string, snoozedUntil: number | null, setId?: string, waitForSet = false) =>
     request<unknown>(`/api/chats/${chatId}/snooze`, {
       method: 'POST',
-      body: setId === undefined ? { snoozedUntil } : { snoozedUntil, setId },
+      body:
+        setId === undefined
+          ? { snoozedUntil }
+          : { snoozedUntil, setId, ...(waitForSet ? { waitForSet: true } : {}) },
     }),
   // spec/04 § Snooze → Back — the chat was opened; the host clears its whole set.
   clearSnoozeBack: (chatId: string) =>
