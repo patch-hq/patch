@@ -147,6 +147,8 @@ export const HEARTBEAT_LIVENESS_TIMEOUT_MS = 30_000;
  * way down. Matches `apps/mobile/src/api/ws.ts`.
  */
 export const STORE_BATCH_MS = 16;
+const SYNC_DEBOUNCE_MS = 1000;
+const SYNC_TIMEOUT_MS = 30_000;
 
 export class PatchWs {
   private ws: WebSocket | null = null;
@@ -173,6 +175,18 @@ export class PatchWs {
    * question twice.
    */
   private readonly lastReplayCursor = new Map<string, number>();
+  /**
+   * Background transcript sync (spec/12 § Offline reading, web variant): the
+   * `lastUpdated` each chat's transcript was last brought level with, the chats
+   * waiting their turn, the one in flight, and the timers that debounce
+   * triggers and bound a host that never answers. One chat at a time, so a
+   * whole library never arrives as one burst.
+   */
+  private readonly syncedAt = new Map<string, number>();
+  private syncQueue: Array<{ chatId: string; lastUpdated: number }> = [];
+  private syncing: { chatId: string; lastUpdated: number } | null = null;
+  private syncTimer: number | null = null;
+  private syncDebounce: number | null = null;
   /** Store events gathered so far in the current batch window, in arrival order. */
   private storeQueue: WireEvent[] = [];
   private storeFlushTimer: number | null = null;
@@ -196,6 +210,9 @@ export class PatchWs {
     this.stopHeartbeat();
     this.stopInputReports();
     this.stopRunningResync();
+    if (this.syncTimer !== null) window.clearTimeout(this.syncTimer);
+    if (this.syncDebounce !== null) window.clearTimeout(this.syncDebounce);
+    this.syncTimer = this.syncDebounce = null;
     this.detachVisibility();
     // Commit anything still inside the batch window. Dropping it would lose
     // real, already-received transcript — the queue is not a cache.
@@ -391,6 +408,73 @@ export class PatchWs {
   }
 
   /**
+   * Bring every roster chat's transcript level with the roster, so opening one
+   * shows its messages at once instead of fetching them on arrival. Driven by
+   * the roster and by live `chat.state` changes, never a timer: a chat is
+   * fetched when its `lastUpdated` differs from the one it was last synced to.
+   * The open chat is skipped (it receives live events), as is a running chat
+   * (it settles with a fresh `lastUpdated`) and a chat on an offline host.
+   */
+  syncTranscripts(): void {
+    const { chats, activeChatId } = useChatStore.getState();
+    const hosts = usePresenceStore.getState().hosts;
+    const queued = new Set(this.syncQueue.map((q) => q.chatId));
+    for (const row of Object.values(chats)) {
+      if (row.chatId === activeChatId || queued.has(row.chatId)) continue;
+      if (this.syncing?.chatId === row.chatId) continue;
+      if (row.activity === 'running') continue;
+      if (hosts[row.hostId]?.online === false) continue;
+      if (this.syncedAt.get(row.chatId) === row.lastUpdated) continue;
+      this.syncQueue.push({ chatId: row.chatId, lastUpdated: row.lastUpdated });
+    }
+    this.pumpSync();
+  }
+
+  /** Coalesce a burst of roster/state changes into one sweep. */
+  private scheduleSync(): void {
+    if (this.syncDebounce !== null) return;
+    this.syncDebounce = window.setTimeout(() => {
+      this.syncDebounce = null;
+      this.syncTranscripts();
+    }, SYNC_DEBOUNCE_MS);
+  }
+
+  private pumpSync(): void {
+    if (this.syncing !== null) return;
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    const next = this.syncQueue.shift();
+    if (next === undefined) return;
+    this.flushStoreQueue();
+    const timeline = useChatStore.getState().timelines[next.chatId];
+    const fromSeq =
+      timeline && timeline.length > 0
+        ? timeline.reduce(
+            (max, e) =>
+              e.localId === undefined && e.streaming !== true && e.seq > max ? e.seq : max,
+            -1,
+          )
+        : -1;
+    this.syncing = next;
+    this.lastReplayCursor.set(next.chatId, fromSeq);
+    this.safeSend({ type: 'chat.replay', chatId: next.chatId, fromSeq, batch: true });
+    // A host that never answers is reported, not retried forever: the chat is
+    // simply not marked synced, so the next trigger asks again.
+    this.syncTimer = window.setTimeout(() => {
+      console.warn(`[ws] background sync of ${next.chatId} timed out`);
+      this.endSync(false);
+    }, SYNC_TIMEOUT_MS);
+  }
+
+  private endSync(done: boolean): void {
+    const finished = this.syncing;
+    this.syncing = null;
+    if (this.syncTimer !== null) window.clearTimeout(this.syncTimer);
+    this.syncTimer = null;
+    if (done && finished) this.syncedAt.set(finished.chatId, finished.lastUpdated);
+    this.pumpSync();
+  }
+
+  /**
    * Ask for a replay of every chat whose transcript this surface is holding —
    * the chat it has open, plus any chat with a rendered timeline. Chats known
    * only as metadata rows are skipped: their transcripts load lazily on open
@@ -501,6 +585,12 @@ export class PatchWs {
     // A new socket has heard nothing: every held chat may need its replay again,
     // including one whose previous request died with the old connection.
     this.lastReplayCursor.clear();
+    // A background fetch in flight died with the old socket; its chat was never
+    // marked synced, so the connect-time sweep asks for it again.
+    this.syncing = null;
+    this.syncQueue = [];
+    if (this.syncTimer !== null) window.clearTimeout(this.syncTimer);
+    this.syncTimer = null;
 
     const ws = new WebSocket(this.url);
     this.ws = ws;
@@ -551,6 +641,7 @@ export class PatchWs {
       // requestReplay), so the cold-start cost is the single metadata call.
       // Reconnect is unchanged: anything already rendered still catches up.
       this.replayHeldChats();
+      this.syncTranscripts();
 
       // spec/12 § "Survives a server restart" — the server's in-memory
       // surface→host buffer is gone across a restart, so any input we sent
@@ -827,7 +918,9 @@ export class PatchWs {
     }
     if (event.type === 'host.offline') {
       usePresenceStore.getState().setHostOnline(event.hostId, false, event.reason);
-      useTerminalStore.getState().interrupt('machine offline, waiting for it to return', event.hostId);
+      useTerminalStore
+        .getState()
+        .interrupt('machine offline, waiting for it to return', event.hostId);
       return;
     }
     if (event.type === 'host.unauthenticated') {
@@ -1224,6 +1317,10 @@ export class PatchWs {
     // permission state (e.g. the spoken "yes"/"no" was parsed host-side and
     // the turn resumed) so the banner doesn't linger after a voice answer.
     if (event.type === 'chat.state') {
+      // A chat other than the one on screen changed: keep its transcript
+      // current in the background. Frames that arrive inside our own
+      // background fetch of that chat are its replay, not news.
+      if (this.syncing?.chatId !== event.chatId) this.scheduleSync();
       const pending = useVoiceStore.getState().permission;
       if (pending && pending.chatId === event.chatId && event.activity !== 'awaiting-permission') {
         useVoiceStore.getState().setPermission(null);
@@ -1262,7 +1359,10 @@ export class PatchWs {
       this.flushStoreQueue();
       // The loading state ends with the LAST chunk, not the first: until then
       // the transcript may still be arriving, and an empty one is not yet empty.
-      if (event.done) useChatStore.getState().setReplaying(event.chatId, false);
+      if (event.done) {
+        useChatStore.getState().setReplaying(event.chatId, false);
+        if (this.syncing?.chatId === event.chatId) this.endSync(true);
+      }
       return;
     }
     // Chat events go to chatStore — coalesced, see queueForStore.

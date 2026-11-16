@@ -124,6 +124,8 @@ export class PatchWs {
   private prefetching: { chatId: string; lastUpdated: number } | null = null;
   private prefetchTimer: TimerHandle | null = null;
   private prefetchTries = new Map<string, number>();
+  /** Debounces live roster changes into one `syncTranscripts` sweep. */
+  private syncDebounce: TimerHandle | null = null;
 
   constructor(url: string) {
     this.url = url;
@@ -145,6 +147,10 @@ export class PatchWs {
 
   close(): void {
     this.closed = true;
+    if (this.syncDebounce !== null) {
+      clearTimeout(this.syncDebounce);
+      this.syncDebounce = null;
+    }
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -267,6 +273,9 @@ export class PatchWs {
     for (const row of Object.values(chats)) {
       if (row.chatId === activeChatId || queued.has(row.chatId)) continue;
       if (this.prefetching?.chatId === row.chatId) continue;
+      // A running chat is still moving; it settles with a fresh `lastUpdated`,
+      // which triggers the sweep again.
+      if (row.activity === 'running') continue;
       // A host that is down cannot answer; its chats are picked up on the
       // next roster refresh after it returns.
       if (hosts[row.hostId]?.online === false) continue;
@@ -681,6 +690,14 @@ export class PatchWs {
   }
 
   private dispatch(event: WireEvent): void {
+    // A live change to a chat keeps its on-phone transcript current without
+    // waiting for the next roster refresh (spec/12 § Offline reading).
+    if (event.type === 'chat.state' && this.syncDebounce === null) {
+      this.syncDebounce = setTimeout(() => {
+        this.syncDebounce = null;
+        this.syncTranscripts();
+      }, 1000);
+    }
     // A refused ask (unknown chat, host error) will never be followed by a last
     // chunk, so the loading state ends here rather than sitting there forever.
     if (event.type === 'chat.error' && typeof event.chatId === 'string') {

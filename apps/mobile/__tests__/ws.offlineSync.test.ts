@@ -67,6 +67,42 @@ const replays = (sock: FakeWebSocket): Array<{ chatId: string; fromSeq: number }
   sock.sent.map((s) => JSON.parse(s as string)).filter((m) => m.type === 'chat.replay');
 
 describe('syncTranscripts', () => {
+  it('keeps a held chat current when a live chat.state moves it, without a roster refresh', () => {
+    useChatStore.getState().hydrate([row('c1', 1)]);
+    const sock = open();
+    getWs().syncTranscripts();
+    sock.emitMessage(
+      JSON.stringify({
+        type: 'chat.replay_batch',
+        chatId: 'c1',
+        events: [ev('c1', 0)],
+        done: true,
+      }),
+    );
+    vi.advanceTimersByTime(1000);
+    sock.sent.length = 0;
+
+    sock.emitMessage(
+      JSON.stringify({
+        type: 'chat.state',
+        chatId: 'c1',
+        hostId: 'h1',
+        permissionMode: 'auto',
+        activity: 'idle',
+        lastUpdated: 9,
+      }),
+    );
+    vi.advanceTimersByTime(1500);
+    expect(replays(sock)).toEqual([{ type: 'chat.replay', chatId: 'c1', fromSeq: 0, batch: true }]);
+  });
+
+  it('leaves a running chat alone until it settles', () => {
+    useChatStore.getState().hydrate([{ ...row('c1', 1), activity: 'running' as const }]);
+    const sock = open();
+    getWs().syncTranscripts();
+    expect(replays(sock)).toEqual([]);
+  });
+
   it('fetches uncached chats one at a time, into the cache and not the store', () => {
     useChatStore.getState().hydrate([row('c1', 1), row('c2', 2)]);
     const sock = open();
