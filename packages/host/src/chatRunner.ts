@@ -10885,6 +10885,11 @@ export class Daemon {
                 );
               }
               this.handleEnvelope(chatId, env, userMessageSeq);
+              // A subagent's result is the end of its turn. Waiting on the stream
+              // to close as well would hang the settle (and so the parent's reply)
+              // for as long as a command the agent detached keeps the process's
+              // pipes open. Leaving the loop closes the stream.
+              if (env.type === 'result' && state.subagent !== undefined) break;
             }
             // A stream that closes without the provider's final `result` (or an error
             // it has already reported) did not

@@ -128,6 +128,45 @@ describe('patch_delegate', () => {
     expect(delegates[0]).toMatchObject({ id, label, status: 'done' });
   });
 
+  it('delivers the reply when the stream stays open after the result (a detached background process)', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'patch-delegate-'));
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-delegate-folder-')));
+    const events: WireEvent[] = [];
+    const sdk: SdkBackend = {
+      ...createMockSdkBackend(),
+      // The result lands, then the stream never closes — as when a command the
+      // agent detached keeps the process's pipes open.
+      async *run(opts) {
+        yield { type: 'assistant', content: 'started the run, waiting', sessionId: 's1' };
+        yield { type: 'result', sessionId: 's1' };
+        await new Promise<void>((resolve) =>
+          opts.abortController.signal.addEventListener('abort', () => resolve()),
+        );
+      },
+    };
+    let id = 0;
+    const daemon = new Daemon({
+      hostId: 'd1',
+      metaStore: createMetaStore(home),
+      sdkBackend: sdk,
+      oauthAccessToken: 'fake-token',
+      emit: (e) => events.push(e),
+      logger: silent,
+      now: () => 1_700_000_000_000,
+      generateChatId: () => `chat-${++id}`,
+      discoverClaudeMcpServers: () => [],
+    });
+    const parentChatId = await daemon.spawnChat({ folder });
+    const { id: childId } = await daemon.createDelegate({ parentChatId, prompt: 'long run' });
+    await flushUntil(() =>
+      messagesOn(events, parentChatId).some(
+        (m) => m.role === 'user' && m.content.includes('started the run, waiting'),
+      ),
+    );
+    expect(daemon.listDelegates(parentChatId)[0]).toMatchObject({ id: childId, status: 'done' });
+    await daemon.stopChat(childId);
+  });
+
   it('isSubagent is true for a delegate chat (live or finished) and false for ordinary and unknown chats', async () => {
     const { daemon, sdk, events, folder } = setup();
     const parentChatId = await daemon.spawnChat({ folder });
