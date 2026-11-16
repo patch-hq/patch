@@ -484,6 +484,7 @@ describe("PatchWs replay cursor vs. the hub dropping this surface's subscription
   it('re-opening a chat after focus was cleared asks for its replay again', async () => {
     useChatStore.getState().hydrate([row('c-1')]);
     const { ws, fake } = await connectAndOpen();
+    fake.sent.length = 0; // drop the connect-time background sync of c-1
     useChatStore.getState().applyEvent({
       type: 'chat.message',
       chatId: 'c-1',
@@ -720,13 +721,13 @@ describe('PatchWs cold start loads metadata only (no per-chat transcript fan-in)
       .filter((e) => e.type === 'chat.replay');
   }
 
-  it('requests NO replay on connect when the roster is metadata-only (empty timelines)', async () => {
-    // spec/12 § Cold start loads metadata only — GET /api/chats hydrates the
-    // sidebar; transcripts load lazily on open, so connect must not kick off
-    // one inbound event stream per known chat.
+  it('syncs a metadata-only roster in the background ONE chat at a time on connect', async () => {
+    // spec/12 § Offline reading — GET /api/chats hydrates the sidebar and each
+    // transcript is then fetched in the background, serially, so connect never
+    // kicks off one inbound event stream per known chat at once.
     useChatStore.getState().hydrate([row('c-1'), row('c-2'), row('c-3')]);
     const { ws, fake } = await connectAndOpen();
-    expect(replaysSent(fake)).toEqual([]);
+    expect(replaysSent(fake).map((r) => r.chatId)).toEqual(['c-1']);
     ws.close();
   });
 
@@ -735,7 +736,8 @@ describe('PatchWs cold start loads metadata only (no per-chat transcript fan-in)
     useChatStore.getState().setActiveChat('c-2');
     const { ws, fake } = await connectAndOpen();
     const replays = replaysSent(fake);
-    expect(replays.map((r) => r.chatId)).toEqual(['c-2']);
+    // The open chat first; then ONE background sync of the other.
+    expect(replays.map((r) => r.chatId)).toEqual(['c-2', 'c-1']);
     expect(replays[0]?.fromSeq).toBe(-1);
     ws.close();
   });
@@ -751,7 +753,7 @@ describe('PatchWs cold start loads metadata only (no per-chat transcript fan-in)
     } as never);
     const { ws, fake } = await connectAndOpen();
     const replays = replaysSent(fake);
-    expect(replays.map((r) => r.chatId)).toEqual(['c-1']);
+    expect([...new Set(replays.map((r) => r.chatId))]).toEqual(['c-1']);
     expect(replays[0]?.fromSeq).toBe(4);
     ws.close();
   });

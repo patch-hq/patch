@@ -661,7 +661,7 @@ describe('integration: send-while-running queues then drains', () => {
 // so the voice turn is NOT shown twice (spec/12 § replay, chatStore reconcile).
 // ===========================================================================
 describe('integration: cold start loads metadata only (spec/12)', () => {
-  it('hydrates the whole roster from ONE GET /api/chats and replays only the open chat', async () => {
+  it('hydrates the whole roster from ONE GET /api/chats, replays the open chat, and syncs the rest one at a time', async () => {
     const rows = [makeRow('c1'), makeRow('c2'), makeRow('c3'), makeRow('c4')];
     const { fake } = await mountApp('/chats/c1', rows);
 
@@ -678,20 +678,26 @@ describe('integration: cold start loads metadata only (spec/12)', () => {
     );
     expect(rosterCalls).toHaveLength(1);
 
-    // Only the chat actually open asked for a transcript — the other three
-    // metadata-only rows must not each pull an inbound event stream.
-    const replayed = fake
-      .outbound()
-      .filter((e) => e.type === 'chat.replay')
-      .map((e) => e.chatId);
-    expect([...new Set(replayed)]).toEqual(['c1']);
+    // The open chat asks for its transcript at once. The other rows are
+    // brought level in the background SERIALLY (spec/12 § Offline reading):
+    // with no answer yet, exactly one of them is in flight — the roster is
+    // never pulled as one burst.
+    await waitFor(() => {
+      const replayed = fake
+        .outbound()
+        .filter((e) => e.type === 'chat.replay')
+        .map((e) => e.chatId);
+      expect([...new Set(replayed)]).toEqual(['c1', 'c2']);
+    });
   });
 
-  it('replays nothing at all when no chat is open', async () => {
+  it('with no chat open, background-syncs one chat at a time', async () => {
     const rows = [makeRow('c1'), makeRow('c2'), makeRow('c3')];
     const { fake } = await mountApp('/chats/new', rows);
     await waitFor(() => expect(useChatStore.getState().chats['c3']).toBeDefined());
-    expect(fake.outbound().filter((e) => e.type === 'chat.replay')).toEqual([]);
+    await waitFor(() =>
+      expect(fake.outbound().filter((e) => e.type === 'chat.replay')).toHaveLength(1),
+    );
   });
 });
 
