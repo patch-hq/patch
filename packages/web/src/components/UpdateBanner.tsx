@@ -23,8 +23,24 @@ export const UPDATE_READY_TITLE = 'A new version of Patch is ready.';
 export const UPDATE_READY_DETAIL = 'Restarting takes a few seconds, and your chats keep running.';
 export const UPDATE_FAILED_TITLE = "Patch didn't restart.";
 
+/**
+ * Squirrel's refusal when the running app's id differs from the id of the build
+ * it downloaded (docs/desktop-packaging.md § Changing the app id). Quitting and
+ * reopening cannot fix it: the old binary can never install a new-id build.
+ */
+export function isAppIdMismatch(installError: string | null): boolean {
+  return installError !== null && /Could not locate update bundle for/i.test(installError);
+}
+
+export const APP_ID_MISMATCH_DETAIL =
+  'This copy of Patch is from before the app was renamed and cannot update itself. Install the latest Patch once from the download page. Your chats keep running.';
+
 /** What to do after a failed restart, for where this window is running. */
-export function failedDetail(where: 'mac' | 'desktop' | 'browser'): string {
+export function failedDetail(
+  where: 'mac' | 'desktop' | 'browser',
+  installError: string | null = null,
+): string {
+  if (isAppIdMismatch(installError)) return APP_ID_MISMATCH_DETAIL;
   if (where === 'browser') return 'To finish updating, refresh this page. Your chats keep running.';
   if (where === 'mac')
     return 'To finish updating, quit Patch with ⌘Q and open it again. Your chats keep running.';
@@ -150,18 +166,22 @@ export function UpdateBanner(): JSX.Element | null {
       <span className="desktop-update-text">
         <b>{failed ? UPDATE_FAILED_TITLE : UPDATE_READY_TITLE}</b>{' '}
         <span className="desktop-update-detail" data-testid="update-banner-detail">
-          {failed ? failedDetail(whereRunning(getDesktopBridge() !== null)) : UPDATE_READY_DETAIL}
+          {failed
+            ? failedDetail(whereRunning(getDesktopBridge() !== null), shellInstallError)
+            : UPDATE_READY_DETAIL}
         </span>
       </span>
-      <button
-        type="button"
-        className="desktop-update-restart"
-        data-testid="update-banner-restart"
-        disabled={pressed}
-        onClick={restart}
-      >
-        {pressed ? 'Restarting…' : failed ? 'Try again' : 'Restart'}
-      </button>
+      {failed && isAppIdMismatch(shellInstallError) ? null : (
+        <button
+          type="button"
+          className="desktop-update-restart"
+          data-testid="update-banner-restart"
+          disabled={pressed}
+          onClick={restart}
+        >
+          {pressed ? 'Restarting…' : failed ? 'Try again' : 'Restart'}
+        </button>
+      )}
     </div>
   );
 }
