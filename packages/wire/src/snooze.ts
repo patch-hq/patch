@@ -42,6 +42,11 @@ export const SnoozeRecord = z
     /** The error behind `erroredAt`. */
     error: SnoozeError.optional(),
     waitingSince: z.number().int().optional(),
+    /**
+     * An until-complete snooze that waits for the whole set (a project snooze):
+     * the chat returns when no chat of the set has work left, not when its own ends.
+     */
+    waitForSet: z.boolean().optional(),
     /** The Back state has been dismissed for this set; the divider stays. */
     backCleared: z.boolean(),
   })

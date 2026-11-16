@@ -7467,6 +7467,7 @@ export async function handleServerEvent(
         // spec/04 § Snooze — absolute wake time, or null to unsnooze.
         await daemon.setSnoozed(event.chatId, event.snoozedUntil, {
           ...(event.setId !== undefined ? { setId: event.setId } : {}),
+          ...(event.waitForSet === true ? { waitForSet: true } : {}),
         });
         return;
       }

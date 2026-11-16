@@ -45,12 +45,30 @@ export function applySnooze(opts: {
     navigate,
     targets.map((c) => c.chatId),
   );
-  for (const c of targets) {
-    store.setSnoozed(c.chatId, until);
-    void api.snoozeChat(c.chatId, until, setId).catch((err) => {
-      useChatStore.getState().setSnoozed(c.chatId, previous.get(c.chatId) ?? null);
-      useUiStore.getState().pushError(failed('snooze'), undefined, (err as Error).message);
-    });
+  for (const c of targets) store.setSnoozed(c.chatId, until);
+  const revert = (c: ChatRow, e: Error): void => {
+    useChatStore.getState().setSnoozed(c.chatId, previous.get(c.chatId) ?? null);
+    useUiStore.getState().pushError(failed('snooze'), undefined, e.message);
+  };
+  if (isProject && isSnoozeUntilComplete(until)) {
+    // A project snooze until complete waits for the whole project: chats with
+    // work go first, so the host sees a busy set before an idle chat joins it.
+    const ordered = [...targets].sort(
+      (a, b) => Number(b.activity === 'running') - Number(a.activity === 'running'),
+    );
+    void (async () => {
+      for (const c of ordered) {
+        try {
+          await api.snoozeChat(c.chatId, until, setId, true);
+        } catch (e) {
+          revert(c, e as Error);
+        }
+      }
+    })();
+  } else {
+    for (const c of targets) {
+      void api.snoozeChat(c.chatId, until, setId).catch((e: Error) => revert(c, e));
+    }
   }
 
   ui.pushSnoozeToast(

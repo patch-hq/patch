@@ -107,6 +107,36 @@ describe('Snooze until complete', () => {
     daemon.shutdown();
   });
 
+  it('a project snooze waits for the whole set: an idle chat joins and all wake together', async () => {
+    const { backend, release } = gated();
+    const { daemon, folder } = setup(backend);
+    const busy = await daemon.spawnChat({ folder });
+    const idle = await daemon.spawnChat({ folder });
+    const turn = daemon.sendInput({ chatId: busy, message: 'go', localId: 'L1', origin: 'user' });
+    await sleep(20);
+    const opts = { setId: 'set-p', waitForSet: true };
+    await daemon.setSnoozed(busy, SNOOZE_UNTIL_COMPLETE, opts);
+    await daemon.setSnoozed(idle, SNOOZE_UNTIL_COMPLETE, opts);
+    await sleep(40);
+    expect(daemon.chatState.get(idle)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
+    release();
+    await turn;
+    await sleep(80);
+    expect(daemon.chatState.get(busy)?.snoozedUntil).toBe(null);
+    expect(daemon.chatState.get(idle)?.snoozedUntil).toBe(null);
+    daemon.shutdown();
+  });
+
+  it('a project snooze with no chat that has work is refused', async () => {
+    const { backend } = gated();
+    const { daemon, folder } = setup(backend);
+    const idle = await daemon.spawnChat({ folder });
+    await expect(
+      daemon.setSnoozed(idle, SNOOZE_UNTIL_COMPLETE, { setId: 'set-p', waitForSet: true }),
+    ).rejects.toThrow(/no running work/);
+    daemon.shutdown();
+  });
+
   it('refuses a chat with nothing running and no goal', async () => {
     const { backend } = gated();
     const { daemon, folder } = setup(backend);
@@ -169,6 +199,26 @@ describe('Snooze until complete', () => {
     await sleep(120);
     expect(daemon.chatState.get(id)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
     expect(metaStore.read(id)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
+    daemon.shutdown();
+  });
+
+  it('stays snoozed while a delegated agent is still running, and wakes once all agents are done', async () => {
+    const { backend, release } = gated();
+    const { daemon, folder } = setup(backend);
+    const parent = await daemon.spawnChat({ folder });
+    // The parent itself is idle; only its agent has work in flight.
+    const { id: agent } = await daemon.createDelegate({ parentChatId: parent, prompt: 'research' });
+    await sleep(20);
+    expect(daemon.chatState.get(agent)?.subagent?.outcome).toBeUndefined();
+
+    await daemon.setSnoozed(parent, SNOOZE_UNTIL_COMPLETE);
+    await sleep(60);
+    expect(daemon.chatState.get(parent)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
+
+    release();
+    await sleep(300);
+    expect(daemon.chatState.get(agent)?.subagent?.outcome).toBe('done');
+    expect(daemon.chatState.get(parent)?.snoozedUntil).toBe(null);
     daemon.shutdown();
   });
 

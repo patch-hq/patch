@@ -1530,6 +1530,26 @@ describe('Sidebar', () => {
     vi.useRealTimers();
   });
 
+  it('a project with one running chat offers Until complete, sent busy chat first with waitForSet', async () => {
+    useChatStore.getState().hydrate([
+      rowFixture({ chatId: 'u1', folder: '/home/tom/projects/untilc', lastUpdated: 2 }),
+      rowFixture({
+        chatId: 'u2',
+        folder: '/home/tom/projects/untilc',
+        activity: 'running',
+        lastUpdated: 1,
+      }),
+    ]);
+    const snoozeSpy = vi.spyOn(api, 'snoozeChat').mockResolvedValue(undefined as never);
+    renderInRouter();
+    fireEvent.click(screen.getByTestId('folder-snooze-/home/tom/projects/untilc'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-preset-until-complete'));
+    fireEvent.click(screen.getByTestId('snooze-sheet-confirm'));
+    await waitFor(() => expect(snoozeSpy).toHaveBeenCalledTimes(2));
+    expect(snoozeSpy.mock.calls.map((c) => c[0])).toEqual(['u2', 'u1']);
+    expect(snoozeSpy.mock.calls.every((c) => c[3] === true)).toBe(true);
+  });
+
   it('whole-project snooze reverts just the failing chat and toasts', async () => {
     useChatStore
       .getState()

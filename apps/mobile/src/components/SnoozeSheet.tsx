@@ -115,15 +115,14 @@ function SheetBody({ target }: { target: SnoozeSheetTarget }): React.ReactElemen
   const running = targets.filter((c) => c.activity === 'running');
   const notRunning = targets.length - running.length;
   const name = isProject ? target.name : deriveChatTitle(targets[0] ?? ({ name: null } as ChatRow));
-  // Enabled only when every chat has work to wait for; the host refuses the rest.
+  // A chat needs work to wait for; a project waits for the whole project, so
+  // one busy chat is enough. The host refuses the rest.
+  const hasWork = (c: ChatRow): boolean =>
+    c.activity === 'running' ||
+    c.goal !== null ||
+    (c.pendingWake != null && c.pendingWake.every === undefined);
   const canUntilComplete =
-    targets.length > 0 &&
-    targets.every(
-      (c) =>
-        c.activity === 'running' ||
-        c.goal !== null ||
-        (c.pendingWake != null && c.pendingWake.every === undefined),
-    );
+    targets.length > 0 && (isProject ? targets.some(hasWork) : targets.every(hasWork));
   const presets = [...distinctPresets(allPresets), UNTIL_COMPLETE_PRESET];
   const wake = wakeFor(selected, customValue, allPresets, sliderIndex);
   const wakeText =
