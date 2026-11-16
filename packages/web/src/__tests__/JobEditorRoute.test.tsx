@@ -2328,8 +2328,7 @@ describe('JobEditorRoute (single-page form)', () => {
     };
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (url: string, init?: RequestInit) => {
-        const method = (init?.method ?? 'GET').toUpperCase();
+      vi.fn(async (url: string) => {
         if (String(url).includes('/runs')) {
           return new Response(JSON.stringify({ runs: [] }), { status: 200 });
         }
