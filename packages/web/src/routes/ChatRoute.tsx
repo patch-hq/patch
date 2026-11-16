@@ -4768,6 +4768,10 @@ interface LinkFileView {
   absPath: string;
   isDirectory: boolean;
   size?: number | undefined;
+  /** Inline preview page, when the host could build one. */
+  previewUrl?: string | undefined;
+  /** Why a previewable file has no preview. */
+  previewError?: string | undefined;
 }
 
 /** Unwrap a `link_file` ack — same three result shapes as `viewFilePayload`. */
@@ -4785,6 +4789,11 @@ function linkFilePayload(result: unknown): LinkFileView | null {
       absPath,
       isDirectory: v['isDirectory'] === true,
       size: typeof v['size'] === 'number' ? v['size'] : undefined,
+      previewUrl:
+        typeof v['previewUrl'] === 'string' && v['previewUrl'].startsWith('/api/')
+          ? v['previewUrl']
+          : undefined,
+      previewError: typeof v['previewError'] === 'string' ? v['previewError'] : undefined,
     };
   };
   const direct = asLink(result);
@@ -4813,6 +4822,7 @@ function linkFilePayload(result: unknown): LinkFileView | null {
  */
 function LinkFileCard({ link, chatId }: { link: LinkFileView; chatId: string }): JSX.Element {
   const [openError, setOpenError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const chatHostId = useChatStore((st) => st.chats[chatId]?.hostId ?? '');
   const bridge = getDesktopBridge();
   const localHostBridge = bridge?.localHost;
@@ -4886,6 +4896,32 @@ function LinkFileCard({ link, chatId }: { link: LinkFileView; chatId: string }):
         <div className="view-file-error" data-testid="link-file-open-error" role="alert">
           {openError}
         </div>
+      ) : null}
+      {link.previewError !== undefined ? (
+        <div className="view-file-error" data-testid="link-file-preview-error" role="alert">
+          No preview: {link.previewError}
+        </div>
+      ) : null}
+      {link.previewUrl !== undefined ? (
+        <>
+          <iframe
+            className={`view-file-frame view-file-preview${expanded ? ' expanded' : ''}`}
+            data-testid="link-file-preview"
+            src={link.previewUrl}
+            title={`Preview of ${link.name}`}
+            sandbox="allow-popups allow-popups-to-escape-sandbox"
+            loading="lazy"
+          />
+          <button
+            type="button"
+            className="view-file-more"
+            data-testid="link-file-preview-toggle"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? 'Show less' : 'Show more'}
+          </button>
+        </>
       ) : null}
     </div>
   );

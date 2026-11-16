@@ -3999,6 +3999,30 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
           : `cannot read ${absPath}: ${err instanceof Error ? err.message : String(err)}`,
       } satisfies ErrorEnvelope);
     }
+    // A previewable file also gets the same inline preview page a view_file
+    // card has, published from here (the file is on this host's disk). A
+    // preview that cannot be built leaves the link intact and says why.
+    let previewUrl: string | undefined;
+    let previewError: string | undefined;
+    const ext = extname(absPath).toLowerCase();
+    if (stat.isFile() && previewable(ext)) {
+      try {
+        if (!opts.publishArtifact) {
+          throw new Error('artifact publishing is not wired on this host');
+        }
+        const previewHtml = await buildPreviewHtml(absPath, ext, basename(absPath));
+        const published = await opts.publishArtifact({
+          chatId: callerChatId,
+          artifactId: artifactIdFor(callerChatId, `link_file_preview\u0000${absPath}`),
+          title: basename(absPath),
+          path: basename(absPath),
+          html: previewHtml,
+        });
+        previewUrl = published.url;
+      } catch (err) {
+        previewError = err instanceof Error ? err.message : String(err);
+      }
+    }
     toolLog({ tool: 'link_file', callerChatId, durationMs: Date.now() - start, ok: true });
     return {
       ok: true,
@@ -4008,6 +4032,8 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       absPath,
       isDirectory: stat.isDirectory(),
       ...(stat.isFile() ? { size: stat.size } : {}),
+      ...(previewUrl !== undefined ? { previewUrl } : {}),
+      ...(previewError !== undefined ? { previewError } : {}),
     };
   });
 
