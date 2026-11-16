@@ -1027,6 +1027,14 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // two cannot drift apart. Unlike a project this is NOT a toggle: a chat
   // always spawns on some model, so re-pressing the chosen one leaves it
   // chosen (spec/14 § Model selector).
+  const accountDefaultModel = usePreferencesStore((st) => st.preferences.defaultModel);
+  const updatePreferences = usePreferencesStore((st) => st.update);
+  function makeDefaultModel(): void {
+    if (effectiveModel === null) return;
+    void updatePreferences({ defaultModel: effectiveModel }).catch((err: Error) =>
+      pushError(err.message),
+    );
+  }
   function chooseModel(id: string): void {
     setModel(id);
     setOpenPicker(null);
@@ -1391,6 +1399,16 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
             active={!modelIsQuick && effectiveModel !== null}
             {...(modelIsQuick ? { triggerLabel: 'More…' } : {})}
           />
+          {effectiveModel !== null && effectiveModel !== accountDefaultModel ? (
+            <button
+              type="button"
+              className="new-chat-make-default"
+              data-testid="new-chat-make-default"
+              onClick={makeDefaultModel}
+            >
+              Set as default
+            </button>
+          ) : null}
         </div>
         {/* The account this chat is LOCKED to (spec/10 § Backend
             credentials — preferred account): a spent account is waited on, not

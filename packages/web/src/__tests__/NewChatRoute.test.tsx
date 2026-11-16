@@ -8,6 +8,7 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { MemoryRouter, Routes, Route, Link } from 'react-router-dom';
 import { compactModelLabel } from '@patch/wire';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { NewChatRoute } from '../routes/NewChatRoute.js';
 import { ChatRoute } from '../routes/ChatRoute.js';
 import { ErrorToasts } from '../components/ErrorToasts.js';
@@ -1053,6 +1054,23 @@ describe('/chats/new', () => {
     // ArrowLeft wraps the other way.
     fireEvent.keyDown(opus, { key: 'ArrowLeft' });
     expect(haiku).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('offers "Set as default" only for a model other than the account default, and saves it', async () => {
+    stubPickerFetch({ folders: [] });
+    const update = vi.fn().mockResolvedValue(undefined);
+    usePreferencesStore.setState((st) => ({
+      preferences: { ...st.preferences, defaultModel: ACCOUNT_DEFAULT_MODEL },
+      update,
+    }));
+    renderPicker();
+
+    await screen.findByTestId(`model-quick-${ACCOUNT_DEFAULT_MODEL}`);
+    expect(screen.queryByTestId('new-chat-make-default')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('model-quick-claude-sonnet-5'));
+    fireEvent.click(await screen.findByTestId('new-chat-make-default'));
+    expect(update).toHaveBeenCalledWith({ defaultModel: 'claude-sonnet-5' });
   });
 
   // ---- Order stability (Tom: "things jump around depending on what's
