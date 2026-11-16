@@ -6,6 +6,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react';
 import {
+  APP_ID_MISMATCH_DETAIL,
   UPDATE_FAILED_TITLE,
   UPDATE_READY_DETAIL,
   UPDATE_READY_TITLE,
@@ -123,5 +124,20 @@ describe('UpdateBanner', () => {
     );
     expect(screen.getByTestId('update-banner-detail')).toHaveTextContent('open it again');
     expect(screen.getByTestId('update-banner-restart')).toHaveTextContent('Try again');
+  });
+
+  it('an old-app-id install failure says so and offers no futile retry', async () => {
+    installBridge(
+      state({
+        downloaded: false,
+        lastResult: 'error',
+        lastErrorKind: 'install',
+        lastError: 'Could not locate update bundle for io.github.example.patch within',
+      }),
+    );
+    render(<UpdateBanner />);
+    expect(await screen.findByText(UPDATE_FAILED_TITLE)).toBeTruthy();
+    expect(screen.getByTestId('update-banner-detail').textContent).toBe(APP_ID_MISMATCH_DETAIL);
+    expect(screen.queryByTestId('update-banner-restart')).toBeNull();
   });
 });
