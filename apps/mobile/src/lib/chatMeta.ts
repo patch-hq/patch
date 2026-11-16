@@ -5,6 +5,7 @@
 // says so in an error toast. Never a silent revert, never a silent success.
 
 import type { TodoItem } from '@patch/wire';
+import type { ChatRow, GoalPlan } from '../stores/types';
 import { api } from '../api/rest';
 import { useChatStore } from '../stores/chatStore';
 import { useUiStore } from '../stores/uiStore';
@@ -24,19 +25,35 @@ function stillOurs<T>(current: T, next: T): boolean {
   return current === next;
 }
 
+/** The plan a row carries today, in the shape the store and REST take. */
+export function planOf(r: ChatRow): Required<GoalPlan> {
+  return {
+    then: r.goalQueue ?? [],
+    remindEvery: r.goalReminderEvery ?? null,
+    checkInEvery: r.goalCheckInEvery ?? null,
+  };
+}
+
 function fail(what: string, e: unknown): void {
   useUiStore.getState().pushError(`${what} failed: ${(e as Error).message}`);
 }
 
 /** Set (text) or clear (`null`) the chat's goal. */
-export async function writeGoal(chatId: string, next: string | null): Promise<void> {
-  const prev = row(chatId).goal;
-  useChatStore.getState().setGoal(chatId, next);
+export async function writeGoal(
+  chatId: string,
+  next: string | null,
+  plan: GoalPlan = {},
+): Promise<void> {
+  const before = row(chatId);
+  const prev = before.goal;
+  const prevPlan = planOf(before);
+  useChatStore.getState().setGoal(chatId, next, plan);
   try {
-    await api.setGoal(chatId, next);
+    if (Object.keys(plan).length === 0) await api.setGoal(chatId, next);
+    else await api.setGoal(chatId, next, plan);
   } catch (e) {
     if (stillOurs(useChatStore.getState().chats[chatId]?.goal, next))
-      useChatStore.getState().setGoal(chatId, prev);
+      useChatStore.getState().setGoal(chatId, prev, prevPlan);
     fail(next === null ? 'clearing goal' : 'updating goal', e);
   }
 }

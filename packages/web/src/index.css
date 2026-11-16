@@ -11250,6 +11250,49 @@ main.empty-state p {
   resize: vertical;
 }
 
+/* Goal editor: follow-on goals and the two cadences under the goal text. */
+.goal-then-row,
+.goal-cadence {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+.goal-then-index,
+.goal-cadence-label {
+  flex: 0 0 64px;
+  color: var(--ink-2);
+  font-size: var(--text-min);
+}
+.goal-then-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.goal-then-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 12px;
+}
+.goal-cadence select,
+.goal-cadence input {
+  padding: 5px 8px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.goal-cadence input {
+  width: 72px;
+}
+
 /* ---------- Inline click-to-edit text (goal bar, task rows) ---------- */
 
 /* Read mode is a button so it is keyboard-reachable, but it must read as the

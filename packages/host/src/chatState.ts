@@ -75,6 +75,8 @@ export interface GoalProgress {
   lastReason: string | null;
   /** The user stopped the chat's turn: the goal is on hold until the next turn starts. */
   pausedByStop?: boolean;
+  /** The evaluator's latest on-track read (spec/04 § Goals — check-in). */
+  lastCheckIn?: { at: number; status: 'on_track' | 'off_track'; reason: string } | null;
 }
 
 /** {@link ChatState.lastGoal} (spec/04 § Goals). */
@@ -101,6 +103,20 @@ export interface ChatState {
    * `null` when no goal is set. Mirrored to meta.json so it survives a restart.
    */
   goal: string | null;
+  /** Goals that start in order once `goal` is met (spec/04 § Goals — sequence). */
+  goalQueue: string[];
+  /** Restate the active goal on this cadence (spec/04 § Goals — reminders); `null` = never. */
+  goalReminderEvery: ReminderEvery | null;
+  /** Ask the evaluator whether the goal is on track on this cadence; `null` = never. */
+  goalCheckInEvery: ReminderEvery | null;
+  /** Agent turns since the goal was last restated (in-memory). */
+  goalReminderTurnsSince: number;
+  /** When the goal was last restated or set, ms (in-memory). */
+  goalReminderLastAt: number;
+  /** Judged turns since the last check-in (in-memory). */
+  goalCheckInTurnsSince: number;
+  /** When the last check-in ran or the goal was set, ms (in-memory). */
+  goalCheckInLastAt: number;
   /**
    * Live progress on the chat's ACTIVE goal (spec/04 § Goals) — `null` exactly
    * when `goal` is `null`. In-memory, rebuilt from `goal`/`lastGoal` on
@@ -407,6 +423,13 @@ export function chatStateFromMeta(meta: ChatMeta): ChatState {
     name: meta.name,
     preview: meta.preview ?? null,
     goal: meta.goal ?? null,
+    goalQueue: meta.goalQueue ?? [],
+    goalReminderEvery: meta.goalReminderEvery ?? null,
+    goalCheckInEvery: meta.goalCheckInEvery ?? null,
+    goalReminderTurnsSince: 0,
+    goalReminderLastAt: Date.now(),
+    goalCheckInTurnsSince: 0,
+    goalCheckInLastAt: Date.now(),
     // Progress counters are in-memory only (see field doc) — a rehydrated
     // active goal starts counting from zero again rather than guessing.
     goalProgress: meta.goal

@@ -82,6 +82,12 @@ export interface ChatRow {
   goalProgress: GoalProgress | null;
   /** The most recently finished goal (spec/04 § Goals), kept after `goal` clears. */
   lastGoal: FinishedGoal | null;
+  /** Goals that start in order once the active one is met (spec/04 § Goals — sequence). */
+  goalQueue?: string[];
+  /** How often the active goal is restated to the agent; `null`/absent = never. */
+  goalReminderEvery?: ReminderEvery | null;
+  /** How often the evaluator is asked whether the goal is on track; `null` = never. */
+  goalCheckInEvery?: ReminderEvery | null;
   /**
    * The chat's reminder (patch/todo.md — Reminders). A configurable reminder to
    * do / not do something, shown in a banner at the top of the chat. `null` when
@@ -470,4 +476,11 @@ export interface SectionCounts {
   snoozed: number;
   deleted: number;
   automations: number;
+}
+
+/** What surrounds a goal when it is set from a surface (spec/04 § Goals). */
+export interface GoalPlan {
+  then?: string[];
+  remindEvery?: ReminderEvery | null;
+  checkInEvery?: ReminderEvery | null;
 }

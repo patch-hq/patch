@@ -7459,7 +7459,11 @@ export async function handleServerEvent(
         return;
       }
       case 'chat.goal_request': {
-        await daemon.setGoal(event.chatId, event.goal);
+        await daemon.setGoal(event.chatId, event.goal, {
+          ...(event.then !== undefined ? { then: event.then } : {}),
+          ...(event.remindEvery !== undefined ? { remindEvery: event.remindEvery } : {}),
+          ...(event.checkInEvery !== undefined ? { checkInEvery: event.checkInEvery } : {}),
+        });
         return;
       }
       case 'chat.todos_request': {

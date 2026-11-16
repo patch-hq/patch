@@ -23,6 +23,7 @@ import type {
   WatchTaskRow,
   StrayProcessRow,
 } from '@patch/wire';
+import type { GoalPlan } from '../stores/types.js';
 import type { Hook, HookCreateBody, HookPatchBody, HookCheckResponse } from '@patch/wire/hooks';
 import { assertVersionReport } from '@patch/wire';
 import { loadCredential } from '../lib/credential.js';
@@ -790,10 +791,10 @@ export const api = {
       body: { name },
     }),
   // patch/todo.md — `/goal`: set (or clear, with null) the chat's goal.
-  setGoal: (chatId: string, goal: string | null) =>
+  setGoal: (chatId: string, goal: string | null, plan: GoalPlan = {}) =>
     request<unknown>(`/api/chats/${chatId}/goal`, {
       method: 'POST',
-      body: { goal },
+      body: { goal, ...plan },
     }),
   // spec/02 § Task list — replace the chat's task list with `todos` (the WHOLE
   // list, not a delta). The host adopts it and tells the agent on its next turn.

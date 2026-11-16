@@ -642,7 +642,14 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   },
   'chat.snooze_back_clear_request': { type: 'chat.snooze_back_clear_request', chatId: 'c1' },
   'chat.delete_request': { type: 'chat.delete_request', chatId: 'c1', deleted: true },
-  'chat.goal_request': { type: 'chat.goal_request', chatId: 'c1', goal: 'Ship it' },
+  'chat.goal_request': {
+    type: 'chat.goal_request',
+    chatId: 'c1',
+    goal: 'Ship it',
+    then: ['Write notes'],
+    remindEvery: { unit: 'turns', n: 3 },
+    checkInEvery: null,
+  },
   'chat.todos_request': {
     type: 'chat.todos_request',
     chatId: 'c1',

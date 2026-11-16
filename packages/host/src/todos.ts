@@ -204,6 +204,14 @@ export function buildGoalSystemReminder(goal: string | null): string {
 }
 
 /**
+ * The recurring `<system-reminder>` restating the chat's active goal on the
+ * goal's own cadence (spec/04 § Goals — reminders).
+ */
+export function buildGoalReminder(goal: string): string {
+  return `<system-reminder>\nReminder: this chat's goal is still active and not yet met: ${goal}\nKeep working towards it.\n</system-reminder>\n\n`;
+}
+
+/**
  * The recurring `<system-reminder>` carrying the chat's own reminder text
  * (spec/04 § Reminders), re-injected on the chat's cadence.
  */

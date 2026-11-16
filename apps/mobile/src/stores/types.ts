@@ -160,6 +160,12 @@ export interface ChatRow {
    * § Chat detail → Status bars), same data as web's GoalBanner.
    */
   goal: string | null;
+  /** Goals that start in order once the active one is met (spec/04 § Goals — sequence). */
+  goalQueue?: string[];
+  /** How often the active goal is restated to the agent; `null`/absent = never. */
+  goalReminderEvery?: ReminderEvery | null;
+  /** How often the evaluator is asked whether the goal is on track; `null`/absent = never. */
+  goalCheckInEvery?: ReminderEvery | null;
   /** The chat's reminder (`/remind`), or `null`. Drives the reminder bar. */
   reminder: string | null;
   /** How often the reminder is re-injected into the agent; `null` = banner only. */
@@ -311,4 +317,11 @@ export function deriveBadge(row: ChatRow): DisplayBadge {
   if (typeof row.backgroundTasks === 'number' && row.backgroundTasks > 0) return 'background';
   if (row.pendingWake) return 'monitoring';
   return 'read';
+}
+
+/** What surrounds a goal when it is set from a surface (spec/04 § Goals). */
+export interface GoalPlan {
+  then?: string[];
+  remindEvery?: ReminderEvery | null;
+  checkInEvery?: ReminderEvery | null;
 }

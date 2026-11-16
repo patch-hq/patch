@@ -503,16 +503,32 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
         "each turn settles, Patch's own evaluator judges `condition` against the conversation: not met " +
         'continues with the reason as guidance, met or impossible clears it. Unlike the composer command, ' +
         'calling this tool does NOT also send `condition` as a turn — it only arms the evaluator, since ' +
-        'you are already mid-conversation. Visible to the user the whole time, via a bar above the chat.',
+        'you are already mid-conversation. Visible to the user the whole time, via a bar above the chat. ' +
+        'Optionally `then` queues goals that start, in order, each when the one before is met; ' +
+        '`remindEvery` restates the goal to you every N turns or minutes; `checkInEvery` has the ' +
+        'evaluator also judge whether the work is on track every N turns or minutes (off track surfaces the chat).',
       inputSchema: {
         condition: z.string().min(1),
+        then: z.array(z.string().min(1)).max(50).optional(),
+        remindEvery: z
+          .object({ unit: z.enum(['turns', 'minutes']), n: z.number().int().min(1).max(10000) })
+          .optional(),
+        checkInEvery: z
+          .object({ unit: z.enum(['turns', 'minutes']), n: z.number().int().min(1).max(10000) })
+          .optional(),
       },
     },
-    async ({ condition }) => {
+    async ({ condition, then, remindEvery, checkInEvery }) => {
       const res = await uds<unknown>({
         method: 'POST',
         path: '/internal/goal',
-        body: { chatId: callerChatId, goal: condition },
+        body: {
+          chatId: callerChatId,
+          goal: condition,
+          ...(then !== undefined ? { then } : {}),
+          ...(remindEvery !== undefined ? { remindEvery } : {}),
+          ...(checkInEvery !== undefined ? { checkInEvery } : {}),
+        },
       });
       return toolResult(res);
     },

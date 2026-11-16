@@ -33,6 +33,7 @@ import type {
   ChatContextUsage,
   GoalProgress,
   FinishedGoal,
+  ReminderEvery,
   ChatBranch,
 } from '@patch/wire';
 import { isReservedSpecialThread, type SnoozeRecord } from '@patch/wire';
@@ -62,6 +63,10 @@ export interface ChatSummary {
   goal: string | null;
   /** Live progress on the chat's active goal, mirrored from the host's `chat.state`. */
   goalProgress: GoalProgress | null;
+  /** Goals that start in order once the active one is met, mirrored from `chat.state`. */
+  goalQueue: string[];
+  goalReminderEvery: ReminderEvery | null;
+  goalCheckInEvery: ReminderEvery | null;
   /** The chat's most recently finished goal, mirrored from the host's `chat.state`. */
   lastGoal: FinishedGoal | null;
   /**
@@ -361,6 +366,9 @@ export class ChatRegistry {
         preview: null,
         goal: null,
         goalProgress: null,
+        goalQueue: [],
+        goalReminderEvery: null,
+        goalCheckInEvery: null,
         lastGoal: null,
         reminder: null,
         statusSummary: null,
@@ -435,6 +443,15 @@ export class ChatRegistry {
         goalProgress:
           event.goalProgress !== undefined ? event.goalProgress : (existing?.goalProgress ?? null),
         lastGoal: event.lastGoal !== undefined ? event.lastGoal : (existing?.lastGoal ?? null),
+        goalQueue: event.goalQueue !== undefined ? event.goalQueue : (existing?.goalQueue ?? []),
+        goalReminderEvery:
+          event.goalReminderEvery !== undefined
+            ? event.goalReminderEvery
+            : (existing?.goalReminderEvery ?? null),
+        goalCheckInEvery:
+          event.goalCheckInEvery !== undefined
+            ? event.goalCheckInEvery
+            : (existing?.goalCheckInEvery ?? null),
         // Reminder CAN be cleared (set to null), so `null` is meaningful — only
         // fall back to the existing reminder when the field is absent (undefined).
         reminder: event.reminder !== undefined ? event.reminder : (existing?.reminder ?? null),
