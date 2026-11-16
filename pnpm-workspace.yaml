@@ -7,3 +7,6 @@ packages:
 supportedArchitectures:
   os: [linux, darwin]
   cpu: [x64, arm64]
+
+patchedDependencies:
+  expo-updates@0.27.5: patches/expo-updates@0.27.5.patch
