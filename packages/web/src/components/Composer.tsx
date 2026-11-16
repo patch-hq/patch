@@ -2390,6 +2390,13 @@ export const Composer = forwardRef(function Composer(
                   type="button"
                   role="option"
                   aria-selected={i === activeSkillIndex}
+                  // Keep the keyboard-highlighted row visible: ↑/↓ change the
+                  // index but a long list doesn't follow it on its own.
+                  ref={
+                    i === activeSkillIndex
+                      ? (el) => el?.scrollIntoView({ block: 'nearest' })
+                      : undefined
+                  }
                   className={`composer-skill-option${i === activeSkillIndex ? ' active' : ''}${item.isBuiltin ? ' builtin' : ''}${item.blocked ? ' blocked' : ''}`}
                   aria-disabled={item.blocked || undefined}
                   title={
