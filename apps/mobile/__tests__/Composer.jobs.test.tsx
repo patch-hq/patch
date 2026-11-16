@@ -1,4 +1,4 @@
-// Composer — run a job with `!` (spec/15 § Composer). Typing `!` opens a list
+// Composer — run a job with `#` (spec/15 § Composer). Typing `#` opens a list
 // of jobs (api.listJobs); tapping one fires it (api.runJob) and strips the
 // token from the draft. No chat turn is sent.
 
@@ -84,7 +84,7 @@ afterEach(() => {
 });
 
 describe('Composer — run a job with !', () => {
-  it('a draft without `!` never reads jobs', () => {
+  it('a draft without `#` never reads jobs', () => {
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     findHost(r.root, byType('TextInput')).props['onChangeText']('hello');
     update(r, <Composer chatId="c1" folder="work" />);
@@ -95,7 +95,7 @@ describe('Composer — run a job with !', () => {
   it('lists jobs, filters by the query, and tapping one runs it and clears the token', async () => {
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byType('TextInput')).props['onChangeText']('!back');
+      findHost(r.root, byType('TextInput')).props['onChangeText']('#back');
     });
     update(r, <Composer chatId="c1" folder="work" />);
     await actAsync(async () => {});
@@ -113,7 +113,7 @@ describe('Composer — run a job with !', () => {
     runJobSpy.mockRejectedValue(new Error('nope'));
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byType('TextInput')).props['onChangeText']('!');
+      findHost(r.root, byType('TextInput')).props['onChangeText']('#');
     });
     update(r, <Composer chatId="c1" folder="work" />);
     await actAsync(async () => {});
@@ -127,7 +127,7 @@ describe('Composer — run a job with !', () => {
     listJobsSpy.mockRejectedValue(new Error('down'));
     const r = renderRN(<Composer chatId="c1" folder="work" />);
     await actAsync(async () => {
-      findHost(r.root, byType('TextInput')).props['onChangeText']('!');
+      findHost(r.root, byType('TextInput')).props['onChangeText']('#');
     });
     await actAsync(async () => {});
     expect(useUiStore.getState().errors.some((e) => JSON.stringify(e).includes('down'))).toBe(true);

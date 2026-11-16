@@ -978,10 +978,10 @@ describe('Composer', () => {
       const onSend = vi.fn();
       render(<Composer chatId="c1" hostId="d1" onSend={onSend} onStartVoiceNote={() => {}} />);
       const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
-      fireEvent.change(input, { target: { value: '!' } });
+      fireEvent.change(input, { target: { value: '#' } });
       await screen.findByTestId('composer-job-option-j1');
       expect(screen.getByTestId('composer-job-option-j2')).toBeInTheDocument();
-      fireEvent.change(input, { target: { value: '!back' } });
+      fireEvent.change(input, { target: { value: '#back' } });
       expect(screen.queryByTestId('composer-job-option-j1')).toBeNull();
       fireEvent.keyDown(input, { key: 'Enter' });
       expect(run).toHaveBeenCalledWith('j2');
@@ -993,7 +993,7 @@ describe('Composer', () => {
     it('says so when the job list cannot be read', async () => {
       vi.spyOn(api, 'listJobs').mockRejectedValue(new Error('boom'));
       const input = mount();
-      fireEvent.change(input, { target: { value: '!' } });
+      fireEvent.change(input, { target: { value: '#' } });
       expect(await screen.findByTestId('composer-job-error')).toHaveTextContent('boom');
     });
 
@@ -1001,7 +1001,7 @@ describe('Composer', () => {
       vi.spyOn(api, 'listJobs').mockResolvedValue({ jobs });
       vi.spyOn(api, 'runJob').mockRejectedValue(new Error('nope'));
       const input = mount();
-      fireEvent.change(input, { target: { value: '!' } });
+      fireEvent.change(input, { target: { value: '#' } });
       await screen.findByTestId('composer-job-option-j1');
       fireEvent.mouseDown(screen.getByTestId('composer-job-option-j1'));
       await waitFor(() =>
