@@ -237,6 +237,7 @@ import type {
 } from '@patch/wire';
 import { BrowserHandoff, type HandoffResult, type ShareResult } from './browserHandoff.js';
 import { voicePrefixForSource } from './specialThreads.js';
+import { sweepAgentWorktrees, type WorktreeSweepResult } from './cleanup.js';
 import { parseLeadingGoal } from './goalCommand.js';
 import { prefixKeepingCommandFirst } from './leadCommand.js';
 
@@ -9779,6 +9780,40 @@ export class Daemon {
       );
     }
     return { removed };
+  }
+
+  /**
+   * Startup cleanup (`cleanupPeriodDays`): delete the logs of chats idle since
+   * before `cutoff`, then sweep stale clean agent worktrees. Pinned chats, the
+   * special threads and anything running (a turn, a watch, a delegate) stay.
+   */
+  async cleanupOldData(
+    cutoff: number,
+  ): Promise<{ chats: string[]; worktrees: WorktreeSweepResult }> {
+    const special = new Set<string>(Object.values(SPECIAL_THREAD_IDS));
+    const all = this.chatState.list();
+    const chats: string[] = [];
+    for (const state of all) {
+      if (special.has(state.chatId) || state.pinned) continue;
+      if (this.aborters.has(state.chatId)) continue;
+      if (this.watch.count(state.chatId) > 0 || this.hasRunningDelegates(state.chatId)) continue;
+      if (state.lastUpdated > cutoff) continue;
+      const metaDir = dirname(this.opts.metaStore.pathFor(state.chatId));
+      this.chatLog.close(state.chatId);
+      rmSync(metaDir, { recursive: true, force: true });
+      this.chatState.delete(state.chatId);
+      this.hydratedFromDisk.delete(state.chatId);
+      chats.push(state.chatId);
+    }
+    if (chats.length > 0)
+      this.opts.logger.info({ count: chats.length }, 'cleanup: removed old chats');
+    const gone = new Set(chats);
+    const worktrees = await sweepAgentWorktrees({
+      folders: all.filter((s) => !gone.has(s.chatId)).map((s) => s.folder),
+      cutoff,
+      logger: this.opts.logger,
+    });
+    return { chats, worktrees };
   }
 
   // -------------------------------------------------------------------------

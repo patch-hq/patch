@@ -19,6 +19,7 @@ export function ChatsPage(): JSX.Element {
   const statusGen = usePreferencesStore((s) => s.preferences.statusGenerationEnabled);
   const morning = usePreferencesStore((s) => s.preferences.snoozeMorningHour);
   const evening = usePreferencesStore((s) => s.preferences.snoozeEveningHour);
+  const cleanupDays = usePreferencesStore((s) => s.preferences.cleanupPeriodDays);
   const loaded = usePreferencesStore((s) => s.loaded);
   const groupSort = useUiStore((s) => s.groupSort);
   const setGroupSort = useUiStore((s) => s.setGroupSort);
@@ -46,6 +47,26 @@ export function ChatsPage(): JSX.Element {
           />
         </Row>
       </Group>
+      <Group label="Cleanup" testid="settings-cleanup">
+        <Row title="Delete chats and stale agent worktrees after" testid="cleanup-period">
+          <input
+            type="number"
+            min={1}
+            className="set-num"
+            aria-label="Cleanup period (days)"
+            data-testid="cleanup-period-days"
+            key={cleanupDays}
+            defaultValue={cleanupDays}
+            disabled={!loaded}
+            onBlur={(e) => setCleanupDays(e.target.value, cleanupDays)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter')
+                setCleanupDays((e.target as HTMLInputElement).value, cleanupDays);
+            }}
+          />
+          <span className="set-unit">days</span>
+        </Row>
+      </Group>
       <Group label="Sidebar" testid="settings-sidebar">
         <Row title="Order projects by" testid="group-sort">
           <select
@@ -55,7 +76,7 @@ export function ChatsPage(): JSX.Element {
             onChange={(e) => setGroupSort(e.target.value as GroupSort)}
           >
             <option value="same-as-chats">Same as chats</option>
-            {CHAT_SORTS.filter((o) => o.value !== 'manual').map((o) => (
+            {CHAT_SORTS.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
               </option>
@@ -85,6 +106,12 @@ export function ChatsPage(): JSX.Element {
       </Group>
     </SettingsPage>
   );
+}
+
+function setCleanupDays(raw: string, current: number): void {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n === current) return;
+  void patchShared('cleanup period', { cleanupPeriodDays: n });
 }
 
 function HourSelect(props: {

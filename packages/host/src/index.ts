@@ -1,3 +1,4 @@
+import { cutoffMs } from './cleanup.js';
 import { AccountsClient, ServerApiClient } from './accountsClient.js';
 import { ServerEventsClient } from './serverEventsClient.js';
 import { CodexAccounts, CODEX_BACKEND_ID, isCodexModel } from './codexAccounts.js';
@@ -882,6 +883,7 @@ async function startHost(
   // Settings → Prompts: the check-in a running background task sends its agent.
   let watchCheckInPrompt: string =
     persistedHostState.watchCheckInPrompt ?? DEFAULT_WATCH_CHECK_IN_PROMPT;
+  let cleanupRan = false;
   let watchCheckInMinutes: number =
     persistedHostState.watchCheckInMinutes ?? DEFAULT_WATCH_CHECK_IN_MINUTES;
   let goalModel: string = persistedHostState.goalModel ?? DEFAULT_GOAL_MODEL;
@@ -1981,6 +1983,30 @@ async function startHost(
       });
       hostStateStore.update({ watchCheckInPrompt, watchCheckInMinutes });
       logger.info({ watchCheckInMinutes }, 'watch check-in settings changed');
+    }
+    if (!cleanupRan) {
+      // Once per host start, on the first settings snapshot (carries the period).
+      cleanupRan = true;
+      if (!Number.isInteger(shared.cleanupPeriodDays) || shared.cleanupPeriodDays < 1) {
+        logger.error(
+          { period: shared.cleanupPeriodDays },
+          'startup cleanup skipped: server sent no valid cleanupPeriodDays',
+        );
+        return;
+      }
+      void daemon
+        .cleanupOldData(cutoffMs(Date.now(), shared.cleanupPeriodDays))
+        .then((r) =>
+          logger.info(
+            {
+              chats: r.chats.length,
+              worktrees: r.worktrees.removed.length,
+              kept: r.worktrees.kept.length,
+            },
+            'startup cleanup done',
+          ),
+        )
+        .catch((err) => logger.error({ err }, 'startup cleanup failed'));
     }
     if (shared.chatNameInterval !== chatNameInterval) {
       chatNameInterval = shared.chatNameInterval;
