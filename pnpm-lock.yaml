@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  expo-updates@0.27.5:
+    hash: 870caffeaa400cfb93ff31ae2b5e032cb982f028eb13f437e29124ba0ae6cf23
+    path: patches/expo-updates@0.27.5.patch
+
 importers:
 
   .:
@@ -142,7 +147,7 @@ importers:
         version: 2.0.1(react-native@0.76.3(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1)
       expo-updates:
         specifier: ~0.27.5
-        version: 0.27.5(encoding@0.1.13)(expo@52.0.49(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.3(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1)))(encoding@0.1.13)(react-native-webview@13.12.5(react-native@0.76.3(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1))(react-native@0.76.3(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1))(react@18.3.1)
+        version: 0.27.5(patch_hash=870caffeaa400cfb93ff31ae2b5e032cb982f028eb13f437e29124ba0ae6cf23)(encoding@0.1.13)(expo@52.0.49(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.3(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1)))(encoding@0.1.13)(react-native-webview@13.12.5(react-native@0.76.3(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1))(react-native@0.76.3(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1))(react@18.3.1)
       lucide-react-native:
         specifier: ^0.460.0
         version: 0.460.0(react-native-svg@15.8.0(react-native@0.76.3(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1))(react-native@0.76.3(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1)
@@ -14755,7 +14760,7 @@ snapshots:
     dependencies:
       expo: 52.0.49(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.3(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1)))(encoding@0.1.13)(react-native-webview@13.12.5(react-native@0.76.3(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1))(react-native@0.76.3(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1)
 
-  expo-updates@0.27.5(encoding@0.1.13)(expo@52.0.49(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.3(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1)))(encoding@0.1.13)(react-native-webview@13.12.5(react-native@0.76.3(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1))(react-native@0.76.3(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1))(react@18.3.1):
+  expo-updates@0.27.5(patch_hash=870caffeaa400cfb93ff31ae2b5e032cb982f028eb13f437e29124ba0ae6cf23)(encoding@0.1.13)(expo@52.0.49(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.3(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1)))(encoding@0.1.13)(react-native-webview@13.12.5(react-native@0.76.3(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1))(react-native@0.76.3(@babel/core@7.29.0)(@babel/preset-env@7.29.3(@babel/core@7.29.0))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1))(react@18.3.1):
     dependencies:
       '@expo/code-signing-certificates': 0.0.6
       '@expo/config': 10.0.11
