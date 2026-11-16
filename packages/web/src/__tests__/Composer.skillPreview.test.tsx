@@ -112,6 +112,28 @@ describe('Composer — skill preview panel', () => {
     });
   });
 
+  it('scrolls the highlighted row into view on ↑/↓', async () => {
+    vi.spyOn(api, 'skills').mockResolvedValue({
+      skills: ['plant', 'plan-travel'],
+      paths: {},
+      descriptions: {},
+      frontmatter: {},
+    });
+    const spy = vi.spyOn(Element.prototype, 'scrollIntoView');
+    renderComposer();
+    const input = screen.getByTestId('composer-input') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: '/pla' } });
+    await screen.findByTestId('composer-skill-option-plant');
+    spy.mockClear();
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    await waitFor(() => {
+      expect(spy).toHaveBeenCalled();
+    });
+    expect(spy.mock.instances.at(-1)).toBe(screen.getByTestId('composer-skill-option-plan-travel'));
+    expect(spy).toHaveBeenLastCalledWith({ block: 'nearest' });
+  });
+
   it('shows the rest of the frontmatter beyond the description', async () => {
     vi.spyOn(api, 'skills').mockResolvedValue({
       skills: ['sync'],
