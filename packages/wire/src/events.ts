@@ -2221,6 +2221,9 @@ export const DICTATION_PAUSE_SECONDS_MAX = 30;
 /** The pauses Settings offers; any value in range can be set through the CLI. */
 export const DICTATION_PAUSE_CHOICES = ['2', '3', '5', '8', '10', '15'] as const;
 
+/** Same default as Claude Code's `cleanupPeriodDays`. */
+export const DEFAULT_CLEANUP_PERIOD_DAYS = 30;
+
 export const SharedSettings = z
   .object({
     /** Whether half-finished features (the Manager, Batch) are shown. Off by default; Settings → Experimental features. */
@@ -2334,6 +2337,8 @@ export const SharedSettings = z
      */
     localModelBaseUrl: z.union([z.literal(''), z.string().url()]).optional(),
     chatNameInterval: z.number().int().nonnegative(),
+    /** Days of inactivity after which a host deletes a chat's log and removes its clean, fully pushed agent worktrees, at startup. Patch's own, separate from Claude Code's setting. */
+    cleanupPeriodDays: z.number().int().min(1).max(3650),
     /** Whether the one-shot AI chat title (a token-spending call) runs. */
     titleGenerationEnabled: z.boolean(),
     /** Whether the one-shot AI per-turn status summary (a token-spending call) runs. */
@@ -2446,6 +2451,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   permissionModeDefault: 'auto',
   providerPermissionDefaults: {},
   chatNameInterval: 0,
+  cleanupPeriodDays: DEFAULT_CLEANUP_PERIOD_DAYS,
   titleGenerationEnabled: true,
   statusGenerationEnabled: true,
   snoozeMorningHour: 9,
