@@ -7,7 +7,7 @@ import { DateTimeField } from '../components/DateTimeField.js';
 import { PromptEditor } from '../components/PromptEditor.js';
 import type { JSX, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { flushSync } from 'react-dom';
-import { Suspense, lazy, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import type { Job, JobAction, JobCreateBody, JobTrigger, WebhookScheme } from '@patch/wire/jobs';
@@ -39,6 +39,7 @@ import { isSubmitChord } from '../lib/submitChord.js';
 import { UNSAVED_BADGE_LABEL, isDirty } from '../lib/unsavedChanges.js';
 import { useJobDraftStore, type JobDraftForm } from '../stores/jobDraftStore.js';
 import { useGoBack } from '../lib/useGoBack.js';
+import { useLayoutStore } from '../stores/layoutStore.js';
 import { NavHistoryControls } from '../components/NavHistoryControls.js';
 import { failed } from '../lib/errorCopy.js';
 import { isPlainEnter } from '../lib/submitChord.js';
@@ -882,6 +883,17 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
   // link. The list only when there is nothing earlier to go back to (spec/14
   // § Layout (desktop), § Jobs view).
   const goBack = useGoBack('/jobs');
+  // Saving or deleting closes this editor's own tab where it sits. History is
+  // no guide here: sidebar and tab clicks never write to it, so `navigate(-1)`
+  // lands on whatever chat URL was last pushed and `showChat` then yanks focus
+  // into a different group. Only an editor with no tab (mounted outside the
+  // pane layout) falls back to the Back behaviour.
+  const leaveEditor = useCallback((): void => {
+    const layout = useLayoutStore.getState();
+    const found = layout.findTab({ kind: 'page', page: 'job', jobId: id ?? 'new' });
+    if (found) layout.closeTab(found.pane.id, found.tab.id);
+    else goBack();
+  }, [id, goBack]);
   const pushError = useUiStore((s) => s.pushError);
   const openFileInBrowser = useUiStore((s) => s.openFileInBrowser);
   const qc = useQueryClient();
@@ -1143,7 +1155,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
       useJobDraftStore.getState().clear(draftKey);
       setBaseline(form);
       qc.invalidateQueries({ queryKey: ['jobs'] });
-      goBack();
+      leaveEditor();
     },
     onError: (e) => pushError(failed('create'), undefined, describeApiError(e)),
   });
@@ -1157,7 +1169,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
       setBaseline(form);
       qc.invalidateQueries({ queryKey: ['jobs'] });
       qc.invalidateQueries({ queryKey: ['job', id] });
-      goBack();
+      leaveEditor();
     },
     onError: (e) => pushError(failed('patch'), undefined, describeApiError(e)),
   });
@@ -1171,7 +1183,7 @@ export function JobEditorRoute({ jobId }: { jobId?: string } = {}): JSX.Element 
       draftDropped.current = true;
       useJobDraftStore.getState().clear(draftKey);
       qc.invalidateQueries({ queryKey: ['jobs'] });
-      goBack();
+      leaveEditor();
     },
     onError: (e) => pushError(failed('delete'), undefined, (e as Error).message),
   });

@@ -2312,6 +2312,46 @@ describe('JobEditorRoute (single-page form)', () => {
     vi.unstubAllGlobals();
   });
 
+  // Bug report 16 Nov 2026: "patch save job goes to a different random tab
+  // group". Saving used history Back, which lands on a stale chat URL and
+  // focuses whichever group shows it. It now closes the editor's own tab.
+  it('saving closes the editor tab in place and leaves the focused group alone', async () => {
+    const job = {
+      id: 'j_test1',
+      name: 'old-name',
+      enabled: true,
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      filter: null,
+      action: { type: 'spawn', hostId: 'd1', folder: '/tmp', prompt: 'hi' },
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const method = (init?.method ?? 'GET').toUpperCase();
+        if (String(url).includes('/runs')) {
+          return new Response(JSON.stringify({ runs: [] }), { status: 200 });
+        }
+        return new Response(JSON.stringify(job), { status: 200 });
+      }),
+    );
+    const layout = useLayoutStore.getState();
+    layout.openTab({ kind: 'page', page: 'job', jobId: 'j_test1' });
+    const focusedBefore = useLayoutStore.getState().focusedGroupId;
+    renderEdit();
+    await screen.findByTestId('job-name');
+    fireEvent.change(screen.getByTestId('job-name'), { target: { value: 'new-name' } });
+    fireEvent.click(screen.getByTestId('job-save'));
+    await waitFor(() =>
+      expect(
+        useLayoutStore.getState().findTab({ kind: 'page', page: 'job', jobId: 'j_test1' }),
+      ).toBeNull(),
+    );
+    expect(useLayoutStore.getState().focusedGroupId).toBe(focusedBefore);
+    vi.unstubAllGlobals();
+  });
+
   it("keeps a cron job's existing filter when only its name is changed", async () => {
     const job = {
       id: 'j_test1',
