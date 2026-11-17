@@ -36,6 +36,23 @@ Front end: the real client render tree, the real stores, the real event dispatch
 
 Anything about routing between hosts is tested with two hosts attached to one server. One host cannot show a turn delivered to the wrong host.
 
+### Load targets
+
+The load targets in `05-surfaces.md` § Loading are required checks, run in the gate:
+
+- The chat list and the followed chats render from the device copy while the server boundary withholds every answer. Anything that waits on the network fails.
+- A chat's last screen renders within one second of opening, against a real server holding a chat of at least 10,000 entries, from a device that holds nothing for it.
+- Nothing a device has shown is lost on reconnect. The connection drops mid-turn while entries keep arriving; after reconnecting every entry shown before is still shown and every later one arrives exactly once, in order.
+- No chat, list or section renders as empty or finished before the server has answered for it.
+
+### Status transitions
+
+The status rules in `12-error-and-offline.md` are required checks:
+
+- Unit: for every status, every allowed transition is accepted and every other one is refused by the server.
+- Integration, back end: each fact that moves a status, produced for real. A host killed mid-turn makes the chat host offline, never running and never failed. A server restarted mid-turn leaves nothing failed. A host restarted while a turn's process lives on shows host restarting and then the turn's own status. A message to an offline host is queued and runs when the host returns. A turn whose process dies shows interrupted. A limit pauses the chat until its reset; a sign-out makes it wait for sign-in.
+- Integration, front end: the rendered status is the one the server sent, including when the transcript's own events would suggest another.
+
 ## Browser
 
 A real browser drives the component dev harness with the real stylesheets loaded and no backend behind it.
@@ -71,6 +88,8 @@ A test that drives a real agent gives that agent no route off its own host. The 
 | Behaviour that crosses a process or component seam | Integration                                        |
 | Behaviour a user sees rendered                     | Browser, when it depends on layout or real styling |
 | Behaviour that depends on the platform             | Surface                                            |
+| Loading, paging or the device copy                 | Integration, with the load targets passing         |
+| Chat status or its transitions                     | Unit and Integration, with the status checks       |
 | A bug fix                                          | A test at the layer where the bug was observable   |
 
 ## Regression tests

@@ -7,7 +7,7 @@ Everything a host reports is readable through it, and every host setting a
 graphical surface can change is settable through it (§ Completeness). Three
 properties:
 
-1. One API per resource owner. Chats, hosts and threads are the host's; jobs, webhooks, message hooks, runs, surfaces and activity are the server's. Web UI, MCP tools and CLI are all clients of those same APIs — the CLI adds no surface of its own.
+1. One API per resource owner. A host's settings, folders and live work are the host's; chat records, the chat index, settings, accounts, jobs, webhooks, message hooks, runs, surfaces and activity are the server's. Web UI, MCP tools and CLI are all clients of those same APIs — the CLI adds no surface of its own.
 2. Primitives only for agents. Agent-facing commands are direct CRUD on resources. The agent composes investigations using the primitives. `patch doctor` and the TUI (`13-design-terminal.md`) are user-facing; agents drive the CLI via `--json` subcommands.
 3. Driven by agents. Most CLI usage comes from inside chats — a `patch-cli` skill on the host teaches the agent how to drive the CLI (§ Skill). The skill is the contract; humans use the same surface sparingly.
 
@@ -46,6 +46,7 @@ patch settings                            # every shared setting, and each host'
 patch settings set <key> <value>          # change a shared setting, e.g. permission-mode, question-expiry, default-model
 patch accounts [<backend>]                # the shared backend accounts, in order
 patch accounts add <backend> --token T [--label L]
+patch accounts sign-in <backend>                   # sign in through the server: prints the address and code to open on any device (10-auth.md § Signing in)
 patch accounts connect <backend> <accountId> --token T
 patch accounts disconnect <backend> <accountId>        # confirmed; takes it out of every host's sequence
 patch accounts order <backend> <accountId>...
@@ -60,18 +61,20 @@ patch chats get <id>                      # show one chat (state, last activity)
 patch chats spawn <folder> [--host H] [--model M] [--prompt P]  # start a chat there and print its id; --model defaults to the host's last-used
 patch chats send-to <id> <message>        # deliver a user-turn into chat
 patch chats permission-mode <id> <mode>   # set the chat's permission mode
-patch chats history <id> [--limit N]      # print the chat's transcript
+patch chats history <id> [--limit N]      # print the chat's transcript, read from the server
 patch chats attach <id>                   # reattach to a live chat's TUI
 patch chats resume [<id>]                 # reopen the most recent chat's TUI, or the one named
 patch chats stop <id>                     # stop a chat
-patch chats resume-now <id>              # run a usage-limit-parked chat's turn now instead of waiting out the limit
-patch chats archive <id>                  # archive a chat (UI hides; its history and metadata stay on its host)
+patch chats resume-now <id>              # re-send a paused turn now instead of waiting for the reset
+patch chats continue <id>                 # continue an interrupted turn (12-error-and-offline.md § Continue)
+patch chats account <id> [<accountId>]    # lock the chat to an account; no account returns it to Automatic (10-auth.md § Choosing an account)
+patch chats archive <id>                  # archive a chat (UI hides; its record stays on the server)
 patch chats set-model <id> <model>       # change an existing chat's model, from its next turn (spec/04 § Model)
 patch chats rename <id> [<name>]          # rename a chat; no name clears it back to the derived label
-patch chats move <id> --host H --folder F   # move a chat to another host, to run in folder F there (spec/04 § Moving a chat to another host)
+patch chats move <id> --host H --folder F   # start a linked chat on host H in folder F, with the drafted first message to edit and send (04-chats-and-folders.md § Moving to another host)
 
 patch activity [--since S] [--until U] [--messages-cursor C] [--sessions] [--sessions-cursor C] [--limit N]
-                                           # the user's own messages, read through every host's chat logs by the server (06-threads-manager-telegram-speakers.md § Cross-chat toolset); always REST — there is no per-host local view. --since/--until take ISO-8601 or ms-epoch; default is the last 24h. `--sessions` also returns the chat dwell sessions (chats open on a focused, visible surface); the default output is messages only.
+                                           # the user's own messages, read from the server's chat records (06-threads-manager-speakers.md § Cross-chat toolset); always REST — there is no per-host local view. --since/--until take ISO-8601 or ms-epoch; default is the last 24h. `--sessions` also returns the chat dwell sessions (chats open on a focused, visible surface); the default output is messages only.
 
 patch jobs list                           # list all jobs
 patch jobs get <id>
@@ -95,7 +98,7 @@ patch message-hooks update <id> <file.json>
 patch message-hooks delete <id>
 patch message-hooks enable <id> | disable <id>
 
-patch threads list                        # the three special threads
+patch threads list                        # the special threads (Manager, Speakers)
 patch threads send-to <name> <message>    # = chats send-to but by thread name
 
 patch surfaces list                       # connected devices/sessions
@@ -110,7 +113,7 @@ patch host start | stop | status | list | clean   # the local host service, on t
 patch logs [--host H]                     # tail a host's log
 
 patch doctor                              # server reachability, per-host status, pending
-                                          # webhook/cron backlog, errored-chat count
+                                          # webhook/cron backlog, failed-chat count
 ```
 
 All commands accept `--json` to emit machine-readable output (default is human-readable). Agents always pass `--json`.
@@ -157,7 +160,7 @@ the JSON output. Same skill any human would read in `patch --help`.
 
 Every chat on that host has it, whatever folder the chat runs in, because a user-level
 skill is available to the agent everywhere (`02-host.md` § Runtime and installation).
-That covers the three special threads, which run in the host's own state directory
+That covers the special threads, which run in the host's own state directory
 rather than in a project (`06-threads-manager-speakers.md` § Where special
 threads run). It's how an agent learns patch's surface area.
 

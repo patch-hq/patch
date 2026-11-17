@@ -14,14 +14,14 @@ No JavaScript files. No Rust on the Node side.
 
 ## Runtime / packaging
 
-- Node.js LTS (current LTS at start of build; pinned in `.nvmrc`, in the server's Docker base image, and shipped inside the host artifact).
+- Node.js LTS (current LTS at start of build; pinned in `.nvmrc` and shipped inside the host artifact).
 - pnpm workspaces for the monorepo.
 - Turborepo for task orchestration and caching across packages.
 - TypeScript project references so cross-package types resolve without rebuilds.
 
 ### Two shipping shapes
 
-- Server → container. Built from this repo, deployed by the operator (`11-deployment.md`).
+- Server → a pure-JavaScript release, installed as an OS service by the operator on an always-on box or on a Mac (`11-deployment.md` § Server installation, § Server on a Mac).
 - Host → native binary artifact per OS/arch. esbuild bundles the host to a single JS file, shipped alongside a pinned Node runtime and the platform's prebuilt native addons, installing on a host with no toolchain (`11-deployment.md` § Host installation).
   - Native addon: `onnxruntime-node` (Silero VAD), shipped per platform alongside the `silero_vad.onnx` weights it runs (~2 MB — the one model file in the artifact, so VAD works on every host with nothing downloaded). The host's native surface stays at this one addon; each additional native dependency multiplies the build matrix.
   - The agent backend, the large voice weights (Kokoro, local Whisper) and Python are provisioned on the host after install (`02-host.md`).
@@ -41,7 +41,7 @@ No JavaScript files. No Rust on the Node side.
 
 ## Host
 
-- @anthropic-ai/claude-agent-sdk loaded in-process, pointed at the host's own Claude Code install via `pathToClaudeCodeExecutable`, so a host runs the same `claude` the user runs (`02-host.md` § Agent backends).
+- One adapter per provider (`02-host.md` § Provider adapters): the Agent Client Protocol for any ACP agent; @anthropic-ai/claude-agent-sdk for Claude Code, pointed at the host's own Claude Code install via `pathToClaudeCodeExecutable`, so a host runs the same `claude` the user runs; a managed Codex app-server process for Codex. Each turn runs under its own detached runner process (`02-host.md` § Host restarts).
 - Loopback control HTTP via Fastify on a Unix domain socket at `~/.patch/daemon.sock`.
 - MCP server (`patch-tools-server`) implemented with @modelcontextprotocol/sdk, launched per SDK query, communicates over UDS.
 - Silero VAD via onnxruntime-node, reading `silero_vad.onnx` out of the host's own install directory (§ Two shipping shapes).
@@ -57,27 +57,30 @@ No JavaScript files. No Rust on the Node side.
 
 - Pure TypeScript. No runtime dependencies beyond `zod`.
 - Discriminated-union event types, encoded as JSON over WebSocket text frames.
-- Per-chat monotonic `seq`, idempotency key on inbound user input, replay via `chat.replay { fromSeq }`.
+- Per-chat monotonic `seq` numbered by the chat's host, idempotency key on inbound user input, history read from the server by position (`03-wire-protocol.md` § Chat history).
 - Adopt happy-wire shapes where direct copy works; diverge where patch's needs differ (cross-chat tools, voice events, special-thread routing).
 
 ## Storage
 
-Stays "flat files" per spec, but with explicit shape:
+Flat files and append-only logs, each account's in its own folder inside the server's data folder (`01-server.md` § Data folder):
 
 - `/data/registry.json` — accounts and host keys. Single file. Atomic write via temp + rename.
+- `/data/chat-logs/<chatId>.jsonl` — Patch's record of each chat, append-only, with large tool-result bodies under `/data/chat-logs/blobs` (`01-server.md` § Responsibilities).
+- The chat index, held messages (`/data/held-input.json`), settings and encrypted secrets (`01-server.md` § Settings).
 - `/data/jobs/*.json` — one file per job. Watched.
 - `/data/pending/<hostId>/*.jsonl` — buffered actions, per host, for a host that is offline.
 - `/data/runs/<jobId>.jsonl` — per-job run log.
 - `/data/webhooks/<jobId>.jsonl` — per-job inbound webhook log.
 - `/data/undelivered.jsonl` — failed notifications.
 - `/data/broadcasts/<thread>.jsonl` — broadcast log per channel-mediating thread, written as the server routes each notify and read by the Manager host when the user replies (`09-notifications.md` § The broadcast log).
-- `~/.patch/chats/<chatId>/` — host-managed per-chat state (NOT under `/data` — host-local): `meta.json` (chat metadata), `seq` (the persisted sequence counter) and `wake.json` (a pending self-wake), per `02-host.md`.
+- `~/.patch/chats/<chatId>/` — host-managed per-chat state (host-local, not under `/data`): `meta.json` (chat metadata), `seq` (the persisted sequence counter) and `wake.json` (a pending self-wake), per `02-host.md`.
+- `~/.patch/outbox/` — the host's outbox, kept until the server acknowledges it (`02-host.md` § Host outbox).
 
 A host-local file is written and read by the same host. Anything one host writes and another reads is server state under `/data`.
 
-Chat history itself stays in Claude Code's native `~/.claude/projects/`; we read it in place.
+The provider's own session stays on the host in the provider's format and is not read for display (`principles.md` § History ownership).
 
-No SQLite. If we hit limits, that's a separate spec change.
+No SQLite or other database.
 
 ## Web SPA (`packages/web`)
 
@@ -115,8 +118,8 @@ No SQLite. If we hit limits, that's a separate spec change.
 - Zustand for state (same as web).
 - react-native-mmkv for local persistence.
 - expo-notifications for the Expo push token, local notification channels, and call/message handling.
-- react-native-callkeep + a custom Expo config plugin for Android `ConnectionService` (Manager incoming-call UI). TBD: confirm callkeep covers the foreground-service + audio-focus story before group 21 — fallback is a hand-rolled native module.
-- expo-av for audio I/O; react-native-webrtc if we need lower-level access for voice.
+- react-native-callkeep + a custom Expo config plugin for Android `ConnectionService` (Manager incoming-call UI).
+- expo-av for audio I/O.
 - expo-updates for JS-only over-the-air delivery, signed in CI and served by the paired server (`11-deployment.md` § Mobile updates); expo-intent-launcher to install a new APK in place.
 - Build with `expo prebuild && cd android && ./gradlew assembleRelease`. The APK is installed via `adb install` or sideload; no Play Store distribution.
 
@@ -138,11 +141,10 @@ No SQLite. If we hit limits, that's a separate spec change.
 
 ## Deployment
 
-- Docker Compose as the reference deployment (host sizing in `11-deployment.md`).
-- Two services: `server`, `caddy`. The host is not a container — it installs on each host as an OS service (§ Two shipping shapes, `02-host.md` § Runtime and installation).
+- The server installs as a release with its own OS service, and the host as its own artifact on each machine (§ Two shipping shapes, `11-deployment.md`).
 - Caddy as the reverse proxy (auto-TLS via Let's Encrypt). Terminates TLS and reverse-proxies everything to the server, which itself serves the web SPA at `/app` and the desktop feed at `/api/desktop/...`.
-- `pnpm deploy` runs the server via docker compose (`up -d --build`); the server image builds + serves the web SPA. No CI publish, no image registry. The host builds separately as an installable artifact (`pnpm build:host`), published for install and self-update (`11-deployment.md`). Host-specific delivery (to a remote box / phone) lives in git-ignored `scripts/local/`.
-- Backups: restic nightly cron on `/data` to off-host object storage.
+- Releases are built and published by CI; every client takes them from its server (`11-deployment.md` § Deploy guide). Host-specific delivery (to a remote box / phone) lives in git-ignored `scripts/local/`.
+- Backups: restic nightly on the server's data folder to off-host object storage (`11-deployment.md` § Backup).
 
 ## Testing
 
@@ -160,8 +162,3 @@ Which layer a test belongs to is decided by `19-testing.md`. This section is onl
 - prettier (zero-config, defaults except `singleQuote: true`, `printWidth: 100`).
 - simple-git-hooks + lint-staged for pre-commit.
 - changesets for versioning across the monorepo.
-
-## Open TBDs (resolve before the relevant group runs)
-
-1. ~~pkg vs `bun build --compile` for CLI single-binary (group 15).~~ RESOLVED — pkg (see Terminal CLI above).
-2. react-native-callkeep coverage for ConnectionService (group 21).

@@ -16,211 +16,106 @@ The server is the credential authority. It holds a signing key and issues every 
 
 Every surface is equal: each holds its own revocable credential, and any linked surface can link another.
 
-## OpenAI accounts
-
-Add account offers Claude, ChatGPT and OpenAI API key. ChatGPT connects through a browser sign-in, a device code usable from another device, or an existing Codex login on the selected host. Each operation reports progress, cancellation and failure. A login is complete only when the host verifies the account. Device-code prerequisites and missing secure credential storage are actionable errors. Credentials stay on the execution host in secure storage; disconnecting an adopted login removes Patch's access without signing the owner out of Codex.
-
-Signing in to a disconnected ChatGPT credit source repairs that account, preserving its ID, label and priority. A connected credit source cannot be added twice.
-
-Each OpenAI account has an isolated Codex runtime profile. Existing credentials are explicitly adopted, never silently inherited. API keys are separately billed sources and cannot be used for subscription overflow without spending authorization. Account metadata and login progress synchronize across surfaces without exposing tokens.
-
-Credit selection takes the first connected, eligible account for the chosen provider and model. Each turn records the account it uses. Exhausted accounts wait for their reported reset, authentication failures require reconnecting, and unknown usage is distinct from available credit. ChatGPT usage is read without generating a response. Credit-source changes do not change a chat's provider or model.
-
-An account refusal is host state, not chat state. The host persists each exhausted account and its stated reset under `~/.patch`, restores that routing gate before accepting turns after a host update/restart, and removes it when the reset passes or a later authoritative usage reading says credit returned. Restarting Patch must never make a known-spent account eligible.
-
-Provider session IDs are caches owned by the account that created them. Patch records that owner. When routing selects a different account, it never sends the old account's session ID; it creates a fresh provider session and reconstructs it from Patch's own durable chat history. Account failover therefore preserves the conversation without assuming provider-session IDs are portable.
-
-OpenAI API keys use the same native secure store. API models have IDs `openai/api/<model>` and are labelled “OpenAI API (paid)”. They are selected explicitly; ChatGPT subscription exhaustion never rotates into an API account. No billed generation runs during credential validation.
-
 ## Backend credentials
 
-Each agent backend authenticates with its own credential. Credentials are shared settings, held by the server and sent to every host (`01-server.md` § Settings); the host that runs a turn uses its copy (`02-host.md` § Agent backends). A backend authenticates against your own subscription or account rather than a patch-held key.
+A provider is signed in once in Patch and is then available on every host, including hosts added or reconnected later. A backend authenticates against the user's own subscription or account rather than a Patch-held key. Each provider holds an ordered list of named accounts. Accounts, their order and each provider's account strategy are shared settings, held on the server (`01-server.md` § Settings); credentials are stored there encrypted at rest and handed to hosts over their host link. No account names a host and no host has accounts of its own.
 
-For Claude Code, patch piggybacks on that backend's own credential and uses your Claude plan over OAuth, or an Anthropic API key. A host can hold several named Claude credentials at once — several `claude setup-token` logins, each kept as its own account — rather than one. They are a SEQUENCE, and every host holds the same one. Every turn puts the keys in an order and runs on the first in that order that is connected and not known to be out of credit; the question is asked again for the next turn, so a key coming back needs nothing moved back onto it.
+- The server alone renews credentials. It serialises renewal and persists each rotated refresh token before handing out the new access credential. Hosts receive access credentials only, never a refresh token: a rotating refresh token held on two machines is spent by whichever renews first and breaks the other. A renewal that fails puts the account in broken with the provider's message.
+- Claude Code runs on a sign-in account's OAuth token, passed to the Agent SDK as `CLAUDE_CODE_OAUTH_TOKEN`, or on an Anthropic API key account (`sk-ant-api…`; a sign-in token is `sk-ant-oat…`), passed as `ANTHROPIC_API_KEY`, never both. Whatever `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` the host's own environment holds is stripped first, so the account chosen is always the one that runs.
+- An Anthropic API key is validated against `/v1/models` with `x-api-key`, is labelled "Claude API (paid)", takes part in the account order like any other account, and is never probed for usage (it has no subscription windows and a probe would be a paid call). Its row shows "API key" and offers Replace key in place of Sign in again.
+- Codex runs with authentication managed by Patch: the host gives each account's isolated Codex runtime profile the access token from the server, and when Codex asks for a fresh one the host gets it from the server. Codex never renews on its own.
+- OpenAI API keys are separately billed sources. API models have ids `openai/api/<model>`, are labelled "OpenAI API (paid)" and are selected explicitly; ChatGPT subscription limits never move a chat onto an API account. No billed generation runs during credential validation.
+- A login already on a host (Claude Code's own `claudeAiOauth` login in env `CLAUDE_CODE_OAUTH_TOKEN`, `~/.claude/.credentials.json` or the macOS Keychain; an existing Codex login) is never used silently. It can be adopted: the host sends it to the server, which stores it as a shared account. Adopting a Codex login and later removing it takes away Patch's access without signing the owner out of Codex. A host that held accounts of its own before it first connected sends them once on that connect (`01-server.md` § Settings).
 
-The ORDER is the backend's account strategy, a shared setting (`01-server.md` § Settings), one for Claude and one for Codex:
+Each host reports, per provider, whether it can run it (the backend is provisioned and its credential check passes) and which models it offers (`02-host.md` § Provider adapters). Whether a chat can run is answered from the account's state on the server and its host's report, never from a host's view of the account: an offline host, or one that has not applied the latest settings, does not make an account look signed out; it receives the account on reconnect and a message sent meanwhile is held for it (`01-server.md`). Until the shared state has loaded nothing is blocked.
 
-- `priority` — the stored order, first to last: the first key is always used while it has credit.
-- `round-robin` — each turn starts on the key after the one the host's last turn started on, so the keys are spent together. Asking where a turn would start (a failover deciding where its re-run lands, a one-shot, a report) does not move it on; only a turn starting does.
-- `soonest-reset` — the key whose weekly window resets first, so allowance about to expire is used rather than lost. A key with no reading goes after every key that has one.
-- `least-used` — the key using the least of its limits, read as the higher of its session and weekly utilisation, so a key close to either is avoided. A key with no reading goes last.
+### Account states
 
-Whatever the strategy, a spent key is skipped: a strategy decides which credit to spend, never whether a turn runs.
+Each account has exactly one state, derived from the provider's own signals as the adapter reports them (refusals, structured limit fields, usage readings):
 
-A chat — and the chat a job creates — can name an account, which LOCKS it there: its turns run only on that key. When that key is spent and Auto-resume is off, the chat waits for the reset or shows the limit card and never moves to another key; the limit card for a locked chat offers Change account. With Auto-resume on, a spent lock is set aside for the turn: the chat runs on whichever other connected key has credit, instead of waiting for its own key's reset, and is back on its locked key as soon as that key resets (the lock itself is never rewritten). If no key has credit it waits for the first reset. The lock can be changed or removed at any time from the chat's account menu; Automatic (no account named) follows the account strategy and is the only way a chat moves between accounts. A locked chat does not move a round-robin on, and a failure is attributed to the key the turn ran on. An account that the host does not hold for the chat's backend is refused when named; one the accounts later lose is ignored, so the chat runs on the host's keys rather than on nothing.
+- Ready.
+- Near limit — usable, with a pool past its provider's warning level or estimated to run out soon.
+- Limited until a reset time — a temporary limit with the reset the provider stated. A pool at 98% or more of a still-future reset counts as limited (readings round; Claude has refused at 99%). A limit that states no reset is limited until a usage reading shows credit.
+- Out — billing or credit that needs the user (no plan, a balance at zero, a spend cap the user must raise).
+- Signed out — the credential is absent, expired or refused, including a token revoked while its stored expiry says otherwise.
+- Broken — anything else the provider reports wrong with the account, shown in the provider's words.
 
-This is what makes a key running out cost one turn rather than every chat on it. The first turn to hit `You've hit your monthly spend limit` records that key as spent, with the reset time the provider's own message states; every turn after that resolves straight past it to the next key, with no failure of its own. When that reset passes the key is simply first in the order again, so everything goes back to it without anything having to remember to move it. Nothing rewrites a chat, because there is nothing on a chat to rewrite.
+The server holds each account's state, so a restart of the server or a host never makes a known-limited account eligible. Unknown usage is not ready credit and not a limit: an account with no reading yet is used. Out and signed out stop every turn that would run on that account and ask the user; they are never retried. A chat waiting on either shows waiting for sign-in or failed with the reason (`12-error-and-offline.md` § Limits and sign-in), with Sign in, Add account or the provider's billing page as its action. Signing in again, adding an account or a reading showing credit makes the waiting work runnable at once.
 
-The turn that discovers it still has to be re-run, and is — once per key, not once per attempt. When no key has credit left the turn stops and waits for the earliest reset rather than trying again: a host whose keys are all spent must go quiet, not spin. (On 2026-09-07 it spun, for hours, because a failure was attributed to a chat's pinned preference rather than the key that actually spent, so the second key never got marked.)
+A chat's model selects its provider; changing an account never changes a chat's provider or model.
 
-**The same sequence answers every AI call, not only turns.** Patch makes one-shot calls that are not turns — a chat's title, its current-status summary, the model catalogue — and each of them walks the accounts too. A turn can afford to learn by failing, because the next turn is routed past the spent key; a one-shot has no next turn, so it walks the remaining sequence within the single call and marks what it learns for the calls behind it. Resolving once and giving up is not a smaller version of the rule, it is the absence of it: on 2026-09-12 title and status generation were pinned to the host's _active_ account while turns rotated away from it, so a night of 76 chats came out with no status at all — every one of them looking equally finished — while the chats themselves ran normally on the second key.
+### Choosing an account
 
-A one-shot that no account can answer resolves to nothing, and the caller leaves what it was going to set unchanged. A one-shot that fails for any OTHER reason fails loudly with the provider's own words rather than resolving to nothing: "the model had nothing to say" and "this call did not happen" must not be the same answer, because reading the second as the first is what made a spend limit look like an empty summary.
+Every turn orders the provider's accounts by the provider's account strategy and runs on the first that is ready or near limit. A limited account is skipped, not retried; it is first in the order again when it returns.
 
-After a restart the spent key is not on disk, so the first stored key is provisionally recorded as spent from a failed chat's message. That record is a guess: it carries the failure's own time and every account's usage is read at once, so a reading showing the key spendable clears it immediately and the turn runs on it, rather than every key being held out until the reset.
+- `priority` — the stored order, first to last.
+- `round-robin` — each turn starts on the account after the one the last turn started on. Asking where a turn would start does not move it on; only a turn starting does.
+- `soonest-reset` — the account whose weekly window resets first, so allowance about to expire is used. An account with no reading goes after every account that has one.
+- `least-used` — the account using the least of its limits, read as the higher of its session and weekly use. An account with no reading goes last.
 
-Work that stopped for want of credit starts again the moment ANY account has some — whichever account, and however it got it. Three things can reveal that, and all three do the same whole thing: a limit reaching the reset it stated; a person adding a key or reconnecting one with a fresh token; and a usage reading finding an account spendable that had been recorded as spent. The third is not a duplicate of the first: a refusal that names no reset time arms no timer, because there is no instant to wait for, so without it such an account stays sidelined until somebody touches a credential.
+A chat, and the chat a job creates, can name an account, which locks it there: its turns run only on that account. A lock is changed or removed from the chat's account menu; Automatic (no account named) follows the strategy. A locked chat does not move a round-robin on. An account the provider does not have is refused when named; one later removed is ignored and the chat follows the strategy.
 
-"Every chat waiting on credit" means both kinds at once, and this is the part that has drifted twice. A chat whose turn was held back sits idle with a stated resume time; a chat that failed on a spent account before it stopped and shows as errored with its turn still owed. They are the same situation seen at two moments of this system's life, and an event that restarts one and not the other leaves a host with credit and turns waiting for it. So a credit event resumes both lists, and a chat does not wait out its own timer once credit has arrived somewhere else — a chat parked against a 7-day weekly window runs when the other key's 5-hour window resets an hour later, not six days later. A resumed chat may try every key again, including ones it already failed on: what it tried is a record of the situation that has just ended.
+Each turn records the account it ran on; a failure and a usage reading are attributed to that account, never to the chat. The chat's state names the account of its latest turn and surfaces show it beside the model. When a turn runs on a different account from the previous turn because that one became limited, the chat gets a visible line naming both accounts and when the limited one returns, in the reader's own time. A move that is the strategy working is not news and writes no line.
 
-The one thing deliberately left behind is the ancient turn. A turn that failed days ago is about a world that has moved on — a deploy since superseded, a task already done by hand — so past a cutoff it stays errored and visible for a person to re-send deliberately, and the count left behind is logged rather than passed over in silence.
+Two accounts in the same Claude organisation are one pool of credit: they become limited together, and the chat says so.
 
-Which key a turn ran on is a property of THAT TURN: it is what the failure names, and what a `rate_limit_event` usage reading is attributed to. It is never stored on the chat. It is shown, though: the chat's state names the account its latest turn ran on, and a surface draws it beside the model. When a turn runs on a different account from the chat's previous turn BECAUSE that one ran out of credit, the chat gets a system line saying so — which account it moved from and to, and when the spent one comes back if the limit said, in the reader's own time. A move that is the strategy working (round-robin moving on, a reset key taking over again) is not news and writes no line.
+One-shot calls that are not turns (a title, a status summary, the model catalogue) choose accounts the same way and, having no next turn, walk the remaining accounts within the call. A one-shot no account can answer resolves to nothing and its caller leaves what it would have set unchanged; one that fails for any other reason fails with the provider's words, so "the model had nothing to say" and "this call did not happen" stay distinct.
 
-- The credential is the OAuth token Claude Code persists after `claude login`. Claude Code stores it under the key `claudeAiOauth` (`{ accessToken, refreshToken, expiresAt, … }`) in a platform-native store — `~/.claude/.credentials.json` on a Linux host and the macOS Keychain (service `Claude Code-credentials`) on a Mac host. It is not in `~/.claude.json`; that file holds account metadata under `oauthAccount` (email, plan, uuids) but no access token. The Claude Agent SDK reads its own credential from that native store directly. Patch passes no `ANTHROPIC_API_KEY` in env for a sign-in account and leaves the credential to the backend. Those three locations (env `CLAUDE_CODE_OAUTH_TOKEN` → `~/.claude/.credentials.json` → Keychain, in that order) are that host's own login, which Settings can adopt as a shared account (below). A host that already held accounts before settings were shared — including the one its first boot seeded from that login — sends them to the server once, the first time it connects (`01-server.md` § Settings), so a single-host install works without touching Settings. From then on the shared accounts are what patch reads to gate queries and to pass the SDK as `CLAUDE_CODE_OAUTH_TOKEN`.
-- First run: host checks for a valid `claudeAiOauth.accessToken` on the account a chat resolves to (via the resolution order above, for the first account; from the store thereafter). If absent/expired, the host refuses to start any `query()` against that account and emits `host.unauthenticated` naming the backend; the host's other backends, and its other Claude accounts, keep running (`02-host.md` § Agent backends). Settings surfaces this as "not connected" on that account's row under that host, with the connect controls below.
-- A credential the check accepts can still be refused by Claude when the turn runs, because a token can be revoked while its stored expiry says otherwise. That refusal means the same thing as an absent one and is reported the same way: `host.unauthenticated` for that backend, the chat told in words that the host's sign-in is no longer valid and where to renew it, and the chat left idle so it runs as soon as the credential is replaced. It is not reported as a fault of that chat, and the backend's own error text is not what the chat shows.
-- The server renews shared credentials and distributes updated access tokens. Hosts do not receive refresh tokens or renew these credentials independently.
-- Claude also takes an Anthropic API key, stored as an account like any other (an `sk-ant-api…` key; a sign-in token is `sk-ant-oat…`). A key account passes the key to `query()` as `ANTHROPIC_API_KEY` and no OAuth token; a sign-in account passes `CLAUDE_CODE_OAUTH_TOKEN` and no key. Whatever `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` the host's own environment holds is stripped first, so the account chosen is always the one that runs. A key is validated against `/v1/models` with `x-api-key`, is labelled "Claude API (paid)", takes part in the account sequence like any other, and is never probed for usage (it has no subscription windows and a probe would be a paid call). Its row shows "API key" and offers Replace key in place of Sign in again.
+### Limits
 
-Provider accounts have NO host tie. Whether a chat can run — the composer, the new-chat screen, the "not signed in" banner — is answered from the server's shared accounts for the chat's model (any connected Claude account; any connected ChatGPT or API-key account of the right kind), never from what one host reports and never naming a host. A host that is offline, or has not yet applied the latest settings, does not make an account look signed out: it receives the account on reconnect, and a chat sent to it queues until then. Until the shared state has loaded nothing is blocked. Where a chat cannot run, Sign in goes straight to signing in (`14-design-web.md` § Offline / error states).
+A turn pauses only when no account it may use has credit: every account of the provider for an Automatic chat, its own account for a locked one. The pause is visible, with the reset time, as the chat status paused until a reset (`12-error-and-offline.md`). The user's chosen behaviour then applies, a shared setting (Settings → Agent behaviour) that each pause also offers as actions for that chat:
 
-Surface in Settings (`design/web-lo-fi-settings.html` § Claude subscription), once per backend for the whole account — the accounts are shared settings, held by the server and sent to every host (`01-server.md` § Settings):
+- Resume at reset — the owed turn runs when an account it may use has credit again, whichever account and however it returned: a stated reset passing, an account added or signed in again, or a reading finding credit.
+- Another account of the same provider — a locked chat runs this turn on another ready account and returns to its own when that resets; the lock is not rewritten. Offered only where another account is ready, and only for providers whose adapter can resume the session on another account.
+- Switch provider — a new chat on another provider, linked to this one (`04-chats-and-folders.md` § Provider switches). Offered only where that provider has a ready account and the chat's host can run it.
 
-- Each stored account gets its own row: connected state shows the account's label and account email (from `~/.claude.json` `oauthAccount.emailAddress` at the time it connected) plus a `Sign out` action; signed-out shows a `Sign in` action. The row's actions sit behind a ⋯ that opens a small panel beside the row — it floats over the rows below rather than pushing them — and each action that is not self-evident carries one line saying what it does: `Sign in again` replaces the stored login with a fresh token; `Sign out` keeps the row and forgets the login; `Remove` forgets the account everywhere. No row names a host: an account is every host's, and a host is only ever the reader of its usage.
-- A `Sign in with Claude` action under the rows starts the browser sign-in (§ Signing in to Claude from a surface) and always creates a new row rather than replacing one; `Paste a token` beside it does the same from a `claude setup-token` token. There is no control to mark an account "active" or "default"; the sequence's order is the only ranking.
-- The `adopt` call (take the backend's own login on a host and add it as an account) stays as a REST and CLI operation, but Settings does not offer it per host: a host that holds accounts the server does not sends them on its first connect (`01-server.md` § Settings), so there is nothing for a person to pick a host for.
-- EVERY PROVIDER IS ONE ENTRY IN A LIST, not a branch in the page. The web page keeps a registry (`providers.tsx`) in which each provider declares its name, which shared strategy setting ranks its accounts, which limit windows it reports and in what order, where its extra-usage add-on is managed, whether a login can be replaced by pasting a token, and the control that adds an account. The page walks the list and draws every entry the same way — strategy row, ranked accounts, add control — so a new provider (a local model server, say) is a new entry and never a change to the page.
-- A strategy control per backend, over the rows (§ above).
-- ONE ROW IS ONE CLAUDE ACCOUNT. Every stored credential records the Anthropic organisation it authenticates as, read from the `anthropic-organization-id` header on the call that validates it. (`GET /api/oauth/profile` answers 403 `oauth_scope_insufficient` for a `claude setup-token` token; the header is stamped on every response, including the free `/v1/models` 200.) A token whose organisation matches an account already stored is REFUSED, naming the row it clashes with — a second credential for the same account is not somewhere to fail over to, it is the same pool of credit under a second label. A re-connect of a row is exempt: replacing a row's own token with a fresh one for the same organisation is a rotation. An organisation that could not be established is "not known", never "different", so an unidentified token is still stored.
-- Two accounts sharing an organisation are sidelined TOGETHER when either runs out, and the chat says so. Failing over between them would spend a turn re-discovering the same empty pool.
+A pause is never retried on a timer before its reset. Only transient errors retry automatically, each attempt shown (`12-error-and-offline.md`). A turn owed for longer than the resume cutoff stays shown as owed for the user to send again rather than running into a changed world.
 
-Every surface with a Settings screen — web, desktop and mobile (`15-design-mobile.md` § Settings tab) — shows the same state and offers the same controls, read from `GET /api/accounts/:backendId` and kept live by the `settings.changed` push (`03-wire-protocol.md` § Settings).
+When every account of a provider is limited, every chat on that provider shows a warning banner naming the accounts and the first to return, counting down. It is a warning, not an error, and clears on its own. It shows only when certain: not while any account has no reading, not while any account is usable, and not when there is no account (the sign-in banner covers that).
 
-- Connect, add, disconnect, relabel, reorder and adopt are REST calls to the server (`01-server.md` § Endpoints). The server validates a pasted token itself, against the provider, before storing anything, so a token that does not work is refused in the reply naming why, and nothing is written.
-- Sign out and Remove are confirmed first: each takes that key out of the sequence every chat on every host draws from.
-- A change is settled when the server has committed it; the reply carries the new list, and the row shows it. Whether each host has picked it up is the host's applied settings version, shown on its Settings → Hosts row (`01-server.md` § Settings) — an offline host does not block a change, it receives it on reconnect.
-- The CLI drives the same calls through `patch accounts` (`17-cli.md` § Commands), and needs the server: with no server link it refuses, naming the server.
+### Signing in
 
-Surface in Settings — Usage: an easy way to see how close an account is to
-Claude's own rate limits, and when they reset.
+Every surface signs in to every provider, with no terminal and nothing installed; the CLI does the same through `patch accounts` (`17-cli.md` § Commands). The sign-in runs on the server, which keeps every secret it involves (PKCE verifiers, device codes, tokens); no secret reaches a surface. Each sign-in reports progress, cancellation and failure, and is complete only when the server has verified the account. A sign-in always creates a new account, except Sign in again on an existing row, which replaces its credential and keeps its id, label and position. An account already connected cannot be added twice.
 
-THE READING IS TAKEN, NOT OVERHEARD. It used to come only from the SDK's
-in-turn `rate_limit_event`, which has a hole the shape of the whole feature: the
-event rides on a query, so an account with no credit cannot produce one, and its
-last reading — the one that blocked it — stood for ever. The host now asks
-Anthropic directly, per stored account, every ten minutes, on demand
-(`host.backend_usage_refresh`), and immediately after any turn runs one out. The
-figures come from the `anthropic-ratelimit-unified-*` response headers, which
-arrive on the 429 as well as the 200, so a spent account reports perfectly well.
-The probe costs one `max_tokens: 1` Haiku call; the 429 costs nothing. In-turn
-`rate_limit_event`s are still folded in when they arrive — they are free — but
-nothing depends on one.
+- Claude. The server answers with a claude.ai address; the person opens it in any browser, signs in, and pastes back the code the page shows. When the browser is on the server's own machine (the request came over loopback, not relayed by a proxy or tunnel) the sign-in is a loopback redirect instead, the way Claude Code's own login works: the server listens on `http://localhost:<free port>/callback`, claude.ai sends the code straight there, and the surface waits and is told when the account is added, with nothing pasted. The server exchanges it for the year-long, inference-only token `claude setup-token` produces (same client, scope, redirect and lifetime). A started sign-in waits 15 minutes and finishes once; an expired or finished one is refused and started again. A code carrying another sign-in's state is refused without calling Claude; a code Claude refuses is reported in Claude's words; Claude unreachable is reported as that and the code can be tried again. Pasting a `claude setup-token` token is offered beside it.
+- ChatGPT. A browser sign-in, or a device code: the server shows a code and an address that any other device opens to approve, which is how a headless host's owner signs in. An OpenAI API key is pasted.
+- Adopting a host's existing login (§ Backend credentials) is a REST and CLI operation, not a Settings control.
 
-THREE WINDOWS, NOT TWO. `five_hour` (the session), `seven_day` (the week) and
-`overage` — the extra-usage pool the other two spill into. Overage was
-previously discarded as per-model detail. It is not: its refusal is what Claude
-Code renders as `You've hit your monthly spend limit`, and its
-`disabled-reason` of `org_level_disabled_until` means extra usage is disabled
-on that account and surfaces say `Extra usage: disabled`, linked to that
-account's Claude Usage settings where the user can enable it.
-`org_level_disabled` means organisation policy prevents it and surfaces say
-`Extra usage: disabled by organisation`. Extra usage is a paid add-on, so
-an account that has never turned it on reports a rejected overage permanently;
-that is a healthy account's steady state, not a fault, and not a transient. Discarding it left that sentence
-with no structured counterpart anywhere in patch, which is why nobody could
-explain it. (The per-model `seven_day_opus`/`seven_day_sonnet` variants remain
-unsurfaced.)
+Every credential is validated by the server before anything is stored. One Claude account is one row: each Claude credential records the Anthropic organisation it authenticates as, read from the `anthropic-organization-id` header on the validating call. A credential whose organisation matches a stored account is refused, naming that row; Sign in again on the same row with the same organisation is a rotation. An organisation that could not be established is "not known", never "different", so the credential is still stored.
 
-RUN-OUT ESTIMATES. A pool at 98% or more of a stated, still-future reset counts as empty (the reading rounds; 99% was seen while Claude was already refusing). From successive probes the host works out each pool's burn rate — the 5-hour pool over the last 45 minutes of readings in the current window, the week over the last 6 hours — and estimates when it reaches 98%; no estimate is made from one reading, a flat one, or when the reset comes first. The estimate does not affect routing: an account is used until it is actually spent (refused, or at 98% of a still-future reset), then new work moves on. It feeds probing and the Settings display only. Probing is every 10 minutes when far from a limit, every 3 minutes at 75% of the session or a run-out within 90 minutes, and every minute at 90% or a run-out within 30 minutes; the week is judged on its run-out only. The estimate travels on the window as `runsOutAt` and Settings shows `runs out ~HH:MM` beside the reset time.
+#### Validating a pasted token
 
-USAGE HISTORY. Settings → Usage opens with two groups above the accounts. "Allowance left" is a burndown: for a chosen period (Day = last 24 h, Week = 7 d, Month = 30 d, or a Custom from/to date) one line per Claude account of the percent of the weekly window still unspent at each probe, rising back at the weekly reset. "Chats by tokens" ranks chats with a completed turn in the period by tokens (fresh + cached input + output, summed from each chat's `turn.end` usage in its own log). Both come from `GET /api/usage-report`: a named `period` (day/week/month) is answered from the server's cache, and `since&until` is read live. Reading means every online host scanning its chat logs (`patch.usage.read.request`), which took long enough that the page opened on a spinner every time; so the server keeps each named period's last answer, stamped with when it was read, hands it back at once, and re-reads behind it when it is older than five minutes — and on a ten-minute timer re-reads the default period (week) and any period that has been asked for, so the figures are current before anyone looks. The page says when the figures were read. The burndown is drawn as a smooth curve within each weekly cycle and a straight vertical step at each reset, so where every account's week starts is visible rather than smeared across the hours between two probes. History starts when a host first records it: each probe is appended to `logs/usage-history.jsonl` (bounded), so a period reaching back before that shows only the readings since; per-chat tokens go back as far as the chat logs do. A host that does not answer fails the call (no partial answer).
-
-Each window carries `status` (`allowed`/`allowed_warning`/`rejected`),
-`utilization` (0–1), `resetsAt` (epoch ms) and an optional `disabledReason`.
-They fold onto the account's entry in the same per-host-per-backend
-`host.account` report as `usage: { session?, week?, overage?, at? }`, so they
-reach every surface through the existing cache/replay/store path with no new
-wire message. `at` is when the reading was taken, and a surface must show it:
-without it a stale figure is indistinguishable from a live one, which is how a
-Wednesday reading came to be displayed on a Friday.
-
-Each Claude-credential row shows a line per window it has data for — omitted
-entirely for a window not yet reported, never a blank/zero placeholder, since
-"not read" and "read as zero" must not look the same. Each line is the
-percentage, a bar, and — when `resetsAt` is present — a local human time
-(same-day `14:32`, otherwise `Wed 14:32`) with the UTC alongside on hover.
-NEVER the raw epoch, never the raw enum, and never the provider's UTC prose
-passed through: every instant patch displays is formatted from an epoch in the
-reader's own zone. A `rejected` session or week window reads as blocked. A
-rejected overage does NOT (spec/12 § A turn only dies for a reason someone
-chose): that line reads as off, in neutral styling, and says that nothing has
-been overspent. The reason sits on the extra-usage line itself, in the column
-where a reset time would go — `Turn on`, linked to that account's Claude usage
-settings, when the add-on was never taken out; `disabled by organisation` when
-policy prevents it — so the line is one line, not a bar with a footnote. A row
-carries no `Refresh` action: the host reads every account every ten minutes and
-after any turn that runs one out, and `host.backend_usage_refresh` remains for
-the CLI and for a surface that has a reason to ask, but a button whose only
-effect is to make a figure a few minutes fresher is a button a person presses
-without knowing why.
-
-Usage also appears where the work happens: the composer's context ring opens a
-popover naming the pool closest to its limit, or the refusal, with every
-window shown alongside it (`14-design-web.md` § Usage popover). A not-yet-spawned
-chat has no ring to measure it with, so the New chat screen carries the same
-one-line summary beside the model instead (`14-design-web.md` §8 New-chat setup
-row), with every window in its tooltip.
-
-WHEN EVERY ACCOUNT ON A HOST IS SPENT, EVERY CHAT ON IT SAYS SO. A warning
-banner in the chat chrome names the spent accounts, the host, and the first
-account to come back, counting down. This is a different fact from the per-chat
-limit notice, and the per-chat notice cannot carry it: that one reaches only the
-chat you happen to have open, and says nothing about the twenty others that are
-equally parked or the jobs that will fire into them and park too.
-
-It is a WARNING colour, not an error one — nothing is broken and it clears on
-its own at the stated time — and it is per host, like the credential banner
-beside it, because credit belongs to a host's accounts and says nothing about
-a chat running elsewhere.
-
-IT STAYS SILENT UNLESS IT IS CERTAIN. Three states read as uncertain and show
-nothing: no connected account (the sign-in banner's story, and two warnings
-about one host is noise), any account without a reading yet (unknown is not
-spent — every cold start passes through this, and warning there would mean
-warning on every load), and any account still usable (one account with credit
-means work continues). A banner that cries wolf is worth nothing on the day it
-is right.
-
-Usage is per host per account: it is that host's view of that account's limits,
-and it is not re-aggregated into one account-wide figure.
-
-The server owns backend credentials, as an ordered list of named accounts per backend in its secrets store (`01-server.md` § Settings). A host reads only its copy from the last settings snapshot at query time; it never reads the backend's own login on that host except to offer it for adoption.
-
-- Disconnect empties an account's credential, leaving the account's entry and every host's own login in place.
-- Connect sets an account's credential: a pasted token, or a host's own login.
-- Add account creates a new account entry from a pasted token, leaving every existing account untouched.
-- The server alone renews provider credentials, serializing renewal and persisting each rotated refresh token before publishing new access credentials. Hosts never receive refresh tokens. Codex uses externally managed authentication. Signing in once makes the provider available on every linked host, including hosts that reconnect later. Renewal failures appear in Settings.
-
-### Signing in to Claude from a surface
-
-A Claude account can be connected from any surface with no terminal and nothing installed. The surface asks the server to start a sign-in; the server answers with a claude.ai address and keeps the sign-in's PKCE secret, which never reaches a surface. The surface opens the address in the person's own browser, they sign in to claude.ai, and the page shows a code, which they paste back into the surface. The server exchanges it for the same year-long, inference-only token `claude setup-token` produces (same client, scope, redirect and lifetime), then stores it exactly as a pasted token: validated, refused when it is the same organisation as another row, and sent to every host.
-
-- WHEN THE BROWSER IS ON THE SERVER'S MACHINE (the request came over loopback, not relayed by a proxy or tunnel) the sign-in is a loopback redirect, the way Claude Code's own login works: the server listens on `http://localhost:<free port>/callback`, claude.ai sends the code straight there, and the surface only waits and is told when the account is added. Nothing is pasted, and a login detour at claude.ai cannot lose the code because the authorize request is an ordinary redirect flow (no `code=true`). Any other browser (a phone, another machine) gets the paste flow below.
-- A started sign-in waits 15 minutes for its code and can be finished once. An expired or finished one is refused and is started again.
-- A code carrying another sign-in's state is refused without calling Claude. A code Claude refuses is reported in Claude's words; Claude being unreachable is reported as that, and the code can be tried again.
-- Add account and a row's Sign in / Sign in again use this flow. Pasting a `claude setup-token` token remains available beside it.
-
-### Validating a pasted token
-
-A pasted token is checked by the server against Anthropic's API (GET /v1/models) before it is
-stored. The check uses the same OAuth bearer + `anthropic-beta: oauth-2025-04-20`
-headers the host uses for model-catalogue reads.
+A pasted Claude token is checked against Anthropic's API (GET /v1/models) with the OAuth bearer and `anthropic-beta: oauth-2025-04-20` headers the host uses for model-catalogue reads.
 
 - `200 OK` → the token is valid; the store write proceeds.
-- `401`/`403` → Anthropic refused the token; the store is NOT written. The
-  reply is `credential_rejected` naming why, shown inline on the credential row.
-- Any other outcome (network error, unexpected status) → the result is
-  inconclusive; the store is NOT written, and the reply is
-  `credential_unreachable`. "We could not check" and "the token
-  is bad" are distinguishable, but neither may lead to a store write: storing
-  a token nobody has confirmed is how a bad one comes to be discovered by a
-  failing chat rather than at entry.
+- `401`/`403` → Anthropic refused the token; nothing is written. The reply is `credential_rejected` naming why, shown inline on the row.
+- Any other outcome (network error, unexpected status) → inconclusive; nothing is written, and the reply is `credential_unreachable`. "We could not check" and "the token is bad" are distinguishable, but neither stores a token nobody has confirmed.
 
-The account email of a pasted token is unknowable — Anthropic's profile endpoint
-refuses `claude setup-token` tokens — so a freshly connected account that was
-added by paste shows no email until a host's next credential check resolves
-one from the OAuth claims and sends it to the server.
+Anthropic's profile endpoint refuses `claude setup-token` tokens, so an account added by paste shows no email until a host's next credential check resolves one from the OAuth claims and sends it to the server.
+
+### Settings
+
+Settings lists every provider the same way, from one list of providers in which each declares its name, its strategy setting, which limit windows it reports and in what order, where its extra-usage add-on is managed, whether a token can be pasted, and how an account is added. A new provider is a new entry, never a change to the page. Under each provider: its strategy control, its accounts in order, and its sign-in actions. Every surface with a Settings screen — web, desktop and mobile (`15-design-mobile.md` § Settings tab) — shows the same state and offers the same controls, read from `GET /api/accounts/:backendId` and kept live by `settings.changed` (`03-wire-protocol.md` § Settings).
+
+- Each account row shows its label, its email, its state and, behind a ⋯ that opens a small panel floating beside the row, its actions, each with one line saying what it does: `Sign in again` replaces the stored login with a fresh one; `Sign out` keeps the row and forgets the login; `Remove` forgets the account everywhere. Sign out and Remove are confirmed, since each takes the account away from every chat on every host. No row names a host.
+- Under the rows, the provider's sign-in actions (§ Signing in), each creating a new row. There is no "active" or "default" account; the order is the only ranking.
+- Connect, add, sign out, remove, relabel and reorder are REST calls to the server (`01-server.md` § Endpoints). A change is settled when the server has committed it; the reply carries the new list. Whether each host has applied it shows on its Settings → Hosts row; an offline host does not block a change.
+
+Each provider's own settings are exposed under that provider for the user to choose — session retention and auto-delete among them (`04-chats-and-folders.md`) — a shared setting each host writes into the provider's own configuration. Patch shows what the provider has set and does not override it.
+
+### Usage
+
+Usage shows how close each account is to its provider's limits and when they reset. The reading is taken, not overheard: an in-turn reading rides on a query, so an account with no credit could never produce one. For Claude the host asks Anthropic directly, per account, from the `anthropic-ratelimit-unified-*` response headers, which arrive on a 429 as well as a 200 (the probe is one `max_tokens: 1` Haiku call; a 429 costs nothing). In-turn `rate_limit_event`s are folded in when they arrive. Probing is every 10 minutes far from a limit, every 3 minutes at 75% of the session or a run-out within 90 minutes, every minute at 90% or a run-out within 30 minutes, on demand (`host.backend_usage_refresh`), and immediately after a turn meets a limit. Readings go to the server, which holds the latest per account and derives the account's state from it; a host is only a reader of an account's usage.
+
+Claude reports three windows: `five_hour` (the session), `seven_day` (the week) and `overage`, the extra-usage pool the other two spill into. Its refusal is what Claude Code shows as `You've hit your monthly spend limit`. A `disabled-reason` of `org_level_disabled_until` means extra usage is off on that account; `org_level_disabled` means organisation policy prevents it. Extra usage is a paid add-on, so an account that never turned it on reports a rejected overage permanently: that is a ready account, not a limit. The per-model weekly variants are not shown.
+
+Each window carries `status` (`allowed`/`allowed_warning`/`rejected`), `utilization` (0–1), `resetsAt` (epoch ms), an optional `disabledReason`, an optional `runsOutAt`, and the account carries `at`, when the reading was taken, which a surface always shows so a stale figure is never mistaken for a live one. From successive readings the host estimates when each pool reaches 98% — the session over the last 45 minutes of the current window, the week over the last 6 hours — making no estimate from one reading, a flat one, or when the reset comes first. The estimate feeds probing, near limit and the display, never account choice.
+
+Each account row shows a line per window it has data for, omitted for a window not yet read, never a zero placeholder. Each line is the percentage, a bar and, with `resetsAt`, a local time (same-day `14:32`, otherwise `Wed 14:32`) with UTC on hover, and `runs out ~HH:MM` beside it when estimated. Every instant is formatted from an epoch in the reader's own zone, never the raw epoch, enum or the provider's prose. A rejected session or week reads as limited. A rejected overage reads as off, in neutral styling, saying nothing has been overspent, with the reason where a reset time would go: `Turn on`, linked to that account's Claude usage settings, or `disabled by organisation`. A row has no Refresh action.
+
+Usage also appears where the work happens: the composer's context ring opens a popover naming the pool closest to its limit, or the refusal, with every window beside it (`14-design-web.md` § Chat panel header), and the New chat screen carries the same one-line summary beside the model (`14-design-web.md` § Model selector).
+
+Settings → Usage opens with two groups above the accounts. "Allowance left" is a burndown: for a period (Day = 24 h, Week = 7 d, Month = 30 d, or Custom from/to) one line per Claude account of the weekly window still unspent at each reading, drawn as a smooth curve within each weekly cycle and a vertical step at each reset. "Chats by tokens" ranks chats with a completed turn in the period by tokens (fresh and cached input plus output, from each turn's usage in the server's chat record). Both come from `GET /api/usage-report`, answered by the server from its own records: a named period from a cache it keeps current every ten minutes, a custom range read on request. The page says when the figures were read. Reading history starts when the server first records it, bounded in size.
 
 ## Surface linking (QR flow)
 
@@ -264,7 +159,7 @@ are peers and any number may be registered; a second host follows the same
 flow as the first.
 
 1. On a linked surface, the user opens Add host; the surface requests a single-use daemon-registration nonce from the server and renders it as a QR and as a short code, for a host where the code is typed rather than scanned. The QR and the short code carry the same nonce, so a host that scans and a host where it is typed submit the same value.
-2. The host on the new host submits the nonce and its public key, as the installer's final step: run the install command, enter the pairing code, and the host appears in Settings → Hosts.
+2. The new host submits the nonce and its public key, as the installer's final step: run the install command, enter the pairing code, and the host appears in Settings → Hosts.
 3. The server registers the host, issues its `daemonKey`, and records the host's self-description (`hostId`, host name, platform, versions). With the `daemonKey` it hands over the voice-session secret every host verifies voice session tokens with (`PATCH_INTERNAL_TOKEN`), so the pairing code is the only thing a person gives the installer. An installer that is not already holding the secret pairs before it registers the service, since the service cannot start without it.
 4. The host stores `~/.patch/daemon.key` and authenticates to the server with it thereafter.
 
@@ -281,24 +176,24 @@ Registration is per host and idempotent: re-running the installer on a host
 that is already registered re-uses its stored `daemonKey` rather than creating a
 duplicate host. A host that has been revoked pairs again from scratch.
 
-Adding a host includes provisioning an agent backend and logging it in there
-(`02-host.md` § Agent backends). Settings shows each host's backend accounts
-separately, and each host's turns depend on its own credentials.
+Adding a host includes provisioning its agent backends (`02-host.md` § Provider
+adapters). It signs in to nothing: the shared accounts reach it with its first
+settings snapshot (§ Backend credentials).
 
 ## Revocation
 
 Any linked surface can be revoked from the app (Settings → Devices). Server invalidates the JWT and terminates the WebSocket.
 
-Revoking a host decommissions that host's install: its `daemonKey` is invalidated, its WebSocket dropped, and its chats become unreachable while their history is retained (`04-chats-and-folders.md`). Removing a host is confirmed, and the confirmation names how many chats live on it. Other hosts continue as they were.
+Revoking a host decommissions that host's install: its `daemonKey` is invalidated, its WebSocket dropped, and its chats stay readable from the server's record but can no longer run (`04-chats-and-folders.md` § History). Removing a host is confirmed, and the confirmation names how many chats live on it. Other hosts continue as they were.
 
 ## What's trusted vs untrusted
 
-| Component                 | Trust                                                                                                                                                               |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A host (on its host)      | Trusted. Holds a copy of the shared backend credentials and provider keys, that host's plaintext history, and runs with the host user's full authority — see below. |
-| Patch server              | Trusted — you run it. Plaintext content; no end-to-end encryption. Stores every shared credential, encrypted at rest (`01-server.md` § Settings).                   |
-| Webhook callers (Todoist) | Untrusted. Rate-limit, JSONata-filter, no code exec.                                                                                                                |
-| Phone/web clients         | Trusted via server-issued credential.                                                                                                                               |
+| Component                 | Trust                                                                                                                                                                                          |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A host                    | Trusted. Holds the shared accounts' access credentials (never refresh tokens) and provider keys, the provider sessions of its chats, and runs with the host user's full authority — see below. |
+| Patch server              | Trusted — you run it. Plaintext content; no end-to-end encryption. Stores every shared credential, encrypted at rest (`01-server.md` § Settings).                                              |
+| Webhook callers (Todoist) | Untrusted. Rate-limit, JSONata-filter, no code exec.                                                                                                                                           |
+| Phone/web clients         | Trusted via server-issued credential.                                                                                                                                                          |
 
 ### The authority of a turn
 
@@ -326,9 +221,10 @@ last four characters.
 
 - EdDSA-JWT for surface/daemon-to-server WebSocket auth.
 - A secret's value — a backend credential or a provider key — inbound on the
-  REST call that sets it, outbound only in a `settings.snapshot` to a host, and
-  from a host to the server when a host refreshes or adopts one. Never in a
-  response to a surface, a report or a log.
+  REST call that sets it, outbound only to a host (in a `settings.snapshot`, or
+  a fresh access credential), and from a host to the server when a host adopts
+  one. A refresh token never leaves the server. Never in a response to a
+  surface, a report or a log.
 - Webhook ingress is gated by the unguessable server-issued jobId in the URL, plus the trigger's own signature scheme where the source supports one (see `08-triggers-and-jobs.md`).
 
 ## Cross-refs
@@ -336,7 +232,3 @@ last four characters.
 - QR flow mechanics: `05-surfaces.md`
 - Host init sequence: `02-host.md`
 - Server endpoints involved: `01-server.md`
-
-The Codex Sign in action in the host list opens the same ChatGPT account form
-as Credit sources → Add account, with all connection methods available. It
-never asks for a Claude token. Claude-only add actions name Claude explicitly.
