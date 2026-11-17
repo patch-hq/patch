@@ -1211,9 +1211,13 @@ shell is a login shell (`$SHELL -l`, else `bash -l`), like an ssh session, so
 the user's profile puts their own tools on PATH. It echoes, prompts, completes
 on Tab and runs full-screen programs.
 
-- The PTY is allocated by a small python3 helper the host runs — no native
+- The PTY is allocated by a small python3 runner the host starts — no native
   module. python3 is present on every host the host runs on; a host where the
-  helper cannot start answers `pty_unavailable`, never a pipe shell instead.
+  runner cannot start answers `pty_unavailable`, never a pipe shell instead.
+- The runner is detached from the host and owns the shell. Everything the shell
+  prints goes first to an output log in `<patchHome>/terminals/<session>/`, and
+  the host talks to the runner over a unix socket in the same directory, so a
+  host that is not there loses nothing (§ Surviving a host restart).
 - `ready` carries `pty: true`. A surface that asked for a PTY and gets a ready
   without it is talking to a host that predates the field and opened a pipe
   shell; it refuses the session and closes it.
@@ -1229,6 +1233,33 @@ on Tab and runs full-screen programs.
   SIGWINCH. A resize for a pipe session is refused with `not_a_pty`.
 - Folder validation, the idle timeout, the output rate cap, the lifecycle and
   the privileges are those of every session, above.
+
+#### Surviving a host restart
+
+A host restart leaves a PTY session's shell and its running programs alone
+(§ Host restarts). Only PTY sessions do: a pipe shell is a child of the host and
+ends with it, with `daemon_shutdown`.
+
+- On stop the host lets go of each runner without ending it. On start it reads
+  `<patchHome>/terminals/` and reattaches each session to the surface that
+  opened it, delivering the output printed since the last byte the previous host
+  handed over (the host records that offset beside the session, so nothing is
+  delivered twice and nothing is skipped). Replayed scrollback is not subject to
+  the output rate cap.
+- A surface that opens the `sessionId` of a session the host has running gets
+  that shell, not a new one: `ready`, then the whole scrollback drawn again, and
+  the same shell state.
+- The log keeps the last 2 MiB of output once it passes 4 MiB. Offsets stay
+  absolute, so a host asking for output that was trimmed is given what remains.
+- A shell that ended while no host was attached is reported on start: its last
+  output, then `exit` with its status and `shell_exit`. A runner that is gone
+  with its shell and no record of it ending (the machine restarted) is reported
+  as `exit` with a null code and `daemon_shutdown`; the surface offers Restart.
+- A runner with no host attached for 30 minutes ends its shell, so an orphaned
+  terminal does not outlive the user's interest in it. The idle timeout applies
+  as before once a host is attached.
+- A session record that cannot be read is discarded. The scrollback is on the
+  host's disk, readable only by its user.
 
 ## Host files
 
