@@ -52,7 +52,6 @@
 
 import { spawn, execFile, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import {
-  existsSync,
   mkdirSync,
   openSync,
   readdirSync,
