@@ -9803,6 +9803,24 @@ button.view-file-download {
   font-weight: 600;
   margin: 0;
 }
+/* Desktop: the nav beside the page already names it (selected row), so the
+   page heading would be a repeat. It returns on the phone, where the nav is
+   hidden behind the open page. Kept for screen readers, only unseen. A head
+   with nothing else in it collapses. */
+.set-head h1 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.set-head:not(:has(> :not(h1, .set-back))) {
+  margin-bottom: 0;
+}
+.set-head > :not(h1, .set-back) {
+  margin-left: auto;
+}
 .set-back {
   display: none;
 }
@@ -10641,8 +10659,19 @@ button.set-row-open:focus-visible {
   .set-back {
     display: inline-block;
   }
+  .set-head:not(:has(> :not(h1, .set-back))) {
+    margin-bottom: 22px;
+  }
   .set-head h1 {
+    position: static;
+    width: auto;
+    height: auto;
+    clip-path: none;
+    white-space: normal;
     font-size: 22px;
+  }
+  .set-head > :not(h1, .set-back) {
+    margin-left: 0;
   }
   .set-row {
     flex-wrap: wrap;
