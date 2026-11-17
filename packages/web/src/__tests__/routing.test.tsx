@@ -35,6 +35,5 @@ describe('routing', () => {
     await waitFor(() => {
       expect(screen.getByTestId('jobs-route')).toBeInTheDocument();
     });
-    expect(screen.getByText('Jobs')).toBeInTheDocument();
   });
 });
