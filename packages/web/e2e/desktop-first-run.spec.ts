@@ -14,12 +14,20 @@ async function open(page: Page): Promise<void> {
     const w = window as unknown as Record<string, unknown>;
     w['__chosen'] = [];
     w['patchSetup'] = {
+      defaultName: () => Promise.resolve('Test Mac'),
       choose: (c: unknown) => (w['__chosen'] as unknown[]).push(c),
       onProgress: (cb: (m: string) => void) => (w['__progress'] = cb),
       onFail: (cb: (m: string) => void) => (w['__fail'] = cb),
     };
   });
   await page.goto(PAGE);
+}
+
+// "This computer" asks for a name first; Continue sends the choice.
+async function chooseLocal(page: Page): Promise<void> {
+  await page.getByTestId('choose-local').click();
+  await expect(page.getByTestId('computer-name')).toHaveValue('Test Mac');
+  await page.getByTestId('start').click();
 }
 
 const chosen = (page: Page): Promise<unknown[]> =>
@@ -39,14 +47,25 @@ test.describe('first run', () => {
     await expect(page.getByTestId('error')).toBeHidden();
   });
 
+  test('the name is editable, trimmed and required', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('choose-local').click();
+    await page.getByTestId('computer-name').fill('   ');
+    await page.getByTestId('start').click();
+    await expect(page.getByTestId('error')).toContainText('Give this computer a name');
+    expect(await chosen(page)).toEqual([]);
+    await page.getByTestId('computer-name').fill('  Studio  ');
+    await page.getByTestId('start').click();
+    expect(await chosen(page)).toEqual([{ kind: 'local', name: 'Studio' }]);
+  });
+
   test('"On this Mac" makes the choice, locks the page, and shows what the shell reports', async ({
     page,
   }) => {
     await open(page);
-    await page.getByTestId('choose-local').click();
-    expect(await chosen(page)).toEqual([{ kind: 'local' }]);
-    await expect(page.getByTestId('choose-local')).toBeDisabled();
-    await expect(page.getByTestId('choose-remote')).toBeDisabled();
+    await chooseLocal(page);
+    expect(await chosen(page)).toEqual([{ kind: 'local', name: 'Test Mac' }]);
+    await expect(page.getByTestId('start')).toBeDisabled();
     await page.evaluate(() =>
       (window as never as { __progress(m: string): void }).__progress('server'),
     );
@@ -71,7 +90,7 @@ test.describe('first run', () => {
     page,
   }) => {
     await open(page);
-    await page.getByTestId('choose-local').click();
+    await chooseLocal(page);
     await page.evaluate(() => {
       const w = window as never as { __progress(m: string): void; __fail(m: string): void };
       w.__progress('host');
@@ -88,16 +107,19 @@ test.describe('first run', () => {
 
   test('a failure is shown, the page unlocks, and it can be tried again', async ({ page }) => {
     await open(page);
-    await page.getByTestId('choose-local').click();
+    await chooseLocal(page);
     await page.evaluate(() =>
       (window as never as { __fail(m: string): void }).__fail(
         'Installing the host failed (1):\ncurl: (7)',
       ),
     );
     await expect(page.getByTestId('error')).toContainText('curl: (7)');
-    await expect(page.getByTestId('choose-local')).toBeEnabled();
-    await page.getByTestId('choose-local').click();
-    expect(await chosen(page)).toEqual([{ kind: 'local' }, { kind: 'local' }]);
+    await expect(page.getByTestId('start')).toBeEnabled();
+    await page.getByTestId('start').click();
+    expect(await chosen(page)).toEqual([
+      { kind: 'local', name: 'Test Mac' },
+      { kind: 'local', name: 'Test Mac' },
+    ]);
     await expect(page.getByTestId('error')).toBeHidden();
   });
 
