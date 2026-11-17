@@ -864,6 +864,8 @@ const SpawnBody = z
     callerChatId: z.string().min(1).optional(),
     /** The stored account the chat starts on: its id or its label. Refused if not held. */
     account: z.string().min(1).optional(),
+    /** Spawn into Hidden (spec/04 § Hidden) — CLI `--hidden`. Same-machine spawns only. */
+    hidden: z.boolean().optional(),
     /** SDK model override (CLI `--model` pass-through; spec/13). */
     model: z.string().min(1).optional(),
     /** SDK permission mode (CLI `--dangerously-skip-permissions`; spec/13). */
@@ -1349,6 +1351,37 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
       return { ok: true };
     },
   );
+
+  // POST /chats/:id/hide — hide/show a chat over the local UDS (spec/04 § Hidden).
+  // The server's REST hide route is not relayable through a host, so a CLI on a
+  // host needs this one. Body `{hidden: boolean}`.
+  // A refused change (special thread, not active) is a 409
+  // carrying the host's reason — NO FALLBACK.
+  app.post<{
+    Params: { id: string };
+    Body: { hidden?: unknown } | undefined;
+  }>('/chats/:id/hide', async (req, reply) => {
+    const auth = checkAuth(req);
+    if (!auth.ok) return reply.code(401).send({ error: auth.reason });
+    if (!opts.daemon) return reply.code(503).send({ error: 'host not initialised' });
+    const hidden = req.body?.hidden;
+    if (typeof hidden !== 'boolean') {
+      return reply.code(400).send({ error: 'hidden (boolean) is required' });
+    }
+    const state = opts.daemon.chatState.resolve(req.params.id);
+    if (!state) return reply.code(404).send({ error: 'not found' });
+    try {
+      await opts.daemon.setHidden(state.chatId, hidden);
+    } catch (err) {
+      if (err instanceof ChatNotFoundError) {
+        return reply.code(404).send({ error: 'not found' });
+      }
+      return reply
+        .code(409)
+        .send({ error: 'hide_refused', message: err instanceof Error ? err.message : String(err) });
+    }
+    return { ok: true };
+  });
 
   // POST /chats/:id/model — run an existing chat on another model from its
   // NEXT turn (spec/04 § Model). Body `{model: string}`, required. A refused
@@ -3049,8 +3082,18 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_input', message: parsed.error.message });
     }
-    const { folder, host, name, prompt, callerChatId, model, permissionMode, account, goal } =
-      parsed.data;
+    const {
+      folder,
+      host,
+      name,
+      prompt,
+      callerChatId,
+      model,
+      permissionMode,
+      account,
+      goal,
+      hidden,
+    } = parsed.data;
     const limiterKey = callerChatId ?? 'anonymous';
     if (!limiter.check(`spawn:${limiterKey}`)) {
       toolLog({
@@ -3085,6 +3128,12 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     // own host is short-circuited in-process; one naming another host
     // goes over the wire, relayed by the server to that host.
     if (host !== undefined && host !== selfHostId) {
+      if (hidden === true) {
+        return reply.code(400).send({
+          error: 'hidden_remote_unsupported',
+          message: `patch_spawn: hidden can only be set on a chat created on this machine, not on ${host}. No chat was created.`,
+        });
+      }
       if (goal !== undefined) {
         return reply.code(400).send({
           error: 'goal_remote_unsupported',
@@ -3167,6 +3216,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
         folder,
         ...(name !== undefined ? { name } : {}),
         ...(prompt !== undefined ? { prompt } : {}),
+        ...(hidden === true ? { hidden: true } : {}),
         ...(model !== undefined ? { model } : {}),
         ...(permissionMode !== undefined ? { permissionMode } : {}),
         ...(preferredAccountId !== undefined ? { preferredAccountId } : {}),

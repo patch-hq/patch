@@ -10,6 +10,7 @@
 //   resume-now → POST /chats/:id/resume-now (uds) | POST /api/chats/:id/resume-now (rest)
 //   set-model → POST /chats/:id/model (uds) | POST /api/chats/:id/model (rest)
 //   archive   → POST /chats/:id/archive (uds) | POST /api/chats/:id/archive (rest)
+//   hide      → POST /chats/:id/hide (uds) | POST /api/chats/:id/hide (rest)
 //   pin       → POST /api/chats/:id/pin (rest)
 //   rename    → POST /api/chats/:id/rename (rest)
 //   move      → POST /api/chats/:id/move (rest — the server drives both hosts)
@@ -162,6 +163,7 @@ export function registerChatsCommands(program: Command): void {
     .option('--folder <folder>', 'Folder (alternative to positional arg)')
     .option('--prompt <prompt>', 'Initial user prompt')
     .option('--name <name>', 'Optional chat name')
+    .option('--hidden', 'Start the chat in Hidden (host socket only)')
     .option('--model <model>', 'SDK model override (pass-through to host spawn)')
     .option(
       '--account <account>',
@@ -181,6 +183,7 @@ export function registerChatsCommands(program: Command): void {
           name?: string;
           model?: string;
           account?: string;
+          hidden?: boolean;
           dangerouslySkipPermissions?: boolean;
         },
         cmd: Command,
@@ -210,10 +213,15 @@ export function registerChatsCommands(program: Command): void {
           if (merged.dangerouslySkipPermissions) body['permissionMode'] = 'bypassPermissions';
           if (t.kind === 'uds') {
             if (opts.account !== undefined) body['account'] = opts.account;
+            if (opts.hidden) body['hidden'] = true;
             const res = await t.post<{ chatId: string }>('/internal/spawn', body);
             if (opts.json) emitJson(res);
             else emitText(`spawned ${res.chatId}`);
           } else {
+            if (opts.hidden)
+              throw new Error(
+                'chats spawn --hidden needs the host socket; over REST, spawn then run `chats hide <id>`',
+              );
             if (opts.account !== undefined) body['preferredAccountId'] = opts.account;
             const res = await t.post<{ chatId: string; status: string }>('/api/chats', body);
             if (opts.json) emitJson(res);
@@ -313,6 +321,25 @@ export function registerChatsCommands(program: Command): void {
         const res = await t.post<{ ok: true }>(path, { archived });
         if (opts.json) emitJson(res);
         else emitText(archived ? 'archived' : 'unarchived');
+      });
+    });
+
+  chats
+    .command('hide <id>')
+    .description('Hide a chat from the active list (or show it again with --show)')
+    .option('--show', 'Bring it back out of Hidden')
+    .option('--json', 'JSON output')
+    .action(async (rawId: string, opts: CommonOpts & { show?: boolean }) => {
+      await run(opts, async () => {
+        const t = getTransport(opts);
+        const id = await resolveChatId(t, rawId);
+        const hidden = opts.show !== true;
+        const body: Record<string, unknown> = { hidden };
+        if (opts.untilComplete) body['untilComplete'] = true;
+        const path = pickPath(t, `/chats/${id}/hide`, `/api/chats/${id}/hide`);
+        const res = await t.post<{ ok: true }>(path, body);
+        if (opts.json) emitJson(res);
+        else emitText(hidden ? 'hidden' : 'shown');
       });
     });
 

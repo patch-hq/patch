@@ -58,7 +58,7 @@ patch keys revoke <keyId>                 # confirmed
 
 patch chats list                          # list active chats
 patch chats get <id>                      # show one chat (state, last activity)
-patch chats spawn <folder> [--host H] [--model M] [--prompt P]  # start a chat there and print its id; --model defaults to the host's last-used
+patch chats spawn <folder> [--host H] [--model M] [--prompt P]  # start a chat there and print its id; --model defaults to the host's last-used; --hidden starts it in Hidden (host socket only)
 patch chats send-to <id> <message>        # deliver a user-turn into chat
 patch chats permission-mode <id> <mode>   # set the chat's permission mode
 patch chats history <id> [--limit N]      # print the chat's transcript, read from the server
@@ -69,6 +69,7 @@ patch chats resume-now <id>              # re-send a paused turn now instead of 
 patch chats continue <id>                 # continue an interrupted turn (12-error-and-offline.md § Continue)
 patch chats account <id> [<accountId>]    # lock the chat to an account; no account returns it to Automatic (10-auth.md § Choosing an account)
 patch chats archive <id>                  # archive a chat (UI hides; its record stays on the server)
+patch chats hide <id> [--show]   # move a chat to Hidden, or back with --show (04-chats-and-folders.md § Hidden)
 patch chats set-model <id> <model>       # change an existing chat's model, from its next turn (spec/04 § Model)
 patch chats rename <id> [<name>]          # rename a chat; no name clears it back to the derived label
 patch chats move <id> --host H --folder F   # start a linked chat on host H in folder F, with the drafted first message to edit and send (04-chats-and-folders.md § Moving to another host)
