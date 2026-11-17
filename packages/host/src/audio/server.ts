@@ -402,6 +402,9 @@ class JtiReplayGuard {
   }
 }
 
+/** How long a closing audio server waits for its clients to say goodbye. */
+export const AUDIO_CLOSE_GRACE_MS = 1_000;
+
 export async function startAudioServer(opts: AudioServerOptions): Promise<AudioServerHandle> {
   const log = opts.logger;
   const cap = opts.maxConcurrentSessions ?? 4;
@@ -1228,12 +1231,20 @@ export async function startAudioServer(opts: AudioServerOptions): Promise<AudioS
       }
       sessions.clear();
       surfaceIndex.clear();
+      // Say goodbye, then drop whatever has not gone: a phone that vanished
+      // never answers the close handshake and `wss.close` waits for every client.
+      const stragglers = setTimeout(() => {
+        for (const client of wss.clients) client.terminate();
+        http.closeAllConnections();
+      }, AUDIO_CLOSE_GRACE_MS);
+      stragglers.unref();
       await new Promise<void>((resolve) => {
         wss.close(() => resolve());
       });
       await new Promise<void>((resolve) => {
         http.close(() => resolve());
       });
+      clearTimeout(stragglers);
     },
   };
 }

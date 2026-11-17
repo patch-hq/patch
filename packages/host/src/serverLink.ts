@@ -254,6 +254,9 @@ interface ServerLinkHelloFrame {
   outbox?: true;
 }
 
+/** How long a clean close may wait for the server's answer before the socket is dropped. */
+export const CLOSE_GRACE_MS = 1_000;
+
 export function createServerLink(opts: ServerLinkOptions): ServerLink {
   const log = opts.logger;
   const schedule = opts.backoffSchedule ?? BACKOFF_SCHEDULE_MS;
@@ -637,6 +640,11 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
         await new Promise<void>((resolve) => {
           socket.once('close', () => resolve());
           socket.close();
+          // A server that is itself going down (the same deploy) may never
+          // answer the close handshake; `ws` would wait 30 s for it.
+          const force = setTimeout(() => socket.terminate(), CLOSE_GRACE_MS);
+          force.unref();
+          socket.once('close', () => clearTimeout(force));
         });
       }
     },

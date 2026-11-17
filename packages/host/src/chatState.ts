@@ -542,8 +542,34 @@ export class ChatStateMap {
     return match;
   }
 
+  /**
+   * The seq position and last-updated time meta.json is known to hold for each
+   * chat: what it was loaded with, or what was last mirrored. A chat whose
+   * state still matches needs nothing written at shutdown (see `needsMirror`).
+   */
+  private readonly mirrored = new Map<string, { nextSeq: number; lastUpdated: number }>();
+
   set(state: ChatState): void {
     this.states.set(state.chatId, state);
+    this.noteMirrored(state.chatId);
+  }
+
+  /** Record that meta.json now holds this chat's current seq position and time. */
+  noteMirrored(chatId: string): void {
+    const s = this.states.get(chatId);
+    if (s) this.mirrored.set(chatId, { nextSeq: s.nextSeq, lastUpdated: s.lastUpdated });
+  }
+
+  /**
+   * Whether this chat's seq position or last-updated time has moved since
+   * meta.json last held it. A host carries thousands of loaded chats and
+   * almost none move in a given run, so shutdown writes only the ones that did.
+   */
+  needsMirror(chatId: string): boolean {
+    const s = this.states.get(chatId);
+    if (!s) return false;
+    const m = this.mirrored.get(chatId);
+    return m === undefined || m.nextSeq !== s.nextSeq || m.lastUpdated !== s.lastUpdated;
   }
 
   has(chatId: string): boolean {
@@ -555,6 +581,7 @@ export class ChatStateMap {
   }
 
   delete(chatId: string): boolean {
+    this.mirrored.delete(chatId);
     return this.states.delete(chatId);
   }
 

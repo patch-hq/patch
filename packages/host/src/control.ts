@@ -1062,7 +1062,10 @@ function isSnoozedNow(state: { snoozedUntil: number | null } | undefined): boole
 export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInstance> {
   const isForeignSpecialThread = (chatId: string): boolean =>
     opts.runsManager !== undefined && !opts.runsManager() && isReservedSpecialThread(chatId);
-  const app = Fastify({ logger: opts.logger ?? false });
+  // forceCloseConnections: the host's own MCP servers and the CLI keep
+  // connections open, some on requests that wait for the user. `close()` must
+  // end them, not wait for them (spec/02 § Restarting the host).
+  const app = Fastify({ logger: opts.logger ?? false, forceCloseConnections: true });
 
   // Normalize fastify's OWN errors (e.g. a malformed/empty JSON body, which
   // fastify otherwise emits as {statusCode,code,error,message}) into the single
