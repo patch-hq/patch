@@ -567,6 +567,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
 
   // Keeps the server's log of each chat and its host's log in step.
   const logSync = new LogSync({
+    usesOutbox: (hostId) => hostLink.usesOutbox?.(hostId) ?? false,
     store: chatLogStore,
     chats: chatRegistry,
     sendTo: (hostId, surfaceId, event) => hostLink.sendTo(hostId, surfaceId, event),
@@ -976,7 +977,7 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     // inject the InProcessHostLink there is no socket to attach, so host
     // hellos are rejected by the gate (no attachHost wired).
     ...(hostLink instanceof InboundHostLink
-      ? { attachHost: (socket, hostId) => hostLink.attach(socket, hostId) }
+      ? { attachHost: (socket, hostId, o) => hostLink.attach(socket, hostId, o) }
       : {}),
     ...(opts.helloTimeoutMs !== undefined ? { helloTimeoutMs: opts.helloTimeoutMs } : {}),
     onCallResponse: (surfaceId, event) => callOrchestrator.handleResponse(surfaceId, event),

@@ -207,6 +207,7 @@ import {
 import { createSleepDetector } from './linkDropCause.js';
 import { createServerLink } from './serverLink.js';
 import { RecordImport } from './recordImport.js';
+import { Outbox } from './outbox.js';
 import { createHealthSampler } from './healthReport.js';
 import { checkLaunchPath } from './launchPath.js';
 import { handleJobExec } from './jobExec.js';
@@ -2338,6 +2339,7 @@ async function startHost(
   const link = createServerLink({
     url: config.serverWsUrl,
     daemonKey,
+    outbox: new Outbox({ path: join(config.patchHome, 'outbox.jsonl'), logger }),
     clientVersion: VERSION,
     clientGitSha: GIT_SHA,
     clientBuiltAt: BUILT_AT,

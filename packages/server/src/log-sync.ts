@@ -31,6 +31,12 @@ export interface LogSyncDeps {
   chats: Pick<ChatRegistry, 'get'>;
   sendTo: (hostId: string, surfaceId: string, event: WireEvent) => void;
   isOnline: (hostId: string) => boolean;
+  /**
+   * Does this host deliver through its outbox (spec/01 § Host outbox)? Such a
+   * host resends whatever the server has not acknowledged, so the server never
+   * compares its log with the host's or asks for anything.
+   */
+  usesOutbox?: (hostId: string) => boolean;
   /** Put an event through the same path a host's own live event takes. */
   inject: (event: WireEvent) => void;
   logger: Pick<Logger, 'info' | 'warn'>;
@@ -103,6 +109,7 @@ export class LogSync {
     if (hostLast === undefined || !this.deps.store.has(chatId)) return;
     const host = this.deps.chats.get(chatId)?.hostId;
     if (host === undefined || !this.deps.isOnline(host)) return;
+    if (this.deps.usesOutbox?.(host) === true) return;
     const high = this.deps.store.highWater(chatId);
     if (hostLast > high) {
       if ((this.askedAt.get(chatId) ?? -1) >= hostLast) return;

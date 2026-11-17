@@ -103,8 +103,13 @@ export interface HostLink {
    * Returns true if a live socket was closed.
    */
   forget(hostId: string): boolean;
+  /** Has this host sent through its outbox on its current link (spec/01 § Host outbox)? */
+  usesOutbox?(hostId: string): boolean;
   close(): Promise<void>;
 }
+
+/** How long acknowledgements of a host's outbox are gathered into one frame. */
+export const OUTBOX_ACK_DELAY_MS = 100;
 
 /**
  * Hand an event to every subscriber, each on its own: one that throws is logged
@@ -259,6 +264,7 @@ interface HostLinkState {
  */
 export class InboundHostLink implements HostLink {
   private readonly hosts = new Map<string, HostLinkState>();
+  private readonly outboxHosts = new Set<string>();
   private readonly eventHandlers = new Set<(e: WireEvent, from: string | null) => void>();
   private readonly statusHandlers = new Set<(s: 'online' | 'offline') => void>();
   private readonly hostStatusHandlers = new Set<
@@ -332,7 +338,7 @@ export class InboundHostLink implements HostLink {
    * for that host flush immediately. A second socket for the SAME host
    * closes the older one; a socket for a DIFFERENT host is independent.
    */
-  attach(socket: WebSocket, hostId: string): void {
+  attach(socket: WebSocket, hostId: string, attachOpts: { outbox?: boolean } = {}): void {
     if (this.closed) {
       try {
         socket.close();
@@ -389,13 +395,41 @@ export class InboundHostLink implements HostLink {
     });
     socket.on('close', () => clearInterval(keepalive));
 
+    // The outbox position committed so far on this link, sent a moment later
+    // so a burst of events is one acknowledgement.
+    let ackThrough = -1;
+    let ackTimer: NodeJS.Timeout | null = null;
+    const noteCommitted = (position: number): void => {
+      if (position > ackThrough) ackThrough = position;
+      if (ackTimer) return;
+      ackTimer = setTimeout(() => {
+        ackTimer = null;
+        if (link.socket === socket && socket.readyState === socket.OPEN) {
+          socket.send(encode({ type: 'host.outbox_ack', through: ackThrough }));
+        }
+      }, OUTBOX_ACK_DELAY_MS);
+      ackTimer.unref();
+    };
+    if (attachOpts.outbox) this.outboxHosts.add(hostId);
+    else this.outboxHosts.delete(hostId);
+    socket.on('close', () => {
+      if (ackTimer) clearTimeout(ackTimer);
+    });
+
     socket.on('message', (raw: WebSocket.RawData) => {
       lastAlive = Date.now();
       if (link.socket !== socket) return;
       const buf = Array.isArray(raw) ? Buffer.concat(raw) : (raw as Buffer);
       let event: WireEvent;
+      let outboxPosition: number | null = null;
       try {
         event = decode(buf);
+        if (event.type === 'host.outbox') {
+          // The wrapped event is a frame in its own right: validated as one.
+          outboxPosition = event.position;
+          this.outboxHosts.add(hostId);
+          event = decode(JSON.stringify(event.event));
+        }
       } catch (err) {
         this.opts.logger.warn(
           { err: (err as Error).message, hostId },
@@ -403,15 +437,20 @@ export class InboundHostLink implements HostLink {
         );
         return;
       }
-      if (this.isStraySpecialThreadEvent(event, hostId)) return;
-      const gated = this.eventGate ? this.eventGate(event, hostId) : event;
-      if (gated === null) return;
-      fanOut(this.eventHandlers, gated, hostId, (err) =>
-        this.opts.logger.error(
-          { err: err.message, hostId, type: gated.type },
-          'host event handler threw',
-        ),
-      );
+      if (outboxPosition !== null) {
+        // Every handler runs synchronously and the log is written before
+        // they return, so the position is committed once this frame is
+        // handled — whatever became of it (a resent duplicate, a stray, a
+        // refused contradiction). Resending it could change nothing.
+        const position = outboxPosition;
+        try {
+          this.handleHostFrame(event, hostId);
+        } finally {
+          noteCommitted(position);
+        }
+        return;
+      }
+      this.handleHostFrame(event, hostId);
     });
 
     socket.on('close', (code: number, reason: Buffer) => {
@@ -429,6 +468,22 @@ export class InboundHostLink implements HostLink {
     this.opts.logger.info({ hostId }, 'host attached');
     this.setStatus(hostId, 'online');
     this.flushBuffers(hostId);
+  }
+
+  private handleHostFrame(event: WireEvent, hostId: string): void {
+    if (this.isStraySpecialThreadEvent(event, hostId)) return;
+    const gated = this.eventGate ? this.eventGate(event, hostId) : event;
+    if (gated === null) return;
+    fanOut(this.eventHandlers, gated, hostId, (err) =>
+      this.opts.logger.error(
+        { err: err.message, hostId, type: gated.type },
+        'host event handler threw',
+      ),
+    );
+  }
+
+  usesOutbox(hostId: string): boolean {
+    return this.outboxHosts.has(hostId);
   }
 
   private flushBuffers(hostId: string): void {

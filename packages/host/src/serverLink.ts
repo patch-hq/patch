@@ -44,12 +44,14 @@ import {
   RESTART_WINDOW_MS,
   decodeCompat,
   encode,
+  isOutboxEvent,
   restartingVersion,
   type AuthOkEvent,
   type WireEvent,
   WireDecodeError,
 } from '@patch/wire';
 import { EventBuffer, DEFAULT_BUFFER_PER_CHAT } from './eventBuffer.js';
+import type { Outbox } from './outbox.js';
 import { classifyDrop, describeDrop, type LinkDrop, type SleepDetector } from './linkDropCause.js';
 
 /**
@@ -127,6 +129,12 @@ export interface ServerLinkOptions {
    * never left open-but-unauthenticated.
    */
   onGreetingUnreadable?: (err: WireDecodeError) => void;
+  /**
+   * The host outbox (spec/02 § Host outbox). Transcript events go here rather
+   * than the offline buffer: kept on disk until the server acknowledges them,
+   * and resent after every reconnect. Absent (tests), they buffer like any other.
+   */
+  outbox?: Outbox;
   /** Test hooks. */
   wsFactory?: (url: string) => WebSocket;
   backoffSchedule?: readonly number[];
@@ -169,6 +177,8 @@ export interface ServerLinkDiagnostics {
   online: boolean;
   /** Total events queued in the offline buffer across all chats. */
   bufferSize: number;
+  /** Transcript events in the outbox the server has not yet acknowledged. */
+  outboxOwed: number;
   /** Per-chat configured cap (DEFAULT_BUFFER_PER_CHAT in production). */
   bufferMaxPerChat: number;
   /**
@@ -241,6 +251,7 @@ interface ServerLinkHelloFrame {
   clientGitSha?: string;
   clientBuiltAt?: string;
   auth: string;
+  outbox?: true;
 }
 
 export function createServerLink(opts: ServerLinkOptions): ServerLink {
@@ -279,6 +290,8 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
 
   let ws: WebSocket | undefined;
   let online = false;
+  // Whether the server on this connection takes `host.outbox` frames.
+  let serverTakesOutbox = false;
   // Down since the host started until the first auth.ok, then since each loss.
   let offlineSince: number | null = Date.now();
   let lastDrop: LinkDrop | undefined;
@@ -302,6 +315,32 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
 
   function flushBuffer(): void {
     for (const ev of buffer.drain()) rawSend(ev);
+  }
+
+  /** Send one outbox entry the way this connection's server takes it. */
+  function sendOutboxEntry(position: number, event: WireEvent): void {
+    if (serverTakesOutbox) {
+      rawSend({ type: 'host.outbox', position, event });
+      return;
+    }
+    // A server that predates the outbox never acknowledges: what it was sent
+    // is all it will get, as before the outbox existed.
+    rawSend(event);
+    opts.outbox?.ack(position);
+  }
+
+  /** After `auth.ok`: everything the server has not acknowledged, in order. */
+  function flushOutbox(): void {
+    const outbox = opts.outbox;
+    if (!outbox) return;
+    const owed = [...outbox.pending()];
+    if (owed.length > 0) {
+      log.info(
+        { owed: owed.length, from: owed[0]!.position, serverTakesOutbox },
+        'server-link: resending the outbox',
+      );
+    }
+    for (const { position, event } of owed) sendOutboxEntry(position, event);
   }
 
   function stopHeartbeat(): void {
@@ -386,6 +425,7 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
         ...(opts.clientGitSha ? { clientGitSha: opts.clientGitSha } : {}),
         ...(opts.clientBuiltAt ? { clientBuiltAt: opts.clientBuiltAt } : {}),
         auth: opts.daemonKey,
+        ...(opts.outbox ? { outbox: true as const } : {}),
       };
       socket.send(JSON.stringify(hello));
       log.info('server-link: sent host hello, awaiting auth.ok');
@@ -451,9 +491,15 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
         offlineSince = null;
         attempt = 0;
         restartingUntil = 0;
+        serverTakesOutbox = event.hostOutbox === true;
         log.info('server-link: authenticated (auth.ok)');
+        flushOutbox();
         flushBuffer();
         opts.onAuthed?.(rawSend, event);
+        return;
+      }
+      if (event.type === 'host.outbox_ack') {
+        opts.outbox?.ack(event.through);
         return;
       }
       // `host.online` is server-emitted bookkeeping; nothing to do here.
@@ -503,9 +549,16 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
       connect();
     },
     send(event: WireEvent): void {
+      const open = online && ws !== undefined && ws.readyState === WebSocket.OPEN;
+      if (opts.outbox && isOutboxEvent(event)) {
+        const position = opts.outbox.append(event);
+        // Offline, the outbox already holds it for the reconnect.
+        if (open) sendOutboxEntry(position, event);
+        return;
+      }
       // `online` stays true until the socket's `close` event, but a socket that
       // is already closing no longer writes: buffer for the reconnect.
-      if (online && ws && ws.readyState === WebSocket.OPEN) {
+      if (open) {
         rawSend(event);
       } else {
         buffer.push(event);
@@ -518,6 +571,7 @@ export function createServerLink(opts: ServerLinkOptions): ServerLink {
       return {
         online,
         bufferSize: buffer.size(),
+        outboxOwed: opts.outbox?.pending().length ?? 0,
         bufferMaxPerChat: opts.bufferMaxPerChat ?? DEFAULT_BUFFER_PER_CHAT,
         offlineSince: online ? null : (offlineSince ?? Date.now()),
       };
