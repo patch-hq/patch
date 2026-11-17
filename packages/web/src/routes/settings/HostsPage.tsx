@@ -48,9 +48,19 @@ function installCommandProblem(err: unknown): string {
 
 const PLATFORM_LABEL: Record<string, string> = {
   darwin: 'macOS',
-  linux: 'linux',
+  linux: 'Linux',
   win32: 'Windows',
 };
+
+const ARCH_LABEL: Record<string, Record<string, string>> = {
+  darwin: { arm64: 'Apple Silicon', x64: 'Intel' },
+};
+
+/** `darwin arm64` as a person says it: `macOS · Apple Silicon`. */
+export function machineLabel(platform: string, arch: string): string {
+  const os = PLATFORM_LABEL[platform] ?? platform;
+  return `${os} · ${ARCH_LABEL[platform]?.[arch] ?? arch}`;
+}
 
 export function HostsPage(): JSX.Element {
   const hosts = usePresenceStore((s) => s.hosts);
@@ -277,7 +287,7 @@ function HostDetail({ host }: { host: HostPresence }): JSX.Element {
               sub={
                 <>
                   <span data-testid={`host-${host.hostId}-platform`}>
-                    {report.platform} {report.arch}
+                    {machineLabel(report.platform, report.arch)}
                   </span>
                   {' · '}
                   <span data-testid={`host-${host.hostId}-version`}>{report.hostVersion}</span>
@@ -427,13 +437,13 @@ function SettingsVersionRow({ host }: { host: HostPresence }): JSX.Element | nul
         ? 'Not applied yet'
         : 'Gets them when it reconnects'
       : state.appliedVersion === shared.version
-        ? 'Up to date'
+        ? 'Has your latest settings'
         : host.online
           ? 'Updating'
           : 'Gets the latest when it reconnects';
   return (
     <Row
-      title="Settings"
+      title="Synced settings"
       testid={`host-${host.hostId}-settings-version`}
       sub={<span data-testid={`host-${host.hostId}-settings-state`}>{text}</span>}
     />

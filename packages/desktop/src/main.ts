@@ -83,7 +83,12 @@ import { decideTrayClick } from './tray-toggle';
 import { configurePermissions } from './permissions';
 import { loadRetryDelay, shouldRetryLoad } from './load-retry';
 import { readHostLink, serverLostText, watchServerLink } from './server-watch';
-import { installLocalHost, localHostStatus, serverOrigin } from './local-host';
+import {
+  friendlyComputerName,
+  installLocalHost,
+  localHostStatus,
+  serverOrigin,
+} from './local-host';
 import { LocalSttController } from './local-stt-controller';
 import { modelDir } from './local-stt-models';
 import { SherpaAccurateEngine, SherpaLiveEngine } from './local-stt-workers';
@@ -2155,9 +2160,13 @@ function showSetupWindow(offerMove = false): {
     pendingMove = null;
   };
   ipcMain.on('patch:setup:choose', onChoose as never);
+  ipcMain.handle('patch:setup:default-name', (event) =>
+    event.sender === window.webContents ? friendlyComputerName() : '',
+  );
   ipcMain.on('patch:setup:move', onMove as never);
   window.once('closed', () => {
     ipcMain.removeListener('patch:setup:choose', onChoose as never);
+    ipcMain.removeHandler('patch:setup:default-name');
     ipcMain.removeListener('patch:setup:move', onMove as never);
   });
   return {
@@ -2220,8 +2229,8 @@ async function resolveServer(): Promise<'ready' | 'stop'> {
       relayUrl: process.env['PATCH_RELAY_URL'] ?? DEFAULT_RELAY_URL,
       label: `${app.getName()} on ${hostname()}`,
       ui,
-      installHost: (origin, code) =>
-        installLocalHost({ serverUrl: origin, code, home: app.getPath('home') }),
+      installHost: (origin, code, name) =>
+        installLocalHost({ serverUrl: origin, code, name, home: app.getPath('home') }),
       hostInstalled: () => localHostStatus(app.getPath('home')).installed,
     });
     activeLaunch = launched;

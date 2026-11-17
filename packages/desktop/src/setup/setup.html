@@ -94,6 +94,7 @@
         gap: 10px;
       }
       button,
+      input,
       textarea {
         font: inherit;
         color: inherit;
@@ -175,11 +176,13 @@
         cursor: pointer;
       }
       button:disabled,
+      input:disabled,
       textarea:disabled {
         opacity: 0.5;
         cursor: default;
       }
       button:focus-visible,
+      input:focus-visible,
       textarea:focus-visible {
         outline: 2px solid var(--accent);
         outline-offset: 2px;
@@ -293,6 +296,21 @@
           </button>
         </div>
       </div>
+      <form id="name" hidden data-testid="name-form">
+        <h1>What should we call this computer?</h1>
+        <input
+          id="computer-name"
+          data-testid="computer-name"
+          aria-label="Computer name"
+          maxlength="64"
+          spellcheck="false"
+          autocomplete="off"
+        />
+        <div class="row">
+          <button type="submit" class="primary" id="start" data-testid="start">Continue</button>
+          <button type="button" class="ghost" id="name-back" data-testid="name-back">Back</button>
+        </div>
+      </form>
       <form id="join" hidden data-testid="join-form">
         <h1 id="join-title">Connect to your server</h1>
         <label for="code">Pairing code</label>
@@ -322,7 +340,8 @@
       const join = $('join');
       const status = $('status');
       const error = $('error');
-      const buttons = () => [...document.querySelectorAll('button, textarea')];
+      const nameForm = $('name');
+      const buttons = () => [...document.querySelectorAll('button, input, textarea')];
 
       function busy(on) {
         for (const el of buttons()) el.disabled = on;
@@ -442,7 +461,26 @@
         window.patchSetup.move(false);
       });
 
-      $('local').addEventListener('click', () => pick({ kind: 'local' }));
+      $('local').addEventListener('click', async () => {
+        error.hidden = true;
+        choose.hidden = true;
+        nameForm.hidden = false;
+        const input = $('computer-name');
+        if (input.value === '') input.value = await window.patchSetup.defaultName();
+        input.focus();
+        input.select();
+      });
+      $('name-back').addEventListener('click', () => {
+        error.hidden = true;
+        nameForm.hidden = true;
+        choose.hidden = false;
+      });
+      nameForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const name = $('computer-name').value.trim();
+        if (name === '') return fail('Give this computer a name.');
+        pick({ kind: 'local', name });
+      });
       function showJoin(title) {
         $('join-title').textContent = title;
         error.hidden = true;

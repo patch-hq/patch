@@ -14,7 +14,7 @@ import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { ClaudeMemoryEntry } from '@patch/wire';
-import { HostsPage } from '../routes/settings/HostsPage.js';
+import { HostsPage, machineLabel } from '../routes/settings/HostsPage.js';
 import { AgentPage } from '../routes/settings/AgentPage.js';
 import { MemoriesPage } from '../routes/settings/MemoriesPage.js';
 import { useSettingsHostStore } from '../routes/settings/hostScope.js';
@@ -290,7 +290,7 @@ describe('Settings → Hosts', () => {
     usePresenceStore.getState().setHostOnline('host-a', true);
     loadShared({ version: 5, hosts: [{ hostId: 'host-a', appliedVersion: 5 }] });
     renderPage('hosts');
-    expect(screen.getByTestId('host-host-a-settings-state')).toHaveTextContent('Up to date');
+    expect(screen.getByTestId('host-host-a-settings-state')).toHaveTextContent('Has your latest settings');
     act(() => {
       loadShared({
         version: 6,
@@ -824,5 +824,13 @@ describe('This Mac (spec/02 § Desktop app and the local host)', () => {
     expect(await screen.findByTestId('this-mac-error')).toHaveTextContent(
       'the pairing code could not be submitted',
     );
+  });
+});
+
+describe('machineLabel', () => {
+  it('says the platform and chip in words', () => {
+    expect(machineLabel('darwin', 'arm64')).toBe('macOS · Apple Silicon');
+    expect(machineLabel('darwin', 'x64')).toBe('macOS · Intel');
+    expect(machineLabel('linux', 'x64')).toBe('Linux · x64');
   });
 });

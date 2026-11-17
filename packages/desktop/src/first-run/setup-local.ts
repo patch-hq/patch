@@ -22,6 +22,7 @@ export interface LocalDeps {
   installHost(
     origin: string,
     code: string,
+    name?: string,
   ): Promise<{ ok: boolean; exitCode: number | null; output: string }>;
   save(saved: SavedConnection): void;
   /**
@@ -39,6 +40,7 @@ export interface LocalDeps {
 export async function bringUpLocal(
   existing: SavedConnection | null,
   d: LocalDeps,
+  name?: string,
 ): Promise<{ saved: SavedConnection; server: LocalServer }> {
   existing ??= d.recover();
   const port =
@@ -80,7 +82,7 @@ export async function bringUpLocal(
           `The server gave no pairing code for this computer: ${started.json.error ?? `HTTP ${started.status}`}`,
         );
       }
-      const installed = await d.installHost(server.origin, started.json.nonce);
+      const installed = await d.installHost(server.origin, started.json.nonce, name);
       if (!installed.ok) {
         throw new Error(
           `Installing the host failed (${installed.exitCode ?? 'did not run'}):\n${installed.output.trim()}`,
