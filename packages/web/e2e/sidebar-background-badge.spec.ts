@@ -17,7 +17,30 @@ import { test, expect } from '@playwright/test';
 // checked against each other in one page.
 const HARNESS = '/app/dev-harness.html?chat=chat_bgtask';
 
+// The bar counts its own running watch rows (GET /watch), not the host's
+// `backgroundTasks`, so the two tasks the sidebar counts must be served here.
+const NOW = Date.now();
+const WATCH_TASKS = ['diag-25045', 'baiw888mq'].map((taskId, i) => ({
+  taskId,
+  description: `Background task ${i + 1}`,
+  command: 'true',
+  outputFile: `/data/chats/chat_bgtask/watch/${taskId}.output`,
+  status: 'running' as const,
+  startedAt: NOW - 5_000 * (i + 1),
+}));
+
 test.describe('sidebar background-job badge', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route('**/api/chats/chat_bgtask/watch', (route) => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ tasks: WATCH_TASKS }),
+      });
+    });
+  });
+
   test('the row shows a static glyph where the tick was, and the bar agrees', async ({ page }) => {
     await page.goto(HARNESS);
     const row = page.getByTestId('chat-row-chat_bgtask');
