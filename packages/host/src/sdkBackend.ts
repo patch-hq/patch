@@ -2038,6 +2038,7 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   let sawResult = false;
   let lastStopReason: string | undefined;
   let sessionId: string | undefined;
+  let skippedResult: SdkEnvelope | undefined;
   try {
     for await (const msg of q) {
       if ((msg as { type?: unknown } | null)?.type === 'result') sawResult = true;
@@ -2049,6 +2050,7 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
       const plan = durable?.plan(msg) ?? { offset: undefined, skip: 0 };
       limitEvents.note(msg);
       const envs = translateSdkMessage(msg, toolNames);
+      skippedResult = skippedResult ?? handledResultToReplay(envs, plan.skip);
       if (plan.skip === -1) continue;
       // A process that listed its skills before one was added would answer
       // "unknown command" for it; reload now, before the prompt is handled.
@@ -2071,6 +2073,9 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
       if (plan.offset !== undefined) durable?.noteConsumed(plan.offset, -1, persist);
       await returnFromPlanMode(q, envs, live.mode);
     }
+    // The previous host handled the `result` before it went down, so the skip
+    // above swallowed it. The turn did finish; the consumer must still hear so.
+    if (skippedResult !== undefined) yield skippedResult;
     // A stream that closes without Claude's `result` was cut (the process was
     // killed, the connection dropped), not finished. Said out loud so the turn
     // is retried or reported, never settled as complete with no reason.
@@ -2147,6 +2152,23 @@ export function cutTurnMessage(lastStopReason: string | undefined, exit?: string
 export interface ProcessExit {
   code: number | null;
   signal: string | null;
+}
+
+/**
+ * A reattached turn replays what Claude already said, and the envelopes the
+ * previous host handled are skipped (`skip` -1 = all, n = the first n). When
+ * that includes the `result`, return a bare one to deliver at the end, so the
+ * consumer sees the turn finish instead of a stream with no result.
+ */
+export function handledResultToReplay(
+  envs: readonly SdkEnvelope[],
+  skip: number,
+): SdkEnvelope | undefined {
+  const i = envs.findIndex((e) => e.type === 'result');
+  if (i === -1) return undefined;
+  if (skip !== -1 && i >= skip) return undefined;
+  const sessionId = envs[i]?.sessionId;
+  return { type: 'result', ...(sessionId !== undefined ? { sessionId } : {}) };
 }
 
 interface LiveRun {
