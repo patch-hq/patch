@@ -36,3 +36,19 @@ describe('harness traits', () => {
     expect(harnessOfSessionId(undefined)).toBeUndefined();
   });
 });
+
+describe('the chat core does not branch on a provider name', () => {
+  it('chatRunner.ts compares no harness id to a provider literal; it reads traits', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../src/chatRunner.ts', import.meta.url), 'utf8');
+    expect(src.match(/[!=]==\s*'(claude|codex|local)'/g) ?? []).toEqual([]);
+  });
+
+  it('each provider names the run option it reseeds through, or none', () => {
+    expect(HARNESS_TRAITS.codex.reseedOption).toBe('codexReseed');
+    expect(HARNESS_TRAITS.local.reseedOption).toBe('localReseed');
+    expect(HARNESS_TRAITS.claude.reseedOption).toBeNull();
+    expect(HARNESS_TRAITS.codex.sessionMovable).toBe(false);
+    expect(HARNESS_TRAITS.claude.ownsSessionFile).toBe(true);
+  });
+});

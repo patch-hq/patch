@@ -31,6 +31,22 @@ export interface HarnessTraits {
   readonly turnRetrySafe: (err: unknown) => boolean;
   /** Must a limit failure STATE when it lifts before the turn is parked for auto-resume? */
   readonly limitMustStateReset: boolean;
+  /** Does Patch prepare and read the provider's session file under the chat's own config dir? */
+  readonly ownsSessionFile: boolean;
+  /** Is a session bound to the account that made it, so an account switch needs a rebuild? */
+  readonly sessionBoundToAccount: boolean;
+  /** Does a turn run in a detached runner process the host reattaches to (spec/02 § Host restarts)? */
+  readonly detachedTurnRunner: boolean;
+  /** Does the host-wide out-of-credit aggregate describe this provider's accounts? */
+  readonly hostCreditAggregate: boolean;
+  /** Can a chat's session move to another host with the chat? */
+  readonly sessionMovable: boolean;
+  /** The run option that carries a reseed of Patch's history into a fresh session; null = none. */
+  readonly reseedOption: 'codexReseed' | 'localReseed' | null;
+  /** The run option that appends items to an existing session on a provider switch; null = none. */
+  readonly appendOption: 'codexAppendItems' | null;
+  /** What a turn refused for want of a sign-in says. `reason` is the credential check's own. */
+  readonly signedOutMessage: (hostId: string, reason: string) => string;
 }
 
 export const HARNESS_TRAITS: Record<HarnessId, HarnessTraits> = {
@@ -41,6 +57,15 @@ export const HARNESS_TRAITS: Record<HarnessId, HarnessTraits> = {
     rateLimitSweeps: true,
     turnRetrySafe: () => true,
     limitMustStateReset: false,
+    ownsSessionFile: true,
+    sessionBoundToAccount: true,
+    detachedTurnRunner: true,
+    hostCreditAggregate: true,
+    sessionMovable: true,
+    reseedOption: null,
+    appendOption: null,
+    signedOutMessage: (hostId) =>
+      `${hostId} isn't signed in to Claude, so this turn can't run. Sign in from Settings → Hosts.`,
   },
   codex: {
     backendId: CODEX_BACKEND_ID,
@@ -49,6 +74,14 @@ export const HARNESS_TRAITS: Record<HarnessId, HarnessTraits> = {
     rateLimitSweeps: false,
     turnRetrySafe: (err) => err instanceof CodexTurnError && err.retrySafe,
     limitMustStateReset: true,
+    ownsSessionFile: false,
+    sessionBoundToAccount: false,
+    detachedTurnRunner: true,
+    hostCreditAggregate: false,
+    sessionMovable: false,
+    reseedOption: 'codexReseed',
+    appendOption: 'codexAppendItems',
+    signedOutMessage: (_hostId, reason) => reason,
   },
   // A local endpoint has no account, no quota and no status model of its own.
   local: {
@@ -58,6 +91,14 @@ export const HARNESS_TRAITS: Record<HarnessId, HarnessTraits> = {
     rateLimitSweeps: false,
     turnRetrySafe: () => false,
     limitMustStateReset: false,
+    ownsSessionFile: false,
+    sessionBoundToAccount: false,
+    detachedTurnRunner: false,
+    hostCreditAggregate: false,
+    sessionMovable: false,
+    reseedOption: 'localReseed',
+    appendOption: null,
+    signedOutMessage: (_hostId, reason) => reason,
   },
 };
 
