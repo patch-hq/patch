@@ -196,7 +196,6 @@ export function useConnectedCount(): number {
  */
 export function ProviderCards(): JSX.Element {
   const secrets = usePreferencesStore((s) => s.shared?.secrets);
-  const hosts = usePresenceStore((s) => s.hosts);
   const claude = secrets?.claude.filter((a) => a.connected) ?? [];
   const chatgpt = secrets?.codex.filter((a) => a.connected) ?? [];
   return (
