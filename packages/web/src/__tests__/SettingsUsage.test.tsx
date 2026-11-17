@@ -45,8 +45,14 @@ const WORK = {
   connected: true,
   email: 'work@example.com',
   organizationId: 'org-a',
+  state: { state: 'ready' as const },
 };
-const PERSONAL = { id: 'acct-b', label: 'personal', connected: false };
+const PERSONAL = {
+  id: 'acct-b',
+  label: 'personal',
+  connected: false,
+  state: { state: 'signed_out' as const },
+};
 const TWO = { claude: [WORK, PERSONAL] };
 
 beforeEach(() => {
@@ -73,7 +79,8 @@ describe('Settings → Usage → accounts', () => {
     expect(order('accounts-rank-claude-code')).toEqual(['acct-a', 'acct-b']);
     expect(screen.getByTestId('account-claude-code-acct-a')).toHaveTextContent('work');
     expect(screen.getByTestId('account-claude-code-acct-a')).toHaveTextContent('work@example.com');
-    expect(screen.getByTestId('account-claude-code-acct-b')).toHaveTextContent('Signed out');
+    expect(screen.getByTestId('account-claude-code-acct-a')).toHaveTextContent('Ready');
+    expect(screen.getByTestId('account-state-claude-code-acct-b')).toHaveTextContent('Signed out');
     expect(screen.queryByTestId('settings-host-switch')).toBeNull();
   });
 
