@@ -81,7 +81,7 @@ describe('TerminalSessions — PTY sessions', { timeout: 20_000 }, () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'patch-pty-'));
     sink = collector();
-    sessions = new TerminalSessions({ emit: sink.emit });
+    sessions = new TerminalSessions({ runDir: join(dir, '.terminals'), emit: sink.emit });
     // A plain bash with no profile noise, so assertions read the shell and not
     // whatever this host's login scripts print.
     prevShell = process.env.SHELL;
@@ -95,7 +95,7 @@ describe('TerminalSessions — PTY sessions', { timeout: 20_000 }, () => {
   });
 
   afterEach(async () => {
-    await sessions.shutdown();
+    await sessions.closeAll();
     process.env.SHELL = prevShell as string;
     process.env.HOME = prevHome as string;
     rmSync(dir, { recursive: true, force: true });
@@ -214,7 +214,11 @@ describe('TerminalSessions — PTY sessions', { timeout: 20_000 }, () => {
   });
 
   it('a missing helper is pty_unavailable, never a pipe shell instead (NO FALLBACK)', async () => {
-    sessions = new TerminalSessions({ emit: sink.emit, python: join(dir, 'no-python') });
+    sessions = new TerminalSessions({
+      runDir: join(dir, '.terminals'),
+      emit: sink.emit,
+      python: join(dir, 'no-python'),
+    });
     open();
     const err = await sink.waitFor((e) => e.type === 'patch.terminal.error', 'error');
     expect(err).toMatchObject({ sessionId: 'p1', code: 'pty_unavailable', forSurfaceId: 'phone' });

@@ -51,12 +51,23 @@
 //     — and the command stays correctly marked as running until it exits.
 
 import { spawn, execFile, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { statSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
-import { randomBytes } from 'node:crypto';
+import { join } from 'node:path';
+import { createHash, randomBytes } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
-import type { Writable } from 'node:stream';
 import { PTY_HELPER_SOURCE } from './ptyHelper.js';
+import { PtyLink, type PtyLinkHandlers } from './ptyLink.js';
 import type { Logger } from 'pino';
 import type { WireEvent } from '@patch/wire';
 
@@ -95,9 +106,29 @@ type TerminalRequest = Extract<
 
 type EndReason = Extract<WireEvent, { type: 'patch.terminal.exit' }>['reason'];
 
+/** What a PTY session keeps on disk, `<runDir>/<hash of sessionId>/meta.json`. */
+interface PtyMeta {
+  sessionId: string;
+  forSurfaceId?: string;
+  cwd: string;
+  /** Output offset the host has handed to the surface. */
+  offset: number;
+}
+
+/** The host's side of a PTY session: its runner's directory and connection. */
+interface PtyState {
+  dir: string;
+  cwd: string;
+  link: PtyLink | null;
+  /** Absolute output offset delivered to the surface so far. */
+  offset: number;
+  metaTimer: NodeJS.Timeout | null;
+}
+
 interface Session {
   sessionId: string;
-  child: ChildProcessWithoutNullStreams;
+  /** The pipe shell. `null` for a PTY session, whose shell belongs to its runner. */
+  child: ChildProcessWithoutNullStreams | null;
   /** The surface that opened it — every frame for this session routes there. */
   forSurfaceId?: string;
   /** Set before we kill the shell so the `exit` handler reports WHY it ended. */
@@ -121,11 +152,8 @@ interface Session {
    * given and a replacement glyph is a bug.
    */
   decoders: { stdout: StringDecoder; stderr: StringDecoder };
-  /**
-   * Set for a PTY session (spec/02 § Terminal sessions — PTY sessions): the
-   * helper's window-size control pipe. `null` for a pipe session.
-   */
-  pty: { control: Writable } | null;
+  /** Set for a PTY session (spec/02 § Terminal sessions — PTY sessions). `null` for a pipe session. */
+  pty: PtyState | null;
 }
 
 export interface TerminalSessionsOptions {
@@ -145,8 +173,20 @@ export interface TerminalSessionsOptions {
    * test can name one that does not exist; the host runs `python3` off PATH.
    */
   python?: string;
+  /**
+   * `<patchHome>/terminals`: one directory per PTY session, holding its
+   * runner's socket and output log (spec/02 § Host restarts).
+   */
+  runDir: string;
+  /** Seconds a runner keeps a shell no host is attached to; tests shorten it. */
+  orphanSeconds?: number;
   logger?: Logger;
 }
+
+/** How long a new runner has to start listening. */
+const RUNNER_START_MS = 15_000;
+/** Persisting the delivered offset is throttled to this. */
+const META_WRITE_MS = 200;
 
 export class TerminalSessions {
   private readonly sessions = new Map<string, Session>();
@@ -179,20 +219,43 @@ export class TerminalSessions {
     }
   }
 
-  /** End every live session — the host is going down (spec: no reattach). */
+  /**
+   * The host is going down. A pipe shell ends with it; a PTY session is its
+   * runner's, so the host only lets go and the next host reattaches
+   * (spec/02 § Host restarts).
+   */
   async shutdown(): Promise<void> {
+    for (const s of [...this.sessions.values()]) {
+      if (s.pty === null) continue;
+      clearTimeout(s.idleTimer);
+      this.flushMeta(s);
+      s.pty.link?.detach();
+      this.sessions.delete(s.sessionId);
+    }
     const ending = [...this.sessions.values()].map(
       (s) =>
         new Promise<void>((resolve) => {
+          const child = s.child as ChildProcessWithoutNullStreams;
           // A child that already exited will never emit `exit` again — resolve
           // straight away rather than hanging the shutdown on a dead process.
           /* v8 ignore next -- every session in the map is live; the guard covers a shell that died between the snapshot and this line. */
-          if (s.child.exitCode !== null || s.child.signalCode !== null) return resolve();
-          s.child.once('exit', () => resolve());
+          if (child.exitCode !== null || child.signalCode !== null) return resolve();
+          child.once('exit', () => resolve());
           this.end(s, 'daemon_shutdown');
         }),
     );
     await Promise.all(ending);
+  }
+
+  /** End every live session, PTY ones included (tests, and anything that means it). */
+  async closeAll(): Promise<void> {
+    const ptys = [...this.sessions.values()].filter((s) => s.pty !== null);
+    for (const s of ptys) this.end(s, 'closed');
+    const deadline = Date.now() + 5_000;
+    while (ptys.some((s) => this.sessions.get(s.sessionId) === s) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    await this.shutdown();
   }
 
   // ---- open ----------------------------------------------------------------
@@ -227,10 +290,17 @@ export class TerminalSessions {
     // Re-opening a live sessionId replaces its shell (a surface that reconnected
     // and re-opened must not leak the old one).
     const existing = this.sessions.get(sessionId);
+    // A PTY session that is still running — one the host reattached after a
+    // restart, which the surface now asks for again — is taken over, not
+    // replaced: its shell, scrollback and running programs stay as they were.
+    if (existing?.pty && event.pty !== undefined && existing.pty.link) {
+      this.takeOver(existing, event.pty, forSurfaceId);
+      return;
+    }
     if (existing) this.end(existing, 'closed');
 
     if (event.pty !== undefined) {
-      this.openPty(sessionId, folder, event.pty, forSurfaceId);
+      void this.openPty(sessionId, folder, event.pty, forSurfaceId);
       return;
     }
 
@@ -314,15 +384,19 @@ export class TerminalSessions {
    * has one output), and Ctrl-C is the ETX byte the line discipline turns into
    * SIGINT for the foreground job, exactly as on a local terminal.
    *
-   * NO FALLBACK: if the helper cannot run, the surface gets `pty_unavailable` —
+   * The shell lives in its own detached runner (`ptyHelper.ts`), not under the
+   * host, so a host restart leaves it running (spec/02 § Host restarts); this
+   * session is the host's connection to it.
+   *
+   * NO FALLBACK: if the runner cannot run, the surface gets `pty_unavailable` —
    * never a pipe shell drawn into an emulator that expects a terminal.
    */
-  private openPty(
+  private async openPty(
     sessionId: string,
     folder: string,
     size: { cols: number; rows: number },
     forSurfaceId: string | undefined,
-  ): void {
+  ): Promise<void> {
     const shell = process.env.SHELL || 'bash';
     const python = this.opts.python ?? 'python3';
     const env: NodeJS.ProcessEnv = {
@@ -340,21 +414,17 @@ export class TerminalSessions {
     if (!env.LC_ALL && !env.LC_CTYPE && !env.LANG) {
       env.LC_CTYPE = process.platform === 'darwin' ? 'UTF-8' : 'C.UTF-8';
     }
-    const child = spawn(
-      python,
-      ['-c', PTY_HELPER_SOURCE, String(size.cols), String(size.rows), shell],
-      {
-        cwd: folder,
-        detached: true,
-        stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
-        env,
-      },
-    ) as unknown as ChildProcessWithoutNullStreams;
-    const control = (child as unknown as { stdio: Writable[] }).stdio[3] as Writable;
+    if (this.opts.orphanSeconds !== undefined) {
+      env.PATCH_PTY_ORPHAN_S = String(this.opts.orphanSeconds);
+    }
 
+    const dir = this.ptyDir(sessionId);
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const state: PtyState = { dir, cwd: folder, link: null, offset: 0, metaTimer: null };
     const session: Session = {
       sessionId,
-      child,
+      child: null,
       ...(forSurfaceId !== undefined ? { forSurfaceId } : {}),
       endReason: null,
       idleTimer: this.armIdleTimer(sessionId),
@@ -364,48 +434,286 @@ export class TerminalSessions {
       marker: '',
       pendingOut: '',
       decoders: { stdout: new StringDecoder('utf8'), stderr: new StringDecoder('utf8') },
-      pty: { control },
+      pty: state,
     };
     this.sessions.set(sessionId, session);
+    this.flushMeta(session);
 
-    const ignoreWriteError = (err: Error): void => {
-      this.opts.logger?.debug({ sessionId, err: err.message }, 'terminal pty write failed');
+    // The runner's stderr goes to a file: it is the only account of a Python
+    // traceback or a failed exec, and the runner outlives this call.
+    const errLog = join(dir, 'err.log');
+    let failed: string | null = null;
+    let spawned: ReturnType<typeof spawn>;
+    try {
+      writeFileSync(errLog, '');
+      spawned = spawn(
+        python,
+        ['-c', PTY_HELPER_SOURCE, dir, String(size.cols), String(size.rows), shell],
+        { cwd: folder, detached: true, stdio: ['ignore', 'ignore', openAppend(errLog)], env },
+      );
+    } catch (err) {
+      this.failPty(session, (err as Error).message, forSurfaceId);
+      return;
+    }
+    spawned.unref();
+    spawned.on('error', (err: Error) => {
+      failed = err.message;
+    });
+    // Before the runner is attached, its exit is a failure to start (a later
+    // one is the shell ending, which the link reports).
+    spawned.on('exit', (code) => {
+      if (state.link === null) {
+        failed = readFileSafe(errLog).trim() || `exited with status ${code}`;
+      }
+    });
+
+    const deadline = Date.now() + RUNNER_START_MS;
+    while (state.link === null) {
+      if (failed !== null) {
+        this.failPty(session, failed, forSurfaceId);
+        return;
+      }
+      if (this.sessions.get(sessionId) !== session) return; // closed while starting
+      try {
+        state.link = await PtyLink.attach(dir, 0, this.linkHandlers(session), 100);
+      } catch {
+        if (Date.now() > deadline) {
+          this.failPty(session, 'the terminal runner never started', forSurfaceId);
+          return;
+        }
+      }
+    }
+    if (this.sessions.get(sessionId) !== session) {
+      state.link.detach();
+      return;
+    }
+    // Ready only once the runner really is listening, so a missing python3
+    // is reported as an error in place of a ready — never after one.
+    this.emit({ type: 'patch.terminal.ready', sessionId, cwd: folder, pty: true }, forSurfaceId);
+  }
+
+  /** The runner never came up: report it and drop everything it left. */
+  private failPty(session: Session, why: string, forSurfaceId: string | undefined): void {
+    this.opts.logger?.warn(
+      { sessionId: session.sessionId, err: why },
+      'terminal pty runner failed',
+    );
+    clearTimeout(session.idleTimer);
+    if (this.sessions.get(session.sessionId) === session) this.sessions.delete(session.sessionId);
+    if (session.pty) {
+      if (session.pty.metaTimer) clearTimeout(session.pty.metaTimer);
+      rmSync(session.pty.dir, { recursive: true, force: true });
+    }
+    this.error(
+      session.sessionId,
+      'pty_unavailable',
+      `this host cannot open a terminal: ${this.opts.python ?? 'python3'} failed to start (${why})`,
+      { forSurfaceId },
+    );
+  }
+
+  /** What the runner's connection reports, applied to `session`. */
+  private linkHandlers(session: Session): PtyLinkHandlers {
+    return {
+      onData: (start, data, replay) => this.ptyData(session, start, data, replay),
+      onExit: (code) => this.ptyEnded(session, code),
+      onClose: () => {
+        // The connection dropped without the shell reporting an end: the runner
+        // was killed. Whatever it wrote before dying is in the log; nothing
+        // else will come.
+        if (this.sessions.get(session.sessionId) === session) this.ptyEnded(session, null);
+      },
     };
-    child.stdin.on('error', ignoreWriteError);
-    control.on('error', ignoreWriteError);
-    child.stdout.on('data', (buf: Buffer) => this.output(session, 'stdout', buf));
-    // The helper's own stderr: a Python traceback, a failed exec. Shown, as
-    // stderr, rather than swallowed — it is the only account of what broke.
-    child.stderr.on('data', (buf: Buffer) => this.output(session, 'stderr', buf));
-    child.on('spawn', () => {
-      // Ready only once the helper really is running, so a missing python3
-      // is reported as an error in place of a ready — never after one.
-      this.emit({ type: 'patch.terminal.ready', sessionId, cwd: folder, pty: true }, forSurfaceId);
-    });
-    child.on('error', (err: Error) => {
-      this.opts.logger?.warn({ sessionId, err: err.message }, 'terminal pty helper failed');
-      clearTimeout(session.idleTimer);
-      if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId);
-      this.error(
-        sessionId,
-        'pty_unavailable',
-        `this host cannot open a terminal: ${python} failed to start (${err.message})`,
-        { forSurfaceId },
-      );
-    });
-    child.on('exit', (code) => {
-      clearTimeout(session.idleTimer);
-      if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId);
-      this.emit(
-        {
-          type: 'patch.terminal.exit',
-          sessionId,
-          code: session.endReason === null ? code : null,
-          reason: session.endReason ?? 'shell_exit',
-        },
-        forSurfaceId,
-      );
-    });
+  }
+
+  /** Output from the runner, skipping what the surface already has. */
+  private ptyData(session: Session, start: number, data: Buffer, replay: boolean): void {
+    const pty = session.pty as PtyState;
+    let chunk = data;
+    if (start < pty.offset) {
+      const seen = pty.offset - start;
+      if (seen >= chunk.length) return;
+      chunk = chunk.subarray(seen);
+    } else if (start > pty.offset) {
+      // The runner trimmed its log past what we had: the gap is gone.
+      pty.offset = start;
+    }
+    pty.offset += chunk.length;
+    this.output(session, 'stdout', chunk, replay);
+    this.scheduleMeta(session);
+  }
+
+  /** The shell ended (or its runner vanished): tell the surface and clean up. */
+  private ptyEnded(session: Session, code: number | null): void {
+    if (this.sessions.get(session.sessionId) !== session) return;
+    const pty = session.pty as PtyState;
+    this.sessions.delete(session.sessionId);
+    clearTimeout(session.idleTimer);
+    if (pty.metaTimer) clearTimeout(pty.metaTimer);
+    pty.link?.detach();
+    rmSync(pty.dir, { recursive: true, force: true });
+    this.emit(
+      {
+        type: 'patch.terminal.exit',
+        sessionId: session.sessionId,
+        code: session.endReason === null ? code : null,
+        // A runner that died with no word from its shell was killed with the
+        // machine; the surface treats it like a host that went away.
+        reason: session.endReason ?? (code === null ? 'daemon_shutdown' : 'shell_exit'),
+      },
+      session.forSurfaceId,
+    );
+  }
+
+  /**
+   * A surface asks for a PTY session the host already has running — reattached
+   * after a restart. It gets the same shell, drawn again from the start of its
+   * scrollback.
+   */
+  private takeOver(
+    session: Session,
+    size: { cols: number; rows: number },
+    forSurfaceId: string | undefined,
+  ): void {
+    const pty = session.pty as PtyState;
+    if (forSurfaceId === undefined) delete session.forSurfaceId;
+    else session.forSurfaceId = forSurfaceId;
+    clearTimeout(session.idleTimer);
+    session.idleTimer = this.armIdleTimer(session.sessionId);
+    this.emit(
+      { type: 'patch.terminal.ready', sessionId: session.sessionId, cwd: pty.cwd, pty: true },
+      forSurfaceId,
+    );
+    // Re-attach from the beginning: the runner replays its whole log and the
+    // offset bookkeeping starts over so none of it is skipped as "seen".
+    pty.link?.detach();
+    pty.offset = 0;
+    session.decoders.stdout = new StringDecoder('utf8');
+    PtyLink.attach(pty.dir, 0, this.linkHandlers(session), 0).then(
+      (link) => {
+        pty.link = link;
+        this.flushMeta(session);
+      },
+      (err: Error) => {
+        this.opts.logger?.warn({ err: err.message }, 'terminal reattach failed');
+        this.ptyEnded(session, null);
+      },
+    );
+  }
+
+  // ---- reattach after a host restart (spec/02 § Host restarts) ---------------
+
+  /**
+   * Adopt the PTY sessions a previous host left running. Called once at start.
+   * A runner still up is reattached and everything it printed since the last
+   * offset the previous host delivered goes to the surface; one whose shell
+   * ended meanwhile hands over its last output and the exit; one that is gone
+   * (a machine restart) is reported ended.
+   */
+  async adopt(): Promise<number> {
+    let names: string[];
+    try {
+      names = readdirSync(this.opts.runDir);
+    } catch {
+      return 0;
+    }
+    let adopted = 0;
+    for (const name of names) {
+      const dir = join(this.opts.runDir, name);
+      let meta: PtyMeta;
+      try {
+        meta = JSON.parse(readFileSync(join(dir, 'meta.json'), 'utf8')) as PtyMeta;
+      } catch {
+        // No readable record: nothing can be told to anyone. Leave a clean slate.
+        rmSync(dir, { recursive: true, force: true });
+        continue;
+      }
+      if (this.sessions.has(meta.sessionId)) continue;
+      const session: Session = {
+        sessionId: meta.sessionId,
+        child: null,
+        ...(meta.forSurfaceId !== undefined ? { forSurfaceId: meta.forSurfaceId } : {}),
+        endReason: null,
+        idleTimer: this.armIdleTimer(meta.sessionId),
+        windowStart: Date.now(),
+        windowBytes: 0,
+        windowTruncated: false,
+        marker: '',
+        pendingOut: '',
+        decoders: { stdout: new StringDecoder('utf8'), stderr: new StringDecoder('utf8') },
+        pty: { dir, cwd: meta.cwd, link: null, offset: meta.offset, metaTimer: null },
+      };
+      this.sessions.set(meta.sessionId, session);
+      const pty = session.pty as PtyState;
+      try {
+        pty.link = await PtyLink.attach(dir, meta.offset, this.linkHandlers(session), 0);
+        adopted++;
+      } catch {
+        // Runner not listening: either its shell ended while no host was
+        // attached (exit.json), or it was killed. Either way the log has the rest.
+        this.replayFromDisk(session);
+      }
+    }
+    return adopted;
+  }
+
+  /** A runner that is gone: deliver what its log still holds, then its end. */
+  private replayFromDisk(session: Session): void {
+    const pty = session.pty as PtyState;
+    let code: number | null = null;
+    try {
+      code = (JSON.parse(readFileSync(join(pty.dir, 'exit.json'), 'utf8')) as { code: number })
+        .code;
+    } catch {
+      code = null;
+    }
+    try {
+      const base = Number(readFileSync(join(pty.dir, 'out.base'), 'utf8'));
+      const log = readFileSync(join(pty.dir, 'out.log'));
+      const from = Math.max(pty.offset, base);
+      const rest = log.subarray(from - base);
+      if (rest.length > 0) this.ptyData(session, from, rest, true);
+    } catch {
+      // No log: nothing was ever printed.
+    }
+    this.ptyEnded(session, code);
+  }
+
+  private ptyDir(sessionId: string): string {
+    return join(this.opts.runDir, createHash('sha1').update(sessionId).digest('hex').slice(0, 16));
+  }
+
+  private scheduleMeta(session: Session): void {
+    const pty = session.pty as PtyState;
+    if (pty.metaTimer) return;
+    pty.metaTimer = setTimeout(() => {
+      pty.metaTimer = null;
+      this.flushMeta(session);
+    }, META_WRITE_MS);
+    pty.metaTimer.unref?.();
+  }
+
+  /** Write the record a restarted host reads (atomic: temp file and rename). */
+  private flushMeta(session: Session): void {
+    const pty = session.pty as PtyState;
+    if (pty.metaTimer) {
+      clearTimeout(pty.metaTimer);
+      pty.metaTimer = null;
+    }
+    const meta: PtyMeta = {
+      sessionId: session.sessionId,
+      ...(session.forSurfaceId !== undefined ? { forSurfaceId: session.forSurfaceId } : {}),
+      cwd: pty.cwd,
+      offset: pty.offset,
+    };
+    try {
+      const tmp = join(pty.dir, 'meta.json.tmp');
+      writeFileSync(tmp, JSON.stringify(meta), { mode: 0o600 });
+      renameSync(tmp, join(pty.dir, 'meta.json'));
+    } catch (err) {
+      // The directory is gone (the session ended): nothing to record.
+      this.opts.logger?.debug({ err: (err as Error).message }, 'terminal meta write skipped');
+    }
   }
 
   private resize(event: Extract<WireEvent, { type: 'patch.terminal.resize' }>): void {
@@ -417,7 +725,7 @@ export class TerminalSessions {
       });
       return;
     }
-    session.pty.control.write(`${event.cols} ${event.rows}\n`);
+    session.pty.link?.resize(event.cols, event.rows);
   }
 
   // ---- input / signal / close ---------------------------------------------
@@ -427,15 +735,19 @@ export class TerminalSessions {
     if (!session) return;
     clearTimeout(session.idleTimer);
     session.idleTimer = this.armIdleTimer(session.sessionId);
-    session.child.stdin.write(event.data);
     // A terminal needs no sentinel — its prompt says when a command is done.
-    if (session.pty !== null) return;
+    if (session.pty !== null) {
+      session.pty.link?.input(event.data);
+      return;
+    }
+    const child = session.child as ChildProcessWithoutNullStreams;
+    child.stdin.write(event.data);
     // A complete line is a command the shell will run, so ask it to report the
     // status the moment it returns. Input that does NOT end in a newline is a
     // partial line — half a command, or bytes being fed to something's stdin —
     // and a sentinel there would be spliced into the middle of it.
     if (!event.data.endsWith('\n')) return;
-    session.child.stdin.write(`printf '${session.marker}:%s\\n' "$?"\n`);
+    child.stdin.write(`printf '${session.marker}:%s\\n' "$?"\n`);
   }
 
   /**
@@ -451,10 +763,11 @@ export class TerminalSessions {
     // discipline, which signals whatever job is in the foreground — and only
     // that job, which the descendant walk below cannot know.
     if (session.pty !== null) {
-      session.child.stdin.write('\x03');
+      session.pty.link?.input('\x03');
       return;
     }
-    const shellPid = session.child.pid;
+    const child = session.child as ChildProcessWithoutNullStreams;
+    const shellPid = child.pid;
     /* v8 ignore next -- a just-spawned, still-live child always has a pid; this guards the typing only. */
     if (shellPid === undefined) return;
     execFile('ps', ['-A', '-o', 'pid=,ppid='], (err, stdout) => {
@@ -479,7 +792,7 @@ export class TerminalSessions {
       // sentinel this is a second, harmless `command-exit`.
       setTimeout(() => {
         if (this.sessions.get(session.sessionId) !== session) return;
-        session.child.stdin.write(`printf '${session.marker}:%s\\n' "$?"\n`);
+        child.stdin.write(`printf '${session.marker}:%s\\n' "$?"\n`);
       }, INTERRUPT_SENTINEL_DELAY_MS);
     });
   }
@@ -504,14 +817,21 @@ export class TerminalSessions {
   private end(session: Session, reason: EndReason): void {
     session.endReason = reason;
     clearTimeout(session.idleTimer);
+    // A PTY shell is its runner's: ask it to end the shell, and its end comes
+    // back over the link like any other.
+    if (session.pty !== null) {
+      session.pty.link?.kill();
+      return;
+    }
+    const child = session.child as ChildProcessWithoutNullStreams;
     // Negative pid = the detached process group: the shell AND whatever it was
     // running. A bare shell kill would orphan a running `pnpm install`.
     /* v8 ignore next 6 -- `pid` is always set for a session that reached the map, and the group having already died between frames is a race no test can schedule. */
-    const pid = session.child.pid;
+    const pid = child.pid;
     // A shell that already exited has released its pid; the OS may have handed
     // it to an unrelated process group by now (CI saw the test runner itself
     // SIGKILLed, exit 137, right after the terminal tests), so never signal it.
-    if (session.child.exitCode !== null || session.child.signalCode !== null) return;
+    if (child.exitCode !== null || child.signalCode !== null) return;
     try {
       if (pid !== undefined) process.kill(-pid, 'SIGKILL');
     } catch {
@@ -545,7 +865,7 @@ export class TerminalSessions {
    * of bytes, and losing it would leave the surface showing a command as
    * running forever because too much scrolled past.
    */
-  private output(session: Session, stream: 'stdout' | 'stderr', buf: Buffer): void {
+  private output(session: Session, stream: 'stdout' | 'stderr', buf: Buffer, replay = false): void {
     const now = Date.now();
     if (now - session.windowStart >= OUTPUT_WINDOW_MS) {
       session.windowStart = now;
@@ -553,7 +873,8 @@ export class TerminalSessions {
       session.windowTruncated = false;
     }
     session.windowBytes += buf.length;
-    const dropping = session.windowBytes > OUTPUT_BYTES_PER_WINDOW;
+    // Scrollback handed back after a reattach is history, not a firehose.
+    const dropping = !replay && session.windowBytes > OUTPUT_BYTES_PER_WINDOW;
     if (dropping && !session.windowTruncated) {
       session.windowTruncated = true;
       this.emit(
@@ -752,4 +1073,17 @@ export function descendantsOf(psOutput: string, rootPid: number): number[] {
     }
   }
   return out;
+}
+
+/** Open `path` for appending and return the descriptor (a runner's stderr). */
+function openAppend(path: string): number {
+  return openSync(path, 'a');
+}
+
+function readFileSafe(path: string): string {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch {
+    return '';
+  }
 }
