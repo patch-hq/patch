@@ -222,8 +222,8 @@ describe('Composer — dictation mic (tap-toggle)', () => {
       sessions[0]!.onPartial('a very long interim transcript '.repeat(40));
     });
     const scroll = r.root.findAllByProps({ testID: 'dictation-mirror-scroll' })[0]!;
-    // Quarter-window cap; scrollable, not clipped.
-    expect(scroll.props['style']).toMatchObject({ maxHeight: 200 });
+    // Compact dictation cap (0.14 of the window); scrollable, not clipped.
+    expect(scroll.props['style']).toMatchObject({ maxHeight: 112 });
     expect(scroll.props['pointerEvents']).not.toBe('none');
     expect(typeof scroll.props['onContentSizeChange']).toBe('function');
     expect(typeof scroll.props['onScroll']).toBe('function');

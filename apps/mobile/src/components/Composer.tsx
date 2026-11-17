@@ -161,6 +161,8 @@ import {
   COMPOSER_MAX_HEIGHT,
   COMPOSER_MIN_HEIGHT,
   dictationMaxHeight,
+  DICTATION_FADE_BANDS,
+  DICTATION_FADE_BAND_HEIGHT,
 } from '../lib/composerHeight';
 import { startDictation, warmDictation, type DictationHandle } from '../lib/dictation';
 import { insertDictation } from '../lib/dictationInsert';
@@ -913,6 +915,9 @@ export function Composer({
   const mirrorScrollRef = React.useRef<ScrollView>(null);
   // Follow the newest words unless the user has scrolled up.
   const mirrorStickRef = React.useRef(true);
+  const mirrorHeightRef = React.useRef(0);
+  // Older words fade out at the top of the box once the text outgrows it.
+  const [mirrorOverflows, setMirrorOverflows] = React.useState(false);
   // (No measured height any more: the mirror is laid out in normal flow while
   // dictating and the input fills it, so the box is sized in the same layout
   // pass as the text — no onLayout → setState → second render per line.)
@@ -2136,7 +2141,11 @@ export function Composer({
                 contentOffset.y + layoutMeasurement.height >= contentSize.height - 24;
             }}
             scrollEventThrottle={32}
-            onContentSizeChange={() => {
+            onLayout={(e) => {
+              mirrorHeightRef.current = e.nativeEvent.layout.height;
+            }}
+            onContentSizeChange={(_w, h) => {
+              setMirrorOverflows(h > mirrorHeightRef.current + 1);
               if (mirrorStickRef.current) mirrorScrollRef.current?.scrollToEnd({ animated: false });
             }}
           >
@@ -2194,6 +2203,26 @@ export function Composer({
             >
               {renderChipMirror()}
             </Text>
+          </View>
+        ) : null}
+        {livePreviewOn && mirrorOverflows ? (
+          // Fades the oldest words out at the top edge: paper-coloured bands of
+          // falling opacity, so the stream stays visible without needing height.
+          <View
+            testID="dictation-fade"
+            pointerEvents="none"
+            style={{ position: 'absolute', left: 1, right: 1, top: 1 }}
+          >
+            {DICTATION_FADE_BANDS.map((opacity) => (
+              <View
+                key={opacity}
+                style={{
+                  height: DICTATION_FADE_BAND_HEIGHT,
+                  backgroundColor: colors.paper,
+                  opacity,
+                }}
+              />
+            ))}
           </View>
         ) : null}
         {/* Drawn after both mirrors so it sits on top of them and stays
