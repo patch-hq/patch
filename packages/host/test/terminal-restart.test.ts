@@ -205,7 +205,9 @@ describe('PTY sessions across a host restart', { timeout: 30_000 }, () => {
     const h1 = host(first);
     open(h1);
     await ready(first);
-    type(h1, "head -c 5000000 /dev/zero | tr '\\0' 'a'; echo; echo big-$((1+1))\r");
+    // The host drops live output past a per-second cap, so the marker must
+    // land in a later window than the flood or it is dropped with it.
+    type(h1, "head -c 5000000 /dev/zero | tr '\\0' 'a'; echo; sleep 1.3; echo big-$((1+1))\r");
     await until(first, 'big-2');
     await h1.shutdown();
     const [name] = readdirNames(runDir);
