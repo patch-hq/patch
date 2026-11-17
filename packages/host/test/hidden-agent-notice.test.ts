@@ -44,7 +44,8 @@ describe('the agent is told its chat was hidden or shown', () => {
     await daemon.setHidden(chatId, true);
     await daemon.sendInput({ chatId, message: 'carry on', localId: 'L1', origin: 'machine' });
     await tick();
-    expect(prompts[0]).toContain('<system-reminder>');
+    expect(prompts[0]).toContain('[Note: ');
+    expect(prompts[0]).not.toContain('system-reminder');
     expect(prompts[0]).toMatch(/now in hidden mode/i);
     await daemon.sendInput({ chatId, message: 'again', localId: 'L2', origin: 'machine' });
     await tick();

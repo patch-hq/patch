@@ -2135,6 +2135,35 @@ describe('chatStore reducer', () => {
   });
 });
 
+describe('chatStore — chat.note (spec/04 § Notes to the agent)', () => {
+  beforeEach(() => {
+    useChatStore.getState()._reset();
+  });
+
+  it('draws each note as its own entry ahead of the message it went with, once across a replay', () => {
+    const s = useChatStore.getState();
+    s.applyEvent({ type: 'chat.spawned', hostId: 'd1', chatId: 'c1', folder: '~/p' });
+    const note = {
+      type: 'chat.note',
+      chatId: 'c1',
+      seq: 1,
+      label: 'Goal set',
+      text: 'Keep going.',
+    } as const;
+    s.applyEvent(note);
+    s.applyEvent({ type: 'chat.message', chatId: 'c1', role: 'user', content: 'carry on', seq: 2 });
+    s.applyEvent(note); // a replay re-delivers it
+    const list = useChatStore.getState().timelines['c1'] ?? [];
+    expect(list.map((e) => [e.kind, e.seq])).toEqual([
+      ['note', 1],
+      ['message', 2],
+    ]);
+    expect(list[0]).toMatchObject({ noteLabel: 'Goal set', content: 'Keep going.' });
+    expect(list[1]).not.toHaveProperty('systemContext');
+    expect(useChatStore.getState().chats['c1']?.lastSeq).toBe(2);
+  });
+});
+
 describe('chatStore — chat.provider_context (spec/02 § Provider-level context)', () => {
   beforeEach(() => {
     useChatStore.getState()._reset();

@@ -70,6 +70,13 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     text: 'You are powered by the model named Sonnet 5.',
     seq: 2,
   },
+  'chat.note': {
+    type: 'chat.note',
+    chatId: 'c1',
+    label: 'Goal set',
+    text: 'A goal has been set on this chat: ship it',
+    seq: 3,
+  },
   'chat.permission_request': {
     type: 'chat.permission_request',
     chatId: 'c1',

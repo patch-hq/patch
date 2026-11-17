@@ -9,6 +9,7 @@
 // and the host wiring in chatRunner stays thin.
 
 import type { AttachmentRef, TodoItem } from '@patch/wire';
+import { noteBlock } from './notes.js';
 
 /** Data marker on a fired todo turn — parity with `[wake]` (self-wake). */
 export const TODO_PREFIX = '[todo] ';
@@ -45,13 +46,13 @@ const STATUS_LABEL: Record<TodoItem['status'], string> = {
 };
 
 /**
- * Build the `<system-reminder>` block that tells the agent a surface rewrote its
+ * Build the note that tells the agent a surface rewrote its
  * task list (spec/02 § Task list), prefixed onto the chat's next turn. The
  * agent's native TodoWrite state can only be written by the agent itself, so
  * this is the entire mechanism: state the list, instruct it to adopt it. Item
  * text is JSON.stringify'd so quotes/newlines can't break the numbered list.
  */
-export function buildTodoEditSystemReminder(todos: TodoItem[]): string {
+export function buildTodoEditNote(todos: TodoItem[]): string {
   const body =
     todos.length === 0
       ? "The user emptied this chat's task list. Call TodoWrite with an empty list to match, then continue."
@@ -67,24 +68,23 @@ export function buildTodoEditSystemReminder(todos: TodoItem[]): string {
           .join(
             '\n',
           )}\nThis replaces your own list. Call TodoWrite with exactly these items and statuses before continuing, then work the list as usual.`;
-  return `<system-reminder>\n${body}\n</system-reminder>\n\n`;
+  return noteBlock('Todo list updated', body);
 }
 
 /**
- * The `<system-reminder>` that rides a fired `[todo]` turn (spec/02 § Task
+ * The note that rides a fired `[todo]` turn (spec/02 § Task
  * list). Without it the turn is a bare `[todo] <text>` line that never tells the
  * agent the line IS one of its own TodoWrite items — so it does the work, never
- * calls TodoWrite, and the item reads `pending` for ever. Stripped from the
- * persisted/displayed user turn like every other leading reminder block.
+ * calls TodoWrite, and the item reads `pending` for ever. Recorded as its own
+ * `chat.note` entry ahead of the turn.
  */
-export function buildTodoFireSystemReminder(text: string): string {
-  return (
-    '<system-reminder>\n' +
+export function buildTodoFireNote(text: string): string {
+  return noteBlock(
+    'Todo item fired',
     `This turn was fired from this chat's task list, from the item ${JSON.stringify(text)} — an ` +
-    'item on your own TodoWrite list. Call TodoWrite to mark it in_progress now, and again to ' +
-    'mark it completed the moment it is genuinely done; the list does not advance past it until ' +
-    'you do. If you cannot finish it, leave it incomplete and say what you need.\n' +
-    '</system-reminder>\n\n'
+      'item on your own TodoWrite list. Call TodoWrite to mark it in_progress now, and again to ' +
+      'mark it completed the moment it is genuinely done; the list does not advance past it until ' +
+      'you do. If you cannot finish it, leave it incomplete and say what you need.',
   );
 }
 
@@ -191,44 +191,50 @@ export function markTodoStarted(todos: TodoItem[], ref: TodoRef): TodoItem[] | n
 }
 
 /**
- * The `<system-reminder>` that tells the agent its chat's goal was set,
+ * The note that tells the agent its chat's goal was set,
  * replaced or cleared (spec/04 § Goals; `null` = cleared). Prefixed onto its
  * next turn, once per change.
  */
-export function buildGoalSystemReminder(goal: string | null): string {
+export function buildGoalNote(goal: string | null): string {
   const body =
     goal === null
       ? "This chat's goal has been cleared: there is no longer a condition to meet, and nothing is evaluating your turns against one."
       : `A goal has been set on this chat: ${goal}\nKeep working until this condition is met. After each turn the host checks it and will send you back if it is not yet satisfied. If it can never be met, say so plainly.`;
-  return `<system-reminder>\n${body}\n</system-reminder>\n\n`;
+  return noteBlock(goal === null ? 'Goal cleared' : 'Goal set', body);
 }
 
 /**
- * The recurring `<system-reminder>` restating the chat's active goal on the
+ * The recurring note restating the chat's active goal on the
  * goal's own cadence (spec/04 § Goals — reminders).
  */
 export function buildGoalReminder(goal: string): string {
-  return `<system-reminder>\nReminder: this chat's goal is still active and not yet met: ${goal}\nKeep working towards it.\n</system-reminder>\n\n`;
+  return noteBlock(
+    'Reminder',
+    `Reminder: this chat's goal is still active and not yet met: ${goal}\nKeep working towards it.`,
+  );
 }
 
 /**
- * The recurring `<system-reminder>` carrying the chat's own reminder text
+ * The recurring note carrying the chat's own reminder text
  * (spec/04 § Reminders), re-injected on the chat's cadence.
  */
 export function buildPeriodicReminder(text: string): string {
-  return `<system-reminder>\nReminder set on this chat by the user, repeated periodically:\n${text}\n</system-reminder>\n\n`;
+  return noteBlock(
+    'Reminder',
+    `Reminder set on this chat by the user, repeated periodically:\n${text}`,
+  );
 }
 
 /**
- * The `<system-reminder>` that tells the agent its chat was hidden or shown
+ * The note that tells the agent its chat was hidden or shown
  * (spec/04 § Hidden), prefixed onto its next turn like a permission-mode
  * change is surfaced: the agent keeps working either way, it just knows
  * whether the user is watching the chat in their list.
  */
-export function buildHiddenSystemReminder(state: 'hidden' | 'shown'): string {
+export function buildHiddenNote(state: 'hidden' | 'shown'): string {
   const body =
     state === 'hidden'
       ? 'This chat is now in hidden mode: the user has moved it out of their chat list. You are still running and nothing about the task changes, but they are not watching. Use patch_ask_human if you need them, or patch_report for something worth seeing; either brings the chat back into the list.'
       : "This chat is no longer in hidden mode: it is back in the user's chat list and they may be reading along.";
-  return `<system-reminder>\n${body}\n</system-reminder>\n\n`;
+  return noteBlock('Hidden', body);
 }

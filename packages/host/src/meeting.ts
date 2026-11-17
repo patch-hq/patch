@@ -2,7 +2,7 @@
 // short audio clips, the host transcribes them with the LOCAL Whisper (never a
 // paid STT), and about every 30s one cheap model pass folds the new transcript
 // into Now / Discussed / Actions. The raw transcript is never posted as chat
-// messages; it reaches the chat's model as a system-reminder on the user's next
+// messages; it reaches the chat's model as a note on the user's next
 // turn (see `contextFor`).
 //
 // The analysis loop is a host timer, not a page timer, so it keeps going while
@@ -12,6 +12,7 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { noteBlock } from './notes.js';
 import { nameFixes } from './meetingVocab.js';
 import type { Logger } from 'pino';
 import type { MeetingEngine } from '@patch/wire/audio';
@@ -1026,7 +1027,7 @@ export class MeetingManager {
   // ---- chat context ----
 
   /**
-   * A `<system-reminder>` for the chat's next turn: the panel as it stands plus
+   * A note for the chat's next turn: the panel as it stands plus
    * transcript the model has not been given yet. Undefined when there is no
    * meeting or nothing new. Calling it marks the transcript as delivered.
    */
@@ -1038,7 +1039,6 @@ export class MeetingManager {
     rt.deliveredUpTo = rt.state.transcript.length;
     const s = rt.state;
     const lines: string[] = [
-      '<system-reminder>',
       `A meeting is ${s.status} in this chat (running ${formatMeetingClock(meetingElapsedMs(s, this.now()))}). Answer questions about it from what follows; look things up and use your tools when asked. Do not take actions on other people\'s behalf unless the user asks. When the user asks you to add to or change the notes (a point, research on a point, the summary), do it with the patch_meeting_notes tool and say what you changed; never state a figure without a source.`,
     ];
     if (s.summary)
@@ -1072,8 +1072,7 @@ export class MeetingManager {
         tx = `…${tx.slice(-MAX_PROMPT_TRANSCRIPT_CHARS)}`;
       lines.push('New transcript since your last turn:', tx);
     }
-    lines.push('</system-reminder>', '');
-    return lines.join('\n');
+    return noteBlock('Meeting context', lines.join('\n'));
   }
 
   /** Stop timers (host shutdown). Meetings stay on disk. */

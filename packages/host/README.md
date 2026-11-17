@@ -466,6 +466,6 @@ user populates it; subsequent host restarts leave their edits intact.
 
 When a chat fires `patch_notify(channel='speakers')`, the host
 appends a JSONL line to `<thread folder>/broadcasts.jsonl`. On the **next user
-reply** to that thread, the host prepends a `<system-reminder>` block listing
-recent broadcasts (relative timestamps) before invoking the SDK. After the
+reply** to that thread, the host prepends a "Broadcast digest" note listing
+recent broadcasts (relative timestamps) before invoking the SDK, recorded as its own `chat.note` entry. After the
 agent commits its response, the sidecar is flushed.

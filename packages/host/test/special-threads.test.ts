@@ -7,7 +7,7 @@
 //   - Manager pinned at the TOP of the sidebar (pinned: true)
 //   - single-instance + restart survival of the stable chatId
 //   - inbound voice-device turn tagged `[voice • device:<deviceId>]`
-//   - voice-device tag co-exists with the broadcast <system-reminder> block
+//   - voice-device tag co-exists with the broadcast note
 //   - folder structure is a sub-folder of the host cwd (CLAUDE.md inheritance)
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -38,7 +38,7 @@ import {
   readPendingBroadcasts,
   flushBroadcasts,
   formatRelativeTime,
-  buildBroadcastSystemReminder,
+  buildBroadcastNote,
   voicePrefixForSource,
   specialThreadFolder,
   SPECIAL_THREAD_IDS,
@@ -103,7 +103,7 @@ async function startHost(opts: { home?: string; cwd?: string } = {}): Promise<St
       const threadId = req.chatId as SpecialThreadId;
       if (!BROADCAST_SIDECAR_THREADS.has(threadId)) return undefined;
       const entries = readPendingBroadcasts(cwd, threadId);
-      const block = buildBroadcastSystemReminder(entries, Date.now());
+      const block = buildBroadcastNote(entries, Date.now());
       if (!block) return undefined;
       return block + (req.voicePrefix ? `${req.voicePrefix}${req.message}` : req.message);
     },
@@ -275,7 +275,7 @@ describe('D1 Speakers ingress — voice-device tagging over a running host', () 
     }
   });
 
-  it('voice-device tag co-exists with the broadcast <system-reminder> block', async () => {
+  it('voice-device tag co-exists with the broadcast note', async () => {
     const s = await startHost();
     // A broadcast from a normal chat lands in the speakers sidecar first.
     appendBroadcast(s.cwd, 'thread_speakers', {
@@ -289,7 +289,7 @@ describe('D1 Speakers ingress — voice-device tagging over a running host', () 
         deviceId: 'bedroom',
       });
       const prompt = s.capturedPrompts.at(-1) ?? '';
-      expect(prompt).toContain('<system-reminder>');
+      expect(prompt).toContain('[Note: Broadcast digest]');
       expect(prompt).toContain('bus leaves in 5');
       expect(prompt).toContain('[voice • device:bedroom] remind me when it leaves');
       // Sidecar flushed after the turn committed.
@@ -299,7 +299,7 @@ describe('D1 Speakers ingress — voice-device tagging over a running host', () 
     }
   });
 
-  it('the live chat.message carries the broadcast digest as systemContext, not inlined into content (spec/02 § System-reminder disclosure)', async () => {
+  it('the broadcast digest is its own chat.note entry, not inlined into the message content (spec/04 § Notes to the agent)', async () => {
     const s = await startHost();
     appendBroadcast(s.cwd, 'thread_speakers', {
       ts: Date.now(),
@@ -315,17 +315,13 @@ describe('D1 Speakers ingress — voice-device tagging over a running host', () 
         (e) => e.type === 'chat.message' && 'role' in e && e.role === 'user',
       );
       expect(userMsg).toBeDefined();
-      const systemContext =
-        userMsg && 'systemContext' in userMsg ? userMsg.systemContext : undefined;
-      expect(systemContext).toEqual([
-        {
-          source: 'patch',
-          label: 'Broadcast digest',
-          text: expect.stringContaining('bus leaves in 5'),
-        },
-      ]);
+      expect(s.events.find((e) => e.type === 'chat.note')).toMatchObject({
+        label: 'Broadcast digest',
+        text: expect.stringContaining('bus leaves in 5'),
+      });
+      expect(userMsg).not.toHaveProperty('systemContext');
       const content = userMsg && 'content' in userMsg ? userMsg.content : undefined;
-      expect(content).not.toContain('<system-reminder>');
+      expect(content).not.toContain('[Note: ');
       expect(content).toContain('remind me when it leaves');
     } finally {
       await s.close();

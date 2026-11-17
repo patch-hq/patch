@@ -4999,11 +4999,54 @@ describe('ChatRoute regression', () => {
   });
 });
 
-// spec/02 § System-reminder disclosure — a turn's captured `<system-reminder>`
-// blocks render as a collapsed, click-to-expand box at that turn (User:
-// "hidden in a box, allow user to see"), never inlined into the bubble text
-// and never open by default.
-describe('ChatRoute — system-reminder disclosure (spec/02)', () => {
+// spec/04 § Notes to the agent — a note is its own entry in the transcript, a
+// quiet row collapsed by default that opens to the exact text the model was sent.
+describe('ChatRoute — notes to the agent (spec/04)', () => {
+  beforeEach(() => {
+    useChatStore.getState()._reset();
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('draws a note as its own collapsed row, labelled, ahead of the message it went with', () => {
+    seedChat('c-note', [
+      {
+        seq: 0,
+        kind: 'note',
+        noteLabel: 'Goal set',
+        content: 'Keep working until it ships.',
+        at: 0,
+      },
+      { seq: 1, kind: 'message', role: 'user', content: 'carry on', at: 0 },
+    ]);
+    renderChat('c-note');
+
+    const row = screen.getByTestId('note');
+    expect(row.getAttribute('data-open')).toBe('false');
+    expect(screen.getByTestId('note-summary').textContent).toContain('Goal set');
+    expect(screen.queryByText('Keep working until it ships.')).toBeNull();
+    // The message itself carries nothing out-of-band.
+    expect(screen.queryByTestId('system-context')).toBeNull();
+    expect(screen.getByText('carry on')).toBeTruthy();
+  });
+
+  it('expands on click to the exact text the model was sent', () => {
+    seedChat('c-note-2', [
+      { seq: 0, kind: 'note', noteLabel: 'Hook advice', content: 'a little terse', at: 0 },
+    ]);
+    renderChat('c-note-2');
+
+    fireEvent.click(screen.getByTestId('note-summary'));
+    expect(screen.getByTestId('note').getAttribute('data-open')).toBe('true');
+    expect(screen.getByTestId('note-detail').textContent).toContain('a little terse');
+  });
+});
+
+// LEGACY records only (written before notes were their own entries): a turn's
+// captured `<system-reminder>` blocks render as a collapsed, click-to-expand box
+// at that turn, never inlined into the bubble text and never open by default.
+describe('ChatRoute — legacy system-reminder disclosure', () => {
   beforeEach(() => {
     useChatStore.getState()._reset();
   });

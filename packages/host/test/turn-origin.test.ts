@@ -38,7 +38,7 @@ type Env = { type: string; [k: string]: unknown };
 type TodoStatus = 'pending' | 'in_progress' | 'completed';
 
 const withoutReminder = (prompt: string): string =>
-  prompt.replace(/^(?:<system-reminder>[\s\S]*?<\/system-reminder>\s*)+/, '');
+  prompt.replace(/^(?:\[Note: [^\]\n]+\]\n[\s\S]*?\n\[End note\]\s*)+/, '');
 
 function recordingBackend() {
   const prompts: string[] = [];

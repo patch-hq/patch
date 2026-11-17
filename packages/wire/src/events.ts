@@ -682,6 +682,11 @@ export const MessageCompaction = z
 export type MessageCompaction = z.infer<typeof MessageCompaction>;
 
 /**
+ * LEGACY. Records written before notes became their own entries (`chat.note`)
+ * carry their `<system-reminder>` blocks here, on the user message. Nothing
+ * writes it any more; surfaces still read it so those records keep their
+ * disclosure. The original description follows.
+ *
  * One injected `<system-reminder>` block a turn actually received, carried
  * out-of-band from `content` rather than inlined into it (spec/02 §
  * System-reminder disclosure). Patch prepends several of these across a
@@ -716,7 +721,8 @@ export const ChatMessageEvent = z
     content: z.string(),
     seq: z.number().int().nonnegative(),
     /**
-     * Every leading `<system-reminder>` block this turn's prompt actually
+     * LEGACY (see `SystemContextItem`): read-only for records written before
+     * `chat.note`. Every leading `<system-reminder>` block this turn's prompt actually
      * carried, stripped from `content` at the same point they always were
      * (spec/02 § System-reminder disclosure), but captured here instead of
      * discarded. Present only on the user turn that received them, in the
@@ -1098,6 +1104,27 @@ export const ChatProviderContextEvent = z
   })
   .strict();
 export type ChatProviderContextEvent = z.infer<typeof ChatProviderContextEvent>;
+
+/**
+ * A note to the agent (spec/04 § Notes to the agent): something that happened
+ * outside the chat's turns — a rewritten task list, a goal set, a hook's advice,
+ * an edited document — told to the model as plain text at the front of the next
+ * turn. Each is its own entry in the record, ahead of the message it went with,
+ * so what the model was sent is exactly what the record shows. `text` is the
+ * note's body verbatim; `label` names it ("Goal set", "Hook advice").
+ */
+export const ChatNoteEvent = z
+  .object({
+    type: z.literal('chat.note'),
+    chatId: z.string().min(1),
+    label: z.string().min(1),
+    text: z.string().min(1),
+    seq: z.number().int().nonnegative(),
+    createdAt: z.number().optional(),
+    ...forSurfaceIdField,
+  })
+  .strict();
+export type ChatNoteEvent = z.infer<typeof ChatNoteEvent>;
 
 /**
  * One block of a tool result's structured `content`, when it IS Anthropic's
@@ -9853,6 +9880,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   ChatToolCallEvent,
   ChatToolResultEvent,
   ChatProviderContextEvent,
+  ChatNoteEvent,
   ChatPermissionRequestEvent,
   ChatPermissionExpiryUpdateEvent,
   ChatArtifactEvent,
@@ -10187,6 +10215,7 @@ export const EVENT_SCHEMAS = {
   'chat.tool_call': ChatToolCallEvent,
   'chat.tool_result': ChatToolResultEvent,
   'chat.provider_context': ChatProviderContextEvent,
+  'chat.note': ChatNoteEvent,
   'chat.permission_request': ChatPermissionRequestEvent,
   'chat.permission_expiry_update': ChatPermissionExpiryUpdateEvent,
   'chat.artifact': ChatArtifactEvent,

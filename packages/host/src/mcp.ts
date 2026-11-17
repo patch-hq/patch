@@ -300,7 +300,7 @@ export function buildPatchToolsServer(opts: PatchToolsServerOptions): McpServer 
     'patch_doc_reply',
     {
       description:
-        'Reply inside an EXISTING comment thread on a Markdown document — how you answer a comment the user left, which arrives as a <system-reminder> naming the threadId. Available in every mode.',
+        'Reply inside an EXISTING comment thread on a Markdown document — how you answer a comment the user left, which arrives as a "New comment" note naming the threadId. Available in every mode.',
       inputSchema: {
         path: z.string().min(1).describe("The document's path, relative to this chat's folder."),
         threadId: z.string().min(1),

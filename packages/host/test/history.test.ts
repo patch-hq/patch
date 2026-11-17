@@ -8,12 +8,12 @@ import { join } from 'node:path';
 import {
   createHistoryReader,
   encodeFolder,
-  extractSystemContext,
   jsonlLineToWire,
   persistedUserContent,
   type CanonicalSeqIndex,
 } from '../src/history.js';
 import { claudeCodePersistedUserTurn } from '../src/sdkBackend.js';
+import { noteBlock } from '../src/notes.js';
 
 /**
  * The seq index of a chat with NOTHING recorded — every transcript event is
@@ -847,7 +847,7 @@ describe('history reader', () => {
   // place / messages in wrong place." On a special (Manager) thread the host
   // PREPENDS a broadcast `<system-reminder>…</system-reminder>` block to the
   // user's turn (index.ts preprocessInput → specialThreads
-  // buildBroadcastSystemReminder) as agent context. Claude Code persists that
+  // buildBroadcastNote) as agent context. Claude Code persists that
   // AUGMENTED prompt, so a naive replay carries the reminder XML. That corrupts
   // the transcript two ways: (a) the internal XML renders as literal user text,
   // and (b) the persisted user echo no longer equals the surface's optimistic
@@ -856,47 +856,106 @@ describe('history reader', () => {
   // wrong place" bug. Replay must strip the leading reminder block so it carries
   // only what the user actually typed; the reconcile then matches and the turn
   // shows exactly once, in order.
-  it('jsonlLineToWire strips a leading broadcast <system-reminder> block from a user turn', () => {
+  const BROADCAST = noteBlock(
+    'Broadcast digest',
+    'Recent broadcasts delivered on this thread (newest last):\n- 2m ago: "port 3000 is mine" (from chat: infra)',
+  );
+
+  it('jsonlLineToWire replays a leading note as its own chat.note entry ahead of the message', () => {
     const out = jsonlLineToWire(
-      JSON.stringify({
-        type: 'user',
-        message: {
-          content:
-            '<system-reminder>\nRecent broadcasts delivered on this thread (newest last):\n- 2m ago: "port 3000 is mine" (from chat: infra)\n</system-reminder>\n\ncarry on with the build',
-        },
-      }),
+      JSON.stringify({ type: 'user', message: { content: `${BROADCAST}carry on with the build` } }),
       'mgr',
       0,
     );
     expect(out).toEqual([
+      {
+        type: 'chat.note',
+        chatId: 'mgr',
+        label: 'Broadcast digest',
+        text: expect.stringContaining('port 3000 is mine'),
+        seq: 0,
+      },
       {
         type: 'chat.message',
         chatId: 'mgr',
         role: 'user',
         content: 'carry on with the build',
-        seq: 0,
-        systemContext: [
-          {
-            source: 'patch',
-            label: 'Broadcast digest',
-            text: expect.stringContaining('port 3000 is mine'),
-          },
-        ],
+        seq: 1,
       },
     ]);
   });
 
-  it('jsonlLineToWire strips EVERY leading <system-reminder> block, not just the first', () => {
-    // One turn can carry more than one injected block — a task-list reminder in
-    // front of the broadcast one — and leaving the second inline puts internal
-    // XML in the transcript and breaks the surface's content-match reconcile
-    // exactly as a single un-stripped block would.
+  it('jsonlLineToWire replays EVERY leading note, in order, each as its own entry', () => {
+    const fired = noteBlock('Todo item fired', "This turn was fired from this chat's task list.");
+    const out = jsonlLineToWire(
+      JSON.stringify({
+        type: 'user',
+        message: { content: `${fired}${BROADCAST}[todo] sweep the yard` },
+      }),
+      'mgr',
+      0,
+    );
+    expect(out.map((e) => [e.type, e.seq])).toEqual([
+      ['chat.note', 0],
+      ['chat.note', 1],
+      ['chat.message', 2],
+    ]);
+    expect(out.map((e) => ('label' in e ? e.label : null))).toEqual([
+      'Todo item fired',
+      'Broadcast digest',
+      null,
+    ]);
+    expect(out[2]).toMatchObject({ content: '[todo] sweep the yard' });
+  });
+
+  it('jsonlLineToWire replays notes when the turn is a text block in a content array', () => {
+    const out = jsonlLineToWire(
+      JSON.stringify({
+        type: 'user',
+        message: { content: [{ type: 'text', text: `${BROADCAST}what is the status?` }] },
+      }),
+      'mgr',
+      0,
+    );
+    expect(out.map((e) => e.type)).toEqual(['chat.note', 'chat.message']);
+    expect(out[1]).toMatchObject({ content: 'what is the status?', seq: 1 });
+  });
+
+  it('jsonlLineToWire keeps a [voice] prefix on the message after the notes (surface strips that)', () => {
+    const out = jsonlLineToWire(
+      JSON.stringify({
+        type: 'user',
+        message: { content: `${BROADCAST}[voice • web] pause everything` },
+      }),
+      'mgr',
+      0,
+    );
+    expect(out.map((e) => e.type)).toEqual(['chat.note', 'chat.message']);
+    expect(out[1]).toMatchObject({ content: '[voice • web] pause everything' });
+  });
+
+  it('jsonlLineToWire replays notes AND reconstructs a following slash command', () => {
+    const out = jsonlLineToWire(
+      JSON.stringify({
+        type: 'user',
+        message: {
+          content: `${BROADCAST}<command-name>/goal</command-name>\n<command-args>finish the app</command-args>`,
+        },
+      }),
+      'mgr',
+      0,
+    );
+    expect(out.map((e) => e.type)).toEqual(['chat.note', 'chat.message']);
+    expect(out[1]).toMatchObject({ content: '/goal finish the app' });
+  });
+
+  it('jsonlLineToWire still reads the legacy <system-reminder> form of an old transcript as notes', () => {
     const out = jsonlLineToWire(
       JSON.stringify({
         type: 'user',
         message: {
           content:
-            '<system-reminder>\nThis turn was fired from this chat\'s task list.\n</system-reminder>\n\n<system-reminder>\nRecent broadcasts delivered on this thread (newest last):\n- 2m ago: "port 3000 is mine" (from chat: infra)\n</system-reminder>\n\n[todo] sweep the yard',
+            '<system-reminder>\nRecent broadcasts delivered on this thread (newest last):\n- 2m ago: "x" (from chat: infra)\n</system-reminder>\n\ncarry on',
         },
       }),
       'mgr',
@@ -904,109 +963,13 @@ describe('history reader', () => {
     );
     expect(out).toEqual([
       {
-        type: 'chat.message',
+        type: 'chat.note',
         chatId: 'mgr',
-        role: 'user',
-        content: '[todo] sweep the yard',
+        label: 'Broadcast digest',
+        text: expect.stringContaining('Recent broadcasts'),
         seq: 0,
-        systemContext: [
-          { source: 'patch', label: 'Todo item fired', text: expect.any(String) },
-          {
-            source: 'patch',
-            label: 'Broadcast digest',
-            text: expect.stringContaining('port 3000 is mine'),
-          },
-        ],
       },
-    ]);
-  });
-
-  it('jsonlLineToWire strips the reminder block when the turn is a text block in a content array', () => {
-    const out = jsonlLineToWire(
-      JSON.stringify({
-        type: 'user',
-        message: {
-          content: [
-            {
-              type: 'text',
-              text: '<system-reminder>\nRecent broadcasts delivered on this thread (newest last):\n- 5m ago: "deploy is running" (from chat: ops)\n</system-reminder>\n\nwhat is the status?',
-            },
-          ],
-        },
-      }),
-      'mgr',
-      0,
-    );
-    expect(out).toEqual([
-      {
-        type: 'chat.message',
-        chatId: 'mgr',
-        role: 'user',
-        content: 'what is the status?',
-        seq: 0,
-        systemContext: [
-          {
-            source: 'patch',
-            label: 'Broadcast digest',
-            text: expect.stringContaining('deploy is running'),
-          },
-        ],
-      },
-    ]);
-  });
-
-  it('jsonlLineToWire strips the reminder block but keeps a following [voice] prefix (surface strips that)', () => {
-    // preprocessInput re-appends the voice prefix INSIDE the block return, so a
-    // spoken turn on a special thread persists as reminder + `[voice • …] text`.
-    // History strips only the reminder; the surface strips the voice tag.
-    const out = jsonlLineToWire(
-      JSON.stringify({
-        type: 'user',
-        message: {
-          content:
-            '<system-reminder>\nRecent broadcasts delivered on this thread (newest last):\n- 1m ago: "heads up" (from chat: a)\n</system-reminder>\n\n[voice • web] pause everything',
-        },
-      }),
-      'mgr',
-      0,
-    );
-    expect(out).toEqual([
-      {
-        type: 'chat.message',
-        chatId: 'mgr',
-        role: 'user',
-        content: '[voice • web] pause everything',
-        seq: 0,
-        systemContext: [
-          { source: 'patch', label: 'Broadcast digest', text: expect.stringContaining('heads up') },
-        ],
-      },
-    ]);
-  });
-
-  it('jsonlLineToWire strips the reminder block AND reconstructs a following slash command', () => {
-    const out = jsonlLineToWire(
-      JSON.stringify({
-        type: 'user',
-        message: {
-          content:
-            '<system-reminder>\nRecent broadcasts delivered on this thread (newest last):\n- 3m ago: "note" (from chat: b)\n</system-reminder>\n\n<command-name>/goal</command-name>\n<command-args>finish the app</command-args>',
-        },
-      }),
-      'mgr',
-      0,
-    );
-    expect(out).toEqual([
-      {
-        type: 'chat.message',
-        chatId: 'mgr',
-        role: 'user',
-        content: '/goal finish the app',
-        seq: 0,
-        systemContext: [
-          { source: 'patch', label: 'Broadcast digest', text: expect.stringContaining('note') },
-        ],
-      },
+      { type: 'chat.message', chatId: 'mgr', role: 'user', content: 'carry on', seq: 1 },
     ]);
   });
 
@@ -1327,110 +1290,6 @@ describe('persistedUserContent matches what the transcript will yield back', () 
     expect(
       persistedUserContent('<command-name></command-name>\n<command-args>x</command-args>'),
     ).toBe(null);
-  });
-});
-
-// spec/02 § System-reminder disclosure — every leading `<system-reminder>`
-// block a prompt carried used to just vanish; `extractSystemContext` is the
-// half of `sanitizeCommandTextWithContext` that captures it instead, labelled
-// by which of Patch's own injection sites produced it.
-describe('extractSystemContext (spec/02 § System-reminder disclosure)', () => {
-  it('returns nothing for a prompt that carried no reminder', () => {
-    expect(extractSystemContext('turn the lights off')).toEqual([]);
-  });
-
-  it('captures a restart reminder with its label', () => {
-    const prompt =
-      '<system-reminder>\nThis turn was already running when the host restarted, so it was ' +
-      'cut off partway through. Check what you had already done.\n</system-reminder>\n\ncarry on';
-    expect(extractSystemContext(prompt)).toEqual([
-      {
-        source: 'patch',
-        label: 'Turn interrupted by restart',
-        text: expect.stringContaining('cut off partway through'),
-      },
-    ]);
-  });
-
-  it('distinguishes the pending-decision restart reminder from the plain one', () => {
-    const prompt =
-      '<system-reminder>\nThis turn was already running when the host restarted, so it was ' +
-      'cut off partway through. Before the restart it had asked: proceed?, and was waiting for ' +
-      'an answer — no answer was recorded.\n</system-reminder>\n\ncarry on';
-    const [item] = extractSystemContext(prompt);
-    expect(item?.label).toBe('Turn interrupted by restart (pending decision)');
-  });
-
-  it('distinguishes a todo-list-edit reminder from a todo-fire reminder', () => {
-    const edited =
-      "<system-reminder>\nThe user edited this chat's task list. It is now, in order:\n" +
-      '1. [pending] "rebuild the index"\n</system-reminder>\n\ncarry on';
-    expect(extractSystemContext(edited)[0]?.label).toBe('Todo list updated');
-
-    const fired =
-      "<system-reminder>\nThis turn was fired from this chat's task list, from the item " +
-      '"rebuild the index" — an item on your own TodoWrite list.\n</system-reminder>\n\n[todo] rebuild the index';
-    expect(extractSystemContext(fired)[0]?.label).toBe('Todo item fired');
-  });
-
-  it('captures a broadcast digest with its label', () => {
-    const prompt =
-      '<system-reminder>\nRecent broadcasts delivered on this thread (newest last):\n- hi\n' +
-      '</system-reminder>\n\nwhat happened?';
-    expect(extractSystemContext(prompt)[0]?.label).toBe('Broadcast digest');
-  });
-
-  it('captures more than one leading block, in order', () => {
-    const prompt =
-      '<system-reminder>\nRecent broadcasts delivered on this thread (newest last):\n- hi\n' +
-      "</system-reminder>\n\n<system-reminder>\nThe user edited this chat's task list. It is now, " +
-      'in order:\n1. [pending] "x"\n</system-reminder>\n\ncarry on';
-    const items = extractSystemContext(prompt);
-    expect(items.map((i) => i.label)).toEqual(['Broadcast digest', 'Todo list updated']);
-  });
-
-  it('labels the meeting reminder "Meeting context"', () => {
-    const prompt =
-      '<system-reminder>\nA meeting is running in this chat (running 3m). Answer questions about it ' +
-      'from what follows.\n</system-reminder>\n\nwhat was decided?';
-    expect(extractSystemContext(prompt)[0]?.label).toBe('Meeting context');
-  });
-
-  it('falls back to a generic label for an unrecognised leading block', () => {
-    const prompt = '<system-reminder>\nsomething neither builder wrote\n</system-reminder>\n\nhi';
-    expect(extractSystemContext(prompt)[0]?.label).toBe('System context');
-  });
-
-  it('does not capture a literal tag the user typed mid-message', () => {
-    expect(extractSystemContext('please explain <system-reminder>tags</system-reminder>')).toEqual(
-      [],
-    );
-  });
-});
-
-// jsonlLineToWire is the REPLAY-path twin of the live emission in chatRunner —
-// both funnel through sanitizeCommandTextWithContext, so a reminder captured
-// live must replay back out the same way (spec/02 § System-reminder
-// disclosure).
-describe('jsonlLineToWire attaches systemContext on replay', () => {
-  const userLine = (text: string): string =>
-    JSON.stringify({ type: 'user', message: { content: [{ type: 'text', text }] } });
-
-  it('attaches systemContext when the persisted turn carried a reminder', () => {
-    const line = userLine(
-      '<system-reminder>\nThis turn was already running when the host restarted, so it was ' +
-        'cut off partway through.\n</system-reminder>\n\ncarry on',
-    );
-    const [event] = jsonlLineToWire(line, 'c1', 0);
-    expect(event && 'systemContext' in event ? event.systemContext : undefined).toEqual([
-      { source: 'patch', label: 'Turn interrupted by restart', text: expect.any(String) },
-    ]);
-    expect(event && 'content' in event ? event.content : undefined).toBe('carry on');
-  });
-
-  it('omits systemContext entirely for an ordinary turn (no empty array on the wire)', () => {
-    const [event] = jsonlLineToWire(userLine('hello'), 'c1', 0);
-    expect(event && 'systemContext' in event).toBe(false);
   });
 });
 

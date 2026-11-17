@@ -17,6 +17,7 @@ const BRIDGE_SURFACE_ID = 'events-rpc-bridge';
 export const RELAYED_EVENT_TYPES: ReadonlySet<string> = new Set([
   'chat.spawned',
   'chat.message',
+  'chat.note',
   'chat.tool_call',
   'chat.tool_result',
   'chat.state',

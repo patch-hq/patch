@@ -14,6 +14,7 @@ import {
   ChatToolRunSummaryEvent,
   ChatErrorCode,
   ChatMessageEvent,
+  ChatNoteEvent,
   ChatToolCallEvent,
   ChatToolResultEvent,
   HarnessId,
@@ -68,6 +69,7 @@ export type BlobRef = z.infer<typeof BlobRef>;
 /** The wire events that are history: what a chat shows and must still show on reload. */
 export const LoggedEvent = z.discriminatedUnion('type', [
   ChatMessageEvent,
+  ChatNoteEvent,
   ChatToolCallEvent,
   ChatToolResultEvent,
   ChatArtifactEvent,
@@ -76,6 +78,7 @@ export const LoggedEvent = z.discriminatedUnion('type', [
 export type LoggedEvent = z.infer<typeof LoggedEvent>;
 export const LOGGED_EVENT_TYPES: ReadonlySet<LoggedEvent['type']> = new Set([
   'chat.message',
+  'chat.note',
   'chat.tool_call',
   'chat.tool_result',
   'chat.artifact',

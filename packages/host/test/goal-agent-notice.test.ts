@@ -44,7 +44,8 @@ describe('the agent is told its goal was set or cleared', () => {
     await daemon.setGoal(chatId, 'Ship the release');
     await daemon.sendInput({ chatId, message: 'carry on', localId: 'L1', origin: 'machine' });
     await tick();
-    expect(prompts[0]).toContain('<system-reminder>');
+    expect(prompts[0]).toContain('[Note: ');
+    expect(prompts[0]).not.toContain('system-reminder');
     expect(prompts[0]).toContain('Ship the release');
     expect(prompts[0]).toMatch(/goal/i);
     await daemon.sendInput({ chatId, message: 'again', localId: 'L2', origin: 'machine' });
@@ -85,15 +86,11 @@ describe('the agent is told its goal was set or cleared', () => {
   });
 });
 
-describe('the goal reminder is disclosed in the transcript', () => {
-  it('labels set and cleared reminders', async () => {
-    const { extractSystemContext } = await import('../src/history.js');
-    const { buildGoalSystemReminder } = await import('../src/todos.js');
-    expect(extractSystemContext(buildGoalSystemReminder('Ship it') + 'hi')[0]?.label).toBe(
-      'Goal set',
-    );
-    expect(extractSystemContext(buildGoalSystemReminder(null) + 'hi')[0]?.label).toBe(
-      'Goal cleared',
-    );
+describe('the goal note is labelled in the record', () => {
+  it('labels set and cleared notes', async () => {
+    const { extractNotes } = await import('../src/notes.js');
+    const { buildGoalNote } = await import('../src/todos.js');
+    expect(extractNotes(buildGoalNote('Ship it') + 'hi')[0]?.label).toBe('Goal set');
+    expect(extractNotes(buildGoalNote(null) + 'hi')[0]?.label).toBe('Goal cleared');
   });
 });

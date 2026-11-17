@@ -35,7 +35,8 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { SystemContextItem, WireEvent } from '@patch/wire';
+import type { WireEvent } from '@patch/wire';
+import { splitLeadingNotes, type NoteItem } from './notes.js';
 import {
   compactionFromTranscriptMetadata,
   compactionSummaryLine,
@@ -380,6 +381,9 @@ export function eventIdentity(ev: WireEvent): string | null {
     // translated payload the same way a chat.message is.
     case 'chat.provider_context':
       return `provider_context ${ev.providerType} ${ev.text}`;
+    // A note to the agent (notes.ts) — its own entry, keyed on what it says.
+    case 'chat.note':
+      return `note ${ev.label} ${ev.text}`;
     default:
       return null;
   }
@@ -441,9 +445,10 @@ export function persistedUserContent(prompt: string): string | null {
 }
 
 /**
- * Which of Patch's own leading-reminder injection sites produced a given
- * `<system-reminder>` block's inner text (spec/02 § System-reminder
- * disclosure) — for the disclosure's label. Matched on a stable substring of
+ * LEGACY. Transcripts written before notes carried their own label hold Patch's
+ * notes as `<system-reminder>` blocks. This names one from its inner text so an
+ * old chat still replays its notes as labelled entries; nothing writes the
+ * old form any more. Matched on a stable substring of
  * each site's own wording (`chatRunner.ts` / `todos.ts` / `specialThreads.ts`)
  * rather than the whole string, so a wording tweak that keeps the substring
  * keeps the label. The pending-decision variant of the restart reminder is
@@ -476,38 +481,46 @@ function labelSystemReminder(text: string): string {
 }
 
 /**
- * Strip every LEADING `<system-reminder>…</system-reminder>` block off `text`,
- * same regex `sanitizeCommandText` always stripped with, but capturing each
- * block's inner text instead of discarding it. Only leading blocks: a user who
- * writes the literal tag mid-message keeps it (see `sanitizeCommandText`).
+ * Split the notes off the front of a user turn's text (notes.ts), so each
+ * replays as its own `chat.note` entry ahead of the message. Reads the current
+ * `[Note: …]` form and, for transcripts written before it, the old leading
+ * `<system-reminder>` blocks. Only leading blocks: a user who writes the same
+ * words mid-message keeps them.
  */
-function extractLeadingSystemReminders(text: string): {
-  cleaned: string;
-  items: SystemContextItem[];
-} {
+function extractLeadingNotes(text: string): { cleaned: string; items: NoteItem[] } {
+  const items: NoteItem[] = [];
   let rest = text;
-  const items: SystemContextItem[] = [];
   for (;;) {
-    const match = /^<system-reminder>([\s\S]*?)<\/system-reminder>\s*/.exec(rest);
-    if (!match) break;
-    const inner = (match[1] ?? '').trim();
-    if (inner.length > 0) {
-      items.push({ source: 'patch', label: labelSystemReminder(inner), text: inner });
+    const current = splitLeadingNotes(rest);
+    if (current.notes.length > 0) {
+      items.push(...current.notes);
+      rest = current.rest;
+      continue;
     }
-    rest = rest.slice(match[0].length);
+    const legacy = /^<system-reminder>([\s\S]*?)<\/system-reminder>\s*/.exec(rest);
+    if (!legacy) break;
+    const inner = (legacy[1] ?? '').trim();
+    if (inner.length > 0) items.push({ label: labelSystemReminder(inner), text: inner });
+    rest = rest.slice(legacy[0].length);
   }
   return { cleaned: rest, items };
 }
 
-/**
- * Every `<system-reminder>` block a raw prompt (or persisted transcript line)
- * actually carried, in the structured form the wire's `systemContext` field
- * expects (spec/02 § System-reminder disclosure) — what `sanitizeCommandText`
- * used to throw away. Callers attach the result to the `chat.message` they are
- * about to emit/replay; an empty array means the turn carried none.
- */
-export function extractSystemContext(prompt: string): SystemContextItem[] {
-  return sanitizeCommandTextWithContext(prompt).systemContext;
+/** The `chat.note` events for a turn's notes, numbered from `seq`. */
+function noteEvents(
+  chatId: string,
+  items: NoteItem[],
+  seq: number,
+  createdAt: number | undefined,
+): WireEvent[] {
+  return items.map((n, i) => ({
+    type: 'chat.note' as const,
+    chatId,
+    label: n.label,
+    text: n.text,
+    seq: seq + i,
+    ...(createdAt !== undefined ? { createdAt } : {}),
+  }));
 }
 
 /** The Claude Code `uuid` of a JSONL entry, or null when it carries none. */
@@ -572,7 +585,7 @@ function providerContextLabel(providerType: string): string {
 
 /**
  * The human-readable text of a `<system-reminder>`-shaped `rendered` block —
- * the same wrapper `extractLeadingSystemReminders` strips off Patch's own
+ * the same wrapper `extractLeadingNotes` strips off Patch's own
  * reminders. Claude Code renders most of its native attachments through the
  * identical tag, so the same unwrap applies.
  */
@@ -597,7 +610,7 @@ function fallbackProviderContextText(attachment: Record<string, unknown>): strin
 /**
  * Claude Code's OWN provider-level context (spec/02 § Provider-level context)
  * — a `type: "attachment"` transcript entry, structurally unrelated to
- * Patch's leading `<system-reminder>` reminders (`extractLeadingSystemReminders`
+ * Patch's notes to the agent (`extractLeadingNotes`
  * above): each is its own top-level JSONL line, never embedded in a turn's
  * prompt. `null` only when the line calls itself an attachment but carries no
  * usable `attachment.type` — a shape this reader cannot even name, as opposed
@@ -754,19 +767,19 @@ export function jsonlLineToWire(
   if (blocks === null) {
     const content = extractContent(obj);
     if (type === 'user') {
-      const { text: cleaned, systemContext } = sanitizeCommandTextWithContext(content);
+      const { text: cleaned, notes } = sanitizeCommandTextWithContext(content);
       // patch/todo.md — "Don't show skill content in history": a command-output
       // turn sanitises to null and is dropped from the replayed transcript.
-      if (cleaned === null) return [];
+      if (cleaned === null) return noteEvents(chatId, notes, seq, createdAt);
       return [
+        ...noteEvents(chatId, notes, seq, createdAt),
         {
           type: 'chat.message',
           chatId,
           role: type,
           content: cleaned,
-          seq,
+          seq: seq + notes.length,
           ...(createdAt !== undefined ? { createdAt } : {}),
-          ...(systemContext.length > 0 ? { systemContext } : {}),
         },
       ];
     }
@@ -794,12 +807,14 @@ export function jsonlLineToWire(
     // content"). Reconstruct the clean `/command args` the user typed, and drop
     // the internal command-output turns, rather than dumping wrapper XML into
     // the transcript. Only user turns carry these wrappers.
-    let systemContext: SystemContextItem[] = [];
     if (type === 'user') {
       const sanitized = sanitizeCommandTextWithContext(content);
+      for (const note of noteEvents(chatId, sanitized.notes, nextSeq, createdAt)) {
+        out.push(note);
+        nextSeq += 1;
+      }
       if (sanitized.text === null) return;
       content = sanitized.text;
-      systemContext = sanitized.systemContext;
     }
     out.push({
       type: 'chat.message',
@@ -808,7 +823,6 @@ export function jsonlLineToWire(
       content,
       seq: nextSeq++,
       ...(createdAt !== undefined ? { createdAt } : {}),
-      ...(systemContext.length > 0 ? { systemContext } : {}),
     });
   };
 
@@ -917,35 +931,27 @@ function sanitizeCommandText(text: string): string | null {
 }
 
 /**
- * `sanitizeCommandText`, plus the leading `<system-reminder>` blocks it used
- * to just delete (spec/02 § System-reminder disclosure — every reader below
- * funnels through this one function, so every reminder Patch injects is
- * captured here exactly once).
+ * `sanitizeCommandText`, plus the notes at the front of the turn (notes.ts —
+ * every reader below funnels through this one function, so each note Patch
+ * sent is separated out here exactly once).
  *
- * Strips LEADING broadcast/reminder `<system-reminder>…</system-reminder>`
- * blocks. On a special (Manager) thread the host PREPENDS this block to the
- * user's turn (index.ts preprocessInput → specialThreads
- * buildBroadcastSystemReminder) as agent context, and Claude Code persists the
- * augmented prompt. Replaying it verbatim dumps the internal XML into the
- * transcript AND — because the persisted user echo no longer equals the
- * surface's optimistic (clean) copy — makes the surface's content-match
- * reconcile miss, so it appends the echo as a DUPLICATE user bubble after the
- * reply (patch/todo.md — "Messages going through twice … in wrong place").
- * Stripped from `text` so replay carries only what the user typed and the
- * reconcile matches — but captured into `systemContext` rather than discarded,
- * so a reply reacting to one is legible as reacting to something (spec/02 §
- * System-reminder disclosure) instead of reading as an unprompted aside. Only
- * LEADING injected blocks are removed — a user who writes the literal tag
- * mid-message keeps it. There can be more than one (a turn can carry both the
- * broadcast block and a task-list block), so every leading block goes, not
- * just the first. Any following voice prefix / command wrapper is handled by
- * the logic below (and the surface's voice-prefix strip).
+ * On a special (Manager) thread, and for every other note, the host PREPENDS
+ * the note to the user's turn as agent context, and Claude Code persists the
+ * augmented prompt. The note is separated from `text` so the user's bubble
+ * carries only what they typed — and the surface's content-match reconcile
+ * still matches (patch/todo.md — "Messages going through twice … in wrong
+ * place") — and returned as `notes`, which the readers above replay as their
+ * own `chat.note` entries ahead of the message, so what the model was told
+ * stays in the record (spec/04 § Notes to the agent). Only LEADING blocks
+ * separate: the same words mid-message are the user's own. A turn can carry
+ * several, so every leading block does. Any following voice prefix / command
+ * wrapper is handled by the logic below (and the surface's voice-prefix strip).
  */
 function sanitizeCommandTextWithContext(text: string): {
   text: string | null;
-  systemContext: SystemContextItem[];
+  notes: NoteItem[];
 } {
-  const { cleaned, items } = extractLeadingSystemReminders(text);
+  const { cleaned, items } = extractLeadingNotes(text);
   // Only a message that BEGINS with a wrapper is one: a user who writes the
   // tag in the middle of a sentence ("why does <local-command-stdout> show…")
   // is typing, and must keep their message.
@@ -956,18 +962,18 @@ function sanitizeCommandTextWithContext(text: string): {
   if (nameMatch) {
     const name = nameMatch[1]?.trim() ?? '';
     // A wrapper with no recoverable command name carries nothing useful — drop.
-    if (name.length === 0) return { text: null, systemContext: items };
+    if (name.length === 0) return { text: null, notes: items };
     const argsMatch = /<command-args>([\s\S]*?)<\/command-args>/.exec(cleaned);
     const args = argsMatch ? (argsMatch[1] ?? '').trim() : '';
     return {
       text: args.length > 0 ? `/${name} ${args}` : `/${name}`,
-      systemContext: items,
+      notes: items,
     };
   }
   // Command output (stdout/stderr) with no invocation is purely skill-generated
   // internal content — drop it from the replayed transcript.
   if (isWrapper && /<local-command-std(out|err)>/.test(cleaned)) {
-    return { text: null, systemContext: items };
+    return { text: null, notes: items };
   }
-  return { text: cleaned, systemContext: items };
+  return { text: cleaned, notes: items };
 }

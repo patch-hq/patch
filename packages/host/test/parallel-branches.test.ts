@@ -388,8 +388,8 @@ describe('spec/04 § Send back', () => {
     expect(graphAfter.branches.find((b) => b.branchId === sideBranchId)!.sentBack).toBe(true);
 
     // The parent's NEXT turn receives the send-back as part of its own
-    // context — visibly, as a disclosed systemContext entry — rather than
-    // invisibly (principles.md § no invisible injection).
+    // context — visibly, as its own chat.note entry ahead of the turn — rather
+    // than invisibly (principles.md § no invisible injection).
     events.length = 0;
     await daemon.sendInput({ chatId, message: 'what happened?', localId: 'main-2' });
     const persistedUserTurn = events.find(
@@ -397,8 +397,14 @@ describe('spec/04 § Send back', () => {
         e.type === 'chat.message' && e.role === 'user' && e.content === 'what happened?',
     );
     expect(persistedUserTurn).toBeDefined();
-    expect(persistedUserTurn!.systemContext).toBeDefined();
-    expect(persistedUserTurn!.systemContext![0]!.text).toContain('From');
+    const sendBackNote = events.find((e) => e.type === 'chat.note') as
+      | { label: string; text: string; seq: number }
+      | undefined;
+    expect(sendBackNote).toBeDefined();
+    expect(sendBackNote!.label).toMatch(/^From /);
+    expect(sendBackNote!.text).toContain('From');
+    expect(sendBackNote!.seq).toBeLessThan(persistedUserTurn!.seq);
+    expect(persistedUserTurn).not.toHaveProperty('systemContext');
 
     // Sending back twice is refused.
     const second = await daemon.sendBackToParent(chatId, sideBranchId);

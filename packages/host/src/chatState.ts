@@ -216,13 +216,13 @@ export interface ChatState {
   /**
    * Set when a surface rewrote the task list (spec/02 § Task list). The agent's
    * own TodoWrite state lives inside its session, so the host can only tell
-   * it: the next turn is prefixed with a `<system-reminder>` naming the edited
+   * it: the next turn is prefixed with a note naming the edited
    * list, and this clears. In-memory only.
    */
   todosEditedBySurface: boolean;
   /**
    * Set when the chat was hidden or shown (spec/04 § Hidden) and the agent has
-   * not been told yet: the next turn is prefixed with a `<system-reminder>`
+   * not been told yet: the next turn is prefixed with a note
    * saying which, and this clears. Hiding then showing before that turn cancels
    * out. In-memory only.
    */
@@ -230,7 +230,7 @@ export interface ChatState {
   /**
    * Set when the chat's goal was set, replaced or cleared (spec/04 § Goals)
    * and the agent has not been told yet: the next turn is prefixed with a
-   * `<system-reminder>` carrying the latest state (`goal: null` = cleared),
+   * note carrying the latest state (`goal: null` = cleared),
    * and this clears. A later change supersedes an unannounced earlier one.
    * In-memory only.
    */

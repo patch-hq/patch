@@ -1313,7 +1313,8 @@ describe('MeetingManager', () => {
     await m.ingestAudio('c1', 'system', Buffer.from('a'));
     await m.tick('c1');
     const first = m.contextFor('c1')!;
-    expect(first).toContain('<system-reminder>');
+    expect(first).toContain('[Note: Meeting context]');
+    expect(first).not.toContain('system-reminder');
     expect(first).toContain('we ship monday');
     expect(first).toContain('Ledger split timing');
     expect(first).toContain("Top up Sam's sandbox");

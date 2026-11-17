@@ -9,8 +9,8 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  buildTodoEditSystemReminder,
-  buildTodoFireSystemReminder,
+  buildTodoEditNote,
+  buildTodoFireNote,
   carryTodoAttachments,
   markTodoStarted,
   parseTodoWriteArgs,
@@ -173,11 +173,12 @@ describe('markTodoStarted', () => {
   });
 });
 
-describe('buildTodoFireSystemReminder', () => {
+describe('buildTodoFireNote', () => {
   it('tells the agent the fired line is its own TodoWrite item and to close it out', () => {
-    const block = buildTodoFireSystemReminder('sweep the "yard"');
-    expect(block.startsWith('<system-reminder>\n')).toBe(true);
-    expect(block.endsWith('</system-reminder>\n\n')).toBe(true);
+    const block = buildTodoFireNote('sweep the "yard"');
+    expect(block.startsWith('[Note: Todo item fired]\n')).toBe(true);
+    expect(block.endsWith('[End note]\n\n')).toBe(true);
+    expect(block).not.toContain('system-reminder');
     expect(block).toContain('TodoWrite');
     expect(block).toContain('in_progress');
     expect(block).toContain('completed');
@@ -236,7 +237,7 @@ describe('todo items with attachments', () => {
   });
 
   it('tells the agent an item has files attached in the edit reminder', () => {
-    const out = buildTodoEditSystemReminder([{ text: 'x', status: 'pending', attachments: [ref] }]);
+    const out = buildTodoEditNote([{ text: 'x', status: 'pending', attachments: [ref] }]);
     expect(out).toContain('1 attached');
   });
 });

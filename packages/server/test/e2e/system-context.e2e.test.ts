@@ -1,17 +1,16 @@
-// End-to-end system-reminder disclosure (spec/02 § System-reminder disclosure)
-// — REAL server + REAL host over a REAL WebSocket link; only the SDK backend
+// End-to-end notes to the agent (spec/04 § Notes to the agent) — REAL server + REAL host over a REAL WebSocket link; only the SDK backend
 // is mocked, and it writes a real transcript for replay.
 //
 // The path exercised:
 //   POST /api/chats/:id/todos  (a surface rewrites the task list)
 //     → server → real serverLink WS → real Daemon.setTodos
 //   chat.input from the surface
-//     → host prefixes the turn with its todo-edit <system-reminder>
-//       → the agent receives it (the mock echoes its prompt)
-//       → the surface receives the user chat.message with the block carried
-//         out of band as systemContext, never inlined into content
+//     → host prefixes the turn with a todo-edit note
+//       → the agent receives it as plain text (the mock echoes its prompt)
+//       → the surface receives it as its own chat.note entry ahead of the user
+//         chat.message, which carries only what was typed
 //   chat.replay from a fresh surface
-//     → the same systemContext rebuilt from the persisted transcript.
+//     → the same chat.note rebuilt from the persisted transcript.
 
 import { describe, it, expect, afterEach } from 'vitest';
 import type { WireEvent } from '@patch/wire';
@@ -29,8 +28,12 @@ const userMessages = (events: WireEvent[], chatId: string): UserMessage[] =>
     (e): e is UserMessage => e.type === 'chat.message' && e.chatId === chatId && e.role === 'user',
   );
 
-describe('e2e system context: an injected reminder reaches the surface beside its turn', () => {
-  it('carries a todo-edit reminder as systemContext live and on replay, never in content', async () => {
+type Note = Extract<WireEvent, { type: 'chat.note' }>;
+const notes = (events: WireEvent[], chatId: string): Note[] =>
+  events.filter((e): e is Note => e.type === 'chat.note' && e.chatId === chatId);
+
+describe('e2e notes: a note to the agent reaches the surface as its own entry', () => {
+  it('carries a todo-edit note as a chat.note live and on replay, never in the message content', async () => {
     h = await startHarness();
     const jwt = await h.mintSurface('srf-sc1');
     const client = await h.connectSurface('srf-sc1b');
@@ -50,7 +53,7 @@ describe('e2e system context: an injected reminder reaches the surface beside it
       'chat.state after spawn',
     );
     client.send({ type: 'chat.focus_change', chatId });
-    const live = record(client, ['chat.message']);
+    const live = record(client, ['chat.message', 'chat.note']);
 
     const todos = await fetch(`${h.httpBase}/api/chats/${chatId}/todos`, {
       method: 'POST',
@@ -73,20 +76,22 @@ describe('e2e system context: an injected reminder reaches the surface beside it
     client.send({ type: 'chat.input', chatId, message: 'go on then', localId: 'L-sc1' });
     const reply = await expectReply(client, chatId, 'todo-edit reminder');
     // The agent really received the block (the mock echoes its whole prompt).
-    expect(reply.content).toContain('<system-reminder>');
+    expect(reply.content).toContain('[Note: Todo list updated]');
+    expect(reply.content).not.toContain('system-reminder');
     expect(reply.content).toContain('water the tomatoes');
 
     await until(() => userMessages(live, chatId).length > 0, 3000, 'live user chat.message');
     const liveUser = userMessages(live, chatId)[0]!;
     expect(liveUser.content).toBe('go on then');
-    expect(liveUser.systemContext).toHaveLength(1);
-    expect(liveUser.systemContext![0]!.source).toBe('patch');
-    expect(liveUser.systemContext![0]!.label).toBe('Todo list updated');
-    expect(liveUser.systemContext![0]!.text).toContain('water the tomatoes');
+    expect(liveUser).not.toHaveProperty('systemContext');
+    const liveNote = notes(live, chatId)[0]!;
+    expect(liveNote.label).toBe('Todo list updated');
+    expect(liveNote.text).toContain('water the tomatoes');
+    expect(liveNote.seq).toBeLessThan(liveUser.seq);
 
     await client.close();
     const client2 = await h.connectSurface('srf-sc1c');
-    const replayed = record(client2, ['chat.message']);
+    const replayed = record(client2, ['chat.message', 'chat.note']);
     client2.replay(chatId, -1);
     await until(
       () => userMessages(replayed, chatId).some((m) => m.content === 'go on then'),
@@ -94,7 +99,11 @@ describe('e2e system context: an injected reminder reaches the surface beside it
       'replayed user turn',
     );
     const replayedUser = userMessages(replayed, chatId).find((m) => m.content === 'go on then')!;
-    expect(replayedUser.systemContext).toEqual(liveUser.systemContext);
+    const replayedNote = notes(replayed, chatId)[0]!;
+    expect(replayedNote.label).toBe(liveNote.label);
+    expect(replayedNote.text).toBe(liveNote.text);
+    expect(replayedNote.seq).toBe(liveNote.seq);
+    expect(replayedUser.seq).toBe(liveUser.seq);
     await client2.close();
   });
 });
