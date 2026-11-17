@@ -37,6 +37,7 @@ export function computeTooltipPosition(
   trigger: Rect,
   tooltip: Size,
   viewport: Size,
+  keepClear?: { right: number; bottom: number },
 ): TooltipPosition {
   const fitsBelow = trigger.bottom + GAP + tooltip.height <= viewport.height - MARGIN;
   const fitsAbove = trigger.top - GAP - tooltip.height >= MARGIN;
@@ -49,6 +50,13 @@ export function computeTooltipPosition(
   const rawLeft = trigger.left + trigger.width / 2 - tooltip.width / 2;
   const maxLeft = Math.max(MARGIN, viewport.width - MARGIN - tooltip.width);
   const left = Math.min(Math.max(rawLeft, MARGIN), maxLeft);
+
+  // A zone pinned to the window's top-left (the macOS traffic lights) the bubble
+  // must not sit over: if it would, drop it to just below the zone.
+  if (keepClear && left < keepClear.right && top < keepClear.bottom) {
+    const clearTop = keepClear.bottom + MARGIN / 2;
+    return { top: Math.min(clearTop, maxTop), left, placement: 'below' };
+  }
 
   return { top, left, placement };
 }

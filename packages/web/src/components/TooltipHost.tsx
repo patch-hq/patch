@@ -40,6 +40,16 @@ interface Shown {
   full: boolean;
 }
 
+/** The desktop shell's traffic-light zone (CSS vars on <html>), or none in a browser. */
+function windowControlsZone(): { right: number; bottom: number } | undefined {
+  const root = document.documentElement;
+  if (!root.classList.contains('overlay-titlebar')) return undefined;
+  const cs = getComputedStyle(root);
+  const right = parseFloat(cs.getPropertyValue('--overlay-titlebar-inset'));
+  const bottom = parseFloat(cs.getPropertyValue('--overlay-titlebar-lights-bottom'));
+  return Number.isFinite(right) && Number.isFinite(bottom) ? { right, bottom } : undefined;
+}
+
 export function TooltipHost(): JSX.Element | null {
   const [shown, setShown] = useState<Shown | null>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
@@ -234,7 +244,7 @@ export function TooltipHost(): JSX.Element | null {
       computeTooltipPosition(trigger, size, {
         width: window.innerWidth,
         height: window.innerHeight,
-      }),
+      }, windowControlsZone()),
     );
   }, [shown]);
 

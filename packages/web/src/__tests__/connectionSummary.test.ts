@@ -20,7 +20,7 @@ describe('connectionSummary', () => {
       a: host('a', 'Box', true),
     });
     expect(text.split('\n')).toEqual([
-      'This surface (web): connected',
+      'This browser: connected',
       'Server: reachable',
       'Host Box: online',
       'Host Mac: offline',
@@ -29,7 +29,7 @@ describe('connectionSummary', () => {
 
   it('reports a dropped link on both surface and server lines', () => {
     const text = connectionSummary('reconnecting', {});
-    expect(text).toContain('This surface (web): reconnecting');
+    expect(text).toContain('This browser: reconnecting');
     expect(text).toContain('Server: reconnecting');
     expect(text).toContain('Hosts: none registered');
   });

@@ -32,13 +32,14 @@ function lastSeen(h: HostPresence): string {
 export function connectionSummary(
   connection: ConnectionState,
   hosts: Record<string, HostPresence>,
+  where: 'app' | 'browser' = 'browser',
 ): string {
   const list = sortHosts(Object.values(hosts));
   return [
-    `This surface (web): ${SERVER_STATE[connection]}`,
+    `This ${where}: ${SERVER_STATE[connection]}`,
     `Server: ${connection === 'connected' ? 'reachable' : SERVER_STATE[connection]}`,
     ...(list.length === 0
       ? ['Hosts: none registered']
-      : list.map((h) => `Host ${hostLabel(h)}: ${h.online ? 'online' : 'offline'}${lastSeen(h)}`)),
+      : list.map((h) => `Host ${h.registeredName ?? hostLabel(h)}: ${h.online ? 'online' : 'offline'}${lastSeen(h)}`)),
   ].join('\n');
 }
