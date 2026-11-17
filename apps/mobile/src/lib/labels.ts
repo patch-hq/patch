@@ -1,3 +1,5 @@
+import { PERMISSION_MODE_COPY } from '@patch/wire';
+
 // User-facing UI copy constants that carry a specific spec requirement, kept
 // here so their exact wording is a single source of truth and can be guarded
 // by unit tests (e.g. "no (AI)", "no read-mostly").
@@ -85,23 +87,12 @@ export function friendlyDeviceName(surfaceKind: string, label?: string): string 
 }
 
 /**
- * How a permission mode is written on screen (spec/02 § Permission mode).
- *
- * The same words as the id, cased and spaced for reading, except `default`,
- * which reads "Ask": it is not the default mode (`auto` is). Mirrors
- * packages/web/src/lib/permissionModeLabel.ts.
+ * How a permission mode is written on screen (spec/02 § Permission mode): the
+ * provider-neutral name from @patch/wire, shared with web.
  */
-const PERMISSION_MODE_LABELS: Record<string, string> = {
-  auto: 'Auto',
-  default: 'Ask',
-  acceptEdits: 'Accept edits',
-  bypassPermissions: 'Bypass permissions',
-  plan: 'Plan',
-};
-
 export function permissionModeLabel(mode: string): string {
-  const known = PERMISSION_MODE_LABELS[mode];
-  if (known !== undefined) return known;
+  const known = (PERMISSION_MODE_COPY as Record<string, { label: string } | undefined>)[mode];
+  if (known !== undefined) return known.label;
   const spaced = mode.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }

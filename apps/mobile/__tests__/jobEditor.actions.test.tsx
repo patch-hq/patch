@@ -422,7 +422,7 @@ describe('JobEditor — Model picker', () => {
     const group = findHost(r.root, byTestId('job-spawn-permission-mode'));
     const pill = (label: string) =>
       findAllHost(group, (i) => i.type === 'Pressable' && hasText(i, label)).length;
-    // 'Auto' is a substring of 'Auto-accept edits', so count the pills instead.
+    // 'Auto' is a substring of 'Allow edits', so count the pills instead.
     expect(findAllHost(group, (i) => i.type === 'Pressable').length).toBe(4);
     expect(pill('Plan only')).toBe(1);
   });

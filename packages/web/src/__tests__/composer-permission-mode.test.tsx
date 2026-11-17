@@ -164,11 +164,11 @@ describe('Composer — approval mode', () => {
       options.map((o) => o.querySelector('.model-option-name')!.firstChild!.textContent),
     ).toEqual(['Auto', 'Ask', 'Edits', 'Bypass', 'Plan']);
     expect(options.map((o) => o.querySelector('.model-option-desc')?.textContent)).toEqual([
-      'Decides what needs asking',
-      'Asks before each action',
-      'Edits files without asking',
-      'No checks at all',
-      'Plans only, changes nothing',
+      'Asks only when something looks risky',
+      'Asks before changing files or running commands',
+      'Edits files freely, asks before running commands',
+      'Never asks, so it can delete or overwrite anything',
+      'Reads and plans, changes nothing',
     ]);
   });
 

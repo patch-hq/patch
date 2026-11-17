@@ -29,6 +29,7 @@ import {
   QUESTION_EXPIRY_SECONDS_MIN,
   DEFAULT_PROVIDER_ID,
   HARNESS_PERMISSION_MODES,
+  permissionModeOptionLabel,
   PROVIDERS,
   type PermissionMode,
 } from '@patch/wire';
@@ -188,8 +189,7 @@ export function AgentPage(): React.ReactElement {
 }
 
 /**
- * The mode new chats start in (spec/02 § Permission mode), named as the SDK
- * names them. A change never reaches back into a chat already running.
+ * The mode new chats start in (spec/02 § Permission mode), named by what it does. A change never reaches back into a chat already running.
  */
 function PermissionDefaultRow({ value }: { value: PermissionMode }): React.ReactElement {
   return (
@@ -201,7 +201,13 @@ function PermissionDefaultRow({ value }: { value: PermissionMode }): React.React
           testID="permission-default"
           selectedId={value}
           selectedLabel={permissionModeLabel(value)}
-          options={PERMISSION_MODES.map((m) => ({ id: m, label: permissionModeLabel(m) }))}
+          options={PERMISSION_MODES.map((m) => ({
+            id: m,
+            label: permissionModeOptionLabel(
+              m,
+              PROVIDERS.map((p) => p.id),
+            ),
+          }))}
           onSelect={(m) =>
             void patchShared('Permission mode', { permissionModeDefault: m as PermissionMode })
           }

@@ -17,7 +17,13 @@ test.describe('Settings → Agent → Permission mode', () => {
     await expect(select).toHaveValue('auto');
     const options = await select.locator('option').allTextContents();
     // `default` reads Ask: it is not the default mode, Auto is (spec/02).
-    expect(options).toEqual(['Auto', 'Ask', 'Accept edits', 'Bypass permissions', 'Plan']);
+    expect(options).toEqual([
+      'Auto (Claude only)',
+      'Ask first',
+      'Allow edits',
+      'Never ask',
+      'Plan only',
+    ]);
     await select.selectOption('acceptEdits');
     await expect
       .poll(() => server.patches)
