@@ -683,6 +683,8 @@ describe('what the install puts on the host', () => {
       join(home, '.patch', 'versions', '9.9.9', 'silero_vad.onnx'),
     );
     expect(captured['SDK_BACKEND']).toBe('real');
+    // The speech engine is a setting in the app now, never carried in the unit.
+    expect(captured).not.toHaveProperty('WHISPER_BACKEND');
 
     // A re-run with an empty environment and no flags must not lose them.
     captured = {};

@@ -29,7 +29,7 @@ export function makeLinkSummariser(opts: {
   sdkBackend: SdkBackend;
   runOnAccountWithCredit: RunOnAccountWithCredit;
   /** The set model and its failovers (smallJobModels.ts). */
-  smallJobModels: readonly string[];
+  smallJobModels: () => readonly string[];
 }): (input: SummariseLinkInput) => Promise<string | null> {
   return async function summariseLink(input) {
     return await runSmallJob(

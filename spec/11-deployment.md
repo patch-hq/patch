@@ -25,7 +25,7 @@ Whisper STT runs on Groq (no local CPU cost). 4 cores easily handle the rest wit
 
 ### Self-hosting Whisper
 
-Set `WHISPER_BACKEND=local` and size the host at ≈8 dedicated cores, 32 GB RAM. `faster-whisper medium.en` runs real-time on 8 cores, ~1 GB RAM, 4–6 cores during transcription. Total time-to-first-audio is ~400ms slower than Groq.
+Set the speech setting to `local` (Settings, or `patch settings set speech-backend local`) and size the host at ≈8 dedicated cores, 32 GB RAM. `faster-whisper medium.en` runs real-time on 8 cores, ~1 GB RAM, 4–6 cores during transcription. Total time-to-first-audio is ~400ms slower than Groq.
 
 That sizing covers a host running voice. A host on remote STT with no TTS
 components installed needs headroom for Node and the agent's own work.
@@ -282,8 +282,8 @@ TODOIST_WEBHOOK_SECRET=...
 # reach the device are a one-time upload to the EAS project (see § Mobile updates).
 
 # Voice
-WHISPER_BACKEND=groq         # or "local" for self-hosted
-GROQ_API_KEY=...             # groq backend; or set it in Settings → Providers
+# The speech engine is the in-app `speechBackend` setting, not an env var.
+GROQ_API_KEY=...             # or set it in Settings → Providers
 # GEMINI_API_KEY / OPENAI_REALTIME_API_KEY — hosted voice. Optional here:
 # provider keys can be set from Settings → Providers instead (shared by every
 # host, stored on the server), which wins over the environment
@@ -300,7 +300,7 @@ GROQ_API_KEY=...             # groq backend; or set it in Settings → Providers
 CLAUDE_CODE_OAUTH_TOKEN=...
 ```
 
-`WHISPER_BACKEND`, `GROQ_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` are read by the
+`GROQ_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` are read by the
 host, so they are set in the environment of each host's service rather than in
 the server's env — or, for the provider keys, from Settings → Providers, which
 stores them on the server and sends them to every host. The rest are the

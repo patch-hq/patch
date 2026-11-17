@@ -425,9 +425,12 @@ async function bootMain(
   // The server says which host runs the Manager; a test boots as that host
   // (remembered from an earlier `host.set_manager`) unless it asks not to.
   const runsManager = envOverrides['__NOT_MANAGER__'] === undefined;
-  if (opts.hostJson || runsManager) {
-    writeFileSync(join(home, 'host.json'), JSON.stringify({ runsManager, ...opts.hostJson }));
-  }
+  // The mock speech engine is a fixture only host state can name (the speech
+  // setting never offers it); every boot gets it unless a test names another.
+  writeFileSync(
+    join(home, 'host.json'),
+    JSON.stringify({ runsManager, speechBackend: 'mock', ...opts.hostJson }),
+  );
   if (opts.claudeStore) {
     writeFileSync(join(home, 'claude-oauth.json'), JSON.stringify(opts.claudeStore), {
       mode: 0o600,
@@ -472,7 +475,6 @@ async function bootMain(
     PATCH_CLAUDE_PROJECTS_ROOT: join(home, 'claude-projects'),
     PATCH_DAEMON_AUDIO_PORT: String(audioPort),
     PATCH_DAEMON_AUDIO_HOST: '127.0.0.1',
-    WHISPER_BACKEND: 'mock',
     KOKORO_BACKEND: 'mock',
     VAD_BACKEND: 'mock',
     PATCH_VOICE_MAX_SESSIONS: '4',
@@ -1843,7 +1845,6 @@ describe('src/index.ts main() — full host boot', () => {
       PATCH_CLAUDE_PROJECTS_ROOT: join(home, 'claude-projects'),
       PATCH_DAEMON_AUDIO_PORT: String(audioPort),
       PATCH_DAEMON_AUDIO_HOST: '127.0.0.1',
-      WHISPER_BACKEND: 'mock',
       KOKORO_BACKEND: 'mock',
       VAD_BACKEND: 'mock',
       PATCH_VOICE_MAX_SESSIONS: '4',
@@ -1904,7 +1905,6 @@ describe('src/index.ts main() — full host boot', () => {
       PATCH_CLAUDE_PROJECTS_ROOT: join(home, 'claude-projects'),
       PATCH_DAEMON_AUDIO_PORT: String(audioPort),
       PATCH_DAEMON_AUDIO_HOST: '127.0.0.1',
-      WHISPER_BACKEND: 'mock',
       KOKORO_BACKEND: 'mock',
       VAD_BACKEND: 'mock',
       CLAUDE_OAUTH_NO_KEYCHAIN: '1',
@@ -2056,10 +2056,10 @@ describe('src/index.ts main() — full host boot', () => {
     const whisperModelHome = mkdtempSync(join(tmpdir(), 'patch-whisper-model-'));
     const whisperModelPath = join(whisperModelHome, 'fake-whisper-model');
     writeFileSync(whisperModelPath, 'not a real model');
-    const bootLocalWhisper = await bootMain({
-      WHISPER_BACKEND: 'local',
-      WHISPER_MODEL_PATH: whisperModelPath,
-    });
+    const bootLocalWhisper = await bootMain(
+      { WHISPER_MODEL_PATH: whisperModelPath },
+      { hostJson: { speechBackend: 'local' } },
+    );
     await bootLocalWhisper.cleanup();
     rmSync(whisperModelHome, { recursive: true, force: true });
 
@@ -2123,7 +2123,7 @@ describe('src/index.ts main() — full host boot', () => {
     }
   }, 30_000);
 
-  it('hands tool prompt edits from the snapshot to the MCP child env, keeps them in host.json, and reports the built-in text', async () => {
+  it('serves tool prompt edits from the snapshot to the MCP child over the control socket, keeps them in host.json, and reports the built-in text', async () => {
     const boot = await bootMain();
     try {
       await boot.fakeServer.waitForAuthed();
@@ -2133,13 +2133,24 @@ describe('src/index.ts main() — full host boot', () => {
       expect(Object.keys(hostReport['toolPromptDefaults'] as Record<string, string>)).toContain(
         'patch_peek',
       );
-      const mcpEnv = (): Record<string, string> =>
+      const localKey = readFileSync(join(boot.home, 'local.key'), 'utf8').trim();
+      const served = async (): Promise<unknown> =>
+        (
+          await boot.ready.app.inject({
+            method: 'GET',
+            url: '/internal/tool-prompts',
+            headers: { authorization: `Bearer ${localKey}` },
+          })
+        ).json();
+      expect(await served()).toEqual({});
+      // No environment variable carries them any more.
+      expect(
         (
           boot.ready.daemon as unknown as {
             opts: { mcpServer: { env: Record<string, string> } };
           }
-        ).opts.mcpServer.env;
-      expect(JSON.parse(mcpEnv()['PATCH_TOOL_PROMPTS'] ?? '')).toEqual({});
+        ).opts.mcpServer.env,
+      ).not.toHaveProperty('PATCH_TOOL_PROMPTS');
 
       boot.fakeServer.send({
         type: 'settings.snapshot',
@@ -2148,9 +2159,63 @@ describe('src/index.ts main() — full host boot', () => {
         settings: { ...DEFAULT_SHARED_SETTINGS, toolPromptOverrides: { patch_peek: 'Edited.' } },
         secrets: { claude: [], codex: [], providerKeys: {} },
       } as WireEvent);
-      await waitFor(() => mcpEnv()['PATCH_TOOL_PROMPTS'] === '{"patch_peek":"Edited."}');
+      let after: unknown;
+      for (let i = 0; i < 200; i++) {
+        after = await served();
+        if (JSON.stringify(after) === '{"patch_peek":"Edited."}') break;
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      expect(after).toEqual({ patch_peek: 'Edited.' });
       const hostJson = JSON.parse(readFileSync(join(boot.home, 'host.json'), 'utf8'));
       expect(hostJson.toolPromptOverrides).toEqual({ patch_peek: 'Edited.' });
+    } finally {
+      await boot.cleanup();
+    }
+  }, 30_000);
+
+  it('applies the small-job model list from the snapshot and keeps it in host.json', async () => {
+    const boot = await bootMain();
+    try {
+      await boot.fakeServer.waitForAuthed();
+      boot.fakeServer.send({
+        type: 'settings.snapshot',
+        hostId: 'd1',
+        version: 43,
+        settings: { ...DEFAULT_SHARED_SETTINGS, smallJobModels: ['m1', 'm2'] },
+        secrets: { claude: [], codex: [], providerKeys: {} },
+      } as WireEvent);
+      const hostJson = (): Record<string, unknown> =>
+        JSON.parse(readFileSync(join(boot.home, 'host.json'), 'utf8'));
+      await waitFor(() => JSON.stringify(hostJson()['smallJobModels']) === '["m1","m2"]');
+    } finally {
+      await boot.cleanup();
+    }
+  }, 30_000);
+
+  it('refuses a speech engine whose key is missing, naming the setting, and applies the rest', async () => {
+    const boot = await bootMain(
+      { GROQ_API_KEY: undefined },
+      { hostJson: { speechBackend: undefined } },
+    );
+    try {
+      await boot.fakeServer.waitForAuthed();
+      boot.fakeServer.send({
+        type: 'settings.snapshot',
+        hostId: 'd1',
+        version: 44,
+        settings: {
+          ...DEFAULT_SHARED_SETTINGS,
+          speechBackend: 'groq',
+          smallJobModels: ['m9'],
+        },
+        secrets: { claude: [], codex: [], providerKeys: {} },
+      } as unknown as WireEvent);
+      const hostJson = (): Record<string, unknown> =>
+        JSON.parse(readFileSync(join(boot.home, 'host.json'), 'utf8'));
+      // The other settings in the same snapshot still take effect...
+      await waitFor(() => JSON.stringify(hostJson()['smallJobModels']) === '["m9"]');
+      // ...and the refused engine is not saved.
+      expect(hostJson()['speechBackend']).toBeUndefined();
     } finally {
       await boot.cleanup();
     }

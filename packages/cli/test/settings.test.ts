@@ -4,7 +4,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Command } from 'commander';
-import { parseBooleanValue, registerSettingsCommands } from '../src/commands/settings.js';
+import {
+  parseBooleanValue,
+  parseModelList,
+  registerSettingsCommands,
+} from '../src/commands/settings.js';
 
 function build(): Command {
   const program = new Command();
@@ -65,4 +69,10 @@ test('on/off settings accept on, off, yes, no, true, false', () => {
   for (const w of ['off', 'no', 'false', 'Off'])
     assert.equal(parseBooleanValue('auto-update', w), false);
   assert.throws(() => parseBooleanValue('auto-update', 'maybe'), /on\/off/);
+});
+
+test('a model list is typed as a comma-separated list or a JSON array, set model first', () => {
+  assert.deepEqual(parseModelList('a, b ,c'), ['a', 'b', 'c']);
+  assert.deepEqual(parseModelList('["a","b"]'), ['a', 'b']);
+  assert.deepEqual(parseModelList('a,,b'), ['a', '', 'b']); // the server refuses the empty entry
 });

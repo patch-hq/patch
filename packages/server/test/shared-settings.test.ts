@@ -842,6 +842,30 @@ describe('shared settings routes', () => {
     }
   });
 
+  it('PATCH /api/settings sets the small-job models and the speech engine, and refuses bad values', async () => {
+    const { built, auth } = await boot();
+    try {
+      const patch = (payload: object) =>
+        built.app.inject({ method: 'PATCH', url: '/api/settings', headers: auth, payload });
+      const before = await built.app.inject({ method: 'GET', url: '/api/settings', headers: auth });
+      expect(before.json().preferences).toMatchObject({
+        smallJobModels: ['claude-haiku-4-5-20251001', 'claude-sonnet-4-5'],
+        speechBackend: 'auto',
+      });
+      const res = await patch({ smallJobModels: ['m1', 'm2'], speechBackend: 'groq' });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().preferences).toMatchObject({
+        smallJobModels: ['m1', 'm2'],
+        speechBackend: 'groq',
+      });
+      expect((await patch({ smallJobModels: [] })).statusCode).toBe(400);
+      expect((await patch({ smallJobModels: ['m1', 'm1'] })).statusCode).toBe(400);
+      expect((await patch({ speechBackend: 'mock' })).statusCode).toBe(400);
+    } finally {
+      await built.app.close();
+    }
+  });
+
   it('PATCH /api/settings writes a shared setting and sends it to an imported host', async () => {
     const { built, auth, link } = await boot();
     try {

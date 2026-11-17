@@ -1,23 +1,26 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  DEFAULT_SHARED_SETTINGS,
   DEFAULT_SMALL_JOB_MODELS,
-  parseSmallJobModels,
-  runWithSmallJobModels,
-} from '../src/smallJobModels.js';
+  SharedSettingsPatch,
+} from '@patch/wire';
+import { runWithSmallJobModels } from '../src/smallJobModels.js';
 
-describe('parseSmallJobModels', () => {
-  it('uses the default list when nothing is configured', () => {
-    expect(parseSmallJobModels(undefined)).toEqual([...DEFAULT_SMALL_JOB_MODELS]);
+describe('the smallJobModels setting', () => {
+  it('starts as the default list', () => {
+    expect(DEFAULT_SHARED_SETTINGS.smallJobModels).toEqual([...DEFAULT_SMALL_JOB_MODELS]);
   });
-  it('reads a comma-separated list, set model first', () => {
-    expect(parseSmallJobModels(' a , b,c ')).toEqual(['a', 'b', 'c']);
+  it('takes a list, set model first', () => {
+    expect(SharedSettingsPatch.parse({ smallJobModels: ['a', 'b', 'c'] }).smallJobModels).toEqual([
+      'a',
+      'b',
+      'c',
+    ]);
   });
-  it('refuses an empty entry rather than guessing', () => {
-    expect(() => parseSmallJobModels('a,,b')).toThrow(/empty/);
-    expect(() => parseSmallJobModels('  ')).toThrow(/empty/);
-  });
-  it('refuses a model named twice', () => {
-    expect(() => parseSmallJobModels('a,b,a')).toThrow(/twice/);
+  it('refuses an empty list, an empty entry and a model named twice', () => {
+    expect(() => SharedSettingsPatch.parse({ smallJobModels: [] })).toThrow();
+    expect(() => SharedSettingsPatch.parse({ smallJobModels: ['a', ''] })).toThrow();
+    expect(() => SharedSettingsPatch.parse({ smallJobModels: ['a', 'b', 'a'] })).toThrow(/twice/);
   });
 });
 

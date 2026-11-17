@@ -349,7 +349,6 @@ export function readBuildInfo(artifactDir: string): BuildInfo {
  * so the host has them on every start without anyone editing the unit.
  */
 export const PASSTHROUGH_ENV = [
-  'WHISPER_BACKEND',
   'GROQ_API_KEY',
   'WHISPER_LOCAL_SIDECAR_URL',
   'PARAKEET_MODEL_DIR',
@@ -706,7 +705,7 @@ export async function runInstaller(ctx: InstallerContext): Promise<InstallResult
       // and barge-in work on this host with nothing downloaded (spec/02).
       VAD_BACKEND: 'silero',
       VAD_MODEL_PATH: join(installDir, 'silero_vad.onnx'),
-      // spec/11 § Env: WHISPER_BACKEND, GROQ_API_KEY and CLAUDE_CODE_OAUTH_TOKEN
+      // spec/11 § Env: GROQ_API_KEY and CLAUDE_CODE_OAUTH_TOKEN
       // "are read by the host, so they are set in the environment of each
       // host's service rather than in the server's compose env". They travel
       // with the install command, and are carried into the unit here.

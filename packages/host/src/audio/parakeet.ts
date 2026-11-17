@@ -1,4 +1,4 @@
-// Parakeet STT backend (WHISPER_BACKEND=parakeet): NVIDIA Parakeet TDT v3 run
+// Parakeet STT backend (the speech setting `parakeet`): NVIDIA Parakeet TDT v3 run
 // on this host's CPU through sherpa-onnx (spec/07 § Dictation engines).
 //
 // It replaces the rationed Groq re-read as the default words engine: nothing
@@ -119,7 +119,7 @@ export class ParakeetWhisperBackend implements WhisperBackend {
     const dir = this.opts.modelDir;
     if (!dir) {
       throw new Error(
-        'WHISPER_BACKEND=parakeet needs PARAKEET_MODEL_DIR (the extracted sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8 directory)',
+        'The speech setting is parakeet but there is no PARAKEET_MODEL_DIR (the extracted sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8 directory)',
       );
     }
     const missing = PARAKEET_MODEL_FILES.filter((f) => !existsSync(join(dir, f)));

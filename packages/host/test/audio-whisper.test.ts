@@ -651,7 +651,7 @@ describe('validateWhisperCredentials (group H1: eager startup abort)', () => {
 
   test('local backend with neither URL nor model path aborts at startup', () => {
     expect(() => validateWhisperCredentials({ whisperBackend: 'local' })).toThrowError(
-      /WHISPER_BACKEND=local.*WHISPER_LOCAL_SIDECAR_URL.*WHISPER_MODEL_PATH/s,
+      /speech setting is local.*WHISPER_LOCAL_SIDECAR_URL.*WHISPER_MODEL_PATH/s,
     );
   });
 

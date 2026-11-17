@@ -93,12 +93,12 @@ export class ProviderKeyStore {
   private stored: KeysFile['keys'];
   private readonly listeners = new Set<() => void>();
 
-  private readonly requiredToStart: Partial<Record<ProviderKeyId, string>>;
+  private requiredToStart: Partial<Record<ProviderKeyId, string>>;
 
   /**
    * `requiredToStart` names each key this host cannot boot without, with the
    * reason (the host aborts at startup when it is missing — Groq under
-   * WHISPER_BACKEND=groq). Revoking the last value of such a key is refused:
+   * the speech setting naming Groq). Revoking the last value of such a key is refused:
    * the host would not come back up to be given a new one.
    */
   constructor(opts: {
@@ -114,6 +114,11 @@ export class ProviderKeyStore {
     }
     this.requiredToStart = opts.requiredToStart ?? {};
     this.stored = this.load();
+  }
+
+  /** The keys this host cannot start without now (the speech setting changed). */
+  setRequiredToStart(required: Partial<Record<ProviderKeyId, string>>): void {
+    this.requiredToStart = required;
   }
 
   private load(): KeysFile['keys'] {

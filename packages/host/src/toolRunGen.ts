@@ -48,7 +48,7 @@ export interface MakeToolRunSummarizerOptions {
   /** The host's AI-call gate (spec/10-auth.md § Backend credentials). */
   runOnAccountWithCredit: RunOnAccountWithCredit;
   /** The set model and its failovers (smallJobModels.ts). */
-  smallJobModels: readonly string[];
+  smallJobModels: () => readonly string[];
   logger?: Logger;
 }
 

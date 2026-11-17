@@ -3,7 +3,6 @@
 
 import { describe, it, expect } from 'vitest';
 import { join } from 'node:path';
-import { DEFAULT_SMALL_JOB_MODELS } from '../src/smallJobModels.js';
 import { defaultHostName, defaultSocketPath, loadConfig } from '../src/config.js';
 
 const base: NodeJS.ProcessEnv = {
@@ -15,17 +14,19 @@ const base: NodeJS.ProcessEnv = {
 };
 
 describe('loadConfig', () => {
-  it('uses the default small-job model list unless PATCH_SMALL_JOB_MODELS names one', () => {
-    expect(loadConfig({ env: { ...base } }).smallJobModels).toEqual([...DEFAULT_SMALL_JOB_MODELS]);
-    expect(
-      loadConfig({ env: { ...base, PATCH_SMALL_JOB_MODELS: 'm1, m2' } }).smallJobModels,
-    ).toEqual(['m1', 'm2']);
+  it('does not read the small-job models from the environment', () => {
+    // The list is the shared `smallJobModels` setting; an env value is ignored.
+    const cfg = loadConfig({ env: { ...base, PATCH_SMALL_JOB_MODELS: 'm1' } });
+    expect(cfg).not.toHaveProperty('smallJobModels');
   });
 
-  it('refuses a malformed PATCH_SMALL_JOB_MODELS at startup (NO FALLBACK)', () => {
-    expect(() => loadConfig({ env: { ...base, PATCH_SMALL_JOB_MODELS: 'm1,,m2' } })).toThrow(
-      /empty entry/,
-    );
+  it('takes the speech engine from the host state, never the environment', () => {
+    const named = loadConfig({ env: { ...base, WHISPER_BACKEND: 'groq' } });
+    expect(named.audio.whisperBackend).toBe('off');
+    expect(named.audio.speechAuto).toBe(true);
+    const fromState = loadConfig({ env: { ...base }, speechBackend: 'groq' });
+    expect(fromState.audio.whisperBackend).toBe('groq');
+    expect(fromState.audio.speechAuto).toBe(false);
   });
 
   it('loads server URLs from env', () => {
@@ -109,7 +110,8 @@ describe('loadConfig', () => {
 
   it('reads WHISPER_MODEL_PATH for the local spawned-sidecar path', () => {
     const cfg = loadConfig({
-      env: { ...base, WHISPER_BACKEND: 'local', WHISPER_MODEL_PATH: '/models/whisper/medium.en' },
+      env: { ...base, WHISPER_MODEL_PATH: '/models/whisper/medium.en' },
+      speechBackend: 'local',
     });
     expect(cfg.audio.whisperModelPath).toBe('/models/whisper/medium.en');
   });
@@ -153,18 +155,12 @@ describe('loadConfig', () => {
   });
 
   it('still aborts when a voice backend IS named but its credential is absent', () => {
-    const env = { ...base, WHISPER_BACKEND: 'groq' };
+    const env = { ...base };
     delete env['GROQ_API_KEY'];
-    const cfg = loadConfig({ env });
+    const cfg = loadConfig({ env, speechBackend: 'groq' });
     expect(cfg.audio.whisperBackend).toBe('groq');
     // The eager boot check is what aborts; config still reports the choice.
     expect(cfg.audio.groqApiKey).toBeUndefined();
-  });
-
-  it('rejects an invalid WHISPER_BACKEND (NO FALLBACK)', () => {
-    expect(() => loadConfig({ env: { ...base, WHISPER_BACKEND: 'bogus' } })).toThrow(
-      /Invalid WHISPER_BACKEND/,
-    );
   });
 
   it('rejects an invalid KOKORO_BACKEND (NO FALLBACK)', () => {

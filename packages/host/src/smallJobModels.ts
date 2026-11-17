@@ -15,29 +15,9 @@ import type { RunOnAccountWithCredit } from './accountFailover.js';
 // last error is thrown with the models tried — a failover list is a defined
 // order, not a way of hiding that the set model stopped working.
 
-/** The set model first, then its failovers. Overridden by PATCH_SMALL_JOB_MODELS. */
-export const DEFAULT_SMALL_JOB_MODELS: readonly string[] = [
-  'claude-haiku-4-5-20251001',
-  'claude-sonnet-4-5',
-];
-
-/**
- * Parse the operator's comma-separated list (set model first). Refuses an empty
- * list, an empty entry or a repeated model: a misconfigured order must fail at
- * startup, not quietly run on something nobody chose.
- */
-export function parseSmallJobModels(raw: string | undefined): readonly string[] {
-  if (raw === undefined) return DEFAULT_SMALL_JOB_MODELS;
-  const models = raw.split(',').map((m) => m.trim());
-  if (models.some((m) => m === '')) {
-    throw new Error(`PATCH_SMALL_JOB_MODELS has an empty entry: "${raw}"`);
-  }
-  const repeated = models.find((m, i) => models.indexOf(m) !== i);
-  if (repeated !== undefined) {
-    throw new Error(`PATCH_SMALL_JOB_MODELS names ${repeated} twice: "${raw}"`);
-  }
-  return models;
-}
+// The list is the shared setting `smallJobModels` (wire/events.ts, which also
+// holds the default and refuses an empty list or a repeated model); the host
+// reads the current value on every job, so an edit applies to the next one.
 
 /**
  * Run `run` on each model in order until one succeeds. A failure moves to the
@@ -73,7 +53,7 @@ export async function runWithSmallJobModels<T>(
 export function runSmallJob<T>(
   opts: {
     runOnAccountWithCredit: RunOnAccountWithCredit;
-    smallJobModels: readonly string[];
+    smallJobModels: () => readonly string[];
     logger?: { warn: (obj: object, msg: string) => void } | undefined;
   },
   label: string,
@@ -81,7 +61,7 @@ export function runSmallJob<T>(
 ): Promise<T | null> {
   return opts.runOnAccountWithCredit(label, (accessToken) =>
     runWithSmallJobModels(
-      opts.smallJobModels,
+      opts.smallJobModels(),
       label,
       (model) => run(accessToken, model),
       opts.logger,

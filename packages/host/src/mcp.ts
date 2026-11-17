@@ -86,16 +86,14 @@ export function patchToolDescriptions(): Record<string, string> {
   );
 }
 
-/** PATCH_TOOL_PROMPTS is the host's JSON of overrides; anything else is a bug to surface. */
-export function parseToolPromptOverrides(raw: string | undefined): Record<string, string> {
-  if (raw === undefined || raw === '') return {};
-  const parsed: unknown = JSON.parse(raw);
+/** The host's answer to `GET /internal/tool-prompts`: tool name → description; anything else is a bug to surface. */
+export function parseToolPromptOverrides(parsed: unknown): Record<string, string> {
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('patch-tools-server: PATCH_TOOL_PROMPTS is not an object (NO FALLBACK)');
+    throw new Error('patch-tools-server: the host sent tool prompts that are not an object');
   }
   for (const [k, v] of Object.entries(parsed)) {
     if (typeof v !== 'string') {
-      throw new Error(`patch-tools-server: PATCH_TOOL_PROMPTS.${k} is not a string (NO FALLBACK)`);
+      throw new Error(`patch-tools-server: the host's tool prompt for ${k} is not a string`);
     }
   }
   return parsed as Record<string, string>;
@@ -1723,10 +1721,21 @@ export async function runPatchToolsServerStdio(): Promise<void> {
   if (!localKey || localKey.length === 0) {
     throw new Error('patch-tools-server: PATCH_DAEMON_LOCAL_KEY env var missing (NO FALLBACK)');
   }
+  const currentKey = (): string =>
+    localKeyFile && localKeyFile.length > 0 ? readFileSync(localKeyFile, 'utf8').trim() : localKey;
+  // The user's edits of tool descriptions come from the host as this process
+  // starts, so a turn's child always begins from the current set.
+  const toolPromptOverrides = parseToolPromptOverrides(
+    await udsRequest<unknown>(hostSocketPath, {
+      method: 'GET',
+      path: '/internal/tool-prompts',
+      localKey: currentKey(),
+    }),
+  );
   const server = buildPatchToolsServer({
     hostSocketPath,
     chatId,
-    toolPromptOverrides: parseToolPromptOverrides(process.env['PATCH_TOOL_PROMPTS']),
+    toolPromptOverrides,
     localKey:
       localKeyFile && localKeyFile.length > 0
         ? () => {

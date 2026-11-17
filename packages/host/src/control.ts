@@ -143,6 +143,11 @@ export interface BuildOptions {
    * authority.
    */
   localKey?: string;
+  /**
+   * The user's edits of Patch tools' descriptions (spec/06 § Tool prompts),
+   * read on each request so the tools process a turn starts sees the current set.
+   */
+  toolPromptOverrides?: () => Record<string, string>;
   /** Jobs store backing patch_job_*. Production: RemoteJobsStore. Tests: MemoryJobsStore. */
   jobs?: AsyncJobsInterface;
   /** Optional upstream emit hook — used to surface cross-chat tool events for audit. */
@@ -1754,6 +1759,12 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     const auth = checkAuth(req);
     if (!auth.ok) return reply.code(401).send({ error: auth.reason });
     return accountsCall(reply, { op: 'list' });
+  });
+  app.get('/internal/tool-prompts', async (_req, reply) => {
+    if (!opts.toolPromptOverrides) {
+      return reply.code(503).send({ error: 'tool prompts not wired on this host' });
+    }
+    return opts.toolPromptOverrides();
   });
   app.get('/internal/accounts', async (_req, reply) => accountsCall(reply, { op: 'list' }));
   app.put('/accounts/:backendId/order', async (req, reply) => {

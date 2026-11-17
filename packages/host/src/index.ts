@@ -93,7 +93,7 @@ import {
 } from '@patch/wire';
 import type { Logger } from 'pino';
 import { randomUUID } from 'node:crypto';
-import { loadConfig } from './config.js';
+import { loadConfig, patchHomeFrom, type HostSpeechBackend } from './config.js';
 import { buildControl } from './control.js';
 import {
   createRemoteSpawnCoordinator,
@@ -113,6 +113,7 @@ import {
   providerForModel,
 } from '@patch/wire';
 import type { ChatInputEvent } from '@patch/wire';
+import { DEFAULT_SMALL_JOB_MODELS } from '@patch/wire';
 import { createMetaStore } from './meta.js';
 import { readAccountExhaustion, writeAccountExhaustion } from './accountAvailabilityStore.js';
 import { readUserMessages } from './userMessages.js';
@@ -428,8 +429,21 @@ async function assertHealthzPortFree(host: string, port: number): Promise<void> 
   await new Promise<void>((resolve) => probe.close(() => resolve()));
 }
 
+/** The provider keys a host cannot start without, given the speech engine its settings name. */
+function speechRequiredKeys(
+  backend: HostSpeechBackend,
+): Partial<Record<'groq' | 'elevenlabs', string>> {
+  if (backend === 'groq') return { groq: 'This host transcribes with Groq (the speech setting)' };
+  if (backend === 'elevenlabs') {
+    return { elevenlabs: 'This host transcribes with ElevenLabs (the speech setting)' };
+  }
+  return {};
+}
+
 export async function main(testHooks?: MainTestHooks): Promise<void> {
-  const config = loadConfig();
+  const config = loadConfig({
+    speechBackend: new HostStateStore(patchHomeFrom(process.env)).get().speechBackend,
+  });
   // A host already running holds this port. Find out NOW: everything below
   // (hydrate re-sends each interrupted turn, the control socket is unlinked and
   // re-bound) acts on state the running host is using, so a second host that
@@ -494,16 +508,7 @@ async function startHost(
       deepgram: config.audio.deepgramApiKey,
       assemblyai: config.audio.assemblyaiApiKey,
     },
-    ...(config.audio.whisperBackend === 'groq'
-      ? { requiredToStart: { groq: 'This host transcribes with Groq (WHISPER_BACKEND=groq)' } }
-      : {}),
-    ...(config.audio.whisperBackend === 'elevenlabs'
-      ? {
-          requiredToStart: {
-            elevenlabs: 'This host transcribes with ElevenLabs (WHISPER_BACKEND=elevenlabs)',
-          },
-        }
-      : {}),
+    requiredToStart: speechRequiredKeys(config.audio.whisperBackend),
   });
   validateWhisperCredentials({
     ...config.audio,
@@ -929,15 +934,15 @@ async function startHost(
   const effectiveToolsPrompt = (): string =>
     harnessToolsPrompt === undefined ? getPatchToolsPrompt() : harnessToolsPrompt;
   let harnessSkills: string[] | 'all' | undefined = persistedHostState.harnessSkills;
-  // Edits of Patch tools' descriptions. The MCP child reads them from its
-  // launch environment, so each turn's child starts from the current set.
+  // Edits of Patch tools' descriptions. The MCP child asks the host for them
+  // (`GET /internal/tool-prompts`) as it starts, so each turn's child starts
+  // from the current set.
   let toolPromptOverrides: Record<string, string> = persistedHostState.toolPromptOverrides ?? {};
   const toolPromptDefaults = patchToolDescriptions();
-  const mcpEnv: Record<string, string> = {};
-  const publishToolPrompts = (): void => {
-    mcpEnv['PATCH_TOOL_PROMPTS'] = JSON.stringify(toolPromptOverrides);
-  };
-  publishToolPrompts();
+  // The small one-shot jobs' model list (shared `smallJobModels`). Read on
+  // every job, so an edit applies to the next one.
+  let smallJobModels: readonly string[] =
+    persistedHostState.smallJobModels ?? DEFAULT_SMALL_JOB_MODELS;
   // The three "layer" toggles (spec/14 § Agent behavior). Unlike the fields
   // above, these always resolve to a concrete boolean — there is no "SDK
   // default" reading for them to fall back to, only a stated default per
@@ -1463,6 +1468,8 @@ async function startHost(
   let onComponentsSettled = (): void => {};
   // Re-picks the speech engine when a speech key is added or removed.
   let onSpeechKeysChanged = (): void => {};
+  /** Set once the speech stack is up: swap the engine for the one the setting now names. */
+  let onSpeechBackendChanged = (): void => {};
   const components = new ComponentManager({
     root: join(config.patchHome, 'components'),
     hostId: selfHostId,
@@ -2103,9 +2110,33 @@ async function startHost(
     }
     if (JSON.stringify(shared.toolPromptOverrides) !== JSON.stringify(toolPromptOverrides)) {
       toolPromptOverrides = shared.toolPromptOverrides;
-      publishToolPrompts();
       hostStateStore.update({ toolPromptOverrides });
       logger.info('tool prompt overrides changed');
+    }
+    if (JSON.stringify(shared.smallJobModels) !== JSON.stringify(smallJobModels)) {
+      smallJobModels = shared.smallJobModels;
+      hostStateStore.update({ smallJobModels: [...smallJobModels] });
+      logger.info({ smallJobModels }, 'small-job models changed');
+    }
+    // A host whose own state says `mock` is a test fixture: no setting moves it.
+    if (hostStateStore.get().speechBackend !== 'mock') {
+      const speech: HostSpeechBackend | undefined =
+        shared.speechBackend === 'auto' ? undefined : shared.speechBackend;
+      if (speech !== hostStateStore.get().speechBackend) {
+        // Refuse a named engine whose credential is missing, saying which (NO FALLBACK).
+        validateWhisperCredentials({
+          ...config.audio,
+          whisperBackend: speech ?? 'off',
+          groqApiKey: providerKeys.get('groq'),
+          elevenlabsApiKey: providerKeys.get('elevenlabs'),
+        });
+        hostStateStore.update({ speechBackend: speech });
+        config.audio.whisperBackend = speech ?? 'off';
+        config.audio.speechAuto = speech === undefined;
+        providerKeys.setRequiredToStart(speechRequiredKeys(config.audio.whisperBackend));
+        logger.info({ speechBackend: shared.speechBackend }, 'speech engine setting changed');
+        onSpeechBackendChanged();
+      }
     }
     accountStrategy = shared.accountStrategy;
   };
@@ -4345,14 +4376,14 @@ async function startHost(
   const translateRecurrenceRule = makeRecurrenceTranslator({
     sdkBackend,
     runOnAccountWithCredit,
-    smallJobModels: config.smallJobModels,
+    smallJobModels: () => smallJobModels,
     logger,
   });
   // spec/14 § Message links — the Summarise button's one-shot.
   const summariseLink = makeLinkSummariser({
     sdkBackend,
     runOnAccountWithCredit,
-    smallJobModels: config.smallJobModels,
+    smallJobModels: () => smallJobModels,
   });
   let pullQueuedFromServer: ((chatId: string) => Promise<ChatInputEvent[]>) | undefined;
   const strayProcesses = new StrayProcessTracker();
@@ -4533,7 +4564,7 @@ async function startHost(
     generateTitle: makeTitleGenerator({
       sdkBackend,
       runOnAccountWithCredit,
-      smallJobModels: config.smallJobModels,
+      smallJobModels: () => smallJobModels,
       // A Codex chat is titled on its own model, like its goal check (below).
       codex: { sdkBackend: routedBackend, resolveOAuth: resolveModelOAuth },
       local: { sdkBackend: routedBackend, resolveOAuth: resolveModelOAuth },
@@ -4546,7 +4577,7 @@ async function startHost(
     generateStatus: makeStatusGenerator({
       sdkBackend,
       runOnAccountWithCredit,
-      smallJobModels: config.smallJobModels,
+      smallJobModels: () => smallJobModels,
       logger,
     }),
     // spec/04 § Goals: after each turn settles on a chat with an active goal,
@@ -4565,7 +4596,7 @@ async function startHost(
     summarizeToolRun: makeToolRunSummarizer({
       sdkBackend,
       runOnAccountWithCredit,
-      smallJobModels: config.smallJobModels,
+      smallJobModels: () => smallJobModels,
       logger,
     }),
     // spec/04 § Send back — the one-line summary a side branch's conclusion
@@ -4573,7 +4604,7 @@ async function startHost(
     summarizeBranchSendBack: makeBranchSendBackSummarizer({
       sdkBackend,
       runOnAccountWithCredit,
-      smallJobModels: config.smallJobModels,
+      smallJobModels: () => smallJobModels,
       logger,
     }),
     // spec/06 § Session rotation — the handoff digest a scheduled rotation
@@ -4592,7 +4623,7 @@ async function startHost(
     mcpServer: {
       command: mcpBin.command,
       args: mcpBin.args,
-      env: Object.assign(mcpEnv, {
+      env: {
         PATCH_HOST_SOCKET: config.socketPath,
         PATCH_DAEMON_SOCKET: config.socketPath,
         // The child presents this as a Bearer on every socket call (spec/02
@@ -4606,7 +4637,7 @@ async function startHost(
         // PATCH_CHAT_ID is injected per-query in chatRunner.runQuery —
         // the MCP child needs the *current* chatId, not a static one.
         // See group 10 BLOCKER A.2.
-      }),
+      },
     },
     // Group 11: prepend the broadcast `<system-reminder>` for special threads.
     preprocessInput: (req) => {
@@ -4731,10 +4762,7 @@ async function startHost(
       // A meeting needs no setup: on a machine with no speech model and no
       // engine chosen, the first clip fetches the model. Until it lands each
       // clip says so (it is not transcribed — never a made-up transcript).
-      if (
-        whisper instanceof UnconfiguredWhisperBackend &&
-        process.env['WHISPER_BACKEND'] === undefined
-      ) {
+      if (whisper instanceof UnconfiguredWhisperBackend && config.audio.speechAuto) {
         throw preparingSpeechModel();
       }
       return dictationTranscribers.local.transcribeClip(wav, 'wav');
@@ -4751,7 +4779,7 @@ async function startHost(
         if (!process.env['DIARISE_MODEL_PATH']) return undefined;
         return async (session: string, wav: Buffer) => {
           if (!(whisper instanceof LocalWhisperBackend))
-            throw new Error('DIARISE_MODEL_PATH is set but WHISPER_BACKEND is not local');
+            throw new Error('DIARISE_MODEL_PATH is set but the speech engine is not local');
           return whisper.transcribeVoices(session, wav);
         };
       }
@@ -5223,6 +5251,7 @@ async function startHost(
   claudeCliTimer.unref?.();
 
   const app = await buildControl({
+    toolPromptOverrides: () => toolPromptOverrides,
     logger: true,
     daemon,
     localKey,
@@ -5428,20 +5457,17 @@ async function startHost(
   // spec/02 § Optional components: installing the speech model is what turns
   // local speech-to-text ON, the same contract as Kokoro below. A machine that
   // has the Whisper component (weights verified, runtime built) transcribes
-  // with it whether or not WHISPER_BACKEND is set; an explicit env var still
+  // with it unless the speech setting names an engine; a named engine still
   // wins (`mock` for tests, `off` to hold a machine quiet, or a hosted engine).
   const whisperFromComponent = (): boolean =>
-    process.env['WHISPER_BACKEND'] === undefined &&
+    config.audio.speechAuto &&
     components.describe().find((c) => c.id === 'whisper')?.state === 'installed';
   // spec/02 § Speech set-up: a Groq key the user added in Settings → Providers is
   // the cloud route, chosen by adding it. With no env var and no installed
   // component it makes this host transcribe with Groq; an installed local model
   // wins because it costs nothing.
   const whisperFromKey = (): boolean =>
-    process.env['WHISPER_BACKEND'] === undefined &&
-    config.audio.whisperBackend === 'off' &&
-    !whisperFromComponent() &&
-    providerKeys.has('groq');
+    config.audio.speechAuto && !whisperFromComponent() && providerKeys.has('groq');
   const buildWhisper = (): WhisperBackend => {
     if (whisperFromKey()) {
       logger.info({ component: 'whisper' }, 'STT enabled: a Groq key is set');
@@ -5529,7 +5555,7 @@ async function startHost(
   const repickWhisper = (): void => {
     const current = whisper;
     if (current === undefined) return;
-    if (process.env['WHISPER_BACKEND'] !== undefined) return;
+    if (!config.audio.speechAuto) return;
     const want = whisperFromComponent() ? 'local' : whisperFromKey() ? 'groq' : 'off';
     const have =
       current instanceof UnconfiguredWhisperBackend
@@ -5540,6 +5566,17 @@ async function startHost(
     if (want === have) return;
     installWhisper(buildWhisper());
     void current.close().catch(() => undefined);
+  };
+  onSpeechBackendChanged = (): void => {
+    const current = whisper;
+    if (current === undefined) return;
+    installWhisper(buildWhisper());
+    void current.close().catch(() => undefined);
+    if (config.audio.whisperBackend === 'parakeet') {
+      void (whisper as ParakeetWhisperBackend).warm().catch((err: unknown) => {
+        logger.error({ err: String(err) }, 'speech engine parakeet failed to load');
+      });
+    }
   };
   onComponentsSettled = repickWhisper;
   onSpeechKeysChanged = repickWhisper;

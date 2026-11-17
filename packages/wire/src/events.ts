@@ -577,6 +577,23 @@ export const CLAUDE_BACKEND_ID = 'claude-code';
  * from the feature being off, which is what the separate on/off flag is for.
  */
 export const QUESTION_EXPIRY_SECONDS_DEFAULT = 600;
+
+/** The small-job model list a fresh account starts with (spec/02 § Small jobs). */
+export const DEFAULT_SMALL_JOB_MODELS: readonly string[] = [
+  'claude-haiku-4-5-20251001',
+  'claude-sonnet-4-5',
+];
+
+/** The speech-to-text engines a user can name (`auto` = follow what the host has). */
+export const SpeechBackendSetting = z.enum([
+  'auto',
+  'off',
+  'groq',
+  'elevenlabs',
+  'local',
+  'parakeet',
+]);
+export type SpeechBackendSetting = z.infer<typeof SpeechBackendSetting>;
 export const QUESTION_EXPIRY_SECONDS_MIN = 5;
 export const QUESTION_EXPIRY_SECONDS_MAX = 3600;
 
@@ -2450,6 +2467,21 @@ export const SharedSettings = z
      * launch, so an edit reaches the next turn.
      */
     toolPromptOverrides: z.record(z.string().min(1), z.string().min(1)),
+    /**
+     * The ordered model list the small one-shot jobs run on (spec/02 § Small
+     * jobs): the first entry is the set model, each later one a failover. No
+     * empty list and no model named twice.
+     */
+    smallJobModels: z
+      .array(z.string().min(1))
+      .min(1)
+      .refine((m) => new Set(m).size === m.length, 'a model is named twice'),
+    /**
+     * Which speech-to-text engine hosts transcribe with (spec/02 § Speech
+     * set-up). `auto` follows what each host has: an installed local model,
+     * else a Groq key, else no speech engine. The others name one engine.
+     */
+    speechBackend: SpeechBackendSetting,
     accountStrategy: z.object({ claude: AccountStrategy, codex: AccountStrategy }).strict(),
   })
   .strict();
@@ -2535,6 +2567,8 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   harnessSystemPrompt: '',
   harnessToolsPrompt: null,
   toolPromptOverrides: {},
+  smallJobModels: [...DEFAULT_SMALL_JOB_MODELS],
+  speechBackend: 'auto',
   harnessSkills: null,
   harnessMemoryEnabled: false,
   accountStrategy: { claude: 'priority', codex: 'priority' },
