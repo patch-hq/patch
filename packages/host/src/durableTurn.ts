@@ -95,9 +95,9 @@ export interface DurableTurnRequest {
   log: DurableTurnLog;
 }
 
-const TURN_META = 'turn.json';
-const CONSUMED = 'consumed.json';
-const RUNNER_LOG = 'runner.log';
+export const TURN_META = 'turn.json';
+export const CONSUMED = 'consumed.json';
+export const RUNNER_LOG = 'runner.log';
 /** How much of claude's stderr a kept failure log carries. */
 const KEPT_STDERR_BYTES = 32 * 1024;
 /** The field each replayed/live line carries to `oneShotRun`, then loses. */
@@ -115,18 +115,18 @@ export function claudePidFor(config: DurableTurnConfig, chatId: string): number 
   );
 }
 
-function writeJsonAtomic(path: string, value: unknown): void {
+export function writeJsonAtomic(path: string, value: unknown): void {
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(value)}\n`);
   renameSync(tmp, path);
 }
 
-function readJson<T>(path: string): T | undefined {
+export function readJson<T>(path: string): T | undefined {
   if (!existsSync(path)) return undefined;
   return JSON.parse(readFileSync(path, 'utf8')) as T;
 }
 
-function isAlive(pid: number): boolean {
+export function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
@@ -274,7 +274,28 @@ export function versionDirsInUse(turnsDir: string, versionsDir: string): Set<str
 
 // ---- Live turns in this process ---------------------------------------------
 
-const liveTurns = new Set<DurableTurn>();
+/**
+ * What this process must let go of, not end, as it exits: a Claude turn
+ * (`DurableTurn`) or a Codex one (`codexDurable.ts`).
+ */
+export interface LiveTurn {
+  readonly chatId: string;
+  readonly runnerUp: boolean;
+  persistConsumed(): void;
+  detach(): void;
+}
+const liveTurns = new Set<LiveTurn>();
+
+export function registerLiveTurn(turn: LiveTurn): void {
+  liveTurns.add(turn);
+}
+export function unregisterLiveTurn(turn: LiveTurn): void {
+  liveTurns.delete(turn);
+}
+/** Whether this process is going down and must leave runners alone. */
+export function isDetachingDurableTurns(): boolean {
+  return detaching;
+}
 /**
  * Set as this process goes (graceful shutdown, a crash, an install's
  * restart). From then on nothing may kill a runner: the SDK's own exit hook
@@ -408,7 +429,8 @@ export class DurableTurn {
       // A turn of this chat still running in this process is the one being
       // replaced: its runner is about to be SIGTERMed, and that is an ending
       // it should report as a kill, not as a runner that died unexplained.
-      for (const t of liveTurns) if (t !== this && t.chatId === this.chatId) t.proc?.supersede();
+      for (const t of liveTurns)
+        if (t !== this && t.chatId === this.chatId && t instanceof DurableTurn) t.proc?.supersede();
       retireTurn(this.dir);
     }
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
