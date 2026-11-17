@@ -521,6 +521,21 @@ interface ChatState {
   /** Chats whose transcript has been asked for and not yet fully delivered. */
   replaying: Record<string, true>;
   setReplaying(chatId: string, on: boolean): void;
+  /**
+   * Older entries remain on the server above what this chat shows (spec/05 §
+   * Loading): the transcript offers to load them as the reader scrolls up.
+   */
+  historyMore: Record<string, boolean>;
+  setHistoryMore(chatId: string, more: boolean): void;
+  /** An older page is on its way for this chat. */
+  historyLoadingEarlier: Record<string, true>;
+  setHistoryLoadingEarlier(chatId: string, on: boolean): void;
+  /**
+   * Put a chat's committed entries back in record order once an older page has
+   * landed after them. Entries not yet committed (an unsent message, a reply
+   * still streaming) keep their place at the end.
+   */
+  orderTimelineBySeq(chatId: string): void;
   /** Nothing in flight any more — the socket that carried the asks is gone. */
   clearReplaying(): void;
   /** Drop a chat row + its timeline (post-DELETE). */
@@ -1083,6 +1098,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   hydrated: false,
   branchGraphs: {},
   replaying: {},
+  historyMore: {},
+  historyLoadingEarlier: {},
   sideThreadPermissions: {},
   activeChatId: null,
   openKebabFor: null,
@@ -3446,6 +3463,41 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((s) => ({ timelines: { ...s.timelines, [chatId]: [] } }));
   },
 
+  orderTimelineBySeq(chatId) {
+    set((st) => {
+      const cur = st.timelines[chatId];
+      if (!cur || cur.length < 2) return st;
+      const committed = cur.filter(
+        (e) => e.localId === undefined && e.streaming !== true && e.seq >= 0,
+      );
+      const rest = cur.filter(
+        (e) => !(e.localId === undefined && e.streaming !== true && e.seq >= 0),
+      );
+      const ordered = [...committed].sort((a, b) => a.seq - b.seq);
+      if (
+        ordered.every((e, i) => e === committed[i]) &&
+        rest.length === cur.length - committed.length &&
+        committed.every((e, i) => cur[i] === e)
+      )
+        return st;
+      return { timelines: { ...st.timelines, [chatId]: [...ordered, ...rest] } };
+    });
+  },
+  setHistoryMore(chatId, more) {
+    set((st) => {
+      if ((st.historyMore[chatId] ?? false) === more) return st;
+      return { historyMore: { ...st.historyMore, [chatId]: more } };
+    });
+  },
+  setHistoryLoadingEarlier(chatId, on) {
+    set((st) => {
+      if ((st.historyLoadingEarlier[chatId] === true) === on) return st;
+      const next = { ...st.historyLoadingEarlier };
+      if (on) next[chatId] = true;
+      else delete next[chatId];
+      return { historyLoadingEarlier: next };
+    });
+  },
   setReplaying(chatId, on) {
     set((s) => {
       if ((s.replaying[chatId] === true) === on) return s;
@@ -3470,6 +3522,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       hydrated: false,
       branchGraphs: {},
       replaying: {},
+      historyMore: {},
+      historyLoadingEarlier: {},
       sideThreadPermissions: {},
       activeChatId: null,
       openKebabFor: null,

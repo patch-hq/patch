@@ -11,7 +11,7 @@ import type { JSX } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { useInstallPickedProviders } from './lib/useInstallPickedProviders.js';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
 import { Sidebar } from './components/Sidebar.js';
 import { SnoozeSheet } from './components/SnoozeSheet.js';
@@ -80,7 +80,13 @@ import { useVoiceStore } from './stores/voiceStore.js';
 import { composerHotkeyDown, composerHotkeyUp } from './lib/composerMic.js';
 import { api } from './api/rest.js';
 import { useDiscardUnsentNewChats } from './lib/unsentNewChat.js';
-import { PatchWs, defaultWsUrl, getActiveWs, setActiveWs } from './api/ws.js';
+import {
+  CHAT_INDEX_STALE_EVENT,
+  PatchWs,
+  defaultWsUrl,
+  getActiveWs,
+  setActiveWs,
+} from './api/ws.js';
 import {
   startVoiceNote,
   sendVoiceNote,
@@ -134,6 +140,15 @@ export function AppShell(): JSX.Element {
   useLeaveWhenArchivedElsewhere(navigate);
   const hydrate = useChatStore((s) => s.hydrate);
   const pushError = useUiStore((s) => s.pushError);
+
+  // The account feed could not continue from what this device holds
+  // (spec/03 § Account feed): reload the chat index.
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    const reload = (): void => void queryClient.invalidateQueries({ queryKey: ['chats'] });
+    window.addEventListener(CHAT_INDEX_STALE_EVENT, reload);
+    return () => window.removeEventListener(CHAT_INDEX_STALE_EVENT, reload);
+  }, [queryClient]);
 
   // Cold-start: GET /api/chats → hydrate sidebar BEFORE the WS arrives.
   const { error: chatsError, isSuccess: chatsLoaded } = useQuery({
