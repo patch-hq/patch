@@ -5,7 +5,7 @@
 // offline. Hosts learn of it from the snapshot that follows.
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   AccountStrategy,
@@ -17,6 +17,7 @@ import {
 import {
   ClaudeSignInError,
   exchangeClaudeSignInCode,
+  listenForClaudeSignIn,
   parseClaudeSignInCode,
   startClaudeSignIn,
 } from '@patch/auth';
@@ -29,6 +30,8 @@ export interface SettingsRoutesDeps {
   shared: SharedSettingsService;
   /** Swaps the claude.ai code for a token; tests stand in for Anthropic. */
   exchangeClaudeCode?: typeof exchangeClaudeSignInCode;
+  /** Listens for claude.ai's redirect on this machine; tests stand in for the browser. */
+  listenForClaudeSignIn?: typeof listenForClaudeSignIn;
   now?: () => number;
 }
 
@@ -52,6 +55,13 @@ const OrderBody = z.object({ accountIds: z.array(z.string().min(1)).min(1) }).st
 const StrategyBody = z.object({ strategy: AccountStrategy }).strict();
 const AdoptBody = z.object({ hostId: z.string().min(1) }).strict();
 const KeyBody = z.object({ value: z.string().min(1) }).strict();
+const SignInStartBody = z
+  .object({
+    label: z.string().min(1).optional(),
+    /** Sign an existing row in again rather than adding one. */
+    accountId: z.string().min(1).optional(),
+  })
+  .strict();
 const SignInCompleteBody = z
   .object({
     signInId: z.string().min(1),
@@ -154,11 +164,68 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: SettingsRoute
   // ---- Signing in to Claude from a surface (spec/10 § Signing in to Claude) ----
   // The surface opens `url`, the person signs in on claude.ai, and the code the
   // page shows comes back to `complete`. The PKCE verifier stays here.
-  const signIns = new Map<string, { verifier: string; state: string; at: number }>();
+  type SignInStatus =
+    | { status: 'waiting' }
+    | { status: 'done' }
+    | { status: 'failed'; message: string };
+  const signIns = new Map<
+    string,
+    {
+      verifier: string;
+      state: string;
+      at: number;
+      /** Set when claude.ai redirects back to this machine; the code is never pasted. */
+      loopback?: { redirectUri: string; close: () => void; outcome: SignInStatus };
+    }
+  >();
   const now = deps.now ?? Date.now;
+  const drop = (id: string): void => {
+    signIns.get(id)?.loopback?.close();
+    signIns.delete(id);
+  };
   const sweep = (): void => {
-    for (const [id, s] of signIns) if (now() - s.at > CLAUDE_SIGNIN_TTL_MS) signIns.delete(id);
-    while (signIns.size >= CLAUDE_SIGNIN_MAX) signIns.delete(signIns.keys().next().value as string);
+    for (const [id, s] of signIns) if (now() - s.at > CLAUDE_SIGNIN_TTL_MS) drop(id);
+    while (signIns.size >= CLAUDE_SIGNIN_MAX) drop(signIns.keys().next().value as string);
+  };
+
+  /** Spend the code on a token and store it exactly as a pasted token is stored. */
+  const redeem = async (
+    pending: { verifier: string; state: string; loopback?: { redirectUri: string } },
+    code: string,
+    who: { label?: string | undefined; accountId?: string | undefined },
+  ): Promise<void> => {
+    let token: string;
+    try {
+      ({ accessToken: token } = await (deps.exchangeClaudeCode ?? exchangeClaudeSignInCode)({
+        code,
+        verifier: pending.verifier,
+        state: pending.state,
+        ...(pending.loopback ? { redirectUri: pending.loopback.redirectUri } : {}),
+      }));
+    } catch (e) {
+      if (e instanceof ClaudeSignInError) {
+        throw new SettingsError(
+          e.kind === 'rejected' ? 400 : 502,
+          e.kind === 'rejected' ? 'credential_rejected' : 'credential_unreachable',
+          e.message,
+        );
+      }
+      throw e;
+    }
+    if (who.accountId) await shared.connectClaude(who.accountId, token);
+    else await shared.addClaude(token, who.label);
+  };
+
+  /**
+   * The browser is on this machine only when the request came over loopback
+   * and was not relayed by a proxy or tunnel; otherwise `localhost` in the
+   * person's browser would not be this server.
+   */
+  const browserIsHere = (req: FastifyRequest): boolean => {
+    const addr = req.socket.remoteAddress ?? '';
+    const loop = addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
+    const h = req.headers;
+    return loop && !h['x-forwarded-for'] && !h['forwarded'] && !h['x-forwarded-host'];
   };
 
   app.post('/api/accounts/claude-code/signin', async (req, reply) => {
@@ -169,45 +236,98 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: SettingsRoute
         .code((e as Error & { statusCode?: number }).statusCode ?? 401)
         .send({ error: (e as Error).message });
     }
+    const parsedBody = SignInStartBody.safeParse(req.body ?? {});
+    if (!parsedBody.success) {
+      return reply.code(400).send({ error: 'invalid_input', message: parsedBody.error.message });
+    }
+    const who = parsedBody.data;
     sweep();
-    const started = startClaudeSignIn();
     const signInId = randomUUID();
-    signIns.set(signInId, { verifier: started.verifier, state: started.state, at: now() });
-    return reply.code(200).send({ signInId, url: started.url });
+    if (!browserIsHere(req)) {
+      const started = startClaudeSignIn();
+      signIns.set(signInId, { verifier: started.verifier, state: started.state, at: now() });
+      return reply.code(200).send({ signInId, url: started.url, mode: 'code' });
+    }
+    // Same machine: claude.ai sends the code straight back to a listener here,
+    // so there is nothing to paste and a login detour cannot lose it.
+    const state = randomBytes(32).toString('base64url');
+    const listener = await (deps.listenForClaudeSignIn ?? listenForClaudeSignIn)(state);
+    const started = startClaudeSignIn(randomBytes, {
+      loopbackRedirect: listener.redirectUri,
+      state,
+    });
+    const loopback = {
+      redirectUri: listener.redirectUri,
+      close: listener.close,
+      outcome: { status: 'waiting' } as SignInStatus,
+    };
+    signIns.set(signInId, { verifier: started.verifier, state, at: now(), loopback });
+    void listener.result.then(async (r) => {
+      if ('error' in r) {
+        loopback.outcome = { status: 'failed', message: r.error };
+        return;
+      }
+      try {
+        await redeem({ verifier: started.verifier, state, loopback }, r.code, who);
+        loopback.outcome = { status: 'done' };
+      } catch (e) {
+        loopback.outcome = { status: 'failed', message: (e as Error).message };
+      }
+    });
+    return reply.code(200).send({ signInId, url: started.url, mode: 'loopback' });
+  });
+
+  app.get('/api/accounts/claude-code/signin/:signInId', async (req, reply) => {
+    try {
+      await requireAuth(req, deps.registry);
+    } catch (e) {
+      return reply
+        .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+        .send({ error: (e as Error).message });
+    }
+    const id = (req.params as { signInId: string }).signInId;
+    const pending = signIns.get(id);
+    if (!pending?.loopback || now() - pending.at > CLAUDE_SIGNIN_TTL_MS) {
+      drop(id);
+      return reply
+        .code(410)
+        .send({ error: 'signin_expired', message: 'That sign-in has expired. Start it again.' });
+    }
+    const out = pending.loopback.outcome;
+    if (out.status !== 'waiting') signIns.delete(id);
+    return reply.code(200).send(out);
+  });
+
+  app.delete('/api/accounts/claude-code/signin/:signInId', async (req, reply) => {
+    try {
+      await requireAuth(req, deps.registry);
+    } catch (e) {
+      return reply
+        .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+        .send({ error: (e as Error).message });
+    }
+    drop((req.params as { signInId: string }).signInId);
+    return reply.code(204).send();
   });
 
   app.post(
     '/api/accounts/claude-code/signin/complete',
     handle(SignInCompleteBody, async (_req, body) => {
       const pending = signIns.get(body.signInId);
-      if (!pending || now() - pending.at > CLAUDE_SIGNIN_TTL_MS) {
-        signIns.delete(body.signInId);
+      if (!pending || pending.loopback || now() - pending.at > CLAUDE_SIGNIN_TTL_MS) {
+        drop(body.signInId);
         throw new SettingsError(410, 'signin_expired', 'That sign-in has expired. Start it again.');
       }
       const parsed = parseClaudeSignInCode(body.code, pending.state);
       if ('error' in parsed) throw new SettingsError(400, 'invalid_input', parsed.error);
-      let token: string;
       try {
-        ({ accessToken: token } = await (deps.exchangeClaudeCode ?? exchangeClaudeSignInCode)({
-          code: parsed.code,
-          verifier: pending.verifier,
-          state: pending.state,
-        }));
+        await redeem(pending, parsed.code, body);
       } catch (e) {
-        if (e instanceof ClaudeSignInError) {
-          // A refused code is spent; an unreachable Claude may answer a retry.
-          if (e.kind === 'rejected') signIns.delete(body.signInId);
-          throw new SettingsError(
-            e.kind === 'rejected' ? 400 : 502,
-            e.kind === 'rejected' ? 'credential_rejected' : 'credential_unreachable',
-            e.message,
-          );
-        }
+        // A refused code is spent; an unreachable Claude may answer a retry.
+        if (e instanceof SettingsError && e.code === 'credential_rejected') drop(body.signInId);
         throw e;
       }
-      signIns.delete(body.signInId);
-      if (body.accountId) await shared.connectClaude(body.accountId, token);
-      else await shared.addClaude(token, body.label);
+      drop(body.signInId);
     }),
   );
 

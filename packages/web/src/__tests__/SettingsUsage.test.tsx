@@ -207,6 +207,7 @@ describe('Settings → Usage → changing accounts', () => {
     vi.spyOn(api, 'claudeSignInStart').mockResolvedValue({
       signInId: 's1',
       url: 'https://claude.com/cai/oauth/authorize?state=x',
+      mode: 'code',
     });
     const complete = vi
       .spyOn(api, 'claudeSignInComplete')
@@ -220,9 +221,10 @@ describe('Settings → Usage → changing accounts', () => {
         'noopener',
       ),
     );
-    expect(await screen.findByTestId('claude-signin-hint')).toHaveTextContent(
+    expect(await screen.findByTestId('claude-signin-reopen')).toHaveTextContent(
       'Open claude.ai again',
     );
+    expect(screen.queryByTestId('claude-signin-hint')).toBeNull();
     fireEvent.change(await screen.findByTestId('claude-signin-code'), {
       target: { value: ' code#x ' },
     });
@@ -234,10 +236,39 @@ describe('Settings → Usage → changing accounts', () => {
     expect(screen.queryByTestId('claude-signin-code')).toBeNull();
   });
 
+  it('a same-machine Claude sign-in needs no code: it waits, then the account appears', async () => {
+    loadShared();
+    vi.spyOn(window, 'open').mockReturnValue(null);
+    vi.spyOn(api, 'claudeSignInStart').mockResolvedValue({
+      signInId: 's1',
+      url: 'https://x',
+      mode: 'loopback',
+    });
+    const status = vi
+      .spyOn(api, 'claudeSignInStatus')
+      .mockResolvedValueOnce({ status: 'waiting' })
+      .mockResolvedValue({ status: 'done' });
+    vi.spyOn(api, 'sharedSettings').mockResolvedValue(
+      sharedState({ version: 2, secrets: { claude: [WORK] } }),
+    );
+    renderSettings('/settings/usage');
+    fireEvent.click(screen.getByTestId('claude-signin-start'));
+    expect(await screen.findByTestId('claude-signin-wait')).toBeInTheDocument();
+    expect(screen.queryByTestId('claude-signin-code')).toBeNull();
+    await waitFor(() => expect(status).toHaveBeenCalledTimes(2), { timeout: 4000 });
+    await waitFor(() =>
+      expect(screen.getByTestId('account-claude-code-acct-a')).toBeInTheDocument(),
+    );
+  });
+
   it('an expired Claude sign-in goes back to the start, saying so', async () => {
     loadShared();
     vi.spyOn(window, 'open').mockReturnValue(null);
-    vi.spyOn(api, 'claudeSignInStart').mockResolvedValue({ signInId: 's1', url: 'https://x' });
+    vi.spyOn(api, 'claudeSignInStart').mockResolvedValue({
+      signInId: 's1',
+      url: 'https://x',
+      mode: 'code',
+    });
     vi.spyOn(api, 'claudeSignInComplete').mockRejectedValue(
       new ApiError(410, 'signin_expired', {
         error: 'signin_expired',
