@@ -3,7 +3,7 @@
 // the host's `activity` has gone idle.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { ChatRoute } from '../routes/ChatRoute.js';
 import { useChatStore } from '../stores/chatStore.js';
@@ -93,6 +93,23 @@ describe('running tool call', () => {
     useChatStore.getState().applyEvent({ ...call, startedAt: NOW - 90_000 });
     renderChat();
     expect(screen.getByTestId('tool-running-elapsed').textContent).toBe('1m 30s');
+  });
+
+  // A long run of short calls: each call's clock restarts, the turn's does not.
+  it('shows how long the whole turn has been working beside the call clock', () => {
+    seed();
+    useChatStore.getState().applyEvent({
+      type: 'chat.message',
+      chatId: 'c1',
+      seq: 0,
+      role: 'user',
+      content: 'go',
+      createdAt: NOW - 25 * 60_000,
+    } as never);
+    useChatStore.getState().applyEvent({ ...call, startedAt: NOW - 5_000 });
+    renderChat();
+    expect(screen.getByTestId('tool-running-elapsed').textContent).toBe('5s');
+    expect(screen.getByTestId('tool-running-turn').textContent).toBe('working for 25m 00s');
   });
 
   it('shows the spinner but no clock when the start time is unknown', () => {
@@ -239,5 +256,108 @@ describe('running tool call', () => {
     const group = screen.getByTestId('tool-group');
     expect(group.getAttribute('data-open')).toBe('false');
     expect(screen.getByTestId('tool-running')).toBeTruthy();
+  });
+
+  // 12 Nov 2026: a growing run showed only a vague AI label ("Investigating…")
+  // that lagged several calls behind, so a working chat looked stuck.
+  it('shows the newest call beside the label of a live collapsed run, not once it is final', () => {
+    seed();
+    const store = useChatStore.getState();
+    store.applyEvent(call);
+    store.applyEvent({
+      ...call,
+      seq: 2,
+      callId: 'call-2',
+      args: { command: 'ls', description: 'List the repo' },
+    });
+    store.applyEvent({
+      type: 'chat.tool_run_summary',
+      chatId: 'c1',
+      callIds: ['call-1'],
+      summary: 'Investigating…',
+      live: true,
+      seq: 3,
+    });
+    renderChat();
+    expect(screen.getByTestId('tool-group-latest').textContent).toBe('List the repo');
+    act(() => {
+      store.applyEvent({
+        type: 'chat.tool_result',
+        chatId: 'c1',
+        callId: 'call-1',
+        result: 'ok',
+        seq: 4,
+      } as never);
+      store.applyEvent({
+        type: 'chat.tool_result',
+        chatId: 'c1',
+        callId: 'call-2',
+        result: 'ok',
+        seq: 5,
+      } as never);
+      store.applyEvent({
+        type: 'chat.tool_run_summary',
+        chatId: 'c1',
+        callIds: ['call-1', 'call-2'],
+        summary: 'Looked around',
+        seq: 6,
+      });
+    });
+    expect(screen.queryByTestId('tool-group-latest')).toBeNull();
+  });
+});
+
+describe('cancel one running command', () => {
+  const sent: unknown[] = [];
+  beforeEach(() => {
+    sent.length = 0;
+    useChatStore.getState()._reset();
+    usePresenceStore.getState().setConnection('connected');
+    usePresenceStore.getState().setHostOnline('d1', true);
+    setActiveWs({ send: (e: unknown) => sent.push(e) } as never);
+  });
+  afterEach(() => {
+    cleanup();
+    setActiveWs(null);
+  });
+  const call = {
+    type: 'chat.tool_call' as const,
+    chatId: 'c1',
+    seq: 1,
+    tool: 'Bash',
+    args: { command: 'sleep 100' },
+    callId: 'call-cancel',
+    startedAt: Date.now(),
+  };
+
+  it('sends chat.tool_cancel_request for just that call, then shows the chip once it returns as an error', () => {
+    seed();
+    useChatStore.getState().applyEvent(call);
+    renderChat();
+    fireEvent.click(screen.getByTestId('tool-cancel'));
+    expect(sent.filter((e) => (e as { type: string }).type === 'chat.tool_cancel_request')).toEqual(
+      [{ type: 'chat.tool_cancel_request', chatId: 'c1', callId: 'call-cancel' }],
+    );
+    expect(screen.queryByTestId('tool-cancelled')).toBeNull();
+    act(() => {
+      useChatStore.getState().applyEvent({
+        type: 'chat.tool_result',
+        chatId: 'c1',
+        tool: 'Bash',
+        callId: 'call-cancel',
+        result: 'Exit code 130',
+        isError: true,
+        seq: 2,
+      });
+    });
+    expect(screen.getByTestId('tool-cancelled').textContent).toBe('Cancelled by you');
+    expect(screen.queryByTestId('tool-cancel')).toBeNull();
+  });
+
+  it('offers no cancel on a non-Bash call', () => {
+    seed();
+    useChatStore.getState().applyEvent({ ...call, tool: 'Read', args: { file_path: '/x' } });
+    renderChat();
+    expect(screen.queryByTestId('tool-cancel')).toBeNull();
   });
 });

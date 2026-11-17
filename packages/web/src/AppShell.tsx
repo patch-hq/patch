@@ -23,9 +23,8 @@ import { SideThreadsPanel, SideThreadsReconciler } from './components/SideThread
 import { ColumnDivider } from './components/ColumnDivider.js';
 import { OfflineBanner } from './components/OfflineBanner.js';
 import { HostOfflineBanner } from './components/HostOfflineBanner.js';
-import { DesktopUpdateBanner } from './components/DesktopUpdateBanner.js';
+import { UpdateBanner } from './components/UpdateBanner.js';
 import { MeetingDetectionBanner } from './components/MeetingDetectionBanner.js';
-import { WebUpdateBanner } from './components/WebUpdateBanner.js';
 import { ConnectionDiagnosticsGate } from './components/ConnectionDiagnostics.js';
 import { IncomingCallBanner } from './components/IncomingCallBanner.js';
 import { SignInApprovalPrompt } from './components/SignInApprovalPrompt.js';
@@ -47,12 +46,15 @@ import { PageNotFound } from './components/PageNotFound.js';
 import { AppErrorBoundary } from './components/AppErrorBoundary.js';
 import { NewChatRoute } from './routes/NewChatRoute.js';
 import { JobsPaneRoute } from './routes/JobsPaneRoute.js';
+import { TriagePaneRoute } from './routes/TriagePaneRoute.js';
 import { PadsPaneRoute } from './routes/PadsPaneRoute.js';
 import { ViewPositionSync } from './components/ViewPositionSync.js';
 import { LifecycleRoute } from './routes/LifecycleRoute.js';
 import { JobPaneRoute } from './routes/JobPaneRoute.js';
 import { SettingsPaneRoute } from './routes/SettingsPaneRoute.js';
 import { IndexRedirect } from './routes/IndexRedirect.js';
+import { WelcomeRoute } from './routes/WelcomeRoute.js';
+import { ConnectRoute } from './routes/ConnectRoute.js';
 import { MenubarRoute, AUTO_CALL_KEY } from './routes/MenubarRoute.js';
 import { VoiceOverlayRoute } from './routes/VoiceOverlayRoute.js';
 import { SidebarWindowRoute } from './routes/SidebarWindowRoute.js';
@@ -65,6 +67,7 @@ import { useSectionCounts } from './lib/sectionCounts.js';
 import { useDocumentTitleSync } from './lib/documentTitle.js';
 import { useFrontChatReport } from './lib/frontChat.js';
 import { useChatStore, deriveBadge } from './stores/chatStore.js';
+import { useAgentWorkingIndicator } from './lib/agentWorkingIndicator.js';
 import { useSelectionStore } from './stores/selectionStore.js';
 import { stepVisibleChat } from './lib/chatGroups.js';
 import { useUiStore, SIDEBAR_MINI_WIDTH } from './stores/uiStore.js';
@@ -122,6 +125,7 @@ export function AppShell(): JSX.Element {
   // (spec/14 § New chat drafts).
   useDiscardUnsentNewChats();
   const activeChatId = useChatStore((s) => s.activeChatId);
+  useAgentWorkingIndicator();
   useLeaveWhenArchivedElsewhere(navigate);
   const hydrate = useChatStore((s) => s.hydrate);
   const pushError = useUiStore((s) => s.pushError);
@@ -165,6 +169,7 @@ export function AppShell(): JSX.Element {
           // `chat.state` only comes when something changes. `null` here is the
           // server saying it does not know, and stays unknown.
           backgroundTasks: c.backgroundTasks,
+          runningAgents: c.runningAgents,
           // spec/04 § Hidden. Nothing in this snapshot is hidden, and saying so
           // clears a stale `true` on a chat that was shown from another surface.
           hidden: c.hidden,
@@ -618,7 +623,9 @@ export function AppShell(): JSX.Element {
     path === '/menubar' ||
     path === '/voice-overlay' ||
     path === '/sidebar-window' ||
-    path === '/tab-window';
+    path === '/tab-window' ||
+    path === '/welcome' ||
+    path === '/connect';
 
   if (isBareRoute) {
     return (
@@ -628,6 +635,8 @@ export function AppShell(): JSX.Element {
           <Route path="/voice-overlay" element={<VoiceOverlayRoute />} />
           <Route path="/sidebar-window" element={<SidebarWindowRoute />} />
           <Route path="/tab-window" element={<TabWindowRoute ws={wsRef.current} />} />
+          <Route path="/welcome" element={<WelcomeRoute />} />
+          <Route path="/connect" element={<ConnectRoute />} />
         </Routes>
       </div>
     );
@@ -644,13 +653,10 @@ export function AppShell(): JSX.Element {
           ChatRoute, means it is never missing on the screens that aren't a
           chat, and never doubled on the ones that are. */}
       <HostOfflineBanner />
-      {/* Standing chrome, not an interruption: the shell has a newer build
-          staged and is waiting to be asked. Renders nothing in a browser. */}
-      <DesktopUpdateBanner />
+      {/* The one update prompt: a newer shell build or page is ready and
+          waiting to be asked. Renders nothing until one is. */}
+      <UpdateBanner />
       <MeetingDetectionBanner />
-      {/* Same contract, for the SPA bundle itself — a deploy landed while this
-          tab was open. Renders nothing until one has (lib/liveUpdate.ts). */}
-      <WebUpdateBanner />
       {/* A sustained voice session takes a strip IN FLOW at the top of the
           shell — it pushes the app down rather than floating over it, and says
           what the open line is doing in either mode (spec/07 § Session
@@ -678,6 +684,7 @@ export function AppShell(): JSX.Element {
             <Route path="/pads" element={<PadsPaneRoute ws={wsRef.current} mode="list" />} />
             <Route path="/pads/new" element={<PadsPaneRoute ws={wsRef.current} mode="new" />} />
             <Route path="/pads/:id" element={<PadsPaneRoute ws={wsRef.current} mode="open" />} />
+            <Route path="/triage" element={<TriagePaneRoute ws={wsRef.current} />} />
             <Route path="/jobs" element={<JobsPaneRoute ws={wsRef.current} />} />
             <Route path="/jobs/new" element={<JobPaneRoute ws={wsRef.current} />} />
             <Route path="/jobs/:id" element={<JobPaneRoute ws={wsRef.current} />} />

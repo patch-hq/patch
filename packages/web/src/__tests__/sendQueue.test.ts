@@ -161,6 +161,31 @@ describe('sendQueue', () => {
     vi.unstubAllGlobals();
   });
 
+  it('a hold released after the upload already failed still lets Retry deliver', async () => {
+    vi.mocked(api.uploadAttachment).mockRejectedValueOnce(new Error('boom'));
+    const localId = sendMessage('c1', 'late check', [image('a.png')], { send, hold: true });
+    await flush(); // upload failed first; the hook check has not landed yet
+    releaseHeld('c1', localId); // ...now it does
+    retryUpload('c1', localId);
+    await flush();
+    expect(sent).toEqual([
+      expect.objectContaining({ type: 'chat.input', chatId: 'c1', message: 'late check', localId }),
+    ]);
+  });
+
+  it('a hold cancelled after the upload already failed removes the turn', async () => {
+    vi.stubGlobal('URL', { ...URL, revokeObjectURL: vi.fn() });
+    vi.mocked(api.uploadAttachment).mockRejectedValueOnce(new Error('boom'));
+    const localId = sendMessage('c1', 'blocked', [image('a.png')], { send, hold: true });
+    await flush();
+    cancelHeld('c1', localId);
+    expect(useChatStore.getState().timelines['c1']).toEqual([]);
+    retryUpload('c1', localId); // nothing left to retry: says so, sends nothing
+    await flush();
+    expect(sent).toEqual([]);
+    vi.unstubAllGlobals();
+  });
+
   it('a same-text persisted turn from elsewhere never swallows a turn still uploading', () => {
     vi.mocked(api.uploadAttachment).mockReturnValue(new Promise(() => {}));
     const localId = sendMessage('c1', 'same', [image('a.png')], { send });

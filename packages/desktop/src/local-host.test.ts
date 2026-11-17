@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   HOST_SERVICE_LABEL,
+  HOST_SYSTEMD_UNITS,
   installLocalHost,
   isPairingCode,
   localHostStatus,
@@ -27,7 +28,17 @@ test('an installed host reports its service and identity', () => {
   writeFileSync(join(home, 'Library', 'LaunchAgents', `${HOST_SERVICE_LABEL}.plist`), '');
   mkdirSync(join(home, '.patch'));
   writeFileSync(join(home, '.patch', 'daemon-identity.json'), JSON.stringify({ hostId: 'D1' }));
-  assert.deepEqual(localHostStatus(home), { installed: true, hostId: 'D1' });
+  assert.deepEqual(localHostStatus(home, 'darwin'), { installed: true, hostId: 'D1' });
+});
+
+test('on Linux the host is its systemd user unit, not a launchd plist', () => {
+  const home = mkdtempSync(join(tmpdir(), 'patch-home-'));
+  mkdirSync(join(home, 'Library', 'LaunchAgents'), { recursive: true });
+  writeFileSync(join(home, 'Library', 'LaunchAgents', `${HOST_SERVICE_LABEL}.plist`), '');
+  assert.equal(localHostStatus(home, 'linux').installed, false);
+  mkdirSync(join(home, '.config', 'systemd', 'user'), { recursive: true });
+  writeFileSync(join(home, '.config', 'systemd', 'user', HOST_SYSTEMD_UNITS[0]), '');
+  assert.equal(localHostStatus(home, 'linux').installed, true);
 });
 
 test('only a base64url nonce counts as a pairing code', () => {

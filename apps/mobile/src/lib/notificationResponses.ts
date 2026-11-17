@@ -120,6 +120,47 @@ export async function registerDynamicCategoryIfNeeded(
   );
 }
 
+/** Marks a local re-presentation so the received listener does not re-present it again. */
+export const REPRESENTED_KEY = 'represented';
+
+/** The channel a re-presented notification posts to when the push did not name one. */
+const DEFAULT_CHANNEL = 'patch_messages';
+
+/**
+ * A push whose buttons carry their own text (quickReplies, a question's
+ * options) is drawn by the OS from whatever the dynamic category held at that
+ * moment — nothing at all on the first one, the PREVIOUS push's labels after.
+ * Rebuilding the category after the fact only helps the next notification, so
+ * once it is rebuilt the arrived notification is replaced by a local copy
+ * (same title, body, data and channel) that is drawn against the right
+ * buttons. Runs only where this app's JS received the push; a no-op for every
+ * notification that resolves to a static category.
+ */
+export async function presentWithDynamicCategory(notification: {
+  request: {
+    identifier: string;
+    content: { title?: string | null; body?: string | null; data?: Record<string, unknown> | null };
+  };
+}): Promise<void> {
+  const { identifier, content } = notification.request;
+  const data = content.data ?? {};
+  if (data[REPRESENTED_KEY] === '1') return;
+  const actions = parseActionsPayload(data['actions']);
+  if (!needsDynamicCategory(actions)) return;
+  await registerDynamicCategoryIfNeeded(actions);
+  await Notifications.dismissNotificationAsync(identifier);
+  const channelId = typeof data['channelId'] === 'string' ? data['channelId'] : DEFAULT_CHANNEL;
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: content.title ?? undefined,
+      body: content.body ?? undefined,
+      data: { ...data, [REPRESENTED_KEY]: '1' },
+      categoryIdentifier: DYNAMIC_CATEGORY,
+    },
+    trigger: { channelId },
+  });
+}
+
 /** The shape `addNotificationResponseReceivedListener` hands the callback. */
 export interface NotificationResponseLike {
   actionIdentifier: string;

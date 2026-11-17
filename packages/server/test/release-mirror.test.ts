@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { readAvailableRelease } from '../src/release-mirror.js';
 import {
   MIRROR_FORMAT,
   mergeHostManifests,
@@ -163,6 +164,36 @@ describe('mirrorOnce', () => {
     expect(readdirSync(dir).some((n) => n.startsWith('mobile-update-'))).toBe(false);
   });
 
+  it('serves both desktop feeds, but not the fixed-name copies a stable release carries for the website', async () => {
+    const files = {
+      ...GOOD(),
+      'latest-mac.yml': 'version: 1.2.3\n',
+      'Patch-1.2.3-arm64-mac.zip': 'MAC',
+      'latest-linux.yml': 'version: 1.2.3\n',
+      'Patch-1.2.3-x86_64.AppImage': 'LINUX',
+      'desktop-linux-latest.json': '{"version":"1.2.3"}',
+      'patch-1.2.3.apk': 'APK',
+      'Patch-mac-arm64.zip': 'MAC',
+      'Patch-mac-arm64.dmg': 'DMG',
+      'Patch-linux-x86_64.AppImage': 'LINUX',
+      'Patch-android.apk': 'APK',
+    };
+    await mirrorOnce(opts(github(files).fetchImpl));
+    for (const n of [
+      'latest-linux.yml',
+      'Patch-1.2.3-x86_64.AppImage',
+      'desktop-linux-latest.json',
+    ])
+      expect(existsSync(join(dir, n))).toBe(true);
+    for (const n of [
+      'Patch-mac-arm64.zip',
+      'Patch-mac-arm64.dmg',
+      'Patch-linux-x86_64.AppImage',
+      'Patch-android.apk',
+    ])
+      expect(existsSync(join(dir, n))).toBe(false);
+  });
+
   it('mirrors a served release again when it was mirrored by code that copied less', async () => {
     const files = { ...GOOD(), 'mobile-update.json': '{"runtimeVersion":"0.1.6"}' };
     const { fetchImpl } = github(files);
@@ -191,6 +222,13 @@ describe('mirrorOnce', () => {
     expect(existsSync(join(dir, 'host-latest.json'))).toBe(false);
     expect(readMirrorState(dir)).toBeNull();
     expect(readdirSync(dir)).toEqual([]);
+  });
+
+  it('peekOnly notes the release on offer and mirrors nothing', async () => {
+    expect(await mirrorOnce({ ...opts(github(GOOD()).fetchImpl), peekOnly: true })).toBeNull();
+    expect(readMirrorState(dir)).toBeNull();
+    expect(existsSync(join(dir, 'host-latest.json'))).toBe(false);
+    expect(readAvailableRelease(dir)?.version).toBe('1.2.3');
   });
 
   it('a manifest that names a target with no signed artifact changes nothing', async () => {

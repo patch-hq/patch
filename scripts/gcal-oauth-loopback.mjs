@@ -33,8 +33,12 @@ function arg(name, def) {
   return i >= 0 ? process.argv[i + 1] : def;
 }
 
-const clientPath = arg('client', '/Users/tomchambers/.gmail_credentials/credentials.json');
+const clientPath = arg('client');
 const dataDir = arg('data-dir');
+if (!clientPath) {
+  console.error('ERROR: --client <google-oauth-credentials.json> is required');
+  process.exit(2);
+}
 const scope = arg('scope', 'https://www.googleapis.com/auth/calendar');
 if (!dataDir) {
   console.error('ERROR: --data-dir <patch-data-dir> is required');

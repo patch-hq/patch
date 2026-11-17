@@ -415,7 +415,7 @@ function summarise(texts) {
 
 // -------------------------------------------------------------- the driver
 
-const PKG = 'io.github.tomchambers2.patch';
+const PKG = 'dev.patchhq.app';
 const ACTIVITY = `${PKG}/.MainActivity`;
 
 /**

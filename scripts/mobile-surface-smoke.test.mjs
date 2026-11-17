@@ -328,7 +328,7 @@ test('crashes, ANRs and unhandled JS errors are invariants too — not just the 
 test('a native crash carries its stack — the count alone does not say what threw', () => {
   const log = [
     '10-05 15:19:59.355  4148  4201 E AndroidRuntime: FATAL EXCEPTION: mqt_native_modules',
-    '10-05 15:19:59.355  4148  4201 E AndroidRuntime: Process: io.github.tomchambers2.patch, PID: 4148',
+    '10-05 15:19:59.355  4148  4201 E AndroidRuntime: Process: dev.patchhq.app, PID: 4148',
     '10-05 15:19:59.355  4148  4201 E AndroidRuntime: java.lang.IllegalStateException: boom',
     '10-05 15:19:59.355  4148  4201 E AndroidRuntime: \tat com.x.Foo.bar(Foo.kt:12)',
     '10-05 15:19:59.400  4148  4148 I Other: unrelated',
@@ -486,9 +486,9 @@ test('splitDevices on an empty list finds nothing rather than throwing', () => {
 test('foregroundPackage names the app owning the focused window', () => {
   assert.equal(
     foregroundPackage(
-      '  mCurrentFocus=Window{9f0 u0 io.github.tomchambers2.patch/com.x.MainActivity}',
+      '  mCurrentFocus=Window{9f0 u0 dev.patchhq.app/com.x.MainActivity}',
     ),
-    'io.github.tomchambers2.patch',
+    'dev.patchhq.app',
   );
   // The case that misled a whole deploy: a different app in front.
   assert.equal(
@@ -529,7 +529,7 @@ test('the pairing link is quoted for the DEVICE shell — an unquoted & split th
   // to /system/bin/sh on the device. The pairing link carries both a
   // credential and a server, so it has an `&` in it — unquoted, the device
   // shell backgrounded the first half and tried to RUN the package name
-  // ("io.github.tomchambers2.patch: inaccessible or not found", exit 127). Every
+  // ("dev.patchhq.app: inaccessible or not found", exit 127). Every
   // deploy failed at smoke, saying nothing about why.
   const link = pairingLink('a.b.c', 'https://patch.example.test/api/download/patch.apk');
   assert.match(link, /&/);

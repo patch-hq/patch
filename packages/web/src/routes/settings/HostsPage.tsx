@@ -24,6 +24,7 @@ import { writeShared } from './sharedWrite.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { Group, Note, OnlineDot, Row, SettingsPage } from './ui.js';
 import { ClaudeSettingsEditor } from './ProvidersPage.js';
+import { KeepRunningGroup } from './KeepRunningGroup.js';
 
 /**
  * The server's refusal, said in words. It answers a machine-readable `error`
@@ -78,6 +79,7 @@ export function HostsPage(): JSX.Element {
     >
       {adding ? <AddHost onClose={() => setAdding(false)} /> : null}
       <ThisMac />
+      <KeepRunningGroup />
       <Group testid="hosts-list">
         {rows.length === 0 ? (
           <Note testid="hosts-empty">No hosts yet</Note>
@@ -141,15 +143,6 @@ function HostListRow({
           {report
             ? `${PLATFORM_LABEL[report.platform] ?? report.platform} · ${seen}`
             : 'awaiting first report'}
-          {report?.power ? (
-            <>
-              {' · '}
-              <span data-testid={`host-${host.hostId}-power`}>
-                {Math.round(report.power.percent)}%{' '}
-                {report.power.onBattery ? 'on battery' : 'plugged in'}
-              </span>
-            </>
-          ) : null}
         </span>
       }
     >

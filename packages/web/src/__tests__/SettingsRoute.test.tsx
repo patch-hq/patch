@@ -42,6 +42,7 @@ const PAGE_TESTID: Record<string, string> = {
   mcp: 'settings-mcp',
   memories: 'settings-memories',
   manager: 'settings-manager-page',
+  experimental: 'settings-experimental-page',
   goals: 'settings-goals-page',
   prompts: 'settings-prompts-page',
   voice: 'settings-voice',
@@ -102,6 +103,7 @@ describe('Settings shell — one pane tab, pages as internal state', () => {
       'Notifications',
       'Devices',
       'Shortcuts',
+      'Experimental features',
       'Updates',
       'Bug reports',
       'Account',
@@ -912,7 +914,7 @@ describe('Settings → Voice', () => {
           voiceConfig: {
             dictation: { phone: 'device', computer: 'whisper', tidy: false },
             meeting: 'local',
-            device: { backend: 'gemini', layer: 'light', handoff: 'auto' },
+            device: { backend: 'local', layer: 'light', handoff: 'auto' },
             handsFree: { backend: 'local', layer: 'direct', handoff: 'auto' },
             call: { backend: 'local', layer: 'direct', handoff: 'auto' },
           },
@@ -922,7 +924,7 @@ describe('Settings → Voice', () => {
       renderSettings('/settings/voice');
       await waitFor(() =>
         expect(screen.getByTestId('voice-device-status')).toHaveTextContent(
-          voiceCellStatus('device', 'gemini', 'light')!,
+          voiceCellStatus('device', 'local', 'light')!,
         ),
       );
       expect(screen.queryByTestId('voice-call-status')).toBeNull();
@@ -944,9 +946,8 @@ describe('Settings → Voice', () => {
   });
 
   it('voiceCellStatus mirrors the host’s branching', () => {
-    expect(voiceCellStatus('device', 'openai', 'light')).toMatch(
-      /Not implemented yet for this surface/,
-    );
+    // Voice devices run every hosted engine too.
+    expect(voiceCellStatus('device', 'openai', 'light')).toBeNull();
     expect(voiceCellStatus('call', 'local', 'light')).toMatch(/no front model built for local/);
     // Gemini hands-free enforces the address word on the host, so there is nothing to warn about.
     expect(voiceCellStatus('handsFree', 'gemini', 'light')).toBeNull();
@@ -1053,37 +1054,37 @@ describe('Settings → Voice', () => {
       ],
     };
 
-    it('says none are paired, and mints no code until Pair is pressed', async () => {
+    it('says none are set up, and creates a token only when asked', async () => {
       const fetchMock = makeFetch();
       vi.stubGlobal('fetch', fetchMock);
       renderSettings('/settings/voice');
       await waitFor(() => expect(screen.getByTestId('voice-devices-empty')).toBeInTheDocument());
       // Linked phones and browsers are not voice devices.
       expect(screen.queryByTestId('device-mob-7')).toBeNull();
-      const minted = (): boolean =>
-        fetchMock.mock.calls.some((c) => String(c[0]).includes('/pair/start'));
-      expect(minted()).toBe(false);
-      fireEvent.click(screen.getByTestId('pair-voice-device-open'));
+      const created = (): boolean =>
+        fetchMock.mock.calls.some((c) => String(c[0]).includes('/api/voice-devices'));
+      fireEvent.click(screen.getByTestId('voice-device-add-open'));
+      expect(screen.getByTestId('voice-device-add-submit')).toBeDisabled();
+      fireEvent.change(screen.getByTestId('voice-device-label'), { target: { value: 'Kitchen' } });
+      expect(created()).toBe(false);
+      fireEvent.click(screen.getByTestId('voice-device-add-submit'));
       await waitFor(() =>
-        expect(screen.getByTestId('pair-voice-device-code')).toHaveTextContent(
-          'NONCE-abc123def456',
-        ),
+        expect(screen.getByTestId('voice-device-token')).toHaveTextContent('DEVICE-TOKEN-xyz'),
       );
-      expect(minted()).toBe(true);
-      // While open there is no second Pair button.
-      expect(screen.queryByTestId('pair-voice-device-open')).toBeNull();
-      fireEvent.click(screen.getByTestId('pair-voice-device-close'));
-      await waitFor(() => expect(screen.queryByTestId('pair-voice-device-panel')).toBeNull());
-      expect(screen.getByTestId('pair-voice-device-open')).toBeInTheDocument();
+      expect(created()).toBe(true);
+      expect(screen.queryByTestId('voice-device-add-open')).toBeNull();
+      fireEvent.click(screen.getByTestId('voice-device-add-close'));
+      await waitFor(() => expect(screen.queryByTestId('voice-device-add-panel')).toBeNull());
+      expect(screen.getByTestId('voice-device-add-open')).toBeInTheDocument();
     });
 
-    it('lists paired voice devices, each revocable, with Pair another', async () => {
+    it('lists voice devices, each revocable, with Add another', async () => {
       const fetchMock = makeFetch(withVoiceDevice);
       vi.stubGlobal('fetch', fetchMock);
       renderSettings('/settings/voice');
       await waitFor(() => expect(screen.getByTestId('device-vd-1')).toHaveTextContent('kitchen'));
       expect(screen.getByTestId('device-vd-1')).toHaveTextContent('Voice device');
-      expect(screen.getByTestId('pair-voice-device-open')).toBeInTheDocument();
+      expect(screen.getByTestId('voice-device-add-open')).toBeInTheDocument();
       fireEvent.click(screen.getByTestId('device-revoke-vd-1'));
       await waitFor(() =>
         expect(

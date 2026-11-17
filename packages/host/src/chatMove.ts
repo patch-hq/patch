@@ -31,7 +31,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
-import type { ChatMoveBundle, ChatMoveFile } from '@patch/wire';
+import { providerForSessionId, type ChatMoveBundle, type ChatMoveFile } from '@patch/wire';
 import { encodeFolder } from './history.js';
 import { expandHome } from './expandHome.js';
 import { ChatMeta } from './meta.js';
@@ -110,11 +110,11 @@ function filesUnder(root: string): string[] {
 /** Every Claude session this chat has ever had, on any of its tracks. */
 function claudeSessionIds(meta: ChatMeta): string[] {
   const ids = new Set<string>();
-  if (meta.claudeSessionId && !meta.claudeSessionId.startsWith('codex-')) {
+  if (meta.claudeSessionId && providerForSessionId(meta.claudeSessionId) === 'claude') {
     ids.add(meta.claudeSessionId);
   }
   for (const b of meta.branches ?? []) {
-    if (b.sessionId && !b.sessionId.startsWith('codex-')) ids.add(b.sessionId);
+    if (b.sessionId && providerForSessionId(b.sessionId) === 'claude') ids.add(b.sessionId);
     const prior = b.harnessSessions?.claude?.sessionId;
     if (prior) ids.add(prior);
   }

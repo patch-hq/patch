@@ -77,19 +77,9 @@ test.describe('Automations sidebar section', () => {
     await expect(done.getByTestId('badge-done')).toBeVisible();
   });
 
-  // The empty state is the count on the toggle itself, not a line of text below
-  // it (spec/14 §6) — four placeholder lines cost more sidebar height than the
-  // chat list they push out of view.
-  test('reports empty as a 0 on the row, with no body at all, when no job has spawned a chat', async ({
-    page,
-  }) => {
-    await page.route('**/api/chats?automations=only*', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ chats: [] }),
-      }),
-    );
+  // An empty section draws no icon at all (spec/14 §6): five icons for five
+  // empty sections tell a newcomer nothing, and the first automation brings it.
+  test('draws no Automations icon while no job has spawned a chat', async ({ page }) => {
     await page.route('**/api/chats/counts', (route) =>
       route.fulfill({
         status: 200,
@@ -98,24 +88,9 @@ test.describe('Automations sidebar section', () => {
       }),
     );
     await page.goto(HARNESS);
-    // The 0 is on the row BEFORE it is opened — that is the whole empty state,
-    // and it is what saves opening the section to find out.
+    await expect(page.getByTestId('archived-toggle')).toBeVisible();
+    await expect(page.getByTestId('automations-toggle')).toHaveCount(0);
     await expect(page.getByTestId('automations-section')).toHaveCount(0);
-    await expect(page.getByTestId('automations-toggle')).toHaveAttribute(
-      'title',
-      'Automations · 0',
-    );
-    await page.getByTestId('automations-toggle').click();
-    // Park the pointer: while it hovers, the tooltip host lifts `title` off the
-    // element to show its own bubble, and the attribute reads as absent.
-    await page.mouse.move(900, 450);
-    const section = page.getByTestId('automations-section');
-    await expect(section).toBeAttached();
-    await expect(page.getByTestId('automations-toggle')).toHaveAttribute(
-      'title',
-      'Automations · 0',
-    );
-    await expect(section).toBeEmpty();
   });
 
   test('a job-spawned chat is a DUPLICATE view — it also shows in Archived, not moved out of it', async ({

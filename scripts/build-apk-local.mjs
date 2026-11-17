@@ -7,7 +7,7 @@
 //
 // `boxBuildCommand` below wraps it for a capped local run: a systemd scope with a memory and CPU ceiling, at nice 19 / idle IO,
 // with gradle held to a 3g heap and two workers (the caps bin/publish uses on
-// Hetzner). `--box` makes gradle run without a host, so the build cannot be
+// the build host). `--box` makes gradle run without a host, so the build cannot be
 // handed to an already-running host OUTSIDE that scope, where no cap applies.
 //
 // Why it exists: EAS's free plan runs out of Android builds partway through a
@@ -174,8 +174,8 @@ function build(info, { box }) {
   for (const f of ['patch-upload.keystore', 'credentials.json']) {
     if (!existsSync(`${creds}/${f}`)) {
       throw new Error(
-        `no ${creds}/${f} — the release key lives outside the repo. Copy it from the box ` +
-          `(same key the live APK is signed with):\n  scp -p hetzner:.patch-mobile-credentials/* ${creds}/`,
+        `no ${creds}/${f} — the release key lives outside the repo. Copy it from the host that signs releases ` +
+          `(same key the live APK is signed with) into ${creds}/`,
       );
     }
   }

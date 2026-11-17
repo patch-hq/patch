@@ -275,6 +275,7 @@ function stubRecording(): VoiceRecording {
 }
 
 beforeEach(() => {
+  document.head.innerHTML = '<link rel="icon" href="/app/favicon.svg" />';
   FakeWs.instances = [];
   (globalThis as unknown as { WebSocket: typeof FakeWs }).WebSocket = FakeWs;
   audioCallbacks = null;

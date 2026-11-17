@@ -53,6 +53,7 @@ import {
 import {
   sendBrowser,
   sendDrive,
+  sendOpen,
   sendViewInput,
   sendViewMove,
   useBrowserWatch,
@@ -226,7 +227,7 @@ function AddressField({
             setEditing(true);
           }}
         >
-          <span className="bv-address-site">{site || url}</span>
+          <span className="bv-address-site">{site || url || 'Enter an address'}</span>
           {path ? <span className="bv-address-path">{path}</span> : null}
         </button>
       )}
@@ -808,8 +809,8 @@ export function BrowserView({
         )}
         <AddressField
           url={shown?.url ?? tabInfo?.url ?? ''}
-          disabled={!v2}
-          onGo={(t) => nav('goto', t)}
+          disabled={tabId ? !v2 : false}
+          onGo={(t) => (tabId ? nav('goto', t) : sendOpen(chatId, t))}
         />
         <DriveChip
           state={state}

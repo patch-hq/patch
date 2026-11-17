@@ -22,7 +22,6 @@ import { configureMarkdownIt } from '../lib/markdownIt';
 import { useRouter } from 'expo-router';
 import { chatLinkRoute } from '../lib/deepLink';
 import { LinkPreview } from './LinkPreview';
-import { setHorizontalScrollTouch } from '../lib/horizontalScrollTouch';
 import { fonts, radii, space, textMin, useTheme } from '../lib/theme';
 
 // A link to another chat opens it inside the app (spec/14 § Message links).
@@ -62,12 +61,8 @@ const tableScrollContent = { flexGrow: 1 };
 // Narrowest a column may get before the table scrolls instead.
 const TABLE_CELL_MIN_WIDTH = 104;
 
-// A table that overflows owns horizontal drags that start on it, so the chat's
-// swipe-to-next-chat does not take them; one that fits leaves the swipe alone.
+// A wide table scrolls sideways inside its own horizontal scroller.
 function TableScroll({ children }: { children: React.ReactNode }): React.ReactElement {
-  const widths = React.useRef({ view: 0, content: 0 });
-  const overflows = () => widths.current.content > widths.current.view + 1;
-  const release = () => setHorizontalScrollTouch(false);
   return (
     <ScrollView
       horizontal
@@ -75,15 +70,6 @@ function TableScroll({ children }: { children: React.ReactNode }): React.ReactEl
       nestedScrollEnabled
       contentContainerStyle={tableScrollContent}
       style={tableScroll}
-      onLayout={(e) => {
-        widths.current.view = e.nativeEvent.layout.width;
-      }}
-      onContentSizeChange={(w) => {
-        widths.current.content = w;
-      }}
-      onTouchStart={() => setHorizontalScrollTouch(overflows())}
-      onTouchEnd={release}
-      onTouchCancel={release}
     >
       {children}
     </ScrollView>

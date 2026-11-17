@@ -20,6 +20,8 @@
 export type WindowChrome = {
   titleBarStyle?: 'hidden';
   trafficLightPosition?: { x: number; y: number };
+  /** Linux/Windows: the menu bar stays out of the way until Alt shows it. */
+  autoHideMenuBar?: boolean;
 };
 
 /** Diameter of a macOS traffic light, so `y` can be given as a centre-line. */
@@ -61,7 +63,9 @@ export function overlayTitleBarSupported(platform: string): boolean {
 
 /** Chrome options to spread into a document window's BrowserWindow config. */
 export function windowChrome(platform: string): WindowChrome {
-  if (!overlayTitleBarSupported(platform)) return {};
+  // Elsewhere the menu is drawn inside every window, under the native frame;
+  // hidden until Alt, the window opens on Patch rather than on a row of menus.
+  if (!overlayTitleBarSupported(platform)) return { autoHideMenuBar: true };
   return {
     titleBarStyle: 'hidden',
     trafficLightPosition: { ...TRAFFIC_LIGHT_POSITION },

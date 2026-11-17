@@ -230,6 +230,29 @@ describe('the preview', () => {
   });
 });
 
+describe('a chat with no browser tab', () => {
+  beforeEach(() => {
+    useBrowserHandoffStore.getState().reset();
+    useBrowserHandoffStore.getState().setView('c1', 'large');
+  });
+
+  it('lets the person type an address, which asks the host to open a tab', () => {
+    const sent = fakeWs();
+    render(<BrowserView chatId="c1" layout="pane" />);
+    const address = screen.getByTestId('browser-handoff-url') as HTMLButtonElement;
+    expect(address.disabled).toBe(false);
+    fireEvent.click(address);
+    const input = screen.getByTestId('browser-address-input');
+    fireEvent.change(input, { target: { value: 'example.com' } });
+    fireEvent.submit(screen.getByTestId('browser-address'));
+    expect(sent).toContainEqual({
+      type: 'patch.browser_view.open',
+      chatId: 'c1',
+      url: 'example.com',
+    });
+  });
+});
+
 describe('the large view', () => {
   beforeEach(() => {
     useBrowserHandoffStore.getState().reset();

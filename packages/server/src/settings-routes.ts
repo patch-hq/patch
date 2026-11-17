@@ -5,6 +5,7 @@
 // offline. Hosts learn of it from the snapshot that follows.
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   AccountStrategy,
@@ -13,6 +14,12 @@ import {
   providerForBackendId,
   SharedSettingsPatch,
 } from '@patch/wire';
+import {
+  ClaudeSignInError,
+  exchangeClaudeSignInCode,
+  parseClaudeSignInCode,
+  startClaudeSignIn,
+} from '@patch/auth';
 import type { Registry } from './registry.js';
 import { requireAuth } from './folder-routes.js';
 import { SettingsError, type BackendId, type SharedSettingsService } from './shared-settings.js';
@@ -20,7 +27,15 @@ import { SettingsError, type BackendId, type SharedSettingsService } from './sha
 export interface SettingsRoutesDeps {
   registry: Registry;
   shared: SharedSettingsService;
+  /** Swaps the claude.ai code for a token; tests stand in for Anthropic. */
+  exchangeClaudeCode?: typeof exchangeClaudeSignInCode;
+  now?: () => number;
 }
+
+/** How long a started Claude sign-in waits for its code. */
+export const CLAUDE_SIGNIN_TTL_MS = 15 * 60_000;
+/** Started sign-ins kept at once; the oldest goes first. */
+const CLAUDE_SIGNIN_MAX = 20;
 
 const Backend = z.enum(BACKEND_IDS);
 const AddBody = z
@@ -37,6 +52,15 @@ const OrderBody = z.object({ accountIds: z.array(z.string().min(1)).min(1) }).st
 const StrategyBody = z.object({ strategy: AccountStrategy }).strict();
 const AdoptBody = z.object({ hostId: z.string().min(1) }).strict();
 const KeyBody = z.object({ value: z.string().min(1) }).strict();
+const SignInCompleteBody = z
+  .object({
+    signInId: z.string().min(1),
+    code: z.string().min(1),
+    label: z.string().min(1).optional(),
+    /** Sign an existing row in again rather than adding one. */
+    accountId: z.string().min(1).optional(),
+  })
+  .strict();
 
 export function registerSettingsRoutes(app: FastifyInstance, deps: SettingsRoutesDeps): void {
   const { shared } = deps;
@@ -124,6 +148,66 @@ export function registerSettingsRoutes(app: FastifyInstance, deps: SettingsRoute
         }
         await shared.addCodexApiKey(body.apiKey, body.label);
       }
+    }),
+  );
+
+  // ---- Signing in to Claude from a surface (spec/10 § Signing in to Claude) ----
+  // The surface opens `url`, the person signs in on claude.ai, and the code the
+  // page shows comes back to `complete`. The PKCE verifier stays here.
+  const signIns = new Map<string, { verifier: string; state: string; at: number }>();
+  const now = deps.now ?? Date.now;
+  const sweep = (): void => {
+    for (const [id, s] of signIns) if (now() - s.at > CLAUDE_SIGNIN_TTL_MS) signIns.delete(id);
+    while (signIns.size >= CLAUDE_SIGNIN_MAX) signIns.delete(signIns.keys().next().value as string);
+  };
+
+  app.post('/api/accounts/claude-code/signin', async (req, reply) => {
+    try {
+      await requireAuth(req, deps.registry);
+    } catch (e) {
+      return reply
+        .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+        .send({ error: (e as Error).message });
+    }
+    sweep();
+    const started = startClaudeSignIn();
+    const signInId = randomUUID();
+    signIns.set(signInId, { verifier: started.verifier, state: started.state, at: now() });
+    return reply.code(200).send({ signInId, url: started.url });
+  });
+
+  app.post(
+    '/api/accounts/claude-code/signin/complete',
+    handle(SignInCompleteBody, async (_req, body) => {
+      const pending = signIns.get(body.signInId);
+      if (!pending || now() - pending.at > CLAUDE_SIGNIN_TTL_MS) {
+        signIns.delete(body.signInId);
+        throw new SettingsError(410, 'signin_expired', 'That sign-in has expired. Start it again.');
+      }
+      const parsed = parseClaudeSignInCode(body.code, pending.state);
+      if ('error' in parsed) throw new SettingsError(400, 'invalid_input', parsed.error);
+      let token: string;
+      try {
+        ({ accessToken: token } = await (deps.exchangeClaudeCode ?? exchangeClaudeSignInCode)({
+          code: parsed.code,
+          verifier: pending.verifier,
+          state: pending.state,
+        }));
+      } catch (e) {
+        if (e instanceof ClaudeSignInError) {
+          // A refused code is spent; an unreachable Claude may answer a retry.
+          if (e.kind === 'rejected') signIns.delete(body.signInId);
+          throw new SettingsError(
+            e.kind === 'rejected' ? 400 : 502,
+            e.kind === 'rejected' ? 'credential_rejected' : 'credential_unreachable',
+            e.message,
+          );
+        }
+        throw e;
+      }
+      signIns.delete(body.signInId);
+      if (body.accountId) await shared.connectClaude(body.accountId, token);
+      else await shared.addClaude(token, body.label);
     }),
   );
 

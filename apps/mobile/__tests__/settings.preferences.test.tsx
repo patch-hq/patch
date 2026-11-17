@@ -5,6 +5,7 @@
 // than swallowing it. Voice's Speaking group is per host (the one picked in
 // the switcher) and writes that host with `host.settings`.
 
+import { ExperimentalPage } from '../src/components/settings/ExperimentalSection';
 import { usePresenceStore } from '../src/stores/presenceStore';
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -470,6 +471,18 @@ describe('Manager page', () => {
     expect(textOf(findHost(r2.root, byTestId('special-thread-model-error')))).toBe(
       'Couldn’t load the model list: host offline',
     );
+  });
+
+  it('Experimental features is off by default and its switch writes the account setting', async () => {
+    seedSettings();
+    const r = renderRN(<ExperimentalPage />);
+    const toggle = findHost(r.root, byTestId('experimental-features'));
+    expect(toggle.props.value).toBe(false);
+    await actAsync(async () => {
+      toggle.props.onValueChange(true);
+      await flush();
+    });
+    expect(api.setPreferences).toHaveBeenCalledWith({ experimentalFeatures: true });
   });
 
   it('rotation switch and time write through; an invalid time is refused', async () => {

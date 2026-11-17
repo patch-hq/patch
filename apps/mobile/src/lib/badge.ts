@@ -18,6 +18,7 @@ export function badgeColor(b: DisplayBadge, colors: ThemeColors): string {
       return colors.waiting;
     case 'errored':
       return colors.red;
+    case 'agents':
     case 'background':
     case 'monitoring':
     case 'read':

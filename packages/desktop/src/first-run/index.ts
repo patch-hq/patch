@@ -6,7 +6,9 @@
 
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { readSaved, writeSaved, type SavedConnection } from './connection.js';
+import { readSaved, welcomeUrl, writeSaved, type SavedConnection } from './connection.js';
+
+export { welcomeUrl };
 import { launchPatch, type Launch, type SetupUi } from './launch.js';
 import { freePort, startLocalServer } from './local-server.js';
 import { bringUpLocal } from './setup-local.js';

@@ -225,6 +225,8 @@ export const ChatErrorCode = z.enum([
   // The ChatGPT/Codex counterpart: no ChatGPT login on the host is usable (never
   // signed in, or the sign-in expired). Surfaces offer a button to sign in again.
   'chatgpt_login_required',
+  // A local model chat on a host with no local model endpoint configured.
+  'local_endpoint_missing',
   // Surface `file.write` refused because the chat was not `idle` (the agent
   // may be editing the same files) or escaped the chat folder. See
   // spec/14-design-web.md § Diff editor and spec/03-wire-protocol.md.
@@ -1283,6 +1285,20 @@ export const GoalProgress = z
      * next turn starts. Absent from hosts predating the field.
      */
     pausedByStop: z.boolean().optional(),
+    /**
+     * The evaluator's latest "is this on track?" read (spec/04 § Goals — check-in),
+     * taken on the goal's own cadence. Absent before the first check-in or when the
+     * goal has no cadence.
+     */
+    lastCheckIn: z
+      .object({
+        at: z.number().int(),
+        status: z.enum(['on_track', 'off_track']),
+        reason: z.string(),
+      })
+      .strict()
+      .nullable()
+      .optional(),
   })
   .strict();
 export type GoalProgress = z.infer<typeof GoalProgress>;
@@ -1482,6 +1498,13 @@ export const ChatStateEvent = z
      */
     backgroundTasks: z.number().int().nonnegative().optional(),
     /**
+     * How many of `backgroundTasks` are running `patch_delegate` sub-agents
+     * (the rest are `patch_watch` tasks), so a surface can draw the two
+     * differently. Optional, and absence is not zero — same rule as
+     * `backgroundTasks`.
+     */
+    runningAgents: z.number().int().nonnegative().optional(),
+    /**
      * How full the chat's context window is (spec/14 § Composer — context
      * ring): the tokens the model read on the chat's latest request, against
      * the window its model has. `null` when nothing has been measured — a chat
@@ -1531,6 +1554,15 @@ export const ChatStateEvent = z
      * resolved met/impossible; optional for back-compat.
      */
     lastGoal: FinishedGoal.nullable().optional(),
+    /**
+     * Goals that start, in order, once the active one is judged met (spec/04 §
+     * Goals — sequence). Absent from hosts predating the field; empty when none.
+     */
+    goalQueue: z.array(z.string().min(1)).optional(),
+    /** How often the active goal is restated to the agent (spec/04 § Goals — reminders). */
+    goalReminderEvery: ReminderEvery.nullable().optional(),
+    /** How often the evaluator is asked whether the active goal is on track (spec/04 § Goals). */
+    goalCheckInEvery: ReminderEvery.nullable().optional(),
     /**
      * The chat's reminder (patch/todo.md — Reminders). A configurable reminder to
      * do / not do something, set from any surface's composer via `/remind <text>`
@@ -1800,6 +1832,25 @@ export const ChatDelegateUpdateEvent = z
      * without it means the subagent is running again.
      */
     outOfCredit: z.object({ resetsAt: z.number().int().positive().optional() }).strict().optional(),
+    /**
+     * Host epoch ms the subagent's current run began. Present on live statuses
+     * (`running`, `awaiting-permission`). Surfaces time the run from this, not
+     * from when they first saw the update, so a reload does not restart the
+     * clock. Optional: older hosts omit it and surfaces fall back to local time.
+     */
+    runStartedAt: z.number().int().nonnegative().optional(),
+    /** The current run is a follow-up wake of a settled subagent (by its parent or a timer). */
+    followUp: z.boolean().optional(),
+    /**
+     * The user paused this subagent: it is alive, idle and waiting to be
+     * resumed (status stays `running`, so an older surface shows it as live).
+     */
+    paused: z.boolean().optional(),
+    /**
+     * The user spun this subagent off into a chat of its own. Status is
+     * `stopped` for the parent's row; this is the new ordinary chat's id.
+     */
+    spunOffChatId: z.string().min(1).optional(),
     seq: z.number().int().nonnegative(),
     ...forSurfaceIdField,
   })
@@ -2034,8 +2085,7 @@ export const HostOfflineEvent = z
     type: z.literal('host.offline'),
     ...hostIdField,
     /**
-     * Why, when the server can tell from the host's last heartbeat: `battery`
-     * (it was nearly flat and discharging), `asleep` (the host reported going
+     * Why, when the server can tell from the host's last heartbeat: `asleep` (the host reported going
      * to sleep) or `unresponsive`. Absent when it was not worked out, e.g. the
      * host was removed. See `describeHostOffline`.
      */
@@ -2075,7 +2125,7 @@ export const HostHealthEvent = z
     eventLoopLagMs: z.number().gte(0),
     /** Milliseconds between reports, so the server knows when one is late. */
     intervalMs: z.number().int().gte(1),
-    /** Battery state; absent on a host with no battery. */
+    /** Deprecated, ignored: hosts no longer report battery. Accepted so an older host's heartbeat still validates. */
     power: z
       .object({ onBattery: z.boolean(), percent: z.number().gte(0).lte(100) })
       .strict()
@@ -2171,8 +2221,13 @@ export const DICTATION_PAUSE_SECONDS_MAX = 30;
 /** The pauses Settings offers; any value in range can be set through the CLI. */
 export const DICTATION_PAUSE_CHOICES = ['2', '3', '5', '8', '10', '15'] as const;
 
+/** Same default as Claude Code's `cleanupPeriodDays`. */
+export const DEFAULT_CLEANUP_PERIOD_DAYS = 30;
+
 export const SharedSettings = z
   .object({
+    /** Whether half-finished features (the Manager, Batch) are shown. Off by default; Settings → Experimental features. */
+    experimentalFeatures: z.boolean(),
     // ---- server-acted preferences ----
     /** Public metadata served at `/agent` for this deployment's Web Bot Auth identity. */
     agentIdentity: z
@@ -2273,7 +2328,17 @@ export const SharedSettings = z
      * `permissionModeDefault`.
      */
     providerPermissionDefaults: z.record(z.string(), PermissionMode),
+    /**
+     * Base URL of the OpenAI-compatible server local models run on (Ollama,
+     * llama.cpp, LM Studio), up to and including its version segment, e.g.
+     * `http://127.0.0.1:11434/v1`. Absent until set: local models are then
+     * unavailable and a chat on one says so. Reached FROM each host, so
+     * `127.0.0.1` means that host. Empty clears it.
+     */
+    localModelBaseUrl: z.union([z.literal(''), z.string().url()]).optional(),
     chatNameInterval: z.number().int().nonnegative(),
+    /** Days of inactivity after which a host deletes a chat's log and removes its clean, fully pushed agent worktrees, at startup. Patch's own, separate from Claude Code's setting. */
+    cleanupPeriodDays: z.number().int().min(1).max(3650),
     /** Whether the one-shot AI chat title (a token-spending call) runs. */
     titleGenerationEnabled: z.boolean(),
     /** Whether the one-shot AI per-turn status summary (a token-spending call) runs. */
@@ -2328,6 +2393,7 @@ export const SharedSettingsPatch = SharedSettings.partial().strict();
 export type SharedSettingsPatch = z.infer<typeof SharedSettingsPatch>;
 
 export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
+  experimentalFeatures: false,
   agentIdentity: {
     enabled: false,
     name: 'Patch',
@@ -2385,6 +2451,7 @@ export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   permissionModeDefault: 'auto',
   providerPermissionDefaults: {},
   chatNameInterval: 0,
+  cleanupPeriodDays: DEFAULT_CLEANUP_PERIOD_DAYS,
   titleGenerationEnabled: true,
   statusGenerationEnabled: true,
   snoozeMorningHour: 9,
@@ -2894,11 +2961,7 @@ export const HostInfoEvent = z
      * current host states `true`; absent means the host predates it.
      */
     harnessClaudeMdEnabled: z.boolean().optional(),
-    /**
-     * The host's power state: whether it is running on battery, and the
-     * charge, 0-100. Absent when the host has no battery (a desktop, a server)
-     * or cannot read one — absent never means "plugged in".
-     */
+    /** Deprecated, ignored: hosts no longer report battery. Accepted so an older host's description still validates. */
     power: z
       .object({
         onBattery: z.boolean(),
@@ -3596,6 +3659,25 @@ export const ChatStopRequestEvent = z
   })
   .strict();
 export type ChatStopRequestEvent = z.infer<typeof ChatStopRequestEvent>;
+
+/**
+ * Cancel ONE running Bash tool call without ending the turn. The host sends
+ * SIGINT to the processes that command started (never claude itself, never its
+ * MCP servers), so the call comes back to the agent as an error result and the
+ * turn carries on. `chat.stop_request` stays the way to end the whole turn.
+ *
+ * A host that predates this event drops the frame as an unknown type, so the
+ * button does nothing there and nothing else changes.
+ */
+export const ChatToolCancelRequestEvent = z
+  .object({
+    type: z.literal('chat.tool_cancel_request'),
+    chatId: z.string().min(1),
+    /** The `callId` of the running `chat.tool_call` to cancel. */
+    callId: z.string().min(1),
+  })
+  .strict();
+export type ChatToolCancelRequestEvent = z.infer<typeof ChatToolCancelRequestEvent>;
 
 export const ChatResumeRequestEvent = z
   .object({
@@ -4347,6 +4429,12 @@ export const ChatGoalRequestEvent = z
     type: z.literal('chat.goal_request'),
     chatId: z.string().min(1),
     goal: z.string().nullable(),
+    /** Goals that follow `goal`, in order, each starting when the one before is met. */
+    then: z.array(z.string().min(1)).max(50).optional(),
+    /** Restate the goal to the agent on this cadence. Absent/null = never. */
+    remindEvery: ReminderEvery.nullable().optional(),
+    /** Ask the evaluator whether the goal is on track on this cadence. Absent/null = never. */
+    checkInEvery: ReminderEvery.nullable().optional(),
   })
   .strict();
 export type ChatGoalRequestEvent = z.infer<typeof ChatGoalRequestEvent>;
@@ -4877,6 +4965,21 @@ export const PatchBrowserViewDriveEvent = z
   })
   .strict();
 export type PatchBrowserViewDriveEvent = z.infer<typeof PatchBrowserViewDriveEvent>;
+
+/**
+ * Surface → host: the person typed an address into a chat's browser view that
+ * has no tab yet. The host opens a tab for the chat at that address, and the
+ * person is driving it from the start (the agent's browser tools on it wait
+ * until they Hand back). `url` is what was typed: a bare host name is allowed.
+ */
+export const PatchBrowserViewOpenEvent = z
+  .object({
+    type: z.literal('patch.browser_view.open'),
+    chatId: z.string().min(1),
+    url: z.string().min(1),
+  })
+  .strict();
+export type PatchBrowserViewOpenEvent = z.infer<typeof PatchBrowserViewOpenEvent>;
 
 /** Host → surfaces: the page's selection, for the surface to put on the user's clipboard. */
 export const PatchBrowserViewClipboardEvent = z
@@ -6576,6 +6679,87 @@ export const PatchWatchStopResponseEvent = z
   .strict();
 export type PatchWatchStopResponseEvent = z.infer<typeof PatchWatchStopResponseEvent>;
 
+export const PatchDelegateControlRequestEvent = z
+  .object({
+    type: z.literal('patch.delegate_control.request'),
+    requestId: z.string().min(1),
+    /** The parent chat; the host refuses a delegate that is not this chat's own. */
+    chatId: z.string().min(1),
+    delegateId: z.string().min(1),
+    action: z.enum(['pause', 'resume', 'stop', 'spin_off']),
+  })
+  .strict();
+export type PatchDelegateControlRequestEvent = z.infer<typeof PatchDelegateControlRequestEvent>;
+
+export const PatchDelegateControlResponseEvent = z
+  .object({
+    type: z.literal('patch.delegate_control.response'),
+    requestId: z.string().min(1),
+    ok: z.boolean(),
+    /** False when the delegate had already finished — idempotent, like `patch_delegate_stop`. */
+    applied: z.boolean().optional(),
+    /** `spin_off` only: the id of the new ordinary chat. */
+    spunOffChatId: z.string().min(1).optional(),
+    error: z
+      .object({
+        code: z.enum(['chat_not_found', 'not_a_delegate', 'internal']),
+        message: z.string(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type PatchDelegateControlResponseEvent = z.infer<typeof PatchDelegateControlResponseEvent>;
+
+// ---------------------------------------------------------------------------
+// Stray processes (server → host → server), spec/02 § Stray processes. What a
+// chat started outside Patch's tracked tools (a `nohup … &` in a Bash call)
+// that is still running, or was when last seen. One pair: list, optionally
+// stopping one first (`stopPid`, which the host only honours for a pid it
+// currently reports as that chat's stray).
+
+export const StrayProcessRow = z
+  .object({
+    pid: z.number().int().positive(),
+    command: z.string(),
+    /** Epoch ms the process started. */
+    startedAt: z.number().int(),
+    running: z.boolean(),
+    /** Epoch ms the host first noticed it gone; absent while running. */
+    endedAt: z.number().int().optional(),
+  })
+  .strict();
+export type StrayProcessRow = z.infer<typeof StrayProcessRow>;
+
+export const PatchStrayProcessesRequestEvent = z
+  .object({
+    type: z.literal('patch.stray_processes.request'),
+    requestId: z.string().min(1),
+    chatId: z.string().min(1),
+    stopPid: z.number().int().positive().optional(),
+  })
+  .strict();
+export type PatchStrayProcessesRequestEvent = z.infer<typeof PatchStrayProcessesRequestEvent>;
+
+export const PatchStrayProcessesResponseEvent = z
+  .object({
+    type: z.literal('patch.stray_processes.response'),
+    requestId: z.string().min(1),
+    ok: z.boolean(),
+    processes: z.array(StrayProcessRow).optional(),
+    /** Present when `stopPid` was sent: false if it was not a running stray of that chat. */
+    stopped: z.boolean().optional(),
+    error: z
+      .object({
+        code: z.enum(['chat_not_found', 'unsupported_platform', 'internal']),
+        message: z.string(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type PatchStrayProcessesResponseEvent = z.infer<typeof PatchStrayProcessesResponseEvent>;
+
 // Change a running task's check-in interval (the bar's "next check-in" control).
 export const PatchWatchCheckInRequestEvent = z
   .object({
@@ -7805,7 +7989,7 @@ export const ChatMoveBundle = z
   .strict();
 export type ChatMoveBundle = z.infer<typeof ChatMoveBundle>;
 
-export const ChatMoveOp = z.enum(['export', 'import', 'retire', 'release']);
+export const ChatMoveOp = z.enum(['export', 'import', 'retire', 'release', 'refolder']);
 export type ChatMoveOp = z.infer<typeof ChatMoveOp>;
 
 export const PatchChatMoveRequestEvent = z
@@ -7816,7 +8000,11 @@ export const PatchChatMoveRequestEvent = z
     ...hostIdField,
     chatId: z.string().min(1),
     op: ChatMoveOp,
-    /** `import` only: the absolute folder the chat will run in on this host. */
+    /**
+     * `import` and `refolder`: the absolute folder the chat will run in on this
+     * host. `refolder` is a move within one host: the host does export, retire
+     * and import itself, so the chat keeps its id and its session.
+     */
     folder: z.string().min(1).optional(),
     /** `import` only: what `export` produced, or what the server built from its own copy. */
     bundle: ChatMoveBundle.optional(),
@@ -9384,6 +9572,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   ChatPermissionResponseEvent,
   ChatSpawnRequestEvent,
   ChatStopRequestEvent,
+  ChatToolCancelRequestEvent,
   ChatUnqueueRequestEvent,
   ChatResumeNowRequestEvent,
   ChatPromoteRequestEvent,
@@ -9436,6 +9625,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchBrowserHandoffControlEvent,
   PatchBrowserViewInputEvent,
   PatchBrowserViewDriveEvent,
+  PatchBrowserViewOpenEvent,
   PatchBrowserViewClipboardEvent,
   PatchBrowserViewFormEvent,
   SurfaceHeartbeatEvent,
@@ -9488,10 +9678,14 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchDocExportResponseEvent,
   PatchBackgroundTaskStatsRequestEvent,
   PatchBackgroundTaskStatsResponseEvent,
+  PatchStrayProcessesRequestEvent,
+  PatchStrayProcessesResponseEvent,
   PatchWatchListRequestEvent,
   PatchWatchListResponseEvent,
   PatchWatchStopRequestEvent,
   PatchWatchStopResponseEvent,
+  PatchDelegateControlRequestEvent,
+  PatchDelegateControlResponseEvent,
   PatchWatchCheckInRequestEvent,
   PatchWatchCheckInResponseEvent,
   PatchWatchOutputRequestEvent,
@@ -9696,6 +9890,7 @@ export const EVENT_SCHEMAS = {
   'chat.permission_response': ChatPermissionResponseEvent,
   'chat.spawn_request': ChatSpawnRequestEvent,
   'chat.stop_request': ChatStopRequestEvent,
+  'chat.tool_cancel_request': ChatToolCancelRequestEvent,
   'chat.unqueue_request': ChatUnqueueRequestEvent,
   'chat.resume_now_request': ChatResumeNowRequestEvent,
   'chat.promote_request': ChatPromoteRequestEvent,
@@ -9748,6 +9943,7 @@ export const EVENT_SCHEMAS = {
   'patch.browser_handoff.control': PatchBrowserHandoffControlEvent,
   'patch.browser_view.input': PatchBrowserViewInputEvent,
   'patch.browser_view.drive': PatchBrowserViewDriveEvent,
+  'patch.browser_view.open': PatchBrowserViewOpenEvent,
   'patch.browser_view.clipboard': PatchBrowserViewClipboardEvent,
   'patch.browser_view.form': PatchBrowserViewFormEvent,
   'surface.heartbeat': SurfaceHeartbeatEvent,
@@ -9799,10 +9995,14 @@ export const EVENT_SCHEMAS = {
   'patch.doc_export.response': PatchDocExportResponseEvent,
   'patch.background_task_stats.request': PatchBackgroundTaskStatsRequestEvent,
   'patch.background_task_stats.response': PatchBackgroundTaskStatsResponseEvent,
+  'patch.stray_processes.request': PatchStrayProcessesRequestEvent,
+  'patch.stray_processes.response': PatchStrayProcessesResponseEvent,
   'patch.watch_list.request': PatchWatchListRequestEvent,
   'patch.watch_list.response': PatchWatchListResponseEvent,
   'patch.watch_stop.request': PatchWatchStopRequestEvent,
   'patch.watch_stop.response': PatchWatchStopResponseEvent,
+  'patch.delegate_control.request': PatchDelegateControlRequestEvent,
+  'patch.delegate_control.response': PatchDelegateControlResponseEvent,
   'patch.watch_checkin.request': PatchWatchCheckInRequestEvent,
   'patch.watch_checkin.response': PatchWatchCheckInResponseEvent,
   'patch.watch_output.request': PatchWatchOutputRequestEvent,

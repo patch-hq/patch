@@ -27,7 +27,7 @@ export const LOG_RESTORE_RETRY_MS = 60_000;
 const SERVER_SURFACE = '_server';
 
 export interface LogSyncDeps {
-  store: Pick<ChatLogStore, 'highWater' | 'has' | 'read'>;
+  store: Pick<ChatLogStore, 'highWater' | 'has' | 'read' | 'noteReach'>;
   chats: Pick<ChatRegistry, 'get'>;
   sendTo: (hostId: string, surfaceId: string, event: WireEvent) => void;
   isOnline: (hostId: string) => boolean;
@@ -62,6 +62,12 @@ export class LogSync {
         // broadcasts what is new.
         if (isTranscriptEvent(inner as WireEvent)) this.deps.inject(inner as WireEvent);
       }
+      // The whole answer is in: the server now has everything up to where the
+      // host's log reached when it was asked, even if all of that was history
+      // the server does not keep (a turn's closing tool-run summary). Record it,
+      // or the next reconnect asks about the same chat again.
+      const asked = this.askedAt.get(event.chatId);
+      if (event.done && asked !== undefined) this.deps.store.noteReach(event.chatId, asked);
       return;
     }
     if (event.type === 'host.offline') {

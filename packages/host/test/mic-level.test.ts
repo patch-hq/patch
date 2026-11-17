@@ -100,6 +100,7 @@ describe('the silent-mic message', () => {
   it('names the fix for the device in hand', () => {
     expect(micSilentMessage('desktop')).toContain('Privacy & Security → Microphone');
     expect(micSilentMessage('mobile')).toContain('Android Settings → Apps → Patch → Permissions');
+    expect(micSilentMessage('mobile')).toContain('Bluetooth');
     expect(micSilentMessage('mobile')).not.toContain('Mac');
   });
 });

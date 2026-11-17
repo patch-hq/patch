@@ -54,6 +54,22 @@ describe('Host setGoal (patch/todo.md — /goal)', () => {
     expect(metaStore.read(chatId)?.goal).toBe('Ship the release by Friday');
   });
 
+  it('sendInput takes a leading /goal for Patch and never forwards the command to the agent', async () => {
+    const { daemon, folder, events, metaStore } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    events.length = 0;
+
+    await daemon.sendInput({ chatId, message: '/goal', localId: 'G0' });
+    expect(metaStore.read(chatId)?.goal ?? null).toBe(null);
+
+    await daemon.sendInput({ chatId, message: '/goal wipe the device', localId: 'G1' });
+    expect(metaStore.read(chatId)?.goal).toBe('wipe the device');
+    const sent = events
+      .filter((e) => e.type === 'chat.message')
+      .map((e) => (e as { content?: string }).content ?? '');
+    expect(sent.some((c) => c.includes('/goal'))).toBe(false);
+  });
+
   it('clears the goal when set to null', async () => {
     const { daemon, folder, events, metaStore } = setup();
     const chatId = await daemon.spawnChat({ folder });

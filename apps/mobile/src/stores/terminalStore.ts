@@ -17,12 +17,21 @@ import type { WireEvent } from '@patch/wire';
 
 export type TerminalStatus = 'starting' | 'live' | 'ended' | 'error';
 
+/**
+ * Whether a dead session should reopen itself: `no` (the user's call, or a
+ * failure — only Restart), `after-offline` (the machine said it is shutting
+ * down; wait until it has really gone), `now` (link or machine gone — reopen
+ * once both are back).
+ */
+export type TerminalReopen = 'no' | 'after-offline' | 'now';
+
 export interface HostTerminal {
   sessionId: string;
   hostId: string;
   /** Where the shell was asked to start, then where it really did. */
   cwd: string;
   status: TerminalStatus;
+  reopen: TerminalReopen;
   /** Everything the shell has printed, oldest first. */
   output: string[];
   /** Total characters in `output`, for the cap. */
@@ -73,6 +82,12 @@ interface TerminalState {
   fail(sessionId: string, message: string): void;
   /** Feed a host → surface terminal frame in. Unknown sessions are ignored. */
   ingest(event: WireEvent): void;
+  /**
+   * The link to the shell is gone with no exit frame coming (socket dropped,
+   * machine went offline): a `live` session would lie. Ends every starting/live
+   * session (of `hostId`, or all when omitted) and marks it to reopen.
+   */
+  interrupt(message: string, hostId?: string): void;
   /** Forget a session (its screen is gone). */
   remove(sessionId: string): void;
   _reset(): void;
@@ -109,6 +124,7 @@ export const useTerminalStore = create<TerminalState>((set) => ({
           hostId,
           cwd,
           status: 'starting',
+          reopen: 'no',
           output: [],
           outputChars: 0,
           outputTotal: 0,
@@ -119,7 +135,26 @@ export const useTerminalStore = create<TerminalState>((set) => ({
     })),
 
   fail: (sessionId, message) =>
-    set((state) => patch(state, sessionId, (s) => ({ ...s, status: 'error', message }))),
+    set((state) =>
+      patch(state, sessionId, (s) => ({ ...s, status: 'error', reopen: 'no', message })),
+    ),
+
+  interrupt: (message, hostId) =>
+    set((state) => {
+      const sessions = { ...state.sessions };
+      let changed = false;
+      for (const [id, s] of Object.entries(state.sessions)) {
+        if (hostId !== undefined && s.hostId !== hostId) continue;
+        if (s.status === 'starting' || s.status === 'live') {
+          sessions[id] = { ...s, status: 'ended', reopen: 'now', message };
+          changed = true;
+        } else if (s.reopen === 'after-offline') {
+          sessions[id] = { ...s, reopen: 'now' };
+          changed = true;
+        }
+      }
+      return changed ? { sessions } : state;
+    }),
 
   ingest: (event) => {
     switch (event.type) {
@@ -128,7 +163,7 @@ export const useTerminalStore = create<TerminalState>((set) => ({
           patch(state, event.sessionId, (s) =>
             event.pty === true
               ? { ...s, status: 'live', cwd: event.cwd }
-              : { ...s, status: 'error', message: TOO_OLD_MESSAGE, wrongKind: true },
+              : { ...s, status: 'error', reopen: 'no', message: TOO_OLD_MESSAGE, wrongKind: true },
           ),
         );
         return;
@@ -145,6 +180,13 @@ export const useTerminalStore = create<TerminalState>((set) => ({
               : {
                   ...s,
                   status: 'ended',
+                  // The offline can beat this frame: an interrupt already released it.
+                  reopen:
+                    s.reopen === 'now'
+                      ? 'now'
+                      : event.reason === 'daemon_shutdown'
+                        ? 'after-offline'
+                        : 'no',
                   message:
                     event.code !== null && event.reason === 'shell_exit'
                       ? `${EXIT_WORDS[event.reason]} with status ${event.code}`
@@ -155,7 +197,7 @@ export const useTerminalStore = create<TerminalState>((set) => ({
         return;
       case 'patch.terminal.error':
         set((state) =>
-          patch(state, event.sessionId, (s) => ({ ...s, status: 'error', message: event.message })),
+          patch(state, event.sessionId, (s) => ({ ...s, status: 'error', reopen: 'no', message: event.message })),
         );
         return;
       default:

@@ -167,6 +167,14 @@ relay when `PATCH_RELAY_URL` names one; the desktop app's own server uses the
 project's hosted relay unless that is set. Anyone may run their own and point
 their servers at it.
 
+The project's hosted relay is `wss://relay.patchhq.dev`: the same protocol as a
+Cloudflare Worker (`packages/relay-worker`) with one Durable Object per channel.
+Its sockets hibernate, so a connected but quiet channel costs nothing, and it
+runs on Cloudflare's free plan. The release workflow deploys it from `main` when
+the relay's code changes. One set of behaviour tests (`packages/relay/test`)
+runs against the Node relay, against the Worker under `wrangler dev`, and against
+the live address.
+
 ## Host installation
 
 The host is built as a per-OS/arch binary artifact and installed; the runtime
@@ -336,6 +344,30 @@ between versions. A release therefore costs each host one drop, not two:
   update; it is never hidden.
 - Staged builds live in `<patchHome>/staged/<version>`; those at or below the
   running version are removed on start.
+
+### One update switch
+
+One account-wide switch, Update automatically, decides whether any part of
+Patch moves to a new release: the server, every host and the desktop app.
+Updating one part on its own while the switch is off is a bug.
+
+- On: releases are mirrored and installed as they appear, the server first and
+  the hosts behind it (§ Updates in lockstep), only when nothing is running on
+  a host. The user sees nothing except one prompt in the window.
+- Off: the release mirror only notes which release is on offer
+  (`release-available.json`); it downloads nothing, so nothing a host or the
+  desktop app reads from the server moves, and the server does not install
+  itself. Settings → Updates shows the version, the one available, and one
+  button, Update everything (`POST /api/update-all`). That lifts the hold for
+  one release: the server mirrors and installs it, then tells every host to
+  update. The hold returns once the server and every online host are on it, or
+  after two hours if that never happens.
+- `GET /api/version` reports `release: { available, autoUpdate, updating }`.
+- The window has one prompt, never two: "A new version of Patch is ready." with
+  one Restart button. It appears when the desktop app has a build staged or the
+  page has a newer deploy, and pressing it does whatever is needed: relaunch
+  the app into its staged build, or reload the page. Hosts and the server never
+  prompt. A restart that fails says so and says what to do.
 
 ## Mobile updates (Android)
 
@@ -514,6 +546,16 @@ Certificate setup and the failure modes around it are in `docs/desktop-packaging
 - `secrets.key` in the data directory is the key to `secrets.json`. The server makes it on first start and nothing needs setting; the two must travel together, so restore them as a pair (01-server.md § Settings).
 - `~/.patch-server/data` is the server's only stateful directory — the registry, job definitions, run/webhook logs, pending queues and the broadcast log. Snapshot it off-host nightly (the reference deployment uses restic).
 - Chat history and per-chat metadata live on each host, under that user's `~/.claude/projects/` and `~/.patch/` (`04-chats-and-folders.md` § History). Each host is backed up on its own; a server snapshot does not carry them.
+
+## Website
+
+The public website, https://patchhq.dev, is the static `site/` folder, published
+to GitHub Pages by `.github/workflows/pages.yml` whenever `site/` changes on
+main. Its download links point at the fixed asset names on the latest stable
+release (`releases/latest/download/<name>`), so it never needs editing for a
+release. The apex and `www` are DNS-only records on Cloudflare pointing at
+GitHub Pages, which issues the certificate. Screenshots are the real web app,
+captured from the dev harness by `site/tools/capture.mjs`.
 
 ## Cross-refs
 

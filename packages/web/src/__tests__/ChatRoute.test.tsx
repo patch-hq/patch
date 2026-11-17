@@ -32,6 +32,8 @@ vi.mock('../api/rest.js', async (importOriginal) => {
     ApiError: actual.ApiError,
     api: {
       chatJobTicks: vi.fn(async () => ({ jobs: [] })),
+      // The Manager's model pill names its model, so it reads the catalogue.
+      models: vi.fn(async () => ({ models: [], fetchedAt: '' })),
       getNotifications: vi.fn(async () => ({ items: [], unread: 0 })),
       markBatchOpened: vi.fn(async () => ({ batch: null, carryover: [] })),
       getFileContent: vi.fn(async (_chatId: string, _path: string) => ({
@@ -320,6 +322,71 @@ describe('ChatRoute regression', () => {
     await new Promise((r) => requestAnimationFrame(() => r(null)));
     // Re-pinned to the bottom despite the earlier scroll-up.
     expect(stream.scrollTop).toBe(12000);
+  });
+
+  // A message sent from the phone or by voice arrives persisted (no localId), so
+  // the optimistic-echo re-pin never fires. The reply after it must still pin
+  // unless the user scrolled up SINCE that message.
+  describe('reply pin after a remote user message', () => {
+    async function setup(id: string) {
+      const base: ChatEventEntry[] = Array.from({ length: 40 }, (_v, i) => ({
+        seq: i,
+        kind: 'message' as const,
+        role: 'user' as const,
+        content: `m${i}`,
+        at: 0,
+      }));
+      seedChat(id, base);
+      renderChat(id);
+      const stream = screen.getByTestId('chat-stream');
+      Object.defineProperty(stream, 'scrollHeight', { configurable: true, value: 12000 });
+      Object.defineProperty(stream, 'clientHeight', { configurable: true, value: 780 });
+      const frames = async () => {
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+      };
+      await frames();
+      const push = async (...extra: ChatEventEntry[]) => {
+        useChatStore.setState((s) => ({
+          timelines: { ...s.timelines, [id]: [...base, ...extra] },
+        }));
+        await frames();
+      };
+      return { stream, push };
+    }
+    const remoteUser: ChatEventEntry = {
+      seq: 40,
+      kind: 'message',
+      role: 'user',
+      content: 'from phone',
+      at: 0,
+    };
+    const reply: ChatEventEntry = {
+      seq: 41,
+      kind: 'message',
+      role: 'assistant',
+      content: 'done',
+      at: 0,
+    };
+
+    it('pins to the reply when follow was dropped before the phone message', async () => {
+      const { stream, push } = await setup('c-remote-pin');
+      stream.scrollTop = 2000;
+      stream.dispatchEvent(new Event('scroll'));
+      await push(remoteUser);
+      expect(stream.scrollTop).toBe(2000);
+      await push(remoteUser, reply);
+      expect(stream.scrollTop).toBe(12000);
+    });
+
+    it('does not pin when the user scrolled up after the phone message', async () => {
+      const { stream, push } = await setup('c-remote-nopin');
+      await push(remoteUser);
+      stream.scrollTop = 2000;
+      stream.dispatchEvent(new Event('scroll'));
+      await push(remoteUser, reply);
+      expect(stream.scrollTop).toBe(2000);
+    });
   });
 
   // The echo is the last entry only at the instant it is appended. Anything the
@@ -2236,6 +2303,21 @@ describe('ChatRoute regression', () => {
     expect(line.querySelector('button')).toBeNull();
   });
 
+  it('the stopped status sits after the partial reply, before the next user message', () => {
+    seedChat('c-stop-place', [
+      { seq: 1, kind: 'message', role: 'user', content: 'first', turnStopped: true, at: 0 },
+      { seq: 2, kind: 'message', role: 'assistant', content: 'partial reply', at: 1 },
+      { seq: 3, kind: 'message', role: 'user', content: 'second', at: 2 },
+    ]);
+    renderChat('c-stop-place');
+    const msgs = screen.getAllByTestId('msg');
+    const line = screen.getByTestId('turn-stopped');
+    // Not inside the user message that started the turn.
+    expect(msgs[0]!.contains(line)).toBe(false);
+    expect(msgs[1]!.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(line.compareDocumentPosition(msgs[2]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('tapping "Continue" on a stopped message sends a fresh nudge turn, not the original text', () => {
     const send = vi.fn();
     seedChat('c-stop-continue', [
@@ -2877,6 +2959,103 @@ describe('ChatRoute regression', () => {
     }
   });
 
+  function seedLinkCard(id: string, ack: Record<string, unknown>): void {
+    seedChat(id, [
+      {
+        seq: 1,
+        kind: 'tool_call',
+        tool: 'link_file',
+        callId: 'l1',
+        toolArgs: { file_path: '/home/u/Documents/plan.xlsx' },
+        at: 0,
+      },
+      {
+        seq: 2,
+        kind: 'tool_result',
+        tool: 'link_file',
+        callId: 'l1',
+        toolResult: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              ok: true,
+              linked: true,
+              kind: 'link',
+              name: 'plan.xlsx',
+              absPath: '/home/u/Documents/plan.xlsx',
+              isDirectory: false,
+              size: 4096,
+              ...ack,
+            }),
+          },
+        ],
+        at: 1,
+      },
+    ]);
+  }
+
+  it('shows a link_file card with the path and no open buttons outside the desktop app', () => {
+    seedLinkCard('c-link-plain', {});
+    renderChat('c-link-plain');
+    expect(screen.getByTestId('link-file-name').textContent).toBe('plan.xlsx');
+    expect(screen.getByTestId('link-file-path').textContent).toBe('/home/u/Documents/plan.xlsx');
+    expect(screen.queryByTestId('link-file-open')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('link-file-reveal')).not.toBeInTheDocument();
+  });
+
+  it("opens or reveals a link_file when this Mac's own host owns the chat", async () => {
+    const openPath = vi.fn().mockResolvedValue(undefined);
+    (window as unknown as { patch: unknown }).patch = {
+      openPath,
+      localHost: { status: async () => ({ installed: true, hostId: 'd1' }) },
+    };
+    try {
+      seedLinkCard('c-link-open', {});
+      renderChat('c-link-open');
+      fireEvent.click(await screen.findByTestId('link-file-open'));
+      fireEvent.click(screen.getByTestId('link-file-reveal'));
+      expect(openPath).toHaveBeenNthCalledWith(1, '/home/u/Documents/plan.xlsx', 'file');
+      expect(openPath).toHaveBeenNthCalledWith(2, '/home/u/Documents/plan.xlsx', 'folder');
+    } finally {
+      delete (window as unknown as { patch?: unknown }).patch;
+    }
+  });
+
+  it('shows the bridge error on a link_file whose path has gone', async () => {
+    (window as unknown as { patch: unknown }).patch = {
+      openPath: vi.fn().mockRejectedValue(new Error('open-path: gone')),
+      localHost: { status: async () => ({ installed: true, hostId: 'd1' }) },
+    };
+    try {
+      seedLinkCard('c-link-gone', {});
+      renderChat('c-link-gone');
+      fireEvent.click(await screen.findByTestId('link-file-open'));
+      expect((await screen.findByTestId('link-file-open-error')).textContent).toContain('gone');
+    } finally {
+      delete (window as unknown as { patch?: unknown }).patch;
+    }
+  });
+
+  it('offers no reveal button on a linked folder, and hides open on another host', async () => {
+    (window as unknown as { patch: unknown }).patch = {
+      openPath: vi.fn(),
+      localHost: { status: async () => ({ installed: true, hostId: 'd1' }) },
+    };
+    try {
+      seedLinkCard('c-link-dir', {
+        name: 'Documents',
+        absPath: '/home/u/Documents',
+        isDirectory: true,
+        size: undefined,
+      });
+      renderChat('c-link-dir');
+      await screen.findByTestId('link-file-open');
+      expect(screen.queryByTestId('link-file-reveal')).not.toBeInTheDocument();
+    } finally {
+      delete (window as unknown as { patch?: unknown }).patch;
+    }
+  });
+
   // spec/14 § Viewing files — a PDF gets the same sandboxed-iframe treatment
   // as an HTML page (not the image/lightbox path), since neither is a
   // lightbox candidate.
@@ -3398,14 +3577,14 @@ describe('ChatRoute regression', () => {
           seq: 0,
           kind: 'message',
           role: 'user',
-          content: '[Pad] Tom sent 2 changes on "Settings" (pad id: settings)\n\n1. Moved h1',
+          content: '[Pad] The user sent 2 changes on "Settings" (pad id: settings)\n\n1. Moved h1',
           jobTrigger: true,
           at: 0,
         },
       ]);
       renderChat('c-pad-input');
       expect(screen.getByTestId('job-trigger-summary').textContent).toContain(
-        '[Pad] Tom sent 2 changes on "Settings" (pad id: settings)',
+        '[Pad] The user sent 2 changes on "Settings" (pad id: settings)',
       );
       expect(document.querySelector('.msg-user')).toBeNull();
     });

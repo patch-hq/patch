@@ -29,7 +29,7 @@
 // which is what every test and e2e spec locates on.
 
 import { useEffect, useState, type JSX } from 'react';
-import { Circle, Clock, Terminal, TriangleAlert } from 'lucide-react';
+import { Bot, Circle, Clock, Terminal, TriangleAlert } from 'lucide-react';
 import type { PendingWake } from '@patch/wire';
 import type { DisplayBadge } from '../stores/types.js';
 import { formatWakeCountdown } from './WakeBar.js';
@@ -41,6 +41,7 @@ const BADGE_TITLE: Record<DisplayBadge, string> = {
   working: 'Working',
   permission: 'Needs your decision',
   errored: 'Failed',
+  agents: 'Agents running',
   background: 'Background job running',
   monitoring: 'Monitoring',
   done: 'Done',
@@ -64,6 +65,21 @@ export function StatusBadge({
     return (
       <span className="badge badge-read" data-testid="badge-read" aria-label="read" title={title}>
         <Circle size={12} strokeWidth={2} aria-hidden />
+      </span>
+    );
+  }
+  if (badge === 'agents') {
+    // Sub-agents (`patch_delegate`) still running on an idle chat. Grey and
+    // static like `background`, with its own glyph: a bot for an agent, a
+    // terminal for a plain process.
+    return (
+      <span
+        className="badge badge-agents"
+        data-testid="badge-agents"
+        aria-label="agents running"
+        title={title}
+      >
+        <Bot size={13} strokeWidth={2.25} aria-hidden />
       </span>
     );
   }

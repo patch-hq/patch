@@ -23,6 +23,8 @@
 #   APPLE_API_KEY_ID, APPLE_API_ISSUER
 #   PATCH_UPDATE_SIGNING_KEY         signs the phone's over-the-air update (its certificate is
 #                                    apps/mobile/certs/certificate.pem, built into the APK)
+#   CLOUDFLARE_API_TOKEN             deploys the public relay (the `relay` job)
+#   CLOUDFLARE_ACCOUNT_ID            the Cloudflare account it runs in
 
 name: release
 
@@ -222,8 +224,8 @@ jobs:
           test -f "$APK"
           # Refuse anything that is not this app: a wrong id would install beside it.
           PKG=$("$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging "$APK" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")
-          if [ "$PKG" != "io.github.tomchambers2.patch" ]; then
-            echo "built package is '$PKG', expected io.github.tomchambers2.patch" >&2
+          if [ "$PKG" != "dev.patchhq.app" ]; then
+            echo "built package is '$PKG', expected dev.patchhq.app" >&2
             exit 1
           fi
           mkdir -p "$RUNNER_TEMP/apk"
@@ -363,13 +365,85 @@ jobs:
           set -euo pipefail
           APP=packages/desktop/release/mac-arm64/Patch.app
           codesign --verify --deep --strict "$APP"
-          codesign -dv "$APP" 2>&1 | grep -q 'Identifier=io.github.tomchambers2.patch'
+          codesign -dv "$APP" 2>&1 | grep -q 'Identifier=dev.patchhq.app'
           # Notarised and stapled: Gatekeeper accepts it as a download.
           ASSESS=$(spctl --assess --type execute -vv "$APP" 2>&1)
           echo "$ASSESS"
           grep -q 'source=Notarized Developer ID' <<<"$ASSESS"
+          xcrun stapler validate "$APP"
+          # The host build "On this computer" installs rides inside, notarised with it.
+          ls "$APP/Contents/Resources/host/"patch-host-*-darwin-arm64.tar.gz
           PATCH_REAL_DESKTOP=1 PATCH_TEST_DESKTOP_BINARY="$PWD/$APP/Contents/MacOS/Patch" \
             node --test packages/desktop/scripts/single-instance.test.cjs
+      - name: Notarise the disk image
+        if: steps.scope.outputs.build == 'true'
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+          # The app inside is already notarised and stapled; the dmg the website
+          # hands out is notarised too, so Gatekeeper accepts the download itself.
+          DMG=$(ls packages/desktop/release/Patch-*-arm64.dmg)
+          codesign --sign "$IDENTITY" --timestamp "$DMG"
+          xcrun notarytool submit "$DMG" --key "$RUNNER_TEMP/AuthKey.p8" \
+            --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait
+          for attempt in 1 2 3; do
+            if xcrun stapler staple "$DMG"; then break; fi
+            [ "$attempt" = 3 ] && exit 1
+            sleep 20
+          done
+          spctl -a -vvv -t open --context context:primary-signature "$DMG"
+          # It opens as the install window: Patch, an Applications shortcut, the background.
+          # Mounted where a double-click mounts it (/Volumes/<name>): the window's
+          # background is found by that path, so a mount elsewhere shows none.
+          mkdir -p "$RUNNER_TEMP/first-run"
+          MNT=$(hdiutil attach -readonly "$DMG" | awk -F'\t' '/\/Volumes\//{print $NF}' | tail -1)
+          echo "mounted at $MNT"
+          case "$MNT" in /Volumes/*) ;; *) echo "the disk image did not mount under /Volumes" >&2; exit 1 ;; esac
+          test -d "$MNT/Patch.app"
+          [ "$(readlink "$MNT/Applications")" = /Applications ]
+          ls "$MNT"/.background/*.tiff
+          # A picture of that window, for a person to look at; not a gate (the
+          # runner's screen may not be capturable).
+          open "$MNT" && sleep 5 && screencapture -x "$RUNNER_TEMP/first-run/dmg-window.png" \
+            || echo "::warning::could not capture the disk image's window"
+          osascript -e 'tell application "Finder" to close every window' || true
+          hdiutil detach "$MNT"
+      # A stranger's first run, on the app as it is published: the zip, downloaded
+      # (quarantined) and unpacked the way Safari does, accepted by Gatekeeper.
+      # Opened from Downloads it offers to move itself to Applications, and does.
+      # Then "On this computer" — the server starts, the host this app carries is
+      # installed as a login service and comes online, and a chat opens — and
+      # the login item macOS holds opens the app where it now is, following it
+      # when it is moved again. The runner is disposable, so installing a host
+      # or a login item here replaces nothing.
+      - name: First run of the notarised app, "On this computer"
+        if: steps.scope.outputs.build == 'true'
+        env:
+          PATCH_SMOKE_SHOTS: ${{ runner.temp }}/first-run
+        run: |
+          set -euo pipefail
+          ZIP=$(ls packages/desktop/release/Patch-*-arm64-mac.zip)
+          DL="$RUNNER_TEMP/download"
+          mkdir -p "$DL"
+          cp "$ZIP" "$DL/"
+          xattr -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;$(uuidgen)" "$DL/$(basename "$ZIP")"
+          ditto -x -k "$DL/$(basename "$ZIP")" "$DL"
+          xattr -p com.apple.quarantine "$DL/Patch.app"
+          spctl -a -vvv -t exec "$DL/Patch.app"
+          node packages/desktop/scripts/smoke-app-location.mjs move "$DL/Patch.app"
+          node packages/desktop/scripts/smoke-first-run.mjs /Applications/Patch.app/Contents/MacOS/Patch --first-run
+          node packages/desktop/scripts/smoke-app-location.mjs login-item /Applications/Patch.app
+          mkdir -p "$HOME/Applications"
+          mv /Applications/Patch.app "$HOME/Applications/Patch.app"
+          node packages/desktop/scripts/smoke-app-location.mjs login-item "$HOME/Applications/Patch.app" /Applications/Patch.app
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.scope.outputs.build == 'true'
+        with:
+          name: mac-first-run
+          path: ${{ runner.temp }}/first-run
+          if-no-files-found: ignore
       - name: Collect the desktop release
         if: steps.scope.outputs.build == 'true'
         run: |
@@ -377,10 +451,11 @@ jobs:
           read -r VERSION SHA BUILT < <(node scripts/version.mjs --json | node -e 'const v=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(v.version,v.gitSha,v.builtAt)')
           REL=packages/desktop/release
           ZIP="Patch-$VERSION-arm64-mac.zip"
-          cp "$REL/latest-mac.yml" "$REL/$ZIP" "$RUNNER_TEMP/out/"
+          DMG="Patch-$VERSION-arm64.dmg"
+          cp "$REL/latest-mac.yml" "$REL/$ZIP" "$REL/$DMG" "$RUNNER_TEMP/out/"
           if [ -f "$REL/$ZIP.blockmap" ]; then cp "$REL/$ZIP.blockmap" "$RUNNER_TEMP/out/"; fi
           # electron-builder's yml has a version but no git sha; this traces the binary to a commit.
-          printf '{"version":"%s","gitSha":"%s","builtAt":"%s","file":"%s"}\n' "$VERSION" "$SHA" "$BUILT" "$ZIP" > "$RUNNER_TEMP/out/desktop-latest.json"
+          printf '{"version":"%s","gitSha":"%s","builtAt":"%s","file":"%s","dmg":"%s"}\n' "$VERSION" "$SHA" "$BUILT" "$ZIP" "$DMG" > "$RUNNER_TEMP/out/desktop-latest.json"
           rm -f "$RUNNER_TEMP/AuthKey.p8"
       - name: Carry the last Mac app build forward unchanged
         if: steps.scope.outputs.build != 'true'
@@ -392,15 +467,122 @@ jobs:
           rm -f "$RUNNER_TEMP/AuthKey.p8"
           cp "$RUNNER_TEMP/prev/desktop-latest.json" "$RUNNER_TEMP/out/"
           ZIP=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).file)' "$RUNNER_TEMP/out/desktop-latest.json")
+          # A build from before the disk image has none to carry.
+          DMG=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).dmg ?? "")' "$RUNNER_TEMP/out/desktop-latest.json")
           gh release download "$PREV" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/out" \
-            --pattern latest-mac.yml --pattern "$ZIP" --pattern "$ZIP.blockmap"
+            --pattern latest-mac.yml --pattern "$ZIP" --pattern "$ZIP.blockmap" ${DMG:+--pattern "$DMG"}
           # NO FALLBACK: the feed and the zip it names must both be there.
           test -f "$RUNNER_TEMP/out/latest-mac.yml"
           test -f "$RUNNER_TEMP/out/$ZIP"
           grep -q "$ZIP" "$RUNNER_TEMP/out/latest-mac.yml"
+          if [ -n "$DMG" ]; then test -f "$RUNNER_TEMP/out/$DMG"; fi
       - uses: actions/upload-artifact@v4
         with:
           name: mac
+          if-no-files-found: error
+          path: ${{ runner.temp }}/out/*
+
+  # The Linux desktop app: one x86_64 AppImage carrying the server release and
+  # the linux-x64 host build from the `host` job, so "On this computer" works with
+  # nothing installed, as on the Mac. electron-updater reads latest-linux.yml
+  # from the server the app is connected to and replaces the AppImage in place.
+  #
+  # Built only when something inside it changed, like the Mac app; otherwise
+  # the last build is carried forward (desktop-linux-latest.json names it).
+  linux-desktop:
+    if: github.repository == 'patch-hq/patch'
+    needs: [host]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Does this release change anything inside the Linux app?
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          PREV=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 --json tagName,isDraft,createdAt \
+            --jq '[.[] | select(.isDraft | not)] | sort_by(.createdAt) | last | .tagName // ""')
+          BASE=""
+          ASSETS=""
+          if [ -n "$PREV" ]; then
+            ASSETS=$(gh release view "$PREV" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          fi
+          if grep -qx 'desktop-linux-latest.json' <<<"$ASSETS"; then
+            mkdir -p "$RUNNER_TEMP/prev"
+            gh release download "$PREV" --repo "$GITHUB_REPOSITORY" --pattern desktop-linux-latest.json --dir "$RUNNER_TEMP/prev"
+            BASE=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).gitSha)' "$RUNNER_TEMP/prev/desktop-linux-latest.json")
+          fi
+          DECISION=$(node scripts/desktop-scope.mjs "$BASE")
+          echo "Linux app: $DECISION (previous release ${PREV:-none}, last app build ${BASE:-none})"
+          echo "build=$([ "$DECISION" = build ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "prev=$PREV" >> "$GITHUB_OUTPUT"
+      # The signed linux-x64 host build this release publishes, laid out where
+      # the desktop build looks for it (dist/host, as `pnpm build:host` leaves it).
+      - uses: actions/download-artifact@v4
+        if: steps.scope.outputs.build == 'true'
+        with:
+          name: host-linux-x64
+          path: dist/host
+      - name: Build the AppImage
+        if: steps.scope.outputs.build == 'true'
+        run: |
+          set -euo pipefail
+          mv dist/host/host-latest-linux-x64.json dist/host/host-latest.json
+          # The host's own installer, which build-host.mjs puts beside its builds
+          # and the app's server hands to `curl …/api/daemon/install.sh | sh`.
+          cp packages/host/installer/curl-install.sh dist/host/install.sh
+          pnpm turbo build --filter=@patch/desktop... --output-logs=errors-only
+          pnpm --filter @patch/desktop dist
+      - name: Check the AppImage starts and offers the first run
+        if: steps.scope.outputs.build == 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends xvfb >/dev/null
+          IMAGE=$(ls packages/desktop/release/Patch-*-x86_64.AppImage)
+          chmod +x "$IMAGE"
+          # The runner has no FUSE and its kernel refuses Chromium's sandbox to
+          # unprivileged users; neither applies to what is being checked here.
+          APPIMAGE_EXTRACT_AND_RUN=1 PATCH_SMOKE_HOME="$RUNNER_TEMP/smoke-home" \
+            xvfb-run -a node packages/desktop/scripts/smoke-first-run.mjs "$IMAGE" --no-sandbox
+      - name: Collect the Linux desktop release
+        if: steps.scope.outputs.build == 'true'
+        run: |
+          set -euo pipefail
+          read -r VERSION SHA BUILT < <(node scripts/version.mjs --json | node -e 'const v=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(v.version,v.gitSha,v.builtAt)')
+          REL=packages/desktop/release
+          IMAGE="Patch-$VERSION-x86_64.AppImage"
+          mkdir -p "$RUNNER_TEMP/out"
+          cp "$REL/latest-linux.yml" "$REL/$IMAGE" "$RUNNER_TEMP/out/"
+          grep -q "$IMAGE" "$RUNNER_TEMP/out/latest-linux.yml"
+          printf '{"version":"%s","gitSha":"%s","builtAt":"%s","file":"%s"}\n' "$VERSION" "$SHA" "$BUILT" "$IMAGE" > "$RUNNER_TEMP/out/desktop-linux-latest.json"
+      - name: Carry the last Linux app build forward unchanged
+        if: steps.scope.outputs.build != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREV: ${{ steps.scope.outputs.prev }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/out"
+          cp "$RUNNER_TEMP/prev/desktop-linux-latest.json" "$RUNNER_TEMP/out/"
+          IMAGE=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).file)' "$RUNNER_TEMP/out/desktop-linux-latest.json")
+          gh release download "$PREV" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/out" \
+            --pattern latest-linux.yml --pattern "$IMAGE"
+          # NO FALLBACK: the feed and the AppImage it names must both be there.
+          test -f "$RUNNER_TEMP/out/latest-linux.yml"
+          test -f "$RUNNER_TEMP/out/$IMAGE"
+          grep -q "$IMAGE" "$RUNNER_TEMP/out/latest-linux.yml"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-desktop
           if-no-files-found: error
           path: ${{ runner.temp }}/out/*
 
@@ -438,15 +620,88 @@ jobs:
           if-no-files-found: error
           path: ${{ runner.temp }}/mobile-update/*
 
+  # The public relay, relay.patchhq.dev: a Cloudflare Worker (packages/relay-worker),
+  # not a release asset — every version of every client reaches the same one. It
+  # is deployed from main once the commit's tests pass, and only when its code
+  # changed, because a deploy restarts every channel and drops each relayed
+  # connection once (both ends redial). Then /healthz has to answer every time,
+  # not once, and the relay's behaviour tests run against the live address. Only
+  # main deploys: a run dispatched on another branch must not put that branch live.
+  #   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID   a token that can deploy Workers
+  relay:
+    if: github.repository == 'patch-hq/patch' && github.ref == 'refs/heads/main'
+    needs: [tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: changed
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          elif git diff --quiet "$BEFORE" "$GITHUB_SHA" -- packages/relay-worker packages/relay/src; then
+            echo "the relay did not change; not deploying"
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.changed.outputs.deploy == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - if: steps.changed.outputs.deploy == 'true'
+        run: corepack enable && pnpm install --frozen-lockfile
+      - if: steps.changed.outputs.deploy == 'true'
+        run: pnpm turbo build --filter=@patch/relay --output-logs=errors-only
+      - name: Deploy the relay
+        if: steps.changed.outputs.deploy == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: 'false'
+        run: pnpm --filter @patch/relay-worker run deploy
+      - name: Check the live relay
+        if: steps.changed.outputs.deploy == 'true'
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 20); do
+            curl -fsS --max-time 10 https://relay.patchhq.dev/healthz
+            echo
+            sleep 3
+          done
+          node packages/relay-worker/test/run.mjs wss://relay.patchhq.dev
+
+  # Only main publishes. A run dispatched on another branch builds, signs,
+  # notarises and checks everything, and publishes nothing — how a change to the
+  # release itself is proved before it merges.
   publish:
-    if: github.repository == 'patch-hq/patch'
-    needs: [tests, server, host, mac, android, mobile-update]
+    if: github.repository == 'patch-hq/patch' && github.ref == 'refs/heads/main'
+    needs: [tests, server, host, mac, linux-desktop, android, mobile-update]
     runs-on: ubuntu-latest
     steps:
+      # Each artifact into its own folder, then only the release's own into
+      # assets/. Merging every artifact once published the Mac first-run
+      # screenshots (`mac-first-run`, kept for reading a failed run) as release files.
       - uses: actions/download-artifact@v4
         with:
-          path: assets
-          merge-multiple: true
+          path: artifacts
+      - name: Gather the release files
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          for dir in artifacts/*/; do
+            name=$(basename "$dir")
+            case "$name" in
+              mac-first-run) echo "not published: $name"; continue ;;
+            esac
+            cp -a "$dir". assets/
+          done
+          ls assets | grep -E '^[0-9]+-.*\.png$' && { echo "a first-run screenshot is in the release files" >&2; exit 1; } || true
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}

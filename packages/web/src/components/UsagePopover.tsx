@@ -18,7 +18,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { PROVIDERS, type ChatContextUsage, type ProviderId } from '@patch/wire';
+import { ACCOUNT_PROVIDERS, type ChatContextUsage, type ProviderId } from '@patch/wire';
 import { usePresenceStore, type HostAccount } from '../stores/presenceStore.js';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { UsageBars } from '../routes/settings/accountList.js';
@@ -45,7 +45,7 @@ export function accountRows(
 ): AccountUsageRow[] {
   if (shared === null) return [];
   const rows: AccountUsageRow[] = [];
-  for (const p of PROVIDERS) {
+  for (const p of ACCOUNT_PROVIDERS) {
     const { backendId, id: providerId, label: backend } = p;
     const accounts = shared.secrets[p.accountsKey];
     for (const account of accounts) {

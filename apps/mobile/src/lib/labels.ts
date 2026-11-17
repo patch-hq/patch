@@ -87,14 +87,13 @@ export function friendlyDeviceName(surfaceKind: string, label?: string): string 
 /**
  * How a permission mode is written on screen (spec/02 § Permission mode).
  *
- * The same words as the id, cased and spaced for reading — never a friendlier
- * synonym, because the value goes to the agent SDK verbatim and a renamed mode
- * would have the user picking one thing and the model told another. Mirrors
+ * The same words as the id, cased and spaced for reading, except `default`,
+ * which reads "Ask": it is not the default mode (`auto` is). Mirrors
  * packages/web/src/lib/permissionModeLabel.ts.
  */
 const PERMISSION_MODE_LABELS: Record<string, string> = {
   auto: 'Auto',
-  default: 'Default',
+  default: 'Ask',
   acceptEdits: 'Accept edits',
   bypassPermissions: 'Bypass permissions',
   plan: 'Plan',

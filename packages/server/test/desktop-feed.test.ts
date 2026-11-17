@@ -97,6 +97,27 @@ describe('desktop feed', () => {
     expect(res.headers['content-length']).toBe(String(Buffer.byteLength(res.body)));
   });
 
+  it('serves the Linux feed and the AppImage it names', async () => {
+    writeFileSync(join(downloadsDir, 'latest-linux.yml'), 'version: 0.1.9\n');
+    writeFileSync(join(downloadsDir, 'Patch-0.1.9-x86_64.AppImage'), 'ELF');
+    const registry = Registry.load(dir);
+    const app = await build({ logger: false, registry, hostLink: new InProcessHostLink() });
+    try {
+      const yml = await app.inject({ method: 'GET', url: '/api/desktop/latest-linux.yml' });
+      expect(yml.statusCode).toBe(200);
+      expect(yml.headers['content-type']).toContain('text/yaml');
+      const image = await app.inject({
+        method: 'GET',
+        url: '/api/desktop/Patch-0.1.9-x86_64.AppImage',
+        headers: { range: 'bytes=0-1' },
+      });
+      expect(image.statusCode).toBe(206);
+      expect(image.body).toBe('EL');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('serves a single surviving range as a plain 206 when the others fall outside the file', async () => {
     const res = await get({ range: 'bytes=50-60, 2-3' });
     expect(res.statusCode).toBe(206);

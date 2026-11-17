@@ -84,6 +84,13 @@ export function TerminalPanel({
   const takePending = useTerminalStore((s) => s.takePending);
   const ingest = useTerminalStore((s) => s.ingest);
 
+  const connection = usePresenceStore((s) => s.connection);
+  const hostOnline = usePresenceStore((s) => {
+    const id = chatHostId ?? defaultHostId(s.hosts);
+    return id !== null && s.hosts[id]?.online === true;
+  });
+  const reopen = session?.reopen === 'now';
+
   const [line, setLine] = useState('');
   // Position in `session.history` while walking it with ↑/↓; null = "at the
   // live line the user is typing".
@@ -120,7 +127,7 @@ export function TerminalPanel({
       return;
     }
     const sessionId = newSessionId();
-    startSession(chatId, folder ?? '', sessionId);
+    startSession(chatId, folder ?? '', sessionId, hostId);
     // Claim a folder only when we actually have one. With none, the host
     // roots the shell and tells us where — never a path this surface guessed.
     send(
@@ -144,6 +151,13 @@ export function TerminalPanel({
     // current session/ws, so a dependency-complete list would re-run it on
     // every render and spawn shells.
   }, [chatId]);
+
+  // A shell that died with the host or the link comes back by itself once both
+  // are up again. Only the mounted (open) terminal does this.
+  useEffect(() => {
+    if (reopen && connection === 'connected' && hostOnline) startShell();
+    // startShell closes over the current session/ws; see the open effect.
+  }, [reopen, connection, hostOnline]);
 
   // Drain whatever asked for this terminal (spec/14 § Background task bar): a
   // click on a running background task queues a command or a note and opens
@@ -261,7 +275,19 @@ export function TerminalPanel({
           </span>
         ))}
       </div>
-      {dead ? (
+      {dead && reopen ? (
+        <div className="terminal-prompt" data-testid="terminal-reconnecting" role="status">
+          <span className="terminal-caret mono">Reconnecting…</span>
+          <button
+            type="button"
+            className="terminal-restart"
+            data-testid="terminal-restart"
+            onClick={startShell}
+          >
+            Restart
+          </button>
+        </div>
+      ) : dead ? (
         <button
           type="button"
           className="terminal-restart"

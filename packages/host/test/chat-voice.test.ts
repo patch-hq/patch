@@ -196,7 +196,7 @@ describe('chat voice glue', () => {
     expect(messages(events).map((m) => [m.role, m.content])).toEqual([
       [
         'system',
-        '[call] Call 0:52 · Gemini Flash · $0.017 · 5,000 tokens in / 600 out · 0 hand-offs',
+        '[call] Call 0:52 · Gemini Flash · $0.017 · 5,000 tokens in / 600 out',
       ],
     ]);
     const t = ledger.totals(Date.UTC(2026, 9, 10));
@@ -235,7 +235,7 @@ describe('chat voice glue', () => {
       messages(events)
         .filter((m) => m.role === 'system')
         .map((m) => m.content),
-    ).toEqual(['[call] Call 0:52 · Gemini Flash · $0 · 1 hand-off']);
+    ).toEqual(['[call] Call 0:52 · Gemini Flash · $0']);
   });
 
   it('writes a failed hand-off into the chat, so a pending one never hangs', async () => {

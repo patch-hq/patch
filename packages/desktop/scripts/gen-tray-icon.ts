@@ -4,7 +4,12 @@
 
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { renderTrayTemplate, encodeGrayAlphaPng } from '../src/tray-icon';
+import {
+  renderTrayTemplate,
+  renderTrayWorking,
+  encodeGrayAlphaPng,
+  encodeRgbaPng,
+} from '../src/tray-icon';
 
 const buildDir = join(__dirname, '..', 'build');
 
@@ -14,5 +19,14 @@ for (const [file, size] of [
 ] as const) {
   const out = join(buildDir, file);
   writeFileSync(out, encodeGrayAlphaPng(renderTrayTemplate(size)));
+  console.log(`wrote ${out} (${size}×${size})`);
+}
+
+for (const [file, size] of [
+  ['trayIconWorking.png', 16],
+  ['trayIconWorking@2x.png', 32],
+] as const) {
+  const out = join(buildDir, file);
+  writeFileSync(out, encodeRgbaPng(renderTrayWorking(size)));
   console.log(`wrote ${out} (${size}×${size})`);
 }

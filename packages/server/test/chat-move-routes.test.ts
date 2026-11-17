@@ -191,11 +191,44 @@ describe('POST /api/chats/:id/move', () => {
     }
   });
 
-  it('refuses a move to the host it is already on, an offline host, or no folder', async () => {
+  it('moves a chat to another folder on its own host in one step, keeping the host', async () => {
+    const link = new FakeHosts(happy);
+    const { built, move, host } = await boot(link);
+    try {
+      const res = await move({ hostId: 'd1', folder: '/Users/tom/Unite2' });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ ok: true, hostId: 'd1', folder: '/Users/tom/Unite2' });
+      expect(link.steps.map((s) => [s.hostId, s.op])).toEqual([['d1', 'refolder']]);
+      expect(link.steps[0]!.event.folder).toBe('/Users/tom/Unite2');
+      expect((await host())?.hostId).toBe('d1');
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('refuses a same-host move into the folder the chat already runs in, and reports the host reason', async () => {
+    const link = new FakeHosts((_d, e) =>
+      e.op === 'refolder'
+        ? { ok: false, error: { code: 'folder_not_found', message: '/nope is not a folder' } }
+        : { ok: true },
+    );
+    const { built, move } = await boot(link);
+    try {
+      const same = await move({ hostId: 'd1', folder: '/Users/tom/Unite' });
+      expect(same.statusCode).toBe(400);
+      expect(same.json().error).toBe('same_folder');
+      const bad = await move({ hostId: 'd1', folder: '/nope' });
+      expect(bad.statusCode).toBe(400);
+      expect(bad.json().message).toBe('Mac: /nope is not a folder');
+    } finally {
+      await built.app.close();
+    }
+  });
+
+  it('refuses an offline host, or no folder', async () => {
     const link = new FakeHosts(happy);
     const { built, move } = await boot(link);
     try {
-      expect((await move({ hostId: 'd1', folder: '/x' })).json().error).toBe('same_host');
       expect((await move({ hostId: 'd2' })).json().error).toBe('folder_required');
       expect((await move({ hostId: 'd2', folder: 'relative/path' })).statusCode).toBe(400);
       expect((await move({ hostId: 'nope', folder: '/x' })).statusCode).toBe(404);

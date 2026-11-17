@@ -49,9 +49,8 @@ test('--print-caddyfile names the domain it was given and proxies to the server'
   assert.match(r.stdout, /email me@example\.com/);
   assert.match(r.stdout, /^patch\.example\.com \{$/m);
   assert.match(r.stdout, /reverse_proxy 127\.0\.0\.1:3970/);
-  assert.match(r.stdout, /@device path \/device\/\*/);
-  assert.match(r.stdout, /reverse_proxy @device 127\.0\.0\.1:3003/);
   assert.doesNotMatch(r.stdout, /@audio|\/audio\/\*/);
+  assert.doesNotMatch(r.stdout, /@device|:3003/);
 });
 
 test('--socket makes Caddy proxy to the Unix socket, with a default path', () => {

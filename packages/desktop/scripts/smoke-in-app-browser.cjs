@@ -15,7 +15,7 @@ const assert = require('node:assert/strict');
 const { app, ipcMain } = require('electron');
 
 if (!process.env.PATCH_SERVER_URL) {
-  process.env.PATCH_SERVER_URL = 'https://patch.tomchambers.me/app/?credential=SMOKE';
+  process.env.PATCH_SERVER_URL = 'https://patch.example.com/app/?credential=SMOKE';
 }
 app.disableHardwareAcceleration();
 
@@ -229,7 +229,7 @@ app.whenReady().then(async () => {
   await delay(400);
   check('will-navigate-keeps-spa-put', () =>
     assert.ok(
-      win.webContents.getURL().includes('patch.tomchambers.me/app/'),
+      win.webContents.getURL().includes('patch.example.com/app/'),
       `SPA navigated away to ${win.webContents.getURL()}`,
     ),
   );

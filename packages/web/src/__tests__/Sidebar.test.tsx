@@ -4,7 +4,9 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { Sidebar } from '../components/Sidebar.js';
 import { SnoozeSheet } from '../components/SnoozeSheet.js';
 import { ConfirmModal } from '../components/ConfirmModal.js';
+import { usePreferencesStore, DEFAULT_PREFERENCES } from '../stores/preferencesStore.js';
 import { useChatStore } from '../stores/chatStore.js';
+import { useBatchStore } from '../stores/batchStore.js';
 import { usePresenceStore } from '../stores/presenceStore.js';
 import { reportHost } from './presenceHelpers.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
@@ -89,6 +91,26 @@ function rowFixture(overrides: Partial<ChatRow> = {}): RowFixture {
  * asserting on a count badge has to put one here; without it the counts are
  * `null` and no badge renders at all.
  */
+/** A Speakers thread that has been spoken to, so Channels is drawn. */
+function usedSpeakers(): void {
+  useChatStore.getState().hydrate([
+    {
+      chatId: 'thread_speakers',
+      hostId: 'd1',
+      permissionMode: 'bypassPermissions' as const,
+      name: 'speakers',
+      folder: '/home/tom/.patch/threads/speakers',
+      activity: 'idle',
+      status: 'active',
+      pinned: false,
+      pinnedAt: null,
+      disabled: false,
+      lastUpdated: 1,
+      preview: 'turn the kitchen lights off',
+    },
+  ]);
+}
+
 function seedCounts(overrides: Partial<Record<string, number>> = {}): void {
   useChatStore.getState().setSectionCounts({
     hidden: 0,
@@ -119,6 +141,9 @@ function selectUnreadView(): void {
 
 describe('Sidebar', () => {
   beforeEach(() => {
+    usePreferencesStore.setState({
+      preferences: { ...DEFAULT_PREFERENCES, experimentalFeatures: true },
+    });
     useChatStore.getState()._reset();
     usePresenceStore.getState().setConnection('connected');
     usePresenceStore.setState({ hostOnline: true });
@@ -163,6 +188,7 @@ describe('Sidebar', () => {
   // for the keyboard reading it (jsdom's navigator is not a Mac).
   it('the sidebar controls with chords name them in their tooltips', () => {
     useUiStore.setState({ sidebarCollapsed: false });
+    usedSpeakers();
     renderInRouter();
     expect(screen.getByTestId('sidebar-collapse').getAttribute('title')).toBe(
       'Collapse sidebar (Ctrl+/)',
@@ -334,6 +360,30 @@ describe('Sidebar', () => {
     // ...and NOT duplicated into the pinned section.
     expect(screen.queryByTestId('manager-row-empty')).not.toBeInTheDocument();
     expect(screen.queryByTestId('pinned-section')).not.toBeInTheDocument();
+  });
+
+  it('hides the Manager row and ignores a persisted Batch mode while experimental features are off', () => {
+    usePreferencesStore.setState({ preferences: DEFAULT_PREFERENCES });
+    useBatchStore.setState({ mode: 'batch' });
+    useChatStore.getState().hydrate([
+      {
+        chatId: 'thread_manager',
+        hostId: 'd1',
+        permissionMode: 'bypassPermissions' as const,
+        name: 'manager',
+        folder: '/home/tom/.patch/threads/manager',
+        activity: 'idle',
+        status: 'active',
+        pinned: true,
+        pinnedAt: 50,
+        disabled: false,
+        lastUpdated: 1,
+      },
+    ]);
+    renderInRouter();
+    expect(screen.queryByTestId('chat-row-thread_manager')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('batch-panel')).not.toBeInTheDocument();
+    useBatchStore.getState()._reset();
   });
 
   // spec/04 § Goals, spec/14 § Sidebar — a chat working toward a goal carries
@@ -676,21 +726,7 @@ describe('Sidebar', () => {
   });
 
   it('puts Speakers in a Channels section collapsed by default, not in folders', () => {
-    useChatStore.getState().hydrate([
-      {
-        chatId: 'thread_speakers',
-        hostId: 'd1',
-        permissionMode: 'bypassPermissions' as const,
-        name: 'speakers',
-        folder: '/home/tom/.patch/threads/speakers',
-        activity: 'idle',
-        status: 'active',
-        pinned: false,
-        pinnedAt: null,
-        disabled: false,
-        lastUpdated: 1,
-      },
-    ]);
+    usedSpeakers();
     renderInRouter();
     // Collapsed by default — channel rows not rendered yet.
     expect(screen.queryByTestId('channels-list')).not.toBeInTheDocument();
@@ -703,21 +739,7 @@ describe('Sidebar', () => {
   });
 
   it('shows a "🎙 <name>" device pill on the Speakers row when a device is mid-session', async () => {
-    useChatStore.getState().hydrate([
-      {
-        chatId: 'thread_speakers',
-        hostId: 'd1',
-        permissionMode: 'bypassPermissions' as const,
-        name: 'speakers',
-        folder: '/home/tom/.patch/threads/speakers',
-        activity: 'idle',
-        status: 'active',
-        pinned: false,
-        pinnedAt: null,
-        disabled: false,
-        lastUpdated: 1,
-      },
-    ]);
+    usedSpeakers();
     // No active device yet → no pill.
     renderInRouter();
     fireEvent.click(screen.getByTestId('channels-toggle'));
@@ -1779,19 +1801,36 @@ describe('Sidebar', () => {
   // spec/14 §6: an empty lifecycle section costs the sidebar nothing — the count
   // in its icon's tooltip IS the empty state, and opening it grows no "open in
   // main window" head (LifecyclePanel withholds that for a `0` count).
-  it('archived section: empty is a 0 on the toggle, with no body', () => {
-    seedCounts();
+  it('an empty section draws no icon, and one with something in it does', () => {
+    seedCounts({ archived: 3 });
     renderInRouter();
-    fireEvent.click(screen.getByTestId('archived-toggle'));
     expect(screen.getByTestId('archived-toggle')).toHaveAttribute(
       'title',
-      'Archived · 0 (Ctrl+Shift+A)',
+      'Archived · 3 (Ctrl+Shift+A)',
     );
-    expect(
-      screen.getByTestId('archived-section').querySelectorAll('[data-testid^="chat-row-"]'),
-    ).toHaveLength(0);
-    expect(screen.queryByTestId('archived-open-main')).toBeNull();
-    expect(screen.queryByTestId('archived-search')).toBeNull();
+    for (const kind of ['hidden', 'snoozed', 'deleted', 'automations']) {
+      expect(screen.queryByTestId(`${kind}-toggle`)).toBeNull();
+    }
+  });
+
+  it('with every section empty the icon row is not drawn at all', () => {
+    seedCounts();
+    renderInRouter();
+    expect(screen.queryByTestId('sb-lifecycle')).toBeNull();
+  });
+
+  it('before the counts load every icon is drawn, so a full section is never hidden', () => {
+    renderInRouter();
+    for (const kind of ['hidden', 'archived', 'snoozed', 'deleted', 'automations']) {
+      expect(screen.getByTestId(`${kind}-toggle`)).toBeInTheDocument();
+    }
+  });
+
+  it('Channels is not drawn until a channel has been used', () => {
+    renderInRouter();
+    expect(screen.queryByTestId('channels-toggle')).toBeNull();
+    act(() => usedSpeakers());
+    expect(screen.getByTestId('channels-toggle')).toBeInTheDocument();
   });
 
   // spec/14 §6: the count is what tells the user whether opening a section is
@@ -1848,6 +1887,7 @@ describe('Sidebar', () => {
   // against the rows the section actually draws, not a literal, so a third
   // channel would fail here rather than silently under-report.
   it('Channels carries a count while collapsed, matching the rows it expands to', () => {
+    usedSpeakers();
     renderInRouter();
     const badge = screen.getByTestId('channels-count');
     expect(badge).toBeInTheDocument();
@@ -2087,16 +2127,6 @@ describe('Sidebar', () => {
     await waitFor(() => {
       expect(screen.getByTestId('deleted-load-error')).toHaveTextContent('db down');
     });
-  });
-
-  it('Deleted section: empty is a 0 on the toggle and no body at all', () => {
-    seedCounts();
-    renderInRouter();
-    fireEvent.click(screen.getByTestId('deleted-toggle'));
-    expect(screen.getByTestId('deleted-toggle')).toHaveAttribute('title', 'Deleted · 0');
-    expect(
-      screen.getByTestId('deleted-section').querySelectorAll('[data-testid^="chat-row-"]'),
-    ).toHaveLength(0);
   });
 
   it('the Deleted-section fetch effect is cancelled cleanly on unmount', () => {

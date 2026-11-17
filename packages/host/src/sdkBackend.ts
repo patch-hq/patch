@@ -329,6 +329,12 @@ export interface SdkRunOptions {
    * fresh thread; it rides the resumed thread's own existing prompt cache.
    */
   codexAppendItems?: { events: readonly TrackEntry[] };
+  /**
+   * Set only for a turn that starts a local-model session from a chat's
+   * existing track (a switch onto a local model). The track becomes the
+   * session's opening messages; there is no native session to resume.
+   */
+  localReseed?: { events: readonly TrackEntry[] };
 }
 
 export interface SdkBackend {
@@ -1297,6 +1303,10 @@ function inferenceProfileOptions(opts: SdkRunOptions): Partial<Options> {
  * it to fall back to and nothing here should pretend otherwise.
  */
 let claudeExecutable: string | undefined | null = null;
+/** Resolve again on the next turn: Claude Code has just been installed or moved. */
+export function forgetClaudeExecutable(): void {
+  claudeExecutable = null;
+}
 function claudeExecutablePath(): string | undefined {
   if (claudeExecutable === null) {
     claudeExecutable = resolveClaudeExecutable({
@@ -1313,6 +1323,7 @@ function hostOpts(
   opts: SdkRunOptions,
   durable?: DurableTurn,
   onPid?: (pid: number | undefined) => void,
+  onExit?: (exit: ProcessExit) => void,
 ): {
   pathToClaudeCodeExecutable?: string;
   spawnClaudeCodeProcess: (spawnOpts: SpawnOptions) => SpawnedProcess;
@@ -1320,10 +1331,17 @@ function hostOpts(
   const exe = claudeExecutablePath();
   // Own process group per claude, reaped whole: see claudeSpawn.ts. A durable
   // turn's runner does the same reaping on the far side of its socket.
-  const spawnClaudeCodeProcess = durable
+  const spawnRaw = durable
     ? durable.spawn
     : (spawnOpts: SpawnOptions): SpawnedProcess =>
         spawnClaudeInGroup(spawnOpts, opts.onReapRefused, onPid);
+  // How claude ended, however it was spawned: a cut stream is reported with it,
+  // since "killed by SIGKILL" and "exited 1" point at different causes.
+  const spawnClaudeCodeProcess = (spawnOpts: SpawnOptions): SpawnedProcess => {
+    const proc = spawnRaw(spawnOpts);
+    if (onExit) proc.once('exit', (code, signal) => onExit({ code, signal }));
+    return proc;
+  };
   return exe === undefined
     ? { spawnClaudeCodeProcess }
     : { pathToClaudeCodeExecutable: exe, spawnClaudeCodeProcess };
@@ -1957,6 +1975,7 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   const { env, mcpServers } = buildSdkEnv(opts);
   const durable = opts.durableTurn ? new DurableTurn(opts.durableTurn) : undefined;
   const sup = mcpServers === undefined ? undefined : new McpSupervisor({});
+  let claudeExit: ProcessExit | undefined;
   // The chat's mode can change while this process is running (the composer's
   // mode control, or "Approve & resume bypass" on a plan-mode card). `live`
   // is what every later decision in this turn reads, and `setLiveRunPermissionMode`
@@ -1991,7 +2010,9 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
           }
         : {}),
       ...SHARED_OPTS,
-      ...hostOpts(opts, durable),
+      ...hostOpts(opts, durable, undefined, (e) => {
+        claudeExit = e;
+      }),
       ...withMcpSupervisor(boundaryHooks(boundaryOpts), sup),
       disallowedTools: disallowedToolsFor(opts),
       env,
@@ -2010,10 +2031,13 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   const limitEvents = createLimitEventMemory();
   let sawResult = false;
   let lastStopReason: string | undefined;
+  let sessionId: string | undefined;
   try {
     for await (const msg of q) {
       if ((msg as { type?: unknown } | null)?.type === 'result') sawResult = true;
       lastStopReason = noteStopReason(msg, lastStopReason);
+      const sid = (msg as { session_id?: unknown } | null)?.session_id;
+      if (typeof sid === 'string' && sid !== '') sessionId = sid;
       // A reattached turn replays claude's whole output so the per-turn state
       // below is rebuilt; what the previous host already handled is skipped.
       const plan = durable?.plan(msg) ?? { offset: undefined, skip: 0 };
@@ -2045,7 +2069,24 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
     // killed, the connection dropped), not finished. Said out loud so the turn
     // is retried or reported, never settled as complete with no reason.
     if (!sawResult && !opts.abortController.signal.aborted) {
-      throw new Error(cutTurnMessage(lastStopReason));
+      const exit =
+        durable?.describeCut() ??
+        (claudeExit
+          ? `claude exited code=${claudeExit.code} signal=${claudeExit.signal}`
+          : undefined);
+      // The model had already ended its turn: every word of the answer is in,
+      // and only Claude Code's closing `result` went missing. Retrying would
+      // run the same input again (a watch alert handled twice, a message sent
+      // twice), so the turn settles as done and the loss is logged instead.
+      if (lastStopReason === 'end_turn') {
+        durable?.warn(
+          { exit },
+          'claude exited after the reply ended (end_turn) without its result; settling the turn as complete',
+        );
+        yield { type: 'result', sessionId };
+        return;
+      }
+      throw new Error(cutTurnMessage(lastStopReason, exit));
     }
   } finally {
     durable?.release();
@@ -2056,12 +2097,30 @@ async function* oneShotRun(opts: SdkRunOptions): AsyncGenerator<SdkEnvelope> {
   }
 }
 
-/** The stop reason of the latest assistant message, carried forward otherwise. */
-function noteStopReason(msg: unknown, previous: string | undefined): string | undefined {
-  const m = msg as { type?: unknown; message?: { stop_reason?: unknown } } | null;
+/**
+ * The stop reason of the model's latest message, carried forward otherwise.
+ * With partial messages on, Claude Code's `assistant` messages carry no stop
+ * reason (one per content block, emitted before the message ends): it arrives
+ * on the `message_delta` stream event. A new message, or a user message, clears it.
+ */
+export function noteStopReason(msg: unknown, previous: string | undefined): string | undefined {
+  const m = msg as {
+    type?: unknown;
+    parent_tool_use_id?: unknown;
+    message?: { stop_reason?: unknown };
+    event?: { type?: unknown; delta?: { stop_reason?: unknown } };
+  } | null;
+  if (m?.type === 'user') return undefined;
+  if (m?.type === 'stream_event') {
+    if (m.event?.type === 'message_start') return undefined;
+    const reason = m.event?.type === 'message_delta' ? m.event.delta?.stop_reason : undefined;
+    return typeof reason === 'string' ? reason : previous;
+  }
   if (m?.type !== 'assistant') return previous;
+  // A sub-agent finishing its own reply says nothing about the main turn.
+  if (typeof m.parent_tool_use_id === 'string') return previous;
   const reason = m.message?.stop_reason;
-  return typeof reason === 'string' ? reason : undefined;
+  return typeof reason === 'string' ? reason : previous;
 }
 
 /**
@@ -2069,12 +2128,19 @@ function noteStopReason(msg: unknown, previous: string | undefined): string | un
  * classifier matches, and adds whether the last reply had finished so the
  * reader can tell "died mid-answer" from "answered, then the process went".
  */
-export function cutTurnMessage(lastStopReason: string | undefined): string {
+export function cutTurnMessage(lastStopReason: string | undefined, exit?: string): string {
   const base =
     'The Claude Code process ended mid-turn without finishing (no result message). The stream was cut, not completed.';
+  const how = exit !== undefined ? ` (${exit})` : '';
   return lastStopReason === 'end_turn'
-    ? `${base} The last reply had finished (stop reason end_turn), so the text above is likely complete; only the closing result was lost.`
-    : `${base} The last reply had not finished, so the text above may be incomplete.`;
+    ? `${base} The last reply had finished (stop reason end_turn), so the text above is likely complete; only the closing result was lost.${how}`
+    : `${base} The last reply had not finished, so the text above may be incomplete.${how}`;
+}
+
+/** How a Claude process ended: its exit code, or the signal that killed it. */
+export interface ProcessExit {
+  code: number | null;
+  signal: string | null;
 }
 
 interface LiveRun {
@@ -2122,7 +2188,15 @@ export async function setLiveRunPermissionMode(
   // process out of plan.
   if (live.mode !== 'plan') return;
   live.mode = mode;
-  await live.query?.setPermissionMode(mode);
+  try {
+    await live.query?.setPermissionMode(mode);
+  } catch (err) {
+    // The process closed while the change was in flight: the turn ended, which
+    // is the "no turn in flight" case above — the next turn starts on `mode`.
+    // Anything else is a real failure and still throws.
+    if (err instanceof Error && err.message === 'Query closed before response received') return;
+    throw err;
+  }
 }
 
 /**

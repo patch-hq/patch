@@ -12,7 +12,7 @@ import { mkdtempSync, mkdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
-import type { WireEvent } from '@patch/wire';
+import { SNOOZE_UNTIL_COMPLETE, type WireEvent } from '@patch/wire';
 import { Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { TurnFailedError, type SdkBackend, type SdkEnvelope } from '../src/sdkBackend.js';
@@ -125,7 +125,7 @@ describe('a transient SDK error is retried, not dropped', () => {
   });
 
   it('re-sends the turn after the first backoff step and the chat recovers', async () => {
-    const { daemon, folder } = makeHost(
+    const { daemon, folder, metaStore } = makeHost(
       throwingOnce('socket hang up', [
         { type: 'assistant', content: 'second time lucky' },
         { type: 'result', sessionId: 's2' },
@@ -136,11 +136,15 @@ describe('a transient SDK error is retried, not dropped', () => {
     await vi.advanceTimersByTimeAsync(100);
     // The failure is still reported — surfaces must see it.
     expect(daemon.chatState.get(chatId)?.activity).toBe('errored');
+    expect(metaStore.read(chatId)?.lastError?.code).toBe('sdk_error');
 
     // First ladder step is 10s; the retry then lands on its own.
     await vi.advanceTimersByTimeAsync(10_000);
     await vi.advanceTimersByTimeAsync(500);
     expect(daemon.chatState.get(chatId)?.activity).toBe('idle');
+    // A retry that got through leaves no stale failure behind.
+    expect(metaStore.read(chatId)?.lastError).toBeUndefined();
+    expect(daemon.chatState.get(chatId)?.lastError).toBeNull();
     daemon.shutdown();
   });
 
@@ -173,6 +177,50 @@ describe('a transient SDK error is retried, not dropped', () => {
       prev = e.activity;
     }
     expect(edges).toEqual([true, true, true, false]);
+    daemon.shutdown();
+  });
+});
+
+describe('an "until complete" snooze waits out the retry ladder', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('is not ended by a transient error the ladder recovers from', async () => {
+    const { daemon, folder } = makeHost(
+      throwingOnce('socket hang up', [
+        { type: 'assistant', content: 'ok' },
+        { type: 'result', sessionId: 's2' },
+      ] as SdkEnvelope[]),
+      'snz-recover',
+    );
+    const chatId = await daemon.spawnChat({ folder, prompt: 'flaky' });
+    await daemon.setSnoozed(chatId, SNOOZE_UNTIL_COMPLETE);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(daemon.chatState.get(chatId)?.activity).toBe('errored');
+    expect(daemon.chatState.get(chatId)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
+
+    await vi.advanceTimersByTimeAsync(10_500);
+    expect(daemon.chatState.get(chatId)?.activity).toBe('idle');
+    expect(daemon.chatState.get(chatId)?.snoozedUntil).toBe(null);
+    const last = daemon.chatState.get(chatId)!.snoozeRecords.at(-1)!;
+    expect(last.outcome.kind).toBe('finished');
+    daemon.shutdown();
+  });
+
+  it('ends with the error once the ladder is exhausted', async () => {
+    const { backend } = alwaysThrows('ECONNRESET');
+    const { daemon, folder } = makeHost(backend, 'snz-exhaust');
+    const chatId = await daemon.spawnChat({ folder, prompt: 'never works' });
+    await daemon.setSnoozed(chatId, SNOOZE_UNTIL_COMPLETE);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(daemon.chatState.get(chatId)?.snoozedUntil).toBe(SNOOZE_UNTIL_COMPLETE);
+    await vi.advanceTimersByTimeAsync(400_000);
+    expect(daemon.chatState.get(chatId)?.snoozedUntil).toBe(null);
+    expect(daemon.chatState.get(chatId)!.snoozeRecords.at(-1)!.outcome.kind).toBe('errored');
     daemon.shutdown();
   });
 });
@@ -275,6 +323,29 @@ describe('a session the SDK aborted unasked is re-sent, not laddered', () => {
     expect(calls).toBe(3);
     expect(daemon.chatState.get(chatId)?.activity).toBe('errored');
     expect(daemon.chatState.get(chatId)?.turnRetrying).toBe(false);
+    daemon.shutdown();
+  });
+
+  it('the fresh restart carries on the task in progress, not just the latest message', async () => {
+    const prompts: string[] = [];
+    let calls = 0;
+    const backend: SdkBackend = {
+      async *run(opts: { prompt: unknown }) {
+        calls++;
+        prompts.push(typeof opts.prompt === 'string' ? opts.prompt : JSON.stringify(opts.prompt));
+        if (calls <= 2) throw abortErr();
+        yield { type: 'assistant', content: 'carrying on' } as SdkEnvelope;
+        yield { type: 'result', sessionId: 's-fresh' } as SdkEnvelope;
+      },
+    } as SdkBackend;
+    const { daemon, folder } = makeHost(backend, 'abort3');
+    await daemon.spawnChat({ folder, prompt: 'latest question' });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(calls).toBe(3);
+    // The resumed re-send repeats the prompt; the fresh one tells the model to continue.
+    expect(prompts[1]).not.toContain('carry on any unfinished task');
+    expect(prompts[2]).toContain('carry on any unfinished task');
+    expect(prompts[2]).toContain('latest question');
     daemon.shutdown();
   });
 });
