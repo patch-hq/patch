@@ -34,6 +34,7 @@ function harness(opts: { now?: () => number; observationGapMs?: number } = {}) {
   const refreshUsage = vi.fn();
   const report = vi.fn();
   const orphans = { n: 0 };
+  const parks = { n: 0 };
   const readings: { accountId: string; blocked: boolean; at: number }[] = [];
   const warnings: string[] = [];
   const credit = new CreditResume({
@@ -44,6 +45,7 @@ function harness(opts: { now?: () => number; observationGapMs?: number } = {}) {
     report,
     readings: () => readings,
     hasOrphanedParks: () => orphans.n > 0,
+    hasCreditParks: () => parks.n > 0,
     now,
     ...(opts.observationGapMs !== undefined ? { observationGapMs: opts.observationGapMs } : {}),
     logger: {
@@ -62,6 +64,7 @@ function harness(opts: { now?: () => number; observationGapMs?: number } = {}) {
     report,
     readings,
     orphans,
+    parks,
     warnings,
   };
 }
@@ -238,10 +241,21 @@ describe('a parked chat nothing is armed for (host restarted past the reset)', (
     expect(h.resumeParked).not.toHaveBeenCalled();
   });
 
-  it('holds off while another account is still recorded as spent (a just-refused turn)', () => {
+  it('releases a park onto an account with credit while ANOTHER is still spent', () => {
+    // The reported bug: the default account is on its weekly limit (recorded as
+    // spent, and kept across a restart), a second account has credit. Turns
+    // parked on credit — with a timer armed for the week reset or not — must
+    // move to the second account rather than wait for the first.
     const h = harness();
-    h.orphans.n = 1;
-    h.rotation.markExhausted('a2', 'spend limit', h.clock.t + HOUR);
+    h.parks.n = 1;
+    h.rotation.markExhausted('a2', 'weekly limit', h.clock.t + 100 * HOUR);
+    h.credit.observedUsable('a1', h.clock.t);
+    expect(h.resumeParked).toHaveBeenCalledTimes(1);
+  });
+
+  it('does nothing for an account with credit when no chat is parked', () => {
+    const h = harness();
+    h.rotation.markExhausted('a2', 'weekly limit', h.clock.t + 100 * HOUR);
     h.credit.observedUsable('a1', h.clock.t);
     expect(h.resumeParked).not.toHaveBeenCalled();
   });

@@ -67,6 +67,12 @@ export interface CreditResumeOpts {
    */
   hasOrphanedParks?: () => boolean;
   /**
+   * Is any chat parked on credit at all, timer armed or not? A park waiting on
+   * ITS account's week-long reset is still owed a turn the moment a different
+   * account is seen to have credit.
+   */
+  hasCreditParks?: () => boolean;
+  /**
    * How long after a refusal an "it has credit" reading is believed.
    *
    * A probe is NOT a source of truth about whether a turn will succeed — a
@@ -181,8 +187,14 @@ export class CreditResume {
       // method would ever fire for it. A reading showing credit while NO account
       // is recorded as spent is that event. (A turn refused a moment ago would
       // have recorded its account, which is what keeps this from looping.)
-      if (this.opts.hasOrphanedParks?.() === true && this.opts.rotation.snapshot().length === 0) {
-        this.resumeWaitingWork('credit is available and a parked chat has nothing armed', {
+      // This account is not recorded as spent and its reading shows credit, so
+      // it is somewhere a parked turn can run — whatever ELSE is sidelined. (It
+      // used to also demand that NO account was sidelined, which is exactly the
+      // case of a default account on its weekly limit with a second one idle:
+      // the parked turns stayed put, restart or not.) A turn refused on this
+      // account would have marked it, so this cannot loop.
+      if (this.opts.hasCreditParks?.() === true || this.opts.hasOrphanedParks?.() === true) {
+        this.resumeWaitingWork('an account has credit and a chat is parked on credit', {
           accountId,
           refreshUsage: false,
         });
