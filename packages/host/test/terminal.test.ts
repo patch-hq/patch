@@ -73,7 +73,7 @@ describe('TerminalSessions', () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'patch-term-'));
     sink = collector();
-    sessions = new TerminalSessions({ emit: sink.emit });
+    sessions = new TerminalSessions({ runDir: join(dir, '.terminals'), emit: sink.emit });
   });
 
   afterEach(async () => {
@@ -315,7 +315,11 @@ describe('TerminalSessions', () => {
     const prev = process.env.SHELL;
     process.env.SHELL = join(dir, 'no-such-shell');
     // With a logger attached, so the failure is reported to the host log too.
-    sessions = new TerminalSessions({ emit: sink.emit, logger: pino({ level: 'silent' }) });
+    sessions = new TerminalSessions({
+      runDir: join(dir, '.terminals'),
+      emit: sink.emit,
+      logger: pino({ level: 'silent' }),
+    });
     try {
       sessions.handle({
         type: 'patch.terminal.open',
@@ -365,7 +369,11 @@ describe('TerminalSessions', () => {
     // Where a clone is actually going. The host's $HOME is /root in the
     // container while the project dirs are mounted elsewhere, so homing there
     // would drop the user somewhere they'd only have to cd out of.
-    sessions = new TerminalSessions({ emit: sink.emit, defaultCwd: () => dir });
+    sessions = new TerminalSessions({
+      runDir: join(dir, '.terminals'),
+      emit: sink.emit,
+      defaultCwd: () => dir,
+    });
     sessions.handle({ type: 'patch.terminal.open', hostId: 'd1', sessionId: 's1' });
     const ready = (await sink.waitFor(
       (e) => e.type === 'patch.terminal.ready',
@@ -433,7 +441,7 @@ describe('TerminalSessions — command completion', () => {
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'patch-term-exit-'));
     sink = collector();
-    sessions = new TerminalSessions({ emit: sink.emit });
+    sessions = new TerminalSessions({ runDir: join(dir, '.terminals'), emit: sink.emit });
     sessions.handle({ type: 'patch.terminal.open', hostId: 'd1', sessionId: 's1', folder: dir });
     await sink.waitFor((e) => e.type === 'patch.terminal.ready', 'ready');
   });

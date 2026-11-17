@@ -1854,6 +1854,8 @@ async function startHost(
   // there is nothing to emit before then.
   let terminalSend: ((event: WireEvent) => void) | undefined;
   const terminals = new TerminalSessions({
+    // spec/02 § Host restarts: each PTY session's runner and scrollback.
+    runDir: join(config.patchHome, 'terminals'),
     // A session opened with no folder (the new-chat drawer) starts in the first
     // published project root that actually exists — where a clone is going. The
     // container's $HOME is /root while the project dirs are mounted elsewhere,
@@ -1868,11 +1870,9 @@ async function startHost(
         }
       }),
     emit: (event) => {
-      // Unreachable in practice: every emit is downstream of a frame we just
-      // received, so the sender is always bound by then.
-      /* v8 ignore next */
-      if (!terminalSend) return;
-      terminalSend(event);
+      // Before any surface frame arrives (a session reattached at start) the
+      // link's own sender stands in; it buffers while the server is away.
+      (terminalSend ?? ((e: WireEvent) => link.send(e)))(event);
     },
     logger,
   });
@@ -5046,6 +5046,14 @@ async function startHost(
   // flush the instant `auth.ok` lands. Auto-reconnects with a short first
   // backoff (serverLink BACKOFF_SCHEDULE_MS).
   link.start();
+  // spec/02 § Host restarts: terminals a previous host left running are
+  // reattached, and what they printed meanwhile goes to the surface.
+  terminals.adopt().then(
+    (n) => {
+      if (n > 0) logger.info({ terminals: n }, 'patch-daemon: reattached terminals');
+    },
+    (err) => logger.error({ err }, 'patch-daemon: terminal reattach failed'),
+  );
   logger.info({ url: config.serverWsUrl }, 'patch-daemon: dialing patch-server WS');
 
   // POST /stop (control IPC) calls this; assigned once the graceful-shutdown
@@ -5959,10 +5967,12 @@ async function startHost(
     // Everything that can wait on something outside the host runs together,
     // each with its own budget (shutdownSteps.ts): one slow close must not
     // hold up the rest, nor run the whole shutdown into its hard deadline.
-    // Terminal shells die with the host (spec/02) and surfaces are told via
-    // `patch.terminal.exit { reason: 'daemon_shutdown' }`, so they go before
-    // the server link does. Host searches die with it too — a surface
-    // mid-search just gets no more frames for that `searchId`.
+    // A pipe shell dies with the host (surfaces are told via
+    // `patch.terminal.exit { reason: 'daemon_shutdown' }`); a PTY session
+    // belongs to its own runner, which keeps running for the next host to
+    // reattach (spec/02 § Host restarts). Terminals go before the server link.
+    // Host searches die with the host too — a surface mid-search just gets no
+    // more frames for that `searchId`.
     hostSearch.cancelAll();
     audioRelayBridge.dispose();
     await runShutdownSteps(
