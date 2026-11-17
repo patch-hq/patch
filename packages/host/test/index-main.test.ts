@@ -520,7 +520,6 @@ async function bootMain(
           return { ok: false, exitCode: 1, output: 'stand-in installer (test)' };
         },
         ...(opts.logStream ? { logStream: opts.logStream } : {}),
-        autoUpdateSettleMs: 0,
       }).catch(reject);
     },
   );

@@ -180,7 +180,6 @@ import {
   applyUpdate,
   checkForUpdate,
   createArtifactWait,
-  createAutoUpdateSettle,
   describeUpdateRefusal,
   createUpdateGate,
   pruneStaged,
@@ -371,12 +370,6 @@ export interface MainTestHooks {
   installClaudeCode?: (home: string) => Promise<import('./claudeInstall.js').ClaudeInstallResult>;
   /** Where the host's log lines go instead of stdout — lets a test read what boot logged. */
   logStream?: import('pino').DestinationStream;
-  /**
-   * Overrides how long a published build must be the newest before the
-   * scheduled auto-update installs it. Present ONLY so a test can exercise the
-   * boot-time apply without waiting out the real window.
-   */
-  autoUpdateSettleMs?: number;
 }
 
 /**
@@ -5015,11 +5008,15 @@ async function startHost(
   // POST /stop (control IPC) calls this; assigned once the graceful-shutdown
   // closure is defined below. Until then the endpoint 503s.
   let shutdownHook: (() => void) | undefined;
-  // Is a newer build published for this host? Checked on boot and hourly,
-  // so `host.host.updateAvailable` reflects the channel rather than a
-  // hard-coded false. A failed check leaves the flag alone and logs why — an
-  // unreachable update channel is not evidence that no update exists.
-  const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+  // Is a newer build published for this host? Checked on boot and every two
+  // minutes, the same cadence the server checks for releases, and installed as
+  // soon as it is seen (spec/02 § Installation). The check is one request to
+  // this host's own server. A failed check leaves the flag alone and logs why:
+  // an unreachable update channel is not evidence that no update exists.
+  const UPDATE_CHECK_INTERVAL_MS = 2 * 60 * 1000;
+  // The host's Claude Code CLI is checked against its own installer, an
+  // outside download, so it keeps an hourly cadence.
+  const CLAUDE_CLI_CHECK_INTERVAL_MS = 60 * 60 * 1000;
   /**
    * Actually try the credential and report what happened. A token that exists
    * but cannot be refreshed is NOT a working credential, and saying otherwise
@@ -5047,7 +5044,6 @@ async function startHost(
   );
   credentialTimer.unref?.();
 
-  const autoUpdateSettle = createAutoUpdateSettle({ settleMs: testHooks?.autoUpdateSettleMs });
   const refreshUpdateAvailable = async (): Promise<void> => {
     const check = await checkForUpdate({
       serverUrl: config.serverUrl,
@@ -5071,19 +5067,9 @@ async function startHost(
     // (2026-09-30 — this host ran over 30h behind a published build with
     // nothing to show for the "schedule" but the Hosts badge). `applyUpdateOnce`
     // already knows how to do this safely: nothing happens with no update
-    // published, and a busy host defers until idle rather than killing a
-    // running turn.
+    // published, and turns, watches and terminals outlive the restart
+    // (spec/02 § Host restarts), so nothing waits for the host to be idle.
     if (autoUpdateHosts && (check.available || check.awaitingArtifact)) {
-      // Deploys come in bursts and each install restarts the host, so wait
-      // until the published build has stopped changing (`AUTO_UPDATE_SETTLE_MS`).
-      // The next scheduled check picks it up; the Update button skips this.
-      if (check.version && !autoUpdateSettle.settled(check.version)) {
-        logger.info(
-          { version: check.version },
-          'self-update: scheduled apply waiting for the published build to settle',
-        );
-        return;
-      }
       if (check.version && check.version === hostStateStore.get().lastAutoUpdateAttempt) {
         logger.warn(
           { version: check.version },
@@ -5109,8 +5095,7 @@ async function startHost(
   // Never hold the process open for a version check.
   updateCheckTimer.unref?.();
 
-  // The host's Claude Code, on the same cadence as the host's own version
-  // check (spec/02 § Agent backends). The CLI only self-updates from an
+  // The host's Claude Code, checked hourly (spec/02 § Agent backends). The CLI only self-updates from an
   // INTERACTIVE session, and a host that exists to run jobs never has one — so
   // it silently stops moving, and an old enough build starts substituting
   // working-looking alternatives for features it is gated out of (a stale CLI is
@@ -5251,7 +5236,7 @@ async function startHost(
     void refreshClaudeCli().catch((err: unknown) => {
       logger.warn({ err }, 'claude-cli-update: update failed');
     });
-  }, UPDATE_CHECK_INTERVAL_MS);
+  }, CLAUDE_CLI_CHECK_INTERVAL_MS);
   claudeCliTimer.unref?.();
 
   const app = await buildControl({
