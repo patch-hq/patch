@@ -500,6 +500,11 @@ export interface MetaStore {
    * hand edit, a schema change) must not stop the host loading every other
    * chat. It is not hidden: the host logs it at error level and `patch
    * doctor` lists it.
+   *
+   * BOOT ONLY. This reads every chat's meta.json from disk. Anything that runs
+   * per chat, per event or per reconnect must use the in-memory chat states
+   * instead — twice a path like that ended up here and chats × chats file reads
+   * froze a 9,000-chat host. `test/no-disk-scan-per-chat.test.ts` guards it.
    */
   list(): ChatMeta[];
   /** The chats the most recent `list()` could not read, and why. */
