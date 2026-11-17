@@ -66,7 +66,7 @@ export function accountRows(
         accountId: account.id,
         label: account.label,
         backend,
-        title: `${backend} · ${account.label}`,
+        title: account.label,
         usage,
       });
     }
@@ -172,6 +172,7 @@ export function UsagePopover({
             {readAt ? <span className="set-sub usage-pop-read-at">{readAt}</span> : null}
             <UsageBars
               usage={r.usage}
+              showReadAt={false}
               testId={`usage-pop-bars-${r.key}`}
               testIdFor={(scope) => `usage-pop-${scope}-${r.key}`}
             />
