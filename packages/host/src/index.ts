@@ -1996,6 +1996,10 @@ async function startHost(
     if (!cleanupRan) {
       // Once per host start, on the first settings snapshot (carries the period).
       cleanupRan = true;
+      if (shared.cleanupPeriodDays === 0) {
+        logger.info('startup cleanup off: cleanupPeriodDays is 0 (never)');
+        return;
+      }
       if (!Number.isInteger(shared.cleanupPeriodDays) || shared.cleanupPeriodDays < 1) {
         logger.error(
           { period: shared.cleanupPeriodDays },

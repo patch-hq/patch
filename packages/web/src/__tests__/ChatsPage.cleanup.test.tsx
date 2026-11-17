@@ -34,4 +34,31 @@ describe('Settings → Chats → Cleanup', () => {
     fireEvent.blur(input);
     expect(spy).toHaveBeenCalledWith('cleanup period', { cleanupPeriodDays: 14 });
   });
+
+  it('Never writes 0, disables the days box, and turning it off restores the default', () => {
+    const spy = vi.spyOn(write, 'patchShared').mockResolvedValue(undefined as never);
+    const setDays = (d: number): void =>
+      usePreferencesStore.setState({
+        loaded: true,
+        preferences: { ...usePreferencesStore.getState().preferences, cleanupPeriodDays: d },
+      });
+    setDays(30);
+    const { unmount } = render(
+      <MemoryRouter>
+        <ChatsPage />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByTestId('cleanup-never-toggle'));
+    expect(spy).toHaveBeenCalledWith('cleanup period', { cleanupPeriodDays: 0 });
+    unmount();
+    setDays(0);
+    render(
+      <MemoryRouter>
+        <ChatsPage />
+      </MemoryRouter>,
+    );
+    expect((screen.getByTestId('cleanup-period-days') as HTMLInputElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId('cleanup-never-toggle'));
+    expect(spy).toHaveBeenLastCalledWith('cleanup period', { cleanupPeriodDays: 30 });
+  });
 });

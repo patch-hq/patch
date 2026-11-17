@@ -8,6 +8,7 @@ import { Toggle } from '../../components/Toggle.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
 import { CHAT_SORTS, type GroupSort } from '../../lib/chatGroups.js';
+import { DEFAULT_CLEANUP_PERIOD_DAYS } from '@patch/wire';
 import { patchShared } from './sharedWrite.js';
 import { hourLabel } from '../../lib/snoozePresets.js';
 import { Group, Row, SettingsPage } from './ui.js';
@@ -48,6 +49,18 @@ export function ChatsPage(): JSX.Element {
         </Row>
       </Group>
       <Group label="Cleanup" testid="settings-cleanup">
+        <Row title="Never delete chats or agent worktrees" testid="cleanup-never">
+          <Toggle
+            checked={cleanupDays === 0}
+            disabled={!loaded}
+            onChange={(never) =>
+              void patchShared('cleanup period', {
+                cleanupPeriodDays: never ? 0 : DEFAULT_CLEANUP_PERIOD_DAYS,
+              })
+            }
+            testid="cleanup-never-toggle"
+          />
+        </Row>
         <Row title="Delete chats and stale agent worktrees after" testid="cleanup-period">
           <input
             type="number"
@@ -56,8 +69,8 @@ export function ChatsPage(): JSX.Element {
             aria-label="Cleanup period (days)"
             data-testid="cleanup-period-days"
             key={cleanupDays}
-            defaultValue={cleanupDays}
-            disabled={!loaded}
+            defaultValue={cleanupDays === 0 ? '' : cleanupDays}
+            disabled={!loaded || cleanupDays === 0}
             onBlur={(e) => setCleanupDays(e.target.value, cleanupDays)}
             onKeyDown={(e) => {
               if (e.key === 'Enter')
