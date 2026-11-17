@@ -575,11 +575,7 @@ Folders are defined on the host — each host owns its host's filesystem
 and is the only party that knows which folders actually exist. Each host holds
 its own registry (a small set of user-designated project roots, seeded from recent
 chats and edited through `patch hosts folders` (`17-cli.md` § Commands) or that
-host's Settings → Project folders, both writing through to that host). Installing a brand-new host — one whose roots were never set and which has no
-chats — creates `~/My first project` and makes it the host's one project root,
-so a first chat has somewhere to run and the project list names it as the
-person's own starting folder rather than after Patch; a host with chats, or whose roots were ever set,
-is left as it is. A host
+host's Settings → Project folders, both writing through to that host). Installing a host creates no folder: Patch never invents a starting folder. A first chat with no folder chosen prompts for one (the new-chat folder picker, which can also make a new folder when the person asks). A host
 publishes its folder list to the server, which relays it to every connected
 surface over the wire (a `folders.list` snapshot on connect and a
 `folders.updated` push on change, both carrying the `hostId`), so one
