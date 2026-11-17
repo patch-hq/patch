@@ -70,7 +70,7 @@ Host restarting is a planned gap: the host said it was restarting (`host.restart
 
 ### Continue
 
-An interrupted chat shows an inline "Turn interrupted" line where the turn stopped and a Continue action on every surface (`chat.continue_request`). Continue resumes through the provider's own resume where its adapter declares one; otherwise it sends a visible message asking the agent to carry on, which reads in the chat like any other message. Nothing is added to the turn unseen. Automatic continue is a user setting (Settings → Agent behaviour): with it on, the host continues each interrupted turn the same way as soon as it is back. A turn that was only queued never began, and is sent as it was.
+An interrupted chat shows an inline "Turn interrupted" line where the turn stopped and a Continue action on every surface (`chat.continue_request`). Continue resumes through the provider's own resume where its adapter declares one; otherwise it sends a visible message asking the agent to carry on, which reads in the chat like any other message. Nothing is added to the turn unseen. Automatic continue is a user setting (Settings → Agent behaviour): with it on, the host continues each interrupted turn the same way as soon as it is back. A turn that was only queued never began, and is sent as it was. The host reports a cut-off turn as a fact, `interrupted` on its `chat.state`, writes the inline line into the chat's record once, and keeps reporting it across further restarts until the chat is continued or another turn starts. A Continue for a chat that is no longer interrupted does nothing. An until-complete snooze (`04-chats-and-folders.md` § Snooze) keeps waiting while a chat is interrupted, as the turn it waits on may still come back. Unattended work, such as an agent's background child, waits for Continue like any other chat unless automatic continue is on.
 
 ### Limits and sign-in
 
@@ -281,7 +281,7 @@ A user's `chat.input` is either delivered or reported as failed. There are two h
 ### A host restarts
 
 - Turns, terminals, watches and background jobs run as their own processes and keep going. The host reattaches to them on start and loads only the chats with live or owed work (`02-host.md` § Host restarts, § Chat loading).
-- A planned restart announces itself, so the chats it was working on show Host restarting rather than Host offline (§ Chat status). A host that crashed is Host offline until it returns.
+- Every stop the host chooses (a self-update, a service restart, a signal) announces itself first, so the chats it was working on show Host restarting rather than Host offline (§ Chat status). A host that crashed is Host offline until it returns.
 - When the host is back each turn is live again, or ended while it was away and reported through the outbox, or, if its process is gone, Interrupted.
 
 ### A host's machine goes down
