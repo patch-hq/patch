@@ -241,6 +241,22 @@ describe('composerAttachmentStore', () => {
     expect(settled?.key).toBe('srv-1');
   });
 
+  it('waitForAttachmentUpload still returns the settled entry when asked after the upload landed (stale Send)', async () => {
+    uploadAttachmentSpy.mockResolvedValue({
+      ok: true,
+      ref: { id: 'srv-2', name: 'a.txt', mimeType: 'text/plain', kind: 'file', url: '/x' },
+    });
+    useComposerAttachmentStore
+      .getState()
+      .attach('c1', { kind: 'chat', chatId: 'c1' }, [file('a.txt')]);
+    const key = useComposerAttachmentStore.getState().byKey['c1']![0]!.key;
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    const settled = await waitForAttachmentUpload('c1', key);
+    expect(settled?.status).toBe('uploaded');
+    expect(settled?.key).toBe('srv-2');
+  });
+
   it('waitForAttachmentUpload resolves to undefined for a key with nothing in flight', async () => {
     await expect(waitForAttachmentUpload('c1', 'never-attached')).resolves.toBeUndefined();
   });
