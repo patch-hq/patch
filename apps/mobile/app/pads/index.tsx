@@ -118,7 +118,9 @@ export default function PadsScreen(): React.ReactElement {
           </View>
         ) : pads === null ? null : groups.length === 0 ? (
           <Text testID="pads-empty" style={{ color: colors.ink3 }}>
-            {query ? 'No pads match.' : 'No pads yet.'}
+            {query
+              ? 'No pads match.'
+              : 'No pads yet. A Pad is a design you can edit and send back to a chat.'}
           </Text>
         ) : (
           groups.map(([app, list]) => (

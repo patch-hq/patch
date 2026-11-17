@@ -52,6 +52,7 @@ import { summariseUsage } from '../lib/usage.js';
 import { Composer, type ComposerHandle } from '../components/Composer.js';
 import { useWholeChatDrop } from '../lib/wholeChatDrop.js';
 import { EmptyChat } from '../components/EmptyChat.js';
+import { FirstRunIntro } from '../components/FirstRunIntro.js';
 import { NavHistoryControls } from '../components/NavHistoryControls.js';
 import { UsageCrumb } from '../components/UsageCrumb.js';
 import { Edit3 } from 'lucide-react';
@@ -1542,6 +1543,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
               drifting to the foot of the panel. */}
             <div className="new-chat-intro">
               <EmptyChat title="New chat" />
+              <FirstRunIntro />
               {/* Not signed in is said by the banner and in the composer,
                   where sending fails — not a third time here. */}
               {draftFailure ? (

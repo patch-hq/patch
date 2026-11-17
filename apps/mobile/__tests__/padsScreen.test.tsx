@@ -122,7 +122,7 @@ describe('Pads list', () => {
   it('says there are none, and hides search', async () => {
     vi.mocked(api.listPads).mockResolvedValue({ pads: [] });
     const r = await mount(<PadsScreen />);
-    expect(hasText(get(r, 'pads-empty'), 'No pads yet.')).toBe(true);
+    expect(hasText(get(r, 'pads-empty'), 'No pads yet')).toBe(true);
     expect(queryHost(r.root, byTestId('pads-search'))).toBeNull();
   });
 

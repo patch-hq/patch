@@ -34,6 +34,7 @@ import { RemoteCallBanner } from './components/RemoteCallBanner.js';
 import { VoiceNoteOverlay } from './components/VoiceNoteOverlay.js';
 import { VoicePermissionBanner } from './components/VoicePermissionBanner.js';
 import { ShortcutCheatSheet } from './components/ShortcutCheatSheet.js';
+import { GettingStarted } from './components/GettingStarted.js';
 import { ErrorToasts } from './components/ErrorToasts.js';
 import { ConfirmModal } from './components/ConfirmModal.js';
 import { SpeechSetupModal } from './components/SpeechSetupModal.js';
@@ -817,6 +818,7 @@ export function AppShell(): JSX.Element {
         }}
       />
       <ShortcutCheatSheet />
+      <GettingStarted />
       <ConnectionDiagnosticsGate />
       <ErrorToasts />
       <SnoozeSheet />
