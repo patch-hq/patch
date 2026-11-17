@@ -83,6 +83,22 @@ beforeEach(() => {
   vi.mocked(applySnooze).mockClear();
 });
 
+describe('ChatRowItem — waiting for sign-in', () => {
+  const waiting = { state: 'waiting_for_sign_in', since: 1 };
+
+  it('the badge of a waiting chat is a Sign in action that goes to Settings, not the chat', () => {
+    const r = renderRN(<ChatRowItem row={makeRow({ chatStatus: waiting })} />);
+    findHost(r.root, (i) => i.props.testID === 'row-signin-chat-1').props.onPress();
+    expect(routerMock.push).toHaveBeenCalledWith('/(tabs)/settings');
+    expect(routerMock.push).not.toHaveBeenCalledWith('/chats/chat-1');
+  });
+
+  it('a chat that is not waiting has no Sign in action', () => {
+    const r = renderRN(<ChatRowItem row={makeRow()} />);
+    expect(queryHost(r.root, (i) => i.props.testID === 'row-signin-chat-1')).toBeNull();
+  });
+});
+
 describe('ChatRowItem — navigation', () => {
   it('tapping the row body pushes to the chat detail route', () => {
     const row = makeRow();
