@@ -566,6 +566,8 @@ describe('resuming turns a host restart interrupted', () => {
     const g2 = gatedBackend();
     const second = hostOver(home, g2.backend);
     second.daemon.hydrate();
+    // Nothing is owed, so start-up leaves the chat alone; opening it finds the cut-off turn.
+    second.daemon.chatState.get(chatId);
     await tick();
 
     expect(g2.prompts).toEqual([]);

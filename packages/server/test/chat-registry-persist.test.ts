@@ -122,6 +122,21 @@ describe('ChatRegistry persistence', () => {
     expect(second.get('other-host')).toBeUndefined();
   });
 
+  test('a restored chat the host names in chatIds stays though it was not announced in full', () => {
+    const first = make();
+    first.observe(spawned('loaded'));
+    first.observe(spawned('not-loaded'));
+    first.observe(spawned('deleted'));
+    first.flush();
+
+    const second = make();
+    second.observe(spawned('loaded')); // the host announces only the chats it loaded
+    second.observe({ ...foldersList('d1'), chatIds: ['loaded', 'not-loaded'] } as WireEvent);
+    expect(second.get('loaded')).toBeDefined();
+    expect(second.get('not-loaded')).toBeDefined();
+    expect(second.get('deleted')).toBeUndefined();
+  });
+
   test('a chat confirmed by a chat.state alone also stays', () => {
     const first = make();
     first.observe(spawned('c1'));

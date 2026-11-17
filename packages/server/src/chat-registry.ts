@@ -451,9 +451,13 @@ export class ChatRegistry {
       // The host has finished telling us what it has: a restored chat of this
       // host that it did not mention is not on it any more.
       let pruned = false;
+      // The host announces in full only the chats it has loaded; `chatIds` names
+      // the rest it still holds, which the server keeps as it restored them.
+      const held = event.chatIds === undefined ? undefined : new Set(event.chatIds);
       for (const chatId of [...this.unconfirmed]) {
         if (this.chats.get(chatId)?.hostId !== event.hostId) continue;
         this.unconfirmed.delete(chatId);
+        if (held?.has(chatId)) continue;
         this.chats.delete(chatId);
         this.spawnedSet.delete(chatId);
         pruned = true;

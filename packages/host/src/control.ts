@@ -1197,7 +1197,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     // listed here — the CLI's `patch chats` is a user-facing surface, same as
     // the sidebar.
     return {
-      chats: opts.daemon.list().filter((c) => !c.subagent),
+      chats: opts.daemon.listAll().filter((c) => !c.subagent),
       unreadable: opts.daemon.unreadableChats(),
     };
   });
@@ -1220,7 +1220,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
 
     // Recent folders from the host's chat roster, most-recent first, deduped.
     // Excludes patch_delegate subagents (spec/02 § Native subagent dispatch).
-    const chats = opts.daemon.list().filter((c) => !c.subagent) as Array<{
+    const chats = opts.daemon.listAll().filter((c) => !c.subagent) as Array<{
       folder?: string;
       lastUpdated?: number;
     }>;
@@ -1500,7 +1500,7 @@ export async function buildControl(opts: BuildOptions = {}): Promise<FastifyInst
     const auth = checkAuth(req);
     if (!auth.ok) return reply.code(401).send({ error: auth.reason });
     if (!opts.daemon) return reply.code(503).send({ error: 'host not initialised' });
-    return { chats: opts.daemon.list().filter((c) => !c.subagent) };
+    return { chats: opts.daemon.listAll().filter((c) => !c.subagent) };
   });
 
   // POST /spawn-chat — spawn a new chat in a folder.

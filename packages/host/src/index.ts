@@ -2485,7 +2485,17 @@ async function startHost(
       // AFTER every chat above: the server reads this host's folders.list as the
       // end of its chat re-announcement, and only then answers a chat it does
       // not know as not found (packages/server/src/unknown-chat.ts).
-      sender({ type: 'folders.list', hostId: selfHostId, ...folderRegistry.snapshot() });
+      // Only the chats this host has loaded were announced in full above; the
+      // ids of every other chat tell the server they still exist
+      // (spec/02 § Chat loading).
+      const folderSnapshot = folderRegistry.snapshot();
+      hostStateStore.update({ recentFolders: folderSnapshot.recent.slice(0, 50) });
+      sender({
+        type: 'folders.list',
+        hostId: selfHostId,
+        ...folderSnapshot,
+        chatIds: daemon.allChatIds(),
+      });
       // spec/02 § Claude Code settings: publish this host's settings.json and
       // memory entries on (re)connect, same snapshot-on-connect contract as
       // folders and secrets below.
@@ -2766,7 +2776,7 @@ async function startHost(
             // A patch_delegate subagent never reaches the server to be indexed
             // any other way, but filter it out here too rather than rely on
             // that alone (spec/02 § Native subagent dispatch).
-            listChats: () => daemon.list().filter((c) => !c.subagent),
+            listChats: () => daemon.listAll().filter((c) => !c.subagent),
             hostId: selfHostId,
             logger,
           },
@@ -3069,9 +3079,7 @@ async function startHost(
           hostStateStore.update({ runsManager: true });
         }
         createSpecialThreads();
-        for (const state of daemon.list()) {
-          if (isReservedSpecialThread(state.chatId)) announceChat(state);
-        }
+        announceSpecialThreads();
         daemon
           .handOverThread('thread_manager', {
             nextSeq: event.nextSeq,
@@ -3093,9 +3101,7 @@ async function startHost(
           logger.info({ runsManager }, 'manager-host flag changed');
           if (nowHome) {
             createSpecialThreads();
-            for (const state of daemon.list()) {
-              if (isReservedSpecialThread(state.chatId)) announceChat(state);
-            }
+            announceSpecialThreads();
           }
         }
         sender(describeHost());
@@ -3750,7 +3756,7 @@ async function startHost(
         // next turn. Only an account this host holds for the chat's own
         // backend; the acknowledgement is the `chat.state` that carries it.
         const { chatId, preferredAccountId } = event;
-        const chat = daemon.list().find((c) => c.chatId === chatId);
+        const chat = daemon.chatState.get(chatId);
         const refuse = (code: ChatErrorCode, message: string): void => {
           logger.warn({ chatId, preferredAccountId, message }, 'chat account change refused');
           sender({ type: 'chat.error', chatId, error: { code, message }, seq: OUT_OF_BAND_SEQ });
@@ -4097,7 +4103,7 @@ async function startHost(
     const failed = spentAccountId;
     const { accounts, route } = claudeRoute(
       store,
-      daemon.list().find((c) => c.chatId === chatId)?.preferredAccountId,
+      daemon.chatState.get(chatId)?.preferredAccountId,
     );
     if (failed !== undefined) {
       // Siblings sharing this account's organisation are marked with it. They
@@ -4552,7 +4558,7 @@ async function startHost(
       return { spent: true, ...(until !== undefined ? { until } : {}) };
     },
     nextAccountAfterExhausted: (chatId, id, message, limit) =>
-      isCodexModel(daemon.list().find((c) => c.chatId === chatId)?.model)
+      isCodexModel(daemon.chatState.get(chatId)?.model)
         ? codexAccounts.markExhausted(id)
         : failoverAccount(chatId, id, message, limit),
     /**
@@ -4570,9 +4576,7 @@ async function startHost(
       // out of credit when ITS account is.
       const { accounts, route } = claudeRoute(
         store,
-        chatId === undefined
-          ? undefined
-          : daemon.list().find((c) => c.chatId === chatId)?.preferredAccountId,
+        chatId === undefined ? undefined : daemon.chatState.get(chatId)?.preferredAccountId,
       );
       return accountRotation.usableAccount(accounts, route) === undefined;
     },
@@ -4970,7 +4974,7 @@ async function startHost(
     // A failed build is logged and still releases waiting searches: each
     // search refreshes every chat itself, so it reports its own failure.
     void chatSearch
-      .warm(daemon.list())
+      .warm(daemon.listAll())
       .then(
         () =>
           logger.info(
@@ -4991,14 +4995,33 @@ async function startHost(
     // designation, not a cache).
     registered: persistedHostState.folderRoots ?? [],
     source: {
-      listChats: () =>
-        daemon.list().map((c) => ({
+      // The loaded chats, then the folders last published for chats that are
+      // not loaded (spec/02 § Chat loading). A host with none published yet
+      // reads every chat's meta once.
+      listChats: () => {
+        const loaded = daemon.list().map((c) => ({
           chatId: c.chatId,
           folder: c.folder,
           lastUpdated: c.lastUpdated,
-        })),
+        }));
+        const kept = hostStateStore.get().recentFolders;
+        if (kept === undefined) {
+          return daemon.listAll().map((c) => ({
+            chatId: c.chatId,
+            folder: c.folder,
+            lastUpdated: c.lastUpdated,
+          }));
+        }
+        return [
+          ...loaded,
+          ...kept.map((folder, i) => ({ chatId: `kept-${i}`, folder, lastUpdated: -i - 1 })),
+        ];
+      },
     },
-    onChange: (registry) => link.send({ type: 'folders.updated', hostId: selfHostId, ...registry }),
+    onChange: (registry) => {
+      hostStateStore.update({ recentFolders: registry.recent.slice(0, 50) });
+      link.send({ type: 'folders.updated', hostId: selfHostId, ...registry });
+    },
   });
   // The Manager and Speakers are the account's and live on the host the server has running them
   // (spec/06 § Where special threads run), so only that host creates them.
@@ -5015,6 +5038,13 @@ async function startHost(
   }
   if (runsManager) createSpecialThreads();
   /** Tell the server about one chat: that it exists, and its current state. */
+  function announceSpecialThreads(): void {
+    for (const id of Object.values(SPECIAL_THREAD_IDS)) {
+      const state = daemon.chatState.get(id);
+      if (state) announceChat(state);
+    }
+  }
+
   function announceChat(state: ReturnType<typeof daemon.list>[number]): void {
     forward({
       type: 'chat.spawned',

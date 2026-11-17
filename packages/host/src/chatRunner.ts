@@ -105,6 +105,7 @@ import type {
 
 import {
   ChatStateMap,
+  chatStateFromMeta,
   type ChatState,
   type ChatMessageSnapshot,
   type HookAdviceNote,
@@ -138,6 +139,7 @@ import {
 } from './notes.js';
 import { randomUUID } from 'node:crypto';
 import { WakeScheduler, parseDelayMs, type WakeRecord } from './wake.js';
+import { LiveChats, metaHasLiveWork } from './liveChats.js';
 import {
   DEFAULT_CHECK_IN_MS,
   DEFAULT_CHECK_IN_PROMPT,
@@ -2522,6 +2524,20 @@ export class Daemon {
       throw new Error('Daemon: one of resolveOAuth / oauthAccessToken is required');
     }
     this.chatState = new ChatStateMap();
+    // spec/02 § Chat loading: a chat nobody has asked for is not in memory;
+    // the first thing that names it opens it.
+    this.chatState.setLoader(
+      (chatId) => this.openChat(chatId),
+      () => this.opts.metaStore.ids(),
+    );
+    this.liveChats = new LiveChats(
+      join(dirname(dirname(dirname(options.metaStore.pathFor('_')))), 'live-chats.json'),
+      options.logger,
+    );
+    // A chat gaining work joins the live list the moment its meta says so.
+    options.metaStore.observeWrites?.((m) => {
+      if (metaHasLiveWork(m)) this.liveChats.add(m.chatId);
+    });
     this.chatLog =
       options.chatLog ??
       new ChatLog({
@@ -2540,7 +2556,8 @@ export class Daemon {
     this.wake = new WakeScheduler({
       deliver: (chatId, message) => this.deliverWake(chatId, message),
       dirForChat: (chatId) => dirname(this.opts.metaStore.pathFor(chatId)),
-      allChatIds: () => this.opts.metaStore.list().map((m) => m.chatId),
+      allChatIds: () => this.liveChatIds(),
+      onPersisted: (chatId) => this.liveChats.add(chatId),
       // spec/02 § Self-wake — "count the interval from the end of the turn":
       // a loop tick due while the chat's pump is occupied is absorbed rather
       // than queued (see wake.ts `fire`/`onTurnEnd`).
@@ -2555,7 +2572,8 @@ export class Daemon {
     this.watch = new WatchScheduler({
       deliver: (chatId, message) => this.deliverWatch(chatId, message),
       dirForChat: (chatId) => dirname(this.opts.metaStore.pathFor(chatId)),
-      allChatIds: () => this.opts.metaStore.list().map((m) => m.chatId),
+      allChatIds: () => this.liveChatIds(),
+      onPersisted: (chatId) => this.liveChats.add(chatId),
       now: () => this.opts.now(),
       logger: this.opts.logger,
       checkIn: () => this.watchCheckIn,
@@ -3200,6 +3218,8 @@ export class Daemon {
     this.snoozeTimers.clear();
     if (this.snoozeSweep !== null) clearInterval(this.snoozeSweep);
     this.snoozeSweep = null;
+    if (this.liveTrimTimer !== null) clearInterval(this.liveTrimTimer);
+    this.liveTrimTimer = null;
     if (this.queuedStallSweep !== null) clearInterval(this.queuedStallSweep);
     this.queuedStallSweep = null;
     for (const t of this.rateLimitTimers.values()) clearTimeout(t);
@@ -3235,6 +3255,11 @@ export class Daemon {
     void this.browser.dispose().catch((err: unknown) => {
       this.opts.logger.error({ err }, 'shutdown: browser dispose failed');
     });
+    try {
+      this.trimLiveChats();
+    } catch (err) {
+      this.opts.logger.error({ err }, 'shutdown: live-chats list trim failed');
+    }
     // Make the history log durable and release its descriptors.
     try {
       this.flushHistory();
@@ -3297,15 +3322,150 @@ export class Daemon {
     }));
   }
 
-  /** Hydrate chat_state from disk on startup. */
+  /**
+   * Hydrate chat_state from disk on startup — only the chats with live or owed
+   * work (spec/02 § Chat loading). Every other chat is opened when something
+   * names it (`openChat`).
+   *
+   * The chats to load come from the live list the host keeps. A host that has
+   * none (first start since the list existed) builds it once with a full scan.
+   */
   hydrate(options: { deferWorkUntilReconciled?: boolean } = {}): void {
-    const metas = this.opts.metaStore.list();
+    const started = Date.now();
+    const metas = this.metasToLoadAtStart();
+    const { lastTurnOutcomeByChatId, lastTurnLocalIdByChatId } = this.loadChats(metas);
+    this.opts.logger.info(
+      { count: metas.length, tookMs: Date.now() - started },
+      'chat_state hydrated from disk (chats with live or owed work)',
+    );
+    this.startLiveListTrim();
+    // spec/02 § Self-wake: re-arm persisted self-wakes; fire any that came due
+    // while the host was down (restart catch-up). Runs after chat hydrate so
+    // deliveries resolve against in-memory state.
+    if (options.deferWorkUntilReconciled) {
+      this.deferredStartupWork = { metas, lastTurnOutcomeByChatId, lastTurnLocalIdByChatId };
+    } else {
+      this.startHydratedWork(metas, lastTurnOutcomeByChatId, lastTurnLocalIdByChatId);
+    }
+  }
+
+  private readonly liveChats: LiveChats;
+  private liveTrimTimer: ReturnType<typeof setInterval> | null = null;
+  /** Chats being opened right now, so opening one that names itself does not recurse. */
+  private readonly opening = new Set<string>();
+
+  /** The chats start-up loads: the live list's, or — with no list yet — a full scan builds it. */
+  private metasToLoadAtStart(): ChatMeta[] {
+    const listed = this.liveChats.load();
+    if (listed !== undefined) {
+      const metas: ChatMeta[] = [];
+      for (const chatId of listed) {
+        const m = this.readMetaForOpen(chatId);
+        if (m) metas.push(m);
+      }
+      return metas;
+    }
+    this.opts.logger.warn(
+      {},
+      'no live-chats list yet: scanning every chat once to build it (first start with lazy chat loading)',
+    );
+    const all = this.opts.metaStore.list();
     for (const u of this.opts.metaStore.unreadable()) {
       this.opts.logger.error(
         { chatId: u.chatId, path: u.path, error: u.error },
         'hydrate: meta.json unreadable; chat not loaded (fix or remove the file, then restart the host)',
       );
     }
+    const live = all.filter(
+      (m) =>
+        metaHasLiveWork(m) || this.wake.peek(m.chatId) !== null || this.watch.count(m.chatId) > 0,
+    );
+    this.liveChats.reset(live.map((m) => m.chatId));
+    return live;
+  }
+
+  /** A chat's meta for loading, or undefined if it has none; an unreadable one is logged, not thrown. */
+  private readMetaForOpen(chatId: string): ChatMeta | undefined {
+    try {
+      return this.opts.metaStore.read(chatId);
+    } catch (err) {
+      this.opts.logger.error(
+        { chatId, err: (err as Error).message },
+        'hydrate: meta.json unreadable; chat not loaded (fix or remove the file, then restart the host)',
+      );
+      return undefined;
+    }
+  }
+
+  /**
+   * Open one chat nothing had asked for yet (the loader behind
+   * `chatState.get`). It is loaded exactly as at start-up, and anything it owed
+   * is resumed: a chat the live list missed does not lose its work.
+   */
+  private openChat(chatId: string): ChatState | undefined {
+    if (this.opening.has(chatId)) return undefined;
+    const meta = this.readMetaForOpen(chatId);
+    if (!meta) return undefined;
+    this.opening.add(chatId);
+    try {
+      const maps = this.loadChats([meta]);
+      if (!this.chatState.loaded(chatId)) return undefined;
+      if (metaHasLiveWork(meta)) {
+        this.opts.logger.warn(
+          { chatId },
+          'chat with owed work was not on the live list; loaded on demand and resumed',
+        );
+      }
+      this.startHydratedWork(
+        [meta],
+        maps.lastTurnOutcomeByChatId,
+        maps.lastTurnLocalIdByChatId,
+        true,
+      );
+      return this.chatState.loaded(chatId);
+    } finally {
+      this.opening.delete(chatId);
+    }
+  }
+
+  /** Is this chat holding work the host must keep an eye on? */
+  private hasLiveWork(chatId: string): boolean {
+    if (this.aborters.has(chatId) || this.pumping.has(chatId)) return true;
+    if (this.owedResend.has(chatId) || this.parkedTurns.has(chatId)) return true;
+    const meta = this.readMetaForOpen(chatId);
+    if (!meta) return false;
+    return metaHasLiveWork(meta) || this.wake.peek(chatId) !== null || this.watch.count(chatId) > 0;
+  }
+
+  /** Drop chats from the live list that no longer have work. */
+  trimLiveChats(): void {
+    for (const chatId of this.liveChats.list()) {
+      if (!this.hasLiveWork(chatId)) this.liveChats.remove(chatId);
+    }
+  }
+
+  private startLiveListTrim(): void {
+    if (this.liveTrimTimer !== null) return;
+    this.liveTrimTimer = setInterval(() => {
+      try {
+        this.trimLiveChats();
+      } catch (err) {
+        this.opts.logger.error({ err }, 'live-chats list trim failed');
+      }
+    }, 30_000);
+    this.liveTrimTimer.unref();
+  }
+
+  /** Chats start-up and the wake and watch timers look after: the live list, plus anything loaded. */
+  private liveChatIds(): string[] {
+    return this.liveChats.list();
+  }
+
+  /** Load these chats' state and history positions. Returns what start-up work needs from their logs. */
+  private loadChats(metas: ChatMeta[]): {
+    lastTurnOutcomeByChatId: Map<string, TurnOutcome | null>;
+    lastTurnLocalIdByChatId: Map<string, string | undefined>;
+  } {
     for (let i = 0; i < metas.length; i++) metas[i] = this.reconcileFolder(metas[i]!);
     this.chatState.hydrate(metas);
     // Mark every restored chat as hydrated-from-disk: its next query is a
@@ -3400,15 +3560,7 @@ export class Daemon {
         this.wakeFromSnooze(m.chatId);
       } else this.armSnoozeTimer(m.chatId, state.snoozedUntil);
     }
-    this.opts.logger.info({ count: metas.length }, 'chat_state hydrated from disk');
-    // spec/02 § Self-wake: re-arm persisted self-wakes; fire any that came due
-    // while the host was down (restart catch-up). Runs after chat hydrate so
-    // deliveries resolve against in-memory state.
-    if (options.deferWorkUntilReconciled) {
-      this.deferredStartupWork = { metas, lastTurnOutcomeByChatId, lastTurnLocalIdByChatId };
-    } else {
-      this.startHydratedWork(metas, lastTurnOutcomeByChatId, lastTurnLocalIdByChatId);
-    }
+    return { lastTurnOutcomeByChatId, lastTurnLocalIdByChatId };
   }
 
   /** Release work after the server has retired chats taken over while offline. */
@@ -3427,8 +3579,9 @@ export class Daemon {
     metas: ChatMeta[],
     lastTurnOutcomeByChatId: Map<string, TurnOutcome | null>,
     lastTurnLocalIdByChatId: Map<string, string | undefined>,
+    onDemand = false,
   ): void {
-    const owned = metas.filter((m) => this.chatState.has(m.chatId));
+    const owned = metas.filter((m) => this.chatState.loaded(m.chatId));
     // A chat cut off before an earlier restart is still interrupted until its
     // user continues it.
     for (const m of owned) {
@@ -3442,9 +3595,10 @@ export class Daemon {
     // turn ends. Loaded first, the wake's own turn started ahead of the resend,
     // took the reattach marker for itself and killed the surviving runner
     // (2026-11-12, Mac restart).
-    this.resumeInterruptedTurns(owned, lastTurnOutcomeByChatId, lastTurnLocalIdByChatId);
-    this.wake.loadAll();
-    this.watch.loadAll();
+    this.resumeInterruptedTurns(owned, lastTurnOutcomeByChatId, lastTurnLocalIdByChatId, !onDemand);
+    const ownedIds = owned.map((m) => m.chatId);
+    this.wake.loadAll(ownedIds);
+    this.watch.loadAll(ownedIds);
     this.flagUnresumedInterruptions(owned);
     this.settleUntilCompleteSnoozes(owned);
     this.resumeDeferredGoalEvaluations(owned);
@@ -3663,6 +3817,7 @@ export class Daemon {
     metas: ChatMeta[],
     lastTurnOutcomeByChatId: Map<string, TurnOutcome | null>,
     lastTurnLocalIdByChatId: Map<string, string | undefined>,
+    retireLeftovers = true,
   ): void {
     const durable = this.opts.durableTurns;
     // Every turn directory the previous host left. Each is claimed below by the
@@ -3671,6 +3826,9 @@ export class Daemon {
     try {
       this.resumeEach(metas, lastTurnOutcomeByChatId, lastTurnLocalIdByChatId, unclaimed);
     } finally {
+      // A chat opened on demand claims only its own turn: the directories left
+      // over belong to chats it knows nothing about, and are live runners.
+      if (!retireLeftovers) unclaimed.clear();
       for (const chatId of unclaimed) {
         this.opts.logger.warn(
           { chatId },
@@ -6882,7 +7040,7 @@ export class Daemon {
       snoozed?: 'only' | 'include';
     } = {},
   ): ChatState[] {
-    const all = this.chatState.list();
+    const all = this.listAll();
     const now = this.opts.now();
     // spec/04 § Snooze: snoozed ⇔ `snoozedUntil > now`, derived every call so a
     // lapsed snooze needs no event to reappear.
@@ -9866,8 +10024,28 @@ export class Daemon {
     return this.opts.metaStore.unreadable();
   }
 
+  /** Every chat id on this host, loaded or not, read from the directory listing alone. */
+  allChatIds(): string[] {
+    return this.opts.metaStore.ids();
+  }
+
+  /** The chats this host is holding in memory: those with live or owed work, and any opened since. */
   list(): ChatState[] {
     return this.chatState.list();
+  }
+
+  /**
+   * Every chat on this host, loaded or not. A chat that is not loaded is read
+   * from its meta for this call and not kept (spec/02 § Chat loading): a
+   * listing or search over all chats must not load them all.
+   */
+  listAll(): ChatState[] {
+    const out = new Map<string, ChatState>();
+    for (const s of this.chatState.list()) out.set(s.chatId, s);
+    for (const m of this.opts.metaStore.list()) {
+      if (!out.has(m.chatId)) out.set(m.chatId, chatStateFromMeta(m));
+    }
+    return [...out.values()];
   }
 
   /**
@@ -9886,7 +10064,7 @@ export class Daemon {
    */
   cleanStaleChats(): { removed: string[] } {
     const removed: string[] = [];
-    for (const state of this.chatState.list()) {
+    for (const state of this.listAll()) {
       // Skip in-flight chats — a running query is by definition not lost.
       if (this.aborters.has(state.chatId)) continue;
       // A chat with no session id has never produced a transcript; it is a
@@ -9928,7 +10106,7 @@ export class Daemon {
     cutoff: number,
   ): Promise<{ chats: string[]; worktrees: WorktreeSweepResult }> {
     const special = new Set<string>(Object.values(SPECIAL_THREAD_IDS));
-    const all = this.chatState.list();
+    const all = this.listAll();
     const chats: string[] = [];
     for (const state of all) {
       if (special.has(state.chatId) || state.pinned) continue;

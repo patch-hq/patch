@@ -514,10 +514,14 @@ export interface MetaStore {
    * froze a 9,000-chat host. `test/no-disk-scan-per-chat.test.ts` guards it.
    */
   list(): ChatMeta[];
+  /** Every chat directory's id, without reading any chat. */
+  ids(): string[];
   /** The chats the most recent `list()` could not read, and why. */
   unreadable(): UnreadableChat[];
   read(chatId: string): ChatMeta | undefined;
   write(meta: ChatMeta): void;
+  /** Called with every meta this store writes, after it is durable. One observer. */
+  observeWrites?(fn: (meta: ChatMeta) => void): void;
   /** Atomic increment helper: reads, runs `mut`, writes back. Caller must serialise. */
   update(chatId: string, mut: (m: ChatMeta) => ChatMeta): ChatMeta;
   /**
@@ -656,8 +660,24 @@ export function createMetaStore(patchHome: string): MetaStore {
     return meta;
   }
 
+  let writeObserver: ((meta: ChatMeta) => void) | undefined;
+  function observeWrites(fn: (meta: ChatMeta) => void): void {
+    writeObserver = fn;
+  }
+
   function write(meta: ChatMeta): void {
     atomicWrite(pathFor(meta.chatId), JSON.stringify(meta, null, 2));
+    writeObserver?.(meta);
+  }
+
+  function ids(): string[] {
+    ensureRoot();
+    try {
+      return readdirSync(root).filter((id) => !id.startsWith('.'));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw err;
+    }
   }
 
   function list(): ChatMeta[] {
@@ -709,5 +729,5 @@ export function createMetaStore(patchHome: string): MetaStore {
 
   ensureRoot();
 
-  return { pathFor, read, write, list, unreadable, update, writeSeq, readSeq };
+  return { pathFor, read, write, observeWrites, list, ids, unreadable, update, writeSeq, readSeq };
 }

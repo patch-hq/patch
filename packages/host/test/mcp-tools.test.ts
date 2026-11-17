@@ -432,9 +432,10 @@ describe('patch-tools MCP server — full client round-trip', () => {
       name: 'patch_peek',
       arguments: { chatId: 'caller-1', limit: 5 },
     })) as { content: { text: string }[]; isError?: boolean };
-    // caller-1 was never spawned — a 404 is fine, we only care that the
-    // `limit` query-param branch in mcp.ts's patch_peek wrapper was taken.
-    expect(peeked.content[0]!.text).toMatch(/404|not_found/i);
+    // caller-1 is on disk from the seeding above but was never loaded; naming it
+    // opens it (spec/02 § Chat loading). We only care that the `limit`
+    // query-param branch in mcp.ts's patch_peek wrapper was taken.
+    expect(peeked.content[0]!.text).toContain('"chatId":"caller-1"');
 
     const spawned = (await client.callTool({
       name: 'patch_spawn',

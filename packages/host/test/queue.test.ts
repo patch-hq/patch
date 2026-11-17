@@ -5,7 +5,7 @@
 // (chat.unqueue_request → chat.dequeued{cancelled}).
 
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
@@ -470,6 +470,8 @@ describe('message queueing (spec/04)', () => {
       now: () => 1_700_000_000_000,
       generateChatId: () => 'queue-race-1',
       onTurnCommitted: (chatId) => {
+        // A deleted chat is gone from disk too; memory alone would just reopen it.
+        rmSync(join(home, 'chats', chatId), { recursive: true, force: true });
         // Simulates an external actor (e.g. `patch host clean`) deleting
         // chat_state in the narrow gap between two queued turns finishing and
         // starting.

@@ -701,6 +701,8 @@ describe('Host → history log', () => {
     fs.appendFileSync(path, '{"v":1,"seq":9,"at":1,"bra');
     const { daemon, events } = makeHost(home);
     daemon.hydrate();
+    // The chat owes nothing, so start-up leaves it; opening it repairs the log.
+    daemon.chatState.get('torn');
     const note = events.find((e) => e.type === 'chat.message') as {
       role: string;
       content: string;
