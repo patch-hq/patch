@@ -87,11 +87,11 @@ describe('launchd update keeps running chats alive', () => {
     expect(calls.some((c) => c.includes('kickstart'))).toBe(false);
   });
 
-  it('start on a stopped job kickstarts it without -k', async () => {
+  it('start on a stopped job kickstarts it with -k (no chats to preserve, and it un-sticks a spawning job)', async () => {
     loaded = false;
     await launchdOps.start(def);
     const ks = calls.find((c) => c.includes('kickstart'));
     expect(ks).toBeDefined();
-    expect(ks).not.toContain('-k');
+    expect(ks).toContain('-k');
   });
 });
