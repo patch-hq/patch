@@ -143,6 +143,8 @@ export class ChatLogStore {
    * than in it, so a question asked again after a host restart is never
    * refused or swallowed as a duplicate of the first asking.
    */
+  /** Requests asked and not yet answered, by chat; live state, not history. */
+  private readonly open = new Map<string, Map<string, WireEvent>>();
   private readonly questions = new Map<
     string,
     Map<string, { request: WireEvent; response?: WireEvent }>
@@ -218,6 +220,15 @@ export class ChatLogStore {
    */
   notePermission(event: WireEvent): void {
     if (event.type === 'chat.permission_request') {
+      // Every request is open until answered; only a question is history.
+      const { forSurfaceId: _r, ...open } = event as WireEvent & { forSurfaceId?: string };
+      void _r;
+      let opened = this.open.get(event.chatId);
+      if (!opened) {
+        opened = new Map();
+        this.open.set(event.chatId, opened);
+      }
+      opened.set(event.requestId, open as WireEvent);
       if (event.request.tool !== QUESTION_TOOL) return;
       const { forSurfaceId: _route, ...whole } = event as WireEvent & { forSurfaceId?: string };
       void _route;
@@ -229,6 +240,7 @@ export class ChatLogStore {
       return;
     }
     if (event.type === 'chat.permission_response' && typeof event.chatId === 'string') {
+      this.open.get(event.chatId)?.delete(event.requestId);
       const asked = this.questionsOf(event.chatId);
       const held = asked.get(event.requestId);
       if (!held) return;
@@ -267,6 +279,49 @@ export class ChatLogStore {
     }
     for (; i < asked.length; i += 1) out.push(asked[i]!.request, asked[i]!.response);
     return out;
+  }
+
+  /**
+   * One page of the chat's record (spec/03 § Chat history): entries after a
+   * position, the `limit` before one, or the last `limit`. `more` says entries
+   * remain in the direction asked.
+   */
+  page(
+    chatId: string,
+    at: { after?: number; before?: number; limit: number },
+  ): { entries: WireEvent[]; more: boolean; through: number } {
+    const all = this.replay(chatId, -1);
+    const through = this.highWater(chatId);
+    const seqOf = (e: WireEvent, i: number): number => {
+      const seq = (e as { seq?: unknown }).seq;
+      // An answer has no seq of its own; it travels with the question before it.
+      if (typeof seq === 'number') return seq;
+      for (let j = i - 1; j >= 0; j--) {
+        const prev = (all[j] as { seq?: unknown }).seq;
+        if (typeof prev === 'number') return prev;
+      }
+      return -1;
+    };
+    if (at.after !== undefined) {
+      const from = all.findIndex((e, i) => seqOf(e, i) > at.after!);
+      if (from === -1) return { entries: [], more: false, through };
+      const entries = all.slice(from, from + at.limit);
+      return { entries, more: from + at.limit < all.length, through };
+    }
+    let end = all.length;
+    if (at.before !== undefined) {
+      end = all.findIndex((e, i) => seqOf(e, i) >= at.before!);
+      if (end === -1) end = all.length;
+    }
+    let start = Math.max(0, end - at.limit);
+    // Never split a question from its answer.
+    while (start > 0 && (all[start] as { seq?: unknown }).seq === undefined) start -= 1;
+    return { entries: all.slice(start, end), more: start > 0, through };
+  }
+
+  /** Every request on the chat still waiting for an answer. */
+  openRequests(chatId: string): WireEvent[] {
+    return [...(this.open.get(chatId)?.values() ?? [])];
   }
 
   private questionsOf(chatId: string): Map<string, { request: WireEvent; response?: WireEvent }> {

@@ -666,6 +666,139 @@ describe('WS hub relay', () => {
     }
   });
 
+  describe('chat history and the account feed', () => {
+    const say = (seq: number) =>
+      ({
+        type: 'chat.message',
+        chatId: 'chat-1',
+        role: 'assistant',
+        content: `m${seq}`,
+        seq,
+      }) as const;
+
+    it('pages a chat: its last screen, then older pages, then what is new', async () => {
+      const user = generateUserKeypair(() => new Uint8Array(32).fill(17));
+      const registry = Registry.load(dir);
+      registry.bootstrapAccount({ keypair: user });
+      const h = await startServer({ registry });
+      try {
+        h.hostLink.emit({ type: 'chat.spawned', chatId: 'chat-1', hostId: 'd1', folder: '/w' });
+        for (let seq = 0; seq < 10; seq++) h.hostLink.emit(say(seq));
+        const c = await makeAuthedClient(h, user, 'srf-hist');
+        const pages: Array<{ seqs: number[]; more: boolean; through: number }> = [];
+        c.on('chat.history', (e) =>
+          pages.push({
+            seqs: e.entries.map((x) => (x as { seq: number }).seq),
+            more: e.more,
+            through: e.through,
+          }),
+        );
+        c.send({ type: 'chat.history_request', requestId: 'r1', chatId: 'chat-1', limit: 4 });
+        c.send({
+          type: 'chat.history_request',
+          requestId: 'r2',
+          chatId: 'chat-1',
+          before: 6,
+          limit: 4,
+        });
+        c.send({ type: 'chat.history_request', requestId: 'r3', chatId: 'chat-1', after: 8 });
+        await new Promise((r) => setTimeout(r, 80));
+        expect(pages).toEqual([
+          { seqs: [6, 7, 8, 9], more: true, through: 9 },
+          { seqs: [2, 3, 4, 5], more: true, through: 9 },
+          { seqs: [9], more: false, through: 9 },
+        ]);
+        // Opening never asks the host for history.
+        expect(h.hostLink.sent.some((s) => s.event.type === 'chat.replay')).toBe(false);
+        await c.close();
+      } finally {
+        await h.close();
+      }
+    });
+
+    it('resumes the feed: changed list entries after the device position, then followed chats caught up', async () => {
+      const user = generateUserKeypair(() => new Uint8Array(32).fill(18));
+      const registry = Registry.load(dir);
+      registry.bootstrapAccount({ keypair: user });
+      const h = await startServer({ registry });
+      try {
+        h.hostLink.emit({ type: 'chat.spawned', chatId: 'chat-1', hostId: 'd1', folder: '/w' });
+        h.hostLink.emit({ type: 'chat.spawned', chatId: 'chat-2', hostId: 'd1', folder: '/w' });
+        for (let seq = 0; seq < 3; seq++) h.hostLink.emit(say(seq));
+        const first = await makeAuthedClient(h, user, 'srf-feed-1');
+        const states: Array<{ chatId: string; feedPos?: number }> = [];
+        first.on('chat.state', (e) =>
+          states.push({
+            chatId: e.chatId,
+            ...(e.feedPos !== undefined ? { feedPos: e.feedPos } : {}),
+          }),
+        );
+        const resets: number[] = [];
+        first.on('feed.reset', (e) => resets.push(e.feedPos));
+        first.send({ type: 'feed.resume', follow: [] });
+        await new Promise((r) => setTimeout(r, 50));
+        // A device holding nothing reloads the index.
+        expect(resets).toHaveLength(1);
+
+        h.hostLink.emit({
+          type: 'chat.state',
+          chatId: 'chat-2',
+          hostId: 'd1',
+          activity: 'running',
+          permissionMode: 'auto',
+          lastUpdated: 5,
+        });
+        await new Promise((r) => setTimeout(r, 50));
+        const live = states.find((s) => s.chatId === 'chat-2');
+        expect(live?.feedPos).toBeGreaterThan(resets[0]!);
+
+        const second = await makeAuthedClient(h, user, 'srf-feed-2');
+        const caught: string[] = [];
+        second.on('chat.state', (e) => caught.push(e.chatId));
+        const history: number[] = [];
+        second.on('chat.history', (e) =>
+          history.push(...e.entries.map((x) => (x as { seq: number }).seq)),
+        );
+        second.send({
+          type: 'feed.resume',
+          after: resets[0]!,
+          follow: [{ chatId: 'chat-1', after: 0 }],
+        });
+        await new Promise((r) => setTimeout(r, 50));
+        expect(caught).toEqual(['chat-2']);
+        expect(history).toEqual([1, 2]);
+        await first.close();
+        await second.close();
+      } finally {
+        await h.close();
+      }
+    });
+
+    it('refuses a history request that names both directions', async () => {
+      const user = generateUserKeypair(() => new Uint8Array(32).fill(19));
+      const registry = Registry.load(dir);
+      registry.bootstrapAccount({ keypair: user });
+      const h = await startServer({ registry });
+      try {
+        const c = await makeAuthedClient(h, user, 'srf-bad');
+        const errors: string[] = [];
+        c.on('chat.error', (e) => errors.push(e.error.code));
+        c.send({
+          type: 'chat.history_request',
+          requestId: 'r',
+          chatId: 'chat-1',
+          after: 1,
+          before: 5,
+        });
+        await new Promise((r) => setTimeout(r, 50));
+        expect(errors).toEqual(['invalid_frame']);
+        await c.close();
+      } finally {
+        await h.close();
+      }
+    });
+  });
+
   it('replays daemon-emitted chat events to subscribed surfaces (replay flow)', async () => {
     const user = generateUserKeypair(() => new Uint8Array(32).fill(12));
     const registry = Registry.load(dir);
