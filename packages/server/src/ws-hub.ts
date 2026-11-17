@@ -223,7 +223,7 @@ export interface WsHubDeps {
    * `InboundHostLink.attach`; tests inject a spy. Absent → host hellos are
    * rejected (the in-process test link can't accept a real socket).
    */
-  attachHost?: (socket: WebSocket, hostId: string) => void;
+  attachHost?: (socket: WebSocket, hostId: string, opts?: { outbox?: boolean }) => void;
   /** Override clock for tests (returns unix seconds). */
   nowSec?: () => number;
   /** Hello-frame timeout (override for tests). */
@@ -1224,6 +1224,7 @@ export class WsHub {
         surfaceId: claims.daemon_id,
         hosts: this.hostRoster(),
         ...(this.deps.chatLogStore ? { recordImport: true as const } : {}),
+        hostOutbox: true,
       }),
     );
 
@@ -1235,7 +1236,7 @@ export class WsHub {
       this.replacingHosts.add(claims.daemon_id);
     }
     try {
-      this.deps.attachHost(socket, claims.daemon_id);
+      this.deps.attachHost(socket, claims.daemon_id, { outbox: hello.outbox === true });
     } finally {
       this.replacingHosts.delete(claims.daemon_id);
     }

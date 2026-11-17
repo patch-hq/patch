@@ -196,6 +196,56 @@ describe('InboundHostLink', () => {
     expect(received[0]?.type).toBe('host.online');
   });
 
+  it('takes an outbox frame as the event it carries, then acknowledges its position', async () => {
+    link = new InboundHostLink({ logger: silentLogger });
+    const received: WireEvent[] = [];
+    link.onEvent((e) => received.push(e));
+    const { server, client } = await makePair(wss, url);
+    sockets.push(client);
+    const acks: unknown[] = [];
+    client.on('message', (raw) => acks.push(JSON.parse(String(raw))));
+    link.attach(server, 'd1', { outbox: true });
+    expect(link.usesOutbox('d1')).toBe(true);
+
+    const say = (seq: number) =>
+      ({
+        type: 'chat.message',
+        chatId: 'c1',
+        role: 'assistant',
+        content: `m${seq}`,
+        seq,
+      }) as WireEvent;
+    client.send(JSON.stringify({ type: 'host.outbox', position: 0, event: say(1) }));
+    client.send(JSON.stringify({ type: 'host.outbox', position: 1, event: say(2) }));
+    await waitFor(() => acks.length === 1, 1000);
+    expect(received.map((e) => (e as { seq: number }).seq)).toEqual([1, 2]);
+    // One acknowledgement for the burst.
+    expect(acks).toEqual([{ type: 'host.outbox_ack', through: 1 }]);
+  });
+
+  it('drops an outbox frame whose event is not a valid frame, without acknowledging it', async () => {
+    link = new InboundHostLink({ logger: silentLogger });
+    const received: WireEvent[] = [];
+    link.onEvent((e) => received.push(e));
+    const { server, client } = await makePair(wss, url);
+    sockets.push(client);
+    const acks: unknown[] = [];
+    client.on('message', (raw) => acks.push(JSON.parse(String(raw))));
+    link.attach(server, 'd1', { outbox: true });
+    client.send(
+      JSON.stringify({ type: 'host.outbox', position: 0, event: { type: 'chat.message' } }),
+    );
+    await new Promise((r) => setTimeout(r, 250));
+    expect(received).toEqual([]);
+    expect(acks).toEqual([]);
+  });
+
+  it('a host that did not say it has an outbox is not taken to use one', () => {
+    link = new InboundHostLink({ logger: silentLogger });
+    link.attach(fakeSocket() as unknown as WebSocket, 'd1');
+    expect(link.usesOutbox('d1')).toBe(false);
+  });
+
   it('sends surface→host events directly when online', async () => {
     link = new InboundHostLink({ logger: silentLogger });
     const { server, client } = await makePair(wss, url);

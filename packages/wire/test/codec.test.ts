@@ -1163,6 +1163,12 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     done: true,
   },
   'host.record_import_ack': { type: 'host.record_import_ack', chatId: 'c1' },
+  'host.outbox': {
+    type: 'host.outbox',
+    position: 7,
+    event: { type: 'chat.message', chatId: 'c1', role: 'assistant', content: 'hi', seq: 3 },
+  },
+  'host.outbox_ack': { type: 'host.outbox_ack', through: 7 },
   'host.reconciled': { type: 'host.reconciled', hostId: 'd1' },
   'host.manager_adopt': {
     type: 'host.manager_adopt',
