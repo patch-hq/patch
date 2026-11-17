@@ -5,12 +5,16 @@ import { test, expect } from '@playwright/test';
 // same place within the header on every screen. Absolute x/y is deliberately not compared:
 // a grouped chat or route sits inside the group card (title + tab bar), which offsets the
 // whole header, and the group card insets it horizontally.
-const SCREENS = ['chat=chat_bus', 'chat=new', 'route=/jobs', 'route=/jobs/new', 'route=/settings'];
+const SCREENS = ['chat=chat_bus', 'chat=new', 'route=/jobs/new', 'route=/settings'];
+// The Jobs list is named by its tab and carries a compact toolbar instead of a page head, so it
+// is deliberately shorter than the others: it only has to keep Back centred in its own bar.
+const COMPACT_SCREENS = ['route=/jobs'];
 
 test('Back/Forward sit at the same place in the header on every screen', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 800 });
   const seen: { screen: string; headHeight: number; centreY: number }[] = [];
-  for (const screen of SCREENS) {
+  const compact: { screen: string; headHeight: number; centreY: number }[] = [];
+  for (const screen of [...SCREENS, ...COMPACT_SCREENS]) {
     await page.goto(`/app/dev-harness.html?${screen}`);
     const back = page.getByTestId('nav-back').first();
     await back.waitFor();
@@ -23,7 +27,12 @@ test('Back/Forward sit at the same place in the header on every screen', async (
       return { headHeight: h.height, centreY: b.y + b.height / 2 - h.y };
     });
     expect(m, screen).not.toBeNull();
-    seen.push({ screen, ...m! });
+    (COMPACT_SCREENS.includes(screen) ? compact : seen).push({ screen, ...m! });
+  }
+  for (const s of compact) {
+    expect(Math.abs(s.centreY - s.headHeight / 2), `${s.screen} Back centred`).toBeLessThanOrEqual(
+      1,
+    );
   }
   for (const s of seen) {
     expect(
