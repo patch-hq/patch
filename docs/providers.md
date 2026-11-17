@@ -4,7 +4,7 @@ A provider is an agent harness a chat can run on (today: `claude`, `codex`, `loc
 
 ## Adding one
 
-1. `packages/wire/src/providers.ts` — add an entry to `PROVIDERS`: `id` (persisted, never rename), `label`, `modelPrefix` (`deepseek/`), `sessionIdPrefix` (`deepseek-`), `permissionModes`, `backendId`, `accountsKey` (`null` for a provider with no accounts, like `local`), `aliases`, `supportsEffort`, `loginRequiredCode`. `HarnessId`, model routing, session-id routing and the permission-mode table all derive from it.
+1. `packages/wire/src/providers.ts` — add an entry to `PROVIDERS`: `id` (persisted, never rename), `label`, `modelPrefix` (`deepseek/`), `sessionIdPrefix` (`deepseek-`), `permissionModes`, `backendId`, `accountsKey` (`null` for a provider with no accounts, like `local`), `aliases`, `supportsEffort`, `loginRequiredCode`, `capabilities` (resume, editAtMessage, rewind, branchAtTurn, disableNativeTools, interrupt, steer: what the provider does natively; a feature whose capability is not declared is absent for its chats, read with `modelHasCapability(model, cap)`). `HarnessId`, model routing, session-id routing and the permission-mode table all derive from it.
 2. `packages/host/src/harnesses.ts` — add its `HARNESS_TRAITS` entry. The `Record<HarnessId, …>` type fails the build until you do. Traits cover: credential `backendId`, permission-mode resolution, status generation, rate-limit sweep ownership, retry safety.
 3. Write the backend (like `codexBackend.ts`): runs a turn, emits Patch events, mints `<sessionIdPrefix>…` session ids, supports reseed from Patch's own history log (provider switching).
 4. If it needs a key, add it to `packages/wire/src/provider-keys.ts`.

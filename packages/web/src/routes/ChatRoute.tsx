@@ -29,6 +29,7 @@ import { quoteSelectionIntoComposer } from '../lib/quoteSelection.js';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   SPECIAL_THREAD_IDS,
+  modelHasCapability,
   modelSupportsEffort,
   hasTaskNotification,
   isEditToolCall as isEditToolCallWire,
@@ -3188,6 +3189,8 @@ function MessageEntry({
     !entry.queued &&
     !entry.transcribing &&
     !entry.streaming &&
+    // Features follow the provider's declared capability (spec/02 § Provider adapters).
+    modelHasCapability(metaModel, 'editAtMessage') &&
     onEditTurn !== undefined;
   // spec/14 § Side threads panel TRIGGER — "Hovering any message (user or
   // agent)". Same settled-turn restriction as the edit pencil (above), minus

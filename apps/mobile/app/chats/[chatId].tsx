@@ -59,6 +59,7 @@ import {
   folderName,
   hasTaskNotification,
   isReservedSpecialThread,
+  modelHasCapability,
   compactModelLabel,
   taskNotificationSummary,
   labelForRun,
@@ -1064,10 +1065,7 @@ function ChatDetailBody(): React.ReactElement {
   );
 
   return (
-    <View
-      testID="chat-surface"
-      style={{ flex: 1, backgroundColor: colors.paper }}
-    >
+    <View testID="chat-surface" style={{ flex: 1, backgroundColor: colors.paper }}>
       <View
         testID="chat-header"
         style={{
@@ -2850,6 +2848,7 @@ const TimelineItem = React.memo(function TimelineItem({
   const colors = useTheme();
   const hostOnline = usePresenceStore((s) => s.daemon === 'online');
   // Sources the `/` skill menu in an open queued-message editor.
+  const chatModel = useChatStore((s) => s.chats[chatId]?.model);
   const chatFolder = useChatStore((s) => s.chats[chatId]?.folder);
   // spec/04 ## Message queueing — a queued entry on a chat out of credit says so.
   const pauseAt = useChatStore((s) => {
@@ -2990,7 +2989,11 @@ const TimelineItem = React.memo(function TimelineItem({
               : {})}
             // Edit: a settled text-only user message is replaced by a fork
             // carrying the new text (spec/04 § Branching).
-            {...(entry.localId === undefined && !entry.queued && editSource(chatId, entry) !== null
+            // Offered only where the chat's provider declares editAtMessage.
+            {...(entry.localId === undefined &&
+            !entry.queued &&
+            modelHasCapability(chatModel, 'editAtMessage') &&
+            editSource(chatId, entry) !== null
               ? { edit: (next: string) => editTurn(chatId, entry.seq, next) }
               : {})}
             // spec/04 ## Message queueing § Edit — a tap on a queued message

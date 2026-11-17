@@ -131,3 +131,31 @@ describe('the local model provider', () => {
     expect(HarnessId.parse('local')).toBe('local');
   });
 });
+
+import { modelHasCapability, providerCapabilities, PROVIDERS as REG } from '../src/providers.js';
+
+describe('provider capabilities', () => {
+  it('every provider declares every capability as a boolean', () => {
+    const keys = [
+      'resume',
+      'editAtMessage',
+      'rewind',
+      'branchAtTurn',
+      'disableNativeTools',
+      'interrupt',
+      'steer',
+    ];
+    for (const p of REG) {
+      expect(Object.keys(p.capabilities).sort()).toEqual([...keys].sort());
+      for (const k of keys)
+        expect(typeof (p.capabilities as Record<string, boolean>)[k]).toBe('boolean');
+    }
+  });
+
+  it('reads capabilities by model', () => {
+    expect(modelHasCapability('claude-opus-5', 'editAtMessage')).toBe(true);
+    expect(modelHasCapability('openai/gpt-5', 'steer')).toBe(true);
+    expect(modelHasCapability('openai/gpt-5', 'rewind')).toBe(false);
+    expect(providerCapabilities('local/x').branchAtTurn).toBe(false);
+  });
+});

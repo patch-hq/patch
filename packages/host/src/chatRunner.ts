@@ -197,6 +197,7 @@ import {
   type ManagerSweepCandidate,
   type ManagerSweepResultEvent,
 } from '@patch/wire';
+import { modelHasCapability } from '@patch/wire';
 import type { SweepDecisionResult } from './managerSweepGen.js';
 import { countMessages, windowTrack } from './managerContext.js';
 import { permissionModeChangeLine } from './permissionMode.js';
@@ -8380,6 +8381,19 @@ export class Daemon {
   }): Promise<void> {
     const state = this.chatState.get(req.chatId);
     if (!state) throw new ChatNotFoundError(req.chatId);
+    if (!modelHasCapability(state.model, 'editAtMessage')) {
+      this.emit({
+        type: 'chat.error',
+        chatId: req.chatId,
+        error: {
+          code: 'capability_unsupported',
+          message: `editing a message is not supported by this chat's provider`,
+        },
+        seq: OUT_OF_BAND_SEQ,
+      });
+      this.opts.logger.warn({ chatId: req.chatId }, 'refused: provider lacks editAtMessage');
+      return;
+    }
     if (req.message.trim().length === 0 && (req.attachments ?? []).length === 0) {
       this.emit({
         type: 'chat.error',
@@ -8487,6 +8501,20 @@ export class Daemon {
   }): Promise<void> {
     const state = this.chatState.get(req.chatId);
     if (!state) throw new ChatNotFoundError(req.chatId);
+
+    if (!modelHasCapability(state.model, 'branchAtTurn')) {
+      this.emit({
+        type: 'chat.error',
+        chatId: req.chatId,
+        error: {
+          code: 'capability_unsupported',
+          message: `a side thread is not supported by this chat's provider`,
+        },
+        seq: OUT_OF_BAND_SEQ,
+      });
+      this.opts.logger.warn({ chatId: req.chatId }, 'refused: provider lacks branchAtTurn');
+      return;
+    }
     const graph = this.ensureBranches(req.chatId);
 
     const fromBranchId = req.branchId ?? graph.activeBranchId;
