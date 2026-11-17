@@ -82,7 +82,7 @@ describe('ChatRegistry persistence', () => {
     const r = make();
     r.observe(spawned('c1'));
     await new Promise((resolve) => setTimeout(resolve, 1_200));
-    expect(JSON.parse(readFileSync(path, 'utf8')).chats[0].chatId).toBe('c1');
+    expect(JSON.parse(readFileSync(path, 'utf8').split('\n')[0]!).c.chatId).toBe('c1');
   });
 
   test('keeps an error, a removal, a delete and a move', () => {
@@ -142,15 +142,15 @@ describe('ChatRegistry persistence', () => {
     expect(make().get('gone')).toBeUndefined();
   });
 
-  test('starts empty, saying so, when the saved mirror is damaged', () => {
-    writeFileSync(path, '{not json');
+  test('starts empty, saying so, when the saved index is damaged before its last line', () => {
+    writeFileSync(path, '{not json\n{"x":"c1"}\n');
     const warnings: string[] = [];
     const r = new ChatRegistry({
       logger: { warn: (_o: unknown, msg?: string) => warnings.push(String(msg)) },
       persistPath: path,
     });
     expect(r.size()).toBe(0);
-    expect(warnings.join(' ')).toContain('could not read the saved mirror');
+    expect(warnings.join(' ')).toContain('could not read the saved chat index');
   });
 
   test('without a path it stays in memory only', () => {
@@ -202,26 +202,31 @@ describe('ChatRegistry persistence', () => {
   });
 
   describe('reading an odd saved file', () => {
-    const read = (body: unknown): ChatRegistry => {
-      writeFileSync(path, typeof body === 'string' ? body : JSON.stringify(body));
+    // `body` is the old whole-file shape; write it as index lines.
+    const read = (body: { chats?: unknown[]; worked?: Record<string, unknown> }): ChatRegistry => {
+      const lines = [
+        ...(body.chats ?? []).map((c) => JSON.stringify({ c })),
+        ...Object.entries(body.worked ?? {}).map(([k, v]) => JSON.stringify({ w: [k, v] })),
+      ];
+      writeFileSync(path, lines.join('\n') + (lines.length ? '\n' : ''));
       return new ChatRegistry({ logger, persistPath: path });
     };
 
     test('a file with no chats and no record of work is an empty mirror', () => {
-      const r = read({ version: 1 });
+      const r = read({});
       expect(r.size()).toBe(0);
       expect(r.hasWorkedSince('c1', 0)).toBe(false);
     });
 
     test('skips an entry with no chat id, an empty one, or that is not an object', () => {
       const good = { chatId: 'c1', hostId: 'd1', activity: 'idle', status: 'active' };
-      const r = read({ version: 1, chats: [null, {}, { chatId: '' }, { chatId: 7 }, good] });
+      const r = read({ chats: [null, {}, { chatId: '' }, { chatId: 7 }, good] });
       expect(r.size()).toBe(1);
       expect(r.get('c1')).toBeDefined();
     });
 
     test('keeps a record of work only when it is a time', () => {
-      const r = read({ version: 1, chats: [], worked: { a: 5_000, b: 'yesterday', c: null } });
+      const r = read({ chats: [], worked: { a: 5_000, b: 'yesterday', c: null } });
       expect(r.hasWorkedSince('a', 4_000)).toBe(true);
       expect(r.hasWorkedSince('b', 0)).toBe(false);
       expect(r.hasWorkedSince('c', 0)).toBe(false);
