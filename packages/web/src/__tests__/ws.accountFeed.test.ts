@@ -59,11 +59,6 @@ const msg = (chatId: string, seq: number) => ({
   content: `m${seq}`,
 });
 
-const replays = (fake: FakeWS): Array<{ chatId: string; fromSeq: number }> =>
-  fake.sent
-    .map((s) => JSON.parse(s) as { type: string; chatId: string; fromSeq: number })
-    .filter((f) => f.type === 'chat.replay');
-
 async function connect(): Promise<{ ws: PatchWs; fake: FakeWS }> {
   const ws = new PatchWs('ws://test/ws');
   ws.connect();
