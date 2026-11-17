@@ -6,7 +6,8 @@
 // Two meters a card — the 5-hour window and the week — each a bar WITH the
 // figure said in words (`79% used · resets 14:00`). It used to be one line of
 // abbreviations (`5h 55% · wk 12%`), which did not say whether 55% was used or
-// left. A window the host has not reported is said to be missing rather than
+// left. A 5-hour window absent beside a reported week has not started, and says
+// so; any other window the host has not reported is said to be missing rather than
 // drawn as an empty bar, and an account nothing has read yet says so.
 //
 // Four accounts show at once; more are a page away, so the block keeps one
@@ -151,6 +152,10 @@ function UsageCard({
           {METERS.map(({ scope, label }) => {
             const win = row.usage?.[scope];
             if (win === undefined) {
+              // The probe omits the 5-hour headers while no window is running
+              // (nothing sent in the last five hours). A reading that carries
+              // the week but not the session is that case, not a gap: say so.
+              const notStarted = scope === 'session' && row.usage?.week !== undefined;
               return (
                 <Fragment key={scope}>
                   <span className="new-chat-usage-label">{label}</span>
@@ -158,7 +163,7 @@ function UsageCard({
                     className="new-chat-usage-fig new-chat-usage-missing"
                     data-testid={`new-chat-usage-${row.key}-${scope}`}
                   >
-                    not reported
+                    {notStarted ? '0% · starts with your first message' : 'not reported'}
                   </span>
                 </Fragment>
               );
