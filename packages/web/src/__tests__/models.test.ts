@@ -33,6 +33,29 @@ describe('model catalogue', () => {
     expect(cat.status).toBe('idle');
   });
 
+  it('keeps a failed backend visible while the others stay listed', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              models: [{ id: 'openai/gpt-5.6-terra', label: 'GPT-5.6-Terra' }],
+              errors: [{ backend: 'claude', code: 'upstream', message: 'HTTP 401' }],
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          ),
+      ),
+    );
+    await loadModels('h1');
+    const cat = getModelCatalog();
+    expect(cat.status).toBe('ready');
+    expect(cat.models).toHaveLength(1);
+    expect(cat.backendErrors).toEqual([
+      { backend: 'claude', code: 'upstream', message: 'HTTP 401' },
+    ]);
+  });
+
   it('loads the live catalogue from /api/models and notifies subscribers', async () => {
     const fetchMock = vi.fn(
       async () =>
