@@ -219,7 +219,15 @@ jobs:
         run: |
           set -euo pipefail
           read -r VERSION SHA BUILT < <(node scripts/version.mjs --json | node -e 'const v=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(v.version,v.gitSha,v.builtAt)')
-          node scripts/build-apk-local.mjs --version "$VERSION" --sha "$SHA" --built-at "$BUILT" | tee "$RUNNER_TEMP/apk.log"
+          # Maven Central / the Gradle plugin portal answer 429 to shared runner IPs; retry the build.
+          for attempt in 1 2 3; do
+            if node scripts/build-apk-local.mjs --version "$VERSION" --sha "$SHA" --built-at "$BUILT" | tee "$RUNNER_TEMP/apk.log"; then
+              break
+            fi
+            [ "$attempt" = 3 ] && exit 1
+            echo "apk build attempt $attempt failed" >&2
+            sleep $((attempt * 30))
+          done
           APK=$(sed -n 's/^##apk //p' "$RUNNER_TEMP/apk.log" | tail -1)
           test -f "$APK"
           # Refuse anything that is not this app: a wrong id would install beside it.
