@@ -815,7 +815,7 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
       return { daemon, metaStore };
     }
 
-    it('first-turn interruption: the provider never returned a session id, yet the original prompt is seeded', async () => {
+    it('first-turn interruption: nothing was answered, so the owed turn restarts as a fresh session with no reseed', async () => {
       const r1 = recordingBackend(null);
       const { home, folder } = setup();
       const first = hostWith(home, r1.backend);
@@ -835,8 +835,10 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
 
       expect(r2.runs).toHaveLength(1);
       expect(r2.runs[0]!.prompt.endsWith('Carry on')).toBe(true);
-      expect(r2.runs[0]!.resumeSessionId).toBeTruthy();
-      expect(reseededTexts(r2.runs[0]!)).toEqual(['Autonomous job. Do not ask questions.']);
+      // Nothing was answered, so there is no conversation to carry: Claude Code
+      // would refuse an empty transcript ("No conversation found").
+      expect(r2.runs[0]!.resumeSessionId).toBeUndefined();
+      expect(reseededTexts(r2.runs[0]!)).toEqual([]);
       await r2.drain();
     });
 
@@ -852,14 +854,16 @@ describe('a turn cut off while awaiting a permission/question decision', () => {
       const r2 = recordingBackend(null);
       hostWith(home, r2.backend).daemon.hydrate();
       await tick();
-      expect(reseededTexts(r2.runs[0]!)).toEqual(['original ask']);
+      expect(r2.runs[0]!.resumeSessionId).toBeUndefined();
+      expect(reseededTexts(r2.runs[0]!)).toEqual([]);
 
       // Reboot 2: the log now also holds the first resend.
       const r3 = recordingBackend('sess-3');
       hostWith(home, r3.backend).daemon.hydrate();
       await tick();
       expect(r3.runs).toHaveLength(1);
-      expect(reseededTexts(r3.runs[0]!)[0]).toBe('original ask');
+      expect(r3.runs[0]!.resumeSessionId).toBeUndefined();
+      expect(reseededTexts(r3.runs[0]!)).toEqual([]);
       expect(r3.runs[0]!.prompt).toContain('original ask');
       expect(r3.runs[0]!.prompt.match(/<\/system-reminder>/g)).toHaveLength(1);
       await r3.drain();
