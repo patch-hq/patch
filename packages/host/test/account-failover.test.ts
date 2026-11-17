@@ -191,6 +191,44 @@ describe('parseLimitResetsAt', () => {
   });
 });
 
+describe('AccountRotation — what the server is told (spec/10 § Account states)', () => {
+  it('reports a refusal with its kind and when it happened, so the server can derive the state', () => {
+    let now = 5_000;
+    const r = new AccountRotation(() => now);
+    r.markExhausted('a1', 'You hit your limit', 9_000);
+    now = 6_000;
+    r.markExhausted('a2', 'credit balance is too low', undefined, undefined, 'out');
+    expect(r.snapshot()).toEqual([
+      { accountId: 'a1', until: 9_000, reason: 'You hit your limit', kind: 'limit', at: 5_000 },
+      {
+        accountId: 'a2',
+        until: undefined,
+        reason: 'credit balance is too low',
+        kind: 'out',
+        at: 6_000,
+      },
+    ]);
+  });
+
+  it('marks a sibling on the same organisation with the same kind', () => {
+    const r = new AccountRotation();
+    r.markExhaustedWithSiblings(
+      [
+        { id: 'a1', connected: true, organizationId: 'o' },
+        { id: 'a2', connected: true, organizationId: 'o' },
+      ],
+      'a1',
+      'billing',
+      undefined,
+      'out',
+    );
+    expect(r.snapshot().map((e) => [e.accountId, e.kind])).toEqual([
+      ['a1', 'out'],
+      ['a2', 'out'],
+    ]);
+  });
+});
+
 describe('AccountRotation — the sequence, in order', () => {
   const accounts = [
     { id: 'a1', connected: true },

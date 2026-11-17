@@ -9,14 +9,19 @@
 
 import type { JSX, ReactNode } from 'react';
 import { useEffect, useState } from 'react';
-import type { AccountStrategy, HostAccountSummary } from '@patch/wire';
+import {
+  accountStateRunnable,
+  describeAccountState,
+  type AccountStrategy,
+  type HostAccountSummary,
+} from '@patch/wire';
 import { ClaudeSignIn } from '../../components/ClaudeSignIn.js';
 import { api, type SharedBackendId } from '../../api/rest.js';
 import { getActiveWs } from '../../api/ws.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { usePresenceStore } from '../../stores/presenceStore.js';
 import { useUiStore } from '../../stores/uiStore.js';
-import { formatAgo } from '../../lib/usage.js';
+import { formatAgo, formatResetLocal } from '../../lib/usage.js';
 import { sortHosts } from './hostScope.js';
 import { sendToHost } from './hostWrite.js';
 import { writeShared } from './sharedWrite.js';
@@ -129,11 +134,9 @@ function AccountEntry({
   // When the reading was taken sits beside the name, where the eye lands
   // first; the sub-line is what the account IS (its email, its kind).
   const ago = formatAgo(reading?.usage?.at);
-  const sub = [
-    row.email ?? null,
-    row.connected ? null : 'Signed out',
-    row.kind === 'apiKey' ? 'API key' : null,
-  ].filter((x): x is string => x !== null);
+  const sub = [row.email ?? null, row.kind === 'apiKey' ? 'API key' : null].filter(
+    (x): x is string => x !== null,
+  );
 
   const pasteToken = (title: string, verb: string): void =>
     void (async () => {
@@ -266,6 +269,15 @@ function AccountEntry({
         ) : null}
       </span>
       {sub.length > 0 ? <span className="set-sub">{sub.join(' · ')}</span> : null}
+      {row.state ? (
+        <span
+          className={`set-sub${accountStateRunnable(row.state) ? '' : ' warn'}`}
+          data-testid={`account-state-${id}`}
+          data-state={row.state.state}
+        >
+          {describeAccountState(row.state, formatResetLocal)}
+        </span>
+      ) : null}
       {twin ? (
         <span className="set-sub warn" data-testid={`account-twin-${id}`}>
           Same {name} account as {twin.label}

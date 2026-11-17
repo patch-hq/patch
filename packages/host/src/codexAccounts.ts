@@ -32,6 +32,8 @@ interface EligibleAccount {
   connected: boolean;
   kind?: string;
   blockedUntil?: number | null;
+  /** When a turn's refusal set `blockedUntil`; a usage reading's own block has none. */
+  blockedAt?: number;
 }
 export function selectCodexAccount<T extends EligibleAccount>(
   accounts: readonly T[],
@@ -277,6 +279,16 @@ export class CodexAccounts {
         ...(a.error ? { error: a.error } : {}),
         ...(a.expired ? { needsSignIn: true } : {}),
         ...(a.usage ? { usage: a.usage } : {}),
+        ...(a.blockedAt !== undefined && a.blockedUntil !== undefined
+          ? {
+              refusal: {
+                kind: 'limit' as const,
+                ...(a.blockedUntil !== null ? { until: a.blockedUntil } : {}),
+                message: 'ChatGPT usage limit reached',
+                at: a.blockedAt,
+              },
+            }
+          : {}),
       })),
     };
   }
@@ -330,7 +342,10 @@ export class CodexAccounts {
             account.blockedUntil = blocked.some((w) => w?.resetsAt === undefined)
               ? null
               : Math.max(...blocked.map((w) => w!.resetsAt!));
-          else if (usage?.session || usage?.week) delete account.blockedUntil;
+          else if (usage?.session || usage?.week) {
+            delete account.blockedUntil;
+            delete account.blockedAt;
+          }
         }
       } catch (error) {
         const message = (error as Error).message;
@@ -613,6 +628,7 @@ export class CodexAccounts {
         connected: s.authJson !== null && (before?.connected ?? false),
         ...(before?.usage ? { usage: before.usage } : {}),
         ...(before?.blockedUntil !== undefined ? { blockedUntil: before.blockedUntil } : {}),
+        ...(before?.blockedAt !== undefined ? { blockedAt: before.blockedAt } : {}),
         ...(s.authJson === null ? { error: 'Disconnected' } : {}),
         ...(s.authJson !== null && before?.expired && !changed
           ? { expired: before.expired, error: SIGN_IN_EXPIRED_MESSAGE }
@@ -809,10 +825,14 @@ export class CodexAccounts {
         windows.length && windows.every((w) => w?.resetsAt !== undefined)
           ? Math.max(...windows.map((w) => w!.resetsAt!))
           : null;
+      account.blockedAt = Date.now();
     }
     if (account?.identity)
       for (const sibling of this.accounts) {
-        if (sibling.identity === account.identity) sibling.blockedUntil = account.blockedUntil;
+        if (sibling.identity === account.identity) {
+          sibling.blockedUntil = account.blockedUntil;
+          if (account.blockedAt !== undefined) sibling.blockedAt = account.blockedAt;
+        }
       }
     this.opts.onChange();
     return selectCodexAccount(this.accounts, Date.now(), account?.kind ?? 'chatgpt')?.id;

@@ -1211,6 +1211,7 @@ async function startHost(
       ...(activeUsage && Object.keys(activeUsage).length > 0 ? { usage: activeUsage } : {}),
       accounts: store.accounts.map((a) => {
         const usage = usageFor(a.id);
+        const spent = accountRotation.snapshot().find((e) => e.accountId === a.id);
         return {
           id: a.id,
           label: a.label,
@@ -1220,6 +1221,16 @@ async function startHost(
             ? { organizationId: a.credential.organizationId }
             : {}),
           ...(usage ? { usage } : {}),
+          ...(spent
+            ? {
+                refusal: {
+                  kind: spent.kind,
+                  ...(spent.until !== undefined ? { until: spent.until } : {}),
+                  message: spent.reason || 'refused',
+                  at: spent.at,
+                },
+              }
+            : {}),
         };
       }),
       ...(activeId !== undefined ? { activeAccountId: activeId } : {}),
@@ -3997,7 +4008,7 @@ async function startHost(
     chatId: string,
     spentAccountId: string | undefined,
     message: string,
-    limit?: { resetsAt?: number },
+    limit?: { resetsAt?: number; kind?: string },
   ): string | undefined => {
     const store = readPatchStore(oauthOpts);
     if (!store) return undefined;
@@ -4024,6 +4035,7 @@ async function startHost(
         failed,
         message.slice(0, 200),
         until,
+        limit?.kind === 'billing_error' ? 'out' : 'limit',
       );
       if (marked.length > 1) {
         logger.warn(

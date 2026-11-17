@@ -48,12 +48,14 @@ import {
   type SharedClaudeAccount,
   type SharedCodexAccount,
   type SharedSecretsSummary,
+  type AccountState,
   type WireEvent,
   accountsKeyForBackend,
   isAnthropicApiKey,
   type ProviderBackendId,
 } from '@patch/wire';
 import { generateWebBotAuthKey, parseWebBotAuthKey } from '@patch/wire/web-bot-auth';
+import { AccountStateTracker } from './account-states.js';
 import { checkProviderKey, type FetchLike } from './provider-key-check.js';
 import { validateClaudeOAuthToken, type ClaudeTokenValidation } from '@patch/auth';
 
@@ -171,6 +173,8 @@ export interface SharedSettingsOptions {
   refreshOpenAI?: typeof refreshOpenAI;
   refreshClaude?: typeof refreshClaude;
   logger?: Pick<Logger, 'info' | 'warn' | 'error'>;
+  /** The clock account states are derived against (tests). */
+  now?: () => number;
 }
 
 interface PendingAdopt {
@@ -200,6 +204,10 @@ export class SharedSettingsService {
   private readonly secretsPath: string;
   private readonly keyPath: string;
   private key: Buffer | undefined;
+  /** The one state per account (spec/10 § Account states). */
+  private readonly accountStates: AccountStateTracker;
+  /** States as last sent, to tell surfaces only when one changed. */
+  private sentStates = new Map<string, string>();
   /** Why the stored secrets cannot be used, when they cannot (see header). */
   private problem: string | undefined;
 
@@ -219,8 +227,15 @@ export class SharedSettingsService {
       this.importedHosts = new Set(state.importedHosts ?? []);
       this.keysImportedHosts = new Set(state.keysImportedHosts ?? []);
     }
+    this.accountStates = new AccountStateTracker({
+      path: join(opts.dataDir, 'account-states.json'),
+      logger: opts.logger,
+      ...(opts.now ? { now: opts.now } : {}),
+      onChange: () => this.accountStatesChanged(),
+    });
     this.loadSecrets();
     this.provisionWebBotIdentity();
+    this.sentStates = this.stateKeys();
   }
 
   private provisionWebBotIdentity(): void {
@@ -390,6 +405,7 @@ export class SharedSettingsService {
           ? { kind: 'apiKey' as const }
           : {}),
         ...(a.credential?.organizationId ? { organizationId: a.credential.organizationId } : {}),
+        state: this.stateOf(a),
       })),
       codex: this.secrets.codex.map((a) => ({
         id: a.id,
@@ -397,6 +413,7 @@ export class SharedSettingsService {
         kind: a.kind,
         connected: a.authJson !== null,
         ...(a.email ? { email: a.email } : {}),
+        state: this.stateOf(a),
       })),
       providerKeys: PROVIDER_KEYS.map(({ id }) => {
         const value = this.secrets.providerKeys[id];
@@ -405,6 +422,50 @@ export class SharedSettingsService {
         return { id, set: true, last4: value.slice(-4), ...(check ? { check } : {}) };
       }),
     };
+  }
+
+  private problemText(): string {
+    if (this.problem !== undefined) return this.problem;
+    return [...this.renewalErrors]
+      .map(([id, message]) => {
+        const label = [...this.secrets.claude, ...this.secrets.codex].find(
+          (a) => a.id === id,
+        )?.label;
+        return `${label ?? id}: ${message}`;
+      })
+      .join('; ');
+  }
+
+  private stateOf(a: SharedClaudeAccount | SharedCodexAccount): AccountState {
+    const hasCredential = 'credential' in a ? a.credential !== null : a.authJson !== null;
+    const apiKey =
+      'credential' in a
+        ? a.credential !== null && isAnthropicApiKey(a.credential.accessToken)
+        : a.kind === 'apiKey';
+    const renewalError = this.renewalErrors.get(a.id);
+    return this.accountStates.stateFor(a.id, {
+      hasCredential,
+      renewalError,
+      apiKey,
+    });
+  }
+
+  private stateKeys(): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const a of [...this.secrets.claude, ...this.secrets.codex]) {
+      out.set(a.id, JSON.stringify(this.stateOf(a)));
+    }
+    return out;
+  }
+
+  /** A fact behind an account's state moved: tell surfaces if a state actually changed. */
+  private accountStatesChanged(): void {
+    const next = this.stateKeys();
+    const same =
+      next.size === this.sentStates.size &&
+      [...next].every(([id, state]) => this.sentStates.get(id) === state);
+    this.sentStates = next;
+    if (!same) this.opts.broadcast(this.changedEvent());
   }
 
   hostStates(): HostSettingsState[] {
@@ -416,15 +477,14 @@ export class SharedSettingsService {
   }
 
   changedEvent(): SettingsChangedEvent {
+    this.sentStates = this.stateKeys();
     return {
       type: 'settings.changed',
       version: this.version,
       settings: this.current(),
       secrets: this.secretsSummary(),
       hosts: this.hostStates(),
-      ...((this.problem ?? [...this.renewalErrors.values()].join('; '))
-        ? { problem: this.problem ?? [...this.renewalErrors.values()].join('; ') }
-        : {}),
+      ...(this.problemText() ? { problem: this.problemText() } : {}),
     };
   }
 
@@ -451,7 +511,11 @@ export class SharedSettingsService {
 
   startCredentialRefresh(): void {
     void this.refreshCredentials();
-    this.renewalTimer = setInterval(() => void this.refreshCredentials(), 60_000);
+    this.renewalTimer = setInterval(() => {
+      void this.refreshCredentials();
+      // A stated reset passing changes an account's state with no new fact.
+      this.accountStatesChanged();
+    }, 60_000);
     this.renewalTimer.unref();
     void this.recheckProviderKeys();
     this.keyCheckTimer = setInterval(() => void this.recheckProviderKeys(), KEY_RECHECK_MS);
@@ -525,8 +589,9 @@ export class SharedSettingsService {
         this.renewalErrors.delete(account.id);
         this.commit({ secrets: true });
       } catch (error) {
-        this.renewalErrors.set(account.id, `${account.label}: ${(error as Error).message}`);
+        this.renewalErrors.set(account.id, (error as Error).message);
         this.opts.logger?.warn({ accountId: account.id }, 'Provider sign-in renewal failed');
+        this.sentStates = this.stateKeys();
         this.opts.broadcast(this.changedEvent());
       }
     }
@@ -711,6 +776,9 @@ export class SharedSettingsService {
         p.resolve(event);
         return;
       }
+      case 'host.account':
+        this.accountStates.observe(event);
+        return;
       case 'settings.secret_update':
         this.secretUpdate(event.hostId, event.update);
         return;
@@ -893,6 +961,8 @@ export class SharedSettingsService {
       accessToken: token.trim(),
       ...(organizationId ? { organizationId } : {}),
     };
+    this.renewalErrors.delete(accountId);
+    this.accountStates.credentialReplaced(accountId);
     this.commit({ secrets: true });
   }
 
@@ -921,6 +991,7 @@ export class SharedSettingsService {
     if (clash) {
       Object.assign(clash, account, { id: clash.id, label: clash.label });
       this.renewalErrors.delete(clash.id);
+      this.accountStates.credentialReplaced(clash.id);
       this.commit({ secrets: true });
       return clash;
     }
@@ -949,6 +1020,7 @@ export class SharedSettingsService {
     const account = this.find(backendId, accountId);
     if ('credential' in account) account.credential = null;
     else account.authJson = null;
+    this.accountStates.credentialReplaced(accountId);
     this.commit({ secrets: true });
   }
 
@@ -964,6 +1036,8 @@ export class SharedSettingsService {
     this.find(backendId, accountId);
     const key = accountsKeyForBackend(backendId);
     this.secrets[key] = this.secrets[key].filter((a) => a.id !== accountId) as never;
+    this.renewalErrors.delete(accountId);
+    this.accountStates.forget(accountId);
     this.commit({ secrets: true });
   }
 

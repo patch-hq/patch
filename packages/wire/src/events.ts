@@ -7,6 +7,7 @@
 // Per spec: every chat-scoped event carries `seq` (per-chat monotonic). Surface
 // inputs (`chat.input`) carry `localId` for server-side dedup on (chatId, localId).
 
+import { AccountRefusal, AccountState } from './accountState.js';
 import { z } from 'zod';
 import { DictationSetting, MeetingEngine } from './audio.js';
 import { DEFAULT_SWEEP_PROMPT } from './sweep-prompt.js';
@@ -2605,6 +2606,8 @@ export const SharedSecretsSummary = z
           kind: z.literal('apiKey').optional(),
           email: z.string().min(1).optional(),
           organizationId: z.string().min(1).optional(),
+          /** The account's one state, derived by the server (spec/10 § Account states). */
+          state: AccountState.optional(),
         })
         .strict(),
     ),
@@ -2616,6 +2619,8 @@ export const SharedSecretsSummary = z
           kind: z.enum(['chatgpt', 'apiKey']),
           connected: z.boolean(),
           email: z.string().min(1).optional(),
+          /** The account's one state, derived by the server (spec/10 § Account states). */
+          state: AccountState.optional(),
         })
         .strict(),
     ),
@@ -3099,6 +3104,12 @@ export const HostAccountSummary = z
      * not retry until it is signed in again (or a long back-off passes).
      */
     needsSignIn: z.boolean().optional(),
+    /**
+     * What the provider last refused this account with — a fact for the server
+     * to derive the account's state from (spec/10 § Account states). The host
+     * does not decide the state; it reports the refusal.
+     */
+    refusal: AccountRefusal.optional(),
     accountEmail: z.string().min(1).nullable().optional(),
     /**
      * Which Anthropic organisation this account's token authenticates as.
