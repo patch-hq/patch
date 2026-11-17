@@ -177,7 +177,7 @@ describe('Composer — dictation shown inside the input', () => {
     expect((live.props['style'] as { fontStyle: string }).fontStyle).toBe('italic');
   });
 
-  it('caps the dictation box at a quarter of the screen, back to the typing cap after', async () => {
+  it('caps the dictation box at a compact fraction of the screen, back to the typing cap after', async () => {
     __setWindowDimensions({ height: 800 });
     const { factory, finish, partial } = makeFactory();
     const r = renderRN(<Composer chatId="c1" dictationFactory={factory} />);
@@ -192,10 +192,10 @@ describe('Composer — dictation shown inside the input', () => {
     expect(inputMax()).toBe(200);
     await actAsync(() => mic(r)['onPress']!());
     await actAsync(() => partial('words'));
-    expect(boxMax()).toBe(200);
+    expect(boxMax()).toBe(112);
     __setWindowDimensions({ height: 1200 });
     await actAsync(() => partial('more words'));
-    expect(boxMax()).toBe(300);
+    expect(boxMax()).toBe(168);
     finish.mockResolvedValueOnce({ kind: 'text', text: 'words' });
     await actAsync(() => mic(r)['onPress']!());
     expect(inputMax()).toBe(200);

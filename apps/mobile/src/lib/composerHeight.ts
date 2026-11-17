@@ -36,12 +36,16 @@ export const COMPOSER_MIN_HEIGHT = 40;
 export const COMPOSER_MAX_HEIGHT = 200;
 
 /**
- * Cap while dictating: a quarter of the window, so the transcript above stays
- * readable. Starting a dictation puts the keyboard away, so the window height is
+ * Cap while dictating: a seventh of the window, so the transcript above stays
+ * readable. The oldest words fade out at the top of the box (see
+ * DICTATION_FADE_BANDS) instead of taking more room. Starting a dictation puts the keyboard away, so the window height is
  * stable for its whole length. Longer text scrolls inside the box; the user can
  * drag the grip to make it taller or shorter.
  */
-export const DICTATION_HEIGHT_FRACTION = 0.25;
+export const DICTATION_HEIGHT_FRACTION = 0.14;
+/** Opacity of the paper-coloured bands that fade the top of the dictation box, oldest words most hidden. */
+export const DICTATION_FADE_BANDS = [0.95, 0.75, 0.5, 0.25] as const;
+export const DICTATION_FADE_BAND_HEIGHT = 10;
 export function dictationMaxHeight(windowHeight: number): number {
   return Math.max(COMPOSER_MIN_HEIGHT, Math.round(windowHeight * DICTATION_HEIGHT_FRACTION));
 }
