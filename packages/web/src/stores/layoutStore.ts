@@ -541,6 +541,13 @@ function normaliseSizes(groups: Group[]): Group[] {
   }));
 }
 
+let lastClosedChat: string | null = null;
+/** The chat whose tab was most recently closed: where a lone emptied group goes
+ *  next must not be the chat that was just closed. */
+export function lastClosedChatId(): string | null {
+  return lastClosedChat;
+}
+
 function emptyGroup(): Group {
   const root = defaultRoot();
   return { id: genId('group'), chatId: null, root, activePaneId: root.id, layouts: {}, size: 1 };
@@ -985,7 +992,14 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
       const pane = findPane(state.root, paneId);
       if (!pane || pane.type !== 'leaf') return;
       const tabs = pane.tabs.filter((t) => t.id !== tabId);
+      const closing = pane.tabs.find((t) => t.id === tabId)?.descriptor;
+      lastClosedChat = closing?.kind === 'chat' ? closing.chatId : null;
       let root: PaneNode | null;
+      if (tabs.length === 0 && pane.id === state.root.id && state.groups.length > 1) {
+        // The group's last tab: the group goes with it (spec/14 § Panes and tabs).
+        get().closeGroup(state.focusedGroupId);
+        return;
+      }
       if (tabs.length === 0) {
         // Closing the last tab closes the pane (spec/14 § Panes and tabs) —
         // unless it's the only pane left, which has nowhere to collapse into.
@@ -1016,6 +1030,10 @@ export const useLayoutStore = create<LayoutState>((set, get) => {
       const state = get();
       const pane = findPane(state.root, paneId);
       if (!pane || pane.type !== 'leaf') return;
+      if (pane.id === state.root.id && state.groups.length > 1) {
+        get().closeGroup(state.focusedGroupId);
+        return;
+      }
       const root =
         pane.id === state.root.id
           ? { ...pane, tabs: [], activeTabId: null }

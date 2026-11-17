@@ -107,7 +107,7 @@ A group remembers its layout per chat. Switching a group to another chat and bac
 
 Pages — Jobs, a job, Settings, the Pads list, a Pad, New Pad, a chat's Files, Host files — open as tabs in the focused group's active pane (§ Opening things), never in a group of their own.
 
-A group is closed from its header's × (shown while more than one group is on screen); closing the last group leaves one empty group. Groups share the width; the dividers between them are drag-resizable like pane dividers. A group is never narrower than about 420px: when the window cannot give every group that, only the focused group is drawn and the others stay reachable from their sidebar numbers, which focus them. Closing a group gives its width to its neighbours.
+A group is closed from its header's × (an empty or lone group's content is closed the same way); closing the last group leaves one empty group, which immediately shows a chat or the new-chat screen as above (§ Panes and tabs). Groups share the width; the dividers between them are drag-resizable like pane dividers. A group is never narrower than about 420px: when the window cannot give every group that, only the focused group is drawn and the others stay reachable from their sidebar numbers, which focus them. Closing a group gives its width to its neighbours.
 
 The whole row — every group, its size, its remembered per-chat layouts, which group is focused — persists per-user across reloads and restarts, the same `localStorage` convention the rest of this layout uses. A layout saved before groups existed (one pane tree) loads as a single group.
 

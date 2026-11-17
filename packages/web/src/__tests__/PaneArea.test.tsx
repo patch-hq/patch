@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, createEvent, act, within } from '@testing-library/react';
 import { StrictMode, useState } from 'react';
 import type { JSX } from 'react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PaneArea } from '../components/PaneArea.js';
 import { _setDragKind } from '../lib/dragState.js';
@@ -48,12 +48,18 @@ function seedChats(ids: string[]): void {
   );
 }
 
+function LocationProbe(): JSX.Element {
+  const l = useLocation();
+  return <div data-testid="loc">{l.pathname + l.search}</div>;
+}
+
 function renderPanes({ strict = false }: { strict?: boolean } = {}): void {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const tree = (
     <QueryClientProvider client={qc}>
       <MemoryRouter>
         <PaneArea ws={null} />
+        <LocationProbe />
       </MemoryRouter>
     </QueryClientProvider>
   );
@@ -693,5 +699,57 @@ describe('PaneArea — drop targets while dragging', () => {
     const groups = useLayoutStore.getState().groups;
     expect((groups[1]!.root as LeafPane).tabs.map((t) => t.id)).toContain('terminal:a');
     expect((groups[0]!.root as LeafPane).tabs.map((t) => t.id)).not.toContain('terminal:a');
+  });
+});
+
+describe('PaneArea — closing the last tab never leaves an empty group', () => {
+  function closeOnlyTab(): void {
+    const leaf = useLayoutStore.getState().root as LeafPane;
+    act(() => useLayoutStore.getState().closeTab(leaf.id, leaf.tabs[0]!.id));
+  }
+
+  it('lone group: moves to the most recent active chat, never shows the empty pane', () => {
+    seedChats(['c1', 'c2', 'c3']);
+    useChatStore.getState().hydrate(
+      ['c1', 'c2', 'c3'].map((chatId, i) => ({
+        chatId,
+        hostId: 'd1',
+        permissionMode: 'bypassPermissions' as const,
+        name: chatId,
+        folder: 'foo',
+        activity: 'idle',
+        status: chatId === 'c3' ? 'archived' : 'active',
+        pinned: false,
+        pinnedAt: null,
+        disabled: false,
+        lastUpdated: i + 1,
+      })),
+    );
+    useLayoutStore.getState().openTab({ kind: 'chat', chatId: 'c1' });
+    renderPanes();
+    closeOnlyTab();
+    expect(screen.queryByTestId('pane-empty')).toBeNull();
+    expect(screen.queryByText('Empty group')).toBeNull();
+    expect(screen.getByTestId('loc').textContent).toBe('/chats/c2');
+  });
+
+  it('lone group with no other chat: goes to the new-chat screen', () => {
+    seedChats(['c1']);
+    useLayoutStore.getState().openTab({ kind: 'chat', chatId: 'c1' });
+    renderPanes();
+    closeOnlyTab();
+    expect(screen.queryByTestId('pane-empty')).toBeNull();
+    expect(screen.getByTestId('loc').textContent).toMatch(/^\/chats\/new\?draft=/);
+  });
+
+  it('with several groups the emptied group is removed', () => {
+    seedChats(['c1', 'c2']);
+    useLayoutStore.getState().showChat('c1');
+    useLayoutStore.getState().showChat('c2', { newGroup: true });
+    renderPanes();
+    closeOnlyTab();
+    expect(useLayoutStore.getState().groups).toHaveLength(1);
+    expect(screen.queryByTestId('pane-empty')).toBeNull();
+    expect(screen.getByTestId('loc').textContent).toBe('/');
   });
 });
