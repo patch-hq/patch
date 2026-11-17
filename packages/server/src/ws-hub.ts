@@ -1602,6 +1602,7 @@ export class WsHub {
       // account has not registered).
       case 'host.settings':
       case 'host.component_install':
+      case 'host.backend_install':
       case 'host.component_remove':
       case 'host.update':
       case 'host.folder_add':

@@ -313,6 +313,26 @@ test('a host installing Claude Code says so, and a failed install shows why', as
   await expect(page.getByTestId('welcome-claude-installed')).toHaveCount(0);
 });
 
+test('a host installing Codex says so in the ChatGPT card, and a failure can be retried', async ({
+  page,
+}) => {
+  await stub(page);
+  await page.goto('/app/dev-harness.html?route=/welcome?machine=local');
+  const codex = { id: 'codex', label: 'OpenAI Codex', version: null };
+  await reportHost(page, { backends: [{ ...codex, state: 'installing' }] });
+  await expect(
+    page.getByTestId('welcome-chatgpt').getByTestId('welcome-codex-installing'),
+  ).toBeVisible();
+  await reportHost(page, {
+    backends: [{ ...codex, state: 'failed', error: 'Installing Codex failed: offline' }],
+  });
+  await expect(page.getByTestId('welcome-codex-install-failed')).toContainText('offline');
+  await page.getByTestId('welcome-codex-install-retry').click();
+  expect((await wsSent(page)).filter((e) => e['type'] === 'host.backend_install')).toEqual([
+    expect.objectContaining({ backendId: 'codex' }),
+  ]);
+});
+
 test('a finished Claude Code install says so briefly instead of vanishing', async ({ page }) => {
   await stub(page);
   await page.goto('/app/dev-harness.html?route=/welcome?machine=local');

@@ -9,6 +9,7 @@
 
 import type { JSX } from 'react';
 import { useEffect, useRef, useState } from 'react';
+import { useInstallPickedProviders } from './lib/useInstallPickedProviders.js';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
@@ -111,6 +112,8 @@ export function AppShell(): JSX.Element {
   // editor rail below their breakpoints so the shell never grows a
   // page-level horizontal scrollbar.
   useResponsiveShell();
+  // A provider's CLI goes onto a host once the user has connected that provider.
+  useInstallPickedProviders();
   const wsRef = useRef<PatchWs | null>(null);
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
   const setSidebarCollapsed = useUiStore((s) => s.setSidebarCollapsed);

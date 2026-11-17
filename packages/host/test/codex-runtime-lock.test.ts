@@ -60,3 +60,31 @@ describe('CodexRuntime install lock', () => {
     expect(log).toEqual(['c start', 'c end']);
   });
 });
+
+describe('CodexRuntime install state', () => {
+  let dir: string;
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('reports installing, then idle on success, telling the host at each change', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'patch-codex-state-'));
+    const seen: string[] = [];
+    const runtime = new CodexRuntime(join(dir, 'codex'), fakeInstall([], 'a', 5), () =>
+      seen.push(runtime.provision.state),
+    );
+    expect(runtime.provision.state).toBe('idle');
+    await runtime.ensure();
+    expect(seen).toEqual(['installing', 'idle']);
+  });
+
+  it('reports a failed install with its reason, never as installed', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'patch-codex-state-'));
+    const runtime = new CodexRuntime(join(dir, 'codex'), async () => {
+      throw new Error('registry unreachable');
+    });
+    await expect(runtime.ensure()).rejects.toThrow('registry unreachable');
+    expect(runtime.provision).toEqual({
+      state: 'failed',
+      error: 'Installing Codex failed: registry unreachable',
+    });
+  });
+});

@@ -180,7 +180,9 @@ export class CodexAccounts {
       onSignedIn?: (requestId: string, account: SharedCodexAccount) => void;
     },
   ) {
-    this.runtime = new CodexRuntime(join(dirname(opts.root), 'backends/codex'));
+    this.runtime = new CodexRuntime(join(dirname(opts.root), 'backends/codex'), undefined, () =>
+      opts.onChange(),
+    );
     mkdirSync(opts.root, { recursive: true, mode: 0o700 });
     this.file = join(opts.root, 'accounts.json');
     if (existsSync(this.file)) {

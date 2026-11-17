@@ -8,10 +8,16 @@ export const CODEX_VERSION = '0.154.0';
 /** Pinned, managed runtime; never substitutes an arbitrary version from PATH. */
 export class CodexRuntime {
   private installing: Promise<string> | undefined;
+  /** Where installing Codex stands, for the host to report to surfaces. */
+  provision: { state: 'installing' } | { state: 'failed'; error: string } | { state: 'idle' } = {
+    state: 'idle',
+  };
   constructor(
     private root: string,
     /** Installs the pinned package into `root`; from the npm registry unless a test stands in. */
     private installPackage: (root: string) => Promise<void> = registryInstall,
+    /** Called when `provision` changes, so the host can republish itself. */
+    private onProvision: () => void = () => {},
   ) {}
   get version(): string | null {
     const manifest = join(this.root, 'node_modules/@openai/codex/package.json');
@@ -24,10 +30,26 @@ export class CodexRuntime {
   }
   ensure(): Promise<string> {
     if (this.version) return Promise.resolve(this.executable);
-    if (!this.installing)
-      this.installing = this.install().finally(() => {
-        this.installing = undefined;
-      });
+    if (!this.installing) {
+      this.provision = { state: 'installing' };
+      this.onProvision();
+      this.installing = this.install()
+        .then((executable) => {
+          this.provision = { state: 'idle' };
+          return executable;
+        })
+        .catch((err: unknown) => {
+          this.provision = {
+            state: 'failed',
+            error: `Installing Codex failed: ${err instanceof Error ? err.message : String(err)}`,
+          };
+          throw err;
+        })
+        .finally(() => {
+          this.installing = undefined;
+          this.onProvision();
+        });
+    }
     return this.installing;
   }
   /**

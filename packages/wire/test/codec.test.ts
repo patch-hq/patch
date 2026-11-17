@@ -243,6 +243,11 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     hostId: 'host-a',
     harnessMcpServers: [],
   },
+  'host.backend_install': {
+    type: 'host.backend_install',
+    hostId: 'host-a',
+    backendId: 'claude-code',
+  },
   'host.component_install': {
     type: 'host.component_install',
     hostId: 'host-a',

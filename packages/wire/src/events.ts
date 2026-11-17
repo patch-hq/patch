@@ -5222,6 +5222,20 @@ export const HostComponentInstallEvent = z
   .strict();
 export type HostComponentInstallEvent = z.infer<typeof HostComponentInstallEvent>;
 
+/**
+ * Surface → host: install an agent backend's CLI on this host (Claude Code or
+ * Codex). Sent once the user has picked that provider; a host installs nothing
+ * for a provider nobody chose.
+ */
+export const HostBackendInstallEvent = z
+  .object({
+    type: z.literal('host.backend_install'),
+    ...hostIdField,
+    backendId: z.string().min(1),
+  })
+  .strict();
+export type HostBackendInstallEvent = z.infer<typeof HostBackendInstallEvent>;
+
 /** Surface → host: delete an installed optional component. */
 export const HostComponentRemoveEvent = z
   .object({
@@ -9523,6 +9537,7 @@ export const HOST_ADDRESSED_SURFACE_EVENTS = [
   'host.rename',
   'host.settings',
   'host.component_install',
+  'host.backend_install',
   'host.component_remove',
   'host.update',
   'host.folder_add',
@@ -9611,6 +9626,7 @@ export const WireEvent = z.discriminatedUnion('type', [
   SigninResolvedEvent,
   HostSettingsEvent,
   HostComponentInstallEvent,
+  HostBackendInstallEvent,
   HostComponentRemoveEvent,
   HostComponentProgressEvent,
   HostUpdateEvent,
@@ -9930,6 +9946,7 @@ export const EVENT_SCHEMAS = {
   'signin.resolved': SigninResolvedEvent,
   'host.settings': HostSettingsEvent,
   'host.component_install': HostComponentInstallEvent,
+  'host.backend_install': HostBackendInstallEvent,
   'host.component_remove': HostComponentRemoveEvent,
   'host.component_progress': HostComponentProgressEvent,
   'host.update': HostUpdateEvent,
