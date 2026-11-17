@@ -93,6 +93,12 @@ export interface ProviderDescriptor {
   readonly capabilities: ProviderCapabilities;
   /** The provider's own settings Settings exposes (spec/10 § Provider settings). */
   readonly settings: readonly ProviderSettingDescriptor[];
+  /**
+   * The Patch tools the provider's own native tools duplicate (subagents,
+   * self-wake, goals). Withheld from its chats when it cannot switch the native
+   * ones off (`capabilities.disableNativeTools`).
+   */
+  readonly nativeDuplicates: readonly string[];
 }
 
 // `as const satisfies` keeps the ids as literals so HarnessId is derived from
@@ -162,6 +168,13 @@ export const PROVIDERS = [
         providerDefault: 30,
       },
     ],
+    nativeDuplicates: [
+      'patch_agent',
+      'patch_wake_me',
+      'patch_loop',
+      'patch_wake_status',
+      'patch_cancel_wake',
+    ],
   },
   {
     id: 'codex',
@@ -201,6 +214,7 @@ export const PROVIDERS = [
       steer: true,
     },
     settings: [],
+    nativeDuplicates: ['patch_agent'],
   },
   {
     id: 'local',
@@ -225,6 +239,7 @@ export const PROVIDERS = [
       steer: false,
     },
     settings: [],
+    nativeDuplicates: [],
   },
 ] as const satisfies readonly ProviderDescriptor[];
 
@@ -300,29 +315,16 @@ export function modelHasCapability(
 }
 
 /**
- * The Patch tools that replace something a provider also offers natively:
- * subagents (`patch_agent`), self-wakes and loops, and goals (principles.md
- * § Patch-owned state). A chat gets one version of each, never both.
- */
-export const PATCH_TOOLS_REPLACING_NATIVE: readonly string[] = [
-  'patch_agent',
-  'patch_wake_me',
-  'patch_loop',
-  'patch_wake_status',
-  'patch_cancel_wake',
-  'patch_goal_set',
-  'patch_goal_get',
-  'patch_goal_clear',
-];
-
-/**
  * The Patch tools withheld from a chat on this model. Where the provider can
  * switch its native equivalents off (`disableNativeTools`) Patch's versions are
- * offered; where it cannot, the native ones stay and Patch's are withheld so the
- * agent never sees two tools that do the same thing.
+ * offered; where it cannot, the native ones stay and the Patch tools they
+ * duplicate (the provider's `nativeDuplicates`) are withheld, so the agent never
+ * sees two tools that do the same thing. A Patch tool with no native twin on the
+ * provider stays.
  */
 export function patchToolsOmittedFor(model: string | null | undefined): readonly string[] {
-  return modelHasCapability(model, 'disableNativeTools') ? [] : PATCH_TOOLS_REPLACING_NATIVE;
+  const p = providerDescriptor(providerForModel(model));
+  return p.capabilities.disableNativeTools ? [] : p.nativeDuplicates;
 }
 
 /** Does the model's provider honour the reasoning-effort control? */

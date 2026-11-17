@@ -9172,8 +9172,8 @@ export class Daemon {
             ...this.opts.mcpServer.env,
             PATCH_CHAT_ID: chatId,
             PATCH_BRANCH_ID: branchId,
-            PATCH_OMIT_TOOLS: patchToolsOmittedFor(state.model).join(','),
           },
+          args: mcpArgsOmitting(this.opts.mcpServer.args, state.model),
         }
       : undefined;
     const sideResumeId = branch?.sessionId ?? state.claudeSessionId;
@@ -10560,8 +10560,8 @@ export class Daemon {
           env: {
             ...this.opts.mcpServer.env,
             PATCH_CHAT_ID: chatId,
-            PATCH_OMIT_TOOLS: patchToolsOmittedFor(state.model).join(','),
           },
+          args: mcpArgsOmitting(this.opts.mcpServer.args, state.model),
         }
       : undefined;
     // The mode the turn runs under: the chat's own, stamped when it was created
@@ -17424,4 +17424,10 @@ export function makePreviewSnippet(prompt: string): string | null {
 /** What names one harness message's event in the log, so a re-send of it is recognised. */
 function nativeDedupeKey(ref: NativeRef, event: WireEvent): string {
   return `${ref.harness}:${ref.id}:${identityHash(eventIdentity(event) ?? event.type)}`;
+}
+
+/** The MCP server's arguments plus the tools this chat's provider keeps natively. */
+function mcpArgsOmitting(args: string[], model: string | undefined): string[] {
+  const omitted = patchToolsOmittedFor(model);
+  return omitted.length > 0 ? [...args, `--omit-tools=${omitted.join(',')}`] : args;
 }

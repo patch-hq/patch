@@ -43,8 +43,8 @@ export interface PatchToolsServerOptions {
    */
   toolPromptOverrides?: Record<string, string>;
   /**
-   * Tools not offered to this chat (PATCH_OMIT_TOOLS): Patch's replacements for
-   * native tools on a provider that cannot switch its native ones off.
+   * Tools not offered to this chat (`--omit-tools=a,b` on the command line):
+   * Patch's versions of tools the provider keeps natively.
    */
   omitTools?: readonly string[];
 }
@@ -89,6 +89,12 @@ export function patchToolDescriptions(): Record<string, string> {
   return Object.fromEntries(
     Object.entries(registered).map(([name, t]) => [name, t.description ?? '']),
   );
+}
+
+/** The tool names after `--omit-tools=` in the server's arguments; none when absent. */
+export function parseOmitToolsArg(argv: readonly string[]): string[] {
+  const arg = argv.find((a) => a.startsWith('--omit-tools='));
+  return (arg?.slice('--omit-tools='.length) ?? '').split(',').filter((n) => n.length > 0);
 }
 
 /** The host's answer to `GET /internal/tool-prompts`: tool name → description; anything else is a bug to surface. */
@@ -1745,7 +1751,7 @@ export async function runPatchToolsServerStdio(): Promise<void> {
     hostSocketPath,
     chatId,
     toolPromptOverrides,
-    omitTools: (process.env['PATCH_OMIT_TOOLS'] ?? '').split(',').filter((n) => n.length > 0),
+    omitTools: parseOmitToolsArg(process.argv.slice(2)),
     localKey:
       localKeyFile && localKeyFile.length > 0
         ? () => {
