@@ -221,7 +221,7 @@ Each turn resumes the chat's provider session through the adapter's own resume. 
 
 A provider session that is gone — deleted by the provider's own retention, refused as unresumable, or never recorded — stays gone. Patch does not rebuild it. The chat stays readable from the record, `sessionId` is cleared, and a divider in the transcript says the model's memory of the chat ended there. The next message starts a new provider session that knows nothing of what came before; to carry context over the user says it in that message, and Patch offers a drafted summary of the chat to start from, as a provider switch does (§ Provider switches). A job's `continue` action into such a chat still runs.
 
-A chat whose folder no longer exists is found at host start and flagged `folderMissing` in its own `meta.json`. An archived or deleted chat is flagged quietly: no per-start warning, no status change, nothing returns to the active list. Any other chat is reported failed with `folder_missing`, so the reason input fails is visible before the user types. The flag clears when the folder is back.
+A chat whose folder no longer exists is found when the chat is loaded (`02-host.md` § Chat loading) and flagged `folderMissing` in its own `meta.json`. An archived or deleted chat is flagged quietly: no per-start warning, no status change, nothing returns to the active list. Any other chat is reported failed with `folder_missing`, so the reason input fails is visible before the user types. The flag clears when the folder is back.
 
 ## chat_state (live)
 

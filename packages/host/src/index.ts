@@ -70,7 +70,6 @@ import type {
 import {
   DEFAULT_SHARED_SETTINGS,
   isHostAddressedSurfaceEvent,
-  isReservedSpecialThread,
   OUT_OF_BAND_SEQ,
   ProviderKeyId,
   type SettingsAdoptRequestEvent,
