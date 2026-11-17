@@ -72,7 +72,7 @@ test.describe('⌘F focuses the page search field', () => {
     // Type a query first, then click away: ⌘F must come back to the field with
     // the existing query selected, so typing replaces it.
     await page.getByTestId('jobs-search').fill('bus');
-    await page.locator('h1.display').click();
+    await page.getByTestId('jobs-search').blur();
     expect(await focusedTestId(page)).not.toBe('jobs-search');
 
     await page.keyboard.press(`${MOD}+f`);
@@ -128,7 +128,7 @@ test.describe('⌘F focuses the page search field', () => {
     await stubJobs(page);
     await page.goto('/app/dev-harness.html?route=/jobs');
     await expect(page.getByTestId('jobs-search')).toBeVisible();
-    await page.locator('h1.display').click();
+    await page.getByTestId('jobs-search').blur();
 
     await page.keyboard.press(`${MOD}+k`);
 
