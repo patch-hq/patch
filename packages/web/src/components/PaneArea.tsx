@@ -25,6 +25,8 @@ import type {
   MouseEvent as ReactMouseEvent,
   ReactNode,
 } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { newChatPath } from '../lib/newChat.js';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/rest.js';
 import { ArtifactPane } from './ArtifactPane.js';
@@ -46,6 +48,7 @@ import {
   findPane,
   firstLeaf,
   isTabDirty,
+  lastClosedChatId,
   useLayoutStore,
   type Group,
   type LeafPane,
@@ -674,16 +677,23 @@ function Pane({ pane }: { pane: LeafPane }): JSX.Element {
             ))}
           </div>
         ) : null}
-        {activeTab ? (
-          <TabSlot tabId={`${group.id}:${activeTab.id}`} />
-        ) : (
-          <div className="pane-empty" data-testid="pane-empty">
-            No tabs open
-          </div>
-        )}
+        {activeTab ? <TabSlot tabId={`${group.id}:${activeTab.id}`} /> : <LeaveEmptyGroup />}
       </div>
     </div>
   );
+}
+
+/** A lone group with nothing in it is never left on screen (spec/14 § Panes and
+ *  tabs): show the most recent other active chat, else the new-chat screen. */
+function LeaveEmptyGroup(): JSX.Element | null {
+  const navigate = useNavigate();
+  useEffect(() => {
+    const recent = Object.values(useChatStore.getState().chats)
+      .filter((c) => c.status !== 'archived' && c.chatId !== lastClosedChatId())
+      .sort((a, b) => b.lastUpdated - a.lastUpdated)[0];
+    navigate(recent ? `/chats/${recent.chatId}` : newChatPath());
+  }, [navigate]);
+  return null;
 }
 
 /** Adopts the tab's persistent host element (see `HostedTab`) into this pane. */

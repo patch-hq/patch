@@ -95,6 +95,27 @@ describe('layoutStore — closing', () => {
     expect(after.id).toBe(leaf.id);
   });
 
+  it('closing the last tab of one of several groups removes that group (no empty group)', () => {
+    store().showChat('c1');
+    store().showChat('c2', { newGroup: true });
+    expect(store().groups).toHaveLength(2);
+    const focused = store().focusedGroupId;
+    const leaf = rootLeaf();
+    store().closeTab(leaf.id, leaf.tabs[0]!.id);
+    expect(store().groups).toHaveLength(1);
+    expect(store().groups.some((g) => g.id === focused)).toBe(false);
+    expect(store().groups[0]!.chatId).toBe('c1');
+    expect(store().focusedGroupId).toBe(store().groups[0]!.id);
+  });
+
+  it('closing the last pane of one of several groups removes that group', () => {
+    store().showChat('c1');
+    store().showChat('c2', { newGroup: true });
+    store().closePane(rootLeaf().id);
+    expect(store().groups).toHaveLength(1);
+    expect(store().groups[0]!.chatId).toBe('c1');
+  });
+
   it('closing a pane with siblings collapses the split (spec: "closes the pane")', () => {
     store().openTab({ kind: 'chat', chatId: 'c1' });
     store().openTab({ kind: 'chat', chatId: 'c2' }, { placement: 'split', edge: 'right' });
