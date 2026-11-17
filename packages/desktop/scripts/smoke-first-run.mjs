@@ -100,7 +100,9 @@ await shot(setup, '1-first-run');
 
 if (firstRun) {
   await setup.getByTestId('choose-local').click();
-  // Choosing it opens the name step; Continue keeps the suggested name.
+  // "This computer" asks for a name first (pre-filled); Continue starts it.
+  await setup.getByTestId('computer-name').waitFor({ state: 'visible', timeout: 15_000 });
+  await shot(setup, '1b-name');
   await setup.getByTestId('start').click();
   // The shell replaces the setup window with Patch itself, served by the
   // server it just started on loopback.
