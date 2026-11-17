@@ -2382,6 +2382,33 @@ describe('Composer', () => {
       expect(mic.getAttribute('aria-pressed')).toBe('false');
     });
 
+    it('the dictation grip sets the box height, taller or shorter', async () => {
+      const rec = makeRec();
+      render(
+        <Composer
+          chatId="c1"
+          hostId="d1"
+          onSend={() => {}}
+          previewFactory={preview.factory}
+          recorderFactory={async () => rec as unknown as VoiceRecording}
+          transcribeClip={async () => ({ transcript: 'x' })}
+        />,
+      );
+      const mic = screen.getByTestId('voice-note-btn');
+      fireEvent.mouseDown(mic);
+      fireEvent.mouseUp(mic);
+      await waitFor(() => expect(mic.getAttribute('aria-pressed')).toBe('true'));
+      const grip = screen.getByTestId('composer-dict-grip');
+      const box = input();
+      Object.defineProperty(box, 'offsetHeight', { configurable: true, value: 100 });
+      fireEvent.pointerDown(grip, { clientY: 300 });
+      fireEvent(window, Object.assign(new Event('pointermove'), { clientY: 250 }));
+      await waitFor(() => expect(box.style.height).toBe('150px'));
+      fireEvent(window, Object.assign(new Event('pointermove'), { clientY: 340 }));
+      await waitFor(() => expect(box.style.height).toBe('60px'));
+      fireEvent(window, new Event('pointerup'));
+    });
+
     // ---- Send while dictating: ends the dictation and sends what it heard
     // (plus anything typed) as one turn. ----
 

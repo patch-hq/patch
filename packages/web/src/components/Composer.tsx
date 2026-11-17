@@ -1341,7 +1341,10 @@ export const Composer = forwardRef(function Composer(
     );
     const contentHeight = Math.max(el.scrollHeight, mirror?.scrollHeight ?? 0) + border;
     const cap = dictCap ?? maxInputHeight();
-    el.style.height = `${Math.min(contentHeight, cap)}px`;
+    // A height the user dragged to is the box's height, not just a ceiling:
+    // otherwise dragging it taller does nothing once the text fits, and
+    // dragging it back down appears to do nothing either.
+    el.style.height = `${dictCap !== null ? cap : Math.min(contentHeight, cap)}px`;
     el.style.overflowY = contentHeight > cap ? 'auto' : 'hidden';
     el.scrollTop = scrollTop;
     syncMirrors(el);
