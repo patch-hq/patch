@@ -4,15 +4,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { ReactNode } from 'react';
 import { usePreferencesStore } from '../stores/preferencesStore.js';
 import { useNotificationLevelSync } from '../lib/useNotificationLevelSync.js';
 import { makeFetch, preferencesServer, resetSettingsState } from './settingsHarness.js';
 import { loadShared } from './sharedHelpers.js';
 
-function wrapper({ children }: { children: ReactNode }) {
+// Typed loosely: tanstack's bundled React types and the web package's differ on ReactNode.
+function wrapper({ children }: { children?: unknown }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  return <QueryClientProvider client={qc}>{children as never}</QueryClientProvider>;
 }
 
 beforeEach(() => resetSettingsState());
