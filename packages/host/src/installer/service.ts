@@ -350,8 +350,17 @@ async function launchdJobUnchanged(
   );
 }
 
+/**
+ * Set when `register` booted the job out and back in during this process. That
+ * job has just been started by launchd (RunAtLoad), so `start` must not
+ * SIGTERM it: killing a host that is still coming up leaves it in launchd's
+ * restart throttle (state=spawn) and the install reports it as not running.
+ */
+let launchdJobJustBootstrapped = false;
+
 export const launchdOps: ServiceOps = {
   async register(def) {
+    launchdJobJustBootstrapped = false;
     mkdirSync(join(def.home, '.patch', 'logs'), { recursive: true });
     const mode = await launchdMode(def);
     const agentPath = launchdPlistPath(def.home);
@@ -457,6 +466,7 @@ export const launchdOps: ServiceOps = {
     } catch (err) {
       throw new ServiceRegistrationError(`launchctl bootstrap ${mode.domain}`, detail(err));
     }
+    launchdJobJustBootstrapped = true;
     try {
       await mode.launchctl(['enable', mode.target]);
     } catch (err) {
@@ -479,8 +489,12 @@ export const launchdOps: ServiceOps = {
     // `kickstart -k` kills the job's processes, which takes every running
     // chat's turn runner with it. Ask the host process alone to exit instead;
     // KeepAlive brings it back, and AbandonProcessGroup leaves its children.
-    const state = await launchdOps.runState(def);
-    if (state.running && state.pid !== undefined) {
+    // A job register just bootstrapped has no chats to preserve: restart it with
+    // -k rather than signalling a host that is still starting.
+    const justBootstrapped = launchdJobJustBootstrapped;
+    launchdJobJustBootstrapped = false;
+    const state = justBootstrapped ? undefined : await launchdOps.runState(def);
+    if (state?.running && state.pid !== undefined) {
       try {
         process.kill(state.pid, 'SIGTERM');
       } catch (err) {
