@@ -204,3 +204,35 @@ test('top-level --resume is accepted (not an unknown option)', async () => {
     },
   );
 });
+
+const ID = '01M3N32N9T7V75JCV7XHY9NRHM';
+
+test('chats hide: posts hidden: true to the REST hide route; --show posts false', async () => {
+  await withBodyCapturingServer(
+    (req) =>
+      req.url === '/api/chats?archived=include'
+        ? { status: 200, body: { chats: [{ chatId: ID }] } }
+        : req.url === `/api/chats/${ID}/hide` && req.method === 'POST'
+          ? { status: 200, body: { ok: true } }
+          : { status: 404, body: { error: 'not found' } },
+    async (env, captured) => {
+      const r = await runCli(['chats', 'hide', ID, '--json'], env);
+      assert.equal(r.code, 0, `stderr=${r.stderr}`);
+      assert.deepEqual(captured.body, { hidden: true });
+      const s = await runCli(['chats', 'hide', ID, '--show', '--json'], env);
+      assert.equal(s.code, 0, `stderr=${s.stderr}`);
+      assert.deepEqual(captured.body, { hidden: false });
+    },
+  );
+});
+
+test('chats spawn --hidden over REST is refused, not ignored', async () => {
+  await withBodyCapturingServer(
+    () => ({ status: 202, body: { chatId: 'c1', status: 'pending' } }),
+    async (env) => {
+      const r = await runCli(['chats', 'spawn', '/tmp/x', '--hidden', '--json'], env);
+      assert.notEqual(r.code, 0);
+      assert.match(r.stderr + r.stdout, /--hidden needs the host socket/);
+    },
+  );
+});

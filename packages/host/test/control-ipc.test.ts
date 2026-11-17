@@ -265,6 +265,79 @@ describe('C1 Control IPC: POST /chats/:id/archive (over UDS)', () => {
   });
 });
 
+describe('C1 Control IPC: POST /chats/:id/hide (over UDS)', () => {
+  it('hides and shows a chat; refuses bad bodies, unknown chats and an unauthenticated call', async () => {
+    const { daemon, jobs, folder } = setup();
+    const chatId = await daemon.spawnChat({ folder });
+    const app = await buildControl({ daemon, jobs, localKey: LOCAL_KEY });
+    try {
+      const url = `/chats/${chatId}/hide`;
+      const unauth = await app.inject({ method: 'POST', url, payload: { hidden: true } });
+      expect(unauth.statusCode).toBe(401);
+
+      const bad = await app.inject({ method: 'POST', url, headers: AUTH, payload: {} });
+      expect(bad.statusCode).toBe(400);
+
+      const hide = await app.inject({
+        method: 'POST',
+        url,
+        headers: AUTH,
+        payload: { hidden: true },
+      });
+      expect(hide.statusCode).toBe(200);
+      expect(daemon.chatState.get(chatId)?.hidden).toBe(true);
+
+      const show = await app.inject({
+        method: 'POST',
+        url,
+        headers: AUTH,
+        payload: { hidden: false },
+      });
+      expect(show.statusCode).toBe(200);
+      expect(daemon.chatState.get(chatId)?.hidden).toBe(false);
+
+      // An archived chat is stopped; hiding it is refused with the host's reason, not ignored.
+      await daemon.setArchived(chatId, true);
+      const refused = await app.inject({
+        method: 'POST',
+        url,
+        headers: AUTH,
+        payload: { hidden: true },
+      });
+      expect(refused.statusCode).toBe(409);
+      expect(refused.json().error).toBe('hide_refused');
+
+      const missing = await app.inject({
+        method: 'POST',
+        url: '/chats/never-heard-of-it/hide',
+        headers: AUTH,
+        payload: { hidden: true },
+      });
+      expect(missing.statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('/internal/spawn with hidden: true starts the chat in Hidden', async () => {
+    const { daemon, jobs, folder } = setup();
+    const app = await buildControl({ daemon, jobs, localKey: LOCAL_KEY });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/spawn',
+        headers: AUTH,
+        payload: { folder, hidden: true },
+      });
+      expect(res.statusCode).toBe(200);
+      const { chatId } = res.json() as { chatId: string };
+      expect(daemon.chatState.get(chatId)?.hidden).toBe(true);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 describe('C1 Control IPC: POST /chats/:id/model (over UDS)', () => {
   it('rejects unauthenticated, bodiless and unknown-chat requests', async () => {
     const { daemon, jobs, folder } = setup();
