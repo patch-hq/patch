@@ -18912,7 +18912,7 @@ a.drop-target {
 }
 .guide-go {
   background: none;
-  border: 1px solid var(--border, currentColor);
+  border: 1px solid var(--line);
   border-radius: 8px;
   padding: 4px 10px;
   color: inherit;
