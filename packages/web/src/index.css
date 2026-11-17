@@ -9227,7 +9227,16 @@ button.view-file-download {
 }
 /* The job defaults card reuses the settings row classes, whose text sits at
    the app-wide floor; the jobs page carries its own higher one. */
-.jobs-route :is(.set-row-title, .set-sub, .set-sub code, .set-btn) {
+.jobs-route :is(.set-row-title, .set-sub, .set-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.set-sub code, .set-btn) {
   font-size: 15px;
 }
 .job-row .job-trigger {

@@ -10,6 +10,7 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, type ReactTestRenderer } from 'react-test-renderer';
+import { useSettingsStore } from '../src/stores/settingsStore';
 import {
   renderRN,
   byTestId,
@@ -98,7 +99,24 @@ beforeEach(() => {
   __clearLastAlert();
   __resetRouterMock();
   resetHosts();
+  setSharedClaude([]);
 });
+
+/** The shared accounts the server sent (spec/10: accounts have no host tie). */
+function setSharedClaude(
+  claude: { id: string; label: string; connected: boolean; email?: string }[],
+) {
+  useSettingsStore.setState({
+    data: {
+      shared: {
+        version: 1,
+        settings: {},
+        secrets: { claude, codex: [], providerKeys: [] },
+        hosts: [],
+      },
+    } as never,
+  });
+}
 
 // ── the list ────────────────────────────────────────────────────────────────
 
@@ -433,21 +451,36 @@ describe('mobile Settings → Hosts → a host’s page', () => {
       expect(queryHost(r.root, byTestId('host-h1-backends'))).toBeNull();
     });
 
-    it('states each backend; Sign in only where one is needed', () => {
+    it('says Signed in from the shared accounts, and a host fault in words with Details', async () => {
+      setSharedClaude([{ id: 'a', label: 'Work', connected: true, email: 'you@example.com' }]);
       reportHost('h1', {
         hostName: 'laptop',
         backends: [
-          { id: 'claude-code', label: 'Claude Code', version: '2.1.0', state: 'present' },
+          {
+            id: 'claude-code',
+            label: 'Claude Code',
+            version: '2.1.0',
+            state: 'logged-out',
+            error: 'run `claude login`',
+          },
           { id: 'codex', label: 'Codex', version: null, state: 'failed', error: 'boom' },
         ],
       });
       const r = render(<HostDetail hostId="h1" />);
       expect(textOf(findHost(r.root, byTestId('host-h1-backend-claude-code')))).toBe(
-        '2.1.0 · present',
+        '2.1.0 · Signed in · you@example.com',
       );
-      expect(textOf(findHost(r.root, byTestId('host-h1-backend-codex')))).toBe('failed — boom');
+      expect(textOf(findHost(r.root, byTestId('host-h1-backend-codex')))).toBe(
+        'Not working on this machine',
+      );
       expect(queryHost(r.root, byTestId('host-h1-backend-claude-code-connect'))).toBeNull();
       expect(findHost(r.root, byTestId('host-h1-backend-codex-connect'))).toBeTruthy();
+      await actAsync(() =>
+        findHost(r.root, byTestId('host-h1-backend-codex-details-toggle')).props.onPress(),
+      );
+      expect(textOf(findHost(r.root, byTestId('host-h1-backend-codex')))).toBe(
+        'Not working on this machine — boom',
+      );
     });
 
     it('a logged-out Claude backend offers Sign in, adding the token for every host', async () => {

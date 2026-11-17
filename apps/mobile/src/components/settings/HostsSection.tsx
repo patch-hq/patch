@@ -17,7 +17,7 @@
 import React from 'react';
 import { Alert, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { providerKeyInfo, type ProviderKeyId } from '@patch/wire';
+import { backendStatus, providerKeyInfo, type ProviderKeyId } from '@patch/wire';
 import { api, ApiError, type SharedState } from '../../api/rest';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { patchShared, writeShared } from './sharedWrite';
@@ -30,6 +30,7 @@ import { agoLabel, sendToHost } from './hostSend';
 import { NoticeRow, hostName, sortedHosts } from './HostSwitcher';
 import { ClaudeSettingsRow } from './ClaudeSettingsSection';
 import { SecretsSection } from './SecretsSection';
+import { PROVIDERS } from './providers';
 import { SettingsPage } from './SettingsPage';
 import { ButtonRow, Chevron, Dot, ErrorLine, Field, Muted, Row, SettingsButton } from './ui';
 
@@ -273,79 +274,96 @@ function HostBackends({ host }: { host: HostPresence }): React.ReactElement | nu
   const hostId = host.hostId;
   const [signingIn, setSigningIn] = React.useState<string | null>(null);
   const [token, setToken] = React.useState('');
+  const [openDetails, setOpenDetails] = React.useState<string | null>(null);
+  const shared = useSettingsStore((s) => s.data?.shared ?? null);
   if (!report || report.backends.length === 0) return null;
   return (
     <SettingsSection title="Agents" testID={`host-${hostId}-backends`}>
-      {report.backends.map((b) => (
-        <Row
-          key={b.id}
-          title={b.label}
-          subtitle={`${b.version ? `${b.version} · ` : ''}${b.state}${b.error ? ` — ${b.error}` : ''}`}
-          subtitleTestID={`host-${hostId}-backend-${b.id}`}
-          right={
-            // A backend that is logged out or absent is the one state to act on.
-            b.state !== 'present' ? (
-              <SettingsButton
-                testID={`host-${hostId}-backend-${b.id}-connect`}
-                label="Sign in"
-                variant="quiet"
-                disabled={!host.online}
-                accessibilityLabel={`Sign in to ${b.label}`}
-                onPress={() => {
-                  if (!host.online) {
-                    Alert.alert(
-                      'Sign in failed',
-                      `${report.hostName} is offline. Sign in once it reconnects.`,
-                    );
-                    return;
-                  }
-                  if (b.id === 'codex') {
-                    // OpenAI sign-in lives on Usage → ChatGPT, where its form is.
-                    useUiStore.getState().setCodexSignInHost(hostId);
-                    router.push({ pathname: '/settings/[page]', params: { page: 'usage' } });
-                    return;
-                  }
-                  setToken('');
-                  setSigningIn((cur) => (cur === b.id ? null : b.id));
-                }}
-              />
-            ) : null
-          }
-        >
-          {signingIn === b.id ? (
-            <View style={{ marginTop: space.sm, gap: space.sm }}>
-              <Field
-                testID={`host-${hostId}-signin-token`}
-                accessibilityLabel="Token"
-                value={token}
-                onChangeText={setToken}
-                placeholder="sk-ant-oat01-… (empty uses this host's own login)"
-                secureTextEntry
-              />
-              <SettingsButton
-                testID={`host-${hostId}-signin-submit`}
-                label="Sign in"
-                onPress={() => {
-                  // A Claude account is shared by every host (spec/01 § Settings):
-                  // a pasted token is added for all of them; an empty one adopts
-                  // the login already on this host.
-                  const t = token.trim();
-                  void writeShared('Sign in', () =>
-                    t
-                      ? api.addAccount('claude-code', { token: t })
-                      : api.adoptAccount('claude-code', hostId),
-                  ).then((ok) => {
-                    if (ok) {
-                      setSigningIn(null);
-                      setToken('');
+      {report.backends.map((b) => {
+        const provider = PROVIDERS.find((p) => p.id === b.id);
+        const status = backendStatus(
+          b,
+          shared === null ? null : (provider?.rows(shared.secrets) ?? []),
+        );
+        return (
+          <Row
+            key={b.id}
+            title={b.label}
+            subtitle={`${b.version ? `${b.version} · ` : ''}${status.text}${status.details !== undefined && openDetails === b.id ? ` — ${status.details}` : ''}`}
+            subtitleTestID={`host-${hostId}-backend-${b.id}`}
+            right={
+              // A backend that is logged out or absent is the one state to act on.
+              status.needsSignIn ? (
+                <SettingsButton
+                  testID={`host-${hostId}-backend-${b.id}-connect`}
+                  label="Sign in"
+                  variant="quiet"
+                  disabled={!host.online}
+                  accessibilityLabel={`Sign in to ${b.label}`}
+                  onPress={() => {
+                    if (!host.online) {
+                      Alert.alert(
+                        'Sign in failed',
+                        `${report.hostName} is offline. Sign in once it reconnects.`,
+                      );
+                      return;
                     }
-                  });
-                }}
+                    if (b.id === 'codex') {
+                      // OpenAI sign-in lives on Usage → ChatGPT, where its form is.
+                      useUiStore.getState().setCodexSignInHost(hostId);
+                      router.push({ pathname: '/settings/[page]', params: { page: 'usage' } });
+                      return;
+                    }
+                    setToken('');
+                    setSigningIn((cur) => (cur === b.id ? null : b.id));
+                  }}
+                />
+              ) : null
+            }
+          >
+            {status.details !== undefined ? (
+              <SettingsButton
+                testID={`host-${hostId}-backend-${b.id}-details-toggle`}
+                label="Details"
+                variant="quiet"
+                onPress={() => setOpenDetails((cur) => (cur === b.id ? null : b.id))}
               />
-            </View>
-          ) : null}
-        </Row>
-      ))}
+            ) : null}
+            {signingIn === b.id ? (
+              <View style={{ marginTop: space.sm, gap: space.sm }}>
+                <Field
+                  testID={`host-${hostId}-signin-token`}
+                  accessibilityLabel="Token"
+                  value={token}
+                  onChangeText={setToken}
+                  placeholder="sk-ant-oat01-… (empty uses this host's own login)"
+                  secureTextEntry
+                />
+                <SettingsButton
+                  testID={`host-${hostId}-signin-submit`}
+                  label="Sign in"
+                  onPress={() => {
+                    // A Claude account is shared by every host (spec/01 § Settings):
+                    // a pasted token is added for all of them; an empty one adopts
+                    // the login already on this host.
+                    const t = token.trim();
+                    void writeShared('Sign in', () =>
+                      t
+                        ? api.addAccount('claude-code', { token: t })
+                        : api.adoptAccount('claude-code', hostId),
+                    ).then((ok) => {
+                      if (ok) {
+                        setSigningIn(null);
+                        setToken('');
+                      }
+                    });
+                  }}
+                />
+              </View>
+            ) : null}
+          </Row>
+        );
+      })}
     </SettingsSection>
   );
 }
