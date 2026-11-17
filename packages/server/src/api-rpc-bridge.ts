@@ -27,6 +27,7 @@ const ALLOWED_PREFIXES = [
   '/api/jobs',
   '/api/hooks',
   '/api/threads',
+  '/api/usage-report',
 ];
 
 export function isRelayablePath(path: string): boolean {

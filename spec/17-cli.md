@@ -73,6 +73,8 @@ patch chats move <id> --host H --folder F   # move a chat to another host, to ru
 patch activity [--since S] [--until U] [--messages-cursor C] [--sessions] [--sessions-cursor C] [--limit N]
                                            # the user's own messages, read through every host's chat logs by the server (06-threads-manager-telegram-speakers.md § Cross-chat toolset); always REST — there is no per-host local view. --since/--until take ISO-8601 or ms-epoch; default is the last 24h. `--sessions` also returns the chat dwell sessions (chats open on a focused, visible surface); the default output is messages only.
 
+patch usage [--period day|week|month]     # cached allowance readings and every chat ranked by token use; defaults to week
+
 patch jobs list                           # list all jobs
 patch jobs get <id>
 patch jobs create <file.json>             # job definition from JSON

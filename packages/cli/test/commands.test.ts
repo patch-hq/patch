@@ -174,6 +174,41 @@ test('jobs list --json: REST happy path', async () => {
   );
 });
 
+test('usage --json: returns the server usage report', async () => {
+  await withSetup(
+    (req) => {
+      if (req.url === '/api/usage-report?period=week' && req.method === 'GET') {
+        return {
+          status: 200,
+          body: {
+            since: 100,
+            until: 200,
+            at: 201,
+            samples: [],
+            chats: [
+              {
+                chatId: 'C1',
+                name: 'costly chat',
+                tokens: 1234,
+                costUsd: 0,
+                turns: 3,
+                hostId: 'H1',
+              },
+            ],
+          },
+        };
+      }
+      return { status: 404, body: { error: 'not found' } };
+    },
+    async (env) => {
+      const r = await runCli(['usage', '--json'], env);
+      assert.equal(r.code, 0, `stderr=${r.stderr}`);
+      const parsed = JSON.parse(r.stdout) as { chats: Array<{ tokens: number }> };
+      assert.equal(parsed.chats[0]?.tokens, 1234);
+    },
+  );
+});
+
 test('chats list --json: bad auth → exit 1 with {error}', async () => {
   await withSetup(
     () => ({ status: 401, body: { error: 'unauthenticated' } }),

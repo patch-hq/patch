@@ -23,6 +23,7 @@ import { registerHostsCommands } from './commands/hosts.js';
 import { registerSettingsCommands } from './commands/settings.js';
 import { registerDoctorCommand } from './commands/doctor.js';
 import { registerManageCommands } from './commands/manage.js';
+import { registerUsageCommand } from './commands/usage.js';
 import { resolveCliVersion } from './version.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -156,6 +157,7 @@ registerHostsCommands(program);
 registerSettingsCommands(program);
 registerDoctorCommand(program);
 registerManageCommands(program);
+registerUsageCommand(program);
 
 // Reject an unknown TOP-LEVEL command before it falls through to the default
 // (TUI) action. The program carries a default `.action()` (bare `patch` →
