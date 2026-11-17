@@ -3005,6 +3005,14 @@ export class Daemon {
     return false;
   }
 
+  /** Is any chat parked on credit, whether or not a reset timer is armed for it? */
+  hasCreditParks(): boolean {
+    return (
+      this.rateLimitPendingTurns.size > 0 ||
+      [...this.parkedTurns.values()].some((t) => t.waitingFor === 'credit')
+    );
+  }
+
   /** Returns how many chats are owed a turn and now in the resume line. */
   resumeAllRateLimited(): number {
     let owed = 0;
