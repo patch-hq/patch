@@ -338,6 +338,49 @@ describe('C1 Control IPC: POST /chats/:id/hide (over UDS)', () => {
   });
 });
 
+describe('C1 Control IPC: archive of a chat on another machine', () => {
+  it('relays to the server when the chat is not here, and passes its answer back', async () => {
+    const { daemon, jobs } = setup();
+    const calls: unknown[] = [];
+    const serverApi = async (c: unknown) => {
+      calls.push(c);
+      return { status: 200, body: { ok: true } };
+    };
+    const app = await buildControl({ daemon, jobs, localKey: LOCAL_KEY, serverApi });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/chats/01REMOTECHAT/archive',
+        headers: AUTH,
+        payload: { archived: false },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(calls).toEqual([
+        { method: 'POST', path: '/api/chats/01REMOTECHAT/archive', body: { archived: false } },
+      ]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("passes the server's 404 through for a chat no machine has", async () => {
+    const { daemon, jobs } = setup();
+    const serverApi = async () => ({ status: 404, body: { error: 'unknown_chat' } });
+    const app = await buildControl({ daemon, jobs, localKey: LOCAL_KEY, serverApi });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/chats/nope/archive',
+        headers: AUTH,
+        payload: { archived: true },
+      });
+      expect(res.statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 describe('C1 Control IPC: POST /chats/:id/model (over UDS)', () => {
   it('rejects unauthenticated, bodiless and unknown-chat requests', async () => {
     const { daemon, jobs, folder } = setup();

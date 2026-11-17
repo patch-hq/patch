@@ -34,6 +34,10 @@ export function isRelayablePath(path: string): boolean {
   if (!path.startsWith('/api/') || path.includes('..') || path.includes('//')) return false;
   const bare = path.split('?')[0]!;
   if (bare === '/api/auth/me') return true;
+  // A chat on another machine is archived through the server, which forwards
+  // to its owner: the one chat op a host's CLI relays (stop/send have their own
+  // host-to-host path).
+  if (/^\/api\/chats\/[^/]+\/archive$/.test(bare)) return true;
   return ALLOWED_PREFIXES.some((p) => bare === p || bare.startsWith(p + '/'));
 }
 

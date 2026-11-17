@@ -15,6 +15,15 @@ import { isRelayablePath } from '../src/api-rpc-bridge.js';
 type Res = Extract<WireEvent, { type: 'patch.api.response' }>;
 let n = 0;
 
+describe('isRelayablePath: chat archive', () => {
+  it("allows only a chat's archive route", () => {
+    expect(isRelayablePath('/api/chats/01ABC/archive')).toBe(true);
+    expect(isRelayablePath('/api/chats/01ABC/stop')).toBe(false);
+    expect(isRelayablePath('/api/chats/01ABC/archive/x')).toBe(false);
+    expect(isRelayablePath('/api/chats')).toBe(false);
+  });
+});
+
 describe('isRelayablePath', () => {
   it('allows management paths and refuses the rest', () => {
     expect(isRelayablePath('/api/settings/shared')).toBe(true);
