@@ -9577,6 +9577,7 @@ export const AuthOkEvent = z
      * Chat record). Absent: the host sends none.
      */
     recordImport: z.literal(true).optional(),
+    /**
      * Sent to a host by a server that takes transcript events through the host
      * outbox (`host.outbox`, spec/01 § Host outbox). Absent: send them bare.
      */
