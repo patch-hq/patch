@@ -606,8 +606,31 @@ export function createMetaStore(patchHome: string): MetaStore {
     return rest;
   }
 
+  /**
+   * Parsed meta keyed by the file's identity. Every replay lists every chat on
+   * the host (`listDelegates`), and re-reading and re-validating thousands of
+   * meta files each time froze the host for minutes until the server dropped
+   * it. A file is only re-read when its inode, mtime or size changes; every
+   * write renames a new file into place, so a write always changes the inode.
+   */
+  const parsedCache = new Map<string, { key: string; meta: ChatMeta }>();
+
   function read(chatId: string): ChatMeta | undefined {
     const p = pathFor(chatId);
+    let key: string;
+    try {
+      const s = statSync(p);
+      key = `${s.ino}:${s.mtimeMs}:${s.size}`;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'ENOTDIR') {
+        parsedCache.delete(chatId);
+        return undefined;
+      }
+      throw err;
+    }
+    const hit = parsedCache.get(chatId);
+    if (hit && hit.key === key) return structuredClone(hit.meta);
     let raw: string;
     try {
       raw = readFileSync(p, 'utf8');
@@ -616,7 +639,9 @@ export function createMetaStore(patchHome: string): MetaStore {
       throw err;
     }
     const parsed: unknown = JSON.parse(raw);
-    return ChatMeta.parse(dropRetiredKeys(parsed));
+    const meta = ChatMeta.parse(dropRetiredKeys(parsed));
+    parsedCache.set(chatId, { key, meta: structuredClone(meta) });
+    return meta;
   }
 
   function write(meta: ChatMeta): void {
@@ -638,13 +663,6 @@ export function createMetaStore(patchHome: string): MetaStore {
       // `.incoming-<id>` is a chat moving in from another host, still being
       // written (chatMove.ts); it becomes a chat when it is renamed into place.
       if (id.startsWith('.')) continue;
-      const sub = join(root, id);
-      try {
-        const s = statSync(sub);
-        if (!s.isDirectory()) continue;
-      } catch {
-        continue;
-      }
       let m: ChatMeta | undefined;
       try {
         m = read(id);
