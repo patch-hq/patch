@@ -4,7 +4,7 @@
 import type { JSX } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api/rest.js';
-import { clearCredential } from '../../lib/credential.js';
+import { forgetAccountOnDevice } from '../../lib/forgetAccountOnDevice.js';
 import { Toggle } from '../../components/Toggle.js';
 import { usePreferencesStore } from '../../stores/preferencesStore.js';
 import { patchShared } from './sharedWrite.js';
@@ -44,7 +44,7 @@ export function AccountPage(): JSX.Element {
     } catch (e) {
       pushError(failed('revoke'), undefined, (e as Error).message);
     }
-    clearCredential();
+    await forgetAccountOnDevice();
     window.location.reload();
   }
 
