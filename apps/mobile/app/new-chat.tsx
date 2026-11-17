@@ -42,6 +42,7 @@ import { getWs } from '../src/api/ws';
 import { FolderPickerSheet } from '../src/components/FolderPickerSheet';
 import { draftDictationChatId } from '@patch/wire/audio';
 import { Composer, type NewChatSetup } from '../src/components/Composer';
+import { FirstRunIntro } from '../src/components/FirstRunIntro';
 import { useSettingsStore } from '../src/stores/settingsStore';
 import { useChatStore } from '../src/stores/chatStore';
 import { useFolderStore } from '../src/stores/folderStore';
@@ -419,6 +420,7 @@ export default function NewChat(): React.ReactElement {
           ) : null}
         </View>
 
+        <FirstRunIntro />
         <Composer
           chatId={draftId}
           dictationChatId={hostId ? draftDictationChatId(hostId) : undefined}

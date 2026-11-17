@@ -103,7 +103,9 @@ export function HostsPage(): JSX.Element {
       <KeepRunningGroup />
       <Group testid="hosts-list">
         {rows.length === 0 ? (
-          <Note testid="hosts-empty">No hosts yet</Note>
+          <Note testid="hosts-empty">
+            No hosts yet. A host is a machine that runs chats; use Add a host to connect one.
+          </Note>
         ) : (
           rows.map((h) => (
             <HostListRow

@@ -26,7 +26,7 @@ export const EMPTY_STATES = {
   },
   jobs: {
     title: 'No jobs yet',
-    body: 'Ask Manager to create one, or add one here.',
+    body: 'A job runs a prompt at set times or when a webhook fires. Add one here.',
   },
   devices: {
     title: 'No other devices',

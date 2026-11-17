@@ -2302,6 +2302,8 @@ export const SharedSettings = z
   .object({
     /** Whether half-finished features (the Manager, Batch) are shown. Off by default; Settings → Experimental features. */
     experimentalFeatures: z.boolean(),
+    /** Whether the first-run intro on a new chat has been dismissed. Per account; the "Getting started" guide stays reachable either way. */
+    introDismissed: z.boolean(),
     // ---- server-acted preferences ----
     /** Public metadata served at `/agent` for this deployment's Web Bot Auth identity. */
     agentIdentity: z
@@ -2492,6 +2494,7 @@ export type SharedSettingsPatch = z.infer<typeof SharedSettingsPatch>;
 
 export const DEFAULT_SHARED_SETTINGS: SharedSettings = {
   experimentalFeatures: false,
+  introDismissed: false,
   agentIdentity: {
     enabled: false,
     name: 'Patch',
