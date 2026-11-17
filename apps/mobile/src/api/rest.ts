@@ -790,6 +790,8 @@ export const api = {
       method: 'POST',
       body: { token, platform: 'android-expo' },
     }),
+  /** Drop this device's push token (the master Notifications switch is off). */
+  pushUnregister: () => request<unknown>('/api/auth/push/register', { method: 'DELETE' }),
   // Approving a new device's sign-in (spec/10 § Surface linking).
   signInPending: () =>
     request<{ requests: { id: string; label: string; expiresAt: number }[] }>(

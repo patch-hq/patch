@@ -17,9 +17,11 @@ import {
   requestBrowserNotifications,
   type BrowserNotificationState,
 } from '../../lib/browserNotifications.js';
+import { Toggle } from '../../components/Toggle.js';
+import { readNotificationsOff, writeNotificationsOff } from '../../lib/notificationsMaster.js';
 import { getDesktopBridge } from '../../lib/desktopBridge.js';
 import { patchShared } from './sharedWrite.js';
-import { Group, Pills, Row, SettingsPage } from './ui.js';
+import { Group, Note, Pills, Row, SettingsPage } from './ui.js';
 
 const OPTIONS = ['1m', '5m', 'lock'] as const satisfies readonly SendToPhoneAfter[];
 const LABELS: Record<SendToPhoneAfter, string> = {
@@ -36,8 +38,26 @@ export function NotificationsPage(): JSX.Element {
   const [browserNotify, setBrowserNotify] = useState<BrowserNotificationState>(
     browserNotificationState(),
   );
+  const [off, setOff] = useState<boolean | null>(null);
   // The desktop app raises its own native toasts; this grant is a browser's.
   const inDesktopApp = getDesktopBridge() !== undefined;
+
+  useEffect(() => {
+    readNotificationsOff().then(setOff, (err: unknown) =>
+      pushError(`notifications: ${err instanceof Error ? err.message : String(err)}`),
+    );
+    // The tray menu can flip it while this page is open.
+    return getDesktopBridge()?.onNotificationsOffChange?.(setOff);
+  }, [pushError]);
+
+  async function changeMaster(nextOff: boolean): Promise<void> {
+    try {
+      await writeNotificationsOff(nextOff);
+      setOff(nextOff);
+    } catch (err) {
+      pushError(`notifications: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   useEffect(() => {
     idleDetectionState().then(setIdle, (err: unknown) =>
@@ -63,6 +83,26 @@ export function NotificationsPage(): JSX.Element {
 
   return (
     <SettingsPage title="Notifications" testid="settings-notifications">
+      <Group testid="notifications-master-group">
+        <Row
+          title="Notifications"
+          sub={off ? 'Off on this device. The bell in the app still collects them.' : null}
+          testid="notifications-master"
+        >
+          <Toggle
+            checked={off === false}
+            disabled={off === null}
+            onChange={(on) => void changeMaster(!on)}
+            testid="notifications-master-toggle"
+          />
+        </Row>
+        {!inDesktopApp && browserNotify === 'denied' ? (
+          <Note testid="notifications-os-blocked">
+            Blocked in this browser. Allow notifications for this site in the browser's site
+            settings (the icon left of the address bar), then reload.
+          </Note>
+        ) : null}
+      </Group>
       <Group>
         {inDesktopApp || browserNotify === 'unsupported' ? null : (
           <Row title="Browser notifications" testid="browser-notifications">

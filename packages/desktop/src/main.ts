@@ -89,6 +89,7 @@ import { modelDir } from './local-stt-models';
 import { SherpaAccurateEngine, SherpaLiveEngine } from './local-stt-workers';
 import { SystemPresence } from './system-presence';
 import { loadFirstRun, type SetupChoice } from './first-run-api';
+import { NotificationsMaster } from './notificationsMaster';
 import { toastSound, type NotifyPriority } from './toastSound';
 import {
   MeetingDetector,
@@ -689,7 +690,9 @@ function startServerLostWatch(): void {
       tray?.setToolTip(`Patch: server unreachable`);
       if (!serverLostNotified) {
         serverLostNotified = true;
-        new Notification({ title: 'Patch server unreachable', body: text }).show();
+        if (!notificationsMaster().isOff()) {
+          new Notification({ title: 'Patch server unreachable', body: text }).show();
+        }
       }
     },
     onRestored: () => {
@@ -717,6 +720,23 @@ function documentWindowChrome(): ReturnType<typeof windowChrome> & { icon?: stri
   };
 }
 
+let notificationsMasterInstance: NotificationsMaster | null = null;
+/** The per-device master switch, loaded on first use (userData is known by then). */
+function notificationsMaster(): NotificationsMaster {
+  if (!notificationsMasterInstance) {
+    notificationsMasterInstance = new NotificationsMaster(
+      join(app.getPath('userData'), 'notifications.json'),
+    );
+    notificationsMasterInstance.onChange((off) => {
+      refreshTrayMenu();
+      for (const w of BrowserWindow.getAllWindows()) {
+        if (!w.isDestroyed()) w.webContents.send('patch:notifications-off:changed', off);
+      }
+    });
+  }
+  return notificationsMasterInstance;
+}
+
 function trayMenu(): Menu {
   return Menu.buildFromTemplate([
     {
@@ -738,6 +758,12 @@ function trayMenu(): Menu {
         mainWindow.focus();
         sendWhenReady(mainWindow, 'patch:navigate', { path: '/settings' });
       },
+    },
+    {
+      label: 'Notifications',
+      type: 'checkbox',
+      checked: !notificationsMaster().isOff(),
+      click: (item) => notificationsMaster().set(!item.checked),
     },
     ...(keepRunning ? keepRunningMenuItems(keepRunning) : []),
     { type: 'separator' },
@@ -1070,7 +1096,7 @@ const meetingToasts = new Set<Notification>();
 
 function showMeetingToast(phase: 'started', appName: string): void {
   logDesktopEvent({ type: 'meeting:prompt-shown', payload: { phase, app: appName } });
-  if (QUIET) return;
+  if (QUIET || notificationsMaster().isOff()) return;
   const n = new Notification({
     title: `Meeting started — ${appName}`,
     body: 'Click to start a Patch meeting',
@@ -1095,7 +1121,7 @@ function endMeetingForCall(appName: string): void {
   if (!mainWindow || mainWindow.isDestroyed()) mainWindow = createMainWindow();
   sendWhenReady(mainWindow, 'patch:meeting-signal', { phase: 'ended', app: appName });
   logDesktopEvent({ type: 'meeting:auto-ended', payload: { app: appName } });
-  if (QUIET) return;
+  if (QUIET || notificationsMaster().isOff()) return;
   new Notification({ title: `Meeting ended — ${appName}`, body: 'Patch ended the meeting' }).show();
 }
 
@@ -1271,6 +1297,8 @@ function showNativeNotification(opts: {
   /** Set when this toast IS a "Not sent — tap to retry" state: a click retries the same thing instead of opening the chat. */
   retry?: { chatId: string; actions?: NotifyActionsPayload; index?: number; replyText?: string };
 }): void {
+  // The master switch is off: raise nothing (the renderer's bell still has it).
+  if (notificationsMaster().isOff()) return;
   const extras = buildNotificationExtras(opts.actions, process.platform);
   const n = new Notification({
     title: opts.title,
@@ -1476,6 +1504,11 @@ function registerIpc(): void {
     if (!inAppBrowser) return;
     inAppBrowser.resetWidth();
     schedulePanelWidthSave(inAppBrowser.getWidthFraction());
+  });
+  ipcMain.handle('patch:notifications-off:get', () => notificationsMaster().isOff());
+  ipcMain.handle('patch:notifications-off:set', (_e, off: unknown) => {
+    if (typeof off !== 'boolean') throw new Error('patch:notifications-off:set expects a boolean');
+    notificationsMaster().set(off);
   });
   ipcMain.on(
     'patch:notify',

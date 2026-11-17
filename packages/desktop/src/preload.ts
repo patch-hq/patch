@@ -97,6 +97,18 @@ contextBridge.exposeInMainWorld('patch', {
       return () => ipcRenderer.removeListener('patch:agent-browser:input', handler);
     },
   },
+  // Settings → Notifications master switch; main owns it so the tray menu can flip it too.
+  notificationsOff(): Promise<boolean> {
+    return ipcRenderer.invoke('patch:notifications-off:get') as Promise<boolean>;
+  },
+  setNotificationsOff(off: boolean): Promise<void> {
+    return ipcRenderer.invoke('patch:notifications-off:set', off) as Promise<void>;
+  },
+  onNotificationsOffChange(cb: (off: boolean) => void): () => void {
+    const handler = (_: unknown, off: boolean): void => cb(off);
+    ipcRenderer.on('patch:notifications-off:changed', handler);
+    return () => ipcRenderer.removeListener('patch:notifications-off:changed', handler);
+  },
   notify(payload: NotifyPayload): void {
     ipcRenderer.send('patch:notify', payload);
   },

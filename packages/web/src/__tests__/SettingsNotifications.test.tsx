@@ -184,3 +184,48 @@ describe('Settings → Devices → computer presence', () => {
     expect(screen.getByTestId('device-pixel')).not.toHaveTextContent(/Active|Away|Not reporting/);
   });
 });
+
+describe('Settings → Notifications → master switch', () => {
+  afterEach(() => localStorage.removeItem('patch.notifications.off'));
+
+  it('is on by default, turns off per device and is remembered', async () => {
+    browserWith(null);
+    loadShared({ settings: {} });
+    renderSettings('/settings/notifications');
+    const toggle = await screen.findByTestId('notifications-master-toggle');
+    await waitFor(() => expect(toggle).toBeChecked());
+    fireEvent.click(toggle);
+    await waitFor(() => expect(toggle).not.toBeChecked());
+    expect(localStorage.getItem('patch.notifications.off')).toBe('1');
+    expect(screen.getByTestId('notifications-master')).toHaveTextContent('bell');
+    // Per-kind settings stay below it.
+    expect(screen.getByTestId('send-to-phone-after')).toBeInTheDocument();
+  });
+
+  it('in the desktop app it goes through main, which owns it', async () => {
+    browserWith(null);
+    let off = false;
+    const setNotificationsOff = vi.fn(async (next: boolean) => {
+      off = next;
+    });
+    (window as unknown as { patch: unknown }).patch = {
+      notificationsOff: async () => off,
+      setNotificationsOff,
+    };
+    loadShared({ settings: {} });
+    renderSettings('/settings/notifications');
+    const toggle = await screen.findByTestId('notifications-master-toggle');
+    await waitFor(() => expect(toggle).toBeChecked());
+    fireEvent.click(toggle);
+    await waitFor(() => expect(setNotificationsOff).toHaveBeenCalledWith(true));
+    expect(localStorage.getItem('patch.notifications.off')).toBeNull();
+  });
+
+  it('says so beside the switch when the browser has blocked notifications', async () => {
+    browserWith(null);
+    vi.stubGlobal('Notification', { permission: 'denied' });
+    loadShared({ settings: {} });
+    renderSettings('/settings/notifications');
+    expect(await screen.findByTestId('notifications-os-blocked')).toHaveTextContent('Blocked');
+  });
+});

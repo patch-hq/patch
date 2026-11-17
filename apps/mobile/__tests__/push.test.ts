@@ -11,7 +11,9 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-vi.mock('../src/api/rest', () => ({ api: { pushRegister: vi.fn(async () => undefined) } }));
+vi.mock('../src/api/rest', () => ({
+  api: { pushRegister: vi.fn(async () => undefined), pushUnregister: vi.fn(async () => undefined) },
+}));
 
 beforeEach(() => {
   vi.resetModules();
@@ -270,5 +272,44 @@ describe('initPush — listeners', () => {
     expect(useUiStore.getState().errors.map((e) => e.message)).toEqual([
       'push token refresh failed: server 500',
     ]);
+  });
+});
+
+describe('master notifications switch', () => {
+  it('off drops the token, is remembered, silences the handler and stops registration; on registers again', async () => {
+    const Notifications = await import('./stubs/expo-notifications');
+    const { api } = await import('../src/api/rest');
+    const { initPush, setNotificationsOff, enablePushNotifications } =
+      await import('../src/lib/push');
+    const { notificationsOff } = await import('../src/lib/notificationsMaster');
+    vi.mocked(api.pushRegister).mockClear();
+    vi.mocked(api.pushUnregister).mockClear();
+    await initPush();
+    expect(api.pushRegister).toHaveBeenCalledTimes(1);
+
+    await setNotificationsOff(true);
+    expect(api.pushUnregister).toHaveBeenCalledTimes(1);
+    expect(notificationsOff()).toBe(true);
+    const handler = Notifications.__getNotificationHandler() as {
+      handleNotification: (n: unknown) => Promise<{ shouldShowAlert: boolean }>;
+    };
+    await expect(
+      handler.handleNotification({ request: { content: { data: { chatId: 'x' } } } }),
+    ).resolves.toMatchObject({ shouldShowAlert: false });
+    await expect(enablePushNotifications()).resolves.toBe(false);
+    expect(api.pushRegister).toHaveBeenCalledTimes(1);
+
+    await setNotificationsOff(false);
+    expect(notificationsOff()).toBe(false);
+    expect(api.pushRegister).toHaveBeenCalledTimes(2);
+  });
+
+  it('a failed unregister leaves the switch on and reports it', async () => {
+    const { api } = await import('../src/api/rest');
+    const { setNotificationsOff } = await import('../src/lib/push');
+    const { notificationsOff } = await import('../src/lib/notificationsMaster');
+    vi.mocked(api.pushUnregister).mockRejectedValueOnce(new Error('server 500'));
+    await expect(setNotificationsOff(true)).rejects.toThrow('server 500');
+    expect(notificationsOff()).toBe(false);
   });
 });

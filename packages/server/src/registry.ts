@@ -518,6 +518,16 @@ export class Registry implements RevocationStoreInterface {
     return removed;
   }
 
+  /** Forget the push token a surface registered (its owner turned notifications off on that device). */
+  removePushTokenForSurface(surfaceId: string): boolean {
+    const current = this.state.pushTokens ?? [];
+    const kept = current.filter((t) => t.surfaceId !== surfaceId);
+    if (kept.length === current.length) return false;
+    this.state.pushTokens = kept;
+    this.flush();
+    return true;
+  }
+
   /**
    * List Expo push tokens for an account. Excludes revoked surfaces.
    *
