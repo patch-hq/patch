@@ -3,7 +3,16 @@
 
 import React from 'react';
 import { Animated, Easing, View } from 'react-native';
-import { Bot, Clock, Terminal, TriangleAlert } from 'lucide-react-native';
+import {
+  Bot,
+  CirclePause,
+  Clock,
+  Hourglass,
+  KeyRound,
+  Terminal,
+  TriangleAlert,
+  Unplug,
+} from 'lucide-react-native';
 import type { DisplayBadge } from '../stores/types';
 import { badgeColor } from '../lib/badge';
 import { useTheme } from '../lib/theme';
@@ -102,6 +111,32 @@ export function StatusBadge({ badge, size = 12 }: Props): React.ReactElement {
   // dot, same as web: the states below already differ only by colour, which
   // is no use to a colour-blind reader for the one state that means the
   // work didn't happen.
+  // The server's held and cut-off states (spec/14 § Status badges, spec/15).
+  const Held =
+    badge === 'interrupted'
+      ? CirclePause
+      : badge === 'signin'
+        ? KeyRound
+        : badge === 'paused'
+          ? Hourglass
+          : badge === 'away'
+            ? Unplug
+            : null;
+  if (Held) {
+    return (
+      <View
+        testID={`badge-${badge}`}
+        style={{
+          width: ringSize,
+          height: ringSize,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Held size={size + 2} color={color} strokeWidth={2.5} />
+      </View>
+    );
+  }
   if (badge === 'errored') {
     return (
       <View

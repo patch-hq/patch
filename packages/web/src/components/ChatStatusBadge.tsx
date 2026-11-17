@@ -42,7 +42,26 @@ export function ChatStatusBadge({
     <StatusBadge
       badge={badge}
       pendingWake={row.pendingWake}
-      failureReason={row.lastError?.message ?? null}
+      failureReason={badgeDetail(badge, row)}
     />
   );
+}
+
+/** What the badge's hover says beyond its name: the failure, the reset, which kind of away. */
+export function badgeDetail(badge: DisplayBadge, row: ChatRow): string | null {
+  const status = row.chatStatus;
+  if (badge === 'errored') return status?.message ?? row.lastError?.message ?? null;
+  if (badge === 'paused' && status?.resetsAt !== undefined) {
+    const at = new Date(status.resetsAt).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    return `Paused until ${at}`;
+  }
+  if (badge === 'away') {
+    if (status?.state === 'host_restarting') return 'Host restarting';
+    if (status?.state === 'queued_offline') return 'Message waiting for the host';
+    return 'Host offline';
+  }
+  return null;
 }

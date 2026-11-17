@@ -29,7 +29,17 @@
 // which is what every test and e2e spec locates on.
 
 import { useEffect, useState, type JSX } from 'react';
-import { Bot, Circle, Clock, Terminal, TriangleAlert } from 'lucide-react';
+import {
+  Bot,
+  Circle,
+  CirclePause,
+  Clock,
+  Hourglass,
+  KeyRound,
+  Terminal,
+  TriangleAlert,
+  Unplug,
+} from 'lucide-react';
 import type { PendingWake } from '@patch/wire';
 import type { DisplayBadge } from '../stores/types.js';
 import { formatWakeCountdown } from './WakeBar.js';
@@ -41,6 +51,10 @@ const BADGE_TITLE: Record<DisplayBadge, string> = {
   working: 'Working',
   permission: 'Needs your decision',
   errored: 'Failed',
+  interrupted: 'Interrupted',
+  signin: 'Waiting for sign-in',
+  paused: 'Paused until reset',
+  away: 'Host away',
   agents: 'Agents running',
   background: 'Background job running',
   monitoring: 'Monitoring',
@@ -54,7 +68,10 @@ export function StatusBadge({
   failureReason,
 }: {
   badge: DisplayBadge;
-  /** Only meaningful when `badge === 'errored'` — the tooltip says why instead of "Failed". */
+  /**
+   * Meaningful for `errored`, `paused` and `away` — the tooltip says why (the
+   * failure, the reset time, which kind of away) instead of the bare name.
+   */
   failureReason?: string | null;
   /** Only meaningful when `badge === 'monitoring'` — powers the hover countdown. */
   pendingWake?: PendingWake | null;
@@ -122,6 +139,25 @@ export function StatusBadge({
     // than the static "Monitoring" label every other state gets, per the user —
     // "hover to see how long until wake".
     return <MonitoringBadge title={title} pendingWake={pendingWake} />;
+  }
+  const drawn: Partial<Record<DisplayBadge, JSX.Element>> = {
+    interrupted: <CirclePause size={14} strokeWidth={2.25} aria-hidden />,
+    signin: <KeyRound size={13} strokeWidth={2.25} aria-hidden />,
+    paused: <Hourglass size={13} strokeWidth={2.25} aria-hidden />,
+    away: <Unplug size={13} strokeWidth={2.25} aria-hidden />,
+  };
+  const glyph = drawn[badge];
+  if (glyph) {
+    return (
+      <span
+        className={`badge badge-${badge}`}
+        data-testid={`badge-${badge}`}
+        aria-label={title.toLowerCase()}
+        title={failureReason || title}
+      >
+        {glyph}
+      </span>
+    );
   }
   if (badge === 'errored') {
     // A drawn glyph rather than a coloured dot: a failure has to be

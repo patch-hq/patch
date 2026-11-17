@@ -39,6 +39,22 @@ const base = {
 };
 
 const states: Array<[string, Record<string, unknown>, string]> = [
+  // spec/05 § Chat status: the server's status decides, on both surfaces alike.
+  [
+    'server: waiting for the user',
+    { chatStatus: { state: 'waiting_for_user', since: 1 } },
+    'permission',
+  ],
+  ['server: failed', { chatStatus: { state: 'failed', since: 1 } }, 'errored'],
+  ['server: interrupted', { chatStatus: { state: 'interrupted', since: 1 } }, 'interrupted'],
+  ['server: sign-in', { chatStatus: { state: 'waiting_for_sign_in', since: 1 } }, 'signin'],
+  ['server: paused', { chatStatus: { state: 'paused', since: 1 } }, 'paused'],
+  ['server: host offline', { chatStatus: { state: 'host_offline', since: 1 } }, 'away'],
+  [
+    'server: idle beats what the surface saw',
+    { chatStatus: { state: 'idle', since: 1 }, activity: 'running', openToolCalls: 1 },
+    'read',
+  ],
   ['quiet', {}, 'read'],
   ['running', { activity: 'running' }, 'working'],
   ['open tool calls', { openToolCalls: 1 }, 'working'],

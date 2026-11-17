@@ -264,6 +264,11 @@ export interface ChatRow {
    */
   runningAgents?: number | null;
   /**
+   * The chat's status as the server derived it (spec/05 § Chat status). When
+   * present it decides the badge; absent only from an older server.
+   */
+  chatStatus?: import('@patch/wire').ChatStatusInfo;
+  /**
    * Tool calls this surface has seen start and not yet seen finish. A call that
    * is still running means the chat is working, whatever `activity` says: a
    * two-minute `Bash` showed the finished tick in the sidebar because nothing
@@ -343,7 +348,11 @@ export type DisplayBadge =
   | 'working'
   | 'permission'
   | 'errored'
+  | 'interrupted'
+  | 'signin'
   | 'done'
+  | 'paused'
+  | 'away'
   | 'agents'
   | 'background'
   | 'monitoring'
@@ -363,6 +372,26 @@ export function isStoppable(row: Pick<ChatRow, 'activity' | 'pendingPermissions'
 
 /** Mapping per spec/14 ## Status badges. */
 export function deriveBadge(row: ChatRow): DisplayBadge {
+  // The server's status decides what the chat is doing (spec/05 § Chat
+  // status); the surface adds only its own read mark and the quiet work the
+  // server reports alongside. Nothing below is consulted for those.
+  const server = row.chatStatus?.state;
+  if (server !== undefined) {
+    if (server === 'waiting_for_user') return 'permission';
+    if (server === 'failed') return 'errored';
+    if (server === 'interrupted') return 'interrupted';
+    if (server === 'waiting_for_sign_in') return 'signin';
+    if (server === 'running') return 'working';
+    if (row.lastSeq > row.lastReadSeq) return 'done';
+    if (server === 'paused') return 'paused';
+    if (server === 'host_offline' || server === 'host_restarting' || server === 'queued_offline') {
+      return 'away';
+    }
+    if (typeof row.runningAgents === 'number' && row.runningAgents > 0) return 'agents';
+    if (typeof row.backgroundTasks === 'number' && row.backgroundTasks > 0) return 'background';
+    if (row.pendingWake) return 'monitoring';
+    return 'read';
+  }
   // An unresolved pending permission is the canonical "needs yes/no" signal —
   // it outlives the transient `awaiting-permission` activity flag, which the
   // host clears when the turn completes even though the prompt is unanswered.

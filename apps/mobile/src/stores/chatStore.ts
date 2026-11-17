@@ -577,6 +577,7 @@ function mergeListRow(prior: ChatRow | undefined, rosterRow: ChatListRow): ChatR
     hidden: r.hidden !== undefined ? r.hidden : base.hidden,
     backgroundTasks: r.backgroundTasks !== undefined ? r.backgroundTasks : base.backgroundTasks,
     runningAgents: r.runningAgents !== undefined ? r.runningAgents : base.runningAgents,
+    ...((r.chatStatus ?? base.chatStatus) ? { chatStatus: r.chatStatus ?? base.chatStatus } : {}),
     context: r.context !== undefined ? r.context : base.context,
   };
 }
@@ -692,6 +693,7 @@ function toListRow(row: ChatRow): ChatListRow {
     hidden: row.hidden,
     backgroundTasks: row.backgroundTasks,
     runningAgents: row.runningAgents,
+    ...(row.chatStatus ? { chatStatus: row.chatStatus } : {}),
     context: row.context,
     model: row.model,
     jobId: row.jobId,
@@ -949,6 +951,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 : (row.backgroundTasks ?? null),
             runningAgents:
               event.runningAgents !== undefined ? event.runningAgents : (row.runningAgents ?? null),
+            ...((event.chatStatus ?? row.chatStatus)
+              ? { chatStatus: event.chatStatus ?? row.chatStatus }
+              : {}),
             context: event.context !== undefined ? event.context : (row.context ?? null),
             // spec/04 § Model — the model the next turn runs on. Also the
             // acknowledgement of a `chat.model_request` from ANY surface. An

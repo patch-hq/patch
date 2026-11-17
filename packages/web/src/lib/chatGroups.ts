@@ -407,6 +407,8 @@ export function needsAttention(row: ChatRow): boolean {
     badge === 'done' ||
     badge === 'permission' ||
     badge === 'errored' ||
+    badge === 'interrupted' ||
+    badge === 'signin' ||
     (row.statusKind === 'question' && row.statusDeclared === true) ||
     row.statusKind === 'report'
   );
@@ -521,6 +523,9 @@ export function matchesStateFilter(row: ChatRow, filter: ChatStateFilter): boole
       return (
         pending ||
         badge === 'working' ||
+        // Held rather than finished (spec/14 § Status badges).
+        badge === 'paused' ||
+        badge === 'away' ||
         badge === 'agents' ||
         (badge === 'background' && !commandsOnlyBackground(row)) ||
         badge === 'monitoring'
@@ -529,7 +534,10 @@ export function matchesStateFilter(row: ChatRow, filter: ChatStateFilter): boole
       // Anything paused ON THE USER: a permission prompt, or an agent that
       // stopped on a question.
       return (
-        badge === 'permission' || (row.statusKind === 'question' && row.statusDeclared === true)
+        badge === 'permission' ||
+        badge === 'interrupted' ||
+        badge === 'signin' ||
+        (row.statusKind === 'question' && row.statusDeclared === true)
       );
     case 'done':
       // Waiting-on-you chats are ready too: they have responded and the next

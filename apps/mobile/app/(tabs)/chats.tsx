@@ -74,7 +74,11 @@ import type { ChatRow, DisplayBadge } from '../../src/stores/types';
 import { useChatBadge } from '../../src/lib/chatBadge';
 import { isHidden, isSnoozed } from '../../src/stores/types';
 import { badgeColor } from '../../src/lib/badge';
-import { getSectionOpen, getStoredSectionOpen, setSectionOpen } from '../../src/lib/sectionCollapse';
+import {
+  getSectionOpen,
+  getStoredSectionOpen,
+  setSectionOpen,
+} from '../../src/lib/sectionCollapse';
 import type { CollapsibleSection } from '../../src/lib/sectionCollapse';
 import { hasDraftText, useNewChatDraftStore } from '../../src/stores/newChatDraftStore';
 
@@ -100,6 +104,10 @@ const MANAGER_STATUS: Record<DisplayBadge, string> = {
   working: 'Working',
   permission: 'Waiting on you',
   errored: 'Failed',
+  interrupted: 'Interrupted',
+  signin: 'Needs sign-in',
+  paused: 'Paused',
+  away: 'Host away',
   done: 'New reply',
   agents: 'Agents running',
   background: 'Background job',

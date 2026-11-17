@@ -116,3 +116,49 @@ describe('deriveBadge — pairwise precedence', () => {
     expect(deriveBadge(row({ ...q, activity: 'running' }))).toBe('permission');
   });
 });
+
+// spec/05 § Chat status — when the server sends the chat's status, the badge
+// draws it; the surface adds only its read mark and the quiet work reported
+// alongside, and works out nothing from activity, open tool calls or prompts.
+describe('deriveBadge with the server status', () => {
+  const status = (state: string, extra = {}) => ({ chatStatus: { state, since: 1, ...extra } });
+  it.each([
+    ['waiting_for_user', 'permission'],
+    ['failed', 'errored'],
+    ['interrupted', 'interrupted'],
+    ['waiting_for_sign_in', 'signin'],
+    ['running', 'working'],
+    ['paused', 'paused'],
+    ['host_offline', 'away'],
+    ['host_restarting', 'away'],
+    ['queued_offline', 'away'],
+    ['idle', 'read'],
+  ] as const)('%s draws %s', (state, badge) => {
+    expect(deriveBadge(row(status(state)))).toBe(badge as DisplayBadge);
+  });
+
+  it('ignores what the surface itself saw: an idle server status is not working', () => {
+    expect(
+      deriveBadge(
+        row({
+          ...status('idle'),
+          activity: 'running',
+          openToolCalls: 2,
+          pendingPermissions: [PERM],
+        }),
+      ),
+    ).toBe('read');
+  });
+
+  it('unread beats a held status, and a decision beats unread', () => {
+    expect(deriveBadge(row({ ...status('paused'), lastSeq: 5, lastReadSeq: 1 }))).toBe('done');
+    expect(deriveBadge(row({ ...status('waiting_for_user'), lastSeq: 5, lastReadSeq: 1 }))).toBe(
+      'permission',
+    );
+  });
+
+  it('an idle chat still draws its reported quiet work', () => {
+    expect(deriveBadge(row({ ...status('idle'), pendingWake: WAKE }))).toBe('monitoring');
+    expect(deriveBadge(row({ ...status('idle'), backgroundTasks: 1 }))).toBe('background');
+  });
+});

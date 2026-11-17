@@ -99,6 +99,8 @@ export interface ChatSummaryRow {
   lastError?: { code: string; message: string; at: number } | null;
   /** The sub-agent share of `backgroundTasks`; absent or null is unknown. */
   runningAgents?: number | null;
+  /** The status the server derived (spec/05 § Chat status). Absent from an older server. */
+  chatStatus?: import('@patch/wire').ChatStatusInfo;
   /**
    * Running out of the active list (spec/04 § Hidden). Optional because an
    * older server does not send it; absent keeps whatever the store knows.

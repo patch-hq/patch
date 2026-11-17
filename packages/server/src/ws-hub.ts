@@ -252,6 +252,9 @@ export interface WsHubDeps {
   autoUpdateHosts?: () => boolean;
 }
 
+/** How long after startup a restored mid-turn chat waits for its host before reading as offline. */
+export const RESTORED_HOST_GRACE_MS = 60_000;
+
 export class WsHub {
   /**
    * surfaceId → EVERY live socket authed as that surface.
@@ -529,7 +532,20 @@ export class WsHub {
     }
   }
 
+  /** Send a `chat.state` the server itself produced to every surface. */
+  broadcastChatState(event: Extract<WireEvent, { type: 'chat.state' }>): void {
+    const wire = encode(event);
+    for (const conn of this.allConns()) conn.socket.send(wire);
+  }
+
   constructor(private readonly deps: WsHubDeps) {
+    // A chat restored mid-turn whose host never comes back after a server
+    // restart must not read as running for ever (spec/12 § Chat status).
+    setTimeout(() => {
+      for (const hostId of this.registeredHostIds()) {
+        if (!deps.hostLink.isOnline(hostId)) this.resolveInFlightChatsOnHostOffline(hostId);
+      }
+    }, RESTORED_HOST_GRACE_MS).unref();
     // Pipe host → surfaces.
     this.hostEventUnsub = deps.hostLink.onEvent((event) => this.onHostEvent(event));
     // Presence names the host it describes: the link tells us WHICH host
@@ -1931,6 +1947,12 @@ export class WsHub {
     // time this handler runs for the SAME event the mirror already has the
     // link recorded (spec/08 § Action) — read it back rather than
     // re-deriving it here.
+    // The status is the server's (spec/12 § Chat status): the mirror has
+    // already derived it from this very frame.
+    if (event.type === 'chat.state') {
+      const chatStatus = this.deps.chatRegistry.get(event.chatId)?.chatStatus;
+      if (chatStatus) event = { ...event, chatStatus };
+    }
     if (event.type === 'chat.spawned') {
       const jobId = this.deps.chatRegistry.get(event.chatId)?.jobId;
       if (jobId) {

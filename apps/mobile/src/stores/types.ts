@@ -112,6 +112,11 @@ export interface ChatRow {
   /** The running sub-agent share of `backgroundTasks`; `null` is unknown. */
   runningAgents: number | null;
   /**
+   * The chat's status as the server derived it (spec/05 § Chat status). When
+   * present it decides the badge; absent only from an older server.
+   */
+  chatStatus?: import('@patch/wire').ChatStatusInfo;
+  /**
    * How full the chat's context window is (spec/14 § Composer — context ring):
    * the roster's value, then every `chat.state` that carries one. `null` is
    * nothing measured (no Claude turn yet, or a Codex chat) — never zero, so no
@@ -236,6 +241,7 @@ export type ChatListRow = Omit<
   hidden?: boolean;
   backgroundTasks?: number | null;
   runningAgents?: number | null;
+  chatStatus?: import('@patch/wire').ChatStatusInfo;
   context?: ChatContextUsage | null;
   model?: string | null;
   jobId?: string | null;
@@ -290,7 +296,11 @@ export type DisplayBadge =
   | 'working'
   | 'permission'
   | 'errored'
+  | 'interrupted'
+  | 'signin'
   | 'done'
+  | 'paused'
+  | 'away'
   | 'agents'
   | 'background'
   | 'monitoring'
@@ -300,6 +310,26 @@ export type DisplayBadge =
  *  adapted to the fields this row carries — see spec/14-design-web.md §
  *  Status badges for the full rationale behind the ordering. */
 export function deriveBadge(row: ChatRow): DisplayBadge {
+  // The server's status decides what the chat is doing (spec/05 § Chat
+  // status); the phone adds only its read mark and the quiet work reported
+  // alongside.
+  const server = row.chatStatus?.state;
+  if (server !== undefined) {
+    if (server === 'waiting_for_user') return 'permission';
+    if (server === 'failed') return 'errored';
+    if (server === 'interrupted') return 'interrupted';
+    if (server === 'waiting_for_sign_in') return 'signin';
+    if (server === 'running') return 'working';
+    if (row.lastSeq > row.lastReadSeq) return 'done';
+    if (server === 'paused') return 'paused';
+    if (server === 'host_offline' || server === 'host_restarting' || server === 'queued_offline') {
+      return 'away';
+    }
+    if (typeof row.runningAgents === 'number' && row.runningAgents > 0) return 'agents';
+    if (typeof row.backgroundTasks === 'number' && row.backgroundTasks > 0) return 'background';
+    if (row.pendingWake) return 'monitoring';
+    return 'read';
+  }
   // A pending permission outlives the transient `awaiting-permission` flag, and a
   // DECLARED question (`patch_ask_human`) is the same "blocked on the user" fact;
   // a generated guess (`statusDeclared` falsy) is not.
