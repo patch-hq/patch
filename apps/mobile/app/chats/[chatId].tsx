@@ -59,6 +59,7 @@ import {
   folderName,
   hasTaskNotification,
   isReservedSpecialThread,
+  modelHasCapability,
   compactModelLabel,
   taskNotificationSummary,
   labelForRun,
@@ -540,6 +541,7 @@ function ChatDetailBody(): React.ReactElement {
   // turns and the keyboard keep it in view), false the moment they scroll away
   // to read history — so auto-scroll never fights a deliberate scroll.
   const listRef = React.useRef<FlatList>(null);
+  const onReachedTop = React.useCallback(() => getWs().loadEarlier(chatId), [chatId]);
   const followRef = React.useRef(true);
   // Mirrors `followRef` into React state so the floating "scroll to bottom"
   // button can react to it — the ref alone doesn't trigger a re-render.
@@ -1064,10 +1066,7 @@ function ChatDetailBody(): React.ReactElement {
   );
 
   return (
-    <View
-      testID="chat-surface"
-      style={{ flex: 1, backgroundColor: colors.paper }}
-    >
+    <View testID="chat-surface" style={{ flex: 1, backgroundColor: colors.paper }}>
       <View
         testID="chat-header"
         style={{
@@ -1271,6 +1270,11 @@ function ChatDetailBody(): React.ReactElement {
           // newest-first, `inverted` renders it back in normal reading order.
           data={invertedRows}
           inverted
+          // Inverted, the list's end is the top of the transcript: reaching it
+          // asks for the page before what is shown (spec/05 § Loading).
+          onEndReached={onReachedTop}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={<EarlierFooter chatId={chatId} />}
           keyExtractor={keyExtractor}
           contentContainerStyle={LIST_CONTENT_STYLE}
           renderItem={renderItem}
@@ -2850,6 +2854,7 @@ const TimelineItem = React.memo(function TimelineItem({
   const colors = useTheme();
   const hostOnline = usePresenceStore((s) => s.daemon === 'online');
   // Sources the `/` skill menu in an open queued-message editor.
+  const chatModel = useChatStore((s) => s.chats[chatId]?.model);
   const chatFolder = useChatStore((s) => s.chats[chatId]?.folder);
   // spec/04 ## Message queueing — a queued entry on a chat out of credit says so.
   const pauseAt = useChatStore((s) => {
@@ -2990,7 +2995,11 @@ const TimelineItem = React.memo(function TimelineItem({
               : {})}
             // Edit: a settled text-only user message is replaced by a fork
             // carrying the new text (spec/04 § Branching).
-            {...(entry.localId === undefined && !entry.queued && editSource(chatId, entry) !== null
+            // Offered only where the chat's provider declares editAtMessage.
+            {...(entry.localId === undefined &&
+            !entry.queued &&
+            modelHasCapability(chatModel, 'editAtMessage') &&
+            editSource(chatId, entry) !== null
               ? { edit: (next: string) => editTurn(chatId, entry.seq, next) }
               : {})}
             // spec/04 ## Message queueing § Edit — a tap on a queued message
@@ -3717,5 +3726,24 @@ function ZoomableImageViewer({
         </Pressable>
       </View>
     </Modal>
+  );
+}
+
+/** The top of a transcript with older pages still on the server (spec/05 § Loading). */
+function EarlierFooter({ chatId }: { chatId: string }): React.ReactElement | null {
+  const colors = useTheme();
+  const more = useChatStore((s) => s.historyMore[chatId] === true);
+  const loading = useChatStore((s) => s.historyLoadingEarlier[chatId] === true);
+  if (!more) return null;
+  return (
+    <Pressable
+      testID="load-earlier"
+      onPress={() => getWs().loadEarlier(chatId)}
+      style={{ paddingVertical: 12, alignItems: 'center' }}
+    >
+      <Text style={{ color: colors.ink3, fontSize: 14 }}>
+        {loading ? 'Loading earlier messages…' : 'Load earlier messages'}
+      </Text>
+    </Pressable>
   );
 }

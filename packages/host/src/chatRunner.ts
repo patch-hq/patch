@@ -197,6 +197,7 @@ import {
   type ManagerSweepCandidate,
   type ManagerSweepResultEvent,
 } from '@patch/wire';
+import { modelHasCapability } from '@patch/wire';
 import type { SweepDecisionResult } from './managerSweepGen.js';
 import { countMessages, windowTrack } from './managerContext.js';
 import { permissionModeChangeLine } from './permissionMode.js';
@@ -7453,9 +7454,18 @@ export class Daemon {
     localId: string | undefined,
   ): Pick<SdkRunOptions, 'durableTurn'> {
     const config = this.opts.durableTurns;
-    if (!config || harness !== 'claude') return {};
+    if (!config || (harness !== 'claude' && harness !== 'codex')) return {};
     const attach = this.takeDurableAttach(chatId, localId);
     this.durableAttach.delete(chatId);
+    // A reattached turn is replayed whatever the previous host had not marked
+    // as handled, which can include a message it had already logged. Nothing
+    // arrives twice (spec/05 § Loading): what the log holds is not logged again.
+    if (attach !== undefined) {
+      for (const { record, event } of this.chatLog.interruptedTurnEvents(chatId)) {
+        if (record.nativeRef)
+          this.chatLog.seedDedupe(chatId, nativeDedupeKey(record.nativeRef, event as WireEvent));
+      }
+    }
     return {
       durableTurn: {
         config,
@@ -8401,6 +8411,19 @@ export class Daemon {
   }): Promise<void> {
     const state = this.chatState.get(req.chatId);
     if (!state) throw new ChatNotFoundError(req.chatId);
+    if (!modelHasCapability(state.model, 'editAtMessage')) {
+      this.emit({
+        type: 'chat.error',
+        chatId: req.chatId,
+        error: {
+          code: 'capability_unsupported',
+          message: `editing a message is not supported by this chat's provider`,
+        },
+        seq: OUT_OF_BAND_SEQ,
+      });
+      this.opts.logger.warn({ chatId: req.chatId }, 'refused: provider lacks editAtMessage');
+      return;
+    }
     if (req.message.trim().length === 0 && (req.attachments ?? []).length === 0) {
       this.emit({
         type: 'chat.error',
@@ -8508,6 +8531,20 @@ export class Daemon {
   }): Promise<void> {
     const state = this.chatState.get(req.chatId);
     if (!state) throw new ChatNotFoundError(req.chatId);
+
+    if (!modelHasCapability(state.model, 'branchAtTurn')) {
+      this.emit({
+        type: 'chat.error',
+        chatId: req.chatId,
+        error: {
+          code: 'capability_unsupported',
+          message: `a side thread is not supported by this chat's provider`,
+        },
+        seq: OUT_OF_BAND_SEQ,
+      });
+      this.opts.logger.warn({ chatId: req.chatId }, 'refused: provider lacks branchAtTurn');
+      return;
+    }
     const graph = this.ensureBranches(req.chatId);
 
     const fromBranchId = req.branchId ?? graph.activeBranchId;
@@ -16030,7 +16067,6 @@ export class Daemon {
       // no native ref (and no dedupe key derived from one).
       const ref =
         event.type === 'chat.tool_run_summary' ? undefined : this.envelopeRefs.get(chatId);
-      const identity = eventIdentity(event) ?? event.type;
       return this.logRecord(
         chatId,
         { k: 'event', event: stripSurfaceId(event) },
@@ -16038,9 +16074,7 @@ export class Daemon {
           seq,
           // A person's message is the one thing that cannot be regenerated.
           sync: event.type === 'chat.message' && event.role === 'user',
-          ...(ref !== undefined
-            ? { nativeRef: ref, dedupeKey: `${ref.harness}:${ref.id}:${identityHash(identity)}` }
-            : {}),
+          ...(ref !== undefined ? { nativeRef: ref, dedupeKey: nativeDedupeKey(ref, event) } : {}),
         },
       );
     }
@@ -17344,4 +17378,9 @@ export function makePreviewSnippet(prompt: string): string | null {
   }
   const MAX = 120;
   return cleaned.length > MAX ? `${cutAt(cleaned, MAX - 1)}…` : cleaned;
+}
+
+/** What names one harness message's event in the log, so a re-send of it is recognised. */
+function nativeDedupeKey(ref: NativeRef, event: WireEvent): string {
+  return `${ref.harness}:${ref.id}:${identityHash(eventIdentity(event) ?? event.type)}`;
 }

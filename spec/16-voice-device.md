@@ -6,7 +6,7 @@ Patch's side is one endpoint on the server, described here. Device firmware live
 
 ## Setting a device up
 
-In Settings → Voice → Voice devices, **Add device** asks for a name and creates a long-lived device token, shown once. The device is given two things: the server's address and that token. The device keeps them and needs nothing else, so it works on any network.
+In Settings → Voice → Voice devices, Add device asks for a name and creates a long-lived device token, shown once. The device is given two things: the server's address and that token. The device keeps them and needs nothing else, so it works on any network.
 
 The token is a surface credential of kind `voice-device` with no expiry. Revoking the device in the same list ends it: the server refuses the token from then on and closes a connection that is already open within a minute.
 
@@ -21,7 +21,7 @@ device ──control WSS──▶ server /device/control      (persistent)
 
 The device opens both connections to the server, over TLS. On a wake the server opens the session itself: it picks the target chat, checks that an online host owns it, mints the voice token and records which host the session belongs to. The audio WSS is then relayed to that host exactly as app voice sessions are (`07-voice-app.md`, `03-wire-protocol.md` § Audio relay over the host link). Speech recognition and speech run on that host.
 
-Wake-word conversations go to the Manager. If no online host owns it, the server answers the wake with an `error` frame saying so and opens nothing.
+Every device's wake-word conversations go to the Manager. If no online host owns it, the server answers the wake with an `error` frame saying so and opens nothing.
 
 ## Control WSS
 
@@ -42,7 +42,7 @@ server → device
 
 A bad or revoked token, or a `hello` naming a different device, closes the socket with code 4401.
 
-`followupMs` is how long the device stays open for a follow-up after a reply, in milliseconds. Patch decides it (5000 today); a device that gets none uses its own default.
+`followupMs` is how long the device stays open for a follow-up after a reply, in milliseconds. Patch decides it (5000); a device that gets none uses its own default.
 
 ## Audio WSS
 
@@ -72,11 +72,7 @@ The device setting in Settings → Voice chooses how a device's conversation is 
 
 ## Announcements
 
-`patch_speak` and `patch_notify(channel: 'speakers')` are spoken on a connected device (`09-notifications.md` § speakers). The server opens a session on the chosen device for the calling chat, with `conversational: false`, and asks that chat's host to speak the message as soon as the device joins. The device then behaves as after any reply: it stays open for the follow-up window. With no device reachable, the notify is pushed instead.
-
-## Not built yet
-
-`patch_call` does not ring voice devices; calls reach the app surfaces only. Per-device target chats are not configurable: every device's wake-word conversations go to the Manager.
+`patch_speak` and `patch_notify(channel: 'speakers')` are spoken on a connected device (`09-notifications.md` § speakers). The server opens a session on the chosen device for the calling chat, with `conversational: false`, and asks that chat's host to speak the message as soon as the device joins. The device then behaves as after any reply: it stays open for the follow-up window. With no device reachable, the notify is pushed instead. `patch_call` rings the app surfaces only, never a voice device.
 
 ## Cross-refs
 

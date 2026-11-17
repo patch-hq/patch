@@ -1,9 +1,9 @@
 # Deployment and installation
 
-The server is deployed once by the operator. A host is installed on each host
-host, from a signed binary artifact, onto a host that has only an OS on it.
-§ Reference deployment covers the server; § Host installation covers the
-host.
+The server is deployed once by the operator, on an always-on box
+(§ Server installation) or on a Mac as a background service (§ Server on a
+Mac). A host is installed on each machine, from a signed binary artifact, onto
+a machine that has only an OS on it (§ Host installation).
 
 ## Host sizing
 
@@ -69,14 +69,13 @@ own is reached by surfaces through a relay (§ Relay).
 
 The server requires one long-lived process, a persistent data directory, TLS
 termination, and a publicly reachable URL for webhook and push ingress. It is
-built as a **release** and installed, the same way on every host — Tom's box and
-anyone self-hosting Patch alike. The running server is never a git checkout:
+built as a release and installed, the same way for every operator. The running server is never a git checkout:
 nothing done to source (a build, `git stash -u`, `git clean`) can reach what is
 live.
 
 Pads (`14-design-web.md` § Pads) draw pictures of changes and card thumbnails in a headless Chromium on the server host, so the host needs one installed for the server's user (`npx playwright install chromium`). A Send or a thumbnail on a host without it fails with that reason; nothing else depends on it.
 
-`pnpm build:server` (`scripts/build-server.mjs`) builds one directory and a
+`pnpm build:server` builds one directory and a
 tarball of it:
 
 ```
@@ -110,10 +109,10 @@ nothing in it is required (`01-server.md` § Starting with no settings).
 `--public-url` records where devices reach the server, which the pairing code
 and the host-install command carry. An install copies the release into
 `versions/`, swaps `current`, writes and restarts the `patch-server` systemd
-unit, and waits until `/api/healthz` reports the release's commit — failing
+unit (a launchd agent on macOS, § Server on a Mac), and waits until `/api/healthz` reports the release's commit — failing
 loudly, with the log tail, if it does not. `--system` writes a system unit
 running as `--user` instead of a user unit; `--no-service` stops after the
-layout, for hosts without systemd. The launcher points the server at `data/`,
+layout, for machines without a service manager. The launcher points the server at `data/`,
 `downloads/` and the release's own `web/` itself; `server.env` cannot move them.
 
 `<home>/current/patch-server pair` asks the running server for a pairing code
@@ -128,7 +127,7 @@ tarball, its checksum and a copy of the tarball under a name that never
 changes — installs a server with HTTPS:
 
 ```
-curl -fsSL https://patch.tomchambers.me/api/server-release/install.sh | sudo sh [-s -- --domain NAME] [--email ADDR]
+curl -fsSL https://<server>/api/server-release/install.sh | sudo sh [-s -- --domain NAME] [--email ADDR]
 ```
 
 It makes a `patch` user, installs the release into `/var/lib/patch-server` as a
@@ -157,21 +156,47 @@ port. The installer offers it with `--socket [PATH]` (default
 Caddy joins the server's group and proxies with `reverse_proxy unix//run/...`,
 and `patch-server pair` follows `PATCH_SOCKET`.
 
+## Server on a Mac
+
+On a Mac the server is its own launchd service, like the host (`02-host.md`
+§ Desktop app and the local host). Choosing "This computer" in the desktop
+app's first run (`05-surfaces.md` § Desktop first run) installs the server
+release the app carries into an install home laid out as in § Server
+installation, registers it as a launchd agent for the user, and starts it.
+The desktop app is only a window onto it: quitting the app leaves the server
+running, and opening the app again connects to the running server. The server
+runs while the Mac is awake; it stops when the user turns it off (Settings →
+Hosts), when the Mac sleeps and when it shuts down, and starts again at login
+and on wake. A newer desktop app installs the server release it carries and
+restarts the service onto it.
+
+## Moving the server
+
+The server's data folder is self-contained (`01-server.md` § Data folder), so
+moving the server to another machine is carrying that folder across: stop the
+server, copy the folder into the new machine's install home, install the
+server there (§ Server installation, § Server on a Mac) and start it. It comes
+up as the same server, with the same accounts, chats, credentials and relay
+channel. Hosts and devices that reach it through its relay channel follow it
+at once; those that reach it by address follow once that address points at
+the new machine. The old copy is not started again: two servers running from
+one folder's contents would each accept hosts' outboxes.
+
 ## Relay
 
 `patch-relay` is the relay of `10-auth.md` § Relay: one small Node process with
 no state and nothing to configure but `PORT` (default 8787). It is run behind a
 TLS reverse proxy that passes WebSocket upgrades (`reverse_proxy 127.0.0.1:8787`
 in Caddy), and the address people use is its `wss://` address. A server uses a
-relay when `PATCH_RELAY_URL` names one; the desktop app's own server uses the
-project's hosted relay unless that is set. Anyone may run their own and point
+relay when `PATCH_RELAY_URL` names one; a server the desktop app installs on a
+Mac uses the project's hosted relay unless that is set. Anyone may run their own and point
 their servers at it.
 
 The project's hosted relay is `wss://relay.patchhq.dev`: the same protocol as a
-Cloudflare Worker (`packages/relay-worker`) with one Durable Object per channel.
+Cloudflare Worker with one Durable Object per channel.
 Its sockets hibernate, so a connected but quiet channel costs nothing, and it
 runs on Cloudflare's free plan. The release workflow deploys it from `main` when
-the relay's code changes. One set of behaviour tests (`packages/relay/test`)
+the relay's code changes. One set of behaviour tests
 runs against the Node relay, against the Worker under `wrangler dev`, and against
 the live address.
 
@@ -209,11 +234,32 @@ Updating never waits unboundedly. Each network step of a host self-update (the
 manifest check, the artifact download) is limited to 2 minutes, extraction to 2
 minutes and the installer to 5 minutes; a step that overruns ends the attempt
 with a message naming what timed out, and the update can be requested again.
-The wait for running turns to finish is deliberately not limited. The desktop
+The desktop
 shell's update check is likewise limited to 2 minutes and runs one at a time;
 overrunning is recorded as a failed check, never as up to date. An attempt that
 could stall forever blocks every later request, because requests join the
 attempt in flight.
+
+## Replacing a host
+
+A chat lives on one host for its whole life, and chats are never moved between
+hosts automatically. Replacing a host is the deliberate step by which a new
+machine takes over an old host's chats: Settings → Hosts → ⋯ on the old host →
+Replace with…, which guides it through:
+
+1. Install a host on the new machine (§ Host installation), if it has none.
+2. Carry the old host's project folders and its provider session files across
+   unchanged, to the same paths. The guide lists every folder the old host's
+   chats use and where each provider keeps its session files on it.
+3. Confirm. The new host checks that every listed folder is present and says
+   which are missing; the user fixes them or confirms without them.
+
+On confirming, the server rebinds every chat of the old host to the new one,
+hands it the messages held for the old host, and removes the old host from the
+account. The new host continues each chat from the server's high-water mark
+(`01-server.md` § Responsibilities); a chat whose provider session
+did not come across stays readable and cannot continue with the model's memory
+(`04-chats-and-folders.md` § History).
 
 ## Env
 
@@ -256,8 +302,8 @@ CLAUDE_CODE_OAUTH_TOKEN=...
 
 `WHISPER_BACKEND`, `GROQ_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` are read by the
 host, so they are set in the environment of each host's service rather than in
-the server's compose env — or, for the provider keys, from Settings →
-Providers, which stores them on the host and never on the server. The rest are the
+the server's env — or, for the provider keys, from Settings → Providers, which
+stores them on the server and sends them to every host. The rest are the
 server's.
 
 ## Deploy guide
@@ -271,7 +317,7 @@ dist/server/patch-server-<release>/install          # installs into ~/.patch-ser
 ```
 
 A server following a release channel does exactly that for itself, with each
-release it mirrors (`packages/server/src/self-update.ts`, see `deploy.md`).
+release it mirrors.
 
 The desktop app, the Android app and the host are builds, not
 deployments — artifacts a person installs:
@@ -294,14 +340,16 @@ The rules that must hold, wherever it runs:
 
 - a server deploy completes without touching any host. Hosts dial out and
   reconnect with backoff (`12-error-and-offline.md`), so a server restart drops
-  every host's link and each host restores itself. Chats in flight during the
-  restart surface the drop.
+  every host's link and each host restores itself. Chats in flight keep
+  running, hosts resend what the server had not acknowledged
+  (`01-server.md` § Host outbox), and nothing is marked failed because
+  the link dropped.
 - server and host versions are independent. The wire protocol is the
   compatibility contract: the server states the host version range it supports,
   and a host outside that range is shown as needing an update.
 - web is part of the server release, so a server deploy always carries the
   current UI. A UI-only deploy assembles a release around the RUNNING release's
-  server (`build-server.mjs --reuse-server`), so it never ships a new server
+  server, so it never ships a new server
   version, and restarts the server onto it.
 - SPA cache headers make new deploys land immediately. The server serves
   `/app/index.html` (and the SPA-fallback routes) with `Cache-Control: no-store`
@@ -319,9 +367,6 @@ immutable` — safe to cache forever because a rebuild changes their filename.
   HEAD (fail loudly on timeout); assert the published APK URL returns 200. NO
   FALLBACK — any failed step aborts.
 
-- Single monorepo: `projects/patch/` contains `packages/{server,host,cli,web,wire,auth,desktop}` and `apps/mobile`.
-- Built in place on one box — no registry, no CI.
-
 ### Updates in lockstep
 
 Server and hosts must run one version, because the wire protocol can change
@@ -335,11 +380,9 @@ between versions. A release therefore costs each host one drop, not two:
   target version (`server restarting into <version>`). A host with exactly that
   version staged installs it at once, from the staged copy, without contacting
   the server (which is down). The server and the host come back together.
-- A host without it staged (offline, failed download) updates on reconnect, as
-  before: the server sees it behind and sends `host.update`.
-- The swap holds for running turns exactly as an ordinary update does. Claude
-  turns survive a host restart as detached runners, but turns of other
-  harnesses do not, so those still defer the install.
+- A host without it staged (offline, failed download) updates on reconnect: the server sees it behind and sends `host.update`.
+- The swap does not wait for running turns: every turn and other piece of
+  host work survives a host restart (`02-host.md` § Host restarts).
 - A failed stage is logged as an error and the host falls to the reconnect
   update; it is never hidden.
 - Staged builds live in `<patchHome>/staged/<version>`; those at or below the
@@ -352,8 +395,7 @@ Patch moves to a new release: the server, every host and the desktop app.
 Updating one part on its own while the switch is off is a bug.
 
 - On: releases are mirrored and installed as they appear, the server first and
-  the hosts behind it (§ Updates in lockstep), only when nothing is running on
-  a host. The user sees nothing except one prompt in the window.
+  the hosts behind it (§ Updates in lockstep). The user sees nothing except one prompt in the window.
 - Off: the release mirror only notes which release is on offer
   (`release-available.json`); it downloads nothing, so nothing a host or the
   desktop app reads from the server moves, and the server does not install
@@ -378,12 +420,12 @@ stable code.
 
 - Two kinds of update. A JS-only change ships over the air: no new APK, no
   reinstall. A native change (new module, permission, `app.config` plugin)
-  bumps `runtimeVersion` in `apps/mobile/app.config.ts` and needs a new APK,
+  bumps the app's `runtimeVersion` and needs a new APK,
   which the phone installs in place (below). An over-the-air update is only
   ever offered to a phone on its own runtime, so JS can never land on native
   code it needs and does not have.
-- Built and signed in CI. The release workflow's `mobile-update` job runs
-  `scripts/build-mobile-update.mjs`: `expo export` for android (with this
+- Built and signed in CI. The release workflow runs
+  `expo export` for android (with this
   commit's version stamps, checked present in the bundle), then an Expo Updates
   manifest naming every file by its URL on the GitHub release, signed with
   `PATCH_UPDATE_SIGNING_KEY`. The bundle and its assets become release files
@@ -405,14 +447,13 @@ stable code.
   expo-updates still rolls back an update that crashes on launch). The
   override takes effect from the next launch, and nothing checks before a
   launch is using it: there is no native check on launch
-  (`checkAutomatically: 'NEVER'`), and `src/lib/updateSource.ts` only lets the
-  JS check once the override was in place when the launch began. A phone
+  (`checkAutomatically: 'NEVER'`), and the app checks only once the override
+  was in place when the launch began. A phone
   reached through the relay cannot use it — native code has no relay
   connection — and moves on by installing APKs; Settings → Updates says so.
 - Checking. The app checks at launch, every 30 minutes and on every return to
   the foreground, and only downloads. NO automatic reload: expo-updates
-  launches a downloaded bundle at the next cold start (reloading on launch was
-  a white flash and a second load). The one reload is the user's: Settings →
+  launches a downloaded bundle at the next cold start. The one reload is the user's: Settings →
   Updates → "Restart to update".
 - A new APK. `android-latest.json` carries the APK's `runtimeVersion`. When it
   differs from the last one announced, the server sends the phone one silent
@@ -421,8 +462,7 @@ stable code.
   to install the release that carries the news. A tap downloads the APK inside
   the app and opens Android's installer (`expo-intent-launcher`,
   `REQUEST_INSTALL_PACKAGES`); Android asks the user to confirm, as it does for
-  anything installed outside a store. An app from before this opens the same
-  link in the browser, because the push names it. The chat list shows an
+  anything installed outside a store. The chat list shows an
   "Install Patch <version>" banner, and Settings → Updates an Install row,
   whenever the published APK is newer and on another runtime.
 - Downloaded ahead of time. As soon as the app reads a published APK that needs
@@ -433,8 +473,8 @@ stable code.
   staged file with no further download. A failed background download is shown
   as an error and retried on the next read.
 - The signing key. `PATCH_UPDATE_SIGNING_KEY` is in the password manager
-  (`patch-update-signing-key`); its certificate is
-  `apps/mobile/certs/certificate.pem`, valid to 2056. Losing the key means no
+  (`patch-update-signing-key`); its certificate ships in
+  the app, valid to 2056. Losing the key means no
   installed app accepts another over-the-air update until it installs an APK
   carrying a new certificate.
 - Push credentials, not updates. Notifications still go through Expo's push
@@ -453,12 +493,6 @@ Electron app on each Mac), and the Android app (APK + OTA). Any of them can be
 left behind by a delivery that only touched the others, and the host layer can
 differ from host to host.
 
-This bit us: a `deliver server` rebuilt the image and bumped the reported git sha,
-while the SPA — served from `deploy/web-dist`, which the image knows nothing about
-— stayed at a build from eight days earlier. `/api/healthz` reported the new
-commit the whole time, so the product looked current while the UI was a week stale.
-Nothing anywhere compared the two.
-
 Rules.
 
 - Every layer is stamped. One source of truth yields
@@ -466,8 +500,8 @@ Rules.
   patch component is the commit count, so versions increase monotonically without
   manual bookkeeping — a hard requirement for electron-updater, which compares
   semver, not shas. The web build emits `dist/version.json`; the desktop build
-  emits `dist/build-info.json`; the server takes `PATCH_VERSION` /
-  `PATCH_GIT_SHA` / `PATCH_BUILT_AT` from the Docker build; the host carries the
+  emits `dist/build-info.json`; the server release carries them in
+  `build-info.json`; the host carries the
   same three stamped into its artifact and reports them on `host.host`; the APK
   inlines `EXPO_PUBLIC_PATCH_*`.
 - Clients report themselves. The WS `hello` carries `clientVersion` plus
@@ -493,39 +527,31 @@ Rules.
   "Couldn't check", never as up to date. `GET /api/version` still carries the
   full per-layer report for diagnostics.
 - Unknown reads as unknown. An unstamped, missing or unreadable layer is
-  reported as such. A malformed report is rejected at the client boundary
-  (`assertVersionReport`) so a partial response reaches the panel's error state
+  reported as such. A malformed report is rejected at the client boundary so a partial response reaches the panel's error state
   instead of rendering as "all layers agree".
-- A delivery that leaves prod inconsistent FAILS. `deliver server` now ships
-  the SPA with it, and every path that changes what prod serves ends by asserting
-  the box's own `/api/healthz` and `/app/version.json` report the same commit.
-- The shell's updater must be able to explain itself. `diagnoseUpdater`
+- A delivery that leaves the server inconsistent fails. Every path that
+  changes what the server serves ends by asserting its own `/api/healthz` and `/app/version.json` report the same commit.
+- The shell's updater must be able to explain itself. It
   names each condition that makes updates
   impossible — unpackaged build, no `app-update.yml` (a `--dir` build), a `0.0.0`
   version that always compares as newer, an adhoc signature macOS won't let
   Squirrel apply — and the panel shows it. Every check outcome, failures included,
   is recorded with a timestamp and persisted, so "nothing new" and "couldn't
   check" read as distinct states.
-- A downloaded update installs itself. Downloading IS the decision: every
-  downloaded build — boot check, hourly check, or the check a landed deploy
-  triggers — quits and comes back on the new build without asking. Patch deploys
-  ~20 times a day, so a per-download "restart to install" prompt was ~20
-  interruptions a day for an answer that was always yes; there is no such
-  control and no such prompt. The close gesture that merely hides the main
-  window (`05-surfaces.md` § Window chrome) must not absorb that quit, or the
+- A downloaded build is applied through the window's one prompt (§ One update
+  switch). The close gesture that merely hides the main window
+  (`05-surfaces.md` § Window chrome) must not absorb the relaunch, or the
   install reads as the window closing while the old build keeps running.
-- A refused install is reported, never swallowed. With no prompt left, the
-  panel's error line is the only way a shell that cannot install (a signature
-  Squirrel won't apply) reaches the user, so an install that throws is recorded
-  as a check failure verbatim and leaves the app running rather than half-quit.
+- A refused install is reported, never swallowed: an install that throws (a
+  signature Squirrel won't apply) is recorded as a check failure verbatim on
+  Settings → Updates and leaves the app running rather than half-quit.
 
 Surface. Settings → Updates,
 also reachable from the tray's right-click menu. Shows the up-to-date status,
-last-checked, a Check now button and one Update control. It REPORTS the shell's
-update state; it never asks for a restart, because updates install themselves.
+last-checked, a Check now button and one Update control.
 
 Desktop update feed. `electron-builder.yml` publishes with the `generic`
-provider to `<public-url>/api/desktop/`; the delivery script rsyncs
+provider to `<public-url>/api/desktop/`; the release puts
 `latest-mac.yml` + the `.zip` (+ `.blockmap`) and a `desktop-latest.json`
 provenance sidecar into the box's downloads dir, served by the server's public
 `/api/desktop/:name` route.
@@ -544,18 +570,17 @@ Certificate setup and the failure modes around it are in `docs/desktop-packaging
 ## Backup
 
 - `secrets.key` in the data directory is the key to `secrets.json`. The server makes it on first start and nothing needs setting; the two must travel together, so restore them as a pair (01-server.md § Settings).
-- `~/.patch-server/data` is the server's only stateful directory — the registry, job definitions, run/webhook logs, pending queues and the broadcast log. Snapshot it off-host nightly (the reference deployment uses restic).
-- Chat history and per-chat metadata live on each host, under that user's `~/.claude/projects/` and `~/.patch/` (`04-chats-and-folders.md` § History). Each host is backed up on its own; a server snapshot does not carry them.
+- `~/.patch-server/data` is the server's only stateful directory (`01-server.md` § Data folder), Patch's record of every chat included. Snapshot it off-host nightly (the reference deployment uses restic).
+- Provider session files and project folders live on each host. Each host is backed up on its own; a server snapshot does not carry them, and a chat whose provider session is lost stays readable from the server's record.
 
 ## Website
 
-The public website, https://patchhq.dev, is the static `site/` folder, published
-to GitHub Pages by `.github/workflows/pages.yml` whenever `site/` changes on
-main. Its download links point at the fixed asset names on the latest stable
+The public website, https://patchhq.dev, is a static site in the repository,
+published to GitHub Pages whenever it changes on main. Its download links point at the fixed asset names on the latest stable
 release (`releases/latest/download/<name>`), so it never needs editing for a
 release. The apex and `www` are DNS-only records on Cloudflare pointing at
 GitHub Pages, which issues the certificate. Screenshots are the real web app,
-captured from the dev harness by `site/tools/capture.mjs`.
+captured from the dev harness.
 
 ## Cross-refs
 

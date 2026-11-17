@@ -1,3 +1,4 @@
+import type { DurableCodexProcess } from './codexDurable.js';
 import { codexIdentity } from './codexIdentity.js';
 import { randomUUID } from 'node:crypto';
 import {
@@ -758,7 +759,7 @@ export class CodexAccounts {
     if (!account) throw new Error('The OpenAI account chosen for this turn is no longer available');
     return { accountId: account.id, client: await this.client(account) };
   }
-  async turnClient(id: string): Promise<CodexClient> {
+  async turnClient(id: string, durable?: DurableCodexProcess): Promise<CodexClient> {
     const account = this.accounts.find((a) => a.id === id);
     if (!account) throw new Error('OpenAI account was disconnected');
     const client = new CodexClient({
@@ -767,6 +768,7 @@ export class CodexAccounts {
       credentialStore: account.store,
       externalAuth: this.externalAuth(account),
       onStderr: this.stderrLogger(account.id),
+      ...(durable ? { durable } : {}),
     });
     try {
       await client.start();

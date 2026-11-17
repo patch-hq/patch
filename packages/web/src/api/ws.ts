@@ -177,6 +177,18 @@ export class PatchWs {
    */
   private readonly lastReplayCursor = new Map<string, number>();
   /**
+   * The server answers history and runs the account feed (spec/05 § Loading):
+   * set from `auth.ok`. Then a chat's history is asked of the server alone, a
+   * page at a time, and the feed keeps the chats this surface holds current.
+   */
+  private accountFeed = false;
+  /** History requests in flight: which chat, and which way the page runs. */
+  private readonly historyAsks = new Map<
+    string,
+    { chatId: string; kind: 'last' | 'before' | 'after' }
+  >();
+  private historySeq = 0;
+  /**
    * Background transcript sync (spec/12 § Offline reading, web variant): the
    * `lastUpdated` each chat's transcript was last brought level with, the chats
    * waiting their turn, the one in flight, and the timers that debounce
@@ -417,6 +429,8 @@ export class PatchWs {
    * (it settles with a fresh `lastUpdated`) and a chat on an offline host.
    */
   syncTranscripts(): void {
+    // The account feed keeps held chats current; nothing is fetched chat by chat.
+    if (this.accountFeed) return;
     const { chats, activeChatId } = useChatStore.getState();
     const hosts = usePresenceStore.getState().hosts;
     const queued = new Set(this.syncQueue.map((q) => q.chatId));
@@ -581,8 +595,69 @@ export class PatchWs {
     // `chat.permission_request` only for what is genuinely still open, so
     // anything real re-lands within the same replay.
     useChatStore.getState().clearPendingPermissions(chatId);
-    this.safeSend({ type: 'chat.replay', chatId, fromSeq, batch: true });
+    if (this.accountFeed) {
+      this.askHistory(chatId, fromSeq >= 0 ? { after: fromSeq } : {});
+    } else {
+      this.safeSend({ type: 'chat.replay', chatId, fromSeq, batch: true });
+    }
     useChatStore.getState().setReplaying(chatId, true);
+  }
+
+  /**
+   * Ask the server for a page of a chat (spec/03 § Chat history): what follows
+   * a position, the page before one, or with neither its last screen.
+   */
+  private askHistory(chatId: string, at: { after?: number; before?: number }): void {
+    const requestId = `h${++this.historySeq}`;
+    const kind = at.after !== undefined ? 'after' : at.before !== undefined ? 'before' : 'last';
+    this.historyAsks.set(requestId, { chatId, kind });
+    this.safeSend({
+      type: 'chat.history_request',
+      requestId,
+      chatId,
+      ...at,
+      ...(kind === 'after' ? { limit: 500 } : { limit: HISTORY_PAGE }),
+    });
+  }
+
+  /** The page before the earliest entry this surface holds, as the reader scrolls up. */
+  loadEarlier(chatId: string): void {
+    if (!this.accountFeed) return;
+    if (useChatStore.getState().historyLoadingEarlier[chatId]) return;
+    this.flushStoreQueue();
+    const timeline = useChatStore.getState().timelines[chatId] ?? [];
+    const earliest = timeline.reduce(
+      (min, e) => (e.localId === undefined && e.seq >= 0 && e.seq < min ? e.seq : min),
+      Number.POSITIVE_INFINITY,
+    );
+    if (!Number.isFinite(earliest)) return;
+    useChatStore.getState().setHistoryLoadingEarlier(chatId, true);
+    this.askHistory(chatId, { before: earliest });
+  }
+
+  /**
+   * After every connect, to a server that runs the feed: the last feed position
+   * this device holds and every chat it holds, with the position it holds in
+   * each (spec/03 § Account feed). The server sends what changed since and
+   * catches each chat up; nothing is asked of a host.
+   */
+  private resumeFeed(): void {
+    this.flushStoreQueue();
+    const { chats, timelines, activeChatId } = useChatStore.getState();
+    const follow: Array<{ chatId: string; after: number }> = [];
+    for (const chatId of Object.keys(chats)) {
+      const timeline = timelines[chatId];
+      const held = chatId === activeChatId || (timeline?.length ?? 0) > 0;
+      if (!held) continue;
+      const after = (timeline ?? []).reduce(
+        (max, e) => (e.localId === undefined && e.streaming !== true && e.seq > max ? e.seq : max),
+        -1,
+      );
+      this.lastReplayCursor.set(chatId, after);
+      follow.push({ chatId, after });
+    }
+    const after = loadFeedPos();
+    this.send({ type: 'feed.resume', ...(after !== null ? { after } : {}), follow });
   }
 
   private openOnce(): void {
@@ -859,6 +934,7 @@ export class PatchWs {
       // frame — including hosts that are asleep and will never announce
       // themselves.
       usePresenceStore.getState().setHosts(event.hosts);
+      this.accountFeed = event.accountFeed === true;
       // Live update (spec/14 § Live updates): the server reports the bundle it
       // serves on every auth.ok. A deploy restarts the server, so this
       // reconnect delivers the new hash — reload if it changed.
@@ -888,7 +964,8 @@ export class PatchWs {
       // the focus frame is behind us: the replay re-subscribes and catches up
       // from the cursor. Forced, because the cursor is unchanged since the
       // request it replaces.
-      this.replayHeldChats(undefined, true);
+      if (this.accountFeed) this.resumeFeed();
+      else this.replayHeldChats(undefined, true);
       // spec/14 § Composer — push every draft the server never confirmed
       // (typed while offline, or a save that failed mid-flight) now that the
       // link is back.
@@ -918,7 +995,9 @@ export class PatchWs {
       // chat or the link changes identity. Without this a chat sits there
       // holding whatever it had when the host went down, silently missing
       // every event emitted since, with no error anywhere.
-      this.replayHeldChats(event.hostId, true);
+      // With the feed, a returning host's events reach this surface live from
+      // the server's record; there is nothing to ask for.
+      if (!this.accountFeed) this.replayHeldChats(event.hostId, true);
       // The server flushes its buffer, but a copy lost to a flap at flush time
       // would never arrive — redeliver every still-pending input so
       // queued-while-offline turns land promptly and any lost one heals
@@ -1362,6 +1441,46 @@ export class PatchWs {
     // rather than waiting out the coalescing frame: there is nothing more
     // coming to coalesce WITH, and the point of asking for a batch was to
     // paint the transcript once instead of watching it arrive.
+    if (event.type === 'chat.history') {
+      const ask = this.historyAsks.get(event.requestId);
+      this.historyAsks.delete(event.requestId);
+      for (const inner of event.entries) this.dispatch(inner as WireEvent);
+      for (const inner of event.pending) this.dispatch(inner as WireEvent);
+      for (const inner of event.queued) this.dispatch(inner as WireEvent);
+      this.flushStoreQueue();
+      const store = useChatStore.getState();
+      store.setReplaying(event.chatId, false);
+      if (ask?.kind === 'before') {
+        store.orderTimelineBySeq(event.chatId);
+        store.setHistoryLoadingEarlier(event.chatId, false);
+      }
+      // `more` running backwards: older pages remain above what is shown.
+      if (ask?.kind === 'last' || ask?.kind === 'before')
+        store.setHistoryMore(event.chatId, event.more);
+      // Catching up runs forwards in pages until it is level.
+      if ((ask?.kind === 'after' || event.requestId === 'feed') && event.more) {
+        const held = store.timelines[event.chatId] ?? [];
+        const after = held.reduce(
+          (max, e) => (e.localId === undefined && e.seq > max ? e.seq : max),
+          -1,
+        );
+        this.askHistory(event.chatId, { after });
+      }
+      return;
+    }
+    if (event.type === 'feed.reset') {
+      // This device holds nothing the feed can continue from: reload the chat
+      // index, then continue from where the feed is now.
+      saveFeedPos(event.feedPos);
+      window.dispatchEvent(new Event(CHAT_INDEX_STALE_EVENT));
+      return;
+    }
+    if (
+      (event.type === 'chat.state' || event.type === 'chat.spawned') &&
+      event.feedPos !== undefined
+    ) {
+      noteFeedPos(event.feedPos);
+    }
     if (event.type === 'chat.replay_batch') {
       // Each inner event goes back through dispatch() so it gets the same
       // special-case side effects as a live one (diff rail, voice banner,
@@ -1481,4 +1600,36 @@ export function setActiveWs(ws: PatchWs | null): void {
 }
 export function getActiveWs(): PatchWs | null {
   return activeWs;
+}
+
+/** A page of history when opening a chat or scrolling up (spec/05 § Loading). */
+const HISTORY_PAGE = 100;
+const FEED_POS_KEY = 'patch.feedPos';
+/** Raised when the chat index must be reloaded from the server (a `feed.reset`). */
+export const CHAT_INDEX_STALE_EVENT = 'patch:chat-index-stale';
+
+/** The last account-feed position this device holds, or null when it holds none. */
+function loadFeedPos(): number | null {
+  try {
+    const raw = window.localStorage.getItem(FEED_POS_KEY);
+    if (raw === null) return null;
+    const n = Number(raw);
+    return Number.isInteger(n) && n >= 0 ? n : null;
+  } catch {
+    // Storage refused (private mode, quota): the feed starts over with a reset.
+    return null;
+  }
+}
+
+function saveFeedPos(pos: number): void {
+  try {
+    window.localStorage.setItem(FEED_POS_KEY, String(pos));
+  } catch {
+    // As above: without storage the next connect reloads the index.
+  }
+}
+
+function noteFeedPos(pos: number): void {
+  const held = loadFeedPos();
+  if (held === null || pos > held) saveFeedPos(pos);
 }

@@ -537,6 +537,30 @@ export class ChatLog {
     this.stateOf(chatId).turn = { turnId, dedupe: new Set() };
   }
 
+  /**
+   * Events the turn before the open one logged — the earlier life of a turn a
+   * restart cut short and the new host carries on. Those sit between the last
+   * two `turn.start` records.
+   */
+  interruptedTurnEvents(chatId: string): Array<{ record: LogRecord; event: LoggedEvent }> {
+    const records = this.read(chatId);
+    const starts: number[] = [];
+    records.forEach((r, i) => {
+      if (r.rec.k === 'turn.start') starts.push(i);
+    });
+    if (starts.length < 2) return [];
+    const out: Array<{ record: LogRecord; event: LoggedEvent }> = [];
+    for (const record of records.slice(starts[starts.length - 2], starts[starts.length - 1])) {
+      if (record.rec.k === 'event') out.push({ record, event: record.rec.event });
+    }
+    return out;
+  }
+
+  /** Mark a record as already logged by the open turn, so a re-send of it is dropped. */
+  seedDedupe(chatId: string, key: string): void {
+    this.stateOf(chatId).turn?.dedupe.add(key);
+  }
+
   endTurn(chatId: string): void {
     const s = this.chats.get(chatId);
     if (s) s.turn = undefined;

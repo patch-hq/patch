@@ -4,37 +4,151 @@ Patch has several parties holding connections: surfaces ↔ server ↔ hosts. An
 
 ## Principles
 
-- Disconnects don't lose conversation state. the agent's session history is persisted by the backend on the host regardless of whether the host is reachable. The next user message resumes from there.
-- No fallbacks. Per the portfolio convention — when something breaks, it's visible, not silently absorbed.
+- Disconnects don't lose anything. The chat's record is on the server and the provider's session stays on its host; neither depends on a connection, and a dropped connection is never a chat outcome.
+- No fallbacks. When something breaks, it's visible, not silently absorbed (`principles.md`).
 - One surface per failure. A failure is reported once, in one place. A surface never repeats the same message in a second element beside the first — two copies of one message read as two separate faults, and the spare copy is the one that ends up unstyled. On web that one place is the error toast; a failure that needs to persist past the toast belongs in the affected control's own state, saying something the toast doesn't. A new chat that failed to start is such a case: it stays as a failed draft with its message, the reason and a Resend (`04-chats-and-folders.md` § Spawn).
 - Said in plain English, code kept. What the user reads is one sentence saying what to do next. The machine-readable code, and any wording a host wrote for whoever wrote the host, are never the message and are never appended to it — an unrecognised code least of all, which takes a generic sentence rather than being interpolated into one. Neither is discarded: both are kept verbatim in a Details disclosure under the sentence, collapsed by default, and a toast holding one does not auto-dismiss while that disclosure is open.
 - Full-page failures use one page. A path no pane claims, and a crash while rendering a pane, each take the panel with a title, one sentence, the path or stack under Details, and the way out (Back to Manager / Reload). A render crash never leaves a blank window, and navigating away clears it. A failed action's toast is `<Action> failed. Try again.` with the thrown message under Details.
-- Sequence-based replay. Every `chat.*` event carries a monotonic `seq` per chat. Reconnecting parties request `chat.replay {chatId, fromSeq}`; host emits missed events from its history.
-- When a surface requests a replay. A surface requests `chat.replay` when it opens a chat, and on (re)connect only for chats whose transcript it is already holding — i.e. the chat it currently has open, plus any chat with a non-empty rendered timeline. The chat it has open counts whether or not the roster knows about it: a chat opened from a notification tap that launched the app is on screen before the roster has arrived, and it is the one chat that must not be missed. A request made while the link is down is not a request — the surface asks again on connect. State-level events (`chat.spawned` / `chat.state`) fan out to all of an account's surfaces unconditionally, so a chat spawned on one surface appears in another's sidebar (name + preview) without that surface ever having replayed it; its transcript and live detail events (`chat.message` and the rest) only arrive once the surface replays it. Opening such a chat therefore requests a replay so its transcript loads instead of showing empty — a chat that first appeared after connect is not covered by the connect-time replay alone. `fromSeq` derives from the durable timeline the surface has already rendered (`-1` when it has none), so re-opening a chat already in hand replays nothing.
-- A replay arrives as a burst, and is applied as one commit. The host re-emits a transcript as one event per entry, so a busy chat replays as hundreds of frames in a fraction of a second. A surface gathers inbound events for up to one frame and applies the run to its store as a single commit, in arrival order — the result is identical to applying them one by one. Applying them one at a time costs a render of the whole transcript per message: the chat visibly fills in from its oldest message down while the scroll chases the growing content, and the work is quadratic in the transcript's length. Anything that reads or writes chat state outside that fold — deriving a replay's `fromSeq`, or resolving a permission card the host has just echoed — commits the gathered events first, so it never acts on a transcript missing entries that have already arrived.
-- Cold start loads metadata only — one call, no transcript fan-in. A freshly-booted surface has no transcripts, so it must NOT ask for one per known chat. The roster comes from the single `GET /api/chats` metadata snapshot, which carries each chat's metadata as `04-chats-and-folders.md` § Chat model defines it — its host `hostId` alongside name, preview, folder, activity, status, pin, snooze and `lastUpdated` — and carries no transcript events; transcripts arrive lazily, one chat at a time, on open. Blanket-replaying every chat on connect made cold start cost O(chats) inbound event streams — each one rewriting sidebar rows and the store — which is the "loading thrashing" the roster snapshot exists to avoid. The reconnect case is unaffected: a surface that has already rendered transcripts still replays exactly those, so no live chat silently misses events across a drop.
-- A surface that keeps a transcript on the device (web IndexedDB, mobile MMKV) paints from it on open and then asks the host only for events newer than the highest seq held. The answer to a question (`chat.permission_response`) carries no seq, so it is kept beside the cached events and re-applied after them; otherwise a restart redraws an answered question open and blank, because the replay for newer events never re-sends the settled pair. Questions past their deadline come back expired.
+- Positions. A surface holds a position in each chat and asks the server for what is newer, or for older pages before its earliest entry. Only the server answers, and opening a chat never waits on its host (`03-wire-protocol.md` § Chat history, `05-surfaces.md` § Loading).
+- Catch-up arrives as a burst, and is applied as one commit. A surface gathers inbound entries for up to one frame and applies the run to its store as a single commit, in arrival order — the result is identical to applying them one by one. Applying them one at a time costs a render of the whole transcript per message: the chat visibly fills in from its oldest message down while the scroll chases the growing content, and the work is quadratic in the transcript's length. Anything that reads or writes chat state outside that fold — working out the position to ask from, or resolving a question card — commits the gathered entries first, so it never acts on a transcript missing entries that have already arrived.
+- Questions survive any reconnect. A history answer carries every question still unresolved on the chat, whatever range was asked, and the record holds each answer, so a surface catching up never draws a settled question open or an open one without its controls. Surfaces identify a question by its request id and ignore one they already hold (`14-design-web.md` § Main chat panel, `15-design-mobile.md` ## Chat detail). Questions past their deadline come back expired.
 
 ### Offline reading
 
-Every chat in the roster opens with its transcript while the surface has no connection. A surface that keeps transcripts on the device (mobile MMKV) therefore holds all of them, not only the ones it has opened. After a roster load it fetches, one chat at a time, each chat whose held copy is missing or was last synced to a different `lastUpdated`, as a `chat.replay` from the held cursor whose answer goes to the device cache and not to the rendered store. It is driven by the roster, never a timer; a chat whose host is offline waits for the next roster refresh; opening a chat takes it over from the background fetch; chats the roster no longer lists are dropped from the device. A fetch that gets no answer in 30s is shown as an error. Web does the same into its in-memory store (nothing is kept across a reload), skipping the open chat, running chats and chats on an offline host; on both surfaces a live `chat.state` that moves another chat's `lastUpdated` triggers the sweep again, debounced to one second, so a chat that changes while nobody is looking is already current when opened. This does not breach Cold start loads metadata only: first paint and the roster call are unchanged, and the background fetch is serial and invisible to every list.
+Chats in the device copy (`05-surfaces.md` § Loading) open from what the device holds while it has no connection, marked as not current. A chat the device does not hold says it needs a connection to load; it is never shown empty.
 
 ### No polling
 
-A surface never re-asks for history on a timer. Live events are pushed to the surfaces subscribed to a chat. `chat.focus_change` is the only subscription operation: it replaces that surface's previous detail subscription, and `chat.replay` never subscribes as a side effect. After its socket reconnects the surface announces its focus, then explicitly recovers the chats it holds from their cursors. A healthy connection that misses an event is a bug to be found and fixed, not something a poll papers over.
+A surface never re-asks for history on a timer. New entries are pushed to the surfaces following or focusing a chat (`03-wire-protocol.md` § Account feed). `chat.focus_change` replaces that surface's previous focus, and a history request never subscribes as a side effect. After its socket reconnects the surface announces its focus and resumes the feed from its positions. A healthy connection that misses an event is a bug to be found and fixed, not something a poll papers over.
 
-### Replay vs history cursors — boundary semantics (read before mixing them)
+## Chat status
 
-There are two "give me events from here" parameters, and they use deliberately opposite boundary conventions. They are not interchangeable — a client must not feed a value from one into the other.
+The server alone decides a chat's status (`01-server.md` § Responsibilities). Hosts report facts — a turn started, a turn ended with its outcome, a question raised or resolved (`03-wire-protocol.md` § Session events) — the server sees each host connect, announce a restart or go, and accounts report their state (`10-auth.md` § Account states). Surfaces display the status the server sends and never derive it (`05-surfaces.md` § Chat status). Snoozed, archived and pinned are user flags, kept apart from status.
 
-| Surface                           | Param     | Boundary                                           | Meaning of the value                                           | Full history                                                                 |
-| --------------------------------- | --------- | -------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| WS `chat.replay`                  | `fromSeq` | exclusive — host emits events with `seq > fromSeq` | the last seq the caller already has (a reconnect/dedup cursor) | pass `-1` (a surface that has seen nothing). `0` deliberately skips `seq 0`. |
-| HTTP `GET /api/chats/:id/history` | `since`   | inclusive — returns events with `seq >= since`     | the first seq the caller wants (a paging cursor)               | pass `0`                                                                     |
+| Status                     | Wire                  | Means                                                                                                                                   |
+| -------------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Idle                       | `idle`                | No turn running and nothing owed                                                                                                        |
+| Running                    | `running`             | A turn is in flight, including one retrying a transient error                                                                           |
+| Waiting for the user       | `waiting_for_user`    | A question is unresolved                                                                                                                |
+| Queued for an offline host | `queued_offline`      | The server holds a message for the chat's host, which is offline                                                                        |
+| Host restarting            | `host_restarting`     | The chat was running or waiting when its host announced a restart, and the host has not yet reattached                                  |
+| Host offline               | `host_offline`        | The chat was running or waiting when its host went without announcing a restart, or did not return within two minutes of announcing one |
+| Interrupted                | `interrupted`         | The turn's process died with its machine (§ Continue)                                                                                   |
+| Paused until a reset       | `paused`              | The turn met a temporary limit; carries the reset time and the account (§ Limits and sign-in)                                           |
+| Waiting for sign-in        | `waiting_for_sign_in` | The account the turn needs is signed out; carries the account                                                                           |
+| Failed                     | `failed`              | The turn ended in a failure that will not clear by itself; carries a reason                                                             |
 
-Rationale: `chat.replay.fromSeq` is a reconnect cursor — the surface passes the highest seq it has already rendered and wants strictly newer events (exclusive avoids re-rendering the boundary event). `history?since` is a paging/fetch cursor — the caller passes the first seq it wants and gets that event included. The HTTP paging loop advances with `since = lastReturnedSeq + 1`; the WS reconnect loop advances with `fromSeq = lastSeenSeq`. Mixing the two without this `±1` adjustment is an off-by-one. This contract is fixed; do not "align" them.
+A chat with nothing running keeps its status when its host goes; the host's own presence says the host is offline (§ Host-offline UX).
 
-One class of event escapes the cursor: a replay also re-sends every permission request still unresolved on the chat, whatever `fromSeq` asked for. The agent layer records an unanswered request only as a plain tool call, so without this a surface that connected after the prompt was produced would render a call with no approve/deny affordance and the chat would sit waiting on a decision it never offered. The consequence is that a surface holding a card already gets it again on any later replay, so surfaces identify a permission by its request id and ignore one they already hold (`14-design-web.md` § Main chat panel, `15-design-mobile.md` ## Chat detail).
+### Allowed transitions
+
+The server keeps to these. A host's report of its own state is a fact and always wins, so a report that implies any other change is applied and logged as a fault — a wrong status left on screen would be worse than a broken rule — while a change the server would make on its own outside the table is never made.
+
+| From                                                   | To                            | On                                                                                         |
+| ------------------------------------------------------ | ----------------------------- | ------------------------------------------------------------------------------------------ |
+| Idle, Interrupted, Paused, Waiting for sign-in, Failed | Running                       | a turn started                                                                             |
+| Running                                                | Waiting for the user          | a question raised                                                                          |
+| Waiting for the user                                   | Running                       | the question resolved                                                                      |
+| Running, Waiting for the user                          | Idle                          | the turn ended done or stopped                                                             |
+| Running                                                | Paused                        | the turn ended limited                                                                     |
+| Running                                                | Waiting for sign-in           | the turn ended signed out                                                                  |
+| Running                                                | Failed                        | the turn ended failed                                                                      |
+| Running, Waiting for the user                          | Host restarting               | the host announced a restart                                                               |
+| Running, Waiting for the user, Host restarting         | Host offline                  | the host's link went unannounced, or two minutes passed since it announced a restart       |
+| Host restarting, Host offline                          | Running, Waiting for the user | the host reattached and the turn is live                                                   |
+| Host restarting, Host offline                          | Interrupted                   | the host returned and the turn's process is gone                                           |
+| Host restarting, Host offline                          | as the turn's outcome gives   | the host returned and its outbox reports the turn ended while it was away                  |
+| Idle, Interrupted, Failed                              | Queued for an offline host    | a message was held for the chat's offline host                                             |
+| Queued for an offline host                             | Running                       | the host returned and took the message                                                     |
+| Paused, Waiting for sign-in                            | Idle                          | nothing is owed any more, or the user switched provider and the new linked chat carries on |
+
+Nothing becomes Failed because a connection dropped, and nothing stays Running once its host has gone silent: the server's heartbeat check (§ Host → server disconnect) makes it Host offline within 15 seconds.
+
+### Restarting, offline, interrupted and failed
+
+Host restarting is a planned gap: the host said it was restarting (`host.restarting`, `03-wire-protocol.md` § Session events), its turns keep running as their own processes, and it reattaches to them (`02-host.md` § Host restarts). Host offline is an unplanned one — a laptop asleep, a lost network, a crash, a restart that has not come back — and says nothing about the turn itself: it may still be running, and the record catches up from the host's outbox when the host returns. Interrupted is known loss: the host is back and the turn's process is not, because its machine went down. Failed is a turn that ended in a failure: the provider refused or broke, the account is out of credit, the provider's session is gone (`04-chats-and-folders.md` § Resume), or transient retries ran out.
+
+### Continue
+
+An interrupted chat shows an inline "Turn interrupted" line where the turn stopped and a Continue action on every surface (`chat.continue_request`). Continue resumes through the provider's own resume where its adapter declares one; otherwise it sends a visible message asking the agent to carry on, which reads in the chat like any other message. Nothing is added to the turn unseen. Automatic continue is a user setting (Settings → Agent behaviour): with it on, the host continues each interrupted turn the same way as soon as it is back. A turn that was only queued never began, and is sent as it was.
+
+### Limits and sign-in
+
+A turn that meets a temporary limit ends `limited` and the chat is Paused until a reset, carrying the reset time and the account; the user's chosen behaviour then applies (`10-auth.md` § Limits). A signed-out account makes the chat Waiting for sign-in, with a Sign in action on every surface (`10-auth.md` § Signing in). Out of credit makes it Failed with that reason, and a broken account Failed with the provider's message under Details. None of these is retried on a timer. The pause is held as the chat's status on the server and as the host's owed turn, so it outlasts any restart.
+
+The pause is a message in the transcript, not a banner: a full-width card under the turn it belongs to, because it is about the reply that is not coming yet.
+
+- The heading names the limit and account — "Session limit · Work" — with "Resets in 16 min · 15:00" on the right, ticking. Where nothing stated a reset there is no countdown, rather than an invented one. Once the reset passes with the card still there, the heading reads "Session limit reset · Work", the corner "4 min ago", and "Message not sent" sits under it. All text is at least 14px.
+- The headline names a pool a person spends — the session (5-hour) or the week (7-day), never the overflow. Overage is what covers for those two when they empty, and naming it as the limit reached suggests no action. A rejected overage on its own blocks nothing and never reads as blocked.
+- The card names the limit behaviour the user chose (`10-auth.md` § Limits) and always draws the same controls. One that cannot help is greyed out with a tooltip saying why, never hidden:
+  - `Send` (`chat.resume_now_request`) — disabled until the reset ("Available at 15:00"); re-sends the paused turn.
+  - `Change account` (menu) — the connected accounts of the chat's provider with usage left, other than the one that ran out. Choosing one runs the turn on it (`10-auth.md` § Limits). Disabled when there is none ("No other account has usage left").
+  - `Change provider` (menu) — every connected provider with usage left, other than the chat's own. Choosing one starts a new chat on it, linked to this one (`04-chats-and-folders.md` § Provider switches). Disabled when none ("No other provider has usage left").
+  - `Extra usage ↗` — a link to the provider's usage settings, because Patch cannot flip an account setting. Disabled when extra usage did not fail to cover the limit ("Extra usage is already on").
+    The filled button is the first enabled of `Change account`, `Change provider`, `Send`. There is no model picker: a session or weekly limit covers every model on the account. There is no "N other accounts available" line; the controls say it.
+- A new message to a paused chat just queues behind the owed turn. For the person who knows better (credit topped up, a limit lifted early) the card header carries a small retry icon that is always enabled; it sends `chat.resume_now_request`, and the queued messages drain behind the owed turn.
+- The card is withdrawn from every surface the moment the chat leaves Paused.
+
+Where Patch states a failure itself, the provider's sentence is not copy anywhere. A failure the provider states structurally is reported in Patch's own words, built from those fields, and that one account is what every surface shows: the transcript, the chat's failed status, and the run log of a job whose chat failed. The provider's sentence is diagnostic detail — it stays in the host log and as the raw field of the structured block — and is never rendered as the failure. Otherwise the same failure is read twice and the two disagree about which limit was even reached. This is driven off the structured fields, never off a match on the wording: a failure Patch has no structured account of keeps its real message, in full.
+
+### Transient errors
+
+Only transient errors retry automatically: a dropped provider connection, a 5xx or a crash mid-stream on a 10s / 30s / 90s ladder, and a 529 overload backing off from 5s, doubling to a 60s cap. Each attempt is shown in the chat, so the retrying is never hidden. The chat stays Running throughout and becomes Failed only when the ladder is spent. A stated limit never goes on this ladder. No setting gates it: a turn dropped by a network blip is not a preference.
+
+### What a recovery leaves behind
+
+A turn that recovered is ONE turn, however many goes it took. Every re-send —
+a rung of the ladder, a paused turn coming back — is the host re-running a turn
+the user sent once, so it must not read as a message the user sent again.
+
+- The re-sent user `chat.message` carries `retryOfSeq`: the seq of the ORIGINAL
+  user message for that turn, on every attempt, never the attempt before it. A
+  surface folds the copy into the bubble already on screen instead of drawing
+  the same sentence a second time. A user retyping the same thing is a new turn.
+  `retryOfSeq` is part of the entry in the chat's record, so the fold holds on
+  every surface and after any reload.
+- Retry on a settled turn forks. Retry in a message's long-press sheet sends
+  `chat.fork_request` for the user turn (`04-chats-and-folders.md` § Branching)
+  and drops every later turn from the view: the retry starts a new track from
+  that point rather than appending to the conversation. It is offered only where
+  the provider can branch natively.
+- Retry in place. A person's Tap to retry on a turn that failed to deliver is
+  the same thing from the other side: the surface sends `chat.input` with
+  `retryOfSeq` set to the ORIGINAL user message's seq, draws no bubble of its
+  own, and the host's resulting `chat.message` folds into the existing bubble
+  as another attempt — the `< >` pager gains a page. The failure mark stays on
+  the bubble until the retry is observed running. The page is added the moment
+  Retry is pressed, not when the host answers: the earlier reply leaves the
+  transcript at once (one `<` away), and only the new run's content appears. A
+  retry that never reaches the host takes the page back off.
+- Retry vs Continue. A turn that failed partway (out of usage, a dropped
+  connection, a crash) offers BOTH on the failed message and on the phone's
+  error row. Retry restarts from that message: the text runs again as a new
+  attempt, and what the first attempt did is set aside. Continue keeps it and
+  carries on as § Continue describes. A long turn may be an hour in when it
+  dies, so Continue is always offered beside Retry and never replaced by it.
+  Neither is offered for a failure that will recur unchanged (input too large):
+  there only "Retry anyway" is drawn.
+- Interruptions. Retry in place is only for a person choosing to re-run a
+  turn. A turn cut off by its machine going down never stamps `retryOfSeq`: the
+  history shows the "Turn interrupted" line, then Continue's resume or visible
+  message, then the next output, all in time order.
+- A failure that has been superseded is not an outcome. As the turn goes
+  round again, the `turnFailed` mark on the bubble comes off. It is not thrown
+  away — it is filed on the ATTEMPT it ended, where the surface's `< >` pager can
+  still reach it. Only a genuinely settled failure — the ladder exhausted, or
+  nothing ever resumed — leaves a mark at rest, and that one keeps its
+  `Tap to retry`.
+- A turn that went round again says so, on the message's own meta strip
+  (`14-design-web.md` § Main chat panel): `Retried once` / `Retried twice` /
+  `Retried N times`.
+
+Why it matters. Unattended work has no one to notice. A job-spawned chat
+that dies on its first turn has not yet claimed its task, so it leaves no trace
+anywhere — the job records the _spawn_ as `ok`, and the task looks like one
+nobody ever filed. A job's run log therefore records a `chat-error` entry
+against the job when a chat it spawned fails, in addition to the earlier `ok`
+for the fire itself.
 
 ## Scenarios
 
@@ -42,9 +156,8 @@ One class of event escapes the cursor: a replay also re-sends every permission r
 
 - Surface notices WS close and its link state becomes `reconnecting` at once. The "reconnecting..." banner waits for the disconnect grace (see Surface connection state model).
 - Surface tries to reconnect with exponential backoff (1s → 2s → 5s → 10s, max 30s).
-- Roster refresh. Replay only covers chats whose transcript the surface holds, so a surface that missed state fan-out (new, renamed, deleted or re-ordered chats) while its socket was down re-reads `GET /api/chats` and hydrates on every reconnect greeting after the first, and whenever the mobile app returns to the foreground. A failed refresh is shown as an error, not swallowed.
-- On reconnect: surface sends `hello` + `chat.replay {chatId, fromSeq}` for every chat whose transcript it already holds (the open chat and any chat with a rendered timeline), rather than the whole roster (see When a surface requests a replay).
-- Server relays replay request to the host. Host streams missed events.
+- On reconnect the surface sends `hello`, then `feed.resume` with its feed position and the position of every chat it follows (`03-wire-protocol.md` § Account feed). The server sends what changed while it was away and each followed chat's entries after its position. Nothing restarts from the beginning and nothing waits on a host.
+- A feed position the server no longer keeps is answered with `feed.reset`, and the surface reloads the chat index. A failed reload is shown as an error, not swallowed.
 - Inbound from user while disconnected: surface queues in-memory. Emits on reconnect. If the surface is killed before reconnect, queued messages are lost — users get a "not sent" indicator.
 
 ### Host → server disconnect
@@ -52,10 +165,10 @@ One class of event escapes the cursor: a replay also re-sends every permission r
 A host dials out to the server, so this fires whenever that link breaks: the host or server restarting, or a laptop host sleeping, changing network, or moving out of range. Reconnection is a normal operating mode.
 
 - The server does not wait for a close to notice. It pings every host socket every 5s, and a host that has sent neither a pong nor any frame for 15s is terminated and announced `host.offline` — a laptop whose lid is shut leaves a TCP link that looks open for minutes, and surfaces must show it offline within seconds.
-- Host marks itself as trying-to-reconnect. In-flight `query()` runs continue locally; their output buffers in host memory.
-- Outbound events (chat messages, tool calls) buffer in host memory (bounded — 10k events per chat; drop oldest with a warning if exceeded).
-- On reconnect: host sends buffered events in order.
-- Server marks the host as `online` again. Surfaces get `host.online` and their chats re-sync.
+- The host's work carries on: turns run, and everything they produce waits in the host's outbox on disk (`02-host.md` § Host outbox).
+- Chats that were running or waiting become Host offline (§ Chat status). Nothing is marked failed.
+- On reconnect the host resends everything after the server's last acknowledged outbox position, in order, then carries on live. Messages the server held for it are delivered (§ Guaranteed input delivery), and each chat's status follows the facts that arrive.
+- The server announces `host.online` to surfaces.
 
 ### Surface connection state model
 
@@ -82,7 +195,7 @@ Offline is per host:
 
 - Chats on reachable hosts stay usable while another host is down. The banner
   names the affected host and appears with that host's chats.
-- Every buffer below (pending webhook/cron payloads, queued surface input) is
+- Every buffer below (pending webhook/cron payloads, held messages) is
   keyed per host and flushed when that host reconnects.
 - A chat, job or voice request stays with its own host, whose folders, tools and
   state are the ones it needs (`04-chats-and-folders.md`).
@@ -97,11 +210,10 @@ Offline is per host:
 A host being unreachable is a first-class, explained UI state. When a surface knows a host is offline:
 
 - The banner appears immediately the moment the surface learns the host is offline — both on a live `host.offline` transition AND on (re)connect, because the server sends the current host status as an `auth.ok` greeting so a surface that connects after the host dropped shows it as offline. There is no window where the UI says "connected" while the agent is actually unreachable.
-- A persistent banner states that the host is unreachable and that messages will be queued and sent when it reconnects, with a tap-through to Settings → Hosts. It is scoped to that host's chats, and becomes app-level when every host is offline.
+- A persistent banner states that the host is unreachable and that messages will be held and sent when it reconnects, with a tap-through to Settings → Hosts. It is scoped to that host's chats, and becomes app-level when every host is offline.
 - Navigation stays fully available — the user can read history and browse chats/settings everywhere.
-- A chat on an offline host offers Continue on another host, which moves the chat from the server's copy (`04-chats-and-folders.md` § Moving a chat to another host).
-- The composer stays usable and QUEUES. A message into an existing chat, or an editor save, sent while its host is offline is ACCEPTED, rendered in a distinct "Host offline — will send when it reconnects" state (never worded as merely "Queued", which reads as the agent being busy; a message already queued behind a turn has its chip read "Host offline" while the host is down), buffered, and delivered automatically on reconnect (see Guaranteed input delivery below). It is always accepted and always delivered. Spawning a new chat on an offline host is refused up front instead, because the folder cannot be validated (`04-chats-and-folders.md` § Spawn). Only real-time-only controls that genuinely cannot be queued — a voice note/call, where audio is ephemeral — render visibly disabled with a host-offline reason.
-- Only chat messages and document saves queue. A document save from a surface into an offline host is accepted and sent without the read-back or conflict check (they need the host), and says it will save when the host reconnects. Host settings do not queue: a host's name, Update and Sign in are disabled while it is offline, with no error raised.
+- The composer stays usable and its messages are held. A message into an existing chat, or an editor save, sent while its host is offline is ACCEPTED, held by the server, rendered in a distinct "Host offline — will send when it reconnects" state (never worded as merely "Queued", which reads as the agent being busy; a message already queued behind a turn has its chip read "Host offline" while the host is down), and delivered automatically on reconnect (see Guaranteed input delivery below). It is always accepted and always delivered. Spawning a new chat on an offline host is refused up front instead, because the folder cannot be validated (`04-chats-and-folders.md` § Spawn). Only real-time-only controls that genuinely cannot be held — a voice note/call, where audio is ephemeral — render visibly disabled with a host-offline reason.
+- Only chat messages and document saves are held. A document save from a surface into an offline host is accepted and sent without the read-back or conflict check (they need the host), and says it will save when the host reconnects. Host settings do not queue: a host's name, Update and Sign in are disabled while it is offline, with no error raised.
 - File browsing, file open and document history on an offline host show a calm "Host offline" in place of the content. A `host_offline` answer is a state, never an error toast or red error line.
 - This state is distinct from WS-`reconnecting` and is shown as such.
 
@@ -126,9 +238,9 @@ What it runs. The screen runs the diagnostics itself, on open and on every Retry
 | Protocol   | what forward compatibility absorbed this session (`03-wire-protocol.md` § Forward compatibility): fields ignored, event types dropped | a surface that is merely a little behind its agent from one that is missing behaviour the agent already has |
 
 The Protocol check is the one place a surface admits it is older than its agent,
-and it grades the two cases differently. **Ignored FIELDS pass**: the agent sent
+and it grades the two cases differently. Ignored FIELDS pass: the agent sent
 something this build has no use for, which is drift worth seeing and nothing
-worth acting on. **Dropped event TYPES fail**, naming the types and saying
+worth acting on. Dropped event TYPES fail, naming the types and saying
 "update this surface": the agent is emitting behaviour this build does not
 implement at all. It is listed last so an upstream failure — no credential, no
 server, no host — still supplies the screen's headline; being behind is never
@@ -146,238 +258,42 @@ Report copies a plain-text diagnostic report — timestamp, origin, WS URL, surf
 
 ### Guaranteed input delivery (surface → host)
 
-A user's `chat.input` is either delivered or reported as failed. There are two hops (surface↔server, server↔host) and each can flap mid-send: a message handed to a socket that dies a instant later is gone with no error, and the in-memory server→host buffer only catches inputs submitted while the host is already detached — not one lost to a flap, nor one lost when the server process itself restarts. The buffer is necessary but not sufficient; delivery is made resilient by tracking every input to completion:
+A user's `chat.input` is either delivered or reported as failed. There are two hops (surface↔server, server↔host) and each can flap mid-send: a message handed to a socket that dies an instant later is gone with no error. Delivery is made resilient by tracking every input to completion:
 
-- Idempotency key. Every `chat.input` / spawn carries a `localId`; the host dedups on `(chatId, localId)`, so re-delivering the same input is a safe no-op. This is what makes blind retry correct.
-- Pending until observed. The sending surface marks the message pending the instant it is submitted and keeps it pending until it OBSERVES the turn take effect: a `chat.input_ack` (below), the chat going `running` for that turn, a `chat.queued {localId}`, the assistant `chat.message`, or a `chat.error`. The one exception is the transient `daemon_unavailable` notice ("Message will resend"): it says the host is away, not that the turn was answered, so the message stays pending and is redelivered the moment `host.online` arrives. Pending messages render in the distinct "sending…/queued" style — the style says whether the turn actually started. The pending line leads with an icon: a clock while the host is online ("Sending…"), a cloud-off while it is away.
+- Idempotency key. Every `chat.input` / spawn carries a `localId`; the host dedups on `(chatId, localId)`, and so does the server for what it holds, so re-delivering the same input is a safe no-op. This is what makes blind retry correct.
+- Pending until observed. The sending surface marks the message pending the instant it is submitted and keeps it pending until it OBSERVES a receipt or the turn take effect: `chat.input_held` (the server holds it for an offline host), `chat.input_ack` (below), the chat going Running for that turn, a `chat.queued {localId}`, the assistant `chat.message`, or a `chat.error`. A held message is drawn as held for the offline host (§ Host-offline UX) until its host acks it. Pending messages render in the distinct "sending…/queued" style — the style says whether the turn actually started. The pending line leads with an icon: a clock while the host is online ("Sending…"), a cloud-off while it is away.
 - Ack. The host emits `chat.input_ack {chatId, localId}` the moment it accepts an input for processing (before the first token); the server relays it. This is the positive receipt that retires the pending state even before output streams — and distinguishes "delivered, working" from "lost".
 - Timeout → idempotent redelivery → loud failure. If a pending input is neither acked nor observed-running within a bounded window (~8s), the surface re-delivers it (same `localId`; the host dedups if it did arrive). After a few failed attempts it stops and shows a persistent "not delivered — tap to retry" affordance on that message. A turn NEVER sits as a silent spinner forever — it resolves to running, to an error, or to a retry affordance.
 - A connected host is not proof that a running worker is healthy. Once a turn has started, ten minutes with no provider event or tool progress ends it with a visible, retryable "agent stopped responding" error. This covers a worker or tool child being killed while the host control socket itself stays online; the UI must not mislabel that state as the whole host being offline, and must not leave the turn `running` forever.
 - Tapping retry is chat-wide, not message-wide. Consecutive sends can each fall into the same flap and pile up as several "not delivered" messages in one chat; tapping retry on any one of them re-sends it AND every other still-pending input in that chat submitted before it (idempotent — same `localId`s, the host dedups), so one tap un-sticks the whole backlog instead of making the user hunt down and tap each earlier message individually. Inputs submitted after the tapped one are untouched — they are still on their own timeout/retry schedule.
-- Queue across an offline host. While host presence is `offline`, inputs are queued (server-side per-surface buffer — cap 10k, drop-oldest with a warning — when only the host is down; surface-side when the server is also unreachable) and flushed in arrival order on reconnect, where ack/observe proceeds as above. The surface shows them as queued with the reconnect reason.
-- Survives a server restart. The server→host buffer is in-memory, so a server restart drops it — but the surface still holds each un-acked input and its pending-timeout redelivers it once the surface's own WS re-establishes. The surface is the source of truth until it sees an ack.
+- Held across an offline host. While the host is offline the server holds inputs on its disk (`01-server.md` § Responsibilities) and delivers them in arrival order when the host returns; when the server is also unreachable, the surface keeps them and sends them on reconnect. Ack and observe proceed as above.
+- Survives a server restart. Held messages are on the server's disk, so a restart keeps them, and the surface still holds each input it has no receipt for and redelivers it once its own connection is back. The surface is the source of truth until it sees a receipt.
 - A turn that was delivered, started, and then failed for an unclassified reason (as opposed to a specific, recoverable case that gets its own error message, like an offline host or an invalid session) is reported on the message that failed, the same "tap to retry" treatment as an undelivered input, rather than as a separate line in the transcript — every "this didn't get a reply" case looks and behaves the same regardless of which hop broke. Retrying resends the message's text as a brand new turn: the original is already recorded as run, so resending its exact input would be deduped into a no-op rather than actually retrying it.
 
-### Server dies
+### Server restarts
 
-- All connections drop.
-- Surfaces show offline. Hosts buffer.
-- When server restarts: clients reconnect, replay everything.
-- Until a host has reconnected and re-announced its chats, the server does not
-  know which chats are on it. A request naming a chat it does not hold is
-  answered `503` naming the host that has not reported yet and whether it is
-  reconnecting or offline, never "chat not found". Only once every registered
-  host has reported is an unknown chat a `404`.
-- A surface's replay request for a chat the server has not yet learned the host of
-  is answered from the server's own message log straight away, so history is on
-  screen before any host has reconnected.
+- All connections drop; surfaces show the server restarting or unreachable (§ Server lost).
+- The stop is bounded: every connection gets the going-away notice, open requests are cut rather than waited on, a socket still open 2 seconds after its notice is closed, and a stop that has not finished in 15 seconds ends the process and is logged as a fault.
+- Nothing is marked failed and no chat changes status because the server went. Turns keep running on their hosts, whose outboxes hold what they produce.
+- The server starts from its record, chat index and held messages on disk (`01-server.md`), so every chat and its history is available to surfaces as soon as it is up, before any host has reconnected.
+- Hosts reconnect and resend everything after their last acknowledged outbox position; surfaces resume the feed from their positions.
 
-### A host process dies
+### A host restarts
 
-- All in-flight SDK queries die with the host (the SDK runs in-process; there are no orphan subprocesses to keep alive).
-- A surface applies `claude_session_invalid` only to a chat confirmed by its
-  account roster or by a live `chat.spawned` event. A replayed state/error pair
-  for a chat absent from that authoritative roster is stale session evidence,
-  not permission to manufacture a new chat row; any row the stale state seeded
-  is retracted so it cannot create a phantom "New chat" entry in the sidebar.
-  Once the REST roster has hydrated, a bare `chat.state` for an id absent from
-  both that roster and the surface's optimistic rows is ignored for the same
-  reason; state updates a chat, it does not create one.
-- Likewise, `chat.error` reports a turn outcome and never establishes a chat.
-  After hydration an error for an id absent from both the authoritative roster
-  and the surface's optimistic rows is ignored, regardless of error code or the
-  order in which several failures for that id replay.
-- Hidden is independent of failure: a hidden background/job chat that becomes
-  `errored` remains in Hidden and never moves into the main project list.
-  Archived and deleted lifecycle states still take precedence over Hidden.
-- the agent's native session history (`~/.claude/projects/<encoded>/<session>.jsonl`) is unaffected — it's already on disk up to the last persisted message.
-- On host restart: scans `~/.patch/chats/*/meta.json`, marks every chat as `idle`. No PID lookups; no reattach. The next user message for any chat triggers a fresh `query({ resume: meta.claudeSessionId, prompt: <message> })` and the SDK reconstructs context from the JSONL.
-- Server notified of `host.offline` during the gap, `host.online` + per-chat state on recovery.
-- A query that was mid-tool-call when the host died loses that tool call. The user (or the host's pending-action queue) decides whether to retry; typically the agent's next turn continues, since the agent sees the partial state via resume.
+- Turns, terminals, watches and background jobs run as their own processes and keep going. The host reattaches to them on start and loads only the chats with live or owed work (`02-host.md` § Host restarts, § Chat loading).
+- A planned restart announces itself, so the chats it was working on show Host restarting rather than Host offline (§ Chat status). A host that crashed is Host offline until it returns.
+- When the host is back each turn is live again, or ended while it was away and reported through the outbox, or, if its process is gone, Interrupted.
 
-### A host reboots
+### A host's machine goes down
 
-- Same as "host process dies." Nothing extra to do. SDK has no live state to restore, only history; resume covers it.
+- The turns' processes die with the machine. When the host is back, each turn that was running is Interrupted (§ Continue).
 - Chats with no turn owed come back idle and stay there — a reboot does not wake a chat that was already finished.
+- A turn that was mid-tool-call loses that tool call; the provider's session holds everything up to it.
 
-### A turn only dies for a reason someone chose
+### Events for unknown chats
 
-A turn is owed until it settles. It stops being owed when the user stops it, the
-credential is refused, the session is gone, or its retries run out — and for no
-other reason. Everything else the host can be hit with is temporary and is
-waited out:
-
-- **A usage or rate limit.** The turn is parked until the limit resets and then
-  re-sent. `resetsAt` comes from the SDK's `rate_limit_event` (soonest of the
-  session and week windows, so a 5-hour limit is not deferred to a 7-day one);
-  with no `resetsAt` to hand, 60 seconds. A 529 overload backs off instead,
-  5s doubling to a 60s cap. Detection is on the fields the provider states
-  structurally on the failing message — the typed error kind and the
-  `quotaLimits` block beside it. The error text is the fallback for a provider
-  that sends no such block, and it is needed: a hit limit sometimes arrives as
-  prose only ("You've hit your limit · resets 5pm (UTC)"), so matching
-  `usage_limit_exceeded`-style codes alone silently drops the very case this
-  exists for. A structured block that says the account is not blocked is an
-  answer, not a gap — the prose behind it is not consulted.
-
-  AUTO-RESUME DECIDES WHETHER A TIMER IS SET, NOT WHETHER THE FAILURE IS
-  UNDERSTOOD. With it off, or once a retry budget is spent, the turn is still
-  owed and still carries the same structured notice — without a resume time,
-  because none was scheduled. `Send` re-sends the owed turn. A stated limit
-  never goes on the generic retry ladder below: the window resets hours away,
-  so three attempts a minute apart only fail three more times, each one saying
-  so again everywhere a failure is reported.
-
-  A NEW MESSAGE TO A CHAT KNOWN TO BE BLOCKED JUST QUEUES. The host does not
-  re-send the owed turn because someone typed: it already knows the account is
-  blocked, and the attempt would only hit the limit again. For the person who
-  knows better (credit topped up, a limit lifted early) the limit card header
-  carries a small, subtle retry icon that is always enabled; it sends
-  `chat.resume_now_request`, the same as `Send`, and the queued messages drain
-  behind the owed turn.
-
-  IT IS NOT A BANNER. The failure carries a structured `limitBlock` — which
-  account, which pool, how full, when it clears — and the surface renders it as
-  A MESSAGE IN THE TRANSCRIPT, under the turn it belongs to. It is about the reply that is not coming yet, so it
-  reads as the next thing in the conversation; in the chrome above it, it was
-  one more permanent-looking strip among six.
-
-  THE HEADLINE NAMES A POOL A PERSON SPENDS — the session (5-hour) or the week
-  (7-day). NEVER the overflow. Overage is what covers for those two when they
-  empty; naming it as the limit reached produced "Extra usage limit on Default",
-  a sentence about a limit nobody reached that suggests no action. A rejected
-  overage on its own blocks nothing and must not read as blocked anywhere.
-
-  THE CARD IS FULL WIDTH. Its heading is the limit and account — "Session limit
-  · Work" — with "Resets in 16 min · 15:00" on the right, ticking. Where nothing
-  stated a reset there is no countdown, rather than an invented one; only a reset
-  the provider stated (on the failing message, or from the account's own windows)
-  reaches the card. Once the reset passes and the card is still there, no pause
-  is left, so the turn demonstrably has not run: the heading reads "Session
-  limit reset · Work", the corner "4 min ago", and "Message not sent" sits under
-  it. All text is at least 14px.
-
-  THE SAME CONTROLS ARE ALWAYS DRAWN, plus the `Auto-resume` toggle (bound to
-  the shared `autoResumeRateLimit`). One that cannot help is greyed out with a
-  tooltip saying why, never hidden:
-  - `Send` (`chat.resume_now_request`) — disabled until the reset ("Available at
-    15:00"); re-sends the parked turn.
-  - `Change account` (menu) — the connected accounts of the chat's provider
-    with usage left, other than the one that ran out. Choosing one locks the
-    chat to it and re-sends. Disabled when there is none ("No other account has
-    usage left").
-  - `Change provider` (menu) — every connected provider with usage left, other
-    than the chat's own; not a fixed pair. Choosing one moves the chat to one of
-    its models (with the usual cross-provider warning) and re-sends. Disabled
-    when none ("No other provider has usage left").
-  - `Extra usage ↗` — a link to the provider's usage settings, because patch
-    cannot flip an account setting. Disabled when extra usage did not fail to
-    cover the limit ("Extra usage is already on").
-    The filled button is the first enabled of `Change account`, `Change provider`,
-    `Send`. There is no model picker: a session or weekly limit covers every model
-    on the account, so a model change cannot escape it. There is no "N other
-    accounts available" line; the controls say it.
-
-  Whenever the pause ends the notice is withdrawn from every surface — when an
-  armed wait elapses, whether or not there is still a turn to re-send, and when
-  `Send` finds nothing owed — because a notice that outlives its limit leaves a
-  control that does nothing when pressed. A surface withdraws it on its own
-  account too, the moment the chat reports a turn in flight (`running` or
-  `awaiting-permission`): a running turn and a limit pause are mutually
-  exclusive states of one chat, so that report is proof the pause is over
-  whatever fields came with it. An `idle` or `errored` chat does not clear it. A
-  usage limit is `errored` whether or not a resume is armed — the badge is the
-  failure triangle and the notification a failure, never the green tick of a
-  finished turn; no `chat.error` row is added for a parked one. (A 529 overload
-  backoff is transient load and stays `idle`.)
-
-  WHERE PATCH STATES A FAILURE ITSELF, THE PROVIDER'S SENTENCE IS NOT COPY
-  ANYWHERE. A failure the provider states structurally is reported in patch's
-  own words, built from those fields, and that one account is what every surface
-  shows: the transcript, the chat's last error, and the run log of a job whose
-  chat failed. The provider's sentence is diagnostic detail — it stays in the
-  host log and as the raw field of the structured block — and is never
-  rendered as the failure. Otherwise the same failure is read twice, once in
-  patch's words and once in the provider's, and the two disagree about which
-  limit was even reached. This is driven off the structured fields, never off a
-  match on the wording: a failure patch has no structured account of keeps its
-  real message, in full.
-
-- **Any other SDK failure** — a dropped connection, a 5xx, a crash mid-stream.
-  Retried on a 10s / 30s / 90s ladder. The chat still goes `errored` and still
-  emits `chat.error` each time, so the failure is never hidden; the ladder
-  either clears it or exhausts itself in the open.
-- **The host dying mid-turn**, which is what every deploy does. Owed turns are
-  written to `meta.json` as `pendingTurns` and re-sent on the next boot. That
-  includes turns parked for a retry: a park can outlast the process, so it
-  cannot live only in a timer.
-
-`autoResumeRateLimit` (host state) gates the limit park, and is ON unless the
-user turns it off. The generic ladder is not gated: a turn dropped by a network
-blip is not a preference.
-
-#### What a recovery leaves behind
-
-A turn that recovered is ONE turn, however many goes it took. Every re-send —
-a restart resume, a rung of the ladder, a limit park coming back — is the host
-re-running a turn the user sent once, so it must not read as a message the user
-sent again.
-
-- The re-sent user `chat.message` carries `retryOfSeq`: the seq of the ORIGINAL
-  user message for that turn, on every attempt, never the attempt before it. A
-  surface folds the copy into the bubble already on screen instead of drawing
-  the same sentence a second time. A user retyping the same thing is a new turn.
-- **Retry on a settled turn forks.** Retry in a message's long-press sheet sends
-  `chat.fork_request` for the user turn (`04-chats-and-folders.md` § Branching)
-  and drops every later turn from the view: the retry starts a new track from
-  that point rather than appending to the conversation.
-- **Retry in place.** A person's Tap to retry on a turn that failed to deliver is
-  the same thing from the other side: the surface sends `chat.input` with
-  `retryOfSeq` set to the ORIGINAL user message's seq, draws no bubble of its
-  own, and the host's resulting `chat.message` folds into the existing bubble
-  as another attempt — the `< >` pager gains a page. The failure mark stays on
-  the bubble until the retry is observed running. The page is added the moment
-  Retry is pressed, not when the host answers: the earlier reply leaves the
-  transcript at once (one `<` away), and only the new run's content appears. A
-  retry that never reaches the host takes the page back off.
-- **Retry vs Continue.** A turn that failed partway (out of usage, a dropped
-  connection, a crash) offers BOTH on the failed message and on the phone's
-  error row. Retry restarts from that message: the text runs again as a new
-  attempt, and what the first attempt did is set aside. Continue keeps it — it
-  sends a fresh "Continue" turn into the same session so the agent picks up
-  where it got to. A long turn may be an hour in when it dies, so Continue is
-  always offered beside Retry and never replaced by it. Neither is offered for a
-  failure that will recur unchanged (input too large): there only "Retry
-  anyway" is drawn.
-- **Restart interruptions.** Retry in place is only for a person choosing to
-  re-run a turn. A host restart that cuts a turn off never stamps `retryOfSeq`:
-  the history shows an inline line, "Turn interrupted by restart", then the
-  host's automated re-send as its own message, then the next attempt's output,
-  all in time order. Chats written before this, whose restart re-sends carried
-  `retryOfSeq`, are replayed the same way (the re-send after a legacy marker is
-  unfolded), so nothing sits behind a pager.
-- The link between attempts is written to the chat's `retryMarks` and spliced
-  back on at replay. The agent's own transcript records each attempt as an
-  ordinary user turn and knows nothing about the one it repeats, so without this
-  the fold would come apart on reload.
-- **A failure that has been superseded is not an outcome.** As the turn goes
-  round again, the marks that said it failed come off: the `turnFailed` flag on
-  the bubble, and the server's out-of-band `daemon_unavailable` card. They are
-  not thrown away — each is filed on the ATTEMPT it ended, where the surface's
-  `< >` pager can still reach it. Only a genuinely settled failure — the ladder
-  exhausted, or nothing ever resumed — leaves a mark at rest, and that one keeps
-  its `Tap to retry`.
-- A turn that went round again says so, on the message's own meta strip
-  (`14-design-web.md` § Messages): `Retried once` / `Retried twice` /
-  `Retried N times`.
-
-**Why it matters.** Unattended work has no one to notice. A job-spawned chat
-that dies on its first turn has not yet claimed its task, so it leaves no trace
-anywhere — the job records the _spawn_ as `ok`, and the task looks like one
-nobody ever filed. A job's run log therefore records a `chat-error` entry
-against the job when a chat it spawned fails, in addition to the earlier `ok`
-for the fire itself, and a chat's `lastError` is persisted for every error code
-rather than only for an invalid session, so a restart cannot erase why it died.
+- A `chat.state` or `chat.error` for a chat absent from both the chat index the surface holds and its own optimistic rows is ignored. State and errors update a chat; they never create one.
+- Hidden is independent of failure: a hidden background/job chat that becomes Failed remains in Hidden and never moves into the main project list. Archived and deleted lifecycle states still take precedence over Hidden.
 
 ### Webhook arrives while a host is down
 
@@ -400,7 +316,7 @@ If a host stays offline through multiple cron firings, the user gets a backlog o
 
 A backlog released by a reconnect is still subject to the job's own concurrency limit (`08-triggers-and-jobs.md` § Concurrency) — a host coming back does not let a limited job run its whole backlog at once. This is the difference between the two queues: the pending buffer is per host, capped, and drops its oldest when full; the concurrency queue is per job and unbounded — a fire waits, it is never refused.
 
-In-chat timers use `patch_wake_me` (`02-host.md` § Self-wake), which is durable across host restarts: the pending wake is persisted to disk, re-armed on boot, and any wake that came due during downtime fires once on restart. (the agent's native `CronCreate` would NOT survive — it's scoped to one in-process query and dies with the turn — which is exactly why patch disallows it and owns the timer itself; see `principles.md` § Tool ownership.)
+In-chat timers use `patch_wake_me` (`02-host.md` § Self-wake), which is durable across host restarts: the pending wake is persisted to disk, re-armed on boot, and any wake that came due during downtime fires once on restart (`principles.md` § Patch-owned state).
 
 ### Voice session mid-disconnect
 
@@ -410,8 +326,6 @@ In-chat timers use `patch_wake_me` (`02-host.md` § Self-wake), which is durable
 
 ## What we don't do
 
-- No cross-region failover.
-- No message deduplication beyond `seq`. If a host emits `seq` 42 twice (shouldn't happen, but belt-and-braces), server sees both and forwards both.
 - No transactional guarantees across chats. Each chat is its own stream.
 - No end-to-end receipts for notifications — we don't confirm a user actually saw a push. (User input, by contrast, IS delivery-guaranteed — see Guaranteed input delivery. The distinction: an input we accept must reach the host or fail loudly; a push is fire-and-forget.)
 
@@ -419,11 +333,14 @@ In-chat timers use `patch_wake_me` (`02-host.md` § Self-wake), which is durable
 
 - Every WebSocket connect/disconnect logged with reason code.
 - Host heartbeat dashboard in the web app (admin/developer view).
-- `patch doctor` (CLI) runs: check server reachability, per-host status, pending webhook/cron count, chat errored count. See `17-cli.md`.
+- `patch doctor` (CLI) runs: check server reachability, per-host status, pending webhook/cron count, failed chat count. See `17-cli.md`.
 
 ## Cross-refs
 
-- Sequence numbering on events: `03-wire-protocol.md`
-- Host resume mechanics: `02-host.md`, `04-chats-and-folders.md`
+- Frames, positions and the account feed: `03-wire-protocol.md`
+- Status authority, held messages and the chat record: `01-server.md`
+- Host outbox and reattach: `02-host.md`
+- Account states, limit behaviour and sign-in: `10-auth.md`
+- Device copy and loading: `05-surfaces.md`
 - Surface heartbeat + presence: `05-surfaces.md`
 - Notification-on-disruption: `09-notifications.md`

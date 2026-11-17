@@ -6,7 +6,7 @@ Outbound messages from a chat to the user (not to another agent).
 
 A notification is a doorbell first: it exists in the moment, on whichever surface it reaches, and the OS keeps its own copy (phone notification centre, macOS notification centre). The user can still miss one, dismiss it by accident, or have it suppressed while a surface was foregrounded, so the server also keeps a short log of what agents sent, and the web surface shows it behind a bell.
 
-- **What is logged:** every agent-sent notification (`patch_notify` at any importance, and `patch_ask_human`'s push). Not logged: a `patch_call` ring, and the notifications the server raises itself (turn finished, permission waiting, batch check-in) — those have their own place in the sidebar (`04-chats-and-folders.md` § Current status).
+- **What is logged:** every agent-sent notification (`patch_notify` at any importance, and `patch_ask_human`'s push). Not logged: a `patch_call` ring, and the notifications the server raises itself (turn finished, permission waiting, batch check-in) — those have their own place in the sidebar (`04-chats-and-folders.md` § Chat model).
 - **Entry:** id, source chat, message (as the agent wrote it), importance, `deepLink` if any, time sent, and read state. Logged whether or not the channel was suppressed — the log is "what the agent said", not "what reached me".
 - **Read state is account-wide and server-held**, so reading on the web clears the unread state everywhere. An entry is unread until the user opens it from the bell (which also opens its source chat), presses "Mark all read", or looks at its source chat: while a chat is open in a web pane or tab, every unread entry for it — already there or arriving live — is marked read. A push being tapped does not mark one read, since the log is a separate surface from the OS tray.
 - **On the chat row:** an unread entry is unread output, so the chat's sidebar row draws the ordinary unread `done` dot (`14-design-web.md` § Status badges) for as long as one is unread, and settles back when it is read. It lifts only the quiet states — a chat that is working, failed or waiting on a decision keeps that badge, which outranks unread. There is no separate bell glyph on the row: one column, one mark. The same status shows wherever the web draws a chat's badge (sidebar, mini sidebar, pane tab, threads and batch panels), from one shared derivation.
@@ -16,7 +16,7 @@ A notification is a doorbell first: it exists in the moment, on whichever surfac
 - The source chat stays the canonical record: every `patch_notify` call is also a tool-call entry in the source chat's history. There is still no cross-channel timeline of OS-level toasts — the bell shows what agents sent, not how it was delivered.
 - The server's broadcast log (speakers) stores broadcast metadata for the agent's reply-context purposes. The thread's agent sees it only when interpreting a reply.
 
-Not in the bell: it is not how a chat becomes worth looking at later. That is a status (`04-chats-and-folders.md` § Current status), persisted and set by a different tool. A notification does, however, un-archive and un-hide its source chat (`04-chats-and-folders.md` § Current status), so the chat that rang is in the list when the user follows it.
+Not in the bell: it is not how a chat becomes worth looking at later. That is a status (`04-chats-and-folders.md` § Chat model), persisted and set by a different tool. A notification does, however, un-archive and un-hide its source chat (`04-chats-and-folders.md` § Chat model), so the chat that rang is in the list when the user follows it.
 
 REST: `GET /api/notifications` → `{ items, unread }`; `POST /api/notifications/read` with `{ ids: string[] }` or `{ all: true }` → the same shape.
 
@@ -69,7 +69,7 @@ patch_speak({
 
 It fills the room, anyone in it hears, and nothing is left behind to read later. `deviceId` names a speaker; omitted, the server picks one as in `### speakers`.
 
-`deepLink` is a URI for an installed app — its own custom scheme (e.g. `citymapper://directions?...`) or an `https://` link the OS routes to that app — that the notification should open instead of the source chat. Only a delivery that lands as a push acts on it (see `### push` below); a desktop toast or a speaker ignores it. Every notify's tool-call record carries whatever `deepLink` was given, so the chat transcript shows the same tappable link that fired (`04-chats-and-folders.md` § tool-call rendering, `14-design-web.md` § Main chat panel, `15-design-mobile.md` § Chat detail).
+`deepLink` is a URI for an installed app — its own custom scheme (e.g. `citymapper://directions?...`) or an `https://` link the OS routes to that app — that the notification should open instead of the source chat. Only a delivery that lands as a push acts on it (see `### push` below); a desktop toast or a speaker ignores it. Every notify's tool-call record carries whatever `deepLink` was given, so the chat transcript shows the same tappable link that fired (`14-design-web.md` § Main chat panel, `15-design-mobile.md` § Chat detail).
 
 `quickReplies` is at most 2 short strings the agent can predict as likely answers (e.g. `["Yes", "Snooze 10 min"]`). Each becomes its own button on a push or desktop notification (§ Notification actions); tapping one sends that exact text back into the source chat as the user's reply, the same as typing it. Omitted, the notification carries Reply alone.
 
@@ -77,7 +77,7 @@ The call is fire-and-forget from the source chat's POV — a tool call recorded 
 
 ## `patch_ask_human` — blocked on a person
 
-Permissions and questions already escalate themselves: a chat that blocks on either comes out of Archived and pushes (`04-chats-and-folders.md` § Lifecycle, § Waiting on you). That covers a decision to make and a tool to approve. It does not cover the third case — work only a person can do, in the world:
+Permissions and questions already escalate themselves: a chat that blocks on either comes out of Archived and pushes (`04-chats-and-folders.md` § Chat model, § Waiting on you). That covers a decision to make and a tool to approve. It does not cover the third case — work only a person can do, in the world:
 
 ```typescript
 patch_ask_human({
@@ -88,13 +88,13 @@ patch_ask_human({
 
 Granting a permission the OS will only take by hand, plugging something in, signing a form, taking a photo. The agent is blocked, but there is nothing to approve and nothing to decide, so neither existing path fits, and without this a job in that position can only write into a chat nobody is looking at.
 
-It pushes at the alert rung and **declares the chat's status as `question`** (`04-chats-and-folders.md` § Current status), which un-archives it on the same one-way rule as a permission block: a chat blocked on a person cannot stay hidden. Blocked on an answer and blocked on a person are the same fact about the chat, so they are the same kind.
+It pushes at the alert rung and **declares the chat's status as `question`** (`04-chats-and-folders.md` § Chat model), which un-archives it on the same one-way rule as a permission block: a chat blocked on a person cannot stay hidden. Blocked on an answer and blocked on a person are the same fact about the chat, so they are the same kind.
 
-Declaring is what makes the ask survive the notification. `task` becomes the line on the chat's row and is persisted, so a missed push does not lose the request and a restart does not either — it used to un-archive and nothing else, leaving the task inside a notification that had already gone, and a row that read as merely finished. It stays until the user puts a turn into the chat. Write `task` as an instruction the user could follow without opening the chat; `why` carries the consequence of not doing it. Having called it, the agent decides for itself whether to wait or carry on with whatever is still possible — the platform does not park the turn on its behalf.
+Declaring is what makes the ask survive the notification. `task` becomes the line on the chat's row and is persisted, so a missed push does not lose the request and a restart does not either. It stays until the user puts a turn into the chat. Write `task` as an instruction the user could follow without opening the chat; `why` carries the consequence of not doing it. Having called it, the agent decides for itself whether to wait or carry on with whatever is still possible — the platform does not park the turn on its behalf.
 
 ## `patch_report` — worth seeing, nothing blocked
 
-The third and only agent-elected way into the sidebar (`04-chats-and-folders.md` § Current status):
+The third and only agent-elected way into the sidebar (`04-chats-and-folders.md` § Chat model):
 
 ```typescript
 patch_report({
@@ -164,12 +164,12 @@ Use `patch_notify` only when the message is unsolicited or destined for a differ
 
 A `push` or `desktop` notification carries inline actions so it can be acted on without opening the app, on top of the tap-through that already opens the chat (or a `deepLink`). What actions it carries follows from what kind of notification it is:
 
-| Notification                                                  | Actions                                                                                                                                                         |
-| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Any chat notification (turn finished, failed, `patch_notify`) | Reply — a text field whose typed text sends as the user's own message into that chat (queued if the chat is already running).                                   |
-| Pending permission (an ordinary tool approval)                | Approve / Deny. Approve requires the device to be unlocked, because approving can run a command; Deny and Reply both work from the lock screen.                 |
-| Pending question (`AskUserQuestion`)                          | Its options as buttons, when there are 3 or fewer and it's a single question with a single-select answer. Otherwise, Reply — the typed text becomes the answer. |
-| `patch_notify` with `quickReplies`                            | Each of up to 2 short strings renders as its own button alongside Reply; tapping one sends that exact text as the user's reply (spec/06 § `patch_notify`).      |
+| Notification                                                  | Actions                                                                                                                                                                                 |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Any chat notification (turn finished, failed, `patch_notify`) | Reply — a text field whose typed text sends as the user's own message into that chat (queued if the chat is already running).                                                           |
+| Pending permission (an ordinary tool approval)                | Approve / Deny. Approve requires the device to be unlocked, because approving can run a command; Deny and Reply both work from the lock screen.                                         |
+| Pending question (`AskUserQuestion`)                          | Its options as buttons, when there are 3 or fewer and it's a single question with a single-select answer. Otherwise, Reply — the typed text becomes the answer.                         |
+| `patch_notify` with `quickReplies`                            | Each of up to 2 short strings renders as its own button alongside Reply; tapping one sends that exact text as the user's reply (`06-threads-manager-speakers.md` § Cross-chat toolset). |
 
 Buttons that answer with a fixed text (quick replies, a question's options) open the app as they send, because Android only hands the tap to the app's code while that code is running — with the app killed, a button that did not open it would do nothing. Reply and Deny send without opening it.
 
@@ -191,7 +191,7 @@ Every push is sent at FCM **high priority**, whatever the rung. Normal priority 
 
 Each rung is **interpreted per surface** — it is a statement about how much this matters, not an instruction about a mechanism, and every surface honours it in its own terms. On Android that means a notification channel, because a channel is the only thing there that controls sound and vibration (message priority merely decides how promptly the device wakes): a silent push carries the LOW-importance `patch_quiet` channel with sound and vibration off, a normal one the default channel and sound, and an urgent one the `patch_urgent_alert` channel, which plays the app's bundled urgent sound (`res/raw/patch_urgent.wav`). A phone on an APK older than that channel shows an urgent push with the ordinary sound. On the desktop the same three rungs are a silent toast, an ordinary toast, and a toast with a more urgent system sound. The rung crosses surfaces; the mechanism never leaves the surface that needs it, and no agent ever names one.
 
-A push from an **archived** chat un-archives it, one-way, exactly as blocking on a permission does (`04-chats-and-folders.md` § Lifecycle). The tap target of a push is its source chat, so a notification from a chat that stays archived points somewhere the user has no reason to look.
+A push from an **archived** chat un-archives it, one-way, exactly as blocking on a permission does (`04-chats-and-folders.md` § Chat model). The tap target of a push is its source chat, so a notification from a chat that stays archived points somewhere the user has no reason to look.
 
 ### `desktop`
 
@@ -234,33 +234,23 @@ The log lives on the server because delivery is spread across hosts while the th
 
 A record is written as the notify is routed rather than on a host's confirmation that it spoke or posted: an announcement that fell through to voicemail reached the user too, and a reply to it needs the same context.
 
-### Injection on user reply
+### On user reply
 
-When the user sends a real reply into the Speakers thread (transcribed voice utterance), the Manager host asks the server for that thread's pending broadcasts (`GET /api/broadcasts/:thread`, authed with its `daemonKey`) and constructs the SDK `query()` prompt by prepending a `<system-reminder>` block containing them:
+When the user sends a real reply into the Speakers thread (transcribed voice utterance), the Manager host asks the server for that thread's pending broadcasts (`GET /api/broadcasts/:thread`, authed with its `daemonKey`) and sends them ahead of the reply as a note labelled `Broadcasts` (`04-chats-and-folders.md` § Notes to the agent): an ordinary message in the thread's record, shown as a quiet row the user can open.
 
 ```
-<system-reminder>
 Recent broadcasts delivered on this thread (newest last):
-- 5 min ago: "washing host done" (from chat: washing-host-watcher)
+- 5 min ago: "washing done" (from chat: washing-watcher)
 - 1 min ago: "bus arriving in 8 min" (from chat: bus-watch)
-</system-reminder>
-
-snooze for 10 minutes
 ```
 
-The model treats `<system-reminder>` tags as authoritative harness messages, interprets the user's reply against the broadcast list, and asks for clarification if it's still ambiguous.
-
-Timestamps are relative (`5 min ago`) so the agent can judge whether a broadcast is still relevant — a reply 2h later may be unrelated.
-
-### Persistence
-
-The `<system-reminder>` block lands in the session JSONL as part of the user turn. On resume the agent sees prior reminders in its history, with the `min/h ago` timestamps making them clearly stale.
+The agent interprets the user's reply against the broadcast list, and asks for clarification if it's still ambiguous. Timestamps are relative (`5 min ago`) so the agent can judge whether a broadcast is still relevant — a reply 2h later may be unrelated. Like every message, the note stays in the thread's record and the provider session, where its timestamps make it clearly stale later.
 
 ### Flush
 
 After the agent commits a response to the user's reply, the host clears what it consumed (`DELETE /api/broadcasts/:thread?through=<ts>`, naming the newest entry it was given). Next reply only sees broadcasts that arrived since.
 
-If the agent invocation fails (network drop, SDK error), no flush is sent — the broadcasts are still pending and will inject on the next attempt.
+If the turn fails (network drop, provider error), no flush is sent — the broadcasts are still pending and go with the next attempt.
 
 ### Mid-turn arrivals
 
@@ -268,11 +258,11 @@ A broadcast that fires while the agent is processing a user reply lands in the l
 
 ### Cap
 
-Broadcast text injected into a turn is capped at 10k chars; the server returns the newest entries that fit, and the flush that follows clears the older ones along with them.
+Broadcast text sent with a turn is capped at 10k chars; the server returns the newest entries that fit, and the flush that follows clears the older ones along with them.
 
 ## Chat completion
 
-When a chat's turn settles — its activity goes from running to idle — the server notifies the user without any agent asking it to. This, § A turn that failed, § Waiting on you and § Batch check-in are the four notifications Patch raises on its own; everything else on this page starts with a `patch_notify` call.
+When a chat's turn settles — its status goes from running to idle — the server notifies the user without any agent asking it to. This, § A turn that failed, § Waiting on you and § Batch check-in are the four notifications Patch raises on its own; everything else on this page starts with a `patch_notify` call.
 
 - Desktop fires on every desktop surface except one that already has this exact chat open — it is already in front of the user, so the toast would only repeat what the screen already shows. If Patch is open on the computer at all the toast appears there; if it isn't, the notification is simply not delivered anywhere.
 - Push fires only when no computer surface is active — the user is somewhere other than the host Patch is on. A live phone surface does not suppress it, since being on the phone is exactly when the push is the point.
@@ -293,14 +283,14 @@ The trailing half is the best account of **this turn** available on the frame th
 | Source                              | What it is                                                                                                                            |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | `turnSummary` on the settling frame | The agent's own closing words — the last thing it said before the turn settled, flattened to one line and cut to notification length. |
-| The chat's current status summary   | A model's after-the-fact reading of the settled thread (`04-chats-and-folders.md` § Current status).                                  |
+| The chat's current status summary   | A model's after-the-fact reading of the settled thread (`04-chats-and-folders.md` § Chat model).                                      |
 | nothing                             | `<name> finished` alone.                                                                                                              |
 
-The agent's own words come first because nothing else here was written by the thing that did the work. The status summary is second because it is second-hand and, more practically, because it is generated by a separate call that lands on a LATER `chat.state` than the settling one — so at the moment the doorbell rings it is usually the previous turn's line, or nothing at all. That is why this notification used to read as little more than the chat's opening message played back.
+The agent's own words come first because nothing else here was written by the thing that did the work. The status summary is second because it is second-hand and, more practically, because it is generated by a separate call that lands on a LATER `chat.state` than the settling one — so at the moment the doorbell rings it is usually the previous turn's line, or nothing at all.
 
 The chat's first-message preview is not in that list at any level. It says what was asked for once, not what just happened. It still resolves the name, where being a durable label for the chat is exactly the job.
 
-`turnSummary` is read off the settling frame and not off the server's mirror of the chat, for the same reason `turnOrigin` and `turnStopped` are: the mirror is the fold of every frame so far and still holds the last turn's summary until this turn's arrives, while the frame is the one thing that speaks for the turn that just ended. The host clears it as the next turn goes running (`03-wire-protocol.md`), so a settling frame never quotes the turn before it.
+`turnSummary` is read off the settling frame and not off the server's stored state of the chat, for the same reason `turnOrigin` and `turnStopped` are: the stored state is the fold of every frame so far and still holds the last turn's summary until this turn's arrives, while the frame is the one thing that speaks for the turn that just ended. The host clears it as the next turn goes running (`03-wire-protocol.md`), so a settling frame never quotes the turn before it.
 
 It is optional on the wire, and its absence changes nothing: a host too old to send it leaves the message reading exactly as it did before the field existed. `null` is read the same way, and means the turn genuinely ended with nothing said — it finished on a tool call — in which case no line is invented to cover it.
 
@@ -318,7 +308,7 @@ A turn is `host` when the host started it for the chat rather than a person did:
 
 Everything else is `user`: a composer turn from any surface, a voice turn, a fork or a side thread. Origin is a property of the turn, not of the chat — a watcher chat that loops silently all day still notifies the moment the user types into it themselves.
 
-A retry inherits the origin of the turn it retries, and survives a host restart carrying it, so a user turn that had to go round the SDK-error or rate-limit ladder still notifies exactly once when it finally settles — and a self-wake that went round the same ladder still says nothing.
+A retry inherits the origin of the turn it retries, and survives a host restart carrying it, so a user turn that went through transient-error retries or a limit pause still notifies exactly once when it finally settles — and a self-wake that did the same still says nothing.
 
 A chat draining a queue settles once, when the queue is empty (`04-chats-and-folders.md` § Message queueing), and that settle carries `user` if the user sent anything into the drain — a self-wake or a `send_to` that queued in behind their message and ran last does not swallow the notification they were waiting for.
 
@@ -342,24 +332,17 @@ So when a `user` turn settles and either holds, the notification is owed rather 
 
 ## A turn that failed
 
-A turn that errors out is the same news as one that finishes — the thing the user was waiting on is not coming — so it rings the same doorbell. It fires on the edge into `errored` (from `running`, or from `idle` for a pre-flight failure such as a missing folder), reads `<name> failed: <error>`, and is delivered exactly as § Chat completion is, to the same audience: a `user` turn, not stopped, on a chat that is not archived, deleted, snoozed, hidden, a special thread, or a job's with `notifyOnComplete: false`. The error is the chat's `lastError` message, flattened to one line and cut to 200 characters.
+A turn that errors out is the same news as one that finishes — the thing the user was waiting on is not coming — so it rings the same doorbell. It fires on the edge into `failed` (`12-error-and-offline.md` § Chat status; from `running`, or a pre-flight failure such as a missing folder), reads `<name> failed: <error>`, and is delivered exactly as § Chat completion is, to the same audience: a `user` turn, not stopped, on a chat that is not archived, deleted, snoozed, hidden, a special thread, or a job's with `notifyOnComplete: false`. The error is the failure's reason, flattened to one line and cut to 200 characters.
 
-`errored` is not always the end of a turn, and only the end rings:
-
-- A rung of the SDK-error retry ladder (`12-error-and-offline.md`) errors the chat and then runs the turn again. The frame that flips the chat `errored` says whether a rung is armed, as `turnRetrying` (`03-wire-protocol.md`), because the server decides on that frame and the retry is armed after it. The ladder's last rung carries `false` and rings; a rung that then succeeds rings as a completion instead.
-- `daemon_unavailable` is the server's own stand-in for a link that dropped mid-turn, which the host resolves when it reconnects. It is transient (`TRANSIENT_CHAT_ERROR_CODES`) and never rings.
-
-A usage limit nobody parked is a failure here — the turn is owed but nothing will run it until the user acts — while a limit with auto-resume armed is not, because the chat parks `idle` and runs again by itself.
-
-`turnRetrying` is optional on the wire. A host too old to send it has every rung read as final: one notification per rung, never a failure missed.
+A chat retrying a transient error stays running (`12-error-and-offline.md` § Transient errors), so only a spent ladder rings. Host offline, host restarting, paused until a reset and waiting for sign-in are not failures and never ring here; out of credit and a broken account are failures and do.
 
 ## Waiting on you
 
-A turn that stops rather than finishes is the other thing the server notifies on unasked. When a chat's activity goes from running to `awaiting-permission` — a permission decision, or a question asked with `AskUserQuestion` (`02-host.md` § Permission mode) — the turn is parked until a person answers it, and never reaches idle, so § Chat completion never covers it.
+A turn that stops rather than finishes is the other thing the server notifies on unasked. When a chat's status goes from running to waiting for the user — a permission decision, or a question asked with `AskUserQuestion` (`02-host.md` § Permission mode) — the turn is parked until a person answers it, and never reaches idle, so § Chat completion never covers it.
 
 Delivery is identical to chat completion: desktop always, push only when no computer surface is active, at normal priority.
 
-It fires on the transition into `awaiting-permission`, so a re-sent state frame is silent while a chat that blocks a second time in the same turn rings again. Deleted and snoozed chats are skipped, as are the special threads. Archived is not a case that arises: a chat blocking on the user leaves Archived as it does so (`04-chats-and-folders.md` § Lifecycle).
+It fires on the transition into waiting for the user, so a re-sent state frame is silent while a chat that blocks a second time in the same turn rings again. Deleted and snoozed chats are skipped, as are the special threads. Archived is not a case that arises: a chat blocking on the user leaves Archived as it does so (`04-chats-and-folders.md` § Chat model).
 
 Origin is deliberately not consulted here. A machine turn is silent when it finishes because nobody was waiting on it; a machine turn that stops to ask is the opposite — it is the run nobody is watching, and it stays stopped until a human answers. This is the same judgement that unarchives such a chat.
 

@@ -220,6 +220,8 @@ export interface ChatSummary {
    * Optional only so a registry file written before it existed still loads.
    */
   chatStatus?: ChatStatusInfo;
+  /** Where this row last changed in the account feed (spec/03 § Account feed). */
+  feedPos?: number;
 }
 
 export interface ChatRegistryOptions {
@@ -277,6 +279,8 @@ export class ChatRegistry {
   private readonly unconfirmed = new Set<string>();
   /** When each chat was last seen working (running, or waiting on a permission). Saved with the mirror. */
   private readonly workedAt = new Map<string, number>();
+  /** The account feed's latest position: one more each time a row changes. */
+  private feedCounter = 0;
 
   constructor(opts: ChatRegistryOptions = {}) {
     this.logger = opts.logger;
@@ -330,6 +334,7 @@ export class ChatRegistry {
         this.chats.set(chat.chatId, chat);
         this.spawnedSet.add(chat.chatId);
         this.unconfirmed.add(chat.chatId);
+        if ((chat.feedPos ?? 0) > this.feedCounter) this.feedCounter = chat.feedPos!;
       }
     } catch (err) {
       // NO FALLBACK: say so, then start empty rather than guess at a damaged file.
@@ -410,6 +415,7 @@ export class ChatRegistry {
         branches: [],
         activeBranchId: null,
         chatStatus: { state: 'idle', since: this.now() },
+        feedPos: ++this.feedCounter,
       });
       return;
     }
@@ -550,6 +556,7 @@ export class ChatRegistry {
         branches: existing?.branches ?? [],
         activeBranchId: existing?.activeBranchId ?? null,
         chatStatus: this.advance(event.chatId, existing?.chatStatus, statusFromHostState(event)),
+        feedPos: ++this.feedCounter,
       };
       this.chats.set(event.chatId, next);
       this.unconfirmed.delete(event.chatId);
@@ -661,6 +668,7 @@ export class ChatRegistry {
     const next: ChatSummary = {
       ...existing,
       chatStatus: nextStatus(existing.chatStatus ?? null, { state: 'queued_offline' }, this.now()),
+      feedPos: ++this.feedCounter,
     };
     this.chats.set(chatId, next);
     this.markDirty();
@@ -705,10 +713,29 @@ export class ChatRegistry {
           ? { state: 'host_offline' }
           : { state: 'failed', reason: error.code, message: error.message },
       ),
+      feedPos: ++this.feedCounter,
     };
     this.chats.set(chatId, next);
     this.markDirty();
     return { ...this.stateEventOf(next), activity: 'errored', lastError };
+  }
+
+  /** The account feed's latest position (spec/03 § Account feed). */
+  feedPosition(): number {
+    return this.feedCounter;
+  }
+
+  /** Every chat whose row changed after `after`, oldest change first. */
+  changedSince(after: number): ChatSummary[] {
+    return [...this.chats.values()]
+      .filter((c) => (c.feedPos ?? 0) > after)
+      .sort((a, b) => (a.feedPos ?? 0) - (b.feedPos ?? 0));
+  }
+
+  /** The chat's whole list entry as a `chat.state`, or null when unknown. */
+  stateEventFor(chatId: string): ChatStateEvent | null {
+    const row = this.chats.get(chatId);
+    return row ? this.stateEventOf(row) : null;
   }
 
   /** The `chat.state` a surface needs to draw this row as the server holds it. */
@@ -738,6 +765,29 @@ export class ChatRegistry {
       hidden: next.hidden,
       ...(next.lastError ? { lastError: next.lastError as ChatStateEvent['lastError'] } : {}),
       ...(next.chatStatus ? { chatStatus: next.chatStatus } : {}),
+      ...(next.feedPos !== undefined ? { feedPos: next.feedPos } : {}),
+      goal: next.goal,
+      goalProgress: next.goalProgress,
+      lastGoal: next.lastGoal,
+      goalQueue: next.goalQueue,
+      goalReminderEvery: next.goalReminderEvery,
+      goalCheckInEvery: next.goalCheckInEvery,
+      reminder: next.reminder,
+      statusSummary: next.statusSummary,
+      statusKind: next.statusKind,
+      statusDeclared: next.statusDeclared,
+      todos: next.todos,
+      pendingWake: next.pendingWake,
+      ...(next.model ? { model: next.model } : {}),
+      effort: next.effort,
+      ...(typeof next.backgroundTasks === 'number'
+        ? { backgroundTasks: next.backgroundTasks }
+        : {}),
+      ...(typeof next.runningAgents === 'number' ? { runningAgents: next.runningAgents } : {}),
+      context: next.context,
+      disabled: next.disabled,
+      lastUserActivity: next.lastUserActivity,
+      ...(next.createdAt !== undefined ? { createdAt: next.createdAt } : {}),
     };
   }
 

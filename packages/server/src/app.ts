@@ -323,7 +323,8 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
       : opts.logger === true
         ? loggerBase
         : (opts.logger ?? false);
-  const app = Fastify({ logger: loggerOption, trustProxy: true });
+  // forceCloseConnections: a restart never waits on a request still open (spec/12 § Server restarts).
+  const app = Fastify({ logger: loggerOption, trustProxy: true, forceCloseConnections: true });
 
   // Host rename, accept-both: a surface or CLI that predates the rename still
   // sends `daemonId` in a JSON body or query string. Rewrite it to `hostId`

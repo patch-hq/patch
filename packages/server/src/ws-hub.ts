@@ -31,6 +31,7 @@ import {
   type HostAccountEvent,
   type HostInfoEvent,
   type FoldersListEvent,
+  type FeedFollow,
   type WireEvent,
 } from '@patch/wire';
 import { verifySurfaceCredential, verifyDaemonKey, CredentialExpiredError } from '@patch/auth';
@@ -41,7 +42,7 @@ import type { HostLink } from './host-link.js';
 import type { ChatRegistry } from './chat-registry.js';
 import type { ComposerDraftStore } from './composer-drafts.js';
 import type { ViewPositionStore } from './view-position.js';
-import type { ChatLogStore } from './chat-log-store.js';
+import { QUESTION_TOOL, type ChatLogStore } from './chat-log-store.js';
 import type { CommitAcks } from './commit-acks.js';
 import type { ManagerFailover } from './manager-failover.js';
 import type { QueueTracker } from './queue-tracker.js';
@@ -251,6 +252,11 @@ export interface WsHubDeps {
   /** Whether a behind host is told to update on connect (shared `autoUpdateHosts`). Absent: yes. */
   autoUpdateHosts?: () => boolean;
 }
+
+/** A page of history when the surface does not say how many (spec/03 § Chat history). */
+export const HISTORY_PAGE_DEFAULT = 100;
+/** The most one page carries; a followed chat's catch-up comes in pages this size. */
+export const HISTORY_PAGE_MAX = 500;
 
 /** How long after startup a restored mid-turn chat waits for its host before reading as offline. */
 export const RESTORED_HOST_GRACE_MS = 60_000;
@@ -529,6 +535,90 @@ export class WsHub {
     // the host, and a cancel for it would otherwise route nowhere.
     for (const [searchId, host] of this.hostSearchHost.entries()) {
       if (host === hostId) this.hostSearchHost.delete(searchId);
+    }
+  }
+
+  /** Each chat's latest `chat.delegate_update` per subagent. */
+  private readonly delegates = new Map<
+    string,
+    Map<string, Extract<WireEvent, { type: 'chat.delegate_update' }>>
+  >();
+
+  /**
+   * Answer a page of a chat's record (spec/03 § Chat history): the entries,
+   * every request still open on the chat, its waiting messages, then the
+   * chat's running subagents and its list entry, so a surface that reloads
+   * draws exactly what a live one shows.
+   */
+  private sendHistory(
+    conn: ConnectedSurface,
+    ask: {
+      requestId: string;
+      chatId: string;
+      branchId?: string;
+      after?: number;
+      before?: number;
+      limit?: number;
+    },
+  ): void {
+    const store = this.deps.chatLogStore;
+    if (!store) return;
+    if (ask.branchId !== undefined) {
+      // A branch's own track is laid out by its host (spec/04 § Parallel
+      // branches); it answers with a replay addressed to this surface.
+      this.deps.hostLink.send(conn.surfaceId, {
+        type: 'chat.replay',
+        chatId: ask.chatId,
+        fromSeq: ask.after ?? -1,
+        branchId: ask.branchId,
+        batch: true,
+        forSurfaceId: conn.surfaceId,
+      });
+      return;
+    }
+    const page = store.page(ask.chatId, {
+      ...(ask.after !== undefined ? { after: ask.after } : {}),
+      ...(ask.before !== undefined ? { before: ask.before } : {}),
+      limit: ask.limit ?? HISTORY_PAGE_DEFAULT,
+    });
+    const row = this.deps.chatRegistry.get(ask.chatId);
+    // An approval is open only while the chat is waiting on it; a question
+    // stays open until it is answered, whatever became of the turn.
+    const waiting = row?.chatStatus?.state === 'waiting_for_user';
+    const pending = store
+      .openRequests(ask.chatId)
+      .filter(
+        (r) =>
+          waiting || (r.type === 'chat.permission_request' && r.request.tool === QUESTION_TOOL),
+      );
+    conn.socket.send(
+      encode({
+        type: 'chat.history',
+        requestId: ask.requestId,
+        chatId: ask.chatId,
+        entries: page.entries,
+        more: page.more,
+        through: page.through,
+        pending,
+        queued: this.deps.queueTracker?.snapshot(ask.chatId) ?? [],
+      }),
+    );
+    for (const d of this.delegates.get(ask.chatId)?.values() ?? []) {
+      conn.socket.send(encode(d));
+    }
+  }
+
+  /** A device follows these chats: their entries flow to it, and it is caught up on each. */
+  private follow(conn: ConnectedSurface, follow: readonly FeedFollow[]): void {
+    for (const f of follow) {
+      conn.watchedChats.add(f.chatId);
+      this.sendHistory(conn, {
+        requestId: 'feed',
+        chatId: f.chatId,
+        ...(f.branchId !== undefined ? { branchId: f.branchId } : {}),
+        after: f.after,
+        limit: HISTORY_PAGE_MAX,
+      });
     }
   }
 
@@ -1063,6 +1153,7 @@ export class WsHub {
         surfaceId: claims.surface_id,
         hosts: this.hostRoster(),
         ...(webBundleHash ? { webBundleHash } : {}),
+        ...(this.deps.chatLogStore ? { accountFeed: true as const } : {}),
       }),
     );
 
@@ -1747,6 +1838,45 @@ export class WsHub {
         this.deps.hostLink.sendTo(hostId, conn.surfaceId, tagged);
         return;
       }
+      case 'chat.history_request': {
+        if (event.after !== undefined && event.before !== undefined) {
+          this.sendControlError(
+            conn,
+            'invalid_frame',
+            'chat.history_request: at most one of after and before',
+            event.chatId,
+          );
+          return;
+        }
+        conn.watchedChats.add(event.chatId);
+        this.sendHistory(conn, event);
+        return;
+      }
+      case 'feed.resume': {
+        const registry = this.deps.chatRegistry;
+        const latest = registry.feedPosition();
+        if (event.after === undefined || event.after > latest) {
+          // Nothing to continue from: the device reloads the chat index.
+          conn.socket.send(encode({ type: 'feed.reset', feedPos: latest }));
+        } else {
+          for (const row of registry.changedSince(event.after)) {
+            const state = registry.stateEventFor(row.chatId);
+            if (state) conn.socket.send(encode(state));
+          }
+        }
+        this.follow(conn, event.follow);
+        return;
+      }
+      case 'feed.follow': {
+        const now = new Set(event.follow.map((f) => f.chatId));
+        for (const chatId of [...conn.watchedChats])
+          if (!now.has(chatId)) conn.watchedChats.delete(chatId);
+        this.follow(
+          conn,
+          event.follow.filter((f) => !conn.watchedChats.has(f.chatId)),
+        );
+        return;
+      }
       case 'chat.replay': {
         conn.watchedChats.add(event.chatId);
         // The server's record answers the history (spec/01 § History reads);
@@ -1997,10 +2127,23 @@ export class WsHub {
     // The status is the server's (spec/12 § Chat status): the mirror has
     // already derived it from this very frame.
     if (event.type === 'chat.state') {
-      const chatStatus = this.deps.chatRegistry.get(event.chatId)?.chatStatus;
-      if (chatStatus) event = { ...event, chatStatus };
+      const row = this.deps.chatRegistry.get(event.chatId);
+      if (row?.chatStatus) event = { ...event, chatStatus: row.chatStatus };
+      if (row?.feedPos !== undefined) event = { ...event, feedPos: row.feedPos };
+    }
+    // The latest subagent status of each chat, so a page of history can restate
+    // the strip a reload would otherwise lose (spec/03 § Chat history).
+    if (event.type === 'chat.delegate_update') {
+      let held = this.delegates.get(event.chatId);
+      if (!held) {
+        held = new Map();
+        this.delegates.set(event.chatId, held);
+      }
+      held.set(event.delegateId, event);
     }
     if (event.type === 'chat.spawned') {
+      const feedPos = this.deps.chatRegistry.get(event.chatId)?.feedPos;
+      if (feedPos !== undefined) event = { ...event, feedPos };
       const jobId = this.deps.chatRegistry.get(event.chatId)?.jobId;
       if (jobId) {
         event = { ...event, jobId };

@@ -29,6 +29,7 @@ import { quoteSelectionIntoComposer } from '../lib/quoteSelection.js';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   SPECIAL_THREAD_IDS,
+  modelHasCapability,
   modelSupportsEffort,
   hasTaskNotification,
   isEditToolCall as isEditToolCallWire,
@@ -2458,7 +2459,10 @@ export function ChatRoute({
                     }
                   />
                 ) : (
-                  renderEntries(Math.min(windowStart, queuedFrom), queuedFrom)
+                  <>
+                    <LoadEarlier chatId={chatId} />
+                    {renderEntries(Math.min(windowStart, queuedFrom), queuedFrom)}
+                  </>
                 )}
                 <VoiceLiveBubble chatId={chatId} />
                 {showThinking ? (
@@ -3219,6 +3223,8 @@ function MessageEntry({
     !entry.queued &&
     !entry.transcribing &&
     !entry.streaming &&
+    // Features follow the provider's declared capability (spec/02 § Provider adapters).
+    modelHasCapability(metaModel, 'editAtMessage') &&
     onEditTurn !== undefined;
   // spec/14 § Side threads panel TRIGGER — "Hovering any message (user or
   // agent)". Same settled-turn restriction as the edit pencil (above), minus
@@ -6707,6 +6713,37 @@ function TurnFailedStatus({
           <pre>{detail}</pre>
         </details>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * The top of a transcript whose older entries are still on the server (spec/05
+ * § Loading): coming into view asks for the page before what is shown.
+ */
+function LoadEarlier({ chatId }: { chatId: string }): JSX.Element | null {
+  const more = useChatStore((s) => s.historyMore[chatId] === true);
+  const loading = useChatStore((s) => s.historyLoadingEarlier[chatId] === true);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!more || !el || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver((seen) => {
+      if (seen.some((e) => e.isIntersecting)) getActiveWs()?.loadEarlier(chatId);
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [chatId, more]);
+  if (!more) return null;
+  return (
+    <div className="load-earlier" data-testid="load-earlier" ref={ref}>
+      {loading ? (
+        'Loading earlier messages…'
+      ) : (
+        <button type="button" onClick={() => getActiveWs()?.loadEarlier(chatId)}>
+          Load earlier messages
+        </button>
+      )}
     </div>
   );
 }
