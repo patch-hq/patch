@@ -108,6 +108,19 @@ const ProjectFoldersRecord = z
   .strict();
 export type ProjectFoldersRecord = z.infer<typeof ProjectFoldersRecord>;
 
+/** One change of the Manager's home host (spec/06 § Changing home). */
+const ManagerHandoverRecord = z
+  .object({
+    hostId: z.string().min(1),
+    epoch: z.number().int().positive(),
+    nextSeq: z.number().int().nonnegative(),
+    fromHostName: z.string().min(1),
+    toHostName: z.string().min(1),
+    message: z.string(),
+  })
+  .strict();
+export type ManagerHandoverRecord = z.infer<typeof ManagerHandoverRecord>;
+
 const RegistryFile = z
   .object({
     version: z.literal(1),
@@ -119,11 +132,16 @@ const RegistryFile = z
      */
     daemonKeys: z.array(DaemonKeyRecord),
     /**
-     * The host running the Manager and Speakers (spec/06). The server
-     * moves it when that host is away; `null` until chosen, in which case
-     * the first registered host holds it so exactly one always does.
+     * The host running the Manager and Speakers (spec/06 § Where special
+     * threads run). The user chooses it; `null` until chosen, in which case
+     * the first registered host holds it. It never moves by itself.
      */
     managerHostId: z.string().min(1).nullable(),
+    /**
+     * The last change of home, kept so a new home that was offline when it was
+     * made is told when it attaches. It acts on each `epoch` once.
+     */
+    managerHandover: ManagerHandoverRecord.optional(),
     /** Group 11: Expo push tokens per surface. */
     pushTokens: z.array(PushTokenRecord).optional(),
     /** Configurable project-launch folders per account (Settings → Project folders). */
@@ -384,6 +402,30 @@ export class Registry implements RevocationStoreInterface {
     }
     this.state.managerHostId = hostId;
     this.flush();
+  }
+
+  /** The last change of home, if there has been one. */
+  managerHandover(): ManagerHandoverRecord | null {
+    return this.state.managerHandover ?? null;
+  }
+
+  /**
+   * The user moves the Manager's home: record the host and the handover the new
+   * home is to act on, numbered after the previous change.
+   */
+  changeManagerHome(
+    hostId: string,
+    handover: Omit<ManagerHandoverRecord, 'hostId' | 'epoch'>,
+  ): ManagerHandoverRecord {
+    this.setManagerHostId(hostId);
+    const record: ManagerHandoverRecord = {
+      hostId,
+      epoch: (this.state.managerHandover?.epoch ?? 0) + 1,
+      ...handover,
+    };
+    this.state.managerHandover = record;
+    this.flush();
+    return record;
   }
 
   /**

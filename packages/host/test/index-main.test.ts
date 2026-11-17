@@ -2259,56 +2259,60 @@ describe('src/index.ts main() — full host boot', () => {
     }
   }, 30_000);
 
-  it('a host told to stand in for the Manager creates it, remembers the takeover once, and lets go on release', async () => {
+  it('a host made the Manager home creates it, marks the handover once, and ignores a repeat', async () => {
     const boot = await bootMain({ __NOT_MANAGER__: '1' });
     try {
       await boot.fakeServer.waitForAuthed();
       expect(boot.ready.daemon.chatState.has('thread_manager')).toBe(false);
 
-      boot.fakeServer.send({
-        type: 'host.manager_adopt',
+      const handover = (epoch: number, message: string): WireEvent => ({
+        type: 'host.manager_handover',
         hostId: 'd1',
-        epoch: 3,
-        handoff: 'recent conversation',
+        epoch,
         nextSeq: 12,
+        fromHostName: 'Laptop',
+        toHostName: 'Server',
+        message,
       });
+      boot.fakeServer.send(handover(3, ''));
       await waitFor(() => boot.ready.daemon.chatState.has('thread_manager'));
       await boot.fakeServer.waitForFrame(
         (e) => e.type === 'chat.spawned' && e.chatId === 'thread_manager',
       );
-      const hostJson = (): { managerEpoch?: number; managerHandoff?: string } =>
+      const divider = (await boot.fakeServer.waitForFrame(
+        (e) =>
+          e.type === 'chat.message' &&
+          e.chatId === 'thread_manager' &&
+          e.role === 'system' &&
+          e.content === 'Home moved · Laptop to Server',
+      )) as { seq: number };
+      expect(divider.seq).toBeGreaterThanOrEqual(12);
+      const hostJson = (): { managerEpoch?: number; runsManager?: boolean } =>
         JSON.parse(readFileSync(join(boot.home, 'host.json'), 'utf8'));
-      expect(hostJson()).toMatchObject({ managerEpoch: 3, managerHandoff: 'recent conversation' });
+      expect(hostJson()).toMatchObject({ managerEpoch: 3, runsManager: true });
 
-      // The same takeover told again, or an older one, changes nothing.
-      boot.fakeServer.send({
-        type: 'host.manager_adopt',
-        hostId: 'd1',
-        epoch: 3,
-        handoff: 'something else',
-        nextSeq: 99,
-      });
-      await new Promise((r) => setTimeout(r, 100));
-      expect(hostJson().managerHandoff).toBe('recent conversation');
-
-      boot.fakeServer.send({ type: 'host.manager_release', hostId: 'd1', epoch: 4 });
-      await waitFor(() => hostJson().managerEpoch === 4);
-      expect(hostJson().managerHandoff).toBeUndefined();
+      // The same change told again, or an older one, changes nothing.
+      boot.fakeServer.send(handover(3, 'something else'));
+      boot.fakeServer.send(handover(2, 'older'));
+      await new Promise((r) => setTimeout(r, 150));
+      expect(hostJson().managerEpoch).toBe(3);
     } finally {
       await boot.cleanup();
     }
   }, 30_000);
 
-  it('ignores a takeover addressed to another host', async () => {
+  it('ignores a handover addressed to another host', async () => {
     const boot = await bootMain({ __NOT_MANAGER__: '1' });
     try {
       await boot.fakeServer.waitForAuthed();
       boot.fakeServer.send({
-        type: 'host.manager_adopt',
+        type: 'host.manager_handover',
         hostId: 'someone-else',
         epoch: 1,
-        handoff: 'x',
         nextSeq: 0,
+        fromHostName: 'A',
+        toHostName: 'B',
+        message: 'x',
       });
       await new Promise((r) => setTimeout(r, 150));
       expect(boot.ready.daemon.chatState.has('thread_manager')).toBe(false);

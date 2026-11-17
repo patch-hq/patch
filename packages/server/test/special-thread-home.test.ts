@@ -68,23 +68,4 @@ describe('special threads come only from the Manager host', () => {
     sockets.other.emit('message', frame('thread_manager'));
     expect(heard).toEqual([['thread_manager', 'other']]);
   });
-
-  it('follows the specialThreadHost when it differs from the registry choice', () => {
-    const link = new InboundHostLink({
-      logger: pino({ level: 'silent' }),
-      managerHostId: () => 'home',
-      specialThreadHost: () => 'other',
-    });
-    const heard: Array<[string, string | null]> = [];
-    link.onEvent((e, from) => {
-      if (e.type === 'chat.message') heard.push([e.chatId, from]);
-    });
-    const home = new FakeSocket();
-    const other = new FakeSocket();
-    link.attach(home as never, 'home');
-    link.attach(other as never, 'other');
-    home.emit('message', frame('thread_manager'));
-    other.emit('message', frame('thread_manager'));
-    expect(heard).toEqual([['thread_manager', 'other']]);
-  });
 });

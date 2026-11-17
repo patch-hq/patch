@@ -25,7 +25,6 @@ import {
   isHostAddressedSurfaceEvent,
   isReadOnlyMirrorThread,
   OUT_OF_BAND_SEQ,
-  SPECIAL_THREAD_IDS,
   type AuthOkHost,
   type ClaudeSettingsListEvent,
   type HostAccountEvent,
@@ -44,7 +43,6 @@ import type { ComposerDraftStore } from './composer-drafts.js';
 import type { ViewPositionStore } from './view-position.js';
 import { QUESTION_TOOL, type ChatLogStore } from './chat-log-store.js';
 import type { CommitAcks } from './commit-acks.js';
-import type { ManagerFailover } from './manager-failover.js';
 import type { QueueTracker } from './queue-tracker.js';
 import type { ServerQueue } from './server-queue.js';
 import type { NewChatDraftStore } from './new-chat-drafts.js';
@@ -225,7 +223,6 @@ export interface WsHubDeps {
    * Which host runs the Manager when the Manager host is away, and the stretch of
    * the Manager's transcript the Manager host's own log is missing.
    */
-  managerFailover?: ManagerFailover;
   /** Server-owned new-chat drafts (spec/14 § New chat drafts). */
   newChatDrafts?: NewChatDraftStore;
   /**
@@ -2010,13 +2007,7 @@ export class WsHub {
     if (!store) return;
     const hostId = this.deps.chatRegistry.get(request.chatId)?.hostId;
     const hostOffline = hostId === undefined || !this.deps.hostLink.isOnline(hostId);
-    // The Manager host's own log does not hold what the Manager said while another
-    // host stood in for it, so that stretch is added from the server's copy.
-    const events = hostOffline
-      ? store.read(request.chatId, request.fromSeq)
-      : request.chatId === SPECIAL_THREAD_IDS.manager
-        ? (this.deps.managerFailover?.gapEvents(request.fromSeq) ?? [])
-        : [];
+    const events = hostOffline ? store.read(request.chatId, request.fromSeq) : [];
     if (events.length === 0) return;
     if (request.batch !== true) {
       for (const e of events) conn.socket.send(encode(e));

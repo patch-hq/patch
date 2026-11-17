@@ -702,8 +702,6 @@ export interface HostOptions {
    * nothing is waiting there.
    */
   pullQueued?: (chatId: string) => Promise<ChatInputEvent[]>;
-  /** The thread's pending handoff was given to the agent with a message. */
-  onHandoffConsumed?: (chatId: string) => void;
   /**
    * Enable the todo auto-advance manager (patch/todo.md § Features to add —
    * "todo list"). When set, the host mirrors each chat's native TodoWrite list
@@ -2195,8 +2193,6 @@ export class Daemon {
    * happened to queue in behind it and run last. Cleared with the pump.
    */
   private readonly drainHadUserTurn = new Set<string>();
-  /** Per thread: what a Manager standing in for another host is to be told with its next message. */
-  private readonly threadHandoffs = new Map<string, string>();
   /** Callers waiting for an input to be accepted (`submitInput`), by chat and localId. */
   private readonly inputAcceptWaiters = new Map<string, () => void>();
   /**
@@ -5666,16 +5662,34 @@ export class Daemon {
   }
 
   /**
-   * This host is to run a special thread another host ran (spec/06 § Manager
-   * failover). The thread carries on numbering from `nextSeq`, so its sequence
-   * stays one across hosts, and the agent is given `handoff` with its next
-   * message. A handoff already waiting is replaced by the newer one.
+   * The user made this host the home of a special thread (spec/06 § Changing
+   * home). The thread's record carries on from `nextSeq` under the same chat id,
+   * a divider marks the handover naming both hosts, and `message`, the summary
+   * the user approved, goes as an ordinary message (nothing when it is empty).
    */
-  adoptThread(chatId: string, adopt: { nextSeq: number; handoff: string }): void {
+  async handOverThread(
+    chatId: string,
+    handover: { nextSeq: number; fromHostName: string; toHostName: string; message: string },
+  ): Promise<void> {
     const state = this.chatState.get(chatId);
     if (!state) throw new ChatNotFoundError(chatId);
-    if (adopt.nextSeq > state.nextSeq) state.nextSeq = adopt.nextSeq;
-    this.threadHandoffs.set(chatId, adopt.handoff);
+    if (handover.nextSeq > state.nextSeq) state.nextSeq = handover.nextSeq;
+    const at = this.opts.now();
+    this.emit({
+      type: 'chat.message',
+      chatId,
+      role: 'system',
+      content: `Home moved · ${handover.fromHostName} to ${handover.toHostName}`,
+      seq: this.bumpSeq(chatId),
+      createdAt: at,
+    });
+    if (handover.message.trim() === '') return;
+    await this.sendInput({
+      chatId,
+      message: handover.message,
+      localId: `handover-${chatId}-${at}`,
+      fromUser: true,
+    });
   }
 
   /**
@@ -5727,16 +5741,6 @@ export class Daemon {
     const state = this.chatState.get(chatId);
     if (!state) return;
     if (through + 1 > state.nextSeq) state.nextSeq = through + 1;
-  }
-
-  /** Put back a handoff that was waiting when this host last stopped. */
-  restoreThreadHandoff(chatId: string, handoff: string): void {
-    this.threadHandoffs.set(chatId, handoff);
-  }
-
-  /** The Manager has moved off this host: whatever handoff was waiting is moot. */
-  dropThreadHandoff(chatId: string): void {
-    this.threadHandoffs.delete(chatId);
   }
 
   /**
@@ -6923,15 +6927,6 @@ export class Daemon {
     // one place every turn funnels through regardless of where it came from.
     // Consumed once: cleared the instant it's attached, win or lose the race
     // with whatever else is about to run.
-    // spec/06 § Manager failover — the conversation the Manager is picking up
-    // from, given with its next message. Shown as a disclosed system reminder,
-    // like any other context the host adds, and given once.
-    const handoff = this.threadHandoffs.get(req.chatId);
-    if (handoff !== undefined) {
-      this.threadHandoffs.delete(req.chatId);
-      this.opts.onHandoffConsumed?.(req.chatId);
-      req.message = `<system-reminder>\n${handoff}\n</system-reminder>\n\n${req.message}`;
-    }
     if (state.pendingHookAdvice.length > 0) {
       const notes = state.pendingHookAdvice;
       state.pendingHookAdvice = [];
