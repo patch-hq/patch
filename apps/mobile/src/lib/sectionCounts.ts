@@ -12,6 +12,7 @@ import React from 'react';
 import { api } from '../api/rest';
 import { useChatStore } from '../stores/chatStore';
 import { useUiStore } from '../stores/uiStore';
+import { usePresenceStore } from '../stores/presenceStore';
 
 export interface SectionCounts {
   archived: number | null;
@@ -42,6 +43,10 @@ export function useSectionCounts(): SectionCounts {
           if (live && mine === asked) setCounts({ archived: r.archived, hidden: r.hidden });
         })
         .catch((e: Error) => {
+          // A failure while the link is down is the expected blip of a server
+          // restart: the banner already says so, and the reconnect below asks
+          // again. Only a failure on a link that claims to be up is an error.
+          if (usePresenceStore.getState().connection !== 'connected') return;
           useUiStore.getState().pushError(`failed to load section counts: ${e.message}`);
         });
     };
@@ -58,9 +63,18 @@ export function useSectionCounts(): SectionCounts {
       lastSignature = next;
       load();
     });
+    // Counts missed or failed while the socket was down are asked for again the
+    // moment it is back; nothing else would, until a chat changed state.
+    let lastConnection = usePresenceStore.getState().connection;
+    const unsubscribePresence = usePresenceStore.subscribe((state) => {
+      const was = lastConnection;
+      lastConnection = state.connection;
+      if (state.connection === 'connected' && was !== 'connected') load();
+    });
     return () => {
       live = false;
       unsubscribe();
+      unsubscribePresence();
     };
   }, []);
 
