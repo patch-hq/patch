@@ -5976,7 +5976,7 @@ function CancelCommandButton({ onCancel }: { onCancel: () => void }): JSX.Elemen
         }
       }}
     >
-      <X size={12} aria-hidden="true" />
+      <CloseIcon />
     </span>
   );
 }
