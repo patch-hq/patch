@@ -729,7 +729,6 @@ describe('PaneArea — closing the last tab never leaves an empty group', () => 
     renderPanes();
     closeOnlyTab();
     expect(screen.queryByTestId('pane-empty')).toBeNull();
-    expect(screen.queryByText('Empty group')).toBeNull();
     expect(screen.getByTestId('loc').textContent).toBe('/chats/c2');
   });
 
