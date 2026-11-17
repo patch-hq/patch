@@ -205,6 +205,7 @@ export const useComposerAttachmentStore = create<ComposerAttachmentState>((set, 
   },
 
   remove(draftKey, target, key) {
+    settledUploads.delete(`${draftKey}::${key}`);
     const entry = get().byKey[draftKey]?.find((a) => a.key === key);
     set((s) => {
       const remaining = (s.byKey[draftKey] ?? []).filter((a) => a.key !== key);
@@ -221,6 +222,7 @@ export const useComposerAttachmentStore = create<ComposerAttachmentState>((set, 
   },
 
   detach(draftKey, keys) {
+    for (const k of keys) settledUploads.delete(`${draftKey}::${k}`);
     const sent = new Set(keys.map((k) => landedAs.get(`${draftKey}::${k}`) ?? k));
     const removed = (get().byKey[draftKey] ?? []).filter((a) => sent.has(a.key));
     for (const a of removed)
@@ -314,6 +316,7 @@ export const useComposerAttachmentStore = create<ComposerAttachmentState>((set, 
   _reset() {
     set({ byKey: {} });
     uploadPromises.clear();
+    settledUploads.clear();
     keyKinds.clear();
     sentWhileUploading.clear();
     landedAs.clear();
@@ -330,6 +333,9 @@ export const useComposerAttachmentStore = create<ComposerAttachmentState>((set, 
  */
 const uploadPromises = new Map<string, Promise<PendingAttachment | undefined>>();
 
+/** `draftKey::key` to the settled entry of an upload that has finished. */
+const settledUploads = new Map<string, PendingAttachment>();
+
 function trackUpload(
   draftKey: string,
   target: AttachmentTarget,
@@ -338,8 +344,12 @@ function trackUpload(
 ): void {
   const promise = runUpload(draftKey, target, key, file);
   uploadPromises.set(`${draftKey}::${key}`, promise);
-  void promise.finally(() => {
+  void promise.then((settled) => {
     if (uploadPromises.get(`${draftKey}::${key}`) === promise) {
+      // Kept until the draft lets go of the chip: a Send holding a stale
+      // `uploading` snapshot can ask after this settled, and must get the
+      // result rather than a false failure.
+      if (settled) settledUploads.set(`${draftKey}::${key}`, settled);
       uploadPromises.delete(`${draftKey}::${key}`);
     }
   });
@@ -355,7 +365,10 @@ export function waitForAttachmentUpload(
   draftKey: string,
   key: string,
 ): Promise<PendingAttachment | undefined> {
-  return uploadPromises.get(`${draftKey}::${key}`) ?? Promise.resolve(undefined);
+  return (
+    uploadPromises.get(`${draftKey}::${key}`) ??
+    Promise.resolve(settledUploads.get(`${draftKey}::${key}`))
+  );
 }
 
 async function runUpload(
