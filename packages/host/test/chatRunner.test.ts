@@ -1469,7 +1469,7 @@ describe('Host ChatRunner', () => {
     sdk.enqueue([{ type: 'result', sessionId: 'sess-A' }]);
     await daemon.spawnChat({ folder, prompt: 'hello' });
     await new Promise((r) => setTimeout(r, 20));
-    expect(sdk.lastOptions()?.mcpServer?.env['PATCH_OMIT_TOOLS']).toBe('');
+    expect(sdk.lastOptions()?.mcpServer?.args).toEqual(['/tmp/mcp.js']);
   });
 
   // spec/04 § Name — AI-generated chat titles (the optional `generateTitle` DI).
