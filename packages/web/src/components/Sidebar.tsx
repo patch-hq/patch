@@ -1228,19 +1228,23 @@ function RegularSidebar({
  *  accent-tint background (spec/14 § Sidebar §7). */
 function BottomNav(): JSX.Element {
   const location = useLocation();
-  const onPads = location.pathname.startsWith('/pads');
-  const onTriage = location.pathname.startsWith('/triage');
-  const experimentalNav = useExperimentalFeatures();
-  const onJobs = location.pathname.startsWith('/jobs');
-  const onSettings = location.pathname.startsWith('/settings');
-  // spec/14 § File browser — open without a chat: the one entry point that
-  // works from anywhere, not just a chat view (§ Sidebar item 7). Lit while
-  // the host files tab is the focused one.
-  const filesActive = useLayoutStore((s) => {
+  // One source for the highlight: the focused tab. The URL only decides when
+  // the focused tab is not a page (it can lag the focused tab, which is how
+  // Files and Pads used to light up together).
+  const focusedPage = useLayoutStore((s) => {
     const pane = resolvePane(s.root, s.activePaneId);
     const tab = pane.tabs.find((t) => t.id === pane.activeTabId);
-    return tab?.descriptor.kind === 'page' && tab.descriptor.page === 'host-files';
+    return tab?.descriptor.kind === 'page' ? tab.descriptor.page : null;
   });
+  const path = location.pathname;
+  const experimentalNav = useExperimentalFeatures();
+  const section = (pages: string[], prefix: string): boolean =>
+    focusedPage !== null ? pages.includes(focusedPage) : path.startsWith(prefix);
+  const filesActive = focusedPage === 'host-files';
+  const onPads = section(['pads', 'pad', 'new-pad'], '/pads');
+  const onJobs = section(['jobs', 'job'], '/jobs');
+  const onSettings = section(['settings'], '/settings');
+  const onTriage = section(['triage'], '/triage');
   return (
     <>
       <nav className="sb-bottom" data-testid="bottom-nav">
