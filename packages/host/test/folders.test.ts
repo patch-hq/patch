@@ -11,7 +11,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node
 import { tmpdir, homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { SPECIAL_THREAD_IDS } from '@patch/wire';
-import { FolderRegistry, FolderNotFoundError, initialProjectRoots } from '../src/folders.js';
+import { FolderRegistry, FolderNotFoundError } from '../src/folders.js';
 
 interface Chat {
   chatId: string;
