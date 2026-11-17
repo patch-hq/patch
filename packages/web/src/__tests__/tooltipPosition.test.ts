@@ -12,6 +12,15 @@ const VIEWPORT = { width: 1000, height: 800 };
 const TOOLTIP = { width: 80, height: 24 };
 
 describe('computeTooltipPosition', () => {
+  it('drops below a keep-clear zone (window controls) instead of covering it', () => {
+    const trigger = rect({ top: 20, left: 150, bottom: 28, right: 158, width: 8, height: 8 });
+    const pos = computeTooltipPosition(trigger, { width: 300, height: 60 }, VIEWPORT, {
+      right: 84,
+      bottom: 43,
+    });
+    expect(pos.top).toBe(47);
+  });
+
   it('places itself below the trigger, centred, when there is room', () => {
     const trigger = rect({ top: 100, left: 100, bottom: 120, right: 140, width: 40, height: 20 });
     const pos = computeTooltipPosition(trigger, TOOLTIP, VIEWPORT);

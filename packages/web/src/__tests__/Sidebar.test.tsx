@@ -229,7 +229,7 @@ describe('Sidebar', () => {
     renderInRouter();
     const dot = screen.getByTestId('conn-dot');
     expect(dot.className).not.toContain('offline');
-    expect(dot.getAttribute('title')).toContain('This surface (web): connected');
+    expect(dot.getAttribute('title')).toContain('This browser: connected');
   });
 
   it('the connection dot tooltip lists every host with its state', () => {
@@ -260,7 +260,7 @@ describe('Sidebar', () => {
     renderInRouter();
     const dot = screen.getByTestId('conn-dot');
     expect(dot.getAttribute('title')).toBe(
-      'This surface (web): connected\nServer: reachable\nHost d-box: offline\nHost d-mac: online',
+      'This browser: connected\nServer: reachable\nHost d-box: offline\nHost d-mac: online',
     );
   });
 

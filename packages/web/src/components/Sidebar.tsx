@@ -66,6 +66,7 @@ import { useSelectionStore } from '../stores/selectionStore.js';
 import { useVoiceStore } from '../stores/voiceStore.js';
 import { isKeptDraft, useDraftStore } from '../stores/draftStore.js';
 import { useComposerAttachmentStore } from '../stores/composerAttachmentStore.js';
+import { getDesktopBridge } from '../lib/desktopBridge.js';
 import { connectionSummary, hostsDown } from '../lib/connectionSummary.js';
 import { api, ApiError } from '../api/rest.js';
 import type { ChatRow, DisplayBadge, SectionCounts } from '../stores/types.js';
@@ -384,7 +385,7 @@ function SidebarInner({ standalone = false }: { standalone?: boolean } = {}): JS
                 if (e.key === 'Enter' || e.key === ' ') navigate('/settings/hosts');
               }}
               aria-label={`connection: ${connection === 'connected' ? (hostOnline ? 'connected' : 'host-offline') : connection}`}
-              title={connectionSummary(connection, hostStates)}
+              title={connectionSummary(connection, hostStates, getDesktopBridge() ? 'app' : 'browser')}
               data-tooltip-full
               data-testid="conn-dot"
             />
