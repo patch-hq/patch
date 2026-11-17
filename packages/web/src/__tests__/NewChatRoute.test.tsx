@@ -1566,6 +1566,39 @@ describe('/chats/new', () => {
     expect(usage.querySelector('[title]')).toBeNull();
   });
 
+  it('draws a full bar for a blocked window with no figure and clamps an over-100% bar', async () => {
+    setSharedAccounts({ claude: [{ connected: true }, { connected: true }] });
+    reportAccounts(
+      'd1',
+      [
+        {
+          id: 'c0',
+          label: 'Claude 0',
+          connected: true,
+          usage: {
+            session: { status: 'rejected', resetsAt: Date.now() + 3_600_000 },
+            week: { status: 'allowed', utilization: 1.04 },
+          },
+        },
+        { id: 'c1', label: 'Claude 1', connected: true },
+      ],
+      'c1',
+    );
+    stubPickerFetch({ folders: [] });
+    renderPicker();
+
+    await screen.findByTestId('new-chat-usage');
+    const bars = screen
+      .getByTestId('new-chat-usage-claude-code:c0')
+      .querySelectorAll('.new-chat-usage-bar i');
+    expect(screen.getByTestId('new-chat-usage-claude-code:c0-session').textContent).toMatch(
+      /^blocked/,
+    );
+    expect(bars[0]).toHaveStyle({ width: '100%' });
+    expect(screen.getByTestId('new-chat-usage-claude-code:c0-week').textContent).toBe('104% used');
+    expect(bars[1]).toHaveStyle({ width: '100%' });
+  });
+
   it('fades a blocked account, lets a usable card be clicked to select it, and outlines the one that will be used', async () => {
     setSharedAccounts({ claude: [{ connected: true }, { connected: true }, { connected: true }] });
     reportAccounts(
