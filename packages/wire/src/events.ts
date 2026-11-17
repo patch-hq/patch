@@ -6918,6 +6918,33 @@ export const ChatCommittedEvent = z
 export type ChatCommittedEvent = z.infer<typeof ChatCommittedEvent>;
 
 /**
+ * Host -> server: one transcript event from the host's outbox (spec/01 § Host
+ * outbox). `position` numbers the host's outbox across every chat; the server
+ * commits `event` exactly as if it had arrived bare, then acknowledges the
+ * position with `host.outbox_ack`. A host resends everything after the last
+ * acknowledged position whenever it reconnects. Sent only to a server whose
+ * `auth.ok` carried `hostOutbox: true`.
+ */
+export const HostOutboxEvent = z
+  .object({
+    type: z.literal('host.outbox'),
+    position: z.number().int().nonnegative(),
+    /** Shallow like `chat.replay_batch`; the server validates it as a frame of its own. */
+    event: z.object({ type: z.string().min(1) }).passthrough(),
+  })
+  .strict();
+export type HostOutboxEvent = z.infer<typeof HostOutboxEvent>;
+
+/** Server -> host: every outbox position up to `through` is committed (spec/01 § Host outbox). */
+export const HostOutboxAckEvent = z
+  .object({
+    type: z.literal('host.outbox_ack'),
+    through: z.number().int().nonnegative(),
+  })
+  .strict();
+export type HostOutboxAckEvent = z.infer<typeof HostOutboxAckEvent>;
+
+/**
  * Server -> host: this host runs the Manager now, because its previous host has
  * been offline for a while (spec/06 § Manager failover). `handoff` is the
  * recent conversation as the server holds it, given to the Manager with its
@@ -9237,6 +9264,11 @@ export const HelloEvent = z
     // EdDSA-JWT bearer (or, during pairing, omitted — see auth events below).
     // Pairing handshakes use a separate `pairing.nonce` flow before having a JWT.
     auth: z.string().min(1).optional(),
+    /**
+     * A host that delivers transcript events through its outbox (spec/01 §
+     * Host outbox). The server then never compares its log with the host's.
+     */
+    outbox: z.literal(true).optional(),
   })
   .strict();
 export type HelloEvent = z.infer<typeof HelloEvent>;
@@ -9439,6 +9471,11 @@ export const AuthOkEvent = z
      * changed it (spec/14 § Live updates). Absent when no SPA is mounted.
      */
     webBundleHash: z.string().optional(),
+    /**
+     * Sent to a host by a server that takes transcript events through the host
+     * outbox (`host.outbox`, spec/01 § Host outbox). Absent: send them bare.
+     */
+    hostOutbox: z.literal(true).optional(),
   })
   .strict();
 export type AuthOkEvent = z.infer<typeof AuthOkEvent>;
@@ -9697,6 +9734,8 @@ export const WireEvent = z.discriminatedUnion('type', [
   PatchLogSyncBatchEvent,
   PatchLogRestoreEvent,
   ChatCommittedEvent,
+  HostOutboxEvent,
+  HostOutboxAckEvent,
   HostReconciledEvent,
   HostManagerAdoptEvent,
   HostManagerReleaseEvent,
@@ -10014,6 +10053,8 @@ export const EVENT_SCHEMAS = {
   'patch.log_sync.batch': PatchLogSyncBatchEvent,
   'patch.log_restore': PatchLogRestoreEvent,
   'chat.committed': ChatCommittedEvent,
+  'host.outbox': HostOutboxEvent,
+  'host.outbox_ack': HostOutboxAckEvent,
   'host.reconciled': HostReconciledEvent,
   'host.manager_adopt': HostManagerAdoptEvent,
   'host.manager_release': HostManagerReleaseEvent,

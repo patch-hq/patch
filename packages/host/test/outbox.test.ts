@@ -1,0 +1,206 @@
+// The host outbox (spec/02 § Host outbox): transcript events kept on disk until
+// the server acknowledges them, and resent after every reconnect.
+
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import pino from 'pino';
+import WS, { type WebSocket } from 'ws';
+import { EventEmitter } from 'node:events';
+import { mkdtempSync, readFileSync, rmSync, appendFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { WireEvent } from '@patch/wire';
+import { Outbox } from '../src/outbox.js';
+import { createServerLink, type ServerLink } from '../src/serverLink.js';
+
+const silent = pino({ level: 'silent' });
+
+const say = (seq: number, chatId = 'c1'): WireEvent =>
+  ({ type: 'chat.message', chatId, role: 'assistant', content: `m${seq}`, seq }) as WireEvent;
+
+class FakeSocket extends EventEmitter {
+  readyState: number = WS.CONNECTING;
+  sent: Record<string, unknown>[] = [];
+  send(data: string): void {
+    this.sent.push(JSON.parse(data) as Record<string, unknown>);
+  }
+  ping(): void {}
+  terminate(): void {
+    this.close();
+  }
+  close(code = 1000, reason = ''): void {
+    if (this.readyState === WS.CLOSED) return;
+    this.readyState = WS.CLOSED;
+    this.emit('close', code, Buffer.from(reason));
+  }
+  open(): void {
+    this.readyState = WS.OPEN;
+    this.emit('open');
+  }
+  receive(frame: Record<string, unknown>): void {
+    this.emit('message', Buffer.from(JSON.stringify(frame)));
+  }
+}
+
+const authOk = (extra: Record<string, unknown> = {}) => ({
+  type: 'auth.ok',
+  accountId: 'a',
+  surfaceId: 'h1',
+  hosts: [],
+  ...extra,
+});
+
+describe('Outbox', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'patch-outbox-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  const open = (compactAfter?: number) =>
+    new Outbox({
+      path: join(dir, 'outbox.jsonl'),
+      logger: silent,
+      ...(compactAfter !== undefined ? { compactAfter } : {}),
+    });
+
+  it('numbers events across chats and keeps them until acknowledged', () => {
+    const box = open();
+    expect(box.append(say(1))).toBe(0);
+    expect(box.append(say(1, 'c2'))).toBe(1);
+    expect(box.append(say(2))).toBe(2);
+    box.ack(1);
+    expect(box.pending().map((p) => p.position)).toEqual([2]);
+    expect(box.acknowledged()).toBe(1);
+  });
+
+  it('survives a restart: owed events and the numbering come back', () => {
+    const first = open();
+    first.append(say(1));
+    first.append(say(2));
+    first.ack(0);
+    const second = open();
+    expect(second.pending().map((p) => p.position)).toEqual([1]);
+    expect(second.append(say(3))).toBe(2);
+  });
+
+  it('ignores an acknowledgement it has already passed, and one past what it holds', () => {
+    const box = open();
+    box.append(say(1));
+    box.ack(0);
+    box.ack(0);
+    box.ack(-1);
+    expect(box.acknowledged()).toBe(0);
+    box.ack(99);
+    expect(box.acknowledged()).toBe(0);
+    expect(box.append(say(2))).toBe(1);
+  });
+
+  it('rewrites the file to what is still owed once enough is acknowledged', () => {
+    const box = open(3);
+    for (let i = 0; i < 5; i++) box.append(say(i));
+    box.ack(3);
+    const lines = readFileSync(join(dir, 'outbox.jsonl'), 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(2); // the acknowledgement and the one still owed
+    const again = open(3);
+    expect(again.pending().map((p) => p.position)).toEqual([4]);
+    expect(again.append(say(9))).toBe(5);
+  });
+
+  it('skips a torn last line from a crash', () => {
+    const box = open();
+    box.append(say(1));
+    appendFileSync(join(dir, 'outbox.jsonl'), '{"p":1,"e":{"ty');
+    expect(
+      open()
+        .pending()
+        .map((p) => p.position),
+    ).toEqual([0]);
+  });
+});
+
+describe('server link with an outbox', () => {
+  let dir: string;
+  let sockets: FakeSocket[];
+  let link: ServerLink;
+  let outbox: Outbox;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'patch-outbox-link-'));
+    sockets = [];
+    outbox = new Outbox({ path: join(dir, 'outbox.jsonl'), logger: silent });
+    link = createServerLink({
+      url: 'ws://x/ws',
+      daemonKey: 'k',
+      clientVersion: '1',
+      logger: silent,
+      outbox,
+      backoffSchedule: [60_000],
+      heartbeatIntervalMs: 60_000,
+      wsFactory: () => {
+        const s = new FakeSocket();
+        sockets.push(s);
+        return s as unknown as WebSocket;
+      },
+    });
+  });
+  afterEach(async () => {
+    await link.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const connect = (greeting = authOk({ hostOutbox: true })): FakeSocket => {
+    const s = sockets[sockets.length - 1]!;
+    s.open();
+    s.receive(greeting);
+    return s;
+  };
+
+  it('says it has an outbox in its hello', () => {
+    link.start();
+    sockets[0]!.open();
+    expect(sockets[0]!.sent[0]).toMatchObject({ type: 'hello', outbox: true });
+  });
+
+  it('wraps transcript events, sends live ones bare, and drops what the server acknowledges', () => {
+    link.start();
+    const s = connect();
+    s.sent.length = 0;
+    link.send(say(1));
+    link.send({ type: 'chat.message_delta', chatId: 'c1', messageSeq: 1, delta: 'x' } as WireEvent);
+    expect(s.sent).toEqual([
+      { type: 'host.outbox', position: 0, event: say(1) },
+      { type: 'chat.message_delta', chatId: 'c1', messageSeq: 1, delta: 'x' },
+    ]);
+    expect(link.diagnostics().outboxOwed).toBe(1);
+    s.receive({ type: 'host.outbox_ack', through: 0 });
+    expect(link.diagnostics().outboxOwed).toBe(0);
+  });
+
+  it('keeps events while offline and resends everything unacknowledged after reconnecting', () => {
+    link.start();
+    const s = connect();
+    link.send(say(1)); // sent, never acknowledged: the socket was half-open
+    s.close(1006);
+    link.send(say(2)); // offline
+    link.start(); // redial now rather than waiting out the backoff
+    const again = connect();
+    const resent = again.sent.filter((f) => f['type'] === 'host.outbox');
+    expect(resent.map((f) => f['position'])).toEqual([0, 1]);
+  });
+
+  it('a server without the outbox gets bare events and nothing is kept for it', () => {
+    link.start();
+    const s = connect(authOk());
+    s.sent.length = 0;
+    link.send(say(1));
+    expect(s.sent).toEqual([say(1)]);
+    expect(link.diagnostics().outboxOwed).toBe(0);
+  });
+
+  it('an event addressed to one surface is not kept: it is a replay, not new', () => {
+    link.start();
+    const s = connect();
+    s.sent.length = 0;
+    link.send({ ...say(1), forSurfaceId: 's1' } as WireEvent);
+    expect(s.sent[0]!['type']).toBe('chat.message');
+    expect(link.diagnostics().outboxOwed).toBe(0);
+  });
+});

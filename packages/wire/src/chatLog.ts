@@ -211,3 +211,26 @@ export const LogRecord = z
   })
   .strict();
 export type LogRecord = z.infer<typeof LogRecord>;
+
+/**
+ * The events a host sends through its outbox (spec/01 § Host outbox): what the
+ * chat's record keeps, numbered in the chat (`seq` 0 or above) and not addressed
+ * to one surface. Everything else is live-only and is not resent.
+ */
+export function isOutboxEvent(event: { type: string }): boolean {
+  if (!OUTBOX_EVENT_TYPES.has(event.type)) return false;
+  const { chatId, seq, forSurfaceId } = event as {
+    chatId?: unknown;
+    seq?: unknown;
+    forSurfaceId?: unknown;
+  };
+  return (
+    typeof chatId === 'string' && typeof seq === 'number' && seq >= 0 && forSurfaceId === undefined
+  );
+}
+
+const OUTBOX_EVENT_TYPES: ReadonlySet<string> = new Set([
+  ...LOGGED_EVENT_TYPES,
+  'chat.provider_context',
+  'chat.error',
+]);

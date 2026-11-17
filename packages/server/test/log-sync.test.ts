@@ -204,6 +204,23 @@ describe('LogSync', () => {
     expect(store.highWater('c1')).toBe(6);
   });
 
+  test('a host with an outbox is never compared or asked: it resends what was not acknowledged', () => {
+    sync.stop();
+    sync = new LogSync({
+      store,
+      chats: { get: () => ({ hostId: 'd1' }) as never },
+      sendTo: (hostId, _s, event) => sent.push({ hostId, event }),
+      isOnline: () => true,
+      usesOutbox: () => true,
+      inject: (e) => injected.push(e),
+      logger,
+    });
+    sync.observe(reported(9));
+    sync.observe(reported(1));
+    settle();
+    expect(sent).toEqual([]);
+  });
+
   test('a host going offline cancels what was waiting', () => {
     sync.observe(reported(9));
     sync.observe({ type: 'host.offline', hostId: 'd1' } as WireEvent);
