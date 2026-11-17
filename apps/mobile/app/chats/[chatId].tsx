@@ -172,6 +172,7 @@ import { startVoiceCall } from '../../src/lib/voiceCall';
 import { getWs } from '../../src/api/ws';
 import { ASK_USER_QUESTION, isQuestionRowCoveredByCard } from '../../src/lib/askUserQuestion';
 import { goHome } from '../../src/lib/goBack';
+import { swipeNeighbours } from '../../src/lib/chatSwipeOrder';
 import { useLeaveWhenArchivedElsewhere } from '../../src/lib/leaveArchived';
 import { QuestionCard } from '../../src/components/QuestionCard';
 
@@ -1065,6 +1066,13 @@ function ChatDetailBody(): React.ReactElement {
       ).length,
   );
 
+  // The chats either side of this one in the Chats tab's order, for the header's
+  // previous / next buttons. Derived from the store's chat map so it follows
+  // the list as it changes; null at an end, or when this chat is outside the
+  // live list (archived, snoozed, hidden, a channel).
+  const chatsById = useChatStore((s) => s.chats);
+  const neighbours = React.useMemo(() => swipeNeighbours(chatsById, chatId), [chatsById, chatId]);
+
   return (
     <View testID="chat-surface" style={{ flex: 1, backgroundColor: colors.paper }}>
       <View
@@ -1181,6 +1189,29 @@ function ChatDetailBody(): React.ReactElement {
           <Text style={{ ...typography.title, color: colors.ink }} numberOfLines={1}>
             {title}
           </Text>
+        </Pressable>
+        {/* Previous / next chat in the Chats tab's order (spec/15 § Chat detail). */}
+        <Pressable
+          testID="chat-prev"
+          onPress={() => neighbours.prev && router.replace(`/chats/${neighbours.prev}` as Href)}
+          disabled={neighbours.prev === null}
+          style={{ padding: space.xs, opacity: neighbours.prev === null ? 0.3 : 1 }}
+          accessibilityRole="button"
+          accessibilityLabel="Previous chat"
+          accessibilityState={{ disabled: neighbours.prev === null }}
+        >
+          <ChevronUp size={20} color={colors.ink} />
+        </Pressable>
+        <Pressable
+          testID="chat-next"
+          onPress={() => neighbours.next && router.replace(`/chats/${neighbours.next}` as Href)}
+          disabled={neighbours.next === null}
+          style={{ padding: space.xs, opacity: neighbours.next === null ? 0.3 : 1 }}
+          accessibilityRole="button"
+          accessibilityLabel="Next chat"
+          accessibilityState={{ disabled: neighbours.next === null }}
+        >
+          <ChevronDown size={20} color={colors.ink} />
         </Pressable>
         {/* Call button — the ONLY place a sustained voice CALL is started on
             mobile (spec/15 § Chat detail). Read-only mirror threads have no
