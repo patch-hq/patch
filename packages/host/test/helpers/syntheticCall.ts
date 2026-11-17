@@ -3,12 +3,19 @@
 // both 16 kHz mono PCM16, cut into the clips a surface sends.
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import pino from 'pino';
 import { createKokoro } from '../../src/audio/kokoro.js';
 
 export const KOKORO_MODEL = join(homedir(), '.patch', 'components', 'kokoro');
-export const KOKORO_SIDECAR = join(__dirname, '..', '..', '..', 'kokoro-sidecar');
+export const KOKORO_SIDECAR = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '..',
+  '..',
+  'kokoro-sidecar',
+);
 export const SAMPLE_RATE = 16_000;
 
 export interface ScriptLine {
@@ -112,6 +119,7 @@ export function wav(pcm: Int16Array): Buffer {
   h.writeUInt16LE(2, 32);
   h.writeUInt16LE(16, 34);
   h.write('data', 36);
+  h.writeUInt32LE(data.length, 40);
   return Buffer.concat([h, data]);
 }
 

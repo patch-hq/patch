@@ -7,9 +7,6 @@
 
 import { EMPTY_UTILIZATION } from '@patch/wire';
 
-/** An account this close to running out has its new turns sent elsewhere. */
-export const NEARLY_OUT_MS = 10 * 60_000;
-
 /** One probe's figure for one pool. */
 export interface UsageSample {
   at: number;
@@ -60,6 +57,9 @@ export const PROBE_FAST_MS = 60_000;
 export const PROBE_MEDIUM_MS = 3 * 60_000;
 export const PROBE_SLOW_MS = 10 * 60_000;
 
+/** Run-out horizons for probing are multiples of this. */
+const HORIZON_UNIT_MS = 10 * 60_000;
+
 export interface PoolForecast {
   scope: 'session' | 'week';
   utilization?: number;
@@ -76,8 +76,8 @@ export function probeIntervalMs(pools: readonly PoolForecast[], now: number): nu
   for (const p of pools) {
     const until = p.runOutAt === undefined ? Infinity : p.runOutAt - now;
     const used = p.scope === 'session' ? (p.utilization ?? 0) : 0;
-    if (until <= 3 * NEARLY_OUT_MS || used >= 0.9) interval = Math.min(interval, PROBE_FAST_MS);
-    else if (until <= 9 * NEARLY_OUT_MS || used >= 0.75) {
+    if (until <= 3 * HORIZON_UNIT_MS || used >= 0.9) interval = Math.min(interval, PROBE_FAST_MS);
+    else if (until <= 9 * HORIZON_UNIT_MS || used >= 0.75) {
       interval = Math.min(interval, PROBE_MEDIUM_MS);
     }
   }

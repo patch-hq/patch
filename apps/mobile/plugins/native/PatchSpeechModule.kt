@@ -1,4 +1,4 @@
-package io.github.tomchambers2.patch
+package dev.patchhq.app
 
 import android.content.Intent
 import android.media.AudioFormat

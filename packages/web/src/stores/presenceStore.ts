@@ -129,6 +129,12 @@ interface PresenceState {
    */
   restarting: { version: string | null; at: number } | null;
   setRestarting(r: { version: string | null; at: number } | null): void;
+  /**
+   * Hosts that were online when the server announced a restart into a new
+   * version, mapped to that version. They swap to the new build and drop off
+   * for a moment: until each is back, it is "being updated", not "offline".
+   */
+  hostsUpdating: Record<string, string>;
   /** Account / surface info, populated after `auth.ok`. */
   accountId: string | null;
   surfaceId: string | null;
@@ -219,6 +225,7 @@ export const usePresenceStore = create<PresenceState>((set) => ({
   failedAttempts: 0,
   lastClose: null,
   restarting: null,
+  hostsUpdating: {},
   accountId: null,
   surfaceId: null,
   setConnection(s) {
@@ -240,7 +247,11 @@ export const usePresenceStore = create<PresenceState>((set) => ({
         folders: null,
       };
     }
-    set({ hosts, hostOnline: anyOnline(hosts), hostsSeeded: true });
+    set((s) => {
+      const hostsUpdating = { ...s.hostsUpdating };
+      for (const id of Object.keys(hostsUpdating)) if (hosts[id]?.online) delete hostsUpdating[id];
+      return { hosts, hostOnline: anyOnline(hosts), hostsSeeded: true, hostsUpdating };
+    });
   },
   removeHost(hostId) {
     set((s) => {
@@ -263,7 +274,9 @@ export const usePresenceStore = create<PresenceState>((set) => ({
             : { offlineReason: offlineReason ?? null }),
         },
       };
-      return { hosts, hostOnline: anyOnline(hosts) };
+      const hostsUpdating = { ...s.hostsUpdating };
+      if (online) delete hostsUpdating[hostId];
+      return { hosts, hostOnline: anyOnline(hosts), hostsUpdating };
     });
   },
   setHostReport(report) {
@@ -317,7 +330,15 @@ export const usePresenceStore = create<PresenceState>((set) => ({
     set({ wsUrl: url, everConnected: true, failedAttempts: 0, restarting: null });
   },
   setRestarting(r) {
-    set({ restarting: r });
+    set((s) => {
+      if (!r?.version) return { restarting: r };
+      const version = r.version;
+      const hostsUpdating = { ...s.hostsUpdating };
+      for (const [id, h] of Object.entries(s.hosts)) {
+        if (h.online && h.host?.hostVersion !== version) hostsUpdating[id] = version;
+      }
+      return { restarting: r, hostsUpdating };
+    });
   },
   noteWsClose(info) {
     set((s) => ({ lastClose: info, failedAttempts: s.failedAttempts + 1 }));

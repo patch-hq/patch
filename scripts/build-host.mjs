@@ -34,8 +34,11 @@ import {
   copyFileSync,
   cpSync,
   existsSync,
-  linkSync,
+  lstatSync,
   mkdirSync,
+  openSync,
+  readSync,
+  closeSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -98,7 +101,7 @@ function signHostApp(outDir, identity) {
   chmodSync(exe, 0o755);
   sh('codesign', [
     '--force',
-    '--timestamp=none',
+    timestampFlag(identity),
     '--identifier',
     HOST_APP_BUNDLE_ID,
     '--options',
@@ -110,10 +113,52 @@ function signHostApp(outDir, identity) {
     app,
   ]);
   sh('codesign', ['--verify', '--strict', '--deep', '--verbose=2', app]);
-  // `node` becomes a hard link to the bundle's executable, so the tarball
-  // carries the binary once.
+  // No top-level `node` on macOS. The installer runs the bundle's executable
+  // (installer/install), and a `node` hard-linked to it carries a signature that
+  // seals an Info.plist it is not beside: macOS kills it on launch, and
+  // notarisation refuses the whole Mac app that carries this artifact for it.
   rmSync(join(outDir, 'node'));
-  linkSync(exe, join(outDir, 'node'));
+}
+
+/**
+ * A Developer ID signature is timestamped by Apple, as notarisation requires;
+ * any other identity (self-signed, or `-` ad hoc) is not, since Apple's
+ * timestamp server is only for Apple-issued certificates' signatures.
+ */
+export function timestampFlag(identity) {
+  return /^Developer ID Application: /.test(identity) ? '--timestamp' : '--timestamp=none';
+}
+
+const MACHO_MAGIC = new Set([0xfeedface, 0xcefaedfe, 0xfeedfacf, 0xcffaedfe, 0xcafebabe, 0xbebafeca]);
+
+/** True for a Mach-O executable, library or bundle (thin or universal). */
+export function isMachO(file) {
+  const fd = openSync(file, 'r');
+  try {
+    const b = Buffer.alloc(4);
+    if (readSync(fd, b, 0, 4, 0) < 4) return false;
+    return MACHO_MAGIC.has(b.readUInt32BE(0));
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Every Mach-O file in the artifact, symlinks skipped. Found by content, not by
+ * a list: notarisation unpacks the tarball the Mac app carries and refuses ANY
+ * binary that is unsigned or lacks a secure timestamp, and a list fell behind
+ * when sherpa-onnx's libraries were added.
+ */
+export function machOFiles(dir) {
+  const out = [];
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    const st = lstatSync(p);
+    if (st.isSymbolicLink()) continue;
+    if (st.isDirectory()) out.push(...machOFiles(p));
+    else if (st.isFile() && st.size >= 4 && isMachO(p)) out.push(p);
+  }
+  return out;
 }
 
 /** The three shipping targets. */
@@ -476,7 +521,7 @@ function codesignMacArtifact(outDir, machos) {
     // takes the last, which is how an earlier stray one silently won.
     sh('codesign', [
       '--force',
-      '--timestamp=none',
+      timestampFlag(identity),
       '--identifier',
       basename(file) === 'node' ? HOST_APP_BUNDLE_ID : basename(file),
       '--options',
@@ -519,7 +564,7 @@ async function buildTarget(t, ctx) {
   chmodSync(join(outDir, 'node'), 0o755);
 
   // 3. the platform's prebuilt native addons
-  const binDir = copyNativeAddons(vendor, t, outDir);
+  copyNativeAddons(vendor, t, outDir);
 
   // 3b. the agent SDK, beside the bundle, so the host's bare import resolves
   // on a host that has nothing installed but this artifact.
@@ -593,22 +638,13 @@ async function buildTarget(t, ctx) {
     if (process.platform !== 'darwin') {
       die('the darwin-arm64 artifact must be built on macOS — codesign lives there');
     }
-    codesignIdentity = codesignMacArtifact(outDir, [
-      join(
-        outDir,
-        'native',
-        'onnxruntime-node',
-        'bin',
-        'napi-v6',
-        t.platform,
-        t.arch,
-        'onnxruntime_binding.node',
-      ),
-      ...['libonnxruntime.1.26.0.dylib', 'libonnxruntime.1.dylib']
-        .map((f) => join(binDir, f))
-        .filter((f) => existsSync(f)),
-      join(outDir, 'node'),
-    ]);
+    // Every Mach-O, `node` last: it becomes the host app's executable, and the
+    // libraries it loads are signed first.
+    const machos = machOFiles(outDir).filter((f) => f !== join(outDir, 'node'));
+    for (const want of ['onnxruntime_binding.node', 'sherpa-onnx.node']) {
+      if (!machos.some((f) => basename(f) === want)) die(`no ${want} to sign in ${outDir}`);
+    }
+    codesignIdentity = codesignMacArtifact(outDir, [...machos, join(outDir, 'node')]);
     signHostApp(outDir, codesignIdentity);
   }
 

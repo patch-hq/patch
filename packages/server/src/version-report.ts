@@ -332,6 +332,7 @@ export function computeDrift(input: DriftInput): VersionDrift[] {
 
 export interface BuildReportInput extends DriftInput {
   server: LayerBuild & { startedAt: string; serverSha: string | null };
+  release?: VersionReport['release'];
   /** Injected for determinism in tests. */
   now: Date;
 }
@@ -347,6 +348,7 @@ export function buildVersionReport(input: BuildReportInput): VersionReport {
     desktop: input.desktop,
     android: input.android,
     clients: input.clients,
+    ...(input.release ? { release: input.release } : {}),
     drift: computeDrift(input),
   };
 }

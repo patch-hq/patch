@@ -316,15 +316,16 @@ describe('TC3 [test-runner] desktop channel — always fires (running server + r
 });
 
 describe('TC3 [test-runner] speakers channel server fanout — undelivered on no devices', () => {
-  it('B6 speakers notify with no voice-device surfaces online logs undelivered', async () => {
+  it('B6 speakers notify with no voice device falls through to push (logged when push cannot deliver)', async () => {
     const h = await startServer({ dir });
     try {
       h.hostLink.emit({ type: 'notify', chatId: 'c', channel: 'speakers', message: 'spoke' });
       const path = join(h.dataDir, 'undelivered.jsonl');
       await waitUntil(() => existsSync(path) && readFileSync(path, 'utf8').includes('spoke'));
       const entry = JSON.parse(readFileSync(path, 'utf8').trim().split('\n').pop() as string);
-      expect(entry.channel).toBe('speakers');
-      expect(entry.error).toContain('no speaker surfaces');
+      expect(entry.channel).toBe('push');
+      // No device is connected, so it goes to push; this server has no push backend.
+      expect(entry.error).toContain('push');
     } finally {
       await h.close();
     }

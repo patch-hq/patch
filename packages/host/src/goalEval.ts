@@ -33,9 +33,15 @@ const MAX_REASON_LEN = 2000;
 
 export type GoalVerdict = 'met' | 'not_met' | 'refused' | 'blocked' | 'impossible';
 
+export type GoalOnTrack = 'on_track' | 'off_track';
+
 export interface GoalEvalResult {
   verdict: GoalVerdict;
   reason: string;
+  /** Present only when the evaluation was a check-in (`GoalEvalInput.checkIn`). */
+  onTrack?: GoalOnTrack;
+  /** Why the goal is on or off track; present with `onTrack`. */
+  onTrackReason?: string;
 }
 
 export interface GoalEvalInput {
@@ -51,6 +57,8 @@ export interface GoalEvalInput {
   userScope: string;
   /** The agent's latest message, verbatim: where it states what is done and what blocks it. */
   agentStatement: string;
+  /** This evaluation is also a check-in: the reply must say whether the goal is on track. */
+  checkIn?: boolean;
 }
 
 export interface GoalJudgeSettings {
@@ -99,7 +107,15 @@ export function parseGoalVerdict(raw: string): GoalEvalResult | null {
   if (typeof rawReason !== 'string' || rawReason.trim() === '') return null;
   let reason = rawReason.trim().replace(/\s+/g, ' ');
   if (reason.length > MAX_REASON_LEN) reason = `${cutAt(reason, MAX_REASON_LEN - 1).trimEnd()}…`;
-  return { verdict, reason };
+  const onTrack = obj['onTrack'];
+  if (onTrack === undefined) return { verdict, reason };
+  if (onTrack !== 'on_track' && onTrack !== 'off_track') return null;
+  const rawOnTrackReason = obj['onTrackReason'];
+  if (typeof rawOnTrackReason !== 'string' || rawOnTrackReason.trim() === '') return null;
+  let onTrackReason = rawOnTrackReason.trim().replace(/\s+/g, ' ');
+  if (onTrackReason.length > MAX_REASON_LEN)
+    onTrackReason = `${cutAt(onTrackReason, MAX_REASON_LEN - 1).trimEnd()}…`;
+  return { verdict, reason, onTrack, onTrackReason };
 }
 
 function buildPrompt(input: GoalEvalInput, instructions: string): string {
@@ -131,8 +147,19 @@ function buildPrompt(input: GoalEvalInput, instructions: string): string {
     'CONVERSATION SO FAR (oldest first):',
     input.transcript,
     '',
+    ...(input.checkIn
+      ? [
+          'This is also a CHECK-IN. Besides the verdict, say whether the work is on track to meet ' +
+            'the goal: "on_track" when it is making real progress towards it, "off_track" when it ' +
+            'has drifted, is going in circles or is stuck. Give the reason in "onTrackReason".',
+          '',
+        ]
+      : []),
     'Reply with ONLY a JSON object of the shape ' +
-      '{"verdict":"met"|"not_met"|"refused"|"blocked"|"impossible","reason":"..."}. No prose outside the JSON.',
+      (input.checkIn
+        ? '{"verdict":"met"|"not_met"|"refused"|"blocked"|"impossible","reason":"...","onTrack":"on_track"|"off_track","onTrackReason":"..."}'
+        : '{"verdict":"met"|"not_met"|"refused"|"blocked"|"impossible","reason":"..."}') +
+      '. No prose outside the JSON.',
   ].join('\n');
 }
 

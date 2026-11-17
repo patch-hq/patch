@@ -9,9 +9,11 @@ import {
   listTurnDirs,
   retireTurn,
   turnDirFor,
+  claudePidFor,
   type Consumed,
   type DurableTurnConfig,
 } from './durableTurn.js';
+import { cancelBashCall } from './cancelCommand.js';
 import type { SleepGuard } from './sleepGuard.js';
 import type { SleepWatch } from './sleepWatch.js';
 import { expandHome } from './expandHome.js';
@@ -58,6 +60,8 @@ import {
   deriveSnoozeOutcome,
   openSnoozeRecord,
   providerDescriptor,
+  providerForSessionId,
+  modelSupportsEffort,
   ChatErrorCode,
   type ReminderEvery,
 } from '@patch/wire';
@@ -105,7 +109,7 @@ import {
   type ChatLastError,
   type SdkPermissionMode,
 } from './chatState.js';
-import { type MetaStore, type ChatMeta, type UnreadableChat } from './meta.js';
+import { type MetaStore, ChatMeta, type UnreadableChat } from './meta.js';
 import {
   PermissionModeDowngradedError,
   type ExtraMcpServer,
@@ -154,6 +158,7 @@ import {
 } from './pendingDecisions.js';
 import {
   buildGoalSystemReminder,
+  buildGoalReminder,
   buildPeriodicReminder,
   buildHiddenSystemReminder,
   buildTodoEditSystemReminder,
@@ -232,6 +237,7 @@ import type {
 } from '@patch/wire';
 import { BrowserHandoff, type HandoffResult, type ShareResult } from './browserHandoff.js';
 import { voicePrefixForSource } from './specialThreads.js';
+import { sweepAgentWorktrees, type WorktreeSweepResult } from './cleanup.js';
 import { parseLeadingGoal } from './goalCommand.js';
 import { prefixKeepingCommandFirst } from './leadCommand.js';
 
@@ -358,7 +364,7 @@ export interface HostOptions {
      * a check that runs nothing (a spawn's credential check), which must not
      * spend a place in the rotation.
      */
-    turn?: { chatId: string; preferredAccountId?: string },
+    turn?: { chatId: string; preferredAccountId?: string; sessionAccountId?: string },
   ) => OAuthCheckResult | Promise<OAuthCheckResult>;
   /**
    * A turn just failed because ITS ACCOUNT has no credit left. Return the next
@@ -600,9 +606,13 @@ export interface HostOptions {
     userScope: string;
     /** The agent's latest message, where it states blockers. */
     agentStatement: string;
+    /** Also report whether the goal is on track (spec/04 § Goals — check-in). */
+    checkIn?: boolean;
   }) => Promise<{
     verdict: 'met' | 'not_met' | 'refused' | 'blocked' | 'impossible';
     reason: string;
+    onTrack?: 'on_track' | 'off_track';
+    onTrackReason?: string;
   } | null>;
   /**
    * How long to wait before re-checking a goal deferred on running
@@ -853,6 +863,8 @@ export interface DelegateSummary {
   id: string;
   label: string;
   status: DelegateStatus;
+  /** The user paused it (status stays `running`). */
+  paused?: boolean;
   createdAt: number;
   finishedAt: number | null;
 }
@@ -1096,6 +1108,17 @@ const ORIGINAL_OPEN = '<original-prompt>\n';
 const ORIGINAL_CLOSE = '\n</original-prompt>';
 const REMINDER_CLOSE = '</system-reminder>';
 const REMINDER_CLOSE_ESCAPED = '</system-reminder-escaped>';
+
+/** What surrounds a goal (spec/04 § Goals): the goals after it and its two cadences. */
+export interface GoalPlan {
+  then?: string[];
+  remindEvery?: ReminderEvery | null;
+  checkInEvery?: ReminderEvery | null;
+}
+
+function sameQueue(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((g, i) => g === b[i]);
+}
 
 function sameEvery(a: ReminderEvery | null, b: ReminderEvery | null): boolean {
   return a === b || (a !== null && b !== null && a.unit === b.unit && a.n === b.n);
@@ -1392,7 +1415,6 @@ import {
   transcriptSize,
   type ClaudeSessionStore,
 } from './claudeSessionStore.js';
-import { isCodexModel } from './codexAccounts.js';
 import { hasConversation } from './syntheticTurns.js';
 import { cutAt } from './textClean.js';
 import { untilAborted } from './untilAborted.js';
@@ -1619,12 +1641,6 @@ export interface SendInputOptions {
    * (spec/04 § Hidden). Unlike `fromUser` it makes no claim that a person sent it.
    */
   fromAgent?: boolean;
-  /**
-   * The message is a sibling agent's `patch_send_to`. It is delivered, but unlike
-   * every other sender it does not un-archive the chat: archiving is the user
-   * putting a chat away, and another agent must not be able to bring it back.
-   */
-  fromSibling?: boolean;
   /**
    * This turn is a job's own fire into the chat (spec/08 § Action — a
    * `continue`/`message` action's fire into an EXISTING chat), not something
@@ -2392,6 +2408,8 @@ export class Daemon {
    * hydrated after a restart it joins this set.
    */
   private readonly hydratedFromDisk = new Set<string>();
+  /** Chats whose log held a turn the previous process never ended (closed `interrupted` at hydrate). */
+  private readonly interruptedAtHydrate = new Set<string>();
   /**
    * Chats being moved to another host (spec/04 § Moving a chat to another
    * host): exported, and not yet retired or released. A new turn is refused
@@ -2515,6 +2533,8 @@ export class Daemon {
    * running `patch_watch` tasks, so it can re-check once they finish instead
    * of leaving the goal silently un-evaluated until the next real turn.
    */
+  /** Chats whose current goal-evaluation deferral has already been logged. */
+  private readonly goalDeferLogged = new Set<string>();
   private readonly goalWatchPollTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private static readonly RECENT_EVENTS_CAP = 200;
   /** OAuth gate run before every query. See HostOptions.resolveOAuth. */
@@ -3155,6 +3175,13 @@ export class Daemon {
    * that waits for the reset.
    */
   private readonly failoverTriedAccounts = new Map<string, Set<string>>();
+
+  /**
+   * Chats whose turn is being re-run on another account. The chat sits idle for
+   * a moment between the failed run and the re-run, but its work is not done —
+   * so a snooze "until complete" must not read that gap as completion.
+   */
+  private readonly failoverRerunPending = new Set<string>();
   /**
    * The account each chat's most recent turn resolved onto, as `resolveOAuth`
    * reported it. Set as that turn starts, and left standing after it — a usage
@@ -3354,6 +3381,7 @@ export class Daemon {
         state.nextSeq = opened.nextSeq;
         lastTurnOutcomeByChatId.set(m.chatId, opened.lastTurnOutcome);
         lastTurnLocalIdByChatId.set(m.chatId, opened.lastTurnLocalId);
+        if (opened.interruptedTurnId !== null) this.interruptedAtHydrate.add(m.chatId);
         if (opened.repaired) {
           repaired.push({ chatId: m.chatId, droppedBytes: opened.repaired.droppedBytes });
         }
@@ -3447,9 +3475,15 @@ export class Daemon {
   ): void {
     const owned = metas.filter((m) => this.chatState.has(m.chatId));
     this.hideArchivedWithLiveWork(owned);
+    // Interrupted turns first: re-sending (or reattaching) one marks the chat
+    // busy synchronously, so an overdue wake loaded after it is held until that
+    // turn ends. Loaded first, the wake's own turn started ahead of the resend,
+    // took the reattach marker for itself and killed the surviving runner
+    // (2026-11-12, Mac restart).
+    this.resumeInterruptedTurns(owned, lastTurnOutcomeByChatId, lastTurnLocalIdByChatId);
     this.wake.loadAll();
     this.watch.loadAll();
-    this.resumeInterruptedTurns(owned, lastTurnOutcomeByChatId, lastTurnLocalIdByChatId);
+    this.flagUnresumedInterruptions(owned);
     this.settleUntilCompleteSnoozes(owned);
     this.resumeDeferredGoalEvaluations(owned);
   }
@@ -3470,6 +3504,26 @@ export class Daemon {
       if (this.owedResend.has(m.chatId) || this.parkedTurns.has(m.chatId)) continue;
       if (this.watch.count(m.chatId) === 0 && !this.hasRunningDelegates(m.chatId)) continue;
       this.armGoalWatchPoll(m.chatId);
+    }
+  }
+
+  /**
+   * A chat hydrates `idle`, which every surface reads as "done". A turn the
+   * previous process was cut off in the middle of, and that nothing re-sent
+   * (no owed turn was recorded, or it was dropped), would therefore look like
+   * it finished. Say it stopped partway instead (spec/12 § No fallbacks).
+   */
+  private flagUnresumedInterruptions(metas: ChatMeta[]): void {
+    const interrupted = new Set(this.interruptedAtHydrate);
+    this.interruptedAtHydrate.clear();
+    for (const m of metas) {
+      if (!interrupted.has(m.chatId) || m.status === 'deleted') continue;
+      if (this.owedResend.has(m.chatId) || this.parkedTurns.has(m.chatId)) continue;
+      this.failPreflight(
+        m.chatId,
+        'sdk_error',
+        'This chat was stopped partway by a restart and its last turn was not resumed. Send a message to carry on.',
+      );
     }
   }
 
@@ -4029,6 +4083,7 @@ export class Daemon {
       description: string;
       timeoutSec: number;
       checkInSec?: number;
+      wakeOnMatch?: string;
       cwd?: string;
     },
   ): WatchRecord {
@@ -4046,6 +4101,7 @@ export class Daemon {
       cwd,
       timeoutSec: opts.timeoutSec,
       ...(opts.checkInSec !== undefined ? { checkInSec: opts.checkInSec } : {}),
+      ...(opts.wakeOnMatch !== undefined ? { wakeOnMatch: opts.wakeOnMatch } : {}),
     });
     this.opts.logger.info({ chatId, taskId: rec.taskId }, 'watch: started');
     // spec/02 § Background task completions — a launch starts work the turn
@@ -4544,6 +4600,13 @@ export class Daemon {
       name: meta.name,
       preview: meta.preview ?? null,
       goal: meta.goal ?? null,
+      goalQueue: meta.goalQueue ?? [],
+      goalReminderEvery: meta.goalReminderEvery ?? null,
+      goalCheckInEvery: meta.goalCheckInEvery ?? null,
+      goalReminderTurnsSince: 0,
+      goalReminderLastAt: this.opts.now(),
+      goalCheckInTurnsSince: 0,
+      goalCheckInLastAt: this.opts.now(),
       goalProgress: null,
       lastGoal: meta.lastGoal ?? null,
       goalRefusalStreak: 0,
@@ -4716,6 +4779,16 @@ export class Daemon {
   }
 
   /**
+   * The caller blocked on `id` (`wait: true`) is gone — its connection closed
+   * before the result arrived. Drop its waiter so the subagent's settle takes
+   * the delivery path and the result reaches the parent as a `[from]` turn;
+   * left registered, it would be handed to a dead socket and lost.
+   */
+  abandonDelegateWait(id: string): void {
+    this.delegateWaiters.delete(id);
+  }
+
+  /**
    * `patch_delegate_send` — a follow-up message to one of the caller's own
    * subagents. A settled one is re-armed (outcome cleared, running again) and
    * keeps its whole context; a running one queues the message behind its
@@ -4758,12 +4831,16 @@ export class Daemon {
   private rearmDelegate(chatId: string): void {
     const state = this.chatState.get(chatId);
     if (state?.subagent?.outcome === undefined) return;
-    const { outcome: _o, finishedAt: _f, ...rest } = state.subagent;
+    const { outcome: _o, finishedAt: _f, ...base } = state.subagent;
+    const rest = { ...base, runStartedAt: this.opts.now(), followUp: true };
     state.subagent = rest;
     this.opts.metaStore.update(chatId, (m) => {
       if (!m.subagent) return m;
       const { outcome: _mo, finishedAt: _mf, ...mrest } = m.subagent;
-      return { ...m, subagent: mrest };
+      return {
+        ...m,
+        subagent: { ...mrest, runStartedAt: rest.runStartedAt, followUp: true },
+      };
     });
     this.emitDelegateUpdate(rest.parentChatId, chatId, rest.label, 'running');
   }
@@ -4795,13 +4872,30 @@ export class Daemon {
     for (const meta of this.opts.metaStore.list()) {
       if (meta.subagent?.parentChatId !== parentChatId) continue;
       const live = this.chatState.get(meta.chatId);
+      // A subagent that ended without ever passing through `maybeSettleDelegate`
+      // (its folder vanished, so the turn never started) has no outcome and
+      // would read as running for ever. An errored chat that is not retrying,
+      // not parked on credit and not mid-run is over: report it failed.
+      const stranded =
+        meta.subagent.outcome === undefined &&
+        !this.aborters.has(meta.chatId) &&
+        !this.limitBlocks.has(meta.chatId) &&
+        !this.rateLimitPendingTurns.has(meta.chatId) &&
+        (live ? live.activity === 'errored' && !live.turnRetrying : meta.status === 'errored');
       const status: DelegateStatus =
         meta.subagent.outcome ??
-        (live?.activity === 'awaiting-permission' ? 'awaiting-permission' : 'running');
+        (stranded
+          ? 'failed'
+          : live?.activity === 'awaiting-permission'
+            ? 'awaiting-permission'
+            : 'running');
       out.push({
         id: meta.chatId,
         label: meta.subagent.label,
         status,
+        ...(meta.subagent.userPaused && meta.subagent.outcome === undefined
+          ? { paused: true }
+          : {}),
         createdAt: meta.createdAt,
         finishedAt: meta.subagent.finishedAt ?? null,
       });
@@ -4823,6 +4917,104 @@ export class Daemon {
     await this.stopChat(id);
     this.finishDelegate(id, 'stopped');
     return true;
+  }
+
+  /** Persist and mirror the user-pause flag on a subagent. */
+  private setDelegatePaused(chatId: string, paused: boolean): void {
+    const state = this.chatState.get(chatId);
+    if (!state?.subagent) return;
+    const { userPaused: _u, ...rest } = state.subagent;
+    state.subagent = paused ? { ...rest, userPaused: true } : rest;
+    this.opts.metaStore.update(chatId, (m) => {
+      if (!m.subagent) return m;
+      const { userPaused: _mu, ...mrest } = m.subagent;
+      return { ...m, subagent: paused ? { ...mrest, userPaused: true } : mrest };
+    });
+  }
+
+  /** The parent's own, unfinished subagent `id`; hydrated into chat state. Undefined for anything else. */
+  private liveDelegateMeta(parentChatId: string, id: string): ChatMeta | undefined {
+    const meta = this.opts.metaStore.read(id);
+    if (!meta?.subagent || meta.subagent.parentChatId !== parentChatId) return undefined;
+    if (!this.chatState.has(id)) this.chatState.hydrate([meta]);
+    return meta;
+  }
+
+  /**
+   * The user pauses a running subagent: its turn is interrupted but it is not
+   * settled, so nothing is reported to the parent and it keeps its context.
+   * False when it is not the parent's, or already finished.
+   */
+  async pauseDelegate(parentChatId: string, id: string): Promise<boolean> {
+    const meta = this.liveDelegateMeta(parentChatId, id);
+    if (!meta?.subagent || meta.subagent.outcome !== undefined) return false;
+    if (this.chatState.get(id)?.subagent?.userPaused) return true;
+    this.setDelegatePaused(id, true);
+    await this.stopChat(id);
+    this.emitDelegateUpdate(parentChatId, id, meta.subagent.label, 'running');
+    return true;
+  }
+
+  /** The user resumes a paused subagent: it carries on from where it stopped. */
+  async resumeDelegate(parentChatId: string, id: string): Promise<boolean> {
+    const meta = this.liveDelegateMeta(parentChatId, id);
+    if (!meta?.subagent || meta.subagent.outcome !== undefined) return false;
+    if (!this.chatState.get(id)?.subagent?.userPaused) return false;
+    // Not awaited: the call settles with the turn it starts, which is the
+    // agent's whole next run, and the caller only asked for it to begin.
+    void this.sendInput({
+      chatId: id,
+      message: 'You were paused. Carry on from where you stopped.',
+      localId: randomUUID(),
+      origin: 'machine',
+    }).catch((err: unknown) => {
+      this.opts.logger.error({ chatId: id, err }, 'patch_delegate: resume failed');
+    });
+    return true;
+  }
+
+  /**
+   * The user spins a subagent off into a chat of its own: it stops being a
+   * subagent (nothing it does is reported to the parent again) and becomes an
+   * ordinary chat in the list, with its whole context and any run in flight.
+   * Returns the chat id, or undefined when `id` is not the parent's subagent.
+   */
+  spinOffDelegate(parentChatId: string, id: string): string | undefined {
+    const meta = this.liveDelegateMeta(parentChatId, id);
+    const state = this.chatState.get(id);
+    if (!meta?.subagent || !state?.subagent) return undefined;
+    const { label } = meta.subagent;
+    this.opts.metaStore.update(id, (m) => {
+      const { subagent: _s, ...rest } = m;
+      return {
+        ...rest,
+        spawnedByChatId: parentChatId,
+        name: m.name ?? label,
+        updatedAt: this.opts.now(),
+      };
+    });
+    delete state.subagent;
+    state.spawnedByChatId = parentChatId;
+    state.name = state.name ?? label;
+    this.pausedDelegates.delete(id);
+    // A caller blocked on it gets an answer rather than waiting for ever.
+    const waiters = this.delegateWaiters.get(id);
+    this.delegateWaiters.delete(id);
+    for (const w of waiters ?? []) {
+      w({ status: 'stopped', reply: 'The user spun this agent off into its own chat.' });
+    }
+    this.emit({
+      type: 'chat.spawned',
+      chatId: id,
+      hostId: this.opts.hostId,
+      folder: state.folder,
+      parentChatId,
+      ...(state.model !== undefined ? { model: state.model } : {}),
+    });
+    this.emitState(id);
+    this.emitDelegateUpdate(parentChatId, id, label, 'stopped', undefined, id);
+    if (this.chatState.has(parentChatId)) this.emitState(parentChatId);
+    return id;
   }
 
   /**
@@ -4881,7 +5073,12 @@ export class Daemon {
     if (waiters?.length) {
       for (const w of waiters) w({ status: outcome, reply });
     } else if (outcome !== 'stopped') {
-      this.deliverToParent(parentChatId, formatAgentReturn(label, chatId, reply));
+      // A wake that adds no assistant message would re-send the same report.
+      const last = outcome === 'done' ? lastAssistantMessage(state) : undefined;
+      if (last === undefined || last.seq !== state.deliveredReportSeq) {
+        if (last !== undefined) state.deliveredReportSeq = last.seq;
+        this.deliverToParent(parentChatId, formatAgentReturn(label, chatId, reply));
+      }
     }
     this.emitDelegateUpdate(parentChatId, chatId, label, outcome);
     if (this.chatState.has(parentChatId)) this.emitState(parentChatId);
@@ -4899,6 +5096,12 @@ export class Daemon {
   private maybeSettleDelegate(chatId: string): void {
     const state = this.chatState.get(chatId);
     if (!state?.subagent || state.subagent.outcome !== undefined) return;
+    if (state.subagent.userPaused) {
+      // The user paused it: the stop that ended this turn is not a settle. It
+      // stays alive and unreported until a turn runs again or it is stopped.
+      this.emitDelegateUpdate(state.subagent.parentChatId, chatId, state.subagent.label, 'running');
+      return;
+    }
     if (state.turnStopped) {
       this.finishDelegate(chatId, 'stopped');
     } else if (state.activity === 'idle') {
@@ -4969,6 +5172,21 @@ export class Daemon {
     });
   }
 
+  /** When the subagent's current run began, and whether it is a follow-up wake. Live statuses only. */
+  private delegateRunFields(
+    delegateId: string,
+    status: DelegateStatus,
+  ): { runStartedAt?: number; followUp?: boolean } {
+    if (status !== 'running' && status !== 'awaiting-permission') return {};
+    const sub =
+      this.chatState.get(delegateId)?.subagent ?? this.opts.metaStore.read(delegateId)?.subagent;
+    const startedAt = sub?.runStartedAt ?? this.opts.metaStore.read(delegateId)?.createdAt;
+    return {
+      ...(startedAt !== undefined ? { runStartedAt: startedAt } : {}),
+      ...(sub?.followUp ? { followUp: true } : {}),
+    };
+  }
+
   /** Live status ping for the parent's `patch_delegate` tool row (spec/14 §
    *  Main chat panel — Delegate tool row). Never withheld by `private emit()`
    *  — it is emitted under the PARENT's own chatId, which is never itself a
@@ -4979,17 +5197,23 @@ export class Daemon {
     label: string,
     status: DelegateStatus,
     outOfCredit?: { resetsAt?: number },
+    spunOffChatId?: string,
   ): void {
     if (!this.chatState.has(parentChatId)) return;
     if (outOfCredit) this.pausedDelegates.add(delegateId);
     else this.pausedDelegates.delete(delegateId);
+    const userPaused =
+      status === 'running' && this.chatState.get(delegateId)?.subagent?.userPaused === true;
     const ev: ChatDelegateUpdateEvent = {
       type: 'chat.delegate_update',
       chatId: parentChatId,
       delegateId,
       label,
       status,
+      ...(userPaused ? {} : this.delegateRunFields(delegateId, status)),
       ...(outOfCredit ? { outOfCredit } : {}),
+      ...(userPaused ? { paused: true } : {}),
+      ...(spunOffChatId !== undefined ? { spunOffChatId } : {}),
       seq: this.bumpSeq(parentChatId),
     };
     this.emit(ev);
@@ -5055,15 +5279,41 @@ export class Daemon {
    * set/clear, so an in-progress goal abandoned by a new `/goal` or a bare
    * clear leaves the chat header showing whatever last actually FINISHED.
    */
-  async setGoal(chatId: string, goal: string | null): Promise<void> {
+  async setGoal(chatId: string, goal: string | null, plan: GoalPlan = {}): Promise<void> {
     const state = this.chatState.get(chatId);
     if (!state) throw new ChatNotFoundError(chatId);
-    if (state.goal === goal) {
+    const then = goal === null ? [] : (plan.then ?? []);
+    const remindEvery = goal === null ? null : (plan.remindEvery ?? null);
+    const checkInEvery = goal === null ? null : (plan.checkInEvery ?? null);
+    if (
+      state.goal === goal &&
+      sameQueue(state.goalQueue, then) &&
+      sameEvery(state.goalReminderEvery, remindEvery) &&
+      sameEvery(state.goalCheckInEvery, checkInEvery)
+    ) {
       this.emitState(chatId);
       return;
     }
+    this.armGoal(chatId, goal, { then, remindEvery, checkInEvery });
+  }
+
+  /**
+   * Put `goal` (and the plan around it) in force: fresh counters, the agent
+   * told on its next turn, persisted. Shared by `setGoal` and the sequence
+   * advancing to its next goal (spec/04 § Goals — sequence).
+   */
+  private armGoal(chatId: string, goal: string | null, plan: Required<GoalPlan>): void {
+    const state = this.chatState.get(chatId);
+    if (!state) throw new ChatNotFoundError(chatId);
     const now = this.opts.now();
     state.goal = goal;
+    state.goalQueue = plan.then;
+    state.goalReminderEvery = plan.remindEvery;
+    state.goalCheckInEvery = plan.checkInEvery;
+    state.goalReminderTurnsSince = 0;
+    state.goalReminderLastAt = now;
+    state.goalCheckInTurnsSince = 0;
+    state.goalCheckInLastAt = now;
     state.goalProgress =
       goal === null
         ? null
@@ -5080,7 +5330,14 @@ export class Daemon {
     state.goalNotice = { goal };
     state.lastUpdated = now;
     if (goal === null) this.flushQueuedNudges(chatId);
-    this.opts.metaStore.update(chatId, (m) => ({ ...m, goal, updatedAt: now }));
+    this.opts.metaStore.update(chatId, (m) => ({
+      ...m,
+      goal,
+      goalQueue: plan.then,
+      goalReminderEvery: plan.remindEvery,
+      goalCheckInEvery: plan.checkInEvery,
+      updatedAt: now,
+    }));
     this.emitState(chatId);
   }
 
@@ -5279,9 +5536,11 @@ export class Daemon {
     // was bounced would still be marked as tried.
     this.overloadRetryCount.delete(chatId);
     this.failoverTriedAccounts.delete(chatId);
+    this.failoverRerunPending.delete(chatId);
     const goalPoll = this.goalWatchPollTimers.get(chatId);
     if (goalPoll !== undefined) clearTimeout(goalPoll);
     this.goalWatchPollTimers.delete(chatId);
+    this.goalDeferLogged.delete(chatId);
     this.parkedTurns.delete(chatId);
     this.persistPendingTurns(chatId);
     // spec/04 § Branching — "Archiving/stopping the chat stops all its
@@ -5980,6 +6239,8 @@ export class Daemon {
     const wake = this.wake.peek(chatId);
     return (
       this.aggregateActivity(chatId) === 'running' ||
+      this.failoverRerunPending.has(chatId) ||
+      state?.turnRetrying === true ||
       (state?.goal ?? null) !== null ||
       (wake !== null && wake.every === undefined) ||
       this.hasRunningDelegates(chatId)
@@ -5997,8 +6258,12 @@ export class Daemon {
     const state = this.chatState.get(chatId);
     if (!state || state.snoozedUntil !== SNOOZE_UNTIL_COMPLETE) return;
     const activity = this.aggregateActivity(chatId);
+    // An errored turn the retry ladder is about to run again is not waiting on
+    // a person: only an error the ladder has given up on is.
     const needsPerson =
-      activity === 'awaiting-permission' || activity === 'errored' || this.isAskingQuestion(state);
+      activity === 'awaiting-permission' ||
+      (activity === 'errored' && !state.turnRetrying) ||
+      this.isAskingQuestion(state);
     if (!needsPerson && this.hasWorkToComplete(chatId)) return;
     this.wakeFromSnooze(chatId);
   }
@@ -6035,6 +6300,7 @@ export class Daemon {
         askingQuestion: this.isAskingQuestion(state),
         finishedAt: open.finishedAt,
         erroredAt: open.erroredAt,
+        error: open.error,
         waitingSince: open.waitingSince,
         now: endedAt,
       }),
@@ -6064,12 +6330,16 @@ export class Daemon {
     const next: SnoozeRecord = { ...open };
     if (prev === 'running' && activity === 'idle') next.finishedAt = now;
     if (activity === 'errored' && prev !== 'errored') next.erroredAt = now;
+    if (activity === 'errored' && state.lastError) {
+      next.error = { code: state.lastError.code, message: state.lastError.message };
+    }
     const waiting = activity === 'awaiting-permission' || this.isAskingQuestion(state);
     if (waiting && next.waitingSince === undefined) next.waitingSince = now;
     if (!waiting && next.waitingSince !== undefined) delete next.waitingSince;
     if (
       next.finishedAt !== open.finishedAt ||
       next.erroredAt !== open.erroredAt ||
+      next.error?.message !== open.error?.message ||
       next.waitingSince !== open.waitingSince
     ) {
       this.replaceLastSnoozeRecord(chatId, next);
@@ -6328,7 +6598,7 @@ export class Daemon {
         chatId,
         {
           k: 'import',
-          harness: sessionId.startsWith('codex-') ? 'codex' : 'claude',
+          harness: providerForSessionId(sessionId) ?? 'claude',
           sessionId,
           records: imported,
         },
@@ -6470,6 +6740,7 @@ export class Daemon {
         delegateId: d.id,
         label: d.label,
         status: d.status,
+        ...this.delegateRunFields(d.id, d.status),
         seq: lastSeq,
       });
     }
@@ -6615,14 +6886,14 @@ export class Daemon {
       req.message = `${buildHookAdviceBlock(notes)}${req.message}`;
     }
 
-    // Any send except a sibling agent's un-archives (Todoist 6hXRrVfCVgCrvC86): archived means stopped
+    // Any send un-archives: archived means stopped
     // (spec/04 § Lifecycle), and a message landing in the chat — the user's,
     // a job's, another agent's `patch_send_to` — is exactly what starts it
     // again. It comes back to where it was: `hidden` survives archiving, so a
     // hidden job's chat returns to Hidden, and a person's message does not
     // bring it into the list either — only Unhide does (spec/04 § Hidden). `setArchived`/`setHidden` emit the state
     // themselves, so this doesn't need its own emit.
-    if (state.status === 'archived' && req.fromSibling !== true) {
+    if (state.status === 'archived') {
       await this.setArchived(req.chatId, false);
     }
     if (req.fromUser === true) this.rehideOnExpiry.delete(req.chatId);
@@ -6802,11 +7073,30 @@ export class Daemon {
 
     // spec/04 § Goals — the goal was set, replaced or cleared since the agent's
     // last turn; one reminder per change.
+    const reminderWasNotice = state.goalNotice !== null;
     if (state.goalNotice !== null) {
       const reminder = buildGoalSystemReminder(state.goalNotice.goal);
       state.goalNotice = null;
       if (head !== null) head = reminder + head;
       else rewrittenWhole = reminder + rewrittenWhole;
+    }
+
+    // spec/04 § Goals — reminders: the active goal restated on its own cadence.
+    // A turn that already carries the goal-set notice does not count.
+    if (state.goal !== null && state.goalReminderEvery !== null && reminderWasNotice === false) {
+      state.goalReminderTurnsSince += 1;
+      const nowMs = this.opts.now();
+      const due =
+        state.goalReminderEvery.unit === 'turns'
+          ? state.goalReminderTurnsSince >= state.goalReminderEvery.n
+          : nowMs - state.goalReminderLastAt >= state.goalReminderEvery.n * 60_000;
+      if (due) {
+        state.goalReminderTurnsSince = 0;
+        state.goalReminderLastAt = nowMs;
+        const reminder = buildGoalReminder(state.goal);
+        if (head !== null) head = reminder + head;
+        else rewrittenWhole = reminder + rewrittenWhole;
+      }
     }
 
     // spec/04 § Reminders — a chat reminder with a cadence is re-injected
@@ -7364,6 +7654,27 @@ export class Daemon {
     const kept: QueuedTurn[] = [];
     for (const it of q) {
       if (it.nudge)
+        this.emit({ type: 'chat.dequeued', chatId, localId: it.localId, reason: 'cancelled' });
+      else kept.push(it);
+    }
+    this.turnQueues.set(chatId, kept);
+    this.persistPendingTurns(chatId);
+  }
+
+  /**
+   * Drop every queued turn that came from another agent or the harness
+   * (`origin: 'machine'`), announcing each as cancelled. A user Stop ends the
+   * turn the user was watching; without this the drain starts the next queued
+   * machine turn (a delegate's report, a `send_to`) the instant the abort
+   * settles, and Stop looks like it did nothing. Turns the user queued
+   * themselves stay: they are deliberate, and `promoteInput` relies on them.
+   */
+  private dropQueuedMachineTurns(chatId: string): void {
+    const q = this.turnQueues.get(chatId);
+    if (!q?.some((it) => it.origin === 'machine')) return;
+    const kept: QueuedTurn[] = [];
+    for (const it of q) {
+      if (it.origin === 'machine')
         this.emit({ type: 'chat.dequeued', chatId, localId: it.localId, reason: 'cancelled' });
       else kept.push(it);
     }
@@ -8600,6 +8911,50 @@ export class Daemon {
     }
   }
 
+  /** Command text of each chat's Bash calls that have not returned, by callId. */
+  private readonly runningBash = new Map<string, Map<string, string>>();
+
+  private trackRunningBash(event: WireEvent): void {
+    if (event.type === 'chat.tool_call' && event.tool === 'Bash') {
+      const command = (event.args as { command?: unknown } | null)?.command;
+      if (typeof command !== 'string') return;
+      let calls = this.runningBash.get(event.chatId);
+      if (!calls) {
+        calls = new Map();
+        this.runningBash.set(event.chatId, calls);
+      }
+      calls.set(event.callId, command);
+      // Calls cut off by a stop never return a result; keep the map small.
+      if (calls.size > 20) calls.delete(calls.keys().next().value!);
+    } else if (event.type === 'chat.tool_result') {
+      this.runningBash.get(event.chatId)?.delete(event.callId);
+    }
+  }
+
+  /**
+   * Cancel one running Bash call (`chat.tool_cancel_request`): SIGINT to what
+   * that command started, leaving claude and the turn alone. Logged either
+   * way, so "I pressed it and nothing happened" is answerable from the log.
+   */
+  async cancelToolCall(chatId: string, callId: string): Promise<void> {
+    const command = this.runningBash.get(chatId)?.get(callId);
+    const durable = this.opts.durableTurns;
+    const claudePid = durable ? claudePidFor(durable, chatId) : undefined;
+    if (command === undefined || claudePid === undefined) {
+      this.opts.logger.warn(
+        { chatId, callId, knownCall: command !== undefined, claudePid },
+        'tool cancel: nothing to cancel (call not running, or no claude process recorded)',
+      );
+      return;
+    }
+    try {
+      const pids = await cancelBashCall(claudePid, command);
+      this.opts.logger.info({ chatId, callId, pids }, 'tool cancel: interrupted a Bash call');
+    } catch (err) {
+      this.opts.logger.warn({ chatId, callId, err: (err as Error).message }, 'tool cancel: failed');
+    }
+  }
+
   /** Stop a specific branch's running turn, or no-op if it has none. */
   stopBranch(chatId: string, branchId: string): void {
     const key = this.branchKey(chatId, branchId);
@@ -8619,6 +8974,9 @@ export class Daemon {
     for (const b of meta?.branches ?? []) {
       if (b.branchId !== meta?.activeBranchId) this.stopBranch(chatId, b.branchId);
     }
+    // Before the abort, so the drain that follows it finds nothing from another
+    // agent to start.
+    this.dropQueuedMachineTurns(chatId);
     await this.stopChat(chatId);
   }
 
@@ -9243,10 +9601,11 @@ export class Daemon {
         'this chat has a subagent running on this host; let it finish or stop it before moving',
       );
     }
-    if (state.claudeSessionId?.startsWith('codex-')) {
+    const nativeProvider = providerForSessionId(state.claudeSessionId);
+    if (nativeProvider !== undefined && nativeProvider !== 'claude') {
       throw new ChatMoveError(
         'unsupported',
-        'this chat is on a Codex session, which a move cannot carry yet',
+        `this chat is on a ${providerDescriptor(nativeProvider).label} session, which a move cannot carry yet`,
       );
     }
     this.movingOut.add(chatId);
@@ -9343,6 +9702,42 @@ export class Daemon {
     this.emitState(chatId);
   }
 
+  /**
+   * Move a chat to another folder on THIS host (spec/04 § Moving a chat). It is
+   * the cross-host move done in one place: export, set the old directory aside,
+   * import under the new folder. The folder is checked first so the usual
+   * refusal never happens half-way; if the import fails anyway, the set-aside
+   * directory is put back and the chat is as it was.
+   */
+  refolderChat(chatId: string, requestedFolder: string): void {
+    const folder = expandHome(requestedFolder);
+    const state = this.chatState.get(chatId);
+    if (!state) throw new ChatMoveError('not_found', `no chat ${chatId} on this host`);
+    if (state.folder === folder) {
+      throw new ChatMoveError('already_exists', `this chat already runs in ${requestedFolder}`);
+    }
+    if (!existsSync(folder) || !statSync(folder).isDirectory()) {
+      throw new ChatMoveError(
+        'folder_not_found',
+        `${requestedFolder} is not a folder on this host`,
+      );
+    }
+    const bundle = this.exportChatForMove(chatId);
+    const keptAt = this.retireMovedChat(chatId);
+    try {
+      this.importMovedChat(bundle, folder);
+    } catch (err) {
+      const chatDir = join(this.movePaths().chatsRoot, chatId);
+      rmSync(chatDir, { recursive: true, force: true });
+      renameSync(keptAt, chatDir);
+      const meta = ChatMeta.parse(JSON.parse(readFileSync(join(chatDir, 'meta.json'), 'utf8')));
+      this.chatState.hydrate([meta]);
+      this.hydratedFromDisk.add(chatId);
+      this.chatLog.hydrate(chatId, this.chatState.get(chatId)!.nextSeq);
+      throw err;
+    }
+  }
+
   /** Chats left out of hydrate because their meta.json could not be read. */
   unreadableChats(): UnreadableChat[] {
     return this.opts.metaStore.unreadable();
@@ -9401,6 +9796,40 @@ export class Daemon {
     return { removed };
   }
 
+  /**
+   * Startup cleanup (`cleanupPeriodDays`): delete the logs of chats idle since
+   * before `cutoff`, then sweep stale clean agent worktrees. Pinned chats, the
+   * special threads and anything running (a turn, a watch, a delegate) stay.
+   */
+  async cleanupOldData(
+    cutoff: number,
+  ): Promise<{ chats: string[]; worktrees: WorktreeSweepResult }> {
+    const special = new Set<string>(Object.values(SPECIAL_THREAD_IDS));
+    const all = this.chatState.list();
+    const chats: string[] = [];
+    for (const state of all) {
+      if (special.has(state.chatId) || state.pinned) continue;
+      if (this.aborters.has(state.chatId)) continue;
+      if (this.watch.count(state.chatId) > 0 || this.hasRunningDelegates(state.chatId)) continue;
+      if (state.lastUpdated > cutoff) continue;
+      const metaDir = dirname(this.opts.metaStore.pathFor(state.chatId));
+      this.chatLog.close(state.chatId);
+      rmSync(metaDir, { recursive: true, force: true });
+      this.chatState.delete(state.chatId);
+      this.hydratedFromDisk.delete(state.chatId);
+      chats.push(state.chatId);
+    }
+    if (chats.length > 0)
+      this.opts.logger.info({ count: chats.length }, 'cleanup: removed old chats');
+    const gone = new Set(chats);
+    const worktrees = await sweepAgentWorktrees({
+      folders: all.filter((s) => !gone.has(s.chatId)).map((s) => s.folder),
+      cutoff,
+      logger: this.opts.logger,
+    });
+    return { chats, worktrees };
+  }
+
   // -------------------------------------------------------------------------
   // Internal: run one SDK query for the chat. Emits wire events as they
   // arrive, persists nextSeq + claudeSessionId after every emit.
@@ -9442,7 +9871,11 @@ export class Daemon {
     }
     const state = this.chatState.get(chatId);
     if (!state) throw new Error(`runQuery: unknown chatId ${chatId}`);
-    if (state.subagent && this.pausedDelegates.has(chatId)) {
+    if (state.subagent?.userPaused) {
+      // A turn is running again, whoever started it: no longer paused.
+      this.setDelegatePaused(chatId, false);
+      this.emitDelegateUpdate(state.subagent.parentChatId, chatId, state.subagent.label, 'running');
+    } else if (state.subagent && this.pausedDelegates.has(chatId)) {
       this.emitDelegateUpdate(state.subagent.parentChatId, chatId, state.subagent.label, 'running');
     }
 
@@ -9658,6 +10091,10 @@ export class Daemon {
       ...(state.preferredAccountId !== undefined
         ? { preferredAccountId: state.preferredAccountId }
         : {}),
+      // The key the live session sits on: moving off it throws the session away.
+      ...(state.claudeSessionId !== undefined && state.claudeSessionAccountId !== undefined
+        ? { sessionAccountId: state.claudeSessionAccountId }
+        : {}),
     });
     // Which key this turn is actually spending, for as long as it runs. Not a
     // preference and never persisted — it is re-decided next turn — but a
@@ -9816,6 +10253,8 @@ export class Daemon {
     // like a fresh one.
     const assistantSeqBeforeTurn = lastAssistantMessage(state)?.seq ?? -1;
 
+    // The re-run (if any) has begun: from here activity itself says it is working.
+    this.failoverRerunPending.delete(chatId);
     this.chatState.setActivity(chatId, 'running');
     // A turn is starting, so a goal held by an earlier stop is live again.
     if (state.goalProgress?.pausedByStop)
@@ -10269,8 +10708,26 @@ export class Daemon {
       const path = chatTranscriptPath(this.chatDirFor(chatId), state.folder, claudeResumeId);
       claudeTranscript = { path, size: transcriptSize(path) };
     }
+    // A turn the user stopped before the model answered leaves a track of bare
+    // prompts, which the session store drops — so the next send (a "Continue")
+    // starts a fresh session and the model sees only that word. Carry the
+    // unanswered prompts in with it.
+    // Only the bare "Continue" nudge (the stop-card button / Threads carry-on):
+    // any other message after a stop is the user moving on, not asking to resume.
+    const sdkPrompt =
+      !fork &&
+      prompt.trim().toLowerCase() === 'continue' &&
+      retryOfSeq === undefined &&
+      userMessageSeq !== undefined &&
+      !isProviderSwitch &&
+      !isNativeRebuild &&
+      !state.claudeSessionId &&
+      this.hasPriorTrack(chatId, userMessageSeq) &&
+      !this.hasAnsweredTrack(chatId, userMessageSeq)
+        ? this.withUnansweredPrompts(chatId, userMessageSeq, prompt)
+        : prompt;
     const sdkOpts: SdkRunOptions = {
-      prompt,
+      prompt: sdkPrompt,
       cwd: state.folder,
       // Keys the persistent warm-session map (PATCH_PERSISTENT_SESSIONS=1);
       // ignored by the one-shot default path.
@@ -10281,6 +10738,14 @@ export class Daemon {
         ? resumeExistingNativeSessionId
           ? { codexAppendItems: { events: reconstructTrack } }
           : { codexReseed: { events: reconstructTrack } }
+        : {}),
+      // A switch onto a local model has no native session to append to: the
+      // track becomes the opening messages of a fresh one.
+      ...((isProviderSwitch || isNativeRebuild) &&
+      targetHarness === 'local' &&
+      reconstructTrack &&
+      !resumeExistingNativeSessionId
+        ? { localReseed: { events: reconstructTrack } }
         : {}),
       // spec/04 § Branching — this turn opens a new TRACK: resume the parent
       // session only up to the shared prefix and land the turn in a fresh
@@ -10443,6 +10908,7 @@ export class Daemon {
                 : undefined;
             if (!tighter) throw err;
             if (targetHarness === 'codex') sdkOpts.codexReseed = { events: tighter };
+            else if (targetHarness === 'local') sdkOpts.localReseed = { events: tighter };
             else if (claudeResumeId !== undefined) {
               // The rejected handoff produced no output, so the file holds only
               // the seed that was too big: replace it outright.
@@ -10468,7 +10934,13 @@ export class Daemon {
         // errored status and the persisted error detail so it no longer counts
         // toward doctor's erroredChats and stops advertising a stale lastError.
         const settled = this.chatState.get(chatId);
-        if (settled && settled.status === 'errored') {
+        // The status is not the only carrier: a retried failure leaves the chat
+        // `active` with its `lastError` persisted, and that stale reason kept
+        // showing under a conversation whose retry had succeeded.
+        if (
+          settled &&
+          (settled.status === 'errored' || this.opts.metaStore.read(chatId)?.lastError)
+        ) {
           settled.status = 'active';
           this.opts.metaStore.update(chatId, (m) => {
             const { lastError: _drop, ...rest } = m;
@@ -10684,7 +11156,7 @@ export class Daemon {
         // This aggregate reads Claude's account rotation. Codex failures must
         // use their own structured limit or account probe below.
         let hostOutOfCredit =
-          !isCodexModel(state.model) && this.opts.hostOutOfCredit?.(chatId) === true;
+          harnessOfModel(state.model) === 'claude' && this.opts.hostOutOfCredit?.(chatId) === true;
         if (
           harnessTraitsForModel(state.model).turnRetrySafe(err) &&
           this.accountOutOfCredit(chatId, limit) &&
@@ -10709,6 +11181,7 @@ export class Daemon {
               'account out of credit — re-running this turn on an account that has some',
             );
             if (prompt !== undefined) {
+              this.failoverRerunPending.add(chatId);
               void this.sendInput({
                 chatId,
                 message: prompt,
@@ -10717,6 +11190,11 @@ export class Daemon {
                 // the message as a new one.
                 ...(userMessageSeq !== undefined ? { retryOfSeq: userMessageSeq } : {}),
                 ...(cur?.turnOrigin === 'machine' ? { origin: 'machine' as const } : {}),
+              }).catch((err: unknown) => {
+                // The re-run never started: nothing is pending, so a snooze may end.
+                this.failoverRerunPending.delete(chatId);
+                this.wakeIfSnoozeComplete(chatId);
+                this.opts.logger.error({ chatId, err }, 'account failover re-run failed to start');
               });
             }
             this.chatState.setActivity(chatId, 'idle');
@@ -11554,12 +12032,42 @@ export class Daemon {
     if (isReservedSpecialThread(chatId)) return;
     const state = this.chatState.get(chatId);
     if (!state || state.goal === null) return;
+    if (state.status !== 'active') {
+      this.opts.logger.warn(
+        { chatId, status: state.status },
+        'goal evaluation skipped: chat is not active',
+      );
+      return;
+    }
 
     // A running delegate is work this chat is waiting on, exactly like a watch:
     // judging the goal now would call an idle parent done while it is in flight.
-    if (this.watch.count(chatId) > 0 || this.hasRunningDelegates(chatId)) {
+    // Every deferral is logged at warn level once per episode (not per 15 s
+    // poll) with its reason; the poll re-checks until the blocker clears.
+    const watches = this.watch.count(chatId);
+    const delegates = this.hasRunningDelegates(chatId);
+    const pendingPermission = this.hasPendingPermission(chatId);
+    if (watches > 0 || delegates || pendingPermission) {
+      if (!this.goalDeferLogged.has(chatId)) {
+        this.goalDeferLogged.add(chatId);
+        this.opts.logger.warn(
+          { chatId, runningWatches: watches, runningDelegates: delegates, pendingPermission },
+          'goal evaluation deferred: waiting on ' +
+            [
+              watches > 0 ? 'a running patch_watch task' : null,
+              delegates ? 'a running delegated agent' : null,
+              pendingPermission ? 'a pending permission request' : null,
+            ]
+              .filter(Boolean)
+              .join(' and ') +
+            '; re-checking until it clears',
+        );
+      }
       this.armGoalWatchPoll(chatId);
       return;
+    }
+    if (this.goalDeferLogged.delete(chatId)) {
+      this.opts.logger.warn({ chatId }, 'goal evaluation unblocked; evaluating now');
     }
 
     const condition = state.goal;
@@ -11569,6 +12077,14 @@ export class Daemon {
     const turnsEvaluated = (state.goalProgress?.turnsEvaluated ?? 0) + 1;
     const folder = state.folder;
     const background = this.describeBackgroundForGoal(chatId);
+    // spec/04 § Goals — check-in: on its cadence the same call also says whether
+    // the work is on track.
+    const checkInEvery = state.goalCheckInEvery;
+    const checkIn =
+      checkInEvery !== null &&
+      (checkInEvery.unit === 'turns'
+        ? state.goalCheckInTurnsSince + 1 >= checkInEvery.n
+        : this.opts.now() - state.goalCheckInLastAt >= checkInEvery.n * 60_000);
     void (async () => {
       try {
         const result = await evaluator({
@@ -11580,6 +12096,7 @@ export class Daemon {
           background,
           userScope,
           agentStatement,
+          ...(checkIn ? { checkIn: true } : {}),
         });
         this.settleGoalEvaluation(chatId, condition, turnsEvaluated, result);
       } catch (err) {
@@ -11638,6 +12155,8 @@ export class Daemon {
     result: {
       verdict: 'met' | 'not_met' | 'refused' | 'blocked' | 'impossible';
       reason: string;
+      onTrack?: 'on_track' | 'off_track';
+      onTrackReason?: string;
     } | null,
   ): void {
     const state = this.chatState.get(chatId);
@@ -11645,9 +12164,9 @@ export class Daemon {
     // The chat was archived or deleted while the judge was thinking: a
     // continuation turn now would be a host message, which un-archives it.
     if (state.status !== 'active') {
-      this.opts.logger.info(
+      this.opts.logger.warn(
         { chatId, status: state.status },
-        'goal verdict dropped: chat not active',
+        'goal verdict dropped: chat not active (goal stays set but nothing re-checks until the chat is active and a turn settles)',
       );
       return;
     }
@@ -11666,7 +12185,27 @@ export class Daemon {
           ? 'not_met'
           : null,
       lastReason: result.reason,
+      ...(progress?.lastCheckIn !== undefined ? { lastCheckIn: progress.lastCheckIn } : {}),
     };
+    if (state.goalCheckInEvery !== null) state.goalCheckInTurnsSince += 1;
+    if (result.onTrack !== undefined && result.onTrackReason !== undefined) {
+      state.goalCheckInTurnsSince = 0;
+      state.goalCheckInLastAt = now;
+      state.goalProgress.lastCheckIn = {
+        at: now,
+        status: result.onTrack,
+        reason: result.onTrackReason,
+      };
+      if (result.onTrack === 'off_track' && result.verdict !== 'met') {
+        void this.declareStatus(
+          chatId,
+          'report',
+          `Goal check-in: off track. ${result.onTrackReason}`,
+        ).catch((err) => {
+          this.opts.logger.warn({ chatId, err }, 'goal check-in: declareStatus failed');
+        });
+      }
+    }
 
     if (result.verdict === 'refused' || result.verdict === 'blocked') {
       state.goalRefusalStreak += 1;
@@ -11722,8 +12261,16 @@ export class Daemon {
     // chat header, and append a quiet transcript marker (no new agent turn).
     const startedAt = state.goalProgress.startedAt;
     const tokens = state.goalProgress.tokensSpent;
-    this.flushQueuedNudges(chatId);
+    // spec/04 § Goals — sequence: `met` starts the next queued goal, with the
+    // same cadences; `impossible` stops the sequence (the rest are not started).
+    const upcoming = result.verdict === 'met' ? state.goalQueue : [];
+    const unstarted = result.verdict === 'met' ? 0 : state.goalQueue.length;
+    const carried = { remindEvery: state.goalReminderEvery, checkInEvery: state.goalCheckInEvery };
+    if (upcoming.length === 0) this.flushQueuedNudges(chatId);
     state.goal = null;
+    state.goalQueue = [];
+    state.goalReminderEvery = null;
+    state.goalCheckInEvery = null;
     state.goalProgress = null;
     state.goalRefusalStreak = 0;
     state.lastGoal = {
@@ -11739,6 +12286,9 @@ export class Daemon {
     this.opts.metaStore.update(chatId, (m) => ({
       ...m,
       goal: null,
+      goalQueue: [],
+      goalReminderEvery: null,
+      goalCheckInEvery: null,
       lastGoal: state.lastGoal,
       updatedAt: now,
     }));
@@ -11753,14 +12303,33 @@ export class Daemon {
     });
     this.emitState(chatId);
     if (result.verdict === 'impossible') {
-      void this.declareStatus(chatId, 'report', `Goal impossible: ${result.reason}`).catch(
+      const tail =
+        unstarted > 0
+          ? ` The ${unstarted} goal${unstarted === 1 ? '' : 's'} queued after it ${unstarted === 1 ? 'was' : 'were'} not started.`
+          : '';
+      void this.declareStatus(chatId, 'report', `Goal impossible: ${result.reason}${tail}`).catch(
         (err) => {
           this.opts.logger.warn({ chatId, err }, 'goal impossible: declareStatus failed');
         },
       );
     }
-    // 'met' needs nothing further — the ordinary turn-complete path already
-    // rings the normal done notification for a turn that was not resubmitted.
+    // 'met' with nothing queued needs nothing further — the ordinary
+    // turn-complete path already rings the normal done notification for a turn
+    // that was not resubmitted.
+    const [next, ...rest] = upcoming;
+    if (next !== undefined) {
+      this.armGoal(chatId, next, { then: rest, ...carried });
+      if (this.isTurnRunning(chatId)) return;
+      void this.sendInput({
+        chatId,
+        message: next,
+        localId: randomUUID(),
+        origin: 'machine',
+        goalTrigger: { reason: 'Previous goal met. Starting the next goal in the sequence.' },
+      }).catch((err) => {
+        this.opts.logger.warn({ chatId, err }, 'goal sequence: next goal failed to send');
+      });
+    }
   }
 
   /**
@@ -14698,7 +15267,7 @@ export class Daemon {
     harness: HarnessId,
     sessionId: string,
   ): Promise<boolean> {
-    if (harness === 'codex') return this.historyReader.hasSession({ folder, sessionId });
+    if (harness !== 'claude') return this.historyReader.hasSession({ folder, sessionId });
     const loaded = await this.claudeSessionStoreFor(chatId, folder).load({
       projectKey: chatId,
       sessionId,
@@ -14734,6 +15303,25 @@ export class Daemon {
    * unanswered prompts, so a session rebuilt from a track of nothing else is
    * empty and Claude Code cannot resume it ("No conversation found").
    */
+  private withUnansweredPrompts(
+    chatId: string,
+    beforeSeq: number | undefined,
+    prompt: string,
+  ): string {
+    const meta = this.opts.metaStore.read(chatId);
+    if (!meta) return prompt;
+    const branchId = meta.activeBranchId ?? this.branchIdFor(chatId);
+    const earlier = readTrack(this.chatLog, chatId, meta, branchId, -1)
+      .filter((t) => beforeSeq === undefined || t.record.seq < beforeSeq)
+      .flatMap((t) =>
+        t.event.type === 'chat.message' && t.event.role === 'user' && t.event.content
+          ? [t.event.content]
+          : [],
+      );
+    if (earlier.length === 0) return prompt;
+    return `Earlier in this chat, not yet answered (the turn was stopped):\n\n${earlier.join('\n\n')}\n\nNow: ${prompt}`;
+  }
+
   private hasAnsweredTrack(chatId: string, beforeSeq: number | undefined): boolean {
     const meta = this.opts.metaStore.read(chatId);
     if (!meta) return false;
@@ -15547,6 +16135,7 @@ export class Daemon {
     this.opts.emit(event);
     if (!o.skipHistory) this.trackToolRun(event);
     this.trackHookToolTally(event);
+    this.trackRunningBash(event);
   }
 
   /**
@@ -16172,7 +16761,7 @@ export class Daemon {
   async setChatEffort(chatId: string, effort: EffortLevel | null): Promise<void> {
     const s = this.chatState.get(chatId);
     if (!s) throw new ChatNotFoundError(chatId);
-    if (isCodexModel(s.model)) throw new EffortNotSupportedError(chatId, s.model);
+    if (!modelSupportsEffort(s.model)) throw new EffortNotSupportedError(chatId, s.model);
     s.effort = effort ?? undefined;
     this.opts.metaStore.update(chatId, (m) => ({ ...m, effort: effort ?? undefined }));
     this.emitState(chatId);
@@ -16326,6 +16915,9 @@ export class Daemon {
       name: s.name,
       preview: s.preview,
       goal: s.goal,
+      goalQueue: s.goalQueue,
+      goalReminderEvery: s.goalReminderEvery,
+      goalCheckInEvery: s.goalCheckInEvery,
       goalProgress: s.goalProgress,
       lastGoal: s.lastGoal,
       reminder: s.reminder,
@@ -16364,6 +16956,8 @@ export class Daemon {
       // Running `patch_delegate` subagents are background work too: the chat is
       // idle but agents it launched are still going.
       backgroundTasks: this.watch.count(chatId) + this.countRunningDelegates(chatId),
+      // The sub-agent share of the count above, so surfaces can tell agents from tasks.
+      runningAgents: this.countRunningDelegates(chatId),
       // spec/14 § Composer — context ring. `null` is "not measured", never zero.
       context: s.context ?? null,
       // spec/04 § Model — the model the chat's NEXT turn will run on, carried on
@@ -16377,7 +16971,7 @@ export class Daemon {
       // turn will run at, carried on every emit for the same reason `model`
       // is. Omitted for a chat on the Codex backend — effort does not apply
       // there, and the field must not be read as "overridable but unset".
-      ...(isCodexModel(s.model) ? {} : { effort: s.effort ?? null }),
+      ...(modelSupportsEffort(s.model) ? { effort: s.effort ?? null } : {}),
     };
     return ev;
   }

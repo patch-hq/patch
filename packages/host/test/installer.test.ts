@@ -71,7 +71,7 @@ function makeArtifact(target = BUILD.target): string {
     const app = join(dir, 'Patch Host.app', 'Contents');
     mkdirSync(join(app, 'MacOS'), { recursive: true });
     writeFileSync(join(app, 'MacOS', 'patch-host'), '#!/bin/sh\n');
-    writeFileSync(join(app, 'Info.plist'), '<string>me.tomchambers.patch-host</string>\n');
+    writeFileSync(join(app, 'Info.plist'), '<string>io.github.patch-hq.host</string>\n');
   }
   writeFileSync(join(dir, 'silero_vad.onnx'), 'onnx');
   writeFileSync(join(dir, 'install'), '#!/bin/sh\n');
@@ -469,6 +469,34 @@ describe('an install whose service does not stay up', () => {
 });
 
 describe('what the install puts on the host', () => {
+  it('a brand-new host gets ~/My first project as its first project folder (spec/04 § Folders)', async () => {
+    const home = mkTmp('patch-home-');
+    const ctx = makeCtx({
+      home,
+      serviceOps: recordingOps(),
+      argv: ['--non-interactive', '--server', 'http://s', '--internal-token', 't'],
+    });
+    await runInstaller(ctx);
+    expect(statSync(join(home, 'My first project')).isDirectory()).toBe(true);
+    expect(JSON.parse(readFileSync(join(home, '.patch', 'host.json'), 'utf8')).folderRoots).toEqual(
+      [join(home, 'My first project')],
+    );
+    expect(streams(ctx).out).toContain(`first project folder: ${join(home, 'My first project')}`);
+  });
+
+  it('an update of a host with chats adds no folder', async () => {
+    const home = mkTmp('patch-home-');
+    mkdirSync(join(home, '.patch', 'chats', 'chat_1'), { recursive: true });
+    await runInstaller(
+      makeCtx({
+        home,
+        serviceOps: recordingOps(),
+        argv: ['--non-interactive', '--server', 'http://s', '--internal-token', 't'],
+      }),
+    );
+    expect(existsSync(join(home, 'My first project'))).toBe(false);
+  });
+
   it('replaces a legacy CLI symlink without overwriting the bundled JavaScript', async () => {
     const home = mkTmp('patch-home-');
     const artifactDir = makeArtifact('linux-x64');
@@ -570,7 +598,7 @@ describe('what the install puts on the host', () => {
     expect(readFileSync(exe, 'utf8')).toBe('#!/bin/sh\n');
     const plist = readFileSync(join(runtime, 'Patch Host.app', 'Contents', 'Info.plist'), 'utf8');
     // The signed bundle from the artifact, copied whole, never rewritten here.
-    expect(plist).toBe('<string>me.tomchambers.patch-host</string>\n');
+    expect(plist).toBe('<string>io.github.patch-hq.host</string>\n');
     expect(existsSync(join(runtime, 'patch-host'))).toBe(false);
   });
 

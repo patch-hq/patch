@@ -19,7 +19,6 @@
 
 import type { Logger } from 'pino';
 import {
-  NEARLY_OUT_MS,
   probeIntervalMs,
   projectRunOut,
   type PoolForecast,
@@ -178,11 +177,6 @@ export class AccountUsageTracker {
       if (at !== undefined) out[scope] = at;
     }
     return out;
-  }
-
-  /** Will this account be empty within `NEARLY_OUT_MS`? New turns should go elsewhere. */
-  nearlyOut(accountId: string): boolean {
-    return Object.values(this.runOutAt(accountId)).some((at) => at - this.now < NEARLY_OUT_MS);
   }
 
   /** How long to leave this account between probes, given how close it is. */

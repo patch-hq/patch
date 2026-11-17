@@ -1,7 +1,7 @@
 // Install the relay (packages/relay) on this box as a systemd user service, the
 // same shape as the server: a self-contained copy in ~/.patch-relay (production
 // node_modules, dist), never run out of a git checkout. Listens on 127.0.0.1:8787;
-// Caddy puts TLS in front (patch.tomchambers.me/relay → 8787, a path on the existing host so it needs no DNS record of its own).
+// Caddy puts TLS in front (<your-server>/relay → 8787, a path on the existing host so it needs no DNS record of its own).
 //
 //   node scripts/install-relay.mjs [--home=DIR] [--no-restart]
 import { execFileSync } from 'node:child_process';

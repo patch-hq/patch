@@ -506,6 +506,7 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     prompt: 'go',
   },
   'chat.stop_request': { type: 'chat.stop_request', chatId: 'c1' },
+  'chat.tool_cancel_request': { type: 'chat.tool_cancel_request', chatId: 'c1', callId: 'call1' },
   'chat.resume_request': { type: 'chat.resume_request', chatId: 'c1' },
   'chat.focus_change': { type: 'chat.focus_change', chatId: 'c1' },
   'chat.pin_request': { type: 'chat.pin_request', chatId: 'c1', pinned: true },
@@ -641,7 +642,14 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
   },
   'chat.snooze_back_clear_request': { type: 'chat.snooze_back_clear_request', chatId: 'c1' },
   'chat.delete_request': { type: 'chat.delete_request', chatId: 'c1', deleted: true },
-  'chat.goal_request': { type: 'chat.goal_request', chatId: 'c1', goal: 'Ship it' },
+  'chat.goal_request': {
+    type: 'chat.goal_request',
+    chatId: 'c1',
+    goal: 'Ship it',
+    then: ['Write notes'],
+    remindEvery: { unit: 'turns', n: 3 },
+    checkInEvery: null,
+  },
   'chat.todos_request': {
     type: 'chat.todos_request',
     chatId: 'c1',
@@ -923,6 +931,21 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     ok: true,
     stats: [{ taskId: 'baiw888mq', cpuPercent: 98.4, rssBytes: 412_000_000, processes: 3 }],
   },
+  'patch.stray_processes.request': {
+    type: 'patch.stray_processes.request',
+    requestId: 'sp1',
+    chatId: 'c1',
+    stopPid: 4242,
+  },
+  'patch.stray_processes.response': {
+    type: 'patch.stray_processes.response',
+    requestId: 'sp1',
+    ok: true,
+    processes: [
+      { pid: 4242, command: 'node server.js', startedAt: 1_700_000_000_000, running: true },
+    ],
+    stopped: true,
+  },
   'patch.watch_list.request': {
     type: 'patch.watch_list.request',
     requestId: 'wl1',
@@ -954,6 +977,20 @@ const FIXTURES: { [K in WireEventType]: Extract<WireEvent, { type: K }> } = {
     requestId: 'ws1',
     ok: true,
     stopped: true,
+  },
+  'patch.delegate_control.request': {
+    type: 'patch.delegate_control.request',
+    requestId: 'dc1',
+    chatId: 'c1',
+    delegateId: 'sub-1',
+    action: 'spin_off',
+  },
+  'patch.delegate_control.response': {
+    type: 'patch.delegate_control.response',
+    requestId: 'dc1',
+    ok: true,
+    applied: true,
+    spunOffChatId: 'sub-1',
   },
   'patch.watch_checkin.request': {
     type: 'patch.watch_checkin.request',

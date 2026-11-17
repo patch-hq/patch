@@ -35,19 +35,22 @@ export default function ChatMoveScreen(): React.ReactElement {
   const byHost = useFolderStore((s) => s.byHost);
 
   const targets = useMemo(
-    () =>
-      Object.values(hosts)
-        .filter((h) => h.hostId !== row?.hostId)
-        .sort((a, b) => hostName(a).localeCompare(hostName(b))),
+    () => Object.values(hosts).sort((a, b) => hostName(a).localeCompare(hostName(b))),
     [hosts, row?.hostId],
   );
+  // Another machine is offered first; this chat's own machine is a target too
+  // (a move to another folder on it), chosen only when it is the one online.
   const [hostId, setHostId] = useState<string | null>(
-    () => targets.find((h) => h.online)?.hostId ?? null,
+    () =>
+      (targets.find((h) => h.online && h.hostId !== row?.hostId) ?? targets.find((h) => h.online))
+        ?.hostId ?? null,
   );
   const folders = useMemo(() => {
     const f = hostId ? byHost[hostId] : undefined;
-    return [...new Set([...(f?.roots ?? []), ...(f?.recent ?? [])])];
-  }, [byHost, hostId]);
+    const all = [...new Set([...(f?.roots ?? []), ...(f?.recent ?? [])])];
+    // On its own machine the folder it already runs in is not a place to move to.
+    return hostId === row?.hostId ? all.filter((x) => x !== row?.folder) : all;
+  }, [byHost, hostId, row?.hostId, row?.folder]);
   const current = row ? hosts[row.hostId] : undefined;
   const offline = current !== undefined && !current.online;
   const takeover = offline;
@@ -157,6 +160,7 @@ export default function ChatMoveScreen(): React.ReactElement {
                   style={{ ...typography.label, color: h.online ? colors.ink : colors.inkFaint }}
                 >
                   {hostName(h)}
+                  {h.hostId === row?.hostId ? ' · this machine' : ''}
                   {h.online ? '' : ' · offline'}
                 </Text>
               </Pressable>

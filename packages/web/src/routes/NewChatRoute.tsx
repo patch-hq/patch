@@ -13,7 +13,7 @@
 import type { JSX, KeyboardEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadLastNewChat, saveLastNewChat } from '../lib/lastNewChat';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   folderName,
@@ -21,6 +21,7 @@ import {
   isJunkFolder,
   isReservedSpecialThread,
   backendIdForModel,
+  compactModelLabel,
   providerForModel,
 } from '@patch/wire';
 import { api } from '../api/rest.js';
@@ -50,7 +51,6 @@ import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import { summariseUsage } from '../lib/usage.js';
 import { Composer, type ComposerHandle } from '../components/Composer.js';
 import { useWholeChatDrop } from '../lib/wholeChatDrop.js';
-import { ClaudeDisconnectedBanner } from '../components/ClaudeDisconnectedBanner.js';
 import { EmptyChat } from '../components/EmptyChat.js';
 import { NavHistoryControls } from '../components/NavHistoryControls.js';
 import { UsageCrumb } from '../components/UsageCrumb.js';
@@ -437,6 +437,21 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // to the live default), and then the folder is another machine's: it is
   // dropped rather than sent to a host where it does not exist.
   const [folderHostId, setFolderHostId] = useState<string | null>(chosenHostId);
+  // With nothing to remember — no new chat made yet, no project chat, no
+  // draft or shortcut — the chosen host's first project folder is the
+  // default, so a first chat starts without a decision nobody has explained
+  // (a fresh host makes `~/Patch` its first, spec/04 § Folders). Seeded once,
+  // as the host's folders arrive; clearing it afterwards is the user's choice.
+  const firstRoot =
+    pickerHostId === null ? undefined : presenceHosts[pickerHostId]?.folders?.roots?.[0];
+  const seededFirstRoot = useRef(false);
+  useEffect(() => {
+    if (seededFirstRoot.current || mruPair !== null || draftFolder || folderParam) return;
+    if (firstRoot === undefined || folder !== '') return;
+    seededFirstRoot.current = true;
+    setFolder(firstRoot);
+    setFolderHostId(pickerHostId);
+  }, [firstRoot, mruPair, draftFolder, folderParam, folder, pickerHostId]);
   // `null` = no host recorded for it (a bare `?folder=` naming no known host),
   // which belongs to whichever host is selected.
   const folderOnOtherHost =
@@ -1012,6 +1027,14 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
   // two cannot drift apart. Unlike a project this is NOT a toggle: a chat
   // always spawns on some model, so re-pressing the chosen one leaves it
   // chosen (spec/14 § Model selector).
+  const accountDefaultModel = usePreferencesStore((st) => st.preferences.defaultModel);
+  const updatePreferences = usePreferencesStore((st) => st.update);
+  function makeDefaultModel(): void {
+    if (effectiveModel === null) return;
+    void updatePreferences({ defaultModel: effectiveModel }).catch((err: Error) =>
+      pushError(err.message),
+    );
+  }
   function chooseModel(id: string): void {
     setModel(id);
     setOpenPicker(null);
@@ -1319,6 +1342,11 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
             ) : null}
           </div>
         </div>
+        {folder !== '' ? (
+          <p className="new-chat-folder-path mono muted" data-testid="new-chat-folder-path">
+            {folder}
+          </p>
+        ) : null}
         {/* The model: the account default first, marked, then the head of the
             catalogue, and the pill that opens the full live list (spec/14 §
             Model selector) — the SAME control the chat header uses to change a
@@ -1351,7 +1379,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
                     onClick={() => chooseModel(id)}
                   >
                     <span className="quick-label">
-                      {catalogModels.find((m) => m.id === id)?.label ?? id}
+                      {compactModelLabel(id, catalogModels.find((m) => m.id === id)?.label)}
                     </span>
                     {id === hostModel ? <span className="quick-sub">default</span> : null}
                   </button>
@@ -1371,6 +1399,16 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
             active={!modelIsQuick && effectiveModel !== null}
             {...(modelIsQuick ? { triggerLabel: 'More…' } : {})}
           />
+          {effectiveModel !== null && effectiveModel !== accountDefaultModel ? (
+            <button
+              type="button"
+              className="new-chat-make-default"
+              data-testid="new-chat-make-default"
+              onClick={makeDefaultModel}
+            >
+              Set as default
+            </button>
+          ) : null}
         </div>
         {/* The account this chat is LOCKED to (spec/10 § Backend
             credentials — preferred account): a spent account is waited on, not
@@ -1519,14 +1557,8 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
               drifting to the foot of the panel. */}
             <div className="new-chat-intro">
               <EmptyChat title="New chat" />
-              {signedOut ? (
-                <div className="new-chat-blocked" data-testid="new-chat-blocked" role="alert">
-                  <p className="new-chat-blocked-title">
-                    Not signed in to {effectiveModel?.startsWith('openai/') ? 'Codex' : 'Claude'}
-                  </p>
-                  <Link to="/settings/usage">Sign in</Link>
-                </div>
-              ) : null}
+              {/* Not signed in is said by the banner and in the composer,
+                  where sending fails — not a third time here. */}
               {draftFailure ? (
                 <div className="new-chat-failed" data-testid="new-chat-failed" role="alert">
                   <p className="new-chat-failed-title">Chat didn’t start</p>
@@ -1558,9 +1590,7 @@ function NewChatPanel({ draftId, ws }: { draftId: string; ws: PatchWs | null }):
           </div>
         </section>
       )}
-      {/* A new chat cannot run without a credential, so say so here too — this is
-          the screen where someone would otherwise type into a dead composer. */}
-      <ClaudeDisconnectedBanner model={effectiveModel ?? undefined} />
+      {/* Signed out is said once, by the composer's own notice. */}
       {/* spec/14 § Terminal — available HERE above all: you are on this screen
           because the folder you want does not exist on the host yet, and a
           shell is how you clone it there. Rooted by the daemon (no folder

@@ -64,6 +64,12 @@ export interface ModelCatalogOptions {
   ttlMs?: number;
   /** Receives each model's stated window and output cap (spec/04 § Handoff budget). */
   limits?: ModelLimits;
+  /**
+   * Called after each successful read from Anthropic. A choice refused while
+   * there was no catalogue (the Manager's model, before any sign-in) is
+   * applied again from here.
+   */
+  onRefreshed?: () => void;
 }
 
 export class ModelCatalog {
@@ -72,6 +78,7 @@ export class ModelCatalog {
   private readonly now: () => number;
   private readonly ttlMs: number;
   private readonly limits: ModelLimits | undefined;
+  private readonly onRefreshed: (() => void) | undefined;
 
   private cached: { models: ModelOption[]; fetchedAt: string; at: number } | null = null;
   private inFlight: Promise<ModelCatalogSnapshot> | null = null;
@@ -82,6 +89,7 @@ export class ModelCatalog {
     this.now = opts.now ?? (() => Date.now());
     this.ttlMs = opts.ttlMs ?? MODELS_TTL_MS;
     this.limits = opts.limits;
+    this.onRefreshed = opts.onRefreshed;
   }
 
   /**
@@ -117,6 +125,7 @@ export class ModelCatalog {
     if (snapshot === null) {
       throw new Error('Claude OAuth unavailable for the model catalogue: no account has credit');
     }
+    this.onRefreshed?.();
     return snapshot;
   }
 

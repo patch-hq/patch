@@ -8,6 +8,11 @@
 // RES_HEAD, RES_BODY chunks, RES_END (or RES_ERROR in place of any of them). A
 // socket is WS_OPEN, then WS_OPENED, then WS_TEXT / WS_BINARY either way, then
 // WS_CLOSE from whichever side ends it.
+//
+// PING (stream 0) is the device's keepalive: the server answers PONG. It keeps a
+// quiet session from being dropped as idle on the way, and tells the device
+// when the path to its server has died without a close. A server from before
+// PING ignores it, as every end ignores a type it does not know.
 
 import { MAX_PLAINTEXT } from './crypto.js';
 import { utf8Decode, utf8Encode } from './utf8.js';
@@ -23,6 +28,8 @@ export const Msg = {
   ResEnd: 6,
   Error: 7,
   Cancel: 8,
+  Ping: 9,
+  Pong: 10,
   WsOpen: 16,
   WsOpened: 17,
   WsText: 18,

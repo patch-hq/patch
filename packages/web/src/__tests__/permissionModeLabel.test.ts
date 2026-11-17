@@ -7,16 +7,17 @@ import { permissionModeLabel } from '../lib/permissionModeLabel.js';
 describe('permissionModeLabel', () => {
   it('writes each mode in sentence case, in the words the SDK uses', () => {
     expect(permissionModeLabel('auto')).toBe('Auto');
-    expect(permissionModeLabel('default')).toBe('Default');
+    expect(permissionModeLabel('default')).toBe('Ask');
     expect(permissionModeLabel('acceptEdits')).toBe('Accept edits');
     expect(permissionModeLabel('bypassPermissions')).toBe('Bypass permissions');
     expect(permissionModeLabel('plan')).toBe('Plan');
   });
 
-  it('never invents a word the SDK does not use', () => {
+  it('never invents a word the SDK does not use, except Ask for default', () => {
     // The value is passed to the SDK verbatim, so a label that renames the mode
-    // would have the user picking one thing and the model told another.
-    for (const mode of ['auto', 'default', 'acceptEdits', 'bypassPermissions', 'plan'] as const) {
+    // would have the user picking one thing and the model told another. `default`
+    // is the exception: it is not the default mode, so it reads as what it does.
+    for (const mode of ['auto', 'acceptEdits', 'bypassPermissions', 'plan'] as const) {
       const label = permissionModeLabel(mode).toLowerCase().replace(/ /g, '');
       expect(label).toBe(mode.toLowerCase());
     }

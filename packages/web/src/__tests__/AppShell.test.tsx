@@ -264,6 +264,7 @@ async function renderShell(
 
 describe('AppShell', () => {
   beforeEach(() => {
+    document.head.innerHTML = '<link rel="icon" href="/app/favicon.svg" />';
     useChatStore.getState()._reset();
     useBatchStore.getState()._reset();
     useUiStore.setState({

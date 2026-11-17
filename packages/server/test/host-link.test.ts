@@ -362,6 +362,28 @@ describe('InboundHostLink', () => {
     expect(received[0]).toMatchObject({ type: 'chat.input', localId: 'L1' });
   });
 
+  it('logs a warning, not an error, when the held frame expires with the host never registering', async () => {
+    const levels: string[] = [];
+    const logger = {
+      ...silentLogger,
+      warn: () => levels.push('warn'),
+      error: () => levels.push('error'),
+    } as unknown as typeof silentLogger;
+    link = new InboundHostLink({
+      logger,
+      resolveChatHost: () => null,
+      managerHostId: () => 'd-home',
+      registeredHostIds: () => ['d-home', 'd-other'],
+      unknownChatHostWaitMs: 20,
+      unknownChatHostPollMs: 5,
+      unknownChatHostResendMs: 40,
+    });
+    link.send('srf-1', { type: 'chat.input', chatId: 'c-never', message: 'hi', localId: 'L1' });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(levels).not.toContain('error');
+    expect(levels.filter((l) => l === 'warn').length).toBeGreaterThanOrEqual(2);
+  });
+
   it('with only ONE registered host, still guesses home for an unresolved chat and buffers rather than waiting (unchanged single-host behaviour)', async () => {
     link = new InboundHostLink({
       logger: silentLogger,

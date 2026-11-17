@@ -244,6 +244,24 @@ describe('Host terminal', () => {
     expect(inputs()).toEqual([]);
   });
 
+  it('a dropped link ends the shell on screen, then opens a fresh one by itself once back', () => {
+    usePresenceStore.setState({
+      connection: 'connected',
+      hosts: { d1: { hostId: 'd1', online: true } as never },
+    });
+    const { r, sessionId } = openLive();
+    actSync(() => {
+      usePresenceStore.setState({ connection: 'reconnecting' });
+      useTerminalStore.getState().interrupt('Connection lost, reconnecting');
+    });
+    expect(hasText(r.root, 'Connection lost, reconnecting')).toBe(true);
+    expect(sent().filter((e) => e.type === 'patch.terminal.open')).toHaveLength(1);
+    actSync(() => usePresenceStore.setState({ connection: 'connected' }));
+    const opens = sent().filter((e) => e.type === 'patch.terminal.open');
+    expect(opens).toHaveLength(2);
+    expect((opens[1] as { sessionId: string }).sessionId).not.toBe(sessionId);
+  });
+
   it('an ended session says why and restarts as a fresh shell on a cleared screen', () => {
     const { r, sessionId } = openLive();
     fromHost({ type: 'patch.terminal.exit', sessionId, code: 0, reason: 'shell_exit' });

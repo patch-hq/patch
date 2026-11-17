@@ -374,3 +374,45 @@ describe('chatStore — a pending retry attempt', () => {
     expect(userBubbles()[0]!.attempts).toBeUndefined();
   });
 });
+
+describe('chatStore — a failure the host retried does not outlive the retry', () => {
+  beforeEach(() => {
+    useChatStore.getState()._reset();
+    spawn();
+  });
+
+  function failure(turnRetrying: boolean): void {
+    const s = useChatStore.getState();
+    s.applyEvent({
+      type: 'chat.error',
+      chatId: 'c1',
+      seq: 3,
+      error: { code: 'sdk_error', message: 'The Claude Code process ended mid-turn' },
+    });
+    s.applyEvent({
+      type: 'chat.state',
+      chatId: 'c1',
+      hostId: 'd1',
+      permissionMode: 'auto',
+      activity: 'errored',
+      lastUpdated: 1,
+      turnRetrying,
+    });
+  }
+
+  const errorRows = (): number =>
+    (useChatStore.getState().timelines['c1'] ?? []).filter((e) => e.kind === 'error').length;
+
+  it('removes the standalone error card once the retry is running', () => {
+    failure(true);
+    expect(errorRows()).toBe(1);
+    state('running');
+    expect(errorRows()).toBe(0);
+  });
+
+  it('keeps the card when the host was not retrying', () => {
+    failure(false);
+    state('running');
+    expect(errorRows()).toBe(1);
+  });
+});

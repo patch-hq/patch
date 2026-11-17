@@ -20,8 +20,10 @@
 
 import { notificationClickPath } from './notificationTarget';
 import { parseOpenChat, writeFrontChat } from './front-chat';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { ensureSpotlightIndexed } from './spotlight';
+import { KeepRunning, OPENED_AT_LOGIN_ARG, setLinuxAutostart } from './keep-running';
+import { applyMacLoginItem, macLoginItemBlocker, shouldOfferMove } from './app-location';
 import {
   app,
   BrowserWindow,
@@ -33,6 +35,7 @@ import {
   ipcMain,
   nativeImage,
   powerMonitor,
+  powerSaveBlocker,
   session,
   desktopCapturer,
   dialog,
@@ -121,6 +124,13 @@ let SERVER_URL = process.env['PATCH_SERVER_URL'] ?? (app.isPackaged ? '' : DEV_S
 let initialUrl: string | null = null;
 /** What the first run started (the local server, a relay bridge), to stop at quit. */
 let activeLaunch: { stop(): Promise<void> } | null = null;
+/**
+ * spec/05 § Keep running — present only when this computer runs Patch itself:
+ * open at login, and the system kept awake on mains power so a phone reaches it.
+ */
+let keepRunning: KeepRunning | null = null;
+/** The command-line flag that tells the main window's preload this computer runs Patch. */
+const LOCAL_MACHINE_ARG = '--patch-local-machine';
 
 // Group 20 fix-7 (DX-11): the global hotkey is configurable via env.
 // Default `Control+Space` collides with macOS "Select previous input
@@ -287,6 +297,7 @@ export interface DesktopEvent {
     | 'meeting:detection-off'
     | 'meeting:detection-restart'
     | 'meeting:detection-recovered'
+    | 'meeting:detection-unsupported'
     | 'meeting:prompt-shown'
     | 'meeting:auto-ended'
     | 'server-watch:error';
@@ -457,7 +468,7 @@ export function openChildWindow(routePath: string, size?: ChildWindowSize): Brow
     // Same overlay title bar as the main window (see createMainWindow): a chat
     // or the sidebar detached into its own window is the same UI, and a native
     // bar on it would be exactly the "patch top bar" being removed.
-    ...windowChrome(process.platform),
+    ...documentWindowChrome(),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -512,16 +523,19 @@ export function createMainWindow(): BrowserWindow {
     width: placement.width,
     height: placement.height,
     title: 'Patch',
-    show: !QUIET,
+    // Opened at login to keep agents and the phone connection running, the app
+    // starts in the menu bar rather than putting a window in front of the user.
+    show: !QUIET && !openedAtLogin(),
     // No native title bar — the SPA runs to the window's top edge and the
     // traffic lights float over its top-left (spec/05 § Window chrome; the user,
     // App Updates: "clean at top, no patch top bar"). The renderer reserves
     // the strip they land in; see `--overlay-titlebar-inset` in index.css.
-    ...windowChrome(process.platform),
+    ...documentWindowChrome(),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      ...(keepRunning ? { additionalArguments: [LOCAL_MACHINE_ARG] } : {}),
       // Group 19: explicit CSP relax — the renderer is the same web SPA
       // bundle Caddy serves; in dev we additionally need to talk to
       // localhost:3000 (server) and any audio WSS the host exposes.
@@ -691,18 +705,88 @@ function startServerLostWatch(): void {
 }
 let serverLostNotified = false;
 
-function createTray(): Tray {
-  // Group 20 fix DX-12: ship a real template image (mac auto-tints
-  // light/dark) at build/trayIconTemplate.png. NO FALLBACK: if the asset
-  // is missing in the bundle we throw rather than show an invisible icon.
-  const candidate = join(__dirname, '..', 'build', 'trayIconTemplate.png');
-  const icon = nativeImage.createFromPath(candidate);
-  if (icon.isEmpty()) {
+/**
+ * A document window's chrome on this platform. On Linux the window also names
+ * its icon: the taskbar shows Electron's own otherwise, since an AppImage that
+ * was never integrated into the desktop has no .desktop file to take it from.
+ */
+function documentWindowChrome(): ReturnType<typeof windowChrome> & { icon?: string } {
+  return {
+    ...windowChrome(process.platform),
+    ...(process.platform === 'linux' ? { icon: join(__dirname, '..', 'build', 'icon.png') } : {}),
+  };
+}
+
+function trayMenu(): Menu {
+  return Menu.buildFromTemplate([
+    {
+      label: 'Open Patch',
+      click: () => {
+        if (!mainWindow) mainWindow = createMainWindow();
+        mainWindow.show();
+        mainWindow.focus();
+      },
+    },
+    {
+      // spec/11 § Version reporting — one click to "what am I running, and is
+      // anything stale?". Worth a top-level entry: the answer used to be
+      // unobtainable from inside the app at all.
+      label: 'Version & updates…',
+      click: () => {
+        if (!mainWindow) mainWindow = createMainWindow();
+        mainWindow.show();
+        mainWindow.focus();
+        sendWhenReady(mainWindow, 'patch:navigate', { path: '/settings' });
+      },
+    },
+    ...(keepRunning ? keepRunningMenuItems(keepRunning) : []),
+    { type: 'separator' },
+    {
+      label: keepRunning ? 'Quit Patch…' : 'Quit Patch',
+      click: () => void quitFromTray(),
+    },
+  ]);
+}
+
+/**
+ * The tray image for idle or working. Idle keeps the template "p" (mac tints it
+ * to the menu bar) / the app icon (Linux). Working is the orange "p" as a plain
+ * coloured image on both — a template image would be recoloured and lose the
+ * orange. NO FALLBACK: a missing asset throws.
+ */
+function trayImage(working: boolean): Electron.NativeImage {
+  const darwin = process.platform === 'darwin';
+  const file = working ? 'trayIconWorking.png' : darwin ? 'trayIconTemplate.png' : 'icon.png';
+  const candidate = join(__dirname, '..', 'build', file);
+  const loaded = nativeImage.createFromPath(candidate);
+  if (loaded.isEmpty()) {
     throw new Error(`tray icon missing or unreadable: ${candidate}`);
   }
-  icon.setTemplateImage(true);
+  // Linux panels do not tint a template image, and a black glyph vanishes on
+  // the dark panels most desktops use, so there idle shows the app icon.
+  const icon = !darwin && !working ? loaded.resize({ width: 32, height: 32 }) : loaded;
+  icon.setTemplateImage(darwin && !working);
+  return icon;
+}
+
+/** Swap the tray between its idle and orange "an agent is working" image. */
+export function setTrayWorking(working: boolean): void {
+  if (!tray) return;
+  tray.setImage(trayImage(working));
+}
+
+function createTray(): Tray {
+  const icon = trayImage(false);
+  const darwin = process.platform === 'darwin';
   const t = new Tray(icon);
   t.setToolTip('Patch');
+  if (!darwin) {
+    // A Linux tray (StatusNotifierItem/AppIndicator) does not report clicks to
+    // the app: the panel opens the icon's menu itself. Give it the menu, and the
+    // popover is reached from the main window instead.
+    t.setContextMenu(trayMenu());
+    return t;
+  }
   t.on('click', () => {
     logDesktopEvent({ type: 'tray:click' });
     // Route through decideTrayClick so a second click always CLOSES the popover
@@ -721,39 +805,136 @@ function createTray(): Tray {
   });
   t.on('right-click', () => {
     logDesktopEvent({ type: 'tray:context-menu' });
-    const menu = Menu.buildFromTemplate([
-      {
-        label: 'Open Patch',
-        click: () => {
-          if (!mainWindow) mainWindow = createMainWindow();
-          mainWindow.show();
-          mainWindow.focus();
-        },
-      },
-      {
-        // spec/11 § Version reporting — one click to "what am I running, and is
-        // anything stale?". Worth a top-level entry: the answer used to be
-        // unobtainable from inside the app at all.
-        label: 'Version & updates…',
-        click: () => {
-          if (!mainWindow) mainWindow = createMainWindow();
-          mainWindow.show();
-          mainWindow.focus();
-          sendWhenReady(mainWindow, 'patch:navigate', { path: '/settings' });
-        },
-      },
-      { type: 'separator' },
-      {
-        label: 'Quit Patch',
-        click: () => {
-          (app as unknown as { isQuitting: boolean }).isQuitting = true;
-          app.quit();
-        },
-      },
-    ]);
-    t.popUpContextMenu(menu);
+    t.popUpContextMenu(trayMenu());
   });
   return t;
+}
+
+/** Whether this app was started at login (spec/05 § Keep running). */
+function openedAtLogin(): boolean {
+  if (process.platform === 'darwin') return app.getLoginItemSettings().wasOpenedAtLogin === true;
+  // A Linux autostart entry says so on the command line (keep-running.ts).
+  return process.argv.includes(OPENED_AT_LOGIN_ARG);
+}
+
+/**
+ * Rebuild the tray menu after a keep-running choice changes. A Linux tray holds
+ * the menu it was given rather than asking for one on each click, so its
+ * checkboxes would otherwise go on showing the old choice.
+ */
+function refreshTrayMenu(): void {
+  if (tray && process.platform !== 'darwin') tray.setContextMenu(trayMenu());
+}
+
+/** Change a keep-running choice from anywhere: the welcome step, Settings or the tray. */
+function setKeepRunning(
+  k: KeepRunning,
+  patch: { openAtLogin?: boolean; keepAwake?: boolean },
+): ReturnType<KeepRunning['set']> {
+  const state = k.set(patch);
+  refreshTrayMenu();
+  return state;
+}
+
+/** The tray's keep-running switches: the same choices as the welcome step and Settings. */
+function keepRunningMenuItems(k: KeepRunning): Electron.MenuItemConstructorOptions[] {
+  const state = k.state();
+  const report = (err: unknown): void =>
+    dialog.showErrorBox('Patch', err instanceof Error ? err.message : String(err));
+  const set = (patch: { openAtLogin?: boolean; keepAwake?: boolean }): void => {
+    try {
+      setKeepRunning(k, patch);
+    } catch (err) {
+      report(err);
+    }
+  };
+  return [
+    { type: 'separator' },
+    ...(state.canOpenAtLogin
+      ? [
+          {
+            label: 'Open at Login',
+            type: 'checkbox' as const,
+            checked: state.openAtLogin,
+            click: (item: Electron.MenuItem) => set({ openAtLogin: item.checked }),
+          },
+        ]
+      : []),
+    {
+      label: 'Keep Awake While Plugged In',
+      type: 'checkbox',
+      checked: state.keepAwake,
+      click: (item) => set({ keepAwake: item.checked }),
+    },
+  ];
+}
+
+/**
+ * Quit, said plainly. When this computer runs Patch, quitting stops the agents
+ * here and cuts the phone off until the app is opened again, so it is asked.
+ */
+async function quitFromTray(): Promise<void> {
+  if (keepRunning) {
+    const { response } = await dialog.showMessageBox({
+      type: 'question',
+      buttons: ['Quit', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      message: 'Quit Patch?',
+      detail: `Agents on this computer stop, and your phone cannot reach it, until Patch is opened again. Closing the window keeps Patch running in the ${process.platform === 'darwin' ? 'menu bar' : 'tray'}.`,
+    });
+    if (response !== 0) return;
+  }
+  (app as unknown as { isQuitting: boolean }).isQuitting = true;
+  app.quit();
+}
+
+/** spec/05 § Keep running: start following the user's choices on this computer. */
+function startKeepRunning(userData: string): void {
+  // On Linux the login entry has to start the AppImage file itself, which only
+  // a run from that file knows. On a Mac the login item is the bundle this run
+  // is, registered afresh when the app has moved (app-location.ts).
+  const linux = process.platform === 'linux';
+  const mac = process.platform === 'darwin';
+  const appImage = process.env['APPIMAGE'];
+  const bundlePath = mac ? join(process.execPath, '..', '..', '..') : '';
+  const macBlocker = mac ? macLoginItemBlocker(bundlePath) : null;
+  const autostart = join(
+    process.env['XDG_CONFIG_HOME'] ?? join(app.getPath('home'), '.config'),
+    'autostart',
+    'patch.desktop',
+  );
+  keepRunning = new KeepRunning(join(userData, 'keep-running.json'), {
+    canOpenAtLogin: linux ? appImage !== undefined : macBlocker === null,
+    whyNotOpenAtLogin: linux
+      ? 'Patch cannot open at login here: it was not started from its AppImage'
+      : (macBlocker ?? undefined),
+    // A quiet instance is a test run beside a real Patch: it never registers
+    // itself as a login item on the computer it runs on.
+    setOpenAtLogin: (on) => {
+      if (QUIET) console.log(`[patch] quiet instance: open at login ${on} not applied`);
+      else if (linux) setLinuxAutostart(autostart, appImage as string, on);
+      else if (mac)
+        applyMacLoginItem(on, {
+          bundlePath,
+          recordFile: join(userData, 'login-item.json'),
+          registered: () => app.getLoginItemSettings().openAtLogin,
+          register: () => app.setLoginItemSettings({ openAtLogin: true }),
+          unregister: () => app.setLoginItemSettings({ openAtLogin: false }),
+          warn: (m) => console.error(`[patch] login item: ${m}`),
+          info: (m) => console.log(`[patch] login item: ${m}`),
+        });
+      else app.setLoginItemSettings({ openAtLogin: on });
+    },
+    onBattery: () => powerMonitor.isOnBatteryPower(),
+    onPowerSourceChange: (cb) => {
+      powerMonitor.on('on-battery', () => cb(true));
+      powerMonitor.on('on-ac', () => cb(false));
+    },
+    holdAwake: () => powerSaveBlocker.start('prevent-app-suspension'),
+    releaseAwake: (id) => powerSaveBlocker.stop(id),
+  });
+  keepRunning.start();
 }
 
 function createVoiceOverlay(): BrowserWindow {
@@ -878,7 +1059,7 @@ function sendWhenReady(win: BrowserWindow, channel: string, payload: unknown): v
 // can offer to start or end a meeting. See meeting-audio.ts.
 
 /** Patch's own helper processes also open the mic (voice notes, the meeting). */
-const OWN_BUNDLE_PREFIX = 'io.github.tomchambers2.patch';
+const OWN_BUNDLE_PREFIX = 'dev.patchhq.app';
 
 const systemAudio = new SystemAudio(() =>
   helperPath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, devDir: __dirname }),
@@ -921,6 +1102,13 @@ function endMeetingForCall(appName: string): void {
 /** NO FALLBACK: detection that cannot run is logged loudly, once, instead of going quiet.
  *  It is background work Tom did not trigger, so it is not toasted at him. */
 function startMeetingDetection(): void {
+  // The helper is a Core Audio tap (native/patch-audio): there is no build of it
+  // for any other platform, so the feature does not exist there. Not a fault to
+  // banner about ("detection is off… retrying" on every launch would be false).
+  if (process.platform !== 'darwin') {
+    logMeetingDetection('meeting:detection-unsupported', { platform: process.platform });
+    return;
+  }
   const detector = new MeetingDetector({
     // A meeting Patch is already capturing needs no prompt to start; the end
     // prompt only matters while it is.
@@ -1055,6 +1243,7 @@ function registerGlobalHotkeys(): void {
  * SPA proxies those through the preload bridge.
  */
 let lastNotification: Notification | null = null;
+const liveToasts = new Set<Notification>();
 
 /** The most recently shown native notification (test/smoke introspection). */
 export function getLastNotification(): Notification | null {
@@ -1131,6 +1320,14 @@ function showNativeNotification(opts: {
     });
   }
   lastNotification = n;
+  // Hold every shown toast until it is clicked or closed: an unreferenced
+  // Notification can be garbage-collected, and a click on a collected toast
+  // (any but the latest) is dropped, leaving the window on whatever chat was
+  // already open instead of navigating.
+  liveToasts.add(n);
+  const release = () => liveToasts.delete(n);
+  n.on('click', release);
+  n.on('close', release);
   n.show();
 }
 
@@ -1225,6 +1422,14 @@ function registerIpc(): void {
   panelWidthFraction = loadPanelWidthFraction();
   ipcMain.on('patch:request-raise', () => {
     raiseMainWindow();
+  });
+  // The renderer owns the chat store, so it reports whether any agent is
+  // working and main only swaps the menu-bar image.
+  ipcMain.on('patch:agent-working', (_e, working: unknown) => {
+    if (typeof working !== 'boolean') {
+      throw new Error('patch:agent-working expects a boolean');
+    }
+    setTrayWorking(working);
   });
   // In-app browser toolbar buttons (in-app-browser.ts / iab-preload.ts). Each
   // drives the single embedded browser controller; a stray message when nothing
@@ -1389,6 +1594,22 @@ function readDesktopBuildInfo(): DesktopBuildInfo {
   }
 }
 
+/**
+ * Whether the running bundle is really signed, asked of macOS itself. The
+ * build-time `signed` flag in build-info.json is stamped BEFORE electron-builder
+ * signs, and shipped as false for a correctly signed app — which made the
+ * updater report 'adhoc-signed' and the web layer show a second banner. The
+ * bundle on disk is the only source that cannot disagree with reality. Off
+ * macOS (or unpackaged) there is no bundle signature, so the stamped flag stands.
+ */
+function isBundleDeveloperSigned(stamped: boolean): boolean {
+  if (process.platform !== 'darwin' || !app.isPackaged) return stamped;
+  const bundle = join(process.execPath, '..', '..', '..');
+  const probe = spawnSync('codesign', ['-dv', '--verbose=2', bundle], { encoding: 'utf8' });
+  const out = `${probe.stdout ?? ''}${probe.stderr ?? ''}`;
+  return !/Signature=adhoc/.test(out) && /Authority=/.test(out);
+}
+
 /** The feed electron-updater will poll, read from the shipped app-update.yml. */
 function readFeedUrl(updateConfigPath: string): string | null {
   if (!existsSync(updateConfigPath)) return null;
@@ -1494,6 +1715,19 @@ const installUpdate = createInstaller({
       message: err.message,
       at: new Date().toISOString(),
     }),
+  forceExit: () => {
+    logUpdate('install-force-exit', 'the quit did not complete; exiting so the installer can run');
+    const launched = activeLaunch;
+    activeLaunch = null;
+    globalShortcut.unregisterAll();
+    tray?.destroy();
+    const stopped = launched
+      ? Promise.race([launched.stop(), new Promise<void>((resolve) => setTimeout(resolve, 5_000))])
+      : Promise.resolve();
+    void stopped
+      .catch((err: unknown) => console.error('[patch] stopping the server failed', err))
+      .finally(() => app.exit(0));
+  },
 });
 
 function setupAutoUpdater(): void {
@@ -1521,8 +1755,10 @@ function setupAutoUpdater(): void {
     isPackaged: app.isPackaged,
     hasUpdateConfig,
     version: build.version,
-    signed: build.signed,
+    signed: isBundleDeveloperSigned(build.signed),
     noFeedReason,
+    platform: process.platform,
+    appImage: process.env['APPIMAGE'],
   });
 
   let persisted = emptyPersisted();
@@ -1714,6 +1950,20 @@ function setupAutoUpdater(): void {
   });
   ipcMain.handle('patch:local-stt:finish', () => localStt.finish());
   ipcMain.on('patch:local-stt:cancel', () => localStt.cancel());
+  // spec/05 § Keep running — the welcome step and Settings read and change the
+  // same choices the tray menu shows. Refused when this computer does not run
+  // Patch itself: there is nothing to keep running.
+  ipcMain.handle('patch:keep-running:get', () => {
+    if (!keepRunning) throw new Error('This computer does not run Patch itself');
+    return keepRunning.state();
+  });
+  ipcMain.handle('patch:keep-running:set', (_e, patch: unknown) => {
+    if (!keepRunning) throw new Error('This computer does not run Patch itself');
+    return setKeepRunning(
+      keepRunning,
+      (patch ?? {}) as { openAtLogin?: boolean; keepAwake?: boolean },
+    );
+  });
   ipcMain.handle('patch:local-host:status', () => localHostStatus(app.getPath('home')));
   ipcMain.handle('patch:local-host:install', (_e, payload: { code?: unknown }) =>
     installLocalHost({
@@ -1780,9 +2030,12 @@ function setupAutoUpdater(): void {
   });
   // Squirrel.Mac's own failures — not a background check that hit a network
   // blip — are the ones that mean the downloaded update will not install.
-  squirrel.on('error', (err: Error) => {
-    errorSinceDownload = err.message;
-  });
+  // Squirrel.Mac exists only on macOS; on Linux electron-updater swaps the AppImage itself.
+  if (process.platform === 'darwin') {
+    squirrel.on('error', (err: Error) => {
+      errorSinceDownload = err.message;
+    });
+  }
   autoUpdater.on('error', (err: Error) => {
     // Surfaced verbatim to the panel. This is the path that used to swallow the
     // "Could not get code signature" failure on an adhoc-signed build.
@@ -1861,38 +2114,57 @@ function isAppEntry(): boolean {
 
 /**
  * What the shell looks like to the first-run page (spec/05 § Desktop first run):
- * a small window of its own asking where Patch runs, answered over IPC.
+ * a small window of its own asking where Patch runs, answered over IPC. With
+ * `offerMove` it first asks to move the app to Applications.
  */
-function showSetupWindow(): {
+function showSetupWindow(offerMove = false): {
   window: BrowserWindow;
-  ui: { choose(): Promise<SetupChoice>; progress(m: string): void; fail(m: string): void };
+  ui: {
+    choose(): Promise<SetupChoice>;
+    /** The answer to "Move Patch to Applications?": true to move. */
+    moveAnswer(): Promise<boolean>;
+    progress(m: string): void;
+    fail(m: string): void;
+  };
 } {
   const window = new BrowserWindow({
     width: 560,
     height: 460,
     title: 'Patch',
-    show: true,
+    // A quiet instance (a test run beside a real Patch) puts nothing on screen.
+    show: !QUIET,
     resizable: false,
-    ...windowChrome(process.platform),
+    ...documentWindowChrome(),
     webPreferences: {
       preload: join(__dirname, 'setup-preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
-  void window.loadFile(join(__dirname, 'setup.html'));
+  void window.loadFile(join(__dirname, 'setup.html'), offerMove ? { hash: 'move' } : {});
   let pending: ((c: SetupChoice) => void) | null = null;
+  let pendingMove: ((yes: boolean) => void) | null = null;
   const onChoose = (event: { sender: unknown }, choice: SetupChoice): void => {
     if (event.sender !== window.webContents) return;
     pending?.(choice);
     pending = null;
   };
+  const onMove = (event: { sender: unknown }, yes: unknown): void => {
+    if (event.sender !== window.webContents) return;
+    pendingMove?.(yes === true);
+    pendingMove = null;
+  };
   ipcMain.on('patch:setup:choose', onChoose as never);
-  window.once('closed', () => ipcMain.removeListener('patch:setup:choose', onChoose as never));
+  ipcMain.on('patch:setup:move', onMove as never);
+  window.once('closed', () => {
+    ipcMain.removeListener('patch:setup:choose', onChoose as never);
+    ipcMain.removeListener('patch:setup:move', onMove as never);
+  });
   return {
     window,
     ui: {
       choose: () => new Promise<SetupChoice>((resolve) => (pending = resolve)),
+      moveAnswer: () => new Promise<boolean>((resolve) => (pendingMove = resolve)),
       progress: (m) => window.webContents.send('patch:setup:progress', m),
       fail: (m) => window.webContents.send('patch:setup:fail', m),
     },
@@ -1905,26 +2177,41 @@ function showSetupWindow(): {
  * the credential-carrying first page, or quits if the question is closed
  * unanswered. A developer run (`pnpm dev`, or PATCH_SERVER_URL) skips all of it.
  */
-async function resolveServer(): Promise<void> {
-  if (process.env['PATCH_SERVER_URL'] || !app.isPackaged) return;
+async function resolveServer(): Promise<'ready' | 'stop'> {
+  if (process.env['PATCH_SERVER_URL'] || !app.isPackaged) return 'ready';
   const firstRun = loadFirstRun();
   const userData = app.getPath('userData');
   let setup: ReturnType<typeof showSetupWindow> | null = null;
+  const openSetup = (offerMove: boolean): ReturnType<typeof showSetupWindow> => {
+    const opened = showSetupWindow(offerMove);
+    // Closing the question unanswered is declining to use the app.
+    opened.window.once('closed', () => {
+      if (!activeLaunch) app.exit(0);
+    });
+    return opened;
+  };
   const ui = {
     choose: () => {
-      if (!setup) {
-        setup = showSetupWindow();
-        // Closing the question unanswered is declining to use the app.
-        setup.window.once('closed', () => {
-          if (!activeLaunch) app.exit(0);
-        });
-      }
+      if (!setup) setup = openSetup(false);
       return setup.ui.choose();
     },
     progress: (m: string) => setup?.ui.progress(m),
     fail: (m: string) => setup?.ui.fail(m),
   };
   try {
+    if (
+      shouldOfferMove({
+        platform: process.platform,
+        packaged: app.isPackaged,
+        quiet: QUIET !== null,
+        inApplications: process.platform === 'darwin' && app.isInApplicationsFolder(),
+        firstRun: firstRun.remembered(userData) === null,
+      })
+    ) {
+      setup = openSetup(true);
+      if (await offerMoveToApplications(setup.ui)) return 'stop';
+    }
+    console.log('[patch] start: bringing up the server');
     const launched = await firstRun.launch({
       userData,
       home: app.getPath('home'),
@@ -1938,23 +2225,54 @@ async function resolveServer(): Promise<void> {
       hostInstalled: () => localHostStatus(app.getPath('home')).installed,
     });
     activeLaunch = launched;
-    initialUrl = launched.appUrl;
+    console.log(`[patch] start: ${launched.mode} server at ${new URL(launched.appUrl).origin}`);
+    if (launched.mode === 'local') startKeepRunning(userData);
+    // A first run goes on to the welcome steps: AI sign-in, defaults, phone.
+    initialUrl = launched.firstRun
+      ? firstRun.welcomeUrl(launched.appUrl, launched.mode)
+      : launched.appUrl;
     const base = new URL(launched.appUrl);
     base.hash = '';
     SERVER_URL = base.toString();
   } catch (err) {
     // A remembered connection that cannot be brought up, or a damaged file: say
     // so and stop. Carrying on with no server would be a window with nothing in it.
+    // In the log too: the dialog is all a person sees, and nothing else records it.
+    console.error('[patch] could not start:', err instanceof Error ? err.message : String(err));
     dialog.showErrorBox('Patch could not start', err instanceof Error ? err.message : String(err));
     app.exit(1);
-    return;
+    return 'stop';
   }
   const done = setup as ReturnType<typeof showSetupWindow> | null;
   if (done) done.window.destroy();
+  return 'ready';
+}
+
+/**
+ * The first run's "Move Patch to Applications?" (spec/05 § Desktop first run).
+ * True when the app has been moved: Electron then quits it and opens the copy
+ * in Applications, so this run goes no further. A move that fails says why on
+ * the same window and the question stands.
+ */
+async function offerMoveToApplications(ui: {
+  moveAnswer(): Promise<boolean>;
+  fail(m: string): void;
+}): Promise<boolean> {
+  for (;;) {
+    if (!(await ui.moveAnswer())) return false;
+    try {
+      if (app.moveToApplicationsFolder()) return true;
+      ui.fail('Patch was not moved to Applications.');
+    } catch (err) {
+      ui.fail(
+        `Patch could not be moved to Applications: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 }
 
 /** The relay a phone reaches this Mac's own server through, unless PATCH_RELAY_URL says otherwise. */
-const DEFAULT_RELAY_URL = 'wss://patch.tomchambers.me/relay';
+const DEFAULT_RELAY_URL = 'wss://relay.patchhq.dev';
 
 /** App menu → Switch Server…: forget the server this app uses, then ask again on relaunch. */
 async function switchServer(): Promise<void> {
@@ -2009,7 +2327,8 @@ export function bootstrap(): void {
     void ensureSpotlightIndexed({
       platform: process.platform,
       isPackaged: app.isPackaged,
-      bundlePath: '/Applications/Patch.app',
+      // Where this copy really is: it may have been moved, or never been in Applications.
+      bundlePath: join(process.execPath, '..', '..', '..'),
       run: (cmd, args) =>
         new Promise((resolve, reject) => {
           const p = spawn(cmd, args);
@@ -2025,7 +2344,9 @@ export function bootstrap(): void {
     }).catch((err) => console.error('[spotlight]', err));
     // Which server this app talks to — the remembered one, or the first-run
     // question — before any window shows Patch itself.
-    await resolveServer();
+    // Moving to Applications quits this run and opens the moved copy; an error
+    // that stops the start has already been shown and the app is exiting.
+    if ((await resolveServer()) === 'stop') return;
     // Reload has to exist. The UI is a remote page, so when the window and the
     // deployed SPA disagree there is otherwise no way back — see app-menu.ts.
     Menu.setApplicationMenu(
@@ -2085,6 +2406,7 @@ export function bootstrap(): void {
       });
     }
     mainWindow = createMainWindow();
+    console.log('[patch] start: main window open');
     // A quiet instance takes no tray icon and, above all, no global hotkeys: they
     // belong to the Patch someone is actually using.
     if (!QUIET) {
@@ -2118,6 +2440,7 @@ export function bootstrap(): void {
       });
     }
     globalShortcut.unregisterAll();
+    keepRunning?.stop();
     systemAudio.stop();
     stopMicWatch?.();
     tray?.destroy();
@@ -2127,14 +2450,23 @@ export function bootstrap(): void {
       e.preventDefault();
       const launched = activeLaunch;
       activeLaunch = null;
-      void launched.stop().finally(() => app.quit());
+      // Exit, not quit again: everything this handler cleans up is done, and a
+      // second app.quit() issued while this one is still unwinding is ignored.
+      // A stop that resolves at once (a remembered remote server has nothing to
+      // stop) lands exactly there, and the app hung with no window, never exiting.
+      void launched
+        .stop()
+        .catch((err: unknown) => console.error('[patch] stopping the server failed', err))
+        .finally(() => app.exit(0));
     }
   });
 
-  // macOS — keep running with no windows so tray + hotkey stay live.
-  app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') app.quit();
-  });
+  // Keep running with no windows so the tray and hotkeys stay live — on Linux
+  // too. Closing the main window only hides it, so this fires in the moment
+  // between the first-run window closing and Patch's own opening, and quitting
+  // there ended every Linux first run just as it succeeded. Quit is in the tray
+  // menu and the app menu; launching the app again shows its window.
+  app.on('window-all-closed', () => undefined);
 }
 
 // A PACKAGED app is always the entry — Electron loads `main` from package.json,

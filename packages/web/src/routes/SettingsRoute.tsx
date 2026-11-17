@@ -24,9 +24,13 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/rest.js';
 import { NavHistoryControls } from '../components/NavHistoryControls.js';
-import { usePreferencesStore } from '../stores/preferencesStore.js';
+import { useExperimentalFeatures, usePreferencesStore } from '../stores/preferencesStore.js';
 import { useUiStore } from '../stores/uiStore.js';
-import { DEFAULT_SETTINGS_PAGE, SETTINGS_PAGES, type SettingsPageId } from './settings/pages.js';
+import {
+  DEFAULT_SETTINGS_PAGE,
+  visibleSettingsPages,
+  type SettingsPageId,
+} from './settings/pages.js';
 import { SettingsBackContext } from './settings/ui.js';
 import { useBehind } from './settings/UpdatesPage.js';
 import { UsagePage } from './settings/UsagePage.js';
@@ -35,6 +39,7 @@ import { AgentPage } from './settings/AgentPage.js';
 import { McpPage } from './settings/McpPage.js';
 import { MemoriesPage } from './settings/MemoriesPage.js';
 import { ManagerPage } from './settings/ManagerPage.js';
+import { ExperimentalPage } from './settings/ExperimentalPage.js';
 import { GoalsPage } from './settings/GoalsPage.js';
 import { PromptsPage } from './settings/PromptsPage.js';
 import { VoicePage } from './settings/VoicePage.js';
@@ -70,6 +75,7 @@ const PAGE_COMPONENTS: Record<SettingsPageId, () => JSX.Element> = {
   providers: ProvidersPage,
   notifications: NotificationsPage,
   devices: DevicesPage,
+  experimental: ExperimentalPage,
   updates: UpdatesPage,
   bugs: BugReportsPage,
   account: AccountPage,
@@ -187,6 +193,7 @@ function SettingsNav({
   onSelect: (p: SettingsPageId) => void;
 }): JSX.Element {
   const behind = useBehind();
+  const experimental = useExperimentalFeatures();
   let lastGroup = '';
   return (
     <nav className="set-nav" data-testid="settings-nav" aria-label="Settings">
@@ -194,7 +201,7 @@ function SettingsNav({
         <NavHistoryControls />
         <h1 className="display">Settings</h1>
       </div>
-      {SETTINGS_PAGES.map((p) => {
+      {visibleSettingsPages(experimental).map((p) => {
         const heading =
           p.group !== lastGroup ? (
             <h2 className="set-label" key={`g-${p.group}`}>

@@ -260,6 +260,36 @@ describe('keepCompletedHistory', () => {
   });
 });
 
+describe('keepCompletedHistory reused text', () => {
+  it('keeps the earlier completed record when the same text comes back pending', () => {
+    const prev = [
+      { text: 'Run tests', status: 'completed' as const },
+      { text: 'Commit', status: 'completed' as const },
+    ];
+    const next = [{ text: 'Run tests', status: 'pending' as const }];
+    expect(keepCompletedHistory(next, prev)).toEqual([prev[0], prev[1], next[0]]);
+  });
+  it('keeps every earlier completed duplicate when reopened', () => {
+    const prev = [
+      { text: 'Run tests', status: 'completed' as const },
+      { text: 'Run tests', status: 'completed' as const },
+    ];
+    const next = [{ text: 'Run tests', status: 'in_progress' as const }];
+    expect(keepCompletedHistory(next, prev)).toEqual([prev[0], prev[1], next[0]]);
+  });
+  it('skips only as many history entries as the new list repeats as completed', () => {
+    const prev = [
+      { text: 'Run tests', status: 'completed' as const },
+      { text: 'Run tests', status: 'completed' as const },
+    ];
+    const next = [
+      { text: 'Run tests', status: 'completed' as const },
+      { text: 'Run tests', status: 'pending' as const },
+    ];
+    expect(keepCompletedHistory(next, prev)).toEqual([prev[0], ...next]);
+  });
+});
+
 describe('keepCompletedHistory clearing', () => {
   it('an empty list clears the history', () => {
     expect(keepCompletedHistory([], [{ text: 'a', status: 'completed' }])).toEqual([]);

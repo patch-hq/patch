@@ -18,7 +18,7 @@
 // exactly the thing that runs once and is gone at the next reboot.
 
 import { execFile } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { installerLog } from './runLog.js';
@@ -28,14 +28,14 @@ const execFileAsync = promisify(execFile);
 export type ServiceManager = 'launchd' | 'systemd';
 
 /** The one service label / unit name a host's patch host is known by. */
-export const SERVICE_LABEL = 'me.tomchambers.patch-host';
+export const SERVICE_LABEL = 'io.github.patch-hq.host';
 export const SYSTEMD_UNIT = 'patch-host.service';
 
 /**
  * The names a host installed before the host rename carries. Registering
  * the new service removes these; they go with the rename's final phase.
  */
-export const LEGACY_SERVICE_LABEL = SERVICE_LABEL.replace(/patch-host$/, 'patch-daemon');
+export const LEGACY_SERVICE_LABELS = ['me.tomchambers.patch-daemon', 'me.tomchambers.patch-host'] as const;
 export const LEGACY_SYSTEMD_UNIT = 'patch-daemon.service';
 
 export interface ServiceDefinition {
@@ -94,8 +94,8 @@ export function legacySystemdUnitPath(home: string): string {
   return join(home, '.config', 'systemd', 'user', LEGACY_SYSTEMD_UNIT);
 }
 
-export function legacyLaunchdPlistPath(home: string): string {
-  return join(home, 'Library', 'LaunchAgents', `${LEGACY_SERVICE_LABEL}.plist`);
+export function legacyLaunchdPlistPath(home: string, label: string): string {
+  return join(home, 'Library', 'LaunchAgents', `${label}.plist`);
 }
 
 function xmlEscape(s: string): string {
@@ -238,15 +238,21 @@ export interface ServiceOps {
   runState(def: ServiceDefinition): Promise<ServiceRunState>;
 }
 
+/** Bytes in the host log now: the mark to pass as `sinceByte` to read only what a new start wrote. */
+export function hostLogSize(home: string): number {
+  const path = join(home, '.patch', 'logs', 'daemon.log');
+  return existsSync(path) ? statSync(path).size : 0;
+}
+
 /**
  * The host's own last words, for an installer that has to explain why the
  * service it just started is not running. Without this the user is told "it
  * failed" and has to go and find the log themselves.
  */
-export function hostLogTail(home: string, lines = 20): string {
+export function hostLogTail(home: string, lines = 20, sinceByte = 0): string {
   const path = join(home, '.patch', 'logs', 'daemon.log');
   if (!existsSync(path)) return `(no host log at ${path})`;
-  const text = readFileSync(path, 'utf8').trimEnd();
+  const text = readFileSync(path).subarray(sinceByte).toString('utf8').trimEnd();
   if (text.length === 0) return `(${path} is empty)`;
   return text.split('\n').slice(-lines).join('\n');
 }
@@ -316,22 +322,22 @@ export const launchdOps: ServiceOps = {
     // A host installed before the rename carries the old label. Two jobs
     // would fight over the host's port, so the old one goes first. This kills
     // the running host; the installer outlives it in its own process group.
-    const legacyPlist = legacyLaunchdPlistPath(def.home);
-    await run('launchctl', ['bootout', `gui/${def.uid}/${LEGACY_SERVICE_LABEL}`]).catch(
-      () => undefined,
-    );
-    if (existsSync(legacyPlist)) {
-      rmSync(legacyPlist, { force: true });
-      otherDomainNotes.push(`removed the pre-rename LaunchAgent at ${legacyPlist}`);
-    }
-    if (mode.domain === 'system') {
-      const legacySystem = `/Library/LaunchDaemons/${LEGACY_SERVICE_LABEL}.plist`;
-      await run('sudo', ['-n', 'launchctl', 'bootout', `system/${LEGACY_SERVICE_LABEL}`]).catch(
-        () => undefined,
-      );
-      if (existsSync(legacySystem)) {
-        await run('sudo', ['-n', 'rm', legacySystem]);
-        otherDomainNotes.push(`removed the pre-rename system job at ${legacySystem}`);
+    for (const legacyLabel of LEGACY_SERVICE_LABELS) {
+      const legacyPlist = legacyLaunchdPlistPath(def.home, legacyLabel);
+      await run('launchctl', ['bootout', `gui/${def.uid}/${legacyLabel}`]).catch(() => undefined);
+      if (existsSync(legacyPlist)) {
+        rmSync(legacyPlist, { force: true });
+        otherDomainNotes.push(`removed the pre-rename LaunchAgent at ${legacyPlist}`);
+      }
+      if (mode.domain === 'system') {
+        const legacySystem = `/Library/LaunchDaemons/${legacyLabel}.plist`;
+        await run('sudo', ['-n', 'launchctl', 'bootout', `system/${legacyLabel}`]).catch(
+          () => undefined,
+        );
+        if (existsSync(legacySystem)) {
+          await run('sudo', ['-n', 'rm', legacySystem]);
+          otherDomainNotes.push(`removed the pre-rename system job at ${legacySystem}`);
+        }
       }
     }
     if (mode.domain === 'system') {

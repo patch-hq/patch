@@ -1,6 +1,5 @@
-// The meeting permissions popover on the Meeting button (lib/meetingSetup.ts):
-// once as a gentle introduction, and again when Meeting is pressed with
-// something still missing.
+// The meeting permissions popover on the Meeting button (lib/meetingSetup.ts),
+// shown when Meeting is pressed with something still missing.
 
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
@@ -37,7 +36,6 @@ export function MeetingSetupPopover({ chatId }: { chatId: string }) {
   }, [shown]);
 
   if (!shown) return null;
-  const starting = open.mode === 'start';
   const gaps = missing(permissions);
   const canStart = permissions.microphone === 'granted' && permissions.callAudio === 'granted';
   const onlyNames = gaps.length === 1 && gaps[0] === 'accessibility';
@@ -46,18 +44,18 @@ export function MeetingSetupPopover({ chatId }: { chatId: string }) {
     <div
       className="mm-setup"
       role="dialog"
-      aria-label={starting ? 'Start meeting' : 'Meetings'}
+      aria-label="Start meeting"
       data-testid="meeting-setup"
       data-mode={open.mode}
     >
       <div className="mm-setup-head">
-        <b>{starting ? 'Start meeting' : 'Meetings'}</b>
+        <b>Start meeting</b>
         <button
           type="button"
           className="mm-setup-x"
           data-testid="meeting-setup-close"
-          aria-label={starting ? 'Cancel' : 'Not now'}
-          title={starting ? 'Cancel' : 'Not now'}
+          aria-label="Cancel"
+          title="Cancel"
           onClick={close}
         >
           <X size={14} aria-hidden="true" />
@@ -74,7 +72,7 @@ export function MeetingSetupPopover({ chatId }: { chatId: string }) {
           >
             <span className="n">
               {r.name}
-              {starting && r.kind === 'accessibility' && state !== 'granted' ? (
+              {r.kind === 'accessibility' && state !== 'granted' ? (
                 <small className="warn">Without it, speakers show as Unknown</small>
               ) : (
                 <small>{r.what}</small>
@@ -85,7 +83,7 @@ export function MeetingSetupPopover({ chatId }: { chatId: string }) {
             ) : (
               <button
                 type="button"
-                className={starting && r.kind === 'accessibility' ? 'mm-btn' : 'mm-btn pri'}
+                className={r.kind === 'accessibility' ? 'mm-btn' : 'mm-btn pri'}
                 data-testid={`meeting-perm-allow-${r.kind}`}
                 disabled={asking !== null}
                 onClick={() => void allowPermission(r.kind)}
@@ -111,29 +109,27 @@ export function MeetingSetupPopover({ chatId }: { chatId: string }) {
           }}
         />
       </label>
-      {starting ? (
-        <div className="mm-setup-acts">
-          {onlyNames ? (
-            <button
-              type="button"
-              className="mm-btn"
-              data-testid="meeting-start-without-names"
-              onClick={() => void startFromSetup(chatId, false)}
-            >
-              Start without names
-            </button>
-          ) : null}
+      <div className="mm-setup-acts">
+        {onlyNames ? (
           <button
             type="button"
-            className="mm-btn pri"
-            data-testid="meeting-setup-start"
-            disabled={!canStart || gaps.length > 0}
-            onClick={() => void startFromSetup(chatId, true)}
+            className="mm-btn"
+            data-testid="meeting-start-without-names"
+            onClick={() => void startFromSetup(chatId, false)}
           >
-            Start
+            Start without names
           </button>
-        </div>
-      ) : null}
+        ) : null}
+        <button
+          type="button"
+          className="mm-btn pri"
+          data-testid="meeting-setup-start"
+          disabled={!canStart || gaps.length > 0}
+          onClick={() => void startFromSetup(chatId, true)}
+        >
+          Start
+        </button>
+      </div>
     </div>
   );
 }

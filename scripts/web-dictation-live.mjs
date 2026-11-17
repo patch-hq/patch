@@ -20,7 +20,8 @@ const HOTKEY = process.argv.includes('--hotkey');
 const wavArg = process.argv.slice(2).find((a) => !a.startsWith('--'));
 const WAV = resolve(wavArg ?? `${REPO}/scripts/fixtures/probe-fakemic-16k.wav`);
 const CRED = readFileSync(`${homedir()}/.patch/probe-credential.jwt`, 'utf8').trim();
-const APP = process.env.PATCH_APP ?? 'https://patch.tomchambers.me/app';
+if (!process.env.PATCH_APP) throw new Error('set PATCH_APP to the app URL, e.g. https://your-patch-server/app');
+const APP = process.env.PATCH_APP;
 const CHAT = process.env.PATCH_CHAT ?? 'thread_manager';
 
 const started = Date.now();

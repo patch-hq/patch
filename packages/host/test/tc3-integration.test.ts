@@ -42,21 +42,12 @@ const LOCAL_KEY = 'test-local-key';
 
 const silent = pino({ level: 'silent' });
 
-interface MockDevice {
-  deviceId: string;
-  online: boolean;
-  muted: boolean;
-  lastUsedAt: number;
-}
-
 interface HostStack {
   app: FastifyInstance;
   socketPath: string;
   cwd: string;
   daemon: Daemon;
   upstream: WireEvent[];
-  sentFrames: { deviceId: string; frame: Record<string, unknown> }[];
-  pushFallbacks: { chatId: string; message: string }[];
   spawnChat: (folder: string) => Promise<string>;
   capturedPrompts: string[];
   close: () => Promise<void>;
@@ -70,17 +61,15 @@ function mkTmp(prefix: string): string {
 }
 
 // Boot a real host control server on a real UDS socket, wired exactly like
-// index.ts: real speakers cascade against `devices`, real sidecar IO under
-// `cwd`, real onBroadcast self-loop suppression, real preprocessInput injection.
-async function startHost(devices: MockDevice[] = []): Promise<HostStack> {
+// index.ts: real sidecar IO under `cwd`, real onBroadcast self-loop
+// suppression, real preprocessInput injection.
+async function startHost(): Promise<HostStack> {
   const home = mkTmp('tc3d-home-');
   const cwd = mkTmp('tc3d-cwd-');
   const sockDir = mkTmp('tc3d-sock-');
   const socketPath = join(sockDir, 'daemon.sock');
 
   const upstream: WireEvent[] = [];
-  const sentFrames: { deviceId: string; frame: Record<string, unknown> }[] = [];
-  const pushFallbacks: { chatId: string; message: string }[] = [];
   const capturedPrompts: string[] = [];
 
   const metaStore = createMetaStore(home);
@@ -125,7 +114,6 @@ async function startHost(devices: MockDevice[] = []): Promise<HostStack> {
     permissionModeDefault: 'auto',
   });
 
-  const byId = (id: string) => devices.find((d) => d.deviceId === id);
   const jobs = new MemoryJobsStore({ now: () => Date.now() });
 
   const app = await buildControl({
@@ -133,23 +121,6 @@ async function startHost(devices: MockDevice[] = []): Promise<HostStack> {
     daemon,
     jobs,
     emitWire: (e) => upstream.push(e),
-    // Real speakers cascade deps — stateful mock presence registry.
-    speakers: {
-      presence: {
-        enumerate: () => devices.map((d) => ({ ...d })),
-        isOnline: (id) => byId(id)?.online ?? false,
-        isMuted: (id) => byId(id)?.muted ?? false,
-        send: (id, frame) => {
-          const d = byId(id);
-          if (!d || !d.online) return false;
-          sentFrames.push({ deviceId: id, frame });
-          return true;
-        },
-      },
-      pushFallback: ({ chatId, message }) => {
-        pushFallbacks.push({ chatId, message });
-      },
-    },
     // Real broadcast-sidecar wiring (index.ts onBroadcast).
     onBroadcast: ({ channel, message, sourceChatId }) => {
       const threadId = threadForChannel(channel);
@@ -169,8 +140,6 @@ async function startHost(devices: MockDevice[] = []): Promise<HostStack> {
     cwd,
     daemon,
     upstream,
-    sentFrames,
-    pushFallbacks,
     capturedPrompts,
     spawnChat: (folder: string) => daemon.spawnChat({ folder }),
     close: async () => {
@@ -184,128 +153,6 @@ beforeEach(() => {
 });
 afterEach(() => {
   for (const d of tmpRoots) rmSync(d, { recursive: true, force: true });
-});
-
-const recent = (msAgo: number) => Date.now() - msAgo;
-
-describe('TC3 [test-runner] speakers cascade over a real UDS host', () => {
-  it('B6a explicit deviceId rings exactly that device with conversational:false ring frame', async () => {
-    const s = await startHost([
-      { deviceId: 'kitchen', online: true, muted: false, lastUsedAt: recent(60_000) },
-      { deviceId: 'bedroom', online: true, muted: false, lastUsedAt: recent(1_000) },
-    ]);
-    const folder = mkTmp('tc3d-folder-');
-    const chatId = await s.spawnChat(folder);
-    try {
-      await udsRequest(s.socketPath, {
-        localKey: LOCAL_KEY,
-        method: 'POST',
-        path: '/internal/notify',
-        body: {
-          channel: 'speakers',
-          message: 'wash done',
-          callerChatId: chatId,
-          deviceId: 'kitchen',
-        },
-      });
-      expect(s.sentFrames).toHaveLength(1);
-      expect(s.sentFrames[0]?.deviceId).toBe('kitchen');
-      expect(s.sentFrames[0]?.frame).toMatchObject({
-        type: 'ring',
-        conversational: false,
-        message: 'wash done',
-      });
-      expect(s.pushFallbacks).toHaveLength(0);
-    } finally {
-      await s.close();
-    }
-  });
-
-  it('B6b muted explicit target falls through to most-recently-active; muted always skipped', async () => {
-    const s = await startHost([
-      { deviceId: 'kitchen', online: true, muted: true, lastUsedAt: recent(1_000) },
-      { deviceId: 'bedroom', online: true, muted: false, lastUsedAt: recent(2_000) },
-    ]);
-    const folder = mkTmp('tc3d-folder-');
-    const chatId = await s.spawnChat(folder);
-    try {
-      await udsRequest(s.socketPath, {
-        localKey: LOCAL_KEY,
-        method: 'POST',
-        path: '/internal/notify',
-        body: { channel: 'speakers', message: 'm', callerChatId: chatId, deviceId: 'kitchen' },
-      });
-      expect(s.sentFrames.map((f) => f.deviceId)).toEqual(['bedroom']);
-    } finally {
-      await s.close();
-    }
-  });
-
-  it('B6c no deviceId → most-recently-active online+unmuted device', async () => {
-    const s = await startHost([
-      { deviceId: 'kitchen', online: true, muted: false, lastUsedAt: recent(120_000) },
-      { deviceId: 'bedroom', online: true, muted: false, lastUsedAt: recent(3_000) },
-      { deviceId: 'office', online: true, muted: false, lastUsedAt: recent(240_000) },
-    ]);
-    const folder = mkTmp('tc3d-folder-');
-    const chatId = await s.spawnChat(folder);
-    try {
-      await udsRequest(s.socketPath, {
-        localKey: LOCAL_KEY,
-        method: 'POST',
-        path: '/internal/notify',
-        body: { channel: 'speakers', message: 'm', callerChatId: chatId },
-      });
-      expect(s.sentFrames.map((f) => f.deviceId)).toEqual(['bedroom']);
-    } finally {
-      await s.close();
-    }
-  });
-
-  it('B6d nothing recently active → all online+unmuted at low volume', async () => {
-    const s = await startHost([
-      { deviceId: 'kitchen', online: true, muted: false, lastUsedAt: recent(10 * 60_000) },
-      { deviceId: 'bedroom', online: true, muted: false, lastUsedAt: recent(20 * 60_000) },
-      { deviceId: 'office', online: true, muted: true, lastUsedAt: recent(11 * 60_000) },
-    ]);
-    const folder = mkTmp('tc3d-folder-');
-    const chatId = await s.spawnChat(folder);
-    try {
-      await udsRequest(s.socketPath, {
-        localKey: LOCAL_KEY,
-        method: 'POST',
-        path: '/internal/notify',
-        body: { channel: 'speakers', message: 'm', callerChatId: chatId },
-      });
-      expect(s.sentFrames.map((f) => f.deviceId).sort()).toEqual(['bedroom', 'kitchen']);
-      for (const f of s.sentFrames) {
-        expect(f.frame).toMatchObject({ conversational: false, lowVolume: true });
-      }
-    } finally {
-      await s.close();
-    }
-  });
-
-  it('B6e all devices offline/muted → push fallback fires with text (not dropped)', async () => {
-    const s = await startHost([
-      { deviceId: 'kitchen', online: false, muted: false, lastUsedAt: recent(1_000) },
-      { deviceId: 'bedroom', online: true, muted: true, lastUsedAt: recent(2_000) },
-    ]);
-    const folder = mkTmp('tc3d-folder-');
-    const chatId = await s.spawnChat(folder);
-    try {
-      await udsRequest(s.socketPath, {
-        localKey: LOCAL_KEY,
-        method: 'POST',
-        path: '/internal/notify',
-        body: { channel: 'speakers', message: 'fire alarm', callerChatId: chatId },
-      });
-      expect(s.sentFrames).toHaveLength(0);
-      expect(s.pushFallbacks).toEqual([{ chatId, message: 'fire alarm' }]);
-    } finally {
-      await s.close();
-    }
-  });
 });
 
 describe('TC3 [test-runner] notify wire emission + sidecar over real UDS', () => {

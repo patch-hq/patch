@@ -125,7 +125,23 @@ const PASS_THROUGH = [
   /^latest-mac\.yml$/,
   /^.+\.zip(\.blockmap)?$/,
   /^desktop-latest\.json$/,
+  // The Linux desktop app's feed: electron-updater reads latest-linux.yml and
+  // replaces the AppImage it names.
+  /^latest-linux\.yml$/,
+  /^Patch-.+\.AppImage$/,
+  /^desktop-linux-latest\.json$/,
 ];
+/**
+ * A stable release's fixed-name copies for the website (scripts/promote.mjs).
+ * No client asks a server for them, and each is a full duplicate of a file that
+ * is mirrored under its versioned name.
+ */
+export const STABLE_ALIAS_ASSETS = new Set([
+  'Patch-mac-arm64.zip',
+  'Patch-mac-arm64.dmg',
+  'Patch-linux-x86_64.AppImage',
+  'Patch-android.apk',
+]);
 const SERVER_RELEASE = ['patch-server.tar.gz', 'patch-server.tar.gz.sha256', 'install.sh'];
 const HOST_MANIFEST = /^host-latest-.+\.json$/;
 
@@ -135,6 +151,31 @@ export interface MirrorOptions {
   downloadsDir: string;
   fetchImpl?: typeof fetch;
   log?: (msg: string) => void;
+  /**
+   * Only note which release is available, without mirroring it. Used while the
+   * auto-update switch is off, so nothing a host or the desktop app reads from
+   * downloads/ moves until the user asks (update-control.ts).
+   */
+  peekOnly?: boolean;
+}
+
+const AVAILABLE_FILE = 'release-available.json';
+
+export interface AvailableRelease {
+  tag: string;
+  version: string;
+  seenAt: string;
+}
+
+/** The newest release the channel offers, as last seen by a check; null if never seen. */
+export function readAvailableRelease(downloadsDir: string): AvailableRelease | null {
+  const file = join(downloadsDir, AVAILABLE_FILE);
+  if (!existsSync(file)) return null;
+  try {
+    return JSON.parse(readFileSync(file, 'utf8')) as AvailableRelease;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -189,6 +230,17 @@ export async function mirrorOnce(opts: MirrorOptions): Promise<string | null> {
     log(`release mirror: ${opts.repo} has no ${opts.channel} release yet`);
     return null;
   }
+  if (opts.peekOnly) {
+    // Only a note of what is on offer; a mirrored release speaks for itself.
+    mkdirSync(opts.downloadsDir, { recursive: true });
+    const available: AvailableRelease = {
+      tag: release.tag_name,
+      version: /\d+\.\d+\.\d+/.exec(release.tag_name)?.[0] ?? release.tag_name,
+      seenAt: new Date().toISOString(),
+    };
+    writeFileSync(join(opts.downloadsDir, AVAILABLE_FILE), JSON.stringify(available));
+    return null;
+  }
   const served = readMirrorState(opts.downloadsDir, log);
   if (served?.tag === release.tag_name && (served.format ?? 1) >= MIRROR_FORMAT) return null;
 
@@ -221,7 +273,9 @@ export async function mirrorOnce(opts: MirrorOptions): Promise<string | null> {
     // Everything else is copied as published. Hosts verify their own artifacts
     // against the signing key they trust, so this server adds no trust of its own.
     const names = [...assets.keys()];
-    for (const name of names.filter((n) => PASS_THROUGH.some((re) => re.test(n)))) {
+    const passThrough = (n: string) =>
+      !STABLE_ALIAS_ASSETS.has(n) && PASS_THROUGH.some((re) => re.test(n));
+    for (const name of names.filter(passThrough)) {
       writeFileSync(join(staging, name), await fetchAsset(name));
     }
 
@@ -260,6 +314,8 @@ export async function mirrorOnce(opts: MirrorOptions): Promise<string | null> {
       'mobile-update.json',
       'latest-mac.yml',
       'desktop-latest.json',
+      'latest-linux.yml',
+      'desktop-linux-latest.json',
     ]);
     const staged = readdirSync(staging).filter((n) => n !== 'server-release');
     for (const n of staged.filter((n) => !MANIFESTS.has(n)))
@@ -297,6 +353,10 @@ export function startReleaseMirror(
   opts: Omit<MirrorOptions, 'channel'> & {
     channel: () => Channel | 'off';
     afterCheck?: () => void;
+    /** True while releases must not move (auto-update off, no update requested). */
+    hold?: () => boolean;
+    /** Receives a function that runs a check at once (after "Update everything"). */
+    onCheckNow?: (checkNow: () => void) => void;
   },
   everyMs = 2 * 60 * 1000,
 ): () => void {
@@ -306,6 +366,10 @@ export function startReleaseMirror(
     try {
       channel = opts.channel();
       if (channel === 'off') return;
+      if (opts.hold?.()) {
+        await mirrorOnce({ ...opts, channel, peekOnly: true });
+        return;
+      }
       await mirrorOnce({ ...opts, channel });
     } catch (err: unknown) {
       log(`release mirror FAILED: ${err instanceof Error ? err.message : String(err)}`);
@@ -318,6 +382,7 @@ export function startReleaseMirror(
     }
   };
   void tick();
+  opts.onCheckNow?.(() => void tick());
   const timer = setInterval(tick, everyMs);
   timer.unref();
   return () => clearInterval(timer);

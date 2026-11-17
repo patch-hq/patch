@@ -1,4 +1,4 @@
-// Move a chat to another host (spec/04 § Moving a chat to another host,
+// Move a chat to another host, or to another folder on its own (spec/04 § Moving a chat to another host,
 // spec/14 § Chat header). Pick the host, then the folder the chat will run
 // in there — offered from that host's own folders, the one with the same
 // name as the chat's current folder chosen first, else the first it offers —
@@ -27,19 +27,22 @@ export function MoveChatModal({
 }): JSX.Element {
   const hosts = usePresenceStore((s) => s.hosts);
   const targets = useMemo(
-    () =>
-      Object.values(hosts)
-        .filter((h) => h.hostId !== row.hostId)
-        .sort((a, b) => hostName(a).localeCompare(hostName(b))),
+    () => Object.values(hosts).sort((a, b) => hostName(a).localeCompare(hostName(b))),
     [hosts, row.hostId],
   );
+  // Another machine is offered first; this chat's own machine is a target too
+  // (a move to another folder on it), chosen only when it is the one online.
   const [hostId, setHostId] = useState<string | null>(
-    () => targets.find((h) => h.online)?.hostId ?? null,
+    () =>
+      (targets.find((h) => h.online && h.hostId !== row.hostId) ?? targets.find((h) => h.online))
+        ?.hostId ?? null,
   );
   const folders = useMemo(() => {
     const f = hostId ? hosts[hostId]?.folders : null;
-    return [...new Set([...(f?.roots ?? []), ...(f?.recent ?? [])])];
-  }, [hosts, hostId]);
+    const all = [...new Set([...(f?.roots ?? []), ...(f?.recent ?? [])])];
+    // On its own machine the folder it already runs in is not a place to move to.
+    return hostId === row.hostId ? all.filter((x) => x !== row.folder) : all;
+  }, [hosts, hostId, row.hostId, row.folder]);
   const current = hosts[row.hostId];
   const offline = current !== undefined && !current.online;
   const takeover = offline;
@@ -119,6 +122,9 @@ export function MoveChatModal({
               onClick={() => setHostId(h.hostId)}
             >
               {hostName(h)}
+              {h.hostId === row.hostId ? (
+                <span className="move-chat-offline"> · this machine</span>
+              ) : null}
               {h.online ? null : <span className="move-chat-offline"> · offline</span>}
             </button>
           ))}

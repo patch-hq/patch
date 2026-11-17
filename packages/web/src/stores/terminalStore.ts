@@ -21,6 +21,16 @@ import type { WireEvent } from '@patch/wire';
 
 export type TerminalStatus = 'starting' | 'live' | 'ended' | 'error';
 
+/**
+ * Whether a dead session should reopen itself.
+ *  - `no`: it ended for a reason that is the user's call (shell exited, closed,
+ *    idle) or a failure — only the Restart button brings it back.
+ *  - `after-offline`: the host said it is shutting down; reopening now would
+ *    dial a dying daemon, so wait until it has actually gone offline.
+ *  - `now`: the link or host is gone — reopen as soon as both are back.
+ */
+export type TerminalReopen = 'no' | 'after-offline' | 'now';
+
 export interface TerminalChunk {
   stream: 'stdout' | 'stderr' | 'meta';
   data: string;
@@ -30,7 +40,10 @@ export interface TerminalSession {
   sessionId: string;
   chatId: string;
   folder: string;
+  /** The host this shell was opened on, so a host going offline ends only its own sessions. */
+  hostId: string | null;
   status: TerminalStatus;
+  reopen: TerminalReopen;
   /** Scrollback, oldest first. Capped so a long-lived session can't grow forever. */
   chunks: TerminalChunk[];
   /** Commands submitted this session, oldest first (↑/↓ walk this). */
@@ -70,7 +83,15 @@ interface TerminalState {
   /** At most one queued command/note per chat, waiting for a live session. */
   pending: Record<string, TerminalPending>;
   /** Register a session the caller is about to open on the wire. */
-  startSession(chatId: string, folder: string, sessionId: string): void;
+  startSession(chatId: string, folder: string, sessionId: string, hostId?: string | null): void;
+  /**
+   * The link to the shell is gone without the host saying so (socket dropped,
+   * host went offline): no exit frame is coming, so a `live` session would lie.
+   * Ends every starting/live session (of `hostId`, or all when omitted) and
+   * marks it to reopen once the link is back. Sessions already waiting on a
+   * host restart are released to reopen.
+   */
+  interrupt(message: string, hostId?: string): void;
   /** Record a submitted command line in the session's history. */
   recordCommand(chatId: string, line: string): void;
   /** Mark this chat's session as waiting on a command it has just sent. */
@@ -103,7 +124,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   bySessionId: {},
   pending: {},
 
-  startSession: (chatId, folder, sessionId) =>
+  startSession: (chatId, folder, sessionId, hostId = null) =>
     set((s) => ({
       sessions: {
         ...s.sessions,
@@ -111,7 +132,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
           sessionId,
           chatId,
           folder,
+          hostId,
           status: 'starting',
+          reopen: 'no',
           // A restart keeps the previous scrollback so the user doesn't lose
           // what the last session printed.
           chunks: s.sessions[chatId]?.chunks ?? [],
@@ -122,6 +145,28 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       },
       bySessionId: { ...s.bySessionId, [sessionId]: chatId },
     })),
+
+  interrupt: (message, hostId) =>
+    set((s) => {
+      const sessions = { ...s.sessions };
+      let changed = false;
+      for (const [chatId, session] of Object.entries(s.sessions)) {
+        if (hostId !== undefined && session.hostId !== hostId) continue;
+        if (session.status === 'starting' || session.status === 'live') {
+          sessions[chatId] = {
+            ...appendChunk(session, { stream: 'meta', data: `\n[${message}]\n` }),
+            status: 'ended',
+            reopen: 'now',
+            running: false,
+          };
+          changed = true;
+        } else if (session.reopen === 'after-offline') {
+          sessions[chatId] = { ...session, reopen: 'now' };
+          changed = true;
+        }
+      }
+      return changed ? { sessions } : s;
+    }),
 
   recordCommand: (chatId, line) =>
     set((s) => {
@@ -206,6 +251,15 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
               }]\n`,
             }),
             status: 'ended',
+            // A host restart is expected to bring the shell back; anything
+            // else ended on purpose. An interrupt that got here first (the
+            // host.offline can beat this frame) already released it.
+            reopen:
+              session.reopen === 'now'
+                ? 'now'
+                : event.reason === 'daemon_shutdown'
+                  ? 'after-offline'
+                  : 'no',
             // The shell is gone, so whatever it was running will never report.
             running: false,
           };
@@ -217,6 +271,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
               data: `\n[error: ${event.message}]\n`,
             }),
             status: 'error',
+            reopen: 'no',
             running: false,
           };
           break;

@@ -62,6 +62,7 @@ import { navigateAfterArchive } from '../lib/archiveNav.js';
 import { openChatInNewWindow } from '../lib/newWindow.js';
 import { SnoozeMenu } from './SnoozeMenu.js';
 import { MoveChatModal } from './MoveChatModal.js';
+import { GoalEditor, planOf, type GoalDraft } from './GoalEditor.js';
 import { useDismissOnClickOff } from '../lib/dismissOnClickOff.js';
 import { shortcutTitle, useActionGlyphs } from '../lib/shortcuts.js';
 import { failed } from '../lib/errorCopy.js';
@@ -172,6 +173,7 @@ export function ChatHeader({
   const setDisabled = useChatStore((s) => s.setDisabled);
   const setName = useChatStore((s) => s.setName);
   const setGoal = useChatStore((s) => s.setGoal);
+  const [goalOpen, setGoalOpen] = useState(false);
   const pushError = useUiStore((s) => s.pushError);
   const setToolsPanelChatId = useUiStore((s) => s.setToolsPanelChatId);
   const setTaskAddChatId = useUiStore((s) => s.setTaskAddChatId);
@@ -287,19 +289,19 @@ export function ChatHeader({
   // Set / change / clear the chat goal from the menu — the same REST mutation
   // as `/goal`, optimistic, reverting + toasting on failure (NO FALLBACK). An
   // empty entry clears the goal. Unlike `/goal` it starts no turn.
-  async function promptGoal(): Promise<void> {
-    const value = await useUiStore.getState().prompt({
-      title: 'Set goal',
-      initialValue: row.goal ?? '',
-      confirmLabel: 'Set goal',
-    });
-    if (value === null) return;
-    const next = value.trim() === '' ? null : value.trim();
-    if (next === (row.goal ?? null)) return;
+  function promptGoal(): void {
+    setGoalOpen(true);
+  }
+  function saveGoal(d: GoalDraft): void {
     const previous = row.goal ?? null;
-    setGoal(row.chatId, next);
-    void api.setGoal(row.chatId, next).catch((err) => {
-      setGoal(row.chatId, previous);
+    const previousPlan = planOf(row);
+    setGoal(row.chatId, d.goal, d.plan);
+    const send =
+      Object.keys(d.plan).length === 0
+        ? api.setGoal(row.chatId, d.goal)
+        : api.setGoal(row.chatId, d.goal, d.plan);
+    void send.catch((err) => {
+      setGoal(row.chatId, previous, previousPlan);
       pushError(failed('setting goal'), undefined, (err as Error).message);
     });
   }
@@ -973,6 +975,14 @@ export function ChatHeader({
           </button>
         ) : null}
         {moveOpen ? <MoveChatModal row={row} onClose={() => setMoveOpen(false)} /> : null}
+        {goalOpen ? (
+          <GoalEditor
+            goal={row.goal ?? null}
+            plan={planOf(row)}
+            onSave={saveGoal}
+            onClose={() => setGoalOpen(false)}
+          />
+        ) : null}
       </header>
     </>
   );

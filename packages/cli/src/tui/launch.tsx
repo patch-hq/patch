@@ -62,7 +62,7 @@ async function listChats(): Promise<ChatBrowserChat[]> {
 
 /**
  * Recent folders for the picker, sourced from the HOST box (spec/13: "Lists
- * recent folders on the Hetzner box"). Only available over the local UDS; in
+ * recent folders on the host machine"). Only available over the local UDS; in
  * remote mode we fall through to whatever the caller passes (config default).
  */
 async function fetchRecentFolders(): Promise<string[]> {

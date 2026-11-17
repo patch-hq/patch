@@ -1625,6 +1625,13 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       timeout: NodeJS.Timeout;
     }
   >();
+  const delegateControlPending = new Map<
+    string,
+    {
+      resolve: (ev: Extract<WireEvent, { type: 'patch.delegate_control.response' }>) => void;
+      timeout: NodeJS.Timeout;
+    }
+  >();
   const watchStopPending = new Map<
     string,
     {
@@ -1667,6 +1674,14 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       const w = watchListPending.get(event.requestId);
       if (!w) return;
       watchListPending.delete(event.requestId);
+      clearTimeout(w.timeout);
+      w.resolve(event);
+      return;
+    }
+    if (event.type === 'patch.delegate_control.response') {
+      const w = delegateControlPending.get(event.requestId);
+      if (!w) return;
+      delegateControlPending.delete(event.requestId);
       clearTimeout(w.timeout);
       w.resolve(event);
       return;
@@ -1763,6 +1778,75 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
     },
   );
 
+  // ---- POST /api/chats/:id/delegates/:delegateId/:action ----
+  // The user's own controls over one delegated agent of this chat: pause,
+  // resume, stop, or spin it off into a chat of its own. The host owns the
+  // agent, so this is the same server→host→server round-trip as above.
+  app.post<{ Params: { id: string; delegateId: string; action: string } }>(
+    '/api/chats/:id/delegates/:delegateId/:action',
+    async (req, reply) => {
+      let auth;
+      try {
+        auth = await requireAuth(req, deps.registry);
+      } catch (e) {
+        return reply
+          .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+          .send({ error: (e as Error).message });
+      }
+      const actions: Record<string, 'pause' | 'resume' | 'stop' | 'spin_off'> = {
+        pause: 'pause',
+        resume: 'resume',
+        stop: 'stop',
+        'spin-off': 'spin_off',
+      };
+      const action = actions[req.params.action];
+      if (action === undefined) {
+        return reply.code(400).send({
+          error: 'invalid_input',
+          message: 'action must be pause, resume, stop or spin-off',
+        });
+      }
+      if (!deps.chatRegistry.get(req.params.id)) {
+        return sendUnknownChat(reply, req.params.id);
+      }
+      const requestId = deps.idGenerator();
+      const result = await new Promise<
+        Extract<WireEvent, { type: 'patch.delegate_control.response' }> | 'timeout'
+      >((resolveP) => {
+        const timeout = setTimeout(() => {
+          delegateControlPending.delete(requestId);
+          resolveP('timeout');
+        }, WATCH_REQUEST_TIMEOUT_MS);
+        delegateControlPending.set(requestId, { resolve: resolveP, timeout });
+        deps.hostLink.send(auth.surfaceId, {
+          type: 'patch.delegate_control.request',
+          requestId,
+          chatId: req.params.id,
+          delegateId: req.params.delegateId,
+          action,
+        });
+      });
+      if (result === 'timeout') {
+        return reply.code(504).send({ error: 'daemon_timeout' });
+      }
+      if (!result.ok) {
+        const code = result.error?.code ?? 'internal';
+        const statusByCode: Record<string, number> = {
+          chat_not_found: 404,
+          not_a_delegate: 404,
+          internal: 502,
+        };
+        return reply
+          .code(statusByCode[code] ?? 502)
+          .send({ error: code, message: result.error?.message ?? 'agent control error' });
+      }
+      return reply.code(200).send({
+        applied: result.applied ?? false,
+        ...(result.spunOffChatId !== undefined ? { spunOffChatId: result.spunOffChatId } : {}),
+      });
+    },
+  );
+
   app.get<{ Params: { id: string; taskId: string }; Querystring: { tail?: string } }>(
     '/api/chats/:id/watch/:taskId/output',
     async (req, reply) => {
@@ -1815,6 +1899,92 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
           .send({ error: code, message: result.error?.message ?? 'watch output error' });
       }
       return reply.code(200).send({ output: result.output ?? '' });
+    },
+  );
+
+  // ---- GET /api/chats/:id/stray-processes, POST .../stray-processes/:pid/stop ----
+  // Processes the chat started outside Patch's tracked tools (spec/02 § Stray
+  // processes). One host round trip serves both: a stop is the same request
+  // with `stopPid`, answered with the refreshed list.
+  const strayPending = new Map<
+    string,
+    {
+      resolve: (ev: Extract<WireEvent, { type: 'patch.stray_processes.response' }>) => void;
+      timeout: NodeJS.Timeout;
+    }
+  >();
+  deps.hostLink.onEvent((event: WireEvent) => {
+    if (event.type !== 'patch.stray_processes.response') return;
+    const w = strayPending.get(event.requestId);
+    if (!w) return;
+    strayPending.delete(event.requestId);
+    clearTimeout(w.timeout);
+    w.resolve(event);
+  });
+  const strayRoute = async (
+    req: { headers: unknown; params: { id: string; pid?: string } } & Parameters<
+      typeof requireAuth
+    >[0],
+    reply: import('fastify').FastifyReply,
+    stopPid: number | undefined,
+  ): Promise<unknown> => {
+    let auth;
+    try {
+      auth = await requireAuth(req, deps.registry);
+    } catch (e) {
+      return reply
+        .code((e as Error & { statusCode?: number }).statusCode ?? 401)
+        .send({ error: (e as Error).message });
+    }
+    if (!deps.chatRegistry.get(req.params.id)) {
+      return sendUnknownChat(reply, req.params.id);
+    }
+    const requestId = deps.idGenerator();
+    const result = await new Promise<
+      Extract<WireEvent, { type: 'patch.stray_processes.response' }> | 'timeout'
+    >((resolveP) => {
+      const timeout = setTimeout(() => {
+        strayPending.delete(requestId);
+        resolveP('timeout');
+      }, WATCH_REQUEST_TIMEOUT_MS);
+      strayPending.set(requestId, { resolve: resolveP, timeout });
+      deps.hostLink.send(auth.surfaceId, {
+        type: 'patch.stray_processes.request',
+        requestId,
+        chatId: req.params.id,
+        ...(stopPid !== undefined ? { stopPid } : {}),
+      });
+    });
+    if (result === 'timeout') {
+      return reply.code(504).send({ error: 'daemon_timeout' });
+    }
+    if (!result.ok) {
+      const code = result.error?.code ?? 'internal';
+      const statusByCode: Record<string, number> = {
+        chat_not_found: 404,
+        unsupported_platform: 501,
+        internal: 502,
+      };
+      return reply
+        .code(statusByCode[code] ?? 502)
+        .send({ error: code, message: result.error?.message ?? 'stray processes error' });
+    }
+    return reply.code(200).send({
+      processes: result.processes ?? [],
+      ...(result.stopped !== undefined ? { stopped: result.stopped } : {}),
+    });
+  };
+  app.get<{ Params: { id: string } }>('/api/chats/:id/stray-processes', (req, reply) =>
+    strayRoute(req, reply, undefined),
+  );
+  app.post<{ Params: { id: string; pid: string } }>(
+    '/api/chats/:id/stray-processes/:pid/stop',
+    (req, reply) => {
+      const pid = Number(req.params.pid);
+      if (!Number.isInteger(pid) || pid <= 0) {
+        return reply.code(400).send({ error: 'invalid_pid' });
+      }
+      return strayRoute(req, reply, pid);
     },
   );
 
@@ -2421,7 +2591,14 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
   // ---- POST /api/chats/:id/goal ----
   // patch/todo.md — `/goal`: set (or clear, with null) the chat's goal. Forwards
   // chat.goal_request to the host, which persists it + echoes chat.state.
-  const GoalBody = z.object({ goal: z.string().nullable() }).strict();
+  const GoalBody = z
+    .object({
+      goal: z.string().nullable(),
+      then: z.array(z.string().min(1)).max(50).optional(),
+      remindEvery: ReminderEvery.nullable().optional(),
+      checkInEvery: ReminderEvery.nullable().optional(),
+    })
+    .strict();
   app.post<{ Params: { id: string } }>('/api/chats/:id/goal', async (req, reply) => {
     let auth;
     try {
@@ -2442,6 +2619,9 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRoutesDeps): 
       type: 'chat.goal_request',
       chatId: req.params.id,
       goal: parsed.data.goal,
+      ...(parsed.data.then !== undefined ? { then: parsed.data.then } : {}),
+      ...(parsed.data.remindEvery !== undefined ? { remindEvery: parsed.data.remindEvery } : {}),
+      ...(parsed.data.checkInEvery !== undefined ? { checkInEvery: parsed.data.checkInEvery } : {}),
     });
     return reply.code(200).send({ ok: true });
   });

@@ -514,6 +514,9 @@ export class PatchWs {
         at: Date.now(),
       });
       if (this.closed || !current) return;
+      // No exit frame comes down a dead socket: end the shells here so none
+      // keeps claiming to be live.
+      useTerminalStore.getState().interrupt('Connection lost, reconnecting');
       // 4401 is the hub REFUSING this credential, not a link that dropped
       // (ws-hub CLOSE_AUTH_FAILED). Retrying cannot fix a refusal — it just
       // reports "reconnecting" for ever while the server has already said no,
@@ -727,6 +730,9 @@ export class PatchWs {
     }
     if (event.type === 'host.offline') {
       usePresenceStore.getState().setHostOnline(event.hostId, false, event.reason);
+      useTerminalStore
+        .getState()
+        .interrupt('The machine went offline, waiting for it to return', event.hostId);
       return;
     }
     if (event.type === 'host.host') {

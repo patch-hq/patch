@@ -206,3 +206,51 @@ describe('terminalStore — command completion', () => {
     expect(store().sessions['c2']?.running).toBe(false);
   });
 });
+
+describe('terminalStore — a link that dies without an exit frame', () => {
+  beforeEach(() => {
+    store()._reset();
+  });
+
+  const live = (chatId: string, sessionId: string, hostId: string): void => {
+    store().startSession(chatId, '/p', sessionId, hostId);
+    store().ingest({ type: 'patch.terminal.ready', sessionId, cwd: '/p' });
+  };
+
+  it('interrupt ends a live session, says why, and marks it to reopen', () => {
+    live('c1', 's1', 'h1');
+    store().interrupt('connection lost');
+    const s = store().sessions['c1'];
+    expect(s?.status).toBe('ended');
+    expect(s?.reopen).toBe('now');
+    expect(s?.chunks.at(-1)?.data).toContain('connection lost');
+  });
+
+  it('a host going offline ends only that host’s shells', () => {
+    live('c1', 's1', 'h1');
+    live('c2', 's2', 'h2');
+    store().interrupt('machine offline', 'h1');
+    expect(store().sessions['c1']?.status).toBe('ended');
+    expect(store().sessions['c2']?.status).toBe('live');
+  });
+
+  it('a daemon_shutdown exit waits for the host to go offline before reopening', () => {
+    live('c1', 's1', 'h1');
+    store().ingest({
+      type: 'patch.terminal.exit',
+      sessionId: 's1',
+      code: null,
+      reason: 'daemon_shutdown',
+    });
+    expect(store().sessions['c1']?.reopen).toBe('after-offline');
+    store().interrupt('machine offline', 'h1');
+    expect(store().sessions['c1']?.reopen).toBe('now');
+  });
+
+  it('an exit the user caused never reopens by itself', () => {
+    live('c1', 's1', 'h1');
+    store().ingest({ type: 'patch.terminal.exit', sessionId: 's1', code: 0, reason: 'shell_exit' });
+    store().interrupt('connection lost');
+    expect(store().sessions['c1']?.reopen).toBe('no');
+  });
+});

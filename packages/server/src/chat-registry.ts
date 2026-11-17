@@ -33,6 +33,7 @@ import type {
   ChatContextUsage,
   GoalProgress,
   FinishedGoal,
+  ReminderEvery,
   ChatBranch,
 } from '@patch/wire';
 import { isReservedSpecialThread, type SnoozeRecord } from '@patch/wire';
@@ -62,6 +63,10 @@ export interface ChatSummary {
   goal: string | null;
   /** Live progress on the chat's active goal, mirrored from the host's `chat.state`. */
   goalProgress: GoalProgress | null;
+  /** Goals that start in order once the active one is met, mirrored from `chat.state`. */
+  goalQueue: string[];
+  goalReminderEvery: ReminderEvery | null;
+  goalCheckInEvery: ReminderEvery | null;
   /** The chat's most recently finished goal, mirrored from the host's `chat.state`. */
   lastGoal: FinishedGoal | null;
   /**
@@ -189,6 +194,15 @@ export interface ChatSummary {
    * rather than claim nothing is running (spec/12 — NO FALLBACK).
    */
   backgroundTasks: number | null;
+  /** The running sub-agent share of `backgroundTasks`; `null` is unknown. */
+  runningAgents: number | null;
+  /**
+   * Why the chat is `errored`, mirrored from the host's `chat.state`. Held here
+   * so a surface that cold-starts from REST (a reload, a reconnect) can still
+   * say what failed instead of a bare "Failed". `null` whenever the chat is not
+   * errored.
+   */
+  lastError: { code: string; message: string; at: number } | null;
   /**
    * How full the chat's context window is, as the host last reported on
    * `chat.state` (spec/14 § Composer — context ring). Mirrored for the same
@@ -352,6 +366,9 @@ export class ChatRegistry {
         preview: null,
         goal: null,
         goalProgress: null,
+        goalQueue: [],
+        goalReminderEvery: null,
+        goalCheckInEvery: null,
         lastGoal: null,
         reminder: null,
         statusSummary: null,
@@ -376,9 +393,11 @@ export class ChatRegistry {
         jobId: this.jobChatLinks?.get(event.chatId) ?? null,
         model: event.model ?? null,
         effort: null,
+        lastError: null,
         // Nothing has reported on this chat's background work yet — unknown,
         // which is not the same as none.
         backgroundTasks: null,
+        runningAgents: null,
         context: null,
         branches: [],
         activeBranchId: null,
@@ -424,6 +443,15 @@ export class ChatRegistry {
         goalProgress:
           event.goalProgress !== undefined ? event.goalProgress : (existing?.goalProgress ?? null),
         lastGoal: event.lastGoal !== undefined ? event.lastGoal : (existing?.lastGoal ?? null),
+        goalQueue: event.goalQueue !== undefined ? event.goalQueue : (existing?.goalQueue ?? []),
+        goalReminderEvery:
+          event.goalReminderEvery !== undefined
+            ? event.goalReminderEvery
+            : (existing?.goalReminderEvery ?? null),
+        goalCheckInEvery:
+          event.goalCheckInEvery !== undefined
+            ? event.goalCheckInEvery
+            : (existing?.goalCheckInEvery ?? null),
         // Reminder CAN be cleared (set to null), so `null` is meaningful — only
         // fall back to the existing reminder when the field is absent (undefined).
         reminder: event.reminder !== undefined ? event.reminder : (existing?.reminder ?? null),
@@ -498,7 +526,18 @@ export class ChatRegistry {
           event.backgroundTasks !== undefined
             ? event.backgroundTasks
             : (existing?.backgroundTasks ?? null),
+        runningAgents:
+          event.runningAgents !== undefined
+            ? event.runningAgents
+            : (existing?.runningAgents ?? null),
         context: event.context !== undefined ? event.context : (existing?.context ?? null),
+        // Only meaningful while errored, so it never outlives the failure.
+        lastError:
+          event.activity !== 'errored'
+            ? null
+            : event.lastError !== undefined
+              ? event.lastError
+              : (existing?.lastError ?? null),
         branches: existing?.branches ?? [],
         activeBranchId: existing?.activeBranchId ?? null,
       };
@@ -606,7 +645,11 @@ export class ChatRegistry {
     // `lastUpdated` is host-owned and clients drop any chat.state older than the
     // one they hold. Stamping the server clock here would outrank every frame
     // the host sends once it recovers, leaving the errored badge stuck for good.
-    const next: ChatSummary = { ...existing, activity: 'errored' };
+    const next: ChatSummary = {
+      ...existing,
+      activity: 'errored',
+      lastError: { code: error.code, message: error.message, at },
+    };
     this.chats.set(chatId, next);
     this.markDirty();
     return {

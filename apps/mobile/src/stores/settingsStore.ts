@@ -78,3 +78,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ data: null, error: null });
   },
 }));
+
+/**
+ * Whether the half-finished features (the Manager, Batch) are on. Not a seeded
+ * default: until the server has answered this is false, which is also what an
+ * account that never switched it on has.
+ */
+export function useExperimentalFeatures(): boolean {
+  return useSettingsStore((s) => s.data?.preferences.experimentalFeatures === true);
+}

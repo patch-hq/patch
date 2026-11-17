@@ -141,6 +141,17 @@ export interface PatchDesktopBridge {
    * host, and installing one with a freshly minted pairing code. Absent in a
    * browser and on shells that predate it.
    */
+  /**
+   * spec/05 § Keep running — whether the app opens at login and keeps this
+   * computer awake while plugged in, so a phone can reach the server it runs.
+   * Present only in a shell that runs Patch on this computer itself.
+   */
+  keepRunning?: {
+    get(): Promise<KeepRunningState>;
+    set(
+      patch: Partial<Pick<KeepRunningState, 'openAtLogin' | 'keepAwake'>>,
+    ): Promise<KeepRunningState>;
+  };
   localHost?: {
     status(): Promise<{ installed: boolean; hostId: string | null }>;
     install(code: string): Promise<{ ok: boolean; exitCode: number | null; output: string }>;
@@ -185,7 +196,7 @@ export interface PatchDesktopBridge {
    * A deploy has just landed (liveUpdate.ts saw a new bundle hash): check the
    * shell's own feed NOW rather than leaving the shell up to an hour behind the
    * surface it is rendering. It DOWNLOADS only — the shell no longer restarts
-   * itself, it raises a banner (see DesktopUpdateBanner) and waits to be asked.
+   * itself, it raises a banner (see UpdateBanner) and waits to be asked.
    */
   checkForUpdateNow?(): void;
   /**
@@ -265,6 +276,16 @@ export interface DesktopUpdaterState {
   staleSince: string | null;
 }
 
+/** The shell's keep-running choices (spec/05 § Keep running). */
+export interface KeepRunningState {
+  openAtLogin: boolean;
+  keepAwake: boolean;
+  /** Whether the awake hold is in force right now (on mains power). */
+  holdingAwake: boolean;
+  /** False where nothing can start the app at login (a Linux run not from its AppImage). */
+  canOpenAtLogin: boolean;
+}
+
 export function getDesktopBridge(): PatchDesktopBridge | undefined {
   /* v8 ignore next -- jsdom (the test environment) always defines `window`; this SSR/non-DOM guard cannot be exercised under vitest+jsdom. */
   if (typeof window === 'undefined') return undefined;
@@ -275,8 +296,8 @@ export function getDesktopBridge(): PatchDesktopBridge | undefined {
  * The shell's own updater state, live. `null` in a browser (no bridge) and
  * until the first `getUpdaterState()` resolves.
  *
- * The ONE place that subscribes to shell updater state, so DesktopUpdateBanner
- * and WebUpdateBanner read the same value instead of each polling their own —
+ * The ONE place that subscribes to shell updater state, so UpdateBanner
+ * and UpdateBanner read the same value instead of each polling their own —
  * two independent reads of "has the shell finished downloading?" is how they
  * used to drift and show a Restart prompt and a Reload prompt for the same
  * deploy at once.

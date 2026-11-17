@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const { withDangerousMod, withMainApplication } = require('expo/config-plugins');
 
-const PKG_PATH = 'io/github/tomchambers2/patch';
+const PKG_PATH = 'dev/patchhq/app';
 const FILES = ['PatchCrashModule.kt', 'PatchCrashPackage.kt'];
 
 const withNativeFiles = (config) =>

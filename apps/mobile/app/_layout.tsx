@@ -329,7 +329,15 @@ export default function RootLayout(): React.ReactElement | null {
           wordmark/title/back-bar collide with the status bar on every screen.
           Screens keep their normal space.* gap on top of this inset. The bottom
           tab bar handles its own bottom inset, so only 'top' is claimed here. */}
-        <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: colors.paper }}>
+        {/* `key` flips once when the fonts register: text painted in the fallback
+          face was measured in it, and Android does not re-measure when the face
+          changes under unchanged props — so narrow boxes clipped Inter ("Pinne",
+          "Idl/e"). Remounting re-measures everything. */}
+        <SafeAreaView
+          key={fontsLoaded ? 'fonts' : 'fallback'}
+          edges={['top']}
+          style={{ flex: 1, backgroundColor: colors.paper }}
+        >
           {/* System bars adapt to the scheme: light glyphs on the dark paper,
             dark glyphs on the light paper (spec/15 § Dark mode). */}
           {/* Background matches the theme dynamically (spec/15 § Dark mode —

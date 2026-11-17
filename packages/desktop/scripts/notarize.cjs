@@ -52,6 +52,9 @@ module.exports = async function afterSign(context) {
     throw new Error(`notarize: Apple answered "${result.status}" for submission ${result.id}`);
   }
   console.log(`[notarize] accepted (${result.id})`);
+  // Apple's log for an accepted submission too: it lists any warnings, and it is
+  // the record of what was notarised.
+  execFileSync('xcrun', ['notarytool', 'log', result.id, ...auth], { stdio: 'inherit' });
 
   // Staple the ticket so Gatekeeper accepts the app offline. Fetching the ticket
   // is a network call that drops now and then; a few tries, then fail loudly.

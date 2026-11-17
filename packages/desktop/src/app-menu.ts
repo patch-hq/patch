@@ -60,6 +60,19 @@ export function buildAppMenuTemplate(
     });
   }
 
+  if (!isMac) {
+    // Linux has no app menu; what it holds on a Mac lives in File here, or the
+    // app could not switch server or quit from its own menu.
+    template.push({
+      label: 'File',
+      submenu: [
+        { label: 'Switch Server…', click: () => deps.switchServer() },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    });
+  }
+
   template.push({
     label: 'Edit',
     submenu: [
