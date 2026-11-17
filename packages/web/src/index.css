@@ -3834,11 +3834,15 @@ button.nav-row {
 }
 .scroll-rail {
   position: absolute;
-  right: 2px;
+  /* Its own 24px lane in the gutter beside the reading column: the column is
+     centred at --measure, so the lane starts where the column ends. When the
+     panel is too narrow to leave a gutter it falls back to the panel edge. */
+  right: max(2px, calc(var(--measure-slack) - 30px));
   bottom: 56px;
+  width: 24px;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: center;
   gap: 0;
   animation: scroll-rail-in 160ms ease-out;
 }
@@ -3851,7 +3855,7 @@ button.nav-row {
 .scroll-rail-stop {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center;
   gap: 8px;
   background: none;
   border: 0;
@@ -3871,8 +3875,9 @@ button.nav-row {
   margin-bottom: 2px;
 }
 .scroll-rail-stop {
+  position: relative;
+  width: 24px;
   min-height: 20px;
-  padding-right: 7px;
 }
 .scroll-rail-top:hover,
 .scroll-rail-top:focus-visible,
@@ -3886,6 +3891,10 @@ button.nav-row {
   border-radius: 999px;
   background: var(--bg-elevated);
   border: 1px solid var(--line);
+  position: absolute;
+  right: 100%;
+  top: 50%;
+  margin-top: -11px;
   opacity: 0;
   transform: translateX(4px);
   transition:
@@ -3924,10 +3933,19 @@ button.nav-row {
   box-shadow: var(--shadow);
   cursor: pointer;
 }
+@container (min-width: 600px) {
+  .chat-stream-content {
+    padding-right: max(0px, calc(32px - var(--measure-slack)));
+  }
+}
 .chat-stream-content {
   width: 100%;
   max-width: var(--measure);
   margin: 0 auto;
+  /* Keep the scroll rail's lane clear on desktop-width panels too narrow to
+     leave a gutter beside the column (see .scroll-rail). Always applied, so
+     the text never shifts when the rail appears. */
+  box-sizing: border-box;
   /* Grow to fill the stream so a lone empty-state child centres; content taller
      than the panel overflows and `.chat-stream` scrolls as normal. */
   flex: 1 0 auto;

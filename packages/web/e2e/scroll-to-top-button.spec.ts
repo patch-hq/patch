@@ -57,3 +57,36 @@ test('the top button sits with the dots and lands on the first message', async (
   await page.getByTestId('scroll-to-top').click();
   await expect(page.getByText('history line 0 —')).toBeVisible();
 });
+
+test('the rail sits in its own lane: centred on one line, clear of the chat text', async ({
+  page,
+}) => {
+  await page.goto('/app/dev-harness.html?chat=chat_long_history');
+  const stream = page.locator('.chat-stream');
+  await expect(stream).toBeVisible();
+  await stream.hover();
+  for (let i = 0; i < 12; i++) await page.mouse.wheel(0, -400);
+  const rail = page.getByTestId('scroll-rail');
+  await expect(rail).toBeVisible();
+
+  const centreX = async (loc: ReturnType<typeof page.locator>): Promise<number> => {
+    const b = (await loc.boundingBox())!;
+    return b.x + b.width / 2;
+  };
+  const topX = await centreX(page.getByTestId('scroll-to-top'));
+  const stops = page.getByTestId('scroll-rail-stop');
+  const n = await stops.count();
+  for (let i = 0; i < n; i++) {
+    expect(Math.abs((await centreX(stops.nth(i).locator('.scroll-rail-dot'))) - topX)).toBeLessThan(
+      1,
+    );
+  }
+
+  const railBox = (await rail.boundingBox())!;
+  const content = (await page.locator('.chat-stream-content').boundingBox())!;
+  const pad = await page
+    .locator('.chat-stream-content')
+    .evaluate((el) => parseFloat(getComputedStyle(el).paddingRight));
+  // The text column ends at the content's padding edge; the rail starts after it.
+  expect(railBox.x).toBeGreaterThanOrEqual(content.x + content.width - pad - 1);
+});
