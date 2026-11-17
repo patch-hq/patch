@@ -827,36 +827,6 @@ describe('Sidebar', () => {
     expect(screen.getByTestId('chat-row-a1')).toBeInTheDocument();
   });
 
-  it('an ARCHIVED row still shows its status — that is where overnight jobs live', () => {
-    // The status line used to be suppressed on archived rows, and archived is
-    // exactly where job-spawned chats sit ("an automation chat is usually
-    // archived"). So the one line saying what an overnight run actually did was
-    // hidden on every row most likely to have one, and twenty of them read
-    // identically.
-    useChatStore.getState().hydrate([
-      {
-        chatId: 'arch-r',
-        hostId: 'd1',
-        permissionMode: 'bypassPermissions' as const,
-        name: 'nightly backup',
-        folder: '~/proj',
-        activity: 'idle',
-        status: 'archived',
-        pinned: false,
-        pinnedAt: null,
-        disabled: false,
-        lastUpdated: 1,
-        statusSummary: 'the backup has been failing silently since Tuesday',
-        statusKind: 'report',
-      },
-    ]);
-    renderInRouter();
-    fireEvent.click(screen.getByTestId('archived-toggle'));
-    const el = screen.getByTestId('status-summary-arch-r');
-    expect(el).toHaveTextContent('the backup has been failing silently since Tuesday');
-    expect(el.getAttribute('data-kind')).toBe('report');
-  });
-
   // G2-d4: two unnamed archived chats in the SAME folder must still be
   // individually identifiable — the daemon-captured first-message preview
   // becomes each row's title so they don't both collapse to the folder basename.
@@ -2588,7 +2558,7 @@ describe('Sidebar', () => {
   // patch/todo.md § Features to add — "Current status": the agent's
   // auto-generated status is shown nested under the chat row, and a thread
   // paused on a QUESTION reads distinctly from one that is merely COMPLETE.
-  describe('Current status summary', () => {
+  describe('Current status (badge only; the summary line is not shown)', () => {
     function seedStatus(
       chatId: string,
       kind: 'question' | 'report' | 'complete',
@@ -2614,40 +2584,14 @@ describe('Sidebar', () => {
       });
     }
 
-    it('renders the summary nested under the row', () => {
+    it('does not render the summary under the row', () => {
       seedStatus('cs-1', 'complete', 'Deployed to staging, nothing outstanding');
       renderInRouter();
-      const el = screen.getByTestId('status-summary-cs-1');
-      expect(el).toBeInTheDocument();
-      expect(el).toHaveTextContent('Deployed to staging, nothing outstanding');
-      // It lives INSIDE the chat row (nested), not as a detached element.
-      expect(screen.getByTestId('chat-row-cs-1').contains(el)).toBe(true);
-    });
-
-    it('marks a question thread distinctly from a complete thread', () => {
-      seedStatus('cs-q', 'question', 'Which branch should I deploy?', '~/pa');
-      seedStatus('cs-c', 'complete', 'All tests green', '~/pb');
-      renderInRouter();
-      const q = screen.getByTestId('status-summary-cs-q');
-      const c = screen.getByTestId('status-summary-cs-c');
-      expect(q.getAttribute('data-kind')).toBe('question');
-      expect(q.className).toContain('is-question');
-      expect(c.getAttribute('data-kind')).toBe('complete');
-      expect(c.className).toContain('is-complete');
-      // "needs you" rather than "needs your answer": a question is the chat
-      // being blocked on the user, and `patch_ask_human` sets it for work only
-      // a person can do in the world, which is not an answer.
-      expect(screen.getByLabelText('needs you')).toBeInTheDocument();
-    });
-
-    it('marks a report — the state an agent elects for itself — as its own thing', () => {
-      seedStatus('cs-r', 'report', 'the backup has been failing since Tuesday', '~/pr');
-      renderInRouter();
-      const r = screen.getByTestId('status-summary-cs-r');
-      expect(r.getAttribute('data-kind')).toBe('report');
-      expect(r.className).toContain('is-report');
-      expect(r).toHaveTextContent('the backup has been failing since Tuesday');
-      expect(screen.getByLabelText('worth seeing')).toBeInTheDocument();
+      expect(screen.getByTestId('chat-row-cs-1')).toBeInTheDocument();
+      expect(screen.queryByTestId('status-summary-cs-1')).not.toBeInTheDocument();
+      expect(
+        screen.queryByText('Deployed to staging, nothing outstanding'),
+      ).not.toBeInTheDocument();
     });
 
     it('a report counts as needs-attention — it is the whole point of declaring one', () => {
@@ -2656,12 +2600,6 @@ describe('Sidebar', () => {
       renderInRouter();
       selectUnreadView();
       expect(screen.getByTestId('chat-row-r-read')).toBeInTheDocument();
-    });
-
-    it('shows no summary element before one is generated', () => {
-      useChatStore.getState().hydrate([rowFixture({ chatId: 'cs-none', folder: '~/p' })]);
-      renderInRouter();
-      expect(screen.queryByTestId('status-summary-cs-none')).not.toBeInTheDocument();
     });
 
     it('a question thread counts as needs-attention even once read; a complete one does not', () => {
@@ -2686,10 +2624,6 @@ describe('Sidebar', () => {
     it('a GENERATED question guess reads as complete and drops out of needs-attention once read', () => {
       seedStatus('q-guess', 'question', 'Anything else you need?', '~/pg', false);
       renderInRouter();
-      const el = screen.getByTestId('status-summary-q-guess');
-      expect(el.getAttribute('data-kind')).toBe('complete');
-      expect(el.className).toContain('is-complete');
-      expect(el.className).not.toContain('is-question');
       useChatStore.getState().markRead('q-guess');
       selectUnreadView();
       expect(screen.queryByTestId('chat-row-q-guess')).not.toBeInTheDocument();
