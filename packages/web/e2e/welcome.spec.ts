@@ -92,7 +92,7 @@ test('this computer: every step, each choice written where Settings writes it', 
   await expect(page.getByTestId('welcome-claude-connected')).toContainText('Claude 1');
   await expect(page.getByTestId('welcome-dots').locator('li')).toHaveCount(5);
   expect(server.writes.map((w) => [w.path, w.body])).toEqual([
-    ['/api/accounts/claude-code/signin', undefined],
+    ['/api/accounts/claude-code/signin', {}],
     ['/api/accounts/claude-code/signin/complete', { signInId: 's1', code: 'the-code#state' }],
   ]);
   await shot(page, '2c-providers-connected');
