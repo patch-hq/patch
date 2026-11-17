@@ -146,6 +146,12 @@
         gap: 12px;
         margin-top: 4px;
       }
+      .intro {
+        margin: 12px 0 0;
+        font-size: 15px;
+        line-height: 1.45;
+        color: var(--ink-3);
+      }
       .primary {
         font-size: 16px;
         font-weight: 600;
@@ -207,14 +213,18 @@
       </div>
       <div id="choose">
         <h1>Where should your agents run?</h1>
+        <p class="intro" data-testid="choose-intro">
+          Patch runs your AI agents on a server, and you chat with them from here or your phone.
+          Pick the machine that does the work.
+        </p>
         <div class="choices" style="margin-top: 20px">
           <button type="button" class="choice" id="local" data-testid="choose-local">
             <span class="choice-title">This computer</span>
-            <span class="choice-hint">Your phone reaches it from anywhere</span>
+            <span class="choice-hint">Patch runs here. Reach it from your phone anywhere. Best if you don’t have a server.</span>
           </button>
           <button type="button" class="choice" id="remote" data-testid="choose-remote">
             <span class="choice-title">My own server</span>
-            <span class="choice-hint">Paste the pairing code it printed</span>
+            <span class="choice-hint">A server you’ve already set up. Paste the pairing code it printed.</span>
           </button>
         </div>
       </div>

@@ -31,7 +31,9 @@ test.describe('first run', () => {
     await expect(
       page.getByRole('heading', { name: 'Where should your agents run?' }),
     ).toBeVisible();
+    await expect(page.getByTestId('choose-intro')).toContainText('Patch runs your AI agents');
     await expect(page.getByTestId('choose-local')).toContainText('This computer');
+    await expect(page.getByTestId('choose-local')).toContainText('Patch runs here');
     await expect(page.getByTestId('choose-remote')).toContainText('My own server');
     await expect(page.getByTestId('join-form')).toBeHidden();
     await expect(page.getByTestId('error')).toBeHidden();
