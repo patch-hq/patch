@@ -240,6 +240,79 @@ describe('WatchScheduler — survives a host restart', () => {
   });
 });
 
+describe('WatchScheduler — work that finishes or keeps talking across a restart', () => {
+  it('a task that finishes while no host is attached is delivered by the next host with its real exit code and output', async () => {
+    const depsA = makeDeps();
+    const a = mkScheduler(depsA);
+    a.start({
+      chatId: 'c-done-down',
+      command: 'sleep 0.3; echo built; exit 3',
+      description: 'ends while the host is down',
+      timeoutSec: 600,
+      cwd: depsA.home,
+    });
+    a.dispose(); // the host goes away; the task keeps running
+    await new Promise((r) => setTimeout(r, 800)); // ...and finishes with nobody attached
+    const depsB = makeDeps({
+      home: depsA.home,
+      dirForChat: depsA.dirForChat,
+      allChatIds: () => ['c-done-down'],
+    });
+    const b = mkScheduler(depsB);
+    try {
+      b.loadAll();
+      await flushUntil(() => depsB.delivered.length > 0);
+      expect(depsB.delivered).toHaveLength(1);
+      expect(depsB.delivered[0]!.message).toMatch(/ends while the host is down/);
+      expect(depsB.delivered[0]!.message).toMatch(/exit(ed)?[^\n]*3|code 3|status 3/i);
+      expect(depsB.delivered[0]!.message).not.toMatch(/killed|host restarted/);
+      expect(b.list('c-done-down')[0]?.exitCode).toBe(3);
+      expect(b.output('c-done-down', b.list('c-done-down')[0]!.taskId, 10)).toContain('built');
+    } finally {
+      b.dispose();
+    }
+  });
+
+  it('a task still running when the next host starts completes normally under it, and a wakeOnMatch line printed while no host was attached is delivered once', async () => {
+    const depsA = makeDeps();
+    const a = mkScheduler(depsA);
+    const rec = a.start({
+      chatId: 'c-live-across',
+      command: 'echo first-ALERT; sleep 0.6; echo second-ALERT; sleep 0.4',
+      description: 'monitor',
+      timeoutSec: 600,
+      cwd: depsA.home,
+      wakeOnMatch: 'ALERT',
+    });
+    a.dispose();
+    const depsB = makeDeps({
+      home: depsA.home,
+      dirForChat: depsA.dirForChat,
+      allChatIds: () => ['c-live-across'],
+    });
+    const b = mkScheduler(depsB);
+    try {
+      b.loadAll();
+      await flushUntil(
+        () =>
+          depsB.delivered.some((d) => /second-ALERT/.test(d.message)) &&
+          b.list('c-live-across')[0]?.status !== 'running',
+        4000,
+      );
+      const msgs = depsB.delivered.map((d) => d.message);
+      const matches = msgs.filter((m) => /printed a line matching/.test(m));
+      expect(matches.filter((m) => /first-ALERT/.test(m))).toHaveLength(1);
+      expect(matches.filter((m) => /second-ALERT/.test(m))).toHaveLength(1);
+      expect(msgs.filter((m) => /finished/.test(m))).toHaveLength(1);
+      expect(msgs.some((m) => /killed|host restarted/.test(m))).toBe(false);
+      expect(b.list('c-live-across')[0]?.taskId).toBe(rec.taskId);
+      expect(b.list('c-live-across')[0]?.exitCode).toBe(0);
+    } finally {
+      b.dispose();
+    }
+  });
+});
+
 describe('WatchScheduler — records written by another version', () => {
   it('still loads a record carrying a field this version does not know', () => {
     const deps = makeDeps();
