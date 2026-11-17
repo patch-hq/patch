@@ -3,7 +3,14 @@
 // from that rather than from nothing.
 
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  rmSync,
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  appendFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
@@ -35,7 +42,7 @@ describe('ChatRegistry persistence', () => {
   let path: string;
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'patch-reg-'));
-    path = join(dir, 'chat-registry.json');
+    path = join(dir, 'chat-index.jsonl');
   });
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
@@ -82,7 +89,7 @@ describe('ChatRegistry persistence', () => {
     const r = make();
     r.observe(spawned('c1'));
     await new Promise((resolve) => setTimeout(resolve, 1_200));
-    expect(JSON.parse(readFileSync(path, 'utf8')).chats[0].chatId).toBe('c1');
+    expect(JSON.parse(readFileSync(path, 'utf8').split('\n')[0]!).r.chatId).toBe('c1');
   });
 
   test('keeps an error, a removal, a delete and a move', () => {
@@ -143,7 +150,7 @@ describe('ChatRegistry persistence', () => {
   });
 
   test('starts empty, saying so, when the saved mirror is damaged', () => {
-    writeFileSync(path, '{not json');
+    writeFileSync(path, '{not json\n{"x":"c1"}\n');
     const warnings: string[] = [];
     const r = new ChatRegistry({
       logger: { warn: (_o: unknown, msg?: string) => warnings.push(String(msg)) },
@@ -158,6 +165,71 @@ describe('ChatRegistry persistence', () => {
     r.observe(spawned('c1'));
     r.flush();
     expect(r.size()).toBe(1);
+  });
+
+  describe('the chat index is an append-friendly journal', () => {
+    const lineCount = (): number => readFileSync(path, 'utf8').split('\n').filter(Boolean).length;
+
+    test('a change to one chat appends one line, it does not rewrite every chat', () => {
+      const r = make();
+      for (let i = 0; i < 50; i++) r.observe(spawned(`c${i}`));
+      r.flush();
+      const before = readFileSync(path, 'utf8');
+      r.observe(state('c7', 'running'));
+      r.flush();
+      const after = readFileSync(path, 'utf8');
+      expect(after.startsWith(before)).toBe(true);
+      const added = after.slice(before.length).split('\n').filter(Boolean);
+      expect(added.filter((l) => l.includes('"r"'))).toHaveLength(1);
+      expect(added.join('')).toContain('"chatId":"c7"');
+    });
+
+    test('a flush with nothing changed writes nothing', () => {
+      const r = make();
+      r.observe(spawned('c1'));
+      r.flush();
+      const before = readFileSync(path, 'utf8');
+      r.flush();
+      expect(readFileSync(path, 'utf8')).toBe(before);
+    });
+
+    test('the journal is compacted once it outgrows the live rows, and nothing is lost', () => {
+      const r = make();
+      r.observe(spawned('c1'));
+      r.observe(spawned('c2'));
+      for (let i = 0; i < 1_100; i++) {
+        r.observe(state('c1', i % 2 ? 'running' : 'idle', { lastUpdated: i }));
+        r.flush();
+      }
+      expect(lineCount()).toBeLessThan(1_100);
+      const second = make();
+      expect(second.get('c1')?.lastUpdated).toBe(1_099);
+      expect(second.get('c2')).toBeDefined();
+    });
+
+    test('a torn last line from a crash mid-append is dropped, the rest kept', () => {
+      const first = make();
+      first.observe(spawned('c1'));
+      first.flush();
+      appendFileSync(path, '{"r":{"chatId":"c2","na');
+      expect(make().get('c1')).toBeDefined();
+    });
+
+    test('the old chat-registry.json is read once, becomes the journal and is set aside', () => {
+      const legacy = join(dir, 'chat-registry.json');
+      const donor = make();
+      donor.observe(spawned('old'));
+      donor.observe(state('old', 'running'));
+      donor.flush();
+      const row = JSON.parse(readFileSync(path, 'utf8').split('\n')[0]!).r;
+      rmSync(path);
+      writeFileSync(legacy, JSON.stringify({ version: 1, chats: [row], worked: { old: 42 } }));
+      const r = new ChatRegistry({ logger, persistPath: path, legacyPath: legacy });
+      expect(r.get('old')).toMatchObject({ chatId: 'old', activity: 'running' });
+      expect(existsSync(legacy)).toBe(false);
+      expect(existsSync(path)).toBe(true);
+      expect(new ChatRegistry({ logger, persistPath: path }).get('old')).toBeDefined();
+    });
   });
 
   describe('knowing a chat has worked', () => {
@@ -201,10 +273,11 @@ describe('ChatRegistry persistence', () => {
     });
   });
 
-  describe('reading an odd saved file', () => {
+  describe('reading an odd old chat-registry.json', () => {
     const read = (body: unknown): ChatRegistry => {
-      writeFileSync(path, typeof body === 'string' ? body : JSON.stringify(body));
-      return new ChatRegistry({ logger, persistPath: path });
+      const legacy = join(dir, 'chat-registry.json');
+      writeFileSync(legacy, typeof body === 'string' ? body : JSON.stringify(body));
+      return new ChatRegistry({ logger, persistPath: path, legacyPath: legacy });
     };
 
     test('a file with no chats and no record of work is an empty mirror', () => {

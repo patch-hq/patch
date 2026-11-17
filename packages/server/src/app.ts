@@ -508,7 +508,10 @@ export async function buildAll(opts: BuildOptions = {}): Promise<BuiltApp> {
     // The server owns what it last knew about each chat, so a restart begins
     // from that instead of from an empty mirror.
     ...(jobChatLinksDataDir
-      ? { persistPath: join(jobChatLinksDataDir, 'chat-registry.json') }
+      ? {
+          persistPath: join(jobChatLinksDataDir, 'chat-index.jsonl'),
+          legacyPath: join(jobChatLinksDataDir, 'chat-registry.json'),
+        }
       : {}),
   });
   app.addHook('onClose', async () => chatRegistry.flush());

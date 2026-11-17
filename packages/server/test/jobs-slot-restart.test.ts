@@ -64,7 +64,7 @@ describe('a job slot across a server restart', () => {
   let registryPath: string;
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'patch-slotrestart-'));
-    registryPath = join(dir, 'chat-registry.json');
+    registryPath = join(dir, 'chat-index.jsonl');
   });
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });

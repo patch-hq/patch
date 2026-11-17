@@ -4,7 +4,7 @@
 //
 // This is a thin mirror — the host remains the source of truth for a chat's
 // work, but the server OWNS what it last knew: the mirror is written to
-// `<dataDir>/chat-registry.json` as it changes and read back at startup, so a
+// `<dataDir>/chat-index.jsonl` as it changes and read back at startup, so a
 // restart begins from what the server knew rather than from nothing. A chat
 // restored this way is unconfirmed until its host reports it again; when a
 // host closes its re-announcement (`folders.list`), a restored chat of that
@@ -19,7 +19,7 @@
 // failed, the row should not exist.
 
 import { parsePersisted } from './persisted-json.js';
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import type { Logger } from 'pino';
 import { isAllowedTransition, nextStatus, statusFromHostState } from './chat-status.js';
 import type {
@@ -235,14 +235,20 @@ export interface ChatRegistryOptions {
    */
   jobChatLinks?: { get(chatId: string): string | null };
   /**
-   * Where the mirror is kept between runs (`<dataDir>/chat-registry.json`).
-   * Absent keeps it in memory only, as a bare-registry test wants.
+   * Where the chat index journal is kept between runs
+   * (`<dataDir>/chat-index.jsonl`). Absent keeps it in memory only, as a
+   * bare-registry test wants.
    */
   persistPath?: string;
+  /** The old whole-file mirror (`chat-registry.json`); read once if no journal exists yet, then set aside. */
+  legacyPath?: string;
 }
 
 /** How long a change waits before the mirror is written, so a burst is one write. */
 const PERSIST_DELAY_MS = 1_000;
+
+/** Journal lines beyond twice the live rows before it is rewritten whole. */
+const COMPACT_SLACK = 1_000;
 
 /** How far past a slot's start a host's own report must be before an idle chat counts as having worked. */
 export const WORK_EVIDENCE_MS = 10_000;
@@ -281,16 +287,25 @@ export class ChatRegistry {
   private readonly workedAt = new Map<string, number>();
   /** The account feed's latest position: one more each time a row changes. */
   private feedCounter = 0;
+  /** The row objects the journal already holds, to tell which changed (rows are replaced, never edited). */
+  private readonly written = new Map<string, ChatSummary>();
+  private readonly writtenWorked = new Map<string, number>();
+  private journalLines = 0;
 
   constructor(opts: ChatRegistryOptions = {}) {
     this.logger = opts.logger;
     this.now = opts.now ?? (() => Date.now());
     this.jobChatLinks = opts.jobChatLinks;
     this.persistPath = opts.persistPath ?? null;
-    this.restore();
+    this.restore(opts.legacyPath);
   }
 
-  /** Write anything still waiting. Resolves synchronously; call on shutdown. */
+  /**
+   * Write anything still waiting. Resolves synchronously; call on shutdown.
+   * Appends only the rows that changed since the last write to the journal
+   * (spec/01 § Chat index); the journal is rewritten whole only when it has
+   * grown well past the live rows.
+   */
   flush(): void {
     if (this.persistTimer) {
       clearTimeout(this.persistTimer);
@@ -298,19 +313,50 @@ export class ChatRegistry {
     }
     if (this.persistPath === null) return;
     try {
-      const tmp = `${this.persistPath}.tmp`;
-      writeFileSync(
-        tmp,
-        JSON.stringify({
-          version: 1,
-          chats: [...this.chats.values()],
-          worked: Object.fromEntries(this.workedAt),
-        }),
-      );
-      renameSync(tmp, this.persistPath);
+      const lines: string[] = [];
+      for (const [chatId, row] of this.chats) {
+        if (this.written.get(chatId) !== row) lines.push(JSON.stringify({ r: row }));
+      }
+      for (const chatId of this.written.keys()) {
+        if (!this.chats.has(chatId)) lines.push(JSON.stringify({ x: chatId }));
+      }
+      for (const [chatId, at] of this.workedAt) {
+        if (this.writtenWorked.get(chatId) !== at) lines.push(JSON.stringify({ w: chatId, at }));
+      }
+      for (const chatId of this.writtenWorked.keys()) {
+        if (!this.workedAt.has(chatId)) lines.push(JSON.stringify({ wx: chatId }));
+      }
+      if (lines.length === 0) return;
+      if (this.journalLines + lines.length > this.chats.size * 2 + COMPACT_SLACK) {
+        this.compact();
+      } else {
+        appendFileSync(this.persistPath, lines.join('\n') + '\n');
+        this.journalLines += lines.length;
+        this.noteWritten();
+      }
     } catch (err) {
       this.logger?.warn({ err }, 'chat-registry: could not write the mirror');
     }
+  }
+
+  /** Rewrite the journal as one line per live row, atomically. */
+  private compact(): void {
+    const path = this.persistPath!;
+    const lines: string[] = [];
+    for (const row of this.chats.values()) lines.push(JSON.stringify({ r: row }));
+    for (const [chatId, at] of this.workedAt) lines.push(JSON.stringify({ w: chatId, at }));
+    const tmp = `${path}.tmp`;
+    writeFileSync(tmp, lines.length ? lines.join('\n') + '\n' : '');
+    renameSync(tmp, path);
+    this.journalLines = lines.length;
+    this.noteWritten();
+  }
+
+  private noteWritten(): void {
+    this.written.clear();
+    for (const [chatId, row] of this.chats) this.written.set(chatId, row);
+    this.writtenWorked.clear();
+    for (const [chatId, at] of this.workedAt) this.writtenWorked.set(chatId, at);
   }
 
   private markDirty(): void {
@@ -319,27 +365,71 @@ export class ChatRegistry {
     this.persistTimer.unref();
   }
 
-  private restore(): void {
-    if (this.persistPath === null || !existsSync(this.persistPath)) return;
+  private restore(legacyPath: string | undefined): void {
+    if (this.persistPath === null) return;
     try {
-      const parsed = parsePersisted(readFileSync(this.persistPath, 'utf8')) as {
-        chats?: ChatSummary[];
-        worked?: Record<string, number>;
-      };
-      for (const [chatId, at] of Object.entries(parsed.worked ?? {})) {
-        if (typeof at === 'number') this.workedAt.set(chatId, at);
-      }
-      for (const chat of parsed.chats ?? []) {
-        if (typeof chat?.chatId !== 'string' || chat.chatId === '') continue;
-        this.chats.set(chat.chatId, chat);
-        this.spawnedSet.add(chat.chatId);
-        this.unconfirmed.add(chat.chatId);
-        if ((chat.feedPos ?? 0) > this.feedCounter) this.feedCounter = chat.feedPos!;
+      if (existsSync(this.persistPath)) {
+        this.replayJournal(readFileSync(this.persistPath, 'utf8'));
+      } else if (legacyPath !== undefined && existsSync(legacyPath)) {
+        // One-off: the old whole-file mirror becomes the journal.
+        const parsed = parsePersisted(readFileSync(legacyPath, 'utf8')) as {
+          chats?: ChatSummary[];
+          worked?: Record<string, number>;
+        };
+        for (const [chatId, at] of Object.entries(parsed.worked ?? {})) {
+          if (typeof at === 'number') this.workedAt.set(chatId, at);
+        }
+        for (const chat of parsed.chats ?? []) this.adopt(chat);
+        this.compact();
+        renameSync(legacyPath, `${legacyPath}.migrated`);
       }
     } catch (err) {
       // NO FALLBACK: say so, then start empty rather than guess at a damaged file.
+      this.chats.clear();
+      this.spawnedSet.clear();
+      this.unconfirmed.clear();
+      this.workedAt.clear();
+      this.feedCounter = 0;
       this.logger?.warn({ err }, 'chat-registry: could not read the saved mirror; starting empty');
     }
+  }
+
+  private adopt(chat: ChatSummary): void {
+    if (typeof chat?.chatId !== 'string' || chat.chatId === '') return;
+    this.chats.set(chat.chatId, chat);
+    this.spawnedSet.add(chat.chatId);
+    this.unconfirmed.add(chat.chatId);
+    if ((chat.feedPos ?? 0) > this.feedCounter) this.feedCounter = chat.feedPos!;
+  }
+
+  private replayJournal(text: string): void {
+    const lines = text.split('\n');
+    // A write cut off mid-line by a crash leaves a torn last line: that one
+    // line is dropped, loudly. A bad line anywhere else is damage, and throws.
+    const last = lines.length - 1;
+    let count = 0;
+    lines.forEach((line, i) => {
+      if (line === '') return;
+      let rec: { r?: ChatSummary; x?: string; w?: string; at?: number; wx?: string };
+      try {
+        rec = parsePersisted(line) as typeof rec;
+      } catch (err) {
+        if (i !== last) throw err;
+        this.logger?.warn({ err }, 'chat-registry: dropped a torn last line of the chat index');
+        return;
+      }
+      count++;
+      if (rec.r) this.adopt(rec.r);
+      else if (rec.x !== undefined) {
+        this.chats.delete(rec.x);
+        this.spawnedSet.delete(rec.x);
+        this.unconfirmed.delete(rec.x);
+      } else if (rec.w !== undefined && typeof rec.at === 'number')
+        this.workedAt.set(rec.w, rec.at);
+      else if (rec.wx !== undefined) this.workedAt.delete(rec.wx);
+    });
+    this.journalLines = count;
+    this.noteWritten();
   }
 
   observe(event: WireEvent): void {
@@ -422,8 +512,11 @@ export class ChatRegistry {
     if (event.type === 'chat.branches') {
       const chat = this.chats.get(event.chatId);
       if (!chat) return;
-      chat.branches = event.branches;
-      chat.activeBranchId = event.activeBranchId;
+      this.chats.set(event.chatId, {
+        ...chat,
+        branches: event.branches,
+        activeBranchId: event.activeBranchId,
+      });
       this.markDirty();
       return;
     }
