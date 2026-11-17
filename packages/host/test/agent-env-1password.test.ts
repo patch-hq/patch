@@ -8,6 +8,7 @@ describe('agent environment', () => {
       const { env } = buildSdkEnv({
         prompt: 'x',
         cwd: '/tmp',
+        oauthAccessToken: 'tok',
         abortController: new AbortController(),
       });
       expect(env['OP_BIOMETRIC_UNLOCK_ENABLED']).toBe('false');

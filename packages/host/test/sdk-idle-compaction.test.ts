@@ -6,7 +6,12 @@
 import { describe, it, expect } from 'vitest';
 import { buildSdkEnv } from '../src/sdkBackend.js';
 
-const base = { prompt: 'x', cwd: '/tmp', abortController: new AbortController() };
+const base = {
+  prompt: 'x',
+  cwd: '/tmp',
+  oauthAccessToken: 'tok',
+  abortController: new AbortController(),
+};
 
 describe('buildSdkEnv — idle compaction', () => {
   it('raises the idle-compaction floor above any real context window', () => {

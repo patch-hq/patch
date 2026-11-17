@@ -96,6 +96,7 @@ describe('SharedMcpPool', () => {
 
 describe('shared entries reach the backends', () => {
   const base = {
+    oauthAccessToken: 'tok',
     mcpServer: { command: 'node', args: [], env: {} },
     extraMcpServers: [{ name: 'echo', url: 'http://127.0.0.1:1/mcp/t/i' }],
   } as unknown as SdkRunOptions;
