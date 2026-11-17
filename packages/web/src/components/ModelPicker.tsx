@@ -206,6 +206,26 @@ export function ModelPicker({
           <ErrorDetail detail={problem.detail} testId="model-popup-error-detail" />
         </div>
       ) : null}
+      {!noProvider && catalog.status === 'ready'
+        ? (catalog.backendErrors ?? []).map((e) => {
+            const h = humaniseError({ code: e.code, message: e.message }, 'models');
+            return (
+              <div
+                key={e.backend}
+                className="model-popup-status"
+                data-testid={`model-popup-backend-error-${e.backend}`}
+              >
+                <span>
+                  {e.backend}: {h.sentence}
+                </span>
+                <ErrorDetail
+                  detail={h.detail}
+                  testId={`model-popup-backend-error-detail-${e.backend}`}
+                />
+              </div>
+            );
+          })
+        : null}
       {!noProvider && catalog.status !== 'error' && catalog.models.length === 0 ? (
         <div className="model-popup-status" data-testid="model-popup-loading">
           Loading models…

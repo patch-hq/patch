@@ -1345,9 +1345,11 @@ export const api = {
   // rejects a call naming none — the same folder path on two hosts is two
   // different directories, and their model lists differ too.
   models: (hostId: string) =>
-    request<{ models: { id: string; label: string }[]; fetchedAt?: string }>(
-      `/api/models?hostId=${encodeURIComponent(hostId)}`,
-    ),
+    request<{
+      models: { id: string; label: string }[];
+      errors?: { backend: string; code: string; message: string }[];
+      fetchedAt?: string;
+    }>(`/api/models?hostId=${encodeURIComponent(hostId)}`),
   // Skills available in a folder's `.claude/skills` (job-editor Skill picker,
   // the chat transcript's Skill tool-call link/tooltip, and the composer's `/`
   // preview panel). `paths` names the file each skill is defined in, keyed by

@@ -24,6 +24,12 @@ export interface ModelOption {
   label: string;
 }
 
+export interface BackendError {
+  backend: string;
+  code: string;
+  message: string;
+}
+
 export type ModelCatalogStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 export interface ModelCatalog {
@@ -34,6 +40,12 @@ export interface ModelCatalog {
    * picker turns into a sentence and keeps as its Details (`lib/errorCopy.ts`).
    */
   error?: string;
+  /**
+   * Backends that failed to answer while others did. The models that resolved
+   * stay listed, so a missing provider is named in the picker instead of
+   * silently absent (spec/02 § Model catalogue).
+   */
+  backendErrors?: readonly BackendError[];
   /** When the host last read the list from Anthropic (ISO 8601). */
   fetchedAt?: string;
 }
@@ -56,12 +68,16 @@ export function setModelCatalog(next: {
   models?: readonly ModelOption[];
   status: ModelCatalogStatus;
   error?: string;
+  backendErrors?: readonly BackendError[];
   fetchedAt?: string;
 }): void {
   catalog = {
     models: next.models ?? [],
     status: next.status,
     ...(next.error !== undefined ? { error: next.error } : {}),
+    ...(next.backendErrors !== undefined && next.backendErrors.length > 0
+      ? { backendErrors: next.backendErrors }
+      : {}),
     ...(next.fetchedAt !== undefined ? { fetchedAt: next.fetchedAt } : {}),
   };
   emit();
@@ -124,6 +140,7 @@ export function loadModels(hostId: string | null, force = false): Promise<void> 
       setModelCatalog({
         models: res.models,
         status: 'ready',
+        ...(res.errors !== undefined ? { backendErrors: res.errors } : {}),
         ...(res.fetchedAt !== undefined ? { fetchedAt: res.fetchedAt } : {}),
       });
     })
