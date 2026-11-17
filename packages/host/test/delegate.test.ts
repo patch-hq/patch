@@ -487,7 +487,7 @@ describe('patch_delegate', () => {
     await flushUntil(() => last()?.runningAgents === 0);
   });
 
-  it('builds a chat.state without scanning every chat on disk (reconnect sends one per chat)', async () => {
+  it('builds a chat.state and lists delegates without scanning every chat on disk (reconnect does both per chat)', async () => {
     const home = mkdtempSync(join(tmpdir(), 'patch-delegate-scan-'));
     const folder = realpathSync(mkdtempSync(join(tmpdir(), 'patch-delegate-scan-folder-')));
     const store = createMetaStore(home);
@@ -517,6 +517,9 @@ describe('patch_delegate', () => {
     listCalls = 0;
     expect(daemon.currentStateEvent(parentChatId)?.backgroundTasks).toBe(1);
     expect(daemon.currentStateEvent(parentChatId)?.runningAgents).toBe(1);
+    expect(listCalls).toBe(0);
+    // A chat's replay lists its delegates, and a reconnect replays every chat.
+    expect(daemon.listDelegates(parentChatId)).toHaveLength(1);
     expect(listCalls).toBe(0);
   });
 
