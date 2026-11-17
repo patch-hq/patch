@@ -69,6 +69,7 @@ export function isTranscriptEvent(event: WireEvent): boolean {
     case 'chat.tool_call':
     case 'chat.tool_result':
     case 'chat.provider_context':
+    case 'chat.note':
     case 'chat.error':
     case 'chat.artifact':
       return true;

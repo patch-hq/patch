@@ -2400,10 +2400,10 @@ describe('src/index.ts main() — full host boot', () => {
       ) as { content: string };
       // preprocessInput returned undefined (`block` was falsy, no pending
       // broadcasts) -> the mock SDK's echoed reply is the RAW turn message,
-      // with no <system-reminder> prepended (the sibling test above always
+      // with no note prepended (the sibling test above always
       // has a broadcast pending, covering only the truthy side).
       expect(assistant.content).toContain('no broadcasts pending here');
-      expect(assistant.content).not.toContain('<system-reminder>');
+      expect(assistant.content).not.toContain('[Note: ');
     } finally {
       await boot.cleanup();
     }
@@ -2443,7 +2443,7 @@ describe('src/index.ts main() — full host boot', () => {
         (e) =>
           e.type === 'chat.message' && e.chatId === 'thread_speakers' && e.role === 'assistant',
       ) as { content: string };
-      expect(assistant.content).toContain('<system-reminder>');
+      expect(assistant.content).toContain('[Note: Broadcast digest]');
       expect(assistant.content).toContain('[voice • device:kitchen] hello from a device');
     } finally {
       await boot.cleanup();

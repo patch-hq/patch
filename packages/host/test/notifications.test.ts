@@ -24,7 +24,7 @@ import {
   appendBroadcast,
   readPendingBroadcasts,
   flushBroadcasts,
-  buildBroadcastSystemReminder,
+  buildBroadcastNote,
   specialThreadFolder,
   broadcastSidecarPath,
   threadForChannel,
@@ -154,23 +154,24 @@ describe('broadcast sidecar', () => {
     ]);
   });
 
-  it('builds a <system-reminder> block with relative timestamps', () => {
+  it('builds a labelled note with relative timestamps', () => {
     const now = 1_700_000_300_000;
-    const block = buildBroadcastSystemReminder(
+    const block = buildBroadcastNote(
       [
         { ts: 1_700_000_000_000, sourceChatName: 'bus-watch', message: 'bus arriving in 8 min' },
         { ts: 1_700_000_240_000, sourceChatName: 'washer', message: 'washing done' },
       ],
       now,
     );
-    expect(block).toContain('<system-reminder>');
+    expect(block).toContain('[Note: Broadcast digest]');
+    expect(block).not.toContain('system-reminder');
     expect(block).toContain('bus-watch');
     expect(block).toContain('5 min ago');
     expect(block).toContain('1 min ago');
   });
 
   it('returns null when no broadcasts pending', () => {
-    expect(buildBroadcastSystemReminder([], Date.now())).toBeNull();
+    expect(buildBroadcastNote([], Date.now())).toBeNull();
   });
 
   it('caps the sidecar at 10k chars, truncating oldest first (spec/09 ## Cap)', () => {
@@ -417,7 +418,7 @@ describe('UDS /internal/call', () => {
   });
 });
 
-describe('preprocessInput injects <system-reminder> on next user reply', () => {
+describe('preprocessInput injects the broadcast note on next user reply', () => {
   it('on thread_speakers a pending broadcast is prepended once and then flushed', async () => {
     const { home, cwd, sdk, events } = setup();
     const captured: string[] = [];
@@ -439,7 +440,7 @@ describe('preprocessInput injects <system-reminder> on next user reply', () => {
       preprocessInput: (req) => {
         if (req.chatId !== 'thread_speakers') return undefined;
         const entries = readPendingBroadcasts(cwd, 'thread_speakers');
-        const block = buildBroadcastSystemReminder(entries, 1_700_000_500_000);
+        const block = buildBroadcastNote(entries, 1_700_000_500_000);
         if (!block) return undefined;
         return block + req.message;
       },
@@ -466,7 +467,7 @@ describe('preprocessInput injects <system-reminder> on next user reply', () => {
       message: 'snooze 10 min',
       localId: 'l1',
     });
-    expect(captured[0]).toContain('<system-reminder>');
+    expect(captured[0]).toContain('[Note: Broadcast digest]');
     expect(captured[0]).toContain('bus-watch');
     expect(captured[0]).toContain('snooze 10 min');
     // Flushed: a second turn with no new broadcasts gets no reminder block.
@@ -501,7 +502,7 @@ describe('preprocessInput injects <system-reminder> on next user reply', () => {
       preprocessInput: (req) => {
         if (req.chatId !== 'thread_speakers') return undefined;
         const entries = readPendingBroadcasts(cwd, 'thread_speakers');
-        const block = buildBroadcastSystemReminder(entries, 1_700_000_500_000);
+        const block = buildBroadcastNote(entries, 1_700_000_500_000);
         if (!block) return undefined;
         return block + req.message;
       },

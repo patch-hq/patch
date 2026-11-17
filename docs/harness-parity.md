@@ -60,14 +60,14 @@ Legend: ✓ native/first-class · ◑ partial/indirect · ✗ absent · `[ext]` 
 
 ## 4. Memory & context
 
-| Capability                                      | patch                                                     | Claude Code                   | Pi (+ packages)                                                              |
-| ----------------------------------------------- | --------------------------------------------------------- | ----------------------------- | ---------------------------------------------------------------------------- |
-| Project/user memory file                        | ✓ CLAUDE.md inherited unmodified (`principles.md`)        | ✓ managed/user/project scopes | ◑ Prompt Templates; CLAUDE.md-equiv `[undoc]`                                |
-| Context compaction / summarization control      | ✗ relies on Claude Code                                   | ◑ `/compact`                  | ✓ `[ext]` **`custom-compaction`** — swap in cheaper-model markdown summaries |
-| Handoff to a fresh session with carried context | ◑ `patch_send_to` a new chat                              | ◑                             | ✓ `[ext]` **`handoff`** — extract relevant history → new session             |
-| Session history persistence & resume            | ✓ native history + `claudeSessionId` (`02-*.md`)          | ✓ native + resume             | ◑ agent-runtime state; resume specifics `[undoc]`                            |
-| Checkpoints / rewind                            | ✗                                                         | ✓ auto-checkpoint + `/rewind` | ✗ (handoff ≠ rewind)                                                         |
-| Broadcast context injection                     | ✓ server broadcast log as `<system-reminder>` (`09-*.md`) | ✗                             | ✗                                                                            |
+| Capability                                      | patch                                                                   | Claude Code                   | Pi (+ packages)                                                              |
+| ----------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------- | ---------------------------------------------------------------------------- |
+| Project/user memory file                        | ✓ CLAUDE.md inherited unmodified (`principles.md`)                      | ✓ managed/user/project scopes | ◑ Prompt Templates; CLAUDE.md-equiv `[undoc]`                                |
+| Context compaction / summarization control      | ✗ relies on Claude Code                                                 | ◑ `/compact`                  | ✓ `[ext]` **`custom-compaction`** — swap in cheaper-model markdown summaries |
+| Handoff to a fresh session with carried context | ◑ `patch_send_to` a new chat                                            | ◑                             | ✓ `[ext]` **`handoff`** — extract relevant history → new session             |
+| Session history persistence & resume            | ✓ native history + `claudeSessionId` (`02-*.md`)                        | ✓ native + resume             | ◑ agent-runtime state; resume specifics `[undoc]`                            |
+| Checkpoints / rewind                            | ✗                                                                       | ✓ auto-checkpoint + `/rewind` | ✗ (handoff ≠ rewind)                                                         |
+| Broadcast context injection                     | ✓ server broadcast log as a visible "Broadcast digest" note (`09-*.md`) | ✗                             | ✗                                                                            |
 
 ## 5. Surfaces & I/O — _patch's other strong axis_
 

@@ -29,7 +29,7 @@ import {
   threadForChannel,
   readPendingBroadcasts,
   flushBroadcasts,
-  buildBroadcastSystemReminder,
+  buildBroadcastNote,
   broadcastSidecarPath,
   SPECIAL_THREAD_IDS,
   BROADCAST_SIDECAR_THREADS,
@@ -93,7 +93,7 @@ async function startHost(): Promise<HostStack> {
       const threadId = req.chatId as SpecialThreadId;
       if (!BROADCAST_SIDECAR_THREADS.has(threadId)) return undefined;
       const entries = readPendingBroadcasts(cwd, threadId);
-      const block = buildBroadcastSystemReminder(entries, Date.now());
+      const block = buildBroadcastNote(entries, Date.now());
       if (!block) return undefined;
       return block + (req.voicePrefix ? `${req.voicePrefix}${req.message}` : req.message);
     },
@@ -257,7 +257,7 @@ describe('TC3 [test-runner] patch_call over real UDS', () => {
 });
 
 describe('TC3 [test-runner] broadcast sidecar injection + flush over real host turns', () => {
-  it('B15 sidecar injected as <system-reminder> on next speakers reply, then flushed', async () => {
+  it('B15 sidecar injected as a note on next speakers reply, then flushed', async () => {
     const s = await startHost();
     // A real notify from a normal chat lands in the speakers sidecar.
     const folder = mkTmp('tc3d-folder-');
@@ -277,7 +277,7 @@ describe('TC3 [test-runner] broadcast sidecar injection + flush over real host t
         localId: 'r1',
       });
       const prompt = s.capturedPrompts[s.capturedPrompts.length - 1] ?? '';
-      expect(prompt).toContain('<system-reminder>');
+      expect(prompt).toContain('[Note: Broadcast digest]');
       expect(prompt).toContain('washing host done');
       expect(prompt).toContain('snooze 10 min');
       // Flushed after the agent committed a response.
@@ -309,7 +309,7 @@ describe('TC3 [test-runner] broadcast sidecar injection + flush over real host t
       preprocessInput: (req: { chatId: string; message: string }) => {
         if (req.chatId !== 'thread_speakers') return undefined;
         const entries = readPendingBroadcasts(cwd, 'thread_speakers');
-        const block = buildBroadcastSystemReminder(entries, Date.now());
+        const block = buildBroadcastNote(entries, Date.now());
         if (!block) return undefined;
         return block + req.message;
       },

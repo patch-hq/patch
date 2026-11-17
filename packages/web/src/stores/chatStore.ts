@@ -632,9 +632,12 @@ export interface ChatEventEntry {
     | 'compaction'
     | 'permission_mode'
     | 'handoff'
-    | 'handoff_link';
+    | 'handoff_link'
+    | 'note';
   /** The chat a `handoff_link` row points at (spec/04 § Handoff budget). */
   linkedChatId?: string;
+  /** spec/04 § Notes to the agent — the label of a `note` entry; `content` is the text the model was sent. */
+  noteLabel?: string;
   role?: 'user' | 'assistant' | 'system';
   content?: string;
   /**
@@ -644,7 +647,8 @@ export interface ChatEventEntry {
    */
   compaction?: MessageCompaction;
   /**
-   * spec/02 § System-reminder disclosure — every leading `<system-reminder>`
+   * LEGACY — records written before notes were their own entries
+   * (`kind: 'note'`). Every leading `<system-reminder>`
    * block this user turn actually carried, captured out-of-band instead of
    * inlined into `content`. Present only on a `message` entry that had one;
    * rendered as a collapsed, click-to-expand disclosure at that turn.
@@ -2768,6 +2772,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ...(event.isError === true ? { toolIsError: true } : {}),
             callId: event.callId,
             at: Date.now(),
+          });
+          break;
+        }
+        case 'chat.note': {
+          // spec/04 § Notes to the agent — its own entry, exactly what the
+          // model was sent, identified by (seq, kind) so a replay draws it once.
+          const row = ensureRow(event.chatId);
+          chats[event.chatId] = { ...row, lastSeq: Math.max(row.lastSeq, event.seq) };
+          const list = timelines[event.chatId];
+          if (list?.some((e) => e.kind === 'note' && e.seq === event.seq)) break;
+          pushTimeline(event.chatId, {
+            seq: event.seq,
+            kind: 'note',
+            noteLabel: event.label,
+            content: event.text,
+            at: event.createdAt ?? Date.now(),
           });
           break;
         }

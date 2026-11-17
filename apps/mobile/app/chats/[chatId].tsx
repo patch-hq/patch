@@ -2997,6 +2997,17 @@ const TimelineItem = React.memo(function TimelineItem({
       </Text>
     );
   }
+  if (entry.kind === 'note') {
+    return (
+      <View testID="note-entry" style={{ marginBottom: space.sm }}>
+        <ContextDisclosure
+          testID="note"
+          summary={entry.noteLabel ?? 'Note'}
+          text={entry.content ?? ''}
+        />
+      </View>
+    );
+  }
   if (entry.kind === 'message' && entry.accountSwitch) {
     return (
       <Text
@@ -3272,8 +3283,8 @@ const TimelineItem = React.memo(function TimelineItem({
             </Text>
           </View>
         ) : null}
-        {/* spec/15 § Chat detail — every <system-reminder> block this turn
-            received, one quiet collapsed row each, under its own bubble. */}
+        {/* LEGACY records only: notes written before they were their own
+            entries ride on the message; each is one quiet collapsed row. */}
         {entry.systemContext && entry.systemContext.length > 0 ? (
           <View testID="system-context-group" style={{ marginTop: space.xs }}>
             {entry.systemContext.map((item, i) => (

@@ -92,10 +92,8 @@ describe('periodic reminder injection', () => {
 
 describe('the periodic reminder is disclosed in the transcript', () => {
   it('labels it "Reminder"', async () => {
-    const { extractSystemContext } = await import('../src/history.js');
+    const { extractNotes } = await import('../src/notes.js');
     const { buildPeriodicReminder } = await import('../src/todos.js');
-    expect(extractSystemContext(buildPeriodicReminder('Principles') + 'hi')[0]?.label).toBe(
-      'Reminder',
-    );
+    expect(extractNotes(buildPeriodicReminder('Principles') + 'hi')[0]?.label).toBe('Reminder');
   });
 });

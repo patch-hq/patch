@@ -34,12 +34,12 @@ function todoWrite(items: Array<[string, TodoStatus]>): Env {
 }
 
 /**
- * Drop the leading `<system-reminder>` block(s) the host prepends to a turn —
+ * Drop the leading note block(s) the host prepends to a turn —
  * what the user's message would be without the injected agent context. Scripts
  * key on that, so a test reads as the turn the chat actually shows.
  */
 const withoutReminder = (prompt: string): string =>
-  prompt.replace(/^(?:<system-reminder>[\s\S]*?<\/system-reminder>\s*)+/, '');
+  prompt.replace(/^(?:\[Note: [^\]\n]+\]\n[\s\S]*?\n\[End note\]\s*)+/, '');
 
 /**
  * A backend that emits a scripted TodoWrite list for each prompt, so the test
@@ -141,15 +141,16 @@ describe('todo auto-advance on the host (patch/todo.md § todo list)', () => {
 
     const fired = prompts.find((p) => withoutReminder(p).startsWith('[todo]'));
     expect(fired).toBeDefined();
-    expect(fired).toContain('<system-reminder>');
+    expect(fired).toContain('[Note: Todo item fired]');
+    expect(fired).not.toContain('system-reminder');
     expect(fired).toContain('TodoWrite');
     expect(fired).toContain('completed');
-    // The reminder leads, so the persisted/displayed turn is just the [todo]
-    // line — the surface never shows the injected XML.
+    // The note leads, so the user's turn is just the [todo] line; the note is
+    // its own entry in the record.
     expect(withoutReminder(fired as string)).toBe('[todo] sweep');
   });
 
-  it("emits the fired turn's reminder as systemContext on its chat.message (spec/02 § System-reminder disclosure)", async () => {
+  it("records the fired turn's note as its own chat.note entry ahead of its message (spec/04 § Notes to the agent)", async () => {
     const { backend } = scriptedBackend({
       'do my chores': [['sweep', 'pending']],
       '[todo] sweep': [['sweep', 'completed']],
@@ -165,15 +166,22 @@ describe('todo auto-advance on the host (patch/todo.md § todo list)', () => {
         e.type === 'chat.message' && e.role === 'user' && e.content === '[todo] sweep',
     );
     expect(firedMsg).toBeDefined();
-    expect(firedMsg!.systemContext).toEqual([
-      { source: 'patch', label: 'Todo item fired', text: expect.stringContaining('sweep') },
-    ]);
-    // The user's own turn carried no reminder, so it has no disclosure.
+    const firedNote = events.find((e) => e.type === 'chat.note') as
+      | { label: string; text: string; seq: number }
+      | undefined;
+    expect(firedNote).toMatchObject({
+      label: 'Todo item fired',
+      text: expect.stringContaining('sweep'),
+    });
+    expect(firedNote!.seq).toBeLessThan(firedMsg!.seq);
+    expect(firedMsg).not.toHaveProperty('systemContext');
+    // The user's own turn carried no note, so none precedes it.
+    expect(events.filter((e) => e.type === 'chat.note')).toHaveLength(1);
     const own = events.find(
       (e): e is Extract<WireEvent, { type: 'chat.message' }> =>
         e.type === 'chat.message' && e.role === 'user' && e.content === 'do my chores',
     );
-    expect(own!.systemContext).toBeUndefined();
+    expect(own).toBeDefined();
   });
 
   it('marks a fired item that came back still pending as in progress, not pending', async () => {

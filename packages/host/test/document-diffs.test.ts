@@ -51,7 +51,7 @@ function setup() {
 }
 
 describe('document editor — diff-since-last-seen (spec/14 § Document editor)', () => {
-  it("prefixes the chat's next turn with a <system-reminder> diff of the edited document", async () => {
+  it("prefixes the chat's next turn with a note holding the diff of the edited document", async () => {
     const { daemon, folder, capturedPrompts } = setup();
     const chatId = await daemon.spawnChat({ folder });
     writeFileSync(join(folder, 'notes.md'), '# Title\n\nOriginal line.\n');
@@ -60,7 +60,8 @@ describe('document editor — diff-since-last-seen (spec/14 § Document editor)'
     await daemon.sendInput({ chatId, message: 'carry on', localId: randomUUID() });
 
     const prompt = capturedPrompts.at(-1) ?? '';
-    expect(prompt).toContain('<system-reminder>');
+    expect(prompt).toContain('[Note: Document edited]');
+    expect(prompt).not.toContain('system-reminder');
     expect(prompt).toContain('notes.md');
     expect(prompt).toContain('-Original line.');
     expect(prompt).toContain('+Edited line.');
@@ -69,7 +70,7 @@ describe('document editor — diff-since-last-seen (spec/14 § Document editor)'
     expect(prompt.endsWith('carry on')).toBe(true);
   });
 
-  it('emits the live chat.message with the diff as systemContext, not inlined into content', async () => {
+  it('records the diff as its own chat.note entry, not inlined into the message', async () => {
     const { daemon, folder, events } = setup();
     const chatId = await daemon.spawnChat({ folder });
     writeFileSync(join(folder, 'notes.md'), 'before\n');
@@ -82,14 +83,11 @@ describe('document editor — diff-since-last-seen (spec/14 § Document editor)'
       (e) => e.type === 'chat.message' && 'role' in e && e.role === 'user',
     );
     expect(userMsg).toBeDefined();
-    const systemContext = userMsg && 'systemContext' in userMsg ? userMsg.systemContext : undefined;
-    expect(systemContext).toEqual([
-      {
-        source: 'patch',
-        label: 'Document edited',
-        text: expect.stringContaining('notes.md'),
-      },
-    ]);
+    expect(events.find((e) => e.type === 'chat.note')).toMatchObject({
+      label: 'Document edited',
+      text: expect.stringContaining('notes.md'),
+    });
+    expect(userMsg).not.toHaveProperty('systemContext');
     expect(userMsg && 'content' in userMsg ? userMsg.content : undefined).toBe('carry on');
   });
 
@@ -102,8 +100,8 @@ describe('document editor — diff-since-last-seen (spec/14 § Document editor)'
     await daemon.sendInput({ chatId, message: 'first', localId: randomUUID() });
     await daemon.sendInput({ chatId, message: 'second', localId: randomUUID() });
 
-    expect(capturedPrompts[0]).toContain('<system-reminder>');
-    expect(capturedPrompts[1]).not.toContain('<system-reminder>');
+    expect(capturedPrompts[0]).toContain('[Note: ');
+    expect(capturedPrompts[1]).not.toContain('[Note: ');
     expect(capturedPrompts[1]).toBe('second');
   });
 
@@ -190,7 +188,7 @@ describe('document editor — diff-since-last-seen (spec/14 § Document editor)'
     await daemon.sendInput({ chatId, message: 'go', localId: randomUUID() });
 
     const prompt = capturedPrompts.at(-1) ?? '';
-    expect(prompt).toContain('<system-reminder>');
+    expect(prompt).toContain('[Note: ');
     expect(prompt.endsWith('a wholly different prompt')).toBe(true);
   });
 

@@ -65,9 +65,12 @@ export interface ChatEventEntry {
     | 'artifact'
     | 'permission_mode'
     | 'handoff'
-    | 'handoff_link';
+    | 'handoff_link'
+    | 'note';
   /** The chat a `handoff_link` row points at (spec/04 § Handoff budget). */
   linkedChatId?: string;
+  /** spec/04 § Notes to the agent — the label of a `note` entry; `content` is the text the model was sent. */
+  noteLabel?: string;
   /** tool_call only: when the host says the call started (wire `startedAt`), not when this phone received it. */
   startedAt?: number;
   role?: 'user' | 'assistant' | 'system';
@@ -100,10 +103,9 @@ export interface ChatEventEntry {
    */
   attachments?: AttachmentRef[];
   /**
-   * spec/02 § System-reminder disclosure — every `<system-reminder>` block
-   * this user turn received, in injection order, including those of any
-   * re-send folded onto it (a restart re-send carries the restart notice).
-   * Drawn as collapsed rows under the bubble; absent when there were none.
+   * LEGACY — records written before notes were their own `note` entries carry
+   * their `<system-reminder>` blocks here. Still drawn as collapsed rows under
+   * the bubble; nothing new is written this way.
    */
   systemContext?: SystemContextItem[];
   /**
@@ -1332,6 +1334,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const list = ownTimeline(event.chatId);
           if (event.reason === 'cancelled') list.splice(at, 1);
           else list[at] = { ...list[at]!, queued: false };
+          break;
+        }
+        case 'chat.note': {
+          // spec/04 § Notes to the agent — its own entry, exactly what the
+          // model was sent; (seq, kind) is its identity so a replay draws it once.
+          const row = ensureRow(event.chatId);
+          chats[event.chatId] = { ...row, lastSeq: Math.max(row.lastSeq, event.seq) };
+          const held = timelines[event.chatId];
+          if (held?.some((e) => e.kind === 'note' && e.seq === event.seq)) break;
+          pushTimeline(event.chatId, {
+            seq: event.seq,
+            kind: 'note',
+            noteLabel: event.label,
+            content: event.text,
+            at: event.createdAt ?? Date.now(),
+          });
           break;
         }
         case 'chat.provider_context': {

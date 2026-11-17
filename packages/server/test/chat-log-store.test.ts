@@ -423,6 +423,28 @@ describe('ChatLogStore', () => {
       expect(store.read('c1', -1, 1)).toEqual([message('c1', 2)]);
     });
 
+    test('keeps a note to the agent as a transcript entry, apart from a message at another seq', () => {
+      const store = new ChatLogStore({ logger });
+      const note = {
+        type: 'chat.note',
+        chatId: 'c1',
+        label: 'Hidden',
+        text: 't',
+        seq: 1,
+      } as WireEvent;
+      expect(store.commit(note)).toBe('new');
+      expect(store.commit(note)).toBe('duplicate');
+      expect(
+        store.commit({
+          type: 'chat.message',
+          chatId: 'c1',
+          role: 'user',
+          content: 'hi',
+          seq: 2,
+        } as WireEvent),
+      ).toBe('new');
+    });
+
     test('tells a provider context apart from an error at the same seq', () => {
       const store = new ChatLogStore({ logger });
       store.commit({

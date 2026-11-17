@@ -234,7 +234,7 @@ describe('document editor — suggestions (spec/14 § Document editor — Propos
 });
 
 describe('document editor — comments both ways (spec/14 § Document editor)', () => {
-  it("a user comment reaches the agent's next turn as a system-reminder naming the thread, then clears", async () => {
+  it("a user comment reaches the agent's next turn as a note naming the thread, then clears", async () => {
     const { daemon, folder, capturedPrompts } = setup();
     const chatId = await daemon.spawnChat({ folder });
     writeFileSync(join(folder, 'notes.md'), 'Hello world.\n');
@@ -246,7 +246,8 @@ describe('document editor — comments both ways (spec/14 § Document editor)', 
 
     await daemon.sendInput({ chatId, message: 'carry on', localId: randomUUID() });
     const prompt = capturedPrompts.at(-1) ?? '';
-    expect(prompt).toContain('<system-reminder>');
+    expect(prompt).toContain('[Note: New comment]');
+    expect(prompt).not.toContain('system-reminder');
     expect(prompt).toContain('notes.md');
     expect(prompt).toContain(threadId);
     expect(prompt).toContain('is this the right tone?');

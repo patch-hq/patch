@@ -108,6 +108,9 @@ const REPLAY_CHUNK_EVENTS = 500;
 
 const DETAIL_LEVEL_EVENT_TYPES = new Set<WireEvent['type']>([
   'chat.message',
+  // A note to the agent is its own entry in the chat's transcript (spec/04 §
+  // Notes to the agent) — only surfaces focused on the chat render it.
+  'chat.note',
   'chat.message_delta',
   'chat.tool_call',
   'chat.tool_result',

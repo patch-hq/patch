@@ -184,22 +184,24 @@ describe('agent-response hooks — the host half (spec/20-hooks.md § On the age
     // The model's actual prompt carries the advice (spec/20-hooks.md: "passed
     // to the agent with its next turn").
     const next = prompts[prompts.length - 1]!;
-    expect(next).toContain('<system-reminder>');
+    expect(next).toContain('[Note: Hook advice]');
+    expect(next).not.toContain('system-reminder');
     expect(next).toContain('tone check');
     expect(next).toContain('a little terse');
     expect(next).toContain('thanks');
-    // The PERSISTED/displayed turn is just "thanks" — the reminder is
-    // stripped from the bubble and carried out-of-band as a systemContext
-    // disclosure instead (spec/02 § System-reminder disclosure; spec/20-hooks.md:
-    // "no invisible injection" — the disclosure is what the agent received).
+    // The user's turn is just "thanks"; the advice is its own chat.note entry
+    // ahead of it (spec/04 § Notes to the agent; spec/20-hooks.md: "no
+    // invisible injection" — the entry is what the agent received).
     const persisted = [...events]
       .reverse()
-      .find((e) => e.type === 'chat.message' && e.role === 'user' && e.content === 'thanks') as
-      | { systemContext?: Array<{ label: string; text: string }> }
-      | undefined;
+      .find((e) => e.type === 'chat.message' && e.role === 'user' && e.content === 'thanks');
     expect(persisted).toBeDefined();
-    expect(persisted?.systemContext?.[0]?.label).toBe('Hook advice');
-    expect(persisted?.systemContext?.[0]?.text).toContain('tone check');
+    const advice = [...events].reverse().find((e) => e.type === 'chat.note') as
+      | { label: string; text: string; seq: number }
+      | undefined;
+    expect(advice?.label).toBe('Hook advice');
+    expect(advice?.text).toContain('tone check');
+    expect(advice!.seq).toBeLessThan((persisted as { seq: number }).seq);
 
     // Consumed once — a THIRD turn carries nothing further.
     await daemon.sendInput({ chatId, message: 'again', localId: 'u3' });
@@ -238,12 +240,10 @@ describe('agent-response hooks — the host half (spec/20-hooks.md § On the age
     expect(next).toContain('flaky');
     expect(next).toContain('no answer within 15000ms');
 
-    const persisted = [...events]
-      .reverse()
-      .find((e) => e.type === 'chat.message' && e.role === 'user' && e.content === 'next turn') as
-      | { systemContext?: Array<{ label: string; text: string }> }
+    const failed = [...events].reverse().find((e) => e.type === 'chat.note') as
+      | { label: string }
       | undefined;
-    expect(persisted?.systemContext?.[0]?.label).toBe('Hook failed');
+    expect(failed?.label).toBe('Hook failed');
   });
 
   it('a stale outcome (superseded checkId) is ignored', async () => {

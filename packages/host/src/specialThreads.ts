@@ -13,6 +13,7 @@ import { newlineIfTorn } from './jsonlAppend.js';
 import { join, resolve } from 'node:path';
 import type { Logger } from 'pino';
 import type { ChatInputSource } from '@patch/wire';
+import { noteBlock } from './notes.js';
 import { ChatStateMap } from './chatState.js';
 import type { SdkPermissionMode } from './chatState.js';
 import type { MetaStore, ChatMeta } from './meta.js';
@@ -296,14 +297,11 @@ export function formatRelativeTime(deltaMs: number): string {
   return `${days}d ago`;
 }
 
-/** Build the <system-reminder> block. Returns null when no broadcasts pending. */
-export function buildBroadcastSystemReminder(
-  entries: BroadcastEntry[],
-  now: number,
-): string | null {
+/** Build the broadcast digest note. Returns null when no broadcasts pending. */
+export function buildBroadcastNote(entries: BroadcastEntry[], now: number): string | null {
   if (entries.length === 0) return null;
   // Group 12 (sec INFO-1): `sourceChatName` is interpolated raw into a
-  // <system-reminder> block delivered to the assistant. This is intentional
+  // note delivered to the assistant. This is intentional
   // self-injection — chat names are user-owned data on a single-user system,
   // and the trust boundary is the user themselves. We JSON.stringify the
   // message body (not the chat name) because messages may contain quotes,
@@ -314,5 +312,8 @@ export function buildBroadcastSystemReminder(
         `- ${formatRelativeTime(now - e.ts)}: ${JSON.stringify(e.message)} (from chat: ${e.sourceChatName})`,
     )
     .join('\n');
-  return `<system-reminder>\nRecent broadcasts delivered on this thread (newest last):\n${lines}\n</system-reminder>\n\n`;
+  return noteBlock(
+    'Broadcast digest',
+    `Recent broadcasts delivered on this thread (newest last):\n${lines}`,
+  );
 }

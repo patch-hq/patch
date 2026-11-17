@@ -27,20 +27,15 @@ export interface UserMessageRow {
 
 /**
  * A cut-off turn re-sent after a host restart shows as a bare `Carry on` with
- * the restart reminder as its system context (`interruptedTurnResend`). It keeps
+ * the restart note recorded just ahead of it (`interruptedTurnResend`). It keeps
  * the original turn's `origin` (so a person's turn still rings the doorbell), so
- * the reminder is the only marker that no person typed this text.
+ * the note is the only marker that no person typed this text.
  */
-function isRestartResume(systemContext: unknown): boolean {
+function isRestartNote(ev: Record<string, unknown> | undefined): boolean {
   return (
-    Array.isArray(systemContext) &&
-    systemContext.some(
-      (c) =>
-        typeof c === 'object' &&
-        c !== null &&
-        typeof (c as { label?: unknown }).label === 'string' &&
-        (c as { label: string }).label.startsWith('Turn interrupted by restart'),
-    )
+    ev?.type === 'chat.note' &&
+    typeof ev.label === 'string' &&
+    ev.label.startsWith('Turn interrupted by restart')
   );
 }
 
@@ -93,8 +88,9 @@ export function readUserMessages(
     }
     if (mtimeMs < since) continue;
     const seen = new Set<string>();
+    let restartNoteSeen = false;
     forEachLine(path, (line) => {
-      if (!line.includes('"role":"user"')) return;
+      if (!line.includes('"role":"user"') && !line.includes('"type":"chat.note"')) return;
       let rec: { rec?: { event?: Record<string, unknown> } };
       try {
         rec = JSON.parse(line);
@@ -103,7 +99,13 @@ export function readUserMessages(
         return;
       }
       const ev = rec.rec?.event;
+      if (isRestartNote(ev)) {
+        restartNoteSeen = true;
+        return;
+      }
       if (ev?.type !== 'chat.message' || ev.role !== 'user') return;
+      const afterRestartNote = restartNoteSeen;
+      restartNoteSeen = false;
       const ts = ev.createdAt;
       const text = ev.content;
       if (typeof ts !== 'number' || typeof text !== 'string') return;
@@ -118,7 +120,7 @@ export function readUserMessages(
             ? 'hook'
             : ev.goalTrigger !== undefined
               ? 'goal'
-              : ev.origin === 'machine' || isRestartResume(ev.systemContext)
+              : ev.origin === 'machine' || afterRestartNote
                 ? 'machine'
                 : undefined;
       rows.push({ chatId, text, ts, ...(kind !== undefined ? { kind } : {}) });

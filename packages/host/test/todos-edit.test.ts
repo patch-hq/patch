@@ -16,7 +16,7 @@ import { ChatNotFoundError, Daemon } from '../src/chatRunner.js';
 import { createMetaStore } from '../src/meta.js';
 import { createHistoryReader } from '../src/history.js';
 import { chatStateFromMeta } from '../src/chatState.js';
-import { buildTodoEditSystemReminder } from '../src/todos.js';
+import { buildTodoEditNote } from '../src/todos.js';
 
 const silent = pino({ level: 'silent' });
 
@@ -79,7 +79,7 @@ describe('Host setTodos (spec/02 § Task list — surface edits)', () => {
     expect(stateEv && 'todos' in stateEv && stateEv.todos).toEqual([]);
   });
 
-  it("prefixes the chat's next turn with a <system-reminder> naming the edited list", async () => {
+  it("prefixes the chat's next turn with a note naming the edited list", async () => {
     const { daemon, folder, capturedPrompts } = setup();
     const chatId = await daemon.spawnChat({ folder });
     daemon.setTodos(chatId, LIST);
@@ -87,7 +87,8 @@ describe('Host setTodos (spec/02 § Task list — surface edits)', () => {
     await daemon.sendInput({ chatId, message: 'carry on', localId: randomUUID() });
 
     const prompt = capturedPrompts.at(-1) ?? '';
-    expect(prompt).toContain('<system-reminder>');
+    expect(prompt).toContain('[Note: Todo list updated]');
+    expect(prompt).not.toContain('system-reminder');
     expect(prompt).toContain('rebuild the index');
     expect(prompt).toContain('TodoWrite');
     // The user's own words still terminate the prompt — the reminder is a
@@ -95,7 +96,7 @@ describe('Host setTodos (spec/02 § Task list — surface edits)', () => {
     expect(prompt.endsWith('carry on')).toBe(true);
   });
 
-  it('emits the live chat.message with the reminder as systemContext, not inlined into content (spec/02 § System-reminder disclosure)', async () => {
+  it('records the note as its own chat.note entry ahead of the user message (spec/04 § Notes to the agent)', async () => {
     const { daemon, folder, events } = setup();
     const chatId = await daemon.spawnChat({ folder });
     daemon.setTodos(chatId, LIST);
@@ -107,17 +108,17 @@ describe('Host setTodos (spec/02 § Task list — surface edits)', () => {
       (e) => e.type === 'chat.message' && 'role' in e && e.role === 'user',
     );
     expect(userMsg).toBeDefined();
-    const systemContext = userMsg && 'systemContext' in userMsg ? userMsg.systemContext : undefined;
-    expect(systemContext).toEqual([
-      {
-        source: 'patch',
-        label: 'Todo list updated',
-        text: expect.stringContaining('rebuild the index'),
-      },
-    ]);
-    // The visible content is the user's own words only — the reminder rides
-    // out-of-band, never inlined into what the transcript shows as typed.
+    const note = events.find((e) => e.type === 'chat.note');
+    expect(note).toMatchObject({
+      type: 'chat.note',
+      label: 'Todo list updated',
+      text: expect.stringContaining('rebuild the index'),
+    });
+    // Its own entry, ahead of the message it went with; the message is only
+    // the user's own words, and nothing rides on it out-of-band.
+    expect(note && userMsg && note.seq < (userMsg as { seq: number }).seq).toBe(true);
     expect(userMsg && 'content' in userMsg ? userMsg.content : undefined).toBe('carry on');
+    expect(userMsg).not.toHaveProperty('systemContext');
   });
 
   it('sends that reminder once, not on every later turn', async () => {
@@ -128,8 +129,8 @@ describe('Host setTodos (spec/02 § Task list — surface edits)', () => {
     await daemon.sendInput({ chatId, message: 'first', localId: randomUUID() });
     await daemon.sendInput({ chatId, message: 'second', localId: randomUUID() });
 
-    expect(capturedPrompts[0]).toContain('<system-reminder>');
-    expect(capturedPrompts[1]).not.toContain('<system-reminder>');
+    expect(capturedPrompts[0]).toContain('[Note: ');
+    expect(capturedPrompts[1]).not.toContain('[Note: ');
     expect(capturedPrompts[1]).toBe('second');
   });
 
@@ -148,20 +149,20 @@ describe('Host setTodos (spec/02 § Task list — surface edits)', () => {
   });
 });
 
-describe('buildTodoEditSystemReminder', () => {
+describe('buildTodoEditNote', () => {
   it('numbers the items with their status and ends with a blank line', () => {
-    const block = buildTodoEditSystemReminder(LIST);
+    const block = buildTodoEditNote(LIST);
     expect(block).toContain('1. [completed] "read the current indexer"');
     expect(block).toContain('2. [in progress] "rebuild the index"');
-    expect(block.endsWith('</system-reminder>\n\n')).toBe(true);
+    expect(block.endsWith('[End note]\n\n')).toBe(true);
   });
 
   it('says the list was emptied when it is empty', () => {
-    expect(buildTodoEditSystemReminder([])).toContain('emptied');
+    expect(buildTodoEditNote([])).toContain('emptied');
   });
 
   it("quotes item text so a newline can't break the numbered list", () => {
-    const block = buildTodoEditSystemReminder([{ text: 'a\nb', status: 'pending' }]);
+    const block = buildTodoEditNote([{ text: 'a\nb', status: 'pending' }]);
     expect(block).toContain('1. [pending] "a\\nb"');
   });
 });

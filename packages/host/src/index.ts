@@ -168,7 +168,7 @@ import {
   isBroadcastSelfLoop,
   readPendingBroadcasts,
   flushBroadcasts,
-  buildBroadcastSystemReminder,
+  buildBroadcastNote,
   threadForChannel,
   BROADCAST_SIDECAR_THREADS,
   SPECIAL_THREAD_IDS,
@@ -4685,10 +4685,10 @@ async function startHost(
         // See group 10 BLOCKER A.2.
       },
     },
-    // Group 11: prepend the broadcast `<system-reminder>` for special threads.
+    // Group 11: prepend the broadcast note for special threads.
     preprocessInput: (req) => {
       // Meeting mode: the panel and any transcript the model has not seen ride in
-      // front of the user's turn, never as chat messages of their own.
+      // front of the user's turn as a note, its own entry in the record.
       const meetingBlock = meetings?.contextFor(req.chatId);
       if (meetingBlock !== undefined) {
         return meetingBlock + (req.voicePrefix ? `${req.voicePrefix}${req.message}` : req.message);
@@ -4698,7 +4698,7 @@ async function startHost(
       if (!BROADCAST_SIDECAR_THREADS.has(threadId)) return undefined;
       const entries = readPendingBroadcasts(hostCwd, threadId);
       const now = Date.now();
-      const block = buildBroadcastSystemReminder(entries, now);
+      const block = buildBroadcastNote(entries, now);
       if (!block) return undefined;
       return block + (req.voicePrefix ? `${req.voicePrefix}${req.message}` : req.message);
     },
@@ -5442,7 +5442,7 @@ async function startHost(
       // Group 12 (DX-1): a thread firing patch_notify on its OWN channel
       // (e.g. thread_speakers → speakers) would otherwise self-loop —
       // appending to its own broadcasts.jsonl, then reading the entry back
-      // as a <system-reminder> on its next user turn. Suppress same-channel
+      // as a note on its next user turn. Suppress same-channel
       // self-loops; any other chat broadcasting on speakers still appends
       // normally.
       if (isBroadcastSelfLoop(channel, sourceChatId)) {

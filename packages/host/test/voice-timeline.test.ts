@@ -106,7 +106,7 @@ describe('voice exchanges in the chat timeline', () => {
     expect(final.content).toBe('A cloud of gas.');
   });
 
-  it("tells the agent's next turn what was said by voice, once, as a disclosed reminder", async () => {
+  it("tells the agent's next turn what was said by voice, once, as a visible note", async () => {
     const { daemon, events, folder, capturedPrompts } = setup();
     const chatId = await daemon.spawnChat({ folder });
     daemon.recordVoiceMessage({ chatId, role: 'user', content: '[voice • web] what is a nebula' });
@@ -117,7 +117,8 @@ describe('voice exchanges in the chat timeline', () => {
     await daemon.sendInput({ chatId, message: 'thanks', localId: randomUUID() });
 
     const first = capturedPrompts[0] ?? '';
-    expect(first).toContain('<system-reminder>');
+    expect(first).toContain('[Note: Voice conversation]');
+    expect(first).not.toContain('system-reminder');
     expect(first).toContain('User: what is a nebula');
     expect(first).toContain('Voice: A cloud of gas and dust.');
     expect(first.endsWith('make me notes on that')).toBe(true);
@@ -125,9 +126,11 @@ describe('voice exchanges in the chat timeline', () => {
 
     const userMsg = messages(events).find((m) => m.role === 'user');
     expect(userMsg?.content).toBe('make me notes on that');
-    expect(userMsg && 'systemContext' in userMsg ? userMsg.systemContext : undefined).toEqual([
-      { source: 'patch', label: 'Voice conversation', text: expect.stringContaining('nebula') },
-    ]);
+    expect(events.find((e) => e.type === 'chat.note')).toMatchObject({
+      label: 'Voice conversation',
+      text: expect.stringContaining('nebula'),
+    });
+    expect(userMsg).not.toHaveProperty('systemContext');
   });
 
   it('does not replay voice exchanges the agent already saw', async () => {

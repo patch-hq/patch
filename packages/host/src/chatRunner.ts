@@ -77,6 +77,7 @@ import type {
   ChatToolCallEvent,
   ChatToolResultEvent,
   ChatProviderContextEvent,
+  ChatNoteEvent,
   ChatPermissionRequestEvent,
   ChatPermissionResponseEvent,
   ChatDelegateUpdateEvent,
@@ -121,11 +122,18 @@ import {
   createHistoryReader,
   eventIdentity,
   persistedUserContent,
-  extractSystemContext,
   type CanonicalSeqIndex,
   type HistoryReader,
   defaultClaudeProjectsRoot,
 } from './history.js';
+import {
+  NOTE_END_LINE,
+  escapeNoteText,
+  extractNotes,
+  noteBlock,
+  unescapeNoteText,
+  type NoteItem,
+} from './notes.js';
 import { randomUUID } from 'node:crypto';
 import { WakeScheduler, parseDelayMs, type WakeRecord } from './wake.js';
 import {
@@ -155,12 +163,12 @@ import {
   clearAllPendingDecisions,
 } from './pendingDecisions.js';
 import {
-  buildGoalSystemReminder,
+  buildGoalNote,
   buildGoalReminder,
   buildPeriodicReminder,
-  buildHiddenSystemReminder,
-  buildTodoEditSystemReminder,
-  buildTodoFireSystemReminder,
+  buildHiddenNote,
+  buildTodoEditNote,
+  buildTodoFireNote,
   markTodoStarted,
   carryTodoAttachments,
   parseTodoWriteArgs,
@@ -516,7 +524,7 @@ export interface HostOptions {
   claudeProjectsRoot?: string;
   /**
    * Hook called at the start of every `sendInput` to optionally prepend
-   * harness context (e.g. broadcast `<system-reminder>` for special threads,
+   * harness context (e.g. the broadcast note for special threads,
    * spec/06 + spec/09). Returns the (possibly-rewritten) message that should
    * be passed to the SDK.
    */
@@ -1069,12 +1077,12 @@ export const CONTINUE_MESSAGE = 'Carry on from where you were cut off.';
  * not finish on the model that started it; the new one is handed the work so
  * far (the session, or the reconstructed track) and told to continue it.
  */
-export const MODEL_SWITCH_TURN_REMINDER =
-  '<system-reminder>\n' +
+export const MODEL_SWITCH_TURN_REMINDER = noteBlock(
+  'Turn moved to another model',
   'This turn was cut off partway through and has been moved to a different model. ' +
-  'Check what had already been done before you continue — carry on from there ' +
-  'rather than starting the whole request again.\n' +
-  '</system-reminder>\n\n';
+    'Check what had already been done before you continue — carry on from there ' +
+    'rather than starting the whole request again.',
+);
 
 /**
  * Folded into a turn re-sent on a fresh session after the SDK aborted its
@@ -1082,18 +1090,16 @@ export const MODEL_SWITCH_TURN_REMINDER =
  * done so far is in front of the model; it must continue that, not answer
  * only the latest message.
  */
-export const SESSION_RESTART_TURN_REMINDER =
-  '<system-reminder>\n' +
+export const SESSION_RESTART_TURN_REMINDER = noteBlock(
+  'Turn restarted on a new session',
   'This turn was cut off partway through when its session failed, and has been restarted ' +
-  'on a new session. The conversation and any task in progress are in the history above. ' +
-  'Check what had already been done and carry on any unfinished task from there, ' +
-  'as well as answering the latest message.\n' +
-  '</system-reminder>\n\n';
+    'on a new session. The conversation and any task in progress are in the history above. ' +
+    'Check what had already been done and carry on any unfinished task from there, ' +
+    'as well as answering the latest message.',
+);
 
 const ORIGINAL_OPEN = '<original-prompt>\n';
 const ORIGINAL_CLOSE = '\n</original-prompt>';
-const REMINDER_CLOSE = '</system-reminder>';
-const REMINDER_CLOSE_ESCAPED = '</system-reminder-escaped>';
 
 /** What surrounds a goal (spec/04 § Goals): the goals after it and its two cadences. */
 export interface GoalPlan {
@@ -1118,9 +1124,8 @@ function sameEvery(a: ReminderEvery | null, b: ReminderEvery | null): boolean {
  * guessing. Any closing tag in the prompt is escaped so it cannot end the block.
  */
 function withOriginalPrompt(reminder: string, original: string): string {
-  const body =
-    ORIGINAL_OPEN + original.split(REMINDER_CLOSE).join(REMINDER_CLOSE_ESCAPED) + ORIGINAL_CLOSE;
-  const end = reminder.lastIndexOf('\n' + REMINDER_CLOSE);
+  const body = ORIGINAL_OPEN + escapeNoteText(original) + ORIGINAL_CLOSE;
+  const end = reminder.lastIndexOf('\n' + NOTE_END_LINE);
   return (
     reminder.slice(0, end) +
     '\nThe prompt that turn was given, in full — follow it, including any instructions about ' +
@@ -1137,11 +1142,8 @@ function withOriginalPrompt(reminder: string, original: string): string {
 function originalPromptOf(message: string): string {
   const start = message.indexOf(ORIGINAL_OPEN);
   const end = message.lastIndexOf(ORIGINAL_CLOSE);
-  if (!message.startsWith('<system-reminder>') || start < 0 || end < start) return message;
-  return message
-    .slice(start + ORIGINAL_OPEN.length, end)
-    .split(REMINDER_CLOSE_ESCAPED)
-    .join(REMINDER_CLOSE);
+  if (!message.startsWith('[Note: ') || start < 0 || end < start) return message;
+  return unescapeNoteText(message.slice(start + ORIGINAL_OPEN.length, end));
 }
 
 /** The text a cut-off head turn is re-sent as. */
@@ -1153,14 +1155,14 @@ export function interruptedTurnResend(reminder: string, turnMessage: string): st
  * Folded into a voice hand-off's turn: the request was spoken to the call's fast voice
  * and relayed here, and the answer is read aloud to the person on the call.
  */
-export const VOICE_HANDOFF_REMINDER =
-  '<system-reminder>\n' +
+export const VOICE_HANDOFF_REMINDER = noteBlock(
+  'Voice hand-off',
   "This turn is a request spoken on a voice call and relayed to you by the call's voice. " +
-  'Do exactly what it asks and nothing more: do not resume, continue or report on any other ' +
-  'work you have in progress, and do not start anything else. Reply in a sentence or two that ' +
-  'reads well aloud, with no formatting. If it asks about something you are mid-way through, ' +
-  'say where it stands.\n' +
-  '</system-reminder>\n';
+    'Do exactly what it asks and nothing more: do not resume, continue or report on any other ' +
+    'work you have in progress, and do not start anything else. Reply in a sentence or two that ' +
+    'reads well aloud, with no formatting. If it asks about something you are mid-way through, ' +
+    'say where it stands.',
+);
 
 /** A spoken message's `[voice • …]` / `[voice hand-off • …]` tag, removed. */
 export function stripVoiceTag(text: string): string {
@@ -2017,16 +2019,13 @@ const HOOK_BLOCK_PREFIX = '[hook: blocked]';
 
 /**
  * One or more deferred `agent_response` hook notes — `advise` outcomes,
- * failed/timed-out hooks, or both — formatted as a `<system-reminder>` block
- * prepended to whichever turn carries them (spec/20-hooks.md § On the
- * agent's response — "passed to the agent with its next turn"). This rides
- * the SAME capture-and-disclose pipeline as every other leading reminder
- * (`extractSystemContext`, `history.ts`'s `labelSystemReminder` — matched
- * there on "agent_response hook"): stripped from the persisted/displayed
- * turn, carried out-of-band as a `systemContext` disclosure under it, so the
- * row is still exactly what the agent received (no invisible injection). A
- * failed hook is never resubmitted (there is nothing to redo), but still
- * draws this same visible disclosure rather than failing silently.
+ * failed/timed-out hooks, or both — formatted as a note prepended to whichever
+ * turn carries them (spec/20-hooks.md § On the agent's response — "passed to
+ * the agent with its next turn"). Labelled "Hook advice", or "Hook failed" when
+ * any failed, and recorded as its own `chat.note` entry like every other note,
+ * so the row is exactly what the agent received. A failed hook is never
+ * resubmitted (there is nothing to redo), but still draws this same visible
+ * note rather than failing silently.
  */
 function buildHookAdviceBlock(notes: HookAdviceNote[]): string {
   const lines = notes.map((n) => {
@@ -2037,7 +2036,10 @@ function buildHookAdviceBlock(notes: HookAdviceNote[]): string {
   const intro = notes.some((n) => n.failed)
     ? 'One or more agent_response hooks could not be run on your last reply (never resubmitted — nothing to redo):'
     : 'One or more agent_response hooks advised on your last reply (they did not block it):';
-  return `<system-reminder>\n${intro}\n\n${lines.join('\n\n')}\n</system-reminder>\n\n`;
+  return noteBlock(
+    notes.some((n) => n.failed) ? 'Hook failed' : 'Hook advice',
+    `${intro}\n\n${lines.join('\n\n')}`,
+  );
 }
 
 /** The message a `block` resubmit sends — the hook's own analysis, verbatim. */
@@ -3610,13 +3612,12 @@ export class Daemon {
    * Message will resend."), and this is what makes that promise true — without
    * it the work simply stopped and waited for a human to notice and retype.
    *
-   * The head turn is re-sent with a `<system-reminder>` (stripped from the
-   * persisted transcript by `persistedUserContent`, so it never shows in the
-   * chat) telling the agent it was cut off. The reminder also carries the turn's
+   * The head turn is re-sent with a note (its own `chat.note` entry, not part
+   * of the user's bubble) telling the agent it was cut off. The reminder also carries the turn's
    * ORIGINAL prompt in full (`interruptedTurnResend`): the resumed session is
    * not a reliable copy of it, and an autonomous turn's instructions ("don't ask
-   * questions") were being lost, so the agent guessed. Being inside the reminder
-   * it stays out of the visible chat — what shows is just `'Carry on'`. Turns
+   * questions") were being lost, so the agent guessed. Being inside the note
+   * the user's bubble stays short — what it shows is just `'Carry on'`. Turns
    * that were only ever queued never began, so they go back verbatim.
    *
    * The head entry is trusted only as far as the chat's own log backs it up.
@@ -5358,7 +5359,7 @@ export class Daemon {
    * The list is taken wholesale — the surface sends the whole list, not a delta
    * — and drives the auto-advance from here on. The agent's own TodoWrite state
    * cannot be written from outside its session, so the edit is flagged and its
-   * next turn carries a `<system-reminder>` telling it to adopt the new list;
+   * next turn carries a note telling it to adopt the new list;
    * without that its next TodoWrite would silently overwrite the user's edit.
    */
   setTodos(chatId: string, todos: TodoItem[]): void {
@@ -7104,7 +7105,7 @@ export class Daemon {
     // reminder per edit, not on every subsequent turn.
     if (state.todosEditedBySurface) {
       state.todosEditedBySurface = false;
-      const reminder = buildTodoEditSystemReminder(state.todos);
+      const reminder = buildTodoEditNote(state.todos);
       if (head !== null) head = reminder + head;
       else rewrittenWhole = reminder + rewrittenWhole;
     }
@@ -7112,7 +7113,7 @@ export class Daemon {
     // spec/04 § Hidden — the user hid or showed this chat since the agent's
     // last turn; one reminder per change.
     if (state.hiddenNotice !== null) {
-      const reminder = buildHiddenSystemReminder(state.hiddenNotice);
+      const reminder = buildHiddenNote(state.hiddenNotice);
       state.hiddenNotice = null;
       if (head !== null) head = reminder + head;
       else rewrittenWhole = reminder + rewrittenWhole;
@@ -7122,7 +7123,7 @@ export class Daemon {
     // last turn; one reminder per change.
     const reminderWasNotice = state.goalNotice !== null;
     if (state.goalNotice !== null) {
-      const reminder = buildGoalSystemReminder(state.goalNotice.goal);
+      const reminder = buildGoalNote(state.goalNotice.goal);
       state.goalNotice = null;
       if (head !== null) head = reminder + head;
       else rewrittenWhole = reminder + rewrittenWhole;
@@ -7653,8 +7654,8 @@ export class Daemon {
         break;
       const content = persistedUserContent(item.message);
       if (content !== null) {
-        const systemContext = extractSystemContext(item.message);
         try {
+          this.emitNotes(chatId, extractNotes(item.message));
           // Same as the turn-opening message: lift the `[Attachments]` block into
           // structured refs so the bubble shows the image, not the raw path text.
           const [hydrated] = this.hydrateReplayAttachments(chatId, [
@@ -7667,7 +7668,6 @@ export class Daemon {
               createdAt: this.opts.now(),
               localId: item.localId,
               midTurn: true,
-              ...(systemContext.length > 0 ? { systemContext } : {}),
             },
           ]);
           this.emit(hydrated as ChatMessageEvent);
@@ -8695,10 +8695,9 @@ export class Daemon {
   private readonly sideBranchFirstMessage = new Map<string, string>();
   /**
    * A send-back still owed to whichever turn next runs on this PARENT branch
-   * (branchKey-keyed), folded into that turn's prompt as a `<system-reminder>`
-   * the instant it is accepted — the SAME capture-and-disclose mechanism
-   * every other injected reminder uses (spec/02 § System-reminder disclosure),
-   * mirroring `pendingHookAdvice` (spec/04 § Turns a hook resubmits). Consumed
+   * (branchKey-keyed), folded into that turn's prompt as a note
+   * the instant it is accepted — the SAME mechanism every other note uses
+   * (spec/04 § Notes to the agent), mirroring `pendingHookAdvice` (spec/04 § Turns a hook resubmits). Consumed
    * once the moment that turn is accepted, then cleared.
    */
   private readonly pendingBranchSendBacks = new Map<
@@ -8887,12 +8886,11 @@ export class Daemon {
     if (!owed || owed.length === 0) return '';
     this.pendingVoiceExchanges.delete(chatId);
     const lines = owed.map((m) => `${m.role === 'user' ? 'User' : 'Voice'}: ${m.text}`);
-    return (
-      '<system-reminder>\n' +
+    return noteBlock(
+      'Voice conversation',
       'The user talked to this chat by voice since your last turn. A fast voice model answered ' +
-      'them without you. The conversation, in order:\n' +
-      `${lines.join('\n')}\n` +
-      '</system-reminder>\n\n'
+        'them without you. The conversation, in order:\n' +
+        lines.join('\n'),
     );
   }
 
@@ -8905,7 +8903,7 @@ export class Daemon {
    * eventual diff covers the whole run of edits in one). Consumed (diffed
    * against the CURRENT on-disk content, then cleared) by `consumeDocumentDiffs`
    * the moment the chat's next turn is accepted — the same capture-and-disclose
-   * `<system-reminder>` mechanism `pendingBranchSendBacks` above uses.
+   * note mechanism `pendingBranchSendBacks` above uses.
    */
   private readonly pendingDocumentDiffs = new Map<string, Map<string, { before: string }>>();
 
@@ -8913,7 +8911,7 @@ export class Daemon {
    * spec/14 § Document editor — comments both ways, step 2 of 3: a user
    * comment or reply (`docAction`'s `add_comment`/`reply_comment`) owed to
    * this chat's agent, queued here the instant it's made and consumed (as a
-   * `<system-reminder>`, then cleared) by `consumeDocComments` the moment the
+   * note, then cleared) by `consumeDocComments` the moment the
    * chat's next turn is accepted — same capture-and-disclose mechanism as
    * `pendingDocumentDiffs` above. The agent's OWN comments/replies
    * (`patch_doc_comment`/`patch_doc_reply`) never land here — they're already
@@ -9104,7 +9102,7 @@ export class Daemon {
     const reminder = this.consumeBranchSendBacks(chatId, branchId);
     const composedPrompt = reminder + prompt;
     const userContent = persistedUserContent(composedPrompt) ?? '';
-    const systemContext = extractSystemContext(composedPrompt);
+    this.emitNotes(chatId, extractNotes(composedPrompt));
     const userSeq = this.bumpSeq(chatId);
     const userEvent: ChatMessageEvent = {
       type: 'chat.message',
@@ -9114,7 +9112,6 @@ export class Daemon {
       seq: userSeq,
       localId,
       createdAt: this.opts.now(),
-      ...(systemContext.length > 0 ? { systemContext } : {}),
     };
     // spec/14 § Side threads panel — "branching again from inside the panel"
     // hangs a NEW side thread off a message that lives only on this branch's
@@ -9410,12 +9407,33 @@ export class Daemon {
   }
 
   /**
+   * Record each note a turn carries as its own `chat.note` entry (spec/04 §
+   * Notes to the agent), ahead of the message it went with. The text is what
+   * the model was sent, unaltered. Each is registered under its canonical seq
+   * so a later replay of the provider transcript lands on the same one.
+   */
+  private emitNotes(chatId: string, notes: NoteItem[]): void {
+    for (const note of notes) {
+      const ev: ChatNoteEvent = {
+        type: 'chat.note',
+        chatId,
+        label: note.label,
+        text: note.text,
+        seq: this.bumpSeq(chatId),
+        createdAt: this.opts.now(),
+      };
+      const key = eventIdentity(ev);
+      /* v8 ignore next -- chat.note always has an identity. */
+      if (key !== null) this.recordCanonicalSeq(chatId, identityHash(key), ev.seq);
+      this.emit(ev);
+    }
+  }
+
+  /**
    * Pull (and clear) whatever a side branch has sent back to THIS branch,
-   * rendered as a leading `<system-reminder>` block for the turn about to
-   * run on it — spec/02 § System-reminder disclosure's capture-and-disclose
-   * mechanism, so it is stripped from the turn's own displayed content and
-   * carried out-of-band as a `systemContext` entry instead of silently
-   * dropped. Empty string when nothing is owed.
+   * rendered as a leading note ("From <branch>") for the turn about to run on
+   * it — recorded as its own `chat.note` entry (spec/04 § Notes to the agent).
+   * Empty string when nothing is owed.
    */
   private consumeBranchSendBacks(chatId: string, branchId: string): string {
     const key = this.branchKey(chatId, branchId);
@@ -9423,11 +9441,11 @@ export class Daemon {
     if (!owed || owed.length === 0) return '';
     this.pendingBranchSendBacks.delete(key);
     return owed
-      .map(
-        (sb) =>
-          '<system-reminder>\n' +
-          `From ${sb.fromBranchName ?? 'a side branch'}: ${sb.summary}\n` +
-          '</system-reminder>\n\n',
+      .map((sb) =>
+        noteBlock(
+          `From ${(sb.fromBranchName ?? 'a side branch').replace(/[\]\r\n]+/g, ' ')}`,
+          `From ${sb.fromBranchName ?? 'a side branch'}: ${sb.summary}`,
+        ),
       )
       .join('');
   }
@@ -9435,10 +9453,9 @@ export class Daemon {
   /**
    * Document editor (spec/14 § Document editor, step 1 of 3): pull (and
    * clear) every `.md` file this chat's surfaces have saved since the agent
-   * last saw it, rendered as one leading `<system-reminder>` block per file
-   * for the turn about to run — the same capture-and-disclose mechanism
-   * `consumeBranchSendBacks` above uses, so it shows up in the transcript as
-   * a collapsed row rather than invisible injection (principles.md). A file
+   * last saw it, rendered as one leading note per file for
+   * the turn about to run — the same mechanism `consumeBranchSendBacks` above
+   * uses, so it shows up in the transcript as its own entry (principles.md). A file
    * saved back to EXACTLY what it already was (baseline === current) is not
    * reported — nothing actually changed for the agent to be told about.
    * Empty string when nothing is owed.
@@ -9461,13 +9478,13 @@ export class Daemon {
         continue;
       }
       if (after === before) continue;
-      out +=
-        '<system-reminder>\n' +
+      out += noteBlock(
+        'Document edited',
         `The user edited ${relPath} since you last saw it. Diff:\n` +
-        '```diff\n' +
-        unifiedDiff(relPath, before, after) +
-        '```\n' +
-        '</system-reminder>\n\n';
+          '```diff\n' +
+          unifiedDiff(relPath, before, after) +
+          '```',
+      );
     }
     return out;
   }
@@ -9475,22 +9492,22 @@ export class Daemon {
   /**
    * spec/14 § Document editor — comments both ways, step 2 of 3: pull (and
    * clear) every comment/reply the user left on this chat's documents since
-   * the agent last saw it, one `<system-reminder>` per comment naming the
-   * file and thread so the agent can reply with `patch_doc_reply`. Same
-   * capture-and-disclose mechanism `consumeDocumentDiffs` above uses.
+   * the agent last saw it, one note per comment naming the file and
+   * thread so the agent can reply with `patch_doc_reply`. Same mechanism
+   * `consumeDocumentDiffs` above uses.
    */
   private consumeDocComments(chatId: string): string {
     const owed = this.pendingDocComments.get(chatId);
     if (!owed || owed.length === 0) return '';
     this.pendingDocComments.delete(chatId);
     return owed
-      .map(
-        (c) =>
-          '<system-reminder>\n' +
+      .map((c) =>
+        noteBlock(
+          'New comment',
           `The user left a comment on ${c.path} (thread ${c.threadId}), anchored to: "${c.anchor}"\n` +
-          `Comment: ${c.text}\n` +
-          `Reply with patch_doc_reply({ path: ${JSON.stringify(c.path)}, threadId: ${JSON.stringify(c.threadId)}, text: ... }).\n` +
-          '</system-reminder>\n\n',
+            `Comment: ${c.text}\n` +
+            `Reply with patch_doc_reply({ path: ${JSON.stringify(c.path)}, threadId: ${JSON.stringify(c.threadId)}, text: ... }).`,
+        ),
       )
       .join('');
   }
@@ -9501,7 +9518,7 @@ export class Daemon {
    * `From <branch name>:` row lands in the parent's track RIGHT NOW (visible
    * even if the parent's next turn is a long way off — principles.md § no
    * invisible injection), and the summary is ALSO queued to ride as a
-   * `<system-reminder>` on the parent's next turn, so its agent reads it as
+   * note on the parent's next turn, so its agent reads it as
    * part of that turn's own context rather than having to notice the row.
    *
    * NO FALLBACK: a branch with no parent, or one that has already sent back,
@@ -10444,12 +10461,6 @@ export class Daemon {
       return false;
     }
     const userContent = persistedUserContent(prompt);
-    // Every leading `<system-reminder>` block this prompt actually carried
-    // (spec/02 § System-reminder disclosure) — the same blocks `userContent`
-    // above just had stripped out of it, captured here instead of discarded so
-    // the live event carries them out-of-band, exactly like the replayed twin
-    // `jsonlLineToWire` builds from the persisted transcript later.
-    const systemContext = extractSystemContext(prompt);
     // The persisted user turn's OWN seq — captured here so a later failure
     // (either branch below) can attach itself to this exact message. Not
     // `localId`: the surface reconciles and drops its optimistic localId the
@@ -10473,6 +10484,9 @@ export class Daemon {
       this.reuseLoggedUserMessage.delete(chatId);
       userMessageSeq = retryOfSeq;
     } else if (userContent !== null) {
+      // spec/04 § Notes to the agent — each note this turn carries is its own
+      // entry, ahead of the message it went with.
+      this.emitNotes(chatId, extractNotes(prompt));
       const raw: ChatMessageEvent = {
         type: 'chat.message',
         chatId,
@@ -10487,7 +10501,6 @@ export class Daemon {
         // of a turn already drawn, so it NAMES the bubble it belongs to instead
         // of asking every surface for one of its own.
         ...(retryOfSeq !== undefined ? { retryOfSeq } : {}),
-        ...(systemContext.length > 0 ? { systemContext } : {}),
         // spec/08 § Action, spec/14 § Job trigger turn — a job's fire, not the user
         // typing, whichever turn of the chat this is.
         ...(jobTrigger ? { jobTrigger } : {}),
@@ -12131,7 +12144,7 @@ export class Daemon {
           // own TodoWrite items, so it had no cue to close the item out when the
           // turn finished. The reminder is stripped from the persisted turn, so
           // surfaces still show only `[todo] x`.
-          message: buildTodoFireSystemReminder(decision.text) + `${TODO_PREFIX}${decision.text}`,
+          message: buildTodoFireNote(decision.text) + `${TODO_PREFIX}${decision.text}`,
           localId: randomUUID(),
           ...(decision.attachments ? { attachments: decision.attachments } : {}),
           // spec/09 § Whose turn it was — the host is advancing the list on
@@ -15942,8 +15955,7 @@ export class Daemon {
         type: 'chat.message',
         chatId,
         role: 'user',
-        // Framed as user-provided context, the same way patch's own
-        // system-reminder blocks are (history.ts's `extractLeadingSystemReminders`)
+        // Framed as user-provided context, the same way patch's own notes are
         // — the Messages/Responses APIs require the first turn to be `user`,
         // and an `assistant`-voiced handoff would misattribute an unspoken
         // reply to the model.

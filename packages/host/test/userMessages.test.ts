@@ -34,6 +34,15 @@ const msg = (
     },
   });
 
+const note = (chatId: string, label: string, createdAt: number) =>
+  JSON.stringify({
+    v: 1,
+    seq: 0,
+    at: createdAt,
+    branchId: `${chatId}-b0`,
+    rec: { k: 'event', event: { type: 'chat.note', chatId, label, text: 'x', seq: 0, createdAt } },
+  });
+
 function writeLog(chatId: string, lines: string[], mtime?: number): void {
   mkdirSync(join(root, chatId), { recursive: true });
   const p = join(root, chatId, 'events.jsonl');
@@ -112,13 +121,10 @@ describe('readUserMessages', () => {
 
   it("reports a restart-resume 'Carry on' as host even though it keeps the turn's own origin", () => {
     writeLog('c1', [
-      msg('c1', 'user', 'Carry on', 1000, {
-        retryOfSeq: 0,
-        systemContext: [{ source: 'patch', label: 'Turn interrupted by restart', text: 'x' }],
-      }),
-      msg('c1', 'user', 'typed', 2000, {
-        systemContext: [{ source: 'x', label: 'Other', text: 'y' }],
-      }),
+      note('c1', 'Turn interrupted by restart', 1000),
+      msg('c1', 'user', 'Carry on', 1000, { retryOfSeq: 0 }),
+      note('c1', 'Other', 2000),
+      msg('c1', 'user', 'typed', 2000),
     ]);
     expect(readUserMessages(root, 0, 9000, 10)).toEqual([
       { chatId: 'c1', text: 'Carry on', ts: 1000, kind: 'machine' },

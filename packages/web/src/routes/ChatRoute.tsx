@@ -2928,6 +2928,18 @@ const TimelineEntry = memo(function TimelineEntry({
   if (entry.kind === 'permission_mode') {
     return <PermissionModeLine entry={entry} />;
   }
+  if (entry.kind === 'note') {
+    return (
+      <div className="system-context-group" data-testid="note-entry">
+        <ToolDisclosure
+          testid="note"
+          variant="system-context"
+          summary={entry.noteLabel ?? 'Note'}
+          detail={<SystemContextText text={entry.content ?? ''} />}
+        />
+      </div>
+    );
+  }
   if (entry.kind === 'handoff') {
     return (
       <div className="mode-change" data-testid="handoff-divider">
@@ -3974,12 +3986,11 @@ function SideThreadMarker({ chatId, branch }: { chatId: string; branch: ChatBran
 }
 
 /**
- * spec/02 § System-reminder disclosure — every `<system-reminder>` block this
- * turn actually carried, collapsed by default (User: "hidden in a box, allow
- * user to see"). Quiet furniture like `CompactionLine`/`JobTriggerLine`, not a
- * banner: it sits at the turn it affected and says nothing unless clicked.
- * Usually one item; a turn can carry more than one (e.g. a todo-edit reminder
- * and a broadcast digest together), so each gets its own row.
+ * A note's text, and the legacy disclosure of records written before notes
+ * were their own entries (`systemContext` on a user message): every
+ * `<system-reminder>` block that turn carried, collapsed by default. Quiet
+ * furniture like `CompactionLine`/`JobTriggerLine`, not a banner: it says
+ * nothing unless clicked. New notes render as `note` entries instead.
  */
 function SystemContextText({ text }: { text: string }): JSX.Element {
   return (
